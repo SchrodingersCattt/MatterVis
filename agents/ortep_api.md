@@ -26,6 +26,12 @@ anisotropic data falls back to `_atom_site_U_iso_or_equiv`.
 
 - `ortep_probability` — default `0.5`, matching the common 50%
   probability ORTEP convention.
+- `ortep_mode_minor` — optional mode used only for minor / disordered
+  atoms. When omitted, minor atoms use the same `ortep_mode` as the
+  rest of the scene. Setting `ortep_mode_minor="ortep_axes"` renders
+  minor atoms as unfilled projected ellipsoid outlines plus principal
+  axes, which pairs cleanly with dashed disorder bonds in static
+  crystallographic panels.
 - `ortep_show_principal_axes` — draw the three principal-axis spokes.
 - `ortep_axis_color`, `ortep_axis_linewidth` — principal-axis styling.
 - `ortep_octant_shading`, `ortep_octant_shadow_color`,

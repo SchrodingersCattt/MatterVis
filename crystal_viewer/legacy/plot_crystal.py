@@ -287,15 +287,22 @@ def parse_asu(path):
         # bogus lone-N "fragments" in the topology UI. Special-position
         # overlaps are still handled by the ``seen_cart`` dedup below.
         ops = symops
-        for op in ops:
+        for symop_index, op in enumerate(ops):
             frac_new = np.array(op.apply_to_xyz(list(frac0)), dtype=float)
             frac_basic = _wrap_frac01(frac_new)
             cart_new = M @ frac_basic
 
-            dup = any(np.linalg.norm(cart_new - sc) < 0.15 for sc in seen_cart)
+            # Deduplicate only symmetry images of the *same crystallographic
+            # label*. Different labels can legitimately sit very close on
+            # special positions or disorder-related sites; dropping them here
+            # silently deletes raw CIF sites and can break rings/bond tables.
+            dup = any(
+                prev_label == asu_at['label'] and np.linalg.norm(cart_new - sc) < 0.15
+                for prev_label, sc in seen_cart
+            )
             if dup:
                 continue
-            seen_cart.append(cart_new)
+            seen_cart.append((asu_at['label'], cart_new))
 
             U_cart = None
             if asu_at['label'] in aniso:
@@ -315,6 +322,9 @@ def parse_asu(path):
                           'occ': asu_at['occ'], 'uiso': asu_at['uiso'],
                           'dg': asu_at['dg'], 'da': asu_at['da'],
                           'U': U_cart,
+                          '_asym_label': asu_at['label'],
+                          '_symop_index': int(symop_index),
+                          '_raw_instance_id': f"{asu_at['label']}@sym{symop_index}",
                           '_bond_partners': asu_at.get('_bond_partners', ()),
                           '_bond_lengths': asu_at.get('_bond_lengths', {}),
                           '_has_bond_table': asu_at.get('_has_bond_table', False)})
@@ -436,10 +446,60 @@ def _bond_matches_table_distance(ai, aj, distance):
     tolerance = 0.18 if 'H' in (ai['elem'], aj['elem']) else 0.22
     return min(abs(distance - ref) for ref in candidates) <= tolerance
 
+def _has_bond_table_atom(atom):
+    return bool(atom.get('_has_bond_table'))
+
+
+def _prune_duplicate_label_bond_candidates(atoms, candidates, tol=0.005):
+    """Remove cross-bonds between duplicate disorder/symmetry alternatives.
+
+    CIF bond tables describe site labels, not every symmetry-expanded copy. If
+    a scene contains two alternatives with the same label (typical for PART or
+    mirror-generated disorder), a naive label-table check allows every C2 copy
+    to bond to every F4 copy. Keep only the nearest copy for each
+    atom->partner-label relation. This is deliberately in the MatterVis bond
+    layer so publication scripts cannot accidentally draw cross-disorder bonds.
+    """
+    if not candidates:
+        return []
+
+    label_counts = {}
+    for atom in atoms:
+        label = atom.get('label')
+        label_counts[label] = label_counts.get(label, 0) + 1
+
+    best = {}
+    for i, j, d in candidates:
+        ai, aj = atoms[i], atoms[j]
+        duplicated = label_counts.get(ai.get('label'), 0) > 1 or label_counts.get(aj.get('label'), 0) > 1
+        table_guided = _has_bond_table_atom(ai) or _has_bond_table_atom(aj)
+        if not (duplicated and table_guided):
+            continue
+        for src, dst in ((i, j), (j, i)):
+            key = (src, atoms[dst].get('label'))
+            best[key] = min(float(d), best.get(key, np.inf))
+
+    if not best:
+        return candidates
+
+    pruned = []
+    for i, j, d in candidates:
+        ai, aj = atoms[i], atoms[j]
+        duplicated = label_counts.get(ai.get('label'), 0) > 1 or label_counts.get(aj.get('label'), 0) > 1
+        table_guided = _has_bond_table_atom(ai) or _has_bond_table_atom(aj)
+        if duplicated and table_guided:
+            if float(d) > best.get((i, aj.get('label')), np.inf) + tol:
+                continue
+            if float(d) > best.get((j, ai.get('label')), np.inf) + tol:
+                continue
+        pruned.append((i, j, d))
+    return pruned
+
+
 # ── Bond finding ────────────────────────────────────────────────────────────
 def find_bonds(atoms, M=None, cell=None):
-    """Find bonds, excluding cross-disorder-group bonds."""
-    bonds = []
+    """Find bonds, excluding cross-disorder-group and cross-alternative bonds."""
+    candidates = []
     n = len(atoms)
     for i in range(n):
         for j in range(i+1, n):
@@ -460,8 +520,9 @@ def find_bonds(atoms, M=None, cell=None):
             if not _bond_matches_table_distance(atoms[i], atoms[j], d):
                 continue
             if d < cutoff:
-                bonds.append((i, j))
-    return bonds
+                candidates.append((i, j, float(d)))
+
+    return [(i, j) for i, j, _ in _prune_duplicate_label_bond_candidates(atoms, candidates)]
 
 # ── Cluster atoms ────────────────────────────────────────────────────────────
 def cluster_atoms(atoms, M=None, cell=None, bonds=None):
@@ -1027,6 +1088,8 @@ def _apply_scene_axes(ax, scene):
         ax.view_init(elev=elev, azim=azim, roll=roll)
     except TypeError:
         ax.view_init(elev=elev, azim=azim)
+    if scene.get('style', {}).get('projection') == 'orthographic':
+        ax.set_proj_type('ortho')
 
     ax.set_axis_off()
     ax.xaxis.pane.fill = False

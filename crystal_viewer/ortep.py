@@ -6,6 +6,8 @@ from typing import Iterable
 import numpy as np
 import plotly.graph_objects as go
 
+from .presets import ORTEP_MODES
+
 
 CHI2_3D_50 = 2.3659738843753377
 CHI2_2D_50 = 1.3862943611198906
@@ -222,6 +224,56 @@ def _atom_color(atom: dict, style: dict) -> str:
     return "#000000" if style.get("monochrome", False) else atom.get("color", "#808080")
 
 
+def _atom_is_minor(atom: dict) -> bool:
+    return bool(atom.get("is_minor"))
+
+
+def _mode_for_atom(atom: dict, style: dict) -> str | None:
+    if _atom_is_minor(atom) and style.get("ortep_mode_minor") is not None:
+        return str(style.get("ortep_mode_minor"))
+    mode = style.get("ortep_mode")
+    return str(mode) if mode is not None else None
+
+
+def _mode_flag(atom: dict, style: dict, key: str, default: bool) -> bool:
+    mode = _mode_for_atom(atom, style)
+    if mode in ORTEP_MODES:
+        return bool(ORTEP_MODES[mode].get(key, default))
+    return bool(style.get(key, default))
+
+
+def _minor_axes_outline_only(atom: dict, style: dict) -> bool:
+    # Keep historic ortep_axes behaviour for normal calls. Only the explicit
+    # per-minor mode gets the publication convention of unfilled minor sites.
+    return _atom_is_minor(atom) and style.get("ortep_mode_minor") == "ortep_axes"
+
+
+def _ortep_outline_trace(segments, *, color: str, width: float, name: str):
+    if not segments:
+        return None
+    xs, ys, zs = [], [], []
+    for ring in segments:
+        for point in ring:
+            xs.append(float(point[0]))
+            ys.append(float(point[1]))
+            zs.append(float(point[2]))
+        first = ring[0]
+        xs.extend([float(first[0]), None])
+        ys.extend([float(first[1]), None])
+        zs.extend([float(first[2]), None])
+    return go.Scatter3d(
+        x=xs,
+        y=ys,
+        z=zs,
+        mode="lines",
+        line=dict(color=color, width=width),
+        opacity=0.95,
+        hoverinfo="skip",
+        showlegend=False,
+        name=name,
+    )
+
+
 def ortep_atom_mesh_traces(scene: dict, style: dict):
     """Batch all ORTEP ellipsoids that share a (color, opacity) group
     into a single ``Mesh3d`` trace.
@@ -242,7 +294,13 @@ def ortep_atom_mesh_traces(scene: dict, style: dict):
     show_minor_only = bool(style.get("show_minor_only", False))
     minor_opacity = float(style.get("minor_opacity", 0.35))
     major_opacity = float(style.get("major_opacity", 1.0))
-    fade_minor = style.get("disorder") == "opacity"
+    # ``force_minor_fade`` lets callers combine dashed-bond disorder with
+    # translucent minor ellipsoids (the default ``disorder == "opacity"``
+    # behaviour is otherwise mutually exclusive with dashed bonds).
+    fade_minor = (
+        style.get("disorder") == "opacity"
+        or bool(style.get("force_minor_fade", False))
+    )
 
     # Subdivision budget mirrors ``_atom_mesh_traces``. ORTEP scenes
     # are typically denser than ball-stick (every atom carries an
@@ -261,15 +319,22 @@ def ortep_atom_mesh_traces(scene: dict, style: dict):
     # (because of the half-occupied-disorder fade) needs distinct
     # traces so we don't collapse two visually different sets.
     groups: dict[tuple[str, float], dict] = {}
+    outline_segments = []
+    view_x = np.asarray(scene.get("view_x", [1.0, 0.0, 0.0]), dtype=float)
+    view_y = np.asarray(scene.get("view_y", [0.0, 1.0, 0.0]), dtype=float)
     for atom in scene.get("draw_atoms", []):
         if show_minor_only and not atom.get("is_minor"):
             continue
-        is_minor = bool(atom.get("is_minor"))
+        is_minor = _atom_is_minor(atom)
+        U, uiso = _atom_u(atom)
+        if _minor_axes_outline_only(atom, style):
+            ring, _, _ = ortep_billboard_polygon(atom["cart"], U, view_x, view_y, probability=probability, uiso=uiso)
+            outline_segments.append(ring)
+            continue
         opacity = minor_opacity if (is_minor and fade_minor) else major_opacity
         color = _atom_color(atom, style)
         key = (color, opacity)
         bucket = groups.setdefault(key, {"verts": [], "tris": [], "vert_offset": 0})
-        U, uiso = _atom_u(atom)
         verts, tris = ortep_mesh3d(
             atom["cart"], U,
             probability=probability,
@@ -303,6 +368,14 @@ def ortep_atom_mesh_traces(scene: dict, style: dict):
                 flatshading=False,
             )
         )
+    outline_trace = _ortep_outline_trace(
+        outline_segments,
+        color=style.get("ortep_axis_color", "#222222"),
+        width=float(style.get("ortep_axis_linewidth", 1.6)),
+        name="ortep-minor-outlines",
+    )
+    if outline_trace is not None:
+        traces.append(outline_trace)
     return traces
 
 
@@ -311,11 +384,15 @@ def ortep_atom_billboard_traces(scene: dict, style: dict):
     probability = float(style.get("ortep_probability", 0.5))
     view_x = np.asarray(scene.get("view_x", [1.0, 0.0, 0.0]), dtype=float)
     view_y = np.asarray(scene.get("view_y", [0.0, 1.0, 0.0]), dtype=float)
+    outline_segments = []
     for atom in scene.get("draw_atoms", []):
         if style.get("show_minor_only", False) and not atom.get("is_minor"):
             continue
         U, uiso = _atom_u(atom)
         ring, _, _ = ortep_billboard_polygon(atom["cart"], U, view_x, view_y, probability=probability, uiso=uiso)
+        if _minor_axes_outline_only(atom, style):
+            outline_segments.append(ring)
+            continue
         center = np.asarray(atom["cart"], dtype=float)
         verts = np.vstack([center[None, :], ring])
         n = len(ring)
@@ -335,15 +412,25 @@ def ortep_atom_billboard_traces(scene: dict, style: dict):
                 flatshading=True,
             )
         )
+    outline_trace = _ortep_outline_trace(
+        outline_segments,
+        color=style.get("ortep_axis_color", "#222222"),
+        width=float(style.get("ortep_axis_linewidth", 1.6)),
+        name="ortep-minor-outlines",
+    )
+    if outline_trace is not None:
+        traces.append(outline_trace)
     return traces
 
 
 def ortep_axis_dash_traces(scene: dict, style: dict):
-    if not style.get("ortep_show_principal_axes", True):
-        return []
     xs, ys, zs = [], [], []
     probability = float(style.get("ortep_probability", 0.5))
     for atom in scene.get("draw_atoms", []):
+        if style.get("show_minor_only", False) and not atom.get("is_minor"):
+            continue
+        if not _mode_flag(atom, style, "ortep_show_principal_axes", bool(style.get("ortep_show_principal_axes", True))):
+            continue
         U, uiso = _atom_u(atom)
         for start, end in ortep_principal_axis_segments(atom["cart"], U, probability=probability, uiso=uiso):
             xs.extend([float(start[0]), float(end[0]), None])
@@ -367,8 +454,6 @@ def ortep_axis_dash_traces(scene: dict, style: dict):
 
 
 def ortep_octant_shade_traces(scene: dict, style: dict):
-    if not style.get("ortep_octant_shading", False):
-        return []
     probability = float(style.get("ortep_probability", 0.5))
     color = style.get("ortep_octant_shadow_color", "#000000")
     opacity = float(style.get("ortep_octant_shadow_alpha", 0.18))
@@ -385,6 +470,8 @@ def ortep_octant_shade_traces(scene: dict, style: dict):
     triangles: list[list[int]] = []
     for atom in scene.get("draw_atoms", []):
         if style.get("show_minor_only", False) and not atom.get("is_minor"):
+            continue
+        if not _mode_flag(atom, style, "ortep_octant_shading", bool(style.get("ortep_octant_shading", False))):
             continue
         center = np.asarray(atom["cart"], dtype=float)
         U, uiso = _atom_u(atom)

@@ -72,6 +72,13 @@ honours:
 - `element_colors`, `element_colors_light` — per-element hex overrides
   layered on top of the vendored palette. Equivalent to calling
   `apply_element_colors` with the same dicts.
+- `projection` — `"perspective"` (default) or `"orthographic"`. Use
+  orthographic projection for crystallographic panels where depth
+  foreshortening should not change apparent bond lengths.
+- `camera_eye_distance` — Plotly camera eye distance multiplier
+  (default `1.8`). Larger values reduce perspective depth when
+  `projection="perspective"`; orthographic views keep the same visual
+  scale but still use the eye direction.
 
 ## Worked example
 

@@ -31,6 +31,8 @@ def validate_style_schema(style: dict) -> dict:
     render_style = str(style.get("style", "ball_stick"))
     disorder = str(style.get("disorder", "outline_rings"))
     ortep_mode = style.get("ortep_mode")
+    ortep_mode_minor = style.get("ortep_mode_minor")
+    projection = str(style.get("projection", "perspective"))
     if material not in MATERIAL_DISPATCH:
         raise ValueError(f"unknown material: {material}")
     if render_style not in STYLE_DISPATCH:
@@ -39,13 +41,21 @@ def validate_style_schema(style: dict) -> dict:
         raise ValueError(f"unknown disorder mode: {disorder}")
     if ortep_mode is not None and str(ortep_mode) not in ORTEP_MODES:
         raise ValueError(f"unknown ORTEP mode: {ortep_mode}")
+    if ortep_mode_minor is not None and str(ortep_mode_minor) not in ORTEP_MODES:
+        raise ValueError(f"unknown minor ORTEP mode: {ortep_mode_minor}")
+    if projection not in ("perspective", "orthographic"):
+        raise ValueError(f"unknown projection: {projection}")
     normalized = dict(style)
     normalized["material"] = material
     normalized["style"] = render_style
     normalized["disorder"] = disorder
+    normalized["projection"] = projection
+    normalized["camera_eye_distance"] = float(normalized.get("camera_eye_distance", 1.8))
     if ortep_mode is not None:
         normalized["ortep_mode"] = str(ortep_mode)
         normalized.update(ORTEP_MODES[normalized["ortep_mode"]])
+    if ortep_mode_minor is not None:
+        normalized["ortep_mode_minor"] = str(ortep_mode_minor)
     normalized["fast_rendering"] = bool(normalized.get("fast_rendering", False)) or material == "flat"
     normalized["minor_wireframe"] = bool(normalized.get("minor_wireframe", False)) or disorder == "outline_rings"
     return normalized
@@ -54,7 +64,11 @@ def validate_style_schema(style: dict) -> dict:
 def _minor_opacity_for(style: dict, is_minor: bool) -> float:
     if not is_minor:
         return float(style.get("major_opacity", 1.0))
-    if style.get("disorder") == "opacity":
+    fade = (
+        style.get("disorder") == "opacity"
+        or bool(style.get("force_minor_fade", False))
+    )
+    if fade:
         return max(0.05, float(style.get("minor_opacity", 0.35)))
     return 1.0
 
@@ -73,13 +87,15 @@ def _normalize(vec: Iterable[float], fallback: Iterable[float]) -> np.ndarray:
     return arr / norm
 
 
-def _plotly_camera_from_scene(scene: dict) -> dict:
-    eye = _normalize(scene.get("view_direction", [0.0, 0.0, 1.0]), [0.0, 0.0, 1.0]) * 1.8
+def _plotly_camera_from_scene(scene: dict, style: dict) -> dict:
+    eye_distance = float(style.get("camera_eye_distance", 1.8))
+    eye = _normalize(scene.get("view_direction", [0.0, 0.0, 1.0]), [0.0, 0.0, 1.0]) * eye_distance
     up = _normalize(scene.get("up", [0.0, 1.0, 0.0]), [0.0, 1.0, 0.0])
     return {
         "eye": {"x": float(eye[0]), "y": float(eye[1]), "z": float(eye[2])},
         "center": {"x": 0.0, "y": 0.0, "z": 0.0},
         "up": {"x": float(up[0]), "y": float(up[1]), "z": float(up[2])},
+        "projection": {"type": str(style.get("projection", "perspective"))},
     }
 
 
@@ -1707,6 +1723,7 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
         str(style.get("style", "ball_stick")),
         str(style.get("disorder", "outline_rings")),
         str(style.get("ortep_mode", "")),
+        str(style.get("ortep_mode_minor", "")),
         bool(style.get("monochrome", False)),
         bool(style.get("show_minor_only", False)),
         round(float(style.get("atom_scale", 1.0)), 3),
@@ -1743,6 +1760,103 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
     }
     cache[key] = payload
     return payload
+
+
+def build_row_figure(
+    scene_style_pairs: list[tuple[dict, dict]],
+    bgcolor: str = "#FFFFFF",
+) -> go.Figure:
+    """Pack N scenes side-by-side in a 1×N Plotly subplot figure.
+
+    Each scene gets its own 3D scene (``scene``, ``scene2``, …) with an
+    independent camera and viewport.  Calling code should call
+    :func:`uniform_viewport` on all scenes *before* this function so the
+    rendered structures share a common physical scale.
+
+    Parameters
+    ----------
+    scene_style_pairs:
+        List of ``(scene_dict, style_dict)`` tuples, one per column.
+    bgcolor:
+        Figure and scene background colour.
+
+    Returns
+    -------
+    go.Figure
+        A multi-column Plotly figure ready for ``write_image``.
+    """
+    from plotly.subplots import make_subplots
+
+    n = len(scene_style_pairs)
+    if n == 0:
+        return go.Figure()
+
+    # Build the subplot template to get the correct domain layout.
+    fig_template = make_subplots(
+        rows=1, cols=n,
+        specs=[[{"type": "scene"}] * n],
+        horizontal_spacing=0.01,
+    )
+    layout_dict = fig_template.to_dict()["layout"]
+
+    # Scene names follow Plotly's convention: scene, scene2, scene3, …
+    scene_names = ["scene"] + [f"scene{i + 2}" for i in range(n - 1)]
+
+    all_trace_dicts: list[dict] = []
+    for col_idx, (scene, style) in enumerate(scene_style_pairs):
+        style_norm = validate_style_schema(style)
+        xr, yr, zr = _scene_ranges(scene, style_norm)
+        use_fast = (
+            bool(style_norm.get("fast_rendering", False))
+            or style_norm.get("material") == "flat"
+            or len(scene.get("draw_atoms", [])) > 2000
+        )
+        mesh_payload = _cached_atom_bond_meshes(scene, style_norm, use_fast=use_fast)
+
+        trace_dicts: list[dict] = []
+        trace_dicts.extend(mesh_payload["bond_dicts"])
+        trace_dicts.extend(mesh_payload["minor_bond_dicts"])
+        trace_dicts.extend(mesh_payload["atom_dicts"])
+        trace_dicts.extend(mesh_payload["minor_outline_dicts"])
+        trace_dicts.extend(_traces_to_dicts(_label_traces(scene, style_norm)))
+        trace_dicts.extend(_traces_to_dicts(_axis_traces(scene, style_norm)))
+        trace_dicts.extend(_traces_to_dicts(_unit_cell_traces(scene, style_norm)))
+        trace_dicts.append(
+            _round_coord_arrays(_atom_selection_trace(scene, style_norm).to_plotly_json())
+        )
+
+        scene_name = scene_names[col_idx]
+        for td in trace_dicts:
+            td["scene"] = scene_name
+        all_trace_dicts.extend(trace_dicts)
+
+        xr_span = xr[1] - xr[0]
+        yr_span = yr[1] - yr[0]
+        zr_span = zr[1] - zr[0]
+        is_cube = (
+            max(abs(xr_span - yr_span), abs(yr_span - zr_span), abs(xr_span - zr_span)) < 1e-6
+        )
+        aspectmode = "cube" if is_cube else "data"
+        camera = _plotly_camera_from_scene(scene, style_norm)
+
+        layout_dict[scene_name] = {
+            "xaxis": {"visible": False, "range": xr},
+            "yaxis": {"visible": False, "range": yr},
+            "zaxis": {"visible": False, "range": zr},
+            "aspectmode": aspectmode,
+            "camera": camera,
+            "bgcolor": bgcolor,
+        }
+
+    layout_dict.update(
+        showlegend=False,
+        paper_bgcolor=bgcolor,
+        plot_bgcolor=bgcolor,
+        margin={"l": 0, "r": 0, "t": 0, "b": 0},
+    )
+
+    fig = go.Figure(data=all_trace_dicts, layout=layout_dict, _validate=False)
+    return fig
 
 
 def build_figure(scene: dict, style: dict, topology_data: dict | None = None) -> go.Figure:
@@ -1821,7 +1935,7 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None) ->
             yaxis=dict(visible=False, range=yr),
             zaxis=dict(visible=False, range=zr),
             aspectmode=aspectmode,
-            camera=_plotly_camera_from_scene(scene),
+            camera=_plotly_camera_from_scene(scene, style),
             uirevision=ui_revision,
             bgcolor=style.get("background", "#FFFFFF"),
         ),
