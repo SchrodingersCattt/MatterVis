@@ -662,7 +662,24 @@ class ViewerBackend:
                 return copy.deepcopy(self.scene_state(scene_id))
             return copy.deepcopy(self.current_state)
 
-    def patch_state(self, patch: Optional[dict[str, Any]], scene_id: Optional[str] = None) -> dict[str, Any]:
+    def patch_state(
+        self,
+        patch: Optional[dict[str, Any]],
+        scene_id: Optional[str] = None,
+        *,
+        broadcast: bool = True,
+    ) -> dict[str, Any]:
+        # ``broadcast`` controls whether ``pending_state`` is armed for
+        # the next ``sync_agent_state`` poll. REST/WS callers want this
+        # so the browser UI picks up the change. Dash callbacks that
+        # originate *from* the same UI (``capture_camera`` in
+        # particular) must pass ``broadcast=False``: otherwise the next
+        # 5 s poll echoes that camera back into ``camera-state-store``,
+        # ``update_view`` rebuilds with the stale-by-debounce camera
+        # value, and the user sees the view "snap back" to where the
+        # last ``relayoutData`` left it. The same logic applies to any
+        # other UI-originated patch where the browser is already
+        # authoritative for the field being changed.
         with self._lock:
             target_scene_id = scene_id or (patch or {}).get("scene_id") or self.scene_store.active_id
             self.current_state = self.normalize_state(patch, scene_id=target_scene_id)
@@ -671,7 +688,8 @@ class ViewerBackend:
                 scene_payload.pop("scene_id", None)
                 scene_payload.pop("scene_label", None)
                 self.scene_store.patch_scene(target_scene_id, scene_payload)
-            self.pending_state = copy.deepcopy(self.current_state)
+            if broadcast:
+                self.pending_state = copy.deepcopy(self.current_state)
             self._bump_version()
             return copy.deepcopy(self.current_state)
 
@@ -1882,10 +1900,23 @@ def create_app(
         state = backend.pop_pending_state()
         if not state:
             return (no_update,) * 19
+        # Defence-in-depth against the camera-snap-back bug: even when
+        # the poll path legitimately picks up an externally-driven
+        # state change (REST agent, WebSocket, scene CRUD), do NOT push
+        # the stored camera back into ``camera-state-store``. The
+        # browser already owns the camera; overwriting it with whatever
+        # was last captured (potentially several seconds stale because
+        # of Plotly's relayout debouncing) yanks the user's view
+        # mid-rotation. ``capture_camera`` is the single writer for
+        # camera-state-store on the UI path; the REST surface should
+        # use the dedicated ``/api/v2/camera`` endpoint to push a
+        # camera change to the browser.
+        outputs = list(scene_control_outputs(state))
+        outputs[-1] = no_update  # camera-state-store slot
         return (
             backend.scene_tabs(),
             state.get("scene_id") or backend.active_scene_id(),
-            *scene_control_outputs(state),
+            *outputs,
         )
 
     @app.callback(
@@ -1973,7 +2004,15 @@ def create_app(
         )
         if not camera:
             return no_update
-        backend.patch_state({"camera": camera}, scene_id=scene_id)
+        # ``broadcast=False`` is essential here: the browser is the
+        # source of truth for the camera, so we must NOT arm
+        # ``pending_state`` -- otherwise the next 5 s ``agent-state-poll``
+        # echoes this camera back through ``sync_agent_state`` ->
+        # ``camera-state-store`` -> ``update_view`` and the figure
+        # re-renders with whatever camera was captured at that exact
+        # moment, snapping the user's view back periodically. See
+        # ``tests/app/test_camera_capture_no_poll_echo.py``.
+        backend.patch_state({"camera": camera}, scene_id=scene_id, broadcast=False)
         return _camera_store_payload(scene_id, camera)
 
     @app.callback(
