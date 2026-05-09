@@ -208,6 +208,32 @@ class SceneStore:
             self.save()
         return scene
 
+    def prune(self, valid_structures: Iterable[str]) -> list[str]:
+        """Drop scenes whose ``structure_name`` is not in ``valid_structures``.
+
+        The persisted store can outlive the catalog: an upload from a
+        previous session goes to ``tempfile.gettempdir()`` and is
+        garbage-collected by the OS, but its scene entry stays on disk;
+        a CIF passed via ``--cif`` last time is gone this time. Without
+        this prune, ``ViewerBackend.__init__`` resolves the active
+        scene, calls ``default_state(structure_name)``, hits an unknown
+        structure and raises ``KeyError`` -- the whole app fails to
+        boot with a blank page and no UI.
+
+        Returns the list of removed scene ids so the caller can log/save.
+        """
+        valid = {str(item) for item in valid_structures}
+        removed: list[str] = []
+        for scene_id, scene in list(self.scenes.items()):
+            if scene.structure_name not in valid:
+                removed.append(scene_id)
+                self.scenes.pop(scene_id, None)
+        if removed:
+            self.order = [sid for sid in self.order if sid in self.scenes]
+            if self.active_id not in self.scenes:
+                self.active_id = self.order[0] if self.order else None
+        return removed
+
     def rename(self, scene_id: str, label: str, *, save: bool = True) -> Scene:
         label = str(label).strip()
         if not label:

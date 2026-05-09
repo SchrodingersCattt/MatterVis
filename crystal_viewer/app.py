@@ -5,6 +5,7 @@ import copy
 import io
 import os
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -265,7 +266,25 @@ class ViewerBackend:
         first_name = self.structure_names[0]
         self.current_state = self.default_state(first_name)
         self.scene_store = SceneStore.load(SceneStore.default_path(self.root_dir))
+        # Persisted scenes can outlive the catalog (uploads land in
+        # ``tempfile.gettempdir()`` and get GC'd; ``--cif`` may have
+        # been dropped). Without prune, ``scene_state(active_id)``
+        # below dereferences an unknown ``structure_name`` and crashes
+        # the entire app at startup with a blank page.
+        scene_count_before = len(self.scene_store.scenes)
+        removed_scene_ids = self.scene_store.prune(self.structure_names)
+        if removed_scene_ids:
+            print(
+                f"[crystal_viewer] dropped {len(removed_scene_ids)} stored scene(s) "
+                f"referencing unknown structures: {removed_scene_ids}",
+                file=sys.stderr,
+            )
         self.scene_store.ensure(self.structure_names, default_state_factory=self.default_state)
+        if len(self.scene_store.scenes) != scene_count_before:
+            try:
+                self.scene_store.save()
+            except OSError as exc:  # pragma: no cover - disk-full / read-only mount
+                print(f"[crystal_viewer] could not persist scene store: {exc}", file=sys.stderr)
         if self.scene_store.active_id:
             self.current_state = self.scene_state(self.scene_store.active_id)
         self.pending_state: Optional[dict[str, Any]] = None
