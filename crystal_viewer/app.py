@@ -284,6 +284,237 @@ def _normalize_atom_groups(raw_groups: Any) -> list[dict[str, Any]]:
     return out
 
 
+# Phase 3 UI: per-row rendering helpers for the left-panel
+# Polyhedra and Atom-group tables. Returns Dash component lists; the
+# panel wires up an "Add" button and ALL/MATCH callbacks for inline
+# edits + deletes (see ``_polyhedra_row_helpers`` and the matching
+# block of ``register_callbacks``).
+_AUTO_LIGAND_VALUE = "__auto__"
+
+
+def _polyhedra_table_rows(
+    specs: list[dict[str, Any]],
+    species_options: list[dict[str, Any]],
+):
+    """Build one row of dash inputs per polyhedron spec.
+
+    Each row id is pattern-matched ``{type, spec_id}`` so a single
+    ALL-input callback can react to any inline edit and a MATCH/ALL
+    callback can identify the deleted row via
+    ``callback_context.triggered_id``.
+    """
+    from dash import dcc, html
+
+    if not specs:
+        return [
+            html.Div(
+                "No named polyhedra. Click \u201cAdd\u201d to register one (centre + optional ligand).",
+                className="polyhedra-empty",
+                style={"fontSize": "12px", "color": "#777", "margin": "6px 0"},
+            )
+        ]
+    ligand_options = [{"label": "(auto)", "value": _AUTO_LIGAND_VALUE}] + list(species_options)
+    rows = []
+    for spec in specs:
+        rows.append(
+            html.Div(
+                [
+                    dcc.Input(
+                        id={"type": "poly-row-color", "spec_id": spec["id"]},
+                        type="color",
+                        value=str(spec.get("color") or "#7C5CBF"),
+                        style={
+                            "width": "30px",
+                            "height": "26px",
+                            "padding": "0",
+                            "border": "1px solid #BBB",
+                            "verticalAlign": "middle",
+                        },
+                        debounce=False,
+                    ),
+                    dcc.Dropdown(
+                        id={"type": "poly-row-center", "spec_id": spec["id"]},
+                        options=species_options,
+                        value=str(spec.get("center_species") or ""),
+                        clearable=False,
+                        style={"flex": "1", "minWidth": "70px", "fontSize": "12px"},
+                    ),
+                    html.Span("\u2192", style={"color": "#888", "fontSize": "12px"}),
+                    dcc.Dropdown(
+                        id={"type": "poly-row-ligand", "spec_id": spec["id"]},
+                        options=ligand_options,
+                        value=str(spec.get("ligand_species") or _AUTO_LIGAND_VALUE),
+                        clearable=False,
+                        style={"flex": "1", "minWidth": "70px", "fontSize": "12px"},
+                    ),
+                    dcc.Checklist(
+                        id={"type": "poly-row-enabled", "spec_id": spec["id"]},
+                        options=[{"label": "", "value": "yes"}],
+                        value=["yes"] if spec.get("enabled", True) else [],
+                        style={"display": "inline-block", "marginLeft": "4px"},
+                    ),
+                    html.Button(
+                        "\u00d7",
+                        id={"type": "poly-row-delete", "spec_id": spec["id"]},
+                        n_clicks=0,
+                        style={
+                            "background": "transparent",
+                            "border": "1px solid #DDD",
+                            "color": "#A00",
+                            "padding": "0 8px",
+                            "cursor": "pointer",
+                            "lineHeight": "20px",
+                            "borderRadius": "3px",
+                        },
+                        title="Remove this polyhedron row",
+                    ),
+                ],
+                style={
+                    "display": "flex",
+                    "alignItems": "center",
+                    "gap": "4px",
+                    "marginBottom": "4px",
+                },
+            )
+        )
+    return rows
+
+
+_ATOM_GROUP_KIND_ALL = "all"
+_ATOM_GROUP_KIND_ELEMENTS = "elements"
+
+
+def _selector_kind(selector: dict[str, Any]) -> str:
+    if selector.get("all"):
+        return _ATOM_GROUP_KIND_ALL
+    return _ATOM_GROUP_KIND_ELEMENTS
+
+
+def _selector_elements_text(selector: dict[str, Any]) -> str:
+    elements = selector.get("elements") or []
+    return ",".join(str(e) for e in elements)
+
+
+def _atom_groups_table_rows(
+    groups: list[dict[str, Any]],
+    element_options: list[dict[str, Any]],
+):
+    """Build one row of dash inputs per atom-group rule. Same
+    pattern-match scheme as ``_polyhedra_table_rows``: every input id
+    is ``{type, group_id}``.
+    """
+    from dash import dcc, html
+
+    if not groups:
+        return [
+            html.Div(
+                "No atom-group rules. Use the preset buttons below or click \u201cAdd\u201d to start.",
+                style={"fontSize": "12px", "color": "#777", "margin": "6px 0"},
+            )
+        ]
+    rows = []
+    for group in groups:
+        selector = group.get("selector") or {}
+        kind = _selector_kind(selector)
+        elements_text = _selector_elements_text(selector)
+        rows.append(
+            html.Div(
+                [
+                    html.Div(
+                        [
+                            dcc.Checklist(
+                                id={"type": "ag-row-visible", "group_id": group["id"]},
+                                options=[{"label": "", "value": "yes"}],
+                                value=["yes"] if group.get("visible", True) else [],
+                                style={"display": "inline-block"},
+                            ),
+                            dcc.Input(
+                                id={"type": "ag-row-color", "group_id": group["id"]},
+                                type="color",
+                                value=str(group.get("color") or "#888888"),
+                                style={
+                                    "width": "30px",
+                                    "height": "26px",
+                                    "padding": "0",
+                                    "border": "1px solid #BBB",
+                                    "verticalAlign": "middle",
+                                    "marginLeft": "4px",
+                                },
+                                debounce=False,
+                            ),
+                            dcc.Dropdown(
+                                id={"type": "ag-row-kind", "group_id": group["id"]},
+                                options=[
+                                    {"label": "all atoms", "value": _ATOM_GROUP_KIND_ALL},
+                                    {"label": "by element", "value": _ATOM_GROUP_KIND_ELEMENTS},
+                                ],
+                                value=kind,
+                                clearable=False,
+                                style={"flex": "1", "marginLeft": "4px", "minWidth": "100px", "fontSize": "12px"},
+                            ),
+                            dcc.Dropdown(
+                                id={"type": "ag-row-elements", "group_id": group["id"]},
+                                options=element_options,
+                                value=[s for s in elements_text.split(",") if s] if kind == _ATOM_GROUP_KIND_ELEMENTS else [],
+                                multi=True,
+                                placeholder="Pick elements",
+                                style={
+                                    "flex": "2",
+                                    "marginLeft": "4px",
+                                    "minWidth": "120px",
+                                    "fontSize": "12px",
+                                    "display": "block" if kind == _ATOM_GROUP_KIND_ELEMENTS else "none",
+                                },
+                            ),
+                            html.Button(
+                                "\u00d7",
+                                id={"type": "ag-row-delete", "group_id": group["id"]},
+                                n_clicks=0,
+                                style={
+                                    "background": "transparent",
+                                    "border": "1px solid #DDD",
+                                    "color": "#A00",
+                                    "padding": "0 8px",
+                                    "cursor": "pointer",
+                                    "lineHeight": "20px",
+                                    "borderRadius": "3px",
+                                    "marginLeft": "4px",
+                                },
+                                title="Remove this group rule",
+                            ),
+                        ],
+                        style={"display": "flex", "alignItems": "center", "gap": "2px"},
+                    ),
+                    html.Div(
+                        [
+                            html.Span("opacity", style={"fontSize": "11px", "color": "#666"}),
+                            dcc.Slider(
+                                id={"type": "ag-row-opacity", "group_id": group["id"]},
+                                min=0.0,
+                                max=1.0,
+                                step=0.05,
+                                value=float(group.get("opacity")) if group.get("opacity") is not None else 1.0,
+                                marks={0.0: "0", 0.5: "0.5", 1.0: "1"},
+                                tooltip={"placement": "bottom", "always_visible": False},
+                                updatemode="mouseup",
+                                included=True,
+                            ),
+                        ],
+                        style={"marginTop": "4px", "padding": "0 4px"},
+                    ),
+                ],
+                style={
+                    "marginBottom": "8px",
+                    "padding": "6px",
+                    "border": "1px solid #EEE",
+                    "borderRadius": "4px",
+                    "background": "#FAFAFA",
+                },
+            )
+        )
+    return rows
+
+
 def _normalize_polyhedron_specs(
     raw_specs: Any,
     *,
@@ -763,6 +994,29 @@ class ViewerBackend:
             }
             for item in self._species_summary(scene.get("fragment_table") or [])
         ]
+
+    def element_options(self, state: Optional[dict[str, Any]] = None) -> list[dict[str, Any]]:
+        """Distinct element symbols present in the active scene's
+        ``draw_atoms``. Used by the Phase 3 atom-group editor's
+        "by element" picker so the user can pick from real elements
+        rather than typing free-form symbols.
+
+        Returns a list of ``{"label": "O", "value": "O"}`` dicts in
+        the order elements first appear in the scene (so e.g. for a
+        perovskite the cations come first, then the anions, matching
+        the user's mental model).
+        """
+        state = state or self.get_state()
+        try:
+            scene = self.scene_for_state(state)
+        except Exception:
+            return []
+        seen: dict[str, None] = {}
+        for atom in scene.get("draw_atoms") or []:
+            elem = str(atom.get("elem") or "").strip()
+            if elem and elem not in seen:
+                seen[elem] = None
+        return [{"label": elem, "value": elem} for elem in seen]
 
     def fragment_options(self, state: Optional[dict[str, Any]] = None) -> list[dict[str, Any]]:
         """Dropdown options for the right-panel "Analyze fragment" selector.
@@ -1978,9 +2232,14 @@ def create_app(
                             {"label": "Minor Only", "value": "minor_only"},
                             {"label": "Hydrogens", "value": "hydrogens"},
                             {"label": "Unit Cell Box", "value": "unit_cell_box"},
-                            {"label": "Monochrome atoms", "value": "monochrome"},
+                            # Phase 3: legacy "Monochrome atoms" toggle
+                            # has been replaced by the Atom-Groups
+                            # editor below (one-click "Monochrome"
+                            # preset). Backend still honours the
+                            # ``monochrome`` flag for callers / saved
+                            # presets that set it directly.
                         ],
-                        value=first_state["display_options"],
+                        value=[opt for opt in first_state["display_options"] if opt != "monochrome"],
                     ),
                     html.Div(style={"height": "10px"}),
                     html.Label("Material / Style / Disorder"),
@@ -2102,18 +2361,107 @@ def create_app(
                     html.Div(
                         [
                             html.Label(
-                                "Polyhedron colour",
-                                style={"marginRight": "8px", "fontSize": "13px"},
+                                "Fallback colour (legacy)",
+                                style={"marginRight": "8px", "fontSize": "12px", "color": "#777"},
                             ),
                             dcc.Input(
                                 id="topology-hull-color",
                                 type="color",
                                 value=first_state.get("topology_hull_color", "#7C5CBF"),
-                                style={"width": "48px", "height": "28px", "padding": "0", "border": "1px solid #BBB", "verticalAlign": "middle"},
+                                style={"width": "40px", "height": "24px", "padding": "0", "border": "1px solid #BBB", "verticalAlign": "middle"},
                             ),
                         ],
                         style={"display": "flex", "alignItems": "center", "marginTop": "8px"},
                     ),
+                    html.Hr(),
+                    # ---- Phase 3: Named polyhedra table ----
+                    html.Div(
+                        [
+                            html.H4(
+                                "Named polyhedra",
+                                style={"display": "inline-block", "marginRight": "8px"},
+                            ),
+                            html.Button(
+                                "+ Add",
+                                id="polyhedra-add-btn",
+                                n_clicks=0,
+                                style={
+                                    "fontSize": "12px",
+                                    "padding": "2px 8px",
+                                    "verticalAlign": "middle",
+                                    "cursor": "pointer",
+                                },
+                                title="Add a named polyhedron row (centre + optional ligand restriction + colour).",
+                            ),
+                        ],
+                        style={"display": "flex", "alignItems": "center"},
+                    ),
+                    html.Div(
+                        id="polyhedra-rows-container",
+                        children=_polyhedra_table_rows(
+                            first_state.get("polyhedron_specs") or [],
+                            backend.species_options(first_state["structure"]),
+                        ),
+                        style={"marginTop": "6px"},
+                    ),
+                    html.Hr(),
+                    # ---- Phase 3: Atom groups table ----
+                    html.Div(
+                        [
+                            html.H4(
+                                "Atom groups",
+                                style={"display": "inline-block", "marginRight": "8px"},
+                            ),
+                            html.Button(
+                                "+ Add",
+                                id="atom-groups-add-btn",
+                                n_clicks=0,
+                                style={
+                                    "fontSize": "12px",
+                                    "padding": "2px 8px",
+                                    "verticalAlign": "middle",
+                                    "cursor": "pointer",
+                                },
+                                title="Add an empty atom-group rule. Pick a selector (all / by-element) and a colour.",
+                            ),
+                        ],
+                        style={"display": "flex", "alignItems": "center"},
+                    ),
+                    html.Div(
+                        [
+                            html.Button(
+                                "Monochrome",
+                                id="atom-groups-preset-mono",
+                                n_clicks=0,
+                                style={"fontSize": "12px", "padding": "2px 8px", "marginRight": "4px", "cursor": "pointer"},
+                                title="Add an 'all atoms = #000000' rule (replacement for the legacy Monochrome checkbox).",
+                            ),
+                            html.Button(
+                                "Hide H",
+                                id="atom-groups-preset-hide-h",
+                                n_clicks=0,
+                                style={"fontSize": "12px", "padding": "2px 8px", "marginRight": "4px", "cursor": "pointer"},
+                                title="Add a 'hydrogen invisible' rule.",
+                            ),
+                            html.Button(
+                                "Clear all",
+                                id="atom-groups-clear-btn",
+                                n_clicks=0,
+                                style={"fontSize": "12px", "padding": "2px 8px", "cursor": "pointer", "color": "#A00"},
+                                title="Drop every atom-group rule for this scene.",
+                            ),
+                        ],
+                        style={"marginTop": "6px"},
+                    ),
+                    html.Div(
+                        id="atom-groups-rows-container",
+                        children=_atom_groups_table_rows(
+                            first_state.get("atom_groups") or [],
+                            backend.element_options(first_state),
+                        ),
+                        style={"marginTop": "6px"},
+                    ),
+                    html.Hr(),
                     html.Div(style={"height": "12px"}),
                     html.Button("Save Preset", id="save-preset-btn", n_clicks=0),
                     html.Button("Export Static Figure", id="export-btn", n_clicks=0, style={"marginLeft": "8px"}),
@@ -2628,6 +2976,238 @@ def create_app(
             return no_update
         backend.record_state(patch)
         return backend.get_state()
+
+    # ------------------------------------------------------------------
+    # Phase 3 UI: Named-polyhedra table.
+    #
+    # ONE callback handles Add / Delete (pattern-matched) / inline edit
+    # (pattern-matched ALL inputs) / scene-change. Dispatch is by
+    # ``callback_context.triggered_id``:
+    #
+    # - "polyhedra-add-btn" / "scene-tabs" -> rebuild children from
+    #   backend state (the inline ALL inputs are stale during these
+    #   triggers because the row count just changed).
+    # - dict with "type": "poly-row-delete" -> remove the row whose
+    #   spec_id is in the triggered_id, rebuild children.
+    # - dict with "type": "poly-row-color" / "...-center" / "...-ligand"
+    #   / "...-enabled" -> reconstruct the spec list from the live ALL
+    #   inputs, persist via ``patch_state``, return ``no_update`` so we
+    #   don't tear down the row React keys mid-edit.
+    # ------------------------------------------------------------------
+    @app.callback(
+        Output("polyhedra-rows-container", "children", allow_duplicate=True),
+        Input("polyhedra-add-btn", "n_clicks"),
+        Input("scene-tabs", "value"),
+        Input({"type": "poly-row-color", "spec_id": ALL}, "value"),
+        Input({"type": "poly-row-center", "spec_id": ALL}, "value"),
+        Input({"type": "poly-row-ligand", "spec_id": ALL}, "value"),
+        Input({"type": "poly-row-enabled", "spec_id": ALL}, "value"),
+        Input({"type": "poly-row-delete", "spec_id": ALL}, "n_clicks"),
+        State({"type": "poly-row-color", "spec_id": ALL}, "id"),
+        prevent_initial_call=True,
+    )
+    def manage_polyhedra(
+        add_clicks,
+        active_scene_id,
+        colors,
+        centers,
+        ligands,
+        enableds,
+        deletes,
+        color_ids,
+    ):
+        triggered = getattr(callback_context, "triggered_id", None)
+        scene_id = active_scene_id or backend.active_scene_id()
+        species_options = backend.species_options(
+            backend.get_state(scene_id).get("structure")
+        )
+
+        def _rebuild():
+            specs = backend.list_polyhedron_specs(scene_id=scene_id)
+            return _polyhedra_table_rows(specs, species_options)
+
+        if triggered == "scene-tabs":
+            return _rebuild()
+
+        if triggered == "polyhedra-add-btn":
+            if not species_options:
+                return _rebuild()
+            try:
+                backend.add_polyhedron_spec(
+                    center_species=str(species_options[0]["value"]),
+                    enabled=True,
+                    scene_id=scene_id,
+                )
+            except Exception:
+                return no_update
+            return _rebuild()
+
+        if isinstance(triggered, dict) and triggered.get("type") == "poly-row-delete":
+            spec_id = triggered.get("spec_id")
+            if not spec_id:
+                return no_update
+            backend.remove_polyhedron_spec(spec_id, scene_id=scene_id)
+            return _rebuild()
+
+        if isinstance(triggered, dict) and triggered.get("type", "").startswith("poly-row-"):
+            # Inline edit. Reconstruct the full spec list from the
+            # current ALL-input values and persist it. We rely on
+            # ``color_ids`` (one id-dict per row) to give us the spec_id
+            # ordering that matches the value lists.
+            if not color_ids:
+                return no_update
+            existing = {
+                spec["id"]: spec
+                for spec in backend.list_polyhedron_specs(scene_id=scene_id)
+            }
+            new_specs: list[dict[str, Any]] = []
+            for index, id_dict in enumerate(color_ids):
+                spec_id = id_dict.get("spec_id")
+                base = existing.get(spec_id, {})
+                ligand_value = ligands[index] if index < len(ligands) else _AUTO_LIGAND_VALUE
+                if ligand_value == _AUTO_LIGAND_VALUE:
+                    ligand_value = None
+                new_specs.append(
+                    {
+                        "id": spec_id,
+                        "name": base.get("name") or "",
+                        "color": colors[index] if index < len(colors) else base.get("color"),
+                        "center_species": centers[index] if index < len(centers) else base.get("center_species"),
+                        "ligand_species": ligand_value,
+                        "enabled": "yes" in (enableds[index] if index < len(enableds) else []),
+                    }
+                )
+            try:
+                backend.patch_state({"polyhedron_specs": new_specs}, scene_id=scene_id)
+            except Exception:
+                pass
+            return no_update
+
+        return no_update
+
+    # ------------------------------------------------------------------
+    # Phase 3 UI: Atom-groups table.
+    #
+    # Same pattern as the polyhedra callback, plus three quick-preset
+    # buttons (Monochrome / Hide H / Clear all) that translate to
+    # backend CRUD calls.
+    # ------------------------------------------------------------------
+    @app.callback(
+        Output("atom-groups-rows-container", "children", allow_duplicate=True),
+        Input("atom-groups-add-btn", "n_clicks"),
+        Input("atom-groups-preset-mono", "n_clicks"),
+        Input("atom-groups-preset-hide-h", "n_clicks"),
+        Input("atom-groups-clear-btn", "n_clicks"),
+        Input("scene-tabs", "value"),
+        Input({"type": "ag-row-visible", "group_id": ALL}, "value"),
+        Input({"type": "ag-row-color", "group_id": ALL}, "value"),
+        Input({"type": "ag-row-kind", "group_id": ALL}, "value"),
+        Input({"type": "ag-row-elements", "group_id": ALL}, "value"),
+        Input({"type": "ag-row-opacity", "group_id": ALL}, "value"),
+        Input({"type": "ag-row-delete", "group_id": ALL}, "n_clicks"),
+        State({"type": "ag-row-color", "group_id": ALL}, "id"),
+        prevent_initial_call=True,
+    )
+    def manage_atom_groups(
+        add_clicks,
+        mono_clicks,
+        hide_h_clicks,
+        clear_clicks,
+        active_scene_id,
+        visibles,
+        colors,
+        kinds,
+        elements_lists,
+        opacities,
+        deletes,
+        color_ids,
+    ):
+        triggered = getattr(callback_context, "triggered_id", None)
+        scene_id = active_scene_id or backend.active_scene_id()
+
+        def _rebuild():
+            groups = backend.list_atom_groups(scene_id=scene_id)
+            return _atom_groups_table_rows(
+                groups, backend.element_options(backend.get_state(scene_id))
+            )
+
+        if triggered == "scene-tabs":
+            return _rebuild()
+
+        if triggered == "atom-groups-add-btn":
+            try:
+                backend.add_atom_group(selector={"all": True}, color="#888888", scene_id=scene_id)
+            except Exception:
+                return no_update
+            return _rebuild()
+
+        if triggered == "atom-groups-preset-mono":
+            backend.add_atom_group(
+                selector={"all": True},
+                color="#000000",
+                name="monochrome",
+                scene_id=scene_id,
+            )
+            return _rebuild()
+
+        if triggered == "atom-groups-preset-hide-h":
+            backend.add_atom_group(
+                selector={"elements": ["H"]},
+                visible=False,
+                name="hide H",
+                scene_id=scene_id,
+            )
+            return _rebuild()
+
+        if triggered == "atom-groups-clear-btn":
+            for group in list(backend.list_atom_groups(scene_id=scene_id)):
+                backend.remove_atom_group(group["id"], scene_id=scene_id)
+            return _rebuild()
+
+        if isinstance(triggered, dict) and triggered.get("type") == "ag-row-delete":
+            group_id = triggered.get("group_id")
+            if not group_id:
+                return no_update
+            backend.remove_atom_group(group_id, scene_id=scene_id)
+            return _rebuild()
+
+        if isinstance(triggered, dict) and triggered.get("type", "").startswith("ag-row-"):
+            if not color_ids:
+                return no_update
+            new_groups: list[dict[str, Any]] = []
+            for index, id_dict in enumerate(color_ids):
+                group_id = id_dict.get("group_id")
+                kind_value = kinds[index] if index < len(kinds) else _ATOM_GROUP_KIND_ALL
+                if kind_value == _ATOM_GROUP_KIND_ALL:
+                    selector = {"all": True}
+                else:
+                    selector = {
+                        "elements": list(elements_lists[index]) if index < len(elements_lists) and elements_lists[index] else []
+                    }
+                opacity_value = opacities[index] if index < len(opacities) else 1.0
+                opacity_payload = None if opacity_value is None or float(opacity_value) >= 0.999 else float(opacity_value)
+                new_groups.append(
+                    {
+                        "id": group_id,
+                        "selector": selector,
+                        "color": colors[index] if index < len(colors) else None,
+                        "visible": "yes" in (visibles[index] if index < len(visibles) else ["yes"]),
+                        "opacity": opacity_payload,
+                    }
+                )
+            try:
+                backend.patch_state({"atom_groups": new_groups}, scene_id=scene_id)
+            except Exception:
+                pass
+            # Special case: switching kind from "all" -> "by element"
+            # needs to reveal the elements multi-select that's
+            # display:none in the existing DOM. Rebuild children to
+            # update the visibility toggle.
+            if triggered.get("type") == "ag-row-kind":
+                return _rebuild()
+            return no_update
+
+        return no_update
 
     @app.callback(
         Output("camera-state-store", "data", allow_duplicate=True),
