@@ -157,6 +157,85 @@ def register_api(dash_app, backend) -> None:
         payload = request.get_json(force=True, silent=True) or {}
         return jsonify(backend.export_static(output_path=payload.get("output_path")))
 
+    # ----- polyhedron specs (Phase 1) -----------------------------------
+    #
+    # Per-scene named-row data model for coordination polymers. Each spec
+    # = {id, name, center_species, ligand_species (None=auto), color,
+    # enabled}. Empty list (DELETE-all or never-set) falls back to the
+    # legacy ``topology_species_keys`` + shared ``topology_hull_color``
+    # behaviour. See ``agents/polyhedron_api.md``.
+
+    def _polyhedra_scene_id() -> str | None:
+        # Body and querystring both supported so simple curl-driven
+        # agents can stay on either; matches the convention used by
+        # ``/topology`` and ``/screenshot``.
+        return _scene_id_from_request()
+
+    @v2.get("/polyhedra")
+    def polyhedra_list():
+        scene_id = request.args.get("scene_id")
+        return jsonify({"specs": backend.list_polyhedron_specs(scene_id=scene_id)})
+
+    @v2.post("/polyhedra")
+    def polyhedra_create():
+        payload = request.get_json(force=True, silent=True) or {}
+        center_species = payload.get("center_species")
+        if not center_species:
+            return jsonify({"error": "center_species is required"}), 400
+        try:
+            spec = backend.add_polyhedron_spec(
+                center_species=center_species,
+                ligand_species=payload.get("ligand_species"),
+                name=payload.get("name"),
+                color=payload.get("color"),
+                enabled=bool(payload.get("enabled", True)),
+                scene_id=_polyhedra_scene_id(),
+                spec_id=payload.get("id"),
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(spec)
+
+    @v2.patch("/polyhedra/<spec_id>")
+    def polyhedra_update(spec_id: str):
+        payload = request.get_json(force=True, silent=True) or {}
+        try:
+            spec = backend.update_polyhedron_spec(
+                spec_id=spec_id,
+                patch=payload,
+                scene_id=_polyhedra_scene_id(),
+            )
+        except KeyError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(spec)
+
+    @v2.delete("/polyhedra/<spec_id>")
+    def polyhedra_delete(spec_id: str):
+        ok = backend.remove_polyhedron_spec(
+            spec_id=spec_id,
+            scene_id=request.args.get("scene_id"),
+        )
+        if not ok:
+            return jsonify({"error": f"unknown polyhedron spec id: {spec_id!r}"}), 404
+        return jsonify({"deleted": spec_id})
+
+    @v2.post("/polyhedra/reorder")
+    def polyhedra_reorder():
+        payload = request.get_json(force=True, silent=True) or {}
+        ordered = payload.get("order")
+        if not isinstance(ordered, list):
+            return jsonify({"error": "'order' must be a list of spec ids"}), 400
+        try:
+            specs = backend.reorder_polyhedron_specs(
+                ordered_ids=ordered,
+                scene_id=_polyhedra_scene_id(),
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify({"specs": specs})
+
     server.register_blueprint(v2)
 
     v1 = Blueprint("crystal_viewer_api_v1", __name__, url_prefix="/api/v1")

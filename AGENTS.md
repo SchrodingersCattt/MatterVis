@@ -109,6 +109,32 @@ both files.
   points DOWN — flip the sign on `ay` when computing it from a
   screen-up direction.
 
+### `crystal_viewer.app` polyhedron specs — see [`agents/polyhedron_api.md`](agents/polyhedron_api.md)
+
+- Coordination polyhedra are a per-scene named-row table
+ (`state["polyhedron_specs"] = [{id, name, center_species,
+ ligand_species, color, enabled}, ...]`). Empty list (default for a
+ fresh scene) falls back to the legacy
+ `topology_species_keys` + shared `topology_hull_color` path so the
+ existing UI checklist keeps working unchanged.
+- The renderer paints **per-spec colour** by reading
+ `topology_data["spec_results"][i].color` directly, not
+ `style["topology_hull_color"]`. The single-colour path remains as a
+ back-compat fallback when `spec_results` is absent.
+- `_topology_state_cache` is keyed on geometry-only fields
+ (`(structure, display_mode, hydrogens, site_index, cutoff,
+ spec_geometry_key)` where `spec_geometry_key` only carries
+ `(center_species, ligand_species)` per spec). Per-spec colour is
+ NOT in the geometry cache key — it lives on the renderer's painter
+ cache instead, so swapping colours stays a cheap re-paint.
+- `analyze_topology` / `extract_coordination_shell` accept an
+ optional `ligand_species` keyword. When set, the neighbour-pool
+ cache is partitioned per ligand restriction; do not collapse the
+ cache key back to `(center_index, cutoff)` or two specs sharing a
+ centre but differing in ligand will poison each other's pool.
+- REST surface `/api/v2/polyhedra` (CRUD + reorder) is part of the
+ public API; back-incompatible changes require an API version bump.
+
 ### `crystal_viewer.scene` / `renderer` — see [`agents/scene_api.md`](agents/scene_api.md)
 
 - `display_mode="cluster"` skips formula-unit selection and PBC bond

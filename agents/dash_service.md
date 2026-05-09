@@ -69,6 +69,12 @@ preset save/load.
   Returns the scene JSON and fragment table.
 - `POST /topology`
   JSON body: `{"structure": "SY", "center_index": 0, "cutoff": 10.0}`.
+- `GET /polyhedra` / `POST /polyhedra` / `PATCH /polyhedra/{id}` /
+  `DELETE /polyhedra/{id}` / `POST /polyhedra/reorder`
+  Per-scene named-row table for coordination polyhedra. Each row pins
+  a centre species + optional ligand species + colour + enabled flag.
+  See [`polyhedron_api.md`](polyhedron_api.md) for the spec shape and
+  worked examples.
 - `GET /screenshot`
   Returns a PNG snapshot of the current Plotly view.
 - `POST /preset/save`

@@ -1501,54 +1501,109 @@ def _merged_hull_edges(overlays: list[list], color: str):
     return [trace]
 
 
+def _multi_spec_cache_key(topology_data: dict, fallback_color: str) -> tuple:
+    """Build a hashable key for the renderer's painter caches that
+    captures every per-spec colour and the fallback shared colour
+    (used by callers that haven't migrated to ``spec_results``)."""
+    spec_results = topology_data.get("spec_results") or []
+    return (
+        tuple((entry.get("spec_id") or "", entry.get("color") or fallback_color) for entry in spec_results),
+        fallback_color,
+    )
+
+
 def topology_background_traces(topology_data: dict | None, style: dict | None = None):
-    """Hull mesh + edges for every overlay. Designed to be added to the
-    figure *before* the atom traces so atoms (especially faded minor /
-    disorder positions) stay visible on top of the semi-transparent hull
-    instead of getting washed out by Plotly's painter-order alpha
-    stacking. Result is cached on the ``topology_data`` dict keyed on
-    ``hull_color`` so toggling a cosmetic checkbox doesn't re-tessellate
-    several thousand hull-edge cylinders for tiled polyhedra."""
+    """Hull mesh + edges for every overlay, painted per-spec when
+    ``topology_data["spec_results"]`` is set; otherwise falls back to the
+    legacy single-colour path keyed on ``style["topology_hull_color"]``.
+
+    Designed to be added to the figure *before* the atom traces so atoms
+    (especially faded minor / disorder positions) stay visible on top of
+    the semi-transparent hull instead of getting washed out by Plotly's
+    painter-order alpha stacking. Result is cached on the
+    ``topology_data`` dict keyed on the per-spec colour tuple so
+    toggling a cosmetic checkbox doesn't re-tessellate several thousand
+    hull-edge cylinders for tiled polyhedra.
+    """
     if not topology_data:
         return []
     style = style or {}
-    hull_color = str(style.get("topology_hull_color", "#7C5CBF"))
+    fallback_color = str(style.get("topology_hull_color", "#7C5CBF"))
     cache = topology_data.setdefault("_background_dict_cache", {})
-    if hull_color in cache:
-        return cache[hull_color]
+    cache_key = _multi_spec_cache_key(topology_data, fallback_color)
+    if cache_key in cache:
+        return cache[cache_key]
     primary_opacity = 0.22
     extra_opacity = 0.12
 
-    overlays_with_opacity: list[tuple[list, float]] = []
-    if topology_data.get("shell_coords"):
-        overlays_with_opacity.append((topology_data["shell_coords"], primary_opacity))
-    for extra in topology_data.get("extra_overlays") or []:
-        if extra.get("shell_coords"):
-            overlays_with_opacity.append((extra["shell_coords"], extra_opacity))
+    traces: list = []
+    spec_results = topology_data.get("spec_results") or []
+    if spec_results:
+        for entry in spec_results:
+            color = str(entry.get("color") or fallback_color)
+            overlays_with_opacity: list[tuple[list, float]] = []
+            for overlay in entry.get("overlays") or []:
+                shell = overlay.get("shell_coords")
+                if not shell:
+                    continue
+                opacity = primary_opacity if overlay.get("is_analysis_anchor") else extra_opacity
+                overlays_with_opacity.append((shell, opacity))
+            if not overlays_with_opacity:
+                continue
+            traces.extend(_merged_hull_mesh(overlays_with_opacity, color=color))
+            traces.extend(_merged_hull_edges([c for c, _ in overlays_with_opacity], color=color))
+    else:
+        # Legacy single-colour path: callers (or test fixtures) that
+        # construct a topology_data dict by hand still see the original
+        # behaviour, no colour table required.
+        overlays_with_opacity = []
+        if topology_data.get("shell_coords"):
+            overlays_with_opacity.append((topology_data["shell_coords"], primary_opacity))
+        for extra in topology_data.get("extra_overlays") or []:
+            if extra.get("shell_coords"):
+                overlays_with_opacity.append((extra["shell_coords"], extra_opacity))
+        traces.extend(_merged_hull_mesh(overlays_with_opacity, color=fallback_color))
+        traces.extend(_merged_hull_edges([c for c, _ in overlays_with_opacity], color=fallback_color))
 
-    traces = list(_merged_hull_mesh(overlays_with_opacity, color=hull_color))
-    traces.extend(_merged_hull_edges([c for c, _ in overlays_with_opacity], color=hull_color))
-    cache[hull_color] = [_trace_to_json_safe_dict(tr) for tr in traces]
-    return cache[hull_color]
+    cache[cache_key] = [_trace_to_json_safe_dict(tr) for tr in traces]
+    return cache[cache_key]
 
 
 def topology_foreground_traces(topology_data: dict | None, style: dict | None = None):
-    """Center markers, connecting lines and shell-atom highlights for the
-    primary overlay plus a faint dot per extra overlay. These belong on
-    top of the atom traces so the user can always see which site owns
-    the histogram / results panel. Cached on ``topology_data`` keyed on
-    ``hull_color``."""
+    """Centre markers, connecting lines and shell-atom highlights.
+
+    Multi-spec mode: one marker cluster per spec, coloured to match the
+    hull. The single fragment marked ``is_analysis_anchor`` keeps the
+    bigger orange marker and connecting lines so the user can always
+    see which site owns the histogram / results panel. Falls back to
+    the legacy single-colour layout when ``spec_results`` is absent.
+    """
     if not topology_data:
         return []
     style = style or {}
-    hull_color = str(style.get("topology_hull_color", "#7C5CBF"))
+    fallback_color = str(style.get("topology_hull_color", "#7C5CBF"))
     cache = topology_data.setdefault("_foreground_dict_cache", {})
-    if hull_color in cache:
-        return cache[hull_color]
+    cache_key = _multi_spec_cache_key(topology_data, fallback_color)
+    if cache_key in cache:
+        return cache[cache_key]
 
     traces: list = []
+    spec_results = topology_data.get("spec_results") or []
     primary_center = topology_data.get("center_coords")
     primary_coords = topology_data.get("shell_coords") or []
+    primary_distances = topology_data.get("distances") or []
+    # Pick the colour the analysis anchor's spec uses, so the
+    # distance-coloured shell-atom markers blend with their hull.
+    anchor_color = fallback_color
+    if spec_results:
+        anchor_spec_id = topology_data.get("analysis_spec_id")
+        for entry in spec_results:
+            if entry.get("spec_id") == anchor_spec_id:
+                anchor_color = str(entry.get("color") or fallback_color)
+                break
+        else:
+            anchor_color = str(spec_results[0].get("color") or fallback_color)
+
     if primary_center is not None and len(primary_coords) > 0:
         traces.extend(shell_center_lines(primary_center, primary_coords))
         primary_marker = _world_sphere_marker_trace(
@@ -1559,26 +1614,54 @@ def topology_foreground_traces(topology_data: dict | None, style: dict | None = 
         )
         if primary_marker is not None:
             traces.append(primary_marker)
-        if topology_data.get("distances"):
-            traces.extend(shell_atom_traces(primary_coords, topology_data["distances"], color=hull_color))
-    extra_centers = []
-    for extra in topology_data.get("extra_overlays") or []:
-        center = extra.get("center_coords")
-        coords = extra.get("shell_coords") or []
-        if center is None or len(coords) == 0:
-            continue
-        extra_centers.append(center)
-    if extra_centers:
-        extra_marker = _world_sphere_marker_trace(
-            extra_centers,
-            radius=0.32,
-            color=hull_color,
-            opacity=0.55,
-        )
-        if extra_marker is not None:
-            traces.append(extra_marker)
-    cache[hull_color] = [_trace_to_json_safe_dict(tr) for tr in traces]
-    return cache[hull_color]
+        if primary_distances:
+            traces.extend(shell_atom_traces(primary_coords, primary_distances, color=anchor_color))
+
+    if spec_results:
+        # One faint marker cluster per spec covering its non-anchor
+        # overlays. We skip the anchor centre because it already has
+        # the bright orange marker above.
+        for entry in spec_results:
+            color = str(entry.get("color") or fallback_color)
+            extra_centers = []
+            for overlay in entry.get("overlays") or []:
+                if overlay.get("is_analysis_anchor"):
+                    continue
+                center = overlay.get("center_coords")
+                coords = overlay.get("shell_coords") or []
+                if center is None or len(coords) == 0:
+                    continue
+                extra_centers.append(center)
+            if not extra_centers:
+                continue
+            extra_marker = _world_sphere_marker_trace(
+                extra_centers,
+                radius=0.32,
+                color=color,
+                opacity=0.55,
+            )
+            if extra_marker is not None:
+                traces.append(extra_marker)
+    else:
+        extra_centers = []
+        for extra in topology_data.get("extra_overlays") or []:
+            center = extra.get("center_coords")
+            coords = extra.get("shell_coords") or []
+            if center is None or len(coords) == 0:
+                continue
+            extra_centers.append(center)
+        if extra_centers:
+            extra_marker = _world_sphere_marker_trace(
+                extra_centers,
+                radius=0.32,
+                color=fallback_color,
+                opacity=0.55,
+            )
+            if extra_marker is not None:
+                traces.append(extra_marker)
+
+    cache[cache_key] = [_trace_to_json_safe_dict(tr) for tr in traces]
+    return cache[cache_key]
 
 
 def topology_traces(topology_data: dict | None, style: dict | None = None):

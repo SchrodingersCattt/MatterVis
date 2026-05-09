@@ -75,17 +75,43 @@ def _translation_grid(bundle, cutoff: float) -> list[tuple[int, int, int, np.nda
     return translations
 
 
-def _neighbor_pool_uncached(bundle, center_fragment: dict, cutoff: float) -> list[dict[str, Any]]:
+def _neighbor_pool_uncached(
+    bundle,
+    center_fragment: dict,
+    cutoff: float,
+    *,
+    ligand_species: tuple[str, ...] | None = None,
+) -> list[dict[str, Any]]:
+    """Find neighbour fragments within ``cutoff`` of the centre.
+
+    ``ligand_species`` overrides the default perovskite XYn neighbour-type
+    inference: when set, only fragments whose ``formula``/``species``
+    matches one of the listed strings are considered. ``None`` keeps the
+    legacy auto-derived behaviour (``_neighbor_types``).
+
+    Pre-built named ``polyhedron_specs`` need this override so the user
+    can paint e.g. C8N1 -> Cl polyhedra in DAP-4 explicitly without
+    fighting the A/B/X auto-classifier.
+    """
     fragments = classify_fragments(bundle)
     center_type = center_fragment.get("type", "?")
-    allowed_types = set(_neighbor_types(fragments, center_type))
+    if ligand_species:
+        wanted = {str(item) for item in ligand_species if item}
+        allowed_types: set[str] = set()
+    else:
+        wanted = None
+        allowed_types = set(_neighbor_types(fragments, center_type))
     center = np.array(center_fragment["center"], dtype=float)
     translations = _translation_grid(bundle, cutoff)
     fragment_entries = []
     for fragment_order, fragment in enumerate(fragments):
         if fragment["index"] == center_fragment["index"] and center_type not in {"X"}:
             continue
-        if allowed_types and fragment.get("type", "?") not in allowed_types:
+        if wanted is not None:
+            formula_key = fragment.get("formula") or fragment.get("species")
+            if formula_key not in wanted:
+                continue
+        elif allowed_types and fragment.get("type", "?") not in allowed_types:
             continue
         fragment_entries.append((fragment_order, fragment))
     if not fragment_entries or not translations:
@@ -129,21 +155,31 @@ def _neighbor_pool_uncached(bundle, center_fragment: dict, cutoff: float) -> lis
     return candidates
 
 
-def _neighbor_pool(bundle, center_fragment: dict, cutoff: float) -> list[dict[str, Any]]:
-    """Cached PBC neighbour search. Bundle topology is immutable after load,
-    so the (center_index, cutoff) tuple uniquely determines the result --
-    invaluable when the species checkbox triggers analyze_topology for many
-    sites in quick succession."""
+def _neighbor_pool(
+    bundle,
+    center_fragment: dict,
+    cutoff: float,
+    *,
+    ligand_species: tuple[str, ...] | None = None,
+) -> list[dict[str, Any]]:
+    """Cached PBC neighbour search. The cache key now includes the
+    ligand-species filter so two specs with the same centre but
+    different ligand restrictions don't poison each other's pool."""
     cache = getattr(bundle, "_neighbor_pool_cache", None)
     if cache is None:
         cache = {}
         try:
             bundle._neighbor_pool_cache = cache
         except Exception:
-            return _neighbor_pool_uncached(bundle, center_fragment, cutoff)
-    key = (int(center_fragment.get("index", -1)), float(cutoff))
+            return _neighbor_pool_uncached(
+                bundle, center_fragment, cutoff, ligand_species=ligand_species
+            )
+    ligand_key = tuple(sorted(ligand_species)) if ligand_species else None
+    key = (int(center_fragment.get("index", -1)), float(cutoff), ligand_key)
     if key not in cache:
-        cache[key] = _neighbor_pool_uncached(bundle, center_fragment, cutoff)
+        cache[key] = _neighbor_pool_uncached(
+            bundle, center_fragment, cutoff, ligand_species=ligand_species
+        )
     return cache[key]
 
 
@@ -151,17 +187,22 @@ def _extract_coordination_shell_static(
     bundle,
     center_index: int,
     cutoff: float,
+    *,
+    ligand_species: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     """Run the geometric part of ``extract_coordination_shell`` -- everything
-    that depends only on (bundle, center_index, cutoff) and not on the
-    per-call display-coordinate offsets. The result is cacheable; the
-    public wrapper layers display fields on top of a shallow copy."""
+    that depends only on (bundle, center_index, cutoff, ligand_species) and
+    not on the per-call display-coordinate offsets. The result is
+    cacheable; the public wrapper layers display fields on top of a
+    shallow copy."""
     fragments = classify_fragments(bundle)
     center_fragment = next((frag for frag in fragments if int(frag["index"]) == int(center_index)), None)
     if center_fragment is None:
         raise IndexError(f"Unknown fragment index: {center_index}")
     source_center = np.array(center_fragment["center"], dtype=float)
-    candidates = _neighbor_pool(bundle, center_fragment, cutoff=cutoff)
+    candidates = _neighbor_pool(
+        bundle, center_fragment, cutoff=cutoff, ligand_species=ligand_species
+    )
     candidate_coords = (
         np.array([item["center"] for item in candidates], dtype=float)
         if candidates else np.zeros((0, 3), dtype=float)
@@ -197,17 +238,28 @@ def _extract_coordination_shell_static(
     }
 
 
-def _cached_extract_static(bundle, center_index: int, cutoff: float) -> dict[str, Any]:
+def _cached_extract_static(
+    bundle,
+    center_index: int,
+    cutoff: float,
+    *,
+    ligand_species: tuple[str, ...] | None = None,
+) -> dict[str, Any]:
     cache = getattr(bundle, "_shell_cache", None)
     if cache is None:
         cache = {}
         try:
             bundle._shell_cache = cache
         except Exception:
-            return _extract_coordination_shell_static(bundle, center_index, cutoff)
-    key = (int(center_index), float(cutoff))
+            return _extract_coordination_shell_static(
+                bundle, center_index, cutoff, ligand_species=ligand_species
+            )
+    ligand_key = tuple(sorted(ligand_species)) if ligand_species else None
+    key = (int(center_index), float(cutoff), ligand_key)
     if key not in cache:
-        cache[key] = _extract_coordination_shell_static(bundle, center_index, cutoff)
+        cache[key] = _extract_coordination_shell_static(
+            bundle, center_index, cutoff, ligand_species=ligand_species
+        )
     return cache[key]
 
 
@@ -219,8 +271,12 @@ def extract_coordination_shell(
     display_center: Iterable[float] | None = None,
     display_label: str | None = None,
     display_type: str | None = None,
+    ligand_species: Iterable[str] | None = None,
 ) -> dict[str, Any]:
-    static = _cached_extract_static(bundle, int(center_index), float(cutoff))
+    ligand_tuple = tuple(str(item) for item in ligand_species) if ligand_species else None
+    static = _cached_extract_static(
+        bundle, int(center_index), float(cutoff), ligand_species=ligand_tuple
+    )
     source_center = np.asarray(static["source_center_coords"], dtype=float)
     plot_center = source_center if display_center is None else np.array(display_center, dtype=float)
     delta = plot_center - source_center
@@ -262,6 +318,8 @@ def _analyze_topology_uncached(
     display_center,
     display_label,
     display_type,
+    *,
+    ligand_species: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     shell = extract_coordination_shell(
         bundle,
@@ -270,6 +328,7 @@ def _analyze_topology_uncached(
         display_center=display_center,
         display_label=display_label,
         display_type=display_type,
+        ligand_species=ligand_species,
     )
     center = shell["center_coords"]
     shell_coords = shell["shell_coords"]
@@ -294,13 +353,16 @@ def analyze_topology(
     display_center: Iterable[float] | None = None,
     display_label: str | None = None,
     display_type: str | None = None,
+    ligand_species: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     """Cached primary-site analysis. The heavy ``planarity_analysis`` pass
     runs ``itertools.combinations`` of size 5 over the shell, which gets
-    expensive for CN=12 / large neighbour pools. We key the cache on the
-    static (center_index, cutoff) tuple -- the full bundle topology is
-    immutable once loaded -- so flipping species checkboxes back and forth
-    no longer redoes the work."""
+    expensive for CN=12 / large neighbour pools. We key the cache on
+    ``(center_index, cutoff, ligand_species)`` -- the full bundle topology
+    is immutable once loaded -- so flipping species checkboxes back and
+    forth no longer redoes the work, but two named polyhedron specs with
+    different ligand restrictions get distinct cache slots."""
+    ligand_tuple = tuple(str(item) for item in ligand_species) if ligand_species else None
     cache = getattr(bundle, "_analyze_topology_cache", None)
     if cache is None:
         cache = {}
@@ -310,13 +372,15 @@ def analyze_topology(
             return _analyze_topology_uncached(
                 bundle, center_index, cutoff,
                 display_center, display_label, display_type,
+                ligand_species=ligand_tuple,
             )
-    key = (int(center_index), float(cutoff))
+    key = (int(center_index), float(cutoff), ligand_tuple)
     cached = cache.get(key)
     if cached is None:
         cached = _analyze_topology_uncached(
             bundle, center_index, cutoff,
             None, None, None,  # cache on the static result; overlay display fields below
+            ligand_species=ligand_tuple,
         )
         cache[key] = cached
     # Display fields shift per call (camera / formula-unit centering); patch

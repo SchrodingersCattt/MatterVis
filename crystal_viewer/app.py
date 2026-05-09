@@ -4,11 +4,13 @@ import argparse
 import copy
 import io
 import os
+import re
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import uuid
 from typing import Any, Dict, Iterable, Optional
 
 import numpy as np
@@ -81,6 +83,110 @@ def _minor_opacity_control_style(disorder: Optional[str]) -> dict[str, Any]:
 
 def _status_class(level: str = "info") -> str:
     return f"status-banner status-banner--{level}"
+
+
+# Colour-blind-friendly cycling palette for auto-assigned polyhedron specs.
+# Built off Okabe-Ito with one extra warm purple so 8-spec scenes still
+# read distinctly. Callers can always override per-spec; this just gives
+# them a sane default when they POST {"name": ...} without a colour.
+_POLYHEDRON_AUTO_COLORS = (
+    "#7C5CBF",
+    "#E07C24",
+    "#1F77B4",
+    "#2CA02C",
+    "#D62728",
+    "#9467BD",
+    "#17BECF",
+    "#BCBD22",
+)
+
+_HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
+
+
+def _coerce_hex_color(value: Any, fallback: str) -> str:
+    """Reject anything that isn't ``#rrggbb`` so a malformed payload from a
+    careless caller can't sneak ``red`` or ``rgba(...)`` into the data
+    model and crash kaleido later. Always returns a six-digit lowercase
+    hex string; ``fallback`` is used unchanged when ``value`` is bad."""
+    if isinstance(value, str):
+        text = value.strip()
+        if _HEX_COLOR_RE.match(text):
+            return text.lower()
+    return fallback
+
+
+def _coerce_species_value(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _normalize_polyhedron_spec(
+    raw: Any,
+    *,
+    fallback_color: str,
+    existing_ids: set[str],
+) -> Optional[dict[str, Any]]:
+    """Turn one POST/PATCH payload entry into the canonical spec shape.
+
+    Returns ``None`` when the entry can't be salvaged (no centre species,
+    not a dict, ...). Mutates ``existing_ids`` so callers building a list
+    in one pass get unique ids without re-scanning the whole list.
+    """
+    if not isinstance(raw, dict):
+        return None
+    center = _coerce_species_value(raw.get("center_species"))
+    if center is None:
+        return None
+    spec_id = str(raw.get("id") or "").strip()
+    if not spec_id or spec_id in existing_ids:
+        spec_id = f"poly_{uuid.uuid4().hex[:10]}"
+        while spec_id in existing_ids:  # pragma: no cover - astronomically unlikely
+            spec_id = f"poly_{uuid.uuid4().hex[:10]}"
+    existing_ids.add(spec_id)
+    name = str(raw.get("name") or center).strip() or center
+    ligand = _coerce_species_value(raw.get("ligand_species"))
+    color = _coerce_hex_color(raw.get("color"), fallback_color)
+    enabled = bool(raw.get("enabled", True))
+    return {
+        "id": spec_id,
+        "name": name,
+        "center_species": center,
+        # ``None`` keeps the legacy auto-derived ligand behaviour
+        # (``_neighbor_types`` / perovskite XYn). Explicit string locks
+        # the spec to that ligand species formula.
+        "ligand_species": ligand,
+        "color": color,
+        "enabled": enabled,
+    }
+
+
+def _normalize_polyhedron_specs(
+    raw_specs: Any,
+    *,
+    fallback_color: str = "#7C5CBF",
+) -> list[dict[str, Any]]:
+    """Validate a list of polyhedron-spec dicts coming from a state patch
+    or REST payload. Drops malformed rows silently; callers that need to
+    surface validation errors should use ``_normalize_polyhedron_spec``
+    directly."""
+    if raw_specs is None:
+        return []
+    if not isinstance(raw_specs, (list, tuple)):
+        return []
+    out: list[dict[str, Any]] = []
+    existing_ids: set[str] = set()
+    for index, raw in enumerate(raw_specs):
+        spec_fallback = _POLYHEDRON_AUTO_COLORS[index % len(_POLYHEDRON_AUTO_COLORS)]
+        spec = _normalize_polyhedron_spec(
+            raw,
+            fallback_color=fallback_color if index == 0 else spec_fallback,
+            existing_ids=existing_ids,
+        )
+        if spec is not None:
+            out.append(spec)
+    return out
 
 
 def _status_message(message: str, level: str = "info") -> tuple[str, str]:
@@ -336,6 +442,13 @@ class ViewerBackend:
             "topology_site_index": None,
             "topology_enabled": bool(style.get("topology_enabled", True)),
             "topology_hull_color": str(style.get("topology_hull_color", "#7C5CBF")),
+            # ``polyhedron_specs`` is the new (Phase 1) per-scene named-row
+            # data model: each entry is {id, name, center_species,
+            # ligand_species, color, enabled}. Empty list = fall back to the
+            # legacy ``topology_species_keys`` + shared ``topology_hull_color``
+            # behaviour (auto-derived neighbour types). See
+            # ``agents/polyhedron_api.md`` for the API surface.
+            "polyhedron_specs": [],
             "fast_rendering": bool(style.get("fast_rendering", False)),
             "camera": scene.get("camera"),
             "cutoff": 10.0,
@@ -650,6 +763,14 @@ class ViewerBackend:
             state["topology_enabled"] = bool(patch["topology_enabled"])
         if "topology_hull_color" in patch and patch["topology_hull_color"]:
             state["topology_hull_color"] = str(patch["topology_hull_color"])
+        if "polyhedron_specs" in patch:
+            # Empty list is a valid override (= "drop all named specs and
+            # fall back to legacy topology_species_keys"); ``None`` means
+            # the same. Treat both uniformly.
+            state["polyhedron_specs"] = _normalize_polyhedron_specs(
+                patch.get("polyhedron_specs") or [],
+                fallback_color=state.get("topology_hull_color", "#7C5CBF"),
+            )
         if "fast_rendering" in patch:
             state["fast_rendering"] = bool(patch["fast_rendering"])
         if "camera" in patch and patch["camera"] is not None:
@@ -914,13 +1035,161 @@ class ViewerBackend:
             return int(candidates[0]["index"])
         return None
 
+    # ---- polyhedron_specs CRUD ---------------------------------------
+    #
+    # All methods operate on the active scene's state by default;
+    # callers may pass ``scene_id`` to target a specific tab. They
+    # always return the persisted list of specs (post-normalisation)
+    # and emit a broadcast so every connected client picks up the
+    # change. Wraps ``patch_state`` so the existing version bump,
+    # autosave, and pending-state machinery just works.
+
+    def list_polyhedron_specs(self, scene_id: Optional[str] = None) -> list[dict[str, Any]]:
+        state = self.get_state(scene_id)
+        return list(state.get("polyhedron_specs") or [])
+
+    def _resolve_specs(self, scene_id: Optional[str]) -> tuple[Optional[str], list[dict[str, Any]]]:
+        scene_id = scene_id or self.active_scene_id()
+        state = self.get_state(scene_id)
+        specs = list(state.get("polyhedron_specs") or [])
+        return scene_id, [dict(spec) for spec in specs]
+
+    def add_polyhedron_spec(
+        self,
+        center_species: str,
+        ligand_species: Optional[str] = None,
+        *,
+        name: Optional[str] = None,
+        color: Optional[str] = None,
+        enabled: bool = True,
+        scene_id: Optional[str] = None,
+        spec_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        scene_id, specs = self._resolve_specs(scene_id)
+        fallback_color = _POLYHEDRON_AUTO_COLORS[len(specs) % len(_POLYHEDRON_AUTO_COLORS)]
+        existing_ids = {spec["id"] for spec in specs}
+        spec = _normalize_polyhedron_spec(
+            {
+                "id": spec_id,
+                "name": name,
+                "center_species": center_species,
+                "ligand_species": ligand_species,
+                "color": color,
+                "enabled": enabled,
+            },
+            fallback_color=fallback_color,
+            existing_ids=existing_ids,
+        )
+        if spec is None:
+            raise ValueError(
+                f"invalid polyhedron spec (missing center_species?): {center_species!r}"
+            )
+        specs.append(spec)
+        self.patch_state({"polyhedron_specs": specs}, scene_id=scene_id)
+        return spec
+
+    def update_polyhedron_spec(
+        self,
+        spec_id: str,
+        patch: dict[str, Any],
+        *,
+        scene_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        scene_id, specs = self._resolve_specs(scene_id)
+        for index, spec in enumerate(specs):
+            if spec["id"] == spec_id:
+                merged = dict(spec)
+                merged.update(patch or {})
+                merged["id"] = spec_id
+                # Re-normalise via the single-row helper so the same
+                # color/species coercion as POST applies.
+                replacement = _normalize_polyhedron_spec(
+                    merged,
+                    fallback_color=spec["color"],
+                    existing_ids={s["id"] for s in specs if s["id"] != spec_id},
+                )
+                if replacement is None:
+                    raise ValueError(
+                        f"invalid polyhedron spec patch for {spec_id!r}: {patch!r}"
+                    )
+                specs[index] = replacement
+                self.patch_state({"polyhedron_specs": specs}, scene_id=scene_id)
+                return replacement
+        raise KeyError(f"unknown polyhedron spec id: {spec_id!r}")
+
+    def remove_polyhedron_spec(
+        self,
+        spec_id: str,
+        *,
+        scene_id: Optional[str] = None,
+    ) -> bool:
+        scene_id, specs = self._resolve_specs(scene_id)
+        before = len(specs)
+        specs = [spec for spec in specs if spec["id"] != spec_id]
+        if len(specs) == before:
+            return False
+        self.patch_state({"polyhedron_specs": specs}, scene_id=scene_id)
+        return True
+
+    def reorder_polyhedron_specs(
+        self,
+        ordered_ids: Iterable[str],
+        *,
+        scene_id: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        scene_id, specs = self._resolve_specs(scene_id)
+        index_by_id = {spec["id"]: spec for spec in specs}
+        wanted = [str(item) for item in ordered_ids]
+        if set(wanted) != set(index_by_id):
+            raise ValueError(
+                "reorder list must contain exactly the existing spec ids; "
+                f"got {wanted!r}, have {sorted(index_by_id)}"
+            )
+        ordered = [index_by_id[spec_id] for spec_id in wanted]
+        self.patch_state({"polyhedron_specs": ordered}, scene_id=scene_id)
+        return ordered
+
+    # ---- topology computation -----------------------------------------
+
+    def _effective_polyhedron_specs(self, state: dict[str, Any]) -> list[dict[str, Any]]:
+        """Resolve the per-render list of specs from explicit
+        ``polyhedron_specs`` if present, otherwise synthesise one entry
+        per legacy ``topology_species_keys`` value (auto ligand, shared
+        ``topology_hull_color``)."""
+        explicit = list(state.get("polyhedron_specs") or [])
+        if explicit:
+            return [dict(spec) for spec in explicit if spec.get("enabled", True)]
+        species_keys = list(state.get("topology_species_keys") or [])
+        if not species_keys:
+            return []
+        color = str(state.get("topology_hull_color", "#7C5CBF"))
+        return [
+            {
+                "id": f"legacy_{index}",
+                "name": str(key),
+                "center_species": str(key),
+                "ligand_species": None,
+                "color": color,
+                "enabled": True,
+            }
+            for index, key in enumerate(species_keys)
+        ]
+
     def topology_for_state(self, state: dict[str, Any], click_data: Optional[dict[str, Any]] = None):
         if not state.get("topology_enabled", True):
             return None
         structure = state["structure"]
         bundle = self.get_bundle(structure)
         scene = self.scene_for_state(state)
-        species_keys = list(state.get("topology_species_keys") or [])
+        effective_specs = self._effective_polyhedron_specs(state)
+        if not effective_specs:
+            return None
+        # Legacy code paths below still consume a single ``species_keys``
+        # list (used to resolve the analysis anchor when the user clicks
+        # in the viewer). Reconstruct it from the union of every active
+        # spec's center species so a click on any rendered polyhedron
+        # still snaps the analysis panel.
+        species_keys = sorted({spec["center_species"] for spec in effective_specs})
         if not species_keys:
             return None
         site_index = self.resolve_topology_site(
@@ -933,32 +1202,88 @@ class ViewerBackend:
         if site_index is None:
             return None
         # Memoize the (heavy) topology dict on the bundle keyed on the
-        # state fields that actually influence it. Cosmetic toggles
-        # (Labels, Axes, Hydrogens, atom-scale, ...) don't touch this
-        # cache, so on the warm path the trace caches we attach to the
-        # topology_data dict (background hull / edges / shell highlights)
-        # also stay alive instead of being thrown away on every
-        # checkbox flick.
+        # state fields that actually influence GEOMETRY. Per-spec colour
+        # is intentionally not in the key -- it only affects the
+        # renderer's painter cache (``_background_dict_cache`` etc),
+        # which is keyed independently on the per-spec colour tuple.
+        # That way swapping a hull colour stays a cheap re-paint and
+        # doesn't recompute coordination shells for every tile.
+        cutoff = float(state.get("cutoff", 10.0))
+        spec_geometry_key = tuple(
+            (
+                spec["center_species"],
+                spec.get("ligand_species") or None,
+            )
+            for spec in effective_specs
+        )
         cache_key = (
             structure,
             state.get("display_mode"),
             bool("hydrogens" in (state.get("display_options") or [])),
-            tuple(sorted(str(k) for k in species_keys)),
             int(site_index),
-            float(state.get("cutoff", 10.0)),
+            cutoff,
+            spec_geometry_key,
         )
         cache = getattr(bundle, "_topology_state_cache", None)
         if cache is None:
             cache = {}
             bundle._topology_state_cache = cache
-        if cache_key in cache:
-            return cache[cache_key]
+        cached_geometry = cache.get(cache_key)
+        if cached_geometry is None:
+            cached_geometry = self._compute_topology_geometry(
+                bundle=bundle,
+                scene=scene,
+                effective_specs=effective_specs,
+                site_index=site_index,
+                cutoff=cutoff,
+            )
+            cache[cache_key] = cached_geometry
+        if cached_geometry is None:
+            return None
+        # Re-attach the per-render colour overrides on every call. The
+        # geometry payload is shared across colour permutations; we only
+        # ever copy a small list of dicts, never the heavy hull arrays.
+        return self._attach_spec_colors(cached_geometry, effective_specs)
+
+    def _compute_topology_geometry(
+        self,
+        *,
+        bundle,
+        scene: dict[str, Any],
+        effective_specs: list[dict[str, Any]],
+        site_index: int,
+        cutoff: float,
+    ) -> Optional[dict[str, Any]]:
         display_fragment = self._display_fragment(scene, site_index)
         topology_fragment = self.map_display_fragment_to_topology(bundle, display_fragment)
         if topology_fragment is None:
-            cache[cache_key] = None
             return None
-        cutoff = float(state.get("cutoff", 10.0))
+
+        # Group enabled specs by (center_species -> [spec_index_in_specs, ...])
+        # so each fragment in the scene knows which spec(s) own it.
+        # Multiple specs may share a centre species but request different
+        # ligand restrictions (e.g. "Pb -> Cl" red vs "Pb -> Br" blue in
+        # mixed-halide perovskites); the same fragment then participates
+        # in both spec_results.
+        center_to_spec_indices: dict[str, list[int]] = {}
+        for index, spec in enumerate(effective_specs):
+            center_to_spec_indices.setdefault(spec["center_species"], []).append(index)
+
+        primary_display_index = int(display_fragment["index"]) if display_fragment else None
+        primary_formula = (
+            (display_fragment.get("formula") or display_fragment.get("species"))
+            if display_fragment else None
+        )
+        # Pick the spec that "owns" the analysis anchor. Preference goes
+        # to a spec whose center species matches the clicked fragment;
+        # if none match, fall back to the first enabled spec so the
+        # right-hand histogram still has data to render.
+        analysis_spec_index = 0
+        if primary_formula and primary_formula in center_to_spec_indices:
+            analysis_spec_index = center_to_spec_indices[primary_formula][0]
+        analysis_spec = effective_specs[analysis_spec_index]
+        analysis_ligand = analysis_spec.get("ligand_species") or None
+
         primary = analyze_topology(
             bundle,
             center_index=int(topology_fragment["index"]),
@@ -966,54 +1291,120 @@ class ViewerBackend:
             display_center=display_fragment.get("center") if display_fragment else None,
             display_label=display_fragment.get("label") if display_fragment else None,
             display_type=display_fragment.get("type") if display_fragment else None,
+            ligand_species=[analysis_ligand] if analysis_ligand else None,
         )
-        # Build hulls for every other fragment whose formula is selected, so
-        # the renderer paints a tiled polyhedra view automatically. The
-        # ``primary`` site keeps the histogram + results panel; the rest land
-        # in ``extra_overlays`` at lower opacity.
-        species_set = {str(key) for key in species_keys}
-        extras = []
-        primary_display_index = int(display_fragment["index"]) if display_fragment else None
-        for frag in scene.get("fragment_table") or []:
-            formula_key = frag.get("formula") or frag.get("species")
-            if formula_key not in species_set:
-                continue
-            if primary_display_index is not None and int(frag["index"]) == primary_display_index:
-                continue
-            mapped = self.map_display_fragment_to_topology(bundle, frag)
-            if mapped is None:
-                continue
-            try:
-                # Extras only feed hull coords + center to the renderer; we
-                # skip the angular / planarity / prism passes that the
-                # primary site needs for the histogram + results panel.
-                # That cuts the heavy ``itertools.combinations`` work in
-                # ``planarity_analysis`` (O(n choose 5)) for every tiled
-                # polyhedron, which is the main reason a checkbox flick
-                # used to wedge the UI for ~1.5 s on dense structures.
-                extra = extract_coordination_shell(
-                    bundle,
-                    center_index=int(mapped["index"]),
-                    cutoff=cutoff,
-                    display_center=frag.get("center"),
-                    display_label=frag.get("label"),
-                    display_type=frag.get("type"),
+
+        # Build per-spec overlay lists. For each fragment whose formula
+        # matches a spec's center species, run the lighter
+        # ``extract_coordination_shell`` (skips planarity / prism /
+        # angular passes -- those only matter for the analysis anchor).
+        # The same fragment may appear in multiple specs if those specs
+        # share its centre species but differ in ligand selection; the
+        # cache hit on (center_index, cutoff, ligand_species) makes the
+        # repeat call cheap.
+        spec_results: list[dict[str, Any]] = []
+        legacy_extras: list[dict[str, Any]] = []
+        for index, spec in enumerate(effective_specs):
+            center_species = spec["center_species"]
+            ligand = spec.get("ligand_species") or None
+            ligand_arg = [ligand] if ligand else None
+            overlays: list[dict[str, Any]] = []
+            for frag in scene.get("fragment_table") or []:
+                formula_key = frag.get("formula") or frag.get("species")
+                if formula_key != center_species:
+                    continue
+                is_anchor = (
+                    index == analysis_spec_index
+                    and primary_display_index is not None
+                    and int(frag["index"]) == primary_display_index
                 )
-            except Exception:
-                continue
-            extras.append(
-                {
+                if is_anchor:
+                    overlays.append(
+                        {
+                            "center_coords": primary["center_coords"],
+                            "center_label": primary.get("center_label"),
+                            "shell_coords": primary["shell_coords"],
+                            "distances": primary["distances"],
+                            "is_analysis_anchor": True,
+                        }
+                    )
+                    continue
+                mapped = self.map_display_fragment_to_topology(bundle, frag)
+                if mapped is None:
+                    continue
+                try:
+                    extra = extract_coordination_shell(
+                        bundle,
+                        center_index=int(mapped["index"]),
+                        cutoff=cutoff,
+                        display_center=frag.get("center"),
+                        display_label=frag.get("label"),
+                        display_type=frag.get("type"),
+                        ligand_species=ligand_arg,
+                    )
+                except Exception:
+                    continue
+                if not extra.get("shell_coords"):
+                    # Empty shell would render as nothing anyway; skip
+                    # the entry so renderer caches stay tidy.
+                    continue
+                overlay = {
                     "center_coords": extra.get("center_coords"),
                     "center_label": extra.get("center_label"),
                     "shell_coords": extra.get("shell_coords"),
                     "distances": extra.get("distances"),
+                    "is_analysis_anchor": False,
+                }
+                overlays.append(overlay)
+                legacy_extras.append(
+                    {
+                        "center_coords": overlay["center_coords"],
+                        "center_label": overlay["center_label"],
+                        "shell_coords": overlay["shell_coords"],
+                        "distances": overlay["distances"],
+                    }
+                )
+            spec_results.append(
+                {
+                    "spec_id": spec["id"],
+                    "name": spec["name"],
+                    "center_species": center_species,
+                    "ligand_species": ligand,
+                    "overlays": overlays,
                 }
             )
-        if extras:
-            primary = dict(primary)
-            primary["extra_overlays"] = extras
-        cache[cache_key] = primary
+
+        primary = dict(primary)
+        if legacy_extras:
+            primary["extra_overlays"] = legacy_extras
+        primary["spec_results"] = spec_results
+        primary["analysis_spec_id"] = analysis_spec["id"]
         return primary
+
+    def _attach_spec_colors(
+        self,
+        cached_geometry: dict[str, Any],
+        effective_specs: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Re-stamp per-spec colours onto a geometry payload pulled from
+        the bundle cache. The geometry dict is shared across colour
+        changes; we copy a small wrapper so the renderer's painter
+        cache (keyed on the colour tuple) doesn't get polluted by
+        stale values."""
+        color_by_id = {spec["id"]: spec.get("color", "#7C5CBF") for spec in effective_specs}
+        spec_results = []
+        for entry in cached_geometry.get("spec_results", []) or []:
+            spec_id = entry.get("spec_id")
+            recoloured = dict(entry)
+            recoloured["color"] = color_by_id.get(spec_id, "#7C5CBF")
+            spec_results.append(recoloured)
+        out = dict(cached_geometry)
+        out["spec_results"] = spec_results
+        # Drop any painter caches the renderer attached to a sibling
+        # colour permutation -- the new wrapper starts clean.
+        out.pop("_background_dict_cache", None)
+        out.pop("_foreground_dict_cache", None)
+        return out
 
     def figure_for_state(self, state: Optional[dict[str, Any]] = None, click_data: Optional[dict[str, Any]] = None):
         state = self.get_state() if state is None else state
