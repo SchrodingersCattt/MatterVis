@@ -61,6 +61,38 @@ DEFAULT_STYLE = {
     "ortep_octant_shading": False,
     "ortep_octant_shadow_color": "#000000",
     "ortep_octant_shadow_alpha": 0.18,
+    # Hatch shading (classic ORTEP-III): parallel surface arcs on one octant
+    # plus three boundary arcs framing it.  Mutually compatible with the
+    # solid-fill octant shading above; both can be on at once but normally
+    # callers pick one or the other via ``ortep_mode``.
+    "ortep_octant_hatching": False,
+    "ortep_octant_hatch_color": "#1A1A1A",
+    "ortep_octant_hatch_linewidth": 1.4,
+    "ortep_octant_hatch_lines": 5,
+    "ortep_octant_hatch_arc_pts": 16,
+    "ortep_octant_edge_color": "#0F0F0F",
+    "ortep_octant_edge_linewidth": 1.9,
+    # Silhouette outline (the dark line that gives ORTEP its "open ellipsoid"
+    # publication look).  When false the white Mesh3d body merges with a
+    # white background; turn this on for any "ortep_hatch" / "ortep_octant"
+    # rendering on light backgrounds.
+    "ortep_silhouette_outline": False,
+    "ortep_silhouette_color": "#1A1A1A",
+    "ortep_silhouette_linewidth": 1.4,
+    # White (or other) filled billboard disk per atom.  Drawn between the
+    # bond strokes and the silhouette outline so bonds don't show through
+    # the atom region.  Only meaningful when ``ortep_octant_hatching`` is
+    # on (otherwise the Mesh3d body provides the same coverage).
+    "ortep_atom_fill": False,
+    "ortep_atom_fill_color": "#FFFFFF",
+    "ortep_z_lift_fill":    0.04,   # white disk lifted toward camera (Å)
+    "ortep_z_lift_hatch":   0.06,   # hatch lifted further (so it sits over the disk)
+    "ortep_z_lift_outline": 0.07,   # silhouette lifted most (so it sits on top of all)
+    # Force every bond half to a single hex colour.  Empty string keeps the
+    # default per-atom split-colour behaviour.  Used by publication ORTEP
+    # presets to render bonds as plain black ink without flipping the
+    # ``monochrome`` flag (which would also blacken atom fills).
+    "force_bond_color": "",
     # Optional hex-colour overrides for elements not in the vendored palette,
     # or to re-skin existing ones for publication figures. The ``elements``
     # dict takes precedence over ``elements_light`` for both primary colour
@@ -81,6 +113,16 @@ ORTEP_MODES = {
     "ortep_octant": {
         "ortep_show_principal_axes": False,
         "ortep_octant_shading": True,
+    },
+    # Classic ORTEP-III publication look: white open ellipsoid + dark
+    # silhouette outline + parallel hatch lines on one octant facing the
+    # camera + three boundary arcs framing the hatch.
+    "ortep_hatch": {
+        "ortep_show_principal_axes": False,
+        "ortep_octant_shading": False,
+        "ortep_octant_hatching": True,
+        "ortep_silhouette_outline": True,
+        "ortep_atom_fill": True,
     },
 }
 

@@ -215,10 +215,28 @@ def _label_payload(ops: Any, draw_atoms, view_x, view_y, view_z):
     for at in label_atoms_all:
         sy_val = float(at["cart"] @ view_y)
         lbl = at["label"]
-        if lbl not in seen_labels or sy_val > seen_labels[lbl][1]:
-            seen_labels[lbl] = (at, sy_val)
+        cur_minor = bool(ops.is_minor(at))
+        if lbl not in seen_labels:
+            seen_labels[lbl] = (at, sy_val, cur_minor)
+            continue
+        prev_at, prev_sy, prev_minor = seen_labels[lbl]
+        if prev_minor and not cur_minor:
+            seen_labels[lbl] = (at, sy_val, cur_minor)
+            continue
+        if (not prev_minor) and cur_minor:
+            continue
+        if sy_val > prev_sy:
+            seen_labels[lbl] = (at, sy_val, cur_minor)
     label_atoms = [v[0] for v in seen_labels.values()]
-    label_positions = ops.compute_label_positions(label_atoms, view_x, view_y, base_offset=0.38)
+    try:
+        label_positions = ops.compute_label_positions(
+            label_atoms, view_x, view_y,
+            base_offset=0.46, all_atoms=draw_atoms,
+        )
+    except TypeError:
+        label_positions = ops.compute_label_positions(
+            label_atoms, view_x, view_y, base_offset=0.46,
+        )
     label_items = []
     for at, lpos_screen in zip(label_atoms, label_positions):
         sz = float(at["cart"] @ view_z)

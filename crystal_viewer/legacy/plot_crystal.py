@@ -849,11 +849,16 @@ def draw_atom_3d(ax, at, view_x, view_y, alpha, depth_t=None):
             ax.add_collection3d(hl_poly)
 
 # ── Smart label placement (screen-space, radial + collision avoidance) ───────
-def _compute_label_positions(label_atoms, view_x, view_y, base_offset=0.38):
+def _compute_label_positions(label_atoms, view_x, view_y, base_offset=0.38,
+                             all_atoms=None):
     """
     Compute 3D label positions for all label_atoms at once.
     Step 1: Place each label radially outward from the structure centroid.
     Step 2: Iteratively push overlapping labels apart (force-directed).
+    Step 3: Push labels off any *other* atom's ellipsoid, using ``all_atoms``
+            (the full set of drawn atoms — including minor disorder ghosts
+            that don't get their own label) when available.
+
     Returns: list of 3D position vectors (one per label_atom).
     """
     if not label_atoms:
@@ -862,6 +867,12 @@ def _compute_label_positions(label_atoms, view_x, view_y, base_offset=0.38):
     non_h = [a for a in label_atoms if a['elem'] != 'H']
     if not non_h:
         non_h = label_atoms
+    if all_atoms is None:
+        all_non_h_atoms = non_h
+    else:
+        all_non_h_atoms = [a for a in all_atoms if a.get('elem') != 'H']
+        if not all_non_h_atoms:
+            all_non_h_atoms = non_h
 
     # Structure centroid in screen space
     carts = np.array([a['cart'] for a in non_h])
@@ -891,28 +902,61 @@ def _compute_label_positions(label_atoms, view_x, view_y, base_offset=0.38):
         scale = er + base_offset
         positions.append([ax_s + dx * scale, ay_s + dy * scale])
 
-    # Step 2: iterative repulsion to avoid label-label overlap
-    # Label "radius" in screen space (approximate half-width of text box)
-    label_r = 0.55   # Å in screen space (roughly 3-4 char label width)
+    # Step 2: iterative repulsion. Two coupled forces:
+    #   (a) label↔label – labels mustn't write on top of each other.
+    #   (b) label↔atom  – labels mustn't write on top of *another* atom's
+    #                     ellipsoid. The label list is one-per-crystallographic
+    #                     -label (deduplicated by the caller), but the scene
+    #                     usually contains additional drawn atoms — symmetry
+    #                     images and disorder alternates with the same label —
+    #                     that share a label position. Pass ``all_atoms`` to
+    #                     this routine so those ghost ellipsoids participate
+    #                     in the repulsion; otherwise labels can land on top
+    #                     of them.
+    label_r = 0.55                   # text half-width in Å (3-4 chars at 7 pt)
     min_sep = label_r * 2.0
+    atom_screen = []                 # (sx, sy, ellipse_r) for every drawn atom
+    for at in all_non_h_atoms:
+        _, a_ax2, b_ax2 = ellipsoid_3d_polygon(at, view_x, view_y, n_pts=4)
+        atom_screen.append((
+            float(at['cart'] @ view_x),
+            float(at['cart'] @ view_y),
+            max(a_ax2, b_ax2),
+        ))
 
-    for _ in range(60):
+    for _ in range(80):
         moved = False
         for i in range(len(positions)):
-            for j in range(i+1, len(positions)):
+            for j in range(i + 1, len(positions)):
                 px, py = positions[i]
                 qx, qy = positions[j]
                 dx = px - qx
                 dy = py - qy
-                dist = math.sqrt(dx*dx + dy*dy)
+                dist = math.sqrt(dx * dx + dy * dy)
                 if dist < min_sep and dist > 1e-6:
-                    # Push apart
                     push = (min_sep - dist) / 2.0 + 0.02
-                    nx, ny = dx/dist, dy/dist
+                    nx, ny = dx / dist, dy / dist
                     positions[i][0] += nx * push
                     positions[i][1] += ny * push
                     positions[j][0] -= nx * push
                     positions[j][1] -= ny * push
+                    moved = True
+            owner_idx = i if i < len(label_atoms) else None
+            owner_cart = label_atoms[owner_idx]['cart'] if owner_idx is not None else None
+            for ax_s, ay_s, er in atom_screen:
+                if owner_cart is not None and abs(ax_s - float(owner_cart @ view_x)) < 1e-6 \
+                        and abs(ay_s - float(owner_cart @ view_y)) < 1e-6:
+                    continue
+                px, py = positions[i]
+                dx = px - ax_s
+                dy = py - ay_s
+                dist = math.sqrt(dx * dx + dy * dy)
+                req = er + label_r * 0.85
+                if dist < req and dist > 1e-6:
+                    push = (req - dist) + 0.02
+                    nx, ny = dx / dist, dy / dist
+                    positions[i][0] += nx * push
+                    positions[i][1] += ny * push
                     moved = True
         if not moved:
             break

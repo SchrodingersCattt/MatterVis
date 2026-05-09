@@ -462,15 +462,26 @@ def _atom_selection_trace(scene: dict, style: dict):
 
 
 def _bond_segments(scene: dict, style: dict):
+    """Yield ``(color, is_minor, start, end)`` 4-tuples for every bond half.
+
+    A ``style["force_bond_color"]`` (hex string) overrides per-atom bond
+    colouring without touching any other colour in the scene.  This is the
+    knob the open-ellipsoid ORTEP path uses to render every bond as plain
+    black ink, matching the publication ORTEP-III convention without
+    forcing ``monochrome=True`` (which would also blacken atom fills).
+    """
+    forced = style.get("force_bond_color")
     for bond in scene["bonds"]:
         if style.get("show_minor_only", False) and not bond["is_minor"]:
             continue
         start = np.array(bond["start"], dtype=float)
         end = np.array(bond["end"], dtype=float)
         mid = (start + end) / 2.0
+        c_i = forced if forced else _style_color(bond["color_i"], style)
+        c_j = forced if forced else _style_color(bond["color_j"], style)
         halves = [
-            (_style_color(bond["color_i"], style), bond["is_minor"], start, mid),
-            (_style_color(bond["color_j"], style), bond["is_minor"], mid, end),
+            (c_i, bond["is_minor"], start, mid),
+            (c_j, bond["is_minor"], mid, end),
         ]
         for color, is_minor, seg_start, seg_end in halves:
             if is_minor and style.get("disorder") == "dashed_bonds":
@@ -792,6 +803,60 @@ def _minor_outline_traces(scene: dict, style: dict):
         name="minor-outline",
     )
     return [trace] if trace is not None else []
+
+
+def _contact_traces(scene: dict, style: dict):
+    """Render scene-level non-bonded contacts (e.g. ammonium...halide contacts).
+
+    A "contact" is a thin dashed/dotted line segment specified in the same
+    cartesian frame as the atoms, so it is guaranteed to land pixel-for-pixel
+    on the rendered atom centres regardless of camera, viewport or panel
+    aspect. Each contact dict supports::
+
+        {"start": [x, y, z], "end": [x, y, z],
+         "color": "#222222", "dash": "dot", "width": 4.0, "opacity": 0.9}
+
+    Contacts whose endpoints fall outside the visible viewport are still
+    drawn — Plotly only clips against the scene cube, never against the
+    Matplotlib outer axes.
+    """
+    contacts = scene.get("contacts") or []
+    if not contacts:
+        return []
+    groups: Dict[Tuple[str, str, float, float], list[list[float]]] = {}
+    for c in contacts:
+        try:
+            start = [float(c["start"][i]) for i in range(3)]
+            end = [float(c["end"][i]) for i in range(3)]
+        except (KeyError, TypeError, IndexError, ValueError):
+            continue
+        color = str(c.get("color", "#1F1F1F"))
+        dash = str(c.get("dash", "dot"))
+        width = float(c.get("width", 4.0))
+        opacity = float(c.get("opacity", 0.9))
+        key = (color, dash, width, opacity)
+        groups.setdefault(key, []).append([start, end])
+    traces = []
+    for (color, dash, width, opacity), segments in groups.items():
+        xs, ys, zs = [], [], []
+        for start, end in segments:
+            xs.extend([start[0], end[0], None])
+            ys.extend([start[1], end[1], None])
+            zs.extend([start[2], end[2], None])
+        traces.append(
+            go.Scatter3d(
+                x=xs,
+                y=ys,
+                z=zs,
+                mode="lines",
+                line=dict(color=color, width=width, dash=dash),
+                opacity=opacity,
+                hoverinfo="skip",
+                showlegend=False,
+                name="contact",
+            )
+        )
+    return traces
 
 
 def _highlight_traces(scene: dict, style: dict):
@@ -1731,6 +1796,11 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
         round(float(style.get("minor_opacity", 0.35)), 3),
         round(float(style.get("minor_bond_scale", 0.6)), 3),
         round(float(style.get("major_opacity", 1.0)), 3),
+        bool(style.get("ortep_atom_fill", False)),
+        bool(style.get("ortep_silhouette_outline", False)),
+        bool(style.get("ortep_octant_hatching", False)),
+        str(style.get("force_bond_color", "")),
+        str(style.get("ortep_atom_fill_color", "#FFFFFF")),
     )
     if key in cache:
         return cache[key]
@@ -1738,12 +1808,57 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
         atom_traces = _wireframe_atom_traces(scene, style)
         bond_traces = _wireframe_bond_traces(scene, style)
     elif style.get("style") == "ortep":
-        from .ortep import ortep_atom_billboard_traces, ortep_atom_mesh_traces, ortep_axis_dash_traces, ortep_octant_shade_traces
+        from .ortep import (
+            ortep_atom_billboard_traces,
+            ortep_atom_mesh_traces,
+            ortep_atom_fill_traces,
+            ortep_axis_dash_traces,
+            ortep_octant_shade_traces,
+            ortep_octant_hatch_traces,
+            ortep_silhouette_outline_traces,
+        )
 
-        atom_traces = ortep_atom_billboard_traces(scene, style) if use_fast else ortep_atom_mesh_traces(scene, style)
-        bond_traces = _bond_scatter_traces(scene, style) if use_fast else _bond_mesh_traces(scene, style)
+        # Classic ORTEP-III "open ellipsoid" mode: when the hatch octant +
+        # silhouette outline are both enabled, the renderer drops every 3D
+        # mesh body (atoms AND bonds) in favour of flat 2D-style lines.
+        # Two reasons for this:
+        #   1. Plotly's WebGL z-buffer aggressively culls Scatter3d line
+        #      segments that share depth with a Mesh3d facet, occluding
+        #      both the silhouette and the hatch arcs at most camera
+        #      angles.  Removing the meshes removes the conflict.
+        #   2. ORTEP-III publication figures are pure ink-on-paper drawings
+        #      with no shading or lighting — the bonds are plain straight
+        #      strokes, not shaded cylinders.  Flat scatter bonds match
+        #      that convention exactly.
+        is_open_ortep = (
+            bool(style.get("ortep_silhouette_outline", False))
+            and bool(style.get("ortep_octant_hatching", False))
+        )
+        if is_open_ortep:
+            # Open-ellipsoid layered z-stack (far → near):
+            #   1. bond strokes (flat black scatter)            ← bottom
+            #   2. white atom-fill billboard disks
+            #   3. hatch arcs + octant boundary arcs
+            #   4. silhouette ellipse outline                    ← top
+            # Each successive layer is pushed toward the camera by a small
+            # ``ortep_z_lift_*`` offset so Plotly's WebGL z-buffer reliably
+            # draws them in this order at every camera angle.
+            bond_traces = _bond_scatter_traces(scene, style)
+            atom_traces = ortep_atom_fill_traces(scene, style)
+        else:
+            atom_traces = (
+                ortep_atom_billboard_traces(scene, style)
+                if use_fast
+                else ortep_atom_mesh_traces(scene, style)
+            )
+            bond_traces = (
+                _bond_scatter_traces(scene, style) if use_fast
+                else _bond_mesh_traces(scene, style)
+            )
         atom_traces.extend(ortep_axis_dash_traces(scene, style))
         atom_traces.extend(ortep_octant_shade_traces(scene, style))
+        atom_traces.extend(ortep_octant_hatch_traces(scene, style))
+        atom_traces.extend(ortep_silhouette_outline_traces(scene, style))
     elif use_fast:
         atom_traces = _atom_scatter_traces(scene, style)
         bond_traces = _bond_scatter_traces(scene, style)
@@ -1818,6 +1933,7 @@ def build_row_figure(
         trace_dicts.extend(mesh_payload["minor_bond_dicts"])
         trace_dicts.extend(mesh_payload["atom_dicts"])
         trace_dicts.extend(mesh_payload["minor_outline_dicts"])
+        trace_dicts.extend(_traces_to_dicts(_contact_traces(scene, style_norm)))
         trace_dicts.extend(_traces_to_dicts(_label_traces(scene, style_norm)))
         trace_dicts.extend(_traces_to_dicts(_axis_traces(scene, style_norm)))
         trace_dicts.extend(_traces_to_dicts(_unit_cell_traces(scene, style_norm)))
@@ -1887,6 +2003,7 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None) ->
     trace_dicts.extend(mesh_payload["minor_bond_dicts"])
     trace_dicts.extend(mesh_payload["atom_dicts"])
     trace_dicts.extend(mesh_payload["minor_outline_dicts"])
+    trace_dicts.extend(_traces_to_dicts(_contact_traces(scene, style)))
     # _highlight_traces (fake specular dots) are deliberately *not* added.
     # They were Scatter3d markers with pixel-fixed sizes -- in the static
     # publication path they read as ugly translucent halos that engulf the

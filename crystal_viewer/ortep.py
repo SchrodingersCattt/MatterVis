@@ -522,6 +522,366 @@ def ortep_octant_shade_traces(scene: dict, style: dict):
     ]
 
 
+def ortep_octant_hatch_traces(scene: dict, style: dict):
+    """Draw classic ORTEP-III parallel hatch lines on one octant per atom.
+
+    The shaded octant is the one whose centroid is closest to the camera
+    (most negative dot product with ``view_dir``).  On that octant we draw
+    ``n_lines`` constant-θ "latitude" arcs in the principal-axis frame,
+    plus three boundary arcs that frame the hatched region.  All segments
+    are batched into one ``Scatter3d`` line trace, so the runtime cost is
+    O(atoms × arcs) line vertices and a single WebGL draw call.
+
+    Why arcs instead of straight chords?  In the principal-axis basis the
+    parametric surface ``p(θ, φ) = c + axes · diag(L) · (sin θ cos φ, …)``
+    yields arcs that are curves *on* the ellipsoid surface; their 2D
+    projection traces the same look as the hatch fills on engraved ORTEP
+    figures (Mercury and ORTEP-III both rasterise these surface curves).
+    A chord-only implementation would float in front of the silhouette and
+    look pasted-on at oblique camera angles.
+
+    Style keys honoured (defaults in DEFAULT_STYLE):
+      * ``ortep_octant_hatching`` (bool, gate)
+      * ``ortep_octant_hatch_lines`` (int, density per octant)
+      * ``ortep_octant_hatch_arc_pts`` (int, sampling per arc)
+      * ``ortep_octant_hatch_color`` / ``_linewidth``
+      * ``ortep_octant_edge_color`` / ``_linewidth``
+      * Per-atom ``atom["hatch_density_multiplier"]`` (float ≥ 1.0) lets
+        callers double-hatch heavy atoms without touching style.
+    """
+    probability = float(style.get("ortep_probability", 0.5))
+    base_lines = int(style.get("ortep_octant_hatch_lines", 5))
+    n_arc_pts = int(style.get("ortep_octant_hatch_arc_pts", 14))
+    color = style.get(
+        "ortep_octant_hatch_color",
+        style.get("ortep_octant_shadow_color", "#1A1A1A"),
+    )
+    width = float(style.get("ortep_octant_hatch_linewidth", 1.4))
+    edge_color = style.get("ortep_octant_edge_color", color)
+    edge_width = float(style.get("ortep_octant_edge_linewidth", width * 1.4))
+    show_minor_only = bool(style.get("show_minor_only", False))
+    fade_minor = (
+        style.get("disorder") == "opacity"
+        or bool(style.get("force_minor_fade", False))
+    )
+    minor_opacity = max(0.05, float(style.get("minor_opacity", 0.35)))
+
+    view_dir = np.asarray(
+        scene.get("view_direction", scene.get("view_z", [1.0, 0.0, 0.0])),
+        dtype=float,
+    )
+    nrm = float(np.linalg.norm(view_dir))
+    view_dir = view_dir / nrm if nrm > 1e-9 else np.array([1.0, 0.0, 0.0])
+    # Push the entire hatch toward the camera so it sits above the white
+    # atom-fill disk.  Without this lift, hatch arcs near the ellipsoid
+    # equator (whose own ``z`` is ≈ atom centre) get occluded by the fill,
+    # and only the arcs that bulge most toward the camera survive.
+    hatch_lift = view_dir * float(style.get("ortep_z_lift_hatch", 0.06))
+
+    # Each list-of-three is (xs, ys, zs) for a separate trace bucket so that
+    # the major/minor atoms can be drawn at different opacities without
+    # dropping back to one trace per atom.
+    hatch_buckets = {"major": ([], [], []), "minor": ([], [], [])}
+    edge_buckets = {"major": ([], [], []), "minor": ([], [], [])}
+
+    for atom in scene.get("draw_atoms", []):
+        if show_minor_only and not atom.get("is_minor"):
+            continue
+        if not _mode_flag(
+            atom, style, "ortep_octant_hatching",
+            bool(style.get("ortep_octant_hatching", False)),
+        ):
+            continue
+        if _atom_element(atom) == "H" and not bool(style.get("show_hydrogen", True)):
+            continue
+
+        bucket_key = "minor" if (_atom_is_minor(atom) and fade_minor) else "major"
+        hatch_xs, hatch_ys, hatch_zs = hatch_buckets[bucket_key]
+        edge_xs, edge_ys, edge_zs = edge_buckets[bucket_key]
+
+        center = np.asarray(atom["cart"], dtype=float)
+        U, uiso = _atom_u(atom)
+        lengths, axes = ellipsoid_principal_axes(U, probability=probability, uiso=uiso)
+        # No mesh body in classic-hatch mode → arcs sit on the natural
+        # ellipsoid surface.  A tiny 1 % expansion still helps when the
+        # caller pairs hatch with the legacy filled-octant Mesh3d (rare).
+        line_lengths = lengths * 1.005
+
+        # ``view_dir`` (a.k.a. ``scene["view_direction"]``) points FROM the
+        # scene TOWARD the viewer — see ``view_rotation`` doc.  So the octant
+        # facing the camera is the one whose centroid has the LARGEST positive
+        # dot product with ``view_dir`` (i.e. sticks out toward the viewer).
+        best_signs = (1.0, 1.0, 1.0)
+        best_dot = -float("inf")
+        for sx in (-1.0, 1.0):
+            for sy in (-1.0, 1.0):
+                for sz in (-1.0, 1.0):
+                    direction = axes @ (lengths * np.array([sx, sy, sz]))
+                    d = float(np.dot(direction, view_dir))
+                    if d > best_dot:
+                        best_dot = d
+                        best_signs = (sx, sy, sz)
+        sx, sy, sz = best_signs
+
+        # Per-atom hatch density (Br/heavy atoms can pass >1 to densify).
+        n_lines = max(1, int(round(base_lines * float(
+            atom.get("hatch_density_multiplier", 1.0)
+        ))))
+
+        # ── Hatch latitudes: constant θ, sweep φ ∈ [0, π/2] ──────────────
+        for k in range(1, n_lines + 1):
+            theta = 0.5 * math.pi * k / (n_lines + 1)
+            st, ct = math.sin(theta), math.cos(theta)
+            for j in range(n_arc_pts + 1):
+                phi = 0.5 * math.pi * j / n_arc_pts
+                local = np.array(
+                    [sx * st * math.cos(phi), sy * st * math.sin(phi), sz * ct],
+                    dtype=float,
+                )
+                p = center + axes @ (line_lengths * local) + hatch_lift
+                hatch_xs.append(float(p[0]))
+                hatch_ys.append(float(p[1]))
+                hatch_zs.append(float(p[2]))
+            hatch_xs.append(None)
+            hatch_ys.append(None)
+            hatch_zs.append(None)
+
+        # ── Octant boundary arcs (3 quarter-circles framing the hatch) ──
+        thetas = np.linspace(0.0, 0.5 * math.pi, n_arc_pts + 1)
+        # Edge at φ=0 (e1-e3 plane) and φ=π/2 (e2-e3 plane)
+        for phi_const in (0.0, 0.5 * math.pi):
+            cp, sp = math.cos(phi_const), math.sin(phi_const)
+            for theta in thetas:
+                st, ct = math.sin(theta), math.cos(theta)
+                local = np.array(
+                    [sx * st * cp, sy * st * sp, sz * ct],
+                    dtype=float,
+                )
+                p = center + axes @ (line_lengths * local) + hatch_lift
+                edge_xs.append(float(p[0]))
+                edge_ys.append(float(p[1]))
+                edge_zs.append(float(p[2]))
+            edge_xs.append(None)
+            edge_ys.append(None)
+            edge_zs.append(None)
+        # Equator at θ=π/2, sweep φ
+        for j in range(n_arc_pts + 1):
+            phi = 0.5 * math.pi * j / n_arc_pts
+            local = np.array(
+                [sx * math.cos(phi), sy * math.sin(phi), 0.0],
+                dtype=float,
+            )
+            p = center + axes @ (line_lengths * local) + hatch_lift
+            edge_xs.append(float(p[0]))
+            edge_ys.append(float(p[1]))
+            edge_zs.append(float(p[2]))
+        edge_xs.append(None)
+        edge_ys.append(None)
+        edge_zs.append(None)
+
+    traces = []
+    for key, opacity, suffix in (
+        ("major", 0.95, ""),
+        ("minor", minor_opacity, "-minor"),
+    ):
+        hxs, hys, hzs = hatch_buckets[key]
+        if hxs:
+            traces.append(go.Scatter3d(
+                x=hxs, y=hys, z=hzs,
+                mode="lines",
+                line=dict(color=color, width=width),
+                opacity=opacity,
+                hoverinfo="skip",
+                showlegend=False,
+                name=f"ortep-octant-hatch{suffix}",
+            ))
+        exs, eys, ezs = edge_buckets[key]
+        if exs:
+            traces.append(go.Scatter3d(
+                x=exs, y=eys, z=ezs,
+                mode="lines",
+                line=dict(color=edge_color, width=edge_width),
+                opacity=opacity if key == "minor" else 0.98,
+                hoverinfo="skip",
+                showlegend=False,
+                name=f"ortep-octant-edges{suffix}",
+            ))
+    return traces
+
+
+def ortep_atom_fill_traces(scene: dict, style: dict):
+    """Per-atom WHITE filled billboard disk (sits *between* bonds and outline).
+
+    This is what makes the classic ORTEP-III layered look possible without
+    a 3D mesh body: bond strokes drawn first, atom disks overpaint the
+    bonds where they enter the atom, silhouette + hatch sit on top.  We
+    push the disk slightly toward the camera (``-view_dir * z_lift``) so
+    Plotly's z-buffer reliably draws atom over bond at every camera angle.
+
+    Returns a single batched ``Mesh3d`` triangle-fan trace per fill colour;
+    minor atoms use the same colour but reduced opacity so disorder still
+    reads through the white fill.
+    """
+    if not bool(style.get("ortep_atom_fill", False)):
+        return []
+    probability = float(style.get("ortep_probability", 0.5))
+    fill_color = style.get("ortep_atom_fill_color", "#FFFFFF")
+    show_minor_only = bool(style.get("show_minor_only", False))
+    fade_minor = (
+        style.get("disorder") == "opacity"
+        or bool(style.get("force_minor_fade", False))
+    )
+    minor_opacity = max(0.05, float(style.get("minor_opacity", 0.35)))
+    z_lift = float(style.get("ortep_z_lift_fill", 0.04))
+    view_x = np.asarray(scene.get("view_x", [1.0, 0.0, 0.0]), dtype=float)
+    view_y = np.asarray(scene.get("view_y", [0.0, 1.0, 0.0]), dtype=float)
+
+    view_dir = np.asarray(
+        scene.get("view_direction", scene.get("view_z", [0.0, 0.0, 1.0])),
+        dtype=float,
+    )
+    nrm = float(np.linalg.norm(view_dir))
+    view_dir = view_dir / nrm if nrm > 1e-9 else np.array([0.0, 0.0, 1.0])
+    cam = view_dir * z_lift  # ``view_dir`` points toward camera (see view_rotation)
+
+    buckets = {"major": ([], [], [], [], 0), "minor": ([], [], [], [], 0)}
+    # Each tuple: (xs, ys, zs, tris, vert_offset).  Lists are mutable; we
+    # track the offset separately so triangle indices stay correct as we
+    # concatenate per-atom triangle fans into one mesh.
+    buckets_dict = {"major": {"x": [], "y": [], "z": [], "tris": [], "off": 0},
+                    "minor": {"x": [], "y": [], "z": [], "tris": [], "off": 0}}
+
+    for atom in scene.get("draw_atoms", []):
+        if show_minor_only and not atom.get("is_minor"):
+            continue
+        if _atom_element(atom) == "H" and not bool(style.get("show_hydrogen", True)):
+            continue
+        if _minor_axes_outline_only(atom, style):
+            continue
+        bucket_key = "minor" if (_atom_is_minor(atom) and fade_minor) else "major"
+        b = buckets_dict[bucket_key]
+
+        U, uiso = _atom_u(atom)
+        ring, _, _ = ortep_billboard_polygon(
+            atom["cart"], U, view_x, view_y,
+            probability=probability, uiso=uiso, n_pts=32,
+        )
+        ring = np.asarray(ring, dtype=float) + cam[None, :]
+        center = np.asarray(atom["cart"], dtype=float) + cam
+
+        # Triangle fan: center vertex + ring vertices, one triangle per ring edge.
+        n = len(ring)
+        b["x"].append(float(center[0]))
+        b["y"].append(float(center[1]))
+        b["z"].append(float(center[2]))
+        ring_start = b["off"] + 1
+        for v in ring:
+            b["x"].append(float(v[0]))
+            b["y"].append(float(v[1]))
+            b["z"].append(float(v[2]))
+        for k in range(n):
+            b["tris"].append([b["off"], ring_start + k, ring_start + (k + 1) % n])
+        b["off"] += 1 + n
+
+    traces = []
+    for key, opacity in (("major", 1.0), ("minor", minor_opacity)):
+        b = buckets_dict[key]
+        if not b["tris"]:
+            continue
+        tris = np.asarray(b["tris"], dtype=int)
+        traces.append(go.Mesh3d(
+            x=b["x"], y=b["y"], z=b["z"],
+            i=tris[:, 0].tolist(),
+            j=tris[:, 1].tolist(),
+            k=tris[:, 2].tolist(),
+            color=fill_color,
+            opacity=opacity,
+            flatshading=True,
+            lighting=dict(ambient=1.0, diffuse=0.0, specular=0.0,
+                          fresnel=0.0, roughness=1.0),
+            hoverinfo="skip",
+            showlegend=False,
+            name=f"ortep-atom-fill-{key}",
+        ))
+    return traces
+
+
+def ortep_silhouette_outline_traces(scene: dict, style: dict):
+    """Per-atom 2D silhouette outline (the projected ellipse boundary).
+
+    Drawn as a single batched Scatter3d line trace.  Without this trace the
+    classic "open white ellipsoid" ORTEP look is impossible: the white
+    Mesh3d ellipsoid body would blend into a white background and the
+    octant hatch would float without an outline anchoring it.
+
+    The billboard polygon vertices are shifted slightly toward the camera
+    in 3D space (along ``-view_dir``) so the outline sits in front of the
+    Mesh3d body and is not z-fighted away by it.
+    """
+    if not bool(style.get("ortep_silhouette_outline", False)):
+        return []
+    probability = float(style.get("ortep_probability", 0.5))
+    color = style.get("ortep_silhouette_color", "#1A1A1A")
+    width = float(style.get("ortep_silhouette_linewidth", 1.4))
+    show_minor_only = bool(style.get("show_minor_only", False))
+    fade_minor = (
+        style.get("disorder") == "opacity"
+        or bool(style.get("force_minor_fade", False))
+    )
+    minor_opacity = float(style.get("minor_opacity", 0.35))
+    view_x = np.asarray(scene.get("view_x", [1.0, 0.0, 0.0]), dtype=float)
+    view_y = np.asarray(scene.get("view_y", [0.0, 1.0, 0.0]), dtype=float)
+
+    # Push the silhouette toward the camera by ``ortep_z_lift_outline`` so
+    # it sits ON TOP of the white atom-fill disk (which is itself lifted by
+    # ``ortep_z_lift_fill`` to sit on top of the bond strokes).  The
+    # cumulative z-stack from far→near is therefore:
+    #     bonds  <  atom-fill  <  hatch lines  <  silhouette outline
+    # which matches the publication ORTEP-III drawing order.
+    z_lift = float(style.get("ortep_z_lift_outline", 0.07))
+    view_dir = np.asarray(
+        scene.get("view_direction", scene.get("view_z", [0.0, 0.0, 1.0])),
+        dtype=float,
+    )
+    nrm = float(np.linalg.norm(view_dir))
+    view_dir = view_dir / nrm if nrm > 1e-9 else np.array([0.0, 0.0, 1.0])
+    camera_offset = view_dir * z_lift  # +view_dir = toward camera
+
+    rings_major: list = []
+    rings_minor: list = []
+    for atom in scene.get("draw_atoms", []):
+        if show_minor_only and not atom.get("is_minor"):
+            continue
+        if _atom_element(atom) == "H" and not bool(style.get("show_hydrogen", True)):
+            continue
+        if _minor_axes_outline_only(atom, style):
+            continue
+        U, uiso = _atom_u(atom)
+        ring, _, _ = ortep_billboard_polygon(
+            atom["cart"], U, view_x, view_y, probability=probability, uiso=uiso,
+        )
+        ring = np.asarray(ring, dtype=float) + camera_offset[None, :]
+        if _atom_is_minor(atom) and fade_minor:
+            rings_minor.append(ring)
+        else:
+            rings_major.append(ring)
+
+    traces = []
+    major_trace = _ortep_outline_trace(
+        rings_major, color=color, width=width, name="ortep-silhouette",
+    )
+    if major_trace is not None:
+        traces.append(major_trace)
+    minor_trace = _ortep_outline_trace(
+        rings_minor, color=color, width=width, name="ortep-silhouette-minor",
+    )
+    if minor_trace is not None:
+        # Reduce opacity in-place since _ortep_outline_trace fixes it at 0.95
+        minor_trace.opacity = max(0.05, minor_opacity)
+        traces.append(minor_trace)
+    return traces
+
+
 def build_ortep_panel_figure(scene: dict, *, probability: float = 0.5, show_axes: bool = True, shade_octants: bool = False, **kwargs):
     from .renderer import build_figure
 
