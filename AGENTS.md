@@ -135,6 +135,35 @@ both files.
 - REST surface `/api/v2/polyhedra` (CRUD + reorder) is part of the
  public API; back-incompatible changes require an API version bump.
 
+### `crystal_viewer.atom_groups` + renderer — see [`agents/atom_groups_api.md`](agents/atom_groups_api.md)
+
+- Atom-group rules are a per-scene list
+ (`state["atom_groups"] = [{id, name, selector, color, color_light,
+ visible, opacity, material, style}, ...]`). Rules apply in list
+ order with later-wins semantics on overlapping atoms. Empty list
+ = no overrides; the legacy `monochrome` flag is still honoured.
+- `tag_atoms_with_groups` writes per-atom `_render_color`,
+ `_render_color_light`, `_render_visible`, `_render_opacity_scale`,
+ `_render_material`, `_render_style` fields. The renderer's
+ `_atom_render_color` helper falls back to the element palette and
+ the legacy `monochrome` flag when no rule overrode the atom; do
+ NOT remove that fallback or pre-Phase-2 callers stop blackening.
+- `_bond_segments` skips bonds whose endpoint atom has
+ `_render_visible=False` and uses the per-atom render colour for the
+ bond half. Do not collapse this back to `bond["color_i"]` directly.
+- The renderer dispatcher partitions visible atoms by
+ `(effective_material, effective_style)` and runs the matching
+ trace builder per partition. Bonds stay scene-level; partitioning
+ bonds across mixed (mesh,ortep) endpoints is intentionally not
+ supported (mismatched per-atom materials would otherwise multiply
+ trace counts and tank the figure JSON cache hit rate).
+- The figure-JSON cache key in `_cached_atom_bond_meshes` extends to
+ `_atom_groups_cache_key(atom_groups)`. Editing or reordering a
+ group must reliably re-render; keep the key in sync if you add new
+ group fields.
+- REST surface `/api/v2/atom_groups` (CRUD + reorder) is part of the
+ public API; back-incompatible changes require an API version bump.
+
 ### `crystal_viewer.scene` / `renderer` — see [`agents/scene_api.md`](agents/scene_api.md)
 
 - `display_mode="cluster"` skips formula-unit selection and PBC bond

@@ -162,6 +162,128 @@ def _normalize_polyhedron_spec(
     }
 
 
+# Selector keys we accept on atom-group rules. Anything outside this
+# set is silently dropped so a forward-compatible UI can post extra
+# experimental fields without breaking the persisted state schema.
+_ATOM_SELECTOR_KEYS = ("all", "elements", "is_minor")
+_ATOM_GROUP_VALID_MATERIALS = {"mesh", "flat"}
+_ATOM_GROUP_VALID_STYLES = {"ball", "ball_stick", "stick", "ortep", "wireframe"}
+
+
+def _coerce_atom_selector(raw: Any) -> Optional[dict[str, Any]]:
+    """Validate an atom-group selector dict.
+
+    Supports today:
+    - ``{"all": True}`` -- match every atom in the scene.
+    - ``{"elements": ["O", "S"]}`` -- match atoms whose element symbol
+      is in the list (case sensitive on the symbol; matches whatever
+      ``draw_atoms[i]["elem"]`` carries).
+    - ``{"is_minor": True}`` / ``{"is_minor": False}`` -- match by
+      disorder major/minor flag.
+
+    Multiple keys can be combined; an atom matches when EVERY present
+    key matches (logical AND). Returns ``None`` when the dict carries
+    no recognised selectors at all (forces the caller to drop the
+    group instead of silently making it match everything).
+    """
+    if not isinstance(raw, dict):
+        return None
+    selector: dict[str, Any] = {}
+    if raw.get("all"):
+        selector["all"] = True
+    elements = raw.get("elements")
+    if isinstance(elements, (list, tuple)):
+        cleaned = [str(item) for item in elements if item is not None and str(item).strip()]
+        if cleaned:
+            selector["elements"] = cleaned
+    if "is_minor" in raw:
+        selector["is_minor"] = bool(raw["is_minor"])
+    return selector or None
+
+
+def _coerce_optional_float(value: Any, *, lo: float = 0.0, hi: float = 1.0) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        x = float(value)
+    except (TypeError, ValueError):
+        return None
+    return max(lo, min(hi, x))
+
+
+def _coerce_optional_choice(value: Any, choices: set[str]) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text if text in choices else None
+
+
+def _normalize_atom_group(
+    raw: Any,
+    *,
+    existing_ids: set[str],
+    fallback_color: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    """Coerce one user payload into the canonical atom-group shape.
+
+    Returns ``None`` when the payload is unsalvageable (not a dict,
+    no recognisable selector). Mutates ``existing_ids`` so callers
+    building a list in one pass can keep ids unique without rescanning.
+    """
+    if not isinstance(raw, dict):
+        return None
+    selector = _coerce_atom_selector(raw.get("selector"))
+    if selector is None:
+        return None
+    group_id = str(raw.get("id") or "").strip()
+    if not group_id or group_id in existing_ids:
+        group_id = f"grp_{uuid.uuid4().hex[:10]}"
+        while group_id in existing_ids:  # pragma: no cover - astronomically unlikely
+            group_id = f"grp_{uuid.uuid4().hex[:10]}"
+    existing_ids.add(group_id)
+    name = str(raw.get("name") or _atom_group_default_name(selector)).strip() or "group"
+    color = _coerce_hex_color(raw.get("color"), fallback_color) if raw.get("color") else None
+    color_light = _coerce_hex_color(raw.get("color_light"), color or "#000000") if raw.get("color_light") else None
+    visible = bool(raw.get("visible", True))
+    opacity = _coerce_optional_float(raw.get("opacity"))
+    material = _coerce_optional_choice(raw.get("material"), _ATOM_GROUP_VALID_MATERIALS)
+    style = _coerce_optional_choice(raw.get("style"), _ATOM_GROUP_VALID_STYLES)
+    return {
+        "id": group_id,
+        "name": name,
+        "selector": selector,
+        "color": color,
+        "color_light": color_light,
+        "visible": visible,
+        "opacity": opacity,
+        "material": material,
+        "style": style,
+    }
+
+
+def _atom_group_default_name(selector: dict[str, Any]) -> str:
+    if selector.get("all"):
+        return "all atoms"
+    parts = []
+    if "elements" in selector:
+        parts.append("/".join(selector["elements"]))
+    if "is_minor" in selector:
+        parts.append("minor" if selector["is_minor"] else "major")
+    return " ".join(parts) or "group"
+
+
+def _normalize_atom_groups(raw_groups: Any) -> list[dict[str, Any]]:
+    if raw_groups is None or not isinstance(raw_groups, (list, tuple)):
+        return []
+    out: list[dict[str, Any]] = []
+    existing_ids: set[str] = set()
+    for raw in raw_groups:
+        group = _normalize_atom_group(raw, existing_ids=existing_ids)
+        if group is not None:
+            out.append(group)
+    return out
+
+
 def _normalize_polyhedron_specs(
     raw_specs: Any,
     *,
@@ -449,6 +571,16 @@ class ViewerBackend:
             # behaviour (auto-derived neighbour types). See
             # ``agents/polyhedron_api.md`` for the API surface.
             "polyhedron_specs": [],
+            # Phase 2: per-scene atom-group rules. Each entry is
+            # {id, name, selector, color, color_light, visible, opacity,
+            # material, style}. Selectors are ANDed across keys; the
+            # supported keys are ``all``, ``elements`` (list), and
+            # ``is_minor``. Multiple groups apply in list order with
+            # later-wins semantics on overlapping atoms. Empty list =
+            # no overrides; the legacy ``monochrome`` flag is still
+            # honoured when no atom_groups are present. See
+            # ``agents/atom_groups_api.md`` for the API surface.
+            "atom_groups": [],
             "fast_rendering": bool(style.get("fast_rendering", False)),
             "camera": scene.get("camera"),
             "cutoff": 10.0,
@@ -771,6 +903,11 @@ class ViewerBackend:
                 patch.get("polyhedron_specs") or [],
                 fallback_color=state.get("topology_hull_color", "#7C5CBF"),
             )
+        if "atom_groups" in patch:
+            # Same semantics as polyhedron_specs: empty list / None
+            # both mean "drop all overrides; use legacy monochrome
+            # flag (if any) and element palette".
+            state["atom_groups"] = _normalize_atom_groups(patch.get("atom_groups") or [])
         if "fast_rendering" in patch:
             state["fast_rendering"] = bool(patch["fast_rendering"])
         if "camera" in patch and patch["camera"] is not None:
@@ -873,6 +1010,13 @@ class ViewerBackend:
         style["fast_rendering"] = bool(state.get("fast_rendering", False)) or style["material"] == "flat"
         style["topology_enabled"] = bool(state.get("topology_enabled", True))
         style["topology_hull_color"] = str(state.get("topology_hull_color", "#7C5CBF"))
+        # Phase 2: per-scene atom-group rules ride along on the style
+        # dict so the renderer dispatcher can partition draw_atoms by
+        # (effective_material, effective_style) without touching the
+        # backend layer. Renderer reads ``style["atom_groups"]`` only
+        # if the list is non-empty; the legacy ``monochrome`` flag is
+        # otherwise honoured untouched.
+        style["atom_groups"] = list(state.get("atom_groups") or [])
         return style
 
     def add_uploaded_bundle(self, contents: str, filename: str) -> LoadedCrystal:
@@ -1147,6 +1291,110 @@ class ViewerBackend:
             )
         ordered = [index_by_id[spec_id] for spec_id in wanted]
         self.patch_state({"polyhedron_specs": ordered}, scene_id=scene_id)
+        return ordered
+
+    # ---- atom_groups CRUD ---------------------------------------------
+    #
+    # Same shape as polyhedron CRUD: scoped to one scene, persisted via
+    # patch_state, returns the canonical post-normalisation list. See
+    # agents/atom_groups_api.md.
+
+    def list_atom_groups(self, scene_id: Optional[str] = None) -> list[dict[str, Any]]:
+        return list(self.get_state(scene_id).get("atom_groups") or [])
+
+    def _resolve_atom_groups(self, scene_id: Optional[str]) -> tuple[Optional[str], list[dict[str, Any]]]:
+        scene_id = scene_id or self.active_scene_id()
+        return scene_id, [dict(group) for group in (self.get_state(scene_id).get("atom_groups") or [])]
+
+    def add_atom_group(
+        self,
+        selector: dict[str, Any],
+        *,
+        name: Optional[str] = None,
+        color: Optional[str] = None,
+        color_light: Optional[str] = None,
+        visible: bool = True,
+        opacity: Optional[float] = None,
+        material: Optional[str] = None,
+        style: Optional[str] = None,
+        scene_id: Optional[str] = None,
+        group_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        scene_id, groups = self._resolve_atom_groups(scene_id)
+        existing_ids = {grp["id"] for grp in groups}
+        group = _normalize_atom_group(
+            {
+                "id": group_id,
+                "name": name,
+                "selector": selector,
+                "color": color,
+                "color_light": color_light,
+                "visible": visible,
+                "opacity": opacity,
+                "material": material,
+                "style": style,
+            },
+            existing_ids=existing_ids,
+        )
+        if group is None:
+            raise ValueError(
+                f"invalid atom_group payload (missing/empty selector?): {selector!r}"
+            )
+        groups.append(group)
+        self.patch_state({"atom_groups": groups}, scene_id=scene_id)
+        return group
+
+    def update_atom_group(
+        self,
+        group_id: str,
+        patch: dict[str, Any],
+        *,
+        scene_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        scene_id, groups = self._resolve_atom_groups(scene_id)
+        for index, group in enumerate(groups):
+            if group["id"] == group_id:
+                merged = dict(group)
+                merged.update(patch or {})
+                merged["id"] = group_id
+                replacement = _normalize_atom_group(
+                    merged,
+                    existing_ids={g["id"] for g in groups if g["id"] != group_id},
+                )
+                if replacement is None:
+                    raise ValueError(
+                        f"invalid atom_group patch for {group_id!r}: {patch!r}"
+                    )
+                groups[index] = replacement
+                self.patch_state({"atom_groups": groups}, scene_id=scene_id)
+                return replacement
+        raise KeyError(f"unknown atom_group id: {group_id!r}")
+
+    def remove_atom_group(self, group_id: str, *, scene_id: Optional[str] = None) -> bool:
+        scene_id, groups = self._resolve_atom_groups(scene_id)
+        before = len(groups)
+        groups = [grp for grp in groups if grp["id"] != group_id]
+        if len(groups) == before:
+            return False
+        self.patch_state({"atom_groups": groups}, scene_id=scene_id)
+        return True
+
+    def reorder_atom_groups(
+        self,
+        ordered_ids: Iterable[str],
+        *,
+        scene_id: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        scene_id, groups = self._resolve_atom_groups(scene_id)
+        index_by_id = {grp["id"]: grp for grp in groups}
+        wanted = [str(item) for item in ordered_ids]
+        if set(wanted) != set(index_by_id):
+            raise ValueError(
+                "reorder list must contain exactly the existing atom_group ids; "
+                f"got {wanted!r}, have {sorted(index_by_id)}"
+            )
+        ordered = [index_by_id[group_id] for group_id in wanted]
+        self.patch_state({"atom_groups": ordered}, scene_id=scene_id)
         return ordered
 
     # ---- topology computation -----------------------------------------

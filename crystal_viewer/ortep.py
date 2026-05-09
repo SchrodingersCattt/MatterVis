@@ -221,11 +221,27 @@ def _atom_u(atom: dict):
 
 
 def _atom_color(atom: dict, style: dict) -> str:
+    # Phase 2: a per-group ``_render_color`` override (set by
+    # :func:`crystal_viewer.atom_groups.tag_atoms_with_groups`) wins
+    # over both the element palette and the legacy monochrome flag.
+    override = atom.get("_render_color")
+    if override:
+        return str(override)
     return "#000000" if style.get("monochrome", False) else atom.get("color", "#808080")
 
 
 def _atom_is_minor(atom: dict) -> bool:
     return bool(atom.get("is_minor"))
+
+
+def _atom_render_visible(atom: dict) -> bool:
+    """Mirror of :func:`crystal_viewer.renderer._atom_render_visible`.
+
+    Inlined here so the ortep module stays self-contained (no
+    renderer-import cycle). Atoms without the field default to
+    visible.
+    """
+    return bool(atom.get("_render_visible", True))
 
 
 def _mode_for_atom(atom: dict, style: dict) -> str | None:
@@ -325,6 +341,8 @@ def ortep_atom_mesh_traces(scene: dict, style: dict):
     for atom in scene.get("draw_atoms", []):
         if show_minor_only and not atom.get("is_minor"):
             continue
+        if not _atom_render_visible(atom):
+            continue
         is_minor = _atom_is_minor(atom)
         U, uiso = _atom_u(atom)
         if _minor_axes_outline_only(atom, style):
@@ -388,6 +406,8 @@ def ortep_atom_billboard_traces(scene: dict, style: dict):
     for atom in scene.get("draw_atoms", []):
         if style.get("show_minor_only", False) and not atom.get("is_minor"):
             continue
+        if not _atom_render_visible(atom):
+            continue
         U, uiso = _atom_u(atom)
         ring, _, _ = ortep_billboard_polygon(atom["cart"], U, view_x, view_y, probability=probability, uiso=uiso)
         if _minor_axes_outline_only(atom, style):
@@ -428,6 +448,8 @@ def ortep_axis_dash_traces(scene: dict, style: dict):
     probability = float(style.get("ortep_probability", 0.5))
     for atom in scene.get("draw_atoms", []):
         if style.get("show_minor_only", False) and not atom.get("is_minor"):
+            continue
+        if not _atom_render_visible(atom):
             continue
         if not _mode_flag(atom, style, "ortep_show_principal_axes", bool(style.get("ortep_show_principal_axes", True))):
             continue
@@ -470,6 +492,8 @@ def ortep_octant_shade_traces(scene: dict, style: dict):
     triangles: list[list[int]] = []
     for atom in scene.get("draw_atoms", []):
         if style.get("show_minor_only", False) and not atom.get("is_minor"):
+            continue
+        if not _atom_render_visible(atom):
             continue
         if not _mode_flag(atom, style, "ortep_octant_shading", bool(style.get("ortep_octant_shading", False))):
             continue
@@ -586,6 +610,8 @@ def ortep_octant_hatch_traces(scene: dict, style: dict):
 
     for atom in scene.get("draw_atoms", []):
         if show_minor_only and not atom.get("is_minor"):
+            continue
+        if not _atom_render_visible(atom):
             continue
         if not _mode_flag(
             atom, style, "ortep_octant_hatching",
@@ -754,6 +780,8 @@ def ortep_atom_fill_traces(scene: dict, style: dict):
     for atom in scene.get("draw_atoms", []):
         if show_minor_only and not atom.get("is_minor"):
             continue
+        if not _atom_render_visible(atom):
+            continue
         if _atom_element(atom) == "H" and not bool(style.get("show_hydrogen", False)):
             continue
         if _minor_axes_outline_only(atom, style):
@@ -851,6 +879,8 @@ def ortep_silhouette_outline_traces(scene: dict, style: dict):
     rings_minor: list = []
     for atom in scene.get("draw_atoms", []):
         if show_minor_only and not atom.get("is_minor"):
+            continue
+        if not _atom_render_visible(atom):
             continue
         if _atom_element(atom) == "H" and not bool(style.get("show_hydrogen", False)):
             continue

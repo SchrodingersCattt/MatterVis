@@ -77,6 +77,36 @@ def _style_color(color: str, style: dict) -> str:
     return "#000000" if style.get("monochrome", False) else color
 
 
+def _atom_render_color(atom: dict, style: dict, *, light: bool = False) -> str:
+    """Resolve an atom's effective render colour after Phase 2
+    atom_groups overrides.
+
+    - ``atom["_render_color"]`` (or ``_render_color_light`` for the
+      minor / light path) wins when set by a matching group rule.
+    - Otherwise we fall back to the element-palette colour passed
+      through :func:`_style_color`, which keeps the legacy
+      ``monochrome`` flag working for callers that haven't migrated
+      to atom_groups.
+    """
+    field = "_render_color_light" if light else "_render_color"
+    override = atom.get(field)
+    if override:
+        return str(override)
+    base = atom.get("color_light" if light else "color", "#888888")
+    return _style_color(base, style)
+
+
+def _atom_render_visible(atom: dict) -> bool:
+    return bool(atom.get("_render_visible", True))
+
+
+def _atom_render_opacity_scale(atom: dict) -> float:
+    try:
+        return max(0.0, min(1.0, float(atom.get("_render_opacity_scale", 1.0))))
+    except (TypeError, ValueError):
+        return 1.0
+
+
 def _normalize(vec: Iterable[float], fallback: Iterable[float]) -> np.ndarray:
     arr = np.array(list(vec), dtype=float)
     if arr.shape != (3,) or np.linalg.norm(arr) < 1e-8:
@@ -471,14 +501,29 @@ def _bond_segments(scene: dict, style: dict):
     forcing ``monochrome=True`` (which would also blacken atom fills).
     """
     forced = style.get("force_bond_color")
+    atoms = scene.get("draw_atoms") or []
+    n_atoms = len(atoms)
     for bond in scene["bonds"]:
         if style.get("show_minor_only", False) and not bond["is_minor"]:
+            continue
+        # Phase 2: skip bonds whose endpoint atom was hidden by an
+        # atom_groups ``visible: false`` rule. A half-bond going to
+        # a vanished atom reads as a rendering bug; cleaner to drop it.
+        i = int(bond.get("i", -1))
+        j = int(bond.get("j", -1))
+        if 0 <= i < n_atoms and not _atom_render_visible(atoms[i]):
+            continue
+        if 0 <= j < n_atoms and not _atom_render_visible(atoms[j]):
             continue
         start = np.array(bond["start"], dtype=float)
         end = np.array(bond["end"], dtype=float)
         mid = (start + end) / 2.0
-        c_i = forced if forced else _style_color(bond["color_i"], style)
-        c_j = forced if forced else _style_color(bond["color_j"], style)
+        # Use the per-atom render colour so a recoloured atom-group
+        # half stays consistent with its sphere's colour.
+        i_color = forced if forced else (atoms[i].get("_render_color") if 0 <= i < n_atoms else None) or _style_color(bond["color_i"], style)
+        j_color = forced if forced else (atoms[j].get("_render_color") if 0 <= j < n_atoms else None) or _style_color(bond["color_j"], style)
+        c_i = i_color
+        c_j = j_color
         halves = [
             (c_i, bond["is_minor"], start, mid),
             (c_j, bond["is_minor"], mid, end),
@@ -549,12 +594,22 @@ def _atom_mesh_traces(scene: dict, style: dict):
         lat_steps, lon_steps = 5, 9
     else:
         lat_steps, lon_steps = 6, 10
-    groups: Dict[Tuple[str, bool], dict] = {}
+    # Bucket key extends to (color, is_minor, opacity_scale_bin) so
+    # per-group ``opacity`` overrides survive the Mesh3d
+    # one-trace-per-colour grouping (Plotly bakes opacity into the
+    # trace, not per-vertex). Quantise the scale to two decimals so a
+    # slider that emits 0.523 vs 0.524 doesn't fragment the trace
+    # list and tank the figure-JSON cache hit rate.
+    groups: Dict[Tuple[str, bool, int], dict] = {}
     for atom in scene["draw_atoms"]:
         if style.get("show_minor_only", False) and not atom["is_minor"]:
             continue
-        key = (_style_color(atom["color"], style), atom["is_minor"])
-        groups.setdefault(key, {"centers": [], "radii": []})
+        if not _atom_render_visible(atom):
+            continue
+        color = _atom_render_color(atom, style, light=atom["is_minor"])
+        opacity_scale = _atom_render_opacity_scale(atom)
+        key = (color, atom["is_minor"], int(round(opacity_scale * 100)))
+        groups.setdefault(key, {"centers": [], "radii": [], "opacity_scale": opacity_scale})
         radius = float(atom["atom_radius"]) * float(style["atom_scale"])
         if atom["is_minor"]:
             radius *= 1.12
@@ -562,7 +617,7 @@ def _atom_mesh_traces(scene: dict, style: dict):
         groups[key]["radii"].append(radius)
 
     traces = []
-    for (color, is_minor), payload in groups.items():
+    for (color, is_minor, _), payload in groups.items():
         vertices, triangles = _sphere_mesh_batch(
             payload["centers"],
             payload["radii"],
@@ -578,7 +633,7 @@ def _atom_mesh_traces(scene: dict, style: dict):
                 j=triangles[:, 1],
                 k=triangles[:, 2],
                 color=color,
-                opacity=_minor_opacity_for(style, is_minor),
+                opacity=_minor_opacity_for(style, is_minor) * payload["opacity_scale"],
                 hoverinfo="skip",
                 showlegend=False,
                 flatshading=False,
@@ -620,14 +675,23 @@ def _bond_scatter_traces(scene: dict, style: dict):
 
 
 def _atom_scatter_traces(scene: dict, style: dict):
-    groups: Dict[Tuple[str, bool], dict] = {}
+    groups: Dict[Tuple[str, bool, str, int], dict] = {}
     for idx, atom in enumerate(scene["draw_atoms"]):
         if style.get("show_minor_only", False) and not atom["is_minor"]:
             continue
-        key = (atom["elem"], atom["is_minor"])
+        if not _atom_render_visible(atom):
+            continue
+        color = _atom_render_color(atom, style, light=atom["is_minor"])
+        opacity_scale = _atom_render_opacity_scale(atom)
+        # Per-trace key = (element, is_minor, effective_color, opacity_scale_bin).
+        # Adding colour to the key means a per-element atom_groups
+        # rule still groups its atoms in one Scatter3d (so legend
+        # entries still read element-by-element) but doesn't merge
+        # red-O with default-O when the user splits them.
+        key = (atom["elem"], atom["is_minor"], color, int(round(opacity_scale * 100)))
         groups.setdefault(
             key,
-            {"x": [], "y": [], "z": [], "size": [], "text": [], "color": _style_color(atom["color"], style), "customdata": []},
+            {"x": [], "y": [], "z": [], "size": [], "text": [], "color": color, "customdata": [], "opacity_scale": opacity_scale},
         )
         base_size = max(10.0, 95.0 * atom["atom_radius"] * float(style["atom_scale"]))
         groups[key]["x"].append(float(atom["cart"][0]))
@@ -638,7 +702,7 @@ def _atom_scatter_traces(scene: dict, style: dict):
         groups[key]["customdata"].append([idx, atom["label"], atom["elem"], int(atom["is_minor"])])
 
     traces = []
-    for (elem, is_minor), payload in groups.items():
+    for (elem, is_minor, _color, _opacity_bin), payload in groups.items():
         traces.append(
             go.Scatter3d(
                 x=payload["x"],
@@ -651,7 +715,7 @@ def _atom_scatter_traces(scene: dict, style: dict):
                 marker=dict(
                     size=payload["size"],
                     color=payload["color"],
-                    opacity=_minor_opacity_for(style, is_minor),
+                    opacity=_minor_opacity_for(style, is_minor) * payload["opacity_scale"],
                     line=dict(color="#444444" if is_minor else payload["color"], width=3.5 if is_minor else 0),
                 ),
                 showlegend=False,
@@ -701,8 +765,10 @@ def _wireframe_atom_traces(scene: dict, style: dict):
     for atom in scene["draw_atoms"]:
         if style.get("show_minor_only", False) and not atom["is_minor"]:
             continue
+        if not _atom_render_visible(atom):
+            continue
         radius = max(0.05, float(atom["atom_radius"]) * float(style["atom_scale"]))
-        key = (_style_color(atom["color"], style), atom["is_minor"])
+        key = (_atom_render_color(atom, style, light=atom["is_minor"]), atom["is_minor"])
         bucket = groups.setdefault(key, [])
         center = np.asarray(atom["cart"], dtype=float)
         for axis in axes:
@@ -775,6 +841,8 @@ def _minor_outline_traces(scene: dict, style: dict):
     minors = []
     for atom in scene["draw_atoms"]:
         if not atom["is_minor"]:
+            continue
+        if not _atom_render_visible(atom):
             continue
         if style.get("show_minor_only", False) and not atom["is_minor"]:
             continue
@@ -1855,6 +1923,88 @@ def _round_coord_arrays(trace_dict: dict) -> dict:
     return trace_dict
 
 
+def _hashable_selector(selector: dict | None) -> tuple:
+    if not isinstance(selector, dict):
+        return ()
+    items = []
+    for key in sorted(selector.keys()):
+        value = selector[key]
+        if isinstance(value, list):
+            items.append((key, tuple(value)))
+        else:
+            items.append((key, value))
+    return tuple(items)
+
+
+def _atom_groups_cache_key(atom_groups: list[dict] | None) -> tuple:
+    """Hashable summary of atom_groups for the figure JSON cache.
+
+    All nested lists are flattened to tuples so the resulting key
+    survives use as a dict key (Python lists are unhashable).
+    """
+    if not atom_groups:
+        return ()
+    return tuple(
+        (
+            str(g.get("id", "")),
+            _hashable_selector(g.get("selector")),
+            str(g.get("color") or ""),
+            str(g.get("color_light") or ""),
+            bool(g.get("visible", True)),
+            float(g.get("opacity")) if g.get("opacity") is not None else None,
+            str(g.get("material") or ""),
+            str(g.get("style") or ""),
+        )
+        for g in atom_groups
+    )
+
+
+def _atom_subscene(scene: dict, sub_atoms: list[dict]) -> dict:
+    """Shallow copy of ``scene`` with ``draw_atoms`` replaced. Other
+    fields (``bonds``, ``M``, ``label_items``, ...) keep the original
+    references; the per-partition atom builders only ever read
+    ``draw_atoms`` so this is safe."""
+    sub = dict(scene)
+    sub["draw_atoms"] = sub_atoms
+    sub.pop("_mesh_trace_cache", None)
+    return sub
+
+
+def _atom_traces_for_partition(
+    sub_scene: dict,
+    sub_style: dict,
+    *,
+    use_fast: bool,
+):
+    """Pick the right atom-trace builder for ``(material, style)`` and
+    run it on ``sub_scene``. Used both by the default scene-style
+    partition and by per-group material/style overrides."""
+    sty = str(sub_style.get("style", "ball_stick"))
+    if sty == "wireframe":
+        return _wireframe_atom_traces(sub_scene, sub_style)
+    if sty == "ortep":
+        from .ortep import (
+            ortep_atom_billboard_traces,
+            ortep_atom_mesh_traces,
+            ortep_atom_fill_traces,
+        )
+
+        is_open_ortep = (
+            bool(sub_style.get("ortep_silhouette_outline", False))
+            and bool(sub_style.get("ortep_octant_hatching", False))
+        )
+        if is_open_ortep:
+            return ortep_atom_fill_traces(sub_scene, sub_style)
+        return (
+            ortep_atom_billboard_traces(sub_scene, sub_style)
+            if use_fast
+            else ortep_atom_mesh_traces(sub_scene, sub_style)
+        )
+    if use_fast or sub_style.get("material") == "flat":
+        return _atom_scatter_traces(sub_scene, sub_style)
+    return _atom_mesh_traces(sub_scene, sub_style)
+
+
 def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
     """Cache atom + bond mesh trace dicts on the scene. Building Mesh3d
     objects (sphere tessellation + Plotly array validation) is by far the
@@ -1864,6 +2014,7 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
     the fast-rendering switch. Cache the list of trace dicts under that
     key and replay them on subsequent rebuilds, so toggling Labels no
     longer regenerates ~1500 sphere triangles."""
+    atom_groups = style.get("atom_groups") or []
     cache = scene.setdefault("_mesh_trace_cache", {})
     key = (
         bool(use_fast),
@@ -1884,9 +2035,87 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
         bool(style.get("ortep_octant_hatching", False)),
         str(style.get("force_bond_color", "")),
         str(style.get("ortep_atom_fill_color", "#FFFFFF")),
+        _atom_groups_cache_key(atom_groups),
     )
     if key in cache:
         return cache[key]
+
+    # Phase 2: when atom_groups is set, decorate every atom with
+    # per-render override fields, then partition by effective
+    # (material, style) and run the matching trace builder per
+    # partition. Bonds stay scene-level: their endpoint colours come
+    # from the per-atom render colour (see ``_bond_segments``), and
+    # bonds touching a hidden atom are dropped there as well, but we
+    # don't fragment the bond render across partitions.
+    scene_material = str(style.get("material", "mesh"))
+    scene_style = str(style.get("style", "ball_stick"))
+    if atom_groups:
+        from .atom_groups import (
+            partition_atoms_by_render_pipeline,
+            tag_atoms_with_groups,
+        )
+
+        tagged_atoms = tag_atoms_with_groups(
+            scene["draw_atoms"], atom_groups,
+            scene_material=scene_material, scene_style=scene_style,
+        )
+        # Mutate the scene so ``_bond_segments`` (called below) sees
+        # the per-atom ``_render_visible`` / ``_render_color`` flags.
+        # We carefully restore the original list afterwards so cache
+        # keys based on the unmutated scene id stay valid.
+        original_atoms = scene["draw_atoms"]
+        scene["draw_atoms"] = tagged_atoms
+        try:
+            partitions = partition_atoms_by_render_pipeline(
+                tagged_atoms,
+                scene_material=scene_material,
+                scene_style=scene_style,
+            )
+            atom_traces = []
+            for (part_material, part_style), part_atoms in partitions.items():
+                sub_style = dict(style)
+                sub_style["material"] = part_material
+                sub_style["style"] = part_style
+                # When the partition style flips to ``flat`` the
+                # parent ``use_fast`` (set by the caller for the
+                # scene-level material) may not match. Recompute it
+                # locally so the partition actually picks the scatter
+                # builder.
+                part_use_fast = (
+                    bool(sub_style.get("fast_rendering", False))
+                    or part_material == "flat"
+                    or len(part_atoms) > 2000
+                )
+                sub_scene = _atom_subscene(scene, part_atoms)
+                atom_traces.extend(
+                    _atom_traces_for_partition(sub_scene, sub_style, use_fast=part_use_fast)
+                )
+            # Bonds use the (mutated) scene with tagged atoms so the
+            # endpoint visibility check works.
+            if scene_style == "wireframe":
+                bond_traces = _wireframe_bond_traces(scene, style)
+            elif scene_style == "ortep":
+                bond_traces = (
+                    _bond_scatter_traces(scene, style) if use_fast
+                    else _bond_mesh_traces(scene, style)
+                )
+            elif use_fast:
+                bond_traces = _bond_scatter_traces(scene, style)
+            else:
+                bond_traces = _bond_mesh_traces(scene, style)
+            minor_outline = _minor_outline_traces(scene, style)
+            minor_bonds = _minor_bond_wireframe_traces(scene, style)
+            payload = {
+                "atom_dicts": [_round_coord_arrays(tr.to_plotly_json()) for tr in atom_traces],
+                "bond_dicts": [_round_coord_arrays(tr.to_plotly_json()) for tr in bond_traces],
+                "minor_outline_dicts": [_round_coord_arrays(tr.to_plotly_json()) for tr in minor_outline],
+                "minor_bond_dicts": [_round_coord_arrays(tr.to_plotly_json()) for tr in minor_bonds],
+            }
+            cache[key] = payload
+            return payload
+        finally:
+            scene["draw_atoms"] = original_atoms
+
     if style.get("style") == "wireframe":
         atom_traces = _wireframe_atom_traces(scene, style)
         bond_traces = _wireframe_bond_traces(scene, style)

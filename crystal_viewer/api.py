@@ -236,6 +236,81 @@ def register_api(dash_app, backend) -> None:
             return jsonify({"error": str(exc)}), 400
         return jsonify({"specs": specs})
 
+    # ----- atom_groups (Phase 2) ----------------------------------------
+    #
+    # Per-scene atom-style override table. Each row pins a selector
+    # (``{"all": true}`` or ``{"elements": [...]}`` or
+    # ``{"is_minor": bool}``) plus optional color / color_light /
+    # visible / opacity / material / style overrides. Rules apply in
+    # list order; later rows win on overlapping atoms. Empty list
+    # falls back to the legacy ``monochrome`` flag + element palette.
+    # See ``agents/atom_groups_api.md``.
+
+    @v2.get("/atom_groups")
+    def atom_groups_list():
+        scene_id = request.args.get("scene_id")
+        return jsonify({"groups": backend.list_atom_groups(scene_id=scene_id)})
+
+    @v2.post("/atom_groups")
+    def atom_groups_create():
+        payload = request.get_json(force=True, silent=True) or {}
+        selector = payload.get("selector")
+        if not isinstance(selector, dict):
+            return jsonify({"error": "'selector' (dict) is required"}), 400
+        try:
+            group = backend.add_atom_group(
+                selector=selector,
+                name=payload.get("name"),
+                color=payload.get("color"),
+                color_light=payload.get("color_light"),
+                visible=bool(payload.get("visible", True)),
+                opacity=payload.get("opacity"),
+                material=payload.get("material"),
+                style=payload.get("style"),
+                scene_id=_scene_id_from_request(),
+                group_id=payload.get("id"),
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(group)
+
+    @v2.patch("/atom_groups/<group_id>")
+    def atom_groups_update(group_id: str):
+        payload = request.get_json(force=True, silent=True) or {}
+        try:
+            group = backend.update_atom_group(
+                group_id=group_id,
+                patch=payload,
+                scene_id=_scene_id_from_request(),
+            )
+        except KeyError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(group)
+
+    @v2.delete("/atom_groups/<group_id>")
+    def atom_groups_delete(group_id: str):
+        ok = backend.remove_atom_group(group_id=group_id, scene_id=request.args.get("scene_id"))
+        if not ok:
+            return jsonify({"error": f"unknown atom_group id: {group_id!r}"}), 404
+        return jsonify({"deleted": group_id})
+
+    @v2.post("/atom_groups/reorder")
+    def atom_groups_reorder():
+        payload = request.get_json(force=True, silent=True) or {}
+        ordered = payload.get("order")
+        if not isinstance(ordered, list):
+            return jsonify({"error": "'order' must be a list of group ids"}), 400
+        try:
+            groups = backend.reorder_atom_groups(
+                ordered_ids=ordered,
+                scene_id=_scene_id_from_request(),
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify({"groups": groups})
+
     server.register_blueprint(v2)
 
     v1 = Blueprint("crystal_viewer_api_v1", __name__, url_prefix="/api/v1")

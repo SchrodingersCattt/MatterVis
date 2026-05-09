@@ -75,6 +75,12 @@ preset save/load.
   a centre species + optional ligand species + colour + enabled flag.
   See [`polyhedron_api.md`](polyhedron_api.md) for the spec shape and
   worked examples.
+- `GET /atom_groups` / `POST /atom_groups` / `PATCH /atom_groups/{id}` /
+  `DELETE /atom_groups/{id}` / `POST /atom_groups/reorder`
+  Per-scene atom-group rules for colour / visibility / opacity /
+  per-group material+style overrides. The Phase 2 replacement for
+  the old binary `monochrome` flag. See
+  [`atom_groups_api.md`](atom_groups_api.md).
 - `GET /screenshot`
   Returns a PNG snapshot of the current Plotly view.
 - `POST /preset/save`
