@@ -104,7 +104,10 @@ def register_api(dash_app, backend) -> None:
         if not file.filename:
             return jsonify({"error": "empty filename"}), 400
         content = file.read()
-        bundle = backend.add_uploaded_file_bytes(content, file.filename)
+        try:
+            bundle = backend.add_uploaded_file_bytes(content, file.filename)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
         return jsonify(bundle.metadata())
 
     @v2.get("/structures")

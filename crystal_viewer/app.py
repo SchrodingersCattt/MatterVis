@@ -749,17 +749,33 @@ class ViewerBackend:
         return bundle
 
     def add_uploaded_file_bytes(self, data: bytes, filename: str) -> LoadedCrystal:
-        upload_dir = os.path.join(tempfile.gettempdir(), "crystal_viewer_uploads")
+        # Sanitise the user-supplied filename before joining it onto a
+        # writable directory. ``os.path.join("/tmp/uploads", "/etc/passwd")``
+        # silently drops the prefix and writes ``/etc/passwd``; even
+        # without an absolute escape, ``../../foo`` walks outside the
+        # upload directory. ``secure_filename`` strips both classes of
+        # attack and the realpath check below is a belt-and-braces
+        # second line of defence in case Werkzeug's normalisation rules
+        # ever change.
+        from werkzeug.utils import secure_filename
+
+        upload_dir = os.path.realpath(os.path.join(tempfile.gettempdir(), "crystal_viewer_uploads"))
         os.makedirs(upload_dir, exist_ok=True)
-        path = os.path.join(upload_dir, filename)
+        safe = secure_filename(filename or "") or "upload.cif"
+        if not safe.lower().endswith(".cif"):
+            safe = f"{safe}.cif"
+        path = os.path.realpath(os.path.join(upload_dir, safe))
+        if os.path.commonpath([path, upload_dir]) != upload_dir:
+            raise ValueError(f"unsafe upload filename: {filename!r}")
         with open(path, "wb") as handle:
             handle.write(data)
-        safe_name = os.path.splitext(os.path.basename(filename))[0]
+        stem = os.path.splitext(safe)[0]
+        safe_name = stem
         suffix = 2
         while safe_name in self.structure_names:
-            safe_name = f"{os.path.splitext(os.path.basename(filename))[0]}_{suffix}"
+            safe_name = f"{stem}_{suffix}"
             suffix += 1
-        bundle = build_loaded_crystal(name=safe_name, cif_path=path, title=os.path.splitext(filename)[0], preset=self.preset, source="upload")
+        bundle = build_loaded_crystal(name=safe_name, cif_path=path, title=stem, preset=self.preset, source="upload")
         self._drop_placeholder()
         self.bundles[bundle.name] = bundle
         self.structure_names.append(bundle.name)
