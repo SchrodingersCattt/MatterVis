@@ -138,13 +138,19 @@ def register_api(dash_app, backend) -> None:
     def preset_save():
         payload = request.get_json(force=True, silent=True) or {}
         path = payload.get("path")
-        return jsonify(backend.save_preset(path=path))
+        try:
+            return jsonify(backend.save_preset(path=path))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
 
     @v2.post("/preset/load")
     def preset_load():
         payload = request.get_json(force=True, silent=True) or {}
         path = payload.get("path")
-        return jsonify(backend.load_preset_from_path(path))
+        try:
+            return jsonify(backend.load_preset_from_path(path))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
 
     @v2.post("/export")
     def export_static():

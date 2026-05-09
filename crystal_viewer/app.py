@@ -27,6 +27,7 @@ from .loader import LoadedCrystal, build_bundle_scene, build_empty_bundle, build
 from .presets import (
     DEFAULT_CATALOG,
     DEFAULT_STYLE,
+    LOCAL_STATE_DIRNAME,
     default_preset,
     default_preset_path,
     get_default_catalog,
@@ -1055,11 +1056,36 @@ class ViewerBackend:
         camera = _camera_payload(eye, center, up)
         return self.set_camera(camera, scene_id=scene_id)
 
+    def _safe_preset_path(self, path: Optional[str]) -> Optional[str]:
+        """Resolve ``path`` against ``<root>/.local`` and reject anything
+        that escapes that directory.
+
+        The REST handlers expose ``/api/v{1,2}/preset/save`` and
+        ``/preset/load`` with a client-controlled ``path`` field. Without
+        this guard, any caller able to reach the API has an
+        arbitrary-file-write (and an arbitrary-JSON-read) primitive on
+        the host. Restricting to ``<root>/.local`` keeps the caller-
+        facing contract (``path`` still works) while collapsing the
+        attack surface to a single state directory the app already
+        owns. ``path=None`` falls through to the default location.
+        """
+        if path is None:
+            return None
+        safe_root = os.path.realpath(os.path.join(self.root_dir, LOCAL_STATE_DIRNAME))
+        os.makedirs(safe_root, exist_ok=True)
+        candidate = path if os.path.isabs(path) else os.path.join(safe_root, path)
+        resolved = os.path.realpath(candidate)
+        if os.path.commonpath([resolved, safe_root]) != safe_root:
+            raise ValueError(
+                f"preset path must resolve inside {safe_root!r}, got {path!r}"
+            )
+        return resolved
+
     def save_preset(self, path: Optional[str] = None) -> dict[str, Any]:
+        target = self._safe_preset_path(path) or self.preset_path
         state = self.get_state()
         bundle = self.get_bundle(state["structure"])
         scene = self.scene_for_state(state)
-        target = path or self.preset_path
         preset_data = load_preset(target) if os.path.exists(target) else default_preset()
         preset_data["style"].update(self.style_for_state(state))
         preset_data.setdefault("structures", {})
@@ -1075,8 +1101,9 @@ class ViewerBackend:
     def load_preset_from_path(self, path: Optional[str]) -> dict[str, Any]:
         if not path:
             raise ValueError("path is required")
-        self.preset = load_preset(path)
-        self.preset_path = path
+        target = self._safe_preset_path(path)
+        self.preset = load_preset(target)
+        self.preset_path = target
         for bundle in self.bundles.values():
             bundle.scene_cache.clear()
             cache = getattr(bundle, "_topology_state_cache", None)
@@ -1084,7 +1111,7 @@ class ViewerBackend:
                 cache.clear()
         structure = self.get_state()["structure"]
         self.patch_state(self.default_state(structure))
-        return {"path": path, "state": self.get_state()}
+        return {"path": target, "state": self.get_state()}
 
     def export_static(self, output_path: Optional[str] = None) -> dict[str, Any]:
         state = self.get_state()
