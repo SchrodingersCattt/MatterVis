@@ -39,8 +39,14 @@ def apply_element_colors(
     scene-building pipeline but skin elements specially for a publication
     figure (e.g. colour I purple, Na yellow).
 
-    The scene is modified in place and also returned for chaining. A ``None``
-    or empty dict is a no-op.
+    Mutates ``scene`` in place and returns the same object for chaining;
+    this function never returns a fresh scene. ``None`` or empty
+    overrides are a no-op **except** when ``scene["style"]["monochrome"]``
+    is true: in that case the function forces every atom and bond to
+    pure black, mirroring the semantics of the ``monochrome`` style key
+    everywhere else in the renderer. Callers that want a non-monochrome
+    skin should pass ``element_colors`` explicitly and not rely on the
+    monochrome short-circuit.
     """
     if scene.get("style", {}).get("monochrome"):
         element_colors = {atom.get("elem", ""): "#000000" for atom in scene.get("draw_atoms", [])}

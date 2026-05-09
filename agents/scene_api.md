@@ -35,9 +35,16 @@ automatically.
 
 ### `crystal_viewer.scene.apply_element_colors(scene, element_colors, element_colors_light)`
 
-Re-skin element palettes on a finished scene. Non-destructive: returns
-the modified scene. Also invoked automatically by
-`build_scene_from_atoms` when `style["element_colors"]` is provided.
+Re-skin element palettes on a finished scene. Mutates `scene` in place
+and returns the same object for chaining; never returns a fresh scene.
+Also invoked automatically by `build_scene_from_atoms` when
+`style["element_colors"]` is provided.
+
+When `scene["style"]["monochrome"]` is true the function forces every
+atom and bond colour to pure black regardless of what `element_colors`
+the caller passes, mirroring the rest of the monochrome rendering
+pipeline. Callers that want a coloured skin must therefore turn
+monochrome off before calling.
 Never mutate the module-level `ELEMENT_COLORS` dict — pass kwargs
 instead.
 
