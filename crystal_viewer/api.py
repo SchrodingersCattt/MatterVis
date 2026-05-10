@@ -319,10 +319,31 @@ def register_api(dash_app, backend) -> None:
     def v1_get_state():
         return jsonify(backend.get_state())
 
+    # Fields that only exist in v2 (Phase 1/2 per-scene CRUD models).
+    # We still accept them on POST /api/v1/state so old scripts that
+    # POST a full snapshot back to v1 keep working, but we attach a
+    # ``Deprecation`` header (RFC 8594) so callers can spot the
+    # migration target without surprise behaviour changes. New code
+    # should use the dedicated v2 CRUD endpoints for these fields.
+    _V2_ONLY_STATE_FIELDS = {
+        "polyhedron_specs": "/api/v2/polyhedra",
+        "atom_groups": "/api/v2/atom_groups",
+    }
+
     @v1.post("/state")
     def v1_post_state():
         payload = request.get_json(force=True, silent=True) or {}
-        return jsonify(backend.patch_state(payload))
+        v2_only_used = [k for k in _V2_ONLY_STATE_FIELDS if k in payload]
+        result = backend.patch_state(payload)
+        response = jsonify(result)
+        if v2_only_used:
+            response.headers["Deprecation"] = "true"
+            target_paths = ", ".join(_V2_ONLY_STATE_FIELDS[k] for k in v2_only_used)
+            response.headers["Warning"] = (
+                f'299 - "fields {v2_only_used!r} are v2-only; '
+                f'use {target_paths} for CRUD with proper validation"'
+            )
+        return response
 
     @v1.get("/camera")
     def v1_get_camera():
@@ -406,7 +427,29 @@ def register_api(dash_app, backend) -> None:
                     payload = json.loads(message)
                 except json.JSONDecodeError:
                     payload = {"type": "raw", "message": message}
-                if payload.get("type") == "set_state":
-                    backend.patch_state(payload.get("payload", {}))
+                handle_ws_message(backend, payload)
 
     sock.route("/api/v1/ws")(ws_state)
+
+
+def handle_ws_message(backend, payload: dict) -> None:
+    """Dispatch one WebSocket message envelope.
+
+    Extracted so the dispatch logic is unit-testable without spinning
+    a real socket. Currently honours one envelope type:
+
+    - ``{"type": "set_state", "payload": {...}, "scene_id": "..."}``
+      patches state on a specific scene; ``scene_id`` may also live
+      inside ``payload`` (legacy shape) or be omitted entirely (active
+      scene). Returns the new state dict for the targeted scene so
+      tests can assert on the result; production callers ignore the
+      return value.
+    """
+    if not isinstance(payload, dict) or payload.get("type") != "set_state":
+        return None
+    inner = payload.get("payload", {}) or {}
+    scene_id = (
+        payload.get("scene_id")
+        or (inner.get("scene_id") if isinstance(inner, dict) else None)
+    )
+    return backend.patch_state(inner, scene_id=scene_id)

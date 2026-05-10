@@ -284,6 +284,22 @@ def _normalize_atom_groups(raw_groups: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _legacy_monochrome_group(existing_ids: set[str]) -> dict[str, Any]:
+    """Synthesize an atom_group representing the legacy ``monochrome``
+    flag: paint every atom black. Used by ``normalize_state`` to
+    auto-migrate old presets so the renderer has a single source of
+    truth (atom_groups) and the ``monochrome`` flag becomes inert.
+    """
+    return _normalize_atom_group(
+        {
+            "selector": {"all": True},
+            "color": "#000000",
+            "name": "monochrome (migrated)",
+        },
+        existing_ids=existing_ids,
+    )
+
+
 # Phase 3 UI: per-row rendering helpers for the left-panel
 # Polyhedra and Atom-group tables. Returns Dash component lists; the
 # panel wires up an "Add" button and ALL/MATCH callbacks for inline
@@ -382,11 +398,16 @@ def _polyhedra_table_rows(
 
 _ATOM_GROUP_KIND_ALL = "all"
 _ATOM_GROUP_KIND_ELEMENTS = "elements"
+_ATOM_GROUP_KIND_MINOR = "minor"
+_ATOM_GROUP_KIND_MAJOR = "major"
+_ATOM_GROUP_INHERIT = "__inherit__"
 
 
 def _selector_kind(selector: dict[str, Any]) -> str:
     if selector.get("all"):
         return _ATOM_GROUP_KIND_ALL
+    if "is_minor" in selector and "elements" not in selector:
+        return _ATOM_GROUP_KIND_MINOR if selector["is_minor"] else _ATOM_GROUP_KIND_MAJOR
     return _ATOM_GROUP_KIND_ELEMENTS
 
 
@@ -447,6 +468,8 @@ def _atom_groups_table_rows(
                                 options=[
                                     {"label": "all atoms", "value": _ATOM_GROUP_KIND_ALL},
                                     {"label": "by element", "value": _ATOM_GROUP_KIND_ELEMENTS},
+                                    {"label": "minor only", "value": _ATOM_GROUP_KIND_MINOR},
+                                    {"label": "major only", "value": _ATOM_GROUP_KIND_MAJOR},
                                 ],
                                 value=kind,
                                 clearable=False,
@@ -501,6 +524,38 @@ def _atom_groups_table_rows(
                             ),
                         ],
                         style={"marginTop": "4px", "padding": "0 4px"},
+                    ),
+                    html.Div(
+                        [
+                            html.Span("material", style={"fontSize": "11px", "color": "#666", "marginRight": "4px"}),
+                            dcc.Dropdown(
+                                id={"type": "ag-row-material", "group_id": group["id"]},
+                                options=[
+                                    {"label": "(scene default)", "value": _ATOM_GROUP_INHERIT},
+                                    {"label": "mesh (3D)", "value": "mesh"},
+                                    {"label": "flat (2D)", "value": "flat"},
+                                ],
+                                value=group.get("material") or _ATOM_GROUP_INHERIT,
+                                clearable=False,
+                                style={"flex": "1", "fontSize": "12px"},
+                            ),
+                            html.Span("style", style={"fontSize": "11px", "color": "#666", "marginLeft": "8px", "marginRight": "4px"}),
+                            dcc.Dropdown(
+                                id={"type": "ag-row-style", "group_id": group["id"]},
+                                options=[
+                                    {"label": "(scene default)", "value": _ATOM_GROUP_INHERIT},
+                                    {"label": "ball+stick", "value": "ball_stick"},
+                                    {"label": "ball", "value": "ball"},
+                                    {"label": "stick", "value": "stick"},
+                                    {"label": "ortep", "value": "ortep"},
+                                    {"label": "wireframe", "value": "wireframe"},
+                                ],
+                                value=group.get("style") or _ATOM_GROUP_INHERIT,
+                                clearable=False,
+                                style={"flex": "1", "fontSize": "12px"},
+                            ),
+                        ],
+                        style={"display": "flex", "alignItems": "center", "marginTop": "4px", "padding": "0 4px"},
                     ),
                 ],
                 style={
@@ -1164,6 +1219,24 @@ class ViewerBackend:
             state["atom_groups"] = _normalize_atom_groups(patch.get("atom_groups") or [])
         if "fast_rendering" in patch:
             state["fast_rendering"] = bool(patch["fast_rendering"])
+        # ---- legacy migration: monochrome=True --> atom_group rule ----
+        #
+        # Old presets / agent scripts may still set ``monochrome=True``
+        # on the display options (or via ``"monochrome"`` in
+        # ``display_options``). Promote that to a single all-atoms
+        # black ``atom_group`` so the renderer has a single source of
+        # truth and the legacy flag becomes inert. Idempotent: we skip
+        # if the user already has any explicit colour rule.
+        wants_mono = False
+        if "display_options" in patch:
+            wants_mono = "monochrome" in (state.get("display_options") or [])
+        existing_groups = list(state.get("atom_groups") or [])
+        has_explicit_color_rule = any(g.get("color") for g in existing_groups)
+        if wants_mono and not has_explicit_color_rule:
+            existing_ids = {g["id"] for g in existing_groups}
+            migrated = _legacy_monochrome_group(existing_ids)
+            if migrated is not None:
+                state["atom_groups"] = existing_groups + [migrated]
         if "camera" in patch and patch["camera"] is not None:
             state["camera"] = patch["camera"]
         return state
@@ -2340,41 +2413,19 @@ def create_app(
                         updatemode="mouseup",
                     ),
                     html.Hr(),
-                    html.H4("Topology"),
+                    html.H4("Polyhedra"),
                     dcc.Checklist(
                         id="topology-toggle",
-                        options=[{"label": "Show topology overlay", "value": "enabled"}],
+                        options=[{"label": "Show polyhedra overlay", "value": "enabled"}],
                         value=["enabled"] if first_state.get("topology_enabled", True) else [],
                     ),
-                    html.Label(
-                        "Polyhedron centres (check one or more species)",
-                        style={"fontSize": "13px", "marginTop": "6px", "display": "block"},
-                    ),
-                    dcc.Checklist(
-                        id="topology-species",
-                        options=backend.species_options(first_state["structure"]),
-                        value=list(first_state.get("topology_species_keys") or []),
-                        style={"marginTop": "4px"},
-                        inputStyle={"marginRight": "6px"},
-                        labelStyle={"display": "block", "fontFamily": "monospace"},
-                    ),
                     html.Div(
-                        [
-                            html.Label(
-                                "Fallback colour (legacy)",
-                                style={"marginRight": "8px", "fontSize": "12px", "color": "#777"},
-                            ),
-                            dcc.Input(
-                                id="topology-hull-color",
-                                type="color",
-                                value=first_state.get("topology_hull_color", "#7C5CBF"),
-                                style={"width": "40px", "height": "24px", "padding": "0", "border": "1px solid #BBB", "verticalAlign": "middle"},
-                            ),
-                        ],
-                        style={"display": "flex", "alignItems": "center", "marginTop": "8px"},
+                        "Each row defines one polyhedron: centre species + optional ligand "
+                        "restriction + colour. The overlay tiles every matching site in the "
+                        "structure. Add a row to start.",
+                        style={"fontSize": "11px", "color": "#777", "marginTop": "4px"},
                     ),
-                    html.Hr(),
-                    # ---- Phase 3: Named polyhedra table ----
+                    # ---- Named polyhedra table ----
                     html.Div(
                         [
                             html.H4(
@@ -2394,7 +2445,7 @@ def create_app(
                                 title="Add a named polyhedron row (centre + optional ligand restriction + colour).",
                             ),
                         ],
-                        style={"display": "flex", "alignItems": "center"},
+                        style={"display": "flex", "alignItems": "center", "marginTop": "8px"},
                     ),
                     html.Div(
                         id="polyhedra-rows-container",
@@ -2437,13 +2488,6 @@ def create_app(
                                 title="Add an 'all atoms = #000000' rule (replacement for the legacy Monochrome checkbox).",
                             ),
                             html.Button(
-                                "Hide H",
-                                id="atom-groups-preset-hide-h",
-                                n_clicks=0,
-                                style={"fontSize": "12px", "padding": "2px 8px", "marginRight": "4px", "cursor": "pointer"},
-                                title="Add a 'hydrogen invisible' rule.",
-                            ),
-                            html.Button(
                                 "Clear all",
                                 id="atom-groups-clear-btn",
                                 n_clicks=0,
@@ -2452,6 +2496,12 @@ def create_app(
                             ),
                         ],
                         style={"marginTop": "6px"},
+                    ),
+                    html.Div(
+                        "Tip: to hide hydrogens use the Hydrogens checkbox under Display "
+                        "Options above; that path also rebuilds bonds correctly. "
+                        "Atom-group rules tweak per-atom colour / opacity / material.",
+                        style={"fontSize": "11px", "color": "#777", "marginTop": "4px"},
                     ),
                     html.Div(
                         id="atom-groups-rows-container",
@@ -2607,10 +2657,8 @@ def create_app(
             state.get("disorder", "outline_rings"),
             state.get("ortep_mode", "ortep_axes"),
             state["axis_scale"],
-            list(state.get("topology_species_keys") or []),
             state["topology_site_index"],
             ["enabled"] if state.get("topology_enabled", True) else [],
-            state.get("topology_hull_color", "#7C5CBF"),
             state,
             _camera_store_payload(scene_id, state.get("camera")),
         )
@@ -2631,25 +2679,6 @@ def create_app(
             bundle = backend.add_uploaded_bundle(contents, filename)
             names_out.append(bundle.name)
         return backend.scene_tabs(), backend.active_scene_id(), f"Uploaded CIF(s): {', '.join(names_out)}"
-
-    @app.callback(
-        Output("topology-species", "options"),
-        Output("topology-species", "value", allow_duplicate=True),
-        Input("scene-tabs", "value"),
-        State("topology-species", "value"),
-        prevent_initial_call=True,
-    )
-    def refresh_species_options(scene_id, current_value):
-        structure = backend.get_state(scene_id).get("structure")
-        opts = backend.species_options(structure)
-        valid_values = {opt["value"] for opt in opts}
-        keep = [v for v in (current_value or []) if v in valid_values]
-        if not keep:
-            # Re-derive a sensible default for the freshly selected structure
-            # rather than leaving the checkbox group empty.
-            default = backend.default_state(structure).get("topology_species_keys") or []
-            keep = list(default)
-        return opts, keep
 
     @app.callback(
         Output("topology-site-index", "value", allow_duplicate=True),
@@ -2858,10 +2887,8 @@ def create_app(
         Output("disorder-selector", "value"),
         Output("ortep-mode-selector", "value"),
         Output("axis-scale-slider", "value"),
-        Output("topology-species", "value"),
         Output("topology-site-index", "value"),
         Output("topology-toggle", "value"),
-        Output("topology-hull-color", "value"),
         Output("agent-state-store", "data"),
         Output("camera-state-store", "data"),
         Input("agent-state-poll", "n_intervals"),
@@ -2874,9 +2901,10 @@ def create_app(
             if callback_context.triggered
             else None
         )
+        n_outputs = 17
         if triggered == "scene-tabs":
             if not scene_id:
-                return (no_update,) * 19
+                return (no_update,) * n_outputs
             backend.set_active_scene(scene_id, broadcast=False)
             state = backend.get_state(scene_id)
             return (
@@ -2886,7 +2914,7 @@ def create_app(
             )
         state = backend.pop_pending_state()
         if not state:
-            return (no_update,) * 19
+            return (no_update,) * n_outputs
         # Defence-in-depth against the camera-snap-back bug: even when
         # the poll path legitimately picks up an externally-driven
         # state change (REST agent, WebSocket, scene CRUD), do NOT push
@@ -2919,10 +2947,8 @@ def create_app(
         Input("disorder-selector", "value"),
         Input("ortep-mode-selector", "value"),
         Input("axis-scale-slider", "value"),
-        Input("topology-species", "value"),
         Input("topology-site-index", "value"),
         Input("topology-toggle", "value"),
-        Input("topology-hull-color", "value"),
         prevent_initial_call=True,
     )
     def capture_state(
@@ -2937,10 +2963,8 @@ def create_app(
         disorder,
         ortep_mode,
         axis_scale,
-        species_keys,
         site_index,
         topology_toggle,
-        topology_hull_color,
     ):
         triggered = callback_context.triggered[0]["prop_id"].split(".")[0] if callback_context.triggered else None
         if triggered == "scene-tabs":
@@ -2959,10 +2983,8 @@ def create_app(
             "disorder": disorder or "outline_rings",
             "ortep_mode": ortep_mode or "ortep_axes",
             "axis_scale": axis_scale,
-            "topology_species_keys": list(species_keys or []),
             "topology_site_index": None if site_index in ("", None) else int(site_index),
             "topology_enabled": "enabled" in (topology_toggle or []),
-            "topology_hull_color": topology_hull_color or "#7C5CBF",
             "fast_rendering": material == "flat",
         }
         # Skip the write -- and the cascade through ``update_view`` --
@@ -3096,7 +3118,6 @@ def create_app(
         Output("atom-groups-rows-container", "children", allow_duplicate=True),
         Input("atom-groups-add-btn", "n_clicks"),
         Input("atom-groups-preset-mono", "n_clicks"),
-        Input("atom-groups-preset-hide-h", "n_clicks"),
         Input("atom-groups-clear-btn", "n_clicks"),
         Input("scene-tabs", "value"),
         Input({"type": "ag-row-visible", "group_id": ALL}, "value"),
@@ -3104,6 +3125,8 @@ def create_app(
         Input({"type": "ag-row-kind", "group_id": ALL}, "value"),
         Input({"type": "ag-row-elements", "group_id": ALL}, "value"),
         Input({"type": "ag-row-opacity", "group_id": ALL}, "value"),
+        Input({"type": "ag-row-material", "group_id": ALL}, "value"),
+        Input({"type": "ag-row-style", "group_id": ALL}, "value"),
         Input({"type": "ag-row-delete", "group_id": ALL}, "n_clicks"),
         State({"type": "ag-row-color", "group_id": ALL}, "id"),
         prevent_initial_call=True,
@@ -3111,7 +3134,6 @@ def create_app(
     def manage_atom_groups(
         add_clicks,
         mono_clicks,
-        hide_h_clicks,
         clear_clicks,
         active_scene_id,
         visibles,
@@ -3119,6 +3141,8 @@ def create_app(
         kinds,
         elements_lists,
         opacities,
+        materials,
+        styles,
         deletes,
         color_ids,
     ):
@@ -3150,15 +3174,6 @@ def create_app(
             )
             return _rebuild()
 
-        if triggered == "atom-groups-preset-hide-h":
-            backend.add_atom_group(
-                selector={"elements": ["H"]},
-                visible=False,
-                name="hide H",
-                scene_id=scene_id,
-            )
-            return _rebuild()
-
         if triggered == "atom-groups-clear-btn":
             for group in list(backend.list_atom_groups(scene_id=scene_id)):
                 backend.remove_atom_group(group["id"], scene_id=scene_id)
@@ -3179,13 +3194,19 @@ def create_app(
                 group_id = id_dict.get("group_id")
                 kind_value = kinds[index] if index < len(kinds) else _ATOM_GROUP_KIND_ALL
                 if kind_value == _ATOM_GROUP_KIND_ALL:
-                    selector = {"all": True}
+                    selector: dict[str, Any] = {"all": True}
+                elif kind_value == _ATOM_GROUP_KIND_MINOR:
+                    selector = {"is_minor": True}
+                elif kind_value == _ATOM_GROUP_KIND_MAJOR:
+                    selector = {"is_minor": False}
                 else:
                     selector = {
                         "elements": list(elements_lists[index]) if index < len(elements_lists) and elements_lists[index] else []
                     }
                 opacity_value = opacities[index] if index < len(opacities) else 1.0
                 opacity_payload = None if opacity_value is None or float(opacity_value) >= 0.999 else float(opacity_value)
+                material_value = materials[index] if index < len(materials) else _ATOM_GROUP_INHERIT
+                style_value = styles[index] if index < len(styles) else _ATOM_GROUP_INHERIT
                 new_groups.append(
                     {
                         "id": group_id,
@@ -3193,6 +3214,8 @@ def create_app(
                         "color": colors[index] if index < len(colors) else None,
                         "visible": "yes" in (visibles[index] if index < len(visibles) else ["yes"]),
                         "opacity": opacity_payload,
+                        "material": None if material_value == _ATOM_GROUP_INHERIT else material_value,
+                        "style": None if style_value == _ATOM_GROUP_INHERIT else style_value,
                     }
                 )
             try:
@@ -3274,6 +3297,28 @@ def create_app(
             state.get("topology_site_index"),
             state.get("topology_enabled"),
             "hydrogens" in (state.get("display_options") or []),
+            # Phase 1/2: per-scene specs and atom-group rules both
+            # affect what the right-side analysis panel reads (which
+            # spec owns the histogram, which atoms are hidden from
+            # the structure summary). Without these the markdown
+            # table can stay stale when the user adds / removes a
+            # named polyhedron or atom-group rule.
+            tuple(
+                (s.get("id"), s.get("center_species"), s.get("ligand_species"), s.get("color"), bool(s.get("enabled", True)))
+                for s in (state.get("polyhedron_specs") or [])
+            ),
+            tuple(
+                (
+                    g.get("id"),
+                    bool(g.get("visible", True)),
+                    g.get("color"),
+                    g.get("opacity"),
+                    tuple(sorted((g.get("selector") or {}).get("elements") or [])) if (g.get("selector") or {}).get("elements") else None,
+                    bool((g.get("selector") or {}).get("all", False)),
+                    (g.get("selector") or {}).get("is_minor"),
+                )
+                for g in (state.get("atom_groups") or [])
+            ),
         )
         prev_key = getattr(update_view, "_topo_cache_key", None)
         if prev_key == topo_key:

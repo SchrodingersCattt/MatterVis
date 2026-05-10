@@ -74,6 +74,20 @@ def _minor_opacity_for(style: dict, is_minor: bool) -> float:
 
 
 def _style_color(color: str, style: dict) -> str:
+    """Apply the legacy ``monochrome`` flag.
+
+    When ``style["atom_groups"]`` is non-empty the monochrome flag is
+    treated as inert: atom_groups is the single source of truth and
+    double-applying ``monochrome`` would surprise users who set up an
+    explicit colour rule but expected unmatched atoms to keep their
+    element palette. A backend caller that wants "everything black"
+    should add ``{"selector": {"all": True}, "color": "#000000"}`` to
+    atom_groups -- the migration in ``ViewerBackend.normalize_state``
+    does this automatically when an old preset was loaded with
+    ``monochrome=True``.
+    """
+    if style.get("atom_groups"):
+        return color
     return "#000000" if style.get("monochrome", False) else color
 
 
@@ -84,9 +98,8 @@ def _atom_render_color(atom: dict, style: dict, *, light: bool = False) -> str:
     - ``atom["_render_color"]`` (or ``_render_color_light`` for the
       minor / light path) wins when set by a matching group rule.
     - Otherwise we fall back to the element-palette colour passed
-      through :func:`_style_color`, which keeps the legacy
-      ``monochrome`` flag working for callers that haven't migrated
-      to atom_groups.
+      through :func:`_style_color`. The legacy ``monochrome`` flag
+      only takes effect when no atom_groups are set on the scene.
     """
     field = "_render_color_light" if light else "_render_color"
     override = atom.get(field)
@@ -105,6 +118,32 @@ def _atom_render_opacity_scale(atom: dict) -> float:
         return max(0.0, min(1.0, float(atom.get("_render_opacity_scale", 1.0))))
     except (TypeError, ValueError):
         return 1.0
+
+
+def _atom_effective_opacity(atom: dict, style: dict) -> float:
+    """Resolve an atom's final opacity after Phase 2 atom_groups overrides.
+
+    Replace semantics: when an atom_group rule supplies an explicit
+    opacity (i.e. ``_render_opacity_scale`` was set to anything other
+    than the default 1.0), we use that value directly and IGNORE the
+    disorder/minor fade for this atom. Otherwise we fall back to the
+    legacy per-style fade (``_minor_opacity_for``).
+
+    Stacking semantics (multiplicative) caused minor + group=0.5 atoms
+    to drift to ~0.18, which read as "disappearing" rather than
+    "halved" -- and a user setting opacity=0 expects an invisible atom,
+    not "0 × something".
+    """
+    is_minor = bool(atom.get("is_minor", False))
+    base = _minor_opacity_for(style, is_minor)
+    scale = atom.get("_render_opacity_scale", 1.0)
+    try:
+        scale_f = max(0.0, min(1.0, float(scale)))
+    except (TypeError, ValueError):
+        scale_f = 1.0
+    if scale_f >= 0.999:
+        return base
+    return scale_f
 
 
 def _normalize(vec: Iterable[float], fallback: Iterable[float]) -> np.ndarray:
@@ -467,10 +506,18 @@ def _cylinder_mesh_batch(segments, radius: float, sides: int = 8):
     return vertices.reshape(-1, 3), triangles.reshape(-1, 3)
 
 
-def _atom_selection_trace(scene: dict, style: dict):
+def _atom_selection_trace(scene: dict, style: dict, hidden_labels: set | None = None):
     xs, ys, zs, sizes, labels, customdata = [], [], [], [], [], []
+    hidden_labels = hidden_labels or set()
     for idx, atom in enumerate(scene["draw_atoms"]):
         if style.get("show_minor_only", False) and not atom["is_minor"]:
+            continue
+        # Phase 2: don't expose a hover/click target for an atom that's
+        # not visually present (atom_groups visible:false). Otherwise
+        # a click on the empty cell still selects an invisible atom.
+        if str(atom.get("label")) in hidden_labels:
+            continue
+        if not _atom_render_visible(atom):
             continue
         xs.append(float(atom["cart"][0]))
         ys.append(float(atom["cart"][1]))
@@ -600,6 +647,12 @@ def _atom_mesh_traces(scene: dict, style: dict):
     # trace, not per-vertex). Quantise the scale to two decimals so a
     # slider that emits 0.523 vs 0.524 doesn't fragment the trace
     # list and tank the figure-JSON cache hit rate.
+    # Bucket key extends to (color, is_minor, effective_opacity_bin) so
+    # per-group ``opacity`` overrides survive the Mesh3d
+    # one-trace-per-colour grouping (Plotly bakes opacity into the
+    # trace, not per-vertex). Quantise the opacity to two decimals so a
+    # slider that emits 0.523 vs 0.524 doesn't fragment the trace
+    # list and tank the figure-JSON cache hit rate.
     groups: Dict[Tuple[str, bool, int], dict] = {}
     for atom in scene["draw_atoms"]:
         if style.get("show_minor_only", False) and not atom["is_minor"]:
@@ -607,9 +660,9 @@ def _atom_mesh_traces(scene: dict, style: dict):
         if not _atom_render_visible(atom):
             continue
         color = _atom_render_color(atom, style, light=atom["is_minor"])
-        opacity_scale = _atom_render_opacity_scale(atom)
-        key = (color, atom["is_minor"], int(round(opacity_scale * 100)))
-        groups.setdefault(key, {"centers": [], "radii": [], "opacity_scale": opacity_scale})
+        eff_opacity = _atom_effective_opacity(atom, style)
+        key = (color, atom["is_minor"], int(round(eff_opacity * 100)))
+        groups.setdefault(key, {"centers": [], "radii": [], "opacity": eff_opacity})
         radius = float(atom["atom_radius"]) * float(style["atom_scale"])
         if atom["is_minor"]:
             radius *= 1.12
@@ -633,7 +686,7 @@ def _atom_mesh_traces(scene: dict, style: dict):
                 j=triangles[:, 1],
                 k=triangles[:, 2],
                 color=color,
-                opacity=_minor_opacity_for(style, is_minor) * payload["opacity_scale"],
+                opacity=payload["opacity"],
                 hoverinfo="skip",
                 showlegend=False,
                 flatshading=False,
@@ -682,16 +735,16 @@ def _atom_scatter_traces(scene: dict, style: dict):
         if not _atom_render_visible(atom):
             continue
         color = _atom_render_color(atom, style, light=atom["is_minor"])
-        opacity_scale = _atom_render_opacity_scale(atom)
-        # Per-trace key = (element, is_minor, effective_color, opacity_scale_bin).
+        eff_opacity = _atom_effective_opacity(atom, style)
+        # Per-trace key = (element, is_minor, effective_color, effective_opacity_bin).
         # Adding colour to the key means a per-element atom_groups
         # rule still groups its atoms in one Scatter3d (so legend
         # entries still read element-by-element) but doesn't merge
         # red-O with default-O when the user splits them.
-        key = (atom["elem"], atom["is_minor"], color, int(round(opacity_scale * 100)))
+        key = (atom["elem"], atom["is_minor"], color, int(round(eff_opacity * 100)))
         groups.setdefault(
             key,
-            {"x": [], "y": [], "z": [], "size": [], "text": [], "color": color, "customdata": [], "opacity_scale": opacity_scale},
+            {"x": [], "y": [], "z": [], "size": [], "text": [], "color": color, "customdata": [], "opacity": eff_opacity},
         )
         base_size = max(10.0, 95.0 * atom["atom_radius"] * float(style["atom_scale"]))
         groups[key]["x"].append(float(atom["cart"][0]))
@@ -715,7 +768,7 @@ def _atom_scatter_traces(scene: dict, style: dict):
                 marker=dict(
                     size=payload["size"],
                     color=payload["color"],
-                    opacity=_minor_opacity_for(style, is_minor) * payload["opacity_scale"],
+                    opacity=payload["opacity"],
                     line=dict(color="#444444" if is_minor else payload["color"], width=3.5 if is_minor else 0),
                 ),
                 showlegend=False,
@@ -728,9 +781,20 @@ def _atom_scatter_traces(scene: dict, style: dict):
 def _minor_bond_wireframe_traces(scene: dict, style: dict):
     if style.get("disorder") not in ("outline_rings", "dashed_bonds") and not style.get("minor_wireframe", False):
         return []
+    atoms = scene.get("draw_atoms") or []
+    n_atoms = len(atoms)
     segments = []
     for bond in scene["bonds"]:
         if not bond["is_minor"]:
+            continue
+        # Phase 2: skip bonds whose endpoint atom was hidden by an
+        # atom_groups ``visible: false`` rule -- otherwise the wireframe
+        # ring sits in empty space and reads as a rendering bug.
+        i = int(bond.get("i", -1))
+        j = int(bond.get("j", -1))
+        if 0 <= i < n_atoms and not _atom_render_visible(atoms[i]):
+            continue
+        if 0 <= j < n_atoms and not _atom_render_visible(atoms[j]):
             continue
         segments.append((np.array(bond["start"], dtype=float), np.array(bond["end"], dtype=float)))
     if not segments:
@@ -974,15 +1038,24 @@ def _highlight_traces(scene: dict, style: dict):
     return traces
 
 
-def _label_traces(scene: dict, style: dict):
+def _label_traces(scene: dict, style: dict, hidden_labels: set | None = None):
     if not style.get("show_labels", True):
         return []
+    hidden_labels = hidden_labels or set()
     cache = scene.setdefault("_label_trace_cache", {})
+    # ``monochrome`` is inert once atom_groups is non-empty (see
+    # ``_style_color``); collapse it in the key so the same cache hit
+    # serves both pre- and post-migration callers.
+    monochrome_effective = bool(style.get("monochrome", False)) and not style.get("atom_groups")
     key = (
         bool(style.get("show_minor_only", False)),
-        bool(style.get("monochrome", False)),
+        monochrome_effective,
         str(style.get("label_color", "#111111")),
         round(float(style.get("label_font_size", 12)), 3),
+        # Cache key carries the hidden set so toggling a "Hide H"
+        # group rule actually re-emits the label trace; otherwise a
+        # warm cache from before the rule still draws the H labels.
+        tuple(sorted(hidden_labels)),
     )
     if key in cache:
         return cache[key]
@@ -997,6 +1070,8 @@ def _label_traces(scene: dict, style: dict):
     }
     for item in scene["label_items"]:
         if style.get("show_minor_only", False) and not item["is_minor"]:
+            continue
+        if str(item.get("text")) in hidden_labels:
             continue
         bucket = buckets[item["is_minor"]]
         bucket["x"].append(float(item["label_cart"][0]))
@@ -2023,6 +2098,8 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
         str(style.get("disorder", "outline_rings")),
         str(style.get("ortep_mode", "")),
         str(style.get("ortep_mode_minor", "")),
+        round(float(style.get("ortep_probability", 0.5)), 3),
+        bool(style.get("minor_wireframe", False)),
         bool(style.get("monochrome", False)),
         bool(style.get("show_minor_only", False)),
         round(float(style.get("atom_scale", 1.0)), 3),
@@ -2030,6 +2107,7 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
         round(float(style.get("minor_opacity", 0.35)), 3),
         round(float(style.get("minor_bond_scale", 0.6)), 3),
         round(float(style.get("major_opacity", 1.0)), 3),
+        bool(style.get("force_minor_fade", False)),
         bool(style.get("ortep_atom_fill", False)),
         bool(style.get("ortep_silhouette_outline", False)),
         bool(style.get("ortep_octant_hatching", False)),
@@ -2091,10 +2169,21 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
                     _atom_traces_for_partition(sub_scene, sub_style, use_fast=part_use_fast)
                 )
             # Bonds use the (mutated) scene with tagged atoms so the
-            # endpoint visibility check works.
-            if scene_style == "wireframe":
+            # endpoint visibility check works. Per-atom-group style
+            # overrides only swing bond *style* when the rule covers
+            # ALL drawn atoms uniformly -- otherwise we'd need to
+            # split bonds across partitions (and pick the "right" half
+            # per endpoint), which is visually ugly. The common case
+            # ("flip the whole scene to ortep via an atom_group rule")
+            # still works because the partition collapses to one
+            # bucket whose style we read here.
+            effective_bond_style = scene_style
+            if len(partitions) == 1:
+                only_key = next(iter(partitions))
+                effective_bond_style = only_key[1]
+            if effective_bond_style == "wireframe":
                 bond_traces = _wireframe_bond_traces(scene, style)
-            elif scene_style == "ortep":
+            elif effective_bond_style == "ortep":
                 bond_traces = (
                     _bond_scatter_traces(scene, style) if use_fast
                     else _bond_mesh_traces(scene, style)
@@ -2240,17 +2329,26 @@ def build_row_figure(
         )
         mesh_payload = _cached_atom_bond_meshes(scene, style_norm, use_fast=use_fast)
 
+        # Same hidden-label propagation as build_figure.
+        hidden_labels_row: set = set()
+        atom_groups_row = style_norm.get("atom_groups") or []
+        if atom_groups_row:
+            from .atom_groups import hidden_atom_label_set, tag_atoms_with_groups
+
+            tagged_row = tag_atoms_with_groups(scene["draw_atoms"], atom_groups_row)
+            hidden_labels_row = hidden_atom_label_set(tagged_row)
+
         trace_dicts: list[dict] = []
         trace_dicts.extend(mesh_payload["bond_dicts"])
         trace_dicts.extend(mesh_payload["minor_bond_dicts"])
         trace_dicts.extend(mesh_payload["atom_dicts"])
         trace_dicts.extend(mesh_payload["minor_outline_dicts"])
         trace_dicts.extend(_traces_to_dicts(_contact_traces(scene, style_norm)))
-        trace_dicts.extend(_traces_to_dicts(_label_traces(scene, style_norm)))
+        trace_dicts.extend(_traces_to_dicts(_label_traces(scene, style_norm, hidden_labels=hidden_labels_row)))
         trace_dicts.extend(_traces_to_dicts(_axis_traces(scene, style_norm)))
         trace_dicts.extend(_traces_to_dicts(_unit_cell_traces(scene, style_norm)))
         trace_dicts.append(
-            _round_coord_arrays(_atom_selection_trace(scene, style_norm).to_plotly_json())
+            _round_coord_arrays(_atom_selection_trace(scene, style_norm, hidden_labels=hidden_labels_row).to_plotly_json())
         )
 
         scene_name = scene_names[col_idx]
@@ -2303,6 +2401,20 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None) ->
     mesh_payload = _cached_atom_bond_meshes(scene, style, use_fast=use_fast)
     topology_on = bool(style.get("topology_enabled", True)) and topology_data is not None
 
+    # Phase 2: derive labels of atoms hidden by atom_groups visible:false
+    # so labels and the click-target overlay stay in sync with what's
+    # actually drawn. The mesh cache may already have done this work --
+    # but it restores ``scene["draw_atoms"]`` afterwards, so we have to
+    # tag again here. The cost is one shallow-dict-per-atom decoration
+    # which is well below the Plotly-validation cost we just saved.
+    hidden_labels: set = set()
+    atom_groups = style.get("atom_groups") or []
+    if atom_groups:
+        from .atom_groups import hidden_atom_label_set, tag_atoms_with_groups
+
+        tagged = tag_atoms_with_groups(scene["draw_atoms"], atom_groups)
+        hidden_labels = hidden_atom_label_set(tagged)
+
     # Build a flat list of trace dicts (skipping per-trace Plotly validation
     # by passing dicts straight to ``go.Figure``) instead of repeated
     # ``add_trace`` calls. ``add_trace`` re-runs the full validator chain
@@ -2321,12 +2433,12 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None) ->
     # publication path they read as ugly translucent halos that engulf the
     # atoms when the scene is zoomed out, and the proper Mesh3d shading on
     # `_atom_mesh_traces` already gives a believable highlight.
-    trace_dicts.extend(_traces_to_dicts(_label_traces(scene, style)))
+    trace_dicts.extend(_traces_to_dicts(_label_traces(scene, style, hidden_labels=hidden_labels)))
     trace_dicts.extend(_traces_to_dicts(_axis_traces(scene, style)))
     trace_dicts.extend(_traces_to_dicts(_unit_cell_traces(scene, style)))
     if topology_on:
         trace_dicts.extend(_traces_to_dicts(topology_foreground_traces(topology_data, style)))
-    trace_dicts.append(_round_coord_arrays(_atom_selection_trace(scene, style).to_plotly_json()))
+    trace_dicts.append(_round_coord_arrays(_atom_selection_trace(scene, style, hidden_labels=hidden_labels).to_plotly_json()))
 
     # ``_validate=False`` skips Plotly's per-property validator chain when
     # constructing the figure. We've already validated the dicts via
