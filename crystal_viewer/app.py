@@ -24,6 +24,7 @@ except ImportError as exc:  # pragma: no cover - user-facing fallback
         "Install it with `python -m pip install dash`."
     ) from exc
 
+from . import perf_log
 from .api import register_api
 from .loader import LoadedCrystal, build_bundle_scene, build_empty_bundle, build_loaded_crystal, load_uploaded_cif
 from .presets import (
@@ -306,6 +307,57 @@ def _legacy_monochrome_group(existing_ids: set[str]) -> dict[str, Any]:
 # edits + deletes (see ``_polyhedra_row_helpers`` and the matching
 # block of ``register_callbacks``).
 _AUTO_LIGAND_VALUE = "__auto__"
+
+
+# Bucket boundaries (in milliseconds) used by the perf-log panel to
+# colour-code event durations. Keep small so the user can spot
+# ``> 500 ms`` red rows at a glance during a slow interaction.
+_PERF_FAST_MS = 50.0
+_PERF_SLOW_MS = 500.0
+
+
+def _perf_log_row(entry: dict[str, Any]) -> Any:
+    """Render one perf-log event as a Dash row.
+
+    Layout: ``[hh:mm:ss.mmm] [label] [duration ms] [info kv pairs]``
+    The duration cell is coloured green / amber / red based on
+    ``_PERF_FAST_MS`` / ``_PERF_SLOW_MS`` so slow events pop out
+    visually.
+    """
+    iso = entry.get("iso", "")
+    clock = iso.split("T", 1)[1] if "T" in iso else iso
+    label = entry.get("label", "")
+    ms = entry.get("ms")
+    if ms is None:
+        ms_text = ""
+        ms_class = "perf-log-ms perf-log-ms--none"
+    else:
+        ms_text = f"{ms:6.1f} ms"
+        if ms < _PERF_FAST_MS:
+            ms_class = "perf-log-ms perf-log-ms--fast"
+        elif ms < _PERF_SLOW_MS:
+            ms_class = "perf-log-ms perf-log-ms--mid"
+        else:
+            ms_class = "perf-log-ms perf-log-ms--slow"
+    info = entry.get("info") or {}
+    info_pairs = []
+    for key, value in info.items():
+        if isinstance(value, (list, tuple)):
+            value = ",".join(str(v) for v in value[:3]) + ("…" if len(value) > 3 else "")
+        text = str(value)
+        if len(text) > 36:
+            text = text[:33] + "…"
+        info_pairs.append(f"{key}={text}")
+    info_text = " ".join(info_pairs)
+    return html.Div(
+        [
+            html.Span(clock, className="perf-log-clock"),
+            html.Span(label, className="perf-log-label"),
+            html.Span(ms_text, className=ms_class),
+            html.Span(info_text, className="perf-log-info"),
+        ],
+        className="perf-log-row",
+    )
 
 
 def _polyhedra_table_rows(
@@ -1347,16 +1399,28 @@ class ViewerBackend:
         return style
 
     def add_uploaded_bundle(self, contents: str, filename: str) -> LoadedCrystal:
-        bundle = load_uploaded_cif(
-            contents=contents,
+        # Charge the three legs (decode + parse via gemmi, register
+        # bundle, create scene) separately so the perf log makes the
+        # actual bottleneck obvious. Empirically the ``load_uploaded_cif``
+        # call dominates for non-trivial structures (CIF parsing +
+        # symmetry expansion + bond perception).
+        with perf_log.time_block(
+            "upload:load_uploaded_cif",
+            kind="event",
             filename=filename,
-            existing_names=self.structure_names,
-            preset=self.preset,
-        )
-        self._drop_placeholder()
-        self.bundles[bundle.name] = bundle
-        self.structure_names.append(bundle.name)
-        self.create_scene(structure=bundle.name, label=bundle.name)
+            data_url_bytes=len(contents or ""),
+        ):
+            bundle = load_uploaded_cif(
+                contents=contents,
+                filename=filename,
+                existing_names=self.structure_names,
+                preset=self.preset,
+            )
+        with perf_log.time_block("upload:create_scene", kind="event", structure=bundle.name):
+            self._drop_placeholder()
+            self.bundles[bundle.name] = bundle
+            self.structure_names.append(bundle.name)
+            self.create_scene(structure=bundle.name, label=bundle.name)
         return bundle
 
     def add_uploaded_file_bytes(self, data: bytes, filename: str) -> LoadedCrystal:
@@ -1378,19 +1442,37 @@ class ViewerBackend:
         path = os.path.realpath(os.path.join(upload_dir, safe))
         if os.path.commonpath([path, upload_dir]) != upload_dir:
             raise ValueError(f"unsafe upload filename: {filename!r}")
-        with open(path, "wb") as handle:
-            handle.write(data)
+        with perf_log.time_block(
+            "upload:write_temp_file",
+            kind="event",
+            filename=safe,
+            bytes=len(data),
+        ):
+            with open(path, "wb") as handle:
+                handle.write(data)
         stem = os.path.splitext(safe)[0]
         safe_name = stem
         suffix = 2
         while safe_name in self.structure_names:
             safe_name = f"{stem}_{suffix}"
             suffix += 1
-        bundle = build_loaded_crystal(name=safe_name, cif_path=path, title=stem, preset=self.preset, source="upload")
-        self._drop_placeholder()
-        self.bundles[bundle.name] = bundle
-        self.structure_names.append(bundle.name)
-        self.create_scene(structure=bundle.name, label=bundle.name)
+        # ``build_loaded_crystal`` parses the CIF (gemmi), expands
+        # symmetry, builds bonds and -- if the preset asks for it --
+        # runs molcryskit topology analysis. For a 1.6 MB CIF this is
+        # by far the slowest leg of the upload (~15 s). Charging it
+        # separately makes the bottleneck unambiguous in the log.
+        with perf_log.time_block(
+            "upload:build_loaded_crystal",
+            kind="event",
+            structure=safe_name,
+            cif_path=path,
+        ):
+            bundle = build_loaded_crystal(name=safe_name, cif_path=path, title=stem, preset=self.preset, source="upload")
+        with perf_log.time_block("upload:create_scene", kind="event", structure=bundle.name):
+            self._drop_placeholder()
+            self.bundles[bundle.name] = bundle
+            self.structure_names.append(bundle.name)
+            self.create_scene(structure=bundle.name, label=bundle.name)
         return bundle
 
     def topology_candidates(self, structure: str, fragment_type: Optional[str] = None) -> list[dict[str, Any]]:
@@ -1983,9 +2065,26 @@ class ViewerBackend:
 
     def figure_for_state(self, state: Optional[dict[str, Any]] = None, click_data: Optional[dict[str, Any]] = None):
         state = self.get_state() if state is None else state
-        scene = self.scene_for_state(state)
-        topology_data = self.topology_for_state(state, click_data=click_data)
-        fig = build_figure(scene, self.style_for_state(state, scene=scene), topology_data=topology_data)
+        scene_id = state.get("scene_id")
+        with perf_log.time_block("scene_for_state", kind="event", scene_id=scene_id):
+            scene = self.scene_for_state(state)
+        atom_count = len(scene.get("atoms", []))
+        bond_count = len(scene.get("bonds", []))
+        with perf_log.time_block(
+            "topology_for_state",
+            kind="event",
+            scene_id=scene_id,
+            n_specs=len((state.get("polyhedron_specs") or [])),
+        ):
+            topology_data = self.topology_for_state(state, click_data=click_data)
+        with perf_log.time_block(
+            "build_figure",
+            kind="event",
+            scene_id=scene_id,
+            atoms=atom_count,
+            bonds=bond_count,
+        ):
+            fig = build_figure(scene, self.style_for_state(state, scene=scene), topology_data=topology_data)
         camera = _plotly_camera(state.get("camera"))
         if camera:
             fig.update_layout(scene_camera=camera)
@@ -2638,6 +2737,47 @@ def create_app(
                     "overflowY": "auto",
                 },
             ),
+            # Floating "Server log" panel (bottom-right). Polls
+            # ``/api/v1/perf`` every second to show the user which
+            # callbacks fired and how long each one took. Collapsed by
+            # default to keep the UI clean; click the header to
+            # expand. Lives outside the right-panel so the analysis
+            # column can be hidden without losing the perf signal.
+            html.Div(
+                [
+                    html.Div(
+                        [
+                            html.Button(
+                                "Server log ▾",
+                                id="perf-log-toggle",
+                                n_clicks=0,
+                                className="perf-log-toggle",
+                            ),
+                            html.Button(
+                                "Clear",
+                                id="perf-log-clear",
+                                n_clicks=0,
+                                className="perf-log-clear",
+                            ),
+                        ],
+                        className="perf-log-header",
+                    ),
+                    html.Div(
+                        id="perf-log-body",
+                        className="perf-log-body",
+                        children=[
+                            html.Div(
+                                "Waiting for events… (interact with the UI to see callbacks)",
+                                className="perf-log-empty",
+                            )
+                        ],
+                    ),
+                    dcc.Interval(id="perf-log-poll", interval=1000, n_intervals=0),
+                    dcc.Store(id="perf-log-cursor", data={"seq": 0, "events": []}),
+                ],
+                id="perf-log-panel",
+                className="perf-log-panel perf-log-panel--collapsed",
+            ),
         ],
         id="viewer-root",
         style={"display": "flex", "height": "100vh", "backgroundColor": "#FFFFFF"},
@@ -2675,9 +2815,32 @@ def create_app(
         if not contents_list:
             return no_update, no_update, no_update
         names_out = []
-        for contents, filename in zip(contents_list, filenames or []):
-            bundle = backend.add_uploaded_bundle(contents, filename)
-            names_out.append(bundle.name)
+        with perf_log.time_block(
+            "callback:upload_cif",
+            kind="cb",
+            n_files=len(contents_list),
+            filenames=list(filenames or []),
+        ):
+            for contents, filename in zip(contents_list, filenames or []):
+                # ``contents`` is the dcc.Upload data URL: it includes
+                # the ``data:...;base64,`` prefix plus the base64
+                # payload. Charge the network leg + parse leg
+                # separately so the user can see WHICH part of an
+                # upload is slow.
+                payload_bytes = len(contents or "")
+                with perf_log.time_block(
+                    "upload:add_uploaded_bundle",
+                    kind="event",
+                    filename=filename,
+                    bytes=payload_bytes,
+                ):
+                    bundle = backend.add_uploaded_bundle(contents, filename)
+                names_out.append(bundle.name)
+                perf_log.record(
+                    "upload:done",
+                    kind="event",
+                    info={"filename": filename, "scene": bundle.name},
+                )
         return backend.scene_tabs(), backend.active_scene_id(), f"Uploaded CIF(s): {', '.join(names_out)}"
 
     @app.callback(
@@ -2997,6 +3160,14 @@ def create_app(
         if all(prev.get(k) == v for k, v in patch.items() if k != "scene_id"):
             return no_update
         backend.record_state(patch)
+        perf_log.record(
+            "callback:capture_state",
+            kind="cb",
+            info={
+                "trigger": triggered,
+                "scene_id": scene_id,
+            },
+        )
         return backend.get_state()
 
     # ------------------------------------------------------------------
@@ -3049,8 +3220,12 @@ def create_app(
         # ``broadcast=False`` on patch_state below stops the same
         # change from echoing back through the poll path on the next
         # tick.
+        cb_start = time.monotonic()
         triggered = getattr(callback_context, "triggered_id", None)
         scene_id = active_scene_id or backend.active_scene_id()
+        triggered_label = (
+            triggered.get("type") if isinstance(triggered, dict) else triggered
+        )
         species_options = backend.species_options(
             backend.get_state(scene_id).get("structure")
         )
@@ -3114,6 +3289,16 @@ def create_app(
                 backend.patch_state({"polyhedron_specs": new_specs}, scene_id=scene_id, broadcast=False)
             except Exception:
                 return no_update, no_update
+            perf_log.record(
+                "callback:manage_polyhedra",
+                duration_ms=(time.monotonic() - cb_start) * 1000.0,
+                kind="cb",
+                info={
+                    "trigger": triggered_label,
+                    "n_specs": len(new_specs),
+                    "scene_id": scene_id,
+                },
+            )
             # ``no_update`` for children to avoid mid-edit React tear-down.
             return no_update, backend.get_state()
 
@@ -3165,8 +3350,12 @@ def create_app(
         # waiting for the 5 s ``agent-state-poll``. Without it, an
         # opacity / colour / visibility change has a 0-5 s perceived
         # latency.
+        cb_start = time.monotonic()
         triggered = getattr(callback_context, "triggered_id", None)
         scene_id = active_scene_id or backend.active_scene_id()
+        triggered_label = (
+            triggered.get("type") if isinstance(triggered, dict) else triggered
+        )
 
         def _rebuild():
             groups = backend.list_atom_groups(scene_id=scene_id)
@@ -3241,6 +3430,16 @@ def create_app(
                 backend.patch_state({"atom_groups": new_groups}, scene_id=scene_id, broadcast=False)
             except Exception:
                 return no_update, no_update
+            perf_log.record(
+                "callback:manage_atom_groups",
+                duration_ms=(time.monotonic() - cb_start) * 1000.0,
+                kind="cb",
+                info={
+                    "trigger": triggered_label,
+                    "n_groups": len(new_groups),
+                    "scene_id": scene_id,
+                },
+            )
             # Special case: switching kind from "all" -> "by element"
             # needs to reveal the elements multi-select that's
             # display:none in the existing DOM. Rebuild children to
@@ -3284,6 +3483,57 @@ def create_app(
     def gate_minor_opacity(disorder):
         return _minor_opacity_disabled(disorder), _minor_opacity_control_style(disorder)
 
+    # ------------------------------------------------------------------
+    # Perf-log panel
+    #
+    # Polls the in-process ``perf_log`` ring buffer every second and
+    # appends new entries to the on-screen list. Each entry shows a
+    # local-time clock, the callback / event label, the duration
+    # (colour-coded), and a short payload summary (filename, atom
+    # count, ...). The store keeps the latest sequence number so the
+    # poll only ships new events.
+    # ------------------------------------------------------------------
+    @app.callback(
+        Output("perf-log-panel", "className"),
+        Input("perf-log-toggle", "n_clicks"),
+        State("perf-log-panel", "className"),
+        prevent_initial_call=True,
+    )
+    def toggle_perf_log(_, current_class):
+        cls = current_class or "perf-log-panel perf-log-panel--collapsed"
+        if "perf-log-panel--collapsed" in cls:
+            return "perf-log-panel perf-log-panel--expanded"
+        return "perf-log-panel perf-log-panel--collapsed"
+
+    @app.callback(
+        Output("perf-log-cursor", "data", allow_duplicate=True),
+        Input("perf-log-clear", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def clear_perf_log(_):
+        perf_log.clear()
+        return {"seq": perf_log.latest_seq(), "events": []}
+
+    @app.callback(
+        Output("perf-log-body", "children"),
+        Output("perf-log-cursor", "data"),
+        Input("perf-log-poll", "n_intervals"),
+        State("perf-log-cursor", "data"),
+    )
+    def refresh_perf_log(_, cursor):
+        cursor = cursor or {"seq": 0, "events": []}
+        new_events = perf_log.recent(limit=200, since_seq=int(cursor.get("seq", 0)))
+        if not new_events and cursor.get("events"):
+            return no_update, no_update
+        merged = list(cursor.get("events") or []) + new_events
+        # Keep only the latest 80 entries on screen so the DOM stays
+        # cheap; the full ring buffer is still available via
+        # ``GET /api/v1/perf``.
+        merged = merged[-80:]
+        rows = [_perf_log_row(entry) for entry in reversed(merged)]
+        latest = merged[-1]["seq"] if merged else int(cursor.get("seq", 0))
+        return rows, {"seq": latest, "events": merged}
+
     @app.callback(
         Output("crystal-graph", "figure"),
         Output("topology-histogram", "figure"),
@@ -3296,6 +3546,15 @@ def create_app(
         agent_state,
         camera_state,
     ):
+        # ``update_view`` is the dominant cost when the user pokes a
+        # slider or a colour swatch -- it rebuilds the figure, the
+        # topology histogram, and the structure-summary table in one
+        # callback. Wrap it so the perf log makes the total wall time
+        # observable. ``figure_for_state`` itself is instrumented
+        # internally with three sub-blocks (``scene_for_state``,
+        # ``topology_for_state``, ``build_figure``) so the user can
+        # tell which leg is slow without re-profiling.
+        cb_start = time.monotonic()
         state = backend.normalize_state(agent_state or backend.get_state())
         camera = _camera_from_store(camera_state, state.get("scene_id"))
         if camera:
@@ -3341,10 +3600,28 @@ def create_app(
         )
         prev_key = getattr(update_view, "_topo_cache_key", None)
         if prev_key == topo_key:
+            perf_log.record(
+                "callback:update_view",
+                duration_ms=(time.monotonic() - cb_start) * 1000.0,
+                kind="cb",
+                info={
+                    "scene_id": state.get("scene_id"),
+                    "side_panel": "cached",
+                },
+            )
             return fig, no_update, no_update, no_update
         update_view._topo_cache_key = topo_key
-        summary = _structure_summary(backend.scene_for_state(state))
-        return fig, topology_histogram_figure(topology_data), topology_results_markdown(topology_data), summary
+        with perf_log.time_block("update_view:side_panel", kind="event"):
+            summary = _structure_summary(backend.scene_for_state(state))
+            histogram = topology_histogram_figure(topology_data)
+            md = topology_results_markdown(topology_data)
+        perf_log.record(
+            "callback:update_view",
+            duration_ms=(time.monotonic() - cb_start) * 1000.0,
+            kind="cb",
+            info={"scene_id": state.get("scene_id"), "side_panel": "rebuilt"},
+        )
+        return fig, histogram, md, summary
 
     @app.callback(
         Output("status-banner", "children"),

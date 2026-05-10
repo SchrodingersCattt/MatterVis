@@ -6,6 +6,8 @@ from typing import Any
 
 from flask import Blueprint, Response, jsonify, request
 
+from . import perf_log
+
 try:
     from flask_sock import Sock
 except Exception:  # pragma: no cover - optional dependency
@@ -103,11 +105,22 @@ def register_api(dash_app, backend) -> None:
         file = request.files["file"]
         if not file.filename:
             return jsonify({"error": "empty filename"}), 400
-        content = file.read()
-        try:
-            bundle = backend.add_uploaded_file_bytes(content, file.filename)
-        except ValueError as exc:
-            return jsonify({"error": str(exc)}), 400
+        with perf_log.time_block(
+            "http:upload",
+            kind="http",
+            filename=file.filename,
+        ):
+            content = file.read()
+            try:
+                with perf_log.time_block(
+                    "upload:parse_and_register",
+                    kind="event",
+                    filename=file.filename,
+                    bytes=len(content),
+                ):
+                    bundle = backend.add_uploaded_file_bytes(content, file.filename)
+            except ValueError as exc:
+                return jsonify({"error": str(exc)}), 400
         return jsonify(bundle.metadata())
 
     @v2.get("/structures")
@@ -311,9 +324,53 @@ def register_api(dash_app, backend) -> None:
             return jsonify({"error": str(exc)}), 400
         return jsonify({"groups": groups})
 
+    # ----- perf log (cross-version) -------------------------------------
+    #
+    # ``/perf`` tails the in-memory ring buffer of perf-log events
+    # written by ``crystal_viewer.perf_log``. It is the missing
+    # "what did the server actually do, and how long did it take"
+    # signal that the dev server's ``POST /_dash-update-component``
+    # log lines deliberately omit. The UI side panel polls this
+    # endpoint with ``since`` so it only ships new events.
+    def _perf_payload():
+        try:
+            since = int(request.args.get("since", "0") or 0)
+        except ValueError:
+            since = 0
+        try:
+            limit = int(request.args.get("limit", "200") or 200)
+        except ValueError:
+            limit = 200
+        events = perf_log.recent(limit=limit, since_seq=since)
+        return jsonify(
+            {
+                "events": events,
+                "latest_seq": perf_log.latest_seq(),
+                "log_path": perf_log.log_path(),
+            }
+        )
+
+    @v2.get("/perf")
+    def perf_get_v2():
+        return _perf_payload()
+
+    @v2.post("/perf/clear")
+    def perf_clear_v2():
+        perf_log.clear()
+        return jsonify({"cleared": True})
+
     server.register_blueprint(v2)
 
     v1 = Blueprint("crystal_viewer_api_v1", __name__, url_prefix="/api/v1")
+
+    @v1.get("/perf")
+    def perf_get_v1():
+        return _perf_payload()
+
+    @v1.post("/perf/clear")
+    def perf_clear_v1():
+        perf_log.clear()
+        return jsonify({"cleared": True})
 
     @v1.get("/state")
     def v1_get_state():

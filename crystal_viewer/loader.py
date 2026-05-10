@@ -472,44 +472,95 @@ def build_loaded_crystal(
     preset: Optional[Dict[str, Any]] = None,
     source: str = "catalog",
 ) -> LoadedCrystal:
+    # Each sub-block is wrapped in a ``perf_log.time_block`` so the
+    # /api/v1/perf endpoint shows exactly which leg of an upload is
+    # slow (CIF parse vs. molcryskit analysis vs. bond perception
+    # vs. fragment-table build). See ``crystal_viewer.perf_log``.
+    from . import perf_log
+
     ops = scene_ops()
     preset = preset or {}
-    raw_atoms, cell, M = ops.parse_asu(cif_path)
-    molcrys_analysis = molcrys_bridge.analyze(raw_atoms, M)
-    formula_unit_atoms = molcrys_bridge.select_formula_unit(raw_atoms, M, analysis=molcrys_analysis)
-    unwrapped_atoms, unwrap_overflow = _unwrapped_atoms_from_atoms(raw_atoms, cell, M, include_minor=True)
-    view_dir, up = legacy_scene._resolve_view(ops, name, raw_atoms, M, cell, preset)
+    with perf_log.time_block("loader:parse_asu", kind="event", structure=name, cif_path=cif_path):
+        raw_atoms, cell, M = ops.parse_asu(cif_path)
+    n_atoms = len(raw_atoms) if raw_atoms is not None else 0
+    with perf_log.time_block(
+        "loader:molcrys_analyze",
+        kind="event",
+        structure=name,
+        n_atoms=n_atoms,
+    ):
+        molcrys_analysis = molcrys_bridge.analyze(raw_atoms, M)
+    with perf_log.time_block("loader:select_formula_unit", kind="event", structure=name):
+        formula_unit_atoms = molcrys_bridge.select_formula_unit(raw_atoms, M, analysis=molcrys_analysis)
+    with perf_log.time_block("loader:unwrap_atoms", kind="event", structure=name):
+        unwrapped_atoms, unwrap_overflow = _unwrapped_atoms_from_atoms(raw_atoms, cell, M, include_minor=True)
+    # ``_resolve_view`` is happy to short-circuit on a preset entry
+    # (camera or view_direction explicitly provided) but otherwise
+    # falls through to ``ops.auto_view_dir`` which scores >1000 view
+    # candidates by ray-projecting every heavy atom -- ~12 s for a
+    # 1024-atom unit cell. For uploaded CIFs there is no preset
+    # entry to short-circuit on, so the user paid that cost on every
+    # upload. The browser camera is fully interactive so a sensible
+    # default direction (look down +z, up = +y) gives a usable initial
+    # view in <1 ms; users that want the full auto-orient can call
+    # the v2 API or add a preset entry. Catalog structures keep the
+    # legacy behaviour because their preset can pin a known-good
+    # camera, and the cost is paid once at boot, not per upload.
+    is_upload = source == "upload"
+    if is_upload:
+        with perf_log.time_block("loader:default_view", kind="event", structure=name, reason="skip_auto_view_for_upload"):
+            view_dir = np.array([0.0, 0.0, 1.0])
+            up = np.array([0.0, 1.0, 0.0])
+    else:
+        with perf_log.time_block("loader:resolve_view", kind="event", structure=name):
+            view_dir, up = legacy_scene._resolve_view(ops, name, raw_atoms, M, cell, preset)
     R = ops.view_rotation(view_dir, up)
     final_title = title or name
-    initial_scene = build_scene_from_atoms(
-        name=name,
-        title=final_title,
-        atoms=raw_atoms,
-        cell=cell,
-        M=M,
-        R=R,
-        preset=preset,
-        show_hydrogen=False,
-        display_mode="formula_unit",
-        ops=ops,
-        formula_unit_atoms=formula_unit_atoms,
-        unwrapped_atoms=unwrapped_atoms,
-    )
+    with perf_log.time_block(
+        "loader:build_scene_from_atoms",
+        kind="event",
+        structure=name,
+        n_atoms=n_atoms,
+    ):
+        initial_scene = build_scene_from_atoms(
+            name=name,
+            title=final_title,
+            atoms=raw_atoms,
+            cell=cell,
+            M=M,
+            R=R,
+            preset=preset,
+            show_hydrogen=False,
+            display_mode="formula_unit",
+            ops=ops,
+            formula_unit_atoms=formula_unit_atoms,
+            unwrapped_atoms=unwrapped_atoms,
+        )
     initial_scene["cif_path"] = cif_path
     initial_scene["view_direction"] = np.array(view_dir, dtype=float)
     initial_scene["up"] = np.array(up, dtype=float)
     initial_scene["unwrap_overflow"] = copy.deepcopy(unwrap_overflow)
-    fragment_table, atom_fragment_labels = _fragment_table_from_atoms(
-        name,
-        initial_scene["draw_atoms"],
-        initial_scene["cell"],
-        initial_scene["M"],
-        use_source_indices=False,
-        include_minor=True,
-    )
+    with perf_log.time_block(
+        "loader:fragment_table_scene",
+        kind="event",
+        structure=name,
+    ):
+        fragment_table, atom_fragment_labels = _fragment_table_from_atoms(
+            name,
+            initial_scene["draw_atoms"],
+            initial_scene["cell"],
+            initial_scene["M"],
+            use_source_indices=False,
+            include_minor=True,
+        )
     initial_scene["fragment_table"] = fragment_table
     initial_scene["atom_fragment_labels"] = atom_fragment_labels
-    topology_fragment_table, _ = _fragment_table_from_atoms(name, raw_atoms, cell, M, use_source_indices=True, include_minor=True)
+    with perf_log.time_block(
+        "loader:fragment_table_topology",
+        kind="event",
+        structure=name,
+    ):
+        topology_fragment_table, _ = _fragment_table_from_atoms(name, raw_atoms, cell, M, use_source_indices=True, include_minor=True)
     fragment_table_cache = {
         ("scene", "formula_unit", False): (
             copy.deepcopy(fragment_table),

@@ -90,6 +90,20 @@ preset save/load.
 - `POST /export`
   Triggers the vendored `crystal_viewer.legacy.plot_crystal` exporter
   with the current preset.
+- `GET /perf?since=N&limit=M`
+  Tail of the in-process perf-event ring buffer. Returns
+  `{"events": [...], "latest_seq": N, "log_path": "/tmp/cv-perf.log"}`.
+  Each event is `{"seq", "ts", "iso", "kind", "label", "ms", "info"}`.
+  `kind` is `cb` (Dash callback), `http` (REST handler), or `event`
+  (sub-block of a longer operation, e.g. `loader:parse_asu` inside
+  `upload:build_loaded_crystal`). Use `since=` to poll incrementally;
+  the buffer keeps the last 1000 events. The full append-only log is
+  also written to disk at `log_path` (override with the `CV_PERF_LOG`
+  env var on the server). The Dash UI surfaces this as the bottom-right
+  "Server log" panel; agents can use the endpoint directly to spot
+  slow callbacks or expensive uploads without screen-scraping.
+- `POST /perf/clear`
+  Empties the in-memory ring buffer (the on-disk log is left alone).
 
 ## Stable UI element IDs
 
