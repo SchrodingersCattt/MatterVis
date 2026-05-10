@@ -3018,6 +3018,7 @@ def create_app(
     # ------------------------------------------------------------------
     @app.callback(
         Output("polyhedra-rows-container", "children", allow_duplicate=True),
+        Output("agent-state-store", "data", allow_duplicate=True),
         Input("polyhedra-add-btn", "n_clicks"),
         Input("scene-tabs", "value"),
         Input({"type": "poly-row-color", "spec_id": ALL}, "value"),
@@ -3038,6 +3039,16 @@ def create_app(
         deletes,
         color_ids,
     ):
+        # The second Output (``agent-state-store.data``) is the
+        # critical perf fix for the inline-edit path: without it, an
+        # in-row colour / centre / ligand / enabled change has to
+        # wait for the 5 s ``agent-state-poll`` to round-trip via
+        # ``sync_agent_state`` before ``update_view`` re-renders the
+        # figure. Pushing the new state directly here cuts the
+        # perceived latency from ~2.5 s (avg) to "the next frame".
+        # ``broadcast=False`` on patch_state below stops the same
+        # change from echoing back through the poll path on the next
+        # tick.
         triggered = getattr(callback_context, "triggered_id", None)
         scene_id = active_scene_id or backend.active_scene_id()
         species_options = backend.species_options(
@@ -3049,11 +3060,11 @@ def create_app(
             return _polyhedra_table_rows(specs, species_options)
 
         if triggered == "scene-tabs":
-            return _rebuild()
+            return _rebuild(), no_update
 
         if triggered == "polyhedra-add-btn":
             if not species_options:
-                return _rebuild()
+                return _rebuild(), no_update
             try:
                 backend.add_polyhedron_spec(
                     center_species=str(species_options[0]["value"]),
@@ -3061,15 +3072,15 @@ def create_app(
                     scene_id=scene_id,
                 )
             except Exception:
-                return no_update
-            return _rebuild()
+                return no_update, no_update
+            return _rebuild(), backend.get_state()
 
         if isinstance(triggered, dict) and triggered.get("type") == "poly-row-delete":
             spec_id = triggered.get("spec_id")
             if not spec_id:
-                return no_update
+                return no_update, no_update
             backend.remove_polyhedron_spec(spec_id, scene_id=scene_id)
-            return _rebuild()
+            return _rebuild(), backend.get_state()
 
         if isinstance(triggered, dict) and triggered.get("type", "").startswith("poly-row-"):
             # Inline edit. Reconstruct the full spec list from the
@@ -3077,7 +3088,7 @@ def create_app(
             # ``color_ids`` (one id-dict per row) to give us the spec_id
             # ordering that matches the value lists.
             if not color_ids:
-                return no_update
+                return no_update, no_update
             existing = {
                 spec["id"]: spec
                 for spec in backend.list_polyhedron_specs(scene_id=scene_id)
@@ -3100,12 +3111,13 @@ def create_app(
                     }
                 )
             try:
-                backend.patch_state({"polyhedron_specs": new_specs}, scene_id=scene_id)
+                backend.patch_state({"polyhedron_specs": new_specs}, scene_id=scene_id, broadcast=False)
             except Exception:
-                pass
-            return no_update
+                return no_update, no_update
+            # ``no_update`` for children to avoid mid-edit React tear-down.
+            return no_update, backend.get_state()
 
-        return no_update
+        return no_update, no_update
 
     # ------------------------------------------------------------------
     # Phase 3 UI: Atom-groups table.
@@ -3116,6 +3128,7 @@ def create_app(
     # ------------------------------------------------------------------
     @app.callback(
         Output("atom-groups-rows-container", "children", allow_duplicate=True),
+        Output("agent-state-store", "data", allow_duplicate=True),
         Input("atom-groups-add-btn", "n_clicks"),
         Input("atom-groups-preset-mono", "n_clicks"),
         Input("atom-groups-clear-btn", "n_clicks"),
@@ -3146,6 +3159,12 @@ def create_app(
         deletes,
         color_ids,
     ):
+        # Same perf rationale as ``manage_polyhedra``: the second
+        # Output pushes the new state straight into ``agent-state-store``
+        # so ``update_view`` re-renders on the next frame instead of
+        # waiting for the 5 s ``agent-state-poll``. Without it, an
+        # opacity / colour / visibility change has a 0-5 s perceived
+        # latency.
         triggered = getattr(callback_context, "triggered_id", None)
         scene_id = active_scene_id or backend.active_scene_id()
 
@@ -3156,14 +3175,14 @@ def create_app(
             )
 
         if triggered == "scene-tabs":
-            return _rebuild()
+            return _rebuild(), no_update
 
         if triggered == "atom-groups-add-btn":
             try:
                 backend.add_atom_group(selector={"all": True}, color="#888888", scene_id=scene_id)
             except Exception:
-                return no_update
-            return _rebuild()
+                return no_update, no_update
+            return _rebuild(), backend.get_state()
 
         if triggered == "atom-groups-preset-mono":
             backend.add_atom_group(
@@ -3172,23 +3191,23 @@ def create_app(
                 name="monochrome",
                 scene_id=scene_id,
             )
-            return _rebuild()
+            return _rebuild(), backend.get_state()
 
         if triggered == "atom-groups-clear-btn":
             for group in list(backend.list_atom_groups(scene_id=scene_id)):
                 backend.remove_atom_group(group["id"], scene_id=scene_id)
-            return _rebuild()
+            return _rebuild(), backend.get_state()
 
         if isinstance(triggered, dict) and triggered.get("type") == "ag-row-delete":
             group_id = triggered.get("group_id")
             if not group_id:
-                return no_update
+                return no_update, no_update
             backend.remove_atom_group(group_id, scene_id=scene_id)
-            return _rebuild()
+            return _rebuild(), backend.get_state()
 
         if isinstance(triggered, dict) and triggered.get("type", "").startswith("ag-row-"):
             if not color_ids:
-                return no_update
+                return no_update, no_update
             new_groups: list[dict[str, Any]] = []
             for index, id_dict in enumerate(color_ids):
                 group_id = id_dict.get("group_id")
@@ -3219,18 +3238,18 @@ def create_app(
                     }
                 )
             try:
-                backend.patch_state({"atom_groups": new_groups}, scene_id=scene_id)
+                backend.patch_state({"atom_groups": new_groups}, scene_id=scene_id, broadcast=False)
             except Exception:
-                pass
+                return no_update, no_update
             # Special case: switching kind from "all" -> "by element"
             # needs to reveal the elements multi-select that's
             # display:none in the existing DOM. Rebuild children to
             # update the visibility toggle.
             if triggered.get("type") == "ag-row-kind":
-                return _rebuild()
-            return no_update
+                return _rebuild(), backend.get_state()
+            return no_update, backend.get_state()
 
-        return no_update
+        return no_update, no_update
 
     @app.callback(
         Output("camera-state-store", "data", allow_duplicate=True),
