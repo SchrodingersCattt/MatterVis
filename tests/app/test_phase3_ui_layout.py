@@ -72,11 +72,37 @@ def test_phase3_panel_sections_present(app):
         "atom-groups-add-btn",
         "atom-groups-rows-container",
         "atom-groups-preset-mono",
-        "atom-groups-preset-hide-h",
         "atom-groups-clear-btn",
     }
     missing = expected - ids
     assert not missing, f"missing Phase 3 UI ids: {missing}"
+
+
+def test_legacy_topology_species_checklist_removed(app):
+    """The legacy ``topology-species`` checklist + ``topology-hull-color``
+    picker have been replaced by the Named-polyhedra table. Their ids
+    must NOT be present in the layout; otherwise Dash will silently
+    accept user clicks on dead controls.
+    """
+    ids = _ids(app.layout)
+    legacy = {"topology-species", "topology-hull-color"}
+    overlap = legacy & ids
+    assert not overlap, (
+        f"legacy topology UI ids must be removed (use polyhedra "
+        f"table instead): {overlap}"
+    )
+
+
+def test_hide_h_preset_removed(app):
+    """The ``Hide H`` atom-groups preset duplicated the existing
+    ``Hydrogens`` checkbox under Display options. Removed in favour of
+    the single canonical control; this test pins that decision.
+    """
+    ids = _ids(app.layout)
+    assert "atom-groups-preset-hide-h" not in ids, (
+        "Hide H atom-group preset is intentionally gone -- use the "
+        "Hydrogens checkbox in Display options."
+    )
 
 
 def test_legacy_monochrome_checkbox_removed_from_display_options(app):

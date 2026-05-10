@@ -54,22 +54,35 @@ everything grey except oxygens, which come out red. Reorder via
 
 ### Relationship to the legacy monochrome flag
 
-`POST /api/v2/state {"monochrome": true}` still works exactly as
-before when the scene has **no** atom_groups: every atom and bond
-forces to black. The moment any atom_group rule supplies a `color`
-override for an atom, that override beats the monochrome flag. So
-the migration path for a "monochrome with red oxygens" figure is:
+The legacy `monochrome` flag (set via `display_options` or as a
+top-level `monochrome=true` on a saved preset) is auto-migrated by
+`ViewerBackend.normalize_state` into a single
+`{"selector": {"all": true}, "color": "#000000"}` atom_group rule
+the first time the patch carrying `display_options` is seen. After
+that one migration the flag is **inert** — the renderer ignores
+`style["monochrome"]` whenever `atom_groups` is non-empty, so a
+caller who later adds a "red oxygens" rule does not get
+double-applied "all-black except red O" without intending to.
 
-```json
-{"monochrome": true, "atom_groups": [
-   {"selector": {"elements": ["O"]}, "color": "#FF0000"}
-]}
+The migration path for a "monochrome with red oxygens" figure is
+therefore:
+
+```bash
+# legacy monochrome auto-migrates into an atom_group on the first
+# normalize pass; you can also POST it explicitly:
+curl -X POST /api/v2/atom_groups \
+  -d '{"selector":{"all":true},"color":"#000000","name":"monochrome"}'
+
+# then layer the red-O override on top (later rules win):
+curl -X POST /api/v2/atom_groups \
+  -d '{"selector":{"elements":["O"]},"color":"#FF0000"}'
 ```
 
 The renderer's atom-trace builders consult `_render_color` first,
 falling back to `_style_color(atom['color'], style)` only when no
-group rule overrode the atom. That's the only path through which
-monochrome interacts with atom_groups.
+group rule overrode the atom AND no atom_groups are set on the
+scene at all. That's the only path through which monochrome
+interacts with atom_groups.
 
 ### `material` / `style` partitioning
 

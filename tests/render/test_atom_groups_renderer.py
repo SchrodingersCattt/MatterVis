@@ -254,3 +254,134 @@ def test_atom_groups_cache_key_changes_when_color_changes():
     g1 = [{"id": "a", "selector": {"all": True}, "color": "#000000", "visible": True}]
     g2 = [{"id": "a", "selector": {"all": True}, "color": "#FF0000", "visible": True}]
     assert _atom_groups_cache_key(g1) != _atom_groups_cache_key(g2)
+
+
+# ---- Sev 3 fixes: hidden labels + selection ----------------------------------
+
+
+def test_label_traces_skip_hidden_atom_labels():
+    """Phase 2: when an atom_groups rule hides H atoms, the label
+    list must drop H labels too -- otherwise a label hangs in empty
+    space where the atom used to be."""
+    from crystal_viewer.renderer import _label_traces
+
+    scene = {
+        "draw_atoms": _atoms(),
+        "label_items": [
+            {"text": "O1", "label_cart": [0, 0, 0], "atom_cart": [0, 0, 0], "is_minor": False},
+            {"text": "C1", "label_cart": [1, 0, 0], "atom_cart": [1, 0, 0], "is_minor": False},
+            {"text": "H1", "label_cart": [2, 0, 0], "atom_cart": [2, 0, 0], "is_minor": False},
+        ],
+    }
+    style = {"show_labels": True}
+    # _label_traces returns a list of cached dicts (or Scatter3d
+    # before caching). The shape carries ``text`` either way.
+    def _texts(traces):
+        out = []
+        for tr in traces:
+            text = tr.get("text") if isinstance(tr, dict) else getattr(tr, "text", None)
+            out.extend(list(text or []))
+        return out
+
+    traces_full = _label_traces(scene, style, hidden_labels=set())
+    full_text = _texts(traces_full)
+    assert "H1" in full_text
+
+    # Now hide H1; the trace must drop it.
+    scene_b = dict(scene)
+    scene_b.pop("_label_trace_cache", None)
+    traces_hidden = _label_traces(scene_b, style, hidden_labels={"H1"})
+    hidden_text = _texts(traces_hidden)
+    assert "H1" not in hidden_text
+    assert "O1" in hidden_text
+
+
+def test_atom_selection_trace_skips_hidden_atoms():
+    """Click-target overlay must drop hidden atoms; otherwise users
+    can still click on an empty cell and select an invisible atom."""
+    from crystal_viewer.renderer import _atom_selection_trace
+
+    atoms = _atoms()
+    atoms[2]["_render_visible"] = False  # H1 hidden via render flag too
+    scene = {"draw_atoms": atoms}
+    style = {"atom_scale": 1.0}
+    trace = _atom_selection_trace(scene, style, hidden_labels={"H1"})
+    custom = [c[1] for c in (trace.customdata or [])]
+    assert "H1" not in custom
+    assert "O1" in custom
+
+
+def test_minor_bond_wireframe_skips_hidden_atoms():
+    """Sev 2: the disorder-outline wireframe ring shouldn't draw a
+    bond stroke through empty space where a hidden minor atom used
+    to live."""
+    from crystal_viewer.renderer import _minor_bond_wireframe_traces
+
+    atoms = [
+        {"label": "A", "elem": "C", "cart": [0, 0, 0], "color": "#000", "color_light": "#000", "is_minor": True, "atom_radius": 0.15, "_render_visible": True},
+        {"label": "B", "elem": "H", "cart": [1, 0, 0], "color": "#FFF", "color_light": "#FFF", "is_minor": True, "atom_radius": 0.12, "_render_visible": False},
+    ]
+    scene = {
+        "draw_atoms": atoms,
+        "bonds": [
+            {
+                "i": 0, "j": 1,
+                "start": np.array([0.0, 0.0, 0.0]),
+                "end": np.array([1.0, 0.0, 0.0]),
+                "color_i": "#000", "color_j": "#FFF",
+                "is_minor": True,
+            }
+        ],
+    }
+    style = {"bond_radius": 0.1, "minor_wireframe": True}
+    traces = _minor_bond_wireframe_traces(scene, style)
+    assert traces == [], (
+        "minor-bond wireframe must skip bonds whose endpoint was "
+        "hidden by an atom_groups visible:false rule"
+    )
+
+
+def test_effective_opacity_replace_semantics():
+    """Sev 2: per-group opacity REPLACES the disorder fade, not
+    multiplies. Otherwise minor atoms set to opacity=0.5 stack with
+    the minor fade and disappear."""
+    from crystal_viewer.renderer import _atom_effective_opacity
+
+    style = {"disorder": "opacity", "minor_opacity": 0.4, "major_opacity": 1.0}
+    minor_with_override = {"is_minor": True, "_render_opacity_scale": 0.5}
+    minor_without_override = {"is_minor": True, "_render_opacity_scale": 1.0}
+    assert _atom_effective_opacity(minor_with_override, style) == pytest.approx(0.5)
+    # Default (no group override): still get the disorder fade.
+    assert _atom_effective_opacity(minor_without_override, style) == pytest.approx(0.4)
+
+
+def test_mesh_cache_key_includes_ortep_probability():
+    """Sev 2: changing ``ortep_probability`` (e.g. 50% -> 90%) must
+    invalidate the trace cache; otherwise the user clicks the slider
+    and nothing changes on screen."""
+    from crystal_viewer.renderer import _cached_atom_bond_meshes
+
+    scene_a = {"draw_atoms": [], "bonds": []}
+    style_a = {"ortep_probability": 0.5, "atom_scale": 1.0, "bond_radius": 0.1}
+    payload_a = _cached_atom_bond_meshes(scene_a, style_a, use_fast=False)
+
+    scene_b = {"draw_atoms": [], "bonds": []}
+    style_b = {"ortep_probability": 0.9, "atom_scale": 1.0, "bond_radius": 0.1}
+    payload_b = _cached_atom_bond_meshes(scene_b, style_b, use_fast=False)
+
+    # We can't easily peek at the cache dict directly, but we can
+    # confirm that changing ortep_probability lands in distinct
+    # cache entries by reading scene._mesh_trace_cache after both
+    # calls -- if the key didn't include probability, the second
+    # call would have written into the same slot as the first.
+    cache_b = scene_b.get("_mesh_trace_cache") or {}
+    cache_a = scene_a.get("_mesh_trace_cache") or {}
+    keys_a = set(cache_a.keys())
+    keys_b = set(cache_b.keys())
+    # Different scene dicts so check by reading the keys.
+    only_key_a = next(iter(keys_a))
+    only_key_b = next(iter(keys_b))
+    assert only_key_a != only_key_b, "ortep_probability must be part of cache key"
+
+
+import pytest  # noqa: E402

@@ -78,7 +78,6 @@ def _output_writers(callbacks):
 KNOWN_WORKING_MIXED_PROPS: set[tuple[str, str]] = {
     ("scene-tabs", "children"),
     ("scene-tabs", "value"),
-    ("topology-species", "value"),
     ("topology-site-index", "value"),
     ("status-dismiss-timer", "n_intervals"),
     ("agent-state-store", "data"),
@@ -98,7 +97,6 @@ SENSITIVE_USER_INPUT_PROPS: set[tuple[str, str]] = {
     ("disorder-selector", "value"),
     ("axis-scale-slider", "value"),
     ("topology-toggle", "value"),
-    ("topology-hull-color", "value"),
 }
 
 

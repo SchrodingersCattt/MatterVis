@@ -114,9 +114,18 @@ hooks rather than the REST surface.
 - `bond-radius-slider`
 - `minor-opacity-slider`
 - `axis-scale-slider`
-- `topology-fragment-type`
 - `topology-site-index`
-- `topology-toggle`
+- `topology-toggle` (single "Show polyhedra overlay" checkbox; the
+  legacy `topology-species` checklist + `topology-hull-color` picker
+  were removed in favour of the named-polyhedra table — see
+  `polyhedron_api.md`)
+- `polyhedra-add-btn`, `polyhedra-rows-container` (Phase 1 named
+  polyhedra editor; per-row inputs are pattern-matched, see
+  `polyhedron_api.md` for the `{type, spec_id}` shape)
+- `atom-groups-add-btn`, `atom-groups-rows-container`,
+  `atom-groups-preset-mono`, `atom-groups-clear-btn` (Phase 2 atom
+  groups editor; per-row inputs are pattern-matched, see
+  `atom_groups_api.md` for the `{type, group_id}` shape)
 - `crystal-graph`
 - `topology-histogram`
 - `topology-results`
@@ -141,6 +150,15 @@ hooks rather than the REST surface.
   whenever state or structure inventory changes.
 - Client → server:
   `{"type": "set_state", "payload": {...}}`
+
+  Optional `"scene_id"` may be sent at the envelope level OR inside
+  the inner `"payload"` to target a specific scene without disturbing
+  the user's active tab. When omitted the patch lands on the active
+  scene (legacy behaviour).
+
+  ```json
+  {"type": "set_state", "scene_id": "scene-2", "payload": {"atom_scale": 1.2}}
+  ```
 
 ## Local-only data
 
