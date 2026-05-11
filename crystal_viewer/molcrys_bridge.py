@@ -121,12 +121,66 @@ def _ase_atoms_from_raw(raw_atoms, M, mk):
     return atoms
 
 
-def _components_with_indices(ase_atoms, mk):
+def _is_minor_atom(atom) -> bool:
+    """SHELX-aware "is this a minor disorder image?" check.
+
+    Mirrors :func:`crystal_viewer.legacy.plot_crystal.is_minor` without
+    importing the legacy module (we don't want molcrys_bridge to
+    depend on the legacy renderer).
+    """
+    if "_is_minor" in atom:
+        return bool(atom["_is_minor"])
+    dg = str(atom.get("dg") or "").strip()
+    if dg == "2":
+        return True
+    if dg.startswith("-") and dg not in ("-",):
+        return True
+    if atom.get("_is_major"):
+        return False
+    da = str(atom.get("da") or "").strip()
+    if dg in (".", "?", "") and da in (".", "?", ""):
+        try:
+            occ = float(atom.get("occ", 1.0))
+        except (TypeError, ValueError):
+            occ = 1.0
+        if occ < 0.5 - 1e-6:
+            return True
+    return False
+
+
+def _minor_index_set(raw_atoms) -> set[int]:
+    """Indices into ``raw_atoms`` that should be excluded from
+    bond perception. After ``_tag_shelx_occupancy_disorder`` has run
+    on a disordered CIF, ``_is_minor`` reflects the actual chosen
+    optimal orientation -- atoms that didn't make the cut are tagged
+    minor and won't bond into any molecule, restoring the correct
+    one-orientation-per-disorder-site molecule grouping.
+    """
+    return {i for i, atom in enumerate(raw_atoms) if _is_minor_atom(atom)}
+
+
+def _components_with_indices(ase_atoms, mk, *, exclude_indices=None):
     """Build the bond graph and return connected components keeping
     their original atom indices, plus the graph itself (for unwrap).
 
     Mirrors :func:`molcrys_kit.io.cif.identify_molecules` but without
     discarding the index map.
+
+    ``exclude_indices`` (optional) is a set of atom indices that must
+    not participate in any bond. They are still present in the graph
+    as isolated nodes so downstream code can address them, but they
+    will never appear in a returned multi-atom connected component.
+
+    For SHELX-disordered CIFs the loader runs
+    :func:`_tag_shelx_occupancy_disorder` *before* calling
+    :func:`analyze`; that pass marks every alternative-orientation atom
+    that didn't make MolCrysKit's optimal-replica choice with
+    ``_is_minor=True``, and :func:`_minor_index_set` collects them so
+    bond perception only sees one consistent set of atoms per disorder
+    site. Without that guard, MolCrysKit's neighbour list would bond a
+    major-orientation N to a minor-orientation N at 0.15 A apart and
+    fuse two chemically distinct cations into one species (the SY
+    ``C4H20N4`` "fused ethylenediamine" bug).
     """
     nx = mk["nx"]
     neighbor_list = mk["neighbor_list"]
@@ -137,6 +191,8 @@ def _components_with_indices(ase_atoms, mk):
     if n == 0:
         return [], graph
 
+    excluded = set(int(x) for x in (exclude_indices or ()))
+
     symbols = ase_atoms.get_chemical_symbols()
     i_list, j_list, d_list, D_vectors = neighbor_list(
         "ijdD", ase_atoms, cutoff=mk["DEFAULT_NEIGHBOR_CUTOFF"]
@@ -144,6 +200,9 @@ def _components_with_indices(ase_atoms, mk):
 
     for i, j, dist, D_vec in zip(i_list, j_list, d_list, D_vectors):
         if i >= j:
+            continue
+        ii, jj = int(i), int(j)
+        if ii in excluded or jj in excluded:
             continue
         sym_i = symbols[i]
         sym_j = symbols[j]
@@ -156,9 +215,16 @@ def _components_with_indices(ase_atoms, mk):
             mk["is_metal_element"](sym_j),
         )
         if dist < threshold:
-            graph.add_edge(int(i), int(j), vector=np.asarray(D_vec, dtype=float))
+            graph.add_edge(ii, jj, vector=np.asarray(D_vec, dtype=float))
 
-    components = [sorted(comp) for comp in nx.connected_components(graph)]
+    components = []
+    for comp in nx.connected_components(graph):
+        comp_list = sorted(int(c) for c in comp)
+        # Drop singleton excluded nodes; they're tracked as orphans
+        # downstream rather than appearing in the molecule list.
+        if len(comp_list) == 1 and comp_list[0] in excluded:
+            continue
+        components.append(comp_list)
     components.sort(key=lambda comp: comp[0])
     return components, graph
 
@@ -260,6 +326,19 @@ def _flatten_bond_pairs(graph) -> list[tuple[int, int]]:
 def analyze(raw_atoms, M, *, max_atoms=None):
     """Run MolCrysKit on ``raw_atoms`` (full unit cell) and return a
     :class:`CrystalAnalysis` summarising species + per-FU counts.
+
+    Atoms tagged as minor disorder images (``_is_minor=True`` set by
+    :func:`crystal_viewer.loader._tag_shelx_occupancy_disorder`, or
+    matched by the SHELX heuristic in :func:`_is_minor_atom`) are
+    excluded from bond perception. Without this guard MolCrysKit's
+    neighbour-list bonded a major-orientation N to a minor-orientation
+    N at 0.15 A apart -- well below the 1.5 A covalent N-N threshold
+    -- and fused two chemically distinct ethylenediamines into one
+    C4H20N4 component. Excluding minor images restores the correct
+    one-orientation-per-disorder-site molecule grouping.
+
+    Minor atoms remain in ``raw_atoms`` (the renderer still draws them
+    faded); they just don't appear in any ``mol_indices`` entry.
     """
     mk = _require_molcryskit()
     if not raw_atoms:
@@ -267,7 +346,10 @@ def analyze(raw_atoms, M, *, max_atoms=None):
         return CrystalAnalysis(crystal, [], [], {}, {}, bond_pairs=[])
 
     ase_atoms = _ase_atoms_from_raw(raw_atoms, M, mk)
-    components, graph = _components_with_indices(ase_atoms, mk)
+    minor_indices = _minor_index_set(raw_atoms)
+    components, graph = _components_with_indices(
+        ase_atoms, mk, exclude_indices=minor_indices
+    )
 
     molecules = []
     mol_indices = []

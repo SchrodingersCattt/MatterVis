@@ -132,15 +132,55 @@ Concrete rules:
   selection, repeat / supercell replicas).
 - **SHELX-style occupancy disorder must go through
   `molcrys_kit.analysis.disorder.\
-generate_ordered_replicas_from_disordered_sites`.** A CIF where two
-  rotamer images both sit on PART 0 with `_atom_site_disorder_group`
-  blank and occupancies summing to 1 (DAP-4 H3A/H3B at occ=0.5)
-  cannot be classified by `is_minor` alone — there is no a-priori
-  winner. `build_loaded_crystal` detects this pattern via
-  `_has_shelx_occupancy_disorder` and consults the optimal-replica
-  resolver to tag the discarded image with `_is_minor=True`. Don't
-  patch the SHELX heuristic any further before checking that the
-  pre-resolution path is the right place to fix it.
+generate_ordered_replicas_from_disordered_sites`.** Two patterns
+  both need the optimal-replica picker:
+    1. `occ < 1` with `_atom_site_disorder_group` and
+       `_atom_site_disorder_assembly` blank (DAP-4 H3A/H3B at
+       occ=0.5).
+    2. `occ < 1` with `dg` starting with `"-"` (SHELX -PART
+       convention, SY's en cation: every alternate's symmetry
+       equivalent is the *other* half of the disorder pair).
+  `_has_shelx_occupancy_disorder` triggers on either. The matcher
+  tags the discarded image with `_is_minor=True` AND the kept image
+  with `_is_minor=False` — both flags are mandatory because
+  `_is_minor_atom`'s SHELX heuristic falls through to
+  `dg.startswith("-")` when the flag is missing, which would
+  otherwise re-classify the chosen N3 / N2 atoms as minor and the
+  bond graph would lose the cation entirely (the "C2N2 missing" SY
+  bug).
+- **Pymatgen rejects `?` in numeric CIF columns.** SHELX-derived
+  CIFs occasionally write `?` in `_atom_site_attached_hydrogens` to
+  mean "no attached hydrogens"; pymatgen's `str2float` raises and
+  `generate_ordered_replicas_from_disordered_sites` crashes.
+  `_sanitize_cif_for_pymatgen` writes a temp copy with `?` -> `0` in
+  that one column only. The original CIF is never touched, and the
+  temp file is removed in a `finally` block so we never leak temp
+  files when the resolver fails.
+- **Match optimal-replica positions to raw atoms with PBC + 1:1
+  greedy assignment.** MolCrysKit's optimal replica returns
+  *unwrapped* Cartesian positions (molecules contiguous across cell
+  faces) but `parse_asu` wraps every atom inside the unit cell. Use
+  the minimum-image convention on the difference vector before
+  thresholding. Greedy nearest-pair assignment over disorder atoms
+  (each optimal slot claims at most one raw atom, each raw atom is
+  claimed at most once) is required — without it SY's two raw N
+  atoms 0.15 A apart both match the same optimal N within the
+  threshold, both get tagged major, and the bond graph re-fuses the
+  ethylenediamines.
+- **`_components_with_indices` must skip atoms tagged minor.** The
+  bond graph in `molcrys_bridge.analyze` is fed
+  `exclude_indices=_minor_index_set(raw_atoms)`. Without that, the
+  ASE neighbour-list bonds a kept N to a discarded N at 0.15 A and
+  fuses two cations into one species again.
+- **Cross-orientation bonds must be filtered at scene build time.**
+  The legacy `find_bonds` in `crystal_viewer/legacy/plot_crystal.py`
+  doesn't know about `_is_minor` and would draw bonds between major
+  and minor atoms — the "套了一层黑色线" / "black cage" complaint.
+  `build_scene_from_atoms` in `crystal_viewer/scene.py` skips any
+  bond whose endpoints disagree on `is_minor`. Bonds between two
+  major atoms render normally; bonds between two minor atoms render
+  faded (so the discarded orientation still draws as a contiguous
+  shape, just translucent).
 - **Slab generation is `molcrys_kit.transforms.generate_topological_slab`.**
   `crystal_viewer/transforms.py` is a thin Dash adapter; if a slab
   parameter is missing here, add it as a passthrough kwarg, don't

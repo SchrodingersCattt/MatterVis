@@ -27,7 +27,6 @@ from collections import Counter
 
 import pytest
 
-from crystal_viewer import molcrys_bridge
 from crystal_viewer.legacy import plot_crystal as pc
 from crystal_viewer.loader import (
     _has_shelx_occupancy_disorder,
@@ -189,3 +188,97 @@ def test_analysis_bond_pairs_match_mol_indices_membership():
         if membership.get(i) != membership.get(j)
     ]
     assert cross == [], f"bond_pairs crossed molecule boundaries: {cross[:5]}"
+
+
+# --------------------------------------------------------------------- #
+# 7) SY ethylenediamine should be split, not fused                      #
+# --------------------------------------------------------------------- #
+def test_sy_ethylenediamine_not_fused():
+    """Regression for the "SY 乙二胺粘连" bug. SHELX -PART disorder +
+    Pa-3 symmetry expansion creates 8 N3 + 8 N2 atoms that overlap at
+    0.15 A pairs (alternative orientations of the same nucleus).
+    MolCrysKit's neighbour-list bonded the alternates together,
+    producing one C4N4H20 fused species instead of two C2N2H10.
+
+    After the loader-side fix ``_tag_shelx_occupancy_disorder`` runs
+    ``generate_ordered_replicas`` on a sanitized copy of the CIF and
+    tags one orientation as minor; the resulting fragment table must
+    contain two distinct cation species (en + DABCO) plus 4 ClO4.
+    """
+    bundle = build_loaded_crystal(
+        name="SY", cif_path="scripts/data/SY.cif", title="SY"
+    )
+    table = bundle.topology_fragment_table
+    formulas = Counter(f["formula"] for f in table)
+
+    # Unit-cell-level counts: 16 ClO4 + 4 en (C2N2 heavy) + 4 DABCO
+    # (C6N2 heavy). Per-FU stoichiometry would be 4 / 1 / 1.
+    assert formulas.get("ClO4") == 16
+    assert formulas.get("C2N2") == 4, (
+        f"expected 4 ethylenediamine cations, got {formulas}"
+    )
+    assert formulas.get("C6N2") == 4, (
+        f"expected 4 DABCO cations, got {formulas}"
+    )
+    # Crucially: no fused C4N4 species.
+    assert "C4N4" not in formulas, (
+        f"two ethylenediamines fused into C4N4: {formulas}"
+    )
+
+
+# --------------------------------------------------------------------- #
+# 8) DAP-4 NH4+ rotamer paired-group fix                                #
+# --------------------------------------------------------------------- #
+def test_dap4_nh4_count_correct():
+    """Regression for the H3A/H3B paired-alternative bug. Even with no
+    ``_atom_site_disorder_group`` tags (Pa-3 CIF where SHELX writes
+    NH4+ rotamers as occ=0.5 + disorder_group='.') the loader must
+    recover one major NH4 per crystallographic site, not split the
+    8 sym-images into 8 independent occ=0.5 alternatives.
+    """
+    bundle = build_loaded_crystal(
+        name="DAP-4", cif_path="scripts/data/DAP-4.cif", title="DAP-4"
+    )
+    table = bundle.topology_fragment_table
+    formulas = Counter(f["formula"] for f in table)
+    # Unit-cell counts: 8 NH4+ + 8 DABCO + 24 ClO4. Per-FU
+    # stoichiometry would be 1 NH4 + 1 DABCO + 3 ClO4.
+    assert formulas.get("ClO4") == 24
+    assert formulas.get("N") == 8, (
+        f"expected 8 NH4+ cations (formula 'N' since heavy-atom), got {formulas}"
+    )
+    assert formulas.get("C6N2") == 8, (
+        f"expected 8 DABCO cations, got {formulas}"
+    )
+
+
+# --------------------------------------------------------------------- #
+# 9) "Black cage" -- cross-orientation ghost bonds are filtered          #
+# --------------------------------------------------------------------- #
+def test_no_cross_orientation_ghost_bonds_in_unit_cell_scene():
+    """The "套了一层黑色线" complaint: ``find_bonds`` doesn't know
+    about ``_is_minor`` and would happily bond a major N3 (kept
+    orientation) to a minor C4 (discarded orientation) at 0.83 A
+    apart. The renderer drew those as full opaque lines, making
+    every disordered cation look like it's wrapped in a dark cage of
+    phantom bonds. ``build_scene_from_atoms`` now skips any bond whose
+    endpoints disagree on the ``is_minor`` flag.
+    """
+    from crystal_viewer.loader import build_bundle_scene
+
+    bundle = build_loaded_crystal(
+        name="SY", cif_path="scripts/data/SY.cif", title="SY"
+    )
+    scene = build_bundle_scene(bundle, display_mode="unit_cell", show_hydrogen=True)
+    bonds = scene.get("bonds") or []
+    draw_atoms = scene.get("draw_atoms") or []
+    # Each bond stores its endpoint indices into ``draw_atoms``;
+    # confirm no bond bridges a major and a minor atom.
+    for b in bonds:
+        ai = draw_atoms[b["i"]]
+        aj = draw_atoms[b["j"]]
+        assert bool(ai.get("is_minor")) == bool(aj.get("is_minor")), (
+            f"cross-orientation bond between atoms "
+            f"{ai.get('label')} (minor={ai.get('is_minor')}) and "
+            f"{aj.get('label')} (minor={aj.get('is_minor')})"
+        )
