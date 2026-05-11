@@ -203,12 +203,6 @@ def register_api(dash_app, backend) -> None:
                 enabled=bool(payload.get("enabled", True)),
                 scene_id=_polyhedra_scene_id(),
                 spec_id=payload.get("id"),
-                # Phase 5: ``kind`` toggles between fragment-graph
-                # polyhedra (legacy) and atom-centred MolCrysKit
-                # polyhedra. ``search_cutoff`` (Å) caps the
-                # neighbour search for atom-centred specs.
-                kind=str(payload.get("kind") or "fragment"),
-                search_cutoff=payload.get("search_cutoff"),
             )
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400

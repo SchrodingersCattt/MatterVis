@@ -23,33 +23,16 @@ def _client(tmp_path: Path):
     return app.server.test_client()
 
 
-def _wipe_polyhedra(client) -> None:
-    """Strip the chemistry-suggested default polyhedron_specs so a CRUD
-    test starts from a clean slate. The atom-centred defaults are
-    covered by their own dedicated test below."""
-    listing = client.get("/api/v2/polyhedra").get_json() or {}
-    for spec in listing.get("specs", []) or []:
-        client.delete(f"/api/v2/polyhedra/{spec['id']}")
-
-
-def test_polyhedra_list_starts_with_chemistry_defaults(tmp_path: Path):
-    """DAP-4 ships chemistry-meaningful atom-centred defaults
-    (perchlorate Cl-O tetrahedra, ammonium N-O caps); the legacy
-    expectation of an empty list is no longer correct. Empty defaults
-    only happen when MolCrysKit's :func:`find_polyhedra` finds no
-    chemistry-likely centres at all."""
+def test_polyhedra_list_starts_empty(tmp_path: Path):
     client = _client(tmp_path)
     response = client.get("/api/v2/polyhedra")
     assert response.status_code == 200
     payload = response.get_json()
-    specs = payload.get("specs", []) or []
-    pairs = {(spec.get("kind"), spec.get("center_species"), spec.get("ligand_species")) for spec in specs}
-    assert ("atom", "Cl", "O") in pairs, pairs
+    assert payload == {"specs": []}
 
 
 def test_polyhedra_post_requires_center_species(tmp_path: Path):
     client = _client(tmp_path)
-    _wipe_polyhedra(client)
     response = client.post("/api/v2/polyhedra", json={"name": "missing centre"})
     assert response.status_code == 400
     assert "center_species" in response.get_json()["error"]
@@ -57,7 +40,6 @@ def test_polyhedra_post_requires_center_species(tmp_path: Path):
 
 def test_polyhedra_post_creates_and_lists(tmp_path: Path):
     client = _client(tmp_path)
-    _wipe_polyhedra(client)
     created = client.post(
         "/api/v2/polyhedra",
         json={
@@ -78,7 +60,6 @@ def test_polyhedra_post_creates_and_lists(tmp_path: Path):
 
 def test_polyhedra_patch_updates_color_and_ligand(tmp_path: Path):
     client = _client(tmp_path)
-    _wipe_polyhedra(client)
     spec = client.post(
         "/api/v2/polyhedra", json={"center_species": "N", "color": "#FF0000"}
     ).get_json()
@@ -105,7 +86,6 @@ def test_polyhedra_patch_unknown_id_returns_404(tmp_path: Path):
 
 def test_polyhedra_delete_removes_spec(tmp_path: Path):
     client = _client(tmp_path)
-    _wipe_polyhedra(client)
     spec = client.post("/api/v2/polyhedra", json={"center_species": "N"}).get_json()
     response = client.delete(f"/api/v2/polyhedra/{spec['id']}")
     assert response.status_code == 200
@@ -121,7 +101,6 @@ def test_polyhedra_delete_unknown_returns_404(tmp_path: Path):
 
 def test_polyhedra_reorder_swaps_specs(tmp_path: Path):
     client = _client(tmp_path)
-    _wipe_polyhedra(client)
     a = client.post("/api/v2/polyhedra", json={"center_species": "N"}).get_json()
     b = client.post("/api/v2/polyhedra", json={"center_species": "C6N2"}).get_json()
     response = client.post("/api/v2/polyhedra/reorder", json={"order": [b["id"], a["id"]]})
@@ -131,7 +110,6 @@ def test_polyhedra_reorder_swaps_specs(tmp_path: Path):
 
 def test_polyhedra_reorder_with_wrong_id_set_returns_400(tmp_path: Path):
     client = _client(tmp_path)
-    _wipe_polyhedra(client)
     a = client.post("/api/v2/polyhedra", json={"center_species": "N"}).get_json()
     response = client.post("/api/v2/polyhedra/reorder", json={"order": [a["id"], "extra"]})
     assert response.status_code == 400
@@ -148,13 +126,6 @@ def test_polyhedra_scoped_to_scene_id(tmp_path: Path):
     other = client.post(
         "/api/v2/scenes", json={"structure": "DAP-4", "label": "tab 2"}
     ).get_json()
-    # Both tabs ship with the same chemistry-suggested defaults (DAP-4
-    # has perchlorate -> Cl-O atom-centred specs); wipe both so the
-    # cross-tab assertion only sees the spec we explicitly POST below.
-    for spec in (client.get(f"/api/v2/polyhedra?scene_id={boot_id}").get_json() or {}).get("specs", []) or []:
-        client.delete(f"/api/v2/polyhedra/{spec['id']}?scene_id={boot_id}")
-    for spec in (client.get(f"/api/v2/polyhedra?scene_id={other['id']}").get_json() or {}).get("specs", []) or []:
-        client.delete(f"/api/v2/polyhedra/{spec['id']}?scene_id={other['id']}")
     spec_other = client.post(
         f"/api/v2/polyhedra?scene_id={other['id']}",
         json={"center_species": "N", "name": "in-tab-2"},

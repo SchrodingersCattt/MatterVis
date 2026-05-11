@@ -115,19 +115,11 @@ both files.
 ### `crystal_viewer.app` polyhedron specs — see [`agents/polyhedron_api.md`](agents/polyhedron_api.md)
 
 - Coordination polyhedra are a per-scene named-row table
- (`state["polyhedron_specs"] = [{id, name, kind, center_species,
- ligand_species, search_cutoff, color, enabled,
- instance_overrides}, ...]`). Each spec carries a `kind` field:
- `"fragment"` (legacy fragment-graph polyhedra) or `"atom"`
- (MolCrysKit-driven atom-centred polyhedra; ClO4 tetrahedra etc.).
- The Phase 5 default for a fresh scene is the chemistry-suggested
- atom-centred specs from
- `crystal_viewer.topology.suggest_default_polyhedron_specs` (driven
- by a `(central, ligand, max_bond)` table covering perchlorate,
- sulfate, nitrate, phosphate, halide / oxide perovskites, halide-
- bridged TM complexes). When that suggestion is empty (pure organic
- crystal etc.) the renderer falls back to the legacy
- `topology_species_keys` + shared `topology_hull_color` path.
+ (`state["polyhedron_specs"] = [{id, name, center_species,
+ ligand_species, color, enabled}, ...]`). Empty list (default for a
+ fresh scene) falls back to the legacy
+ `topology_species_keys` + shared `topology_hull_color` path so the
+ existing UI checklist keeps working unchanged.
 - The renderer paints **per-spec colour** by reading
  `topology_data["spec_results"][i].color` directly, not
  `style["topology_hull_color"]`. The single-colour path remains as a
