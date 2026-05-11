@@ -18,25 +18,73 @@ Every spec is a flat dict with these fields:
 |---|---|---|
 | `id` | string | Stable identifier; auto-generated if not provided. |
 | `name` | string | Display label for the row. Defaults to `center_species`. |
-| `center_species` | string | **Required.** Stoichiometric formula key from `species_options(structure)` (`"N"`, `"ClO4"`, `"C6N2"`, ...). |
-| `ligand_species` | string \| null | When set, the polyhedron neighbour pool is restricted to fragments matching this formula. `null` = legacy auto-derive (perovskite-style A↔X / B↔X / X↔A,B). |
+| `kind` | string | **Phase 5.** `"fragment"` (default; legacy fragment-graph polyhedra) or `"atom"` (MolCrysKit-driven atom-centred polyhedra; ClO4 tetrahedra, PbCl6 octahedra, ...). See "Spec kinds" below. |
+| `center_species` | string | **Required.** Either a fragment formula (`"ClO4"`, `"C6N2"`, ...) when `kind="fragment"`, or an element symbol (`"Cl"`, `"Pb"`, ...) when `kind="atom"`. The dropdown at `species_options(structure)` lists both. |
+| `ligand_species` | string \| null | Fragment kind: restricts the neighbour pool to fragments matching this formula (`null` = legacy auto-derive). Atom kind: **required** element symbol of the ligand atoms (`"O"` for ClO4, `"Cl"` for PbCl6, ...). |
+| `search_cutoff` | number \| null | **Phase 5, atom kind only.** Per-spec cap (Å) on MolCrysKit's `find_polyhedra` neighbour search. `null` = MolCrysKit default (~5 Å). Use a tight covalent cap (e.g. `2.0` for Cl-O, `1.6` for N-O, `3.5` for Pb-Cl) to lock the polyhedron to the textbook coordination sphere instead of also catching H-bond / vdW contacts. |
 | `color` | string | Hull / shell colour; six-digit hex (`#RRGGBB`). Auto-assigned from a colour-blind-friendly palette when omitted. |
 | `enabled` | bool | `false` rows persist but are skipped at render time. |
-| `instance_overrides` | object | **Phase 4.** Per-fragment override map: `{fragment_label: {color, visible}}`. Empty `{}` means every matched fragment inherits the spec-level colour and visibility. Keys are the fragment-table labels exposed in `topology_data["spec_results"][i]["overlays"][j]["center_label"]`. |
+| `instance_overrides` | object | **Phase 4.** Per-fragment override map: `{fragment_label: {color, visible}}`. Empty `{}` means every matched fragment inherits the spec-level colour and visibility. Keys are the fragment-table labels exposed in `topology_data["spec_results"][i]["overlays"][j]["center_label"]`. Atom-centred specs key on `"<element><center_index>"` instead (e.g. `"Cl0"`). |
+
+## Spec kinds
+
+The `kind` field selects between two distinct polyhedron models. Pick
+the one that matches your chemistry:
+
+### `kind="fragment"` (default; legacy)
+
+`center_species` and `ligand_species` are **fragment formulas**.
+MolCrysKit's stoichiometry analyser groups atoms into molecular /
+ionic fragments first; one polyhedron is drawn per fragment whose
+formula matches `center_species`, with vertices at the centroids of
+neighbouring fragments matching `ligand_species` (or auto-picked
+A↔X / B↔X / X↔A,B for unspecified ligands).
+
+Use this for true coordination chemistry on the fragment graph:
+A-site cation surrounded by anion units in a perovskite framework,
+metal-organic cage analysis, etc.
+
+### `kind="atom"` (Phase 5; preferred for textbook polyhedra)
+
+`center_species` and `ligand_species` are **element symbols**. Calls
+MolCrysKit's `find_polyhedra(crystal, central, ligand, search_cutoff)`
+directly: one polyhedron per central atom of the requested element,
+ligand vertices at the actual neighbouring shell atoms (PBC-aware,
+ASE neighbour-list driven).
+
+Use this for the textbook covalent / ionic coordination polyhedra
+chemists draw with VESTA / Diamond:
+
+- ClO4 / SO4 / PO4 / NO3 anion tetrahedra (centre = Cl/S/P/N, ligand = O)
+- PbCl6 / PbI6 / SnBr6 halide octahedra in halide perovskites
+- TiO6 / FeO6 oxide octahedra in oxide perovskites
+
+Pair with a tight `search_cutoff` (covalent bond range) to keep
+H-bond / vdW contacts out of the polyhedron.
 
 ### State integration
 
 `GET /api/v2/state` returns `polyhedron_specs: [...]` alongside the
 existing `topology_*` keys. The relationship between the two is:
 
-- **Empty list** (default for every fresh scene) → the renderer falls
-  back to the legacy `topology_species_keys` + shared
-  `topology_hull_color`. One synthesised hull per matching fragment,
-  one shared colour, no per-row identity. This is the pre-Phase-1
-  behaviour and the path the existing Dash UI checklist still drives.
+- **Empty list** → the renderer falls back to the legacy
+  `topology_species_keys` + shared `topology_hull_color`. One
+  synthesised hull per matching fragment, one shared colour, no
+  per-row identity. This is the pre-Phase-1 behaviour and the path
+  the existing Dash UI checklist still drives.
 - **Non-empty list** → the explicit named rows take over. The legacy
   `topology_species_keys` field is still readable but no longer
   influences rendering for that scene.
+
+**Phase 5 default**: fresh scenes now ship with chemistry-meaningful
+`kind="atom"` defaults derived from MolCrysKit's `find_polyhedra`
+applied to a curated `(central, ligand, max_bond)` table (perchlorate,
+sulfate, nitrate, phosphate, halide perovskites, oxide perovskites,
+halide-bridged TM complexes; see
+`crystal_viewer.topology._ATOM_POLY_DEFAULT_CHEMISTRY`). Pure-organic
+crystals still get an empty list. The legacy auto-derived
+`topology_species_keys` fragment-around-fragment defaults only fire
+when no atom-centred chemistry is detected.
 
 `POST /api/v2/state` honours `polyhedron_specs` directly (full
 replacement semantics). Use the dedicated CRUD endpoints below when
@@ -64,7 +112,7 @@ scene. Includes `enabled: false` rows.
 
 ### `POST /api/v2/polyhedra`
 
-Body:
+Body (fragment-centred, legacy):
 
 ```json
 {
@@ -74,6 +122,20 @@ Body:
   "color": "#FF6A00",
   "enabled": true,
   "id": "optional-stable-id"
+}
+```
+
+Body (atom-centred, Phase 5 — ClO4 tetrahedra example):
+
+```json
+{
+  "name": "perchlorate",
+  "kind": "atom",
+  "center_species": "Cl",
+  "ligand_species": "O",
+  "search_cutoff": 2.0,
+  "color": "#7C5CBF",
+  "enabled": true
 }
 ```
 

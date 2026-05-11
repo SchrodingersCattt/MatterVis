@@ -41,9 +41,12 @@ def backend(tmp_path: Path) -> ViewerBackend:
 
 
 def test_topology_for_state_emits_spec_results_per_enabled_spec(backend: ViewerBackend):
-    # Default state ships with topology_species_keys = ["N", "C6N2"];
-    # add named specs that match those formulas so the analysis anchor
-    # resolves on either species depending on the click.
+    # Wipe the chemistry-suggested atom-centred defaults so the
+    # assertion below sees only the fragment-centred specs we POST in
+    # this test. (DAP-4 ships with a Cl-O ClO4 default that would
+    # otherwise leak in as a third spec_results entry.)
+    for spec in backend.list_polyhedron_specs():
+        backend.remove_polyhedron_spec(spec["id"])
     spec_a = backend.add_polyhedron_spec(
         center_species="N", color="#FF0000", name="ammonium"
     )
@@ -87,6 +90,8 @@ def test_topology_for_state_emits_spec_results_per_enabled_spec(backend: ViewerB
 
 
 def test_topology_for_state_caches_geometry_across_color_changes(backend: ViewerBackend):
+    for spec in backend.list_polyhedron_specs():
+        backend.remove_polyhedron_spec(spec["id"])
     spec = backend.add_polyhedron_spec(center_species="N", color="#FF0000")
     state = backend.get_state()
     first = backend.topology_for_state(state)
@@ -113,6 +118,8 @@ def test_topology_for_state_caches_geometry_across_color_changes(backend: Viewer
 def test_topology_for_state_falls_back_to_legacy_species_keys(backend: ViewerBackend):
     # No explicit polyhedron_specs --> legacy ``topology_species_keys``
     # must still drive a topology that the renderer can paint.
+    for spec in backend.list_polyhedron_specs():
+        backend.remove_polyhedron_spec(spec["id"])
     state = backend.get_state()
     state["polyhedron_specs"] = []
     state["topology_species_keys"] = ["N"]
