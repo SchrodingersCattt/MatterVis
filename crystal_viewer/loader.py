@@ -228,7 +228,33 @@ def _unwrapped_atoms_from_atoms(
     *,
     include_minor: bool = True,
     max_atoms: int | None = DEFAULT_UNWRAP_MAX_ATOMS,
+    molcrys_analysis: Any = None,
 ) -> tuple[list[dict[str, Any]], list[list[int]]]:
+    """Return per-atom positions that are continuous across periodic
+    boundaries, so a molecule that straddles a cell face renders as a
+    single contiguous fragment instead of two halves drifting apart.
+
+    When ``molcrys_analysis`` is provided (the normal load path), we
+    reuse :class:`MolCrysKit`'s already-computed
+    ``mol_indices`` / ``mol_cart_positions``: those are the canonical
+    BFS unwrap result that the rest of the formula-unit pipeline
+    already trusts. Doing it again with a homegrown
+    ``find_bonds(cell=cell)`` call is both redundant and was
+    historically buggy on monoclinic cells (the MPEP regression where
+    a ring crossing the cell boundary was rendered as two halves --
+    the legacy KDTree pre-filter ignored PBC, so the cross-cell bond
+    that should have stitched the ring back together never made it
+    into the bond graph).
+
+    The fall-back path (no ``molcrys_analysis``) is the legacy
+    ``find_bonds(cell=cell)`` -> ``_unwrap_atom_pool`` flow; it is
+    kept for callers that don't have a MolCrysKit handle yet (a few
+    test fixtures synthesise atoms by hand and expect ``unwrap`` to
+    work without first booting MolCrysKit).
+    """
+    if molcrys_analysis is not None:
+        return _unwrapped_atoms_from_molcrys(atoms, M, molcrys_analysis, include_minor=include_minor)
+
     ops = scene_ops()
     atom_pool = []
     source_indices = []
@@ -261,6 +287,52 @@ def _unwrapped_atoms_from_atoms(
         unwrapped_atoms[source_idx] = dict(unwrapped_pool[local_idx])
     overflow = [[source_indices[idx] for idx in component] for component in overflow_local]
     return unwrapped_atoms, overflow
+
+
+def _unwrapped_atoms_from_molcrys(
+    atoms,
+    M,
+    molcrys_analysis,
+    *,
+    include_minor: bool = True,
+) -> tuple[list[dict[str, Any]], list[list[int]]]:
+    """Build the unwrapped-atom list directly from a
+    :class:`molcrys_bridge.CrystalAnalysis`. ``mol_indices`` /
+    ``mol_cart_positions`` were already produced by MolCrysKit's
+    PBC-aware ASE neighbour-list traversal; copy those Cartesian
+    positions onto the source atom dicts and recompute the matching
+    fractional coords. Atoms not touched by any molecule (e.g.
+    isolated minor-disorder ghosts that the analysis dropped) keep
+    their original cart/frac.
+    """
+    out = [dict(atom) for atom in atoms]
+    for atom in out:
+        atom["_unwrapped"] = False
+
+    inv_m = np.linalg.inv(np.asarray(M, dtype=float))
+
+    mol_indices = getattr(molcrys_analysis, "mol_indices", None) or []
+    mol_cart_positions = getattr(molcrys_analysis, "mol_cart_positions", None) or []
+
+    for indices, cart_positions in zip(mol_indices, mol_cart_positions):
+        coords = np.asarray(cart_positions, dtype=float)
+        if coords.ndim != 2 or coords.shape[0] != len(indices):
+            continue
+        for local_idx, raw_idx in enumerate(indices):
+            if raw_idx < 0 or raw_idx >= len(out):
+                continue
+            cart = coords[local_idx]
+            out[raw_idx]["cart"] = cart.copy()
+            out[raw_idx]["frac"] = inv_m @ cart
+            out[raw_idx]["_unwrapped"] = True
+
+    if not include_minor:
+        ops = scene_ops()
+        out = [atom for atom in out if not ops.is_minor(atom)]
+
+    # MolCrysKit handles oversize fragments internally (it never returns
+    # a partial molecule); there is no overflow component to surface.
+    return out, []
 
 
 def _fragment_table_from_atoms(
@@ -551,7 +623,13 @@ def build_loaded_crystal(
     with perf_log.time_block("loader:select_formula_unit", kind="event", structure=name):
         formula_unit_atoms = molcrys_bridge.select_formula_unit(raw_atoms, M, analysis=molcrys_analysis)
     with perf_log.time_block("loader:unwrap_atoms", kind="event", structure=name):
-        unwrapped_atoms, unwrap_overflow = _unwrapped_atoms_from_atoms(raw_atoms, cell, M, include_minor=True)
+        unwrapped_atoms, unwrap_overflow = _unwrapped_atoms_from_atoms(
+            raw_atoms,
+            cell,
+            M,
+            include_minor=True,
+            molcrys_analysis=molcrys_analysis,
+        )
     # ``_resolve_view`` is happy to short-circuit on a preset entry
     # (camera or view_direction explicitly provided) but otherwise
     # falls through to ``ops.auto_view_dir`` which scores >1000 view

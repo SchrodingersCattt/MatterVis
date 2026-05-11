@@ -502,19 +502,26 @@ _BOND_MAX_CUTOFF = 5.0  # Å — wide enough for any covalent pair the table can
 
 
 def _bond_candidate_pairs(atoms, M, cell):
-    """Yield ``(i, j)`` index pairs with ``i < j`` whose Cartesian distance
-    is plausibly within bond range. For ``len(atoms) >= _BOND_KDTREE_THRESHOLD``
-    we use ``cKDTree.query_pairs`` to prune the O(N^2) python loop down to
-    O(N * neighbours). For smaller scenes the python loop is faster than
-    constructing a KDTree, so we keep the legacy enumeration.
+    """Yield ``(i, j)`` index pairs with ``i < j`` whose Cartesian
+    distance (or, when ``cell is not None``, **PBC** Cartesian distance)
+    is plausibly within bond range.
 
-    The prefilter does NOT respect PBC -- callers that want PBC bonds
-    will still need ``cell`` for the per-pair distance refinement, but
-    those bonds are by construction within ``_BOND_MAX_CUTOFF`` of the
-    home positions when ``cell`` exists, so the KDTree on raw cart
-    coords still captures them. (Pathological cells where a bond
-    crosses two cell faces simultaneously are not currently supported
-    by the legacy detector either.)
+    For ``len(atoms) >= _BOND_KDTREE_THRESHOLD`` we use
+    ``cKDTree.query_pairs`` to prune the O(N^2) python loop down to
+    O(N * neighbours). For smaller scenes the python loop is faster
+    than constructing a KDTree, so we keep the legacy enumeration.
+
+    PBC handling: when ``cell is not None`` and ``M`` is provided, the
+    atom set is expanded with one image-replica per neighbour cell
+    (3^3 - 1 = 26 ghosts per atom) before the KDTree query. Pairs that
+    fall within the cutoff are then mapped back to the home index. This
+    is necessary because a ring that crosses the cell boundary has
+    bonds whose **raw cart** length spans the cell (8+ Å) but whose
+    PBC-image length is normal covalent. Without ghost replication,
+    ``_unwrapped_atoms_from_atoms`` cannot reassemble the ring and the
+    user sees fragmented organic cations -- regression observed on the
+    MPEP structure (P2_1/c, monoclinic) after the v1 KDTree pre-filter
+    landed.
     """
     n = len(atoms)
     if n < _BOND_KDTREE_THRESHOLD:
@@ -530,13 +537,51 @@ def _bond_candidate_pairs(atoms, M, cell):
                 yield (i, j)
         return
     coords = np.asarray([a['cart'] for a in atoms], dtype=float)
-    tree = cKDTree(coords)
+
+    # No PBC requested -> plain non-periodic KDTree on raw cart coords.
+    if cell is None or M is None:
+        tree = cKDTree(coords)
+        pairs = tree.query_pairs(r=_BOND_MAX_CUTOFF, output_type='ndarray')
+        if pairs.size == 0:
+            return
+        for i, j in pairs.tolist():
+            yield (int(i), int(j)) if i < j else (int(j), int(i))
+        return
+
+    # PBC path: expand the atom set with 26 image-replicas so that
+    # cross-cell bonds become local in cart space.
+    M_arr = np.asarray(M, dtype=float)
+    a_vec = M_arr[:, 0]
+    b_vec = M_arr[:, 1]
+    c_vec = M_arr[:, 2]
+    coord_chunks = [coords]
+    orig_idx_chunks = [np.arange(n, dtype=int)]
+    for da in (-1, 0, 1):
+        for db in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                if da == 0 and db == 0 and dc == 0:
+                    continue
+                offset = da * a_vec + db * b_vec + dc * c_vec
+                coord_chunks.append(coords + offset)
+                orig_idx_chunks.append(np.arange(n, dtype=int))
+    all_coords = np.vstack(coord_chunks)
+    all_orig = np.concatenate(orig_idx_chunks)
+
+    tree = cKDTree(all_coords)
     pairs = tree.query_pairs(r=_BOND_MAX_CUTOFF, output_type='ndarray')
     if pairs.size == 0:
         return
-    pairs = pairs[pairs[:, 0] != pairs[:, 1]]
+    seen: set[tuple[int, int]] = set()
     for i, j in pairs.tolist():
-        yield (int(i), int(j)) if i < j else (int(j), int(i))
+        oi = int(all_orig[i])
+        oj = int(all_orig[j])
+        if oi == oj:
+            continue  # ghost-of-self at zero distance is not a bond candidate
+        a_idx, b_idx = (oi, oj) if oi < oj else (oj, oi)
+        if (a_idx, b_idx) in seen:
+            continue
+        seen.add((a_idx, b_idx))
+        yield (a_idx, b_idx)
 
 
 def find_bonds(atoms, M=None, cell=None):
