@@ -2053,8 +2053,7 @@ def topology_results_markdown(topology_data: dict | None) -> str:
             "Either no fragment of the requested type exists in this structure, "
             "or the topology overlay is disabled."
         )
-    angular = topology_data.get("angular", {})
-    best = angular.get("best_match")
+    shape = topology_data.get("shape") or {}
     planarity = topology_data.get("planarity", {})
     prism = topology_data.get("prism_analysis", {})
     cn = int(topology_data.get("coordination_number", 0) or 0)
@@ -2087,23 +2086,25 @@ def topology_results_markdown(topology_data: dict | None) -> str:
             for atom in shell[:cn or len(shell)]
         )
         lines.append(f"Shell: {neighbours}")
-    if best:
-        rmsd = best.get("angular_rmsd")
-        rmsd_str = f"{rmsd:.2f}\u00b0" if rmsd is not None else "n/a"
-        lines.append(f"Best ideal polyhedron: {best['name']} (angular RMSD {rmsd_str})")
+    label = shape.get("primary_label")
+    modifier = shape.get("label_modifier")
+    cshm_value = shape.get("cshm_value")
+    if label:
+        modifier_text = f"{modifier} " if modifier else ""
+        cshm_text = f"  (CShM = {cshm_value:.2f})" if cshm_value is not None else ""
+        lines.append(f"Shape: {modifier_text}{label}{cshm_text}")
+        description = shape.get("structural_description") or ""
+        residuals = shape.get("residuals") or []
+        # Only print the verbose structural description when it adds info
+        # beyond the headline label (i.e. when ``classify_shell`` had to
+        # peel off residual atoms to fit a smaller core polyhedron).
+        if residuals and description:
+            lines.append(f"  {description}")
     elif cn:
-        if cn < 8:
-            lines.append(
-                f"No ideal-polyhedron reference for CN={cn} "
-                "(angular library only covers CN 8\u201312)."
-            )
-        elif cn > 12:
-            lines.append(
-                f"No ideal-polyhedron reference for CN={cn} "
-                "(angular library only covers CN 8\u201312)."
-            )
-        else:
-            lines.append("No ideal polyhedron matched within the cutoff.")
+        lines.append(
+            f"No ideal-polyhedron reference for CN={cn} "
+            "(shape registry covers CN 4\u201312)."
+        )
     if planarity.get("best_rms") is not None:
         rms = planarity["best_rms"]
         warn = ""

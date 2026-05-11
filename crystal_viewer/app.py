@@ -3582,7 +3582,8 @@ class ViewerBackend:
         # Build per-spec overlay lists. For each fragment whose formula
         # matches a spec's center species, run the lighter
         # ``extract_coordination_shell`` (skips planarity / prism /
-        # angular passes -- those only matter for the analysis anchor).
+        # shape-classification passes -- those only matter for the
+        # analysis anchor).
         # The same fragment may appear in multiple specs if those specs
         # share its centre species but differ in ligand selection; the
         # cache hit on (center_index, cutoff, ligand_species) makes the

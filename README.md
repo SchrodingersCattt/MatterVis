@@ -192,7 +192,8 @@ target = next(f for f in bundle.topology_fragment_table if f.get("formula") == "
 result = analyze_topology(bundle, center_index=target["index"], cutoff=8.0)
 
 print(result["coordination_number"])             # 9
-print(result["angular"]["best_match"]["name"])   # tricapped_trigonal_prism
+print(result["shape"]["primary_label"])          # tricapped_trigonal_prism
+print(result["shape"]["label_modifier"])         # distorted
 print(result["gap_info"]["gap_value"])           # 0.124 Å
 ```
 
@@ -233,7 +234,7 @@ named scores that together describe a coordination shell. One line summary:
 | Score | Module field | What it measures |
 | --- | --- | --- |
 | Coordination number | `coordination_number` + `gap_info.gap_value` | Neighbours in the first shell, picked by the largest distance jump. |
-| Angular RMSD | `angular.best_match`, `angular.results` | Degree of distortion versus 12 ideal polyhedra for CN 8-12. |
+| Shape classification | `shape.primary_label` / `label_modifier` / `cshm_value` | CShM-based polyhedron name + distortion tier (`clean` / `distorted` / `ambiguous`) for CN 4-12. |
 | Planarity RMS | `planarity.best_rms` / `best_indices` | Best-fit plane through any 5 shell atoms (Å). |
 | Prism / antiprism twist | `prism_analysis.twist_deg` / `classification` | Average inter-ring rotation; threshold 18°, only for CN ≥ 10. |
 | Convex hull | `hull.vertices` / `simplices` / `edges` | Geometry the viewer draws as the purple polyhedron. |

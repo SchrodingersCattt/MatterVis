@@ -8,21 +8,21 @@ import numpy as np
 
 from molcrys_kit.analysis.packing_shell import (
     DEFAULT_CENTROID_OFFSET_FRAC,
-    angular_rmsd_vs_ideals,
     compute_angular_signature,
     detect_coordination_number,
     detect_prism_vs_antiprism,
     hull_encloses_center as _hull_encloses_center,
     planarity_analysis,
 )
+from molcrys_kit.analysis.shape import classify_shell
 from molcrys_kit.structures.polyhedra import convex_hull_payload, ideal_polyhedra_for_cn
 
 __all__ = [
     "DEFAULT_CENTROID_OFFSET_FRAC",
     "_hull_encloses_center",
     "analyze_topology",
-    "angular_rmsd_vs_ideals",
     "classify_fragments",
+    "classify_shell",
     "compute_angular_signature",
     "convex_hull_payload",
     "detect_coordination_number",
@@ -411,16 +411,112 @@ def _analyze_topology_uncached(
     )
     center = shell["center_coords"]
     shell_coords = shell["shell_coords"]
-    angular = angular_rmsd_vs_ideals(shell_coords, center=center)
+    # Use molcrys_kit's modern CShM-based classifier (classify_shell) instead
+    # of the deprecated angular_rmsd_vs_ideals. classify_shell returns clean
+    # labels like "irregular cuboctahedron" with a structural description and
+    # core/residual decomposition; the old angular signature returned vague
+    # "best ideal" tokens that confused chemists looking at packing shells
+    # around organic cations. ``max_strip=1`` and ``n_random_inits=4`` keep
+    # the per-call cost under ~200 ms for CN<=12; the result is bundle-cached
+    # via ``_analyze_topology_cache`` so it only runs once per (centre,
+    # cutoff, ligand, search_supercell) tuple.
+    shape = _classify_shell_payload(shell_coords, center)
     planarity = planarity_analysis(shell_coords, group_size=min(5, len(shell_coords)) if shell_coords else 5)
     prism = detect_prism_vs_antiprism(shell_coords)
     hull = convex_hull_payload(shell_coords)
     return {
         **shell,
-        "angular": angular,
+        "shape": shape,
         "planarity": planarity,
         "prism_analysis": prism,
         "hull": hull,
+    }
+
+
+def _classify_shell_payload(
+    shell_coords: list | np.ndarray,
+    center: list | np.ndarray,
+) -> dict[str, Any]:
+    """Run ``classify_shell`` defensively and return a JSON-safe payload.
+
+    ``classify_shell`` raises on degenerate inputs (CN < 1, all points
+    collinear, etc.) which we don't want to bubble up to the renderer
+    text-panel call site; an empty / partial shell should just degrade to
+    ``primary_label = None`` rather than crash the whole topology card.
+    """
+    if not shell_coords:
+        return _empty_shape_payload()
+    try:
+        # ``max_strip=0`` keeps classify_shell in pure rigid-CShM mode: it
+        # picks the single best polyhedron of CN=N rather than peeling off
+        # k>0 atoms and producing compound ``"X + 1 off_axis_cap"`` labels.
+        # The compound labels are exactly the "ambiguous + face cap+1"
+        # tokens chemists complained about for packing shells around
+        # organic cations -- they leak the classifier's internal search
+        # state into a label that humans then mis-read as a structural
+        # claim. The k=0 layer gives us the clean ``"distorted
+        # cuboctahedron"`` / ``"clean tetrahedron"`` story we actually
+        # want, and is also ~5x faster than k=1 at CN=12.
+        result = classify_shell(
+            shell_coords,
+            center=center,
+            max_strip=0,
+            n_random_inits=4,
+            top_k=3,
+        )
+    except Exception as exc:
+        return {**_empty_shape_payload(), "error": str(exc)}
+    return _sanitize_shape_payload(result)
+
+
+# Fields under ``shape["topology"]`` (and inside each candidate's
+# ``core.topology``) carry molcrys_kit's polyhedron-registry namedtuples
+# (``FaceInfo``, ``EdgeInfo``, etc.) that are not JSON-serialisable and
+# not actionable for any downstream consumer in this repo. Strip them so
+# ``analyze_topology`` keeps its "JSON-safe payload" contract.
+_SHAPE_DROP_KEYS = ("topology",)
+
+
+def _sanitize_shape_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    cleaned = {key: value for key, value in payload.items() if key not in _SHAPE_DROP_KEYS}
+    if isinstance(cleaned.get("core"), dict):
+        cleaned["core"] = {
+            key: value
+            for key, value in cleaned["core"].items()
+            if key not in _SHAPE_DROP_KEYS
+        }
+    cleaned["candidates"] = [_sanitize_candidate(item) for item in cleaned.get("candidates") or []]
+    cleaned["alternatives"] = [_sanitize_candidate(item) for item in cleaned.get("alternatives") or []]
+    if isinstance(cleaned.get("best_match"), dict):
+        cleaned["best_match"] = _sanitize_candidate(cleaned["best_match"])
+    return cleaned
+
+
+def _sanitize_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+    cleaned = {key: value for key, value in candidate.items() if key not in _SHAPE_DROP_KEYS}
+    if isinstance(cleaned.get("core"), dict):
+        cleaned["core"] = {
+            key: value
+            for key, value in cleaned["core"].items()
+            if key not in _SHAPE_DROP_KEYS
+        }
+    return cleaned
+
+
+def _empty_shape_payload() -> dict[str, Any]:
+    return {
+        "coordination_number": 0,
+        "primary_label": None,
+        "label_modifier": None,
+        "label_source": None,
+        "confidence_gap": None,
+        "cshm_value": None,
+        "core": None,
+        "residuals": [],
+        "structural_description": "",
+        "alternatives": [],
+        "best_match": None,
+        "candidates": [],
     }
 
 

@@ -70,6 +70,126 @@ should be rejected and rewritten.
    open the saved PNG/PDF. Plotly + Kaleido fails silently on
    layout/transparency/legend issues; a clean exit code does not
    imply a correct figure.
+6. **Reuse before reinvent — and prefer the *current* primitive.**
+   Before writing new geometry, classification, or PBC logic in
+   `crystal_viewer/`, check `molcrys_kit.analysis.*` and
+   `molcrys_kit.structures.*` for an existing primitive that already
+   does it. If you find one, also check whether it is deprecated:
+   `git grep -nE "deprecated|use .* instead"` inside the installed
+   `molcrys_kit` package, or read the module docstring. Wiring up a
+   *deprecated* helper feels like reuse but is just delayed
+   reinvention — you'll have to re-do the work the next time the
+   author drops it. See `Working with molcrys_kit` below.
+
+## Working with `molcrys_kit`
+
+`molcrys_kit` owns the chemistry: PBC unwrapping, packing-shell
+detection, ideal-polyhedron registry, CShM-based shape
+classification, slabs, etc. MatterVis is the renderer + UI layer on
+top. The boundary is non-negotiable; if you find yourself writing new
+chemistry code in `crystal_viewer/`, stop and look upstream first.
+
+Concrete rules:
+
+- **Polyhedron / coordination-shell semantics live in
+  `molcrys_kit.analysis.packing_shell` and
+  `molcrys_kit.analysis.shape`.** `find_polyhedra` already knows how
+  to do gap+enclosure detection, how to expand the search to
+  enclose the centre, and how to handle both tight covalent shells
+  (e.g. ClO₄ tetrahedra) *and* broader packing shells (e.g.
+  cuboctahedra around organic cations) from the same call. Do
+  **not** wrap it with hard-coded covalent cutoffs to "force" one
+  interpretation; that disables the very feature that makes it
+  useful.
+- **Shape classification is `shape.classify_shell`, not
+  `packing_shell.angular_rmsd_vs_ideals`.** The angular helper is
+  deprecated. It compares sorted angle signatures and, when run with
+  k>0 residual stripping, emits compound `"X + 1 face cap+1"` tokens
+  that look like structural claims but are really diagnostics from
+  the classifier's internal search. Always use `classify_shell` for
+  user-visible labels; pass `max_strip=0` if you only want the
+  rigid-CShM polyhedron name + distortion modifier (clean /
+  distorted / ambiguous / irregular).
+- **Molecular fragmentation is `MolecularCrystal.unwrap*`.** Do not
+  re-implement minimum-image unwrapping, fragment completion, or
+  bond-graph traversal across periodic boundaries in
+  `crystal_viewer/scene.py` or `loader.py`. The `unit_cell` display
+  mode in particular must keep delegating to `molcrys_kit` for
+  unwrapped coordinates so molecules don't get chopped at cell
+  faces.
+- **Slab generation is `molcrys_kit.transforms.generate_topological_slab`.**
+  `crystal_viewer/transforms.py` is a thin Dash adapter; if a slab
+  parameter is missing here, add it as a passthrough kwarg, don't
+  duplicate the math.
+- **Sanitise before returning.** `analyze_topology()`'s contract
+  promises a JSON-safe payload. `classify_shell` returns
+  registry-internal namedtuples (`FaceInfo`, `EdgeInfo`) under
+  `topology.faces` / `topology.edges`; strip those before
+  surfacing the dict to callers (see `_sanitize_shape_payload` in
+  `crystal_viewer/topology.py`).
+
+When `molcrys_kit` is updated and a function you call gets
+deprecated:
+
+1. Read the new module's docstring **and** the deprecation note on
+   the old one — they usually point at the replacement.
+2. If the replacement returns a richer / different payload, surface
+   the new fields in `agents/*.md` and update the matching
+   `scripts/` examples; do not silently coerce the new payload into
+   the old shape.
+3. If the replacement is more expensive, push the call into the
+   appropriate cache layer (`_analyze_topology_cache`,
+   `_neighbor_pool_cache`, `_shell_cache`) and check that the cache
+   key includes every input that affects the result.
+
+## Postmortems — past mis-fixes worth remembering
+
+These are short case studies of mistakes that have already happened
+in this repo. Re-read them before touching the affected modules; the
+goal is "don't repeat known failures", not blame.
+
+### "Atom-centred polyhedra" misadventure (PR #11, reverted as #12)
+
+- **Symptom report:** "SY's perchlorate is drawn wrong, EAP-4's
+  default polyhedra look weird — please update the latest
+  `molcrys_kit` and adapt."
+- **Wrong fix that landed (and was reverted):** added a `kind`
+  field (`"atom"` vs `"fragment"`) to `polyhedron_specs`, plus a
+  hard-coded `_ATOM_POLY_DEFAULT_CHEMISTRY` table mapping element
+  pairs to short covalent cutoffs (e.g. Cl-O at 2.0 Å), then routed
+  those cases through `find_polyhedra(search_cutoff=2.0)` to "force"
+  ClO₄ tetrahedra. Visually it produced the right pictures for
+  ClO₄ — but it disabled `find_polyhedra`'s gap+enclosure
+  intelligence everywhere, including for the organic cations that
+  the user actually cared about. The cuboctahedron-around-cation
+  case the user wanted to *keep* was the one this fix broke.
+- **Root causes:**
+  1. *Misread of the symptom.* The user said "the labels are
+     weird"; I read "the geometry is wrong". The geometry was
+     fine; the labels (from the deprecated
+     `angular_rmsd_vs_ideals` → "ambiguous cuboctahedron + 1 face
+     cap+1") were the actual confusing thing.
+  2. *Skipped the upstream library docstring.* `molcrys_kit`'s
+     `packing_shell` module already documents that
+     `find_polyhedra` does both covalent and packing shells from
+     the same call, and that `angular_rmsd_vs_ideals` is
+     superseded by `shape.classify_shell`. Reading it would have
+     pointed at the one-line replacement.
+  3. *Added a parallel concept instead of swapping a primitive.*
+     Introducing `kind="atom"` doubled the spec table, the API
+     surface, and the tests — none of which the chemistry needed.
+- **Right fix (this PR):** replace the deprecated
+  `angular_rmsd_vs_ideals` call site in
+  `crystal_viewer/topology.py` with `shape.classify_shell`
+  (`max_strip=0` to keep labels clean), surface
+  `primary_label` / `label_modifier` / `cshm_value` in the
+  analysis-text panel, and leave the `polyhedron_specs` shape and
+  the `find_polyhedra` invocation strictly alone.
+- **Permanent rule (already added above as principle #6 and the
+  `Working with molcrys_kit` section):** before adding a new
+  concept to MatterVis, verify the upstream library doesn't
+  already express it. Before wrapping an upstream function, verify
+  that function isn't itself deprecated.
 
 ## Invariants the library promises to callers
 

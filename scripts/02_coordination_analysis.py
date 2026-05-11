@@ -53,7 +53,7 @@ def _fmt(v, digits=3, suffix=""):
 
 def print_scores(topology: dict) -> None:
     gap = topology["gap_info"]
-    ang = topology["angular"]
+    shape = topology["shape"]
     plan = topology["planarity"]
     prism = topology["prism_analysis"]
 
@@ -62,13 +62,22 @@ def print_scores(topology: dict) -> None:
     print(f"  gap_value (Å)       : {_fmt(gap.get('gap_value'))}")
     print(f"  pool size / cutoff  : {topology['neighbor_pool_size']} / {topology['cutoff']:.2f} Å")
     print(f"  shell distances (Å) : {[round(d, 3) for d in topology['distances']]}")
-    if ang.get("best_match"):
-        best = ang["best_match"]
-        print(f"  best ideal          : {best['name']}  (angular RMSD = {_fmt(best['angular_rmsd'], 2, '°')})")
-        for rank, entry in enumerate(ang.get("results", [])[1:], start=2):
-            print(f"     rank {rank}: {entry['name']}  (angular RMSD = {_fmt(entry['angular_rmsd'], 2, '°')})")
+    if shape.get("primary_label"):
+        modifier = shape.get("label_modifier") or ""
+        cshm = shape.get("cshm_value")
+        modifier_str = f"{modifier} " if modifier else ""
+        print(
+            f"  shape               : {modifier_str}{shape['primary_label']}  "
+            f"(CShM = {_fmt(cshm, 2)})"
+        )
+        for rank, entry in enumerate(shape.get("candidates", [])[1:], start=2):
+            print(
+                f"     rank {rank}: {entry['name']}  (CShM = {_fmt(entry.get('cshm'), 2)})"
+            )
+        if shape.get("structural_description"):
+            print(f"  description         : {shape['structural_description']}")
     else:
-        print(f"  best ideal          : n/a  (no library entry for CN={topology['coordination_number']})")
+        print(f"  shape               : n/a  (no library entry for CN={topology['coordination_number']})")
     print(f"  planarity best RMS  : {_fmt(plan.get('best_rms'), 3, ' Å')}  "
           f"indices={plan.get('best_indices')}  (group_size={plan.get('group_size')})")
     print(f"  prism/antiprism     : {prism.get('classification') or 'n/a'}  "
@@ -77,7 +86,7 @@ def print_scores(topology: dict) -> None:
 
 def build_summary(topology: dict) -> dict:
     gap = topology["gap_info"]
-    ang = topology["angular"]
+    shape = topology["shape"]
     plan = topology["planarity"]
     prism = topology["prism_analysis"]
     return {
@@ -90,19 +99,22 @@ def build_summary(topology: dict) -> dict:
         "gap_value_A": gap.get("gap_value"),
         "gap_index": gap.get("gap_index"),
         "shell_distances_A": [round(d, 4) for d in topology["distances"]],
-        "angular": {
-            "best_match": (
-                {
-                    "name": ang["best_match"]["name"],
-                    "angular_rmsd_deg": round(ang["best_match"]["angular_rmsd"], 3),
-                }
-                if ang.get("best_match")
+        "shape": {
+            "primary_label": shape.get("primary_label"),
+            "label_modifier": shape.get("label_modifier"),
+            "cshm_value": (
+                round(shape["cshm_value"], 3)
+                if shape.get("cshm_value") is not None
                 else None
             ),
-            "ranked": [
-                {"name": r["name"], "angular_rmsd_deg": round(r["angular_rmsd"], 3)}
-                for r in ang.get("results", [])
+            "candidates": [
+                {
+                    "name": entry["name"],
+                    "cshm": round(entry.get("cshm", 0.0), 3),
+                }
+                for entry in shape.get("candidates", [])
             ],
+            "structural_description": shape.get("structural_description"),
         },
         "planarity": {
             "best_rms_A": plan.get("best_rms"),
@@ -138,12 +150,18 @@ def main() -> None:
         },
     )
     fig = build_figure(bundle.scene, style, topology_data=topology)
-    best_name = topology["angular"]["best_match"]["name"] if topology["angular"].get("best_match") else "n/a"
+    shape = topology["shape"]
+    if shape.get("primary_label"):
+        modifier = shape.get("label_modifier") or ""
+        prefix = f"{modifier} " if modifier else ""
+        shape_text = f"{prefix}{shape['primary_label']}"
+    else:
+        shape_text = "n/a"
     fig.update_layout(
         title=dict(
             text=(
                 f"DAP-4 · {target['label']} ({target['species']}) · "
-                f"CN={topology['coordination_number']} · best ideal: {best_name}"
+                f"CN={topology['coordination_number']} · shape: {shape_text}"
             ),
             x=0.5,
         )
@@ -169,8 +187,24 @@ def main() -> None:
     print(f"Wrote {summary_path}")
 
     full_path = OUTPUT_DIR / "02_coordination_full.json"
-    full_path.write_text(json.dumps(topology, indent=2, default=float))
+    # ``build_figure`` decorates the topology dict with renderer-internal
+    # caches (``_background_dict_cache`` etc.) that use tuple keys -- those
+    # are not JSON-safe and we don't want them in the dev dump anyway, so
+    # strip any underscore-prefixed key before serialising.
+    full_path.write_text(json.dumps(_strip_private(topology), indent=2, default=float))
     print(f"Wrote {full_path}")
+
+
+def _strip_private(value):
+    if isinstance(value, dict):
+        return {
+            key: _strip_private(item)
+            for key, item in value.items()
+            if not (isinstance(key, str) and key.startswith("_"))
+        }
+    if isinstance(value, (list, tuple)):
+        return [_strip_private(item) for item in value]
+    return value
 
 
 if __name__ == "__main__":
