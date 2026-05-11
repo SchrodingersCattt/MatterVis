@@ -1895,12 +1895,146 @@ def _camera_vectors(camera: Optional[dict[str, Any]]) -> tuple[np.ndarray, np.nd
     return eye, center, up
 
 
-def _camera_payload(eye: np.ndarray, center: np.ndarray, up: np.ndarray) -> dict[str, Any]:
-    return {
+def _camera_payload(
+    eye: np.ndarray,
+    center: np.ndarray,
+    up: np.ndarray,
+    *,
+    projection: Optional[str] = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "eye": {"x": float(eye[0]), "y": float(eye[1]), "z": float(eye[2])},
         "center": {"x": float(center[0]), "y": float(center[1]), "z": float(center[2])},
         "up": {"x": float(up[0]), "y": float(up[1]), "z": float(up[2])},
     }
+    if projection is not None:
+        payload["projection"] = {"type": str(projection)}
+    return payload
+
+
+# ---------------------------------------------------------------------
+# Axis-aligned camera presets (VESTA-style "down a / b / c / a* / b* / c*")
+# ---------------------------------------------------------------------
+#
+# ``M`` carries the lattice vectors as columns (M[:, 0] = a, etc.).
+# Reciprocal vectors live in the rows of (M^-1) -- equivalently the
+# columns of (M^-T): a* = (M^-T)[:, 0], etc. ``camera_for_axis`` picks
+# a unit view direction along the requested axis, picks an "up"
+# reference axis from the remaining lattice vectors (real-space when
+# the request is real-space, reciprocal-space when reciprocal), and
+# uses Gram-Schmidt to orthogonalise that "up" against the view
+# direction so non-orthogonal cells still produce a sane camera. The
+# ``eye`` magnitude is preserved across alignments so the user's zoom
+# level survives an axis switch.
+
+_AXIS_VIEW_KEYS = ("a", "b", "c", "a*", "b*", "c*")
+
+
+def _normalize_axis_key(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip().lower().replace(" ", "")
+    if text in {"a", "b", "c", "a*", "b*", "c*"}:
+        return text
+    # Tolerate alternative forms: "astar", "a-star", "areciprocal"
+    aliases = {
+        "astar": "a*", "a-star": "a*", "areciprocal": "a*", "a_reciprocal": "a*",
+        "bstar": "b*", "b-star": "b*", "breciprocal": "b*", "b_reciprocal": "b*",
+        "cstar": "c*", "c-star": "c*", "creciprocal": "c*", "c_reciprocal": "c*",
+    }
+    return aliases.get(text)
+
+
+def _lattice_axes(M: np.ndarray) -> dict[str, np.ndarray]:
+    """Return unit vectors for a, b, c, a*, b*, c* derived from
+    cartesian lattice matrix ``M`` (columns = a, b, c)."""
+    M_arr = np.asarray(M, dtype=float)
+    if M_arr.shape != (3, 3):
+        raise ValueError(f"expected 3x3 lattice matrix, got shape {M_arr.shape}")
+    real_cols = [M_arr[:, i] for i in range(3)]
+    try:
+        recip_T = np.linalg.inv(M_arr).T
+    except np.linalg.LinAlgError as exc:
+        raise ValueError("lattice matrix is singular; cannot build reciprocal axes") from exc
+    recip_cols = [recip_T[:, i] for i in range(3)]
+    out: dict[str, np.ndarray] = {}
+    for key, vec in zip(("a", "b", "c"), real_cols):
+        norm = float(np.linalg.norm(vec))
+        out[key] = vec / norm if norm > 1e-12 else np.array([1.0, 0.0, 0.0])
+    for key, vec in zip(("a*", "b*", "c*"), recip_cols):
+        norm = float(np.linalg.norm(vec))
+        out[key] = vec / norm if norm > 1e-12 else np.array([1.0, 0.0, 0.0])
+    return out
+
+
+def _orthogonalise_up(view_dir: np.ndarray, up_pick: np.ndarray) -> np.ndarray:
+    """Project ``up_pick`` onto the plane perpendicular to ``view_dir``
+    (Gram-Schmidt) and normalise. Falls back to a canonical up if the
+    pick is degenerate (parallel to view_dir)."""
+    proj = up_pick - float(np.dot(up_pick, view_dir)) * view_dir
+    norm = float(np.linalg.norm(proj))
+    if norm < 1e-9:
+        # ``up_pick`` is parallel to ``view_dir`` -- pick the closest
+        # canonical world axis that isn't.
+        for fallback in (
+            np.array([0.0, 0.0, 1.0]),
+            np.array([0.0, 1.0, 0.0]),
+            np.array([1.0, 0.0, 0.0]),
+        ):
+            proj = fallback - float(np.dot(fallback, view_dir)) * view_dir
+            norm = float(np.linalg.norm(proj))
+            if norm > 1e-9:
+                break
+    return proj / norm
+
+
+def camera_for_axis(
+    M: np.ndarray,
+    axis: str,
+    *,
+    eye_distance: float = 1.8,
+    center: Optional[np.ndarray] = None,
+    projection: Optional[str] = None,
+) -> dict[str, Any]:
+    """Build a Plotly camera dict that looks down the requested axis.
+
+    ``axis`` is one of ``a``, ``b``, ``c``, ``a*``, ``b*``, ``c*``.
+    The camera ``up`` follows the VESTA convention:
+
+    - looking down ``a``, ``b``  -> up = c (orthogonalised vs. view)
+    - looking down ``c``         -> up = b
+    - looking down ``a*``, ``b*`` -> up = c*
+    - looking down ``c*``        -> up = b*
+
+    Non-orthogonal cells go through Gram-Schmidt so the up is always
+    perpendicular to the view direction; degenerate picks fall back
+    to a canonical world axis.
+    """
+    key = _normalize_axis_key(axis)
+    if key is None:
+        raise ValueError(f"unknown axis: {axis!r}; pick one of {_AXIS_VIEW_KEYS}")
+    axes = _lattice_axes(M)
+    view_dir = axes[key]
+    # VESTA-style up choice: pick the lattice axis that gives the
+    # most useful "up" -- conventionally ``c`` for in-plane views,
+    # ``b`` for the [001] view. Reciprocal lookups stay reciprocal.
+    up_pick_map_real = {"a": "c", "b": "c", "c": "b"}
+    up_pick_map_recip = {"a*": "c*", "b*": "c*", "c*": "b*"}
+    up_key = up_pick_map_real.get(key) or up_pick_map_recip[key]
+    up = _orthogonalise_up(view_dir, axes[up_key])
+    center_arr = np.array([0.0, 0.0, 0.0]) if center is None else np.asarray(center, dtype=float)
+    eye = center_arr + float(eye_distance) * view_dir
+    return _camera_payload(eye, center_arr, up, projection=projection)
+
+
+_VALID_PROJECTIONS = ("perspective", "orthographic")
+
+
+def _coerce_projection(value: Any, *, fallback: str = "perspective") -> str:
+    text = str(value or "").strip().lower()
+    if text in _VALID_PROJECTIONS:
+        return text
+    return fallback
 
 
 def _rotate_vector(vec: np.ndarray, axis: np.ndarray, angle_deg: float) -> np.ndarray:
@@ -2061,6 +2195,14 @@ class ViewerBackend:
             "polyhedron_search_supercell": [0, 0, 0],
             "fast_rendering": bool(style.get("fast_rendering", False)),
             "camera": scene.get("camera"),
+            # Phase 4: camera projection mode mirrored onto state so a
+            # caller can inspect / set it via REST without diffing the
+            # Plotly camera dict. ``style_for_state`` propagates this
+            # to ``style["projection"]`` so the renderer picks it up.
+            "projection": _coerce_projection(
+                style.get("projection", "perspective"),
+                fallback="perspective",
+            ),
             "cutoff": 10.0,
         }
 
@@ -2467,6 +2609,20 @@ class ViewerBackend:
                 state["atom_groups"] = existing_groups + [migrated]
         if "camera" in patch and patch["camera"] is not None:
             state["camera"] = patch["camera"]
+        # Phase 4 (view tools): top-level ``projection`` is a v2 state
+        # key that mirrors ``camera.projection.type``. Accept either
+        # spelling so AI callers don't have to dig into the camera
+        # dict; ``set_projection`` keeps the two in sync.
+        if "projection" in patch and patch["projection"] is not None:
+            state["projection"] = _coerce_projection(
+                patch["projection"], fallback=str(state.get("projection", "perspective"))
+            )
+        elif isinstance(patch.get("camera"), dict):
+            cam_proj = patch["camera"].get("projection")
+            if isinstance(cam_proj, dict) and "type" in cam_proj:
+                state["projection"] = _coerce_projection(
+                    cam_proj["type"], fallback=str(state.get("projection", "perspective"))
+                )
         return state
 
     def get_state(self, scene_id: Optional[str] = None) -> dict[str, Any]:
@@ -2585,6 +2741,14 @@ class ViewerBackend:
         # scene is mutable); this entry is the single source of truth
         # for downstream callers.
         style["bond_groups"] = list(state.get("bond_groups") or [])
+        # Phase 4 (view tools): persist the camera projection choice
+        # onto the style dict so the renderer's
+        # ``_plotly_camera_from_scene`` picks orthographic vs.
+        # perspective without rebuilding the scene.
+        style["projection"] = _coerce_projection(
+            state.get("projection", style.get("projection", "perspective")),
+            fallback=str(style.get("projection", "perspective")),
+        )
         return style
 
     def add_uploaded_bundle(self, contents: str, filename: str) -> LoadedCrystal:
@@ -3600,7 +3764,14 @@ class ViewerBackend:
         if action == "reset":
             return self.set_camera(self.default_camera(self.get_state(scene_id)), scene_id=scene_id)
 
-        eye, center, up = _camera_vectors(self.get_camera(scene_id))
+        if action == "align":
+            return self.align_camera(payload.get("axis"), scene_id=scene_id)
+
+        if action in ("projection", "set_projection"):
+            return self.set_projection(payload.get("type") or payload.get("projection"), scene_id=scene_id)
+
+        current_camera = self.get_camera(scene_id)
+        eye, center, up = _camera_vectors(current_camera)
         if action == "zoom":
             factor = float(payload.get("factor", 1.0))
             if abs(factor) > 1e-8:
@@ -3623,7 +3794,68 @@ class ViewerBackend:
             if np.linalg.norm(right) > 1e-8:
                 eye = _rotate_vector(eye, right, pitch_deg)
                 up = _rotate_vector(up, right, pitch_deg)
-        camera = _camera_payload(eye, center, up)
+        # Preserve the existing projection across orbit/pan/zoom so the
+        # caller doesn't have to repeat ``set_projection`` after every
+        # movement (the renderer would otherwise default to perspective).
+        projection = None
+        proj_payload = (current_camera or {}).get("projection")
+        if isinstance(proj_payload, dict) and proj_payload.get("type"):
+            projection = str(proj_payload["type"])
+        elif isinstance(self.get_state(scene_id).get("projection"), str):
+            projection = self.get_state(scene_id)["projection"]
+        camera = _camera_payload(eye, center, up, projection=projection)
+        return self.set_camera(camera, scene_id=scene_id)
+
+    def align_camera(self, axis: Any, scene_id: Optional[str] = None) -> dict[str, Any]:
+        """Look down the requested lattice axis (``a``/``b``/``c``) or
+        reciprocal axis (``a*``/``b*``/``c*``).
+
+        Preserves the current eye-to-center distance so the user's
+        zoom level survives an axis switch (mirrors VESTA's behaviour
+        where the alignment buttons rotate but do not zoom).
+        """
+        key = _normalize_axis_key(axis)
+        if key is None:
+            raise ValueError(f"unknown axis: {axis!r}; pick one of {_AXIS_VIEW_KEYS}")
+        state = self.get_state(scene_id)
+        scene = self.scene_for_state(state)
+        M = np.asarray(scene["M"], dtype=float)
+        current = self.get_camera(scene_id)
+        eye, center, _up = _camera_vectors(current)
+        eye_distance = float(np.linalg.norm(eye - center))
+        if eye_distance < 1e-6:
+            eye_distance = 1.8
+        # Carry projection through the alignment so users who have
+        # opted into orthographic don't get bounced back to perspective
+        # every time they hit a "down a" button.
+        projection = None
+        proj_payload = (current or {}).get("projection")
+        if isinstance(proj_payload, dict) and proj_payload.get("type"):
+            projection = str(proj_payload["type"])
+        elif isinstance(state.get("projection"), str):
+            projection = state["projection"]
+        camera = camera_for_axis(
+            M,
+            key,
+            eye_distance=eye_distance,
+            center=center,
+            projection=projection,
+        )
+        return self.set_camera(camera, scene_id=scene_id)
+
+    def set_projection(self, projection: Any, scene_id: Optional[str] = None) -> dict[str, Any]:
+        """Toggle the camera projection between ``perspective`` and
+        ``orthographic``. Persists onto ``state["projection"]`` so the
+        next ``style_for_state`` reflects the choice and so the REST
+        ``GET /state`` echoes back what was set.
+        """
+        normalized = _coerce_projection(projection, fallback="perspective")
+        self.patch_state({"projection": normalized}, scene_id=scene_id)
+        # Stamp ``projection`` onto the persisted camera dict so a
+        # subsequent ``set_camera`` round-trip (e.g. user drags the
+        # scene to a new orientation) doesn't drop the choice.
+        camera = dict(self.get_camera(scene_id))
+        camera["projection"] = {"type": normalized}
         return self.set_camera(camera, scene_id=scene_id)
 
     def _safe_preset_path(self, path: Optional[str]) -> Optional[str]:
@@ -3991,6 +4223,65 @@ def create_app(
                             # presets that set it directly.
                         ],
                         value=[opt for opt in first_state["display_options"] if opt != "monochrome"],
+                    ),
+                    html.Div(style={"height": "10px"}),
+                    # ---- Phase 4 (view tools): VESTA-style axis-aligned
+                    # views + perspective / orthographic toggle.
+                    #
+                    # Six small buttons map to ``align`` actions on the
+                    # backend; the radio mirrors ``state["projection"]``.
+                    # All wiring lives in ``apply_view_action`` /
+                    # ``apply_view_projection`` callbacks below.
+                    html.Label("View"),
+                    html.Div(
+                        [
+                            html.Button(
+                                "a", id="view-align-a", n_clicks=0,
+                                className="view-align-btn",
+                                title="Look down lattice axis a",
+                            ),
+                            html.Button(
+                                "b", id="view-align-b", n_clicks=0,
+                                className="view-align-btn",
+                                title="Look down lattice axis b",
+                            ),
+                            html.Button(
+                                "c", id="view-align-c", n_clicks=0,
+                                className="view-align-btn",
+                                title="Look down lattice axis c",
+                            ),
+                            html.Button(
+                                "a*", id="view-align-astar", n_clicks=0,
+                                className="view-align-btn",
+                                title="Look down reciprocal axis a*",
+                            ),
+                            html.Button(
+                                "b*", id="view-align-bstar", n_clicks=0,
+                                className="view-align-btn",
+                                title="Look down reciprocal axis b*",
+                            ),
+                            html.Button(
+                                "c*", id="view-align-cstar", n_clicks=0,
+                                className="view-align-btn",
+                                title="Look down reciprocal axis c*",
+                            ),
+                            html.Button(
+                                "Reset", id="view-reset", n_clicks=0,
+                                className="view-align-btn view-reset-btn",
+                                title="Reset to scene-default camera",
+                            ),
+                        ],
+                        className="view-align-row",
+                    ),
+                    dcc.RadioItems(
+                        id="view-projection",
+                        options=[
+                            {"label": "Perspective", "value": "perspective"},
+                            {"label": "Orthographic", "value": "orthographic"},
+                        ],
+                        value=str(first_state.get("projection", "perspective")),
+                        inline=True,
+                        className="view-projection-row",
                     ),
                     html.Div(style={"height": "10px"}),
                     html.Label("Material / Style / Disorder"),
@@ -5906,6 +6197,97 @@ def create_app(
     )
     def close_kbd_help(_):
         return "kbd-help kbd-help--hidden"
+
+    # ------------------------------------------------------------------
+    # View tools (Phase 4): VESTA-style axis alignment + projection
+    # toggle.
+    #
+    # Both callbacks call into ``backend.camera_action`` (the same path
+    # exercised by ``POST /api/v2/camera/action``), then push the new
+    # camera into ``camera-state-store`` and the post-mutation state
+    # into ``agent-state-store`` so ``update_view`` redraws the figure.
+    # Without the camera-state-store write the next ``update_view``
+    # would still read the captured (pre-mutation) camera and snap the
+    # alignment back to whatever the user was on a moment ago.
+    # ------------------------------------------------------------------
+    @app.callback(
+        Output("agent-state-store", "data", allow_duplicate=True),
+        Output("camera-state-store", "data", allow_duplicate=True),
+        Input("view-align-a", "n_clicks"),
+        Input("view-align-b", "n_clicks"),
+        Input("view-align-c", "n_clicks"),
+        Input("view-align-astar", "n_clicks"),
+        Input("view-align-bstar", "n_clicks"),
+        Input("view-align-cstar", "n_clicks"),
+        Input("view-reset", "n_clicks"),
+        State("scene-tabs", "value"),
+        prevent_initial_call=True,
+    )
+    def apply_view_action(_a, _b, _c, _astar, _bstar, _cstar, _reset, scene_id):
+        triggered = getattr(callback_context, "triggered_id", None)
+        if not triggered:
+            return no_update, no_update
+        scene_id = scene_id or backend.active_scene_id()
+        button_to_axis = {
+            "view-align-a": "a",
+            "view-align-b": "b",
+            "view-align-c": "c",
+            "view-align-astar": "a*",
+            "view-align-bstar": "b*",
+            "view-align-cstar": "c*",
+        }
+        try:
+            if triggered == "view-reset":
+                camera = backend.camera_action("reset", scene_id=scene_id)
+            elif triggered in button_to_axis:
+                camera = backend.camera_action(
+                    "align",
+                    scene_id=scene_id,
+                    axis=button_to_axis[triggered],
+                )
+            else:
+                return no_update, no_update
+        except Exception:  # pragma: no cover - best-effort, surface in console
+            return no_update, no_update
+        return backend.get_state(scene_id), _camera_store_payload(scene_id, camera)
+
+    @app.callback(
+        Output("view-projection", "value", allow_duplicate=True),
+        Input("agent-state-store", "data"),
+        prevent_initial_call=True,
+    )
+    def sync_view_projection_from_state(state):
+        # Mirror ``state["projection"]`` onto the radio so externally
+        # driven changes (REST mutations, scene switches) keep the UI
+        # honest. The matched-value short-circuit in
+        # ``apply_view_projection`` prevents the round-trip from
+        # ratcheting the figure cache.
+        if not isinstance(state, dict):
+            return no_update
+        return _coerce_projection(state.get("projection") or "perspective")
+
+    @app.callback(
+        Output("agent-state-store", "data", allow_duplicate=True),
+        Output("camera-state-store", "data", allow_duplicate=True),
+        Input("view-projection", "value"),
+        State("scene-tabs", "value"),
+        prevent_initial_call=True,
+    )
+    def apply_view_projection(projection, scene_id):
+        if not projection:
+            return no_update, no_update
+        scene_id = scene_id or backend.active_scene_id()
+        # Skip the redraw if the user clicked the radio that was
+        # already selected -- avoids ratcheting the figure JSON cache
+        # for a no-op.
+        current = backend.get_state(scene_id).get("projection", "perspective")
+        if str(projection) == str(current):
+            return no_update, no_update
+        try:
+            camera = backend.set_projection(projection, scene_id=scene_id)
+        except Exception:  # pragma: no cover
+            return no_update, no_update
+        return backend.get_state(scene_id), _camera_store_payload(scene_id, camera)
 
     @app.callback(
         Output("camera-state-store", "data", allow_duplicate=True),
