@@ -30,7 +30,7 @@ Every group is a flat dict with these fields:
 ### Selector grammar
 
 A selector is a dict whose keys are AND-combined. Any key that is
-absent is ignored. The supported keys today are:
+absent is ignored. The supported keys are:
 
 - `{"all": true}` — match every atom in the scene.
 - `{"elements": ["O", "S"]}` — match atoms whose element symbol
@@ -38,6 +38,25 @@ absent is ignored. The supported keys today are:
   loader puts in `draw_atoms[i]["elem"]`).
 - `{"is_minor": true}` / `{"is_minor": false}` — match by the
   disorder major/minor flag.
+- `{"labels": ["Pb1", "Cl3"]}` — **Phase 4.** Exact atom-label list.
+  Stable across structure transforms (a `repeat 2x2x2` keeps the
+  home-cell labels intact and assigns `[na,nb,nc]` suffixes to
+  replicas, so `["Pb1"]` keeps matching the original Pb after
+  growing the cell). The right-click "Set this one cyan" path
+  emits this selector; AI scripts use it to recolour by label.
+- `{"atom_indices": [0, 5]}` — **Phase 4.** 0-based indices into
+  the rendered `draw_atoms`. Volatile across transforms — use
+  `labels` for transform-stable identity. The renderer threads
+  the index through `tag_atoms_with_groups`; library callers must
+  do the same when calling `atom_matches_selector` directly.
+- `{"fragment_labels": ["A0", "B1"]}` — **Phase 4.** Match every
+  atom whose fragment-table label is in the list. Used by the
+  per-instance polyhedron override pipeline (the renderer threads
+  `scene["atom_fragment_labels"][idx]` through to the matcher).
+- `{"fragment_indices": [2]}` — **Phase 4.** Same as
+  `fragment_labels` but matches by integer fragment index. Accepts
+  both bare integer (`5`) and digit-string (`"5"`) forms when the
+  caller threads the label through.
 
 Unknown keys are silently ignored. A selector that ends up with no
 recognised keys is **rejected** at the normaliser layer

@@ -14,6 +14,8 @@ MatterVis/
 ├── crystal_viewer/      ← the library + Dash app
 │   ├── api.py           ← REST handlers
 │   ├── app.py           ← Dash UI bindings (callbacks, layouts)
+│   ├── atom_groups.py   ← per-scene atom styling rules
+│   ├── bond_groups.py   ← per-scene bond styling rules
 │   ├── compass.py       ← camera-projected paper-coord indicators
 │   ├── cube.py          ← static cube/orbital figures (I/O, isosurfaces, atoms, bonds)
 │   ├── ideal_polyhedra.py
@@ -24,7 +26,8 @@ MatterVis/
 │   ├── ortep.py         ← thermal ellipsoid geometry + traces
 │   ├── renderer.py      ← `build_figure` Plotly assembly + `uniform_viewport`
 │   ├── scene.py         ← cell/cluster scene builder
-│   └── topology.py
+│   ├── topology.py      ← coordination polyhedra geometry & analysis
+│   └── transforms.py    ← supercell / grow / slab structure mutations
 ├── docs/                ← sphinx sources, score tables
 ├── scripts/             ← runnable scripts that exercise the public API
 │   └── private/         ← local/private analysis scripts; keep unpublished data ignored
@@ -132,7 +135,22 @@ both files.
  cache is partitioned per ligand restriction; do not collapse the
  cache key back to `(center_index, cutoff)` or two specs sharing a
  centre but differing in ligand will poison each other's pool.
-- REST surface `/api/v2/polyhedra` (CRUD + reorder) is part of the
+- `analyze_topology` / `extract_coordination_shell` also accept
+ `search_supercell=(na, nb, nc)`. This is the *neighbour-search*
+ supercell — independent of the display supercell from the
+ `repeat` transform. The neighbour-pool cache key includes it; do
+ not collapse the key back to ignore it or callers that grow the
+ search range will silently see stale (cached) hulls. Per-spec
+ colour and per-instance overrides are NOT in this geometry cache
+ key — they live on the renderer painter cache.
+- Polyhedron specs may carry `instance_overrides`, a dict keyed on
+ `fragment_label` whose values are partial style dicts
+ (`{"color": ..., "visible": ...}`). The renderer applies these
+ per-overlay in `topology_background_traces` and
+ `topology_foreground_traces`; the geometry cache key does NOT
+ include them, so flipping an instance is a cheap re-paint.
+- REST surface `/api/v2/polyhedra` (CRUD + reorder, plus
+ `instance_overrides/{fragment_label}` POST/DELETE) is part of the
  public API; back-incompatible changes require an API version bump.
 
 ### `crystal_viewer.atom_groups` + renderer — see [`agents/atom_groups_api.md`](agents/atom_groups_api.md)
@@ -158,10 +176,72 @@ both files.
  supported (mismatched per-atom materials would otherwise multiply
  trace counts and tank the figure JSON cache hit rate).
 - The figure-JSON cache key in `_cached_atom_bond_meshes` extends to
- `_atom_groups_cache_key(atom_groups)`. Editing or reordering a
- group must reliably re-render; keep the key in sync if you add new
+ `_atom_groups_cache_key(atom_groups)` AND
+ `bond_groups_cache_key(bond_groups)`. Editing or reordering either
+ list must reliably re-render; keep the key in sync if you add new
  group fields.
+- Atom-group selectors accept `all`, `elements`, `is_minor`,
+ `labels`, `atom_indices`, `fragment_labels`, `fragment_indices`.
+ Combining keys uses **AND** semantics; do not switch to OR or
+ callers' "atoms named Pb1 in fragment X" rules silently broaden.
 - REST surface `/api/v2/atom_groups` (CRUD + reorder) is part of the
+ public API; back-incompatible changes require an API version bump.
+
+### `crystal_viewer.bond_groups` + renderer — see [`agents/bond_groups_api.md`](agents/bond_groups_api.md)
+
+- Bond-group rules mirror atom-group shape:
+ `state["bond_groups"] = [{id, name, selector, color, visible,
+ opacity, radius_scale, enabled}, ...]`. List order with
+ later-wins on overlapping bonds.
+- Selector grammar is `all`, `between_elements` (set-equal,
+ order-independent), `labels` (list of label pairs, also
+ order-independent within each pair), and `is_minor`. Combining
+ keys uses **AND** semantics.
+- `tag_bonds_with_groups` writes per-bond `_render_color`,
+ `_render_visible`, `_render_opacity_scale`, `_render_radius_scale`.
+ The renderer's `_bond_segments` skips invisible bonds, prefers
+ `_render_color` over the per-half `color_i` / `color_j`, and
+ yields `(radius_scale, opacity_scale)` so `_bond_mesh_traces`
+ buckets segments by `(color, is_minor, radius_bin, opacity_bin)`.
+ Do not collapse this back to `(color, is_minor)` — bond rules
+ with non-default scales would otherwise stomp each other.
+- The renderer wraps bond-group tagging in `try…finally` so the
+ original bond dicts are restored after each render; downstream
+ code MUST NOT depend on `_render_*` outside a render pass.
+- REST surface `/api/v2/bond_groups` (CRUD + reorder) is part of the
+ public API; back-incompatible changes require an API version bump.
+
+### `crystal_viewer.transforms` + loader — see [`agents/transforms_api.md`](agents/transforms_api.md)
+
+- Transforms are an ordered, list-shaped pipeline:
+ `state["transforms"] = [{id, name, kind, params, enabled}, ...]`.
+ Each transform consumes the previous one's output scene; the
+ base (no-transform) scene is cached on the bundle, the
+ post-transform scene on `_transformed_scene_cache` keyed by
+ `(display_mode, show_hydrogen, transforms_cache_key(transforms))`.
+- Supported `kind`s: `repeat`, `grow_radius`, `grow_bonds`,
+ `complete_fragment`, `complete_polyhedron`, `by_symmetry`, `slab`.
+ Add new kinds via `apply_one_transform` dispatch + a normaliser
+ entry; never special-case kinds in `apply_transforms` itself.
+- `replicate_atoms` keeps the home-cell `(0,0,0)` replica's labels
+ unchanged and suffixes the new ones with `[na,nb,nc]`. Do not
+ relabel the home replica or atom-group rules and click handlers
+ stop matching the canonical names.
+- `MAX_ATOMS_AFTER_TRANSFORM` is the safety ceiling — raise it only
+ with a perf justification; the renderer is not free above ~50k.
+- After atoms change, callers MUST run `rebuild_scene_with_atoms`
+ (which re-detects bonds, recomputes bounds, regenerates fragment
+ labels). Returning a scene with stale `bonds` or
+ `_atom_fragment_labels` is what poisons polyhedron analysis.
+- `transforms_cache_key` is the canonical hashable summary of the
+ list. It includes `kind`, `enabled`, and sorted `params` keys; it
+ excludes `id` and `name` so a row rename stays a cheap re-paint.
+- The `polyhedron_search_supercell` field on the scene state lives
+ in `topology_state_cache`'s key, NOT in `transforms_cache_key`,
+ so changing the search range invalidates polyhedron geometry only,
+ not the entire scene.
+- REST surface `/api/v2/transforms` (CRUD + reorder) and the
+ `supercell` shorthand on `POST /api/v2/state` are part of the
  public API; back-incompatible changes require an API version bump.
 
 ### `crystal_viewer.scene` / `renderer` — see [`agents/scene_api.md`](agents/scene_api.md)
