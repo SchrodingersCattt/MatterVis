@@ -115,10 +115,13 @@ def main() -> None:
         "center_index": a_indices[0],
         "cutoff": 8.0,
     })
-    best = topology["angular"]["best_match"]
+    shape = topology.get("shape") or {}
+    label = shape.get("primary_label") or "n/a"
+    modifier = shape.get("label_modifier") or ""
+    label_text = f"{modifier} {label}".strip() if modifier else label
     print(f"Topology: {topology['center_label']} (type={topology['center_type']})  "
           f"CN={topology['coordination_number']}  "
-          f"best_ideal={best['name'] if best else 'n/a'}")
+          f"shape={label_text}")
 
     _api("POST", base, "/api/v2/camera/action", {
         "action": "orbit",
@@ -137,7 +140,11 @@ def main() -> None:
             "center_index": topology["center_index"],
             "coordination_number": topology["coordination_number"],
             "shell_distances_A": topology["distances"],
-            "best_ideal": topology["angular"]["best_match"],
+            "shape": {
+                "primary_label": shape.get("primary_label"),
+                "label_modifier": shape.get("label_modifier"),
+                "cshm_value": shape.get("cshm_value"),
+            },
         },
     }, indent=2))
     print(f"Wrote summary: {summary}")

@@ -73,52 +73,75 @@ shell" and "out of the shell" — no manual cutoff required.
 
 ---
 
-## 2. Angular RMSD vs ideal polyhedra (`angular.*`)
+## 2. Shape classification (`shape.*`)
 
-**What it is:** a dimensionless comparison of the shell's angular fingerprint
-against a library of ideal polyhedra of matching CN.
+**What it is:** a CShM (Continuous Shape Measure)-based classification of the
+shell against `molcrys_kit`'s registry of ideal polyhedra, with optional
+core-residual decomposition for shells that are *almost* a smaller registered
+polyhedron with one or two extra atoms (face caps, vertex extensions, edge
+bridges).
 
-**How it is computed** (`angular_rmsd_vs_ideals`):
+**How it is computed** (`molcrys_kit.analysis.shape.classify_shell`):
 
-1. Build the full list of pairwise centre-to-neighbour bond angles for the
-   actual shell (`C(CN, 2)` angles).
-2. Sort that list ascending → the **angular signature**.
-3. For every ideal polyhedron of the same CN, sort its signature the same way.
-4. RMSD across the sorted signatures:
+1. Project the shell onto the unit sphere (translate by `center`, normalise).
+2. For `k = 0, 1` residual atoms (a cheap superset of the rigid CShM
+   classifier), enumerate the `C(CN, k)` choices of which atoms to peel
+   off and which `CN-k` core polyhedra in the registry to fit.
+3. Fit each candidate via CShM — alternating Hungarian assignment and
+   Kabsch rotation steps over multiple random initial rotations — and
+   classify any peeled residual atom by its position in the ideal frame
+   (`face_cap`, `off_axis_cap`, `edge_bridge`, `vertex_extension`,
+   `interstitial`, `floating`).
+4. Pick the candidate with the lowest combined CShM + role penalty score;
+   that becomes `primary_label` (e.g. `"cuboctahedron"`,
+   `"tetrahedron"`, `"capped_square_antiprism"`).
+5. Tag the result with `label_modifier ∈ {"clean", "distorted",
+   "ambiguous", "irregular"}` based on the absolute CShM value
+   (clean < 0.5, distorted < 3.0) and the gap to the second-best
+   candidate.
 
-  ```
-  angular_rmsd = sqrt(mean((actual - ideal) ** 2))   # in degrees
-  ```
-
-5. Report results sorted ascending and single out `best_match`.
-
-**Library** (`crystal_viewer.ideal_polyhedra`):
+**Library** (CN coverage as of `molcrys_kit ≥ 0.4`):
 
 | CN | Ideal shapes |
 | --- | --- |
-| 8 | cube · square antiprism · dodecahedron |
-| 9 | capped square antiprism · tricapped trigonal prism |
-| 10 | bicapped square antiprism · bicapped dodecahedron |
-| 11 | capped pentagonal antiprism · capped pentagonal prism · edge-bicapped square antiprism |
+| 4 | tetrahedron · square_planar |
+| 5 | trigonal_bipyramid · square_pyramid |
+| 6 | octahedron · trigonal_prism |
+| 7 | pentagonal_bipyramid · capped_octahedron |
+| 8 | cube · square_antiprism · dodecahedron |
+| 9 | capped_square_antiprism · tricapped_trigonal_prism |
+| 10 | bicapped_square_antiprism · bicapped_dodecahedron · sphenocorona · gyrobifastigium |
+| 11 | capped_pentagonal_antiprism · tricapped_cube · etc. |
 | 12 | icosahedron · cuboctahedron |
 
-If the CN is outside 8..12, `results == []` and `best_match is None`.
+If the CN is outside the registry, `primary_label is None`,
+`candidates == []`, and `cshm_value is None`.
 
-**Output sub-dict `angular`:**
+**Output sub-dict `shape`:**
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `coordination_number` | int | echoes the CN actually compared |
-| `results` | `list[{name, angular_rmsd}]` | every ideal, sorted ascending |
-| `best_match` | dict \| None | `results[0]` or `None` |
+| `coordination_number` | int | CN actually classified |
+| `primary_label` | str \| None | best polyhedron name (e.g. `"cuboctahedron"`) |
+| `label_modifier` | str \| None | `"clean"` / `"distorted"` / `"ambiguous"` / `"irregular"` |
+| `cshm_value` | float \| None | combined CShM + role-penalty score (lower is better) |
+| `confidence_gap` | float \| None | score gap between best and second-best candidate |
+| `core` | dict \| None | `{prototype, cn, indices, cshm, quality, topology}` |
+| `residuals` | `list[dict]` | per-residual `{index, role, confidence, ...}` records |
+| `structural_description` | str | one-line human summary |
+| `candidates` | `list[{name, cshm, ...}]` | top-K alternatives, sorted ascending |
+| `best_match` | dict \| None | `candidates[0]` (kept for back-compat with v1 callers) |
 
 **Interpretation tips:**
 
-- `angular_rmsd` < 5° — essentially the ideal polyhedron (allow for thermal
-  motion and numerical precision).
-- 5–15° — clearly distorted but still in the same family.
-- > 20° — the shape has drifted far from any textbook polyhedron; pick up the
-  `prism_analysis.twist_deg` and `planarity.best_rms` below to triangulate.
+- `cshm_value < 0.5` — essentially the ideal polyhedron (`label_modifier = "clean"`).
+- `0.5 ≤ cshm_value < 3.0` — clearly distorted but still in the same family
+  (`label_modifier = "distorted"`).
+- `cshm_value ≥ 3.0` and a small `confidence_gap` — `label_modifier = "ambiguous"`;
+  inspect `candidates` for the runners-up.
+- `residuals` non-empty means the classifier had to peel one atom off the
+  shell to fit a smaller core polyhedron; the `role` field tells you whether
+  that atom is sitting over a face, off-axis, on an edge, etc.
 
 ---
 
@@ -179,7 +202,7 @@ described as a **prism** (stacked faces) or **antiprism** (rotated faces).
 
 - The 18° threshold sits halfway between an ideal pentagonal prism (0°) and
   an ideal pentagonal antiprism (36°).
-- Use this alongside `angular.best_match` — a "bicapped square antiprism"
+- Use this alongside `shape.primary_label` — a `"bicapped_square_antiprism"`
   reported as a prism (twist < 18°) is probably a mis-assignment.
 - For CN < 10 the twist is undefined and `classification` is `None`.
 
@@ -219,11 +242,13 @@ the dict:
   "coordination_number": 9,
   "gap_value_A": 0.124,
   "shell_distances_A": [4.98, 4.98, 4.98, 5.10, 5.10, 5.10, 5.10, 5.10, 5.10],
-  "angular": {
-    "best_match": {"name": "tricapped_trigonal_prism", "angular_rmsd_deg": 15.06},
-    "ranked": [
-      {"name": "tricapped_trigonal_prism", "angular_rmsd_deg": 15.06},
-      {"name": "capped_square_antiprism",  "angular_rmsd_deg": 16.71}
+  "shape": {
+    "primary_label": "tricapped_trigonal_prism",
+    "label_modifier": "distorted",
+    "cshm_value": 0.83,
+    "candidates": [
+      {"name": "tricapped_trigonal_prism", "cshm": 0.83},
+      {"name": "capped_square_antiprism",  "cshm": 1.42}
     ]
   },
   "planarity":      {"best_rms_A": 0.093, "best_indices": [1, 4, 5, 6, 7], "group_size": 5},
