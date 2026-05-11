@@ -24,6 +24,7 @@ except ImportError as exc:  # pragma: no cover - user-facing fallback
         "Install it with `python -m pip install dash`."
     ) from exc
 
+from . import perf_log
 from .api import register_api
 from .loader import LoadedCrystal, build_bundle_scene, build_empty_bundle, build_loaded_crystal, load_uploaded_cif
 from .presets import (
@@ -149,6 +150,7 @@ def _normalize_polyhedron_spec(
     ligand = _coerce_species_value(raw.get("ligand_species"))
     color = _coerce_hex_color(raw.get("color"), fallback_color)
     enabled = bool(raw.get("enabled", True))
+    instance_overrides = _coerce_instance_overrides(raw.get("instance_overrides"))
     return {
         "id": spec_id,
         "name": name,
@@ -159,15 +161,76 @@ def _normalize_polyhedron_spec(
         "ligand_species": ligand,
         "color": color,
         "enabled": enabled,
+        # Per-fragment override map: ``{fragment_label: {color: "#hex",
+        # visible: bool}}``. Empty dict means every fragment matched by
+        # this spec inherits the spec-level colour and visibility.
+        "instance_overrides": instance_overrides,
     }
+
+
+def _coerce_instance_overrides(raw: Any) -> dict[str, dict[str, Any]]:
+    """Validate the per-fragment override map on a polyhedron spec.
+
+    Accepts ``{fragment_label: {color: "#hex", visible: bool}}`` or
+    a list of ``{label: ..., color: ..., visible: ...}`` entries.
+    Unknown keys on each entry are dropped silently. Returns an
+    empty dict when the input is empty / malformed.
+    """
+    if raw is None:
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    if isinstance(raw, dict):
+        items = raw.items()
+        for label, entry in items:
+            if not isinstance(entry, dict):
+                continue
+            label_key = str(label)
+            cleaned: dict[str, Any] = {}
+            color = entry.get("color")
+            if color:
+                hex_color = _coerce_hex_color(color, "")
+                if hex_color:
+                    cleaned["color"] = hex_color
+            if "visible" in entry:
+                cleaned["visible"] = bool(entry["visible"])
+            if cleaned:
+                out[label_key] = cleaned
+    elif isinstance(raw, (list, tuple)):
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            label = str(entry.get("label") or entry.get("center_label") or "").strip()
+            if not label:
+                continue
+            cleaned = {}
+            color = entry.get("color")
+            if color:
+                hex_color = _coerce_hex_color(color, "")
+                if hex_color:
+                    cleaned["color"] = hex_color
+            if "visible" in entry:
+                cleaned["visible"] = bool(entry["visible"])
+            if cleaned:
+                out[label] = cleaned
+    return out
 
 
 # Selector keys we accept on atom-group rules. Anything outside this
 # set is silently dropped so a forward-compatible UI can post extra
 # experimental fields without breaking the persisted state schema.
-_ATOM_SELECTOR_KEYS = ("all", "elements", "is_minor")
+_ATOM_SELECTOR_KEYS = (
+    "all",
+    "elements",
+    "is_minor",
+    "labels",
+    "atom_indices",
+    "fragment_labels",
+    "fragment_indices",
+)
 _ATOM_GROUP_VALID_MATERIALS = {"mesh", "flat"}
 _ATOM_GROUP_VALID_STYLES = {"ball", "ball_stick", "stick", "ortep", "wireframe"}
+
+_BOND_SELECTOR_KEYS = ("all", "between_elements", "labels", "is_minor")
 
 
 def _coerce_atom_selector(raw: Any) -> Optional[dict[str, Any]]:
@@ -175,16 +238,24 @@ def _coerce_atom_selector(raw: Any) -> Optional[dict[str, Any]]:
 
     Supports today:
     - ``{"all": True}`` -- match every atom in the scene.
-    - ``{"elements": ["O", "S"]}`` -- match atoms whose element symbol
-      is in the list (case sensitive on the symbol; matches whatever
-      ``draw_atoms[i]["elem"]`` carries).
-    - ``{"is_minor": True}`` / ``{"is_minor": False}`` -- match by
-      disorder major/minor flag.
+    - ``{"elements": ["O", "S"]}`` -- element symbol filter.
+    - ``{"is_minor": True/False}`` -- disorder major/minor flag.
+    - ``{"labels": ["Pb1", "Cl3"]}`` -- exact atom label list (post-Phase 4
+      AI API affordance: the selector that survived a structure transform
+      and remains valid against the manifested atom list).
+    - ``{"atom_indices": [0, 5]}`` -- exact 0-based atom-index list in
+      the current ``draw_atoms`` (volatile across transforms; for
+      one-shot interactive picks).
+    - ``{"fragment_labels": ["B0", "X3"]}`` -- match every atom whose
+      fragment-table label is in the list (used by the per-instance
+      polyhedron override pipeline when the user wants atoms inside
+      a specific polyhedron repainted as a group).
+    - ``{"fragment_indices": [2]}`` -- by 0-based fragment index.
 
-    Multiple keys can be combined; an atom matches when EVERY present
-    key matches (logical AND). Returns ``None`` when the dict carries
-    no recognised selectors at all (forces the caller to drop the
-    group instead of silently making it match everything).
+    Multiple keys are combined with logical AND -- e.g.
+    ``{"elements": ["Pb"], "is_minor": False}`` means "major Pb atoms
+    only". The matcher in :mod:`crystal_viewer.atom_groups` enforces
+    this; see ``atom_matches_selector``.
     """
     if not isinstance(raw, dict):
         return None
@@ -196,6 +267,72 @@ def _coerce_atom_selector(raw: Any) -> Optional[dict[str, Any]]:
         cleaned = [str(item) for item in elements if item is not None and str(item).strip()]
         if cleaned:
             selector["elements"] = cleaned
+    if "is_minor" in raw:
+        selector["is_minor"] = bool(raw["is_minor"])
+    labels = raw.get("labels")
+    if isinstance(labels, (list, tuple)):
+        cleaned = [str(item) for item in labels if item is not None and str(item).strip()]
+        if cleaned:
+            selector["labels"] = cleaned
+    atom_indices = raw.get("atom_indices")
+    if isinstance(atom_indices, (list, tuple)):
+        cleaned_idx: list[int] = []
+        for item in atom_indices:
+            try:
+                cleaned_idx.append(int(item))
+            except (TypeError, ValueError):
+                continue
+        if cleaned_idx:
+            selector["atom_indices"] = cleaned_idx
+    fragment_labels = raw.get("fragment_labels")
+    if isinstance(fragment_labels, (list, tuple)):
+        cleaned = [str(item) for item in fragment_labels if item is not None and str(item).strip()]
+        if cleaned:
+            selector["fragment_labels"] = cleaned
+    fragment_indices = raw.get("fragment_indices")
+    if isinstance(fragment_indices, (list, tuple)):
+        cleaned_fi: list[int] = []
+        for item in fragment_indices:
+            try:
+                cleaned_fi.append(int(item))
+            except (TypeError, ValueError):
+                continue
+        if cleaned_fi:
+            selector["fragment_indices"] = cleaned_fi
+    return selector or None
+
+
+def _coerce_bond_selector(raw: Any) -> Optional[dict[str, Any]]:
+    """Validate a bond-group selector dict.
+
+    Supports today:
+    - ``{"all": True}`` -- every bond.
+    - ``{"between_elements": ["O", "H"]}`` -- bonds whose endpoint
+      elements form an unordered match against the listed pair / triple.
+      A length-2 list matches O-H or H-O; a length-1 list (e.g. ``["O"]``)
+      matches O-X for any second element. Length 3+ uses a "both ends in
+      the set" rule (useful for picking out e.g. M-X bonds where X is
+      a halide family).
+    - ``{"labels": ["Pb1-Cl3"]}`` -- exact bond identifier strings
+      (constructed as ``"<atom_i_label>-<atom_j_label>"`` in label order).
+    - ``{"is_minor": True/False}`` -- pick by major/minor flag (matches
+      the bond-level ``is_minor`` field already on the scene).
+    """
+    if not isinstance(raw, dict):
+        return None
+    selector: dict[str, Any] = {}
+    if raw.get("all"):
+        selector["all"] = True
+    between_elements = raw.get("between_elements")
+    if isinstance(between_elements, (list, tuple)):
+        cleaned = [str(item) for item in between_elements if item is not None and str(item).strip()]
+        if cleaned:
+            selector["between_elements"] = cleaned
+    labels = raw.get("labels")
+    if isinstance(labels, (list, tuple)):
+        cleaned = [str(item) for item in labels if item is not None and str(item).strip()]
+        if cleaned:
+            selector["labels"] = cleaned
     if "is_minor" in raw:
         selector["is_minor"] = bool(raw["is_minor"])
     return selector or None
@@ -284,6 +421,243 @@ def _normalize_atom_groups(raw_groups: Any) -> list[dict[str, Any]]:
     return out
 
 
+_BOND_GROUP_FALLBACK_COLOR = "#7C5CBF"
+
+
+def _bond_group_default_name(selector: dict[str, Any]) -> str:
+    if selector.get("all"):
+        return "all bonds"
+    parts = []
+    if "between_elements" in selector:
+        parts.append("/".join(selector["between_elements"]))
+    if "labels" in selector:
+        parts.append(f"{len(selector['labels'])} labels")
+    if "is_minor" in selector:
+        parts.append("minor" if selector["is_minor"] else "major")
+    return " ".join(parts) or "bond group"
+
+
+def _normalize_bond_group(
+    raw: Any,
+    *,
+    existing_ids: set[str],
+    fallback_color: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    """Coerce one user payload into the canonical bond-group shape.
+
+    The shape mirrors :func:`_normalize_atom_group`. Fields:
+    - ``id``: stable id (auto-generated if missing).
+    - ``name``: display label.
+    - ``selector``: dict (see :func:`_coerce_bond_selector`).
+    - ``color``: hex string (None means inherit per-atom bond colours).
+    - ``visible``: bool.
+    - ``opacity``: float in [0, 1] or None.
+    - ``radius_scale``: float >0 multiplier on the ``style.bond_radius``.
+    """
+    if not isinstance(raw, dict):
+        return None
+    selector = _coerce_bond_selector(raw.get("selector"))
+    if selector is None:
+        return None
+    group_id = str(raw.get("id") or "").strip()
+    if not group_id or group_id in existing_ids:
+        group_id = f"bgrp_{uuid.uuid4().hex[:10]}"
+        while group_id in existing_ids:  # pragma: no cover - astronomically unlikely
+            group_id = f"bgrp_{uuid.uuid4().hex[:10]}"
+    existing_ids.add(group_id)
+    name = str(raw.get("name") or _bond_group_default_name(selector)).strip() or "bond group"
+    color = _coerce_hex_color(raw.get("color"), fallback_color) if raw.get("color") else None
+    visible = bool(raw.get("visible", True))
+    opacity = _coerce_optional_float(raw.get("opacity"))
+    radius_scale = raw.get("radius_scale")
+    try:
+        radius_value = float(radius_scale) if radius_scale is not None else None
+    except (TypeError, ValueError):
+        radius_value = None
+    if radius_value is not None:
+        radius_value = max(0.05, min(8.0, radius_value))
+    return {
+        "id": group_id,
+        "name": name,
+        "selector": selector,
+        "color": color,
+        "visible": visible,
+        "opacity": opacity,
+        "radius_scale": radius_value,
+    }
+
+
+def _normalize_bond_groups(raw_groups: Any) -> list[dict[str, Any]]:
+    if raw_groups is None or not isinstance(raw_groups, (list, tuple)):
+        return []
+    out: list[dict[str, Any]] = []
+    existing_ids: set[str] = set()
+    for raw in raw_groups:
+        group = _normalize_bond_group(raw, existing_ids=existing_ids)
+        if group is not None:
+            out.append(group)
+    return out
+
+
+_TRANSFORM_KIND_NAMES = {
+    "repeat": "Repeat",
+    "grow_radius": "Grow by radius",
+    "grow_bonds": "Grow by bonds",
+    "complete_fragment": "Complete fragments",
+    "complete_polyhedron": "Complete polyhedra",
+    "by_symmetry": "Apply symmetry",
+    "slab": "Slab",
+}
+
+
+def _normalize_transform(
+    raw: Any,
+    *,
+    existing_ids: set[str],
+) -> Optional[dict[str, Any]]:
+    """Coerce one transform payload into the canonical spec shape.
+
+    See :mod:`crystal_viewer.transforms` for the full schema. We
+    validate the ``kind`` and trust the kind-specific dispatcher to
+    coerce its own params; the only non-trivial coercion done here is
+    the ``seeds`` selector (reuses the atom-group selector grammar).
+    """
+    if not isinstance(raw, dict):
+        return None
+    kind = str(raw.get("kind") or "").strip()
+    from .transforms import KNOWN_TRANSFORM_KINDS
+
+    if kind not in KNOWN_TRANSFORM_KINDS:
+        return None
+    transform_id = str(raw.get("id") or "").strip()
+    if not transform_id or transform_id in existing_ids:
+        transform_id = f"trf_{uuid.uuid4().hex[:10]}"
+        while transform_id in existing_ids:  # pragma: no cover - astronomically unlikely
+            transform_id = f"trf_{uuid.uuid4().hex[:10]}"
+    existing_ids.add(transform_id)
+    name = str(raw.get("name") or _TRANSFORM_KIND_NAMES.get(kind, kind)).strip() or kind
+    enabled = bool(raw.get("enabled", True))
+    params_raw = raw.get("params") or {}
+    if not isinstance(params_raw, dict):
+        params_raw = {}
+    params: dict[str, Any] = {}
+    if kind == "repeat":
+        for axis in ("a", "b", "c"):
+            try:
+                params[axis] = max(1, int(params_raw.get(axis, 1) or 1))
+            except (TypeError, ValueError):
+                params[axis] = 1
+    elif kind in ("grow_radius", "grow_bonds", "complete_fragment", "complete_polyhedron", "by_symmetry"):
+        seeds = _coerce_atom_selector(params_raw.get("seeds"))
+        params["seeds"] = seeds or {}
+        if kind == "grow_radius":
+            try:
+                params["radius"] = max(0.0, float(params_raw.get("radius", 0.0) or 0.0))
+            except (TypeError, ValueError):
+                params["radius"] = 0.0
+        elif kind == "grow_bonds":
+            try:
+                params["hops"] = max(0, int(params_raw.get("hops", 1) or 1))
+            except (TypeError, ValueError):
+                params["hops"] = 1
+        elif kind == "complete_fragment":
+            try:
+                params["max_hops"] = max(1, int(params_raw.get("max_hops", 32) or 32))
+            except (TypeError, ValueError):
+                params["max_hops"] = 32
+        elif kind == "complete_polyhedron":
+            try:
+                params["cutoff"] = max(0.0, float(params_raw.get("cutoff", 4.0) or 4.0))
+            except (TypeError, ValueError):
+                params["cutoff"] = 4.0
+        elif kind == "by_symmetry":
+            ops_in = params_raw.get("ops") or []
+            ops_out: list[list[Any]] = []
+            for op in ops_in:
+                if not isinstance(op, (list, tuple)) or len(op) != 2:
+                    continue
+                R, t = op
+                try:
+                    R_arr = [[float(x) for x in row] for row in R]
+                    t_arr = [float(x) for x in t]
+                    if len(R_arr) == 3 and all(len(row) == 3 for row in R_arr) and len(t_arr) == 3:
+                        ops_out.append([R_arr, t_arr])
+                except (TypeError, ValueError):
+                    continue
+            params["ops"] = ops_out
+    elif kind == "slab":
+        miller_raw = params_raw.get("miller") or [1, 0, 0]
+        try:
+            miller = [int(x) for x in miller_raw]
+        except (TypeError, ValueError):
+            miller = [1, 0, 0]
+        if len(miller) != 3:
+            miller = [1, 0, 0]
+        params["miller"] = miller
+        layers = params_raw.get("layers")
+        if layers is not None:
+            try:
+                params["layers"] = max(1, int(layers))
+            except (TypeError, ValueError):
+                params["layers"] = None
+        else:
+            params["layers"] = None
+        min_thickness = params_raw.get("min_thickness")
+        if min_thickness is not None:
+            try:
+                params["min_thickness"] = max(0.0, float(min_thickness))
+            except (TypeError, ValueError):
+                params["min_thickness"] = None
+        else:
+            params["min_thickness"] = None
+        try:
+            params["vacuum"] = max(0.0, float(params_raw.get("vacuum", 10.0) or 10.0))
+        except (TypeError, ValueError):
+            params["vacuum"] = 10.0
+    return {
+        "id": transform_id,
+        "name": name,
+        "kind": kind,
+        "params": params,
+        "enabled": enabled,
+    }
+
+
+def _normalize_transforms(raw_transforms: Any) -> list[dict[str, Any]]:
+    if raw_transforms is None or not isinstance(raw_transforms, (list, tuple)):
+        return []
+    out: list[dict[str, Any]] = []
+    existing_ids: set[str] = set()
+    for raw in raw_transforms:
+        transform = _normalize_transform(raw, existing_ids=existing_ids)
+        if transform is not None:
+            out.append(transform)
+    return out
+
+
+def _normalize_search_supercell(value: Any) -> list[int]:
+    """Convert the ``polyhedron_search_supercell`` state value into a
+    canonical ``[na, nb, nc]`` triple.
+
+    Accepts an int (broadcast across axes), a 3-list, or ``None`` /
+    missing (returns ``[0, 0, 0]`` -- cutoff-driven span only).
+    """
+    if value is None:
+        return [0, 0, 0]
+    if isinstance(value, (int, float)):
+        v = max(0, int(value))
+        return [v, v, v]
+    if isinstance(value, (list, tuple)) and len(value) >= 3:
+        out: list[int] = []
+        for x in list(value)[:3]:
+            try:
+                out.append(max(0, int(x)))
+            except (TypeError, ValueError):
+                out.append(0)
+        return out
+    return [0, 0, 0]
+
+
 def _legacy_monochrome_group(existing_ids: set[str]) -> dict[str, Any]:
     """Synthesize an atom_group representing the legacy ``monochrome``
     flag: paint every atom black. Used by ``normalize_state`` to
@@ -306,6 +680,57 @@ def _legacy_monochrome_group(existing_ids: set[str]) -> dict[str, Any]:
 # edits + deletes (see ``_polyhedra_row_helpers`` and the matching
 # block of ``register_callbacks``).
 _AUTO_LIGAND_VALUE = "__auto__"
+
+
+# Bucket boundaries (in milliseconds) used by the perf-log panel to
+# colour-code event durations. Keep small so the user can spot
+# ``> 500 ms`` red rows at a glance during a slow interaction.
+_PERF_FAST_MS = 50.0
+_PERF_SLOW_MS = 500.0
+
+
+def _perf_log_row(entry: dict[str, Any]) -> Any:
+    """Render one perf-log event as a Dash row.
+
+    Layout: ``[hh:mm:ss.mmm] [label] [duration ms] [info kv pairs]``
+    The duration cell is coloured green / amber / red based on
+    ``_PERF_FAST_MS`` / ``_PERF_SLOW_MS`` so slow events pop out
+    visually.
+    """
+    iso = entry.get("iso", "")
+    clock = iso.split("T", 1)[1] if "T" in iso else iso
+    label = entry.get("label", "")
+    ms = entry.get("ms")
+    if ms is None:
+        ms_text = ""
+        ms_class = "perf-log-ms perf-log-ms--none"
+    else:
+        ms_text = f"{ms:6.1f} ms"
+        if ms < _PERF_FAST_MS:
+            ms_class = "perf-log-ms perf-log-ms--fast"
+        elif ms < _PERF_SLOW_MS:
+            ms_class = "perf-log-ms perf-log-ms--mid"
+        else:
+            ms_class = "perf-log-ms perf-log-ms--slow"
+    info = entry.get("info") or {}
+    info_pairs = []
+    for key, value in info.items():
+        if isinstance(value, (list, tuple)):
+            value = ",".join(str(v) for v in value[:3]) + ("…" if len(value) > 3 else "")
+        text = str(value)
+        if len(text) > 36:
+            text = text[:33] + "…"
+        info_pairs.append(f"{key}={text}")
+    info_text = " ".join(info_pairs)
+    return html.Div(
+        [
+            html.Span(clock, className="perf-log-clock"),
+            html.Span(label, className="perf-log-label"),
+            html.Span(ms_text, className=ms_class),
+            html.Span(info_text, className="perf-log-info"),
+        ],
+        className="perf-log-row",
+    )
 
 
 def _polyhedra_table_rows(
@@ -568,6 +993,753 @@ def _atom_groups_table_rows(
             )
         )
     return rows
+
+
+# --- Phase 4 UI: transforms + bond_groups + polyhedron search supercell ---
+#
+# These mirror the polyhedra/atom_groups table pattern: each row gets
+# pattern-matched ``{type, transform_id|group_id}`` ids so a single
+# ALL-input callback handles add/edit/delete dispatching by
+# ``callback_context.triggered_id``. The widgets are deliberately minimal --
+# the contract is "every backend feature is reachable from the UI", not
+# "the UI is pretty". Polished forms can land later; the right-click /
+# keyboard layer can also push selectors into the same text inputs used
+# here.
+
+_BOND_GROUP_KIND_ALL = "all"
+_BOND_GROUP_KIND_BETWEEN = "between"
+_BOND_GROUP_KIND_MINOR = "minor"
+_BOND_GROUP_KIND_MAJOR = "major"
+
+
+def _bond_selector_kind(selector: dict[str, Any]) -> str:
+    if selector.get("all"):
+        return _BOND_GROUP_KIND_ALL
+    if selector.get("between_elements"):
+        return _BOND_GROUP_KIND_BETWEEN
+    if "is_minor" in selector:
+        return _BOND_GROUP_KIND_MINOR if selector["is_minor"] else _BOND_GROUP_KIND_MAJOR
+    return _BOND_GROUP_KIND_ALL
+
+
+def _bond_selector_elements_text(selector: dict[str, Any]) -> list[str]:
+    return [str(x) for x in (selector.get("between_elements") or [])]
+
+
+def _bond_groups_table_rows(
+    groups: list[dict[str, Any]],
+    element_options: list[dict[str, Any]],
+):
+    """One row of dash inputs per bond-group rule. Same pattern-match
+    scheme as ``_atom_groups_table_rows`` but with bond-specific
+    selectors (all / between elements / minor / major) and bond-specific
+    style fields (color / opacity / radius_scale).
+    """
+    from dash import dcc, html
+
+    if not groups:
+        return [
+            html.Div(
+                "No bond-group rules. Click \u201cAdd\u201d or right-click a bond to start.",
+                style={"fontSize": "12px", "color": "#777", "margin": "6px 0"},
+            )
+        ]
+    rows = []
+    for group in groups:
+        selector = group.get("selector") or {}
+        kind = _bond_selector_kind(selector)
+        between_values = _bond_selector_elements_text(selector)
+        rows.append(
+            html.Div(
+                [
+                    html.Div(
+                        [
+                            dcc.Checklist(
+                                id={"type": "bg-row-visible", "group_id": group["id"]},
+                                options=[{"label": "", "value": "yes"}],
+                                value=["yes"] if group.get("visible", True) else [],
+                                style={"display": "inline-block"},
+                            ),
+                            dcc.Input(
+                                id={"type": "bg-row-color", "group_id": group["id"]},
+                                type="color",
+                                value=str(group.get("color") or _BOND_GROUP_FALLBACK_COLOR),
+                                style={
+                                    "width": "30px",
+                                    "height": "26px",
+                                    "padding": "0",
+                                    "border": "1px solid #BBB",
+                                    "verticalAlign": "middle",
+                                    "marginLeft": "4px",
+                                },
+                                debounce=False,
+                            ),
+                            dcc.Dropdown(
+                                id={"type": "bg-row-kind", "group_id": group["id"]},
+                                options=[
+                                    {"label": "all bonds", "value": _BOND_GROUP_KIND_ALL},
+                                    {"label": "between elements", "value": _BOND_GROUP_KIND_BETWEEN},
+                                    {"label": "minor only", "value": _BOND_GROUP_KIND_MINOR},
+                                    {"label": "major only", "value": _BOND_GROUP_KIND_MAJOR},
+                                ],
+                                value=kind,
+                                clearable=False,
+                                style={"flex": "1", "marginLeft": "4px", "minWidth": "100px", "fontSize": "12px"},
+                            ),
+                            dcc.Dropdown(
+                                id={"type": "bg-row-elements", "group_id": group["id"]},
+                                options=element_options,
+                                value=between_values if kind == _BOND_GROUP_KIND_BETWEEN else [],
+                                multi=True,
+                                placeholder="Pick 1\u20132 elements (e.g. Pb, Cl)",
+                                style={
+                                    "flex": "2",
+                                    "marginLeft": "4px",
+                                    "minWidth": "120px",
+                                    "fontSize": "12px",
+                                    "display": "block" if kind == _BOND_GROUP_KIND_BETWEEN else "none",
+                                },
+                            ),
+                            html.Button(
+                                "\u00d7",
+                                id={"type": "bg-row-delete", "group_id": group["id"]},
+                                n_clicks=0,
+                                style={
+                                    "background": "transparent",
+                                    "border": "1px solid #DDD",
+                                    "color": "#A00",
+                                    "padding": "0 8px",
+                                    "cursor": "pointer",
+                                    "lineHeight": "20px",
+                                    "borderRadius": "3px",
+                                    "marginLeft": "4px",
+                                },
+                                title="Remove this bond-group rule",
+                            ),
+                        ],
+                        style={"display": "flex", "alignItems": "center", "gap": "2px"},
+                    ),
+                    html.Div(
+                        [
+                            html.Span("opacity", style={"fontSize": "11px", "color": "#666"}),
+                            dcc.Slider(
+                                id={"type": "bg-row-opacity", "group_id": group["id"]},
+                                min=0.0,
+                                max=1.0,
+                                step=0.05,
+                                value=float(group.get("opacity") if group.get("opacity") is not None else 1.0),
+                                marks={0.0: "0", 0.5: "0.5", 1.0: "1"},
+                                tooltip={"placement": "bottom", "always_visible": False},
+                                updatemode="mouseup",
+                                included=True,
+                            ),
+                        ],
+                        style={"marginTop": "4px", "padding": "0 4px"},
+                    ),
+                    html.Div(
+                        [
+                            html.Span("radius \u00d7", style={"fontSize": "11px", "color": "#666"}),
+                            dcc.Slider(
+                                id={"type": "bg-row-radius", "group_id": group["id"]},
+                                min=0.1,
+                                max=3.0,
+                                step=0.1,
+                                value=float(group.get("radius_scale") if group.get("radius_scale") is not None else 1.0),
+                                marks={0.5: "0.5", 1.0: "1", 2.0: "2"},
+                                tooltip={"placement": "bottom", "always_visible": False},
+                                updatemode="mouseup",
+                                included=True,
+                            ),
+                        ],
+                        style={"marginTop": "4px", "padding": "0 4px"},
+                    ),
+                ],
+                style={
+                    "padding": "6px 4px",
+                    "marginBottom": "6px",
+                    "border": "1px solid #EEE",
+                    "borderRadius": "4px",
+                    "background": "#FAFAFA",
+                },
+            )
+        )
+    return rows
+
+
+# Seed-selector text format used in the Transforms UI rows. The text input
+# accepts (case-insensitive):
+#   - ``"all"``                 -> {"all": true}
+#   - ``"elem:Pb,Cl"`` / ``"el:Pb"`` -> {"elements": ["Pb","Cl"]}
+#   - ``"label:Pb1,Cl3"`` / ``"lab:Pb1"`` -> {"labels": ["Pb1","Cl3"]}
+#   - ``"index:0,5"`` / ``"idx:0,5"`` -> {"atom_indices": [0,5]}
+#   - ``"frag:A0"`` / ``"fragment:A0"`` -> {"fragment_labels": ["A0"]}
+# Bare comma-separated values (no prefix) are treated as ``elements``
+# because that is the most common case for AI scripting.
+
+def _seed_selector_to_text(seeds: dict[str, Any] | None) -> str:
+    if not isinstance(seeds, dict) or not seeds:
+        return ""
+    if seeds.get("all"):
+        return "all"
+    if seeds.get("elements"):
+        return "elem:" + ",".join(str(x) for x in seeds["elements"])
+    if seeds.get("labels"):
+        return "label:" + ",".join(str(x) for x in seeds["labels"])
+    if seeds.get("atom_indices"):
+        return "index:" + ",".join(str(x) for x in seeds["atom_indices"])
+    if seeds.get("fragment_labels"):
+        return "frag:" + ",".join(str(x) for x in seeds["fragment_labels"])
+    return ""
+
+
+def _seed_text_to_selector(text: Any) -> dict[str, Any]:
+    if text is None:
+        return {}
+    raw = str(text).strip()
+    if not raw:
+        return {}
+    if raw.lower() == "all":
+        return {"all": True}
+    if ":" in raw:
+        prefix, rest = raw.split(":", 1)
+        prefix = prefix.strip().lower()
+        values = [v.strip() for v in rest.split(",") if v.strip()]
+        if not values:
+            return {}
+        if prefix in ("elem", "element", "elements", "el"):
+            return {"elements": values}
+        if prefix in ("label", "labels", "lab"):
+            return {"labels": values}
+        if prefix in ("index", "indices", "idx", "atom_index"):
+            try:
+                return {"atom_indices": [int(v) for v in values]}
+            except ValueError:
+                return {}
+        if prefix in ("frag", "fragment", "fragment_labels"):
+            return {"fragment_labels": values}
+        return {}
+    # No prefix: treat as element list (common AI / quick-typing case).
+    values = [v.strip() for v in raw.split(",") if v.strip()]
+    return {"elements": values} if values else {}
+
+
+def _transform_param_widgets(transform: dict[str, Any]) -> list[Any]:
+    """Build the per-kind parameter widgets for one transform row.
+
+    All widgets carry ``{type: "trf-param-<field>", transform_id: ...}``
+    ids so the parent callback can identify them. The set of widgets is
+    chosen per ``kind``; absent fields render as nothing so the row
+    height stays predictable per transform kind.
+    """
+    from dash import dcc, html
+
+    transform_id = transform["id"]
+    kind = transform.get("kind") or "repeat"
+    params = transform.get("params") or {}
+    children: list[Any] = []
+    if kind == "repeat":
+        for axis in ("a", "b", "c"):
+            children.append(
+                html.Span(axis, style={"fontSize": "11px", "color": "#666", "margin": "0 2px 0 6px"})
+            )
+            children.append(
+                dcc.Input(
+                    id={"type": f"trf-param-{axis}", "transform_id": transform_id},
+                    type="number",
+                    min=1,
+                    step=1,
+                    value=int(params.get(axis, 1) or 1),
+                    style={"width": "50px", "fontSize": "12px"},
+                    debounce=True,
+                )
+            )
+    elif kind in ("grow_radius", "grow_bonds", "complete_fragment", "complete_polyhedron", "by_symmetry"):
+        children.append(
+            html.Span("seeds", style={"fontSize": "11px", "color": "#666", "marginRight": "4px"})
+        )
+        children.append(
+            dcc.Input(
+                id={"type": "trf-param-seeds", "transform_id": transform_id},
+                type="text",
+                value=_seed_selector_to_text(params.get("seeds")),
+                placeholder="elem:Pb  /  label:Pb1  /  all",
+                style={"flex": "1", "minWidth": "100px", "fontSize": "12px"},
+                debounce=True,
+            )
+        )
+        if kind == "grow_radius":
+            children.extend([
+                html.Span("\u00c5", style={"fontSize": "11px", "color": "#666", "margin": "0 2px 0 6px"}),
+                dcc.Input(
+                    id={"type": "trf-param-radius", "transform_id": transform_id},
+                    type="number",
+                    min=0.0,
+                    step=0.1,
+                    value=float(params.get("radius", 0.0) or 0.0),
+                    style={"width": "60px", "fontSize": "12px"},
+                    debounce=True,
+                ),
+            ])
+        elif kind == "grow_bonds":
+            children.extend([
+                html.Span("hops", style={"fontSize": "11px", "color": "#666", "margin": "0 2px 0 6px"}),
+                dcc.Input(
+                    id={"type": "trf-param-hops", "transform_id": transform_id},
+                    type="number",
+                    min=0,
+                    step=1,
+                    value=int(params.get("hops", 1) or 1),
+                    style={"width": "50px", "fontSize": "12px"},
+                    debounce=True,
+                ),
+            ])
+        elif kind == "complete_fragment":
+            children.extend([
+                html.Span("max hops", style={"fontSize": "11px", "color": "#666", "margin": "0 2px 0 6px"}),
+                dcc.Input(
+                    id={"type": "trf-param-maxhops", "transform_id": transform_id},
+                    type="number",
+                    min=1,
+                    step=1,
+                    value=int(params.get("max_hops", 32) or 32),
+                    style={"width": "50px", "fontSize": "12px"},
+                    debounce=True,
+                ),
+            ])
+        elif kind == "complete_polyhedron":
+            children.extend([
+                html.Span("cutoff \u00c5", style={"fontSize": "11px", "color": "#666", "margin": "0 2px 0 6px"}),
+                dcc.Input(
+                    id={"type": "trf-param-cutoff", "transform_id": transform_id},
+                    type="number",
+                    min=0.0,
+                    step=0.1,
+                    value=float(params.get("cutoff", 4.0) or 4.0),
+                    style={"width": "60px", "fontSize": "12px"},
+                    debounce=True,
+                ),
+            ])
+        elif kind == "by_symmetry":
+            # JSON ops textarea -- power-user / AI path. Empty = no ops.
+            import json as _json
+            ops_json = _json.dumps(params.get("ops") or [])
+            children.append(
+                dcc.Textarea(
+                    id={"type": "trf-param-ops", "transform_id": transform_id},
+                    value=ops_json,
+                    placeholder='[[[[r11,r12,r13],[r21,r22,r23],[r31,r32,r33]],[tx,ty,tz]], ...]',
+                    style={"width": "100%", "minHeight": "40px", "fontSize": "11px", "fontFamily": "monospace", "marginTop": "4px"},
+                ),
+            )
+    elif kind == "slab":
+        miller = params.get("miller") or [1, 0, 0]
+        for i, axis in enumerate(("h", "k", "l")):
+            children.append(
+                html.Span(axis, style={"fontSize": "11px", "color": "#666", "margin": "0 2px 0 6px"})
+            )
+            children.append(
+                dcc.Input(
+                    id={"type": f"trf-param-miller-{i}", "transform_id": transform_id},
+                    type="number",
+                    step=1,
+                    value=int(miller[i] if i < len(miller) else 0),
+                    style={"width": "44px", "fontSize": "12px"},
+                    debounce=True,
+                )
+            )
+        children.extend([
+            html.Span("layers", style={"fontSize": "11px", "color": "#666", "margin": "0 2px 0 6px"}),
+            dcc.Input(
+                id={"type": "trf-param-layers", "transform_id": transform_id},
+                type="number",
+                min=1,
+                step=1,
+                value=int(params.get("layers") or 3),
+                style={"width": "50px", "fontSize": "12px"},
+                debounce=True,
+            ),
+            html.Span("vacuum \u00c5", style={"fontSize": "11px", "color": "#666", "margin": "0 2px 0 6px"}),
+            dcc.Input(
+                id={"type": "trf-param-vacuum", "transform_id": transform_id},
+                type="number",
+                min=0.0,
+                step=0.5,
+                value=float(params.get("vacuum", 10.0) or 10.0),
+                style={"width": "60px", "fontSize": "12px"},
+                debounce=True,
+            ),
+        ])
+    return children
+
+
+def _transforms_table_rows(transforms: list[dict[str, Any]]):
+    """One row per transform spec. Each row carries the kind label,
+    enabled/delete controls, and a kind-specific parameter line."""
+    from dash import dcc, html
+
+    if not transforms:
+        return [
+            html.Div(
+                "No transforms. Use the Add menu below to repeat the cell, grow by radius, slab, ...",
+                style={"fontSize": "12px", "color": "#777", "margin": "6px 0"},
+            )
+        ]
+    rows = []
+    for index, transform in enumerate(transforms):
+        kind = transform.get("kind") or "repeat"
+        rows.append(
+            html.Div(
+                [
+                    html.Div(
+                        [
+                            html.Span(
+                                f"{index + 1}.",
+                                style={"fontSize": "11px", "color": "#888", "marginRight": "4px", "minWidth": "16px"},
+                            ),
+                            html.Span(
+                                _TRANSFORM_KIND_NAMES.get(kind, kind),
+                                style={
+                                    "fontSize": "12px",
+                                    "fontWeight": "bold",
+                                    "color": "#444",
+                                    "marginRight": "6px",
+                                    "flex": "1",
+                                },
+                            ),
+                            dcc.Checklist(
+                                id={"type": "trf-row-enabled", "transform_id": transform["id"]},
+                                options=[{"label": "", "value": "yes"}],
+                                value=["yes"] if transform.get("enabled", True) else [],
+                                style={"display": "inline-block", "marginLeft": "4px"},
+                            ),
+                            html.Button(
+                                "\u25b2",
+                                id={"type": "trf-row-up", "transform_id": transform["id"]},
+                                n_clicks=0,
+                                disabled=index == 0,
+                                style={
+                                    "background": "transparent",
+                                    "border": "1px solid #DDD",
+                                    "color": "#666",
+                                    "padding": "0 4px",
+                                    "cursor": "pointer" if index > 0 else "not-allowed",
+                                    "lineHeight": "18px",
+                                    "borderRadius": "3px",
+                                    "marginLeft": "2px",
+                                    "fontSize": "11px",
+                                },
+                                title="Move earlier in the pipeline",
+                            ),
+                            html.Button(
+                                "\u25bc",
+                                id={"type": "trf-row-down", "transform_id": transform["id"]},
+                                n_clicks=0,
+                                disabled=index >= len(transforms) - 1,
+                                style={
+                                    "background": "transparent",
+                                    "border": "1px solid #DDD",
+                                    "color": "#666",
+                                    "padding": "0 4px",
+                                    "cursor": "pointer" if index < len(transforms) - 1 else "not-allowed",
+                                    "lineHeight": "18px",
+                                    "borderRadius": "3px",
+                                    "marginLeft": "2px",
+                                    "fontSize": "11px",
+                                },
+                                title="Move later in the pipeline",
+                            ),
+                            html.Button(
+                                "\u00d7",
+                                id={"type": "trf-row-delete", "transform_id": transform["id"]},
+                                n_clicks=0,
+                                style={
+                                    "background": "transparent",
+                                    "border": "1px solid #DDD",
+                                    "color": "#A00",
+                                    "padding": "0 8px",
+                                    "cursor": "pointer",
+                                    "lineHeight": "20px",
+                                    "borderRadius": "3px",
+                                    "marginLeft": "4px",
+                                },
+                                title="Remove this transform",
+                            ),
+                        ],
+                        style={"display": "flex", "alignItems": "center"},
+                    ),
+                    html.Div(
+                        _transform_param_widgets(transform),
+                        style={
+                            "display": "flex",
+                            "alignItems": "center",
+                            "flexWrap": "wrap",
+                            "gap": "2px",
+                            "marginTop": "4px",
+                        },
+                    ),
+                ],
+                style={
+                    "padding": "6px 4px",
+                    "marginBottom": "6px",
+                    "border": "1px solid #EEE",
+                    "borderRadius": "4px",
+                    "background": "#F8F8FB",
+                },
+            )
+        )
+    return rows
+
+
+# Dispatch table for right-click + keyboard actions. The Dash callback
+# resolves which mutation to run; this helper does the actual backend
+# calls so the callback stays a thin shim. ``target`` is the full
+# rightclick-target store payload; ``payload`` is shorthand for
+# ``target.get("payload")``. Optional kwargs (``color``, ``radius``,
+# ``hops``) are passed through from the popover / keyboard layer.
+def _dispatch_rightclick_action(
+    backend: Any,
+    scene_id: Optional[str],
+    action: str,
+    kind: Optional[str],
+    payload: dict[str, Any],
+    target: dict[str, Any],
+    *,
+    color: Optional[str] = None,
+    radius: Optional[float] = None,
+    hops: Optional[int] = None,
+) -> None:
+    if action in ("supercell_2x", "supercell_clear"):
+        n = 2 if action == "supercell_2x" else 1
+        backend.patch_state(
+            {"supercell": {"a": n, "b": n, "c": n}},
+            scene_id=scene_id,
+        )
+        return
+
+    if not kind or kind == "_global":
+        # Bare keyboard shortcut without a hovered target. ``r`` /
+        # ``R`` were handled above; everything else needs a target.
+        return
+
+    if action == "hide":
+        if kind == "atom":
+            label = payload.get("label")
+            if not label:
+                return
+            backend.add_atom_group(
+                selector={"labels": [str(label)]},
+                color="#888888",
+                visible=False,
+                name=f"hide {label}",
+                scene_id=scene_id,
+            )
+        elif kind == "polyhedron":
+            spec_id = payload.get("spec_id")
+            frag = payload.get("fragment_label")
+            if not spec_id or not frag:
+                return
+            existing = backend.list_polyhedron_specs(scene_id=scene_id)
+            base = next((s for s in existing if s["id"] == spec_id), None)
+            if base is None:
+                return
+            overrides = dict(base.get("instance_overrides") or {})
+            overrides[str(frag)] = dict(overrides.get(str(frag), {}), visible=False)
+            backend.update_polyhedron_spec(
+                spec_id, {"instance_overrides": overrides}, scene_id=scene_id
+            )
+        elif kind == "bond":
+            elements = payload.get("element_pair") or ""
+            parts = [p.strip() for p in str(elements).split("\u2013") if p.strip()] or [
+                p.strip() for p in str(elements).split("-") if p.strip()
+            ]
+            selector = (
+                {"between_elements": parts}
+                if len(parts) == 2
+                else {"labels": [str(payload.get("label_pair") or "")]}
+            )
+            backend.add_bond_group(
+                selector=selector,
+                color="#888888",
+                visible=False,
+                name=f"hide {elements or 'bond'}",
+                scene_id=scene_id,
+            )
+        return
+
+    if action == "set_color":
+        if not color:
+            return
+        if kind == "atom":
+            label = payload.get("label")
+            if not label:
+                return
+            backend.add_atom_group(
+                selector={"labels": [str(label)]},
+                color=color,
+                visible=True,
+                name=f"colour {label}",
+                scene_id=scene_id,
+            )
+        elif kind == "polyhedron":
+            spec_id = payload.get("spec_id")
+            frag = payload.get("fragment_label")
+            if not spec_id or not frag:
+                return
+            existing = backend.list_polyhedron_specs(scene_id=scene_id)
+            base = next((s for s in existing if s["id"] == spec_id), None)
+            if base is None:
+                return
+            overrides = dict(base.get("instance_overrides") or {})
+            overrides[str(frag)] = dict(overrides.get(str(frag), {}), color=color)
+            backend.update_polyhedron_spec(
+                spec_id, {"instance_overrides": overrides}, scene_id=scene_id
+            )
+        elif kind == "bond":
+            elements = payload.get("element_pair") or ""
+            parts = [p.strip() for p in str(elements).split("\u2013") if p.strip()] or [
+                p.strip() for p in str(elements).split("-") if p.strip()
+            ]
+            selector = (
+                {"between_elements": parts}
+                if len(parts) == 2
+                else {"labels": [str(payload.get("label_pair") or "")]}
+            )
+            backend.add_bond_group(
+                selector=selector,
+                color=color,
+                visible=True,
+                name=f"colour {elements or 'bond'}",
+                scene_id=scene_id,
+            )
+        return
+
+    if action == "grow_bonds":
+        seeds = _seeds_from_payload(kind, payload)
+        if seeds is None:
+            return
+        n_hops = int(target.get("hops") or hops or 1)
+        backend.add_transform(
+            kind="grow_bonds",
+            params={"seeds": seeds, "hops": max(1, n_hops)},
+            scene_id=scene_id,
+        )
+        return
+
+    if action == "grow_radius":
+        seeds = _seeds_from_payload(kind, payload)
+        if seeds is None:
+            return
+        r = float(target.get("radius") or radius or 4.0)
+        backend.add_transform(
+            kind="grow_radius",
+            params={"seeds": seeds, "radius": max(0.0, r)},
+            scene_id=scene_id,
+        )
+        return
+
+    if action == "complete_fragment":
+        seeds = _seeds_from_payload(kind, payload)
+        if seeds is None:
+            return
+        backend.add_transform(
+            kind="complete_fragment",
+            params={"seeds": seeds, "max_hops": 32},
+            scene_id=scene_id,
+        )
+        return
+
+    if action == "promote_to_group":
+        if kind == "atom":
+            elem = payload.get("element")
+            if not elem:
+                return
+            backend.add_atom_group(
+                selector={"elements": [str(elem)]},
+                color="#888888",
+                visible=True,
+                name=f"all {elem}",
+                scene_id=scene_id,
+            )
+        elif kind == "bond":
+            elements = payload.get("element_pair") or ""
+            parts = [p.strip() for p in str(elements).split("\u2013") if p.strip()] or [
+                p.strip() for p in str(elements).split("-") if p.strip()
+            ]
+            if len(parts) != 2:
+                return
+            backend.add_bond_group(
+                selector={"between_elements": parts},
+                color="#7C5CBF",
+                visible=True,
+                name=f"all {parts[0]}\u2013{parts[1]}",
+                scene_id=scene_id,
+            )
+        elif kind == "polyhedron":
+            # Already a polyhedron spec -- promotion would be a no-op.
+            return
+        return
+
+    if action == "colour_picker":
+        # Keyboard shortcut: just leave the popover open; the JS will
+        # not have created the popover yet, so we open one centred on
+        # the screen by re-pushing target with no action.
+        # The render callback ignores the absence of x/y and uses
+        # 0/0 -- good enough for this MVP.
+        return
+
+    if action == "analyze":
+        # Sets the topology focus to this fragment so the right-side
+        # analysis panel updates. We piggyback on the existing
+        # ``topology_site_index`` state field (per scene) -- the
+        # update_view callback already re-renders when it changes.
+        if kind == "atom":
+            atom_index = payload.get("index")
+            if atom_index is None:
+                return
+            try:
+                state = backend.get_state(scene_id)
+                site_index = backend.fragment_index_for_atom(
+                    backend.scene_for_state(state), int(atom_index)
+                )
+                if site_index is not None:
+                    backend.patch_state(
+                        {"topology_site_index": int(site_index)}, scene_id=scene_id
+                    )
+            except Exception:
+                pass
+        elif kind == "polyhedron":
+            # The picked-payload already came from the topology side;
+            # promoting the spec to "topology focus" is a no-op for
+            # now.
+            pass
+        return
+
+
+def _seeds_from_payload(kind: Optional[str], payload: dict[str, Any]) -> Optional[dict[str, Any]]:
+    if kind == "atom":
+        idx = payload.get("index")
+        if idx is None:
+            label = payload.get("label")
+            if label:
+                return {"labels": [str(label)]}
+            return None
+        return {"atom_indices": [int(idx)]}
+    if kind == "polyhedron":
+        frag = payload.get("fragment_label")
+        if frag:
+            return {"fragment_labels": [str(frag)]}
+        return None
+    if kind == "bond":
+        # Bonds aren't atoms, but we can seed from the constituent
+        # element pair as a coarse fallback.
+        elements = payload.get("element_pair") or ""
+        parts = [p.strip() for p in str(elements).split("\u2013") if p.strip()] or [
+            p.strip() for p in str(elements).split("-") if p.strip()
+        ]
+        if parts:
+            return {"elements": parts}
+        return None
+    return None
 
 
 def _normalize_polyhedron_specs(
@@ -860,13 +2032,33 @@ class ViewerBackend:
             # Phase 2: per-scene atom-group rules. Each entry is
             # {id, name, selector, color, color_light, visible, opacity,
             # material, style}. Selectors are ANDed across keys; the
-            # supported keys are ``all``, ``elements`` (list), and
-            # ``is_minor``. Multiple groups apply in list order with
-            # later-wins semantics on overlapping atoms. Empty list =
-            # no overrides; the legacy ``monochrome`` flag is still
-            # honoured when no atom_groups are present. See
-            # ``agents/atom_groups_api.md`` for the API surface.
+            # supported keys are ``all``, ``elements`` (list),
+            # ``is_minor``, and the Phase-4 additions ``labels``,
+            # ``atom_indices``, ``fragment_labels``, ``fragment_indices``.
+            # Multiple groups apply in list order with later-wins
+            # semantics on overlapping atoms. Empty list = no overrides;
+            # the legacy ``monochrome`` flag is still honoured when no
+            # atom_groups are present. See ``agents/atom_groups_api.md``.
             "atom_groups": [],
+            # Phase 4: per-scene bond-group rules. Each entry is
+            # {id, name, selector, color, visible, opacity,
+            # radius_scale}. Selectors support ``all``,
+            # ``between_elements`` (unordered), ``labels`` (atom-pair
+            # ids), and ``is_minor``. Empty list = render bonds as the
+            # endpoint atoms dictate. See ``agents/bond_groups_api.md``.
+            "bond_groups": [],
+            # Phase 4: list of structure-mutation transforms. See
+            # ``crystal_viewer.transforms`` and
+            # ``agents/transforms_api.md`` for the schema. Empty list =
+            # no transform; ``apply_transforms`` short-circuits.
+            "transforms": [],
+            # Phase 4: per-axis floor on the polyhedron neighbour search
+            # range, decoupled from the display supercell. ``[0,0,0]``
+            # means "use the cutoff-driven span only" (legacy behaviour).
+            # ``[1,1,1]`` extends the search by one cell on each side so
+            # polyhedra wrap to neighbouring images even without a
+            # display-side ``repeat`` transform.
+            "polyhedron_search_supercell": [0, 0, 0],
             "fast_rendering": bool(style.get("fast_rendering", False)),
             "camera": scene.get("camera"),
             "cutoff": 10.0,
@@ -1217,6 +2409,42 @@ class ViewerBackend:
             # both mean "drop all overrides; use legacy monochrome
             # flag (if any) and element palette".
             state["atom_groups"] = _normalize_atom_groups(patch.get("atom_groups") or [])
+        if "bond_groups" in patch:
+            state["bond_groups"] = _normalize_bond_groups(patch.get("bond_groups") or [])
+        if "transforms" in patch:
+            state["transforms"] = _normalize_transforms(patch.get("transforms") or [])
+        # ``supercell`` is a v2 shorthand: ``{"a": Na, "b": Nb, "c": Nc}``
+        # is rewritten to a single ``repeat`` transform appended to the
+        # transforms list. Keeps the AI scripting path one-line for the
+        # most common "show me a 2x2x2" request without forcing the
+        # caller to construct a transform spec.
+        if "supercell" in patch and patch["supercell"] is not None:
+            sc = patch["supercell"]
+            try:
+                a = max(1, int(sc.get("a", 1) if isinstance(sc, dict) else sc[0]))
+                b = max(1, int(sc.get("b", 1) if isinstance(sc, dict) else sc[1]))
+                c = max(1, int(sc.get("c", 1) if isinstance(sc, dict) else sc[2]))
+            except (TypeError, ValueError, KeyError, IndexError):
+                a = b = c = 1
+            existing = list(state.get("transforms") or [])
+            # Always replace any existing repeat transform from a previous
+            # supercell shorthand call instead of stacking; otherwise the AI
+            # ends up with [repeat 2x2x2, repeat 3x3x3] and the user gets a
+            # 6x6x6. ``{1,1,1}`` therefore acts as "clear the supercell".
+            existing = [t for t in existing if t.get("kind") != "repeat"]
+            if (a, b, c) != (1, 1, 1):
+                existing_ids = {t["id"] for t in existing}
+                normalized = _normalize_transform(
+                    {"kind": "repeat", "params": {"a": a, "b": b, "c": c}, "name": f"Repeat {a}x{b}x{c}"},
+                    existing_ids=existing_ids,
+                )
+                if normalized is not None:
+                    existing.append(normalized)
+            state["transforms"] = existing
+        if "polyhedron_search_supercell" in patch:
+            state["polyhedron_search_supercell"] = _normalize_search_supercell(
+                patch["polyhedron_search_supercell"]
+            )
         if "fast_rendering" in patch:
             state["fast_rendering"] = bool(patch["fast_rendering"])
         # ---- legacy migration: monochrome=True --> atom_group rule ----
@@ -1302,11 +2530,16 @@ class ViewerBackend:
     def scene_for_state(self, state: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         state = self.current_state if state is None else state
         bundle = self.get_bundle(state["structure"])
+        # Phase 4: ``state["transforms"]`` is the structure-mutation
+        # pipeline. ``build_bundle_scene`` short-circuits when the list
+        # is empty so the no-transform path stays a single dict lookup.
+        transforms = list(state.get("transforms") or [])
         scene = build_bundle_scene(
             bundle,
             display_mode=state.get("display_mode", "formula_unit"),
             show_hydrogen=self.show_hydrogen_for_state(state),
             preset=self.preset,
+            transforms=transforms,
         )
         bundle.scene = scene
         bundle.fragment_table = scene.get("fragment_table", bundle.fragment_table)
@@ -1344,19 +2577,39 @@ class ViewerBackend:
         # if the list is non-empty; the legacy ``monochrome`` flag is
         # otherwise honoured untouched.
         style["atom_groups"] = list(state.get("atom_groups") or [])
+        # Phase 4: bond-group rules ride on the style dict so the
+        # renderer's bond pipeline (``_bond_segments``) can decorate
+        # each bond with ``_render_color`` / ``_render_visible`` /
+        # ``_render_opacity_scale`` / ``_render_radius_scale``. The
+        # tagging itself happens in ``figure_for_state`` (where the
+        # scene is mutable); this entry is the single source of truth
+        # for downstream callers.
+        style["bond_groups"] = list(state.get("bond_groups") or [])
         return style
 
     def add_uploaded_bundle(self, contents: str, filename: str) -> LoadedCrystal:
-        bundle = load_uploaded_cif(
-            contents=contents,
+        # Charge the three legs (decode + parse via gemmi, register
+        # bundle, create scene) separately so the perf log makes the
+        # actual bottleneck obvious. Empirically the ``load_uploaded_cif``
+        # call dominates for non-trivial structures (CIF parsing +
+        # symmetry expansion + bond perception).
+        with perf_log.time_block(
+            "upload:load_uploaded_cif",
+            kind="event",
             filename=filename,
-            existing_names=self.structure_names,
-            preset=self.preset,
-        )
-        self._drop_placeholder()
-        self.bundles[bundle.name] = bundle
-        self.structure_names.append(bundle.name)
-        self.create_scene(structure=bundle.name, label=bundle.name)
+            data_url_bytes=len(contents or ""),
+        ):
+            bundle = load_uploaded_cif(
+                contents=contents,
+                filename=filename,
+                existing_names=self.structure_names,
+                preset=self.preset,
+            )
+        with perf_log.time_block("upload:create_scene", kind="event", structure=bundle.name):
+            self._drop_placeholder()
+            self.bundles[bundle.name] = bundle
+            self.structure_names.append(bundle.name)
+            self.create_scene(structure=bundle.name, label=bundle.name)
         return bundle
 
     def add_uploaded_file_bytes(self, data: bytes, filename: str) -> LoadedCrystal:
@@ -1378,19 +2631,37 @@ class ViewerBackend:
         path = os.path.realpath(os.path.join(upload_dir, safe))
         if os.path.commonpath([path, upload_dir]) != upload_dir:
             raise ValueError(f"unsafe upload filename: {filename!r}")
-        with open(path, "wb") as handle:
-            handle.write(data)
+        with perf_log.time_block(
+            "upload:write_temp_file",
+            kind="event",
+            filename=safe,
+            bytes=len(data),
+        ):
+            with open(path, "wb") as handle:
+                handle.write(data)
         stem = os.path.splitext(safe)[0]
         safe_name = stem
         suffix = 2
         while safe_name in self.structure_names:
             safe_name = f"{stem}_{suffix}"
             suffix += 1
-        bundle = build_loaded_crystal(name=safe_name, cif_path=path, title=stem, preset=self.preset, source="upload")
-        self._drop_placeholder()
-        self.bundles[bundle.name] = bundle
-        self.structure_names.append(bundle.name)
-        self.create_scene(structure=bundle.name, label=bundle.name)
+        # ``build_loaded_crystal`` parses the CIF (gemmi), expands
+        # symmetry, builds bonds and -- if the preset asks for it --
+        # runs molcryskit topology analysis. For a 1.6 MB CIF this is
+        # by far the slowest leg of the upload (~15 s). Charging it
+        # separately makes the bottleneck unambiguous in the log.
+        with perf_log.time_block(
+            "upload:build_loaded_crystal",
+            kind="event",
+            structure=safe_name,
+            cif_path=path,
+        ):
+            bundle = build_loaded_crystal(name=safe_name, cif_path=path, title=stem, preset=self.preset, source="upload")
+        with perf_log.time_block("upload:create_scene", kind="event", structure=bundle.name):
+            self._drop_placeholder()
+            self.bundles[bundle.name] = bundle
+            self.structure_names.append(bundle.name)
+            self.create_scene(structure=bundle.name, label=bundle.name)
         return bundle
 
     def topology_candidates(self, structure: str, fragment_type: Optional[str] = None) -> list[dict[str, Any]]:
@@ -1490,7 +2761,20 @@ class ViewerBackend:
             point = click_data["points"][0]
             custom = point.get("customdata")
             if custom:
-                atom_index = int(custom[0])
+                # Phase 4: customdata schema is
+                # ``[kind, idx, label, elem, is_minor, fragment_label]``.
+                # We read by index 1 when the first slot is a kind tag
+                # ("atom"), and fall back to index 0 for backwards
+                # compatibility with any frontend payload still on the
+                # legacy schema (cached page from before redeploy).
+                if isinstance(custom[0], str) and len(custom) > 1:
+                    atom_index_raw = custom[1]
+                else:
+                    atom_index_raw = custom[0]
+                try:
+                    atom_index = int(atom_index_raw)
+                except (TypeError, ValueError):
+                    return None
                 return self.fragment_index_for_atom(scene, atom_index)
         if species_set:
             candidates = [
@@ -1724,6 +3008,251 @@ class ViewerBackend:
         self.patch_state({"atom_groups": ordered}, scene_id=scene_id)
         return ordered
 
+    # ---- bond_groups CRUD ---------------------------------------------
+    #
+    # Mirror of atom_groups CRUD; see ``agents/bond_groups_api.md``.
+
+    def list_bond_groups(self, scene_id: Optional[str] = None) -> list[dict[str, Any]]:
+        return list(self.get_state(scene_id).get("bond_groups") or [])
+
+    def _resolve_bond_groups(self, scene_id: Optional[str]) -> tuple[Optional[str], list[dict[str, Any]]]:
+        scene_id = scene_id or self.active_scene_id()
+        return scene_id, [dict(group) for group in (self.get_state(scene_id).get("bond_groups") or [])]
+
+    def add_bond_group(
+        self,
+        selector: dict[str, Any],
+        *,
+        name: Optional[str] = None,
+        color: Optional[str] = None,
+        visible: bool = True,
+        opacity: Optional[float] = None,
+        radius_scale: Optional[float] = None,
+        scene_id: Optional[str] = None,
+        group_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        scene_id, groups = self._resolve_bond_groups(scene_id)
+        existing_ids = {grp["id"] for grp in groups}
+        group = _normalize_bond_group(
+            {
+                "id": group_id,
+                "name": name,
+                "selector": selector,
+                "color": color,
+                "visible": visible,
+                "opacity": opacity,
+                "radius_scale": radius_scale,
+            },
+            existing_ids=existing_ids,
+        )
+        if group is None:
+            raise ValueError(
+                f"invalid bond_group payload (missing/empty selector?): {selector!r}"
+            )
+        groups.append(group)
+        self.patch_state({"bond_groups": groups}, scene_id=scene_id)
+        return group
+
+    def update_bond_group(
+        self,
+        group_id: str,
+        patch: dict[str, Any],
+        *,
+        scene_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        scene_id, groups = self._resolve_bond_groups(scene_id)
+        for index, group in enumerate(groups):
+            if group["id"] == group_id:
+                merged = dict(group)
+                merged.update(patch or {})
+                merged["id"] = group_id
+                replacement = _normalize_bond_group(
+                    merged,
+                    existing_ids={g["id"] for g in groups if g["id"] != group_id},
+                )
+                if replacement is None:
+                    raise ValueError(
+                        f"invalid bond_group patch for {group_id!r}: {patch!r}"
+                    )
+                groups[index] = replacement
+                self.patch_state({"bond_groups": groups}, scene_id=scene_id)
+                return replacement
+        raise KeyError(f"unknown bond_group id: {group_id!r}")
+
+    def remove_bond_group(self, group_id: str, *, scene_id: Optional[str] = None) -> bool:
+        scene_id, groups = self._resolve_bond_groups(scene_id)
+        before = len(groups)
+        groups = [grp for grp in groups if grp["id"] != group_id]
+        if len(groups) == before:
+            return False
+        self.patch_state({"bond_groups": groups}, scene_id=scene_id)
+        return True
+
+    def reorder_bond_groups(
+        self,
+        ordered_ids: Iterable[str],
+        *,
+        scene_id: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        scene_id, groups = self._resolve_bond_groups(scene_id)
+        index_by_id = {grp["id"]: grp for grp in groups}
+        wanted = [str(item) for item in ordered_ids]
+        if set(wanted) != set(index_by_id):
+            raise ValueError(
+                "reorder list must contain exactly the existing bond_group ids; "
+                f"got {wanted!r}, have {sorted(index_by_id)}"
+            )
+        ordered = [index_by_id[group_id] for group_id in wanted]
+        self.patch_state({"bond_groups": ordered}, scene_id=scene_id)
+        return ordered
+
+    # ---- transforms CRUD ----------------------------------------------
+    #
+    # Mirrors atom_groups CRUD. The whole pipeline is a list; ordering
+    # matters (each transform takes the result of the previous one as
+    # its input scene). See ``agents/transforms_api.md``.
+
+    def list_transforms(self, scene_id: Optional[str] = None) -> list[dict[str, Any]]:
+        return list(self.get_state(scene_id).get("transforms") or [])
+
+    def _resolve_transforms(self, scene_id: Optional[str]) -> tuple[Optional[str], list[dict[str, Any]]]:
+        scene_id = scene_id or self.active_scene_id()
+        return scene_id, [dict(t) for t in (self.get_state(scene_id).get("transforms") or [])]
+
+    def add_transform(
+        self,
+        kind: str,
+        params: Optional[dict[str, Any]] = None,
+        *,
+        name: Optional[str] = None,
+        enabled: bool = True,
+        scene_id: Optional[str] = None,
+        transform_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        scene_id, transforms = self._resolve_transforms(scene_id)
+        existing_ids = {t["id"] for t in transforms}
+        transform = _normalize_transform(
+            {
+                "id": transform_id,
+                "name": name,
+                "kind": kind,
+                "params": params or {},
+                "enabled": enabled,
+            },
+            existing_ids=existing_ids,
+        )
+        if transform is None:
+            raise ValueError(f"invalid transform spec (unknown kind?): kind={kind!r}, params={params!r}")
+        transforms.append(transform)
+        self.patch_state({"transforms": transforms}, scene_id=scene_id)
+        return transform
+
+    def update_transform(
+        self,
+        transform_id: str,
+        patch: dict[str, Any],
+        *,
+        scene_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        scene_id, transforms = self._resolve_transforms(scene_id)
+        for index, transform in enumerate(transforms):
+            if transform["id"] == transform_id:
+                merged = dict(transform)
+                merged.update(patch or {})
+                merged["id"] = transform_id
+                replacement = _normalize_transform(
+                    merged,
+                    existing_ids={t["id"] for t in transforms if t["id"] != transform_id},
+                )
+                if replacement is None:
+                    raise ValueError(
+                        f"invalid transform patch for {transform_id!r}: {patch!r}"
+                    )
+                transforms[index] = replacement
+                self.patch_state({"transforms": transforms}, scene_id=scene_id)
+                return replacement
+        raise KeyError(f"unknown transform id: {transform_id!r}")
+
+    def remove_transform(self, transform_id: str, *, scene_id: Optional[str] = None) -> bool:
+        scene_id, transforms = self._resolve_transforms(scene_id)
+        before = len(transforms)
+        transforms = [t for t in transforms if t["id"] != transform_id]
+        if len(transforms) == before:
+            return False
+        self.patch_state({"transforms": transforms}, scene_id=scene_id)
+        return True
+
+    def reorder_transforms(
+        self,
+        ordered_ids: Iterable[str],
+        *,
+        scene_id: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        scene_id, transforms = self._resolve_transforms(scene_id)
+        index_by_id = {t["id"]: t for t in transforms}
+        wanted = [str(item) for item in ordered_ids]
+        if set(wanted) != set(index_by_id):
+            raise ValueError(
+                "reorder list must contain exactly the existing transform ids; "
+                f"got {wanted!r}, have {sorted(index_by_id)}"
+            )
+        ordered = [index_by_id[transform_id] for transform_id in wanted]
+        self.patch_state({"transforms": ordered}, scene_id=scene_id)
+        return ordered
+
+    # ---- polyhedron instance overrides --------------------------------
+    #
+    # A per-fragment override of the spec-level colour / visibility.
+    # Applies on top of the existing spec colour without mutating it,
+    # so the right-click "Set this one cyan" path stays scoped to the
+    # picked instance only.
+
+    def set_polyhedron_instance_override(
+        self,
+        spec_id: str,
+        fragment_label: str,
+        override: dict[str, Any],
+        *,
+        scene_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        scene_id, specs = self._resolve_specs(scene_id)
+        for index, spec in enumerate(specs):
+            if spec["id"] != spec_id:
+                continue
+            current = dict(spec.get("instance_overrides") or {})
+            cleaned: dict[str, Any] = {}
+            color = override.get("color") if isinstance(override, dict) else None
+            if color:
+                hex_color = _coerce_hex_color(color, "")
+                if hex_color:
+                    cleaned["color"] = hex_color
+            if isinstance(override, dict) and "visible" in override:
+                cleaned["visible"] = bool(override["visible"])
+            if cleaned:
+                current[str(fragment_label)] = cleaned
+            else:
+                current.pop(str(fragment_label), None)
+            spec_patch = dict(spec)
+            spec_patch["instance_overrides"] = current
+            specs[index] = spec_patch
+            self.patch_state({"polyhedron_specs": specs}, scene_id=scene_id)
+            return spec_patch
+        raise KeyError(f"unknown polyhedron spec id: {spec_id!r}")
+
+    def clear_polyhedron_instance_override(
+        self,
+        spec_id: str,
+        fragment_label: str,
+        *,
+        scene_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        return self.set_polyhedron_instance_override(
+            spec_id,
+            fragment_label,
+            {},
+            scene_id=scene_id,
+        )
+
     # ---- topology computation -----------------------------------------
 
     def _effective_polyhedron_specs(self, state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1746,6 +3275,7 @@ class ViewerBackend:
                 "ligand_species": None,
                 "color": color,
                 "enabled": True,
+                "instance_overrides": {},
             }
             for index, key in enumerate(species_keys)
         ]
@@ -1791,6 +3321,17 @@ class ViewerBackend:
             )
             for spec in effective_specs
         )
+        # Phase 4: ``transforms`` change which fragments exist, and
+        # ``polyhedron_search_supercell`` changes how far the neighbour
+        # search reaches. Both must be in the geometry cache key,
+        # otherwise switching transforms or extending the search range
+        # silently shows stale polyhedra. Per-spec colours and
+        # ``instance_overrides`` stay OUT of the key (they only affect
+        # the renderer's painter cache; see ``_attach_spec_colors``).
+        from .transforms import transforms_cache_key
+
+        transforms_key = transforms_cache_key(state.get("transforms") or [])
+        search_supercell = tuple(state.get("polyhedron_search_supercell") or (0, 0, 0))
         cache_key = (
             structure,
             state.get("display_mode"),
@@ -1798,6 +3339,8 @@ class ViewerBackend:
             int(site_index),
             cutoff,
             spec_geometry_key,
+            transforms_key,
+            search_supercell,
         )
         cache = getattr(bundle, "_topology_state_cache", None)
         if cache is None:
@@ -1811,6 +3354,7 @@ class ViewerBackend:
                 effective_specs=effective_specs,
                 site_index=site_index,
                 cutoff=cutoff,
+                search_supercell=search_supercell,
             )
             cache[cache_key] = cached_geometry
         if cached_geometry is None:
@@ -1828,6 +3372,7 @@ class ViewerBackend:
         effective_specs: list[dict[str, Any]],
         site_index: int,
         cutoff: float,
+        search_supercell: tuple[int, int, int] = (0, 0, 0),
     ) -> Optional[dict[str, Any]]:
         display_fragment = self._display_fragment(scene, site_index)
         topology_fragment = self.map_display_fragment_to_topology(bundle, display_fragment)
@@ -1867,6 +3412,7 @@ class ViewerBackend:
             display_label=display_fragment.get("label") if display_fragment else None,
             display_type=display_fragment.get("type") if display_fragment else None,
             ligand_species=[analysis_ligand] if analysis_ligand else None,
+            search_supercell=search_supercell,
         )
 
         # Build per-spec overlay lists. For each fragment whose formula
@@ -1916,6 +3462,7 @@ class ViewerBackend:
                         display_label=frag.get("label"),
                         display_type=frag.get("type"),
                         ligand_species=ligand_arg,
+                        search_supercell=search_supercell,
                     )
                 except Exception:
                     continue
@@ -1961,17 +3508,39 @@ class ViewerBackend:
         cached_geometry: dict[str, Any],
         effective_specs: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        """Re-stamp per-spec colours onto a geometry payload pulled from
-        the bundle cache. The geometry dict is shared across colour
-        changes; we copy a small wrapper so the renderer's painter
-        cache (keyed on the colour tuple) doesn't get polluted by
-        stale values."""
+        """Re-stamp per-spec colours and per-fragment instance overrides
+        onto a geometry payload pulled from the bundle cache. The
+        geometry dict is shared across colour changes; we copy a small
+        wrapper so the renderer's painter cache (keyed on the colour
+        tuple) doesn't get polluted by stale values."""
         color_by_id = {spec["id"]: spec.get("color", "#7C5CBF") for spec in effective_specs}
+        overrides_by_id: dict[str, dict[str, dict[str, Any]]] = {
+            spec["id"]: dict(spec.get("instance_overrides") or {}) for spec in effective_specs
+        }
         spec_results = []
         for entry in cached_geometry.get("spec_results", []) or []:
             spec_id = entry.get("spec_id")
             recoloured = dict(entry)
             recoloured["color"] = color_by_id.get(spec_id, "#7C5CBF")
+            spec_overrides = overrides_by_id.get(spec_id) or {}
+            if spec_overrides:
+                # Patch each overlay with its per-fragment override (if
+                # any). The override key is the fragment label; we copy
+                # the overlay dict so the cached geometry stays clean.
+                new_overlays = []
+                for overlay in entry.get("overlays") or []:
+                    label = str(overlay.get("center_label") or "")
+                    override = spec_overrides.get(label)
+                    if override:
+                        patched = dict(overlay)
+                        if "color" in override:
+                            patched["color"] = override["color"]
+                        if "visible" in override:
+                            patched["visible"] = bool(override["visible"])
+                        new_overlays.append(patched)
+                    else:
+                        new_overlays.append(overlay)
+                recoloured["overlays"] = new_overlays
             spec_results.append(recoloured)
         out = dict(cached_geometry)
         out["spec_results"] = spec_results
@@ -1983,9 +3552,26 @@ class ViewerBackend:
 
     def figure_for_state(self, state: Optional[dict[str, Any]] = None, click_data: Optional[dict[str, Any]] = None):
         state = self.get_state() if state is None else state
-        scene = self.scene_for_state(state)
-        topology_data = self.topology_for_state(state, click_data=click_data)
-        fig = build_figure(scene, self.style_for_state(state, scene=scene), topology_data=topology_data)
+        scene_id = state.get("scene_id")
+        with perf_log.time_block("scene_for_state", kind="event", scene_id=scene_id):
+            scene = self.scene_for_state(state)
+        atom_count = len(scene.get("atoms", []))
+        bond_count = len(scene.get("bonds", []))
+        with perf_log.time_block(
+            "topology_for_state",
+            kind="event",
+            scene_id=scene_id,
+            n_specs=len((state.get("polyhedron_specs") or [])),
+        ):
+            topology_data = self.topology_for_state(state, click_data=click_data)
+        with perf_log.time_block(
+            "build_figure",
+            kind="event",
+            scene_id=scene_id,
+            atoms=atom_count,
+            bonds=bond_count,
+        ):
+            fig = build_figure(scene, self.style_for_state(state, scene=scene), topology_data=topology_data)
         camera = _plotly_camera(state.get("camera"))
         if camera:
             fig.update_layout(scene_camera=camera)
@@ -2216,6 +3802,98 @@ def create_app(
             # interval up to 30 s and let pushed messages do the work.
             dcc.Interval(id="agent-state-poll", interval=5000, n_intervals=0),
             html.Div(id="state-sync-sentinel", style={"display": "none"}),
+            # Phase 4: right-click + keyboard shortcut wiring -----------
+            # The JS in ``assets/right_click_menu.js`` writes the
+            # picked-target payload into ``rightclick-target.data``;
+            # ``assets/keyboard_shortcuts.js`` writes the same store but
+            # with an extra ``action`` field for one-key dispatch.
+            # ``rightclick-target-fallback`` is a defensive hidden input
+            # the JS uses if ``dash_clientside.set_props`` is not yet
+            # bootstrapped (e.g. very early page load); a tiny callback
+            # keeps the store in sync with that input.
+            dcc.Store(id="rightclick-target", data=None),
+            dcc.Input(
+                id="rightclick-target-fallback",
+                type="hidden",
+                value="",
+                debounce=False,
+            ),
+            html.Div(
+                id="rightclick-menu",
+                className="rightclick-menu rightclick-menu--hidden",
+                children=[],
+                style={"top": "0px", "left": "0px"},
+            ),
+            html.Div(
+                id="kbd-help",
+                className="kbd-help kbd-help--hidden",
+                children=[
+                    html.Button(
+                        "\u00d7",
+                        id="kbd-help-close",
+                        n_clicks=0,
+                        className="kbd-help__close",
+                        title="Close",
+                    ),
+                    html.Div("Keyboard shortcuts", className="kbd-help__title"),
+                    html.Div(
+                        [
+                            html.Span("?", className="kbd-help__key"),
+                            html.Span("Toggle this panel"),
+                        ],
+                        className="kbd-help__row",
+                    ),
+                    html.Div(
+                        [
+                            html.Span("r", className="kbd-help__key"),
+                            html.Span("Repeat 2\u00d72\u00d72 (replace existing)"),
+                        ],
+                        className="kbd-help__row",
+                    ),
+                    html.Div(
+                        [
+                            html.Span("Shift+r", className="kbd-help__key"),
+                            html.Span("Clear repeat (back to home cell)"),
+                        ],
+                        className="kbd-help__row",
+                    ),
+                    html.Div(
+                        [
+                            html.Span("g", className="kbd-help__key"),
+                            html.Span("Grow by 1 bond hop from hovered atom"),
+                        ],
+                        className="kbd-help__row",
+                    ),
+                    html.Div(
+                        [
+                            html.Span("Shift+g", className="kbd-help__key"),
+                            html.Span("Grow by 4\u202f\u00c5 from hovered atom"),
+                        ],
+                        className="kbd-help__row",
+                    ),
+                    html.Div(
+                        [
+                            html.Span("h", className="kbd-help__key"),
+                            html.Span("Hide hovered atom / bond / polyhedron"),
+                        ],
+                        className="kbd-help__row",
+                    ),
+                    html.Div(
+                        [
+                            html.Span("c", className="kbd-help__key"),
+                            html.Span("Open colour picker for hovered target"),
+                        ],
+                        className="kbd-help__row",
+                    ),
+                    html.Div(
+                        [
+                            html.Span("p", className="kbd-help__key"),
+                            html.Span("Promote hovered atom to a group rule"),
+                        ],
+                        className="kbd-help__row",
+                    ),
+                ],
+            ),
             html.Div(
                 [
                     html.H3("Crystal Viewer", style={"marginTop": "0"}),
@@ -2455,6 +4133,47 @@ def create_app(
                         ),
                         style={"marginTop": "6px"},
                     ),
+                    # ---- Phase 4: polyhedron neighbour-search supercell ----
+                    html.Div(
+                        [
+                            html.Span(
+                                "Search radius (cells):",
+                                style={"fontSize": "11px", "color": "#666", "marginRight": "6px"},
+                            ),
+                            *[
+                                comp
+                                for axis_index, axis in enumerate(("a", "b", "c"))
+                                for comp in (
+                                    html.Span(
+                                        axis,
+                                        style={"fontSize": "11px", "color": "#666", "margin": "0 2px 0 4px"},
+                                    ),
+                                    dcc.Input(
+                                        id={"type": "polyhedron-search-supercell", "axis": axis},
+                                        type="number",
+                                        min=0,
+                                        step=1,
+                                        value=int((first_state.get("polyhedron_search_supercell") or [0, 0, 0])[axis_index]),
+                                        style={"width": "44px", "fontSize": "12px"},
+                                        debounce=True,
+                                    ),
+                                )
+                            ],
+                            html.Span(
+                                "0 = cutoff-driven (default). Higher pulls in further images so polyhedra wrap across cells.",
+                                style={"fontSize": "10px", "color": "#999", "marginLeft": "8px"},
+                            ),
+                        ],
+                        style={
+                            "display": "flex",
+                            "alignItems": "center",
+                            "flexWrap": "wrap",
+                            "marginTop": "6px",
+                            "padding": "4px",
+                            "background": "#FAFAFA",
+                            "borderRadius": "3px",
+                        },
+                    ),
                     html.Hr(),
                     # ---- Phase 3: Atom groups table ----
                     html.Div(
@@ -2509,6 +4228,120 @@ def create_app(
                             first_state.get("atom_groups") or [],
                             backend.element_options(first_state),
                         ),
+                        style={"marginTop": "6px"},
+                    ),
+                    html.Hr(),
+                    # ---- Phase 4: Bond groups table ----
+                    html.Div(
+                        [
+                            html.H4(
+                                "Bond groups",
+                                style={"display": "inline-block", "marginRight": "8px"},
+                            ),
+                            html.Button(
+                                "+ Add",
+                                id="bond-groups-add-btn",
+                                n_clicks=0,
+                                style={
+                                    "fontSize": "12px",
+                                    "padding": "2px 8px",
+                                    "verticalAlign": "middle",
+                                    "cursor": "pointer",
+                                },
+                                title="Add a bond-styling rule (selector + colour / opacity / radius scale).",
+                            ),
+                        ],
+                        style={"display": "flex", "alignItems": "center"},
+                    ),
+                    html.Div(
+                        "Per-rule overrides for bond colour, visibility, opacity, and "
+                        "radius. Selector \u2018between elements\u2019 picks a Pb\u2013Cl style; "
+                        "\u2018minor only\u2019 / \u2018major only\u2019 follow disorder flags.",
+                        style={"fontSize": "11px", "color": "#777", "marginTop": "4px"},
+                    ),
+                    html.Div(
+                        id="bond-groups-rows-container",
+                        children=_bond_groups_table_rows(
+                            first_state.get("bond_groups") or [],
+                            backend.element_options(first_state),
+                        ),
+                        style={"marginTop": "6px"},
+                    ),
+                    html.Hr(),
+                    # ---- Phase 4: Transforms pipeline ----
+                    html.Div(
+                        [
+                            html.H4(
+                                "Transforms",
+                                style={"display": "inline-block", "marginRight": "8px"},
+                            ),
+                            dcc.Dropdown(
+                                id="transforms-kind-select",
+                                options=[
+                                    {"label": label, "value": kind}
+                                    for kind, label in _TRANSFORM_KIND_NAMES.items()
+                                ],
+                                value="repeat",
+                                clearable=False,
+                                style={"width": "150px", "fontSize": "12px", "display": "inline-block", "marginRight": "4px"},
+                            ),
+                            html.Button(
+                                "+ Add",
+                                id="transforms-add-btn",
+                                n_clicks=0,
+                                style={
+                                    "fontSize": "12px",
+                                    "padding": "2px 8px",
+                                    "verticalAlign": "middle",
+                                    "cursor": "pointer",
+                                },
+                                title="Append a new transform of the selected kind. Default params = a sane no-op.",
+                            ),
+                        ],
+                        style={"display": "flex", "alignItems": "center", "gap": "4px", "flexWrap": "wrap"},
+                    ),
+                    html.Div(
+                        [
+                            html.Button(
+                                "2\u00d72\u00d72",
+                                id="transforms-preset-2x",
+                                n_clicks=0,
+                                style={"fontSize": "12px", "padding": "2px 8px", "marginRight": "4px", "cursor": "pointer"},
+                                title="Quick preset: append a repeat 2\u00d72\u00d72 (or replace the existing repeat).",
+                            ),
+                            html.Button(
+                                "3\u00d73\u00d73",
+                                id="transforms-preset-3x",
+                                n_clicks=0,
+                                style={"fontSize": "12px", "padding": "2px 8px", "marginRight": "4px", "cursor": "pointer"},
+                                title="Quick preset: repeat 3\u00d73\u00d73.",
+                            ),
+                            html.Button(
+                                "Home cell",
+                                id="transforms-clear-repeat",
+                                n_clicks=0,
+                                style={"fontSize": "12px", "padding": "2px 8px", "marginRight": "4px", "cursor": "pointer"},
+                                title="Drop any repeat transform (back to single home cell).",
+                            ),
+                            html.Button(
+                                "Clear all",
+                                id="transforms-clear-btn",
+                                n_clicks=0,
+                                style={"fontSize": "12px", "padding": "2px 8px", "cursor": "pointer", "color": "#A00"},
+                                title="Drop every transform (back to the raw scene).",
+                            ),
+                        ],
+                        style={"marginTop": "6px"},
+                    ),
+                    html.Div(
+                        "Transforms run top \u2192 bottom; each sees the previous one\u2019s output. "
+                        "Seed format: \u2018all\u2019, \u2018elem:Pb,Cl\u2019, \u2018label:Pb1\u2019, \u2018index:0,5\u2019, "
+                        "\u2018frag:A0\u2019. Bare \u2018Pb,Cl\u2019 = elements.",
+                        style={"fontSize": "11px", "color": "#777", "marginTop": "4px"},
+                    ),
+                    html.Div(
+                        id="transforms-rows-container",
+                        children=_transforms_table_rows(first_state.get("transforms") or []),
                         style={"marginTop": "6px"},
                     ),
                     html.Hr(),
@@ -2638,6 +4471,47 @@ def create_app(
                     "overflowY": "auto",
                 },
             ),
+            # Floating "Server log" panel (bottom-right). Polls
+            # ``/api/v1/perf`` every second to show the user which
+            # callbacks fired and how long each one took. Collapsed by
+            # default to keep the UI clean; click the header to
+            # expand. Lives outside the right-panel so the analysis
+            # column can be hidden without losing the perf signal.
+            html.Div(
+                [
+                    html.Div(
+                        [
+                            html.Button(
+                                "Server log ▾",
+                                id="perf-log-toggle",
+                                n_clicks=0,
+                                className="perf-log-toggle",
+                            ),
+                            html.Button(
+                                "Clear",
+                                id="perf-log-clear",
+                                n_clicks=0,
+                                className="perf-log-clear",
+                            ),
+                        ],
+                        className="perf-log-header",
+                    ),
+                    html.Div(
+                        id="perf-log-body",
+                        className="perf-log-body",
+                        children=[
+                            html.Div(
+                                "Waiting for events… (interact with the UI to see callbacks)",
+                                className="perf-log-empty",
+                            )
+                        ],
+                    ),
+                    dcc.Interval(id="perf-log-poll", interval=1000, n_intervals=0),
+                    dcc.Store(id="perf-log-cursor", data={"seq": 0, "events": []}),
+                ],
+                id="perf-log-panel",
+                className="perf-log-panel perf-log-panel--collapsed",
+            ),
         ],
         id="viewer-root",
         style={"display": "flex", "height": "100vh", "backgroundColor": "#FFFFFF"},
@@ -2675,9 +4549,32 @@ def create_app(
         if not contents_list:
             return no_update, no_update, no_update
         names_out = []
-        for contents, filename in zip(contents_list, filenames or []):
-            bundle = backend.add_uploaded_bundle(contents, filename)
-            names_out.append(bundle.name)
+        with perf_log.time_block(
+            "callback:upload_cif",
+            kind="cb",
+            n_files=len(contents_list),
+            filenames=list(filenames or []),
+        ):
+            for contents, filename in zip(contents_list, filenames or []):
+                # ``contents`` is the dcc.Upload data URL: it includes
+                # the ``data:...;base64,`` prefix plus the base64
+                # payload. Charge the network leg + parse leg
+                # separately so the user can see WHICH part of an
+                # upload is slow.
+                payload_bytes = len(contents or "")
+                with perf_log.time_block(
+                    "upload:add_uploaded_bundle",
+                    kind="event",
+                    filename=filename,
+                    bytes=payload_bytes,
+                ):
+                    bundle = backend.add_uploaded_bundle(contents, filename)
+                names_out.append(bundle.name)
+                perf_log.record(
+                    "upload:done",
+                    kind="event",
+                    info={"filename": filename, "scene": bundle.name},
+                )
         return backend.scene_tabs(), backend.active_scene_id(), f"Uploaded CIF(s): {', '.join(names_out)}"
 
     @app.callback(
@@ -2997,6 +4894,14 @@ def create_app(
         if all(prev.get(k) == v for k, v in patch.items() if k != "scene_id"):
             return no_update
         backend.record_state(patch)
+        perf_log.record(
+            "callback:capture_state",
+            kind="cb",
+            info={
+                "trigger": triggered,
+                "scene_id": scene_id,
+            },
+        )
         return backend.get_state()
 
     # ------------------------------------------------------------------
@@ -3018,6 +4923,7 @@ def create_app(
     # ------------------------------------------------------------------
     @app.callback(
         Output("polyhedra-rows-container", "children", allow_duplicate=True),
+        Output("agent-state-store", "data", allow_duplicate=True),
         Input("polyhedra-add-btn", "n_clicks"),
         Input("scene-tabs", "value"),
         Input({"type": "poly-row-color", "spec_id": ALL}, "value"),
@@ -3038,8 +4944,22 @@ def create_app(
         deletes,
         color_ids,
     ):
+        # The second Output (``agent-state-store.data``) is the
+        # critical perf fix for the inline-edit path: without it, an
+        # in-row colour / centre / ligand / enabled change has to
+        # wait for the 5 s ``agent-state-poll`` to round-trip via
+        # ``sync_agent_state`` before ``update_view`` re-renders the
+        # figure. Pushing the new state directly here cuts the
+        # perceived latency from ~2.5 s (avg) to "the next frame".
+        # ``broadcast=False`` on patch_state below stops the same
+        # change from echoing back through the poll path on the next
+        # tick.
+        cb_start = time.monotonic()
         triggered = getattr(callback_context, "triggered_id", None)
         scene_id = active_scene_id or backend.active_scene_id()
+        triggered_label = (
+            triggered.get("type") if isinstance(triggered, dict) else triggered
+        )
         species_options = backend.species_options(
             backend.get_state(scene_id).get("structure")
         )
@@ -3049,11 +4969,11 @@ def create_app(
             return _polyhedra_table_rows(specs, species_options)
 
         if triggered == "scene-tabs":
-            return _rebuild()
+            return _rebuild(), no_update
 
         if triggered == "polyhedra-add-btn":
             if not species_options:
-                return _rebuild()
+                return _rebuild(), no_update
             try:
                 backend.add_polyhedron_spec(
                     center_species=str(species_options[0]["value"]),
@@ -3061,15 +4981,15 @@ def create_app(
                     scene_id=scene_id,
                 )
             except Exception:
-                return no_update
-            return _rebuild()
+                return no_update, no_update
+            return _rebuild(), backend.get_state()
 
         if isinstance(triggered, dict) and triggered.get("type") == "poly-row-delete":
             spec_id = triggered.get("spec_id")
             if not spec_id:
-                return no_update
+                return no_update, no_update
             backend.remove_polyhedron_spec(spec_id, scene_id=scene_id)
-            return _rebuild()
+            return _rebuild(), backend.get_state()
 
         if isinstance(triggered, dict) and triggered.get("type", "").startswith("poly-row-"):
             # Inline edit. Reconstruct the full spec list from the
@@ -3077,7 +4997,7 @@ def create_app(
             # ``color_ids`` (one id-dict per row) to give us the spec_id
             # ordering that matches the value lists.
             if not color_ids:
-                return no_update
+                return no_update, no_update
             existing = {
                 spec["id"]: spec
                 for spec in backend.list_polyhedron_specs(scene_id=scene_id)
@@ -3100,12 +5020,23 @@ def create_app(
                     }
                 )
             try:
-                backend.patch_state({"polyhedron_specs": new_specs}, scene_id=scene_id)
+                backend.patch_state({"polyhedron_specs": new_specs}, scene_id=scene_id, broadcast=False)
             except Exception:
-                pass
-            return no_update
+                return no_update, no_update
+            perf_log.record(
+                "callback:manage_polyhedra",
+                duration_ms=(time.monotonic() - cb_start) * 1000.0,
+                kind="cb",
+                info={
+                    "trigger": triggered_label,
+                    "n_specs": len(new_specs),
+                    "scene_id": scene_id,
+                },
+            )
+            # ``no_update`` for children to avoid mid-edit React tear-down.
+            return no_update, backend.get_state()
 
-        return no_update
+        return no_update, no_update
 
     # ------------------------------------------------------------------
     # Phase 3 UI: Atom-groups table.
@@ -3116,6 +5047,7 @@ def create_app(
     # ------------------------------------------------------------------
     @app.callback(
         Output("atom-groups-rows-container", "children", allow_duplicate=True),
+        Output("agent-state-store", "data", allow_duplicate=True),
         Input("atom-groups-add-btn", "n_clicks"),
         Input("atom-groups-preset-mono", "n_clicks"),
         Input("atom-groups-clear-btn", "n_clicks"),
@@ -3146,8 +5078,18 @@ def create_app(
         deletes,
         color_ids,
     ):
+        # Same perf rationale as ``manage_polyhedra``: the second
+        # Output pushes the new state straight into ``agent-state-store``
+        # so ``update_view`` re-renders on the next frame instead of
+        # waiting for the 5 s ``agent-state-poll``. Without it, an
+        # opacity / colour / visibility change has a 0-5 s perceived
+        # latency.
+        cb_start = time.monotonic()
         triggered = getattr(callback_context, "triggered_id", None)
         scene_id = active_scene_id or backend.active_scene_id()
+        triggered_label = (
+            triggered.get("type") if isinstance(triggered, dict) else triggered
+        )
 
         def _rebuild():
             groups = backend.list_atom_groups(scene_id=scene_id)
@@ -3156,14 +5098,14 @@ def create_app(
             )
 
         if triggered == "scene-tabs":
-            return _rebuild()
+            return _rebuild(), no_update
 
         if triggered == "atom-groups-add-btn":
             try:
                 backend.add_atom_group(selector={"all": True}, color="#888888", scene_id=scene_id)
             except Exception:
-                return no_update
-            return _rebuild()
+                return no_update, no_update
+            return _rebuild(), backend.get_state()
 
         if triggered == "atom-groups-preset-mono":
             backend.add_atom_group(
@@ -3172,23 +5114,23 @@ def create_app(
                 name="monochrome",
                 scene_id=scene_id,
             )
-            return _rebuild()
+            return _rebuild(), backend.get_state()
 
         if triggered == "atom-groups-clear-btn":
             for group in list(backend.list_atom_groups(scene_id=scene_id)):
                 backend.remove_atom_group(group["id"], scene_id=scene_id)
-            return _rebuild()
+            return _rebuild(), backend.get_state()
 
         if isinstance(triggered, dict) and triggered.get("type") == "ag-row-delete":
             group_id = triggered.get("group_id")
             if not group_id:
-                return no_update
+                return no_update, no_update
             backend.remove_atom_group(group_id, scene_id=scene_id)
-            return _rebuild()
+            return _rebuild(), backend.get_state()
 
         if isinstance(triggered, dict) and triggered.get("type", "").startswith("ag-row-"):
             if not color_ids:
-                return no_update
+                return no_update, no_update
             new_groups: list[dict[str, Any]] = []
             for index, id_dict in enumerate(color_ids):
                 group_id = id_dict.get("group_id")
@@ -3219,18 +5161,751 @@ def create_app(
                     }
                 )
             try:
-                backend.patch_state({"atom_groups": new_groups}, scene_id=scene_id)
+                backend.patch_state({"atom_groups": new_groups}, scene_id=scene_id, broadcast=False)
             except Exception:
-                pass
+                return no_update, no_update
+            perf_log.record(
+                "callback:manage_atom_groups",
+                duration_ms=(time.monotonic() - cb_start) * 1000.0,
+                kind="cb",
+                info={
+                    "trigger": triggered_label,
+                    "n_groups": len(new_groups),
+                    "scene_id": scene_id,
+                },
+            )
             # Special case: switching kind from "all" -> "by element"
             # needs to reveal the elements multi-select that's
             # display:none in the existing DOM. Rebuild children to
             # update the visibility toggle.
             if triggered.get("type") == "ag-row-kind":
-                return _rebuild()
+                return _rebuild(), backend.get_state()
+            return no_update, backend.get_state()
+
+        return no_update, no_update
+
+    # ------------------------------------------------------------------
+    # Phase 4 UI: Bond-groups table.
+    #
+    # Same dispatch pattern as ``manage_atom_groups`` -- pattern-matched
+    # row inputs, single ALL callback, ``agent-state-store`` second
+    # Output for instant re-render. Only difference: bond-specific
+    # selectors (between elements / minor / major) and per-bond
+    # ``radius_scale``.
+    # ------------------------------------------------------------------
+    @app.callback(
+        Output("bond-groups-rows-container", "children", allow_duplicate=True),
+        Output("agent-state-store", "data", allow_duplicate=True),
+        Input("bond-groups-add-btn", "n_clicks"),
+        Input("scene-tabs", "value"),
+        Input({"type": "bg-row-visible", "group_id": ALL}, "value"),
+        Input({"type": "bg-row-color", "group_id": ALL}, "value"),
+        Input({"type": "bg-row-kind", "group_id": ALL}, "value"),
+        Input({"type": "bg-row-elements", "group_id": ALL}, "value"),
+        Input({"type": "bg-row-opacity", "group_id": ALL}, "value"),
+        Input({"type": "bg-row-radius", "group_id": ALL}, "value"),
+        Input({"type": "bg-row-delete", "group_id": ALL}, "n_clicks"),
+        State({"type": "bg-row-color", "group_id": ALL}, "id"),
+        prevent_initial_call=True,
+    )
+    def manage_bond_groups(
+        add_clicks,
+        active_scene_id,
+        visibles,
+        colors,
+        kinds,
+        elements_lists,
+        opacities,
+        radius_scales,
+        deletes,
+        color_ids,
+    ):
+        cb_start = time.monotonic()
+        triggered = getattr(callback_context, "triggered_id", None)
+        scene_id = active_scene_id or backend.active_scene_id()
+        triggered_label = (
+            triggered.get("type") if isinstance(triggered, dict) else triggered
+        )
+
+        def _rebuild():
+            groups = backend.list_bond_groups(scene_id=scene_id)
+            return _bond_groups_table_rows(
+                groups, backend.element_options(backend.get_state(scene_id))
+            )
+
+        if triggered == "scene-tabs":
+            return _rebuild(), no_update
+
+        if triggered == "bond-groups-add-btn":
+            try:
+                backend.add_bond_group(selector={"all": True}, scene_id=scene_id)
+            except Exception:
+                return no_update, no_update
+            return _rebuild(), backend.get_state()
+
+        if isinstance(triggered, dict) and triggered.get("type") == "bg-row-delete":
+            group_id = triggered.get("group_id")
+            if not group_id:
+                return no_update, no_update
+            backend.remove_bond_group(group_id, scene_id=scene_id)
+            return _rebuild(), backend.get_state()
+
+        if isinstance(triggered, dict) and triggered.get("type", "").startswith("bg-row-"):
+            if not color_ids:
+                return no_update, no_update
+            new_groups: list[dict[str, Any]] = []
+            for index, id_dict in enumerate(color_ids):
+                group_id = id_dict.get("group_id")
+                kind_value = kinds[index] if index < len(kinds) else _BOND_GROUP_KIND_ALL
+                if kind_value == _BOND_GROUP_KIND_ALL:
+                    selector: dict[str, Any] = {"all": True}
+                elif kind_value == _BOND_GROUP_KIND_MINOR:
+                    selector = {"is_minor": True}
+                elif kind_value == _BOND_GROUP_KIND_MAJOR:
+                    selector = {"is_minor": False}
+                else:
+                    elements = [str(e) for e in (elements_lists[index] if index < len(elements_lists) else []) if e]
+                    selector = {"between_elements": elements} if elements else {"all": True}
+                new_groups.append(
+                    {
+                        "id": group_id,
+                        "selector": selector,
+                        "color": colors[index] if index < len(colors) else None,
+                        "visible": "yes" in (visibles[index] if index < len(visibles) else []),
+                        "opacity": float(opacities[index]) if index < len(opacities) and opacities[index] is not None else None,
+                        "radius_scale": float(radius_scales[index]) if index < len(radius_scales) and radius_scales[index] is not None else None,
+                        "enabled": True,
+                    }
+                )
+            try:
+                backend.patch_state({"bond_groups": new_groups}, scene_id=scene_id, broadcast=False)
+            except Exception:
+                return no_update, no_update
+            perf_log.record(
+                "callback:manage_bond_groups",
+                duration_ms=(time.monotonic() - cb_start) * 1000.0,
+                kind="cb",
+                info={
+                    "trigger": triggered_label,
+                    "n_groups": len(new_groups),
+                    "scene_id": scene_id,
+                },
+            )
+            # ``bg-row-kind`` toggles between visible/hidden elements
+            # multi-select, so rebuild children to reveal it.
+            if triggered.get("type") == "bg-row-kind":
+                return _rebuild(), backend.get_state()
+            return no_update, backend.get_state()
+
+        return no_update, no_update
+
+    # ------------------------------------------------------------------
+    # Phase 4 UI: Transforms pipeline.
+    #
+    # The ``transforms-rows-container`` shows one row per transform spec
+    # in ``state["transforms"]``, in pipeline order. Mutations:
+    #
+    #   - ``transforms-add-btn`` + ``transforms-kind-select`` -> append a
+    #     new transform of the selected kind (sane defaults).
+    #   - ``transforms-preset-2x`` / ``-3x`` / ``-clear-repeat`` /
+    #     ``-clear-btn`` -> quick presets for the most common cases.
+    #   - ``trf-row-delete`` / ``-up`` / ``-down`` -> remove / reorder.
+    #   - ``trf-row-enabled`` and any ``trf-param-*`` -> patch the
+    #     transform via ``update_transform`` (kind-aware).
+    #
+    # Because per-row parameter widgets vary by kind, the dispatch reads
+    # ``State`` lists for every possible widget type and only consumes
+    # the ones the row's kind cares about. Empty / missing values fall
+    # back to the spec's defaults.
+    # ------------------------------------------------------------------
+    @app.callback(
+        Output("transforms-rows-container", "children", allow_duplicate=True),
+        Output("agent-state-store", "data", allow_duplicate=True),
+        Input("transforms-add-btn", "n_clicks"),
+        Input("transforms-preset-2x", "n_clicks"),
+        Input("transforms-preset-3x", "n_clicks"),
+        Input("transforms-clear-repeat", "n_clicks"),
+        Input("transforms-clear-btn", "n_clicks"),
+        Input("scene-tabs", "value"),
+        Input({"type": "trf-row-enabled", "transform_id": ALL}, "value"),
+        Input({"type": "trf-row-delete", "transform_id": ALL}, "n_clicks"),
+        Input({"type": "trf-row-up", "transform_id": ALL}, "n_clicks"),
+        Input({"type": "trf-row-down", "transform_id": ALL}, "n_clicks"),
+        Input({"type": "trf-param-a", "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-b", "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-c", "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-seeds", "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-radius", "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-hops", "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-maxhops", "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-cutoff", "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-ops", "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-miller-0", "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-miller-1", "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-miller-2", "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-layers", "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-vacuum", "transform_id": ALL}, "value"),
+        State("transforms-kind-select", "value"),
+        State({"type": "trf-row-enabled", "transform_id": ALL}, "id"),
+        prevent_initial_call=True,
+    )
+    def manage_transforms(
+        add_clicks,
+        preset_2x_clicks,
+        preset_3x_clicks,
+        clear_repeat_clicks,
+        clear_all_clicks,
+        active_scene_id,
+        enableds,
+        deletes,
+        ups,
+        downs,
+        param_a,
+        param_b,
+        param_c,
+        param_seeds,
+        param_radius,
+        param_hops,
+        param_maxhops,
+        param_cutoff,
+        param_ops,
+        param_miller0,
+        param_miller1,
+        param_miller2,
+        param_layers,
+        param_vacuum,
+        kind_select,
+        enabled_ids,
+    ):
+        cb_start = time.monotonic()
+        triggered = getattr(callback_context, "triggered_id", None)
+        scene_id = active_scene_id or backend.active_scene_id()
+        triggered_label = (
+            triggered.get("type") if isinstance(triggered, dict) else triggered
+        )
+
+        def _rebuild():
+            return _transforms_table_rows(backend.list_transforms(scene_id=scene_id))
+
+        if triggered == "scene-tabs":
+            return _rebuild(), no_update
+
+        # Quick presets ------------------------------------------------
+        if triggered == "transforms-preset-2x" or triggered == "transforms-preset-3x":
+            n = 2 if triggered == "transforms-preset-2x" else 3
+            try:
+                backend.patch_state(
+                    {"supercell": {"a": n, "b": n, "c": n}},
+                    scene_id=scene_id,
+                )
+            except Exception:
+                return no_update, no_update
+            return _rebuild(), backend.get_state()
+
+        if triggered == "transforms-clear-repeat":
+            try:
+                backend.patch_state(
+                    {"supercell": {"a": 1, "b": 1, "c": 1}},
+                    scene_id=scene_id,
+                )
+            except Exception:
+                return no_update, no_update
+            return _rebuild(), backend.get_state()
+
+        if triggered == "transforms-clear-btn":
+            try:
+                backend.patch_state({"transforms": []}, scene_id=scene_id)
+            except Exception:
+                return no_update, no_update
+            return _rebuild(), backend.get_state()
+
+        if triggered == "transforms-add-btn":
+            kind = kind_select or "repeat"
+            defaults_by_kind = {
+                "repeat": {"a": 2, "b": 2, "c": 2},
+                "grow_radius": {"seeds": {"all": True}, "radius": 4.0},
+                "grow_bonds": {"seeds": {"all": True}, "hops": 1},
+                "complete_fragment": {"seeds": {"all": True}, "max_hops": 32},
+                "complete_polyhedron": {"seeds": {"all": True}, "cutoff": 4.0},
+                "by_symmetry": {"seeds": {"all": True}, "ops": []},
+                "slab": {"miller": [0, 0, 1], "layers": 3, "vacuum": 10.0},
+            }
+            try:
+                backend.add_transform(
+                    kind=kind,
+                    params=defaults_by_kind.get(kind, {}),
+                    scene_id=scene_id,
+                )
+            except Exception:
+                return no_update, no_update
+            return _rebuild(), backend.get_state()
+
+        if isinstance(triggered, dict) and triggered.get("type") == "trf-row-delete":
+            transform_id = triggered.get("transform_id")
+            if not transform_id:
+                return no_update, no_update
+            backend.remove_transform(transform_id, scene_id=scene_id)
+            return _rebuild(), backend.get_state()
+
+        if isinstance(triggered, dict) and triggered.get("type") in ("trf-row-up", "trf-row-down"):
+            transform_id = triggered.get("transform_id")
+            transforms = list(backend.list_transforms(scene_id=scene_id))
+            ids = [t["id"] for t in transforms]
+            if transform_id not in ids:
+                return no_update, no_update
+            i = ids.index(transform_id)
+            j = i - 1 if triggered.get("type") == "trf-row-up" else i + 1
+            if j < 0 or j >= len(ids):
+                return no_update, no_update
+            ids[i], ids[j] = ids[j], ids[i]
+            try:
+                backend.reorder_transforms(ids, scene_id=scene_id)
+            except Exception:
+                return no_update, no_update
+            return _rebuild(), backend.get_state()
+
+        # Inline edit (enabled toggle or any param change) -------------
+        if isinstance(triggered, dict) and (
+            triggered.get("type") == "trf-row-enabled"
+            or triggered.get("type", "").startswith("trf-param-")
+        ):
+            if not enabled_ids:
+                return no_update, no_update
+            existing = {t["id"]: t for t in backend.list_transforms(scene_id=scene_id)}
+            new_transforms: list[dict[str, Any]] = []
+            for index, id_dict in enumerate(enabled_ids):
+                transform_id = id_dict.get("transform_id")
+                base = existing.get(transform_id)
+                if base is None:
+                    continue
+                kind = base.get("kind") or "repeat"
+                params: dict[str, Any] = {}
+                if kind == "repeat":
+                    params = {
+                        "a": int(param_a[index]) if index < len(param_a) and param_a[index] is not None else int(base["params"].get("a", 1) or 1),
+                        "b": int(param_b[index]) if index < len(param_b) and param_b[index] is not None else int(base["params"].get("b", 1) or 1),
+                        "c": int(param_c[index]) if index < len(param_c) and param_c[index] is not None else int(base["params"].get("c", 1) or 1),
+                    }
+                elif kind in ("grow_radius", "grow_bonds", "complete_fragment", "complete_polyhedron", "by_symmetry"):
+                    seeds_text = param_seeds[index] if index < len(param_seeds) else None
+                    seeds = _seed_text_to_selector(seeds_text) if seeds_text is not None else base["params"].get("seeds") or {}
+                    params["seeds"] = seeds
+                    if kind == "grow_radius":
+                        params["radius"] = float(param_radius[index]) if index < len(param_radius) and param_radius[index] is not None else float(base["params"].get("radius", 0.0) or 0.0)
+                    elif kind == "grow_bonds":
+                        params["hops"] = int(param_hops[index]) if index < len(param_hops) and param_hops[index] is not None else int(base["params"].get("hops", 1) or 1)
+                    elif kind == "complete_fragment":
+                        params["max_hops"] = int(param_maxhops[index]) if index < len(param_maxhops) and param_maxhops[index] is not None else int(base["params"].get("max_hops", 32) or 32)
+                    elif kind == "complete_polyhedron":
+                        params["cutoff"] = float(param_cutoff[index]) if index < len(param_cutoff) and param_cutoff[index] is not None else float(base["params"].get("cutoff", 4.0) or 4.0)
+                    elif kind == "by_symmetry":
+                        ops_text = param_ops[index] if index < len(param_ops) else None
+                        if ops_text:
+                            try:
+                                import json as _json
+                                params["ops"] = _json.loads(ops_text)
+                            except (ValueError, TypeError):
+                                params["ops"] = base["params"].get("ops") or []
+                        else:
+                            params["ops"] = base["params"].get("ops") or []
+                elif kind == "slab":
+                    miller = [
+                        int(param_miller0[index]) if index < len(param_miller0) and param_miller0[index] is not None else (base["params"].get("miller") or [0, 0, 1])[0],
+                        int(param_miller1[index]) if index < len(param_miller1) and param_miller1[index] is not None else (base["params"].get("miller") or [0, 0, 1])[1],
+                        int(param_miller2[index]) if index < len(param_miller2) and param_miller2[index] is not None else (base["params"].get("miller") or [0, 0, 1])[2],
+                    ]
+                    layers_val = param_layers[index] if index < len(param_layers) and param_layers[index] is not None else base["params"].get("layers")
+                    vacuum_val = param_vacuum[index] if index < len(param_vacuum) and param_vacuum[index] is not None else base["params"].get("vacuum", 10.0)
+                    params = {
+                        "miller": miller,
+                        "layers": int(layers_val) if layers_val is not None else None,
+                        "vacuum": float(vacuum_val or 10.0),
+                    }
+                new_transforms.append(
+                    {
+                        "id": transform_id,
+                        "name": base.get("name") or "",
+                        "kind": kind,
+                        "params": params,
+                        "enabled": "yes" in (enableds[index] if index < len(enableds) else []),
+                    }
+                )
+            try:
+                backend.patch_state({"transforms": new_transforms}, scene_id=scene_id, broadcast=False)
+            except Exception:
+                return no_update, no_update
+            perf_log.record(
+                "callback:manage_transforms",
+                duration_ms=(time.monotonic() - cb_start) * 1000.0,
+                kind="cb",
+                info={
+                    "trigger": triggered_label,
+                    "n_transforms": len(new_transforms),
+                    "scene_id": scene_id,
+                },
+            )
+            # An enabled toggle doesn't change the parameter widgets,
+            # but ``patch_state`` may have mutated the transform list
+            # ordering / id set; safe to push state without rebuilding.
+            return no_update, backend.get_state()
+
+        return no_update, no_update
+
+    # ------------------------------------------------------------------
+    # Phase 4 UI: polyhedron neighbour-search supercell.
+    #
+    # Three small ``polyhedron-search-supercell.{a,b,c}`` inputs that
+    # write back into ``state["polyhedron_search_supercell"]``. The
+    # geometry cache key on the renderer side includes this triple, so
+    # changing it reliably re-runs polyhedron analysis with the new
+    # neighbour-image span.
+    # ------------------------------------------------------------------
+    @app.callback(
+        Output("agent-state-store", "data", allow_duplicate=True),
+        Input({"type": "polyhedron-search-supercell", "axis": ALL}, "value"),
+        State({"type": "polyhedron-search-supercell", "axis": ALL}, "id"),
+        State("scene-tabs", "value"),
+        prevent_initial_call=True,
+    )
+    def update_polyhedron_search_supercell(values, ids, active_scene_id):
+        scene_id = active_scene_id or backend.active_scene_id()
+        triple = [0, 0, 0]
+        for idx_dict, value in zip(ids or [], values or []):
+            axis = idx_dict.get("axis")
+            try:
+                v = max(0, int(value or 0))
+            except (TypeError, ValueError):
+                v = 0
+            if axis == "a":
+                triple[0] = v
+            elif axis == "b":
+                triple[1] = v
+            elif axis == "c":
+                triple[2] = v
+        try:
+            backend.patch_state(
+                {"polyhedron_search_supercell": triple},
+                scene_id=scene_id,
+                broadcast=False,
+            )
+        except Exception:
+            return no_update
+        return backend.get_state()
+
+    # ------------------------------------------------------------------
+    # Phase 4 UI: right-click context menu + keyboard shortcuts.
+    #
+    # Wiring overview:
+    #   1. ``assets/right_click_menu.js`` listens for native
+    #      ``contextmenu`` on ``#crystal-graph`` and writes a payload
+    #      ``{kind, payload, x, y, ts}`` into
+    #      ``dcc.Store(id="rightclick-target")`` via
+    #      ``dash_clientside.set_props``.
+    #   2. ``assets/keyboard_shortcuts.js`` writes the same store but
+    #      with an extra ``action`` field (e.g. ``"supercell_2x"``,
+    #      ``"hide"``, ``"grow_bonds"``) so a single dispatch callback
+    #      can handle keyboard actions.
+    #   3. ``sync_rightclick_fallback`` mirrors the hidden text-input
+    #      fallback into the store for the rare case set_props isn't
+    #      bootstrapped.
+    #   4. ``render_rightclick_menu`` rebuilds the popover children
+    #      based on the picked-target kind and positions it.
+    #   5. ``apply_rightclick_action`` dispatches both popover button
+    #      clicks (Hide / Grow / Analyze / Promote) and keyboard
+    #      shortcut actions to backend mutations.
+    #   6. ``apply_rightclick_color`` handles the inline colour picker
+    #      that lives inside the popover.
+    #   7. ``toggle_kbd_help`` shows/hides the keyboard-help overlay
+    #      (close button only -- the JS handles the ``?`` toggle).
+    # ------------------------------------------------------------------
+    @app.callback(
+        Output("rightclick-target", "data", allow_duplicate=True),
+        Input("rightclick-target-fallback", "value"),
+        prevent_initial_call=True,
+    )
+    def sync_rightclick_fallback(raw_value):
+        if not raw_value:
+            return no_update
+        try:
+            import json as _json
+            payload = _json.loads(raw_value)
+            return payload
+        except (ValueError, TypeError):
             return no_update
 
-        return no_update
+    @app.callback(
+        Output("rightclick-menu", "children"),
+        Output("rightclick-menu", "style"),
+        Output("rightclick-menu", "className"),
+        Input("rightclick-target", "data"),
+    )
+    def render_rightclick_menu(target):
+        from dash import dcc, html
+
+        hidden_class = "rightclick-menu rightclick-menu--hidden"
+        empty_style = {"top": "0px", "left": "0px"}
+        if not target or not isinstance(target, dict):
+            return [], empty_style, hidden_class
+        kind = target.get("kind")
+        if kind == "_close":
+            return [], empty_style, hidden_class
+        # Keyboard-shortcut path: just dispatch and don't render. We
+        # still want the popover hidden (it might have been visible
+        # before).
+        if target.get("action"):
+            return [], empty_style, hidden_class
+        payload = target.get("payload") or {}
+        x = int(target.get("x") or 0)
+        y = int(target.get("y") or 0)
+        items: list[Any] = []
+        header_text = ""
+        color_picker_color = "#888888"
+
+        if kind == "atom":
+            label = payload.get("label") or "(atom)"
+            elem = payload.get("element") or ""
+            header_text = f"Atom \u00b7 {label} ({elem})"
+            items.extend([
+                html.Div(
+                    [
+                        html.Label("Colour", htmlFor="rcm-color-picker"),
+                        dcc.Input(
+                            id="rcm-color-picker",
+                            type="color",
+                            value=color_picker_color,
+                            debounce=False,
+                        ),
+                    ],
+                    className="rightclick-menu__color",
+                ),
+                html.Button(
+                    [html.Span("Hide this atom"), html.Span("h", className="rightclick-menu__shortcut")],
+                    id="rcm-action-hide",
+                    n_clicks=0,
+                    className="rightclick-menu__item",
+                ),
+                html.Button(
+                    [html.Span("Grow by 1 bond hop"), html.Span("g", className="rightclick-menu__shortcut")],
+                    id="rcm-action-grow-bonds",
+                    n_clicks=0,
+                    className="rightclick-menu__item",
+                ),
+                html.Button(
+                    [html.Span("Grow by 4\u202f\u00c5 radius"), html.Span("\u21e7g", className="rightclick-menu__shortcut")],
+                    id="rcm-action-grow-radius",
+                    n_clicks=0,
+                    className="rightclick-menu__item",
+                ),
+                html.Button(
+                    "Complete fragment",
+                    id="rcm-action-complete-fragment",
+                    n_clicks=0,
+                    className="rightclick-menu__item",
+                ),
+                html.Button(
+                    "Analyze coordination",
+                    id="rcm-action-analyze",
+                    n_clicks=0,
+                    className="rightclick-menu__item",
+                ),
+                html.Div(className="rightclick-menu__divider"),
+                html.Button(
+                    [html.Span("Promote to group rule"), html.Span("p", className="rightclick-menu__shortcut")],
+                    id="rcm-action-promote",
+                    n_clicks=0,
+                    className="rightclick-menu__item",
+                ),
+            ])
+        elif kind == "polyhedron":
+            label = payload.get("fragment_label") or "(polyhedron)"
+            header_text = f"Polyhedron \u00b7 {label}"
+            items.extend([
+                html.Div(
+                    [
+                        html.Label("Colour", htmlFor="rcm-color-picker"),
+                        dcc.Input(
+                            id="rcm-color-picker",
+                            type="color",
+                            value=color_picker_color,
+                            debounce=False,
+                        ),
+                    ],
+                    className="rightclick-menu__color",
+                ),
+                html.Button(
+                    [html.Span("Hide this polyhedron"), html.Span("h", className="rightclick-menu__shortcut")],
+                    id="rcm-action-hide",
+                    n_clicks=0,
+                    className="rightclick-menu__item",
+                ),
+                html.Button(
+                    "Complete coordination",
+                    id="rcm-action-complete-fragment",
+                    n_clicks=0,
+                    className="rightclick-menu__item",
+                ),
+                html.Div(className="rightclick-menu__divider"),
+                # Keep the rest of the popover schema consistent with
+                # the atom branch so the buttons exist for the
+                # callback's Inputs (Dash needs the ids present).
+                html.Button(
+                    "Grow polyhedron neighbourhood",
+                    id="rcm-action-grow-bonds",
+                    n_clicks=0,
+                    className="rightclick-menu__item",
+                ),
+                html.Button(
+                    "Grow by 4\u202f\u00c5 radius",
+                    id="rcm-action-grow-radius",
+                    n_clicks=0,
+                    className="rightclick-menu__item",
+                ),
+                html.Button(
+                    "Re-analyze",
+                    id="rcm-action-analyze",
+                    n_clicks=0,
+                    className="rightclick-menu__item",
+                ),
+                html.Button(
+                    "Promote to group rule",
+                    id="rcm-action-promote",
+                    n_clicks=0,
+                    className="rightclick-menu__item",
+                ),
+            ])
+        elif kind == "bond":
+            label = payload.get("label_pair") or "(bond)"
+            elements = payload.get("element_pair") or ""
+            header_text = f"Bond \u00b7 {label} ({elements})"
+            items.extend([
+                html.Div(
+                    [
+                        html.Label("Colour", htmlFor="rcm-color-picker"),
+                        dcc.Input(
+                            id="rcm-color-picker",
+                            type="color",
+                            value=color_picker_color,
+                            debounce=False,
+                        ),
+                    ],
+                    className="rightclick-menu__color",
+                ),
+                html.Button(
+                    [html.Span("Hide bonds like this"), html.Span("h", className="rightclick-menu__shortcut")],
+                    id="rcm-action-hide",
+                    n_clicks=0,
+                    className="rightclick-menu__item",
+                ),
+                html.Button(
+                    "Promote to bond-group rule",
+                    id="rcm-action-promote",
+                    n_clicks=0,
+                    className="rightclick-menu__item",
+                ),
+                html.Div(className="rightclick-menu__divider"),
+                # Hidden no-ops to satisfy callback Input list.
+                html.Button("", id="rcm-action-grow-bonds", n_clicks=0, style={"display": "none"}),
+                html.Button("", id="rcm-action-grow-radius", n_clicks=0, style={"display": "none"}),
+                html.Button("", id="rcm-action-complete-fragment", n_clicks=0, style={"display": "none"}),
+                html.Button("", id="rcm-action-analyze", n_clicks=0, style={"display": "none"}),
+            ])
+        else:
+            return [], empty_style, hidden_class
+
+        children: list[Any] = [html.Div(header_text, className="rightclick-menu__header")] + items
+        # Position: clamp so the menu stays inside the viewport. The
+        # JS sends viewport coords (clientX/clientY); we use position:
+        # fixed in CSS so the same coords work directly.
+        style = {
+            "top": f"{max(8, y)}px",
+            "left": f"{max(8, x)}px",
+        }
+        return children, style, "rightclick-menu"
+
+    @app.callback(
+        Output("agent-state-store", "data", allow_duplicate=True),
+        Output("rightclick-target", "data", allow_duplicate=True),
+        Input("rcm-action-hide", "n_clicks"),
+        Input("rcm-action-grow-bonds", "n_clicks"),
+        Input("rcm-action-grow-radius", "n_clicks"),
+        Input("rcm-action-complete-fragment", "n_clicks"),
+        Input("rcm-action-analyze", "n_clicks"),
+        Input("rcm-action-promote", "n_clicks"),
+        Input("rightclick-target", "data"),
+        State("scene-tabs", "value"),
+        prevent_initial_call=True,
+    )
+    def apply_rightclick_action(
+        hide_clicks,
+        grow_bonds_clicks,
+        grow_radius_clicks,
+        complete_clicks,
+        analyze_clicks,
+        promote_clicks,
+        target,
+        active_scene_id,
+    ):
+        triggered = getattr(callback_context, "triggered_id", None)
+        if not target or not isinstance(target, dict):
+            return no_update, no_update
+        scene_id = active_scene_id or backend.active_scene_id()
+        kind = target.get("kind")
+        payload = target.get("payload") or {}
+        # Keyboard path: store update with ``action`` set; do not also
+        # consume button clicks on the same event.
+        action = None
+        if triggered == "rightclick-target":
+            action = target.get("action")
+            if not action:
+                return no_update, no_update
+        else:
+            mapping = {
+                "rcm-action-hide": "hide",
+                "rcm-action-grow-bonds": "grow_bonds",
+                "rcm-action-grow-radius": "grow_radius",
+                "rcm-action-complete-fragment": "complete_fragment",
+                "rcm-action-analyze": "analyze",
+                "rcm-action-promote": "promote_to_group",
+            }
+            action = mapping.get(triggered)
+            if action is None:
+                return no_update, no_update
+
+        try:
+            _dispatch_rightclick_action(backend, scene_id, action, kind, payload, target)
+        except Exception:  # pragma: no cover - best-effort; surface in browser console
+            return no_update, {"kind": "_close", "ts": time.time()}
+        # Close the popover after a successful action.
+        return backend.get_state(), {"kind": "_close", "ts": time.time()}
+
+    @app.callback(
+        Output("agent-state-store", "data", allow_duplicate=True),
+        Input("rcm-color-picker", "value"),
+        State("rightclick-target", "data"),
+        State("scene-tabs", "value"),
+        prevent_initial_call=True,
+    )
+    def apply_rightclick_color(color, target, active_scene_id):
+        if not color or not target or not isinstance(target, dict):
+            return no_update
+        scene_id = active_scene_id or backend.active_scene_id()
+        kind = target.get("kind")
+        payload = target.get("payload") or {}
+        try:
+            _dispatch_rightclick_action(
+                backend, scene_id, "set_color", kind, payload, target, color=str(color)
+            )
+        except Exception:
+            return no_update
+        return backend.get_state()
+
+    @app.callback(
+        Output("kbd-help", "className"),
+        Input("kbd-help-close", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def close_kbd_help(_):
+        return "kbd-help kbd-help--hidden"
 
     @app.callback(
         Output("camera-state-store", "data", allow_duplicate=True),
@@ -3265,6 +5940,57 @@ def create_app(
     def gate_minor_opacity(disorder):
         return _minor_opacity_disabled(disorder), _minor_opacity_control_style(disorder)
 
+    # ------------------------------------------------------------------
+    # Perf-log panel
+    #
+    # Polls the in-process ``perf_log`` ring buffer every second and
+    # appends new entries to the on-screen list. Each entry shows a
+    # local-time clock, the callback / event label, the duration
+    # (colour-coded), and a short payload summary (filename, atom
+    # count, ...). The store keeps the latest sequence number so the
+    # poll only ships new events.
+    # ------------------------------------------------------------------
+    @app.callback(
+        Output("perf-log-panel", "className"),
+        Input("perf-log-toggle", "n_clicks"),
+        State("perf-log-panel", "className"),
+        prevent_initial_call=True,
+    )
+    def toggle_perf_log(_, current_class):
+        cls = current_class or "perf-log-panel perf-log-panel--collapsed"
+        if "perf-log-panel--collapsed" in cls:
+            return "perf-log-panel perf-log-panel--expanded"
+        return "perf-log-panel perf-log-panel--collapsed"
+
+    @app.callback(
+        Output("perf-log-cursor", "data", allow_duplicate=True),
+        Input("perf-log-clear", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def clear_perf_log(_):
+        perf_log.clear()
+        return {"seq": perf_log.latest_seq(), "events": []}
+
+    @app.callback(
+        Output("perf-log-body", "children"),
+        Output("perf-log-cursor", "data"),
+        Input("perf-log-poll", "n_intervals"),
+        State("perf-log-cursor", "data"),
+    )
+    def refresh_perf_log(_, cursor):
+        cursor = cursor or {"seq": 0, "events": []}
+        new_events = perf_log.recent(limit=200, since_seq=int(cursor.get("seq", 0)))
+        if not new_events and cursor.get("events"):
+            return no_update, no_update
+        merged = list(cursor.get("events") or []) + new_events
+        # Keep only the latest 80 entries on screen so the DOM stays
+        # cheap; the full ring buffer is still available via
+        # ``GET /api/v1/perf``.
+        merged = merged[-80:]
+        rows = [_perf_log_row(entry) for entry in reversed(merged)]
+        latest = merged[-1]["seq"] if merged else int(cursor.get("seq", 0))
+        return rows, {"seq": latest, "events": merged}
+
     @app.callback(
         Output("crystal-graph", "figure"),
         Output("topology-histogram", "figure"),
@@ -3277,6 +6003,15 @@ def create_app(
         agent_state,
         camera_state,
     ):
+        # ``update_view`` is the dominant cost when the user pokes a
+        # slider or a colour swatch -- it rebuilds the figure, the
+        # topology histogram, and the structure-summary table in one
+        # callback. Wrap it so the perf log makes the total wall time
+        # observable. ``figure_for_state`` itself is instrumented
+        # internally with three sub-blocks (``scene_for_state``,
+        # ``topology_for_state``, ``build_figure``) so the user can
+        # tell which leg is slow without re-profiling.
+        cb_start = time.monotonic()
         state = backend.normalize_state(agent_state or backend.get_state())
         camera = _camera_from_store(camera_state, state.get("scene_id"))
         if camera:
@@ -3322,10 +6057,28 @@ def create_app(
         )
         prev_key = getattr(update_view, "_topo_cache_key", None)
         if prev_key == topo_key:
+            perf_log.record(
+                "callback:update_view",
+                duration_ms=(time.monotonic() - cb_start) * 1000.0,
+                kind="cb",
+                info={
+                    "scene_id": state.get("scene_id"),
+                    "side_panel": "cached",
+                },
+            )
             return fig, no_update, no_update, no_update
         update_view._topo_cache_key = topo_key
-        summary = _structure_summary(backend.scene_for_state(state))
-        return fig, topology_histogram_figure(topology_data), topology_results_markdown(topology_data), summary
+        with perf_log.time_block("update_view:side_panel", kind="event"):
+            summary = _structure_summary(backend.scene_for_state(state))
+            histogram = topology_histogram_figure(topology_data)
+            md = topology_results_markdown(topology_data)
+        perf_log.record(
+            "callback:update_view",
+            duration_ms=(time.monotonic() - cb_start) * 1000.0,
+            kind="cb",
+            info={"scene_id": state.get("scene_id"), "side_panel": "rebuilt"},
+        )
+        return fig, histogram, md, summary
 
     @app.callback(
         Output("status-banner", "children"),

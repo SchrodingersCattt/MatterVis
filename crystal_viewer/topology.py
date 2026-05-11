@@ -61,12 +61,46 @@ def _neighbor_types(fragments: list[dict[str, Any]], center_type: str) -> list[s
     return [frag_type for frag_type in ("B", "A", "X", "?") if frag_type in available and frag_type != center_type]
 
 
-def _translation_grid(bundle, cutoff: float) -> list[tuple[int, int, int, np.ndarray]]:
+def _normalize_search_supercell(value) -> tuple[int, int, int]:
+    """Coerce caller input into a (na, nb, nc) span triple.
+
+    ``None`` and falsy values map to ``(0, 0, 0)`` (use cutoff-driven span
+    only). Negative numbers clamp to zero -- a polyhedron centre cannot
+    request fewer than zero adjacent images.
+    """
+    if value is None:
+        return (0, 0, 0)
+    if isinstance(value, (int, float)):
+        v = max(0, int(value))
+        return (v, v, v)
+    seq = tuple(value)
+    if len(seq) == 1:
+        v = max(0, int(seq[0]))
+        return (v, v, v)
+    if len(seq) >= 3:
+        return (
+            max(0, int(seq[0])),
+            max(0, int(seq[1])),
+            max(0, int(seq[2])),
+        )
+    raise ValueError(f"search_supercell must be int or 3-tuple, got: {value!r}")
+
+
+def _translation_grid(
+    bundle,
+    cutoff: float,
+    *,
+    search_supercell: tuple[int, int, int] = (0, 0, 0),
+) -> list[tuple[int, int, int, np.ndarray]]:
     lattice = _lattice_vectors(bundle)
     ranges = []
-    for vec in lattice:
+    for vec, extra in zip(lattice, search_supercell):
         length = max(np.linalg.norm(vec), 1e-6)
-        span = max(1, int(math.ceil((cutoff + 1.0) / length)))
+        cutoff_span = max(1, int(math.ceil((cutoff + 1.0) / length)))
+        # ``search_supercell`` is a *floor* on the search radius (in lattice
+        # units). Cutoff still wins when it requests more images than the
+        # caller asked for.
+        span = max(cutoff_span, int(extra))
         ranges.append(range(-span, span + 1))
     translations = []
     for na, nb, nc in itertools.product(*ranges):
@@ -81,6 +115,7 @@ def _neighbor_pool_uncached(
     cutoff: float,
     *,
     ligand_species: tuple[str, ...] | None = None,
+    search_supercell: tuple[int, int, int] = (0, 0, 0),
 ) -> list[dict[str, Any]]:
     """Find neighbour fragments within ``cutoff`` of the centre.
 
@@ -92,6 +127,11 @@ def _neighbor_pool_uncached(
     Pre-built named ``polyhedron_specs`` need this override so the user
     can paint e.g. C8N1 -> Cl polyhedra in DAP-4 explicitly without
     fighting the A/B/X auto-classifier.
+
+    ``search_supercell`` is a per-axis *floor* on the lattice-image
+    search radius. Cutoff still drives the natural span; the floor only
+    matters when the caller wants polyhedra to extend across cell
+    boundaries even when cutoff alone would not have searched that far.
     """
     fragments = classify_fragments(bundle)
     center_type = center_fragment.get("type", "?")
@@ -102,7 +142,7 @@ def _neighbor_pool_uncached(
         wanted = None
         allowed_types = set(_neighbor_types(fragments, center_type))
     center = np.array(center_fragment["center"], dtype=float)
-    translations = _translation_grid(bundle, cutoff)
+    translations = _translation_grid(bundle, cutoff, search_supercell=search_supercell)
     fragment_entries = []
     for fragment_order, fragment in enumerate(fragments):
         if fragment["index"] == center_fragment["index"] and center_type not in {"X"}:
@@ -161,10 +201,12 @@ def _neighbor_pool(
     cutoff: float,
     *,
     ligand_species: tuple[str, ...] | None = None,
+    search_supercell: tuple[int, int, int] = (0, 0, 0),
 ) -> list[dict[str, Any]]:
     """Cached PBC neighbour search. The cache key now includes the
-    ligand-species filter so two specs with the same centre but
-    different ligand restrictions don't poison each other's pool."""
+    ligand-species filter and the search-supercell floor so two specs
+    with the same centre but different restrictions don't poison each
+    other's pool."""
     cache = getattr(bundle, "_neighbor_pool_cache", None)
     if cache is None:
         cache = {}
@@ -172,13 +214,27 @@ def _neighbor_pool(
             bundle._neighbor_pool_cache = cache
         except Exception:
             return _neighbor_pool_uncached(
-                bundle, center_fragment, cutoff, ligand_species=ligand_species
+                bundle,
+                center_fragment,
+                cutoff,
+                ligand_species=ligand_species,
+                search_supercell=search_supercell,
             )
     ligand_key = tuple(sorted(ligand_species)) if ligand_species else None
-    key = (int(center_fragment.get("index", -1)), float(cutoff), ligand_key)
+    super_key = tuple(int(v) for v in search_supercell)
+    key = (
+        int(center_fragment.get("index", -1)),
+        float(cutoff),
+        ligand_key,
+        super_key,
+    )
     if key not in cache:
         cache[key] = _neighbor_pool_uncached(
-            bundle, center_fragment, cutoff, ligand_species=ligand_species
+            bundle,
+            center_fragment,
+            cutoff,
+            ligand_species=ligand_species,
+            search_supercell=search_supercell,
         )
     return cache[key]
 
@@ -189,19 +245,24 @@ def _extract_coordination_shell_static(
     cutoff: float,
     *,
     ligand_species: tuple[str, ...] | None = None,
+    search_supercell: tuple[int, int, int] = (0, 0, 0),
 ) -> dict[str, Any]:
     """Run the geometric part of ``extract_coordination_shell`` -- everything
-    that depends only on (bundle, center_index, cutoff, ligand_species) and
-    not on the per-call display-coordinate offsets. The result is
-    cacheable; the public wrapper layers display fields on top of a
-    shallow copy."""
+    that depends only on (bundle, center_index, cutoff, ligand_species,
+    search_supercell) and not on the per-call display-coordinate offsets.
+    The result is cacheable; the public wrapper layers display fields on
+    top of a shallow copy."""
     fragments = classify_fragments(bundle)
     center_fragment = next((frag for frag in fragments if int(frag["index"]) == int(center_index)), None)
     if center_fragment is None:
         raise IndexError(f"Unknown fragment index: {center_index}")
     source_center = np.array(center_fragment["center"], dtype=float)
     candidates = _neighbor_pool(
-        bundle, center_fragment, cutoff=cutoff, ligand_species=ligand_species
+        bundle,
+        center_fragment,
+        cutoff=cutoff,
+        ligand_species=ligand_species,
+        search_supercell=search_supercell,
     )
     candidate_coords = (
         np.array([item["center"] for item in candidates], dtype=float)
@@ -244,6 +305,7 @@ def _cached_extract_static(
     cutoff: float,
     *,
     ligand_species: tuple[str, ...] | None = None,
+    search_supercell: tuple[int, int, int] = (0, 0, 0),
 ) -> dict[str, Any]:
     cache = getattr(bundle, "_shell_cache", None)
     if cache is None:
@@ -252,13 +314,22 @@ def _cached_extract_static(
             bundle._shell_cache = cache
         except Exception:
             return _extract_coordination_shell_static(
-                bundle, center_index, cutoff, ligand_species=ligand_species
+                bundle,
+                center_index,
+                cutoff,
+                ligand_species=ligand_species,
+                search_supercell=search_supercell,
             )
     ligand_key = tuple(sorted(ligand_species)) if ligand_species else None
-    key = (int(center_index), float(cutoff), ligand_key)
+    super_key = tuple(int(v) for v in search_supercell)
+    key = (int(center_index), float(cutoff), ligand_key, super_key)
     if key not in cache:
         cache[key] = _extract_coordination_shell_static(
-            bundle, center_index, cutoff, ligand_species=ligand_species
+            bundle,
+            center_index,
+            cutoff,
+            ligand_species=ligand_species,
+            search_supercell=search_supercell,
         )
     return cache[key]
 
@@ -272,10 +343,16 @@ def extract_coordination_shell(
     display_label: str | None = None,
     display_type: str | None = None,
     ligand_species: Iterable[str] | None = None,
+    search_supercell=None,
 ) -> dict[str, Any]:
     ligand_tuple = tuple(str(item) for item in ligand_species) if ligand_species else None
+    super_tuple = _normalize_search_supercell(search_supercell)
     static = _cached_extract_static(
-        bundle, int(center_index), float(cutoff), ligand_species=ligand_tuple
+        bundle,
+        int(center_index),
+        float(cutoff),
+        ligand_species=ligand_tuple,
+        search_supercell=super_tuple,
     )
     source_center = np.asarray(static["source_center_coords"], dtype=float)
     plot_center = source_center if display_center is None else np.array(display_center, dtype=float)
@@ -320,6 +397,7 @@ def _analyze_topology_uncached(
     display_type,
     *,
     ligand_species: tuple[str, ...] | None = None,
+    search_supercell: tuple[int, int, int] = (0, 0, 0),
 ) -> dict[str, Any]:
     shell = extract_coordination_shell(
         bundle,
@@ -329,6 +407,7 @@ def _analyze_topology_uncached(
         display_label=display_label,
         display_type=display_type,
         ligand_species=ligand_species,
+        search_supercell=search_supercell,
     )
     center = shell["center_coords"]
     shell_coords = shell["shell_coords"]
@@ -354,15 +433,26 @@ def analyze_topology(
     display_label: str | None = None,
     display_type: str | None = None,
     ligand_species: Iterable[str] | None = None,
+    search_supercell=None,
 ) -> dict[str, Any]:
     """Cached primary-site analysis. The heavy ``planarity_analysis`` pass
     runs ``itertools.combinations`` of size 5 over the shell, which gets
     expensive for CN=12 / large neighbour pools. We key the cache on
-    ``(center_index, cutoff, ligand_species)`` -- the full bundle topology
-    is immutable once loaded -- so flipping species checkboxes back and
-    forth no longer redoes the work, but two named polyhedron specs with
-    different ligand restrictions get distinct cache slots."""
+    ``(center_index, cutoff, ligand_species, search_supercell)`` -- the
+    full bundle topology is immutable once loaded -- so flipping species
+    checkboxes back and forth no longer redoes the work, but two named
+    polyhedron specs with different ligand restrictions or search ranges
+    get distinct cache slots.
+
+    ``search_supercell`` is a per-axis floor on the lattice-image search
+    range. It is decoupled from the *display* supercell (a structural
+    transform): callers can keep a single cell on screen but ask for
+    polyhedra to wrap to neighbouring images, or repeat the structure
+    without inflating the search radius. Accepts ``int``, ``(na, nb, nc)``
+    triples, or ``None`` (cutoff-driven span only).
+    """
     ligand_tuple = tuple(str(item) for item in ligand_species) if ligand_species else None
+    super_tuple = _normalize_search_supercell(search_supercell)
     cache = getattr(bundle, "_analyze_topology_cache", None)
     if cache is None:
         cache = {}
@@ -373,14 +463,16 @@ def analyze_topology(
                 bundle, center_index, cutoff,
                 display_center, display_label, display_type,
                 ligand_species=ligand_tuple,
+                search_supercell=super_tuple,
             )
-    key = (int(center_index), float(cutoff), ligand_tuple)
+    key = (int(center_index), float(cutoff), ligand_tuple, super_tuple)
     cached = cache.get(key)
     if cached is None:
         cached = _analyze_topology_uncached(
             bundle, center_index, cutoff,
             None, None, None,  # cache on the static result; overlay display fields below
             ligand_species=ligand_tuple,
+            search_supercell=super_tuple,
         )
         cache[key] = cached
     # Display fields shift per call (camera / formula-unit centering); patch

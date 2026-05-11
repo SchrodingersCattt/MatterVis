@@ -37,32 +37,95 @@ from __future__ import annotations
 from typing import Any
 
 
-def atom_matches_selector(atom: dict, selector: dict) -> bool:
+def atom_matches_selector(
+    atom: dict,
+    selector: dict,
+    *,
+    atom_index: int | None = None,
+    fragment_label: str | None = None,
+) -> bool:
     """Return True iff ``atom`` matches every key in ``selector``.
 
     The legal keys (intersected, AND semantics) are:
-    - ``all``: matches every atom regardless of element / disorder.
-    - ``elements``: list of element symbols; matches when
+
+    * ``all``: matches every atom regardless of element / disorder.
+    * ``elements``: list of element symbols; matches when
       ``atom['elem']`` is in the list.
-    - ``is_minor``: matches the atom's ``is_minor`` flag exactly.
+    * ``is_minor``: matches the atom's ``is_minor`` flag exactly.
+    * ``labels``: list of atom labels (``atom['label']``). Phase 4
+      addition for per-instance overrides driven by the right-click
+      menu and AI callers (``atom_groups`` selector =
+      ``{"labels": ["Pb1"]}`` recolours just that atom).
+    * ``atom_indices``: list of integer indices into the rendered
+      ``draw_atoms`` list. ``atom_index`` MUST be passed by the
+      caller (the renderer's tagger does this) -- without it this
+      key is silently ignored. Indices reference the rendered scene
+      and are NOT stable across transforms (use ``labels`` for
+      transform-stable identity).
+    * ``fragment_labels`` / ``fragment_indices``: filter by the
+      fragment-table label (``"A0"``, ``"B1"``, ...) or numeric
+      fragment index. ``fragment_label`` MUST be passed by the
+      caller; without it these keys are silently ignored.
+
+    The "MUST be passed" keys exist because the atom dict alone
+    doesn't know its own scene-level index or fragment membership;
+    the caller (the renderer's :func:`tag_atoms_with_groups` loop)
+    threads those through so the matcher stays a pure function of
+    its inputs.
     """
     if selector.get("all"):
         return True
+
+    used_any_key = False
+
     if "elements" in selector:
+        used_any_key = True
         if atom.get("elem") not in selector["elements"]:
             return False
     if "is_minor" in selector:
+        used_any_key = True
         if bool(atom.get("is_minor", False)) != bool(selector["is_minor"]):
             return False
-    # If the selector reached here without any of {all, elements, is_minor}
-    # being present, treat it as a no-op (don't match anything). The
-    # backend normaliser should reject empty selectors before they reach
-    # this layer, but we belt-and-brace the renderer too.
-    if not (
-        selector.get("all")
-        or "elements" in selector
-        or "is_minor" in selector
-    ):
+    if "labels" in selector:
+        used_any_key = True
+        wanted = {str(item) for item in (selector.get("labels") or [])}
+        if str(atom.get("label") or "") not in wanted:
+            return False
+    if "atom_indices" in selector:
+        if atom_index is None:
+            # Caller didn't thread the index through; treat as no-op
+            # rather than silently matching nothing.
+            return False
+        used_any_key = True
+        wanted_ints = {int(item) for item in (selector.get("atom_indices") or [])}
+        if int(atom_index) not in wanted_ints:
+            return False
+    if "fragment_labels" in selector:
+        if fragment_label is None:
+            return False
+        used_any_key = True
+        wanted_labels = {str(item) for item in (selector.get("fragment_labels") or [])}
+        if str(fragment_label) not in wanted_labels:
+            return False
+    if "fragment_indices" in selector:
+        # Fragment indices are passed via the ``fragment_label`` arg
+        # too -- we accept either ``"A0"``-style label or a bare
+        # integer like ``0``. The caller threads either form.
+        if fragment_label is None:
+            return False
+        used_any_key = True
+        wanted_idx = {int(item) for item in (selector.get("fragment_indices") or [])}
+        try:
+            label_int = int(fragment_label)
+        except (TypeError, ValueError):
+            return False
+        if label_int not in wanted_idx:
+            return False
+
+    if not used_any_key and not selector.get("all"):
+        # No recognised keys -> selector is a no-op (matches nothing).
+        # The backend normaliser rejects empty selectors before they
+        # reach this layer; we belt-and-brace the renderer too.
         return False
     return True
 
@@ -73,6 +136,7 @@ def tag_atoms_with_groups(
     *,
     scene_material: str | None = None,
     scene_style: str | None = None,
+    fragment_labels: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Decorate every atom dict with per-render override fields.
 
@@ -97,7 +161,7 @@ def tag_atoms_with_groups(
     future bond colouring extensions.
     """
     tagged: list[dict[str, Any]] = []
-    for atom in atoms:
+    for idx, atom in enumerate(atoms):
         decorated = dict(atom)
         # Sentinels: ``None`` means "no group provided an override; the
         # builder should fall back to the element-palette colour /
@@ -110,9 +174,17 @@ def tag_atoms_with_groups(
         decorated["_render_opacity_scale"] = 1.0
         decorated["_render_material"] = None
         decorated["_render_style"] = None
+        fragment_label = (
+            fragment_labels[idx] if fragment_labels and idx < len(fragment_labels) else None
+        )
         for group in atom_groups:
             selector = group.get("selector") or {}
-            if not atom_matches_selector(decorated, selector):
+            if not atom_matches_selector(
+                decorated,
+                selector,
+                atom_index=idx,
+                fragment_label=fragment_label,
+            ):
                 continue
             color = group.get("color")
             if color:
