@@ -10,13 +10,11 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any, Dict, Iterable, Optional
 
-import networkx as nx
 import numpy as np
-from .molcrys_compat import unwrap_positions_along_bonds
 
 from .presets import get_default_catalog, workspace_root
 from . import molcrys_bridge
-from .scene import build_scene_from_atoms, legacy_scene, pc, scene_json, scene_metadata, scene_ops
+from .scene import build_scene_from_atoms, legacy_scene, scene_json, scene_metadata, scene_ops
 
 
 @dataclass
@@ -154,71 +152,111 @@ def build_empty_bundle(
     )
 
 
-def _cluster_components(n_items: int, pairs: Iterable[tuple[int, int]]) -> list[list[int]]:
-    parents = list(range(n_items))
-
-    def find(idx: int) -> int:
-        while parents[idx] != idx:
-            parents[idx] = parents[parents[idx]]
-            idx = parents[idx]
-        return idx
-
-    def union(a: int, b: int) -> None:
-        ra = find(a)
-        rb = find(b)
-        if ra != rb:
-            parents[ra] = rb
-
-    for i, j in pairs:
-        union(int(i), int(j))
-
-    groups: dict[int, list[int]] = defaultdict(list)
-    for idx in range(n_items):
-        groups[find(idx)].append(idx)
-    return [sorted(group) for _, group in sorted(groups.items(), key=lambda item: min(item[1]))]
-
-
 DEFAULT_UNWRAP_MAX_ATOMS = 500
 
 
-def _unwrap_atom_pool(
-    atoms: list[dict[str, Any]],
-    bond_pairs: Iterable[tuple[int, int]],
-    cell,
-    M,
-    components: Iterable[list[int]],
-    *,
-    max_atoms: int | None = DEFAULT_UNWRAP_MAX_ATOMS,
-) -> tuple[list[dict[str, Any]], list[list[int]]]:
-    out = [dict(atom) for atom in atoms]
-    graph = nx.Graph()
-    graph.add_nodes_from(range(len(out)))
-    for i, j in bond_pairs:
-        i = int(i)
-        j = int(j)
-        start = np.asarray(out[i]["cart"], dtype=float)
-        near = np.asarray(pc._nearest_pbc_cart(out[i]["cart"], out[j]["cart"], cell), dtype=float)
-        vector = near - start if i < j else start - near
-        graph.add_edge(i, j, vector=vector)
+def _has_shelx_occupancy_disorder(raw_atoms) -> bool:
+    """Return True if ``raw_atoms`` contains SHELX-style occupancy
+    disorder that ``parse_asu`` cannot resolve on its own.
 
-    positions = np.asarray([atom["cart"] for atom in out], dtype=float)
-    inv_m = np.linalg.inv(np.asarray(M, dtype=float))
-    overflow: list[list[int]] = []
-    for component in components:
-        unwrapped, completed = unwrap_positions_along_bonds(
-            graph,
-            component,
-            positions,
-            max_atoms=max_atoms,
-        )
-        if not completed:
-            overflow.append(list(component))
+    SHELX often encodes a rotamer pair (e.g. NH4+ in DAP-4, perchlorate
+    H atoms in SY) with occupancies summing to 1 and *no*
+    ``_atom_site_disorder_group`` / ``_atom_site_disorder_assembly``
+    tags (both default to "."). Without one of those tags
+    ``parse_asu`` keeps every alternative as a major atom; downstream
+    bond perception then tries to bond all rotamers at once and
+    fragments split chemically equivalent cations across rotamers
+    (the DAP-4 NH4 -> N1H1 / N1H2 / N1H4 / N1H8 split bug).
+    """
+    for atom in raw_atoms:
+        try:
+            occ = float(atom.get("occ", 1.0))
+        except (TypeError, ValueError):
+            occ = 1.0
+        if occ >= 0.999:
             continue
-        for local_idx, atom_idx in enumerate(component):
-            out[atom_idx]["cart"] = unwrapped[local_idx]
-            out[atom_idx]["frac"] = inv_m @ unwrapped[local_idx]
-            out[atom_idx]["_unwrapped"] = True
-    return out, overflow
+        dg = str(atom.get("dg") or ".").strip()
+        da = str(atom.get("da") or ".").strip()
+        if dg in (".", "?", "") and da in (".", "?", ""):
+            return True
+    return False
+
+
+def _tag_shelx_occupancy_disorder(raw_atoms, cif_path: str, M):
+    """If ``raw_atoms`` contains SHELX-style occupancy disorder,
+    consult :func:`molcrys_kit.analysis.disorder.\
+generate_ordered_replicas_from_disordered_sites` for the optimal
+    rotamer choice and tag every non-chosen disorder image with
+    ``_is_minor=True``.
+
+    The renderer continues to draw every atom; minor images are just
+    faded to ``disorder_alpha=0.22`` and the fragment-table builder
+    drops them so the stoichiometry / coordination polyhedron analysis
+    sees a single chemically sensible structure.
+
+    Position-based matching (Cartesian distance < ``threshold`` to any
+    atom in the optimal replica) is used because the ordered-replica
+    pipeline rewrites atom labels and re-applies symmetry; index
+    alignment with ``raw_atoms`` is not preserved. ``threshold`` is
+    set conservatively (0.4 Angstrom) so site jitter from MolCrysKit's
+    occupancy normaliser doesn't accidentally tag a major atom as
+    minor.
+
+    All steps are wrapped in a single ``try`` block: if MolCrysKit
+    can't resolve the disorder for any reason (missing dependency,
+    parser error, CIF rejected by ``scan_cif_disorder``) we leave
+    ``raw_atoms`` untouched and the patched ``is_minor`` heuristic in
+    ``crystal_viewer.legacy.plot_crystal`` still does best-effort
+    classification.
+    """
+    if not _has_shelx_occupancy_disorder(raw_atoms):
+        return raw_atoms
+
+    try:
+        from molcrys_kit.analysis.disorder import (
+            generate_ordered_replicas_from_disordered_sites,
+        )
+
+        replicas = generate_ordered_replicas_from_disordered_sites(
+            cif_path, method="optimal"
+        )
+    except Exception:
+        return raw_atoms
+    if not replicas:
+        return raw_atoms
+
+    optimal_carts: list[np.ndarray] = []
+    for molecule in replicas[0].molecules:
+        try:
+            positions = molecule.get_positions()
+        except Exception:
+            continue
+        for pos in positions:
+            optimal_carts.append(np.asarray(pos, dtype=float))
+    if not optimal_carts:
+        return raw_atoms
+    optimal_grid = np.array(optimal_carts, dtype=float)
+
+    threshold = 0.4
+    out = [dict(atom) for atom in raw_atoms]
+    for atom in out:
+        try:
+            occ = float(atom.get("occ", 1.0))
+        except (TypeError, ValueError):
+            occ = 1.0
+        if occ >= 0.999 or "_is_minor" in atom:
+            continue
+        cart = np.asarray(atom.get("cart"), dtype=float)
+        if cart.shape != (3,):
+            continue
+        # Squared distance to the nearest optimal-replica atom; if no
+        # match within ``threshold``, the disorder image is the
+        # discarded one.
+        diffs = optimal_grid - cart[None, :]
+        d2 = np.einsum("ij,ij->i", diffs, diffs)
+        if float(np.sqrt(d2.min())) > threshold:
+            atom["_is_minor"] = True
+    return out
 
 
 def _unwrapped_atoms_from_atoms(
@@ -228,65 +266,40 @@ def _unwrapped_atoms_from_atoms(
     *,
     include_minor: bool = True,
     max_atoms: int | None = DEFAULT_UNWRAP_MAX_ATOMS,
-    molcrys_analysis: Any = None,
+    molcrys_analysis: Any,
 ) -> tuple[list[dict[str, Any]], list[list[int]]]:
     """Return per-atom positions that are continuous across periodic
     boundaries, so a molecule that straddles a cell face renders as a
     single contiguous fragment instead of two halves drifting apart.
 
-    When ``molcrys_analysis`` is provided (the normal load path), we
-    reuse :class:`MolCrysKit`'s already-computed
-    ``mol_indices`` / ``mol_cart_positions``: those are the canonical
-    BFS unwrap result that the rest of the formula-unit pipeline
-    already trusts. Doing it again with a homegrown
-    ``find_bonds(cell=cell)`` call is both redundant and was
-    historically buggy on monoclinic cells (the MPEP regression where
-    a ring crossing the cell boundary was rendered as two halves --
-    the legacy KDTree pre-filter ignored PBC, so the cross-cell bond
-    that should have stitched the ring back together never made it
-    into the bond graph).
+    ``molcrys_analysis`` is required: the unwrapping always goes
+    through :class:`MolCrysKit`'s already-computed
+    ``mol_indices`` / ``mol_cart_positions``. Those are the canonical
+    BFS unwrap result that the formula-unit / topology pipelines also
+    trust, and doing it again with a homegrown ``find_bonds(cell=cell)``
+    call was historically buggy on monoclinic cells (the MPEP
+    regression where a ring crossing the cell boundary was rendered as
+    two halves -- the legacy KDTree pre-filter ignored PBC, so the
+    cross-cell bond that should have stitched the ring back together
+    never made it into the bond graph).
 
-    The fall-back path (no ``molcrys_analysis``) is the legacy
-    ``find_bonds(cell=cell)`` -> ``_unwrap_atom_pool`` flow; it is
-    kept for callers that don't have a MolCrysKit handle yet (a few
-    test fixtures synthesise atoms by hand and expect ``unwrap`` to
-    work without first booting MolCrysKit).
+    The legacy fallback that re-derived bonds via
+    ``ops.find_bonds(cell=cell)`` was removed in the
+    "loader-mol-indices" refactor: every production caller has a
+    :class:`molcrys_bridge.CrystalAnalysis` handle (it's built once
+    per CIF in :func:`build_loaded_crystal`), and synthetic-atom
+    test fixtures should call :func:`molcrys_bridge.analyze` first
+    rather than relying on the legacy path that historically
+    misbehaved on disorder + PBC special positions.
     """
-    if molcrys_analysis is not None:
-        return _unwrapped_atoms_from_molcrys(atoms, M, molcrys_analysis, include_minor=include_minor)
-
-    ops = scene_ops()
-    atom_pool = []
-    source_indices = []
-    for idx, atom in enumerate(atoms):
-        copied = dict(atom)
-        copied["_source_index"] = idx
-        copied["_unwrapped"] = False
-        if ops.is_minor(copied) and not include_minor:
-            continue
-        atom_pool.append(copied)
-        source_indices.append(idx)
-    if not atom_pool:
-        return [], []
-
-    bond_pairs = ops.find_bonds(atom_pool, cell=cell)
-    components = _cluster_components(len(atom_pool), bond_pairs)
-    unwrapped_pool, overflow_local = _unwrap_atom_pool(
-        atom_pool,
-        bond_pairs,
-        cell,
-        M,
-        components,
-        max_atoms=max_atoms,
-    )
-
-    unwrapped_atoms = [dict(atom) for atom in atoms]
-    for atom in unwrapped_atoms:
-        atom["_unwrapped"] = False
-    for local_idx, source_idx in enumerate(source_indices):
-        unwrapped_atoms[source_idx] = dict(unwrapped_pool[local_idx])
-    overflow = [[source_indices[idx] for idx in component] for component in overflow_local]
-    return unwrapped_atoms, overflow
+    if molcrys_analysis is None:
+        raise TypeError(
+            "_unwrapped_atoms_from_atoms now requires a molcrys_analysis "
+            "argument. Call molcrys_bridge.analyze(atoms, M) first and "
+            "pass the result, or use build_loaded_crystal which wires "
+            "this up automatically."
+        )
+    return _unwrapped_atoms_from_molcrys(atoms, M, molcrys_analysis, include_minor=include_minor)
 
 
 def _unwrapped_atoms_from_molcrys(
@@ -306,8 +319,9 @@ def _unwrapped_atoms_from_molcrys(
     their original cart/frac.
     """
     out = [dict(atom) for atom in atoms]
-    for atom in out:
+    for idx, atom in enumerate(out):
         atom["_unwrapped"] = False
+        atom["_source_index"] = int(idx)
 
     inv_m = np.linalg.inv(np.asarray(M, dtype=float))
 
@@ -341,28 +355,90 @@ def _fragment_table_from_atoms(
     cell,
     M,
     *,
+    molcrys_analysis,
     use_source_indices: bool = True,
     include_minor: bool = False,
 ) -> tuple[list[dict[str, Any]], list[str]]:
+    """Build the per-fragment table directly from MolCrysKit's
+    ``mol_indices`` -- the canonical molecule grouping.
+
+    The legacy implementation re-derived this by calling
+    ``ops.find_bonds(atom_pool, cell=cell)`` and clustering the result.
+    On structures with SHELX-style occupancy disorder (DAP-4 NH4+,
+    SY perchlorate H atoms) and atoms on special positions
+    (face / edge / corner), that path produced:
+
+        * 18× "?" orphan-H fragments (Bug 3)
+        * 8× NH4+ split into cluster_size = 2/3/5 instead of 5 (Bug 2)
+        * "N", "NH", "NH4", "NH8" fragments for chemically equivalent
+          ammonium cations (Bug 5/6)
+
+    MolCrysKit's bond graph already handles PBC special positions and
+    multi-image disorder correctly; this function now just *formats*
+    that grouping into the per-fragment dict the renderer / topology
+    code expects. ``molcrys_analysis`` is required -- there is no
+    fallback to ``ops.find_bonds`` any more.
+
+    ``atoms`` may be ``raw_atoms`` (one-to-one with raw indices) or a
+    subset/translated copy thereof (each atom carrying a
+    ``_source_index`` field pointing back to its raw_atoms position).
+    For atoms missing ``_source_index`` we fall back to their position
+    in ``atoms``; that's correct only when ``atoms is raw_atoms``.
+    """
     ops = scene_ops()
-    atom_pool = []
-    source_indices = []
-    for idx, atom in enumerate(atoms):
-        if ops.is_minor(atom) and not include_minor:
-            continue
-        atom_pool.append(dict(atom))
-        source_indices.append(idx if use_source_indices else len(source_indices))
-    if not atom_pool:
+    mol_indices = getattr(molcrys_analysis, "mol_indices", None) or []
+    if not atoms:
         return [], []
 
-    bond_pairs = ops.find_bonds(atom_pool, cell=cell)
-    components = _cluster_components(len(atom_pool), bond_pairs)
-    atom_pool, _ = _unwrap_atom_pool(atom_pool, bond_pairs, cell, M, components)
+    # Build (image_shift, raw_index) -> local_index map. Atoms produced
+    # by ``replicate_atoms`` (repeat / supercell transforms) share a
+    # ``_source_index`` across replicas but have distinct
+    # ``_image_shift`` tuples; keying on the pair preserves one
+    # fragment-table row per replica instead of collapsing them.
+    image_to_local: dict[tuple[tuple[int, int, int], int], int] = {}
+    pool_kept: list[dict[str, Any]] = []
+    pool_source_idx: list[int] = []
+    for local_idx, atom in enumerate(atoms):
+        if ops.is_minor(atom) and not include_minor:
+            continue
+        raw_idx = int(atom.get("_source_index", local_idx))
+        shift = atom.get("_image_shift") or (0, 0, 0)
+        shift_key = tuple(int(x) for x in shift)
+        image_to_local[(shift_key, raw_idx)] = len(pool_kept)
+        pool_kept.append(dict(atom))
+        pool_source_idx.append(local_idx if not use_source_indices else raw_idx)
+
+    if not pool_kept:
+        return [], []
+
+    # Group atoms by (image_shift, mol_index_k). Each replica image of a
+    # MolCrysKit molecule becomes its own fragment-table row.
+    components: list[list[int]] = []
+    seen_local: set[int] = set()
+    seen_images = sorted({key[0] for key in image_to_local})
+    for shift_key in seen_images:
+        for indices in mol_indices:
+            component = []
+            for raw_idx in indices:
+                local = image_to_local.get((shift_key, int(raw_idx)))
+                if local is None or local in seen_local:
+                    continue
+                component.append(local)
+                seen_local.add(local)
+            if component:
+                components.append(sorted(component))
+    # Sweep for any kept atom that didn't make it into a molecule
+    # component (orphans). They get one-atom singleton fragments so
+    # they remain visible in the fragment table for diagnostics.
+    for local_idx in range(len(pool_kept)):
+        if local_idx not in seen_local:
+            components.append([local_idx])
+            seen_local.add(local_idx)
 
     fragments = []
     for component in components:
-        site_indices = sorted(source_indices[idx] for idx in component)
-        component_atoms = [atom_pool[idx] for idx in component]
+        site_indices = sorted(pool_source_idx[idx] for idx in component)
+        component_atoms = [pool_kept[idx] for idx in component]
         heavy_atoms = [atom for atom in component_atoms if atom["elem"] != "H"]
         center_atoms = heavy_atoms or component_atoms
         elem_set = {atom["elem"] for atom in heavy_atoms}
@@ -535,6 +611,7 @@ def build_bundle_scene(
                 base_scene["draw_atoms"],
                 base_scene["cell"],
                 base_scene["M"],
+                molcrys_analysis=bundle.molcrys_analysis,
                 use_source_indices=False,
                 include_minor=True,
             )
@@ -579,6 +656,7 @@ def build_bundle_scene(
         transformed["draw_atoms"],
         transformed.get("cell") or base_scene["cell"],
         transformed.get("M") if transformed.get("M") is not None else base_scene["M"],
+        molcrys_analysis=bundle.molcrys_analysis,
         use_source_indices=False,
         include_minor=True,
     )
@@ -612,6 +690,13 @@ def build_loaded_crystal(
     preset = preset or {}
     with perf_log.time_block("loader:parse_asu", kind="event", structure=name, cif_path=cif_path):
         raw_atoms, cell, M = ops.parse_asu(cif_path)
+    with perf_log.time_block(
+        "loader:resolve_shelx_disorder",
+        kind="event",
+        structure=name,
+        cif_path=cif_path,
+    ):
+        raw_atoms = _tag_shelx_occupancy_disorder(raw_atoms, cif_path, M)
     n_atoms = len(raw_atoms) if raw_atoms is not None else 0
     with perf_log.time_block(
         "loader:molcrys_analyze",
@@ -686,6 +771,7 @@ def build_loaded_crystal(
             initial_scene["draw_atoms"],
             initial_scene["cell"],
             initial_scene["M"],
+            molcrys_analysis=molcrys_analysis,
             use_source_indices=False,
             include_minor=True,
         )
@@ -696,7 +782,15 @@ def build_loaded_crystal(
         kind="event",
         structure=name,
     ):
-        topology_fragment_table, _ = _fragment_table_from_atoms(name, raw_atoms, cell, M, use_source_indices=True, include_minor=True)
+        topology_fragment_table, _ = _fragment_table_from_atoms(
+            name,
+            raw_atoms,
+            cell,
+            M,
+            molcrys_analysis=molcrys_analysis,
+            use_source_indices=True,
+            include_minor=True,
+        )
     fragment_table_cache = {
         ("scene", "formula_unit", False): (
             copy.deepcopy(fragment_table),

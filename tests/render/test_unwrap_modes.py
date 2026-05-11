@@ -3,6 +3,7 @@ from __future__ import annotations
 import gemmi
 import numpy as np
 
+from crystal_viewer import molcrys_bridge
 from crystal_viewer.loader import _unwrapped_atoms_from_atoms
 from crystal_viewer.scene import build_scene_from_atoms, scene_ops
 
@@ -31,7 +32,15 @@ def test_unit_cell_prefers_unwrapped_atoms_for_boundary_fragment():
         },
     ]
     ops = scene_ops()
-    unwrapped_atoms, overflow = _unwrapped_atoms_from_atoms(atoms, cell, M)
+    # The legacy fallback that used to re-derive bonds via
+    # ``ops.find_bonds(cell=cell)`` is gone; every caller (including
+    # synthetic-atom test fixtures) must hand a real
+    # ``CrystalAnalysis`` to ``_unwrapped_atoms_from_atoms``. We build
+    # one from these two carbons by running the full bridge.
+    analysis = molcrys_bridge.analyze(atoms, M)
+    unwrapped_atoms, overflow = _unwrapped_atoms_from_atoms(
+        atoms, cell, M, molcrys_analysis=analysis
+    )
 
     assert overflow == []
     np.testing.assert_allclose(unwrapped_atoms[1]["cart"], [10.2, 5.0, 5.0])

@@ -378,6 +378,29 @@ def is_minor(at):
     # Some SHELX files encode alternate parts as negative PART numbers.
     if dg.startswith('-') and dg not in ('-',):
         return True
+    # SHELX-style occupancy-only disorder (DAP-4 NH4+ rotamers, SY
+    # perchlorate H atoms, ...): both alternative images sit on the
+    # *same* PART (or PART 0) with disorder_group / assembly tags blank
+    # and occupancies summing to 1. Without this branch every
+    # alternative image is treated as a major atom and the renderer
+    # tries to draw N-H bonds to both rotamers at once; downstream
+    # fragment grouping then splits the cation across rotamers.
+    # An atom flagged as major elsewhere on the dict (``_is_major=True``)
+    # bypasses this rule -- caller knows better.
+    if at.get('_is_major'):
+        return False
+    da = str(at.get('da') or '').strip()
+    if dg in ('.', '?', '') and da in ('.', '?', ''):
+        try:
+            occ = float(at.get('occ', 1.0))
+        except (TypeError, ValueError):
+            occ = 1.0
+        # 0.999 cutoff matches ``_has_disorder_metadata``. The 0.5
+        # boundary picks "the smaller half" of an occ=0.5/0.5 pair as
+        # minor (lex-tie-break on label happens via the label suffix
+        # one level up where parse_asu lays sites in CIF order).
+        if occ < 0.5 - 1e-6:
+            return True
     return False
 
 def disorder_alpha(at):
