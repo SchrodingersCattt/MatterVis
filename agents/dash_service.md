@@ -34,6 +34,10 @@ preset save/load.
   rather than stacking),
   `bond_groups` (full list of bond-styling overrides; see
   `bond_groups_api.md`),
+  `projection` (`"perspective"` / `"orthographic"`; mirrors the
+  Plotly camera's `projection.type`. Setting it via `POST /state`
+  has the same effect as `POST /camera/action {"action":
+  "projection", "type": ...}`),
   `fast_rendering`, `camera`, `cutoff`. `material` is `mesh` or
   `flat`; `style` is `ball`, `ball_stick`, `stick`, `ortep`, or
   `wireframe`; `disorder` is `opacity`, `dashed_bonds`,
@@ -55,7 +59,20 @@ preset save/load.
   `{"action": "zoom", "factor": 1.15}`,
   `{"action": "orbit", "yaw_deg": 12, "pitch_deg": -6}`,
   `{"action": "pan", "dx": 0.05, "dy": -0.03, "dz": 0.0}`,
-  `{"action": "reset"}`.
+  `{"action": "reset"}`,
+  `{"action": "align", "axis": "c"}`  (VESTA-style "look down lattice
+  axis ``c``"; valid axes are `a`, `b`, `c`, `a*`, `b*`, `c*`),
+  `{"action": "projection", "type": "orthographic"}`  (toggle the
+  Plotly camera between ``perspective`` and ``orthographic``;
+  mirrored onto ``state["projection"]`` so a subsequent ``GET
+  /state`` echoes the choice).
+  Both `align` and `projection` preserve the current zoom and the
+  other half of the camera (alignment keeps projection, projection
+  toggle keeps eye/center/up). Use them together to script a
+  publication shot, e.g.
+  `POST /camera/action {"action": "projection", "type":
+  "orthographic"}` followed by `POST /camera/action {"action":
+  "align", "axis": "c*"}`.
 - `GET /scenes`
   Lists scene tabs and the active scene id.
 - `POST /scenes`
@@ -184,6 +201,14 @@ hooks rather than the REST surface.
   `transforms_api.md`)
 - `polyhedron-search-supercell-{a,b,c}` (Phase 4 inputs that drive
   `polyhedron_search_supercell`; see `polyhedron_api.md`)
+- `view-align-{a,b,c,astar,bstar,cstar}` and `view-reset` (Phase 4
+  view tools — VESTA-style axis alignment buttons; clicking them
+  fires the matching `POST /camera/action {"action": "align",
+  "axis": ...}` on the backend)
+- `view-projection` (Phase 4 view tools — `dcc.RadioItems` with
+  values `perspective` / `orthographic`; mirrors
+  `state["projection"]` and the camera's `projection.type` in both
+  directions)
 - `crystal-graph`
 - `topology-histogram`
 - `topology-results`

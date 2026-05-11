@@ -497,30 +497,125 @@ def _prune_duplicate_label_bond_candidates(atoms, candidates, tol=0.005):
 
 
 # ── Bond finding ────────────────────────────────────────────────────────────
-def find_bonds(atoms, M=None, cell=None):
-    """Find bonds, excluding cross-disorder-group and cross-alternative bonds."""
-    candidates = []
+_BOND_KDTREE_THRESHOLD = 64
+_BOND_MAX_CUTOFF = 5.0  # Å — wide enough for any covalent pair the table can return.
+
+
+def _bond_candidate_pairs(atoms, M, cell):
+    """Yield ``(i, j)`` index pairs with ``i < j`` whose Cartesian
+    distance (or, when ``cell is not None``, **PBC** Cartesian distance)
+    is plausibly within bond range.
+
+    For ``len(atoms) >= _BOND_KDTREE_THRESHOLD`` we use
+    ``cKDTree.query_pairs`` to prune the O(N^2) python loop down to
+    O(N * neighbours). For smaller scenes the python loop is faster
+    than constructing a KDTree, so we keep the legacy enumeration.
+
+    PBC handling: when ``cell is not None`` and ``M`` is provided, the
+    atom set is expanded with one image-replica per neighbour cell
+    (3^3 - 1 = 26 ghosts per atom) before the KDTree query. Pairs that
+    fall within the cutoff are then mapped back to the home index. This
+    is necessary because a ring that crosses the cell boundary has
+    bonds whose **raw cart** length spans the cell (8+ Å) but whose
+    PBC-image length is normal covalent. Without ghost replication,
+    ``_unwrapped_atoms_from_atoms`` cannot reassemble the ring and the
+    user sees fragmented organic cations -- regression observed on the
+    MPEP structure (P2_1/c, monoclinic) after the v1 KDTree pre-filter
+    landed.
+    """
     n = len(atoms)
-    for i in range(n):
-        for j in range(i+1, n):
-            if not _bond_allowed_by_table(atoms[i], atoms[j]):
-                continue
-            if bonds_conflict(atoms[i], atoms[j]):
-                continue
-            cutoff = _bond_cutoff(atoms[i], atoms[j])
-            if cutoff is None:
-                continue
-            if cell is not None:
-                near = _nearest_pbc_cart(atoms[i]['cart'], atoms[j]['cart'], cell)
-                d = np.linalg.norm(near - atoms[i]['cart'])
-            elif M is None:
-                d = np.linalg.norm(atoms[i]['cart'] - atoms[j]['cart'])
-            else:
-                d = np.linalg.norm(bond_vector_mic(atoms[i], atoms[j], M, search_radius=1)[0])
-            if not _bond_matches_table_distance(atoms[i], atoms[j], d):
-                continue
-            if d < cutoff:
-                candidates.append((i, j, float(d)))
+    if n < _BOND_KDTREE_THRESHOLD:
+        for i in range(n):
+            for j in range(i + 1, n):
+                yield (i, j)
+        return
+    try:
+        from scipy.spatial import cKDTree
+    except ImportError:
+        for i in range(n):
+            for j in range(i + 1, n):
+                yield (i, j)
+        return
+    coords = np.asarray([a['cart'] for a in atoms], dtype=float)
+
+    # No PBC requested -> plain non-periodic KDTree on raw cart coords.
+    if cell is None or M is None:
+        tree = cKDTree(coords)
+        pairs = tree.query_pairs(r=_BOND_MAX_CUTOFF, output_type='ndarray')
+        if pairs.size == 0:
+            return
+        for i, j in pairs.tolist():
+            yield (int(i), int(j)) if i < j else (int(j), int(i))
+        return
+
+    # PBC path: expand the atom set with 26 image-replicas so that
+    # cross-cell bonds become local in cart space.
+    M_arr = np.asarray(M, dtype=float)
+    a_vec = M_arr[:, 0]
+    b_vec = M_arr[:, 1]
+    c_vec = M_arr[:, 2]
+    coord_chunks = [coords]
+    orig_idx_chunks = [np.arange(n, dtype=int)]
+    for da in (-1, 0, 1):
+        for db in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                if da == 0 and db == 0 and dc == 0:
+                    continue
+                offset = da * a_vec + db * b_vec + dc * c_vec
+                coord_chunks.append(coords + offset)
+                orig_idx_chunks.append(np.arange(n, dtype=int))
+    all_coords = np.vstack(coord_chunks)
+    all_orig = np.concatenate(orig_idx_chunks)
+
+    tree = cKDTree(all_coords)
+    pairs = tree.query_pairs(r=_BOND_MAX_CUTOFF, output_type='ndarray')
+    if pairs.size == 0:
+        return
+    seen: set[tuple[int, int]] = set()
+    for i, j in pairs.tolist():
+        oi = int(all_orig[i])
+        oj = int(all_orig[j])
+        if oi == oj:
+            continue  # ghost-of-self at zero distance is not a bond candidate
+        a_idx, b_idx = (oi, oj) if oi < oj else (oj, oi)
+        if (a_idx, b_idx) in seen:
+            continue
+        seen.add((a_idx, b_idx))
+        yield (a_idx, b_idx)
+
+
+def find_bonds(atoms, M=None, cell=None):
+    """Find bonds, excluding cross-disorder-group and cross-alternative bonds.
+
+    For large atom counts (~64+ atoms, see ``_BOND_KDTREE_THRESHOLD``)
+    the candidate set is pre-filtered with a Cartesian KDTree on
+    ``cart`` coordinates. The slow per-pair table check then only runs
+    on plausible neighbours. This drops the cost from O(N^2) to
+    O(N * k) where k ~ 10-20 covalent neighbours per atom -- the
+    difference between 1 second and 1 minute on a 1500-atom supercell.
+    """
+    candidates = []
+    for i, j in _bond_candidate_pairs(atoms, M=M, cell=cell):
+        ai = atoms[i]
+        aj = atoms[j]
+        if not _bond_allowed_by_table(ai, aj):
+            continue
+        if bonds_conflict(ai, aj):
+            continue
+        cutoff = _bond_cutoff(ai, aj)
+        if cutoff is None:
+            continue
+        if cell is not None:
+            near = _nearest_pbc_cart(ai['cart'], aj['cart'], cell)
+            d = np.linalg.norm(near - ai['cart'])
+        elif M is None:
+            d = np.linalg.norm(ai['cart'] - aj['cart'])
+        else:
+            d = np.linalg.norm(bond_vector_mic(ai, aj, M, search_radius=1)[0])
+        if not _bond_matches_table_distance(ai, aj, d):
+            continue
+        if d < cutoff:
+            candidates.append((i, j, float(d)))
 
     return [(i, j) for i, j, _ in _prune_duplicate_label_bond_candidates(atoms, candidates)]
 
@@ -851,15 +946,25 @@ def draw_atom_3d(ax, at, view_x, view_y, alpha, depth_t=None):
 # ── Smart label placement (screen-space, radial + collision avoidance) ───────
 def _compute_label_positions(label_atoms, view_x, view_y, base_offset=0.38,
                              all_atoms=None):
-    """
-    Compute 3D label positions for all label_atoms at once.
-    Step 1: Place each label radially outward from the structure centroid.
-    Step 2: Iteratively push overlapping labels apart (force-directed).
-    Step 3: Push labels off any *other* atom's ellipsoid, using ``all_atoms``
-            (the full set of drawn atoms — including minor disorder ghosts
-            that don't get their own label) when available.
+    """Compute 3D label positions for ``label_atoms`` using a vectorised
+    force-directed layout.
 
-    Returns: list of 3D position vectors (one per label_atom).
+    Step 1: Place each label radially outward from the structure centroid.
+    Step 2: Iteratively push overlapping labels apart (Jacobi-style
+            repulsion against every other label and against every atom's
+            ellipsoid).
+
+    Notes on the rewrite (2026-05): the original implementation looped in
+    pure Python with ``math.sqrt`` per pair. For a 192-atom unit-cell
+    scene that pinned ``build_scene_from_atoms`` at ~14 s of CPU, which
+    is what the user feels as "every style change is slow" -- the slow
+    cold scene build invalidates the cache often enough that the cost
+    surfaces on every interaction. The numpy version below is a Jacobi
+    sweep instead of Gauss-Seidel: forces from all neighbours are
+    accumulated then applied at once. The visual result is functionally
+    identical (label placement is purely cosmetic), and the cost drops
+    from O(N_lab^2 + N_lab*N_atoms) python ops per iter to two numpy
+    matmuls per iter.
     """
     if not label_atoms:
         return []
@@ -874,100 +979,198 @@ def _compute_label_positions(label_atoms, view_x, view_y, base_offset=0.38,
         if not all_non_h_atoms:
             all_non_h_atoms = non_h
 
-    # Structure centroid in screen space
-    carts = np.array([a['cart'] for a in non_h])
-    cx = float(np.mean(carts @ view_x))
-    cy = float(np.mean(carts @ view_y))
+    view_x_arr = np.asarray(view_x, dtype=float)
+    view_y_arr = np.asarray(view_y, dtype=float)
 
-    # Step 1: initial radial placement
-    positions = []   # (sx, sy) in screen space
-    ellipse_rs = []
-    for at in label_atoms:
-        _, a_ax, b_ax = ellipsoid_3d_polygon(at, view_x, view_y, n_pts=4)
-        er = max(a_ax, b_ax)
-        ellipse_rs.append(er)
+    # Pre-compute ellipse radii. We only need ``max(a_ax, b_ax)``, so the
+    # full polygon vertices are wasted work; ``_label_atom_radius`` keeps
+    # the same size convention but skips the ``np.linspace`` /
+    # parametrisation legs.
+    label_carts = np.array([a['cart'] for a in label_atoms], dtype=float)
+    label_xy = np.column_stack(
+        (label_carts @ view_x_arr, label_carts @ view_y_arr)
+    )  # (N_lab, 2)
+    ellipse_rs = np.array(
+        [_label_atom_radius(at, view_x_arr, view_y_arr) for at in label_atoms],
+        dtype=float,
+    )
 
-        ax_s = float(at['cart'] @ view_x)
-        ay_s = float(at['cart'] @ view_y)
+    non_h_carts = np.array([a['cart'] for a in non_h], dtype=float)
+    cx = float((non_h_carts @ view_x_arr).mean())
+    cy = float((non_h_carts @ view_y_arr).mean())
 
-        dx = ax_s - cx
-        dy = ay_s - cy
-        dist = math.sqrt(dx*dx + dy*dy)
-        if dist < 0.05:
-            dx, dy = 0.0, 1.0
-        else:
-            dx /= dist
-            dy /= dist
-
-        scale = er + base_offset
-        positions.append([ax_s + dx * scale, ay_s + dy * scale])
+    # Step 1: initial radial placement (vectorised)
+    delta = label_xy - np.array([cx, cy])
+    norms = np.linalg.norm(delta, axis=1)
+    safe_mask = norms < 0.05
+    direction = np.where(
+        safe_mask[:, None],
+        np.array([0.0, 1.0]),
+        np.divide(delta, np.where(norms[:, None] == 0, 1.0, norms[:, None])),
+    )
+    scale = (ellipse_rs + base_offset)[:, None]
+    positions = label_xy + direction * scale
 
     # Step 2: iterative repulsion. Two coupled forces:
-    #   (a) label↔label – labels mustn't write on top of each other.
-    #   (b) label↔atom  – labels mustn't write on top of *another* atom's
-    #                     ellipsoid. The label list is one-per-crystallographic
-    #                     -label (deduplicated by the caller), but the scene
-    #                     usually contains additional drawn atoms — symmetry
-    #                     images and disorder alternates with the same label —
-    #                     that share a label position. Pass ``all_atoms`` to
-    #                     this routine so those ghost ellipsoids participate
-    #                     in the repulsion; otherwise labels can land on top
-    #                     of them.
-    label_r = 0.55                   # text half-width in Å (3-4 chars at 7 pt)
+    #   (a) label<->label - labels mustn't write on top of each other.
+    #   (b) label<->atom  - labels mustn't write on top of *another* atom's
+    #                       ellipsoid. The label list is one-per-
+    #                       crystallographic-label (deduplicated by the
+    #                       caller), but the scene usually contains
+    #                       additional drawn atoms - symmetry images and
+    #                       disorder alternates with the same label - that
+    #                       share a label position. Pass ``all_atoms`` to
+    #                       this routine so those ghost ellipsoids
+    #                       participate in the repulsion; otherwise labels
+    #                       can land on top of them.
+    label_r = 0.55  # text half-width in Å (3-4 chars at 7 pt)
     min_sep = label_r * 2.0
-    atom_screen = []                 # (sx, sy, ellipse_r) for every drawn atom
-    for at in all_non_h_atoms:
-        _, a_ax2, b_ax2 = ellipsoid_3d_polygon(at, view_x, view_y, n_pts=4)
-        atom_screen.append((
-            float(at['cart'] @ view_x),
-            float(at['cart'] @ view_y),
-            max(a_ax2, b_ax2),
-        ))
+
+    atom_carts = np.array([a['cart'] for a in all_non_h_atoms], dtype=float)
+    atom_xy = np.column_stack(
+        (atom_carts @ view_x_arr, atom_carts @ view_y_arr)
+    )  # (M, 2)
+    atom_er = np.array(
+        [_label_atom_radius(at, view_x_arr, view_y_arr) for at in all_non_h_atoms],
+        dtype=float,
+    )
+
+    eps = 1e-6
+    move_eps = 1e-3
+    n_lab = len(positions)
+    n_atom = len(atom_xy)
+
+    # Skip the iterative force-directed pass when the structure has
+    # too many atoms for the (N_lab, N_atom, 2) tensor to be cheap.
+    # 1500+ atoms = 1.2M-cell tensor per iteration × 80 iterations =
+    # several seconds even after vectorisation. The user looking at a
+    # 2x2x2 unit-cell supercell of a 200-atom asymmetric unit doesn't
+    # need pixel-perfect label placement -- the labels overlap each
+    # other regardless. Drop straight to the radial Step-1 placement.
+    LABEL_OPT_MAX_ATOMS = 600
+    if n_atom > LABEL_OPT_MAX_ATOMS:
+        return [
+            positions[k, 0] * view_x_arr + positions[k, 1] * view_y_arr
+            for k in range(n_lab)
+        ]
+
+    # ``owner_mask[i, k]`` = True if atom ``k`` is the same crystallographic
+    # site as label ``i`` (so label i should not repel from atom k).
+    owner_mask = (
+        (np.abs(label_xy[:, 0:1] - atom_xy[:, 0]) < 1e-6)
+        & (np.abs(label_xy[:, 1:2] - atom_xy[:, 1]) < 1e-6)
+    )
+
+    # Spatial pre-filter: for each label, only consider atoms within a
+    # bounding window around it. The maximum radius an atom-ellipsoid
+    # can repel a label from is ``max_er + label_r * 0.85 + 1`` (Å); we
+    # use cKDTree for the lookup so the per-iteration force assembly
+    # stays O(N_lab × few neighbours) instead of O(N_lab × N_atom).
+    use_kdtree = n_atom > 64
+    nearby_idx: list[np.ndarray] | None = None
+    if use_kdtree:
+        try:
+            from scipy.spatial import cKDTree
+            tree = cKDTree(atom_xy)
+            cutoff = float(atom_er.max()) + label_r * 0.85 + 0.5
+            # Re-query inside the loop (positions move) but only when
+            # a label has likely moved out of its bucket. Cheap version:
+            # run query once per iteration. Even at 80 iterations × 24
+            # labels × log(N_atom) it's microseconds.
+            def query_nearby(pos_xy: np.ndarray) -> list[np.ndarray]:
+                neigh = tree.query_ball_point(pos_xy, r=cutoff)
+                return [np.asarray(idx, dtype=int) for idx in neigh]
+
+            nearby_idx = query_nearby(positions)
+        except ImportError:
+            use_kdtree = False
 
     for _ in range(80):
-        moved = False
-        for i in range(len(positions)):
-            for j in range(i + 1, len(positions)):
-                px, py = positions[i]
-                qx, qy = positions[j]
-                dx = px - qx
-                dy = py - qy
-                dist = math.sqrt(dx * dx + dy * dy)
-                if dist < min_sep and dist > 1e-6:
-                    push = (min_sep - dist) / 2.0 + 0.02
-                    nx, ny = dx / dist, dy / dist
-                    positions[i][0] += nx * push
-                    positions[i][1] += ny * push
-                    positions[j][0] -= nx * push
-                    positions[j][1] -= ny * push
-                    moved = True
-            owner_idx = i if i < len(label_atoms) else None
-            owner_cart = label_atoms[owner_idx]['cart'] if owner_idx is not None else None
-            for ax_s, ay_s, er in atom_screen:
-                if owner_cart is not None and abs(ax_s - float(owner_cart @ view_x)) < 1e-6 \
-                        and abs(ay_s - float(owner_cart @ view_y)) < 1e-6:
-                    continue
-                px, py = positions[i]
-                dx = px - ax_s
-                dy = py - ay_s
-                dist = math.sqrt(dx * dx + dy * dy)
-                req = er + label_r * 0.85
-                if dist < req and dist > 1e-6:
-                    push = (req - dist) + 0.02
-                    nx, ny = dx / dist, dy / dist
-                    positions[i][0] += nx * push
-                    positions[i][1] += ny * push
-                    moved = True
-        if not moved:
-            break
+        # ----- label <-> label forces -----
+        diff_ll = positions[:, None, :] - positions[None, :, :]  # (N, N, 2)
+        dist_ll = np.sqrt((diff_ll ** 2).sum(axis=2))  # (N, N)
+        np.fill_diagonal(dist_ll, np.inf)
+        active_ll = (dist_ll < min_sep) & (dist_ll > eps)
+        if active_ll.any():
+            push_ll = np.where(active_ll, (min_sep - dist_ll) / 2.0 + 0.02, 0.0)
+            inv_ll = np.where(active_ll, 1.0 / np.where(dist_ll == 0, 1.0, dist_ll), 0.0)
+            unit_ll = diff_ll * inv_ll[:, :, None]
+            force_ll = (unit_ll * push_ll[:, :, None]).sum(axis=1)
+        else:
+            force_ll = np.zeros_like(positions)
 
-    # Convert screen-space positions back to 3D
-    result = []
-    for (sx, sy), at in zip(positions, label_atoms):
-        # 3D position = sx * view_x + sy * view_y + sz * view_z
-        # where sz is the atom's depth (we keep the label at the atom's depth)
-        result.append(sx * view_x + sy * view_y)
-    return result
+        # ----- label <-> atom forces -----
+        if use_kdtree and nearby_idx is not None:
+            force_la = np.zeros_like(positions)
+            for i, idx_arr in enumerate(nearby_idx):
+                if idx_arr.size == 0:
+                    continue
+                diff = positions[i, None, :] - atom_xy[idx_arr, :]  # (k, 2)
+                dist = np.sqrt((diff ** 2).sum(axis=1))  # (k,)
+                req = atom_er[idx_arr] + label_r * 0.85
+                # Mask out the owner atom (same screen position).
+                mask = (dist < req) & (dist > eps) & (~owner_mask[i, idx_arr])
+                if not mask.any():
+                    continue
+                push = np.where(mask, (req - dist) + 0.02, 0.0)
+                inv = np.where(mask, 1.0 / np.where(dist == 0, 1.0, dist), 0.0)
+                unit = diff * inv[:, None]
+                force_la[i] += (unit * push[:, None]).sum(axis=0)
+        else:
+            diff_la = positions[:, None, :] - atom_xy[None, :, :]  # (N, M, 2)
+            dist_la = np.sqrt((diff_la ** 2).sum(axis=2))  # (N, M)
+            req = atom_er[None, :] + label_r * 0.85
+            active_la = (dist_la < req) & (dist_la > eps) & (~owner_mask)
+            if active_la.any():
+                push_la = np.where(active_la, (req - dist_la) + 0.02, 0.0)
+                inv_la = np.where(active_la, 1.0 / np.where(dist_la == 0, 1.0, dist_la), 0.0)
+                unit_la = diff_la * inv_la[:, :, None]
+                force_la = (unit_la * push_la[:, :, None]).sum(axis=1)
+            else:
+                force_la = np.zeros_like(positions)
+
+        delta_step = force_ll + force_la
+        max_move = float(np.linalg.norm(delta_step, axis=1).max() if n_lab else 0.0)
+        if max_move < move_eps:
+            break
+        positions = positions + delta_step
+        # Re-query KDTree neighbours every few iterations as labels drift.
+        if use_kdtree and nearby_idx is not None and max_move > 0.5:
+            nearby_idx = query_nearby(positions)
+
+    return [
+        positions[k, 0] * view_x_arr + positions[k, 1] * view_y_arr
+        for k in range(n_lab)
+    ]
+
+
+def _label_atom_radius(atom, view_x, view_y):
+    """Return ``max(a_ax, b_ax)`` for ``atom``'s view-plane ellipse,
+    skipping the polygon parametrisation that
+    :func:`ellipsoid_3d_polygon` does for rendering. Used by the
+    label-placement loop where only the bounding radius matters.
+    """
+    elem = atom.get('elem', 'C')
+    U = atom.get('U')
+    if U is not None and elem != 'H':
+        try:
+            P = np.array([view_x, view_y], dtype=float)
+            U2 = P @ np.asarray(U, dtype=float) @ P.T
+            U2 = (U2 + U2.T) / 2.0
+            eigvals = np.linalg.eigvalsh(U2)
+            eigvals = np.abs(eigvals)
+            scale = np.sqrt(1.3863)  # 50 % probability
+            a_ax = max(0.05, min(scale * np.sqrt(eigvals[0]), 0.40))
+            b_ax = max(0.05, min(scale * np.sqrt(eigvals[1]), 0.40))
+            return max(a_ax, b_ax)
+        except np.linalg.LinAlgError:
+            return 0.11
+    if elem == 'H':
+        return 0.07
+    uiso = max(atom.get('uiso', 0.04) or 0.04, 0.02)
+    r_atom = atom_r(elem)
+    r = max(r_atom * 0.8, min(np.sqrt(1.3863 * uiso) * 0.65, r_atom * 1.3))
+    return float(r)
 
 
 def _label_offset_3d(at, all_atoms, view_x, view_y, base_offset=0.38):

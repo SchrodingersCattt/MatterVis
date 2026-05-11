@@ -198,7 +198,14 @@ def _whole_components_in_box(ops: Any, atoms, M, cell):
 def _selected_atoms_for_mode(ops: Any, atoms, M, cell, display_mode: str, formula_unit_atoms=None, unwrapped_atoms=None):
     continuous_atoms = unwrapped_atoms if unwrapped_atoms else atoms
     if display_mode == "unit_cell":
-        return [dict(atom) for atom in continuous_atoms]
+        # Mirror VESTA's "unit cell" view: any atom on a face / edge /
+        # corner of the cell gets drawn at every equivalent boundary so
+        # the visual cell looks closed. Without this, an O sitting at
+        # frac=(0,0,0) appears only at one corner and the polyhedron
+        # around it on the opposite side of the cell is missing one
+        # ligand.
+        base = [dict(atom) for atom in continuous_atoms]
+        return _expand_boundary_replicas(base, M)
     if display_mode == "asymmetric_unit":
         return _asymmetric_unit_atoms(continuous_atoms)
     if display_mode == "cluster":
@@ -213,6 +220,74 @@ def _selected_atoms_for_mode(ops: Any, atoms, M, cell, display_mode: str, formul
         return [dict(atom) for atom in formula_unit_atoms]
     from . import molcrys_bridge
     return molcrys_bridge.select_formula_unit(atoms, M)
+
+
+_BOUNDARY_TOL = 1e-3  # fractional-coordinate tolerance for "on the cell boundary"
+
+
+def _expand_boundary_replicas(atoms: list[dict[str, Any]], M: Any) -> list[dict[str, Any]]:
+    """Add image-replica copies of any atom that sits on a face / edge /
+    corner of the unit cell.
+
+    An atom with fractional coordinate ``f`` near 0 is also a valid
+    representative at ``f + 1`` (and vice versa). For an atom on a
+    corner ``(0, 0, 0)`` this generates 7 additional images ``(1,0,0)
+    ... (1,1,1)`` so the rendered cell looks closed -- see VESTA's
+    "Show all equivalent atoms" toggle.
+
+    Returns a new list; atoms already inside ``[tol, 1-tol)`` are
+    passed through unchanged.
+    """
+    if not atoms:
+        return atoms
+    M_arr = np.asarray(M, dtype=float)
+    out: list[dict[str, Any]] = []
+    for atom in atoms:
+        out.append(atom)
+        frac = atom.get("frac")
+        if frac is None:
+            continue
+        frac_arr = np.asarray(frac, dtype=float)
+        if frac_arr.shape != (3,):
+            continue
+        # Per-axis "is on a boundary" with sign of the replica shift.
+        # Treat both 0 and 1 as boundary; an atom at frac=0.5 is NOT
+        # on a face for unit-cell tiling (only frac=0 / 1 are) -- this
+        # mirrors VESTA's behaviour.
+        shifts: list[tuple[int, int, int]] = []
+        per_axis_shifts: list[list[int]] = [[0], [0], [0]]
+        for axis in range(3):
+            f = float(frac_arr[axis])
+            # Strict windows around 0 and 1 only -- unwrapped atoms at
+            # frac=1.02 (drawn outside the cell to keep a molecule
+            # continuous) must NOT trigger a replica because their true
+            # crystallographic site is the home cell, not a special
+            # position. ``f`` outside the strict windows is interior or
+            # continuation; either way no replica is needed.
+            on_zero = -_BOUNDARY_TOL <= f <= _BOUNDARY_TOL
+            on_one = 1.0 - _BOUNDARY_TOL <= f <= 1.0 + _BOUNDARY_TOL
+            if on_zero:
+                per_axis_shifts[axis] = [0, 1]
+            elif on_one:
+                per_axis_shifts[axis] = [0, -1]
+        for sa in per_axis_shifts[0]:
+            for sb in per_axis_shifts[1]:
+                for sc in per_axis_shifts[2]:
+                    if sa == 0 and sb == 0 and sc == 0:
+                        continue
+                    shifts.append((sa, sb, sc))
+        if not shifts:
+            continue
+        for shift in shifts:
+            replica = dict(atom)
+            shift_arr = np.array(shift, dtype=float)
+            replica["frac"] = frac_arr + shift_arr
+            replica["cart"] = np.asarray(atom.get("cart"), dtype=float) + (M_arr @ shift_arr)
+            replica["_image_shift"] = shift
+            replica["_origin_label"] = atom.get("_origin_label", atom.get("label"))
+            replica["_is_boundary_replica"] = True
+            out.append(replica)
+    return out
 
 
 def _bond_endpoints(ai, aj, cell, display_mode: str):
