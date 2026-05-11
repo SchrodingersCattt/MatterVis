@@ -406,8 +406,21 @@ def atoms_completing_fragment(
     """
     if not seed_indices:
         return []
+    # Short-circuit: when the seed set already covers every atom in
+    # the scene there is no fragment to "complete" -- the user's home
+    # cell already holds the full graph. Without this guard the halo
+    # below blows up to (3.5 * max_hops) angstrom and the
+    # ``atoms_within_radius`` broadcast becomes O(N_atoms^2 * N_cells)
+    # which can easily hang the figure render on a supercell.
+    if len(set(int(i) for i in seed_indices)) >= len(atoms):
+        return [_atom_copy(atom, image_shift=(0, 0, 0)) for atom in atoms]
     typical_bond_len = 3.5
-    halo_radius = typical_bond_len * float(max_hops)
+    # Cap the halo so a runaway max_hops doesn't pull in tens of
+    # thousands of replicas. 24 angstrom is enough for any sane
+    # organic ligand (~6-7 bond hops) and keeps the periodic image
+    # grid bounded; the BFS over ``adj`` will still respect the full
+    # ``max_hops`` budget for chains that wrap across cells.
+    halo_radius = min(typical_bond_len * float(max_hops), 24.0)
     candidate = atoms_within_radius(
         atoms,
         M,

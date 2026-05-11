@@ -259,6 +259,76 @@ def test_known_kinds_includes_phase_4_set():
     }
 
 
+def test_complete_fragment_with_all_seeds_short_circuits():
+    """Regression: ``complete_fragment(seeds={'all': True}, max_hops=32)``
+    on a multi-cell scene used to compute a 3.5 * 32 = 112 angstrom halo
+    around every seed atom and run an O(N^2 * N_cells) numpy broadcast
+    through ``atoms_within_radius``, which on a 640-atom 2x2x2 supercell
+    consumed ~1 GB of memory before timing out the figure render.
+
+    With every atom already a seed there is by definition nothing left
+    to "complete" -- the function must return the input atoms verbatim
+    without spinning up the radius pipeline.
+    """
+    from crystal_viewer.transforms import atoms_completing_fragment
+
+    atoms = _atoms_2()
+    M = np.eye(3) * 5.0
+
+    # All-seeds path: must be cheap and return exactly the input
+    # atoms (one per seed). The previous behaviour would block on the
+    # halo broadcast.
+    out = atoms_completing_fragment(
+        atoms,
+        M,
+        seed_indices=list(range(len(atoms))),
+        ops=None,
+        cell=None,
+        max_hops=32,
+    )
+    assert len(out) == len(atoms)
+    # Returned atoms are home-cell copies (image_shift == (0,0,0)).
+    for atom in out:
+        assert atom["_image_shift"] == (0, 0, 0)
+
+
+def test_complete_fragment_caps_halo_radius():
+    """The original implementation set ``halo_radius = 3.5 * max_hops``
+    which exploded the periodic image grid. The cap keeps the
+    expensive ``atoms_within_radius`` call within a sane budget while
+    still letting the BFS over ``adj`` walk the full ``max_hops``
+    chain. We can't observe the cap directly, but we can assert the
+    function returns in well under a second even for max_hops=128 on
+    a small home cell.
+    """
+    import time as _time
+    from types import SimpleNamespace
+    from crystal_viewer.transforms import atoms_completing_fragment
+
+    atoms = _atoms_2()
+    M = np.eye(3) * 5.0
+    # The pure-math layer needs an ``ops`` shim with ``find_bonds`` to
+    # walk the bond graph; for a 2-atom isolated test scene it just
+    # needs to return an iterable.
+    ops_stub = SimpleNamespace(find_bonds=lambda atoms, cell=None: [])
+    start = _time.monotonic()
+    out = atoms_completing_fragment(
+        atoms,
+        M,
+        seed_indices=[0],
+        ops=ops_stub,
+        cell=None,
+        max_hops=128,
+    )
+    elapsed = _time.monotonic() - start
+    # Pure-math budget is generous; the unit test box is otherwise
+    # idle. Without the cap, max_hops=128 -> halo=448 angstrom -> the
+    # periodic-image grid alone (capped at +-4) is 9^3 = 729 shifts
+    # but the broadcast dominates and used to take >>1 s.
+    assert elapsed < 1.0, f"complete_fragment took {elapsed:.3f}s; halo cap likely regressed"
+    assert isinstance(out, list)
+
+
 # ---- topology search_supercell ----------------------------------------
 #
 # ``analyze_topology`` accepts ``search_supercell`` to extend the
