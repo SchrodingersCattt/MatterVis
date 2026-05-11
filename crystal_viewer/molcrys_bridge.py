@@ -15,7 +15,6 @@ heuristics.
 from __future__ import annotations
 
 import copy
-from typing import Any
 
 import numpy as np
 
@@ -31,7 +30,7 @@ def _require_molcryskit():
         from molcrys_kit.structures.molecule import CrystalMolecule
         from molcrys_kit.analysis.stoichiometry import StoichiometryAnalyzer
         from molcrys_kit.analysis.interactions import get_bonding_threshold
-        from molcrys_kit.utils.geometry import unwrap_positions_along_bonds
+        from .molcrys_compat import unwrap_positions_along_bonds
         from molcrys_kit.constants import (
             get_atomic_radius,
             has_atomic_radius,

@@ -298,7 +298,13 @@ def test_label_traces_skip_hidden_atom_labels():
 
 def test_atom_selection_trace_skips_hidden_atoms():
     """Click-target overlay must drop hidden atoms; otherwise users
-    can still click on an empty cell and select an invisible atom."""
+    can still click on an empty cell and select an invisible atom.
+
+    Phase 4: customdata schema is
+    ``[kind, atom_index, label, elem, is_minor, fragment_label]`` so
+    the right-click handler can demux on the kind tag. Index 2 is
+    the label, not index 1 (which is now the integer atom index).
+    """
     from crystal_viewer.renderer import _atom_selection_trace
 
     atoms = _atoms()
@@ -306,9 +312,12 @@ def test_atom_selection_trace_skips_hidden_atoms():
     scene = {"draw_atoms": atoms}
     style = {"atom_scale": 1.0}
     trace = _atom_selection_trace(scene, style, hidden_labels={"H1"})
-    custom = [c[1] for c in (trace.customdata or [])]
+    custom = [c[2] for c in (trace.customdata or [])]
     assert "H1" not in custom
     assert "O1" in custom
+    # Every custom entry is tagged with the "atom" kind so the right-
+    # click handler can demux without inspecting the trace name.
+    assert all(c[0] == "atom" for c in (trace.customdata or []))
 
 
 def test_minor_bond_wireframe_skips_hidden_atoms():

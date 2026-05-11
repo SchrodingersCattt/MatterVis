@@ -509,6 +509,7 @@ def _cylinder_mesh_batch(segments, radius: float, sides: int = 8):
 def _atom_selection_trace(scene: dict, style: dict, hidden_labels: set | None = None):
     xs, ys, zs, sizes, labels, customdata = [], [], [], [], [], []
     hidden_labels = hidden_labels or set()
+    fragment_labels = scene.get("atom_fragment_labels") or []
     for idx, atom in enumerate(scene["draw_atoms"]):
         if style.get("show_minor_only", False) and not atom["is_minor"]:
             continue
@@ -524,7 +525,24 @@ def _atom_selection_trace(scene: dict, style: dict, hidden_labels: set | None = 
         zs.append(float(atom["cart"][2]))
         sizes.append(max(6.0, 48.0 * atom["atom_radius"] * float(style["atom_scale"])))
         labels.append(atom["label"])
-        customdata.append([idx, atom["label"], atom["elem"], int(atom["is_minor"])])
+        # Phase 4: customdata schema is now ``[kind, idx, label, elem,
+        # is_minor, fragment_label]`` so the right-click handler can
+        # demux on ``kind`` (atom / bond / polyhedron) without having
+        # to track which trace name was hit. Pre-Phase 4 callers
+        # (existing click handlers) read ``customdata[1]`` for the
+        # atom index; the kind tag at index 0 is additive so they
+        # keep working against the same trace.
+        frag_label = (
+            str(fragment_labels[idx]) if idx < len(fragment_labels) and fragment_labels[idx] is not None else ""
+        )
+        customdata.append([
+            "atom",
+            int(idx),
+            str(atom["label"]),
+            str(atom["elem"]),
+            int(atom["is_minor"]),
+            frag_label,
+        ])
     return go.Scatter3d(
         x=xs,
         y=ys,
@@ -532,14 +550,134 @@ def _atom_selection_trace(scene: dict, style: dict, hidden_labels: set | None = 
         mode="markers",
         marker=dict(size=sizes, color="rgba(0,0,0,0)", opacity=0.02),
         customdata=customdata,
-        hovertemplate="%{customdata[1]} (%{customdata[2]})<extra></extra>",
+        hovertemplate="%{customdata[2]} (%{customdata[3]})<extra></extra>",
         showlegend=False,
         name="atom-selection",
     )
 
 
-def _bond_segments(scene: dict, style: dict):
-    """Yield ``(color, is_minor, start, end)`` 4-tuples for every bond half.
+def _polyhedron_selection_trace(topology_data: dict | None) -> "go.Scatter3d | None":
+    """Invisible Scatter3d markers at every polyhedron centre, carrying
+    ``customdata=[kind, spec_id, fragment_label, is_anchor]`` so the
+    right-click menu can identify which polyhedron the user picked.
+
+    Plotly's Mesh3d accepts neither per-face nor per-vertex customdata,
+    so a separate Scatter3d marker layer is the only way to make
+    polyhedron centres click-targetable. The markers are placed at the
+    centroid of each overlay (matching ``_world_sphere_marker_trace``'s
+    geometry) and rendered fully transparent; the rounded marker size
+    and ``hoverinfo="text"`` keep the hover hit area generous enough
+    that the user doesn't have to land exactly on a face vertex.
+    """
+    if not topology_data:
+        return None
+    spec_results = topology_data.get("spec_results") or []
+    if not spec_results:
+        return None
+    xs, ys, zs, customdata, hover = [], [], [], [], []
+    for entry in spec_results:
+        spec_id = str(entry.get("spec_id") or "")
+        spec_name = str(entry.get("name") or "")
+        for overlay in entry.get("overlays") or []:
+            center = overlay.get("center_coords")
+            if center is None or not overlay.get("visible", True):
+                continue
+            label = str(overlay.get("center_label") or "")
+            xs.append(float(center[0]))
+            ys.append(float(center[1]))
+            zs.append(float(center[2]))
+            customdata.append([
+                "polyhedron",
+                spec_id,
+                label,
+                int(bool(overlay.get("is_analysis_anchor"))),
+            ])
+            hover.append(f"{spec_name} \u00b7 {label}")
+    if not xs:
+        return None
+    return go.Scatter3d(
+        x=xs,
+        y=ys,
+        z=zs,
+        mode="markers",
+        marker=dict(size=18, color="rgba(0,0,0,0)", opacity=0.02),
+        customdata=customdata,
+        hovertext=hover,
+        hovertemplate="%{hovertext}<extra></extra>",
+        showlegend=False,
+        name="polyhedron-selection",
+    )
+
+
+def _bond_selection_trace(scene: dict, style: dict) -> "go.Scatter3d | None":
+    """Invisible Scatter3d markers at each bond midpoint, carrying
+    ``customdata=[kind, label_pair, elem_pair, is_minor]`` so the
+    right-click menu has somewhere to land for chemical-bond picks.
+
+    Like :func:`_polyhedron_selection_trace` this is a separate marker
+    layer; the bond-mesh path (cylinders) cannot expose hover targets.
+    Half-bond endpoints with ``_render_visible=False`` are skipped so
+    a hidden bond doesn't generate a phantom hover target.
+    """
+    bonds = scene.get("bonds") or []
+    atoms = scene.get("draw_atoms") or []
+    if not bonds:
+        return None
+    n = len(atoms)
+    xs, ys, zs, customdata, hover = [], [], [], [], []
+    for bond in bonds:
+        if style.get("show_minor_only", False) and not bond.get("is_minor"):
+            continue
+        if not bool(bond.get("_render_visible", True)):
+            continue
+        i = int(bond.get("i", -1))
+        j = int(bond.get("j", -1))
+        if not (0 <= i < n and 0 <= j < n):
+            continue
+        if not _atom_render_visible(atoms[i]) or not _atom_render_visible(atoms[j]):
+            continue
+        start = np.asarray(bond["start"], dtype=float)
+        end = np.asarray(bond["end"], dtype=float)
+        mid = (start + end) / 2.0
+        label_i = str(atoms[i].get("label") or "")
+        label_j = str(atoms[j].get("label") or "")
+        elem_i = str(atoms[i].get("elem") or "")
+        elem_j = str(atoms[j].get("elem") or "")
+        xs.append(float(mid[0]))
+        ys.append(float(mid[1]))
+        zs.append(float(mid[2]))
+        customdata.append([
+            "bond",
+            f"{label_i}-{label_j}",
+            f"{elem_i}-{elem_j}",
+            int(bool(bond.get("is_minor"))),
+        ])
+        hover.append(f"{label_i} \u2014 {label_j}")
+    if not xs:
+        return None
+    return go.Scatter3d(
+        x=xs,
+        y=ys,
+        z=zs,
+        mode="markers",
+        marker=dict(size=10, color="rgba(0,0,0,0)", opacity=0.02),
+        customdata=customdata,
+        hovertext=hover,
+        hovertemplate="%{hovertext}<extra></extra>",
+        showlegend=False,
+        name="bond-selection",
+    )
+
+
+def _bond_segments(scene: dict, style: dict, *, with_scales: bool = False):
+    """Yield ``(color, is_minor, start, end)`` tuples for every bond half.
+
+    When ``with_scales=True`` each yield is extended with
+    ``(radius_scale, opacity_scale)`` (floats, default 1.0) so callers
+    that build mesh traces can bucket on the bond_groups radius/opacity
+    overrides. Default ``False`` keeps the legacy 4-tuple API for the
+    other callers (cylinder schematic / line traces) that don't need
+    per-bond cosmetics.
 
     A ``style["force_bond_color"]`` (hex string) overrides per-atom bond
     colouring without touching any other colour in the scene.  This is the
@@ -553,9 +691,13 @@ def _bond_segments(scene: dict, style: dict):
     for bond in scene["bonds"]:
         if style.get("show_minor_only", False) and not bond["is_minor"]:
             continue
-        # Phase 2: skip bonds whose endpoint atom was hidden by an
-        # atom_groups ``visible: false`` rule. A half-bond going to
-        # a vanished atom reads as a rendering bug; cleaner to drop it.
+        # Phase 4: bond_groups can mark a bond invisible directly. We
+        # honour both the bond-level ``_render_visible`` (set by
+        # ``tag_bonds_with_groups``) and the per-atom visibility (set
+        # by ``tag_atoms_with_groups``); a half-bond that survives
+        # both is drawn.
+        if not bool(bond.get("_render_visible", True)):
+            continue
         i = int(bond.get("i", -1))
         j = int(bond.get("j", -1))
         if 0 <= i < n_atoms and not _atom_render_visible(atoms[i]):
@@ -565,12 +707,20 @@ def _bond_segments(scene: dict, style: dict):
         start = np.array(bond["start"], dtype=float)
         end = np.array(bond["end"], dtype=float)
         mid = (start + end) / 2.0
-        # Use the per-atom render colour so a recoloured atom-group
-        # half stays consistent with its sphere's colour.
-        i_color = forced if forced else (atoms[i].get("_render_color") if 0 <= i < n_atoms else None) or _style_color(bond["color_i"], style)
-        j_color = forced if forced else (atoms[j].get("_render_color") if 0 <= j < n_atoms else None) or _style_color(bond["color_j"], style)
+        # Per-bond ``_render_color`` (bond_groups override) wins over
+        # everything except ``style.force_bond_color`` (which is the
+        # global "publication ORTEP-III black ink" knob).
+        bond_render_color = bond.get("_render_color")
+        if bond_render_color:
+            i_color = forced if forced else bond_render_color
+            j_color = forced if forced else bond_render_color
+        else:
+            i_color = forced if forced else (atoms[i].get("_render_color") if 0 <= i < n_atoms else None) or _style_color(bond["color_i"], style)
+            j_color = forced if forced else (atoms[j].get("_render_color") if 0 <= j < n_atoms else None) or _style_color(bond["color_j"], style)
         c_i = i_color
         c_j = j_color
+        radius_scale = float(bond.get("_render_radius_scale", 1.0) or 1.0)
+        opacity_scale = float(bond.get("_render_opacity_scale", 1.0) or 1.0)
         halves = [
             (c_i, bond["is_minor"], start, mid),
             (c_j, bond["is_minor"], mid, end),
@@ -581,23 +731,47 @@ def _bond_segments(scene: dict, style: dict):
                 dash_len = max(0.08, 0.22 * length)
                 gap_len = max(0.05, 0.14 * length)
                 for dash_start, dash_end in _dashed_segments([(seg_start, seg_end)], dash_len=dash_len, gap_len=gap_len):
-                    yield color, is_minor, dash_start, dash_end
+                    if with_scales:
+                        yield color, is_minor, dash_start, dash_end, radius_scale, opacity_scale
+                    else:
+                        yield color, is_minor, dash_start, dash_end
             else:
-                yield color, is_minor, seg_start, seg_end
+                if with_scales:
+                    yield color, is_minor, seg_start, seg_end, radius_scale, opacity_scale
+                else:
+                    yield color, is_minor, seg_start, seg_end
 
 
 def _bond_mesh_traces(scene: dict, style: dict):
-    groups: Dict[Tuple[str, bool], dict] = {}
-    radius = max(0.04, float(style["bond_radius"]))
-    for color, is_minor, start, end in _bond_segments(scene, style):
-        key = (color, is_minor)
-        groups.setdefault(key, {"segments": []})["segments"].append((start, end))
+    """Build the bond Mesh3d traces, bucketed by ``(color, is_minor,
+    radius_bin, opacity_bin)`` so per-bond ``_render_radius_scale`` /
+    ``_render_opacity_scale`` (set by ``tag_bonds_with_groups``)
+    survive the one-trace-per-colour grouping. Plotly bakes opacity
+    onto the trace, not per-vertex; the same is true of ``color``;
+    so we have to expand the bucket key to keep their distinct
+    cosmetic values from collapsing."""
+    groups: Dict[Tuple[str, bool, int, int], dict] = {}
+    base_radius = max(0.04, float(style["bond_radius"]))
+    for color, is_minor, start, end, radius_scale, opacity_scale in _bond_segments(
+        scene, style, with_scales=True
+    ):
+        # Bin to two decimals so e.g. a 1.50 vs 1.51 slider tick doesn't
+        # fragment the trace list. Same trick is used in _atom_mesh_traces.
+        radius_bin = int(round(float(radius_scale) * 100))
+        opacity_bin = int(round(float(opacity_scale) * 100))
+        key = (color, is_minor, radius_bin, opacity_bin)
+        groups.setdefault(key, {"segments": [], "radius_scale": radius_scale, "opacity_scale": opacity_scale})["segments"].append((start, end))
 
     traces = []
-    for (color, is_minor), payload in groups.items():
+    for (color, is_minor, _r_bin, _o_bin), payload in groups.items():
+        radius_scale = float(payload["radius_scale"])
+        opacity_scale = float(payload["opacity_scale"])
+        radius = base_radius * radius_scale * (
+            float(style.get("minor_bond_scale", 0.82)) if is_minor else 1.0
+        )
         vertices, triangles = _cylinder_mesh_batch(
             payload["segments"],
-            radius * (float(style.get("minor_bond_scale", 0.82)) if is_minor else 1.0),
+            radius,
             sides=6,
         )
         if len(vertices) == 0:
@@ -611,7 +785,7 @@ def _bond_mesh_traces(scene: dict, style: dict):
                 j=triangles[:, 1],
                 k=triangles[:, 2],
                 color=color,
-                opacity=_minor_opacity_for(style, is_minor),
+                opacity=_minor_opacity_for(style, is_minor) * opacity_scale,
                 hoverinfo="skip",
                 showlegend=False,
                 flatshading=False,
@@ -729,6 +903,7 @@ def _bond_scatter_traces(scene: dict, style: dict):
 
 def _atom_scatter_traces(scene: dict, style: dict):
     groups: Dict[Tuple[str, bool, str, int], dict] = {}
+    fragment_labels = scene.get("atom_fragment_labels") or []
     for idx, atom in enumerate(scene["draw_atoms"]):
         if style.get("show_minor_only", False) and not atom["is_minor"]:
             continue
@@ -752,7 +927,17 @@ def _atom_scatter_traces(scene: dict, style: dict):
         groups[key]["z"].append(float(atom["cart"][2]))
         groups[key]["size"].append(base_size * (1.12 if atom["is_minor"] else 1.0))
         groups[key]["text"].append(atom["label"])
-        groups[key]["customdata"].append([idx, atom["label"], atom["elem"], int(atom["is_minor"])])
+        frag_label = (
+            str(fragment_labels[idx]) if idx < len(fragment_labels) and fragment_labels[idx] is not None else ""
+        )
+        groups[key]["customdata"].append([
+            "atom",
+            int(idx),
+            str(atom["label"]),
+            str(atom["elem"]),
+            int(atom["is_minor"]),
+            frag_label,
+        ])
 
     traces = []
     for (elem, is_minor, _color, _opacity_bin), payload in groups.items():
@@ -1646,13 +1831,25 @@ def _merged_hull_edges(overlays: list[list], color: str):
 
 def _multi_spec_cache_key(topology_data: dict, fallback_color: str) -> tuple:
     """Build a hashable key for the renderer's painter caches that
-    captures every per-spec colour and the fallback shared colour
+    captures every per-spec colour and per-overlay instance override
     (used by callers that haven't migrated to ``spec_results``)."""
     spec_results = topology_data.get("spec_results") or []
-    return (
-        tuple((entry.get("spec_id") or "", entry.get("color") or fallback_color) for entry in spec_results),
-        fallback_color,
-    )
+    parts = []
+    for entry in spec_results:
+        overlay_overrides = []
+        for overlay in entry.get("overlays") or []:
+            color_override = overlay.get("color")
+            if color_override is None and not overlay.get("visible", True):
+                color_override = "_hidden"
+            overlay_overrides.append((str(overlay.get("center_label") or ""), color_override))
+        parts.append(
+            (
+                entry.get("spec_id") or "",
+                entry.get("color") or fallback_color,
+                tuple(overlay_overrides),
+            )
+        )
+    return (tuple(parts), fallback_color)
 
 
 def topology_background_traces(topology_data: dict | None, style: dict | None = None):
@@ -1683,18 +1880,25 @@ def topology_background_traces(topology_data: dict | None, style: dict | None = 
     spec_results = topology_data.get("spec_results") or []
     if spec_results:
         for entry in spec_results:
-            color = str(entry.get("color") or fallback_color)
-            overlays_with_opacity: list[tuple[list, float]] = []
+            spec_color = str(entry.get("color") or fallback_color)
+            # Bucket overlays by the colour they will paint with: any
+            # ``instance_overrides`` entry can swap a single fragment to
+            # a different hue, and we want every solid colour to take
+            # exactly one merged-mesh trace (otherwise the per-shape
+            # cylinder counts explode for tiled polyhedra).
+            overlays_by_color: dict[str, list[tuple[list, float]]] = {}
             for overlay in entry.get("overlays") or []:
                 shell = overlay.get("shell_coords")
                 if not shell:
                     continue
+                if not overlay.get("visible", True):
+                    continue
                 opacity = primary_opacity if overlay.get("is_analysis_anchor") else extra_opacity
-                overlays_with_opacity.append((shell, opacity))
-            if not overlays_with_opacity:
-                continue
-            traces.extend(_merged_hull_mesh(overlays_with_opacity, color=color))
-            traces.extend(_merged_hull_edges([c for c, _ in overlays_with_opacity], color=color))
+                color = str(overlay.get("color") or spec_color)
+                overlays_by_color.setdefault(color, []).append((shell, opacity))
+            for color, group in overlays_by_color.items():
+                traces.extend(_merged_hull_mesh(group, color=color))
+                traces.extend(_merged_hull_edges([c for c, _ in group], color=color))
     else:
         # Legacy single-colour path: callers (or test fixtures) that
         # construct a topology_data dict by hand still see the original
@@ -1763,28 +1967,33 @@ def topology_foreground_traces(topology_data: dict | None, style: dict | None = 
     if spec_results:
         # One faint marker cluster per spec covering its non-anchor
         # overlays. We skip the anchor centre because it already has
-        # the bright orange marker above.
+        # the bright orange marker above. ``instance_overrides`` may
+        # paint individual fragments a different colour or hide them
+        # entirely; we honour those here so the centre marker matches
+        # the hull beneath.
         for entry in spec_results:
-            color = str(entry.get("color") or fallback_color)
-            extra_centers = []
+            spec_color = str(entry.get("color") or fallback_color)
+            centers_by_color: dict[str, list[list[float]]] = {}
             for overlay in entry.get("overlays") or []:
                 if overlay.get("is_analysis_anchor"):
+                    continue
+                if not overlay.get("visible", True):
                     continue
                 center = overlay.get("center_coords")
                 coords = overlay.get("shell_coords") or []
                 if center is None or len(coords) == 0:
                     continue
-                extra_centers.append(center)
-            if not extra_centers:
-                continue
-            extra_marker = _world_sphere_marker_trace(
-                extra_centers,
-                radius=0.32,
-                color=color,
-                opacity=0.55,
-            )
-            if extra_marker is not None:
-                traces.append(extra_marker)
+                color = str(overlay.get("color") or spec_color)
+                centers_by_color.setdefault(color, []).append(center)
+            for color, centers in centers_by_color.items():
+                extra_marker = _world_sphere_marker_trace(
+                    centers,
+                    radius=0.32,
+                    color=color,
+                    opacity=0.55,
+                )
+                if extra_marker is not None:
+                    traces.append(extra_marker)
     else:
         extra_centers = []
         for extra in topology_data.get("extra_overlays") or []:
@@ -2034,6 +2243,29 @@ def _atom_groups_cache_key(atom_groups: list[dict] | None) -> tuple:
     )
 
 
+def _bond_groups_cache_key(bond_groups: list[dict] | None) -> tuple:
+    """Hashable summary of bond_groups for the figure JSON cache.
+
+    Mirrors :func:`_atom_groups_cache_key`. Editing or reordering a
+    bond group must reliably re-render; if you add a new field to
+    :func:`crystal_viewer.bond_groups.tag_bonds_with_groups`, extend
+    this key so the cache slot doesn't go stale.
+    """
+    if not bond_groups:
+        return ()
+    return tuple(
+        (
+            str(g.get("id", "")),
+            _hashable_selector(g.get("selector")),
+            str(g.get("color") or ""),
+            bool(g.get("visible", True)),
+            float(g.get("opacity")) if g.get("opacity") is not None else None,
+            float(g.get("radius_scale")) if g.get("radius_scale") is not None else None,
+        )
+        for g in bond_groups
+    )
+
+
 def _atom_subscene(scene: dict, sub_atoms: list[dict]) -> dict:
     """Shallow copy of ``scene`` with ``draw_atoms`` replaced. Other
     fields (``bonds``, ``M``, ``label_items``, ...) keep the original
@@ -2090,6 +2322,7 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
     key and replay them on subsequent rebuilds, so toggling Labels no
     longer regenerates ~1500 sphere triangles."""
     atom_groups = style.get("atom_groups") or []
+    bond_groups = style.get("bond_groups") or []
     cache = scene.setdefault("_mesh_trace_cache", {})
     key = (
         bool(use_fast),
@@ -2114,9 +2347,27 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
         str(style.get("force_bond_color", "")),
         str(style.get("ortep_atom_fill_color", "#FFFFFF")),
         _atom_groups_cache_key(atom_groups),
+        _bond_groups_cache_key(bond_groups),
     )
     if key in cache:
         return cache[key]
+
+    # Phase 4: bond_groups go through ``tag_bonds_with_groups`` BEFORE
+    # ``_bond_segments`` reads the bond render fields, so any
+    # _render_color / _render_visible / _render_radius_scale /
+    # _render_opacity_scale set by a matching rule survives into the
+    # mesh trace bucket key.
+    if bond_groups:
+        from .bond_groups import tag_bonds_with_groups
+
+        original_bonds = scene["bonds"]
+        scene["bonds"] = tag_bonds_with_groups(
+            original_bonds,
+            bond_groups,
+            atoms=scene.get("draw_atoms") or [],
+        )
+    else:
+        original_bonds = None
 
     # Phase 2: when atom_groups is set, decorate every atom with
     # per-render override fields, then partition by effective
@@ -2133,9 +2384,11 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
             tag_atoms_with_groups,
         )
 
+        fragment_labels = scene.get("atom_fragment_labels") or None
         tagged_atoms = tag_atoms_with_groups(
             scene["draw_atoms"], atom_groups,
             scene_material=scene_material, scene_style=scene_style,
+            fragment_labels=fragment_labels,
         )
         # Mutate the scene so ``_bond_segments`` (called below) sees
         # the per-atom ``_render_visible`` / ``_render_color`` flags.
@@ -2204,6 +2457,8 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
             return payload
         finally:
             scene["draw_atoms"] = original_atoms
+            if original_bonds is not None:
+                scene["bonds"] = original_bonds
 
     if style.get("style") == "wireframe":
         atom_traces = _wireframe_atom_traces(scene, style)
@@ -2275,6 +2530,8 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
         "minor_bond_dicts": [_round_coord_arrays(tr.to_plotly_json()) for tr in minor_bonds],
     }
     cache[key] = payload
+    if original_bonds is not None:
+        scene["bonds"] = original_bonds
     return payload
 
 
@@ -2439,6 +2696,15 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None) ->
     if topology_on:
         trace_dicts.extend(_traces_to_dicts(topology_foreground_traces(topology_data, style)))
     trace_dicts.append(_round_coord_arrays(_atom_selection_trace(scene, style, hidden_labels=hidden_labels).to_plotly_json()))
+    # Phase 4: extra invisible markers so the right-click menu has
+    # click targets for polyhedron centres and bond midpoints.
+    if topology_on:
+        poly_pick = _polyhedron_selection_trace(topology_data)
+        if poly_pick is not None:
+            trace_dicts.append(_round_coord_arrays(poly_pick.to_plotly_json()))
+    bond_pick = _bond_selection_trace(scene, style)
+    if bond_pick is not None:
+        trace_dicts.append(_round_coord_arrays(bond_pick.to_plotly_json()))
 
     # ``_validate=False`` skips Plotly's per-property validator chain when
     # constructing the figure. We've already validated the dicts via

@@ -22,6 +22,7 @@ Every spec is a flat dict with these fields:
 | `ligand_species` | string \| null | When set, the polyhedron neighbour pool is restricted to fragments matching this formula. `null` = legacy auto-derive (perovskite-style A↔X / B↔X / X↔A,B). |
 | `color` | string | Hull / shell colour; six-digit hex (`#RRGGBB`). Auto-assigned from a colour-blind-friendly palette when omitted. |
 | `enabled` | bool | `false` rows persist but are skipped at render time. |
+| `instance_overrides` | object | **Phase 4.** Per-fragment override map: `{fragment_label: {color, visible}}`. Empty `{}` means every matched fragment inherits the spec-level colour and visibility. Keys are the fragment-table labels exposed in `topology_data["spec_results"][i]["overlays"][j]["center_label"]`. |
 
 ### State integration
 
@@ -101,6 +102,42 @@ every existing spec id exactly once, in the desired display order.
 Returns `{"specs": [...]}` (the new ordered list) on success, `400`
 on a missing/extra id.
 
+### `POST /api/v2/polyhedra/{spec_id}/instance_overrides/{fragment_label}` (Phase 4)
+
+Body: `{"color": "#RRGGBB", "visible": bool}` (both fields optional;
+at least one must be supplied for the override to register). Stamps a
+per-fragment override on the spec, overlaying the spec-level colour /
+visibility for that single polyhedron. Returns the updated spec on
+success, `404` for unknown `spec_id`. Mirrors the right-click "Set
+this one cyan" workflow in the UI.
+
+Posting an empty body (`{}`) clears the override (semantically
+identical to `DELETE`).
+
+### `DELETE /api/v2/polyhedra/{spec_id}/instance_overrides/{fragment_label}` (Phase 4)
+
+Removes the override for one fragment. Returns the updated spec on
+success, `404` for unknown `spec_id`. Unknown fragment labels are a
+no-op (returns the spec unchanged with HTTP 200).
+
+### `PATCH /api/v2/polyhedra/{spec_id}` with `instance_overrides` (Phase 4)
+
+The existing PATCH endpoint accepts an `instance_overrides` field
+that replaces the entire map in one call:
+
+```json
+{
+  "instance_overrides": {
+    "X0": {"color": "#FF0000"},
+    "X3": {"visible": false}
+  }
+}
+```
+
+Use this when replaying a saved scene state in a single round trip
+(AI agents, scene-store reloads). The per-fragment endpoints above
+are for incremental edits.
+
 ## Worked example
 
 ```bash
@@ -162,5 +199,33 @@ When `spec_results` is absent (legacy callers, hand-built fixtures),
 the renderer falls back to the single-colour
 `style["topology_hull_color"]` path. Both `topology_background_traces`
 and `topology_foreground_traces` keep painter caches keyed on the
-per-spec colour tuple so toggling a colour is a cheap re-paint, not a
-geometry recompute.
+per-spec colour tuple **plus** the per-overlay instance override
+tuple (Phase 4) so toggling a colour or hiding a single fragment is
+a cheap re-paint, not a geometry recompute.
+
+Per-overlay instance overrides ride on each overlay dict as
+optional `color` (`#RRGGBB`) and `visible` (bool, default `True`)
+fields. The renderer buckets overlays by colour so two distinct
+override colours produce two merged-mesh traces; a hidden overlay
+contributes nothing to the trace list.
+
+### Polyhedron picking (Phase 4)
+
+The renderer adds an invisible `Scatter3d` marker layer named
+`polyhedron-selection` whose `customdata` carries
+`["polyhedron", spec_id, fragment_label, is_anchor_int]`. The
+right-click menu reads this on `clickData` to identify which
+polyhedron the user picked; library callers driving Plotly directly
+get the same hook.
+
+### `polyhedron_search_supercell` (Phase 4)
+
+A per-state `polyhedron_search_supercell: [Na, Nb, Nc]` triple is a
+**floor** on the lattice-image search range used by
+`analyze_topology` / `extract_coordination_shell`. `[0, 0, 0]`
+(default) keeps the cutoff-driven span -- this is the legacy
+behaviour. `[1, 1, 1]` extends the search by one image cell on each
+side so polyhedra wrap to neighbouring images even without a
+display-side supercell transform. The setting is decoupled from any
+`repeat` transform applied via `transforms`; the two combine
+multiplicatively (more images visible, more search range applied).

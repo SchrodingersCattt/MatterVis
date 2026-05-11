@@ -14,8 +14,10 @@ instead.
 | Build a static cube/orbital figure (HOMO, LUMO, density) | [`cube_api.md`](cube_api.md) |
 | Render ORTEP / thermal ellipsoid figures | [`ortep_api.md`](ortep_api.md) |
 | Add a/b/c (or x/y/z, k-path, dipole) direction indicators to any 3D plot | [`compass_api.md`](compass_api.md) |
-| Manage named coordination polyhedra (per-row colour, ligand restriction) | [`polyhedron_api.md`](polyhedron_api.md) |
+| Manage named coordination polyhedra (per-row colour, ligand restriction, per-instance overrides) | [`polyhedron_api.md`](polyhedron_api.md) |
 | Apply per-element / per-group colour, visibility, or render-style overrides | [`atom_groups_api.md`](atom_groups_api.md) |
+| Recolour, hide, thin out, or fade chemical bonds by selector | [`bond_groups_api.md`](bond_groups_api.md) |
+| Repeat a unit cell, grow by radius / bonds, complete fragments / polyhedra, or generate a slab | [`transforms_api.md`](transforms_api.md) |
 
 ## Cross-cutting conventions
 

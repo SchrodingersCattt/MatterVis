@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any
 
 from flask import Blueprint, Response, jsonify, request
+
+from . import perf_log
 
 try:
     from flask_sock import Sock
@@ -103,11 +104,22 @@ def register_api(dash_app, backend) -> None:
         file = request.files["file"]
         if not file.filename:
             return jsonify({"error": "empty filename"}), 400
-        content = file.read()
-        try:
-            bundle = backend.add_uploaded_file_bytes(content, file.filename)
-        except ValueError as exc:
-            return jsonify({"error": str(exc)}), 400
+        with perf_log.time_block(
+            "http:upload",
+            kind="http",
+            filename=file.filename,
+        ):
+            content = file.read()
+            try:
+                with perf_log.time_block(
+                    "upload:parse_and_register",
+                    kind="event",
+                    filename=file.filename,
+                    bytes=len(content),
+                ):
+                    bundle = backend.add_uploaded_file_bytes(content, file.filename)
+            except ValueError as exc:
+                return jsonify({"error": str(exc)}), 400
         return jsonify(bundle.metadata())
 
     @v2.get("/structures")
@@ -311,9 +323,221 @@ def register_api(dash_app, backend) -> None:
             return jsonify({"error": str(exc)}), 400
         return jsonify({"groups": groups})
 
+    # ----- bond_groups (Phase 4) ---------------------------------------
+    #
+    # Per-scene bond-style override table. See agents/bond_groups_api.md.
+
+    @v2.get("/bond_groups")
+    def bond_groups_list():
+        return jsonify({"groups": backend.list_bond_groups(scene_id=request.args.get("scene_id"))})
+
+    @v2.post("/bond_groups")
+    def bond_groups_create():
+        payload = request.get_json(force=True, silent=True) or {}
+        selector = payload.get("selector")
+        if not isinstance(selector, dict):
+            return jsonify({"error": "'selector' (dict) is required"}), 400
+        try:
+            group = backend.add_bond_group(
+                selector=selector,
+                name=payload.get("name"),
+                color=payload.get("color"),
+                visible=bool(payload.get("visible", True)),
+                opacity=payload.get("opacity"),
+                radius_scale=payload.get("radius_scale"),
+                scene_id=_scene_id_from_request(),
+                group_id=payload.get("id"),
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(group)
+
+    @v2.patch("/bond_groups/<group_id>")
+    def bond_groups_update(group_id: str):
+        payload = request.get_json(force=True, silent=True) or {}
+        try:
+            group = backend.update_bond_group(
+                group_id=group_id,
+                patch=payload,
+                scene_id=_scene_id_from_request(),
+            )
+        except KeyError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(group)
+
+    @v2.delete("/bond_groups/<group_id>")
+    def bond_groups_delete(group_id: str):
+        ok = backend.remove_bond_group(group_id=group_id, scene_id=request.args.get("scene_id"))
+        if not ok:
+            return jsonify({"error": f"unknown bond_group id: {group_id!r}"}), 404
+        return jsonify({"deleted": group_id})
+
+    @v2.post("/bond_groups/reorder")
+    def bond_groups_reorder():
+        payload = request.get_json(force=True, silent=True) or {}
+        ordered = payload.get("order")
+        if not isinstance(ordered, list):
+            return jsonify({"error": "'order' must be a list of group ids"}), 400
+        try:
+            groups = backend.reorder_bond_groups(
+                ordered_ids=ordered,
+                scene_id=_scene_id_from_request(),
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify({"groups": groups})
+
+    # ----- transforms (Phase 4) ----------------------------------------
+    #
+    # Per-scene structure-mutation pipeline. Each entry is a transform
+    # spec dict {id, name, kind, params, enabled}. Order matters --
+    # later transforms see the results of earlier ones. See
+    # agents/transforms_api.md for the parameter schema per kind.
+
+    @v2.get("/transforms")
+    def transforms_list():
+        return jsonify({"transforms": backend.list_transforms(scene_id=request.args.get("scene_id"))})
+
+    @v2.post("/transforms")
+    def transforms_create():
+        payload = request.get_json(force=True, silent=True) or {}
+        kind = payload.get("kind")
+        if not kind:
+            return jsonify({"error": "'kind' is required"}), 400
+        try:
+            transform = backend.add_transform(
+                kind=kind,
+                params=payload.get("params") or {},
+                name=payload.get("name"),
+                enabled=bool(payload.get("enabled", True)),
+                scene_id=_scene_id_from_request(),
+                transform_id=payload.get("id"),
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(transform)
+
+    @v2.patch("/transforms/<transform_id>")
+    def transforms_update(transform_id: str):
+        payload = request.get_json(force=True, silent=True) or {}
+        try:
+            transform = backend.update_transform(
+                transform_id=transform_id,
+                patch=payload,
+                scene_id=_scene_id_from_request(),
+            )
+        except KeyError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(transform)
+
+    @v2.delete("/transforms/<transform_id>")
+    def transforms_delete(transform_id: str):
+        ok = backend.remove_transform(
+            transform_id=transform_id,
+            scene_id=request.args.get("scene_id"),
+        )
+        if not ok:
+            return jsonify({"error": f"unknown transform id: {transform_id!r}"}), 404
+        return jsonify({"deleted": transform_id})
+
+    @v2.post("/transforms/reorder")
+    def transforms_reorder():
+        payload = request.get_json(force=True, silent=True) or {}
+        ordered = payload.get("order")
+        if not isinstance(ordered, list):
+            return jsonify({"error": "'order' must be a list of transform ids"}), 400
+        try:
+            transforms = backend.reorder_transforms(
+                ordered_ids=ordered,
+                scene_id=_scene_id_from_request(),
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify({"transforms": transforms})
+
+    # ----- polyhedron instance overrides (Phase 4) ---------------------
+    #
+    # POST/DELETE on a single fragment_label inside a spec's
+    # instance_overrides map. The full PATCH endpoint above also
+    # accepts ``instance_overrides`` to set the entire map at once.
+
+    @v2.post("/polyhedra/<spec_id>/instance_overrides/<fragment_label>")
+    def polyhedra_instance_override_set(spec_id: str, fragment_label: str):
+        payload = request.get_json(force=True, silent=True) or {}
+        try:
+            spec = backend.set_polyhedron_instance_override(
+                spec_id=spec_id,
+                fragment_label=fragment_label,
+                override=payload,
+                scene_id=_polyhedra_scene_id(),
+            )
+        except KeyError as exc:
+            return jsonify({"error": str(exc)}), 404
+        return jsonify(spec)
+
+    @v2.delete("/polyhedra/<spec_id>/instance_overrides/<fragment_label>")
+    def polyhedra_instance_override_clear(spec_id: str, fragment_label: str):
+        try:
+            spec = backend.clear_polyhedron_instance_override(
+                spec_id=spec_id,
+                fragment_label=fragment_label,
+                scene_id=request.args.get("scene_id"),
+            )
+        except KeyError as exc:
+            return jsonify({"error": str(exc)}), 404
+        return jsonify(spec)
+
+    # ----- perf log (cross-version) -------------------------------------
+    #
+    # ``/perf`` tails the in-memory ring buffer of perf-log events
+    # written by ``crystal_viewer.perf_log``. It is the missing
+    # "what did the server actually do, and how long did it take"
+    # signal that the dev server's ``POST /_dash-update-component``
+    # log lines deliberately omit. The UI side panel polls this
+    # endpoint with ``since`` so it only ships new events.
+    def _perf_payload():
+        try:
+            since = int(request.args.get("since", "0") or 0)
+        except ValueError:
+            since = 0
+        try:
+            limit = int(request.args.get("limit", "200") or 200)
+        except ValueError:
+            limit = 200
+        events = perf_log.recent(limit=limit, since_seq=since)
+        return jsonify(
+            {
+                "events": events,
+                "latest_seq": perf_log.latest_seq(),
+                "log_path": perf_log.log_path(),
+            }
+        )
+
+    @v2.get("/perf")
+    def perf_get_v2():
+        return _perf_payload()
+
+    @v2.post("/perf/clear")
+    def perf_clear_v2():
+        perf_log.clear()
+        return jsonify({"cleared": True})
+
     server.register_blueprint(v2)
 
     v1 = Blueprint("crystal_viewer_api_v1", __name__, url_prefix="/api/v1")
+
+    @v1.get("/perf")
+    def perf_get_v1():
+        return _perf_payload()
+
+    @v1.post("/perf/clear")
+    def perf_clear_v1():
+        perf_log.clear()
+        return jsonify({"cleared": True})
 
     @v1.get("/state")
     def v1_get_state():
@@ -328,6 +552,10 @@ def register_api(dash_app, backend) -> None:
     _V2_ONLY_STATE_FIELDS = {
         "polyhedron_specs": "/api/v2/polyhedra",
         "atom_groups": "/api/v2/atom_groups",
+        "bond_groups": "/api/v2/bond_groups",
+        "transforms": "/api/v2/transforms",
+        "supercell": "/api/v2/transforms (POST kind=repeat)",
+        "polyhedron_search_supercell": "/api/v2/state",
     }
 
     @v1.post("/state")

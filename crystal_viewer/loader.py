@@ -12,7 +12,7 @@ from typing import Any, Dict, Iterable, Optional
 
 import networkx as nx
 import numpy as np
-from molcrys_kit.utils.geometry import unwrap_positions_along_bonds
+from .molcrys_compat import unwrap_positions_along_bonds
 
 from .presets import get_default_catalog, workspace_root
 from . import molcrys_bridge
@@ -42,6 +42,12 @@ class LoadedCrystal:
     fragment_table_cache: dict[tuple[Any, ...], tuple[list[dict[str, Any]], list[str]]] = field(default_factory=dict)
     atom_fragment_labels: list[str] = field(default_factory=list)
     source: str = "catalog"
+    # Per-bundle cache for scenes after a transforms pipeline has been
+    # applied. Key is ``(display_mode, show_hydrogen, transforms_cache_key)``;
+    # value is the post-transform scene dict (already including a refreshed
+    # fragment_table). Lives here -- not on the global app -- so two
+    # bundles served by the same Dash worker don't poison each other.
+    _transformed_scene_cache: dict[tuple[Any, ...], Dict[str, Any]] = field(default_factory=dict)
 
     def metadata(self) -> Dict[str, Any]:
         meta = scene_metadata(self.scene)
@@ -413,55 +419,107 @@ def build_bundle_scene(
     display_mode: str = "formula_unit",
     show_hydrogen: bool = False,
     preset: Optional[Dict[str, Any]] = None,
+    transforms: Optional[list[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    cache_key = (display_mode, bool(show_hydrogen))
-    if cache_key in bundle.scene_cache:
-        return bundle.scene_cache[cache_key]
+    """Build the scene dict for ``bundle``.
 
-    ops = scene_ops()
-    view_dir = np.array(bundle.view_direction, dtype=float)
-    up = np.array(bundle.up, dtype=float)
-    R = ops.view_rotation(view_dir, up)
-    scene = build_scene_from_atoms(
-        name=bundle.name,
-        title=bundle.title,
-        atoms=bundle.raw_atoms,
-        cell=bundle.cell,
-        M=bundle.M,
-        R=R,
-        show_hydrogen=show_hydrogen,
-        preset=preset,
-        display_mode=display_mode,
-        ops=ops,
-        formula_unit_atoms=bundle.formula_unit_atoms if display_mode == "formula_unit" else None,
-        unwrapped_atoms=bundle.unwrapped_atoms,
+    ``transforms`` is an optional list of transform-spec dicts (see
+    :mod:`crystal_viewer.transforms`); when present the base scene is
+    built once (and cached) then transforms are composed on top, with
+    the post-transform fragment table re-derived from the manifested
+    atom list. The base scene cache is unchanged so toggling transforms
+    on/off stays cheap.
+    """
+    base_cache_key = (display_mode, bool(show_hydrogen))
+    base_scene = bundle.scene_cache.get(base_cache_key)
+    if base_scene is None:
+        ops = scene_ops()
+        view_dir = np.array(bundle.view_direction, dtype=float)
+        up = np.array(bundle.up, dtype=float)
+        R = ops.view_rotation(view_dir, up)
+        base_scene = build_scene_from_atoms(
+            name=bundle.name,
+            title=bundle.title,
+            atoms=bundle.raw_atoms,
+            cell=bundle.cell,
+            M=bundle.M,
+            R=R,
+            show_hydrogen=show_hydrogen,
+            preset=preset,
+            display_mode=display_mode,
+            ops=ops,
+            formula_unit_atoms=bundle.formula_unit_atoms if display_mode == "formula_unit" else None,
+            unwrapped_atoms=bundle.unwrapped_atoms,
+        )
+        base_scene["cif_path"] = bundle.cif_path
+        base_scene["view_direction"] = view_dir
+        base_scene["up"] = up
+        base_scene["unwrap_overflow"] = copy.deepcopy(bundle.unwrap_overflow)
+        fragment_cache_key = ("scene", display_mode, bool(show_hydrogen))
+        cached_fragments = bundle.fragment_table_cache.get(fragment_cache_key)
+        if cached_fragments is None:
+            fragment_table, atom_fragment_labels = _fragment_table_from_atoms(
+                bundle.name,
+                base_scene["draw_atoms"],
+                base_scene["cell"],
+                base_scene["M"],
+                use_source_indices=False,
+                include_minor=True,
+            )
+            bundle.fragment_table_cache[fragment_cache_key] = (
+                copy.deepcopy(fragment_table),
+                list(atom_fragment_labels),
+            )
+        else:
+            fragment_table = copy.deepcopy(cached_fragments[0])
+            atom_fragment_labels = list(cached_fragments[1])
+        base_scene["fragment_table"] = fragment_table
+        base_scene["atom_fragment_labels"] = atom_fragment_labels
+        bundle.scene_cache[base_cache_key] = base_scene
+
+    if not transforms:
+        return base_scene
+
+    from .transforms import apply_transforms, transforms_cache_key
+
+    transformed_cache = getattr(bundle, "_transformed_scene_cache", None)
+    if transformed_cache is None:
+        transformed_cache = {}
+        try:
+            bundle._transformed_scene_cache = transformed_cache
+        except Exception:
+            pass
+    cache_key = (display_mode, bool(show_hydrogen), transforms_cache_key(transforms))
+    cached = transformed_cache.get(cache_key) if isinstance(transformed_cache, dict) else None
+    if cached is not None:
+        return cached
+
+    transformed = apply_transforms(
+        base_scene,
+        transforms,
+        bundle=bundle,
+        style=base_scene.get("style"),
     )
-    scene["cif_path"] = bundle.cif_path
-    scene["view_direction"] = view_dir
-    scene["up"] = up
-    scene["unwrap_overflow"] = copy.deepcopy(bundle.unwrap_overflow)
-    fragment_cache_key = ("scene", display_mode, bool(show_hydrogen))
-    cached_fragments = bundle.fragment_table_cache.get(fragment_cache_key)
-    if cached_fragments is None:
-        fragment_table, atom_fragment_labels = _fragment_table_from_atoms(
-            bundle.name,
-            scene["draw_atoms"],
-            scene["cell"],
-            scene["M"],
-            use_source_indices=False,
-            include_minor=True,
-        )
-        bundle.fragment_table_cache[fragment_cache_key] = (
-            copy.deepcopy(fragment_table),
-            list(atom_fragment_labels),
-        )
-    else:
-        fragment_table = copy.deepcopy(cached_fragments[0])
-        atom_fragment_labels = list(cached_fragments[1])
-    scene["fragment_table"] = fragment_table
-    scene["atom_fragment_labels"] = atom_fragment_labels
-    bundle.scene_cache[cache_key] = scene
-    return scene
+    if transformed is base_scene:
+        return base_scene
+    fragment_table, atom_fragment_labels = _fragment_table_from_atoms(
+        bundle.name,
+        transformed["draw_atoms"],
+        transformed.get("cell") or base_scene["cell"],
+        transformed.get("M") if transformed.get("M") is not None else base_scene["M"],
+        use_source_indices=False,
+        include_minor=True,
+    )
+    transformed = dict(transformed)
+    transformed["fragment_table"] = fragment_table
+    transformed["atom_fragment_labels"] = atom_fragment_labels
+    transformed["cif_path"] = base_scene.get("cif_path")
+    transformed["view_direction"] = base_scene.get("view_direction")
+    transformed["up"] = base_scene.get("up")
+    transformed["unwrap_overflow"] = []
+    if isinstance(transformed_cache, dict):
+        transformed_cache[cache_key] = transformed
+    return transformed
 
 
 def build_loaded_crystal(
@@ -472,44 +530,95 @@ def build_loaded_crystal(
     preset: Optional[Dict[str, Any]] = None,
     source: str = "catalog",
 ) -> LoadedCrystal:
+    # Each sub-block is wrapped in a ``perf_log.time_block`` so the
+    # /api/v1/perf endpoint shows exactly which leg of an upload is
+    # slow (CIF parse vs. molcryskit analysis vs. bond perception
+    # vs. fragment-table build). See ``crystal_viewer.perf_log``.
+    from . import perf_log
+
     ops = scene_ops()
     preset = preset or {}
-    raw_atoms, cell, M = ops.parse_asu(cif_path)
-    molcrys_analysis = molcrys_bridge.analyze(raw_atoms, M)
-    formula_unit_atoms = molcrys_bridge.select_formula_unit(raw_atoms, M, analysis=molcrys_analysis)
-    unwrapped_atoms, unwrap_overflow = _unwrapped_atoms_from_atoms(raw_atoms, cell, M, include_minor=True)
-    view_dir, up = legacy_scene._resolve_view(ops, name, raw_atoms, M, cell, preset)
+    with perf_log.time_block("loader:parse_asu", kind="event", structure=name, cif_path=cif_path):
+        raw_atoms, cell, M = ops.parse_asu(cif_path)
+    n_atoms = len(raw_atoms) if raw_atoms is not None else 0
+    with perf_log.time_block(
+        "loader:molcrys_analyze",
+        kind="event",
+        structure=name,
+        n_atoms=n_atoms,
+    ):
+        molcrys_analysis = molcrys_bridge.analyze(raw_atoms, M)
+    with perf_log.time_block("loader:select_formula_unit", kind="event", structure=name):
+        formula_unit_atoms = molcrys_bridge.select_formula_unit(raw_atoms, M, analysis=molcrys_analysis)
+    with perf_log.time_block("loader:unwrap_atoms", kind="event", structure=name):
+        unwrapped_atoms, unwrap_overflow = _unwrapped_atoms_from_atoms(raw_atoms, cell, M, include_minor=True)
+    # ``_resolve_view`` is happy to short-circuit on a preset entry
+    # (camera or view_direction explicitly provided) but otherwise
+    # falls through to ``ops.auto_view_dir`` which scores >1000 view
+    # candidates by ray-projecting every heavy atom -- ~12 s for a
+    # 1024-atom unit cell. For uploaded CIFs there is no preset
+    # entry to short-circuit on, so the user paid that cost on every
+    # upload. The browser camera is fully interactive so a sensible
+    # default direction (look down +z, up = +y) gives a usable initial
+    # view in <1 ms; users that want the full auto-orient can call
+    # the v2 API or add a preset entry. Catalog structures keep the
+    # legacy behaviour because their preset can pin a known-good
+    # camera, and the cost is paid once at boot, not per upload.
+    is_upload = source == "upload"
+    if is_upload:
+        with perf_log.time_block("loader:default_view", kind="event", structure=name, reason="skip_auto_view_for_upload"):
+            view_dir = np.array([0.0, 0.0, 1.0])
+            up = np.array([0.0, 1.0, 0.0])
+    else:
+        with perf_log.time_block("loader:resolve_view", kind="event", structure=name):
+            view_dir, up = legacy_scene._resolve_view(ops, name, raw_atoms, M, cell, preset)
     R = ops.view_rotation(view_dir, up)
     final_title = title or name
-    initial_scene = build_scene_from_atoms(
-        name=name,
-        title=final_title,
-        atoms=raw_atoms,
-        cell=cell,
-        M=M,
-        R=R,
-        preset=preset,
-        show_hydrogen=False,
-        display_mode="formula_unit",
-        ops=ops,
-        formula_unit_atoms=formula_unit_atoms,
-        unwrapped_atoms=unwrapped_atoms,
-    )
+    with perf_log.time_block(
+        "loader:build_scene_from_atoms",
+        kind="event",
+        structure=name,
+        n_atoms=n_atoms,
+    ):
+        initial_scene = build_scene_from_atoms(
+            name=name,
+            title=final_title,
+            atoms=raw_atoms,
+            cell=cell,
+            M=M,
+            R=R,
+            preset=preset,
+            show_hydrogen=False,
+            display_mode="formula_unit",
+            ops=ops,
+            formula_unit_atoms=formula_unit_atoms,
+            unwrapped_atoms=unwrapped_atoms,
+        )
     initial_scene["cif_path"] = cif_path
     initial_scene["view_direction"] = np.array(view_dir, dtype=float)
     initial_scene["up"] = np.array(up, dtype=float)
     initial_scene["unwrap_overflow"] = copy.deepcopy(unwrap_overflow)
-    fragment_table, atom_fragment_labels = _fragment_table_from_atoms(
-        name,
-        initial_scene["draw_atoms"],
-        initial_scene["cell"],
-        initial_scene["M"],
-        use_source_indices=False,
-        include_minor=True,
-    )
+    with perf_log.time_block(
+        "loader:fragment_table_scene",
+        kind="event",
+        structure=name,
+    ):
+        fragment_table, atom_fragment_labels = _fragment_table_from_atoms(
+            name,
+            initial_scene["draw_atoms"],
+            initial_scene["cell"],
+            initial_scene["M"],
+            use_source_indices=False,
+            include_minor=True,
+        )
     initial_scene["fragment_table"] = fragment_table
     initial_scene["atom_fragment_labels"] = atom_fragment_labels
-    topology_fragment_table, _ = _fragment_table_from_atoms(name, raw_atoms, cell, M, use_source_indices=True, include_minor=True)
+    with perf_log.time_block(
+        "loader:fragment_table_topology",
+        kind="event",
+        structure=name,
+    ):
+        topology_fragment_table, _ = _fragment_table_from_atoms(name, raw_atoms, cell, M, use_source_indices=True, include_minor=True)
     fragment_table_cache = {
         ("scene", "formula_unit", False): (
             copy.deepcopy(fragment_table),
