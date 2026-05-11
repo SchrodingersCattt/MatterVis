@@ -123,30 +123,6 @@ def _coerce_species_value(value: Any) -> Optional[str]:
     return text or None
 
 
-# Allowed values for ``polyhedron_specs[*].kind``.
-#
-# - ``"fragment"`` (legacy default): centre is a fragment formula (e.g.
-#   ``"NH4"``) and ligands are surrounding fragments (one polyhedron per
-#   fragment matched by the spec; convex hull of neighbour fragment
-#   centroids). Use this for true coordination chemistry on the fragment
-#   graph -- A-site cation in a perovskite framework, etc.
-# - ``"atom"`` (preferred for textbook polyhedra): centre is an element
-#   symbol (``"Cl"``) and ligands are also an element symbol (``"O"``).
-#   One polyhedron per central atom, ligand vertices are the actual
-#   shell atoms returned by MolCrysKit's PBC-aware
-#   :func:`find_polyhedra`. ClO4 tetrahedra, PbCl6 octahedra, etc. live
-#   here.
-_VALID_POLYHEDRON_KINDS = ("fragment", "atom")
-
-
-def _coerce_polyhedron_kind(value: Any, fallback: str = "fragment") -> str:
-    if isinstance(value, str):
-        text = value.strip().lower()
-        if text in _VALID_POLYHEDRON_KINDS:
-            return text
-    return fallback
-
-
 def _normalize_polyhedron_spec(
     raw: Any,
     *,
@@ -158,10 +134,6 @@ def _normalize_polyhedron_spec(
     Returns ``None`` when the entry can't be salvaged (no centre species,
     not a dict, ...). Mutates ``existing_ids`` so callers building a list
     in one pass get unique ids without re-scanning the whole list.
-
-    The ``kind`` field selects between fragment-centred (legacy) and
-    atom-centred (MolCrysKit-driven) polyhedra. See
-    :data:`_VALID_POLYHEDRON_KINDS` for semantics.
     """
     if not isinstance(raw, dict):
         return None
@@ -179,36 +151,14 @@ def _normalize_polyhedron_spec(
     color = _coerce_hex_color(raw.get("color"), fallback_color)
     enabled = bool(raw.get("enabled", True))
     instance_overrides = _coerce_instance_overrides(raw.get("instance_overrides"))
-    kind = _coerce_polyhedron_kind(raw.get("kind"))
-    search_cutoff_value = raw.get("search_cutoff")
-    try:
-        search_cutoff = float(search_cutoff_value) if search_cutoff_value is not None else None
-    except (TypeError, ValueError):
-        search_cutoff = None
-    if search_cutoff is not None and search_cutoff <= 0:
-        search_cutoff = None
     return {
         "id": spec_id,
         "name": name,
-        # ``"fragment"`` (default) for legacy fragment-centred polyhedra,
-        # ``"atom"`` for MolCrysKit atom-centred ones. See the constant
-        # for the contract.
-        "kind": kind,
         "center_species": center,
         # ``None`` keeps the legacy auto-derived ligand behaviour
-        # (``_neighbor_types`` / perovskite XYn) for fragment-centred
-        # specs. Explicit string locks the spec to that ligand. For
-        # atom-centred specs (``kind="atom"``) the ligand is a
-        # required element symbol; spec is silently dropped at render
-        # time when missing.
+        # (``_neighbor_types`` / perovskite XYn). Explicit string locks
+        # the spec to that ligand species formula.
         "ligand_species": ligand,
-        # Per-spec override on MolCrysKit's ``search_cutoff`` (Å) for
-        # atom-centred polyhedra. ``None`` keeps the
-        # MolCrysKit default (~5 Å) which captures full coordination
-        # spheres but also catches H-bond contacts in dense crystals.
-        # Set to a tight covalent cap (e.g. 1.6 for N-O, 2.0 for Cl-O)
-        # to lock the polyhedron to textbook geometry.
-        "search_cutoff": search_cutoff,
         "color": color,
         "enabled": enabled,
         # Per-fragment override map: ``{fragment_label: {color: "#hex",
@@ -807,16 +757,6 @@ def _polyhedra_table_rows(
     ligand_options = [{"label": "(auto)", "value": _AUTO_LIGAND_VALUE}] + list(species_options)
     rows = []
     for spec in specs:
-        spec_kind = _coerce_polyhedron_kind(spec.get("kind"))
-        spec_center = str(spec.get("center_species") or "")
-        # Make sure every value already on the spec is selectable in
-        # the dropdown -- atom-centred defaults often carry an element
-        # symbol (``Cl``) that may not appear in ``species_options``
-        # when only fragment formulas are listed for older catalogs.
-        center_options = list(species_options)
-        if spec_center and not any(opt.get("value") == spec_center for opt in center_options):
-            label_suffix = " (atom)" if spec_kind == "atom" else ""
-            center_options.append({"label": f"{spec_center}{label_suffix}", "value": spec_center})
         rows.append(
             html.Div(
                 [
@@ -833,33 +773,10 @@ def _polyhedra_table_rows(
                         },
                         debounce=False,
                     ),
-                    html.Span(
-                        "atom" if spec_kind == "atom" else "frag",
-                        title=(
-                            "Atom-centred (MolCrysKit find_polyhedra; centre is an element symbol; "
-                            "ligand is an element symbol)."
-                            if spec_kind == "atom"
-                            else "Fragment-centred (centre and ligand are fragment formulas; "
-                            "polyhedra are drawn around fragment centroids)."
-                        ),
-                        style={
-                            "fontSize": "10px",
-                            "fontWeight": "bold",
-                            "padding": "2px 4px",
-                            "borderRadius": "3px",
-                            "background": "#F4ECFF" if spec_kind == "atom" else "#FFF4E0",
-                            "color": "#5C3DA8" if spec_kind == "atom" else "#A06C00",
-                            "border": "1px solid",
-                            "borderColor": "#D4C2F2" if spec_kind == "atom" else "#F0D8A8",
-                            "verticalAlign": "middle",
-                            "minWidth": "30px",
-                            "textAlign": "center",
-                        },
-                    ),
                     dcc.Dropdown(
                         id={"type": "poly-row-center", "spec_id": spec["id"]},
-                        options=center_options,
-                        value=spec_center,
+                        options=species_options,
+                        value=str(spec.get("center_species") or ""),
                         clearable=False,
                         style={"flex": "1", "minWidth": "70px", "fontSize": "12px"},
                     ),
@@ -2206,52 +2123,23 @@ class ViewerBackend:
         style.update(entry_style)
         if scene.get("has_minor") and "minor_wireframe" not in preset_style and "minor_wireframe" not in entry_style:
             style["minor_wireframe"] = True
-        # Default polyhedra: prefer chemistry-meaningful atom-centred
-        # ones (ClO4 tetrahedra around Cl, PbCl6 octahedra around Pb,
-        # ...) over the legacy fragment-around-fragment auto-defaults.
-        # See ``crystal_viewer.topology.suggest_default_polyhedron_specs``
-        # for the central -> ligand chemistry table that drives this.
-        # The legacy ``topology_species_keys`` list is left empty so
-        # the no-explicit-specs fallback path stays inert by default;
-        # the auto-suggested specs get assigned ids + colours below
-        # and dropped straight into ``polyhedron_specs``.
-        from .topology import suggest_default_polyhedron_specs
-
-        try:
-            atom_specs = suggest_default_polyhedron_specs(bundle)
-        except Exception:
-            atom_specs = []
-        default_polyhedron_specs: list[dict[str, Any]] = []
-        if atom_specs:
-            existing_ids: set[str] = set()
-            for index, spec in enumerate(atom_specs):
-                color = _POLYHEDRON_AUTO_COLORS[index % len(_POLYHEDRON_AUTO_COLORS)]
-                spec = {**spec, "color": color, "id": f"auto_{spec['center_species']}_{spec['ligand_species']}"}
-                normalized = _normalize_polyhedron_spec(
-                    spec, fallback_color=color, existing_ids=existing_ids
-                )
-                if normalized:
-                    default_polyhedron_specs.append(normalized)
-        # Legacy ``topology_species_keys`` stays empty when atom-
-        # centred defaults are present; otherwise we keep the old
-        # fragment-pick fallback so structures with no chemistry-
-        # obvious central atom (pure organic crystals) still get
-        # *something* in the polyhedron panel for the user to try.
-        if default_polyhedron_specs:
-            default_species: list[str] = []
+        # Default selected polyhedron centres: every non-halide species in
+        # the structure. That generalises the old "B-site default" without
+        # baking ABX nomenclature into the UI, and gives the multi-species
+        # tiling view "for free" -- e.g. DAP-4 ships with one polyhedron
+        # around the NH4+ centre and one around each DABCO ring.
+        species_present = self._species_summary(scene.get("fragment_table") or [])
+        anion_only = {"Cl", "Br", "I", "F"}
+        non_anion = [
+            item for item in species_present
+            if not (set(item["elements"]) and set(item["elements"]).issubset(anion_only | {"O"}))
+        ]
+        if non_anion:
+            default_species = [item["formula"] for item in non_anion]
+        elif species_present:
+            default_species = [species_present[0]["formula"]]
         else:
-            species_present = self._species_summary(scene.get("fragment_table") or [])
-            anion_only = {"Cl", "Br", "I", "F"}
-            non_anion = [
-                item for item in species_present
-                if not (set(item["elements"]) and set(item["elements"]).issubset(anion_only | {"O"}))
-            ]
-            if non_anion:
-                default_species = [item["formula"] for item in non_anion]
-            elif species_present:
-                default_species = [species_present[0]["formula"]]
-            else:
-                default_species = []
+            default_species = []
         return {
             "structure": structure,
             "atom_scale": float(style["atom_scale"]),
@@ -2274,7 +2162,7 @@ class ViewerBackend:
             # legacy ``topology_species_keys`` + shared ``topology_hull_color``
             # behaviour (auto-derived neighbour types). See
             # ``agents/polyhedron_api.md`` for the API surface.
-            "polyhedron_specs": default_polyhedron_specs,
+            "polyhedron_specs": [],
             # Phase 2: per-scene atom-group rules. Each entry is
             # {id, name, selector, color, color_light, visible, opacity,
             # material, style}. Selectors are ANDed across keys; the
@@ -2476,52 +2364,25 @@ class ViewerBackend:
         return sorted(by_formula.values(), key=lambda item: (item["heavy"], -item["count"]))
 
     def species_options(self, structure: Optional[str] = None) -> list[dict[str, Any]]:
-        """Centre options for the polyhedron-spec dropdown.
+        """Checklist options for the species-based polyhedron selector.
 
-        Two kinds of entry coexist in this list, both stable for use as
-        ``polyhedron_specs[*].center_species`` values:
-
-        - **Fragment formulas** (e.g. ``ClO4 \u00d716``) — picks every
-          fragment whose stoichiometric formula matches; default
-          ``polyhedron_specs[*].kind == "fragment"`` semantics.
-        - **Element symbols** (e.g. ``Cl (atom) \u00d716``) — selects
-          single atoms of that element; pairs with ``kind == "atom"``
-          for MolCrysKit ``find_polyhedra`` output (ClO4 tetrahedra,
-          PbCl6 octahedra, ...).
-
-        The element entries are listed AFTER the fragment ones so the
-        existing fragment-spec workflow stays first in the dropdown
-        (no surprise default change for legacy users).
+        One entry per stoichiometrically distinct fragment present in the
+        currently displayed scene. Each entry's ``value`` is the formula
+        string (used as a stable group key) and the ``label`` shows the
+        formula together with how many sites it covers, so the user sees
+        e.g. ``C8N1 \u00d72`` for the DABCO rings of DAP-4.
         """
         target = structure or (self.structure_names[0] if self.structure_names else None)
         if target is None or target not in self.bundles:
             return []
         scene = self.get_bundle(target).scene
-        fragments = scene.get("fragment_table") or []
-        atoms = scene.get("draw_atoms") or scene.get("atoms") or []
-        # Per-element atom counts (skip H so the dropdown stays compact;
-        # ClO4 tetrahedra etc. never use H as a centre).
-        element_counts: dict[str, int] = {}
-        for atom in atoms:
-            elem = str(atom.get("elem") or "").strip()
-            if not elem or elem == "H":
-                continue
-            element_counts[elem] = element_counts.get(elem, 0) + 1
-        fragment_entries = [
+        return [
             {
                 "label": f"{item['formula']} \u00d7{item['count']}",
                 "value": item["formula"],
             }
-            for item in self._species_summary(fragments)
+            for item in self._species_summary(scene.get("fragment_table") or [])
         ]
-        element_entries = [
-            {
-                "label": f"{elem} (atom) \u00d7{count}",
-                "value": elem,
-            }
-            for elem, count in sorted(element_counts.items())
-        ]
-        return fragment_entries + element_entries
 
     def element_options(self, state: Optional[dict[str, Any]] = None) -> list[dict[str, Any]]:
         """Distinct element symbols present in the active scene's
@@ -3122,22 +2983,7 @@ class ViewerBackend:
         enabled: bool = True,
         scene_id: Optional[str] = None,
         spec_id: Optional[str] = None,
-        kind: str = "fragment",
-        search_cutoff: Optional[float] = None,
     ) -> dict[str, Any]:
-        """Append a polyhedron spec to the active scene's
-        ``polyhedron_specs`` list.
-
-        ``kind`` selects the polyhedron model:
-        - ``"fragment"`` (default, back-compat): centre + ligand are
-          fragment formulas; polyhedra wrap fragment centroids.
-        - ``"atom"``: centre + ligand are element symbols; uses
-          MolCrysKit's ``find_polyhedra`` to draw textbook coordination
-          shells (ClO4 tetrahedra, PbCl6 octahedra, ...).
-
-        ``search_cutoff`` (Å) only matters for atom-centred specs;
-        leave ``None`` to use MolCrysKit's default (~5 Å).
-        """
         scene_id, specs = self._resolve_specs(scene_id)
         fallback_color = _POLYHEDRON_AUTO_COLORS[len(specs) % len(_POLYHEDRON_AUTO_COLORS)]
         existing_ids = {spec["id"] for spec in specs}
@@ -3149,8 +2995,6 @@ class ViewerBackend:
                 "ligand_species": ligand_species,
                 "color": color,
                 "enabled": enabled,
-                "kind": kind,
-                "search_cutoff": search_cutoff,
             },
             fallback_color=fallback_color,
             existing_ids=existing_ids,
@@ -3582,11 +3426,7 @@ class ViewerBackend:
         ``topology_hull_color``)."""
         explicit = list(state.get("polyhedron_specs") or [])
         if explicit:
-            return [
-                {**dict(spec), "kind": _coerce_polyhedron_kind(spec.get("kind"))}
-                for spec in explicit
-                if spec.get("enabled", True)
-            ]
+            return [dict(spec) for spec in explicit if spec.get("enabled", True)]
         species_keys = list(state.get("topology_species_keys") or [])
         if not species_keys:
             return []
@@ -3595,7 +3435,6 @@ class ViewerBackend:
             {
                 "id": f"legacy_{index}",
                 "name": str(key),
-                "kind": "fragment",
                 "center_species": str(key),
                 "ligand_species": None,
                 "color": color,
@@ -3614,32 +3453,23 @@ class ViewerBackend:
         effective_specs = self._effective_polyhedron_specs(state)
         if not effective_specs:
             return None
-        # Resolve a fragment anchor only when at least one *fragment-
-        # centred* spec is active. Atom-centred specs (e.g. ClO4
-        # tetrahedra) draw straight from MolCrysKit's atom shells and
-        # don't need the fragment graph; demanding a fragment anchor
-        # would silently drop them when the structure has no fragment
-        # whose formula matches any spec's centre.
-        fragment_specs = [
-            spec for spec in effective_specs
-            if _coerce_polyhedron_kind(spec.get("kind")) == "fragment"
-        ]
-        species_keys = sorted({spec["center_species"] for spec in fragment_specs})
-        if fragment_specs:
-            site_index = self.resolve_topology_site(
-                state=state,
-                structure=structure,
-                explicit_site=state.get("topology_site_index"),
-                species_keys=species_keys,
-                click_data=click_data,
-            )
-            if site_index is None:
-                return None
-        else:
-            # Atom-only mode: pick a sentinel value so the cache key is
-            # stable. ``_compute_topology_geometry`` skips all fragment
-            # work when there is no fragment-centred spec.
-            site_index = -1
+        # Legacy code paths below still consume a single ``species_keys``
+        # list (used to resolve the analysis anchor when the user clicks
+        # in the viewer). Reconstruct it from the union of every active
+        # spec's center species so a click on any rendered polyhedron
+        # still snaps the analysis panel.
+        species_keys = sorted({spec["center_species"] for spec in effective_specs})
+        if not species_keys:
+            return None
+        site_index = self.resolve_topology_site(
+            state=state,
+            structure=structure,
+            explicit_site=state.get("topology_site_index"),
+            species_keys=species_keys,
+            click_data=click_data,
+        )
+        if site_index is None:
+            return None
         # Memoize the (heavy) topology dict on the bundle keyed on the
         # state fields that actually influence GEOMETRY. Per-spec colour
         # is intentionally not in the key -- it only affects the
@@ -3650,10 +3480,8 @@ class ViewerBackend:
         cutoff = float(state.get("cutoff", 10.0))
         spec_geometry_key = tuple(
             (
-                _coerce_polyhedron_kind(spec.get("kind")),
                 spec["center_species"],
                 spec.get("ligand_species") or None,
-                spec.get("search_cutoff"),
             )
             for spec in effective_specs
         )
@@ -3710,29 +3538,10 @@ class ViewerBackend:
         cutoff: float,
         search_supercell: tuple[int, int, int] = (0, 0, 0),
     ) -> Optional[dict[str, Any]]:
-        # Atom-only mode (``site_index == -1`` set by ``topology_for_state``
-        # when there is no fragment-centred spec): skip every fragment-
-        # graph step and synthesise an empty ``primary`` payload. The
-        # spec loop further down still emits atom-centred overlays.
-        atom_only = site_index < 0
-        if atom_only:
-            display_fragment = None
-            topology_fragment = None
-            primary = {
-                "center_index": None,
-                "center_label": None,
-                "center_coords": None,
-                "shell_coords": [],
-                "distances": [],
-                "all_distances": [],
-                "best_match": None,
-                "ideal_matches": [],
-            }
-        else:
-            display_fragment = self._display_fragment(scene, site_index)
-            topology_fragment = self.map_display_fragment_to_topology(bundle, display_fragment)
-            if topology_fragment is None:
-                return None
+        display_fragment = self._display_fragment(scene, site_index)
+        topology_fragment = self.map_display_fragment_to_topology(bundle, display_fragment)
+        if topology_fragment is None:
+            return None
 
         # Group enabled specs by (center_species -> [spec_index_in_specs, ...])
         # so each fragment in the scene knows which spec(s) own it.
@@ -3758,28 +3567,17 @@ class ViewerBackend:
             analysis_spec_index = center_to_spec_indices[primary_formula][0]
         analysis_spec = effective_specs[analysis_spec_index]
         analysis_ligand = analysis_spec.get("ligand_species") or None
-        analysis_kind = _coerce_polyhedron_kind(analysis_spec.get("kind"))
-        # ``analyze_topology`` operates on the fragment graph; passing
-        # an *atom* element symbol as ``ligand_species`` would make the
-        # neighbour pool empty (no fragment is named "O"). Strip the
-        # restriction when the anchor spec is atom-centred -- the
-        # right-hand histogram still gets the full fragment shell.
-        if analysis_kind == "atom":
-            analysis_ligand_arg = None
-        else:
-            analysis_ligand_arg = [analysis_ligand] if analysis_ligand else None
 
-        if not atom_only:
-            primary = analyze_topology(
-                bundle,
-                center_index=int(topology_fragment["index"]),
-                cutoff=cutoff,
-                display_center=display_fragment.get("center") if display_fragment else None,
-                display_label=display_fragment.get("label") if display_fragment else None,
-                display_type=display_fragment.get("type") if display_fragment else None,
-                ligand_species=analysis_ligand_arg,
-                search_supercell=search_supercell,
-            )
+        primary = analyze_topology(
+            bundle,
+            center_index=int(topology_fragment["index"]),
+            cutoff=cutoff,
+            display_center=display_fragment.get("center") if display_fragment else None,
+            display_label=display_fragment.get("label") if display_fragment else None,
+            display_type=display_fragment.get("type") if display_fragment else None,
+            ligand_species=[analysis_ligand] if analysis_ligand else None,
+            search_supercell=search_supercell,
+        )
 
         # Build per-spec overlay lists. For each fragment whose formula
         # matches a spec's center species, run the lighter
@@ -3795,43 +3593,6 @@ class ViewerBackend:
             center_species = spec["center_species"]
             ligand = spec.get("ligand_species") or None
             ligand_arg = [ligand] if ligand else None
-            kind = _coerce_polyhedron_kind(spec.get("kind"))
-            if kind == "atom":
-                # MolCrysKit-driven atom-centred polyhedra. Bypasses
-                # the fragment graph entirely: ClO4 tetrahedra around
-                # each Cl, PbCl6 octahedra around each Pb, etc.
-                from .topology import atom_centered_polyhedra
-
-                if not ligand:
-                    spec_results.append(
-                        {
-                            "spec_id": spec["id"],
-                            "name": spec["name"],
-                            "kind": "atom",
-                            "center_species": center_species,
-                            "ligand_species": None,
-                            "overlays": [],
-                        }
-                    )
-                    continue
-                spec_search_cutoff = spec.get("search_cutoff")
-                atom_overlays = atom_centered_polyhedra(
-                    bundle,
-                    central=center_species,
-                    ligand=ligand,
-                    search_cutoff=spec_search_cutoff,
-                )
-                spec_results.append(
-                    {
-                        "spec_id": spec["id"],
-                        "name": spec["name"],
-                        "kind": "atom",
-                        "center_species": center_species,
-                        "ligand_species": ligand,
-                        "overlays": atom_overlays,
-                    }
-                )
-                continue
             overlays: list[dict[str, Any]] = []
             for frag in scene.get("fragment_table") or []:
                 formula_key = frag.get("formula") or frag.get("species")
@@ -3893,7 +3654,6 @@ class ViewerBackend:
                 {
                     "spec_id": spec["id"],
                     "name": spec["name"],
-                    "kind": "fragment",
                     "center_species": center_species,
                     "ligand_species": ligand,
                     "overlays": overlays,
