@@ -215,12 +215,46 @@ class CrystalAnalysis:
         count by the GCD across all species.  Canonical Z=1 stoich.
     """
 
-    def __init__(self, crystal, mol_indices, mol_cart_positions, species_map, per_fu):
+    def __init__(
+        self,
+        crystal,
+        mol_indices,
+        mol_cart_positions,
+        species_map,
+        per_fu,
+        bond_pairs=None,
+    ):
         self.crystal = crystal
         self.mol_indices = mol_indices
         self.mol_cart_positions = mol_cart_positions
         self.species_map = species_map
         self.per_fu = per_fu
+        # ``bond_pairs`` is the canonical molecule-graph edge list in raw_atom
+        # indices, sorted (i < j). It is the single source of truth for bond
+        # connectivity in the unit cell. Downstream code that needs a bond
+        # list (renderer, fragment-table builder) MUST consume this rather
+        # than calling the legacy ``ops.find_bonds`` again, otherwise it
+        # reintroduces the disorder/PBC mishandling that produced the
+        # "?-orphan-H" / variable-cluster_size NH4 bugs (DAP-4, SY).
+        self.bond_pairs: list[tuple[int, int]] = list(bond_pairs or [])
+
+
+def _flatten_bond_pairs(graph) -> list[tuple[int, int]]:
+    """Flatten a :class:`networkx.Graph` into a sorted list of ``(i, j)``
+    edges with ``i < j`` and integer node ids.
+
+    The molecule graph built by :func:`_components_with_indices` already
+    uses raw_atom indices as node labels, so the flattened edge list maps
+    1:1 onto the global atom indexing used by the rest of the loader.
+    """
+    pairs: list[tuple[int, int]] = []
+    for u, v in graph.edges():
+        a, b = int(u), int(v)
+        if a > b:
+            a, b = b, a
+        pairs.append((a, b))
+    pairs.sort()
+    return pairs
 
 
 def analyze(raw_atoms, M, *, max_atoms=None):
@@ -230,7 +264,7 @@ def analyze(raw_atoms, M, *, max_atoms=None):
     mk = _require_molcryskit()
     if not raw_atoms:
         crystal = mk["MolecularCrystal"](np.eye(3), [], pbc=(True, True, True))
-        return CrystalAnalysis(crystal, [], [], {}, {})
+        return CrystalAnalysis(crystal, [], [], {}, {}, bond_pairs=[])
 
     ase_atoms = _ase_atoms_from_raw(raw_atoms, M, mk)
     components, graph = _components_with_indices(ase_atoms, mk)
@@ -254,6 +288,7 @@ def analyze(raw_atoms, M, *, max_atoms=None):
         mol_cart_positions=mol_cart_positions,
         species_map=copy.deepcopy(analyzer.species_map),
         per_fu=copy.deepcopy(analyzer.get_simplest_unit()),
+        bond_pairs=_flatten_bond_pairs(graph),
     )
 
 
@@ -293,6 +328,13 @@ def _translate_cluster(raw_atoms, indices, shift_frac, M, cart_positions=None):
         )
         atom["cart"] = base_cart + shift_cart
         atom["frac"] = inv_m @ atom["cart"]
+        # Preserve the raw_atoms index on every translated copy so the
+        # fragment-table builder (which consumes mol_indices into raw_atoms)
+        # can still figure out which molecule each formula-unit atom
+        # belongs to. Without this, formula_unit-mode draw_atoms lose their
+        # provenance and we'd have to re-derive the grouping by Cartesian
+        # proximity -- which is exactly the legacy mistake we're eliminating.
+        atom["_source_index"] = int(i)
         out.append(atom)
     return out
 

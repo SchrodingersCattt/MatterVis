@@ -110,13 +110,37 @@ Concrete rules:
   user-visible labels; pass `max_strip=0` if you only want the
   rigid-CShM polyhedron name + distortion modifier (clean /
   distorted / ambiguous / irregular).
-- **Molecular fragmentation is `MolecularCrystal.unwrap*`.** Do not
-  re-implement minimum-image unwrapping, fragment completion, or
-  bond-graph traversal across periodic boundaries in
-  `crystal_viewer/scene.py` or `loader.py`. The `unit_cell` display
-  mode in particular must keep delegating to `molcrys_kit` for
-  unwrapped coordinates so molecules don't get chopped at cell
-  faces.
+- **Molecular fragmentation is `MolecularCrystal.unwrap*` _and_
+  `mol_indices`.** Do not re-implement minimum-image unwrapping,
+  fragment completion, or bond-graph traversal across periodic
+  boundaries in `crystal_viewer/scene.py` or `loader.py`. The
+  `unit_cell` display mode in particular must keep delegating to
+  `molcrys_kit` for unwrapped coordinates so molecules don't get
+  chopped at cell faces.
+
+  The fragment-table builder (`_fragment_table_from_atoms` in
+  `crystal_viewer/loader.py`) consumes
+  `molcrys_analysis.mol_indices` directly — the molecule grouping is
+  what defines a fragment, full stop. Do not reintroduce a parallel
+  `ops.find_bonds(atom_pool, cell=cell)` → `_cluster_components` path
+  on top of that grouping; on disorder + special-position structures
+  (DAP-4 NH4⁺ rotamers, SY perchlorate H atoms) the legacy path
+  splits chemically equivalent cations across rotamers and produces
+  orphan-H "?" fragments. Atoms passed in must carry a
+  `_source_index` field pointing back to the raw_atoms position so
+  the molecule lookup works for translated copies (formula-unit
+  selection, repeat / supercell replicas).
+- **SHELX-style occupancy disorder must go through
+  `molcrys_kit.analysis.disorder.\
+generate_ordered_replicas_from_disordered_sites`.** A CIF where two
+  rotamer images both sit on PART 0 with `_atom_site_disorder_group`
+  blank and occupancies summing to 1 (DAP-4 H3A/H3B at occ=0.5)
+  cannot be classified by `is_minor` alone — there is no a-priori
+  winner. `build_loaded_crystal` detects this pattern via
+  `_has_shelx_occupancy_disorder` and consults the optimal-replica
+  resolver to tag the discarded image with `_is_minor=True`. Don't
+  patch the SHELX heuristic any further before checking that the
+  pre-resolution path is the right place to fix it.
 - **Slab generation is `molcrys_kit.transforms.generate_topological_slab`.**
   `crystal_viewer/transforms.py` is a thin Dash adapter; if a slab
   parameter is missing here, add it as a passthrough kwarg, don't
@@ -190,6 +214,69 @@ goal is "don't repeat known failures", not blame.
   concept to MatterVis, verify the upstream library doesn't
   already express it. Before wrapping an upstream function, verify
   that function isn't itself deprecated.
+
+### "Re-derived bonds on top of MolCrysKit's molecule graph" misadventure (PR #14)
+
+- **Symptom report:** "DAP-4 / SY produce N1H1 / N1H2 / N1H4 / N1H8
+  ammonium fragments + 18 orphan-H "?" rows, even though MolCrysKit
+  groups the molecules correctly."
+- **Wrong code that lived in the loader:**
+  `_unwrapped_atoms_from_atoms` was already routing through
+  `molcrys_bridge.analyze` to get unwrapped coordinates, but
+  `_fragment_table_from_atoms` then **threw the molecule grouping
+  away** and called `ops.find_bonds(atom_pool, cell=cell)` again to
+  re-derive connectivity. On atoms sitting on cell-face / corner
+  special positions with SHELX-style occupancy disorder, the legacy
+  bond detector picked inconsistent PBC images per atom (the
+  `_prune_duplicate_label_bond_candidates` step further dropped
+  bonds that shared an atom label across symmetry images), splitting
+  the eight chemically equivalent NH4⁺ cations into four different
+  formulae and stranding 18 disorder-H atoms in their own
+  components.
+- **Root causes:**
+  1. *MolCrysKit was already wired in but the result was discarded.*
+     `analyze()` returned `mol_indices` and `mol_cart_positions` at
+     load time; the loader copied the unwrapped Cartesian positions
+     onto raw_atoms but threw the molecule-membership map away
+     before reaching `_fragment_table_from_atoms`. The fix was a
+     plumbing change, not new chemistry.
+  2. *"It works on the catalog" was misread as "it works".* The
+     shipped `scripts/data/DAP-4.cif` is a slightly different SHELX
+     export from the user's own DAP-4 (no `occ < 1` rotamers), so
+     internal QA didn't trip the bug. The fix landed only after a
+     diagnostic that ran the full topology table on the catalog CIF
+     and counted "?" / variable-cluster_size rows directly.
+  3. *Two formula counters disagreed silently.* The MatterVis loader
+     formula (`heavy_atom_count` only) said `"N1"`; the caller-side
+     `_formula` (counts including H) said `"N1H8"`. Neither side
+     noticed because both happened to put the cation in the same
+     A/B bucket. Tests now assert
+     `Counter(f["formula"] for f in topology_fragment_table)` has a
+     known shape, which would have flagged the regression
+     immediately.
+- **Right fix (this PR):**
+  - Expose `bond_pairs` on `CrystalAnalysis` (the flattened molecule
+    graph in raw-index pairs).
+  - Rewrite `_fragment_table_from_atoms` to consume `mol_indices`
+    directly, dropping the legacy `find_bonds` →
+    `_cluster_components` path entirely.
+  - Add `_source_index` / `_image_shift` plumbing so formula-unit
+    and repeat / supercell paths still resolve back to the right
+    molecule.
+  - Drop the legacy fallback in `_unwrapped_atoms_from_atoms`;
+    `molcrys_analysis` is now a required keyword argument
+    everywhere.
+  - Add `_has_shelx_occupancy_disorder` + `_tag_shelx_occupancy_disorder`
+    so SHELX-occupancy CIFs auto-resolve via
+    `generate_ordered_replicas_from_disordered_sites(method="optimal")`
+    and the discarded rotamer image gets `_is_minor=True`.
+  - Patch `is_minor` to recognise the SHELX `occ<0.5 + dg='.' + da='.'`
+    pattern as a fallback when the auto-resolver can't be used.
+- **Permanent rule:** when MolCrysKit already computes a quantity
+  (molecule grouping, bond graph, ordered replica, …), MatterVis must
+  consume it as the single source of truth. Re-deriving the same
+  thing in MatterVis "for safety" is reinvention by another name and
+  has historically been the source of disorder + PBC bugs.
 
 ## Invariants the library promises to callers
 
