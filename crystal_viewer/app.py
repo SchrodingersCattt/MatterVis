@@ -4034,6 +4034,7 @@ def create_app(
                 id="camera-state-store",
                 data=_camera_store_payload(first_state.get("scene_id"), first_state.get("camera")),
             ),
+            dcc.Store(id="native-upload-sync", data={"seq": 0}),
             dcc.Download(id="export-download"),
             dcc.Interval(id="status-dismiss-timer", interval=5000, n_intervals=0, disabled=True),
             # 5 s is a deliberate compromise: long enough to avoid
@@ -4189,16 +4190,30 @@ def create_app(
                         style={"marginBottom": "12px", "fontSize": "13px", "color": "#444444"},
                     ),
                     html.Label("Upload CIF"),
-                    dcc.Upload(
-                        id="scene-cif-upload",
-                        children=html.Div(["Drag and drop CIF, or click to upload"]),
-                        multiple=True,
-                        style={
-                            "border": "1px dashed #999999",
-                            "padding": "10px",
-                            "marginBottom": "12px",
-                            "textAlign": "center",
-                        },
+                    html.Div(
+                        [
+                            dcc.Input(
+                                id="scene-cif-upload-input",
+                                type="file",
+                                multiple=True,
+                                style={"display": "none"},
+                            ),
+                            html.Div(
+                                "Drag and drop CIF, or click to upload",
+                                id="scene-cif-upload",
+                                role="button",
+                                tabIndex=0,
+                                **{"aria-label": "Upload CIF"},
+                                style={
+                                    "border": "1px dashed #999999",
+                                    "padding": "10px",
+                                    "marginBottom": "12px",
+                                    "textAlign": "center",
+                                    "cursor": "pointer",
+                                    "userSelect": "none",
+                                },
+                            ),
+                        ],
                     ),
                     html.Div(
                         id="upload-status",
@@ -4805,46 +4820,6 @@ def create_app(
         )
 
     @app.callback(
-        Output("scene-tabs", "children"),
-        Output("scene-tabs", "value"),
-        Output("upload-status", "children"),
-        Input("scene-cif-upload", "contents"),
-        State("scene-cif-upload", "filename"),
-        prevent_initial_call=True,
-    )
-    def upload_cif(contents_list, filenames):
-        if not contents_list:
-            return no_update, no_update, no_update
-        names_out = []
-        with perf_log.time_block(
-            "callback:upload_cif",
-            kind="cb",
-            n_files=len(contents_list),
-            filenames=list(filenames or []),
-        ):
-            for contents, filename in zip(contents_list, filenames or []):
-                # ``contents`` is the dcc.Upload data URL: it includes
-                # the ``data:...;base64,`` prefix plus the base64
-                # payload. Charge the network leg + parse leg
-                # separately so the user can see WHICH part of an
-                # upload is slow.
-                payload_bytes = len(contents or "")
-                with perf_log.time_block(
-                    "upload:add_uploaded_bundle",
-                    kind="event",
-                    filename=filename,
-                    bytes=payload_bytes,
-                ):
-                    bundle = backend.add_uploaded_bundle(contents, filename)
-                names_out.append(bundle.name)
-                perf_log.record(
-                    "upload:done",
-                    kind="event",
-                    info={"filename": filename, "scene": bundle.name},
-                )
-        return backend.scene_tabs(), backend.active_scene_id(), f"Uploaded CIF(s): {', '.join(names_out)}"
-
-    @app.callback(
         Output("topology-site-index", "value", allow_duplicate=True),
         Input("crystal-graph", "clickData"),
         State("scene-tabs", "value"),
@@ -5056,10 +5031,11 @@ def create_app(
         Output("agent-state-store", "data"),
         Output("camera-state-store", "data"),
         Input("agent-state-poll", "n_intervals"),
+        Input("native-upload-sync", "data"),
         Input("scene-tabs", "value"),
         prevent_initial_call=True,
     )
-    def sync_agent_state(_n_intervals, scene_id):
+    def sync_agent_state(_n_intervals, _native_upload_sync, scene_id):
         triggered = (
             callback_context.triggered[0]["prop_id"].split(".")[0]
             if callback_context.triggered
