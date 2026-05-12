@@ -95,12 +95,25 @@ Concrete rules:
   `molcrys_kit.analysis.packing_shell` and
   `molcrys_kit.analysis.shape`.** `find_polyhedra` already knows how
   to do gap+enclosure detection, how to expand the search to
-  enclose the centre, and how to handle both tight covalent shells
-  (e.g. ClO₄ tetrahedra) *and* broader packing shells (e.g.
-  cuboctahedra around organic cations) from the same call. Do
-  **not** wrap it with hard-coded covalent cutoffs to "force" one
-  interpretation; that disables the very feature that makes it
-  useful.
+  enclose the centre, and how to handle both atom-level shells
+  (`level="atom"`) and molecule-centroid packing shells
+  (`level="molecule"`). MatterVis named polyhedra must call that API
+  rather than maintaining a local fragment-neighbour implementation.
+  Do **not** wrap it with hard-coded covalent cutoffs to "force" one
+  interpretation; that disables the very feature that makes it useful.
+  - **Mind the per-level radial knob semantics (MCK PR #32).** On
+    `level="molecule"` the kwarg `cutoff=` is the *candidate search
+    radius* feeding gap+enclosure — passing MV's state `cutoff` there
+    is correct (search wider, get the natural first shell). The
+    "fill the ball" historical behaviour is opt-in via `hard_cutoff=`
+    and MV intentionally does **not** plumb it through
+    `polyhedron_specs`. The early `cutoff=10` → CN=37 surprise on the
+    SY perchlorate (en) cation came from before this split, when MV
+    was unintentionally invoking the hard-cap mode. On
+    `level="atom"`, by contrast, `cutoff=` *is* the historical hard
+    cap and `hard_cutoff=` is rejected — see
+    `agents/polyhedron_api.md` for the full table of record fields
+    (`search_cutoff`, `hard_cutoff`, `mode`, …).
 - **Shape classification is `shape.classify_shell`, not
   `packing_shell.angular_rmsd_vs_ideals`.** The angular helper is
   deprecated. It compares sorted angle signatures and, when run with
@@ -199,10 +212,6 @@ has grown the exact hook named here.
   an asymmetric-unit slice, explicit boundary replicas, or a
   transformed cluster. The renderer needs bonds for the manifested
   display atoms, not the original raw atom list.
-- `topology.py` searches over fragment centres from
-  `topology_fragment_table`, not atom sites. `molcrys_kit.find_polyhedra`
-  owns atom-centred coordination shells; MatterVis' topology cards own
-  fragment-centred packing shells and the A/B/X display labels.
 - `transforms.py` grow / complete-fragment / repeat operations work on
   manifested Cartesian scene atoms. `rebuild_scene_with_atoms` reruns
   non-PBC bond perception intentionally because transformed scenes are
@@ -231,8 +240,8 @@ deprecated:
    the old shape.
 3. If the replacement is more expensive, push the call into the
    appropriate cache layer (`_analyze_topology_cache`,
-   `_neighbor_pool_cache`, `_shell_cache`) and check that the cache
-   key includes every input that affects the result.
+   `_topology_state_cache`) and check that the cache key includes every
+   input that affects the result.
 
 ## Postmortems — past mis-fixes worth remembering
 
@@ -392,32 +401,34 @@ both files.
 - Coordination polyhedra are a per-scene named-row table
  (`state["polyhedron_specs"] = [{id, name, center_species,
  ligand_species, color, enabled}, ...]`). Empty list (default for a
- fresh scene) falls back to the legacy
- `topology_species_keys` + shared `topology_hull_color` path so the
- existing UI checklist keeps working unchanged.
+ fresh scene) means **no overlay** — MV no longer auto-derives
+ ligand shells from `topology_species_keys`; users must register
+ explicit centre/ligand pairs (or load a preset that does). The
+ overlay toggle (`topology_enabled`) also defaults to `False` so
+ newly opened structures don't pay the analysis cost until asked.
 - The renderer paints **per-spec colour** by reading
  `topology_data["spec_results"][i].color` directly, not
  `style["topology_hull_color"]`. The single-colour path remains as a
  back-compat fallback when `spec_results` is absent.
 - `_topology_state_cache` is keyed on geometry-only fields
  (`(structure, display_mode, hydrogens, site_index, cutoff,
- spec_geometry_key)` where `spec_geometry_key` only carries
- `(center_species, ligand_species)` per spec). Per-spec colour is
- NOT in the geometry cache key — it lives on the renderer's painter
- cache instead, so swapping colours stays a cheap re-paint.
+ spec_geometry_key, transforms_key)` where `spec_geometry_key` only
+ carries `(center_species, ligand_species)` per spec). Per-spec
+ colour is NOT in the geometry cache key — it lives on the renderer's
+ painter cache instead, so swapping colours stays a cheap re-paint.
 - `analyze_topology` / `extract_coordination_shell` accept an
- optional `ligand_species` keyword. When set, the neighbour-pool
- cache is partitioned per ligand restriction; do not collapse the
- cache key back to `(center_index, cutoff)` or two specs sharing a
- centre but differing in ligand will poison each other's pool.
-- `analyze_topology` / `extract_coordination_shell` also accept
- `search_supercell=(na, nb, nc)`. This is the *neighbour-search*
- supercell — independent of the display supercell from the
- `repeat` transform. The neighbour-pool cache key includes it; do
- not collapse the key back to ignore it or callers that grow the
- search range will silently see stale (cached) hulls. Per-spec
- colour and per-instance overrides are NOT in this geometry cache
- key — they live on the renderer painter cache.
+  optional `ligand_species` keyword (required, no auto-derivation)
+  and delegate molecule-level PBC image enumeration to
+  `molcrys_kit.analysis.packing_shell.find_polyhedra(level="molecule")`.
+  The state `cutoff` is forwarded as MCK's `cutoff=` kwarg, which on
+  molecule level is the *candidate search radius* (gap+enclosure
+  picks the natural shell from there). Do **not** route the state
+  `cutoff` into MCK's `hard_cutoff=` — that reproduces the CN=37
+  surprise this whole pipeline was rewritten to avoid (see the SY
+  perchlorate regression notes in `tests/topology/`).
+  The topology cache key includes ligand restriction; do not collapse
+  it back to `(center_index, cutoff)` or two specs sharing a centre but
+  differing in ligand will poison each other's shell.
 - Polyhedron specs may carry `instance_overrides`, a dict keyed on
  `fragment_label` whose values are partial style dicts
  (`{"color": ..., "visible": ...}`). The renderer applies these
@@ -511,10 +522,6 @@ both files.
 - `transforms_cache_key` is the canonical hashable summary of the
  list. It includes `kind`, `enabled`, and sorted `params` keys; it
  excludes `id` and `name` so a row rename stays a cheap re-paint.
-- The `polyhedron_search_supercell` field on the scene state lives
- in `topology_state_cache`'s key, NOT in `transforms_cache_key`,
- so changing the search range invalidates polyhedron geometry only,
- not the entire scene.
 - REST surface `/api/v2/transforms` (CRUD + reorder) and the
  `supercell` shorthand on `POST /api/v2/state` are part of the
  public API; back-incompatible changes require an API version bump.

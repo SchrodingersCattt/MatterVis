@@ -41,16 +41,16 @@ def backend(tmp_path: Path) -> ViewerBackend:
 
 
 def test_topology_for_state_emits_spec_results_per_enabled_spec(backend: ViewerBackend):
-    # Default state ships with topology_species_keys = ["N", "C6N2"];
-    # add named specs that match those formulas so the analysis anchor
-    # resolves on either species depending on the click.
+    # Named specs use explicit ligands; MatterVis delegates molecule-level
+    # packing shells to MolCrysKit and does not synthesize auto-ligand rows.
     spec_a = backend.add_polyhedron_spec(
-        center_species="N", color="#FF0000", name="ammonium"
+        center_species="N", ligand_species="ClO4", color="#FF0000", name="ammonium"
     )
     spec_b = backend.add_polyhedron_spec(
-        center_species="C6N2", color="#0000FF", name="DABCO ring"
+        center_species="C6N2", ligand_species="ClO4", color="#0000FF", name="DABCO ring"
     )
     state = backend.get_state()
+    state["topology_enabled"] = True
 
     topology = backend.topology_for_state(state)
     assert topology is not None, "DAP-4 must yield a non-empty topology"
@@ -87,8 +87,9 @@ def test_topology_for_state_emits_spec_results_per_enabled_spec(backend: ViewerB
 
 
 def test_topology_for_state_caches_geometry_across_color_changes(backend: ViewerBackend):
-    spec = backend.add_polyhedron_spec(center_species="N", color="#FF0000")
+    spec = backend.add_polyhedron_spec(center_species="N", ligand_species="ClO4", color="#FF0000")
     state = backend.get_state()
+    state["topology_enabled"] = True
     first = backend.topology_for_state(state)
     assert first is not None
     cache = backend.get_bundle(state["structure"])._topology_state_cache
@@ -99,6 +100,7 @@ def test_topology_for_state_caches_geometry_across_color_changes(backend: Viewer
     # the heavy coordination-shell extraction stays a single entry.
     backend.update_polyhedron_spec(spec["id"], {"color": "#00FF00"})
     state = backend.get_state()
+    state["topology_enabled"] = True
     second = backend.topology_for_state(state)
     assert second is not None
     cached_keys_second = set(cache.keys())
@@ -110,18 +112,13 @@ def test_topology_for_state_caches_geometry_across_color_changes(backend: Viewer
     assert by_color[spec["id"]] == "#00ff00", "new colour must reach spec_results"
 
 
-def test_topology_for_state_falls_back_to_legacy_species_keys(backend: ViewerBackend):
-    # No explicit polyhedron_specs --> legacy ``topology_species_keys``
-    # must still drive a topology that the renderer can paint.
+def test_topology_for_state_does_not_fall_back_to_legacy_species_keys(backend: ViewerBackend):
     state = backend.get_state()
+    state["topology_enabled"] = True
     state["polyhedron_specs"] = []
     state["topology_species_keys"] = ["N"]
     state["topology_hull_color"] = "#abcdef"
-    topology = backend.topology_for_state(state)
-    assert topology is not None
-    spec_results = topology.get("spec_results")
-    assert spec_results, "legacy path must still synthesise spec_results"
-    assert all(entry["color"].lower() == "#abcdef" for entry in spec_results)
+    assert backend.topology_for_state(state) is None
 
 
 # ---- renderer painter ----------------------------------------------------

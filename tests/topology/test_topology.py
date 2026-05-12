@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from crystal_viewer.topology import _neighbor_types, detect_coordination_number
+from crystal_viewer import molcrys_bridge
+from crystal_viewer.topology import detect_coordination_number
 
 
 def test_coordination_number_expands_until_centered_inside_hull():
@@ -66,7 +67,6 @@ def test_coordination_number_keeps_gap_cn_when_shell_is_centered():
     assert result["enclosure_expanded"] is False
 
 
-def test_x_center_uses_all_cation_types_as_neighbours():
-    fragments = [{"type": "A"}, {"type": "B"}, {"type": "X"}]
-
-    assert _neighbor_types(fragments, "X") == ["A", "B"]
+def test_formula_to_moiety_for_mck_molecule_level_polyhedra():
+    assert molcrys_bridge.formula_to_moiety("C6N2") == "C6 N2"
+    assert molcrys_bridge.formula_to_moiety("ClO4") == "Cl O4"

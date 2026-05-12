@@ -19,7 +19,7 @@ Every spec is a flat dict with these fields:
 | `id` | string | Stable identifier; auto-generated if not provided. |
 | `name` | string | Display label for the row. Defaults to `center_species`. |
 | `center_species` | string | **Required.** Stoichiometric formula key from `species_options(structure)` (`"N"`, `"ClO4"`, `"C6N2"`, ...). |
-| `ligand_species` | string \| null | When set, the polyhedron neighbour pool is restricted to fragments matching this formula. `null` = legacy auto-derive (perovskite-style A↔X / B↔X / X↔A,B). |
+| `ligand_species` | string \| null | Explicit ligand formula for MolCrysKit molecule-level packing polyhedra. `null` persists but is not rendered; MatterVis no longer derives auto-ligand shells locally. |
 | `color` | string | Hull / shell colour; six-digit hex (`#RRGGBB`). Auto-assigned from a colour-blind-friendly palette when omitted. |
 | `enabled` | bool | `false` rows persist but are skipped at render time. |
 | `instance_overrides` | object | **Phase 4.** Per-fragment override map: `{fragment_label: {color, visible}}`. Empty `{}` means every matched fragment inherits the spec-level colour and visibility. Keys are the fragment-table labels exposed in `topology_data["spec_results"][i]["overlays"][j]["center_label"]`. |
@@ -27,16 +27,11 @@ Every spec is a flat dict with these fields:
 ### State integration
 
 `GET /api/v2/state` returns `polyhedron_specs: [...]` alongside the
-existing `topology_*` keys. The relationship between the two is:
-
-- **Empty list** (default for every fresh scene) → the renderer falls
-  back to the legacy `topology_species_keys` + shared
-  `topology_hull_color`. One synthesised hull per matching fragment,
-  one shared colour, no per-row identity. This is the pre-Phase-1
-  behaviour and the path the existing Dash UI checklist still drives.
-- **Non-empty list** → the explicit named rows take over. The legacy
-  `topology_species_keys` field is still readable but no longer
-  influences rendering for that scene.
+existing `topology_*` keys. Fresh scenes start with
+`topology_enabled=false`, so no polyhedron overlay is computed until the
+caller opts in. Empty `polyhedron_specs` means "render no named
+polyhedra"; MatterVis no longer synthesises auto-ligand rows from
+`topology_species_keys`. Non-empty explicit rows drive the overlay.
 
 `POST /api/v2/state` honours `polyhedron_specs` directly (full
 replacement semantics). Use the dedicated CRUD endpoints below when
@@ -209,6 +204,48 @@ fields. The renderer buckets overlays by colour so two distinct
 override colours produce two merged-mesh traces; a hidden overlay
 contributes nothing to the trace list.
 
+### MolCrysKit Computation
+
+Named polyhedra are computed by
+`molcrys_kit.analysis.packing_shell.find_polyhedra(level="molecule")`.
+MatterVis passes the spec's compact formulas (`"C6N2"`, `"ClO4"`, ...)
+as MolCrysKit moiety strings (`"C6 N2"`, `"Cl O4"`, ...), the matched
+MolCrysKit molecule index as `central_indices`, and the state `cutoff`
+as the MolCrysKit `cutoff=` kwarg. **On `level="molecule"` (per
+MolCrysKit PR #32), `cutoff=` is the candidate search radius feeding
+`detect_coordination_number`'s gap+enclosure heuristic — _not_ a hard
+"include every neighbour within X Å" cap.** That semantic is the right
+one for MV's analysis card: the displayed CN is always the natural
+first packing shell selected by gap+enclosure, regardless of how
+generously the user widens the search radius.
+
+The historical "fill the ball" mode (formerly the default in MCK
+before PR #32) is still available in MolCrysKit via
+`hard_cutoff=`, but MV intentionally does **not** plumb `hard_cutoff`
+through `polyhedron_specs` — exposing a per-spec hard cap would make
+two specs at the same `cutoff` disagree on what the polyhedron means,
+which is exactly the footgun the gap+enclosure default is there to
+prevent. If we ever want to surface the extended A--X12 perovskite
+cuboctahedron (or any other "show me everything within X Å"
+analysis), it should be a separate, explicitly-named spec field, not
+overloaded onto `cutoff`.
+
+MatterVis only applies display-coordinate offsets and renderer colours
+to the returned `shell_coords`; it does not maintain a separate
+fragment-centroid neighbour search.
+
+The analysis-card payload (`topology_data["gap_info"]`) carries the
+MCK record fields verbatim so callers can introspect the result:
+
+| Field | Meaning |
+|---|---|
+| `mode` | `"gap+enclosure"` for MV's natural-shell calls; `"cutoff"` only when a future feature opts into hard-cap mode. |
+| `search_cutoff` | The candidate search radius MV asked for (= state `cutoff`). |
+| `hard_cutoff` | `null` for MV's natural-shell calls; echoes the MCK kwarg if a hard cap was applied. |
+| `cutoff` | Echo of what `detect_coordination_number` received (i.e. the hard cap value, or `null`). Kept for back-compat; new code should prefer `hard_cutoff` to ask "was a hard cap applied?". |
+| `primary_gap_cn`, `gap_value`, `gap_index` | Where the natural distance gap fell in the candidate list. |
+| `enclosed`, `enclosure_expanded` | Whether the chosen CN's hull encloses the centre, and whether the algorithm had to expand past the gap to make that true. |
+
 ### Polyhedron picking (Phase 4)
 
 The renderer adds an invisible `Scatter3d` marker layer named
@@ -218,14 +255,3 @@ right-click menu reads this on `clickData` to identify which
 polyhedron the user picked; library callers driving Plotly directly
 get the same hook.
 
-### `polyhedron_search_supercell` (Phase 4)
-
-A per-state `polyhedron_search_supercell: [Na, Nb, Nc]` triple is a
-**floor** on the lattice-image search range used by
-`analyze_topology` / `extract_coordination_shell`. `[0, 0, 0]`
-(default) keeps the cutoff-driven span -- this is the legacy
-behaviour. `[1, 1, 1]` extends the search by one image cell on each
-side so polyhedra wrap to neighbouring images even without a
-display-side supercell transform. The setting is decoupled from any
-`repeat` transform applied via `transforms`; the two combine
-multiplicatively (more images visible, more search range applied).

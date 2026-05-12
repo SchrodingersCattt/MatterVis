@@ -15,6 +15,7 @@ heuristics.
 from __future__ import annotations
 
 import copy
+import re
 
 import numpy as np
 from molcrys_kit.utils.geometry import cart_to_frac, frac_to_cart
@@ -140,6 +141,45 @@ def _minor_index_set(raw_atoms) -> set[int]:
     one-orientation-per-disorder-site molecule grouping.
     """
     return {i for i, atom in enumerate(raw_atoms) if _is_minor_atom(atom)}
+
+
+_FORMULA_TOKEN_RE = re.compile(r"([A-Z][a-z]?)(\d*)")
+
+
+def formula_to_moiety(formula: str) -> str:
+    """Convert MatterVis compact formula keys to MolCrysKit moiety strings.
+
+    MatterVis species selectors are compact formula keys such as ``C6N2`` or
+    ``ClO4``. MolCrysKit's molecule-level packing-shell API accepts single
+    moiety strings such as ``C6 N2`` and ``Cl O4``. This adapter is purely
+    syntactic; invalid or multi-moiety values fail instead of falling back to
+    MatterVis-local chemistry.
+    """
+    text = str(formula or "").strip()
+    if not text or text == "?":
+        raise ValueError(f"Cannot convert empty fragment formula to moiety: {formula!r}")
+    parts: list[str] = []
+    pos = 0
+    for match in _FORMULA_TOKEN_RE.finditer(text):
+        if match.start() != pos:
+            raise ValueError(f"Invalid compact formula for MolCrysKit moiety: {formula!r}")
+        elem, count = match.groups()
+        parts.append(f"{elem}{count}" if count else elem)
+        pos = match.end()
+    if pos != len(text) or not parts:
+        raise ValueError(f"Invalid compact formula for MolCrysKit moiety: {formula!r}")
+    return " ".join(parts)
+
+
+def molecular_crystal_from_bundle(bundle):
+    """Return the MolCrysKit ``MolecularCrystal`` already built for a bundle."""
+    analysis = getattr(bundle, "molcrys_analysis", None)
+    crystal = getattr(analysis, "crystal", None) or getattr(bundle, "crystal", None)
+    if crystal is None:
+        raise ValueError("Bundle has no MolCrysKit MolecularCrystal analysis.")
+    if getattr(crystal, "molecules", None) is None or getattr(crystal, "lattice", None) is None:
+        raise TypeError("MolCrysKit molecule-level polyhedra require .molecules and .lattice.")
+    return crystal
 
 
 class CrystalAnalysis:

@@ -2673,7 +2673,7 @@ def build_row_figure(
 
 def build_figure(scene: dict, style: dict, topology_data: dict | None = None) -> go.Figure:
     style = validate_style_schema(style)
-    xr, yr, zr = _scene_ranges(scene, style, topology_data=topology_data if style.get("topology_enabled", True) else None)
+    xr, yr, zr = _scene_ranges(scene, style, topology_data=topology_data if style.get("topology_enabled", False) else None)
     # Mesh3d atoms are 3D world-coordinate spheres -- they grow when the
     # camera dollies in, which is what users expect from "zoom". Scatter3d
     # markers are pixel-fixed and break that expectation (the user reported
@@ -2685,7 +2685,7 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None) ->
     use_fast = bool(style.get("fast_rendering", False)) or style.get("material") == "flat" or len(scene.get("draw_atoms", [])) > 2000
 
     mesh_payload = _cached_atom_bond_meshes(scene, style, use_fast=use_fast)
-    topology_on = bool(style.get("topology_enabled", True)) and topology_data is not None
+    topology_on = bool(style.get("topology_enabled", False)) and topology_data is not None
 
     # Phase 2: derive labels of atoms hidden by atom_groups visible:false
     # so labels and the click-target overlay stay in sync with what's

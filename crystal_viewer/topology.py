@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import itertools
-import math
 from typing import Any, Iterable
 
 import numpy as np
@@ -11,11 +9,14 @@ from molcrys_kit.analysis.packing_shell import (
     compute_angular_signature,
     detect_coordination_number,
     detect_prism_vs_antiprism,
+    find_polyhedra,
     hull_encloses_center as _hull_encloses_center,
     planarity_analysis,
 )
 from molcrys_kit.analysis.shape import classify_shell
 from molcrys_kit.structures.polyhedra import convex_hull_payload, ideal_polyhedra_for_cn
+
+from . import molcrys_bridge
 
 __all__ = [
     "DEFAULT_CENTROID_OFFSET_FRAC",
@@ -37,208 +38,6 @@ def classify_fragments(bundle) -> list[dict[str, Any]]:
     return list(getattr(bundle, "topology_fragment_table", None) or bundle.fragment_table)
 
 
-def _lattice_vectors(bundle) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    M = np.array(bundle.M if getattr(bundle, "M", None) is not None else bundle.scene["M"], dtype=float)
-    return M[0], M[1], M[2]
-
-
-def _neighbor_types(fragments: list[dict[str, Any]], center_type: str) -> list[str]:
-    """Pick which fragment types should populate the neighbour pool.
-
-    XYn perovskite-style chemistry: cations (A or B) are coordinated by
-    anions (X), and X is coordinated by cations. We treat A and B as a
-    *single class* of cation when X is the centre; otherwise the classifier's
-    A/B size split would arbitrarily exclude half of the surrounding cage
-    just because half the cations happen to be heavier than the others.
-    """
-    available = {frag.get("type", "?") for frag in fragments}
-    if center_type in ("A", "B") and "X" in available:
-        return ["X"]
-    if center_type == "X":
-        cations = [t for t in ("A", "B") if t in available]
-        if cations:
-            return cations
-    return [frag_type for frag_type in ("B", "A", "X", "?") if frag_type in available and frag_type != center_type]
-
-
-def _normalize_search_supercell(value) -> tuple[int, int, int]:
-    """Coerce caller input into a (na, nb, nc) span triple.
-
-    ``None`` and falsy values map to ``(0, 0, 0)`` (use cutoff-driven span
-    only). Negative numbers clamp to zero -- a polyhedron centre cannot
-    request fewer than zero adjacent images.
-    """
-    if value is None:
-        return (0, 0, 0)
-    if isinstance(value, (int, float)):
-        v = max(0, int(value))
-        return (v, v, v)
-    seq = tuple(value)
-    if len(seq) == 1:
-        v = max(0, int(seq[0]))
-        return (v, v, v)
-    if len(seq) >= 3:
-        return (
-            max(0, int(seq[0])),
-            max(0, int(seq[1])),
-            max(0, int(seq[2])),
-        )
-    raise ValueError(f"search_supercell must be int or 3-tuple, got: {value!r}")
-
-
-def _translation_grid(
-    bundle,
-    cutoff: float,
-    *,
-    search_supercell: tuple[int, int, int] = (0, 0, 0),
-) -> list[tuple[int, int, int, np.ndarray]]:
-    lattice = _lattice_vectors(bundle)
-    ranges = []
-    for vec, extra in zip(lattice, search_supercell):
-        length = max(np.linalg.norm(vec), 1e-6)
-        cutoff_span = max(1, int(math.ceil((cutoff + 1.0) / length)))
-        # ``search_supercell`` is a *floor* on the search radius (in lattice
-        # units). Cutoff still wins when it requests more images than the
-        # caller asked for.
-        span = max(cutoff_span, int(extra))
-        ranges.append(range(-span, span + 1))
-    translations = []
-    for na, nb, nc in itertools.product(*ranges):
-        shift_vec = na * lattice[0] + nb * lattice[1] + nc * lattice[2]
-        translations.append((na, nb, nc, shift_vec))
-    return translations
-
-
-def _neighbor_pool_uncached(
-    bundle,
-    center_fragment: dict,
-    cutoff: float,
-    *,
-    ligand_species: tuple[str, ...] | None = None,
-    search_supercell: tuple[int, int, int] = (0, 0, 0),
-) -> list[dict[str, Any]]:
-    """Find neighbour fragments within ``cutoff`` of the centre.
-
-    ``ligand_species`` overrides the default perovskite XYn neighbour-type
-    inference: when set, only fragments whose ``formula``/``species``
-    matches one of the listed strings are considered. ``None`` keeps the
-    legacy auto-derived behaviour (``_neighbor_types``).
-
-    Pre-built named ``polyhedron_specs`` need this override so the user
-    can paint e.g. C8N1 -> Cl polyhedra in DAP-4 explicitly without
-    fighting the A/B/X auto-classifier.
-
-    ``search_supercell`` is a per-axis *floor* on the lattice-image
-    search radius. Cutoff still drives the natural span; the floor only
-    matters when the caller wants polyhedra to extend across cell
-    boundaries even when cutoff alone would not have searched that far.
-    """
-    fragments = classify_fragments(bundle)
-    center_type = center_fragment.get("type", "?")
-    if ligand_species:
-        wanted = {str(item) for item in ligand_species if item}
-        allowed_types: set[str] = set()
-    else:
-        wanted = None
-        allowed_types = set(_neighbor_types(fragments, center_type))
-    center = np.array(center_fragment["center"], dtype=float)
-    translations = _translation_grid(bundle, cutoff, search_supercell=search_supercell)
-    fragment_entries = []
-    for fragment_order, fragment in enumerate(fragments):
-        if fragment["index"] == center_fragment["index"] and center_type not in {"X"}:
-            continue
-        if wanted is not None:
-            formula_key = fragment.get("formula") or fragment.get("species")
-            if formula_key not in wanted:
-                continue
-        elif allowed_types and fragment.get("type", "?") not in allowed_types:
-            continue
-        fragment_entries.append((fragment_order, fragment))
-    if not fragment_entries or not translations:
-        return []
-
-    base_centers = np.array([frag["center"] for _, frag in fragment_entries], dtype=float)
-    shift_vectors = np.array([item[3] for item in translations], dtype=float)
-    distances = np.linalg.norm(base_centers[:, None, :] + shift_vectors[None, :, :] - center, axis=-1)
-    mask = (distances > 1e-8) & (distances <= float(cutoff))
-
-    center_idx = int(center_fragment["index"])
-    zero_translation = np.array(
-        [(na, nb, nc) == (0, 0, 0) for na, nb, nc, _ in translations],
-        dtype=bool,
-    )
-    for row, (_, fragment) in enumerate(fragment_entries):
-        if int(fragment["index"]) == center_idx:
-            mask[row, zero_translation] = False
-
-    rows, cols = np.nonzero(mask)
-    if len(rows) == 0:
-        return []
-
-    insertion_order = np.array(
-        [fragment_entries[row][0] * len(translations) + int(col) for row, col in zip(rows, cols)],
-        dtype=int,
-    )
-    ranked = np.lexsort((insertion_order, distances[rows, cols]))
-    candidates = []
-    for pos in ranked:
-        row = int(rows[pos])
-        col = int(cols[pos])
-        fragment = fragment_entries[row][1]
-        na, nb, nc, shift_vec = translations[col]
-        point = base_centers[row] + shift_vec
-        item = dict(fragment)
-        item["image_shift"] = [na, nb, nc]
-        item["center"] = [float(x) for x in point]
-        item["distance"] = float(distances[row, col])
-        candidates.append(item)
-    return candidates
-
-
-def _neighbor_pool(
-    bundle,
-    center_fragment: dict,
-    cutoff: float,
-    *,
-    ligand_species: tuple[str, ...] | None = None,
-    search_supercell: tuple[int, int, int] = (0, 0, 0),
-) -> list[dict[str, Any]]:
-    """Cached PBC neighbour search. The cache key now includes the
-    ligand-species filter and the search-supercell floor so two specs
-    with the same centre but different restrictions don't poison each
-    other's pool."""
-    cache = getattr(bundle, "_neighbor_pool_cache", None)
-    if cache is None:
-        cache = {}
-        try:
-            bundle._neighbor_pool_cache = cache
-        except Exception:
-            return _neighbor_pool_uncached(
-                bundle,
-                center_fragment,
-                cutoff,
-                ligand_species=ligand_species,
-                search_supercell=search_supercell,
-            )
-    ligand_key = tuple(sorted(ligand_species)) if ligand_species else None
-    super_key = tuple(int(v) for v in search_supercell)
-    key = (
-        int(center_fragment.get("index", -1)),
-        float(cutoff),
-        ligand_key,
-        super_key,
-    )
-    if key not in cache:
-        cache[key] = _neighbor_pool_uncached(
-            bundle,
-            center_fragment,
-            cutoff,
-            ligand_species=ligand_species,
-            search_supercell=search_supercell,
-        )
-    return cache[key]
-
-
 def _shift_hull_payload(hull: dict[str, Any] | None, delta: np.ndarray) -> dict[str, Any]:
     """Return a copy of a MolCrysKit hull payload translated by ``delta``."""
     if not hull:
@@ -250,49 +49,132 @@ def _shift_hull_payload(hull: dict[str, Any] | None, delta: np.ndarray) -> dict[
     return out
 
 
+def _mck_polyhedron_record(
+    bundle,
+    center_fragment: dict[str, Any],
+    cutoff: float,
+    *,
+    ligand_species: tuple[str, ...] | None = None,
+) -> dict[str, Any] | None:
+    if not ligand_species:
+        raise ValueError(
+            "MolCrysKit molecule-level polyhedra require an explicit ligand_species; "
+            "MatterVis no longer derives ligand shells locally."
+        )
+    source_molecule_index = center_fragment.get("source_molecule_index")
+    if source_molecule_index is None:
+        raise ValueError(
+            f"Fragment {center_fragment.get('label') or center_fragment.get('index')} "
+            "does not carry a MolCrysKit source_molecule_index."
+        )
+    center_formula = center_fragment.get("formula") or center_fragment.get("species")
+    ligand_formula = next((str(item) for item in ligand_species if item), None)
+    if not center_formula or not ligand_formula:
+        raise ValueError("Both center and ligand formulas are required for MolCrysKit polyhedra.")
+    crystal = molcrys_bridge.molecular_crystal_from_bundle(bundle)
+    # On level="molecule", MCK's ``cutoff`` IS the candidate search radius
+    # that feeds gap+enclosure (per MCK PR #32). MV's state-level ``cutoff``
+    # is also a search radius, so the kwarg name lines up after the MCK
+    # split. Do NOT pass ``hard_cutoff`` here -- that would force MCK back
+    # into the historical "fill the ball" mode and reproduce the CN=37
+    # surprise on SY (cf. ``test_topology_cutoff_is_search_radius``). If a
+    # caller ever wants the over-shell CN=12 / CN=4 cuboctahedron /
+    # square-planar interpretations we should expose ``hard_cutoff`` as a
+    # separate per-spec field, not by hijacking the search radius.
+    records = find_polyhedra(
+        crystal,
+        molcrys_bridge.formula_to_moiety(str(center_formula)),
+        molcrys_bridge.formula_to_moiety(ligand_formula),
+        level="molecule",
+        center_kind="centroid",
+        cutoff=float(cutoff),
+        central_indices=[int(source_molecule_index)],
+    )
+    return records[0] if records else None
+
+
 def _extract_coordination_shell_static(
     bundle,
     center_index: int,
     cutoff: float,
     *,
     ligand_species: tuple[str, ...] | None = None,
-    search_supercell: tuple[int, int, int] = (0, 0, 0),
 ) -> dict[str, Any]:
-    """Run the geometric part of ``extract_coordination_shell`` -- everything
-    that depends only on (bundle, center_index, cutoff, ligand_species,
-    search_supercell) and not on the per-call display-coordinate offsets.
-    The result is cacheable; the public wrapper layers display fields on
-    top of a shallow copy."""
     fragments = classify_fragments(bundle)
     center_fragment = next((frag for frag in fragments if int(frag["index"]) == int(center_index)), None)
     if center_fragment is None:
         raise IndexError(f"Unknown fragment index: {center_index}")
-    source_center = np.array(center_fragment["center"], dtype=float)
-    candidates = _neighbor_pool(
+    record = _mck_polyhedron_record(
         bundle,
         center_fragment,
-        cutoff=cutoff,
+        cutoff,
         ligand_species=ligand_species,
-        search_supercell=search_supercell,
     )
-    candidate_coords = (
-        np.array([item["center"] for item in candidates], dtype=float)
-        if candidates else np.zeros((0, 3), dtype=float)
-    )
-    cn_info = detect_coordination_number(
-        [item["distance"] for item in candidates],
-        coords=candidate_coords,
-        center=source_center,
-        enforce_enclosure=True,
-    )
-    cn = int(cn_info["coordination_number"])
-    shell = candidates[:cn]
-    source_shell_coords = (
-        np.array([item["center"] for item in shell], dtype=float)
-        if shell else np.zeros((0, 3), dtype=float)
-    )
-    shell_distances = [float(item["distance"]) for item in shell]
-    hull = convex_hull_payload(source_shell_coords)
+    if record is None:
+        source_center = np.array(center_fragment["center"], dtype=float)
+        source_shell_coords = np.zeros((0, 3), dtype=float)
+        shell_distances: list[float] = []
+        hull = convex_hull_payload(source_shell_coords)
+        cn = 0
+        # Empty-shell fallback: report the search radius MV asked for so
+        # the analysis card can still render "search_cutoff: 10 Å, no
+        # neighbours found" instead of an entirely blank row.
+        gap_info: dict[str, Any] = {
+            "coordination_number": 0,
+            "mode": "molecule",
+            "primary_gap_cn": 0,
+            "gap_index": None,
+            "gap_value": None,
+            "enclosed": False,
+            "enclosure_expanded": False,
+            "cutoff": None,
+            "search_cutoff": float(cutoff),
+            "hard_cutoff": None,
+        }
+    else:
+        source_center = np.array(record["center_position"], dtype=float)
+        source_shell_coords = np.array(record.get("shell_coords") or [], dtype=float)
+        if source_shell_coords.size == 0:
+            source_shell_coords = np.zeros((0, 3), dtype=float)
+        shell_distances = [float(x) for x in record.get("shell_distances") or []]
+        hull = convex_hull_payload(source_shell_coords)
+        cn = int(record.get("coordination_number", len(shell_distances)))
+        # MCK PR #32 split the radial knobs at molecule level:
+        # * ``record["search_cutoff"]`` is the candidate search radius
+        #   actually used (= MV's state ``cutoff``).
+        # * ``record["hard_cutoff"]`` is None when the natural-shell
+        #   gap+enclosure path ran (the MV default), or a float when the
+        #   caller explicitly opted into the "fill the ball" mode.
+        # * ``record["cutoff"]`` echoes whatever ``detect_coordination_
+        #   number`` received (= ``hard_cutoff`` value, or None). Kept
+        #   here for back-compat but downstream code that wants to ask
+        #   "was a hard cap applied?" should read ``hard_cutoff``.
+        gap_info = {
+            "coordination_number": cn,
+            "mode": record.get("mode"),
+            "primary_gap_cn": record.get("primary_gap_cn"),
+            "gap_index": record.get("gap_index"),
+            "gap_value": record.get("gap_value"),
+            "enclosed": record.get("enclosed"),
+            "enclosure_expanded": record.get("enclosure_expanded"),
+            "cutoff": record.get("cutoff"),
+            "search_cutoff": record.get("search_cutoff"),
+            "hard_cutoff": record.get("hard_cutoff"),
+        }
+    shell = [
+        {
+            "index": int(idx),
+            "center": coord,
+            "distance": dist,
+            "image_shift": offset,
+        }
+        for idx, coord, dist, offset in zip(
+            (record or {}).get("shell_molecule_indices") or [],
+            source_shell_coords.tolist(),
+            shell_distances,
+            (record or {}).get("shell_offsets") or [],
+        )
+    ]
     return {
         "center_index": int(center_index),
         "default_label": center_fragment.get("label", f"site-{center_index}"),
@@ -300,51 +182,16 @@ def _extract_coordination_shell_static(
         "center_formula": center_fragment.get("formula") or center_fragment.get("species"),
         "source_center_coords": source_center,
         "cutoff": float(cutoff),
-        "neighbor_pool_size": len(candidates),
+        "neighbor_pool_size": len(shell),
         "coordination_number": cn,
-        "gap_info": cn_info,
+        "gap_info": gap_info,
         "shell": shell,
-        "candidate_fragments": candidates,
+        "candidate_fragments": shell,
         "source_shell_coords": source_shell_coords,
         "source_hull": hull,
         "distances": shell_distances,
-        "all_distances": [float(item["distance"]) for item in candidates],
+        "all_distances": shell_distances,
     }
-
-
-def _cached_extract_static(
-    bundle,
-    center_index: int,
-    cutoff: float,
-    *,
-    ligand_species: tuple[str, ...] | None = None,
-    search_supercell: tuple[int, int, int] = (0, 0, 0),
-) -> dict[str, Any]:
-    cache = getattr(bundle, "_shell_cache", None)
-    if cache is None:
-        cache = {}
-        try:
-            bundle._shell_cache = cache
-        except Exception:
-            return _extract_coordination_shell_static(
-                bundle,
-                center_index,
-                cutoff,
-                ligand_species=ligand_species,
-                search_supercell=search_supercell,
-            )
-    ligand_key = tuple(sorted(ligand_species)) if ligand_species else None
-    super_key = tuple(int(v) for v in search_supercell)
-    key = (int(center_index), float(cutoff), ligand_key, super_key)
-    if key not in cache:
-        cache[key] = _extract_coordination_shell_static(
-            bundle,
-            center_index,
-            cutoff,
-            ligand_species=ligand_species,
-            search_supercell=search_supercell,
-        )
-    return cache[key]
 
 
 def extract_coordination_shell(
@@ -356,16 +203,13 @@ def extract_coordination_shell(
     display_label: str | None = None,
     display_type: str | None = None,
     ligand_species: Iterable[str] | None = None,
-    search_supercell=None,
 ) -> dict[str, Any]:
     ligand_tuple = tuple(str(item) for item in ligand_species) if ligand_species else None
-    super_tuple = _normalize_search_supercell(search_supercell)
-    static = _cached_extract_static(
+    static = _extract_coordination_shell_static(
         bundle,
         int(center_index),
         float(cutoff),
         ligand_species=ligand_tuple,
-        search_supercell=super_tuple,
     )
     source_center = np.asarray(static["source_center_coords"], dtype=float)
     plot_center = source_center if display_center is None else np.array(display_center, dtype=float)
@@ -412,7 +256,6 @@ def _analyze_topology_uncached(
     display_type,
     *,
     ligand_species: tuple[str, ...] | None = None,
-    search_supercell: tuple[int, int, int] = (0, 0, 0),
 ) -> dict[str, Any]:
     shell = extract_coordination_shell(
         bundle,
@@ -422,7 +265,6 @@ def _analyze_topology_uncached(
         display_label=display_label,
         display_type=display_type,
         ligand_species=ligand_species,
-        search_supercell=search_supercell,
     )
     center = shell["center_coords"]
     shell_coords = shell["shell_coords"]
@@ -434,7 +276,7 @@ def _analyze_topology_uncached(
     # around organic cations. ``max_strip=1`` and ``n_random_inits=4`` keep
     # the per-call cost under ~200 ms for CN<=12; the result is bundle-cached
     # via ``_analyze_topology_cache`` so it only runs once per (centre,
-    # cutoff, ligand, search_supercell) tuple.
+    # cutoff, ligand) tuple.
     shape = _classify_shell_payload(shell_coords, center)
     planarity = planarity_analysis(shell_coords, group_size=min(5, len(shell_coords)) if shell_coords else 5)
     prism = detect_prism_vs_antiprism(shell_coords)
@@ -542,26 +384,18 @@ def analyze_topology(
     display_label: str | None = None,
     display_type: str | None = None,
     ligand_species: Iterable[str] | None = None,
-    search_supercell=None,
 ) -> dict[str, Any]:
     """Cached primary-site analysis. The heavy ``planarity_analysis`` pass
     runs ``itertools.combinations`` of size 5 over the shell, which gets
     expensive for CN=12 / large neighbour pools. We key the cache on
-    ``(center_index, cutoff, ligand_species, search_supercell)`` -- the
+    ``(center_index, cutoff, ligand_species)`` -- the
     full bundle topology is immutable once loaded -- so flipping species
     checkboxes back and forth no longer redoes the work, but two named
-    polyhedron specs with different ligand restrictions or search ranges
-    get distinct cache slots.
-
-    ``search_supercell`` is a per-axis floor on the lattice-image search
-    range. It is decoupled from the *display* supercell (a structural
-    transform): callers can keep a single cell on screen but ask for
-    polyhedra to wrap to neighbouring images, or repeat the structure
-    without inflating the search radius. Accepts ``int``, ``(na, nb, nc)``
-    triples, or ``None`` (cutoff-driven span only).
+    polyhedron specs with different ligand restrictions get distinct cache
+    slots. PBC image enumeration is delegated to MolCrysKit's
+    ``find_polyhedra(level="molecule")`` implementation.
     """
     ligand_tuple = tuple(str(item) for item in ligand_species) if ligand_species else None
-    super_tuple = _normalize_search_supercell(search_supercell)
     cache = getattr(bundle, "_analyze_topology_cache", None)
     if cache is None:
         cache = {}
@@ -572,16 +406,14 @@ def analyze_topology(
                 bundle, center_index, cutoff,
                 display_center, display_label, display_type,
                 ligand_species=ligand_tuple,
-                search_supercell=super_tuple,
             )
-    key = (int(center_index), float(cutoff), ligand_tuple, super_tuple)
+    key = (int(center_index), float(cutoff), ligand_tuple)
     cached = cache.get(key)
     if cached is None:
         cached = _analyze_topology_uncached(
             bundle, center_index, cutoff,
             None, None, None,  # cache on the static result; overlay display fields below
             ligand_species=ligand_tuple,
-            search_supercell=super_tuple,
         )
         cache[key] = cached
     # Display fields shift per call (camera / formula-unit centering); patch

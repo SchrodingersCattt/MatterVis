@@ -15,9 +15,8 @@ matplotlib
 pillow
 ase
 networkx
-# Molecule identification, disorder handling, and per-formula-unit stoichiometry
-# (GCD across cell-counts) for the formula_unit display mode. Hard dep --
-# without it the formula_unit picker falls back to legacy heuristics that
-# get the anion count wrong on perchlorate salts (DAP-4 surfaces 4 ClO4
-# instead of 3, etc.).  See crystal_viewer/molcrys_bridge.py.
-molcrys-kit
+# Molecule identification, disorder handling, per-formula-unit stoichiometry,
+# and molecule-level packing polyhedra. Pinned to the merge of MCK PR #32
+# (find_polyhedra(level='molecule') with split cutoff/hard_cutoff
+# semantics + auto-bumped molecule search radius) on main.
+molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@9e8884d

@@ -427,11 +427,11 @@ def _fragment_table_from_atoms(
 
     # Group atoms by (image_shift, mol_index_k). Each replica image of a
     # MolCrysKit molecule becomes its own fragment-table row.
-    components: list[list[int]] = []
+    components: list[tuple[list[int], int | None]] = []
     seen_local: set[int] = set()
     seen_images = sorted({key[0] for key in image_to_local})
     for shift_key in seen_images:
-        for indices in mol_indices:
+        for mol_index, indices in enumerate(mol_indices):
             component = []
             for raw_idx in indices:
                 local = image_to_local.get((shift_key, int(raw_idx)))
@@ -440,17 +440,17 @@ def _fragment_table_from_atoms(
                 component.append(local)
                 seen_local.add(local)
             if component:
-                components.append(sorted(component))
+                components.append((sorted(component), int(mol_index)))
     # Sweep for any kept atom that didn't make it into a molecule
     # component (orphans). They get one-atom singleton fragments so
     # they remain visible in the fragment table for diagnostics.
     for local_idx in range(len(pool_kept)):
         if local_idx not in seen_local:
-            components.append([local_idx])
+            components.append(([local_idx], None))
             seen_local.add(local_idx)
 
     fragments = []
-    for component in components:
+    for component, mol_index in components:
         site_indices = sorted(pool_source_idx[idx] for idx in component)
         component_atoms = [pool_kept[idx] for idx in component]
         heavy_atoms = [atom for atom in component_atoms if atom["elem"] != "H"]
@@ -490,6 +490,7 @@ def _fragment_table_from_atoms(
         formula = "".join(f"{elem}{count}" if count > 1 else elem for elem, count in ordered) or "?"
         fragments.append({
             "site_indices": site_indices,
+            "source_molecule_index": mol_index,
             "center": [float(x) for x in center_cart],
             "frac_center": [float(x) for x in center_frac],
             "elem_set": sorted(elem_set),
@@ -568,6 +569,7 @@ def _fragment_table_from_atoms(
             "center": frag["center"],
             "frac_center": frag["frac_center"],
             "site_indices": frag["site_indices"],
+            "source_molecule_index": frag.get("source_molecule_index"),
             "source": bundle_name,
             "heavy_atom_count": frag["heavy_atom_count"],
             "cluster_size": frag["cluster_size"],
