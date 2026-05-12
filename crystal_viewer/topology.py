@@ -299,23 +299,19 @@ def _classify_shell_payload(
     text-panel call site; an empty / partial shell should just degrade to
     ``primary_label = None`` rather than crash the whole topology card.
     """
-    if not shell_coords:
+    if len(np.asarray(shell_coords)) == 0:
         return _empty_shape_payload()
     try:
-        # ``max_strip=0`` keeps classify_shell in pure rigid-CShM mode: it
-        # picks the single best polyhedron of CN=N rather than peeling off
-        # k>0 atoms and producing compound ``"X + 1 off_axis_cap"`` labels.
-        # The compound labels are exactly the "ambiguous + face cap+1"
-        # tokens chemists complained about for packing shells around
-        # organic cations -- they leak the classifier's internal search
-        # state into a label that humans then mis-read as a structural
-        # claim. The k=0 layer gives us the clean ``"distorted
-        # cuboctahedron"`` / ``"clean tetrahedron"`` story we actually
-        # want, and is also ~5x faster than k=1 at CN=12.
+        # Delegate the shell label policy to molcrys_kit's current
+        # classifier. Earlier MatterVis pinned ``max_strip=0`` to force a
+        # rigid CN=N CShM match, but that bypassed MCK's newer core/residual
+        # decomposition and mislabelled registered derived shells such as
+        # EAP-4 AX11 (tricapped cube) as rigid CN=11 alternatives. Leaving
+        # ``max_strip`` unset keeps MV aligned with upstream MCK labels while
+        # still returning a JSON-safe payload for the renderer/scripts.
         result = classify_shell(
             shell_coords,
             center=center,
-            max_strip=0,
             n_random_inits=4,
             top_k=3,
         )

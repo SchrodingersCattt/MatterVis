@@ -36,6 +36,23 @@ from crystal_viewer.topology import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DAP4_CIF = REPO_ROOT / "scripts" / "data" / "DAP-4.cif"
 
+EAP4_AX11_UNIT = np.array(
+    [
+        [0.737505, 0.547393, -0.395534],
+        [-0.737505, -0.547393, -0.395534],
+        [0.000000, 0.000000, -1.000000],
+        [0.516923, 0.503351, 0.692408],
+        [-0.516923, -0.503351, 0.692408],
+        [0.675385, -0.497826, 0.544081],
+        [-0.675385, 0.497826, 0.544081],
+        [0.631204, -0.618904, -0.467482],
+        [-0.631204, 0.618904, -0.467482],
+        [0.000000, -0.997303, 0.073398],
+        [0.000000, 0.997303, 0.073398],
+    ],
+    dtype=float,
+)
+
 
 def test_empty_shell_returns_empty_shape_payload():
     payload = _classify_shell_payload([], [0.0, 0.0, 0.0])
@@ -71,6 +88,24 @@ def test_distorted_octahedron_classifies_with_octahedron_label():
     assert payload["label_modifier"] in {"clean", "distorted", "ambiguous", "irregular"}
     assert "+" not in payload["primary_label"]
     assert payload["cshm_value"] is not None and payload["cshm_value"] >= 0
+
+
+def test_classify_shell_payload_uses_mck_core_residual_decomposition():
+    """MatterVis must not pin MCK back to rigid ``max_strip=0`` labels.
+
+    EAP-4's A-site is the motivating production case: MCK's current
+    classifier describes the CN=11 shell as a cube core plus three caps
+    (``tricapped_cube``), while MatterVis's former rigid-k0 call could pick
+    a different full-CN ideal. The ideal registry case is a fast regression
+    for keeping MV aligned with upstream MCK label policy.
+    """
+    payload = _classify_shell_payload(EAP4_AX11_UNIT, [0.0, 0.0, 0.0])
+
+    assert payload["primary_label"] == "tricapped_cube"
+    assert payload["best_match"]["name"] == "tricapped_cube"
+    assert payload["core"]["prototype"] == "cube"
+    assert len(payload["residuals"]) == 3
+    assert payload["structural_description"]
 
 
 def test_classify_shell_payload_recovers_from_pathological_input():
