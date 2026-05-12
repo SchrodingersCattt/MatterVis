@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from typing import Any, Dict, Iterable, Optional
 
 import numpy as np
+from molcrys_kit.utils.geometry import cart_to_frac
 
 from .presets import get_default_catalog, workspace_root
 from . import molcrys_bridge
@@ -196,94 +197,6 @@ def _has_shelx_occupancy_disorder(raw_atoms) -> bool:
     return False
 
 
-def _sanitize_cif_for_pymatgen(cif_path: str) -> str | None:
-    """Return a path to a temp CIF where ``?`` markers in the
-    ``_atom_site_attached_hydrogens`` column are replaced with ``0``,
-    or ``None`` if no rewrite was needed.
-
-    The motivation: ``pymatgen.io.cif.CifParser`` (used internally by
-    ``generate_ordered_replicas_from_disordered_sites`` to read the
-    lattice matrix) crashes on ``?`` in numeric columns. Several
-    SHELX-derived CIFs (SY.cif among them) write ``?`` for
-    "no attached hydrogens" instead of ``0``. The CIF spec allows
-    both; pymatgen's str2float helper is the strict reader. We rewrite
-    a minimal copy that pymatgen accepts; the original CIF is never
-    touched.
-    """
-    import os
-    import tempfile
-
-    try:
-        with open(cif_path, encoding="utf-8") as f:
-            lines = f.readlines()
-    except OSError:
-        return None
-
-    out_lines: list[str] = []
-    rewrote = False
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        if line.strip() == "loop_":
-            j = i + 1
-            loop_columns: list[str] = []
-            while j < len(lines) and lines[j].lstrip().startswith("_"):
-                loop_columns.append(lines[j].strip())
-                j += 1
-            if any("_atom_site_label" in c for c in loop_columns):
-                attached_h_col_idx = None
-                for k, c in enumerate(loop_columns):
-                    if c == "_atom_site_attached_hydrogens":
-                        attached_h_col_idx = k
-                        break
-                out_lines.append(line)
-                for c in loop_columns:
-                    out_lines.append(c + "\n")
-                i = j
-                while i < len(lines):
-                    dl = lines[i]
-                    stripped = dl.strip()
-                    if (
-                        stripped == ""
-                        or stripped.startswith("loop_")
-                        or stripped.startswith("data_")
-                        or stripped.startswith("_")
-                    ):
-                        break
-                    if attached_h_col_idx is not None:
-                        parts = dl.split()
-                        if (
-                            len(parts) > attached_h_col_idx
-                            and parts[attached_h_col_idx] == "?"
-                        ):
-                            parts[attached_h_col_idx] = "0"
-                            rewrote = True
-                            out_lines.append("  ".join(parts) + "\n")
-                        else:
-                            out_lines.append(dl)
-                    else:
-                        out_lines.append(dl)
-                    i += 1
-                continue
-        out_lines.append(line)
-        i += 1
-
-    if not rewrote:
-        return None
-
-    fd, tmp_path = tempfile.mkstemp(suffix=".cif", prefix="mattervis_sanitized_")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.writelines(out_lines)
-    except Exception:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        return None
-    return tmp_path
-
-
 def _tag_shelx_occupancy_disorder(raw_atoms, cif_path: str, M):
     """If ``raw_atoms`` contains SHELX-style occupancy disorder,
     consult :func:`molcrys_kit.analysis.disorder.\
@@ -296,34 +209,20 @@ generate_ordered_replicas_from_disordered_sites` for the optimal
     drops them so the stoichiometry / coordination polyhedron analysis
     sees a single chemically sensible structure.
 
-    Position-based matching (Cartesian distance < ``threshold`` to any
-    atom in the optimal replica) is used because the ordered-replica
-    pipeline rewrites atom labels and re-applies symmetry; index
-    alignment with ``raw_atoms`` is not preserved. ``threshold`` is
-    set conservatively (0.4 Angstrom) so site jitter from MolCrysKit's
-    occupancy normaliser doesn't accidentally tag a major atom as
-    minor.
-
-    Some CIFs trip pymatgen's strict numeric-field reader (e.g. ``?``
-    in ``_atom_site_attached_hydrogens``). We feed a sanitized copy
-    (``?`` -> ``0`` in that one column only) to MolCrysKit when the
-    original is rejected; the rewrite is purely syntactic and never
-    touches the on-disk file.
+    MolCrysKit exposes the selected source-site indices via
+    ``return_kept_indices=True``; MatterVis only mirrors that selection
+    onto its raw atom dicts for rendering.
 
     All steps are wrapped in a single ``try`` block: if MolCrysKit
     can't resolve the disorder for any reason (missing dependency,
     parser error, CIF rejected by ``scan_cif_disorder``) we leave
-    ``raw_atoms`` untouched and the patched ``is_minor`` heuristic in
+    ``raw_atoms`` untouched and the ``is_minor`` heuristic in
     ``crystal_viewer.legacy.plot_crystal`` still does best-effort
     classification.
     """
     if not _has_shelx_occupancy_disorder(raw_atoms):
         return raw_atoms
 
-    import os
-
-    sanitized_path = _sanitize_cif_for_pymatgen(cif_path)
-    cif_to_use = sanitized_path or cif_path
     try:
         try:
             from molcrys_kit.analysis.disorder import (
@@ -331,41 +230,20 @@ generate_ordered_replicas_from_disordered_sites` for the optimal
             )
 
             replicas = generate_ordered_replicas_from_disordered_sites(
-                cif_to_use, method="optimal"
+                cif_path, method="optimal", return_kept_indices=True
             )
         except Exception:
             return raw_atoms
         if not replicas:
             return raw_atoms
-
-        optimal_carts: list[np.ndarray] = []
-        optimal_elems: list[str] = []
-        for molecule in replicas[0].molecules:
-            try:
-                positions = molecule.get_positions()
-                symbols = molecule.get_chemical_symbols()
-            except Exception:
-                continue
-            for pos, sym in zip(positions, symbols):
-                optimal_carts.append(np.asarray(pos, dtype=float))
-                optimal_elems.append(str(sym))
-        if not optimal_carts:
+        first = replicas[0]
+        if not isinstance(first, tuple) or len(first) != 2:
             return raw_atoms
-        optimal_grid = np.array(optimal_carts, dtype=float)
-
-        # Each optimal-replica atom can claim AT MOST ONE raw atom, and
-        # each raw atom can be claimed AT MOST ONCE. Without this the
-        # SY case (two raw atoms 0.15 A apart -- N3 and N2 -- both
-        # match the same optimal N within the 0.4 A threshold) would
-        # leave both tagged as major and the bond perception would
-        # again fuse the two ethylenediamines. Greedy nearest-pair
-        # assignment over disorder atoms only:
-        threshold = 0.4
+        _crystal, kept_indices = first
+        kept_raw = {int(idx) for idx in kept_indices}
         out = [dict(atom) for atom in raw_atoms]
 
         disordered_idx: list[int] = []
-        disordered_carts: list[np.ndarray] = []
-        disordered_elems: list[str] = []
         for idx, atom in enumerate(out):
             try:
                 occ = float(atom.get("occ", 1.0))
@@ -373,64 +251,10 @@ generate_ordered_replicas_from_disordered_sites` for the optimal
                 occ = 1.0
             if occ >= 0.999 or "_is_minor" in atom:
                 continue
-            cart = np.asarray(atom.get("cart"), dtype=float)
-            if cart.shape != (3,):
-                continue
             disordered_idx.append(idx)
-            disordered_carts.append(cart)
-            disordered_elems.append(str(atom.get("elem") or ""))
 
         if not disordered_idx:
             return out
-
-        # MolCrysKit's optimal-replica returns *unwrapped* Cartesian
-        # positions (molecules are kept contiguous across cell faces),
-        # while parse_asu wraps every atom inside the unit cell.
-        # Direct Euclidean distance fails on en chains that cross the
-        # cell boundary -- the optimal N at x = -1.57 vs the raw N at
-        # x = 6.52 (cell_a = 8.10) appears to be 8 A apart even
-        # though they're the same atom under PBC. Use the minimum
-        # image convention via fractional-coordinate wraparound on
-        # the difference vector.
-        M_arr = np.asarray(M, dtype=float)
-        try:
-            inv_M = np.linalg.inv(M_arr)
-        except np.linalg.LinAlgError:
-            inv_M = None
-        d_grid = np.array(disordered_carts, dtype=float)
-        diffs = d_grid[:, None, :] - optimal_grid[None, :, :]
-        if inv_M is not None:
-            # diffs has shape (N_dis, N_opt, 3). Map to fractional,
-            # take residual to [-0.5, 0.5), map back to Cartesian.
-            frac = np.einsum("ij,klj->kli", inv_M, diffs)
-            frac = frac - np.round(frac)
-            diffs = np.einsum("ij,klj->kli", M_arr, frac)
-        dist = np.sqrt(np.einsum("ijk,ijk->ij", diffs, diffs))
-        elem_mismatch = np.array(
-            [
-                [da_elem != opt_elem for opt_elem in optimal_elems]
-                for da_elem in disordered_elems
-            ],
-            dtype=bool,
-        )
-        dist = np.where(elem_mismatch, np.inf, dist)
-        dist = np.where(dist > threshold, np.inf, dist)
-
-        claimed_optimal: set[int] = set()
-        kept_raw: set[int] = set()
-        # Greedy: smallest distance first.
-        flat_order = np.argsort(dist, axis=None)
-        n_opt = optimal_grid.shape[0]
-        for flat in flat_order:
-            d = float(dist.flat[flat])
-            if d == np.inf:
-                break
-            i = int(flat // n_opt)
-            j = int(flat % n_opt)
-            if disordered_idx[i] in kept_raw or j in claimed_optimal:
-                continue
-            kept_raw.add(disordered_idx[i])
-            claimed_optimal.add(j)
 
         # Explicit major / minor labels on every disordered atom: a
         # chosen atom must have ``_is_minor=False`` set (NOT just
@@ -445,12 +269,8 @@ generate_ordered_replicas_from_disordered_sites` for the optimal
             else:
                 out[idx]["_is_minor"] = True
         return out
-    finally:
-        if sanitized_path:
-            try:
-                os.unlink(sanitized_path)
-            except OSError:
-                pass
+    except Exception:
+        return raw_atoms
 
 
 def _unwrapped_atoms_from_atoms(
@@ -517,7 +337,7 @@ def _unwrapped_atoms_from_molcrys(
         atom["_unwrapped"] = False
         atom["_source_index"] = int(idx)
 
-    inv_m = np.linalg.inv(np.asarray(M, dtype=float))
+    M_arr = np.asarray(M, dtype=float)
 
     mol_indices = getattr(molcrys_analysis, "mol_indices", None) or []
     mol_cart_positions = getattr(molcrys_analysis, "mol_cart_positions", None) or []
@@ -531,7 +351,7 @@ def _unwrapped_atoms_from_molcrys(
                 continue
             cart = coords[local_idx]
             out[raw_idx]["cart"] = cart.copy()
-            out[raw_idx]["frac"] = inv_m @ cart
+            out[raw_idx]["frac"] = cart_to_frac(cart, M_arr)
             out[raw_idx]["_unwrapped"] = True
 
     if not include_minor:
@@ -607,11 +427,11 @@ def _fragment_table_from_atoms(
 
     # Group atoms by (image_shift, mol_index_k). Each replica image of a
     # MolCrysKit molecule becomes its own fragment-table row.
-    components: list[list[int]] = []
+    components: list[tuple[list[int], int | None]] = []
     seen_local: set[int] = set()
     seen_images = sorted({key[0] for key in image_to_local})
     for shift_key in seen_images:
-        for indices in mol_indices:
+        for mol_index, indices in enumerate(mol_indices):
             component = []
             for raw_idx in indices:
                 local = image_to_local.get((shift_key, int(raw_idx)))
@@ -620,17 +440,17 @@ def _fragment_table_from_atoms(
                 component.append(local)
                 seen_local.add(local)
             if component:
-                components.append(sorted(component))
+                components.append((sorted(component), int(mol_index)))
     # Sweep for any kept atom that didn't make it into a molecule
     # component (orphans). They get one-atom singleton fragments so
     # they remain visible in the fragment table for diagnostics.
     for local_idx in range(len(pool_kept)):
         if local_idx not in seen_local:
-            components.append([local_idx])
+            components.append(([local_idx], None))
             seen_local.add(local_idx)
 
     fragments = []
-    for component in components:
+    for component, mol_index in components:
         site_indices = sorted(pool_source_idx[idx] for idx in component)
         component_atoms = [pool_kept[idx] for idx in component]
         heavy_atoms = [atom for atom in component_atoms if atom["elem"] != "H"]
@@ -670,6 +490,7 @@ def _fragment_table_from_atoms(
         formula = "".join(f"{elem}{count}" if count > 1 else elem for elem, count in ordered) or "?"
         fragments.append({
             "site_indices": site_indices,
+            "source_molecule_index": mol_index,
             "center": [float(x) for x in center_cart],
             "frac_center": [float(x) for x in center_frac],
             "elem_set": sorted(elem_set),
@@ -748,6 +569,7 @@ def _fragment_table_from_atoms(
             "center": frag["center"],
             "frac_center": frag["frac_center"],
             "site_indices": frag["site_indices"],
+            "source_molecule_index": frag.get("source_molecule_index"),
             "source": bundle_name,
             "heavy_atom_count": frag["heavy_atom_count"],
             "cluster_size": frag["cluster_size"],
@@ -866,6 +688,48 @@ def build_bundle_scene(
     return transformed
 
 
+# Diagonal viewing direction used as the upload fallback when no preset
+# matches. Matches Plotly's default (1.25, 1.25, 1.25) eye direction with
+# +c as the screen-up axis, so any non-cubic cell still shows depth
+# instead of collapsing into a flat ab-plane projection. Stored as a
+# unit vector so ``view_rotation`` doesn't need to renormalise.
+_UPLOAD_DEFAULT_VIEW_DIR = np.array([1.0, 1.0, 1.0], dtype=float) / np.sqrt(3.0)
+_UPLOAD_DEFAULT_UP = np.array([0.0, 0.0, 1.0], dtype=float)
+
+
+def _upload_default_view(name: str, preset: Optional[Dict[str, Any]]) -> tuple[np.ndarray, np.ndarray]:
+    """Pick an initial ``(view_direction, up)`` for an uploaded CIF.
+
+    Tries an exact preset entry first, then a stem match (so ``SY_3``
+    honours the ``SY`` preset), then falls back to a 3D-friendly
+    diagonal so elongated cells don't render as flat 2D projections.
+    """
+    structures = (preset or {}).get("structures", {}) if isinstance(preset, dict) else {}
+    candidates = [name]
+    # ``infer_uploaded_name`` appends ``_2``, ``_3``, ... when a name
+    # collides; strip the suffix so the original preset still applies.
+    stem_match = re.match(r"^(?P<stem>.+?)(?:_\d+)?$", name)
+    if stem_match:
+        stem = stem_match.group("stem")
+        if stem and stem != name:
+            candidates.append(stem)
+    for candidate in candidates:
+        entry = structures.get(candidate) if isinstance(structures, dict) else None
+        if not isinstance(entry, dict):
+            continue
+        camera = entry.get("camera") if isinstance(entry.get("camera"), dict) else None
+        if camera and camera.get("position") and camera.get("focal_point") and camera.get("up"):
+            view_dir, up = legacy_scene.scene_from_camera(
+                camera["position"], camera["focal_point"], camera["up"]
+            )
+            return np.asarray(view_dir, dtype=float), np.asarray(up, dtype=float)
+        view_direction = entry.get("view_direction")
+        if view_direction:
+            up = entry.get("up", [0.0, 0.0, 1.0])
+            return np.asarray(view_direction, dtype=float), np.asarray(up, dtype=float)
+    return _UPLOAD_DEFAULT_VIEW_DIR.copy(), _UPLOAD_DEFAULT_UP.copy()
+
+
 def build_loaded_crystal(
     *,
     name: str,
@@ -883,7 +747,8 @@ def build_loaded_crystal(
     ops = scene_ops()
     preset = preset or {}
     with perf_log.time_block("loader:parse_asu", kind="event", structure=name, cif_path=cif_path):
-        raw_atoms, cell, M = ops.parse_asu(cif_path)
+        raw_atoms, cell, legacy_M = ops.parse_asu(cif_path)
+        M = np.asarray(legacy_M, dtype=float).T
     with perf_log.time_block(
         "loader:resolve_shelx_disorder",
         kind="event",
@@ -913,22 +778,21 @@ def build_loaded_crystal(
     # (camera or view_direction explicitly provided) but otherwise
     # falls through to ``ops.auto_view_dir`` which scores >1000 view
     # candidates by ray-projecting every heavy atom -- ~12 s for a
-    # 1024-atom unit cell. For uploaded CIFs there is no preset
-    # entry to short-circuit on, so the user paid that cost on every
-    # upload. The browser camera is fully interactive so a sensible
-    # default direction (look down +z, up = +y) gives a usable initial
-    # view in <1 ms; users that want the full auto-orient can call
-    # the v2 API or add a preset entry. Catalog structures keep the
-    # legacy behaviour because their preset can pin a known-good
-    # camera, and the cost is paid once at boot, not per upload.
+    # 1024-atom unit cell. Uploaded CIFs almost never have a preset
+    # by their unique name (``SY_3``, ``upload_2``, ...), so the user
+    # paid that cost on every upload. We use a 3D-friendly diagonal
+    # default (eye along (1,1,1), up=+c) instead of straight +z --
+    # the latter projects elongated cells (e.g. SY's 8 x 25 x 10) to
+    # a tall, depthless rectangle that users perceive as "flat".
+    # Preset entries (catalog or user-supplied) still win, including
+    # a stem-match fallback so ``SY_3`` honours the ``SY`` preset.
     is_upload = source == "upload"
     if is_upload:
         with perf_log.time_block("loader:default_view", kind="event", structure=name, reason="skip_auto_view_for_upload"):
-            view_dir = np.array([0.0, 0.0, 1.0])
-            up = np.array([0.0, 1.0, 0.0])
+            view_dir, up = _upload_default_view(name, preset)
     else:
         with perf_log.time_block("loader:resolve_view", kind="event", structure=name):
-            view_dir, up = legacy_scene._resolve_view(ops, name, raw_atoms, M, cell, preset)
+            view_dir, up = legacy_scene._resolve_view(ops, name, raw_atoms, legacy_M, cell, preset)
     R = ops.view_rotation(view_dir, up)
     final_title = title or name
     with perf_log.time_block(

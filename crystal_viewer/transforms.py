@@ -9,7 +9,7 @@ reflect the transform applied. Transforms compose in list order via
 Layered API (per ``AGENTS.md``):
 
 1. **Pure math primitives** -- operate on plain Python lists of atom
-   dicts and a 3x3 lattice ``M``.
+   dicts and a 3x3 row-lattice ``M`` (rows = a, b, c vectors).
 
    * :func:`replicate_atoms` -- ``Na x Nb x Nc`` supercell of a flat
      atom list. Returns the new atoms plus a list of ``image_shift``
@@ -98,6 +98,7 @@ import math
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+from molcrys_kit.utils.geometry import cart_to_frac, frac_to_cart
 
 
 # Transform kinds the dispatcher recognises. Anything else is rejected
@@ -201,7 +202,7 @@ def _atom_copy(atom: Dict[str, Any], *, image_shift: Tuple[int, int, int],
 def _shift_cart(M: np.ndarray, image_shift: Tuple[int, int, int]) -> np.ndarray:
     M = np.asarray(M, dtype=float)
     shift_frac = np.array(image_shift, dtype=float)
-    return M @ shift_frac
+    return frac_to_cart(shift_frac, M)
 
 
 def replicate_atoms(
@@ -252,8 +253,8 @@ def _periodic_image_grid(
     """
     M_arr = np.asarray(M, dtype=float)
     spans: List[int] = []
-    for col in range(3):
-        length = float(np.linalg.norm(M_arr[:, col]))
+    for axis in range(3):
+        length = float(np.linalg.norm(M_arr[axis]))
         if length < 1e-9:
             spans.append(0)
             continue
@@ -505,7 +506,6 @@ def atoms_under_symmetry(
     if not seed_indices or not sym_ops:
         return []
     M_arr = np.asarray(M, dtype=float)
-    inv_M = np.linalg.inv(M_arr)
     out: Dict[Tuple[str, Tuple[int, int, int]], Dict[str, Any]] = {}
     for seed_idx in seed_indices:
         atom = atoms[int(seed_idx)]
@@ -513,13 +513,13 @@ def atoms_under_symmetry(
         frac = (
             np.asarray(atom["frac"], dtype=float)
             if atom.get("frac") is not None
-            else inv_M @ cart
+            else cart_to_frac(cart, M_arr)
         )
         for op_idx, (R, t) in enumerate(sym_ops):
             R_arr = np.asarray(R, dtype=float)
             t_arr = np.asarray(t, dtype=float)
             new_frac = R_arr @ frac + t_arr
-            new_cart = M_arr @ new_frac
+            new_cart = frac_to_cart(new_frac, M_arr)
             shift_int = (int(op_idx), 0, 0)  # encode op id in image_shift slot
             new = _atom_copy(atom, image_shift=shift_int, new_label_suffix=f"<sym{op_idx}>")
             new["cart"] = new_cart.copy()
@@ -549,7 +549,7 @@ def slab_atoms_from_bundle(
     Returns ``(atoms_list, slab_M)`` where ``atoms_list`` is a list of
     MatterVis-shaped atom dicts (``elem``, ``cart``, ``frac``,
     ``label``, ``occ``, ...) and ``slab_M`` is the slab cell as a 3x3
-    column-vector matrix matching MatterVis's lattice convention.
+    row-lattice matrix matching MatterVis's lattice convention.
     """
     from molcrys_kit.operations.surface import generate_topological_slab
 
@@ -569,11 +569,8 @@ def slab_atoms_from_bundle(
         min_thickness=min_thickness,
         vacuum=float(vacuum),
     )
-    # MolecularCrystal stores lattice as row-vectors; convert to MatterVis's
-    # column-vector convention.
-    slab_M = np.asarray(slab.lattice, dtype=float).T
-    inv_M = np.linalg.inv(slab_M)
-
+    # MolecularCrystal stores lattice as row vectors, matching MatterVis.
+    slab_M = np.asarray(slab.lattice, dtype=float)
     out: List[Dict[str, Any]] = []
     counter = 0
     for mol in slab.molecules:
@@ -582,7 +579,7 @@ def slab_atoms_from_bundle(
         positions = ase_atoms.get_positions()
         for elem, cart in zip(symbols, positions):
             cart = np.asarray(cart, dtype=float)
-            frac = inv_M @ cart
+            frac = cart_to_frac(cart, slab_M)
             out.append(
                 {
                     "elem": str(elem),
@@ -703,7 +700,7 @@ def rebuild_scene_with_atoms(
 
     M_arr = np.asarray(M, dtype=float)
     projected_axes = [
-        (float(M_arr[:, i] @ view_x), float(M_arr[:, i] @ view_y))
+        (float(M_arr[i] @ view_x), float(M_arr[i] @ view_y))
         for i in range(3)
     ]
 
@@ -840,9 +837,9 @@ def apply_one_transform(
         from types import SimpleNamespace
 
         slab_cell = SimpleNamespace(
-            a=float(np.linalg.norm(slab_M[:, 0])),
-            b=float(np.linalg.norm(slab_M[:, 1])),
-            c=float(np.linalg.norm(slab_M[:, 2])),
+            a=float(np.linalg.norm(slab_M[0])),
+            b=float(np.linalg.norm(slab_M[1])),
+            c=float(np.linalg.norm(slab_M[2])),
             alpha=90.0,
             beta=90.0,
             gamma=90.0,

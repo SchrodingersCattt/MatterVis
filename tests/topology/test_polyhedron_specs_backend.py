@@ -11,9 +11,9 @@ replaced (alongside) the legacy ``topology_species_keys`` selector:
     ``remove_polyhedron_spec`` / ``reorder_polyhedron_specs`` operate on
     the active scene's state, persist via ``patch_state``, and survive a
     round-trip through the scene store.
-  * ``_effective_polyhedron_specs`` falls back to the legacy
-    ``topology_species_keys`` when no explicit spec list is set, so
-    pre-Phase-1 callers (and the existing UI checklist) keep rendering.
+  * ``_effective_polyhedron_specs`` only returns explicit named rows.
+    MatterVis no longer synthesises auto-ligand packing shells; those
+    semantics live in MolCrysKit's molecule-level ``find_polyhedra``.
 
 DO NOT REMOVE -- this guards the contract documented in
 ``agents/polyhedron_api.md``.
@@ -123,6 +123,13 @@ def test_add_polyhedron_spec_persists_to_active_scene(backend: ViewerBackend):
     assert any(item["id"] == spec["id"] for item in state["polyhedron_specs"])
 
 
+def test_polyhedra_overlay_defaults_off(backend: ViewerBackend):
+    state = backend.get_state()
+
+    assert state["topology_enabled"] is False
+    assert backend.topology_for_state(state) is None
+
+
 def test_add_polyhedron_spec_rejects_missing_center(backend: ViewerBackend):
     with pytest.raises(ValueError):
         backend.add_polyhedron_spec(center_species="")
@@ -166,27 +173,17 @@ def test_reorder_polyhedron_specs_requires_full_set(backend: ViewerBackend):
         backend.reorder_polyhedron_specs([a["id"], b["id"], "extra"])
 
 
-# ---- legacy fallback ------------------------------------------------------
+# ---- explicit specs only --------------------------------------------------
 
 
-def test_effective_specs_falls_back_to_topology_species_keys(backend: ViewerBackend):
-    # Default state for DAP-4 ships with non-empty topology_species_keys
-    # and no explicit polyhedron_specs. The effective list must be
-    # synthesised from the legacy fields so the existing UI keeps
-    # rendering exactly as before this PR.
+def test_effective_specs_do_not_synthesize_auto_ligand_rows(backend: ViewerBackend):
     state = backend.get_state()
     state["polyhedron_specs"] = []
     state["topology_species_keys"] = ["NH4", "C6N2"]
     state["topology_hull_color"] = "#7C5CBF"
 
     effective = backend._effective_polyhedron_specs(state)
-    assert [spec["center_species"] for spec in effective] == ["NH4", "C6N2"]
-    # All synthesised entries share the legacy hull colour and have
-    # ``ligand_species=None`` (= auto perovskite-style derivation).
-    # Case-insensitive: legacy fallback never re-validates the hex string
-    # so whatever the UI / preset stored survives unchanged.
-    assert all(spec["color"].lower() == "#7c5cbf" for spec in effective)
-    assert all(spec["ligand_species"] is None for spec in effective)
+    assert effective == []
 
 
 def test_explicit_polyhedron_specs_override_legacy_fields(backend: ViewerBackend):

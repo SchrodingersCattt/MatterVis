@@ -50,7 +50,7 @@ DEFAULT_STYLE = {
     "axis_key_label_order": ["c", "b", "a"],  # top→bottom stacking order
     "axis_key_italic": True,
     "fast_rendering": False,
-    "topology_enabled": True,
+    "topology_enabled": False,
     "monochrome": False,
     "ortep_probability": 0.5,
     "ortep_mode": "ortep_axes",
@@ -150,6 +150,11 @@ LOCAL_CATALOG_FILENAMES = (
 DEFAULT_STRUCTURE_PRESETS = {
     "DAP-4": {
         "view_direction": [1.0, 0.0, 0.0],
+        "up": [0.0, 0.0, 1.0],
+        "show_hydrogen": False,
+    },
+    "SY": {
+        "view_direction": [1.0, 1.0, 1.0],
         "up": [0.0, 0.0, 1.0],
         "show_hydrogen": False,
     },

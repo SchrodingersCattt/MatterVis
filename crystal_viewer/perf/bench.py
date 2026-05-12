@@ -13,7 +13,6 @@ import numpy as np
 from crystal_viewer.loader import build_bundle_scene, build_loaded_crystal
 from crystal_viewer.renderer import _cached_atom_bond_meshes, style_from_controls
 from crystal_viewer.topology import (
-    _neighbor_pool,
     analyze_topology,
     classify_fragments,
     planarity_analysis,
@@ -52,10 +51,18 @@ def _first_topology_site(bundle) -> int:
     return int(fragments[0]["index"]) if fragments else 0
 
 
+def _first_ligand_formula(bundle) -> str | None:
+    for fragment in classify_fragments(bundle):
+        if fragment.get("type") == "X":
+            return fragment.get("formula") or fragment.get("species")
+    for fragment in classify_fragments(bundle):
+        if int(fragment["index"]) != _first_topology_site(bundle):
+            return fragment.get("formula") or fragment.get("species")
+    return None
+
+
 def _clear_bundle_perf_caches(bundle) -> None:
     for attr in (
-        "_neighbor_pool_cache",
-        "_shell_cache",
         "_analyze_topology_cache",
         "_topology_state_cache",
     ):
@@ -68,20 +75,6 @@ def _clear_scene_mesh_cache(scene: dict) -> None:
     cache = scene.get("_mesh_trace_cache")
     if isinstance(cache, dict):
         cache.clear()
-
-
-def bench_neighbor_pool(bundle, cutoff: float = 10.0, *, repeat: int = 5) -> dict[str, Any]:
-    fragments = classify_fragments(bundle)
-    center = fragments[_first_topology_site(bundle)]
-
-    def run():
-        _clear_bundle_perf_caches(bundle)
-        return _neighbor_pool(bundle, center, cutoff)
-
-    result = _time_call(run, repeat=repeat, warmup=0)
-    result["candidate_count"] = len(run())
-    result["center_index"] = int(center["index"])
-    return result
 
 
 def bench_planarity(*, repeat: int = 5) -> dict[str, Any]:
@@ -109,9 +102,16 @@ def bench_atom_mesh(scene: dict, style: dict, *, repeat: int = 3) -> dict[str, A
 
 
 def bench_topology_full(bundle, center_index: int, cutoff: float = 10.0, *, repeat: int = 3) -> dict[str, Any]:
+    ligand = _first_ligand_formula(bundle)
+
     def run():
         _clear_bundle_perf_caches(bundle)
-        return analyze_topology(bundle, center_index=center_index, cutoff=cutoff)
+        return analyze_topology(
+            bundle,
+            center_index=center_index,
+            cutoff=cutoff,
+            ligand_species=[ligand] if ligand else None,
+        )
 
     result = _time_call(run, repeat=repeat, warmup=0)
     payload = run()
@@ -136,7 +136,6 @@ def build_benchmark_payload(cif_path: Path, *, repeat: int = 3) -> dict[str, Any
         "fragment_count": len(classify_fragments(bundle)),
         "atom_count_unit_cell": len(scene.get("draw_atoms", [])),
         "benchmarks": {
-            "neighbor_pool": bench_neighbor_pool(bundle, repeat=repeat),
             "planarity": bench_planarity(repeat=repeat),
             "atom_mesh_unit_cell": bench_atom_mesh(scene, style, repeat=max(1, min(3, repeat))),
             "topology_full": bench_topology_full(bundle, center_index, repeat=max(1, min(3, repeat))),

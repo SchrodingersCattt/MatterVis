@@ -15,6 +15,7 @@ from typing import Any, Dict, Iterable, Optional
 
 import numpy as np
 import plotly.io as pio
+from molcrys_kit.utils.geometry import minimum_image_distance
 
 try:
     from dash import ALL, Dash, Input, Output, State, callback_context, dcc, html, no_update
@@ -80,6 +81,10 @@ def _minor_opacity_control_style(disorder: Optional[str]) -> dict[str, Any]:
     if _minor_opacity_disabled(disorder):
         style["opacity"] = 0.4
     return style
+
+
+def _polyhedra_controls_style(enabled: bool) -> dict[str, Any]:
+    return {} if enabled else {"display": "none"}
 
 
 def _status_class(level: str = "info") -> str:
@@ -155,9 +160,9 @@ def _normalize_polyhedron_spec(
         "id": spec_id,
         "name": name,
         "center_species": center,
-        # ``None`` keeps the legacy auto-derived ligand behaviour
-        # (``_neighbor_types`` / perovskite XYn). Explicit string locks
-        # the spec to that ligand species formula.
+        # ``None`` persists for API compatibility but is not rendered by the
+        # MCK molecule-level path; explicit strings lock the spec to that
+        # ligand species formula.
         "ligand_species": ligand,
         "color": color,
         "enabled": enabled,
@@ -633,29 +638,6 @@ def _normalize_transforms(raw_transforms: Any) -> list[dict[str, Any]]:
         if transform is not None:
             out.append(transform)
     return out
-
-
-def _normalize_search_supercell(value: Any) -> list[int]:
-    """Convert the ``polyhedron_search_supercell`` state value into a
-    canonical ``[na, nb, nc]`` triple.
-
-    Accepts an int (broadcast across axes), a 3-list, or ``None`` /
-    missing (returns ``[0, 0, 0]`` -- cutoff-driven span only).
-    """
-    if value is None:
-        return [0, 0, 0]
-    if isinstance(value, (int, float)):
-        v = max(0, int(value))
-        return [v, v, v]
-    if isinstance(value, (list, tuple)) and len(value) >= 3:
-        out: list[int] = []
-        for x in list(value)[:3]:
-            try:
-                out.append(max(0, int(x)))
-            except (TypeError, ValueError):
-                out.append(0)
-        return out
-    return [0, 0, 0]
 
 
 def _legacy_monochrome_group(existing_ids: set[str]) -> dict[str, Any]:
@@ -1916,9 +1898,9 @@ def _camera_payload(
 # Axis-aligned camera presets (VESTA-style "down a / b / c / a* / b* / c*")
 # ---------------------------------------------------------------------
 #
-# ``M`` carries the lattice vectors as columns (M[:, 0] = a, etc.).
-# Reciprocal vectors live in the rows of (M^-1) -- equivalently the
-# columns of (M^-T): a* = (M^-T)[:, 0], etc. ``camera_for_axis`` picks
+# ``M`` carries the lattice vectors as rows (M[0] = a, etc.).
+# Fractional coordinates are row vectors (cart = frac @ M), so reciprocal
+# vectors live in the columns of M^-1. ``camera_for_axis`` picks
 # a unit view direction along the requested axis, picks an "up"
 # reference axis from the remaining lattice vectors (real-space when
 # the request is real-space, reciprocal-space when reciprocal), and
@@ -1947,18 +1929,18 @@ def _normalize_axis_key(value: Any) -> Optional[str]:
 
 def _lattice_axes(M: np.ndarray) -> dict[str, np.ndarray]:
     """Return unit vectors for a, b, c, a*, b*, c* derived from
-    cartesian lattice matrix ``M`` (columns = a, b, c)."""
+    cartesian row-lattice matrix ``M`` (rows = a, b, c)."""
     M_arr = np.asarray(M, dtype=float)
     if M_arr.shape != (3, 3):
         raise ValueError(f"expected 3x3 lattice matrix, got shape {M_arr.shape}")
-    real_cols = [M_arr[:, i] for i in range(3)]
+    real_rows = [M_arr[i] for i in range(3)]
     try:
-        recip_T = np.linalg.inv(M_arr).T
+        recip = np.linalg.inv(M_arr)
     except np.linalg.LinAlgError as exc:
         raise ValueError("lattice matrix is singular; cannot build reciprocal axes") from exc
-    recip_cols = [recip_T[:, i] for i in range(3)]
+    recip_cols = [recip[:, i] for i in range(3)]
     out: dict[str, np.ndarray] = {}
-    for key, vec in zip(("a", "b", "c"), real_cols):
+    for key, vec in zip(("a", "b", "c"), real_rows):
         norm = float(np.linalg.norm(vec))
         out[key] = vec / norm if norm > 1e-12 else np.array([1.0, 0.0, 0.0])
     for key, vec in zip(("a*", "b*", "c*"), recip_cols):
@@ -2154,7 +2136,7 @@ class ViewerBackend:
             "display_mode": style.get("display_mode", scene.get("display_mode", "formula_unit")),
             "topology_species_keys": list(default_species),
             "topology_site_index": None,
-            "topology_enabled": bool(style.get("topology_enabled", True)),
+            "topology_enabled": False,
             "topology_hull_color": str(style.get("topology_hull_color", "#7C5CBF")),
             # ``polyhedron_specs`` is the new (Phase 1) per-scene named-row
             # data model: each entry is {id, name, center_species,
@@ -2186,13 +2168,6 @@ class ViewerBackend:
             # ``agents/transforms_api.md`` for the schema. Empty list =
             # no transform; ``apply_transforms`` short-circuits.
             "transforms": [],
-            # Phase 4: per-axis floor on the polyhedron neighbour search
-            # range, decoupled from the display supercell. ``[0,0,0]``
-            # means "use the cutoff-driven span only" (legacy behaviour).
-            # ``[1,1,1]`` extends the search by one cell on each side so
-            # polyhedra wrap to neighbouring images even without a
-            # display-side ``repeat`` transform.
-            "polyhedron_search_supercell": [0, 0, 0],
             "fast_rendering": bool(style.get("fast_rendering", False)),
             "camera": scene.get("camera"),
             # Phase 4: camera projection mode mirrored onto state so a
@@ -2583,10 +2558,6 @@ class ViewerBackend:
                 if normalized is not None:
                     existing.append(normalized)
             state["transforms"] = existing
-        if "polyhedron_search_supercell" in patch:
-            state["polyhedron_search_supercell"] = _normalize_search_supercell(
-                patch["polyhedron_search_supercell"]
-            )
         if "fast_rendering" in patch:
             state["fast_rendering"] = bool(patch["fast_rendering"])
         # ---- legacy migration: monochrome=True --> atom_group rule ----
@@ -2609,6 +2580,16 @@ class ViewerBackend:
                 state["atom_groups"] = existing_groups + [migrated]
         if "camera" in patch and patch["camera"] is not None:
             state["camera"] = patch["camera"]
+        # ``camera_revision`` is the uirevision-bump counter written by
+        # ``camera_action`` / ``align_camera``. ``normalize_state``
+        # whitelists keys, so without an explicit pass-through the
+        # bump silently drops on the floor and Plotly keeps clamping
+        # the figure to whatever rotation the user drag-saved last.
+        if "camera_revision" in patch and patch["camera_revision"] is not None:
+            try:
+                state["camera_revision"] = int(patch["camera_revision"])
+            except (TypeError, ValueError):
+                pass
         # Phase 4 (view tools): top-level ``projection`` is a v2 state
         # key that mirrors ``camera.projection.type``. Accept either
         # spelling so AI callers don't have to dig into the camera
@@ -2724,7 +2705,7 @@ class ViewerBackend:
         style["disorder"] = state.get("disorder", style.get("disorder", "outline_rings"))
         style["ortep_mode"] = state.get("ortep_mode", style.get("ortep_mode", "ortep_axes"))
         style["fast_rendering"] = bool(state.get("fast_rendering", False)) or style["material"] == "flat"
-        style["topology_enabled"] = bool(state.get("topology_enabled", True))
+        style["topology_enabled"] = bool(state.get("topology_enabled", False))
         style["topology_hull_color"] = str(state.get("topology_hull_color", "#7C5CBF"))
         # Phase 2: per-scene atom-group rules ride along on the style
         # dict so the renderer dispatcher can partition draw_atoms by
@@ -2748,6 +2729,20 @@ class ViewerBackend:
         style["projection"] = _coerce_projection(
             state.get("projection", style.get("projection", "perspective")),
             fallback=str(style.get("projection", "perspective")),
+        )
+        # Plotly's ``layout.scene.uirevision`` makes the WebGL camera
+        # state persist across redraws -- reusing the same revision
+        # means a mouse-drag rotation survives a Labels toggle. The
+        # flip side: when the user clicks Reset / down-a / down-b /
+        # ... the layout's new camera is silently ignored unless the
+        # revision changes. ``camera_revision`` (bumped by
+        # ``camera_action`` and ``align_camera``) gives the renderer
+        # exactly that signal: Reset triggers a fresh revision so
+        # Plotly accepts the new camera, while pan/orbit updates that
+        # flow through ``patch_state`` directly leave it untouched.
+        style["uirevision"] = "{name}__{rev}".format(
+            name=scene.get("name", "scene"),
+            rev=int(state.get("camera_revision", 0) or 0),
         )
         return style
 
@@ -2861,13 +2856,29 @@ class ViewerBackend:
         return next((fragment for fragment in scene.get("fragment_table", []) if int(fragment["index"]) == int(display_index)), None)
 
     def _pbc_distance(self, bundle: LoadedCrystal, frac_a, frac_b) -> float:
-        delta = np.array(frac_b, dtype=float) - np.array(frac_a, dtype=float)
-        delta -= np.round(delta)
-        return float(np.linalg.norm(np.array(bundle.M, dtype=float) @ delta))
+        return float(
+            minimum_image_distance(
+                np.array(frac_b, dtype=float),
+                np.array(frac_a, dtype=float),
+                np.array(bundle.M, dtype=float),
+            )
+        )
 
     def map_display_fragment_to_topology(self, bundle: LoadedCrystal, display_fragment: dict | None) -> Optional[dict[str, Any]]:
         if display_fragment is None:
             return None
+        source_molecule_index = display_fragment.get("source_molecule_index")
+        if source_molecule_index is not None:
+            matched = next(
+                (
+                    fragment
+                    for fragment in bundle.topology_fragment_table
+                    if fragment.get("source_molecule_index") == source_molecule_index
+                ),
+                None,
+            )
+            if matched is not None:
+                return matched
         # Prefer matching by stoichiometric formula (the species-checkbox
         # identity); fall back to A/B/X type for older payloads where the
         # formula field hasn't been populated yet.
@@ -3420,32 +3431,19 @@ class ViewerBackend:
     # ---- topology computation -----------------------------------------
 
     def _effective_polyhedron_specs(self, state: dict[str, Any]) -> list[dict[str, Any]]:
-        """Resolve the per-render list of specs from explicit
-        ``polyhedron_specs`` if present, otherwise synthesise one entry
-        per legacy ``topology_species_keys`` value (auto ligand, shared
-        ``topology_hull_color``)."""
+        """Resolve the per-render list of explicit named polyhedron specs.
+
+        MatterVis no longer synthesises auto-ligand specs from
+        ``topology_species_keys``; molecule-level packing shells are delegated
+        to MolCrysKit and require explicit centre/ligand formulas.
+        """
         explicit = list(state.get("polyhedron_specs") or [])
         if explicit:
             return [dict(spec) for spec in explicit if spec.get("enabled", True)]
-        species_keys = list(state.get("topology_species_keys") or [])
-        if not species_keys:
-            return []
-        color = str(state.get("topology_hull_color", "#7C5CBF"))
-        return [
-            {
-                "id": f"legacy_{index}",
-                "name": str(key),
-                "center_species": str(key),
-                "ligand_species": None,
-                "color": color,
-                "enabled": True,
-                "instance_overrides": {},
-            }
-            for index, key in enumerate(species_keys)
-        ]
+        return []
 
     def topology_for_state(self, state: dict[str, Any], click_data: Optional[dict[str, Any]] = None):
-        if not state.get("topology_enabled", True):
+        if not state.get("topology_enabled", False):
             return None
         structure = state["structure"]
         bundle = self.get_bundle(structure)
@@ -3485,17 +3483,13 @@ class ViewerBackend:
             )
             for spec in effective_specs
         )
-        # Phase 4: ``transforms`` change which fragments exist, and
-        # ``polyhedron_search_supercell`` changes how far the neighbour
-        # search reaches. Both must be in the geometry cache key,
-        # otherwise switching transforms or extending the search range
-        # silently shows stale polyhedra. Per-spec colours and
+        # Phase 4: ``transforms`` change which fragments exist and must be
+        # in the geometry cache key. Per-spec colours and
         # ``instance_overrides`` stay OUT of the key (they only affect
         # the renderer's painter cache; see ``_attach_spec_colors``).
         from .transforms import transforms_cache_key
 
         transforms_key = transforms_cache_key(state.get("transforms") or [])
-        search_supercell = tuple(state.get("polyhedron_search_supercell") or (0, 0, 0))
         cache_key = (
             structure,
             state.get("display_mode"),
@@ -3504,7 +3498,6 @@ class ViewerBackend:
             cutoff,
             spec_geometry_key,
             transforms_key,
-            search_supercell,
         )
         cache = getattr(bundle, "_topology_state_cache", None)
         if cache is None:
@@ -3518,7 +3511,6 @@ class ViewerBackend:
                 effective_specs=effective_specs,
                 site_index=site_index,
                 cutoff=cutoff,
-                search_supercell=search_supercell,
             )
             cache[cache_key] = cached_geometry
         if cached_geometry is None:
@@ -3536,7 +3528,6 @@ class ViewerBackend:
         effective_specs: list[dict[str, Any]],
         site_index: int,
         cutoff: float,
-        search_supercell: tuple[int, int, int] = (0, 0, 0),
     ) -> Optional[dict[str, Any]]:
         display_fragment = self._display_fragment(scene, site_index)
         topology_fragment = self.map_display_fragment_to_topology(bundle, display_fragment)
@@ -3576,7 +3567,6 @@ class ViewerBackend:
             display_label=display_fragment.get("label") if display_fragment else None,
             display_type=display_fragment.get("type") if display_fragment else None,
             ligand_species=[analysis_ligand] if analysis_ligand else None,
-            search_supercell=search_supercell,
         )
 
         # Build per-spec overlay lists. For each fragment whose formula
@@ -3611,6 +3601,7 @@ class ViewerBackend:
                             "center_label": primary.get("center_label"),
                             "shell_coords": primary["shell_coords"],
                             "distances": primary["distances"],
+                            "hull": primary.get("hull"),
                             "is_analysis_anchor": True,
                         }
                     )
@@ -3627,7 +3618,6 @@ class ViewerBackend:
                         display_label=frag.get("label"),
                         display_type=frag.get("type"),
                         ligand_species=ligand_arg,
-                        search_supercell=search_supercell,
                     )
                 except Exception:
                     continue
@@ -3640,6 +3630,7 @@ class ViewerBackend:
                     "center_label": extra.get("center_label"),
                     "shell_coords": extra.get("shell_coords"),
                     "distances": extra.get("distances"),
+                    "hull": extra.get("hull"),
                     "is_analysis_anchor": False,
                 }
                 overlays.append(overlay)
@@ -3649,6 +3640,7 @@ class ViewerBackend:
                         "center_label": overlay["center_label"],
                         "shell_coords": overlay["shell_coords"],
                         "distances": overlay["distances"],
+                        "hull": overlay.get("hull"),
                     }
                 )
             spec_results.append(
@@ -3763,9 +3755,11 @@ class ViewerBackend:
 
     def camera_action(self, action: str, scene_id: Optional[str] = None, **payload) -> dict[str, Any]:
         if action == "reset":
+            self._bump_camera_revision(scene_id=scene_id)
             return self.set_camera(self.default_camera(self.get_state(scene_id)), scene_id=scene_id)
 
         if action == "align":
+            self._bump_camera_revision(scene_id=scene_id)
             return self.align_camera(payload.get("axis"), scene_id=scene_id)
 
         if action in ("projection", "set_projection"):
@@ -3858,6 +3852,22 @@ class ViewerBackend:
         camera = dict(self.get_camera(scene_id))
         camera["projection"] = {"type": normalized}
         return self.set_camera(camera, scene_id=scene_id)
+
+    def _bump_camera_revision(self, scene_id: Optional[str] = None) -> int:
+        """Increment ``state['camera_revision']`` so the next figure
+        rebuild gets a fresh ``layout.scene.uirevision`` and Plotly
+        accepts the layout-supplied camera instead of preserving the
+        user's last mouse-drag rotation.
+
+        Mouse-drag updates flow through ``patch_state`` directly (not
+        through ``camera_action``) so they intentionally do NOT bump
+        the revision -- preserving Plotly's drag continuity across
+        non-camera UI toggles like Labels/Hydrogens.
+        """
+        state = self.get_state(scene_id)
+        current = int(state.get("camera_revision", 0) or 0)
+        self.patch_state({"camera_revision": current + 1}, scene_id=scene_id)
+        return current + 1
 
     def _safe_preset_path(self, path: Optional[str]) -> Optional[str]:
         """Resolve ``path`` against ``<root>/.local`` and reject anything
@@ -4387,84 +4397,49 @@ def create_app(
                     dcc.Checklist(
                         id="topology-toggle",
                         options=[{"label": "Show polyhedra overlay", "value": "enabled"}],
-                        value=["enabled"] if first_state.get("topology_enabled", True) else [],
+                        value=["enabled"] if first_state.get("topology_enabled", False) else [],
                     ),
-                    html.Div(
-                        "Each row defines one polyhedron: centre species + optional ligand "
-                        "restriction + colour. The overlay tiles every matching site in the "
-                        "structure. Add a row to start.",
-                        style={"fontSize": "11px", "color": "#777", "marginTop": "4px"},
-                    ),
-                    # ---- Named polyhedra table ----
                     html.Div(
                         [
-                            html.H4(
-                                "Named polyhedra",
-                                style={"display": "inline-block", "marginRight": "8px"},
+                            html.Div(
+                                "Each row defines one MolCrysKit molecule-level packing polyhedron: "
+                                "centre species + explicit ligand species + colour. The overlay "
+                                "tiles every matching site in the structure.",
+                                style={"fontSize": "11px", "color": "#777", "marginTop": "4px"},
                             ),
-                            html.Button(
-                                "+ Add",
-                                id="polyhedra-add-btn",
-                                n_clicks=0,
-                                style={
-                                    "fontSize": "12px",
-                                    "padding": "2px 8px",
-                                    "verticalAlign": "middle",
-                                    "cursor": "pointer",
-                                },
-                                title="Add a named polyhedron row (centre + optional ligand restriction + colour).",
+                            # ---- Named polyhedra table ----
+                            html.Div(
+                                [
+                                    html.H4(
+                                        "Named polyhedra",
+                                        style={"display": "inline-block", "marginRight": "8px"},
+                                    ),
+                                    html.Button(
+                                        "+ Add",
+                                        id="polyhedra-add-btn",
+                                        n_clicks=0,
+                                        style={
+                                            "fontSize": "12px",
+                                            "padding": "2px 8px",
+                                            "verticalAlign": "middle",
+                                            "cursor": "pointer",
+                                        },
+                                        title="Add a named polyhedron row (centre + explicit ligand restriction + colour).",
+                                    ),
+                                ],
+                                style={"display": "flex", "alignItems": "center", "marginTop": "8px"},
+                            ),
+                            html.Div(
+                                id="polyhedra-rows-container",
+                                children=_polyhedra_table_rows(
+                                    first_state.get("polyhedron_specs") or [],
+                                    backend.species_options(first_state["structure"]),
+                                ),
+                                style={"marginTop": "6px"},
                             ),
                         ],
-                        style={"display": "flex", "alignItems": "center", "marginTop": "8px"},
-                    ),
-                    html.Div(
-                        id="polyhedra-rows-container",
-                        children=_polyhedra_table_rows(
-                            first_state.get("polyhedron_specs") or [],
-                            backend.species_options(first_state["structure"]),
-                        ),
-                        style={"marginTop": "6px"},
-                    ),
-                    # ---- Phase 4: polyhedron neighbour-search supercell ----
-                    html.Div(
-                        [
-                            html.Span(
-                                "Search radius (cells):",
-                                style={"fontSize": "11px", "color": "#666", "marginRight": "6px"},
-                            ),
-                            *[
-                                comp
-                                for axis_index, axis in enumerate(("a", "b", "c"))
-                                for comp in (
-                                    html.Span(
-                                        axis,
-                                        style={"fontSize": "11px", "color": "#666", "margin": "0 2px 0 4px"},
-                                    ),
-                                    dcc.Input(
-                                        id={"type": "polyhedron-search-supercell", "axis": axis},
-                                        type="number",
-                                        min=0,
-                                        step=1,
-                                        value=int((first_state.get("polyhedron_search_supercell") or [0, 0, 0])[axis_index]),
-                                        style={"width": "44px", "fontSize": "12px"},
-                                        debounce=True,
-                                    ),
-                                )
-                            ],
-                            html.Span(
-                                "0 = cutoff-driven (default). Higher pulls in further images so polyhedra wrap across cells.",
-                                style={"fontSize": "10px", "color": "#999", "marginLeft": "8px"},
-                            ),
-                        ],
-                        style={
-                            "display": "flex",
-                            "alignItems": "center",
-                            "flexWrap": "wrap",
-                            "marginTop": "6px",
-                            "padding": "4px",
-                            "background": "#FAFAFA",
-                            "borderRadius": "3px",
-                        },
+                        id="polyhedra-controls",
+                        style=_polyhedra_controls_style(first_state.get("topology_enabled", False)),
                     ),
                     html.Hr(),
                     # ---- Phase 3: Atom groups table ----
@@ -4824,7 +4799,7 @@ def create_app(
             state.get("ortep_mode", "ortep_axes"),
             state["axis_scale"],
             state["topology_site_index"],
-            ["enabled"] if state.get("topology_enabled", True) else [],
+            ["enabled"] if state.get("topology_enabled", False) else [],
             state,
             _camera_store_payload(scene_id, state.get("camera")),
         )
@@ -5160,6 +5135,8 @@ def create_app(
             return no_update
         if scene_id:
             backend.set_active_scene(scene_id, broadcast=False)
+        prev = backend.get_state(scene_id)
+        display_changed = display_mode != prev.get("display_mode")
         patch: dict[str, Any] = {
             "scene_id": scene_id,
             "display_mode": display_mode,
@@ -5172,7 +5149,7 @@ def create_app(
             "disorder": disorder or "outline_rings",
             "ortep_mode": ortep_mode or "ortep_axes",
             "axis_scale": axis_scale,
-            "topology_site_index": None if site_index in ("", None) else int(site_index),
+            "topology_site_index": None if display_changed or site_index in ("", None) else int(site_index),
             "topology_enabled": "enabled" in (topology_toggle or []),
             "fast_rendering": material == "flat",
         }
@@ -5182,7 +5159,6 @@ def create_app(
         # -> refresh_fragment_options -> topology-site-index.value ->
         # capture_state -> agent-state-store`` would otherwise double up
         # every figure render, doubling the 1.4 MB-per-frame cost.
-        prev = backend.get_state(scene_id)
         if all(prev.get(k) == v for k, v in patch.items() if k != "scene_id"):
             return no_update
         backend.record_state(patch)
@@ -5266,9 +5242,15 @@ def create_app(
         if triggered == "polyhedra-add-btn":
             if not species_options:
                 return _rebuild(), no_update
+            center_species = str(species_options[0]["value"])
+            ligand_species = next(
+                (str(option["value"]) for option in species_options if str(option["value"]) != center_species),
+                None,
+            )
             try:
                 backend.add_polyhedron_spec(
-                    center_species=str(species_options[0]["value"]),
+                    center_species=center_species,
+                    ligand_species=ligand_species,
                     enabled=True,
                     scene_id=scene_id,
                 )
@@ -5844,47 +5826,6 @@ def create_app(
         return no_update, no_update
 
     # ------------------------------------------------------------------
-    # Phase 4 UI: polyhedron neighbour-search supercell.
-    #
-    # Three small ``polyhedron-search-supercell.{a,b,c}`` inputs that
-    # write back into ``state["polyhedron_search_supercell"]``. The
-    # geometry cache key on the renderer side includes this triple, so
-    # changing it reliably re-runs polyhedron analysis with the new
-    # neighbour-image span.
-    # ------------------------------------------------------------------
-    @app.callback(
-        Output("agent-state-store", "data", allow_duplicate=True),
-        Input({"type": "polyhedron-search-supercell", "axis": ALL}, "value"),
-        State({"type": "polyhedron-search-supercell", "axis": ALL}, "id"),
-        State("scene-tabs", "value"),
-        prevent_initial_call=True,
-    )
-    def update_polyhedron_search_supercell(values, ids, active_scene_id):
-        scene_id = active_scene_id or backend.active_scene_id()
-        triple = [0, 0, 0]
-        for idx_dict, value in zip(ids or [], values or []):
-            axis = idx_dict.get("axis")
-            try:
-                v = max(0, int(value or 0))
-            except (TypeError, ValueError):
-                v = 0
-            if axis == "a":
-                triple[0] = v
-            elif axis == "b":
-                triple[1] = v
-            elif axis == "c":
-                triple[2] = v
-        try:
-            backend.patch_state(
-                {"polyhedron_search_supercell": triple},
-                scene_id=scene_id,
-                broadcast=False,
-            )
-        except Exception:
-            return no_update
-        return backend.get_state()
-
-    # ------------------------------------------------------------------
     # Phase 4 UI: right-click context menu + keyboard shortcuts.
     #
     # Wiring overview:
@@ -6322,6 +6263,13 @@ def create_app(
     )
     def gate_minor_opacity(disorder):
         return _minor_opacity_disabled(disorder), _minor_opacity_control_style(disorder)
+
+    @app.callback(
+        Output("polyhedra-controls", "style"),
+        Input("topology-toggle", "value"),
+    )
+    def gate_polyhedra_controls(topology_toggle):
+        return _polyhedra_controls_style("enabled" in (topology_toggle or []))
 
     # ------------------------------------------------------------------
     # Perf-log panel

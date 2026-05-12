@@ -77,7 +77,7 @@ def test_camera_for_axis_oblique_cell_keeps_up_perpendicular():
         assert abs(np.dot(view_dir, up)) < 1e-9, axis
 
 
-def test_camera_for_axis_reciprocal_uses_inverse_transpose():
+def test_camera_for_axis_reciprocal_uses_inverse_columns():
     # Build a non-trivial cell so a* != a / |a|^2 trivially.
     M = np.array(
         [
@@ -89,7 +89,7 @@ def test_camera_for_axis_reciprocal_uses_inverse_transpose():
     cam = camera_for_axis(M, "a*", eye_distance=1.0)
     eye = np.array([cam["eye"][k] for k in "xyz"])
 
-    expected_dir = np.linalg.inv(M).T[:, 0]
+    expected_dir = np.linalg.inv(M)[:, 0]
     expected_dir /= np.linalg.norm(expected_dir)
     assert np.allclose(eye, expected_dir, atol=1e-8)
 

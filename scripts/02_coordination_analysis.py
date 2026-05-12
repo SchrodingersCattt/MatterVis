@@ -135,7 +135,17 @@ def main() -> None:
     print(f"Center fragment: {target['label']} ({target['species']}, "
           f"index={target['index']}, heavy_atoms={target['heavy_atom_count']})")
 
-    topology = analyze_topology(bundle, center_index=target["index"], cutoff=8.0)
+    # MCK PR #32 made the molecule-level packing-shell API explicit-only:
+    # callers must name the ligand species (no auto-derivation from
+    # neighbour pool). DAP-4's A-site is the diaminopropane (DAP^2+)
+    # cation surrounded by ClO4 anions; cutoff=8 here is the search
+    # radius, the gap+enclosure heuristic then selects the natural shell.
+    topology = analyze_topology(
+        bundle,
+        center_index=target["index"],
+        cutoff=8.0,
+        ligand_species=["ClO4"],
+    )
     print_scores(topology)
 
     style = scene_style(

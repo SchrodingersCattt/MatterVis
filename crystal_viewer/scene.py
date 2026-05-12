@@ -5,6 +5,7 @@ import os
 from typing import Any, Dict, Optional
 
 import numpy as np
+from molcrys_kit.utils.geometry import frac_to_cart
 
 from .presets import DEFAULT_STYLE, deep_merge, default_preset, json_safe
 
@@ -152,8 +153,9 @@ def _continuous_components(ops: Any, atoms, M, cell):
     bond_pairs = ops.find_bonds(atoms_out, cell=cell)
     clusters = pc.cluster_atoms(atoms_out, bonds=bond_pairs)
     ordered = [sorted(idxs) for _, idxs in sorted(clusters.items(), key=lambda item: min(item[1]))]
+    legacy_M = np.asarray(M, dtype=float).T
     for idxs in ordered:
-        atoms_out = pc.assemble_component_p1(atoms_out, idxs, bond_pairs, M)
+        atoms_out = pc.assemble_component_p1(atoms_out, idxs, bond_pairs, legacy_M)
     return atoms_out, ordered
 
 
@@ -178,7 +180,7 @@ def _best_component_shift_frac(component_atoms) -> np.ndarray:
 
 def _translate_component_frac(atoms, idxs, shift_frac, M):
     shift_frac = np.array(shift_frac, dtype=float)
-    shift_cart = M @ shift_frac
+    shift_cart = frac_to_cart(shift_frac, np.asarray(M, dtype=float))
     translated = [dict(atom) for atom in atoms]
     for idx in idxs:
         translated[idx]["frac"] = np.array(translated[idx]["frac"], dtype=float) + shift_frac
@@ -282,7 +284,7 @@ def _expand_boundary_replicas(atoms: list[dict[str, Any]], M: Any) -> list[dict[
             replica = dict(atom)
             shift_arr = np.array(shift, dtype=float)
             replica["frac"] = frac_arr + shift_arr
-            replica["cart"] = np.asarray(atom.get("cart"), dtype=float) + (M_arr @ shift_arr)
+            replica["cart"] = np.asarray(atom.get("cart"), dtype=float) + frac_to_cart(shift_arr, M_arr)
             replica["_image_shift"] = shift
             replica["_origin_label"] = atom.get("_origin_label", atom.get("label"))
             replica["_is_boundary_replica"] = True
@@ -404,7 +406,7 @@ def build_scene_from_atoms(
     # components, matching ``view_x``/``view_y``.
     M_arr = np.asarray(M, dtype=float)
     projected_axes = [
-        (float(M_arr[:, i] @ view_x), float(M_arr[:, i] @ view_y))
+        (float(M_arr[i] @ view_x), float(M_arr[i] @ view_y))
         for i in range(3)
     ]
     axis_labels = list(style.get("axes_labels") or ["a", "b", "c"])[:3]
@@ -454,8 +456,9 @@ def build_scene_from_cif(
 ) -> Dict[str, Any]:
     ops = scene_ops() if ops is None else ops
     preset = default_preset() if preset is None else preset
-    atoms, cell, M = ops.parse_asu(cif_path)
-    view_dir, up = legacy_scene._resolve_view(ops, name, atoms, M, cell, preset)
+    atoms, cell, legacy_M = ops.parse_asu(cif_path)
+    M = np.asarray(legacy_M, dtype=float).T
+    view_dir, up = legacy_scene._resolve_view(ops, name, atoms, legacy_M, cell, preset)
     R = ops.view_rotation(view_dir, up)
     formula_unit_atoms = None
     if display_mode == "formula_unit":

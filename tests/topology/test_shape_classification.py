@@ -95,7 +95,12 @@ def test_analyze_topology_returns_shape_key_for_dap4_a_site():
     target = next(
         f for f in bundle.topology_fragment_table if f.get("formula") == "C6N2"
     )
-    result = analyze_topology(bundle, center_index=target["index"], cutoff=8.0)
+    result = analyze_topology(
+        bundle,
+        center_index=target["index"],
+        cutoff=8.0,
+        ligand_species=["ClO4"],
+    )
 
     # Modern key is set and structured.
     assert "shape" in result
@@ -113,12 +118,43 @@ def test_analyze_topology_returns_shape_key_for_dap4_a_site():
     # Deprecated key is gone.
     assert "angular" not in result
 
-    # DAP-4 A-site is CN ~ 9, so the registry must have produced a label.
-    assert result["coordination_number"] >= 4
+    # MCK PR #32 split the molecule-level radial knobs: ``cutoff`` is now
+    # the candidate search radius (feeding gap+enclosure), not a hard
+    # "fill the ball" cap. For the DAP^2+ A-site at search_cutoff=8 Å
+    # the natural enclosing shell is the CN=9 capped-square-antiprism
+    # of nearest ClO4 anions (~5.0--5.1 Å); the conventional CN=12
+    # cuboctahedron is the *extended* perovskite A--X12 cage that lives
+    # past the natural gap and is only reachable via the explicit
+    # ``hard_cutoff`` opt-in (which MV intentionally does not expose
+    # through ``analyze_topology`` -- the analysis card always shows
+    # the natural-shell answer).
+    assert result["coordination_number"] == 9
     assert shape["primary_label"] is not None
     assert shape["label_modifier"] in {"clean", "distorted", "ambiguous", "irregular"}
     assert isinstance(shape["candidates"], list) and len(shape["candidates"]) >= 1
     assert shape["best_match"]["name"] == shape["candidates"][0]["name"]
+
+
+@pytest.mark.skipif(not DAP4_CIF.exists(), reason="DAP-4 CIF not available")
+def test_analyze_topology_uses_mck_molecule_level_nh4_octahedra():
+    bundle = build_loaded_crystal(name="DAP-4", cif_path=str(DAP4_CIF), title="DAP-4")
+    nh4_fragments = [
+        f for f in bundle.topology_fragment_table if f.get("formula") == "N"
+    ]
+
+    results = [
+        analyze_topology(
+            bundle,
+            center_index=fragment["index"],
+            cutoff=5.0,
+            ligand_species=["ClO4"],
+        )
+        for fragment in nh4_fragments
+    ]
+
+    octahedral = [result for result in results if result["coordination_number"] == 6]
+    assert len(octahedral) >= 4
+    assert any(result["shape"]["best_match"]["name"] == "octahedron" for result in octahedral)
 
 
 @pytest.mark.skipif(not DAP4_CIF.exists(), reason="DAP-4 CIF not available")
@@ -141,9 +177,9 @@ def test_analyze_topology_caches_shape_classification(monkeypatch):
 
     monkeypatch.setattr(topology_module, "_classify_shell_payload", counting_classify)
 
-    analyze_topology(bundle, center_index=target["index"], cutoff=8.0)
+    analyze_topology(bundle, center_index=target["index"], cutoff=8.0, ligand_species=["ClO4"])
     first = call_count["n"]
-    analyze_topology(bundle, center_index=target["index"], cutoff=8.0)
+    analyze_topology(bundle, center_index=target["index"], cutoff=8.0, ligand_species=["ClO4"])
     second = call_count["n"]
 
     assert first == 1, "classify_shell must run on first analysis call"

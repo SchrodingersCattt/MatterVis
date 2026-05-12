@@ -555,7 +555,6 @@ def register_api(dash_app, backend) -> None:
         "bond_groups": "/api/v2/bond_groups",
         "transforms": "/api/v2/transforms",
         "supercell": "/api/v2/transforms (POST kind=repeat)",
-        "polyhedron_search_supercell": "/api/v2/state",
     }
 
     @v1.post("/state")

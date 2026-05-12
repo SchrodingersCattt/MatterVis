@@ -13,7 +13,6 @@ DO NOT REMOVE -- this guards the contract documented in
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from crystal_viewer.transforms import (
     KNOWN_TRANSFORM_KINDS,
@@ -327,24 +326,6 @@ def test_complete_fragment_caps_halo_radius():
     # but the broadcast dominates and used to take >>1 s.
     assert elapsed < 1.0, f"complete_fragment took {elapsed:.3f}s; halo cap likely regressed"
     assert isinstance(out, list)
-
-
-# ---- topology search_supercell ----------------------------------------
-#
-# ``analyze_topology`` accepts ``search_supercell`` to extend the
-# neighbour-image span without changing the display supercell.
-
-
-def test_search_supercell_normaliser():
-    from crystal_viewer.topology import _normalize_search_supercell
-
-    assert _normalize_search_supercell(None) == (0, 0, 0)
-    assert _normalize_search_supercell(2) == (2, 2, 2)
-    assert _normalize_search_supercell([1, 0, 2]) == (1, 0, 2)
-    assert _normalize_search_supercell((1,)) == (1, 1, 1)
-    assert _normalize_search_supercell(-1) == (0, 0, 0)
-    with pytest.raises(ValueError):
-        _normalize_search_supercell([1, 2])  # 2-element list is ambiguous
 
 
 # ---- backend supercell shorthand --------------------------------------

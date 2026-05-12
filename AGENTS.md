@@ -95,12 +95,25 @@ Concrete rules:
   `molcrys_kit.analysis.packing_shell` and
   `molcrys_kit.analysis.shape`.** `find_polyhedra` already knows how
   to do gap+enclosure detection, how to expand the search to
-  enclose the centre, and how to handle both tight covalent shells
-  (e.g. ClO₄ tetrahedra) *and* broader packing shells (e.g.
-  cuboctahedra around organic cations) from the same call. Do
-  **not** wrap it with hard-coded covalent cutoffs to "force" one
-  interpretation; that disables the very feature that makes it
-  useful.
+  enclose the centre, and how to handle both atom-level shells
+  (`level="atom"`) and molecule-centroid packing shells
+  (`level="molecule"`). MatterVis named polyhedra must call that API
+  rather than maintaining a local fragment-neighbour implementation.
+  Do **not** wrap it with hard-coded covalent cutoffs to "force" one
+  interpretation; that disables the very feature that makes it useful.
+  - **Mind the per-level radial knob semantics (MCK PR #32).** On
+    `level="molecule"` the kwarg `cutoff=` is the *candidate search
+    radius* feeding gap+enclosure — passing MV's state `cutoff` there
+    is correct (search wider, get the natural first shell). The
+    "fill the ball" historical behaviour is opt-in via `hard_cutoff=`
+    and MV intentionally does **not** plumb it through
+    `polyhedron_specs`. The early `cutoff=10` → CN=37 surprise on the
+    SY perchlorate (en) cation came from before this split, when MV
+    was unintentionally invoking the hard-cap mode. On
+    `level="atom"`, by contrast, `cutoff=` *is* the historical hard
+    cap and `hard_cutoff=` is rejected — see
+    `agents/polyhedron_api.md` for the full table of record fields
+    (`search_cutoff`, `hard_cutoff`, `mode`, …).
 - **Shape classification is `shape.classify_shell`, not
   `packing_shell.angular_rmsd_vs_ideals`.** The angular helper is
   deprecated. It compares sorted angle signatures and, when run with
@@ -151,27 +164,21 @@ generate_ordered_replicas_from_disordered_sites`.** Two patterns
 - **Pymatgen rejects `?` in numeric CIF columns.** SHELX-derived
   CIFs occasionally write `?` in `_atom_site_attached_hydrogens` to
   mean "no attached hydrogens"; pymatgen's `str2float` raises and
-  `generate_ordered_replicas_from_disordered_sites` crashes.
-  `_sanitize_cif_for_pymatgen` writes a temp copy with `?` -> `0` in
-  that one column only. The original CIF is never touched, and the
-  temp file is removed in a `finally` block so we never leak temp
-  files when the resolver fails.
-- **Match optimal-replica positions to raw atoms with PBC + 1:1
-  greedy assignment.** MolCrysKit's optimal replica returns
-  *unwrapped* Cartesian positions (molecules contiguous across cell
-  faces) but `parse_asu` wraps every atom inside the unit cell. Use
-  the minimum-image convention on the difference vector before
-  thresholding. Greedy nearest-pair assignment over disorder atoms
-  (each optimal slot claims at most one raw atom, each raw atom is
-  claimed at most once) is required — without it SY's two raw N
-  atoms 0.15 A apart both match the same optimal N within the
-  threshold, both get tagged major, and the bond graph re-fuses the
-  ethylenediamines.
-- **`_components_with_indices` must skip atoms tagged minor.** The
-  bond graph in `molcrys_bridge.analyze` is fed
-  `exclude_indices=_minor_index_set(raw_atoms)`. Without that, the
-  ASE neighbour-list bonds a kept N to a discarded N at 0.15 A and
-  fuses two cations into one species again.
+  `generate_ordered_replicas_from_disordered_sites` crashes. This
+  sanitisation now lives upstream in `molcrys_kit.io.cif`; do not add
+  a MatterVis-local temp-file rewrite.
+- **Disorder selection comes from MolCrysKit kept indices, not local
+  atom matching.** Call
+  `generate_ordered_replicas_from_disordered_sites(...,
+  return_kept_indices=True)` and mirror the returned source-site
+  indices onto `_is_minor`. Do not resurrect MatterVis' old
+  Cartesian/PBC greedy matcher; it existed only because MolCrysKit did
+  not yet expose solver provenance.
+- **Minor atoms are excluded through MolCrysKit's molecule finder.**
+  The bond graph in `molcrys_bridge.analyze` is fed
+  `identify_molecules(..., exclude_indices=_minor_index_set(raw_atoms))`.
+  Without that, the ASE neighbour-list bonds a kept N to a discarded N
+  at 0.15 A and fuses two cations into one species again.
 - **Cross-orientation bonds must be filtered at scene build time.**
   The legacy `find_bonds` in `crystal_viewer/legacy/plot_crystal.py`
   doesn't know about `_is_minor` and would draw bonds between major
@@ -181,7 +188,8 @@ generate_ordered_replicas_from_disordered_sites`.** Two patterns
   major atoms render normally; bonds between two minor atoms render
   faded (so the discarded orientation still draws as a contiguous
   shape, just translucent).
-- **Slab generation is `molcrys_kit.transforms.generate_topological_slab`.**
+- **Slab generation is
+  `molcrys_kit.operations.surface.generate_topological_slab`.**
   `crystal_viewer/transforms.py` is a thin Dash adapter; if a slab
   parameter is missing here, add it as a passthrough kwarg, don't
   duplicate the math.
@@ -191,6 +199,35 @@ generate_ordered_replicas_from_disordered_sites`.** Two patterns
   `topology.faces` / `topology.edges`; strip those before
   surfacing the dict to callers (see `_sanitize_shape_payload` in
   `crystal_viewer/topology.py`).
+
+### MatterVis-only code that is intentionally not upstream chemistry
+
+These paths can look like duplicate chemistry at first glance. Do not
+delete them in favour of a `molcrys_kit` call unless the upstream API
+has grown the exact hook named here.
+
+- `scene.py` still runs `ops.find_bonds(draw_atoms, ...)` after
+  display-mode filtering. `CrystalAnalysis.bond_pairs` is the
+  unit-cell chemistry graph; `draw_atoms` may be a formula-unit slice,
+  an asymmetric-unit slice, explicit boundary replicas, or a
+  transformed cluster. The renderer needs bonds for the manifested
+  display atoms, not the original raw atom list.
+- `transforms.py` grow / complete-fragment / repeat operations work on
+  manifested Cartesian scene atoms. `rebuild_scene_with_atoms` reruns
+  non-PBC bond perception intentionally because transformed scenes are
+  no longer a periodic unit cell.
+- `cube.py` bond helpers operate on Gaussian-cube cluster coordinates.
+  They are not crystallographic PBC bond perception and should not be
+  routed through `MolecularCrystal`.
+- Minor-disorder outlines in `renderer.py` are visual annotations only.
+  Their colours must come from per-atom/per-bond render colours
+  (`_atom_render_color(..., light=True)`), not hard-coded black/grey
+  "outline ink".
+- MatterVis stores every live lattice matrix as row vectors
+  (`cart = frac @ M`), matching ASE, pymatgen, and `molcrys_kit`.
+  The vendored legacy parser still returns the old column-vector
+  matrix; convert it once at the boundary and do not pass column
+  matrices into new code.
 
 When `molcrys_kit` is updated and a function you call gets
 deprecated:
@@ -203,8 +240,8 @@ deprecated:
    the old shape.
 3. If the replacement is more expensive, push the call into the
    appropriate cache layer (`_analyze_topology_cache`,
-   `_neighbor_pool_cache`, `_shell_cache`) and check that the cache
-   key includes every input that affects the result.
+   `_topology_state_cache`) and check that the cache key includes every
+   input that affects the result.
 
 ## Postmortems — past mis-fixes worth remembering
 
@@ -364,32 +401,34 @@ both files.
 - Coordination polyhedra are a per-scene named-row table
  (`state["polyhedron_specs"] = [{id, name, center_species,
  ligand_species, color, enabled}, ...]`). Empty list (default for a
- fresh scene) falls back to the legacy
- `topology_species_keys` + shared `topology_hull_color` path so the
- existing UI checklist keeps working unchanged.
+ fresh scene) means **no overlay** — MV no longer auto-derives
+ ligand shells from `topology_species_keys`; users must register
+ explicit centre/ligand pairs (or load a preset that does). The
+ overlay toggle (`topology_enabled`) also defaults to `False` so
+ newly opened structures don't pay the analysis cost until asked.
 - The renderer paints **per-spec colour** by reading
  `topology_data["spec_results"][i].color` directly, not
  `style["topology_hull_color"]`. The single-colour path remains as a
  back-compat fallback when `spec_results` is absent.
 - `_topology_state_cache` is keyed on geometry-only fields
  (`(structure, display_mode, hydrogens, site_index, cutoff,
- spec_geometry_key)` where `spec_geometry_key` only carries
- `(center_species, ligand_species)` per spec). Per-spec colour is
- NOT in the geometry cache key — it lives on the renderer's painter
- cache instead, so swapping colours stays a cheap re-paint.
+ spec_geometry_key, transforms_key)` where `spec_geometry_key` only
+ carries `(center_species, ligand_species)` per spec). Per-spec
+ colour is NOT in the geometry cache key — it lives on the renderer's
+ painter cache instead, so swapping colours stays a cheap re-paint.
 - `analyze_topology` / `extract_coordination_shell` accept an
- optional `ligand_species` keyword. When set, the neighbour-pool
- cache is partitioned per ligand restriction; do not collapse the
- cache key back to `(center_index, cutoff)` or two specs sharing a
- centre but differing in ligand will poison each other's pool.
-- `analyze_topology` / `extract_coordination_shell` also accept
- `search_supercell=(na, nb, nc)`. This is the *neighbour-search*
- supercell — independent of the display supercell from the
- `repeat` transform. The neighbour-pool cache key includes it; do
- not collapse the key back to ignore it or callers that grow the
- search range will silently see stale (cached) hulls. Per-spec
- colour and per-instance overrides are NOT in this geometry cache
- key — they live on the renderer painter cache.
+  optional `ligand_species` keyword (required, no auto-derivation)
+  and delegate molecule-level PBC image enumeration to
+  `molcrys_kit.analysis.packing_shell.find_polyhedra(level="molecule")`.
+  The state `cutoff` is forwarded as MCK's `cutoff=` kwarg, which on
+  molecule level is the *candidate search radius* (gap+enclosure
+  picks the natural shell from there). Do **not** route the state
+  `cutoff` into MCK's `hard_cutoff=` — that reproduces the CN=37
+  surprise this whole pipeline was rewritten to avoid (see the SY
+  perchlorate regression notes in `tests/topology/`).
+  The topology cache key includes ligand restriction; do not collapse
+  it back to `(center_index, cutoff)` or two specs sharing a centre but
+  differing in ligand will poison each other's shell.
 - Polyhedron specs may carry `instance_overrides`, a dict keyed on
  `fragment_label` whose values are partial style dicts
  (`{"color": ..., "visible": ...}`). The renderer applies these
@@ -483,10 +522,6 @@ both files.
 - `transforms_cache_key` is the canonical hashable summary of the
  list. It includes `kind`, `enabled`, and sorted `params` keys; it
  excludes `id` and `name` so a row rename stays a cheap re-paint.
-- The `polyhedron_search_supercell` field on the scene state lives
- in `topology_state_cache`'s key, NOT in `transforms_cache_key`,
- so changing the search range invalidates polyhedron geometry only,
- not the entire scene.
 - REST surface `/api/v2/transforms` (CRUD + reorder) and the
  `supercell` shorthand on `POST /api/v2/state` are part of the
  public API; back-incompatible changes require an API version bump.

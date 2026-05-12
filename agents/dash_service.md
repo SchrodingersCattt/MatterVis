@@ -20,13 +20,10 @@ preset save/load.
   `material`, `style`, `disorder`, `minor_opacity`, `axis_scale`,
   `display_options`,
   `topology_species_keys` (list of stoichiometric formulas like
-  `"C8N1"`, `"ClO4"`, `"N1"` -- one polyhedron per matching fragment
-  for every key in the list, which gives a tiled view "for free"),
+  `"C8N1"`, `"ClO4"`, `"N1"`; retained for legacy state inspection,
+  but named polyhedra now render from `polyhedron_specs`),
   `topology_site_index` (primary site for the histogram /
   results panel), `topology_enabled`, `topology_hull_color`,
-  `polyhedron_search_supercell` (`{a,b,c}` integer search radius
-  used to discover ligands across periodic images for polyhedra; see
-  `polyhedron_api.md`),
   `transforms` (full ordered list of structure mutations; see
   `transforms_api.md`),
   `supercell` (`{a,b,c}` shorthand that gets rewritten as a single
@@ -199,8 +196,6 @@ hooks rather than the REST surface.
   `transforms-kind-select` (Phase 4 transforms editor; per-row
   inputs are pattern-matched with `{type, transform_id}` shape, see
   `transforms_api.md`)
-- `polyhedron-search-supercell-{a,b,c}` (Phase 4 inputs that drive
-  `polyhedron_search_supercell`; see `polyhedron_api.md`)
 - `view-align-{a,b,c,astar,bstar,cstar}` and `view-reset` (Phase 4
   view tools — VESTA-style axis alignment buttons; clicking them
   fires the matching `POST /camera/action {"action": "align",
