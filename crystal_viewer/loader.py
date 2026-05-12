@@ -688,6 +688,48 @@ def build_bundle_scene(
     return transformed
 
 
+# Diagonal viewing direction used as the upload fallback when no preset
+# matches. Matches Plotly's default (1.25, 1.25, 1.25) eye direction with
+# +c as the screen-up axis, so any non-cubic cell still shows depth
+# instead of collapsing into a flat ab-plane projection. Stored as a
+# unit vector so ``view_rotation`` doesn't need to renormalise.
+_UPLOAD_DEFAULT_VIEW_DIR = np.array([1.0, 1.0, 1.0], dtype=float) / np.sqrt(3.0)
+_UPLOAD_DEFAULT_UP = np.array([0.0, 0.0, 1.0], dtype=float)
+
+
+def _upload_default_view(name: str, preset: Optional[Dict[str, Any]]) -> tuple[np.ndarray, np.ndarray]:
+    """Pick an initial ``(view_direction, up)`` for an uploaded CIF.
+
+    Tries an exact preset entry first, then a stem match (so ``SY_3``
+    honours the ``SY`` preset), then falls back to a 3D-friendly
+    diagonal so elongated cells don't render as flat 2D projections.
+    """
+    structures = (preset or {}).get("structures", {}) if isinstance(preset, dict) else {}
+    candidates = [name]
+    # ``infer_uploaded_name`` appends ``_2``, ``_3``, ... when a name
+    # collides; strip the suffix so the original preset still applies.
+    stem_match = re.match(r"^(?P<stem>.+?)(?:_\d+)?$", name)
+    if stem_match:
+        stem = stem_match.group("stem")
+        if stem and stem != name:
+            candidates.append(stem)
+    for candidate in candidates:
+        entry = structures.get(candidate) if isinstance(structures, dict) else None
+        if not isinstance(entry, dict):
+            continue
+        camera = entry.get("camera") if isinstance(entry.get("camera"), dict) else None
+        if camera and camera.get("position") and camera.get("focal_point") and camera.get("up"):
+            view_dir, up = legacy_scene.scene_from_camera(
+                camera["position"], camera["focal_point"], camera["up"]
+            )
+            return np.asarray(view_dir, dtype=float), np.asarray(up, dtype=float)
+        view_direction = entry.get("view_direction")
+        if view_direction:
+            up = entry.get("up", [0.0, 0.0, 1.0])
+            return np.asarray(view_direction, dtype=float), np.asarray(up, dtype=float)
+    return _UPLOAD_DEFAULT_VIEW_DIR.copy(), _UPLOAD_DEFAULT_UP.copy()
+
+
 def build_loaded_crystal(
     *,
     name: str,
@@ -736,19 +778,18 @@ def build_loaded_crystal(
     # (camera or view_direction explicitly provided) but otherwise
     # falls through to ``ops.auto_view_dir`` which scores >1000 view
     # candidates by ray-projecting every heavy atom -- ~12 s for a
-    # 1024-atom unit cell. For uploaded CIFs there is no preset
-    # entry to short-circuit on, so the user paid that cost on every
-    # upload. The browser camera is fully interactive so a sensible
-    # default direction (look down +z, up = +y) gives a usable initial
-    # view in <1 ms; users that want the full auto-orient can call
-    # the v2 API or add a preset entry. Catalog structures keep the
-    # legacy behaviour because their preset can pin a known-good
-    # camera, and the cost is paid once at boot, not per upload.
+    # 1024-atom unit cell. Uploaded CIFs almost never have a preset
+    # by their unique name (``SY_3``, ``upload_2``, ...), so the user
+    # paid that cost on every upload. We use a 3D-friendly diagonal
+    # default (eye along (1,1,1), up=+c) instead of straight +z --
+    # the latter projects elongated cells (e.g. SY's 8 x 25 x 10) to
+    # a tall, depthless rectangle that users perceive as "flat".
+    # Preset entries (catalog or user-supplied) still win, including
+    # a stem-match fallback so ``SY_3`` honours the ``SY`` preset.
     is_upload = source == "upload"
     if is_upload:
         with perf_log.time_block("loader:default_view", kind="event", structure=name, reason="skip_auto_view_for_upload"):
-            view_dir = np.array([0.0, 0.0, 1.0])
-            up = np.array([0.0, 1.0, 0.0])
+            view_dir, up = _upload_default_view(name, preset)
     else:
         with perf_log.time_block("loader:resolve_view", kind="event", structure=name):
             view_dir, up = legacy_scene._resolve_view(ops, name, raw_atoms, legacy_M, cell, preset)

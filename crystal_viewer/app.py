@@ -2580,6 +2580,16 @@ class ViewerBackend:
                 state["atom_groups"] = existing_groups + [migrated]
         if "camera" in patch and patch["camera"] is not None:
             state["camera"] = patch["camera"]
+        # ``camera_revision`` is the uirevision-bump counter written by
+        # ``camera_action`` / ``align_camera``. ``normalize_state``
+        # whitelists keys, so without an explicit pass-through the
+        # bump silently drops on the floor and Plotly keeps clamping
+        # the figure to whatever rotation the user drag-saved last.
+        if "camera_revision" in patch and patch["camera_revision"] is not None:
+            try:
+                state["camera_revision"] = int(patch["camera_revision"])
+            except (TypeError, ValueError):
+                pass
         # Phase 4 (view tools): top-level ``projection`` is a v2 state
         # key that mirrors ``camera.projection.type``. Accept either
         # spelling so AI callers don't have to dig into the camera
@@ -2719,6 +2729,20 @@ class ViewerBackend:
         style["projection"] = _coerce_projection(
             state.get("projection", style.get("projection", "perspective")),
             fallback=str(style.get("projection", "perspective")),
+        )
+        # Plotly's ``layout.scene.uirevision`` makes the WebGL camera
+        # state persist across redraws -- reusing the same revision
+        # means a mouse-drag rotation survives a Labels toggle. The
+        # flip side: when the user clicks Reset / down-a / down-b /
+        # ... the layout's new camera is silently ignored unless the
+        # revision changes. ``camera_revision`` (bumped by
+        # ``camera_action`` and ``align_camera``) gives the renderer
+        # exactly that signal: Reset triggers a fresh revision so
+        # Plotly accepts the new camera, while pan/orbit updates that
+        # flow through ``patch_state`` directly leave it untouched.
+        style["uirevision"] = "{name}__{rev}".format(
+            name=scene.get("name", "scene"),
+            rev=int(state.get("camera_revision", 0) or 0),
         )
         return style
 
@@ -3731,9 +3755,11 @@ class ViewerBackend:
 
     def camera_action(self, action: str, scene_id: Optional[str] = None, **payload) -> dict[str, Any]:
         if action == "reset":
+            self._bump_camera_revision(scene_id=scene_id)
             return self.set_camera(self.default_camera(self.get_state(scene_id)), scene_id=scene_id)
 
         if action == "align":
+            self._bump_camera_revision(scene_id=scene_id)
             return self.align_camera(payload.get("axis"), scene_id=scene_id)
 
         if action in ("projection", "set_projection"):
@@ -3826,6 +3852,22 @@ class ViewerBackend:
         camera = dict(self.get_camera(scene_id))
         camera["projection"] = {"type": normalized}
         return self.set_camera(camera, scene_id=scene_id)
+
+    def _bump_camera_revision(self, scene_id: Optional[str] = None) -> int:
+        """Increment ``state['camera_revision']`` so the next figure
+        rebuild gets a fresh ``layout.scene.uirevision`` and Plotly
+        accepts the layout-supplied camera instead of preserving the
+        user's last mouse-drag rotation.
+
+        Mouse-drag updates flow through ``patch_state`` directly (not
+        through ``camera_action``) so they intentionally do NOT bump
+        the revision -- preserving Plotly's drag continuity across
+        non-camera UI toggles like Labels/Hydrogens.
+        """
+        state = self.get_state(scene_id)
+        current = int(state.get("camera_revision", 0) or 0)
+        self.patch_state({"camera_revision": current + 1}, scene_id=scene_id)
+        return current + 1
 
     def _safe_preset_path(self, path: Optional[str]) -> Optional[str]:
         """Resolve ``path`` against ``<root>/.local`` and reject anything
