@@ -200,12 +200,11 @@ def _whole_components_in_box(ops: Any, atoms, M, cell):
 def _selected_atoms_for_mode(ops: Any, atoms, M, cell, display_mode: str, formula_unit_atoms=None, unwrapped_atoms=None):
     continuous_atoms = unwrapped_atoms if unwrapped_atoms else atoms
     if display_mode == "unit_cell":
-        # Mirror VESTA's "unit cell" view: any atom on a face / edge /
-        # corner of the cell gets drawn at every equivalent boundary so
-        # the visual cell looks closed. Without this, an O sitting at
-        # frac=(0,0,0) appears only at one corner and the polyhedron
-        # around it on the opposite side of the cell is missing one
-        # ligand.
+        # Mirror VESTA's "unit cell" view, but keep molecular fragments as
+        # the first-class object: if any atom in a MCK molecule lies on a
+        # face / edge / corner, replicate the entire molecule image at the
+        # equivalent boundary. Replicating only that boundary atom creates
+        # chemically impossible orphan dots at corners/edges.
         base = [dict(atom) for atom in continuous_atoms]
         return _expand_boundary_replicas(base, M)
     if display_mode == "asymmetric_unit":
@@ -228,7 +227,15 @@ _BOUNDARY_TOL = 1e-3  # fractional-coordinate tolerance for "on the cell boundar
 
 
 def _expand_boundary_replicas(atoms: list[dict[str, Any]], M: Any) -> list[dict[str, Any]]:
-    """Add image-replica copies of any atom that sits on a face / edge /
+    """Add image-replica copies for cell-boundary atoms/fragments.
+
+    When atoms carry ``_source_molecule_index`` (set from MolCrysKit's
+    molecule graph), boundary images are generated per whole molecule:
+    any member atom on a face / edge / corner causes the entire fragment
+    to be translated to the equivalent image. Ungrouped atoms fall back
+    to the old atom-level behaviour.
+
+    Add image-replica copies of any atom that sits on a face / edge /
     corner of the unit cell.
 
     An atom with fractional coordinate ``f`` near 0 is also a valid
@@ -243,15 +250,18 @@ def _expand_boundary_replicas(atoms: list[dict[str, Any]], M: Any) -> list[dict[
     if not atoms:
         return atoms
     M_arr = np.asarray(M, dtype=float)
-    out: list[dict[str, Any]] = []
-    for atom in atoms:
-        out.append(atom)
-        frac = atom.get("frac")
+
+    def boundary_shifts_for_atom(atom: dict[str, Any]) -> list[tuple[int, int, int]]:
+        # Use the original wrapped crystallographic coordinates when present.
+        # ``frac`` may be MCK's continuous/unwrapped position for a molecule
+        # crossing the cell face, and those values can legitimately sit
+        # outside [0, 1].
+        frac = atom.get("_wrapped_frac", atom.get("frac"))
         if frac is None:
-            continue
+            return []
         frac_arr = np.asarray(frac, dtype=float)
         if frac_arr.shape != (3,):
-            continue
+            return []
         # Per-axis "is on a boundary" with sign of the replica shift.
         # Treat both 0 and 1 as boundary; an atom at frac=0.5 is NOT
         # on a face for unit-cell tiling (only frac=0 / 1 are) -- this
@@ -272,18 +282,80 @@ def _expand_boundary_replicas(atoms: list[dict[str, Any]], M: Any) -> list[dict[
                 per_axis_shifts[axis] = [0, 1]
             elif on_one:
                 per_axis_shifts[axis] = [0, -1]
+        shifts: list[tuple[int, int, int]] = []
         for sa in per_axis_shifts[0]:
             for sb in per_axis_shifts[1]:
                 for sc in per_axis_shifts[2]:
                     if sa == 0 and sb == 0 and sc == 0:
                         continue
                     shifts.append((sa, sb, sc))
-        if not shifts:
+        return shifts
+
+    def boundary_shifts_for_fragment(fragment_atoms: list[dict[str, Any]]) -> list[tuple[int, int, int]]:
+        per_axis_shifts: list[set[int]] = [set([0]), set([0]), set([0])]
+        for atom in fragment_atoms:
+            frac = atom.get("_wrapped_frac", atom.get("frac"))
+            if frac is None:
+                continue
+            frac_arr = np.asarray(frac, dtype=float)
+            if frac_arr.shape != (3,):
+                continue
+            for axis in range(3):
+                f = float(frac_arr[axis])
+                if -_BOUNDARY_TOL <= f <= _BOUNDARY_TOL:
+                    per_axis_shifts[axis].add(1)
+                elif 1.0 - _BOUNDARY_TOL <= f <= 1.0 + _BOUNDARY_TOL:
+                    per_axis_shifts[axis].add(-1)
+        shifts: list[tuple[int, int, int]] = []
+        for sa in sorted(per_axis_shifts[0]):
+            for sb in sorted(per_axis_shifts[1]):
+                for sc in sorted(per_axis_shifts[2]):
+                    if sa == 0 and sb == 0 and sc == 0:
+                        continue
+                    shifts.append((sa, sb, sc))
+        return shifts
+
+    out: list[dict[str, Any]] = []
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    ungrouped: list[dict[str, Any]] = []
+    for atom in atoms:
+        mol_idx = atom.get("_source_molecule_index")
+        if mol_idx is None:
+            ungrouped.append(atom)
             continue
+        try:
+            grouped.setdefault(int(mol_idx), []).append(atom)
+        except (TypeError, ValueError):
+            ungrouped.append(atom)
+
+    consumed_ids: set[int] = set()
+    for molecule_atoms in grouped.values():
+        out.extend(molecule_atoms)
+        consumed_ids.update(id(atom) for atom in molecule_atoms)
+        shifts = boundary_shifts_for_fragment(molecule_atoms)
         for shift in shifts:
-            replica = dict(atom)
             shift_arr = np.array(shift, dtype=float)
-            replica["frac"] = frac_arr + shift_arr
+            shift_cart = frac_to_cart(shift_arr, M_arr)
+            for atom in molecule_atoms:
+                frac = np.asarray(atom.get("frac"), dtype=float)
+                replica = dict(atom)
+                replica["frac"] = frac + shift_arr if frac.shape == (3,) else atom.get("frac")
+                replica["cart"] = np.asarray(atom.get("cart"), dtype=float) + shift_cart
+                replica["_image_shift"] = shift
+                replica["_origin_label"] = atom.get("_origin_label", atom.get("label"))
+                replica["_is_boundary_replica"] = True
+                replica["_is_fragment_boundary_replica"] = True
+                out.append(replica)
+
+    for atom in ungrouped:
+        out.append(atom)
+        if id(atom) in consumed_ids:
+            continue
+        for shift in boundary_shifts_for_atom(atom):
+            shift_arr = np.array(shift, dtype=float)
+            frac = np.asarray(atom.get("frac"), dtype=float)
+            replica = dict(atom)
+            replica["frac"] = frac + shift_arr if frac.shape == (3,) else atom.get("frac")
             replica["cart"] = np.asarray(atom.get("cart"), dtype=float) + frac_to_cart(shift_arr, M_arr)
             replica["_image_shift"] = shift
             replica["_origin_label"] = atom.get("_origin_label", atom.get("label"))

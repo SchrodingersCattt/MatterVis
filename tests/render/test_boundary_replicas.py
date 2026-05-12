@@ -81,6 +81,49 @@ def test_atom_on_face_replicates_to_two_faces():
     assert coords == [(0.0, 4.0, 4.0), (8.0, 4.0, 4.0)]
 
 
+def test_fragment_on_face_replicates_as_whole_fragment():
+    """Boundary images must preserve complete molecular fragments.
+
+    Special-position atoms used to be replicated one-by-one, producing
+    orphan dots on the opposite unit-cell face. When MCK source molecule
+    metadata is present, the full fragment translates together.
+    """
+    cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
+    M = np.eye(3) * 10.0
+    atoms = [
+        _atom("C1", [0.0, 0.5, 0.5], M),
+        _atom("C2", [0.1, 0.5, 0.5], M),
+    ]
+    for atom in atoms:
+        atom["_source_molecule_index"] = 7
+        atom["_wrapped_frac"] = np.array(atom["frac"], dtype=float)
+
+    scene = build_scene_from_atoms(
+        name="fragment_face",
+        title="Fragment Face",
+        atoms=atoms,
+        cell=cell,
+        M=M,
+        R=np.eye(3),
+        display_mode="unit_cell",
+        ops=scene_ops(),
+        unwrapped_atoms=atoms,
+        preset={"style": {"show_labels": False, "show_axes": False}},
+    )
+
+    assert len(scene["draw_atoms"]) == 4
+    labels_by_x = sorted(
+        (atom["label"], round(float(atom["cart"][0]), 5), bool(atom.get("_is_fragment_boundary_replica")))
+        for atom in scene["draw_atoms"]
+    )
+    assert labels_by_x == [
+        ("C1", 0.0, False),
+        ("C1", 10.0, True),
+        ("C2", 1.0, False),
+        ("C2", 11.0, True),
+    ]
+
+
 def test_atom_on_edge_replicates_to_four():
     cell = gemmi.UnitCell(6.0, 6.0, 6.0, 90.0, 90.0, 90.0)
     M = np.eye(3) * 6.0

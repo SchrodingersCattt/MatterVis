@@ -342,7 +342,7 @@ def _unwrapped_atoms_from_molcrys(
     mol_indices = getattr(molcrys_analysis, "mol_indices", None) or []
     mol_cart_positions = getattr(molcrys_analysis, "mol_cart_positions", None) or []
 
-    for indices, cart_positions in zip(mol_indices, mol_cart_positions):
+    for mol_idx, (indices, cart_positions) in enumerate(zip(mol_indices, mol_cart_positions)):
         coords = np.asarray(cart_positions, dtype=float)
         if coords.ndim != 2 or coords.shape[0] != len(indices):
             continue
@@ -350,6 +350,13 @@ def _unwrapped_atoms_from_molcrys(
             if raw_idx < 0 or raw_idx >= len(out):
                 continue
             cart = coords[local_idx]
+            # Keep the crystallographic wrapped position as the boundary
+            # image key. ``frac`` below is overwritten with MCK's continuous
+            # molecule coordinate, which may be outside [0, 1] for fragments
+            # crossing a face; boundary replication must still be based on
+            # the original special-position / face membership.
+            out[raw_idx]["_wrapped_frac"] = np.asarray(out[raw_idx].get("frac"), dtype=float).copy()
+            out[raw_idx]["_source_molecule_index"] = int(mol_idx)
             out[raw_idx]["cart"] = cart.copy()
             out[raw_idx]["frac"] = cart_to_frac(cart, M_arr)
             out[raw_idx]["_unwrapped"] = True
