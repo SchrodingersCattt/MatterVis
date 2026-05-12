@@ -156,17 +156,29 @@ DEFAULT_UNWRAP_MAX_ATOMS = 500
 
 
 def _has_shelx_occupancy_disorder(raw_atoms) -> bool:
-    """Return True if ``raw_atoms`` contains SHELX-style occupancy
-    disorder that ``parse_asu`` cannot resolve on its own.
+    """Return True if ``raw_atoms`` contains any SHELX-style disorder
+    that needs MolCrysKit's optimal-replica picker to resolve.
 
-    SHELX often encodes a rotamer pair (e.g. NH4+ in DAP-4, perchlorate
-    H atoms in SY) with occupancies summing to 1 and *no*
-    ``_atom_site_disorder_group`` / ``_atom_site_disorder_assembly``
-    tags (both default to "."). Without one of those tags
-    ``parse_asu`` keeps every alternative as a major atom; downstream
-    bond perception then tries to bond all rotamers at once and
-    fragments split chemically equivalent cations across rotamers
-    (the DAP-4 NH4 -> N1H1 / N1H2 / N1H4 / N1H8 split bug).
+    Two patterns trigger this:
+
+    1. *Occupancy-only* disorder: ``occ < 1`` with both
+       ``_atom_site_disorder_group`` and ``_atom_site_disorder_assembly``
+       blank (both default to "."). SHELX often writes rotamer pairs
+       (NH4+ in DAP-4, perchlorate H atoms in SY's older revisions)
+       this way, summing two occupancies to 1 with no other markers.
+    2. *SHELX -PART convention*: ``occ < 1`` with ``dg`` starting with
+       ``"-"`` (e.g. ``"-1"``). The other half of the disorder pair
+       lives at the symmetry equivalent of this atom; after
+       :func:`parse_asu` symmetry expansion both alternatives are
+       present as separate atoms, but neither carries the marker that
+       distinguishes them. MolCrysKit's neighbour-list will then bond
+       the two alternatives together (N3 / N2 at 0.15 A apart in SY),
+       fusing two chemically distinct cations into one species.
+
+    In either case ``parse_asu`` alone cannot resolve the disorder, so
+    we hand the CIF to MolCrysKit's optimal-replica picker and tag the
+    non-chosen alternates with ``_is_minor=True`` so the bond graph
+    sees one consistent set per disorder site.
     """
     for atom in raw_atoms:
         try:
@@ -179,7 +191,97 @@ def _has_shelx_occupancy_disorder(raw_atoms) -> bool:
         da = str(atom.get("da") or ".").strip()
         if dg in (".", "?", "") and da in (".", "?", ""):
             return True
+        if dg.startswith("-") and dg not in ("-",):
+            return True
     return False
+
+
+def _sanitize_cif_for_pymatgen(cif_path: str) -> str | None:
+    """Return a path to a temp CIF where ``?`` markers in the
+    ``_atom_site_attached_hydrogens`` column are replaced with ``0``,
+    or ``None`` if no rewrite was needed.
+
+    The motivation: ``pymatgen.io.cif.CifParser`` (used internally by
+    ``generate_ordered_replicas_from_disordered_sites`` to read the
+    lattice matrix) crashes on ``?`` in numeric columns. Several
+    SHELX-derived CIFs (SY.cif among them) write ``?`` for
+    "no attached hydrogens" instead of ``0``. The CIF spec allows
+    both; pymatgen's str2float helper is the strict reader. We rewrite
+    a minimal copy that pymatgen accepts; the original CIF is never
+    touched.
+    """
+    import os
+    import tempfile
+
+    try:
+        with open(cif_path, encoding="utf-8") as f:
+            lines = f.readlines()
+    except OSError:
+        return None
+
+    out_lines: list[str] = []
+    rewrote = False
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.strip() == "loop_":
+            j = i + 1
+            loop_columns: list[str] = []
+            while j < len(lines) and lines[j].lstrip().startswith("_"):
+                loop_columns.append(lines[j].strip())
+                j += 1
+            if any("_atom_site_label" in c for c in loop_columns):
+                attached_h_col_idx = None
+                for k, c in enumerate(loop_columns):
+                    if c == "_atom_site_attached_hydrogens":
+                        attached_h_col_idx = k
+                        break
+                out_lines.append(line)
+                for c in loop_columns:
+                    out_lines.append(c + "\n")
+                i = j
+                while i < len(lines):
+                    dl = lines[i]
+                    stripped = dl.strip()
+                    if (
+                        stripped == ""
+                        or stripped.startswith("loop_")
+                        or stripped.startswith("data_")
+                        or stripped.startswith("_")
+                    ):
+                        break
+                    if attached_h_col_idx is not None:
+                        parts = dl.split()
+                        if (
+                            len(parts) > attached_h_col_idx
+                            and parts[attached_h_col_idx] == "?"
+                        ):
+                            parts[attached_h_col_idx] = "0"
+                            rewrote = True
+                            out_lines.append("  ".join(parts) + "\n")
+                        else:
+                            out_lines.append(dl)
+                    else:
+                        out_lines.append(dl)
+                    i += 1
+                continue
+        out_lines.append(line)
+        i += 1
+
+    if not rewrote:
+        return None
+
+    fd, tmp_path = tempfile.mkstemp(suffix=".cif", prefix="mattervis_sanitized_")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.writelines(out_lines)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        return None
+    return tmp_path
 
 
 def _tag_shelx_occupancy_disorder(raw_atoms, cif_path: str, M):
@@ -202,6 +304,12 @@ generate_ordered_replicas_from_disordered_sites` for the optimal
     occupancy normaliser doesn't accidentally tag a major atom as
     minor.
 
+    Some CIFs trip pymatgen's strict numeric-field reader (e.g. ``?``
+    in ``_atom_site_attached_hydrogens``). We feed a sanitized copy
+    (``?`` -> ``0`` in that one column only) to MolCrysKit when the
+    original is rejected; the rewrite is purely syntactic and never
+    touches the on-disk file.
+
     All steps are wrapped in a single ``try`` block: if MolCrysKit
     can't resolve the disorder for any reason (missing dependency,
     parser error, CIF rejected by ``scan_cif_disorder``) we leave
@@ -212,51 +320,137 @@ generate_ordered_replicas_from_disordered_sites` for the optimal
     if not _has_shelx_occupancy_disorder(raw_atoms):
         return raw_atoms
 
+    import os
+
+    sanitized_path = _sanitize_cif_for_pymatgen(cif_path)
+    cif_to_use = sanitized_path or cif_path
     try:
-        from molcrys_kit.analysis.disorder import (
-            generate_ordered_replicas_from_disordered_sites,
-        )
-
-        replicas = generate_ordered_replicas_from_disordered_sites(
-            cif_path, method="optimal"
-        )
-    except Exception:
-        return raw_atoms
-    if not replicas:
-        return raw_atoms
-
-    optimal_carts: list[np.ndarray] = []
-    for molecule in replicas[0].molecules:
         try:
-            positions = molecule.get_positions()
+            from molcrys_kit.analysis.disorder import (
+                generate_ordered_replicas_from_disordered_sites,
+            )
+
+            replicas = generate_ordered_replicas_from_disordered_sites(
+                cif_to_use, method="optimal"
+            )
         except Exception:
-            continue
-        for pos in positions:
-            optimal_carts.append(np.asarray(pos, dtype=float))
-    if not optimal_carts:
-        return raw_atoms
-    optimal_grid = np.array(optimal_carts, dtype=float)
+            return raw_atoms
+        if not replicas:
+            return raw_atoms
 
-    threshold = 0.4
-    out = [dict(atom) for atom in raw_atoms]
-    for atom in out:
+        optimal_carts: list[np.ndarray] = []
+        optimal_elems: list[str] = []
+        for molecule in replicas[0].molecules:
+            try:
+                positions = molecule.get_positions()
+                symbols = molecule.get_chemical_symbols()
+            except Exception:
+                continue
+            for pos, sym in zip(positions, symbols):
+                optimal_carts.append(np.asarray(pos, dtype=float))
+                optimal_elems.append(str(sym))
+        if not optimal_carts:
+            return raw_atoms
+        optimal_grid = np.array(optimal_carts, dtype=float)
+
+        # Each optimal-replica atom can claim AT MOST ONE raw atom, and
+        # each raw atom can be claimed AT MOST ONCE. Without this the
+        # SY case (two raw atoms 0.15 A apart -- N3 and N2 -- both
+        # match the same optimal N within the 0.4 A threshold) would
+        # leave both tagged as major and the bond perception would
+        # again fuse the two ethylenediamines. Greedy nearest-pair
+        # assignment over disorder atoms only:
+        threshold = 0.4
+        out = [dict(atom) for atom in raw_atoms]
+
+        disordered_idx: list[int] = []
+        disordered_carts: list[np.ndarray] = []
+        disordered_elems: list[str] = []
+        for idx, atom in enumerate(out):
+            try:
+                occ = float(atom.get("occ", 1.0))
+            except (TypeError, ValueError):
+                occ = 1.0
+            if occ >= 0.999 or "_is_minor" in atom:
+                continue
+            cart = np.asarray(atom.get("cart"), dtype=float)
+            if cart.shape != (3,):
+                continue
+            disordered_idx.append(idx)
+            disordered_carts.append(cart)
+            disordered_elems.append(str(atom.get("elem") or ""))
+
+        if not disordered_idx:
+            return out
+
+        # MolCrysKit's optimal-replica returns *unwrapped* Cartesian
+        # positions (molecules are kept contiguous across cell faces),
+        # while parse_asu wraps every atom inside the unit cell.
+        # Direct Euclidean distance fails on en chains that cross the
+        # cell boundary -- the optimal N at x = -1.57 vs the raw N at
+        # x = 6.52 (cell_a = 8.10) appears to be 8 A apart even
+        # though they're the same atom under PBC. Use the minimum
+        # image convention via fractional-coordinate wraparound on
+        # the difference vector.
+        M_arr = np.asarray(M, dtype=float)
         try:
-            occ = float(atom.get("occ", 1.0))
-        except (TypeError, ValueError):
-            occ = 1.0
-        if occ >= 0.999 or "_is_minor" in atom:
-            continue
-        cart = np.asarray(atom.get("cart"), dtype=float)
-        if cart.shape != (3,):
-            continue
-        # Squared distance to the nearest optimal-replica atom; if no
-        # match within ``threshold``, the disorder image is the
-        # discarded one.
-        diffs = optimal_grid - cart[None, :]
-        d2 = np.einsum("ij,ij->i", diffs, diffs)
-        if float(np.sqrt(d2.min())) > threshold:
-            atom["_is_minor"] = True
-    return out
+            inv_M = np.linalg.inv(M_arr)
+        except np.linalg.LinAlgError:
+            inv_M = None
+        d_grid = np.array(disordered_carts, dtype=float)
+        diffs = d_grid[:, None, :] - optimal_grid[None, :, :]
+        if inv_M is not None:
+            # diffs has shape (N_dis, N_opt, 3). Map to fractional,
+            # take residual to [-0.5, 0.5), map back to Cartesian.
+            frac = np.einsum("ij,klj->kli", inv_M, diffs)
+            frac = frac - np.round(frac)
+            diffs = np.einsum("ij,klj->kli", M_arr, frac)
+        dist = np.sqrt(np.einsum("ijk,ijk->ij", diffs, diffs))
+        elem_mismatch = np.array(
+            [
+                [da_elem != opt_elem for opt_elem in optimal_elems]
+                for da_elem in disordered_elems
+            ],
+            dtype=bool,
+        )
+        dist = np.where(elem_mismatch, np.inf, dist)
+        dist = np.where(dist > threshold, np.inf, dist)
+
+        claimed_optimal: set[int] = set()
+        kept_raw: set[int] = set()
+        # Greedy: smallest distance first.
+        flat_order = np.argsort(dist, axis=None)
+        n_opt = optimal_grid.shape[0]
+        for flat in flat_order:
+            d = float(dist.flat[flat])
+            if d == np.inf:
+                break
+            i = int(flat // n_opt)
+            j = int(flat % n_opt)
+            if disordered_idx[i] in kept_raw or j in claimed_optimal:
+                continue
+            kept_raw.add(disordered_idx[i])
+            claimed_optimal.add(j)
+
+        # Explicit major / minor labels on every disordered atom: a
+        # chosen atom must have ``_is_minor=False`` set (NOT just
+        # absent) because ``_is_minor_atom`` falls through to the
+        # ``dg.startswith("-")`` SHELX-PART heuristic when the flag is
+        # missing -- that heuristic would otherwise re-classify the
+        # chosen N3 / N2 atoms as minor and the bond graph would lose
+        # the en cation entirely (the "C2N2 missing" SY bug).
+        for idx in disordered_idx:
+            if idx in kept_raw:
+                out[idx]["_is_minor"] = False
+            else:
+                out[idx]["_is_minor"] = True
+        return out
+    finally:
+        if sanitized_path:
+            try:
+                os.unlink(sanitized_path)
+            except OSError:
+                pass
 
 
 def _unwrapped_atoms_from_atoms(
@@ -782,6 +976,16 @@ def build_loaded_crystal(
         kind="event",
         structure=name,
     ):
+        # ``include_minor=False`` here is deliberate: the topology
+        # fragment table summarises the *chemical* contents of the
+        # cell, not the atoms drawn on screen. Minor disorder images
+        # (the discarded alternative orientation that
+        # ``_tag_shelx_occupancy_disorder`` flagged) are not part of
+        # any real molecule once MolCrysKit's bond perception has run
+        # without them; including them would pollute the table with
+        # singleton "?" fragments for every orphan H / C / N of the
+        # rejected orientation. The renderer still draws those atoms
+        # faded; only the analysis table hides them.
         topology_fragment_table, _ = _fragment_table_from_atoms(
             name,
             raw_atoms,
@@ -789,7 +993,7 @@ def build_loaded_crystal(
             M,
             molcrys_analysis=molcrys_analysis,
             use_source_indices=True,
-            include_minor=True,
+            include_minor=False,
         )
     fragment_table_cache = {
         ("scene", "formula_unit", False): (

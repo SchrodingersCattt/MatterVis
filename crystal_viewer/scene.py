@@ -360,6 +360,17 @@ def build_scene_from_atoms(
     for i, j in bond_pairs:
         ai = draw_atoms[i]
         aj = draw_atoms[j]
+        # Skip cross-orientation ghost bonds: ``find_bonds`` doesn't know
+        # about ``_is_minor`` and will happily connect e.g. a major N3
+        # to a minor C4 sitting 0.83 A away (alternate ethylenediamine
+        # orientation). Drawing those produces the "black cage" of
+        # phantom lines around disordered cations users have been
+        # complaining about. Bonds where both endpoints are major are
+        # the normal case; bonds where both endpoints are minor are
+        # kept so the discarded orientation still renders as a
+        # contiguous shape, just faded.
+        if ai.get("is_minor") != aj.get("is_minor"):
+            continue
         start, end = _bond_endpoints(ai, aj, cell, display_mode=display_mode)
         bonds.append(
             {
