@@ -229,84 +229,101 @@ _BOUNDARY_TOL = 1e-3  # fractional-coordinate tolerance for "on the cell boundar
 def _expand_boundary_replicas(atoms: list[dict[str, Any]], M: Any) -> list[dict[str, Any]]:
     """Add image-replica copies for cell-boundary atoms/fragments.
 
-    When atoms carry ``_source_molecule_index`` (set from MolCrysKit's
-    molecule graph), boundary images are generated per whole molecule:
-    any member atom on a face / edge / corner causes the entire fragment
-    to be translated to the equivalent image. Ungrouped atoms fall back
-    to the old atom-level behaviour.
+    The boundary "mirror set" of each atom is determined in *canonical
+    wrapped* fractional space (the original ``parse_asu`` coordinates,
+    pinned to ``_wrapped_frac`` before MCK overwrites ``frac`` with its
+    continuous unwrapped value). An atom whose wrapped frac touches a
+    face / edge / corner contributes the corresponding mirror shifts.
 
-    Add image-replica copies of any atom that sits on a face / edge /
-    corner of the unit cell.
+    For atoms that carry ``_source_molecule_index`` (set from MCK's
+    molecule graph), the *fragment* is replicated rather than each atom
+    independently: the union of all member atoms' canonical mirror
+    shifts gives the set of canonical mirror images the molecule should
+    appear at.
 
-    An atom with fractional coordinate ``f`` near 0 is also a valid
-    representative at ``f + 1`` (and vice versa). For an atom on a
-    corner ``(0, 0, 0)`` this generates 7 additional images ``(1,0,0)
-    ... (1,1,1)`` so the rendered cell looks closed -- see VESTA's
-    "Show all equivalent atoms" toggle.
+    Cart-space placement of each replica accounts for the integer
+    *MCK drift* between the molecule's canonical wrapped centroid and
+    its MCK home centroid. MCK may translate a corner-NH4 from its
+    canonical home (e.g. corner ``(0, 0, 0)``) to one of the equivalent
+    corner images (e.g. ``(1, 1, 0)``) so the fragment renders as one
+    contiguous blob; without the drift correction the per-canonical
+    shift would land replicas at ``(2x, 2y, 0)`` -- visibly outside the
+    unit-cell box.
 
-    Returns a new list; atoms already inside ``[tol, 1-tol)`` are
-    passed through unchanged.
+    Ungrouped atoms (no MCK molecule grouping) have no drift and use
+    the per-atom mirror shifts directly.
+
+    Returns a new list; atoms inside ``(tol, 1-tol)`` along every axis
+    are passed through unchanged.
     """
     if not atoms:
         return atoms
     M_arr = np.asarray(M, dtype=float)
 
-    def boundary_shifts_for_atom(atom: dict[str, Any]) -> list[tuple[int, int, int]]:
-        # Use the original wrapped crystallographic coordinates when present.
-        # ``frac`` may be MCK's continuous/unwrapped position for a molecule
-        # crossing the cell face, and those values can legitimately sit
-        # outside [0, 1].
+    def canonical_shifts_for_atom(atom: dict[str, Any]) -> list[tuple[int, int, int]]:
+        # Returns canonical-space mirror shifts (target_position -
+        # wrapped_position) for this atom. Includes (0,0,0) (the home).
         frac = atom.get("_wrapped_frac", atom.get("frac"))
         if frac is None:
-            return []
+            return [(0, 0, 0)]
         frac_arr = np.asarray(frac, dtype=float)
         if frac_arr.shape != (3,):
-            return []
-        # Per-axis "is on a boundary" with sign of the replica shift.
-        # Treat both 0 and 1 as boundary; an atom at frac=0.5 is NOT
-        # on a face for unit-cell tiling (only frac=0 / 1 are) -- this
-        # mirrors VESTA's behaviour.
-        shifts: list[tuple[int, int, int]] = []
-        per_axis_shifts: list[list[int]] = [[0], [0], [0]]
+            return [(0, 0, 0)]
+        per_axis: list[list[int]] = [[0], [0], [0]]
         for axis in range(3):
             f = float(frac_arr[axis])
-            # Strict windows around 0 and 1 only -- unwrapped atoms at
-            # frac=1.02 (drawn outside the cell to keep a molecule
-            # continuous) must NOT trigger a replica because their true
-            # crystallographic site is the home cell, not a special
-            # position. ``f`` outside the strict windows is interior or
-            # continuation; either way no replica is needed.
+            # Strict windows around integer positions only. An atom at
+            # wrapped frac=0.98 is INTERIOR (not on a face), so it does
+            # not contribute a mirror shift. This protects against
+            # MCK-unwrapped continuation atoms (frac=1.02 etc) that
+            # would otherwise spawn duplicate copies.
             on_zero = -_BOUNDARY_TOL <= f <= _BOUNDARY_TOL
             on_one = 1.0 - _BOUNDARY_TOL <= f <= 1.0 + _BOUNDARY_TOL
             if on_zero:
-                per_axis_shifts[axis] = [0, 1]
+                per_axis[axis] = [0, 1]
             elif on_one:
-                per_axis_shifts[axis] = [0, -1]
-        shifts: list[tuple[int, int, int]] = []
-        for sa in per_axis_shifts[0]:
-            for sb in per_axis_shifts[1]:
-                for sc in per_axis_shifts[2]:
-                    if sa == 0 and sb == 0 and sc == 0:
-                        continue
-                    shifts.append((sa, sb, sc))
+                per_axis[axis] = [0, -1]
+        out_shifts: list[tuple[int, int, int]] = []
+        for sa in per_axis[0]:
+            for sb in per_axis[1]:
+                for sc in per_axis[2]:
+                    out_shifts.append((sa, sb, sc))
+        return out_shifts
+
+    def molecule_canonical_shifts(molecule_atoms: list[dict[str, Any]]) -> set[tuple[int, int, int]]:
+        # Union of per-atom canonical mirror shifts. Includes (0, 0, 0)
+        # (every atom contributes the home shift).
+        shifts: set[tuple[int, int, int]] = set()
+        for atom in molecule_atoms:
+            for shift in canonical_shifts_for_atom(atom):
+                shifts.add(shift)
         return shifts
 
-    def boundary_shifts_for_fragment(fragment_atoms: list[dict[str, Any]]) -> list[tuple[int, int, int]]:
-        # Take the *union* of per-atom shifts across the fragment, NOT a
-        # Cartesian product of per-axis boundary memberships. The latter
-        # spuriously combines independent face-membership signals from
-        # different atoms in the same molecule -- e.g. an H near x=0 and a
-        # different H near y=0 would yield a phantom (+x, +y, 0) replica
-        # of the whole NH4 fragment which has no crystallographic basis.
-        # The union gives one replica per face/edge/corner that some atom
-        # in the molecule actually sits on, so a fragment straddling a
-        # face still gets its mirror image, but a fragment that just
-        # happens to span two unrelated faces does not.
-        shifts: set[tuple[int, int, int]] = set()
-        for atom in fragment_atoms:
-            for shift in boundary_shifts_for_atom(atom):
-                shifts.add(shift)
-        return sorted(shifts)
+    def molecule_drift(molecule_atoms: list[dict[str, Any]]) -> tuple[int, int, int]:
+        # Integer 3-vector ``round(mck_centroid - wrapped_centroid)``.
+        # For molecules MCK left in place (interior), drift is (0,0,0).
+        # For corner / edge / face molecules MCK translated to keep the
+        # fragment continuous, drift records the MCK-chosen image so we
+        # can subtract it from each canonical mirror shift.
+        wrapped = []
+        mck = []
+        for atom in molecule_atoms:
+            w = atom.get("_wrapped_frac", atom.get("frac"))
+            f = atom.get("frac")
+            if w is None or f is None:
+                continue
+            w_arr = np.asarray(w, dtype=float)
+            f_arr = np.asarray(f, dtype=float)
+            if w_arr.shape != (3,) or f_arr.shape != (3,):
+                continue
+            wrapped.append(w_arr)
+            mck.append(f_arr)
+        if not wrapped:
+            return (0, 0, 0)
+        wrapped_centroid = np.mean(wrapped, axis=0)
+        mck_centroid = np.mean(mck, axis=0)
+        delta = mck_centroid - wrapped_centroid
+        return tuple(int(np.floor(d + 0.5)) for d in delta)
 
     out: list[dict[str, Any]] = []
     grouped: dict[int, list[dict[str, Any]]] = {}
@@ -321,20 +338,34 @@ def _expand_boundary_replicas(atoms: list[dict[str, Any]], M: Any) -> list[dict[
         except (TypeError, ValueError):
             ungrouped.append(atom)
 
-    consumed_ids: set[int] = set()
     for molecule_atoms in grouped.values():
         out.extend(molecule_atoms)
-        consumed_ids.update(id(atom) for atom in molecule_atoms)
-        shifts = boundary_shifts_for_fragment(molecule_atoms)
-        for shift in shifts:
-            shift_arr = np.array(shift, dtype=float)
+        canonical_shifts = molecule_canonical_shifts(molecule_atoms)
+        drift = molecule_drift(molecule_atoms)
+        # If MCK's home image isn't itself a canonical mirror of any
+        # atom (e.g. a molecule that simply straddles a boundary -- C1
+        # at frac 0.98 bonded to C2 at frac 0.02 -- where MCK shifts C2
+        # to 1.02 but no atom lies on a face), don't replicate. Drawing
+        # the canonical-home image as a replica there would duplicate
+        # the molecule visually.
+        if drift not in canonical_shifts:
+            continue
+        for cs in sorted(canonical_shifts):
+            # Translate ``cs`` (defined in canonical wrapped space) into
+            # the cart-space shift to apply to MCK's already-translated
+            # atom positions. ``cs == drift`` is the MCK home image,
+            # already in ``out``.
+            if cs == drift:
+                continue
+            effective = (cs[0] - drift[0], cs[1] - drift[1], cs[2] - drift[2])
+            shift_arr = np.array(effective, dtype=float)
             shift_cart = frac_to_cart(shift_arr, M_arr)
             for atom in molecule_atoms:
                 frac = np.asarray(atom.get("frac"), dtype=float)
                 replica = dict(atom)
                 replica["frac"] = frac + shift_arr if frac.shape == (3,) else atom.get("frac")
                 replica["cart"] = np.asarray(atom.get("cart"), dtype=float) + shift_cart
-                replica["_image_shift"] = shift
+                replica["_image_shift"] = effective
                 replica["_origin_label"] = atom.get("_origin_label", atom.get("label"))
                 replica["_is_boundary_replica"] = True
                 replica["_is_fragment_boundary_replica"] = True
@@ -342,14 +373,15 @@ def _expand_boundary_replicas(atoms: list[dict[str, Any]], M: Any) -> list[dict[
 
     for atom in ungrouped:
         out.append(atom)
-        if id(atom) in consumed_ids:
-            continue
-        for shift in boundary_shifts_for_atom(atom):
+        for shift in canonical_shifts_for_atom(atom):
+            if shift == (0, 0, 0):
+                continue
             shift_arr = np.array(shift, dtype=float)
+            shift_cart = frac_to_cart(shift_arr, M_arr)
             frac = np.asarray(atom.get("frac"), dtype=float)
             replica = dict(atom)
             replica["frac"] = frac + shift_arr if frac.shape == (3,) else atom.get("frac")
-            replica["cart"] = np.asarray(atom.get("cart"), dtype=float) + frac_to_cart(shift_arr, M_arr)
+            replica["cart"] = np.asarray(atom.get("cart"), dtype=float) + shift_cart
             replica["_image_shift"] = shift
             replica["_origin_label"] = atom.get("_origin_label", atom.get("label"))
             replica["_is_boundary_replica"] = True
