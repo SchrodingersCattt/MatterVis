@@ -17,26 +17,17 @@ from __future__ import annotations
 import copy
 
 import numpy as np
+from molcrys_kit.utils.geometry import cart_to_frac, frac_to_cart
 
 
 def _require_molcryskit():
     """Import MolCrysKit lazily and surface a clean error if missing."""
     try:
         from ase import Atoms
-        from ase.neighborlist import neighbor_list
-        import networkx as nx
 
         from molcrys_kit.structures.crystal import MolecularCrystal
-        from molcrys_kit.structures.molecule import CrystalMolecule
+        from molcrys_kit.io.cif import identify_molecules
         from molcrys_kit.analysis.stoichiometry import StoichiometryAnalyzer
-        from molcrys_kit.analysis.interactions import get_bonding_threshold
-        from .molcrys_compat import unwrap_positions_along_bonds
-        from molcrys_kit.constants import (
-            get_atomic_radius,
-            has_atomic_radius,
-            is_metal_element,
-            DEFAULT_NEIGHBOR_CUTOFF,
-        )
         from molcrys_kit.constants.config import (
             KEY_OCCUPANCY,
             KEY_DISORDER_GROUP,
@@ -52,17 +43,9 @@ def _require_molcryskit():
 
     return {
         "Atoms": Atoms,
-        "neighbor_list": neighbor_list,
-        "nx": nx,
         "MolecularCrystal": MolecularCrystal,
-        "CrystalMolecule": CrystalMolecule,
+        "identify_molecules": identify_molecules,
         "StoichiometryAnalyzer": StoichiometryAnalyzer,
-        "unwrap_positions_along_bonds": unwrap_positions_along_bonds,
-        "get_bonding_threshold": get_bonding_threshold,
-        "get_atomic_radius": get_atomic_radius,
-        "has_atomic_radius": has_atomic_radius,
-        "is_metal_element": is_metal_element,
-        "DEFAULT_NEIGHBOR_CUTOFF": DEFAULT_NEIGHBOR_CUTOFF,
         "KEY_OCCUPANCY": KEY_OCCUPANCY,
         "KEY_DISORDER_GROUP": KEY_DISORDER_GROUP,
         "KEY_ASSEMBLY": KEY_ASSEMBLY,
@@ -73,12 +56,12 @@ def _require_molcryskit():
 def _ase_atoms_from_raw(raw_atoms, M, mk):
     """Build an index-aligned ASE Atoms with MolCrysKit disorder arrays.
 
-    MatterVis stores the lattice as a 3x3 matrix whose **columns** are
-    the a, b, c vectors; ASE expects them as **rows**, so we transpose.
+    MatterVis stores the lattice as a 3x3 matrix whose **rows** are
+    the a, b, c vectors, matching ASE and MolCrysKit.
     """
     symbols = [atom["elem"] for atom in raw_atoms]
     positions = np.array([atom["cart"] for atom in raw_atoms], dtype=float)
-    cell = np.asarray(M, dtype=float).T
+    cell = np.asarray(M, dtype=float)
 
     atoms = mk["Atoms"](
         symbols=symbols,
@@ -159,105 +142,6 @@ def _minor_index_set(raw_atoms) -> set[int]:
     return {i for i, atom in enumerate(raw_atoms) if _is_minor_atom(atom)}
 
 
-def _components_with_indices(ase_atoms, mk, *, exclude_indices=None):
-    """Build the bond graph and return connected components keeping
-    their original atom indices, plus the graph itself (for unwrap).
-
-    Mirrors :func:`molcrys_kit.io.cif.identify_molecules` but without
-    discarding the index map.
-
-    ``exclude_indices`` (optional) is a set of atom indices that must
-    not participate in any bond. They are still present in the graph
-    as isolated nodes so downstream code can address them, but they
-    will never appear in a returned multi-atom connected component.
-
-    For SHELX-disordered CIFs the loader runs
-    :func:`_tag_shelx_occupancy_disorder` *before* calling
-    :func:`analyze`; that pass marks every alternative-orientation atom
-    that didn't make MolCrysKit's optimal-replica choice with
-    ``_is_minor=True``, and :func:`_minor_index_set` collects them so
-    bond perception only sees one consistent set of atoms per disorder
-    site. Without that guard, MolCrysKit's neighbour list would bond a
-    major-orientation N to a minor-orientation N at 0.15 A apart and
-    fuse two chemically distinct cations into one species (the SY
-    ``C4H20N4`` "fused ethylenediamine" bug).
-    """
-    nx = mk["nx"]
-    neighbor_list = mk["neighbor_list"]
-
-    n = len(ase_atoms)
-    graph = nx.Graph()
-    graph.add_nodes_from(range(n))
-    if n == 0:
-        return [], graph
-
-    excluded = set(int(x) for x in (exclude_indices or ()))
-
-    symbols = ase_atoms.get_chemical_symbols()
-    i_list, j_list, d_list, D_vectors = neighbor_list(
-        "ijdD", ase_atoms, cutoff=mk["DEFAULT_NEIGHBOR_CUTOFF"]
-    )
-
-    for i, j, dist, D_vec in zip(i_list, j_list, d_list, D_vectors):
-        if i >= j:
-            continue
-        ii, jj = int(i), int(j)
-        if ii in excluded or jj in excluded:
-            continue
-        sym_i = symbols[i]
-        sym_j = symbols[j]
-        rad_i = mk["get_atomic_radius"](sym_i) if mk["has_atomic_radius"](sym_i) else 0.5
-        rad_j = mk["get_atomic_radius"](sym_j) if mk["has_atomic_radius"](sym_j) else 0.5
-        threshold = mk["get_bonding_threshold"](
-            rad_i,
-            rad_j,
-            mk["is_metal_element"](sym_i),
-            mk["is_metal_element"](sym_j),
-        )
-        if dist < threshold:
-            graph.add_edge(ii, jj, vector=np.asarray(D_vec, dtype=float))
-
-    components = []
-    for comp in nx.connected_components(graph):
-        comp_list = sorted(int(c) for c in comp)
-        # Drop singleton excluded nodes; they're tracked as orphans
-        # downstream rather than appearing in the molecule list.
-        if len(comp_list) == 1 and comp_list[0] in excluded:
-            continue
-        components.append(comp_list)
-    components.sort(key=lambda comp: comp[0])
-    return components, graph
-
-
-def _unwrapped_positions(ase_atoms, indices, graph, mk, *, max_atoms=None):
-    """Walk the bond graph from the smallest index outward to obtain
-    PBC-continuous positions for ``indices``.
-    """
-    unwrapped, _completed = mk["unwrap_positions_along_bonds"](
-        graph,
-        indices,
-        ase_atoms.get_positions(),
-        max_atoms=max_atoms,
-    )
-    return unwrapped
-
-
-def _build_crystal_molecule(ase_atoms, indices, unwrapped_positions, mk):
-    Atoms = mk["Atoms"]
-    CrystalMolecule = mk["CrystalMolecule"]
-    symbols = [ase_atoms.get_chemical_symbols()[i] for i in indices]
-    sub = Atoms(symbols=symbols, positions=unwrapped_positions)
-    for key in (
-        mk["KEY_OCCUPANCY"],
-        mk["KEY_DISORDER_GROUP"],
-        mk["KEY_ASSEMBLY"],
-        mk["KEY_LABEL"],
-    ):
-        if key in ase_atoms.arrays:
-            sub.set_array(key, ase_atoms.arrays[key][indices])
-    return CrystalMolecule(sub, check_pbc=False)
-
-
 class CrystalAnalysis:
     """MolCrysKit-derived chemistry on the unit cell.
 
@@ -305,24 +189,6 @@ class CrystalAnalysis:
         self.bond_pairs: list[tuple[int, int]] = list(bond_pairs or [])
 
 
-def _flatten_bond_pairs(graph) -> list[tuple[int, int]]:
-    """Flatten a :class:`networkx.Graph` into a sorted list of ``(i, j)``
-    edges with ``i < j`` and integer node ids.
-
-    The molecule graph built by :func:`_components_with_indices` already
-    uses raw_atom indices as node labels, so the flattened edge list maps
-    1:1 onto the global atom indexing used by the rest of the loader.
-    """
-    pairs: list[tuple[int, int]] = []
-    for u, v in graph.edges():
-        a, b = int(u), int(v)
-        if a > b:
-            a, b = b, a
-        pairs.append((a, b))
-    pairs.sort()
-    return pairs
-
-
 def analyze(raw_atoms, M, *, max_atoms=None):
     """Run MolCrysKit on ``raw_atoms`` (full unit cell) and return a
     :class:`CrystalAnalysis` summarising species + per-FU counts.
@@ -347,18 +213,33 @@ def analyze(raw_atoms, M, *, max_atoms=None):
 
     ase_atoms = _ase_atoms_from_raw(raw_atoms, M, mk)
     minor_indices = _minor_index_set(raw_atoms)
-    components, graph = _components_with_indices(
-        ase_atoms, mk, exclude_indices=minor_indices
+    identified = mk["identify_molecules"](
+        ase_atoms,
+        max_atoms=max_atoms,
+        exclude_indices=minor_indices,
     )
 
     molecules = []
     mol_indices = []
     mol_cart_positions = []
-    for comp in components:
-        unwrapped = _unwrapped_positions(ase_atoms, comp, graph, mk, max_atoms=max_atoms)
-        molecules.append(_build_crystal_molecule(ase_atoms, comp, unwrapped, mk))
-        mol_indices.append(comp)
-        mol_cart_positions.append(unwrapped)
+    bond_pairs: set[tuple[int, int]] = set()
+    for molecule in identified:
+        indices = [int(i) for i in (molecule.info.get("atom_indices") or [])]
+        if not indices:
+            continue
+        if len(indices) == 1 and indices[0] in minor_indices:
+            continue
+        positions = np.asarray(molecule.get_positions(), dtype=float)
+        if positions.ndim != 2 or positions.shape[0] != len(indices):
+            continue
+        molecules.append(molecule)
+        mol_indices.append(indices)
+        mol_cart_positions.append(positions)
+        for i, j in molecule.info.get("bond_pairs") or []:
+            a, b = int(i), int(j)
+            if a > b:
+                a, b = b, a
+            bond_pairs.add((a, b))
 
     crystal = mk["MolecularCrystal"](
         ase_atoms.get_cell(), molecules, pbc=tuple(ase_atoms.get_pbc())
@@ -370,7 +251,7 @@ def analyze(raw_atoms, M, *, max_atoms=None):
         mol_cart_positions=mol_cart_positions,
         species_map=copy.deepcopy(analyzer.species_map),
         per_fu=copy.deepcopy(analyzer.get_simplest_unit()),
-        bond_pairs=_flatten_bond_pairs(graph),
+        bond_pairs=sorted(bond_pairs),
     )
 
 
@@ -388,7 +269,7 @@ def _best_pbc_translation(raw_atoms, indices, anchor, M, cart_positions=None, se
         for nb in range(-search_radius, search_radius + 1):
             for nc in range(-search_radius, search_radius + 1):
                 shift_frac = np.array([na, nb, nc], dtype=float)
-                shift_cart = M @ shift_frac
+                shift_cart = frac_to_cart(shift_frac, M)
                 d = float(np.linalg.norm(base + shift_cart - anchor))
                 if d < best_d:
                     best_d = d
@@ -398,8 +279,7 @@ def _best_pbc_translation(raw_atoms, indices, anchor, M, cart_positions=None, se
 
 def _translate_cluster(raw_atoms, indices, shift_frac, M, cart_positions=None):
     M = np.asarray(M, dtype=float)
-    shift_cart = M @ shift_frac
-    inv_m = np.linalg.inv(M)
+    shift_cart = frac_to_cart(shift_frac, M)
     out = []
     for local_idx, i in enumerate(indices):
         atom = copy.deepcopy(raw_atoms[i])
@@ -409,7 +289,7 @@ def _translate_cluster(raw_atoms, indices, shift_frac, M, cart_positions=None):
             else np.asarray(atom["cart"], dtype=float)
         )
         atom["cart"] = base_cart + shift_cart
-        atom["frac"] = inv_m @ atom["cart"]
+        atom["frac"] = cart_to_frac(atom["cart"], M)
         # Preserve the raw_atoms index on every translated copy so the
         # fragment-table builder (which consumes mol_indices into raw_atoms)
         # can still figure out which molecule each formula-unit atom

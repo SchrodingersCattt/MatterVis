@@ -15,6 +15,7 @@ from typing import Any, Dict, Iterable, Optional
 
 import numpy as np
 import plotly.io as pio
+from molcrys_kit.utils.geometry import minimum_image_distance
 
 try:
     from dash import ALL, Dash, Input, Output, State, callback_context, dcc, html, no_update
@@ -1916,9 +1917,9 @@ def _camera_payload(
 # Axis-aligned camera presets (VESTA-style "down a / b / c / a* / b* / c*")
 # ---------------------------------------------------------------------
 #
-# ``M`` carries the lattice vectors as columns (M[:, 0] = a, etc.).
-# Reciprocal vectors live in the rows of (M^-1) -- equivalently the
-# columns of (M^-T): a* = (M^-T)[:, 0], etc. ``camera_for_axis`` picks
+# ``M`` carries the lattice vectors as rows (M[0] = a, etc.).
+# Fractional coordinates are row vectors (cart = frac @ M), so reciprocal
+# vectors live in the columns of M^-1. ``camera_for_axis`` picks
 # a unit view direction along the requested axis, picks an "up"
 # reference axis from the remaining lattice vectors (real-space when
 # the request is real-space, reciprocal-space when reciprocal), and
@@ -1947,18 +1948,18 @@ def _normalize_axis_key(value: Any) -> Optional[str]:
 
 def _lattice_axes(M: np.ndarray) -> dict[str, np.ndarray]:
     """Return unit vectors for a, b, c, a*, b*, c* derived from
-    cartesian lattice matrix ``M`` (columns = a, b, c)."""
+    cartesian row-lattice matrix ``M`` (rows = a, b, c)."""
     M_arr = np.asarray(M, dtype=float)
     if M_arr.shape != (3, 3):
         raise ValueError(f"expected 3x3 lattice matrix, got shape {M_arr.shape}")
-    real_cols = [M_arr[:, i] for i in range(3)]
+    real_rows = [M_arr[i] for i in range(3)]
     try:
-        recip_T = np.linalg.inv(M_arr).T
+        recip = np.linalg.inv(M_arr)
     except np.linalg.LinAlgError as exc:
         raise ValueError("lattice matrix is singular; cannot build reciprocal axes") from exc
-    recip_cols = [recip_T[:, i] for i in range(3)]
+    recip_cols = [recip[:, i] for i in range(3)]
     out: dict[str, np.ndarray] = {}
-    for key, vec in zip(("a", "b", "c"), real_cols):
+    for key, vec in zip(("a", "b", "c"), real_rows):
         norm = float(np.linalg.norm(vec))
         out[key] = vec / norm if norm > 1e-12 else np.array([1.0, 0.0, 0.0])
     for key, vec in zip(("a*", "b*", "c*"), recip_cols):
@@ -2861,9 +2862,13 @@ class ViewerBackend:
         return next((fragment for fragment in scene.get("fragment_table", []) if int(fragment["index"]) == int(display_index)), None)
 
     def _pbc_distance(self, bundle: LoadedCrystal, frac_a, frac_b) -> float:
-        delta = np.array(frac_b, dtype=float) - np.array(frac_a, dtype=float)
-        delta -= np.round(delta)
-        return float(np.linalg.norm(np.array(bundle.M, dtype=float) @ delta))
+        return float(
+            minimum_image_distance(
+                np.array(frac_b, dtype=float),
+                np.array(frac_a, dtype=float),
+                np.array(bundle.M, dtype=float),
+            )
+        )
 
     def map_display_fragment_to_topology(self, bundle: LoadedCrystal, display_fragment: dict | None) -> Optional[dict[str, Any]]:
         if display_fragment is None:
@@ -3611,6 +3616,7 @@ class ViewerBackend:
                             "center_label": primary.get("center_label"),
                             "shell_coords": primary["shell_coords"],
                             "distances": primary["distances"],
+                            "hull": primary.get("hull"),
                             "is_analysis_anchor": True,
                         }
                     )
@@ -3640,6 +3646,7 @@ class ViewerBackend:
                     "center_label": extra.get("center_label"),
                     "shell_coords": extra.get("shell_coords"),
                     "distances": extra.get("distances"),
+                    "hull": extra.get("hull"),
                     "is_analysis_anchor": False,
                 }
                 overlays.append(overlay)
@@ -3649,6 +3656,7 @@ class ViewerBackend:
                         "center_label": overlay["center_label"],
                         "shell_coords": overlay["shell_coords"],
                         "distances": overlay["distances"],
+                        "hull": overlay.get("hull"),
                     }
                 )
             spec_results.append(

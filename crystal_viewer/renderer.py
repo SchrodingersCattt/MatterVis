@@ -211,9 +211,9 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
 
     extras = []
     if style.get("show_unit_cell", False):
-        a = np.array(scene["M"][:, 0], dtype=float)
-        b = np.array(scene["M"][:, 1], dtype=float)
-        c = np.array(scene["M"][:, 2], dtype=float)
+        a = np.array(scene["M"][0], dtype=float)
+        b = np.array(scene["M"][1], dtype=float)
+        c = np.array(scene["M"][2], dtype=float)
         for corner in (
             np.zeros(3, dtype=float),
             a, b, c, a + b, a + c, b + c, a + b + c,
@@ -968,7 +968,7 @@ def _minor_bond_wireframe_traces(scene: dict, style: dict):
         return []
     atoms = scene.get("draw_atoms") or []
     n_atoms = len(atoms)
-    segments = []
+    groups: Dict[str, list[tuple[np.ndarray, np.ndarray]]] = {}
     for bond in scene["bonds"]:
         if not bond["is_minor"]:
             continue
@@ -981,27 +981,45 @@ def _minor_bond_wireframe_traces(scene: dict, style: dict):
             continue
         if 0 <= j < n_atoms and not _atom_render_visible(atoms[j]):
             continue
-        segments.append((np.array(bond["start"], dtype=float), np.array(bond["end"], dtype=float)))
-    if not segments:
-        return []
-    if style.get("disorder") == "dashed_bonds":
-        lengths = [float(np.linalg.norm(end - start)) for start, end in segments]
-        typical = float(np.median(lengths)) if lengths else 1.0
-        segments = _dashed_segments(
-            segments,
-            dash_len=max(0.08, 0.18 * typical),
-            gap_len=max(0.05, 0.12 * typical),
+        start = np.array(bond["start"], dtype=float)
+        end = np.array(bond["end"], dtype=float)
+        mid = (start + end) / 2.0
+        i_color = (
+            _atom_render_color(atoms[i], style, light=True)
+            if 0 <= i < n_atoms
+            else _style_color(bond.get("color_i", "#888888"), style)
         )
+        j_color = (
+            _atom_render_color(atoms[j], style, light=True)
+            if 0 <= j < n_atoms
+            else _style_color(bond.get("color_j", "#888888"), style)
+        )
+        groups.setdefault(i_color, []).append((start, mid))
+        groups.setdefault(j_color, []).append((mid, end))
+    if not groups:
+        return []
+    traces = []
     radius = max(0.015, 0.55 * float(style["bond_radius"]))
-    trace = _segment_cylinder_trace(
-        segments,
-        radius=radius,
-        color="#202020",
-        opacity=0.9,
-        sides=4,
-        name="minor-bond-wireframe",
-    )
-    return [trace] if trace is not None else []
+    for color, segments in groups.items():
+        if style.get("disorder") == "dashed_bonds":
+            lengths = [float(np.linalg.norm(end - start)) for start, end in segments]
+            typical = float(np.median(lengths)) if lengths else 1.0
+            segments = _dashed_segments(
+                segments,
+                dash_len=max(0.08, 0.18 * typical),
+                gap_len=max(0.05, 0.12 * typical),
+            )
+        trace = _segment_cylinder_trace(
+            segments,
+            radius=radius,
+            color=color,
+            opacity=0.9,
+            sides=4,
+            name="minor-bond-wireframe",
+        )
+        if trace is not None:
+            traces.append(trace)
+    return traces
 
 
 def _wireframe_atom_traces(scene: dict, style: dict):
@@ -1087,7 +1105,7 @@ def _minor_outline_traces(scene: dict, style: dict):
     once the structure shrank."""
     if style.get("disorder") not in ("outline_rings", "color_shift") and not style.get("minor_wireframe", False):
         return []
-    minors = []
+    groups: Dict[str, list[tuple[np.ndarray, float]]] = {}
     for atom in scene["draw_atoms"]:
         if not atom["is_minor"]:
             continue
@@ -1097,29 +1115,33 @@ def _minor_outline_traces(scene: dict, style: dict):
             continue
         ring_scale = 1.34 if style.get("minor_wireframe", False) else 1.20
         radius = float(atom["atom_radius"]) * float(style["atom_scale"]) * ring_scale
-        minors.append((np.asarray(atom["cart"], dtype=float), radius))
-    if not minors:
+        color = _atom_render_color(atom, style, light=True)
+        groups.setdefault(color, []).append((np.asarray(atom["cart"], dtype=float), radius))
+    if not groups:
         return []
-    color = "#111111" if style.get("minor_wireframe", False) else "#555555"
     cylinder_radius = 0.022 if style.get("minor_wireframe", False) else 0.014
-    segments: list[tuple[np.ndarray, np.ndarray]] = []
     axes = [
         np.array([1.0, 0.0, 0.0]),
         np.array([0.0, 1.0, 0.0]),
         np.array([0.0, 0.0, 1.0]),
     ]
-    for center, radius in minors:
-        for axis in axes:
-            segments.extend(_ring_segments(center, radius, axis, segments=14))
-    trace = _segment_cylinder_trace(
-        segments,
-        radius=cylinder_radius,
-        color=color,
-        opacity=0.95,
-        sides=4,
-        name="minor-outline",
-    )
-    return [trace] if trace is not None else []
+    traces = []
+    for color, minors in groups.items():
+        segments: list[tuple[np.ndarray, np.ndarray]] = []
+        for center, radius in minors:
+            for axis in axes:
+                segments.extend(_ring_segments(center, radius, axis, segments=14))
+        trace = _segment_cylinder_trace(
+            segments,
+            radius=cylinder_radius,
+            color=color,
+            opacity=0.95,
+            sides=4,
+            name="minor-outline",
+        )
+        if trace is not None:
+            traces.append(trace)
+    return traces
 
 
 def _contact_traces(scene: dict, style: dict):
@@ -1305,7 +1327,7 @@ def _axis_traces(scene: dict, style: dict):
     segments: list[tuple[np.ndarray, np.ndarray]] = []
     label_positions: list[tuple[np.ndarray, str]] = []
     for vec, label in zip(
-        [scene["M"][:, 0], scene["M"][:, 1], scene["M"][:, 2]],
+        [scene["M"][0], scene["M"][1], scene["M"][2]],
         labels[:3],
     ):
         v = _normalize(vec, [1.0, 0.0, 0.0])
@@ -1546,9 +1568,9 @@ def _unit_cell_traces(scene: dict, style: dict):
     if not style.get("show_unit_cell", False):
         return []
     origin = np.zeros(3, dtype=float)
-    a = np.array(scene["M"][:, 0], dtype=float)
-    b = np.array(scene["M"][:, 1], dtype=float)
-    c = np.array(scene["M"][:, 2], dtype=float)
+    a = np.array(scene["M"][0], dtype=float)
+    b = np.array(scene["M"][1], dtype=float)
+    c = np.array(scene["M"][2], dtype=float)
     corners = {
         "000": origin,
         "100": a,
@@ -1578,22 +1600,20 @@ def _unit_cell_traces(scene: dict, style: dict):
     return [trace] if trace is not None else []
 
 
-def hull_mesh_trace(shell_coords, color: str, opacity: float = 0.15):
+def hull_mesh_trace(shell_coords, color: str, opacity: float = 0.15, hull: dict | None = None):
     coords = np.array(shell_coords, dtype=float)
     if len(coords) < 4:
         return None
-    try:
-        from scipy.spatial import ConvexHull
-    except Exception:  # pragma: no cover - optional dependency
+    simplices = _hull_simplices(coords, hull or {})
+    if len(simplices) == 0:
         return None
-    hull = ConvexHull(coords)
     return go.Mesh3d(
         x=coords[:, 0],
         y=coords[:, 1],
         z=coords[:, 2],
-        i=hull.simplices[:, 0],
-        j=hull.simplices[:, 1],
-        k=hull.simplices[:, 2],
+        i=simplices[:, 0],
+        j=simplices[:, 1],
+        k=simplices[:, 2],
         color=color,
         opacity=opacity,
         flatshading=True,
@@ -1603,23 +1623,50 @@ def hull_mesh_trace(shell_coords, color: str, opacity: float = 0.15):
     )
 
 
-def hull_edge_traces(shell_coords, color: str):
-    coords = np.array(shell_coords, dtype=float)
-    if len(coords) < 4:
-        return []
+def _overlay_coords_and_hull(overlay) -> tuple[np.ndarray, dict]:
+    if isinstance(overlay, dict):
+        coords = np.asarray(overlay.get("shell_coords") or [], dtype=float)
+        hull = overlay.get("hull") or {}
+    else:
+        coords = np.asarray(overlay or [], dtype=float)
+        hull = {}
+    return coords, hull
+
+
+def _hull_simplices(coords: np.ndarray, hull: dict) -> np.ndarray:
+    simplices = np.asarray(hull.get("simplices") or [], dtype=int)
+    if simplices.ndim == 2 and simplices.shape[1] == 3:
+        return simplices
     try:
         from scipy.spatial import ConvexHull
     except Exception:  # pragma: no cover - optional dependency
-        return []
-    hull = ConvexHull(coords)
-    edges = set()
-    for simplex in hull.simplices:
-        a, b, c = simplex
-        edges.add(tuple(sorted((int(a), int(b)))))
-        edges.add(tuple(sorted((int(b), int(c)))))
-        edges.add(tuple(sorted((int(a), int(c)))))
+        return np.zeros((0, 3), dtype=int)
+    try:
+        return np.asarray(ConvexHull(coords).simplices, dtype=int)
+    except Exception:
+        return np.zeros((0, 3), dtype=int)
 
-    segments = [(coords[i], coords[j]) for (i, j) in sorted(edges)]
+
+def _hull_edges(coords: np.ndarray, hull: dict) -> list[tuple[int, int]]:
+    edges = hull.get("edges") or []
+    if edges:
+        return [tuple(sorted((int(edge[0]), int(edge[1])))) for edge in edges if len(edge) >= 2]
+    edge_set: set[tuple[int, int]] = set()
+    for simplex in _hull_simplices(coords, hull):
+        a, b, c = simplex
+        edge_set.add(tuple(sorted((int(a), int(b)))))
+        edge_set.add(tuple(sorted((int(b), int(c)))))
+        edge_set.add(tuple(sorted((int(a), int(c)))))
+    return sorted(edge_set)
+
+
+def hull_edge_traces(shell_coords, color: str, hull: dict | None = None):
+    coords = np.array(shell_coords, dtype=float)
+    if len(coords) < 4:
+        return []
+    edges = _hull_edges(coords, hull or {})
+
+    segments = [(coords[i], coords[j]) for (i, j) in edges]
     # Edge thickness scales with the polyhedron itself: take a small
     # fraction of the typical edge length so a tiny ClO4 tetrahedron and
     # a large CN=12 cuboctahedron both look proportionally tubed (rather
@@ -1729,27 +1776,22 @@ def _merged_hull_mesh(overlays: list[tuple[list, float]], color: str):
     With 40+ tiled polyhedra each contributing its own ConvexHull this
     drops the Plotly trace count by ~2x while keeping the same on-
     screen look (semi-transparent hulls layered front-to-back)."""
-    try:
-        from scipy.spatial import ConvexHull
-    except Exception:  # pragma: no cover - optional dep
-        return []
     bins: dict[float, dict] = {}
-    for coords, opacity in overlays:
-        coords = np.asarray(coords, dtype=float)
+    for overlay, opacity in overlays:
+        coords, hull = _overlay_coords_and_hull(overlay)
         if len(coords) < 4:
             continue
-        try:
-            hull = ConvexHull(coords)
-        except Exception:
+        simplices = _hull_simplices(coords, hull)
+        if len(simplices) == 0:
             continue
         bin_payload = bins.setdefault(round(float(opacity), 4), {"x": [], "y": [], "z": [], "i": [], "j": [], "k": []})
         base = len(bin_payload["x"])
         bin_payload["x"].extend(coords[:, 0].tolist())
         bin_payload["y"].extend(coords[:, 1].tolist())
         bin_payload["z"].extend(coords[:, 2].tolist())
-        bin_payload["i"].extend((hull.simplices[:, 0] + base).tolist())
-        bin_payload["j"].extend((hull.simplices[:, 1] + base).tolist())
-        bin_payload["k"].extend((hull.simplices[:, 2] + base).tolist())
+        bin_payload["i"].extend((simplices[:, 0] + base).tolist())
+        bin_payload["j"].extend((simplices[:, 1] + base).tolist())
+        bin_payload["k"].extend((simplices[:, 2] + base).tolist())
     traces = []
     for opacity, payload in bins.items():
         if not payload["x"]:
@@ -1773,7 +1815,7 @@ def _merged_hull_mesh(overlays: list[tuple[list, float]], color: str):
     return traces
 
 
-def _merged_hull_edges(overlays: list[list], color: str):
+def _merged_hull_edges(overlays: list, color: str):
     """All polyhedron edges in the scene packed into a single
     ``Scatter3d`` line trace using NaN-separated segments.
 
@@ -1786,28 +1828,14 @@ def _merged_hull_edges(overlays: list[list], color: str):
     weight close enough to the cylinder version for the interactive
     overlay. Static publication exports that want fat tubes can opt
     back into the cylinder path via the legacy renderer if needed."""
-    try:
-        from scipy.spatial import ConvexHull
-    except Exception:  # pragma: no cover - optional dep
-        return []
     xs: list[float] = []
     ys: list[float] = []
     zs: list[float] = []
-    for coords in overlays:
-        coords = np.asarray(coords, dtype=float)
+    for overlay in overlays:
+        coords, hull = _overlay_coords_and_hull(overlay)
         if len(coords) < 4:
             continue
-        try:
-            hull = ConvexHull(coords)
-        except Exception:
-            continue
-        edges: set[tuple[int, int]] = set()
-        for simplex in hull.simplices:
-            a, b, c = simplex
-            edges.add(tuple(sorted((int(a), int(b)))))
-            edges.add(tuple(sorted((int(b), int(c)))))
-            edges.add(tuple(sorted((int(a), int(c)))))
-        for i, j in edges:
+        for i, j in _hull_edges(coords, hull):
             p0 = coords[i]
             p1 = coords[j]
             xs.extend([float(p0[0]), float(p1[0]), float("nan")])
@@ -1895,22 +1923,22 @@ def topology_background_traces(topology_data: dict | None, style: dict | None = 
                     continue
                 opacity = primary_opacity if overlay.get("is_analysis_anchor") else extra_opacity
                 color = str(overlay.get("color") or spec_color)
-                overlays_by_color.setdefault(color, []).append((shell, opacity))
+                overlays_by_color.setdefault(color, []).append((overlay, opacity))
             for color, group in overlays_by_color.items():
                 traces.extend(_merged_hull_mesh(group, color=color))
-                traces.extend(_merged_hull_edges([c for c, _ in group], color=color))
+                traces.extend(_merged_hull_edges([overlay for overlay, _ in group], color=color))
     else:
         # Legacy single-colour path: callers (or test fixtures) that
         # construct a topology_data dict by hand still see the original
         # behaviour, no colour table required.
         overlays_with_opacity = []
         if topology_data.get("shell_coords"):
-            overlays_with_opacity.append((topology_data["shell_coords"], primary_opacity))
+            overlays_with_opacity.append((topology_data, primary_opacity))
         for extra in topology_data.get("extra_overlays") or []:
             if extra.get("shell_coords"):
-                overlays_with_opacity.append((extra["shell_coords"], extra_opacity))
+                overlays_with_opacity.append((extra, extra_opacity))
         traces.extend(_merged_hull_mesh(overlays_with_opacity, color=fallback_color))
-        traces.extend(_merged_hull_edges([c for c, _ in overlays_with_opacity], color=fallback_color))
+        traces.extend(_merged_hull_edges([overlay for overlay, _ in overlays_with_opacity], color=fallback_color))
 
     cache[cache_key] = [_trace_to_json_safe_dict(tr) for tr in traces]
     return cache[cache_key]

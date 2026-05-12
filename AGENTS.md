@@ -151,27 +151,21 @@ generate_ordered_replicas_from_disordered_sites`.** Two patterns
 - **Pymatgen rejects `?` in numeric CIF columns.** SHELX-derived
   CIFs occasionally write `?` in `_atom_site_attached_hydrogens` to
   mean "no attached hydrogens"; pymatgen's `str2float` raises and
-  `generate_ordered_replicas_from_disordered_sites` crashes.
-  `_sanitize_cif_for_pymatgen` writes a temp copy with `?` -> `0` in
-  that one column only. The original CIF is never touched, and the
-  temp file is removed in a `finally` block so we never leak temp
-  files when the resolver fails.
-- **Match optimal-replica positions to raw atoms with PBC + 1:1
-  greedy assignment.** MolCrysKit's optimal replica returns
-  *unwrapped* Cartesian positions (molecules contiguous across cell
-  faces) but `parse_asu` wraps every atom inside the unit cell. Use
-  the minimum-image convention on the difference vector before
-  thresholding. Greedy nearest-pair assignment over disorder atoms
-  (each optimal slot claims at most one raw atom, each raw atom is
-  claimed at most once) is required — without it SY's two raw N
-  atoms 0.15 A apart both match the same optimal N within the
-  threshold, both get tagged major, and the bond graph re-fuses the
-  ethylenediamines.
-- **`_components_with_indices` must skip atoms tagged minor.** The
-  bond graph in `molcrys_bridge.analyze` is fed
-  `exclude_indices=_minor_index_set(raw_atoms)`. Without that, the
-  ASE neighbour-list bonds a kept N to a discarded N at 0.15 A and
-  fuses two cations into one species again.
+  `generate_ordered_replicas_from_disordered_sites` crashes. This
+  sanitisation now lives upstream in `molcrys_kit.io.cif`; do not add
+  a MatterVis-local temp-file rewrite.
+- **Disorder selection comes from MolCrysKit kept indices, not local
+  atom matching.** Call
+  `generate_ordered_replicas_from_disordered_sites(...,
+  return_kept_indices=True)` and mirror the returned source-site
+  indices onto `_is_minor`. Do not resurrect MatterVis' old
+  Cartesian/PBC greedy matcher; it existed only because MolCrysKit did
+  not yet expose solver provenance.
+- **Minor atoms are excluded through MolCrysKit's molecule finder.**
+  The bond graph in `molcrys_bridge.analyze` is fed
+  `identify_molecules(..., exclude_indices=_minor_index_set(raw_atoms))`.
+  Without that, the ASE neighbour-list bonds a kept N to a discarded N
+  at 0.15 A and fuses two cations into one species again.
 - **Cross-orientation bonds must be filtered at scene build time.**
   The legacy `find_bonds` in `crystal_viewer/legacy/plot_crystal.py`
   doesn't know about `_is_minor` and would draw bonds between major
@@ -181,7 +175,8 @@ generate_ordered_replicas_from_disordered_sites`.** Two patterns
   major atoms render normally; bonds between two minor atoms render
   faded (so the discarded orientation still draws as a contiguous
   shape, just translucent).
-- **Slab generation is `molcrys_kit.transforms.generate_topological_slab`.**
+- **Slab generation is
+  `molcrys_kit.operations.surface.generate_topological_slab`.**
   `crystal_viewer/transforms.py` is a thin Dash adapter; if a slab
   parameter is missing here, add it as a passthrough kwarg, don't
   duplicate the math.
@@ -191,6 +186,39 @@ generate_ordered_replicas_from_disordered_sites`.** Two patterns
   `topology.faces` / `topology.edges`; strip those before
   surfacing the dict to callers (see `_sanitize_shape_payload` in
   `crystal_viewer/topology.py`).
+
+### MatterVis-only code that is intentionally not upstream chemistry
+
+These paths can look like duplicate chemistry at first glance. Do not
+delete them in favour of a `molcrys_kit` call unless the upstream API
+has grown the exact hook named here.
+
+- `scene.py` still runs `ops.find_bonds(draw_atoms, ...)` after
+  display-mode filtering. `CrystalAnalysis.bond_pairs` is the
+  unit-cell chemistry graph; `draw_atoms` may be a formula-unit slice,
+  an asymmetric-unit slice, explicit boundary replicas, or a
+  transformed cluster. The renderer needs bonds for the manifested
+  display atoms, not the original raw atom list.
+- `topology.py` searches over fragment centres from
+  `topology_fragment_table`, not atom sites. `molcrys_kit.find_polyhedra`
+  owns atom-centred coordination shells; MatterVis' topology cards own
+  fragment-centred packing shells and the A/B/X display labels.
+- `transforms.py` grow / complete-fragment / repeat operations work on
+  manifested Cartesian scene atoms. `rebuild_scene_with_atoms` reruns
+  non-PBC bond perception intentionally because transformed scenes are
+  no longer a periodic unit cell.
+- `cube.py` bond helpers operate on Gaussian-cube cluster coordinates.
+  They are not crystallographic PBC bond perception and should not be
+  routed through `MolecularCrystal`.
+- Minor-disorder outlines in `renderer.py` are visual annotations only.
+  Their colours must come from per-atom/per-bond render colours
+  (`_atom_render_color(..., light=True)`), not hard-coded black/grey
+  "outline ink".
+- MatterVis stores every live lattice matrix as row vectors
+  (`cart = frac @ M`), matching ASE, pymatgen, and `molcrys_kit`.
+  The vendored legacy parser still returns the old column-vector
+  matrix; convert it once at the boundary and do not pass column
+  matrices into new code.
 
 When `molcrys_kit` is updated and a function you call gets
 deprecated:

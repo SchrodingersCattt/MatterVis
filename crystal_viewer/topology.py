@@ -39,7 +39,7 @@ def classify_fragments(bundle) -> list[dict[str, Any]]:
 
 def _lattice_vectors(bundle) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     M = np.array(bundle.M if getattr(bundle, "M", None) is not None else bundle.scene["M"], dtype=float)
-    return M[:, 0], M[:, 1], M[:, 2]
+    return M[0], M[1], M[2]
 
 
 def _neighbor_types(fragments: list[dict[str, Any]], center_type: str) -> list[str]:
@@ -239,6 +239,17 @@ def _neighbor_pool(
     return cache[key]
 
 
+def _shift_hull_payload(hull: dict[str, Any] | None, delta: np.ndarray) -> dict[str, Any]:
+    """Return a copy of a MolCrysKit hull payload translated by ``delta``."""
+    if not hull:
+        return {"vertices": [], "simplices": [], "edges": []}
+    out = dict(hull)
+    vertices = hull.get("vertices") or []
+    if vertices:
+        out["vertices"] = (np.asarray(vertices, dtype=float) + delta).tolist()
+    return out
+
+
 def _extract_coordination_shell_static(
     bundle,
     center_index: int,
@@ -281,6 +292,7 @@ def _extract_coordination_shell_static(
         if shell else np.zeros((0, 3), dtype=float)
     )
     shell_distances = [float(item["distance"]) for item in shell]
+    hull = convex_hull_payload(source_shell_coords)
     return {
         "center_index": int(center_index),
         "default_label": center_fragment.get("label", f"site-{center_index}"),
@@ -294,6 +306,7 @@ def _extract_coordination_shell_static(
         "shell": shell,
         "candidate_fragments": candidates,
         "source_shell_coords": source_shell_coords,
+        "source_hull": hull,
         "distances": shell_distances,
         "all_distances": [float(item["distance"]) for item in candidates],
     }
@@ -367,6 +380,7 @@ def extract_coordination_shell(
         np.array([item["center"] for item in candidates], dtype=float) + delta
         if candidates else np.zeros((0, 3), dtype=float)
     )
+    hull = _shift_hull_payload(static.get("source_hull"), delta)
     return {
         "center_index": int(center_index),
         "center_label": display_label or static["default_label"],
@@ -382,6 +396,7 @@ def extract_coordination_shell(
         "candidate_fragments": candidates,
         "shell_coords": shell_coords.tolist(),
         "source_shell_coords": source_shell_coords.tolist(),
+        "hull": hull,
         "distances": static["distances"],
         "all_distances": static["all_distances"],
         "pool_coords": pool_coords_arr.tolist(),
@@ -423,13 +438,11 @@ def _analyze_topology_uncached(
     shape = _classify_shell_payload(shell_coords, center)
     planarity = planarity_analysis(shell_coords, group_size=min(5, len(shell_coords)) if shell_coords else 5)
     prism = detect_prism_vs_antiprism(shell_coords)
-    hull = convex_hull_payload(shell_coords)
     return {
         **shell,
         "shape": shape,
         "planarity": planarity,
         "prism_analysis": prism,
-        "hull": hull,
     }
 
 
@@ -582,6 +595,7 @@ def analyze_topology(
         if out.get("source_shell_coords"):
             shell = np.array(out["source_shell_coords"], dtype=float) + delta
             out["shell_coords"] = shell.tolist()
+        out["hull"] = _shift_hull_payload(out.get("source_hull") or out.get("hull"), delta)
     if display_label is not None:
         out["center_label"] = display_label
     if display_type is not None:

@@ -153,6 +153,11 @@ DEFAULT_STRUCTURE_PRESETS = {
         "up": [0.0, 0.0, 1.0],
         "show_hydrogen": False,
     },
+    "SY": {
+        "view_direction": [1.0, 1.0, 1.0],
+        "up": [0.0, 0.0, 1.0],
+        "show_hydrogen": False,
+    },
 }
 
 
