@@ -124,6 +124,54 @@ def test_fragment_on_face_replicates_as_whole_fragment():
     ]
 
 
+def test_fragment_face_membership_does_not_cartesian_explode():
+    """Two atoms in the same molecule, each touching a *different* face,
+    must NOT spawn a phantom (+x, +y, 0) replica of the whole fragment.
+
+    Regression for a bug where ``boundary_shifts_for_fragment`` collected
+    per-axis shift signals from independent atoms (atom A on x=0 ->
+    shift +x; atom B on y=0 -> shift +y) and then took the Cartesian
+    product, yielding shifts {(+x,0,0), (0,+y,0), (+x,+y,0)}. The
+    (+x,+y,0) replica has no crystallographic basis -- it would only be
+    legitimate if some single atom in the molecule lay on the (x=0, y=0)
+    edge. The fragment translates as a whole, so the correct shift set
+    is the *union* of per-atom shifts, not the product.
+    """
+    cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
+    M = np.eye(3) * 10.0
+    atoms = [
+        _atom("H1", [0.0, 0.5, 0.5], M),
+        _atom("H2", [0.5, 0.0, 0.5], M),
+    ]
+    for atom in atoms:
+        atom["_source_molecule_index"] = 11
+        atom["_wrapped_frac"] = np.array(atom["frac"], dtype=float)
+
+    scene = build_scene_from_atoms(
+        name="fragment_two_faces",
+        title="Fragment Two Faces",
+        atoms=atoms,
+        cell=cell,
+        M=M,
+        R=np.eye(3),
+        display_mode="unit_cell",
+        ops=scene_ops(),
+        unwrapped_atoms=atoms,
+        preset={"style": {"show_labels": False, "show_axes": False}},
+    )
+
+    # Originals (2) + replicas for {(+x,0,0), (0,+y,0)} applied to the
+    # whole 2-atom fragment = 2 + 2 * 2 = 6. The cartesian-product bug
+    # would have produced 2 + 3 * 2 = 8 (extra (+x,+y,0) copy).
+    assert len(scene["draw_atoms"]) == 6
+    image_shifts = sorted({
+        tuple(atom.get("_image_shift", (0, 0, 0)))
+        for atom in scene["draw_atoms"]
+        if atom.get("_is_boundary_replica")
+    })
+    assert image_shifts == [(0, 1, 0), (1, 0, 0)]
+
+
 def test_atom_on_edge_replicates_to_four():
     cell = gemmi.UnitCell(6.0, 6.0, 6.0, 90.0, 90.0, 90.0)
     M = np.eye(3) * 6.0

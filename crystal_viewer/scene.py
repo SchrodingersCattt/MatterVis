@@ -292,28 +292,21 @@ def _expand_boundary_replicas(atoms: list[dict[str, Any]], M: Any) -> list[dict[
         return shifts
 
     def boundary_shifts_for_fragment(fragment_atoms: list[dict[str, Any]]) -> list[tuple[int, int, int]]:
-        per_axis_shifts: list[set[int]] = [set([0]), set([0]), set([0])]
+        # Take the *union* of per-atom shifts across the fragment, NOT a
+        # Cartesian product of per-axis boundary memberships. The latter
+        # spuriously combines independent face-membership signals from
+        # different atoms in the same molecule -- e.g. an H near x=0 and a
+        # different H near y=0 would yield a phantom (+x, +y, 0) replica
+        # of the whole NH4 fragment which has no crystallographic basis.
+        # The union gives one replica per face/edge/corner that some atom
+        # in the molecule actually sits on, so a fragment straddling a
+        # face still gets its mirror image, but a fragment that just
+        # happens to span two unrelated faces does not.
+        shifts: set[tuple[int, int, int]] = set()
         for atom in fragment_atoms:
-            frac = atom.get("_wrapped_frac", atom.get("frac"))
-            if frac is None:
-                continue
-            frac_arr = np.asarray(frac, dtype=float)
-            if frac_arr.shape != (3,):
-                continue
-            for axis in range(3):
-                f = float(frac_arr[axis])
-                if -_BOUNDARY_TOL <= f <= _BOUNDARY_TOL:
-                    per_axis_shifts[axis].add(1)
-                elif 1.0 - _BOUNDARY_TOL <= f <= 1.0 + _BOUNDARY_TOL:
-                    per_axis_shifts[axis].add(-1)
-        shifts: list[tuple[int, int, int]] = []
-        for sa in sorted(per_axis_shifts[0]):
-            for sb in sorted(per_axis_shifts[1]):
-                for sc in sorted(per_axis_shifts[2]):
-                    if sa == 0 and sb == 0 and sc == 0:
-                        continue
-                    shifts.append((sa, sb, sc))
-        return shifts
+            for shift in boundary_shifts_for_atom(atom):
+                shifts.add(shift)
+        return sorted(shifts)
 
     out: list[dict[str, Any]] = []
     grouped: dict[int, list[dict[str, Any]]] = {}
