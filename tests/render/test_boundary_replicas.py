@@ -124,6 +124,50 @@ def test_fragment_on_face_replicates_as_whole_fragment():
     ]
 
 
+def test_minor_disorder_fragment_replicates_as_whole_fragment():
+    """Minor disorder alternatives use the same whole-fragment boundary path.
+
+    MCK now returns minor SHELX PART alternatives in ``mol_indices`` instead of
+    leaving them as orphan atoms. Once that provenance is present, the unit-cell
+    boundary convention must mirror the full minor fragment, preserving the
+    minor styling metadata on the replica atoms.
+    """
+    cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
+    M = np.eye(3) * 10.0
+    atoms = [
+        _atom("N3", [0.0, 0.25, 0.5], M),
+        _atom("C5", [0.1, 0.25, 0.5], M),
+    ]
+    for atom in atoms:
+        atom["_source_molecule_index"] = 17
+        atom["_wrapped_frac"] = np.array(atom["frac"], dtype=float)
+        atom["_is_minor"] = True
+        atom["dg"] = "-1"
+
+    scene = build_scene_from_atoms(
+        name="minor_fragment_face",
+        title="Minor Fragment Face",
+        atoms=atoms,
+        cell=cell,
+        M=M,
+        R=np.eye(3),
+        display_mode="unit_cell",
+        ops=scene_ops(),
+        unwrapped_atoms=atoms,
+        preset={"style": {"show_labels": False, "show_axes": False}},
+    )
+
+    assert len(scene["draw_atoms"]) == 4
+    replicas = [
+        atom for atom in scene["draw_atoms"]
+        if atom.get("_is_fragment_boundary_replica")
+    ]
+    assert sorted(atom["label"] for atom in replicas) == ["C5", "N3"]
+    assert {tuple(atom["_image_shift"]) for atom in replicas} == {(1, 0, 0)}
+    assert all(atom.get("_is_minor") is True for atom in replicas)
+    assert all(atom.get("is_minor") is True for atom in replicas)
+
+
 def test_fragment_with_mck_drift_replicates_at_canonical_cell_corners():
     """When MCK has translated a fragment by an integer cell vector to keep
     it continuous, the boundary replicas must still land at the proper

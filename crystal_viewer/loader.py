@@ -448,9 +448,10 @@ def _fragment_table_from_atoms(
                 seen_local.add(local)
             if component:
                 components.append((sorted(component), int(mol_index)))
-    # Sweep for any kept atom that didn't make it into a molecule
-    # component (orphans). They get one-atom singleton fragments so
-    # they remain visible in the fragment table for diagnostics.
+    # Sweep for any kept atom that didn't make it into a molecule component.
+    # These should be rare now that MCK's bond perception is disorder-aware
+    # and returns both major and minor alternatives as whole fragments; keep
+    # singleton rows only as diagnostics for genuinely uncovered atoms.
     for local_idx in range(len(pool_kept)):
         if local_idx not in seen_local:
             components.append(([local_idx], None))

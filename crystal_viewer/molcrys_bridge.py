@@ -34,6 +34,7 @@ def _require_molcryskit():
             KEY_DISORDER_GROUP,
             KEY_ASSEMBLY,
             KEY_LABEL,
+            KEY_SYM_OP_INDEX,
         )
     except ImportError as exc:
         raise ImportError(
@@ -51,6 +52,7 @@ def _require_molcryskit():
         "KEY_DISORDER_GROUP": KEY_DISORDER_GROUP,
         "KEY_ASSEMBLY": KEY_ASSEMBLY,
         "KEY_LABEL": KEY_LABEL,
+        "KEY_SYM_OP_INDEX": KEY_SYM_OP_INDEX,
     }
 
 
@@ -88,6 +90,18 @@ def _ase_atoms_from_raw(raw_atoms, M, mk):
             dg[i] = int(float(value))
         except (TypeError, ValueError):
             dg[i] = 0
+    for i, atom in enumerate(raw_atoms):
+        if dg[i] != 0:
+            continue
+        # Occupancy-only rotamer disorder (e.g. DAP-4 NH4+) has no CIF PART
+        # label, so MCK would see every alternative as group 0 and allow
+        # cross-orientation close contacts to fuse. Reuse the optimal-replica
+        # picker result as a synthetic PART label only at the MCK adapter
+        # boundary; raw atom dictionaries keep their original dg/da fields.
+        if atom.get("_is_minor") is True:
+            dg[i] = -1
+        elif atom.get("_is_major") is True or atom.get("_is_minor") is False:
+            dg[i] = 1
 
     da = np.array([
         (str(atom.get("da", "") or "").strip()) for atom in raw_atoms
@@ -97,11 +111,15 @@ def _ase_atoms_from_raw(raw_atoms, M, mk):
     label = np.array([
         atom.get("label") or atom["elem"] for atom in raw_atoms
     ])
+    sym_op_index = np.array([
+        int(atom.get("_symop_index", 0) or 0) for atom in raw_atoms
+    ], dtype=int)
 
     atoms.set_array(mk["KEY_OCCUPANCY"], occ)
     atoms.set_array(mk["KEY_DISORDER_GROUP"], dg)
     atoms.set_array(mk["KEY_ASSEMBLY"], da)
     atoms.set_array(mk["KEY_LABEL"], label)
+    atoms.set_array(mk["KEY_SYM_OP_INDEX"], sym_op_index)
     return atoms
 
 
@@ -233,18 +251,14 @@ def analyze(raw_atoms, M, *, max_atoms=None):
     """Run MolCrysKit on ``raw_atoms`` (full unit cell) and return a
     :class:`CrystalAnalysis` summarising species + per-FU counts.
 
-    Atoms tagged as minor disorder images (``_is_minor=True`` set by
-    :func:`crystal_viewer.loader._tag_shelx_occupancy_disorder`, or
-    matched by the SHELX heuristic in :func:`_is_minor_atom`) are
-    excluded from bond perception. Without this guard MolCrysKit's
-    neighbour-list bonded a major-orientation N to a minor-orientation
-    N at 0.15 A apart -- well below the 1.5 A covalent N-N threshold
-    -- and fused two chemically distinct ethylenediamines into one
-    C4H20N4 component. Excluding minor images restores the correct
-    one-orientation-per-disorder-site molecule grouping.
-
-    Minor atoms remain in ``raw_atoms`` (the renderer still draws them
-    faded); they just don't appear in any ``mol_indices`` entry.
+    MolCrysKit's ``identify_molecules`` is disorder-aware: atoms in
+    incompatible non-zero PART groups are not bonded even when their
+    Cartesian positions overlap. MatterVis passes CIF disorder groups
+    through directly, and synthesises a private +1/-1 group at the ASE
+    adapter boundary for occupancy-only rotamers already classified by
+    ``_tag_shelx_occupancy_disorder``. Both major and minor alternatives
+    therefore remain full molecular fragments in ``mol_indices``; the
+    renderer still distinguishes them via the original ``_is_minor`` flag.
     """
     mk = _require_molcryskit()
     if not raw_atoms:
@@ -252,12 +266,7 @@ def analyze(raw_atoms, M, *, max_atoms=None):
         return CrystalAnalysis(crystal, [], [], {}, {}, bond_pairs=[])
 
     ase_atoms = _ase_atoms_from_raw(raw_atoms, M, mk)
-    minor_indices = _minor_index_set(raw_atoms)
-    identified = mk["identify_molecules"](
-        ase_atoms,
-        max_atoms=max_atoms,
-        exclude_indices=minor_indices,
-    )
+    identified = mk["identify_molecules"](ase_atoms, max_atoms=max_atoms)
 
     molecules = []
     mol_indices = []
@@ -266,8 +275,6 @@ def analyze(raw_atoms, M, *, max_atoms=None):
     for molecule in identified:
         indices = [int(i) for i in (molecule.info.get("atom_indices") or [])]
         if not indices:
-            continue
-        if len(indices) == 1 and indices[0] in minor_indices:
             continue
         positions = np.asarray(molecule.get_positions(), dtype=float)
         if positions.ndim != 2 or positions.shape[0] != len(indices):
