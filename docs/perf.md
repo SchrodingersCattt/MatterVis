@@ -68,3 +68,48 @@ spots:
 | `crystal_scene._label_payload` | 1.228 | label collision placement |
 | `renderer.topology_foreground_traces` | 0.806 | primary/extra overlay markers |
 | `loader._fragment_table_from_atoms` | 0.484 | only cold display scopes |
+
+## After Phase 2 (auto_view + label cache, 2026-05-11)
+
+The single biggest user-facing latency was ``loader.build_loaded_crystal``
+on a *cold* CIF: ~9.85 s on DAP-4. ``cProfile`` showed
+``plot_crystal.auto_view_dir`` accounting for ~9.0 s of that, with the
+hot path being ~1080 candidate-view scoring iterations × O(N^2) Python
+occlusion loops × per-pair ``_pair_weight`` dict lookups, plus 8 656
+``np.percentile`` calls inside ``_cluster_crowding_penalty``.
+
+Three changes (see git log around ``perf(legacy): auto_view_dir LRU
+cache + vectorise occlusion loop``) cut both the cold-load cost and the
+per-interaction stutter:
+
+1. **``auto_view_dir`` content-hashed LRU**. Cache key = (rounded atom
+   positions, labels, elements, ``M``, cell, compound name); cache
+   capped at 64 entries. Catalog presets, REST round-trips, dev
+   reloads, and the test suite (which loads the same CIFs many times)
+   now pay the cost once.
+2. **Vectorised occlusion / weight precomputation**. The O(N^2) Python
+   loop that re-evaluated ``_pair_weight`` for every (i, j) pair × every
+   candidate view is replaced with a single hoisted ``(N, N)`` weight
+   matrix and a numpy mask reduction. ``excluded_pairs`` likewise lifts
+   to a precomputed boolean matrix.
+3. **``_cluster_shape_p80`` + manual p10/p90**. ``np.percentile`` for a
+   single quantile on tiny (5-10 element) arrays was ~50 us of dispatch
+   overhead per call; replaced with ``np.sort`` + linear interpolation,
+   which exactly matches numpy's default mode.
+4. **``_compute_label_positions`` content-hashed LRU**. Style toggles,
+   palette swaps, and re-renders with identical geometry now hit the
+   cache instead of running the 80-iteration force-directed sweep.
+
+Wall-clock impact (DAP-4):
+
+| Scenario | Before | After | Speedup |
+| --- | ---: | ---: | ---: |
+| cold ``build_loaded_crystal`` | 9.85 s | 4.7 s | 2.1x |
+| warm ``build_loaded_crystal`` (cache hit) | 9.85 s | 0.74 s | 13.3x |
+| ``build_bundle_scene`` repeat 2x2x1, 2nd call | 1.06 s | 0.000 s | full cache |
+| pytest (whole suite) | 185.9 s | 137.5 s | 1.35x |
+
+The cached values are content-addressed so they are safe to share
+across structures, and across processes that touch the same CIF
+file. Cache invalidation happens automatically when the input atom
+positions change (e.g. after a transform).

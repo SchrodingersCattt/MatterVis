@@ -19,6 +19,7 @@ from mpl_toolkits.mplot3d import Axes3D          # noqa: F401 – registers proj
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import os
 import math
+from collections import OrderedDict
 from types import SimpleNamespace
 
 try:
@@ -967,6 +968,40 @@ def draw_atom_3d(ax, at, view_x, view_y, alpha, depth_t=None):
             ax.add_collection3d(hl_poly)
 
 # ── Smart label placement (screen-space, radial + collision avoidance) ───────
+_LABEL_POS_CACHE: "OrderedDict[tuple, list]" = OrderedDict()
+_LABEL_POS_CACHE_MAX = 64
+
+
+def _label_pos_cache_key(label_atoms, view_x, view_y, base_offset, all_atoms):
+    """Stable hash of inputs to ``_compute_label_positions``.
+
+    Label placement is purely cosmetic and depends only on screen-space
+    geometry: the rounded Cartesian positions of label atoms, the same
+    for the (optional) ``all_atoms`` reference cloud, the view-plane
+    basis vectors, and the requested radial offset. Style toggles and
+    fragment colours don't affect the layout, so re-rendering the same
+    scene with a different palette returns from cache.
+    """
+    label_bytes = np.round(
+        np.array([atom["cart"] for atom in label_atoms], dtype=float), 4
+    ).tobytes()
+    if all_atoms is None:
+        all_bytes = b""
+    else:
+        all_bytes = np.round(
+            np.array([atom["cart"] for atom in all_atoms], dtype=float), 4
+        ).tobytes()
+    return (
+        len(label_atoms),
+        label_bytes,
+        np.round(np.asarray(view_x, dtype=float), 5).tobytes(),
+        np.round(np.asarray(view_y, dtype=float), 5).tobytes(),
+        round(float(base_offset), 4),
+        len(all_atoms) if all_atoms is not None else -1,
+        all_bytes,
+    )
+
+
 def _compute_label_positions(label_atoms, view_x, view_y, base_offset=0.38,
                              all_atoms=None):
     """Compute 3D label positions for ``label_atoms`` using a vectorised
@@ -988,9 +1023,20 @@ def _compute_label_positions(label_atoms, view_x, view_y, base_offset=0.38,
     identical (label placement is purely cosmetic), and the cost drops
     from O(N_lab^2 + N_lab*N_atoms) python ops per iter to two numpy
     matmuls per iter.
+
+    A content-hashed LRU on top kills the residual ~1 s/call on repeat
+    transforms: changing the colour palette / opacity / display mode
+    doesn't move atoms, so the layout is identical to the previous
+    call and we can return the cached position list.
     """
     if not label_atoms:
         return []
+
+    cache_key = _label_pos_cache_key(label_atoms, view_x, view_y, base_offset, all_atoms)
+    cached = _LABEL_POS_CACHE.get(cache_key)
+    if cached is not None:
+        _LABEL_POS_CACHE.move_to_end(cache_key)
+        return [pos.copy() for pos in cached]
 
     non_h = [a for a in label_atoms if a['elem'] != 'H']
     if not non_h:
@@ -1072,10 +1118,14 @@ def _compute_label_positions(label_atoms, view_x, view_y, base_offset=0.38,
     # other regardless. Drop straight to the radial Step-1 placement.
     LABEL_OPT_MAX_ATOMS = 600
     if n_atom > LABEL_OPT_MAX_ATOMS:
-        return [
+        result = [
             positions[k, 0] * view_x_arr + positions[k, 1] * view_y_arr
             for k in range(n_lab)
         ]
+        _LABEL_POS_CACHE[cache_key] = result
+        if len(_LABEL_POS_CACHE) > _LABEL_POS_CACHE_MAX:
+            _LABEL_POS_CACHE.popitem(last=False)
+        return [pos.copy() for pos in result]
 
     # ``owner_mask[i, k]`` = True if atom ``k`` is the same crystallographic
     # site as label ``i`` (so label i should not repel from atom k).
@@ -1161,10 +1211,14 @@ def _compute_label_positions(label_atoms, view_x, view_y, base_offset=0.38,
         if use_kdtree and nearby_idx is not None and max_move > 0.5:
             nearby_idx = query_nearby(positions)
 
-    return [
+    result = [
         positions[k, 0] * view_x_arr + positions[k, 1] * view_y_arr
         for k in range(n_lab)
     ]
+    _LABEL_POS_CACHE[cache_key] = result
+    if len(_LABEL_POS_CACHE) > _LABEL_POS_CACHE_MAX:
+        _LABEL_POS_CACHE.popitem(last=False)
+    return [pos.copy() for pos in result]
 
 
 def _label_atom_radius(atom, view_x, view_y):
@@ -1638,14 +1692,38 @@ def _pair_weight(i, j, org_set, anion_set):
         return 0.90
     return 1.00
 
+def _cluster_shape_p80(pts, cluster_radii):
+    """Return ``(centroid, radial_p80)`` for a cluster's screen-space
+    extent. Replaces ``np.percentile(radial, 80)`` -- per-view we call
+    this 6+ times across 1000+ candidate views, and ``np.percentile``
+    has ~50 us of dispatch overhead per call for trivial-sized inputs
+    that dominate the function. Sorting + interpolation matches numpy's
+    default linear interpolation mode and runs in <2 us for the typical
+    5-10-atom cluster.
+    """
+    centroid = pts.mean(axis=0)
+    radial = np.sqrt(((pts - centroid) ** 2).sum(axis=1)) + cluster_radii
+    n = radial.size
+    if n == 0:
+        return centroid, 0.0
+    if n == 1:
+        return centroid, float(radial[0])
+    sorted_r = np.sort(radial)
+    rank = 0.8 * (n - 1)
+    lo = int(np.floor(rank))
+    hi = int(np.ceil(rank))
+    frac = rank - lo
+    if lo == hi:
+        return centroid, float(sorted_r[lo])
+    return centroid, float(sorted_r[lo] * (1 - frac) + sorted_r[hi] * frac)
+
+
 def _cluster_crowding_penalty(pts_2d, radii, org_clusters, anion_clusters):
     def cluster_shape(idxs):
         if not idxs:
             return None
-        pts = pts_2d[idxs]
-        centroid = pts.mean(axis=0)
-        radial = np.sqrt(((pts - centroid) ** 2).sum(axis=1)) + radii[np.array(idxs)]
-        return centroid, float(np.percentile(radial, 80))
+        idx_arr = np.asarray(idxs, dtype=int)
+        return _cluster_shape_p80(pts_2d[idx_arr], radii[idx_arr])
 
     penalty = 0.0
     org_shapes = [cluster_shape(idxs) for idxs in org_clusters if idxs]
@@ -1687,8 +1765,49 @@ def _perturb_view(view_vec, dx_deg, dy_deg):
     candidate /= np.linalg.norm(candidate)
     return candidate
 
+def _build_pair_weight_matrix(n, org_pos, anion_pos):
+    """Precompute the per-pair occlusion-penalty weights once per
+    ``auto_view_dir`` call. Replaces the in-loop ``_pair_weight``
+    call which used to dominate ``_score_auto_view`` because it ran
+    O(N^2) Python lookups per view × 1000+ candidate views.
+    """
+    is_org = np.zeros(n, dtype=bool)
+    is_ani = np.zeros(n, dtype=bool)
+    if org_pos:
+        is_org[np.asarray(list(org_pos), dtype=int)] = True
+    if anion_pos:
+        is_ani[np.asarray(list(anion_pos), dtype=int)] = True
+    i_org = is_org[:, None]
+    j_org = is_org[None, :]
+    i_ani = is_ani[:, None]
+    j_ani = is_ani[None, :]
+    both_org = i_org & j_org
+    org_ani_cross = (i_org & j_ani) | (j_org & i_ani)
+    both_ani = i_ani & j_ani
+    return np.where(
+        both_org, 1.25,
+        np.where(
+            org_ani_cross, 1.40,
+            np.where(both_ani, 0.90, 1.00),
+        ),
+    )
+
+
+def _build_excluded_mask(n, excluded_pairs):
+    """Precompute the symmetric (N, N) bool mask of bond-excluded
+    pairs so the per-view occlusion sum can run as a single
+    vectorised reduction."""
+    mask = np.zeros((n, n), dtype=bool)
+    if excluded_pairs:
+        idx = np.array(list(excluded_pairs), dtype=int)
+        mask[idx[:, 0], idx[:, 1]] = True
+        mask[idx[:, 1], idx[:, 0]] = True
+    return mask
+
+
 def _score_auto_view(coords, radii, org_pos, anion_pos, org_clusters, anion_clusters,
-                     excluded_pairs, weights, view_vec):
+                     excluded_pairs, weights, view_vec,
+                     pair_weight_matrix=None, excluded_mask=None):
     R = view_rotation(view_vec)
     sx = coords @ R[0]
     sy = coords @ R[1]
@@ -1701,7 +1820,23 @@ def _score_auto_view(coords, radii, org_pos, anion_pos, org_clusters, anion_clus
     org_cov = np.cov((org_2d - org_center).T) if len(org_2d) > 2 else np.eye(2) * 1e-4
     eigvals = np.clip(np.linalg.eigvalsh(org_cov), 1e-8, None)
     organic_plane = float(np.sqrt(eigvals[0] * eigvals[1]))
-    org_depth = float(np.percentile(sz[org_idx], 90) - np.percentile(sz[org_idx], 10))
+    # Combined p10/p90 via a single sort instead of two ``np.percentile``
+    # calls (50 us each in dispatch overhead) -- this runs once per view
+    # candidate × 1000+ candidates per ``auto_view_dir`` call.
+    sz_org = np.sort(sz[org_idx])
+    n_org = sz_org.size
+    if n_org < 2:
+        org_depth = 0.0
+    else:
+        rank_lo = 0.10 * (n_org - 1)
+        rank_hi = 0.90 * (n_org - 1)
+        lo_lo = int(np.floor(rank_lo))
+        lo_hi = int(np.ceil(rank_lo))
+        hi_lo = int(np.floor(rank_hi))
+        hi_hi = int(np.ceil(rank_hi))
+        p10 = sz_org[lo_lo] + (rank_lo - lo_lo) * (sz_org[lo_hi] - sz_org[lo_lo])
+        p90 = sz_org[hi_lo] + (rank_hi - hi_lo) * (sz_org[hi_hi] - sz_org[hi_lo])
+        org_depth = float(p90 - p10)
 
     all_w = sx.max() - sx.min()
     all_h = sy.max() - sy.min()
@@ -1712,19 +1847,26 @@ def _score_auto_view(coords, radii, org_pos, anion_pos, org_clusters, anion_clus
     dz = np.abs(sz[:, None] - sz[None, :])
     thresh = 0.78 * (radii[:, None] + radii[None, :])
 
-    org_set = set(org_pos)
-    anion_set = set(anion_pos)
-    occlusion = 0.0
-    for i in range(len(coords)):
-        for j in range(i + 1, len(coords)):
-            if (i, j) in excluded_pairs:
-                continue
-            overlap = thresh[i, j] - dists[i, j]
-            if overlap <= 0:
-                continue
-            depth_scale = np.clip(1.0 - dz[i, j] / max(thresh[i, j], 1e-6), 0.0, 1.0)
-            occlusion += _pair_weight(i, j, org_set, anion_set) * \
-                ((overlap / max(thresh[i, j], 1e-6)) ** 2) * (1.0 + 1.6 * depth_scale)
+    n = len(coords)
+    if pair_weight_matrix is None:
+        pair_weight_matrix = _build_pair_weight_matrix(n, org_pos, anion_pos)
+    if excluded_mask is None:
+        excluded_mask = _build_excluded_mask(n, excluded_pairs)
+
+    # Vectorised occlusion sum: replaces the O(N^2) Python loop that
+    # used to call ``_pair_weight`` per pair × 1000+ views, which was
+    # the inner hot-loop of ``auto_view_dir``. Mask is upper-triangular
+    # so each unordered pair contributes once.
+    upper = np.triu(np.ones((n, n), dtype=bool), k=1)
+    overlap_mat = thresh - dists
+    safe_thresh = np.maximum(thresh, 1e-6)
+    active = upper & (~excluded_mask) & (overlap_mat > 0)
+    if active.any():
+        depth_scale = np.clip(1.0 - dz / safe_thresh, 0.0, 1.0)
+        contrib = pair_weight_matrix * ((overlap_mat / safe_thresh) ** 2) * (1.0 + 1.6 * depth_scale)
+        occlusion = float(contrib[active].sum())
+    else:
+        occlusion = 0.0
 
     robust_sep = 0.0
     close_contact = 0.0
@@ -1760,17 +1902,80 @@ def _score_auto_view(coords, radii, org_pos, anion_pos, org_clusters, anion_clus
     )
     return score
 
+_AUTO_VIEW_CACHE: "OrderedDict[tuple, tuple[np.ndarray, np.ndarray]]" = OrderedDict()
+_AUTO_VIEW_CACHE_MAX = 64
+
+
+def _auto_view_cache_key(atoms, M, cell, compound_name) -> tuple:
+    """Stable hash of the inputs that drive ``auto_view_dir``.
+
+    The function is deterministic in
+    ``(atom positions, atom labels, M, cell, compound_name)``; nothing
+    else affects the chosen view direction. Hashing the rounded
+    Cartesian positions (4 decimals = 0.1 mAa) gives a key that
+    survives copy / round-trip without false misses.
+    """
+    M_arr = np.asarray(M, dtype=float)
+    pos_bytes = np.round(
+        np.array([atom["cart"] for atom in atoms], dtype=float), 4
+    ).tobytes()
+    labels = tuple(str(atom.get("label") or atom.get("elem")) for atom in atoms)
+    elems = tuple(str(atom.get("elem")) for atom in atoms)
+    cell_key = None
+    if cell is not None:
+        try:
+            cell_key = (
+                round(float(cell.a), 5), round(float(cell.b), 5), round(float(cell.c), 5),
+                round(float(cell.alpha), 4), round(float(cell.beta), 4), round(float(cell.gamma), 4),
+            )
+        except AttributeError:
+            cell_key = tuple(np.round(np.asarray(cell, dtype=float), 5).flatten().tolist())
+    return (
+        len(atoms),
+        pos_bytes,
+        labels,
+        elems,
+        np.round(M_arr, 5).tobytes(),
+        cell_key,
+        str(compound_name or ""),
+    )
+
+
 def auto_view_dir(atoms, M, cell, compound_name=None):
+    # The auto-view-direction picker is the dominant cost of
+    # ``build_loaded_crystal`` (~9 s on DAP-4: ~3 s in the second-pass
+    # ``select_formula_unit`` call below, ~6 s scoring 1080+ candidate
+    # camera angles by O(N^2) projected-occlusion penalties). The
+    # result is fully determined by the atoms / cell / compound name,
+    # so memoising on a content hash is safe and turns every repeat
+    # load (tests, REST round-trip, dev iteration) into a no-op.
+    cache_key = _auto_view_cache_key(atoms, M, cell, compound_name)
+    cached = _AUTO_VIEW_CACHE.get(cache_key)
+    if cached is not None:
+        _AUTO_VIEW_CACHE.move_to_end(cache_key)
+        view_dir, up = cached
+        return view_dir.copy(), up.copy()
+
     atoms_copy = [dict(a) for a in atoms]
     try:
         atoms_sel, sel_idxs = select_formula_unit(atoms_copy, M, cell)
         sel_atoms = [atoms_sel[i] for i in sel_idxs]
     except Exception:
-        return np.array([0.174, 0.985, 0.000]), np.array([0.0, 0.0, 1.0])
+        view_dir = np.array([0.174, 0.985, 0.000])
+        up = np.array([0.0, 0.0, 1.0])
+        _AUTO_VIEW_CACHE[cache_key] = (view_dir, up)
+        if len(_AUTO_VIEW_CACHE) > _AUTO_VIEW_CACHE_MAX:
+            _AUTO_VIEW_CACHE.popitem(last=False)
+        return view_dir.copy(), up.copy()
 
     valid_atoms = [at for at in sel_atoms if at['elem'] != 'H' and is_major(at)]
     if len(valid_atoms) < 3:
-        return np.array([0.174, 0.985, 0.000]), np.array([0.0, 0.0, 1.0])
+        view_dir = np.array([0.174, 0.985, 0.000])
+        up = np.array([0.0, 0.0, 1.0])
+        _AUTO_VIEW_CACHE[cache_key] = (view_dir, up)
+        if len(_AUTO_VIEW_CACHE) > _AUTO_VIEW_CACHE_MAX:
+            _AUTO_VIEW_CACHE.popitem(last=False)
+        return view_dir.copy(), up.copy()
 
     org_clusters, anion_clusters = _classify_clusters(valid_atoms)
     if not org_clusters:
@@ -1813,10 +2018,18 @@ def auto_view_dir(atoms, M, cell, compound_name=None):
     for vec in _sphere_view_grid(n_elev=19, n_azim=36):
         add_candidate(vec)
 
+    n_atoms_view = len(coords)
+    pair_weight_matrix = _build_pair_weight_matrix(n_atoms_view, org_pos, anion_pos)
+    excluded_mask = _build_excluded_mask(n_atoms_view, excluded_pairs)
+
     ranked = []
     for view_vec in candidates:
-        score = _score_auto_view(coords, radii, org_pos, anion_pos, org_clusters,
-                                 anion_clusters, excluded_pairs, weights, view_vec)
+        score = _score_auto_view(
+            coords, radii, org_pos, anion_pos, org_clusters,
+            anion_clusters, excluded_pairs, weights, view_vec,
+            pair_weight_matrix=pair_weight_matrix,
+            excluded_mask=excluded_mask,
+        )
         ranked.append((score, view_vec))
     ranked.sort(key=lambda item: item[0], reverse=True)
 
@@ -1835,8 +2048,12 @@ def auto_view_dir(atoms, M, cell, compound_name=None):
     best_score = ranked[0][0]
     best_view = ranked[0][1]
     for view_vec in fine_candidates:
-        score = _score_auto_view(coords, radii, org_pos, anion_pos, org_clusters,
-                                 anion_clusters, excluded_pairs, weights, view_vec)
+        score = _score_auto_view(
+            coords, radii, org_pos, anion_pos, org_clusters,
+            anion_clusters, excluded_pairs, weights, view_vec,
+            pair_weight_matrix=pair_weight_matrix,
+            excluded_mask=excluded_mask,
+        )
         if score > best_score:
             best_score = score
             best_view = view_vec
@@ -1846,7 +2063,10 @@ def auto_view_dir(atoms, M, cell, compound_name=None):
         np.array([0.0, 1.0, 0.0]),
         np.array([1.0, 0.0, 0.0]),
     ])
-    return best_view, up_vec
+    _AUTO_VIEW_CACHE[cache_key] = (best_view, up_vec)
+    if len(_AUTO_VIEW_CACHE) > _AUTO_VIEW_CACHE_MAX:
+        _AUTO_VIEW_CACHE.popitem(last=False)
+    return best_view.copy(), up_vec.copy()
 
 # ── Main render function ─────────────────────────────────────────────────────
 def _render(show_labels=True, preset_path=None, names=None):
