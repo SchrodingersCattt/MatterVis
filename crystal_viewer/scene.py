@@ -223,7 +223,8 @@ def _selected_atoms_for_mode(ops: Any, atoms, M, cell, display_mode: str, formul
     return molcrys_bridge.select_formula_unit(atoms, M)
 
 
-_BOUNDARY_TOL = 1e-3  # fractional-coordinate tolerance for "on the cell boundary"
+_BOUNDARY_TOL = 1e-3  # fractional-coordinate tolerance for exact special positions
+_FRAGMENT_FACE_TOL = 3e-2  # visual tolerance for whole fragments sitting near a cell face
 
 
 def _expand_boundary_replicas(atoms: list[dict[str, Any]], M: Any) -> list[dict[str, Any]]:
@@ -260,10 +261,9 @@ def _expand_boundary_replicas(atoms: list[dict[str, Any]], M: Any) -> list[dict[
         return atoms
     M_arr = np.asarray(M, dtype=float)
 
-    def canonical_shifts_for_atom(atom: dict[str, Any]) -> list[tuple[int, int, int]]:
+    def canonical_shifts_for_frac(frac: Any, tol: float) -> list[tuple[int, int, int]]:
         # Returns canonical-space mirror shifts (target_position -
-        # wrapped_position) for this atom. Includes (0,0,0) (the home).
-        frac = atom.get("_wrapped_frac", atom.get("frac"))
+        # wrapped_position) for a fractional point. Includes (0,0,0) (home).
         if frac is None:
             return [(0, 0, 0)]
         frac_arr = np.asarray(frac, dtype=float)
@@ -272,13 +272,12 @@ def _expand_boundary_replicas(atoms: list[dict[str, Any]], M: Any) -> list[dict[
         per_axis: list[list[int]] = [[0], [0], [0]]
         for axis in range(3):
             f = float(frac_arr[axis])
-            # Strict windows around integer positions only. An atom at
-            # wrapped frac=0.98 is INTERIOR (not on a face), so it does
-            # not contribute a mirror shift. This protects against
-            # MCK-unwrapped continuation atoms (frac=1.02 etc) that
-            # would otherwise spawn duplicate copies.
-            on_zero = -_BOUNDARY_TOL <= f <= _BOUNDARY_TOL
-            on_one = 1.0 - _BOUNDARY_TOL <= f <= 1.0 + _BOUNDARY_TOL
+            # Windows around integer positions only. Atom callers pass a tight
+            # tolerance so an unwrapped continuation atom at frac=0.98/1.02
+            # stays interior; fragment-centroid callers pass a wider visual
+            # tolerance for molecules whose centre sits just inside a face.
+            on_zero = -tol <= f <= tol
+            on_one = 1.0 - tol <= f <= 1.0 + tol
             if on_zero:
                 per_axis[axis] = [0, 1]
             elif on_one:
@@ -290,14 +289,73 @@ def _expand_boundary_replicas(atoms: list[dict[str, Any]], M: Any) -> list[dict[
                     out_shifts.append((sa, sb, sc))
         return out_shifts
 
+    def canonical_shifts_for_atom(atom: dict[str, Any]) -> list[tuple[int, int, int]]:
+        # Atom-level shifts remain strict. These represent exact special
+        # positions (faces/edges/corners), not merely a molecule passing near a
+        # boundary while being unwrapped for continuity.
+        return canonical_shifts_for_frac(
+            atom.get("_wrapped_frac", atom.get("frac")),
+            _BOUNDARY_TOL,
+        )
+
     def molecule_canonical_shifts(molecule_atoms: list[dict[str, Any]]) -> set[tuple[int, int, int]]:
-        # Union of per-atom canonical mirror shifts. Includes (0, 0, 0)
-        # (every atom contributes the home shift).
+        # Union of exact per-atom special-position shifts plus a looser
+        # centroid-based face tolerance for whole fragments. The centroid pass
+        # fills visually boundary-sitting anions (e.g. DAP-4 ClO4 with Cl at
+        # frac 0.012/0.988) without treating an arbitrary bond crossing the
+        # boundary (atoms at 0.98 and 0.02, centroid 0.5) as a cell-face image.
         shifts: set[tuple[int, int, int]] = set()
+        wrapped_fracs = []
         for atom in molecule_atoms:
             for shift in canonical_shifts_for_atom(atom):
                 shifts.add(shift)
+            frac = atom.get("_wrapped_frac", atom.get("frac"))
+            if frac is None:
+                continue
+            frac_arr = np.asarray(frac, dtype=float)
+            if frac_arr.shape == (3,):
+                wrapped_fracs.append(frac_arr)
+        if wrapped_fracs:
+            centroid = np.mean(wrapped_fracs, axis=0)
+            for shift in canonical_shifts_for_frac(centroid, _FRAGMENT_FACE_TOL):
+                shifts.add(shift)
         return shifts
+
+    def molecule_has_disorder(molecule_atoms: list[dict[str, Any]]) -> bool:
+        for atom in molecule_atoms:
+            if "_is_minor" in atom or atom.get("_is_major"):
+                return True
+            dg = str(atom.get("dg") or "").strip()
+            if dg not in ("", ".", "?", "0"):
+                return True
+            da = str(atom.get("da") or "").strip()
+            if da not in ("", ".", "?"):
+                return True
+        return False
+
+    def molecule_display_face_shifts(molecule_atoms: list[dict[str, Any]]) -> set[tuple[int, int, int]]:
+        # Disorder alternatives should remain visually adjacent. MCK may unwrap
+        # two PART images of the same crystallographic site to opposite sides
+        # of the displayed cell (centres near 0 and 1). Add display-space
+        # whole-fragment images for those near-face disorder fragments so the
+        # alternatives appear next to one another at the boundary. This is
+        # intentionally restricted to disorder/PART fragments; a normal molecule
+        # that merely crosses a boundary is already continuous and should not be
+        # duplicated just because its display centroid sits near a face.
+        if not molecule_has_disorder(molecule_atoms):
+            return set()
+        fracs = []
+        for atom in molecule_atoms:
+            frac = atom.get("frac")
+            if frac is None:
+                continue
+            frac_arr = np.asarray(frac, dtype=float)
+            if frac_arr.shape == (3,):
+                fracs.append(frac_arr)
+        if not fracs:
+            return set()
+        centroid = np.mean(fracs, axis=0)
+        return set(canonical_shifts_for_frac(centroid, _FRAGMENT_FACE_TOL))
 
     def molecule_drift(molecule_atoms: list[dict[str, Any]]) -> tuple[int, int, int]:
         # Integer 3-vector ``round(mck_centroid - wrapped_centroid)``.
@@ -342,22 +400,27 @@ def _expand_boundary_replicas(atoms: list[dict[str, Any]], M: Any) -> list[dict[
         out.extend(molecule_atoms)
         canonical_shifts = molecule_canonical_shifts(molecule_atoms)
         drift = molecule_drift(molecule_atoms)
+        effective_shifts: set[tuple[int, int, int]] = set()
         # If MCK's home image isn't itself a canonical mirror of any
         # atom (e.g. a molecule that simply straddles a boundary -- C1
         # at frac 0.98 bonded to C2 at frac 0.02 -- where MCK shifts C2
         # to 1.02 but no atom lies on a face), don't replicate. Drawing
         # the canonical-home image as a replica there would duplicate
         # the molecule visually.
-        if drift not in canonical_shifts:
-            continue
-        for cs in sorted(canonical_shifts):
-            # Translate ``cs`` (defined in canonical wrapped space) into
-            # the cart-space shift to apply to MCK's already-translated
-            # atom positions. ``cs == drift`` is the MCK home image,
-            # already in ``out``.
-            if cs == drift:
-                continue
-            effective = (cs[0] - drift[0], cs[1] - drift[1], cs[2] - drift[2])
+        if drift in canonical_shifts:
+            for cs in sorted(canonical_shifts):
+                # Translate ``cs`` (defined in canonical wrapped space) into
+                # the cart-space shift to apply to MCK's already-translated
+                # atom positions. ``cs == drift`` is the MCK home image,
+                # already in ``out``.
+                if cs == drift:
+                    continue
+                effective_shifts.add((cs[0] - drift[0], cs[1] - drift[1], cs[2] - drift[2]))
+        effective_shifts.update(
+            shift for shift in molecule_display_face_shifts(molecule_atoms)
+            if shift != (0, 0, 0)
+        )
+        for effective in sorted(effective_shifts):
             shift_arr = np.array(effective, dtype=float)
             shift_cart = frac_to_cart(shift_arr, M_arr)
             for atom in molecule_atoms:

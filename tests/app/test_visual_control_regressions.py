@@ -54,7 +54,9 @@ def test_labels_checkbox_removes_text_traces():
     )
 
     assert any(getattr(trace, "mode", None) == "text" for trace in shown.data)
-    assert not any(getattr(trace, "mode", None) == "text" for trace in hidden.data)
+    hidden_text = [trace for trace in hidden.data if getattr(trace, "mode", None) == "text"]
+    assert hidden_text
+    assert all(getattr(trace, "visible", True) is False for trace in hidden_text)
 
 
 def test_material_persists_when_style_changes(tmp_path):

@@ -13,6 +13,7 @@ from typing import Any, Dict, Iterable, Optional
 import numpy as np
 from molcrys_kit.utils.geometry import cart_to_frac
 
+from . import perf_log
 from .presets import get_default_catalog, workspace_root
 from . import molcrys_bridge
 from .scene import build_scene_from_atoms, legacy_scene, scene_json, scene_metadata, scene_ops
@@ -448,9 +449,10 @@ def _fragment_table_from_atoms(
                 seen_local.add(local)
             if component:
                 components.append((sorted(component), int(mol_index)))
-    # Sweep for any kept atom that didn't make it into a molecule
-    # component (orphans). They get one-atom singleton fragments so
-    # they remain visible in the fragment table for diagnostics.
+    # Sweep for any kept atom that didn't make it into a molecule component.
+    # These should be rare now that MCK's bond perception is disorder-aware
+    # and returns both major and minor alternatives as whole fragments; keep
+    # singleton rows only as diagnostics for genuinely uncovered atoms.
     for local_idx in range(len(pool_kept)):
         if local_idx not in seen_local:
             components.append(([local_idx], None))
@@ -604,6 +606,11 @@ def build_bundle_scene(
     base_cache_key = (display_mode, bool(show_hydrogen))
     base_scene = bundle.scene_cache.get(base_cache_key)
     if base_scene is None:
+        perf_log.record(
+            "cache:scene",
+            kind="cache",
+            info={"hit": False, "display_mode": display_mode, "hydrogens": bool(show_hydrogen)},
+        )
         ops = scene_ops()
         view_dir = np.array(bundle.view_direction, dtype=float)
         up = np.array(bundle.up, dtype=float)
@@ -648,6 +655,12 @@ def build_bundle_scene(
         base_scene["fragment_table"] = fragment_table
         base_scene["atom_fragment_labels"] = atom_fragment_labels
         bundle.scene_cache[base_cache_key] = base_scene
+    else:
+        perf_log.record(
+            "cache:scene",
+            kind="cache",
+            info={"hit": True, "display_mode": display_mode, "hydrogens": bool(show_hydrogen)},
+        )
 
     if not transforms:
         return base_scene

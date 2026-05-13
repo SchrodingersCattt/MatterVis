@@ -226,6 +226,35 @@ def test_sy_ethylenediamine_not_fused():
     )
 
 
+def test_sy_minor_ethylenediamine_fragments_are_grouped_whole():
+    """Minor SHELX -PART atoms must remain first-class fragments.
+
+    The renderer draws minor alternatives faded, but they still need MCK
+    molecule provenance so boundary handling and fragment diagnostics treat the
+    entire ethylenediamine as one object instead of orphaning individual atoms.
+    """
+    bundle = build_loaded_crystal(
+        name="SY", cif_path="scripts/data/SY.cif", title="SY"
+    )
+    raw_to_mol: dict[int, int] = {}
+    for mol_idx, raw_indices in enumerate(bundle.molcrys_analysis.mol_indices):
+        for raw_idx in raw_indices:
+            raw_to_mol[int(raw_idx)] = int(mol_idx)
+
+    minor_indices = [
+        idx for idx, atom in enumerate(bundle.raw_atoms)
+        if atom.get("_is_minor")
+    ]
+    assert len(minor_indices) == 56
+    assert all(idx in raw_to_mol for idx in minor_indices)
+
+    minor_mol_sizes = Counter(
+        len(bundle.molcrys_analysis.mol_indices[raw_to_mol[idx]])
+        for idx in minor_indices
+    )
+    assert minor_mol_sizes == Counter({14: 56})
+
+
 # --------------------------------------------------------------------- #
 # 8) DAP-4 NH4+ rotamer paired-group fix                                #
 # --------------------------------------------------------------------- #

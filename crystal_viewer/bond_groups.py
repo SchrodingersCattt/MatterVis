@@ -161,6 +161,8 @@ def tag_bonds_with_groups(
     * ``_render_visible``: bool. ``False`` means hide the bond.
     * ``_render_opacity_scale``: float in [0, 1]. Multiplies the
       bond's effective opacity (after disorder fade).
+    * ``_render_opacity_group_id``: id of the last matching rule that
+      supplied opacity, so opacity edits can restyle cached geometry.
     * ``_render_radius_scale``: float -- multiplies the scene-level
       ``style["bond_radius"]`` for this bond.
 
@@ -173,6 +175,7 @@ def tag_bonds_with_groups(
         decorated["_render_color"] = None
         decorated["_render_visible"] = True
         decorated["_render_opacity_scale"] = 1.0
+        decorated["_render_opacity_group_id"] = None
         decorated["_render_radius_scale"] = 1.0
         for group in bond_groups:
             selector = group.get("selector") or {}
@@ -186,6 +189,7 @@ def tag_bonds_with_groups(
             opacity = group.get("opacity")
             if opacity is not None:
                 decorated["_render_opacity_scale"] = max(0.0, min(1.0, float(opacity)))
+                decorated["_render_opacity_group_id"] = str(group.get("id") or "")
             radius_scale = group.get("radius_scale")
             if radius_scale is not None:
                 decorated["_render_radius_scale"] = max(0.0, float(radius_scale))
@@ -212,7 +216,6 @@ def bond_groups_cache_key(bond_groups: Optional[Sequence[Dict[str, Any]]]) -> Tu
                 tuple(sorted(str(e) for e in selector.get("between_elements", []) or [])),
                 str(group.get("color") or ""),
                 bool(group.get("visible", True)),
-                float(group.get("opacity")) if group.get("opacity") is not None else None,
                 float(group.get("radius_scale")) if group.get("radius_scale") is not None else None,
             )
         )
