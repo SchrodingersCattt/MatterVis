@@ -281,6 +281,31 @@ def _visible_atoms(scene: dict, style: dict):
     return atoms or scene["draw_atoms"]
 
 
+def _axis_triad_segments(scene: dict, style: dict):
+    if "bounds" not in scene:
+        return [], []
+    mins = np.array(scene["bounds"]["mins"], dtype=float)
+    screen_span = max(scene["bounds"]["screen_ranges"])
+    offset = 0.10 * screen_span
+    origin = mins - offset * np.array(scene["view_x"], dtype=float)
+    origin -= offset * np.array(scene["view_y"], dtype=float)
+    scale = float(style.get("axis_scale", 0.14)) * screen_span
+
+    labels = style.get("axes_labels") or ["a", "b", "c"]
+    labels = list(labels) + ["", "", ""]  # pad defensively
+    segments: list[tuple[np.ndarray, np.ndarray]] = []
+    label_positions: list[tuple[np.ndarray, str]] = []
+    for vec, label in zip(
+        [scene["M"][0], scene["M"][1], scene["M"][2]],
+        labels[:3],
+    ):
+        v = _normalize(vec, [1.0, 0.0, 0.0])
+        end = origin + v * scale
+        segments.append((origin.copy(), end))
+        label_positions.append((end, label))
+    return segments, label_positions
+
+
 def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
     """Compute ``[xr, yr, zr]`` axis ranges for the Plotly scene.
 
@@ -316,6 +341,9 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
         atom_maxs = (carts + radii[:, None]).max(axis=0)
 
     extras = []
+    if style.get("show_axes", False):
+        for start, end in _axis_triad_segments(scene, style)[0]:
+            extras.extend((start, end))
     if style.get("show_unit_cell", False):
         a = np.array(scene["M"][0], dtype=float)
         b = np.array(scene["M"][1], dtype=float)
@@ -1362,6 +1390,7 @@ def _label_traces(scene: dict, style: dict, hidden_labels: set | None = None):
     key = (
         monochrome_effective,
         str(style.get("label_color", "#111111")),
+        str(style.get("minor_label_color", "#666666")),
         round(float(style.get("label_font_size", 12)), 3),
         # Cache key carries the hidden set so toggling a "Hide H"
         # group rule actually re-emits the label trace; otherwise a
@@ -1377,9 +1406,10 @@ def _label_traces(scene: dict, style: dict, hidden_labels: set | None = None):
     # signalling "minor"). Disorder is conveyed by colour only; size stays uniform.
     label_size = float(style.get("label_font_size", 12))
     major_label_color = style.get("label_color", "#111111")
+    minor_label_color = style.get("minor_label_color", "#666666")
     buckets = {
         False: {"x": [], "y": [], "z": [], "text": [], "color": major_label_color},
-        True: {"x": [], "y": [], "z": [], "text": [], "color": "#999999"},
+        True: {"x": [], "y": [], "z": [], "text": [], "color": minor_label_color},
     }
     for item in scene["label_items"]:
         if str(item.get("text")) in hidden_labels:
@@ -1413,31 +1443,16 @@ def _label_traces(scene: dict, style: dict, hidden_labels: set | None = None):
 def _axis_traces(scene: dict, style: dict):
     if "bounds" not in scene:
         return []
-    mins = np.array(scene["bounds"]["mins"], dtype=float)
     screen_span = max(scene["bounds"]["screen_ranges"])
-    offset = 0.10 * screen_span
-    origin = mins - offset * np.array(scene["view_x"], dtype=float)
-    origin -= offset * np.array(scene["view_y"], dtype=float)
-    scale = float(style["axis_scale"]) * screen_span
+    scale = float(style.get("axis_scale", 0.14)) * screen_span
     color = style.get("axis_color", "#666666")
     opacity = float(style.get("axis_opacity", 0.72))
-    labels = style.get("axes_labels") or ["a", "b", "c"]
-    labels = list(labels) + ["", "", ""]  # pad defensively
 
     # Match thickness to the legend size so the axis shafts stay
     # proportional to the structure they annotate, regardless of zoom.
     shaft_radius = max(0.025, 0.012 * scale)
 
-    segments: list[tuple[np.ndarray, np.ndarray]] = []
-    label_positions: list[tuple[np.ndarray, str]] = []
-    for vec, label in zip(
-        [scene["M"][0], scene["M"][1], scene["M"][2]],
-        labels[:3],
-    ):
-        v = _normalize(vec, [1.0, 0.0, 0.0])
-        end = origin + v * scale
-        segments.append((origin, end))
-        label_positions.append((end, label))
+    segments, label_positions = _axis_triad_segments(scene, style)
 
     traces: list = []
     shaft = _segment_cylinder_trace(

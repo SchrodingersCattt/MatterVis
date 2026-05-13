@@ -24,6 +24,7 @@ Plus unit tests for the pieces:
 from __future__ import annotations
 
 from collections import Counter
+from pathlib import Path
 
 import pytest
 
@@ -290,8 +291,9 @@ def test_no_cross_orientation_ghost_bonds_in_unit_cell_scene():
     orientation) to a minor C4 (discarded orientation) at 0.83 A
     apart. The renderer drew those as full opaque lines, making
     every disordered cation look like it's wrapped in a dark cage of
-    phantom bonds. ``build_scene_from_atoms`` now skips any bond whose
-    endpoints disagree on the ``is_minor`` flag.
+    phantom bonds. ``build_scene_from_atoms`` now skips bonds whose
+    endpoints have incompatible disorder groups, while preserving valid
+    major/minor bonds to ordered hubs.
     """
     from crystal_viewer.loader import build_bundle_scene
 
@@ -302,12 +304,35 @@ def test_no_cross_orientation_ghost_bonds_in_unit_cell_scene():
     bonds = scene.get("bonds") or []
     draw_atoms = scene.get("draw_atoms") or []
     # Each bond stores its endpoint indices into ``draw_atoms``;
-    # confirm no bond bridges a major and a minor atom.
+    # confirm no bond bridges mutually exclusive disorder groups.
     for b in bonds:
         ai = draw_atoms[b["i"]]
         aj = draw_atoms[b["j"]]
-        assert bool(ai.get("is_minor")) == bool(aj.get("is_minor")), (
+        assert not pc.bonds_conflict(ai, aj), (
             f"cross-orientation bond between atoms "
-            f"{ai.get('label')} (minor={ai.get('is_minor')}) and "
-            f"{aj.get('label')} (minor={aj.get('is_minor')})"
+            f"{ai.get('label')} (group={ai.get('_mv_auto_disorder_group') or ai.get('dg')}) and "
+            f"{aj.get('label')} (group={aj.get('_mv_auto_disorder_group') or aj.get('dg')})"
         )
+
+
+def test_hpep_minor_branches_keep_ordered_hub_bonds():
+    """HPEP PART-2 branches bond through ordered Cl/N hub atoms.
+
+    Those are valid major/minor bonds and must not be removed by the
+    cross-orientation ghost-bond filter.
+    """
+    if not Path("scripts/data/HPEP.cif").exists():
+        pytest.skip("local HPEP CIF fixture is not present")
+
+    bundle = build_loaded_crystal(
+        name="HPEP", cif_path="scripts/data/HPEP.cif", title="HPEP"
+    )
+    scene = bundle.scene
+    draw_atoms = scene.get("draw_atoms") or []
+    label_pairs = {
+        frozenset((draw_atoms[b["i"]]["label"], draw_atoms[b["j"]]["label"]))
+        for b in scene.get("bonds") or []
+    }
+
+    for pair in (("Cl3", "O10A"), ("Cl3", "O11A"), ("Cl3", "O12A"), ("N1", "C1A"), ("N2", "C2A")):
+        assert frozenset(pair) in label_pairs
