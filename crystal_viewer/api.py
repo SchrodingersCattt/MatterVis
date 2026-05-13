@@ -94,8 +94,9 @@ def register_api(dash_app, backend) -> None:
         action = payload.get("action")
         if not action:
             return jsonify({"error": "action is required"}), 400
-        rest = {key: value for key, value in payload.items() if key not in ("action", "scene_id")}
-        return jsonify({"camera": backend.camera_action(action, scene_id=_scene_id_from_request(), **rest)})
+        broadcast = bool(payload.get("broadcast", True))
+        rest = {key: value for key, value in payload.items() if key not in ("action", "scene_id", "broadcast")}
+        return jsonify({"camera": backend.camera_action(action, scene_id=_scene_id_from_request(), broadcast=broadcast, **rest)})
 
     @v2.post("/upload")
     def upload_cif():
@@ -638,8 +639,9 @@ def register_api(dash_app, backend) -> None:
     @sock.route("/api/v2/ws")
     def ws_state(socket):
         last_version = -1
+        include_figure = False
         while True:
-            snapshot = backend.websocket_snapshot()
+            snapshot = backend.websocket_snapshot(include_figure=include_figure)
             version = snapshot["version"]
             if version != last_version:
                 socket.send(json.dumps(snapshot, ensure_ascii=False))
@@ -654,6 +656,10 @@ def register_api(dash_app, backend) -> None:
                     payload = json.loads(message)
                 except json.JSONDecodeError:
                     payload = {"type": "raw", "message": message}
+                if isinstance(payload, dict) and payload.get("type") == "subscribe_figure":
+                    include_figure = bool(payload.get("enabled", True))
+                    last_version = -1
+                    continue
                 handle_ws_message(backend, payload)
 
     sock.route("/api/v1/ws")(ws_state)

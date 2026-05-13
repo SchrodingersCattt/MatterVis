@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import copy
 import io
+import json
 import os
 import re
 import subprocess
@@ -18,7 +20,7 @@ import plotly.io as pio
 from molcrys_kit.utils.geometry import minimum_image_distance
 
 try:
-    from dash import ALL, Dash, Input, Output, State, callback_context, dcc, html, no_update
+    from dash import ALL, Dash, Input, Output, Patch, State, callback_context, dcc, html, no_update
 except ImportError as exc:  # pragma: no cover - user-facing fallback
     raise SystemExit(
         "Dash is required for the browser viewer. "
@@ -70,6 +72,100 @@ def _camera_from_store(camera_state: Optional[dict[str, Any]], scene_id: Optiona
     if scene_id is None and "eye" in camera_state:
         return copy.deepcopy(camera_state)
     return None
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
+
+
+def _fast_view_metadata(backend: "ViewerBackend", state: dict[str, Any], camera_state: Optional[dict[str, Any]] = None) -> str:
+    """Small JSON blob consumed by assets/near_zero_latency.js.
+
+    It intentionally contains only cheap, camera/style-relevant fields so
+    high-frequency view controls can update Plotly locally without waiting for
+    the heavy Dash figure callback.
+    """
+    state = backend.normalize_state(state or backend.get_state())
+    scene_id = state.get("scene_id")
+    scene = backend.scene_for_state(state)
+    camera = _camera_from_store(camera_state, scene_id) or state.get("camera") or scene.get("camera")
+    payload = {
+        "scene_id": scene_id,
+        "M": _json_safe(scene.get("M")),
+        "camera": _json_safe(_plotly_camera(camera) or backend.default_camera(state)),
+        "default_camera": _json_safe(backend.default_camera(state)),
+        "projection": _coerce_projection(state.get("projection", "perspective")),
+        "camera_revision": int(state.get("camera_revision", 0) or 0),
+        "display_options": list(state.get("display_options") or []),
+        "axis_scale": float(state.get("axis_scale", 1.0) or 1.0),
+        "minor_opacity": float(state.get("minor_opacity", 0.35) or 0.35),
+    }
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def _fast_style_patch_for_figure(
+    figure: Optional[dict[str, Any]],
+    *,
+    display_options: Iterable[str] | None,
+    minor_opacity: float | None = None,
+) -> Patch | Any:
+    """Patch trace visibility/opacity for style-only controls.
+
+    The renderer stamps role metadata onto traces. This helper only flips
+    those lightweight fields and never rebuilds Mesh3d coordinates.
+    """
+    if not isinstance(figure, dict):
+        return no_update
+    options = set(display_options or [])
+    show_labels = "labels" in options
+    show_axes = "axes" in options
+    show_unit_cell = "unit_cell_box" in options
+    minor_only = "minor_only" in options
+    patch = Patch()
+    changed = False
+    try:
+        minor_alpha = max(0.05, float(minor_opacity)) if minor_opacity is not None else None
+    except (TypeError, ValueError):
+        minor_alpha = None
+
+    for idx, trace in enumerate(figure.get("data") or []):
+        if not isinstance(trace, dict):
+            continue
+        meta = trace.get("meta") if isinstance(trace.get("meta"), dict) else {}
+        role = meta.get("mv_role") or trace.get("name")
+        is_minor = bool(meta.get("mv_minor", False))
+        hide_on_minor_only = bool(meta.get("mv_hide_on_minor_only", False))
+        visible: bool | None = None
+        if role in {"labels", "atom-label", "atom-label-major", "atom-label-minor"}:
+            visible = show_labels and (not minor_only or is_minor)
+        elif role in {"axes", "axes-shafts", "axes-labels"}:
+            visible = show_axes
+        elif role in {"unit_cell", "unit-cell", "unit-cell-box"}:
+            visible = show_unit_cell
+        elif role in {"atom", "bond", "atom_selection", "bond_selection"} and minor_only and not is_minor:
+            visible = False
+        elif role in {"atom", "bond", "atom_selection", "bond_selection"} and not minor_only:
+            visible = True
+        elif hide_on_minor_only and minor_only:
+            visible = False
+        elif hide_on_minor_only:
+            visible = True
+        if visible is not None:
+            patch["data"][idx]["visible"] = visible
+            changed = True
+        if minor_alpha is not None and is_minor and role in {"atom", "bond", "minor_overlay", "minor-outline", "minor-bond"}:
+            if trace.get("type") == "scatter3d":
+                patch["data"][idx]["marker"]["opacity"] = minor_alpha
+            else:
+                patch["data"][idx]["opacity"] = minor_alpha
+            changed = True
+    return patch if changed else no_update
 
 
 def _minor_opacity_disabled(disorder: Optional[str]) -> bool:
@@ -2769,6 +2865,7 @@ class ViewerBackend:
             self.bundles[bundle.name] = bundle
             self.structure_names.append(bundle.name)
             self.create_scene(structure=bundle.name, label=bundle.name)
+            _prewarm_bundle_async(self, bundle.name)
         return bundle
 
     def add_uploaded_file_bytes(self, data: bytes, filename: str) -> LoadedCrystal:
@@ -2821,6 +2918,7 @@ class ViewerBackend:
             self.bundles[bundle.name] = bundle
             self.structure_names.append(bundle.name)
             self.create_scene(structure=bundle.name, label=bundle.name)
+            _prewarm_bundle_async(self, bundle.name)
         return bundle
 
     def topology_candidates(self, structure: str, fragment_type: Optional[str] = None) -> list[dict[str, Any]]:
@@ -3476,7 +3574,7 @@ class ViewerBackend:
         # That way swapping a hull colour stays a cheap re-paint and
         # doesn't recompute coordination shells for every tile.
         cutoff = float(state.get("cutoff", 10.0))
-        spec_geometry_key = tuple(
+        spec_geometry_key = frozenset(
             (
                 spec["center_species"],
                 spec.get("ligand_species") or None,
@@ -3712,8 +3810,9 @@ class ViewerBackend:
         scene_id = state.get("scene_id")
         with perf_log.time_block("scene_for_state", kind="event", scene_id=scene_id):
             scene = self.scene_for_state(state)
-        atom_count = len(scene.get("atoms", []))
+        atom_count = len(scene.get("draw_atoms", []))
         bond_count = len(scene.get("bonds", []))
+        replica_count = sum(1 for atom in scene.get("draw_atoms", []) if atom.get("_is_boundary_replica"))
         with perf_log.time_block(
             "topology_for_state",
             kind="event",
@@ -3727,6 +3826,7 @@ class ViewerBackend:
             scene_id=scene_id,
             atoms=atom_count,
             bonds=bond_count,
+            replicas=replica_count,
         ):
             fig = build_figure(scene, self.style_for_state(state, scene=scene), topology_data=topology_data)
         camera = _plotly_camera(state.get("camera"))
@@ -3749,21 +3849,42 @@ class ViewerBackend:
         state = self.get_state(scene_id)
         return _plotly_camera(state.get("camera")) or self.default_camera(state)
 
-    def set_camera(self, camera: dict[str, Any], scene_id: Optional[str] = None) -> dict[str, Any]:
-        self.patch_state({"camera": camera}, scene_id=scene_id)
+    def set_camera(
+        self,
+        camera: dict[str, Any],
+        scene_id: Optional[str] = None,
+        *,
+        broadcast: bool = True,
+    ) -> dict[str, Any]:
+        self.patch_state({"camera": camera}, scene_id=scene_id, broadcast=broadcast)
         return self.get_camera(scene_id)
 
-    def camera_action(self, action: str, scene_id: Optional[str] = None, **payload) -> dict[str, Any]:
+    def camera_action(
+        self,
+        action: str,
+        scene_id: Optional[str] = None,
+        *,
+        broadcast: bool = True,
+        **payload,
+    ) -> dict[str, Any]:
         if action == "reset":
-            self._bump_camera_revision(scene_id=scene_id)
-            return self.set_camera(self.default_camera(self.get_state(scene_id)), scene_id=scene_id)
+            self._bump_camera_revision(scene_id=scene_id, broadcast=broadcast)
+            return self.set_camera(
+                self.default_camera(self.get_state(scene_id)),
+                scene_id=scene_id,
+                broadcast=broadcast,
+            )
 
         if action == "align":
-            self._bump_camera_revision(scene_id=scene_id)
-            return self.align_camera(payload.get("axis"), scene_id=scene_id)
+            self._bump_camera_revision(scene_id=scene_id, broadcast=broadcast)
+            return self.align_camera(payload.get("axis"), scene_id=scene_id, broadcast=broadcast)
 
         if action in ("projection", "set_projection"):
-            return self.set_projection(payload.get("type") or payload.get("projection"), scene_id=scene_id)
+            return self.set_projection(
+                payload.get("type") or payload.get("projection"),
+                scene_id=scene_id,
+                broadcast=broadcast,
+            )
 
         current_camera = self.get_camera(scene_id)
         eye, center, up = _camera_vectors(current_camera)
@@ -3799,9 +3920,15 @@ class ViewerBackend:
         elif isinstance(self.get_state(scene_id).get("projection"), str):
             projection = self.get_state(scene_id)["projection"]
         camera = _camera_payload(eye, center, up, projection=projection)
-        return self.set_camera(camera, scene_id=scene_id)
+        return self.set_camera(camera, scene_id=scene_id, broadcast=broadcast)
 
-    def align_camera(self, axis: Any, scene_id: Optional[str] = None) -> dict[str, Any]:
+    def align_camera(
+        self,
+        axis: Any,
+        scene_id: Optional[str] = None,
+        *,
+        broadcast: bool = True,
+    ) -> dict[str, Any]:
         """Look down the requested lattice axis (``a``/``b``/``c``) or
         reciprocal axis (``a*``/``b*``/``c*``).
 
@@ -3836,24 +3963,30 @@ class ViewerBackend:
             center=center,
             projection=projection,
         )
-        return self.set_camera(camera, scene_id=scene_id)
+        return self.set_camera(camera, scene_id=scene_id, broadcast=broadcast)
 
-    def set_projection(self, projection: Any, scene_id: Optional[str] = None) -> dict[str, Any]:
+    def set_projection(
+        self,
+        projection: Any,
+        scene_id: Optional[str] = None,
+        *,
+        broadcast: bool = True,
+    ) -> dict[str, Any]:
         """Toggle the camera projection between ``perspective`` and
         ``orthographic``. Persists onto ``state["projection"]`` so the
         next ``style_for_state`` reflects the choice and so the REST
         ``GET /state`` echoes back what was set.
         """
         normalized = _coerce_projection(projection, fallback="perspective")
-        self.patch_state({"projection": normalized}, scene_id=scene_id)
+        self.patch_state({"projection": normalized}, scene_id=scene_id, broadcast=broadcast)
         # Stamp ``projection`` onto the persisted camera dict so a
         # subsequent ``set_camera`` round-trip (e.g. user drags the
         # scene to a new orientation) doesn't drop the choice.
         camera = dict(self.get_camera(scene_id))
         camera["projection"] = {"type": normalized}
-        return self.set_camera(camera, scene_id=scene_id)
+        return self.set_camera(camera, scene_id=scene_id, broadcast=broadcast)
 
-    def _bump_camera_revision(self, scene_id: Optional[str] = None) -> int:
+    def _bump_camera_revision(self, scene_id: Optional[str] = None, *, broadcast: bool = True) -> int:
         """Increment ``state['camera_revision']`` so the next figure
         rebuild gets a fresh ``layout.scene.uirevision`` and Plotly
         accepts the layout-supplied camera instead of preserving the
@@ -3866,7 +3999,7 @@ class ViewerBackend:
         """
         state = self.get_state(scene_id)
         current = int(state.get("camera_revision", 0) or 0)
-        self.patch_state({"camera_revision": current + 1}, scene_id=scene_id)
+        self.patch_state({"camera_revision": current + 1}, scene_id=scene_id, broadcast=broadcast)
         return current + 1
 
     def _safe_preset_path(self, path: Optional[str]) -> Optional[str]:
@@ -3961,12 +4094,18 @@ class ViewerBackend:
         state["cutoff"] = cutoff
         return self.topology_for_state(state)
 
-    def websocket_snapshot(self) -> dict[str, Any]:
-        return {
+    def websocket_snapshot(self, *, include_figure: bool = False) -> dict[str, Any]:
+        state = self.get_state()
+        snapshot = {
             "version": self.version,
-            "state": self.get_state(),
+            "state": state,
             "structures": self.list_structures(),
         }
+        if include_figure:
+            fig, _ = self.figure_for_state(state)
+            snapshot["figure"] = fig.to_plotly_json()
+            snapshot["figure_version"] = self.version
+        return snapshot
 
 
 def create_app(
@@ -4033,6 +4172,16 @@ def create_app(
             dcc.Store(
                 id="camera-state-store",
                 data=_camera_store_payload(first_state.get("scene_id"), first_state.get("camera")),
+            ),
+            dcc.Store(id="fast-ui-event-store", data=None),
+            html.Div(
+                id="fast-view-metadata",
+                children=_fast_view_metadata(
+                    backend,
+                    first_state,
+                    _camera_store_payload(first_state.get("scene_id"), first_state.get("camera")),
+                ),
+                style={"display": "none"},
             ),
             dcc.Store(id="native-upload-sync", data={"seq": 0}),
             dcc.Download(id="export-download"),
@@ -5112,6 +5261,9 @@ def create_app(
         if scene_id:
             backend.set_active_scene(scene_id, broadcast=False)
         prev = backend.get_state(scene_id)
+        prev_options = set(prev.get("display_options") or [])
+        next_options = set(display_options or [])
+        hydrogens_changed = ("hydrogens" in prev_options) != ("hydrogens" in next_options)
         display_changed = display_mode != prev.get("display_mode")
         patch: dict[str, Any] = {
             "scene_id": scene_id,
@@ -5129,6 +5281,24 @@ def create_app(
             "topology_enabled": "enabled" in (topology_toggle or []),
             "fast_rendering": material == "flat",
         }
+        if triggered in {"display-options", "axis-scale-slider", "minor-opacity-slider"} and not hydrogens_changed:
+            # Style-only controls are patched directly onto the current
+            # Plotly figure by ``patch_fast_style_controls`` below. Persist
+            # their state for API callers, but do not touch
+            # ``agent-state-store`` or the full-figure callback.
+            if all(prev.get(k) == v for k, v in patch.items() if k != "scene_id"):
+                return no_update
+            backend.record_state(patch)
+            perf_log.record(
+                "callback:capture_state",
+                kind="cb",
+                info={
+                    "trigger": triggered,
+                    "scene_id": scene_id,
+                    "fast_path": True,
+                },
+            )
+            return no_update
         # Skip the write -- and the cascade through ``update_view`` --
         # if every captured field already matches the persisted state.
         # The chain ``Labels click -> capture_state -> agent-state-store
@@ -5147,6 +5317,42 @@ def create_app(
             },
         )
         return backend.get_state()
+
+    @app.callback(
+        Output("crystal-graph", "figure", allow_duplicate=True),
+        Output("fast-view-metadata", "children", allow_duplicate=True),
+        Input("display-options", "value"),
+        Input("axis-scale-slider", "value"),
+        Input("minor-opacity-slider", "value"),
+        State("crystal-graph", "figure"),
+        State("scene-tabs", "value"),
+        prevent_initial_call=True,
+    )
+    def patch_fast_style_controls(display_options, axis_scale, minor_opacity, current_figure, scene_id):
+        """Patch style-only trace attributes without rebuilding the figure.
+
+        Hydrogens remain on the full scene path because they change the atom
+        and bond sets. Labels/axes/unit-cell/minor-only/minor-opacity only
+        flip trace visibility/opacity, so a small Dash Patch is enough.
+        """
+        scene_id = scene_id or backend.active_scene_id()
+        prev = backend.get_state(scene_id)
+        prev_options = set(prev.get("display_options") or [])
+        next_options = set(display_options or [])
+        if ("hydrogens" in prev_options) != ("hydrogens" in next_options):
+            return no_update, no_update
+        patch_payload = {
+            "display_options": list(display_options or []),
+            "axis_scale": axis_scale,
+            "minor_opacity": minor_opacity,
+        }
+        backend.record_state(patch_payload, scene_id=scene_id)
+        fig_patch = _fast_style_patch_for_figure(
+            current_figure,
+            display_options=display_options,
+            minor_opacity=minor_opacity,
+        )
+        return fig_patch, _fast_view_metadata(backend, backend.get_state(scene_id))
 
     # ------------------------------------------------------------------
     # Phase 3 UI: Named-polyhedra table.
@@ -6122,14 +6328,12 @@ def create_app(
     #
     # Both callbacks call into ``backend.camera_action`` (the same path
     # exercised by ``POST /api/v2/camera/action``), then push the new
-    # camera into ``camera-state-store`` and the post-mutation state
-    # into ``agent-state-store`` so ``update_view`` redraws the figure.
-    # Without the camera-state-store write the next ``update_view``
-    # would still read the captured (pre-mutation) camera and snap the
-    # alignment back to whatever the user was on a moment ago.
+    # camera into ``camera-state-store`` only. The browser-side fast path
+    # has already relaid out the Plotly scene, so touching
+    # ``agent-state-store`` would just trigger a wasteful full-figure
+    # rebuild for a layout-only change.
     # ------------------------------------------------------------------
     @app.callback(
-        Output("agent-state-store", "data", allow_duplicate=True),
         Output("camera-state-store", "data", allow_duplicate=True),
         Input("view-align-a", "n_clicks"),
         Input("view-align-b", "n_clicks"),
@@ -6144,7 +6348,7 @@ def create_app(
     def apply_view_action(_a, _b, _c, _astar, _bstar, _cstar, _reset, scene_id):
         triggered = getattr(callback_context, "triggered_id", None)
         if not triggered:
-            return no_update, no_update
+            return no_update
         scene_id = scene_id or backend.active_scene_id()
         button_to_axis = {
             "view-align-a": "a",
@@ -6156,18 +6360,19 @@ def create_app(
         }
         try:
             if triggered == "view-reset":
-                camera = backend.camera_action("reset", scene_id=scene_id)
+                camera = backend.camera_action("reset", scene_id=scene_id, broadcast=False)
             elif triggered in button_to_axis:
                 camera = backend.camera_action(
                     "align",
                     scene_id=scene_id,
+                    broadcast=False,
                     axis=button_to_axis[triggered],
                 )
             else:
-                return no_update, no_update
+                return no_update
         except Exception:  # pragma: no cover - best-effort, surface in console
-            return no_update, no_update
-        return backend.get_state(scene_id), _camera_store_payload(scene_id, camera)
+            return no_update
+        return _camera_store_payload(scene_id, camera)
 
     @app.callback(
         Output("view-projection", "value", allow_duplicate=True),
@@ -6185,7 +6390,6 @@ def create_app(
         return _coerce_projection(state.get("projection") or "perspective")
 
     @app.callback(
-        Output("agent-state-store", "data", allow_duplicate=True),
         Output("camera-state-store", "data", allow_duplicate=True),
         Input("view-projection", "value"),
         State("scene-tabs", "value"),
@@ -6193,19 +6397,19 @@ def create_app(
     )
     def apply_view_projection(projection, scene_id):
         if not projection:
-            return no_update, no_update
+            return no_update
         scene_id = scene_id or backend.active_scene_id()
         # Skip the redraw if the user clicked the radio that was
         # already selected -- avoids ratcheting the figure JSON cache
         # for a no-op.
         current = backend.get_state(scene_id).get("projection", "perspective")
         if str(projection) == str(current):
-            return no_update, no_update
+            return no_update
         try:
-            camera = backend.set_projection(projection, scene_id=scene_id)
+            camera = backend.set_projection(projection, scene_id=scene_id, broadcast=False)
         except Exception:  # pragma: no cover
-            return no_update, no_update
-        return backend.get_state(scene_id), _camera_store_payload(scene_id, camera)
+            return no_update
+        return _camera_store_payload(scene_id, camera)
 
     @app.callback(
         Output("camera-state-store", "data", allow_duplicate=True),
@@ -6231,6 +6435,16 @@ def create_app(
         # ``tests/app/test_camera_capture_no_poll_echo.py``.
         backend.patch_state({"camera": camera}, scene_id=scene_id, broadcast=False)
         return _camera_store_payload(scene_id, camera)
+
+    @app.callback(
+        Output("fast-view-metadata", "children", allow_duplicate=True),
+        Input("agent-state-store", "data"),
+        State("camera-state-store", "data"),
+        prevent_initial_call=True,
+    )
+    def refresh_fast_view_metadata(agent_state, camera_state):
+        state = backend.normalize_state(agent_state or backend.get_state())
+        return _fast_view_metadata(backend, state, camera_state)
 
     @app.callback(
         Output("minor-opacity-slider", "disabled"),
@@ -6422,7 +6636,7 @@ def create_app(
         return "", _status_class("idle"), True
 
     register_api(app, backend)
-    if str(os.environ.get("MATTERVIS_PREWARM", "0")).lower() in {"1", "true", "yes", "on"}:
+    if str(os.environ.get("MATTERVIS_PREWARM", "1")).lower() not in {"0", "false", "no", "off"}:
         _start_cache_prewarm(backend)
     if str(os.environ.get("MATTERVIS_AUDIT", "0")).lower() in {"1", "true", "yes", "on"}:
         _install_callback_audit(app)
@@ -6483,6 +6697,61 @@ def _install_callback_audit(app) -> None:
         return response
 
 
+_PREWARM_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="mattervis-prewarm")
+
+
+def _prewarm_bundle_async(backend: ViewerBackend, structure_name: str) -> None:
+    def _job():
+        try:
+            bundle = backend.get_bundle(structure_name)
+            defaults = backend.default_state(structure_name)
+        except Exception:
+            return
+        old_scene = getattr(bundle, "scene", None)
+        try:
+            for display_mode in ("formula_unit", "asymmetric_unit", "unit_cell", "cluster"):
+                for show_hydrogen in (False, True):
+                    try:
+                        scene = build_bundle_scene(
+                            bundle,
+                            display_mode=display_mode,
+                            show_hydrogen=show_hydrogen,
+                            preset=backend.preset,
+                        )
+                        style = dict(scene.get("style", {}))
+                        options = list(defaults.get("display_options") or [])
+                        if show_hydrogen and "hydrogens" not in options:
+                            options.append("hydrogens")
+                        elif not show_hydrogen:
+                            options = [opt for opt in options if opt != "hydrogens"]
+                        style.update(
+                            style_from_controls(
+                                defaults["atom_scale"],
+                                defaults["bond_radius"],
+                                defaults["minor_opacity"],
+                                defaults["axis_scale"],
+                                options,
+                                material=defaults.get("material"),
+                                render_style=defaults.get("style"),
+                                disorder=defaults.get("disorder"),
+                                ortep_mode=defaults.get("ortep_mode"),
+                            )
+                        )
+                        style["display_mode"] = display_mode
+                        style["topology_enabled"] = False
+                        build_figure(scene, style, topology_data=None)
+                    except Exception:
+                        continue
+        finally:
+            if old_scene is not None:
+                bundle.scene = old_scene
+
+    try:
+        _PREWARM_EXECUTOR.submit(_job)
+    except Exception:
+        pass
+
+
 def _start_cache_prewarm(backend: ViewerBackend) -> None:
     """Warm expensive scene / mesh caches after the Dash app is ready.
 
@@ -6496,57 +6765,15 @@ def _start_cache_prewarm(backend: ViewerBackend) -> None:
 
     def _worker():
         # Let the initial server-side figure finish before trickling through
-        # heavier display scopes. The prewarm thread is opt-in via
-        # MATTERVIS_PREWARM=1 so it cannot steal CPU from the default first
-        # interaction path.
+        # heavier display scopes. The prewarm thread is on by default and
+        # can be disabled with MATTERVIS_PREWARM=0 for constrained hosts.
         ready = getattr(backend, "_first_figure_ready", None)
         if ready is not None:
             ready.wait(timeout=1.5)
         else:
             time.sleep(1.5)
-        names = list(backend.bundles.keys())
-        for name in names:
-            try:
-                bundle = backend.get_bundle(name)
-            except Exception:
-                continue
-            defaults = backend.default_state(name)
-            for display_mode in ("formula_unit", "asymmetric_unit", "unit_cell"):
-                old_scene = bundle.scene
-                try:
-                    scene = build_bundle_scene(
-                        bundle,
-                        display_mode=display_mode,
-                        show_hydrogen=False,
-                        preset=backend.preset,
-                    )
-                    style = dict(scene.get("style", {}))
-                    style.update(
-                        style_from_controls(
-                            defaults["atom_scale"],
-                            defaults["bond_radius"],
-                            defaults["minor_opacity"],
-                            defaults["axis_scale"],
-                            defaults["display_options"],
-                        )
-                    )
-                    style["display_mode"] = display_mode
-                    style["fast_rendering"] = bool(defaults.get("fast_rendering", False))
-                    # Warm atom/bond mesh payloads first. Topology overlays are
-                    # cached on demand because selected species/site can vary.
-                    style["topology_enabled"] = False
-                    build_figure(scene, style, topology_data=None)
-                    # Also warm the default topology path for this display
-                    # scope, then restore the visible bundle.scene pointer so
-                    # metadata for the currently selected view does not jump
-                    # around while the background thread is working.
-                    state = dict(defaults)
-                    state["display_mode"] = display_mode
-                    backend.figure_for_state(state)
-                except Exception:
-                    continue
-                finally:
-                    bundle.scene = old_scene
+        for name in list(backend.bundles.keys()):
+            _prewarm_bundle_async(backend, name)
 
     thread = threading.Thread(target=_worker, name="mattervis-cache-prewarm", daemon=True)
     thread.start()

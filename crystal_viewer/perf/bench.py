@@ -11,7 +11,7 @@ from typing import Any, Callable
 import numpy as np
 
 from crystal_viewer.loader import build_bundle_scene, build_loaded_crystal
-from crystal_viewer.renderer import _cached_atom_bond_meshes, style_from_controls
+from crystal_viewer.renderer import _cached_atom_bond_meshes, build_figure, style_from_controls
 from crystal_viewer.topology import (
     analyze_topology,
     classify_fragments,
@@ -101,6 +101,19 @@ def bench_atom_mesh(scene: dict, style: dict, *, repeat: int = 3) -> dict[str, A
     return result
 
 
+def bench_style_toggle(scene: dict, style: dict, *, repeat: int = 10) -> dict[str, Any]:
+    build_figure(scene, style)
+    toggled = dict(style)
+    toggled["show_labels"] = not bool(style.get("show_labels", False))
+    toggled["show_axes"] = not bool(style.get("show_axes", False))
+    toggled["show_unit_cell"] = not bool(style.get("show_unit_cell", False))
+    toggled["show_minor_only"] = not bool(style.get("show_minor_only", False))
+
+    result = _time_call(lambda: build_figure(scene, toggled), repeat=repeat, warmup=1)
+    result["mesh_cache_entries"] = len(scene.get("_mesh_trace_cache") or {})
+    return result
+
+
 def bench_topology_full(bundle, center_index: int, cutoff: float = 10.0, *, repeat: int = 3) -> dict[str, Any]:
     ligand = _first_ligand_formula(bundle)
 
@@ -138,6 +151,7 @@ def build_benchmark_payload(cif_path: Path, *, repeat: int = 3) -> dict[str, Any
         "benchmarks": {
             "planarity": bench_planarity(repeat=repeat),
             "atom_mesh_unit_cell": bench_atom_mesh(scene, style, repeat=max(1, min(3, repeat))),
+            "style_toggle_patch_path": bench_style_toggle(scene, style, repeat=max(1, repeat)),
             "topology_full": bench_topology_full(bundle, center_index, repeat=max(1, min(3, repeat))),
         },
     }

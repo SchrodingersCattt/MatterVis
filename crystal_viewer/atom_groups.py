@@ -152,6 +152,9 @@ def tag_atoms_with_groups(
       bond touching it.
     - ``_render_opacity_scale``: float in [0, 1]. Multiplies the
       atom's effective opacity (after disorder fade is applied).
+    - ``_render_opacity_group_id``: id of the last matching rule that
+      supplied opacity. This lets the renderer keep geometry cached
+      while opacity sliders restyle existing traces.
     - ``_render_material``: ``"mesh" | "flat" | None``. Per-atom
       override of ``style['material']``. ``None`` = inherit.
     - ``_render_style``: ``"ball"|"ball_stick"|"stick"|"ortep"|"wireframe"|None``.
@@ -172,6 +175,7 @@ def tag_atoms_with_groups(
         decorated["_render_color_light"] = None
         decorated["_render_visible"] = True
         decorated["_render_opacity_scale"] = 1.0
+        decorated["_render_opacity_group_id"] = None
         decorated["_render_material"] = None
         decorated["_render_style"] = None
         fragment_label = (
@@ -206,6 +210,7 @@ def tag_atoms_with_groups(
                 # O -> 30%]`` => O ends up at 30%; everything else at
                 # 50%; nothing drifts to zero from accidental stacking.
                 decorated["_render_opacity_scale"] = max(0.0, min(1.0, float(opacity)))
+                decorated["_render_opacity_group_id"] = str(group.get("id") or "")
             material = group.get("material")
             if material:
                 decorated["_render_material"] = material
