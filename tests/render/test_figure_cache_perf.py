@@ -57,6 +57,50 @@ def test_camera_change_does_not_invalidate_cache(tmp_path):
     assert len(backend._figure_cache) == snapshot
 
 
+def _compass_shapes(fig) -> list[dict]:
+    """Pull arrow line-shapes (compass arrow shafts) from fig.layout."""
+    shapes = list(fig.layout.shapes or [])
+    return [
+        {"x0": float(s.x0), "y0": float(s.y0), "x1": float(s.x1), "y1": float(s.y1)}
+        for s in shapes
+        if s.type == "line"
+    ]
+
+
+def test_cached_figure_refreshes_compass_under_live_camera(tmp_path):
+    """Regression for the "axis错了" report: a cached figure was
+    serving stale paper-coord compass arrows because the in-figure
+    overlay is camera-dependent. ``figure_for_state`` now re-projects
+    the compass after the cache hit so the arrows match the requested
+    camera even when the heavy mesh body is reused verbatim.
+    """
+    backend = _make_backend(tmp_path)
+    state = backend.get_state()
+    state["display_options"] = list(set((state.get("display_options") or []) + ["axes"]))
+    state["camera"] = {
+        "eye": {"x": 2.0, "y": 0.0, "z": 0.5},
+        "up": {"x": 0.0, "y": 0.0, "z": 1.0},
+        "center": {"x": 0.0, "y": 0.0, "z": 0.0},
+    }
+    fig_first, _ = backend.figure_for_state(state)
+    first_arrows = _compass_shapes(fig_first)
+    assert first_arrows, "expected compass arrows on initial render"
+
+    state_far = dict(state)
+    state_far["camera"] = {
+        "eye": {"x": 0.0, "y": 2.0, "z": 0.5},
+        "up": {"x": 0.0, "y": 0.0, "z": 1.0},
+        "center": {"x": 0.0, "y": 0.0, "z": 0.0},
+    }
+    fig_second, _ = backend.figure_for_state(state_far)
+    second_arrows = _compass_shapes(fig_second)
+    assert second_arrows, "expected compass arrows on second render"
+    assert first_arrows != second_arrows, (
+        "compass arrows should reproject when the live camera changes "
+        "even when the figure-body cache hits"
+    )
+
+
 def test_preset_load_invalidates_figure_cache(tmp_path):
     backend = _make_backend(tmp_path)
     state = backend.get_state()

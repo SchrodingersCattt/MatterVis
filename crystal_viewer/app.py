@@ -42,7 +42,7 @@ from .presets import (
     save_preset,
     workspace_root,
 )
-from .renderer import build_figure, style_from_controls, topology_histogram_figure, topology_results_markdown
+from .renderer import build_figure, compose_axis_key_layout, style_from_controls, topology_histogram_figure, topology_results_markdown
 from .scene import scene_json
 from .scenes import Scene, SceneStore
 from .topology import analyze_topology, extract_coordination_shell
@@ -4096,7 +4096,30 @@ class ViewerBackend:
                 cache_key = None
         if cache_key is not None and cache_key in self._figure_cache:
             cached_fig, cached_topology = self._figure_cache[cache_key]
-            return copy.deepcopy(cached_fig), copy.deepcopy(cached_topology)
+            fig = copy.deepcopy(cached_fig)
+            # The cached figure was built with whatever camera was
+            # current at the time. The corner axis-key compass is a
+            # paper-coord overlay whose arrows are pre-projected from
+            # that camera, so reusing the cache verbatim freezes the
+            # compass at a stale angle (visible bug:
+            # https://… "axis错了" report). Refresh the compass +
+            # disorder legend under the *live* camera, which is cheap
+            # (a handful of trig ops, no mesh rebuild).
+            try:
+                with perf_log.time_block("scene_for_state", kind="event", scene_id=scene_id, cached=True):
+                    scene_for_overlay = self.scene_for_state(state)
+                style_for_overlay = self.style_for_state(state, scene=scene_for_overlay)
+                annotations, shapes = compose_axis_key_layout(scene_for_overlay, style_for_overlay)
+                fig.update_layout(
+                    annotations=annotations or None,
+                    shapes=shapes or None,
+                )
+                camera = _plotly_camera(state.get("camera"))
+                if camera:
+                    fig.update_layout(scene_camera=camera)
+            except Exception:  # pragma: no cover - defensive, fall back to verbatim cache
+                pass
+            return fig, copy.deepcopy(cached_topology)
         with perf_log.time_block("scene_for_state", kind="event", scene_id=scene_id):
             scene = self.scene_for_state(state)
         atom_count = len(scene.get("draw_atoms", []))

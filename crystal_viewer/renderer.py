@@ -2922,10 +2922,34 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None) ->
             bgcolor=style.get("background", "#FFFFFF"),
         ),
     )
-    key_annotations, key_shapes = axis_key_overlay(scene, style)
-    if style.get("style") == "ortep" and scene.get("has_minor") and style.get("disorder") in {"outline_rings", "dashed_bonds"}:
-        key_annotations = list(key_annotations)
-        key_annotations.append(dict(
+    key_annotations, key_shapes = compose_axis_key_layout(scene, style)
+    if key_annotations:
+        layout_kwargs["annotations"] = key_annotations
+    if key_shapes:
+        layout_kwargs["shapes"] = key_shapes
+    fig.update_layout(**layout_kwargs)
+    return fig
+
+
+def compose_axis_key_layout(scene: dict, style: dict) -> tuple[list[dict], list[dict]]:
+    """Produce paper-coord ``(annotations, shapes)`` lists for the compass
+    triad **plus** the optional ORTEP disorder mini-legend.
+
+    Factored out of :func:`build_figure` so callers that reuse a cached
+    figure can refresh the compass arrows under the *current* camera
+    without re-paying the heavy mesh build. The compass is the only
+    figure-layout element that genuinely depends on
+    ``style["camera"]`` (the disorder legend does not); both are
+    bundled here because they share the same layout slots.
+    """
+    annotations, shapes = axis_key_overlay(scene, style)
+    if (
+        style.get("style") == "ortep"
+        and scene.get("has_minor")
+        and style.get("disorder") in {"outline_rings", "dashed_bonds"}
+    ):
+        annotations = list(annotations)
+        annotations.append(dict(
             x=0.5,
             y=0.02,
             xref="paper",
@@ -2936,9 +2960,4 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None) ->
             yanchor="bottom",
             font=dict(size=11, color="#666666"),
         ))
-    if key_annotations:
-        layout_kwargs["annotations"] = key_annotations
-    if key_shapes:
-        layout_kwargs["shapes"] = key_shapes
-    fig.update_layout(**layout_kwargs)
-    return fig
+    return annotations, shapes
