@@ -37,11 +37,14 @@ DEFAULT_STYLE = {
     "axes_labels": ["a", "b", "c"],
     # Corner axis-key overlay: a compact triad rendered as Plotly paper-coord
     # annotations so the labels sit cleanly inside a figure corner and can
-    # never be clipped by the 3D viewport or a caller's outer axes. Unlike
-    # ``show_axes`` (the in-scene 3D triad), this overlay renders in 2D screen
-    # space with labels stacked in a left-aligned column. Callers that prefer
-    # to draw their own badge can leave ``show_axis_key`` off and instead use
-    # ``scene["projected_axes"]`` to query the current axis projections.
+    # never be clipped by the 3D viewport or a caller's outer axes. The
+    # in-app ``show_axes`` checkbox feeds the same overlay (it used to
+    # render a 3D cylinder shaft in world space, which foreshortened to a
+    # stub on cameras aligned with a lattice vector and cut a long line
+    # through the structure on oblique cameras). Set ``show_axis_key`` only
+    # when a caller wants the publication-style triad with explicit
+    # ``axis_key_*`` paper-coord controls; the in-app default uses the
+    # ``axis_scale`` slider instead.
     "show_axis_key": False,
     "axis_key_anchor": [0.05, 0.07],      # lower-left (paper coords)
     "axis_key_row_gap": 0.095,            # vertical gap between rows (paper)

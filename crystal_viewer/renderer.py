@@ -341,9 +341,6 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
         atom_maxs = (carts + radii[:, None]).max(axis=0)
 
     extras = []
-    if style.get("show_axes", False):
-        for start, end in _axis_triad_segments(scene, style)[0]:
-            extras.extend((start, end))
     if style.get("show_unit_cell", False):
         a = np.array(scene["M"][0], dtype=float)
         b = np.array(scene["M"][1], dtype=float)
@@ -1441,44 +1438,17 @@ def _label_traces(scene: dict, style: dict, hidden_labels: set | None = None):
 
 
 def _axis_traces(scene: dict, style: dict):
-    if "bounds" not in scene:
-        return []
-    screen_span = max(scene["bounds"]["screen_ranges"])
-    scale = float(style.get("axis_scale", 0.14)) * screen_span
-    color = style.get("axis_color", "#666666")
-    opacity = float(style.get("axis_opacity", 0.72))
+    """Deprecated: the in-scene 3D axis triad has been retired.
 
-    # Match thickness to the legend size so the axis shafts stay
-    # proportional to the structure they annotate, regardless of zoom.
-    shaft_radius = max(0.025, 0.012 * scale)
-
-    segments, label_positions = _axis_triad_segments(scene, style)
-
-    traces: list = []
-    shaft = _segment_cylinder_trace(
-        segments,
-        radius=shaft_radius,
-        color=color,
-        opacity=opacity,
-        sides=5,
-        name="axes-shafts",
-    )
-    if shaft is not None:
-        traces.append(_annotate_trace(shaft, "axes"))
-    if label_positions:
-        traces.append(
-            _annotate_trace(go.Scatter3d(
-                x=[float(p[0]) for p, _ in label_positions],
-                y=[float(p[1]) for p, _ in label_positions],
-                z=[float(p[2]) for p, _ in label_positions],
-                mode="text",
-                text=[lab for _, lab in label_positions],
-                textfont=dict(size=12, color=color),
-                hoverinfo="skip",
-                showlegend=False,
-            ), "axes")
-        )
-    return traces
+    The 3D cylinder shafts foreshortened to invisible stubs on cameras
+    aligned with a lattice vector, and the opposite case (oblique
+    cameras on long cells like EMAP) drew a single long shaft through
+    the structure. The ``show_axes`` toggle now drives the paper-coord
+    compass via :func:`axis_key_overlay`, which always sits in a stable
+    figure corner. Kept as an empty-list shim so any external caller
+    that still imports the symbol keeps working.
+    """
+    return []
 
 
 def axis_key_overlay(scene: dict, style: dict) -> tuple[list[dict], list[dict]]:
@@ -1497,13 +1467,16 @@ def axis_key_overlay(scene: dict, style: dict) -> tuple[list[dict], list[dict]]:
     filled triangular path — both of which honour ``xref='paper'``. Labels
     are separate ``annotations`` objects. Returns ``(annotations, shapes)``.
 
-    Set ``style["show_axis_key"] = True`` to include the triad; when off this
-    helper returns empty lists. The projections are read from
+    The in-app ``show_axes`` checkbox and the publication-style
+    ``show_axis_key`` flag both feed this overlay; either being truthy
+    renders the triad. Projections are read from
     ``scene["projected_axes"]`` (populated by :func:`scene.build_scene_from_atoms`)
     and the label strings come from ``style["axes_labels"]`` with stacking
     order controlled by ``style["axis_key_label_order"]``.
     """
-    if not style.get("show_axis_key", False):
+    show_axes = bool(style.get("show_axes", False))
+    show_axis_key = bool(style.get("show_axis_key", False))
+    if not (show_axes or show_axis_key):
         return [], []
     projections = scene.get("projected_axes")
     if not projections or len(projections) < 3:
@@ -1522,6 +1495,13 @@ def axis_key_overlay(scene: dict, style: dict) -> tuple[list[dict], list[dict]]:
     anchor_y = float(anchor[1])
     row_gap = float(style.get("axis_key_row_gap", 0.095))
     arrow_len = float(style.get("axis_key_arrow_len", 0.085))
+    if show_axes and not show_axis_key:
+        # When the in-app "Axes" checkbox is the trigger, route the
+        # matching "Axis Scale" slider (0.05-0.25) through this overlay so
+        # the user-visible control keeps working. ``0.6`` keeps the
+        # default slider value (0.14) near the publication preset
+        # (``axis_key_arrow_len`` default 0.085).
+        arrow_len = max(0.02, float(style.get("axis_scale", 0.14)) * 0.6)
     label_pad = float(style.get("axis_key_label_pad", 0.045))
     font_size = float(style.get("axis_key_font_size", 13))
     line_width = float(style.get("axis_key_line_width", 1.6))
