@@ -2302,7 +2302,23 @@ class ViewerBackend:
         }
 
     def _bump_version(self):
+        # ``_figure_cache`` is keyed on the *content* of the state dict
+        # (scene_id, structure, every render-affecting field), so two
+        # different cached figures never collide even though the global
+        # version counter has moved on. Earlier revisions cleared the
+        # whole cache on every bump, which made every tab switch and
+        # every slider tick force a full 400+ ms ``build_figure``. We
+        # only clear when the underlying structure catalog itself
+        # changes (see ``_invalidate_figure_cache``).
         self.version += 1
+
+    def _invalidate_figure_cache(self) -> None:
+        """Drop every cached figure.
+
+        Call this when a *bundle* underlying a cached scene mutates
+        (new upload, structure deleted, preset reload) -- ``cache_key``
+        won't change but the cached fig now refers to stale geometry.
+        """
         self._figure_cache.clear()
         self._figure_cache_order.clear()
 
@@ -2483,6 +2499,28 @@ class ViewerBackend:
         self.pending_state = copy.deepcopy(self.current_state)
         self._bump_version()
         return removed.to_dict()
+
+    def delete_other_scenes(self, keep_id: str) -> dict[str, Any]:
+        """Close every scene except ``keep_id``.
+
+        Returns a summary ``{"kept": scene_dict, "removed": [scene_dict,
+        ...]}`` so the UI / REST caller can show a status banner. The
+        scene store is mutated in place; we only bump the version once
+        at the end to avoid invalidating ``_figure_cache`` N times in a
+        row when the user batch-closes many tabs.
+        """
+        keep_id = str(keep_id)
+        if keep_id not in self.scene_store.scenes:
+            raise KeyError(f"Unknown scene id: {keep_id}")
+        removed: list[dict[str, Any]] = []
+        for scene_id in [sid for sid in list(self.scene_store.scenes.keys()) if sid != keep_id]:
+            removed.append(self.scene_store.remove(scene_id).to_dict())
+        self.scene_store.active_id = keep_id
+        self.current_state = self.scene_state(keep_id)
+        self.pending_state = copy.deepcopy(self.current_state)
+        if removed:
+            self._bump_version()
+        return {"kept": self.scene_store.get(keep_id).to_dict(), "removed": removed}
 
     def duplicate_scene(self, scene_id: str, label: Optional[str] = None) -> dict[str, Any]:
         scene = self.scene_store.duplicate(scene_id, label=label)
@@ -4036,7 +4074,24 @@ class ViewerBackend:
         cache_key = None
         if click_data is None:
             try:
-                cache_key = json.dumps(_json_safe(state), sort_keys=True, separators=(",", ":"))
+                # ``version`` and ``server_started_at`` change on every
+                # state mutation / restart but do not affect the figure
+                # body, so they would only cause spurious cache misses.
+                # ``camera`` is applied post-cache via ``update_layout``
+                # (the in-figure axis-key compass uses
+                # ``_camera_axis_projections`` which reads ``style``
+                # directly, so this means the compass arrow stays at
+                # whatever projection was captured when the figure was
+                # first built; it picks up the live camera on the next
+                # genuine state change). Dropping these three fields
+                # lets back-to-back tab switches and reverted slider
+                # tweaks reuse the previously built figure instead of
+                # paying the ~430 ms ``build_figure`` cost every time.
+                key_state = {
+                    k: v for k, v in state.items()
+                    if k not in ("version", "server_started_at", "camera")
+                }
+                cache_key = json.dumps(_json_safe(key_state), sort_keys=True, separators=(",", ":"))
             except Exception:
                 cache_key = None
         if cache_key is not None and cache_key in self._figure_cache:
@@ -4357,6 +4412,10 @@ class ViewerBackend:
             cache = getattr(bundle, "_topology_state_cache", None)
             if cache:
                 cache.clear()
+        # The new preset can rewrite per-scene style + transforms, so
+        # any cached figures from the previous preset are stale even
+        # when the state-dict keys happen to collide.
+        self._invalidate_figure_cache()
         structure = self.get_state()["structure"]
         if self.scene_store.active_id:
             self.current_state = self.scene_state(self.scene_store.active_id)
@@ -4666,6 +4725,14 @@ def create_app(
                             html.Label("Scenes", style={"fontWeight": "bold"}),
                             html.Div(
                                 [
+                                    html.Button(
+                                        "Close others",
+                                        id="scene-close-others-btn",
+                                        n_clicks=0,
+                                        title="Close every scene except the active one",
+                                        className="scene-batch-close-btn",
+                                        style={"marginRight": "6px"},
+                                    ),
                                     html.Button(
                                         "+",
                                         id="scene-new-tab-btn",
@@ -5437,11 +5504,12 @@ def create_app(
         Input("scene-new-tab-btn", "n_clicks"),
         Input("scene-rename-btn", "n_clicks"),
         Input("scene-tab-close-active", "n_clicks"),
+        Input("scene-close-others-btn", "n_clicks"),
         State("scene-tabs", "value"),
         State("scene-tab-rename-input", "value"),
         prevent_initial_call=True,
     )
-    def mutate_scene_tabs(_, __, ___, active_scene_id, label):
+    def mutate_scene_tabs(_, __, ___, ____, active_scene_id, label):
         triggered = callback_context.triggered[0]["prop_id"].split(".")[0] if callback_context.triggered else None
         if not active_scene_id:
             return no_update, no_update, no_update
@@ -5457,6 +5525,12 @@ def create_app(
                     return no_update, active_scene_id, "At least one scene tab must remain."
                 backend.delete_scene(active_scene_id)
                 return backend.scene_tabs(), backend.active_scene_id(), "Closed scene."
+            if triggered == "scene-close-others-btn":
+                if len(backend.scene_options()) <= 1:
+                    return no_update, active_scene_id, "Only one scene open — nothing to close."
+                result = backend.delete_other_scenes(active_scene_id)
+                n = len(result.get("removed") or [])
+                return backend.scene_tabs(), backend.active_scene_id(), f"Closed {n} other scene{'s' if n != 1 else ''}."
         except Exception as exc:
             return no_update, active_scene_id, f"Scene action failed: {exc}"
         return no_update, active_scene_id, no_update

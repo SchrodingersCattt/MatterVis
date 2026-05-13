@@ -81,6 +81,14 @@ def register_api(dash_app, backend) -> None:
         payload = request.get_json(force=True, silent=True) or {}
         return jsonify({"order": backend.reorder_scenes(payload.get("order") or [])})
 
+    @v2.post("/scenes/close_others")
+    def scenes_close_others():
+        payload = request.get_json(force=True, silent=True) or {}
+        keep_id = payload.get("keep") or payload.get("keep_id") or backend.active_scene_id()
+        if not keep_id:
+            return jsonify({"error": "keep id is required", "type": "ValueError"}), 400
+        return jsonify(backend.delete_other_scenes(keep_id))
+
     @v2.get("/scenes/active")
     def scenes_active_get():
         scene_id = backend.active_scene_id()

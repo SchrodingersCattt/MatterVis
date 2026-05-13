@@ -95,6 +95,12 @@ preset save/load.
   Duplicates a tab.
 - `POST /scenes/reorder`
   Body: `{"order": ["scene_a", "scene_b"]}`.
+- `POST /scenes/close_others`
+  Body: `{"keep": "scene_id"}` (optional; defaults to the active scene).
+  Closes every scene except `keep` in a single call, bumping the state
+  version exactly once. Returns
+  `{"kept": {...scene}, "removed": [{...scene}, ...]}`. The UI surfaces
+  this through the "Close others" button next to the Duplicate-tab `+`.
 - `GET /scenes/active` / `POST /scenes/active`
   Reads or changes the active scene.
 - `POST /upload`
