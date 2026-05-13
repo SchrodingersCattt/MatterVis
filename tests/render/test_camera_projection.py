@@ -79,3 +79,27 @@ def test_show_axes_uses_paper_compass_for_sy():
     style_off = {**style_on, "show_axes": False}
     fig_off = build_figure(bundle.scene, style_off)
     assert not {"a", "b", "c"}.intersection(_annotation_labels(fig_off))
+
+
+def test_axis_key_reprojects_from_current_camera():
+    scene = _empty_scene()
+    scene["projected_axes"] = [[1.0, 0.0], [0.0, 1.0], [0.0, 0.2]]
+    style = {
+        **DEFAULT_STYLE,
+        "show_axes": True,
+        "show_axis_key": False,
+        "camera": {
+            "eye": {"x": 1.0, "y": 0.0, "z": 0.0},
+            "up": {"x": 0.0, "y": 0.0, "z": 1.0},
+        },
+    }
+
+    fig = build_figure(scene, style)
+    line_shapes = [shape for shape in (fig.layout.shapes or []) if shape.type == "line"]
+    dot_shapes = [shape for shape in (fig.layout.shapes or []) if shape.type == "circle"]
+
+    assert len(line_shapes) == 2, "axis projected along the camera should not use stale scene projection"
+    assert len(dot_shapes) == 1
+    # Looking down +x makes the a axis project nearly to a point. If the
+    # stale scene["projected_axes"] were used, the a row would have a
+    # horizontal arrow instead.

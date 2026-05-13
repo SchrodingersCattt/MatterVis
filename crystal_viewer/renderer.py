@@ -274,6 +274,39 @@ def _plotly_camera_from_scene(scene: dict, style: dict) -> dict:
     }
 
 
+def _camera_axis_projections(scene: dict, style: dict) -> list[list[float]] | None:
+    camera = style.get("camera")
+    if not isinstance(camera, dict):
+        return None
+    eye_raw = camera.get("eye") or {}
+    up_raw = camera.get("up") or {}
+    try:
+        if isinstance(eye_raw, dict):
+            eye = np.array([float(eye_raw.get(axis, 0.0)) for axis in ("x", "y", "z")], dtype=float)
+        else:
+            eye = np.array([float(v) for v in eye_raw], dtype=float)
+        if isinstance(up_raw, dict):
+            up = np.array([float(up_raw.get(axis, 0.0)) for axis in ("x", "y", "z")], dtype=float)
+        else:
+            up = np.array([float(v) for v in up_raw], dtype=float)
+    except (TypeError, ValueError):
+        return None
+    if eye.shape[0] != 3 or up.shape[0] != 3:
+        return None
+    view = _normalize(eye, [0.0, 0.0, 1.0])
+    up = _normalize(up, [0.0, 1.0, 0.0])
+    right = np.cross(up, view)
+    if np.linalg.norm(right) < 1e-8:
+        return None
+    right = _normalize(right, [1.0, 0.0, 0.0])
+    screen_up = _normalize(np.cross(view, right), [0.0, 1.0, 0.0])
+    projections: list[list[float]] = []
+    for vec in np.asarray(scene.get("M"), dtype=float)[:3]:
+        axis = _normalize(vec, [1.0, 0.0, 0.0])
+        projections.append([float(np.dot(axis, right)), float(np.dot(axis, screen_up))])
+    return projections
+
+
 def _visible_atoms(scene: dict, style: dict):
     atoms = scene["draw_atoms"]
     if style.get("show_minor_only", False):
@@ -1478,7 +1511,7 @@ def axis_key_overlay(scene: dict, style: dict) -> tuple[list[dict], list[dict]]:
     show_axis_key = bool(style.get("show_axis_key", False))
     if not (show_axes or show_axis_key):
         return [], []
-    projections = scene.get("projected_axes")
+    projections = _camera_axis_projections(scene, style) or scene.get("projected_axes")
     if not projections or len(projections) < 3:
         return [], []
 
@@ -1546,6 +1579,19 @@ def axis_key_overlay(scene: dict, style: dict) -> tuple[list[dict], list[dict]]:
         dx, dy = label_to_proj[label]
         norm = math.hypot(float(dx), float(dy))
         if norm < 1e-8:
+            dot_x = anchor_x + label_pad
+            dot_r = max(0.004, head_width * 0.35)
+            shapes.append(dict(
+                type="circle",
+                xref="paper", yref="paper",
+                x0=dot_x - dot_r,
+                x1=dot_x + dot_r,
+                y0=row_y - dot_r,
+                y1=row_y + dot_r,
+                fillcolor=color,
+                line=dict(color=color, width=0),
+                layer="above",
+            ))
             continue
         ux = float(dx) / norm
         uy = float(dy) / norm
@@ -2877,6 +2923,19 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None) ->
         ),
     )
     key_annotations, key_shapes = axis_key_overlay(scene, style)
+    if style.get("style") == "ortep" and scene.get("has_minor") and style.get("disorder") in {"outline_rings", "dashed_bonds"}:
+        key_annotations = list(key_annotations)
+        key_annotations.append(dict(
+            x=0.5,
+            y=0.02,
+            xref="paper",
+            yref="paper",
+            text="filled = major / outline = minor disorder",
+            showarrow=False,
+            xanchor="center",
+            yanchor="bottom",
+            font=dict(size=11, color="#666666"),
+        ))
     if key_annotations:
         layout_kwargs["annotations"] = key_annotations
     if key_shapes:

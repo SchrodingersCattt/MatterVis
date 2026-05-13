@@ -80,16 +80,13 @@ def test_camera_action_align_then_projection_keeps_both(tmp_path: Path):
     assert state["projection"] == "orthographic"
 
 
-def test_camera_action_unknown_axis_returns_500(tmp_path: Path):
-    # The handler does not currently translate ValueError into 400; it
-    # propagates as the Flask default 500. This test pins the
-    # behaviour so a future refactor that wants to surface 400 has to
-    # update the contract together with this assertion.
+def test_camera_action_unknown_axis_returns_400_json(tmp_path: Path):
     client = _client(tmp_path)
     response = client.post(
         "/api/v2/camera/action", json={"action": "align", "axis": "foo"}
     )
-    assert response.status_code == 500
+    assert response.status_code == 400
+    assert response.get_json()["type"] == "ValueError"
 
 
 def test_camera_action_align_reciprocal_axes_all_supported(tmp_path: Path):

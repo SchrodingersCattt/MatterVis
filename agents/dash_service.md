@@ -13,7 +13,13 @@ preset save/load.
 
 - `GET /state`
   Returns the full viewer state. Add `?scene_id=...` to target a
-  non-active tab.
+  non-active tab. The response includes `server_started_at`; clients
+  can compare this value across calls to detect that the service
+  restarted and should refresh uploaded-structure / scene ids.
+- `GET /healthz`
+  Lightweight liveness probe for automation retry loops. Returns
+  `{"ok": true, "uptime_s": ..., "server_started_at": ..., "scenes": N,
+  "structures": N, "version": N}` without building a figure.
 - `POST /state`
   Accepts any subset of:
   `structure`, `display_mode`, `atom_scale`, `bond_radius`,
@@ -38,7 +44,9 @@ preset save/load.
   `fast_rendering`, `camera`, `cutoff`. `material` is `mesh` or
   `flat`; `style` is `ball`, `ball_stick`, `stick`, `ortep`, or
   `wireframe`; `disorder` is `opacity`, `dashed_bonds`,
-  `outline_rings`, `color_shift`, or `none`.
+  `outline_rings`, `color_shift`, or `none`. Fresh scenes default to
+  hydrogens + unit-cell box visible, labels hidden, and
+  `label_mode="unique_sites"`.
 
   Legacy aliases that still work: `topology_fragment_type` (`"A"` /
   `"B"` / `"X"`) is translated to the matching list of species keys
@@ -57,6 +65,7 @@ preset save/load.
   `{"action": "orbit", "yaw_deg": 12, "pitch_deg": -6}`,
   `{"action": "pan", "dx": 0.05, "dy": -0.03, "dz": 0.0}`,
   `{"action": "reset"}`,
+  `{"action": "fit"}`,
   `{"action": "align", "axis": "c"}`  (VESTA-style "look down lattice
   axis ``c``"; valid axes are `a`, `b`, `c`, `a*`, `b*`, `c*`),
   `{"action": "projection", "type": "orthographic"}`  (toggle the
@@ -74,7 +83,10 @@ preset save/load.
   Lists scene tabs and the active scene id.
 - `POST /scenes`
   Creates a tab. Body: `{"structure": "DAP-4", "label": "view A",
-  "state": {...}}`.
+  "state": {...}}`. If the requested label already exists, the
+  server appends a numeric suffix and echoes
+  `{"requested_label": "...", "label_renamed": true}` in the returned
+  scene payload.
 - `PATCH /scenes/{id}`
   Renames or patches a tab.
 - `DELETE /scenes/{id}`
@@ -86,13 +98,36 @@ preset save/load.
 - `GET /scenes/active` / `POST /scenes/active`
   Reads or changes the active scene.
 - `POST /upload`
-  Multipart form upload with field `file`.
+  Multipart form upload with field `file`. Uploaded CIFs are recorded
+  in `.local/crystal_view_uploads.json` by SHA-256 and restored on
+  service restart when the on-disk file still exists. Re-uploading the
+  same bytes is idempotent: the existing structure is returned with
+  `existing: true` instead of creating `_2`, `_3`, ... names. The
+  response keeps legacy `atom_count` and also exposes
+  `parsed_atom_count`, `displayed_atom_count`, and `asu_atom_count` so
+  clients can distinguish CIF parsing from the current display slice.
 - `GET /structures`
   Lists the loaded catalog and uploaded structures.
 - `GET /scene/{name}`
-  Returns the scene JSON and fragment table.
+  Returns the base scene JSON and fragment table. Add
+  `?after_transforms=true` to return the current transform-applied draw
+  atoms / bonds / fragment table for that structure.
 - `POST /topology`
   JSON body: `{"structure": "SY", "center_index": 0, "cutoff": 10.0}`.
+  `center_index` is the fragment-table `index` returned by
+  `GET /scene/{name}`. The call normally uses the scene's enabled
+  `polyhedron_specs`; for one-shot scripts you may include
+  `center_species` and `ligand_species` in the body to run an
+  ephemeral spec without first mutating `/polyhedra`. Add
+  `level: "molecule"` (default) for packing shells between molecular
+  fragments, or `level: "atom"` for element-level coordination
+  polyhedra such as `{"center_species":"Cl","ligand_species":"O"}`.
+  Responses include `analysis_level`; labels are echoed as
+  `packing_shell_label` on molecule-level calls and
+  `coordination_polyhedron_label` on atom-level calls. Invalid
+  `center_index` / `cutoff` values return `400`. Missing scene
+  preconditions such as `topology_enabled=false` or no enabled specs
+  return `409` with a recovery hint rather than `null`.
 - `GET /polyhedra` / `POST /polyhedra` / `PATCH /polyhedra/{id}` /
   `DELETE /polyhedra/{id}` / `POST /polyhedra/reorder`
   Per-scene named-row table for coordination polyhedra. Each row pins
@@ -131,11 +166,30 @@ preset save/load.
   spec defaults. Both endpoints are documented in
   [`polyhedron_api.md`](polyhedron_api.md).
 - `GET /screenshot`
-  Returns a PNG snapshot of the current Plotly view.
+  Returns a PNG snapshot of the current Plotly view. Query parameters:
+  `scene_id`, `width`, `height`, `scale`, `fast=true`, `at_version`,
+  and `timeout`. Use the state `version` returned by mutating calls as
+  `at_version=N` to block until the screenshot sees that state (or
+  returns 504 after `timeout` seconds). `fast=true` uses the flat
+  renderer path for low-latency thumbnails. By default,
+  Plotly/Kaleido export failures are returned as a small fallback PNG
+  for backwards compatibility. Callers that prefer structured failures
+  should send `Accept: application/json`; export failures then return
+  HTTP 503 with `{"error": "...", "type": "...", "hint": "..."}`.
 - `POST /preset/save`
-  Optional JSON body: `{"path": "custom_preset.json"}`.
+  Optional JSON body: `{"path": "custom_preset.json"}`. Presets saved
+  through v2 use schema `version: 2` and include a `scenes` array plus
+  `order` / `active_id`, so scene tabs, cameras, atom groups, bond
+  groups, polyhedron specs, and transforms round-trip together. The
+  legacy `structures` block is still written for v1-style callers.
+  Paths are jailed under `.local/` by default; pass
+  `allow_external=true` in the body or query string to explicitly write
+  outside that directory.
 - `POST /preset/load`
-  JSON body: `{"path": "custom_preset.json"}`.
+  JSON body: `{"path": "custom_preset.json"}`. `version: 2` presets
+  rebuild scene tabs; older presets continue to load via the legacy
+  per-structure style path. The same `.local/` jail and
+  `allow_external=true` escape hatch apply.
 - `POST /export`
   Triggers the vendored `crystal_viewer.legacy.plot_crystal` exporter
   with the current preset.
@@ -153,6 +207,27 @@ preset save/load.
   slow callbacks or expensive uploads without screen-scraping.
 - `POST /perf/clear`
   Empties the in-memory ring buffer (the on-disk log is left alone).
+
+## Error Responses
+
+REST endpoints return JSON error bodies whenever possible:
+
+```json
+{"error": "human-readable message", "type": "ValueError", "hint": "optional recovery hint"}
+```
+
+Use status codes to distinguish caller mistakes from service state:
+`400` for malformed payloads, `404` for unknown ids, `409` for missing
+scene preconditions, `503` for temporary renderer/export failures, and
+`500` for unexpected server errors.
+
+## Local Proxy Note
+
+On workstations with `HTTP_PROXY` / `HTTPS_PROXY` set, loopback calls
+may accidentally route through the proxy. Use `curl --noproxy '*'` or
+configure Python `requests` with `session.trust_env = False` (or
+`proxies={"http": None, "https": None}`) when calling
+`http://127.0.0.1:<port>/api/v2`.
 
 ## Stable UI element IDs
 

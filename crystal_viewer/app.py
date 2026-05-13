@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import copy
+import hashlib
 import io
 import json
 import os
@@ -43,7 +44,7 @@ from .presets import (
 )
 from .renderer import build_figure, style_from_controls, topology_histogram_figure, topology_results_markdown
 from .scene import scene_json
-from .scenes import SceneStore
+from .scenes import Scene, SceneStore
 from .topology import analyze_topology, extract_coordination_shell
 
 
@@ -52,6 +53,22 @@ WORKSPACE_DIR = workspace_root(PACKAGE_DIR)
 DEFAULT_PRESET_PATH = default_preset_path(WORKSPACE_DIR)
 LEGACY_EXPORT_MODULE = "crystal_viewer.legacy.plot_crystal"
 PLACEHOLDER_STRUCTURE = "__upload__"
+
+
+class ApiError(RuntimeError):
+    """Exception with an HTTP status that REST handlers can surface."""
+
+    status_code = 400
+
+    def __init__(self, message: str, *, hint: str | None = None, status_code: int | None = None):
+        super().__init__(message)
+        self.hint = hint
+        if status_code is not None:
+            self.status_code = int(status_code)
+
+
+class TopologyUnavailable(ApiError):
+    status_code = 409
 
 
 def _camera_store_payload(scene_id: Optional[str], camera: Optional[dict[str, Any]]) -> dict[str, Any]:
@@ -2149,6 +2166,7 @@ class ViewerBackend:
         self.root_dir = root_dir or WORKSPACE_DIR
         self.preset_path = preset_path
         self.preset = load_preset(preset_path) if os.path.exists(preset_path) else default_preset()
+        self.server_started_at = time.time()
         self.catalog = get_default_catalog(root_dir=self.root_dir)
         self._lock = threading.Lock()
         self._bundle_lock = threading.Lock()
@@ -2158,6 +2176,9 @@ class ViewerBackend:
         if not self.structure_names:
             self.structure_names = list(self.catalog.keys())
         self.bundles: Dict[str, LoadedCrystal] = {}
+        self.upload_manifest_path = os.path.join(self.root_dir, LOCAL_STATE_DIRNAME, "crystal_view_uploads.json")
+        self.upload_manifest = self._load_upload_manifest()
+        self._restore_uploaded_bundles()
         if not self.structure_names:
             placeholder = build_empty_bundle(name=PLACEHOLDER_STRUCTURE)
             self.bundles[placeholder.name] = placeholder
@@ -2189,6 +2210,8 @@ class ViewerBackend:
         self.pending_state: Optional[dict[str, Any]] = None
         self._first_figure_ready = threading.Event()
         self.version = 0
+        self._figure_cache: dict[str, tuple[Any, Any]] = {}
+        self._figure_cache_order: list[str] = []
 
     def default_state(self, structure: str) -> dict[str, Any]:
         bundle = self.get_bundle(structure)
@@ -2229,6 +2252,7 @@ class ViewerBackend:
             "ortep_mode": str(style.get("ortep_mode", "ortep_axes")),
             "axis_scale": float(style["axis_scale"]),
             "display_options": _display_options_from_style(style),
+            "label_mode": str(style.get("label_mode", "unique_sites")),
             "display_mode": style.get("display_mode", scene.get("display_mode", "formula_unit")),
             "topology_species_keys": list(default_species),
             "topology_site_index": None,
@@ -2279,6 +2303,84 @@ class ViewerBackend:
 
     def _bump_version(self):
         self.version += 1
+        self._figure_cache.clear()
+        self._figure_cache_order.clear()
+
+    def wait_for_version(self, version: int, *, timeout: float = 30.0) -> bool:
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while self.version < int(version):
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.05)
+        return True
+
+    def server_started_iso(self) -> str:
+        return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(self.server_started_at))
+
+    def healthz(self) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "uptime_s": max(0.0, time.time() - self.server_started_at),
+            "server_started_at": self.server_started_iso(),
+            "scenes": len(self.scene_store.scenes),
+            "structures": len(self.structure_names),
+            "version": self.version,
+        }
+
+    def _load_upload_manifest(self) -> dict[str, Any]:
+        if not os.path.exists(self.upload_manifest_path):
+            return {"version": 1, "uploads": {}}
+        try:
+            with open(self.upload_manifest_path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except Exception:
+            return {"version": 1, "uploads": {}}
+        if not isinstance(payload, dict):
+            return {"version": 1, "uploads": {}}
+        payload.setdefault("version", 1)
+        payload.setdefault("uploads", {})
+        return payload
+
+    def _save_upload_manifest(self) -> None:
+        os.makedirs(os.path.dirname(os.path.abspath(self.upload_manifest_path)), exist_ok=True)
+        with open(self.upload_manifest_path, "w", encoding="utf-8") as handle:
+            json.dump(self.upload_manifest, handle, indent=2, ensure_ascii=False)
+
+    def _restore_uploaded_bundles(self) -> None:
+        uploads = self.upload_manifest.get("uploads") or {}
+        changed = False
+        for digest, record in list(uploads.items()):
+            if not isinstance(record, dict):
+                uploads.pop(digest, None)
+                changed = True
+                continue
+            name = str(record.get("name") or "")
+            path = str(record.get("path") or "")
+            if not name or not path or not os.path.exists(path):
+                uploads.pop(digest, None)
+                changed = True
+                continue
+            if name in self.structure_names:
+                continue
+            try:
+                bundle = build_loaded_crystal(
+                    name=name,
+                    cif_path=path,
+                    title=str(record.get("title") or name),
+                    preset=self.preset,
+                    source="upload",
+                )
+            except Exception:
+                uploads.pop(digest, None)
+                changed = True
+                continue
+            self.bundles[bundle.name] = bundle
+            self.structure_names.append(bundle.name)
+        if changed:
+            try:
+                self._save_upload_manifest()
+            except OSError:
+                pass
 
     def list_structures(self) -> list[dict[str, Any]]:
         return [self.get_bundle(name).metadata() for name in self.structure_names]
@@ -2342,8 +2444,9 @@ class ViewerBackend:
         base_state = self.default_state(structure)
         if state:
             base_state.update(self.normalize_state(state))
+        requested_label = label or structure
         scene = self.scene_store.add(
-            label=label or structure,
+            label=requested_label,
             structure_name=structure,
             state_patch=base_state,
             camera=base_state.get("camera"),
@@ -2351,7 +2454,10 @@ class ViewerBackend:
         self.current_state = self.scene_state(scene.id)
         self.pending_state = copy.deepcopy(self.current_state)
         self._bump_version()
-        return scene.to_dict()
+        payload = scene.to_dict()
+        payload["requested_label"] = str(requested_label)
+        payload["label_renamed"] = payload["label"] != str(requested_label)
+        return payload
 
     def update_scene(self, scene_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         scene = self.scene_store.get(scene_id)
@@ -2529,10 +2635,13 @@ class ViewerBackend:
             self.bundles[name] = built
             return built
 
-    def get_scene_json(self, name: str) -> dict[str, Any]:
+    def get_scene_json(self, name: str, *, after_transforms: bool = False) -> dict[str, Any]:
         state = self.get_state()
         if state["structure"] != name:
             state = self.normalize_state({"structure": name})
+        if not after_transforms:
+            state = dict(state)
+            state["transforms"] = []
         bundle = self.get_bundle(name)
         scene = self.scene_for_state(state)
         return {
@@ -2565,9 +2674,11 @@ class ViewerBackend:
         for key in ("atom_scale", "bond_radius", "minor_opacity", "axis_scale", "cutoff"):
             if key in patch and patch[key] is not None:
                 state[key] = float(patch[key])
-        for key in ("material", "style", "disorder", "ortep_mode"):
+        for key in ("material", "style", "disorder", "ortep_mode", "label_mode"):
             if key in patch and patch[key] is not None:
                 state[key] = str(patch[key])
+        if state.get("style") == "ortep" and "display_mode" not in patch:
+            state["display_mode"] = "asymmetric_unit"
         if "display_options" in patch and patch["display_options"] is not None:
             state["display_options"] = list(patch["display_options"])
         if "display_mode" in patch and patch["display_mode"] is not None:
@@ -2705,8 +2816,12 @@ class ViewerBackend:
     def get_state(self, scene_id: Optional[str] = None) -> dict[str, Any]:
         with self._lock:
             if scene_id is not None:
-                return copy.deepcopy(self.scene_state(scene_id))
-            return copy.deepcopy(self.current_state)
+                state = copy.deepcopy(self.scene_state(scene_id))
+            else:
+                state = copy.deepcopy(self.current_state)
+            state["server_started_at"] = self.server_started_iso()
+            state["version"] = self.version
+            return state
 
     def patch_state(
         self,
@@ -2737,7 +2852,10 @@ class ViewerBackend:
             if broadcast:
                 self.pending_state = copy.deepcopy(self.current_state)
             self._bump_version()
-            return copy.deepcopy(self.current_state)
+            state = copy.deepcopy(self.current_state)
+            state["version"] = self.version
+            state["server_started_at"] = self.server_started_iso()
+            return state
 
     def pop_pending_state(self) -> Optional[dict[str, Any]]:
         with self._lock:
@@ -2800,6 +2918,7 @@ class ViewerBackend:
         style["style"] = state.get("style", style.get("style", "ball_stick"))
         style["disorder"] = state.get("disorder", style.get("disorder", "outline_rings"))
         style["ortep_mode"] = state.get("ortep_mode", style.get("ortep_mode", "ortep_axes"))
+        style["label_mode"] = state.get("label_mode", style.get("label_mode", "unique_sites"))
         style["fast_rendering"] = bool(state.get("fast_rendering", False)) or style["material"] == "flat"
         style["topology_enabled"] = bool(state.get("topology_enabled", False))
         style["topology_hull_color"] = str(state.get("topology_hull_color", "#7C5CBF"))
@@ -2826,6 +2945,8 @@ class ViewerBackend:
             state.get("projection", style.get("projection", "perspective")),
             fallback=str(style.get("projection", "perspective")),
         )
+        if isinstance(state.get("camera"), dict):
+            style["camera"] = copy.deepcopy(state["camera"])
         # Plotly's ``layout.scene.uirevision`` makes the WebGL camera
         # state persist across redraws -- reusing the same revision
         # means a mouse-drag rotation survives a Labels toggle. The
@@ -2879,6 +3000,15 @@ class ViewerBackend:
         # ever change.
         from werkzeug.utils import secure_filename
 
+        digest = hashlib.sha256(data).hexdigest()
+        existing_record = (self.upload_manifest.get("uploads") or {}).get(digest)
+        if isinstance(existing_record, dict):
+            existing_name = existing_record.get("name")
+            if existing_name in self.structure_names:
+                bundle = self.get_bundle(existing_name)
+                setattr(bundle, "_upload_existing", True)
+                return bundle
+
         upload_dir = os.path.realpath(os.path.join(tempfile.gettempdir(), "crystal_viewer_uploads"))
         os.makedirs(upload_dir, exist_ok=True)
         safe = secure_filename(filename or "") or "upload.cif"
@@ -2919,6 +3049,18 @@ class ViewerBackend:
             self.structure_names.append(bundle.name)
             self.create_scene(structure=bundle.name, label=bundle.name)
             _prewarm_bundle_async(self, bundle.name)
+        self.upload_manifest.setdefault("uploads", {})[digest] = {
+            "name": bundle.name,
+            "path": path,
+            "sha256": digest,
+            "original_filename": filename,
+            "title": stem,
+        }
+        try:
+            self._save_upload_manifest()
+        except OSError as exc:  # pragma: no cover - read-only / disk-full
+            print(f"[crystal_viewer] could not persist upload manifest: {exc}", file=sys.stderr)
+        setattr(bundle, "_upload_existing", False)
         return bundle
 
     def topology_candidates(self, structure: str, fragment_type: Optional[str] = None) -> list[dict[str, Any]]:
@@ -3401,6 +3543,7 @@ class ViewerBackend:
         enabled: bool = True,
         scene_id: Optional[str] = None,
         transform_id: Optional[str] = None,
+        auto_promote: bool = True,
     ) -> dict[str, Any]:
         scene_id, transforms = self._resolve_transforms(scene_id)
         existing_ids = {t["id"] for t in transforms}
@@ -3416,9 +3559,66 @@ class ViewerBackend:
         )
         if transform is None:
             raise ValueError(f"invalid transform spec (unknown kind?): kind={kind!r}, params={params!r}")
+        state = self.get_state(scene_id)
+        warnings: list[str] = []
+        promoted_from: str | None = None
+        mutates_geometry = transform["kind"] in {
+            "repeat",
+            "grow_radius",
+            "grow_bonds",
+            "complete_fragment",
+            "complete_polyhedron",
+            "by_symmetry",
+            "slab",
+        }
+        if mutates_geometry and state.get("display_mode") == "formula_unit":
+            message = (
+                "display_mode=formula_unit trims transform output; "
+                "MatterVis promoted the scene to unit_cell for this transform."
+            )
+            warnings.append(message)
+            if auto_promote:
+                promoted_from = "formula_unit"
+                state["display_mode"] = "unit_cell"
+            else:
+                warnings[-1] = (
+                    "display_mode=formula_unit will trim transform output; "
+                    "set display_mode=unit_cell before rendering."
+                )
+        if transform["kind"] == "slab":
+            fragments = (self.get_bundle(state["structure"]).fragment_table or [])
+            if len(fragments) > 1:
+                warnings.append(
+                    "slab transform on a molecular crystal can cut covalent fragments; "
+                    "validate the result before using it as a surface model."
+                )
+        if transform["kind"] == "repeat":
+            from .transforms import MAX_ATOMS_AFTER_TRANSFORM
+
+            scene = self.scene_for_state(state)
+            atom_count = len(scene.get("draw_atoms") or [])
+            repeat_atoms = (
+                atom_count
+                * int(transform["params"].get("a", 1))
+                * int(transform["params"].get("b", 1))
+                * int(transform["params"].get("c", 1))
+            )
+            if repeat_atoms > MAX_ATOMS_AFTER_TRANSFORM:
+                raise ValueError(
+                    f"repeat transform would produce {repeat_atoms} atoms, "
+                    f"exceeds MAX_ATOMS_AFTER_TRANSFORM={MAX_ATOMS_AFTER_TRANSFORM}"
+                )
         transforms.append(transform)
-        self.patch_state({"transforms": transforms}, scene_id=scene_id)
-        return transform
+        patch = {"transforms": transforms}
+        if promoted_from:
+            patch["display_mode"] = state["display_mode"]
+        self.patch_state(patch, scene_id=scene_id)
+        response = dict(transform)
+        if warnings:
+            response["warnings"] = warnings
+        if promoted_from:
+            response["display_mode_auto_promoted"] = f"{promoted_from} -> {state['display_mode']}"
+        return response
 
     def update_transform(
         self,
@@ -3540,14 +3740,30 @@ class ViewerBackend:
             return [dict(spec) for spec in explicit if spec.get("enabled", True)]
         return []
 
-    def topology_for_state(self, state: dict[str, Any], click_data: Optional[dict[str, Any]] = None):
+    def topology_for_state(
+        self,
+        state: dict[str, Any],
+        click_data: Optional[dict[str, Any]] = None,
+        *,
+        strict: bool = False,
+    ):
         if not state.get("topology_enabled", False):
+            if strict:
+                raise TopologyUnavailable(
+                    "topology is disabled for this scene",
+                    hint="POST /api/v2/state with topology_enabled=true, or include center_species and ligand_species in the topology request.",
+                )
             return None
         structure = state["structure"]
         bundle = self.get_bundle(structure)
         scene = self.scene_for_state(state)
         effective_specs = self._effective_polyhedron_specs(state)
         if not effective_specs:
+            if strict:
+                raise TopologyUnavailable(
+                    "no enabled polyhedron specs are registered for this scene",
+                    hint="POST /api/v2/polyhedra first, or include center_species and ligand_species in the topology request.",
+                )
             return None
         # Legacy code paths below still consume a single ``species_keys``
         # list (used to resolve the analysis anchor when the user clicks
@@ -3556,6 +3772,8 @@ class ViewerBackend:
         # still snaps the analysis panel.
         species_keys = sorted({spec["center_species"] for spec in effective_specs})
         if not species_keys:
+            if strict:
+                raise TopologyUnavailable("no center species are available for topology analysis")
             return None
         site_index = self.resolve_topology_site(
             state=state,
@@ -3565,6 +3783,11 @@ class ViewerBackend:
             click_data=click_data,
         )
         if site_index is None:
+            if strict:
+                raise TopologyUnavailable(
+                    "could not resolve a topology fragment for center_index",
+                    hint="Use an index from GET /api/v2/scene/{name} topology_fragment_table.",
+                )
             return None
         # Memoize the (heavy) topology dict on the bundle keyed on the
         # state fields that actually influence GEOMETRY. Per-spec colour
@@ -3612,6 +3835,8 @@ class ViewerBackend:
             )
             cache[cache_key] = cached_geometry
         if cached_geometry is None:
+            if strict:
+                raise TopologyUnavailable("topology analysis produced no geometry for the requested fragment")
             return None
         # Re-attach the per-render colour overrides on every call. The
         # geometry payload is shared across colour permutations; we only
@@ -3808,6 +4033,15 @@ class ViewerBackend:
     def figure_for_state(self, state: Optional[dict[str, Any]] = None, click_data: Optional[dict[str, Any]] = None):
         state = self.get_state() if state is None else state
         scene_id = state.get("scene_id")
+        cache_key = None
+        if click_data is None:
+            try:
+                cache_key = json.dumps(_json_safe(state), sort_keys=True, separators=(",", ":"))
+            except Exception:
+                cache_key = None
+        if cache_key is not None and cache_key in self._figure_cache:
+            cached_fig, cached_topology = self._figure_cache[cache_key]
+            return copy.deepcopy(cached_fig), copy.deepcopy(cached_topology)
         with perf_log.time_block("scene_for_state", kind="event", scene_id=scene_id):
             scene = self.scene_for_state(state)
         atom_count = len(scene.get("draw_atoms", []))
@@ -3832,13 +4066,41 @@ class ViewerBackend:
         camera = _plotly_camera(state.get("camera"))
         if camera:
             fig.update_layout(scene_camera=camera)
+        if cache_key is not None:
+            self._figure_cache[cache_key] = (copy.deepcopy(fig), copy.deepcopy(topology_data))
+            self._figure_cache_order.append(cache_key)
+            while len(self._figure_cache_order) > 16:
+                old_key = self._figure_cache_order.pop(0)
+                self._figure_cache.pop(old_key, None)
         return fig, topology_data
 
-    def render_current_png(self, scene_id: Optional[str] = None) -> bytes:
-        fig, _ = self.figure_for_state(self.get_state(scene_id))
+    def render_current_png(
+        self,
+        scene_id: Optional[str] = None,
+        *,
+        raise_errors: bool = False,
+        width: int | None = None,
+        height: int | None = None,
+        scale: float = 2.0,
+        fast: bool = False,
+    ) -> bytes:
+        state = self.get_state(scene_id)
+        if fast:
+            state = copy.deepcopy(state)
+            state["material"] = "flat"
+            state["fast_rendering"] = True
+        fig, _ = self.figure_for_state(state)
+        kwargs: dict[str, Any] = {"format": "png", "scale": float(scale)}
+        if width is not None:
+            kwargs["width"] = int(width)
+        if height is not None:
+            kwargs["height"] = int(height)
         try:
-            return pio.to_image(fig, format="png", scale=2)
+            with perf_log.time_block("http:screenshot", kind="http", scene_id=scene_id, fast=bool(fast)):
+                return pio.to_image(fig, **kwargs)
         except Exception as exc:  # pragma: no cover - depends on local Chrome/Kaleido state
+            if raise_errors:
+                raise
             return _fallback_png(f"Plotly image export failed: {exc}")
 
     def default_camera(self, state: Optional[dict[str, Any]] = None) -> dict[str, Any]:
@@ -3878,6 +4140,19 @@ class ViewerBackend:
         if action == "align":
             self._bump_camera_revision(scene_id=scene_id, broadcast=broadcast)
             return self.align_camera(payload.get("axis"), scene_id=scene_id, broadcast=broadcast)
+
+        if action == "fit":
+            self._bump_camera_revision(scene_id=scene_id, broadcast=broadcast)
+            state = self.get_state(scene_id)
+            camera = self.default_camera(state)
+            # Plotly uses unitless eye vectors against the already fixed
+            # world-cube ranges; 1.55 fills most structures without clipping.
+            eye = camera.get("eye", {})
+            norm = np.linalg.norm([eye.get("x", 0.0), eye.get("y", 0.0), eye.get("z", 0.0)])
+            if norm > 1e-8:
+                scale = 1.55 / norm
+                camera["eye"] = {axis: float(eye.get(axis, 0.0)) * scale for axis in ("x", "y", "z")}
+            return self.set_camera(camera, scene_id=scene_id, broadcast=broadcast)
 
         if action in ("projection", "set_projection"):
             return self.set_projection(
@@ -4002,7 +4277,7 @@ class ViewerBackend:
         self.patch_state({"camera_revision": current + 1}, scene_id=scene_id, broadcast=broadcast)
         return current + 1
 
-    def _safe_preset_path(self, path: Optional[str]) -> Optional[str]:
+    def _safe_preset_path(self, path: Optional[str], *, allow_external: bool = False) -> Optional[str]:
         """Resolve ``path`` against ``<root>/.local`` and reject anything
         that escapes that directory.
 
@@ -4017,6 +4292,8 @@ class ViewerBackend:
         """
         if path is None:
             return None
+        if allow_external:
+            return os.path.realpath(path)
         safe_root = os.path.realpath(os.path.join(self.root_dir, LOCAL_STATE_DIRNAME))
         os.makedirs(safe_root, exist_ok=True)
         candidate = path if os.path.isabs(path) else os.path.join(safe_root, path)
@@ -4027,12 +4304,13 @@ class ViewerBackend:
             )
         return resolved
 
-    def save_preset(self, path: Optional[str] = None) -> dict[str, Any]:
-        target = self._safe_preset_path(path) or self.preset_path
+    def save_preset(self, path: Optional[str] = None, *, allow_external: bool = False) -> dict[str, Any]:
+        target = self._safe_preset_path(path, allow_external=allow_external) or self.preset_path
         state = self.get_state()
         bundle = self.get_bundle(state["structure"])
         scene = self.scene_for_state(state)
         preset_data = load_preset(target) if os.path.exists(target) else default_preset()
+        preset_data["version"] = max(int(preset_data.get("version", 1) or 1), 2)
         preset_data["style"].update(self.style_for_state(state))
         preset_data.setdefault("structures", {})
         preset_data["structures"][bundle.name] = {
@@ -4040,23 +4318,52 @@ class ViewerBackend:
             "show_hydrogen": self.show_hydrogen_for_state(state),
             "style": self.style_for_state(state),
         }
+        preset_data["scenes"] = [item for item in self.scene_store.list()]
+        preset_data["active_id"] = self.scene_store.active_id
+        preset_data["order"] = list(self.scene_store.order)
         save_preset(target, preset_data)
         self.preset = preset_data
-        return {"path": target, "structure": bundle.name}
+        return {"path": target, "structure": bundle.name, "scenes": len(preset_data["scenes"])}
 
-    def load_preset_from_path(self, path: Optional[str]) -> dict[str, Any]:
+    def load_preset_from_path(self, path: Optional[str], *, allow_external: bool = False) -> dict[str, Any]:
         if not path:
             raise ValueError("path is required")
-        target = self._safe_preset_path(path)
+        target = self._safe_preset_path(path, allow_external=allow_external)
         self.preset = load_preset(target)
         self.preset_path = target
+        if isinstance(self.preset.get("scenes"), list):
+            store = SceneStore(self.scene_store.path)
+            for item in self.preset.get("scenes") or []:
+                try:
+                    scene = Scene.from_dict(item)
+                except Exception:
+                    continue
+                if scene.structure_name not in self.structure_names:
+                    continue
+                if scene.id in store.scenes:
+                    continue
+                store.scenes[scene.id] = scene
+                store.order.append(scene.id)
+            order = [str(item) for item in (self.preset.get("order") or [])]
+            if order and set(order) == set(store.scenes):
+                store.order = order
+            active_id = self.preset.get("active_id")
+            store.active_id = str(active_id) if active_id in store.scenes else (store.order[0] if store.order else None)
+            if store.scenes:
+                self.scene_store = store
+                self.scene_store.save()
         for bundle in self.bundles.values():
             bundle.scene_cache.clear()
             cache = getattr(bundle, "_topology_state_cache", None)
             if cache:
                 cache.clear()
         structure = self.get_state()["structure"]
-        self.patch_state(self.default_state(structure))
+        if self.scene_store.active_id:
+            self.current_state = self.scene_state(self.scene_store.active_id)
+            self.pending_state = copy.deepcopy(self.current_state)
+            self._bump_version()
+        else:
+            self.patch_state(self.default_state(structure))
         return {"path": target, "state": self.get_state()}
 
     def export_static(self, output_path: Optional[str] = None) -> dict[str, Any]:
@@ -4086,13 +4393,77 @@ class ViewerBackend:
             payload["output_path"] = output_path
         return payload
 
-    def query_topology(self, structure: str, center_index: int, cutoff: float = 10.0, scene_id: Optional[str] = None) -> dict[str, Any]:
+    def query_topology(
+        self,
+        structure: str,
+        center_index: int,
+        cutoff: float = 10.0,
+        scene_id: Optional[str] = None,
+        *,
+        center_species: Optional[str] = None,
+        ligand_species: Optional[str] = None,
+        level: str = "molecule",
+    ) -> dict[str, Any]:
+        if cutoff <= 0 or cutoff > 1000:
+            raise ApiError("cutoff must be in the range (0, 1000]", status_code=400)
         state = self.get_state(scene_id)
         if state["structure"] != structure:
             state = self.normalize_state({"structure": structure}, scene_id=scene_id)
+        scene = self.scene_for_state(state)
+        if self._display_fragment(scene, center_index) is None:
+            raise ApiError(
+                f"center_index {center_index} is not present in this scene's fragment table",
+                hint="Use an index from GET /api/v2/scene/{name} topology_fragment_table.",
+                status_code=400,
+            )
         state["topology_site_index"] = center_index
         state["cutoff"] = cutoff
-        return self.topology_for_state(state)
+        level = str(level or "molecule")
+        if level not in {"molecule", "atom"}:
+            raise ApiError("level must be 'molecule' or 'atom'", status_code=400)
+        if level == "atom":
+            display_fragment = self._display_fragment(scene, center_index)
+            topology_fragment = self.map_display_fragment_to_topology(self.get_bundle(structure), display_fragment)
+            if topology_fragment is None:
+                raise TopologyUnavailable("could not map display fragment to topology fragment")
+            try:
+                return analyze_topology(
+                    self.get_bundle(structure),
+                    center_index=int(topology_fragment["index"]),
+                    cutoff=cutoff,
+                    display_center=display_fragment.get("center") if display_fragment else None,
+                    display_label=display_fragment.get("label") if display_fragment else None,
+                    display_type=display_fragment.get("type") if display_fragment else None,
+                    ligand_species=[ligand_species] if ligand_species else None,
+                    level="atom",
+                    center_species=center_species,
+                )
+            except ValueError as exc:
+                raise ApiError(str(exc), status_code=400) from exc
+        if center_species is not None or ligand_species is not None:
+            if not center_species:
+                fragment = self._display_fragment(scene, center_index)
+                center_species = (fragment or {}).get("formula") or (fragment or {}).get("species")
+            state["topology_enabled"] = True
+            state["polyhedron_specs"] = _normalize_polyhedron_specs(
+                [
+                    {
+                        "id": "ephemeral_topology_request",
+                        "name": str(center_species or "Topology"),
+                        "center_species": center_species,
+                        "ligand_species": ligand_species,
+                        "enabled": True,
+                    }
+                ],
+                fallback_color=state.get("topology_hull_color", "#7C5CBF"),
+            )
+        try:
+            result = self.topology_for_state(state, strict=True)
+        except ValueError as exc:
+            raise ApiError(str(exc), status_code=400) from exc
+        if result is None:
+            raise TopologyUnavailable("topology analysis was unavailable for this request")
+        return result
 
     def websocket_snapshot(self, *, include_figure: bool = False) -> dict[str, Any]:
         state = self.get_state()

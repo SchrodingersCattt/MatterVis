@@ -39,6 +39,26 @@ you only want to mutate one row at a time — they go through the same
 normalisation pipeline and broadcast a state change to every connected
 client.
 
+## Molecule vs Atom Analysis
+
+Named polyhedron specs remain molecule-level packing shells:
+`center_species` and `ligand_species` are fragment formula keys such as
+`"C6N2"` and `"ClO4"`, and MolCrysKit compares molecular centroids.
+
+For atom-level coordination polyhedra, call `POST /api/v2/topology`
+with `level: "atom"` and element symbols:
+
+```json
+{"center_index": 0, "center_species": "Cl", "ligand_species": "O", "level": "atom"}
+```
+
+The response includes `analysis_level`, `coordination_polyhedron_label`,
+`label_modifier`, and `cshm_value` (inside `shape`). Molecule-level
+calls instead fill `packing_shell_label`. CShM values are comparable to
+SHAPE-style continuous shape measures: `0` is ideal; small values
+indicate clean/distorted matches, and large values are reported as
+ambiguous or irregular by MolCrysKit's `label_modifier`.
+
 ## REST surface
 
 All endpoints are scoped to a single scene. The target scene is

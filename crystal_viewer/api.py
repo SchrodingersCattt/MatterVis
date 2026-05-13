@@ -4,6 +4,7 @@ import json
 import time
 
 from flask import Blueprint, Response, jsonify, request
+from werkzeug.exceptions import HTTPException
 
 from . import perf_log
 
@@ -15,6 +16,30 @@ except Exception:  # pragma: no cover - optional dependency
 
 def register_api(dash_app, backend) -> None:
     server = dash_app.server
+
+    def _error_payload(exc: Exception, *, hint: str | None = None) -> dict:
+        payload = {"error": str(exc), "type": type(exc).__name__}
+        if hint:
+            payload["hint"] = hint
+        return payload
+
+    def _error_response(exc: Exception, status: int = 500, *, hint: str | None = None):
+        return jsonify(_error_payload(exc, hint=hint)), status
+
+    @server.errorhandler(Exception)
+    def _api_error_handler(exc: Exception):
+        if not request.path.startswith("/api/"):
+            raise exc
+        if isinstance(exc, HTTPException):
+            return jsonify({"error": exc.description, "type": type(exc).__name__}), exc.code
+        status_code = getattr(exc, "status_code", None)
+        if isinstance(status_code, int):
+            return _error_response(exc, status_code, hint=getattr(exc, "hint", None))
+        if isinstance(exc, KeyError):
+            return _error_response(exc, 404)
+        if isinstance(exc, (TypeError, ValueError)):
+            return _error_response(exc, 400)
+        return _error_response(exc, 500)
 
     def _scene_id_from_request() -> str | None:
         payload = request.get_json(silent=True) if request.method not in ("GET", "HEAD") else None
@@ -73,6 +98,10 @@ def register_api(dash_app, backend) -> None:
     def get_state():
         return jsonify(backend.get_state(request.args.get("scene_id")))
 
+    @v2.get("/healthz")
+    def healthz_v2():
+        return jsonify(backend.healthz())
+
     @v2.post("/state")
     def post_state():
         payload = request.get_json(force=True, silent=True) or {}
@@ -121,7 +150,10 @@ def register_api(dash_app, backend) -> None:
                     bundle = backend.add_uploaded_file_bytes(content, file.filename)
             except ValueError as exc:
                 return jsonify({"error": str(exc)}), 400
-        return jsonify(bundle.metadata())
+        meta = bundle.metadata()
+        if getattr(bundle, "_upload_existing", False):
+            meta["existing"] = True
+        return jsonify(meta)
 
     @v2.get("/structures")
     def structures():
@@ -129,7 +161,8 @@ def register_api(dash_app, backend) -> None:
 
     @v2.get("/scene/<name>")
     def scene(name: str):
-        return jsonify(backend.get_scene_json(name))
+        after_transforms = str(request.args.get("after_transforms", "")).lower() in {"1", "true", "yes", "on"}
+        return jsonify(backend.get_scene_json(name, after_transforms=after_transforms))
 
     @v2.post("/topology")
     def topology():
@@ -137,22 +170,70 @@ def register_api(dash_app, backend) -> None:
         state = backend.get_state(_scene_id_from_request())
         structure = payload.get("structure") or state.get("structure")
         center_index = payload.get("center_index")
-        cutoff = float(payload.get("cutoff", 10.0))
         if center_index is None:
             return jsonify({"error": "center_index is required"}), 400
-        return jsonify(backend.query_topology(structure=structure, center_index=int(center_index), cutoff=cutoff, scene_id=_scene_id_from_request()))
+        try:
+            cutoff = float(payload.get("cutoff", 10.0))
+        except (TypeError, ValueError):
+            return jsonify({"error": "cutoff must be numeric", "type": "ValueError"}), 400
+        return jsonify(
+            backend.query_topology(
+                structure=structure,
+                center_index=int(center_index),
+                cutoff=cutoff,
+                scene_id=_scene_id_from_request(),
+                center_species=payload.get("center_species"),
+                ligand_species=payload.get("ligand_species"),
+                level=payload.get("level", "molecule"),
+            )
+        )
 
     @v2.get("/screenshot")
     def screenshot():
-        png = backend.render_current_png(scene_id=request.args.get("scene_id"))
+        wants_json_errors = "application/json" in (request.headers.get("Accept") or "")
+        at_version = request.args.get("at_version")
+        if at_version not in (None, ""):
+            try:
+                timeout = float(request.args.get("timeout", 30.0))
+                ready = backend.wait_for_version(int(at_version), timeout=timeout)
+            except (TypeError, ValueError) as exc:
+                return _error_response(exc, 400, hint="at_version must be an integer and timeout must be numeric")
+            if not ready:
+                return _error_response(
+                    TimeoutError(f"timed out waiting for state version {at_version}"),
+                    504,
+                    hint="Retry after polling GET /api/v2/state for the current version.",
+                )
+        def _int_arg(name: str):
+            raw = request.args.get(name)
+            return None if raw in (None, "") else int(raw)
+
+        def _float_arg(name: str, default: float):
+            raw = request.args.get(name)
+            return default if raw in (None, "") else float(raw)
+
+        try:
+            png = backend.render_current_png(
+                scene_id=request.args.get("scene_id"),
+                raise_errors=wants_json_errors,
+                width=_int_arg("width"),
+                height=_int_arg("height"),
+                scale=_float_arg("scale", 2.0),
+                fast=str(request.args.get("fast", "")).lower() in {"1", "true", "yes", "on"},
+            )
+        except (TypeError, ValueError) as exc:
+            return _error_response(exc, 400, hint="width and height must be integers; scale must be numeric")
+        except Exception as exc:
+            return _error_response(exc, 503, hint="Plotly/Kaleido image export failed")
         return Response(png, mimetype="image/png")
 
     @v2.post("/preset/save")
     def preset_save():
         payload = request.get_json(force=True, silent=True) or {}
         path = payload.get("path")
+        allow_external = bool(payload.get("allow_external")) or str(request.args.get("allow_external", "")).lower() in {"1", "true", "yes"}
         try:
-            return jsonify(backend.save_preset(path=path))
+            return jsonify(backend.save_preset(path=path, allow_external=allow_external))
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
 
@@ -160,8 +241,9 @@ def register_api(dash_app, backend) -> None:
     def preset_load():
         payload = request.get_json(force=True, silent=True) or {}
         path = payload.get("path")
+        allow_external = bool(payload.get("allow_external")) or str(request.args.get("allow_external", "")).lower() in {"1", "true", "yes"}
         try:
-            return jsonify(backend.load_preset_from_path(path))
+            return jsonify(backend.load_preset_from_path(path, allow_external=allow_external))
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
 
@@ -415,6 +497,7 @@ def register_api(dash_app, backend) -> None:
                 enabled=bool(payload.get("enabled", True)),
                 scene_id=_scene_id_from_request(),
                 transform_id=payload.get("id"),
+                auto_promote=str(request.args.get("auto_promote", "true")).lower() not in {"0", "false", "no"},
             )
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
@@ -544,6 +627,10 @@ def register_api(dash_app, backend) -> None:
     def v1_get_state():
         return jsonify(backend.get_state())
 
+    @v1.get("/healthz")
+    def healthz_v1():
+        return healthz_v2()
+
     # Fields that only exist in v2 (Phase 1/2 per-scene CRUD models).
     # We still accept them on POST /api/v1/state so old scripts that
     # POST a full snapshot back to v1 keep working, but we attach a
@@ -611,7 +698,16 @@ def register_api(dash_app, backend) -> None:
         cutoff = float(payload.get("cutoff", 10.0))
         if center_index is None:
             return jsonify({"error": "center_index is required"}), 400
-        return jsonify(backend.query_topology(structure=structure, center_index=int(center_index), cutoff=cutoff))
+        return jsonify(
+            backend.query_topology(
+                structure=structure,
+                center_index=int(center_index),
+                cutoff=cutoff,
+                center_species=payload.get("center_species"),
+                ligand_species=payload.get("ligand_species"),
+                level=payload.get("level", "molecule"),
+            )
+        )
 
     @v1.get("/screenshot")
     def v1_screenshot():

@@ -55,6 +55,9 @@ class LoadedCrystal:
             "source": self.source,
             "fragment_count": len(self.topology_fragment_table or self.fragment_table),
             "has_topology": bool(self.topology_fragment_table or self.fragment_table),
+            "parsed_atom_count": len(self.raw_atoms or []),
+            "displayed_atom_count": len(self.scene.get("draw_atoms", []) or []),
+            "asu_atom_count": len(self.raw_atoms or []),
         })
         return meta
 

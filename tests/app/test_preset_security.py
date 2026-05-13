@@ -71,3 +71,23 @@ def test_load_preset_with_relative_filename_works(backend: ViewerBackend, tmp_pa
     written = Path(result["path"]).resolve()
     safe_root = (tmp_path / ".local").resolve()
     assert str(written).startswith(str(safe_root))
+
+
+def test_preset_v2_round_trips_multiple_scenes(backend: ViewerBackend) -> None:
+    first_id = backend.active_scene_id()
+    structure = backend.get_state()["structure"]
+    second = backend.create_scene(structure=structure, label="second view")
+    backend.patch_state({"display_mode": "unit_cell"}, scene_id=second["id"])
+
+    saved = backend.save_preset(path="multi_scene.json")
+    assert saved["scenes"] >= 2
+
+    backend.delete_scene(second["id"])
+    assert second["id"] not in {scene["id"] for scene in backend.scene_options()}
+
+    loaded = backend.load_preset_from_path("multi_scene.json")
+    scene_ids = {scene["id"] for scene in backend.scene_options()}
+    assert first_id in scene_ids
+    assert second["id"] in scene_ids
+    assert loaded["state"]["scene_id"] in scene_ids
+    assert backend.get_state(second["id"])["display_mode"] == "unit_cell"

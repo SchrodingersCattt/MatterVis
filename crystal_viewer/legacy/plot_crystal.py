@@ -44,10 +44,15 @@ except ImportError:  # pragma: no cover - allows direct script execution
 # low saturation, print-safe, distinguishable in greyscale
 ELEM_COLOR = {
     'C':  "#5E5E5E",   # dark charcoal gray
-    'H':  "#EAEAEA",   # light gray
+    'H':  "#DDDDDD",   # light gray
     'N':  "#2C61AF",   # muted steel blue
     'O':  "#B85060",   # muted brick red
     'Cl': "#218E6A",   # muted sage green
+    'Cu': "#B87333",
+    'Fe': "#B7410E",
+    'Ni': "#4C8C4A",
+    'Co': "#3F5FBF",
+    'Zn': "#7D80B8",
     'default': '#808080',
 }
 ELEM_COLOR_LIGHT = {
@@ -56,11 +61,16 @@ ELEM_COLOR_LIGHT = {
     'N':  '#8FADD4',   # lighter steel blue
     'O':  '#D48A88',   # lighter brick red
     'Cl': '#7DB88A',   # lighter sage green
+    'Cu': '#D19A66',
+    'Fe': '#D07A55',
+    'Ni': '#82B57F',
+    'Co': '#7F93D1',
+    'Zn': '#A6A8D0',
     'default': '#B0B0B0',
 }
 # Atom display radii (Å) — used when no ADP available
-ATOM_RADIUS = {'C': 0.18, 'N': 0.18, 'O': 0.17, 'Cl': 0.24, 'H': 0.08, 'default': 0.18}
-COV_RADIUS   = {'C': 0.77, 'H': 0.31, 'N': 0.75, 'O': 0.73, 'Cl': 0.99}
+ATOM_RADIUS = {'C': 0.18, 'N': 0.18, 'O': 0.17, 'Cl': 0.24, 'H': 0.08, 'Cu': 0.22, 'Fe': 0.22, 'Ni': 0.22, 'Co': 0.22, 'Zn': 0.22, 'default': 0.18}
+COV_RADIUS   = {'C': 0.77, 'H': 0.31, 'N': 0.75, 'O': 0.73, 'Cl': 0.99, 'Cu': 1.32, 'Fe': 1.24, 'Ni': 1.21, 'Co': 1.26, 'Zn': 1.22}
 
 def elem_color(s):       return ELEM_COLOR.get(s, ELEM_COLOR['default'])
 def elem_color_light(s): return ELEM_COLOR_LIGHT.get(s, ELEM_COLOR_LIGHT['default'])
@@ -173,6 +183,33 @@ def parse_asu(path):
             break
     if not symops:
         symops = [gemmi.Op('x,y,z')]
+    if len(symops) == 1:
+        sg = None
+        it_value = block.find_value('_space_group_IT_number') or block.find_value('_symmetry_Int_Tables_number')
+        if it_value:
+            try:
+                sg = gemmi.find_spacegroup_by_number(int(gemmi.cif.as_number(it_value)))
+            except Exception:
+                sg = None
+        if sg is None:
+            for tag in ['_space_group_name_H-M_alt', '_symmetry_space_group_name_H-M', '_space_group_name_H-M']:
+                name = block.find_value(tag)
+                if not name:
+                    continue
+                try:
+                    cleaned = str(name).strip().strip("'").strip('"')
+                    if cleaned and cleaned.upper().replace(" ", "") not in {'P1', 'P-1'}:
+                        sg = gemmi.SpaceGroup(cleaned)
+                        break
+                except Exception:
+                    continue
+        if sg is not None and sg.number > 1:
+            try:
+                expanded_ops = list(sg.operations())
+                if len(expanded_ops) > 1:
+                    symops = expanded_ops
+            except Exception:
+                pass
 
     bond_partners = {}
     bond_lengths = {}
