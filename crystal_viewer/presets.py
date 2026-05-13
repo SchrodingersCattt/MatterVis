@@ -29,6 +29,8 @@ DEFAULT_STYLE = {
     "projection": "perspective",
     "camera_eye_distance": 1.8,
     "background": "#FFFFFF",
+    "label_color": "#111111",
+    "minor_label_color": "#666666",
     "axis_scale": 0.14,
     "axis_color": "#666666",
     "axis_opacity": 0.72,

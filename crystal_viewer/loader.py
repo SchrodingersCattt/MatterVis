@@ -267,8 +267,12 @@ generate_ordered_replicas_from_disordered_sites` for the optimal
         for idx in disordered_idx:
             if idx in kept_raw:
                 out[idx]["_is_minor"] = False
+                out[idx]["_mv_auto_disorder_assembly"] = "mv_auto"
+                out[idx]["_mv_auto_disorder_group"] = "1"
             else:
                 out[idx]["_is_minor"] = True
+                out[idx]["_mv_auto_disorder_assembly"] = "mv_auto"
+                out[idx]["_mv_auto_disorder_group"] = "2"
         return out
     except Exception:
         return raw_atoms

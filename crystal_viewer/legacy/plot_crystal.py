@@ -411,6 +411,12 @@ def disorder_alpha(at):
 
 def _disorder_group_id(at):
     """Return a canonical disorder group identifier for conflict checking."""
+    synthetic_dg = str(at.get('_mv_auto_disorder_group') or '').strip()
+    if synthetic_dg not in ('', '.', '?'):
+        synthetic_da = str(at.get('_mv_auto_disorder_assembly') or 'mv_auto').strip()
+        if synthetic_da in ('', '.', '?'):
+            synthetic_da = 'mv_auto'
+        return (synthetic_da, synthetic_dg)
     dg = at['dg'].strip()
     da = at['da'].strip()
     if dg in ('.', '?', ''):
