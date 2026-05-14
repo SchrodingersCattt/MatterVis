@@ -275,36 +275,66 @@ def _plotly_camera_from_scene(scene: dict, style: dict) -> dict:
 
 
 def _camera_axis_projections(scene: dict, style: dict) -> list[list[float]] | None:
+    """Reproject the lattice axes onto the live camera's screen plane.
+
+    Delegates to :func:`compass.camera_screen_basis` (Layer 1 of the
+    paper-coord compass API) so the view-direction convention
+    (``view = center - eye``) matches every other paper-coord caller.
+    The previous hand-rolled implementation flipped the sign on view
+    by using ``eye`` directly, and additionally normalised each lattice
+    vector to unit length before projection -- both bugs combined made
+    the compass for orthorhombic cells (e.g. SY, where M is diagonal)
+    draw the ``a`` and ``b`` arrows into the same screen quadrant with
+    near-equal lengths, instead of the expected perpendicular
+    ``|a| : |b| : |c|`` proportions.
+    """
     camera = style.get("camera")
     if not isinstance(camera, dict):
         return None
     eye_raw = camera.get("eye") or {}
     up_raw = camera.get("up") or {}
+    center_raw = camera.get("center") or {}
+
+    def _coerce_xyz(raw, fallback):
+        try:
+            if isinstance(raw, dict):
+                return np.array(
+                    [float(raw.get(k, fallback[i])) for i, k in enumerate(("x", "y", "z"))],
+                    dtype=float,
+                )
+            return np.array([float(v) for v in raw], dtype=float)
+        except (TypeError, ValueError):
+            return None
+
+    eye = _coerce_xyz(eye_raw, (0.0, 0.0, 1.0))
+    up = _coerce_xyz(up_raw, (0.0, 1.0, 0.0))
+    center = _coerce_xyz(center_raw, (0.0, 0.0, 0.0))
+    if eye is None or up is None or center is None:
+        return None
+    if eye.shape[0] != 3 or up.shape[0] != 3 or center.shape[0] != 3:
+        return None
+    canonical = {
+        "eye": {"x": float(eye[0]), "y": float(eye[1]), "z": float(eye[2])},
+        "center": {"x": float(center[0]), "y": float(center[1]), "z": float(center[2])},
+        "up": {"x": float(up[0]), "y": float(up[1]), "z": float(up[2])},
+    }
     try:
-        if isinstance(eye_raw, dict):
-            eye = np.array([float(eye_raw.get(axis, 0.0)) for axis in ("x", "y", "z")], dtype=float)
-        else:
-            eye = np.array([float(v) for v in eye_raw], dtype=float)
-        if isinstance(up_raw, dict):
-            up = np.array([float(up_raw.get(axis, 0.0)) for axis in ("x", "y", "z")], dtype=float)
-        else:
-            up = np.array([float(v) for v in up_raw], dtype=float)
-    except (TypeError, ValueError):
+        from .compass import camera_screen_basis
+        right, screen_up = camera_screen_basis(canonical)
+    except (ValueError, KeyError, TypeError):
         return None
-    if eye.shape[0] != 3 or up.shape[0] != 3:
+
+    M = np.asarray(scene.get("M"), dtype=float)
+    if M.ndim != 2 or M.shape[0] < 3 or M.shape[1] != 3:
         return None
-    view = _normalize(eye, [0.0, 0.0, 1.0])
-    up = _normalize(up, [0.0, 1.0, 0.0])
-    right = np.cross(up, view)
-    if np.linalg.norm(right) < 1e-8:
-        return None
-    right = _normalize(right, [1.0, 0.0, 0.0])
-    screen_up = _normalize(np.cross(view, right), [0.0, 1.0, 0.0])
-    projections: list[list[float]] = []
-    for vec in np.asarray(scene.get("M"), dtype=float)[:3]:
-        axis = _normalize(vec, [1.0, 0.0, 0.0])
-        projections.append([float(np.dot(axis, right)), float(np.dot(axis, screen_up))])
-    return projections
+    # Project each lattice vector *without* unit-normalising it: the
+    # compass overlay derives its arrow lengths from relative
+    # magnitudes, so for SY-like anisotropic cells (|a|=8, |b|=25,
+    # |c|=10) the b arrow should be visibly ~3x longer than a.
+    return [
+        [float(np.dot(M[i], right)), float(np.dot(M[i], screen_up))]
+        for i in range(3)
+    ]
 
 
 def _visible_atoms(scene: dict, style: dict):

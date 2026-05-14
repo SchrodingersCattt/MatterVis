@@ -103,3 +103,77 @@ def test_axis_key_reprojects_from_current_camera():
     # Looking down +x makes the a axis project nearly to a point. If the
     # stale scene["projected_axes"] were used, the a row would have a
     # horizontal arrow instead.
+
+
+def test_compass_projects_orthogonal_axes_to_orthogonal_screen_vectors():
+    """Regression: ``_camera_axis_projections`` used to take ``view = eye``
+    instead of ``view = center - eye`` and pre-normalised every lattice
+    vector. The combined bug made SY's compass draw the ``a`` and ``b``
+    arrows into the same screen quadrant with near-equal lengths, even
+    though SY is orthorhombic with ``|b| = 3 |a|``. Pin the math by
+    asserting that for a diagonal cell viewed straight down ``+z``, the
+    projected basis is genuinely orthogonal AND magnitudes track the
+    real ``|a|``, ``|b|``, ``|c|``.
+    """
+    from crystal_viewer.renderer import _camera_axis_projections
+
+    scene = {"M": np.diag([8.09, 24.72, 10.20])}
+    style = {
+        "camera": {
+            "eye": {"x": 0.0, "y": 0.0, "z": 1.8},
+            "center": {"x": 0.0, "y": 0.0, "z": 0.0},
+            "up": {"x": 0.0, "y": 1.0, "z": 0.0},
+        }
+    }
+
+    proj = _camera_axis_projections(scene, style)
+    assert proj is not None
+    a_xy, b_xy, c_xy = proj
+
+    # Looking -z with up=+y: a projects to screen-left (since right = up x
+    # view = (0,1,0) x (0,0,-1) = (-1,0,0)), b projects to screen-up, c
+    # collapses to the origin.
+    assert math.isclose(a_xy[0], -8.09, rel_tol=0, abs_tol=1e-4)
+    assert math.isclose(a_xy[1], 0.0, rel_tol=0, abs_tol=1e-4)
+    assert math.isclose(b_xy[0], 0.0, rel_tol=0, abs_tol=1e-4)
+    assert math.isclose(b_xy[1], 24.72, rel_tol=0, abs_tol=1e-4)
+    assert math.isclose(c_xy[0], 0.0, rel_tol=0, abs_tol=1e-4)
+    assert math.isclose(c_xy[1], 0.0, rel_tol=0, abs_tol=1e-4)
+
+    # a perp b on screen.
+    assert math.isclose(a_xy[0] * b_xy[0] + a_xy[1] * b_xy[1], 0.0, abs_tol=1e-4)
+
+    # Magnitudes must track real cell anisotropy; the pre-fix normalisation
+    # would have collapsed all three to unit length.
+    a_len = math.hypot(*a_xy)
+    b_len = math.hypot(*b_xy)
+    assert math.isclose(b_len / a_len, 24.72 / 8.09, rel_tol=1e-4)
+
+
+def test_compass_uses_view_minus_eye_not_eye():
+    """A camera viewing the origin from ``+z`` and the same camera viewing
+    from ``-z`` are mirror images: their screen ``right`` flips sign, so
+    the projected ``a`` arrow flips horizontally. If the function were
+    still computing ``view = eye`` (wrong sign), both cameras would
+    produce the SAME projection.
+    """
+    from crystal_viewer.renderer import _camera_axis_projections
+
+    scene = {"M": np.diag([8.09, 24.72, 10.20])}
+    above = {
+        "camera": {
+            "eye": {"x": 0.0, "y": 0.0, "z": 1.8},
+            "center": {"x": 0.0, "y": 0.0, "z": 0.0},
+            "up": {"x": 0.0, "y": 1.0, "z": 0.0},
+        }
+    }
+    below = {
+        "camera": {
+            "eye": {"x": 0.0, "y": 0.0, "z": -1.8},
+            "center": {"x": 0.0, "y": 0.0, "z": 0.0},
+            "up": {"x": 0.0, "y": 1.0, "z": 0.0},
+        }
+    }
+    a_above = _camera_axis_projections(scene, above)[0]
+    a_below = _camera_axis_projections(scene, below)[0]
+    assert math.isclose(a_above[0], -a_below[0], rel_tol=0, abs_tol=1e-6)
