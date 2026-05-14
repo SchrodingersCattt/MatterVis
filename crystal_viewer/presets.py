@@ -46,10 +46,21 @@ DEFAULT_STYLE = {
     # ``axis_key_*`` paper-coord controls; the in-app default uses the
     # ``axis_scale`` slider instead.
     "show_axis_key": False,
-    "axis_key_anchor": [0.05, 0.07],      # lower-left (paper coords)
-    "axis_key_row_gap": 0.095,            # vertical gap between rows (paper)
-    "axis_key_arrow_len": 0.085,          # max arrow length (paper)
-    "axis_key_label_pad": 0.045,          # label→arrow horizontal gap (paper)
+    # Single-anchor triad compass: this is the SHARED tail position
+    # for all three lattice arrows (paper coords). Pushed in from the
+    # absolute corner so down-pointing arrows still have room for
+    # their labels below the tip without clipping past the figure
+    # edge. Old row-stacked layout used 0.05,0.07 -- safe for vertical
+    # rows but too close to the corner for an omnidirectional triad.
+    "axis_key_anchor": [0.10, 0.18],      # shared paper-coord tail
+    "axis_key_row_gap": 0.095,            # legacy field, unused by the triad
+    "axis_key_arrow_len": 0.085,          # legacy field, unused by the triad
+    "axis_key_label_pad": 0.045,          # legacy field, unused by the triad
+    "axis_key_pixel_length": 50.0,        # max arrow length in pixels
+    "axis_key_label_pixel_offset": 10.0,  # label push past arrow tip
+    "axis_key_arrow_head": 3,             # Plotly arrowhead style id
+    "axis_key_dot_threshold": 0.05,       # rel-magnitude threshold for dot
+    "axis_key_dot_radius_px": 4.0,        # dot radius in pixels
     "axis_key_font_size": 13,             # label font size (points)
     "axis_key_color": "#2F2F2F",
     "axis_key_label_order": ["c", "b", "a"],  # top→bottom stacking order

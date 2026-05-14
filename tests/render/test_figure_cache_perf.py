@@ -57,14 +57,33 @@ def test_camera_change_does_not_invalidate_cache(tmp_path):
     assert len(backend._figure_cache) == snapshot
 
 
+_COMPASS_ITEM_NAME = "mv_compass"
+
+
 def _compass_shapes(fig) -> list[dict]:
-    """Pull arrow line-shapes (compass arrow shafts) from fig.layout."""
-    shapes = list(fig.layout.shapes or [])
-    return [
-        {"x0": float(s.x0), "y0": float(s.y0), "x1": float(s.x1), "y1": float(s.y1)}
-        for s in shapes
-        if s.type == "line"
-    ]
+    """Pull compass arrow annotations from ``fig.layout``.
+
+    The new single-anchor compass renders each axis as a Plotly
+    annotation arrow (``showarrow=True``) tagged with
+    ``name="mv_compass"`` so the clientside reprojection handler can
+    find them. The previous row-stacked layout used separate
+    ``shape.type="line"`` shafts; that path is gone.
+    """
+    out: list[dict] = []
+    for ann in fig.layout.annotations or []:
+        if getattr(ann, "name", None) != _COMPASS_ITEM_NAME:
+            continue
+        if not getattr(ann, "showarrow", False):
+            continue
+        out.append(
+            {
+                "x": float(ann.x),
+                "y": float(ann.y),
+                "ax": float(ann.ax),
+                "ay": float(ann.ay),
+            }
+        )
+    return out
 
 
 def test_cached_figure_refreshes_compass_under_live_camera(tmp_path):

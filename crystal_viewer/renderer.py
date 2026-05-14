@@ -327,14 +327,82 @@ def _camera_axis_projections(scene: dict, style: dict) -> list[list[float]] | No
     M = np.asarray(scene.get("M"), dtype=float)
     if M.ndim != 2 or M.shape[0] < 3 or M.shape[1] != 3:
         return None
-    # Project each lattice vector *without* unit-normalising it: the
-    # compass overlay derives its arrow lengths from relative
-    # magnitudes, so for SY-like anisotropic cells (|a|=8, |b|=25,
-    # |c|=10) the b arrow should be visibly ~3x longer than a.
+
+    # ASPECT-MODE CORRECTION
+    #
+    # Plotly's camera operates in *normalised scene-cube* coordinates,
+    # not data coordinates. With ``aspectmode="data"`` (which is what
+    # MatterVis uses for anisotropic cells like SY,
+    # |a|:|b|:|c| = 8.09 : 24.72 : 10.20) the camera ``eye``/``up``/
+    # ``center`` are still interpreted in cube space [-1, 1]³ even
+    # though the cell ranges differ per axis. That means the *screen*
+    # direction of a unit step in data y is roughly ⅓ the screen
+    # direction of a unit step in data x for SY, because Plotly maps
+    # the long b axis onto the same [-1, 1] cube extent as a.
+    #
+    # To project the lattice M onto the live screen plane correctly
+    # we therefore have to rescale M from data units to cube units
+    # using the same per-axis half-ranges Plotly applies when laying
+    # the scene cube out. Without this rescaling the oblique-camera
+    # compass on SY draws b as far longer than a even when on screen
+    # they're nearly equal length -- exactly the "几何不对" complaint.
+    cube_scale = _axis_cube_scale(scene, style)
+    if cube_scale is not None:
+        # Each lattice row gets divided per-axis by the data half-range
+        # for that axis so that the resulting (cube-space) vector is
+        # what the camera basis above actually projects.
+        M_cube = M[:3] / cube_scale[None, :]
+    else:
+        M_cube = M[:3]
+
     return [
-        [float(np.dot(M[i], right)), float(np.dot(M[i], screen_up))]
+        [float(np.dot(M_cube[i], right)), float(np.dot(M_cube[i], screen_up))]
         for i in range(3)
     ]
+
+
+def _axis_cube_scale(scene: dict, style: dict) -> np.ndarray | None:
+    """Return the per-axis half-range (data units per cube unit) for
+    the current scene, or ``None`` if the scene would render with
+    ``aspectmode='cube'`` (i.e. all three axis spans match, in which
+    case data == cube and no rescaling is needed).
+
+    Lives next to :func:`_camera_axis_projections` because the
+    aspect-mode logic in :func:`build_figure` is the source of truth
+    for what Plotly will actually do with the eye/up vectors; if the
+    two ever drift the compass projection silently desyncs from the
+    rendered scene. Keeping both reads cheap (scene["viewport"] or
+    scene["bounds"]) means the compass overlay never re-walks the
+    full atom list.
+    """
+    override = scene.get("viewport")
+    if override:
+        try:
+            xs = (float(override["x"][1]) - float(override["x"][0])) / 2.0
+            ys = (float(override["y"][1]) - float(override["y"][0])) / 2.0
+            zs = (float(override["z"][1]) - float(override["z"][0])) / 2.0
+        except (KeyError, TypeError, ValueError):
+            return None
+        return np.array([max(xs, 1e-9), max(ys, 1e-9), max(zs, 1e-9)], dtype=float)
+    bounds = scene.get("bounds")
+    if isinstance(bounds, dict):
+        mins = bounds.get("mins")
+        maxs = bounds.get("maxs")
+        if mins is not None and maxs is not None:
+            mins_arr = np.asarray(mins, dtype=float)
+            maxs_arr = np.asarray(maxs, dtype=float)
+            if mins_arr.shape == (3,) and maxs_arr.shape == (3,):
+                halves = (maxs_arr - mins_arr) / 2.0
+                if (halves > 0).all():
+                    # If all three half-ranges agree to within 1e-6
+                    # the scene renders as aspectmode="cube" (see
+                    # ``is_cube`` in :func:`build_figure`); in that
+                    # case the cube already equals the data cube so
+                    # no rescaling is required.
+                    if float(halves.max() - halves.min()) < 1e-6:
+                        return None
+                    return halves
+    return None
 
 
 def _visible_atoms(scene: dict, style: dict):
@@ -1514,28 +1582,45 @@ def _axis_traces(scene: dict, style: dict):
     return []
 
 
+_COMPASS_META_MARKER = "mv_compass"
+# Plotly's per-annotation / per-shape ``meta`` field only accepts
+# strings (it's a template-string slot, not free-form metadata).
+# Using the ``name`` field instead -- which IS free-form and is
+# already used by Plotly's template machinery -- is the simplest way
+# to tag overlay items so the clientside compass handler can pick
+# them out reliably.
+_COMPASS_ITEM_NAME = "mv_compass"
+
+
 def axis_key_overlay(scene: dict, style: dict) -> tuple[list[dict], list[dict]]:
-    """Build Plotly paper-coord annotations + shapes for a corner axis triad.
+    """Build Plotly paper-coord annotations + shapes for a corner compass.
 
-    The triad is rendered in **screen space** (paper coordinates) rather than
-    inside the 3D scene, so labels and arrows live in a stable figure corner
-    and cannot be clipped by the 3D viewport cube or a caller's outer
-    matplotlib axes. Labels stack in a left-aligned vertical column (one per
-    crystallographic axis, default order c → b → a top-to-bottom), with each
-    label followed by a short arrow pointing in the *projected* direction of
-    that axis. Arrow lengths are normalised so the longest projection fills
-    ``axis_key_arrow_len`` while shorter axes preserve their relative length.
+    All three lattice axes are rendered as arrows sharing a SINGLE
+    paper-coord anchor (the compass tail). Arrow lengths are scaled to
+    preserve relative ``|a| : |b| : |c|`` screen-projection magnitudes,
+    so callers can read both direction and degree of foreshortening
+    off the triad. Axes whose screen projection collapses below
+    ``axis_key_dot_threshold`` (i.e. they're aligned with the view
+    direction) are drawn as a filled dot at the anchor instead of an
+    invisible zero-length arrow.
 
-    The arrow body is drawn as a Plotly line ``shape`` and the arrowhead as a
-    filled triangular path — both of which honour ``xref='paper'``. Labels
-    are separate ``annotations`` objects. Returns ``(annotations, shapes)``.
+    The previous implementation laid out one row per axis with each
+    row owning its own ``y0`` -- visually a vertical legend, not a
+    compass; the three arrow tails never met. Restoring the shared
+    anchor is required so the triad reads as "three vectors from one
+    origin" the way every crystallography paper draws it.
 
     The in-app ``show_axes`` checkbox and the publication-style
     ``show_axis_key`` flag both feed this overlay; either being truthy
-    renders the triad. Projections are read from
-    ``scene["projected_axes"]`` (populated by :func:`scene.build_scene_from_atoms`)
-    and the label strings come from ``style["axes_labels"]`` with stacking
-    order controlled by ``style["axis_key_label_order"]``.
+    renders the triad. Projections come from the live camera (via
+    :func:`_camera_axis_projections`) when ``style["camera"]`` is set,
+    otherwise they fall back to the static ``scene["projected_axes"]``
+    from scene-build time.
+
+    Each emitted annotation / shape carries ``meta.mv_compass=True``
+    so the clientside callback can identify and replace them after a
+    camera relayout without disturbing other overlays (ORTEP legend,
+    topology badges, ...).
     """
     show_axes = bool(style.get("show_axes", False))
     show_axis_key = bool(style.get("show_axis_key", False))
@@ -1546,135 +1631,257 @@ def axis_key_overlay(scene: dict, style: dict) -> tuple[list[dict], list[dict]]:
         return [], []
 
     axes_labels = list(style.get("axes_labels") or scene.get("axis_labels") or ["a", "b", "c"])[:3]
-    label_to_proj = {axes_labels[i]: projections[i] for i in range(min(3, len(axes_labels)))}
+    if len(axes_labels) < 3:
+        return [], []
+    label_to_proj = {axes_labels[i]: projections[i] for i in range(3)}
 
-    order = list(style.get("axis_key_label_order") or ["c", "b", "a"])
+    # Draw all three axes by default; ``axis_key_label_order`` only
+    # controls paint order (later items render on top of earlier ones
+    # on z-fights). Single-anchor triad means the visual order of
+    # "rows" no longer exists.
+    order = list(style.get("axis_key_label_order") or list(axes_labels))
     order = [label for label in order if label in label_to_proj]
+    # Ensure every axis label appears exactly once even if the
+    # caller-provided ``axis_key_label_order`` omits one (e.g. legacy
+    # "c, b, a" preset stays valid; "c, b" would silently drop a).
+    for label in axes_labels:
+        if label not in order:
+            order.append(label)
     if not order:
         return [], []
 
-    anchor = style.get("axis_key_anchor") or [0.05, 0.07]
+    anchor = style.get("axis_key_anchor") or [0.08, 0.12]
     anchor_x = float(anchor[0])
     anchor_y = float(anchor[1])
-    row_gap = float(style.get("axis_key_row_gap", 0.095))
-    arrow_len = float(style.get("axis_key_arrow_len", 0.085))
-    if show_axes and not show_axis_key:
-        # When the in-app "Axes" checkbox is the trigger, route the
-        # matching "Axis Scale" slider (0.05-0.25) through this overlay so
-        # the user-visible control keeps working. ``0.6`` keeps the
-        # default slider value (0.14) near the publication preset
-        # (``axis_key_arrow_len`` default 0.085).
-        arrow_len = max(0.02, float(style.get("axis_scale", 0.14)) * 0.6)
-    label_pad = float(style.get("axis_key_label_pad", 0.045))
-    font_size = float(style.get("axis_key_font_size", 13))
-    line_width = float(style.get("axis_key_line_width", 1.6))
-    head_len = float(style.get("axis_key_head_len", 0.025))
-    head_width = float(style.get("axis_key_head_width", 0.018))
-    color = style.get("axis_key_color", "#2F2F2F")
-    italic = bool(style.get("axis_key_italic", True))
 
-    norms = [math.hypot(float(label_to_proj[label][0]), float(label_to_proj[label][1])) for label in order]
-    max_norm = max(norms) if norms else 0.0
+    # Figure pixel size used to convert ``(dx_world, dy_world)``
+    # screen-projection deltas into paper-coord head positions. The
+    # tail-to-head offset itself lives in pixels (``axref="pixel"``),
+    # so this only affects WHERE the head lands on paper -- the arrow
+    # geometry stays isotropic regardless of figure aspect ratio.
+    # JS clientside callback updates these in-place using the live
+    # graph-div dimensions on relayout.
+    fig_w = float(style.get("axis_key_fig_width", 1024.0))
+    fig_h = float(style.get("axis_key_fig_height", 720.0))
+
+    # Pixel length of the LONGEST projected axis; shorter axes scale
+    # proportionally to keep |a|:|b|:|c| signal. The in-app
+    # ``axis_scale`` slider (0.05-0.25) maps to ~30-150 px so the
+    # widget still does something.
+    if show_axes and not show_axis_key:
+        pixel_length = max(20.0, float(style.get("axis_scale", 0.14)) * 360.0)
+    else:
+        pixel_length = float(style.get("axis_key_pixel_length", 50.0))
+
+    line_width = float(style.get("axis_key_line_width", 2.0))
+    arrowhead = int(style.get("axis_key_arrow_head", 3))
+    label_pixel_offset = float(style.get("axis_key_label_pixel_offset", 10.0))
+    font_size = float(style.get("axis_key_font_size", 14))
+    italic = bool(style.get("axis_key_italic", True))
+    color_default = style.get("axis_key_color", "#2F2F2F")
+    palette = style.get("axis_key_colors")
+    if isinstance(palette, (list, tuple)) and len(palette) >= 3:
+        colors = {axes_labels[i]: str(palette[i]) for i in range(3)}
+    else:
+        colors = {label: color_default for label in axes_labels}
+
+    deltas = {label: tuple(map(float, label_to_proj[label])) for label in order}
+    norms = {label: math.hypot(*deltas[label]) for label in order}
+    max_norm = max(norms.values()) if norms else 0.0
     if max_norm < 1e-8:
         return [], []
 
-    # Cap arrow_len so the arrow's **vertical** extent (arrow_len * |dy/norm|)
-    # can never exceed half the row gap. Without this clamp a steeply-
-    # projecting axis on one row can shoot into the neighbouring row and
-    # collide with that row's label, producing the "fragmented triad" look.
-    # Share a single scale factor across all rows so relative lengths are
-    # preserved.
-    max_abs_uy = max(
-        abs(float(label_to_proj[label][1]) / norm) if norm > 1e-8 else 0.0
-        for label, norm in zip(order, norms)
-    )
-    if max_abs_uy > 1e-8:
-        y_budget = 0.42 * row_gap
-        arrow_len = min(arrow_len, y_budget / max_abs_uy)
+    # Cap the arrow length so the FURTHEST extent (tip + label) stays
+    # inside the figure margin. Without this clamp, a long projected
+    # axis pointing toward an edge runs the label off-screen (the
+    # original SY-oblique "missing b label" complaint). The margin
+    # is 1% of figure size to leave room for descenders / italic
+    # ascents.
+    edge_margin_px = 8.0
+    max_extent_px = pixel_length + label_pixel_offset + 8.0  # crude label box estimate
+    avail_left = max(anchor_x * fig_w - edge_margin_px, 1.0)
+    avail_right = max((1.0 - anchor_x) * fig_w - edge_margin_px, 1.0)
+    avail_down = max(anchor_y * fig_h - edge_margin_px, 1.0)
+    avail_up = max((1.0 - anchor_y) * fig_h - edge_margin_px, 1.0)
+    # Find the most-constraining unit direction across all three axes
+    # and rescale pixel_length so even the longest arrow's tip + label
+    # stay inside (anchor margin, fig - margin).
+    cap = pixel_length
+    for label in order:
+        dx_world, dy_world = deltas[label]
+        n = norms[label]
+        if n < 1e-12:
+            continue
+        ux = dx_world / n
+        uy = dy_world / n
+        rel = n / max_norm
+        wanted_px = (pixel_length + label_pixel_offset) * rel
+        if wanted_px <= 0:
+            continue
+        if ux > 0:
+            allowed_px = avail_right / ux
+        elif ux < 0:
+            allowed_px = avail_left / -ux
+        else:
+            allowed_px = float("inf")
+        if uy > 0:
+            allowed_px = min(allowed_px, avail_up / uy)
+        elif uy < 0:
+            allowed_px = min(allowed_px, avail_down / -uy)
+        if allowed_px < wanted_px:
+            shrink = allowed_px / wanted_px
+            cap = min(cap, pixel_length * shrink)
+    pixel_length = max(cap, 12.0)
+    scale_px = pixel_length / max_norm
+
+    # Axes within ``dot_threshold`` of zero projected length render as
+    # filled circles AT the anchor -- the geometric "this axis points
+    # into the screen" hint -- rather than as a row-stacked dot off to
+    # the side. Threshold is a fraction of ``max_norm`` so it tracks
+    # cell shape.
+    dot_threshold = float(style.get("axis_key_dot_threshold", 0.05))
+    dot_radius = float(style.get("axis_key_dot_radius_px", 4.0))
 
     annotations: list[dict] = []
     shapes: list[dict] = []
-    n_rows = len(order)
-    for row_idx, label in enumerate(order):
-        row_y = anchor_y + (n_rows - 1 - row_idx) * row_gap
+
+    for label in order:
+        dx_world, dy_world = deltas[label]
+        norm = norms[label]
+        color = colors.get(label, color_default)
         text = f"<i>{label}</i>" if italic else label
-        annotations.append(dict(
-            x=anchor_x, y=row_y,
-            xref="paper", yref="paper",
-            text=text,
-            showarrow=False,
-            xanchor="left", yanchor="middle",
-            font=dict(size=font_size, color=color),
-        ))
-        dx, dy = label_to_proj[label]
-        norm = math.hypot(float(dx), float(dy))
-        if norm < 1e-8:
-            dot_x = anchor_x + label_pad
-            dot_r = max(0.004, head_width * 0.35)
+        rel = norm / max_norm if max_norm > 0 else 0.0
+
+        if rel < dot_threshold:
+            # Foreshortened to ~point: dot at anchor + label just
+            # above-right so the user still sees which axis it is.
+            r_paper_x = dot_radius / fig_w
+            r_paper_y = dot_radius / fig_h
             shapes.append(dict(
                 type="circle",
                 xref="paper", yref="paper",
-                x0=dot_x - dot_r,
-                x1=dot_x + dot_r,
-                y0=row_y - dot_r,
-                y1=row_y + dot_r,
+                x0=anchor_x - r_paper_x, x1=anchor_x + r_paper_x,
+                y0=anchor_y - r_paper_y, y1=anchor_y + r_paper_y,
                 fillcolor=color,
                 line=dict(color=color, width=0),
                 layer="above",
+                name=_COMPASS_ITEM_NAME,
+            ))
+            offset_paper = (dot_radius + label_pixel_offset)
+            annotations.append(dict(
+                x=anchor_x + offset_paper / fig_w,
+                y=anchor_y + offset_paper / fig_h,
+                xref="paper", yref="paper",
+                text=text,
+                showarrow=False,
+                xanchor="left", yanchor="bottom",
+                font=dict(size=font_size, color=color),
+                name=_COMPASS_ITEM_NAME,
             ))
             continue
-        ux = float(dx) / norm
-        uy = float(dy) / norm
-        # Scale arrow length by the axis's 2D projection magnitude so near-
-        # perpendicular axes render as shorter arrows. Impose a minimum so
-        # (a) near-perpendicular axes never collapse to an invisible speck
-        # (the user would read that as a rendering bug) and (b) the shaft is
-        # always longer than the arrowhead — otherwise the head's base
-        # falls behind the arrow's own origin and the triad visibly
-        # fragments into detached triangles.
-        min_scale = 0.65
-        rel = max(norm / max_norm, min_scale)
-        length = max(arrow_len * rel, 1.35 * head_len)
-        x0 = anchor_x + label_pad
-        y0 = row_y
-        x1 = x0 + length * ux
-        y1 = y0 + length * uy
-        # Arrow shaft (stops just short of the tip to avoid the arrowhead
-        # line-width bleeding past the triangle on retina renders).
-        shaft_end_x = x1 - 0.55 * head_len * ux
-        shaft_end_y = y1 - 0.55 * head_len * uy
-        shapes.append(dict(
-            type="line",
+
+        dx_px = dx_world * scale_px
+        dy_px = dy_world * scale_px
+        tip_x = anchor_x + dx_px / fig_w
+        tip_y = anchor_y + dy_px / fig_h
+
+        # Arrow as a Plotly annotation: head at (tip_x, tip_y) in
+        # paper coords; tail offset (-dx_px, +dy_px) in PIXELS so the
+        # shaft direction stays isotropic regardless of figure shape.
+        # Plotly's pixel y points DOWN, so flip sign on the y offset
+        # to keep "screen up" pointing up.
+        annotations.append(dict(
+            x=tip_x, y=tip_y,
+            ax=-dx_px, ay=dy_px,
             xref="paper", yref="paper",
-            x0=x0, y0=y0,
-            x1=shaft_end_x, y1=shaft_end_y,
-            line=dict(color=color, width=line_width),
-            layer="above",
+            axref="pixel", ayref="pixel",
+            showarrow=True,
+            arrowhead=arrowhead,
+            arrowsize=1.0,
+            arrowwidth=line_width,
+            arrowcolor=color,
+            text="",
+            standoff=0.0,
+            startstandoff=0.0,
+            name=_COMPASS_ITEM_NAME,
         ))
-        # Filled triangular arrowhead tip — points from (x1, y1) backward
-        # along (-ux, -uy), with left/right base points straddling the
-        # perpendicular (-uy, ux).
-        base_cx = x1 - head_len * ux
-        base_cy = y1 - head_len * uy
-        px = -uy
-        py = ux
-        base_left_x = base_cx + 0.5 * head_width * px
-        base_left_y = base_cy + 0.5 * head_width * py
-        base_right_x = base_cx - 0.5 * head_width * px
-        base_right_y = base_cy - 0.5 * head_width * py
-        shapes.append(dict(
-            type="path",
+
+        length_px = float(math.hypot(dx_px, dy_px))
+        ux = dx_px / length_px
+        uy = dy_px / length_px
+        label_x = tip_x + ux * label_pixel_offset / fig_w
+        label_y = tip_y + uy * label_pixel_offset / fig_h
+        annotations.append(dict(
+            x=label_x, y=label_y,
             xref="paper", yref="paper",
-            path=(
-                f"M {x1},{y1} "
-                f"L {base_left_x},{base_left_y} "
-                f"L {base_right_x},{base_right_y} Z"
-            ),
-            fillcolor=color,
-            line=dict(color=color, width=0),
-            layer="above",
+            text=text,
+            showarrow=False,
+            xanchor="center", yanchor="middle",
+            font=dict(size=font_size, color=color),
+            name=_COMPASS_ITEM_NAME,
         ))
+
     return annotations, shapes
+
+
+def compass_clientside_context(scene: dict, style: dict) -> dict | None:
+    """Serialise the inputs the clientside callback needs to reproject
+    the compass under a live camera, without round-tripping to the
+    server.
+
+    The returned dict mirrors the kwargs of :func:`axis_key_overlay`
+    so the JS side can stay a near-line-for-line port: lattice rows,
+    paper anchor, label strings, palette, sizing knobs, threshold.
+    Returns ``None`` when the compass would not render anyway
+    (``show_axes`` / ``show_axis_key`` both off, or no usable
+    ``scene["M"]``) so the JS handler can short-circuit.
+    """
+    show_axes = bool(style.get("show_axes", False))
+    show_axis_key = bool(style.get("show_axis_key", False))
+    if not (show_axes or show_axis_key):
+        return None
+    M = np.asarray(scene.get("M"), dtype=float) if scene.get("M") is not None else None
+    if M is None or M.ndim != 2 or M.shape != (3, 3):
+        return None
+    axes_labels = list(style.get("axes_labels") or scene.get("axis_labels") or ["a", "b", "c"])[:3]
+    if len(axes_labels) < 3:
+        return None
+    palette = style.get("axis_key_colors")
+    color_default = style.get("axis_key_color", "#2F2F2F")
+    if isinstance(palette, (list, tuple)) and len(palette) >= 3:
+        colors = [str(palette[i]) for i in range(3)]
+    else:
+        colors = [color_default, color_default, color_default]
+    anchor = style.get("axis_key_anchor") or [0.08, 0.12]
+    if show_axes and not show_axis_key:
+        pixel_length = max(20.0, float(style.get("axis_scale", 0.14)) * 360.0)
+    else:
+        pixel_length = float(style.get("axis_key_pixel_length", 50.0))
+    # Cube-scale per axis: data-to-cube half-range. ``None`` means the
+    # scene renders with aspectmode="cube" (e.g. uniform_viewport
+    # stamped) so JS skips the rescaling step. See
+    # :func:`_axis_cube_scale` for the matching server-side fallback.
+    cube_scale = _axis_cube_scale(scene, style)
+    cube_scale_payload = (
+        [float(cube_scale[0]), float(cube_scale[1]), float(cube_scale[2])]
+        if cube_scale is not None
+        else None
+    )
+    return {
+        "M": [[float(M[i, j]) for j in range(3)] for i in range(3)],
+        "cube_scale": cube_scale_payload,
+        "labels": list(axes_labels),
+        "colors": colors,
+        "anchor": [float(anchor[0]), float(anchor[1])],
+        "pixel_length": float(pixel_length),
+        "line_width": float(style.get("axis_key_line_width", 2.0)),
+        "arrowhead": int(style.get("axis_key_arrow_head", 3)),
+        "label_pixel_offset": float(style.get("axis_key_label_pixel_offset", 10.0)),
+        "font_size": float(style.get("axis_key_font_size", 14)),
+        "italic": bool(style.get("axis_key_italic", True)),
+        "dot_threshold": float(style.get("axis_key_dot_threshold", 0.05)),
+        "dot_radius_px": float(style.get("axis_key_dot_radius_px", 4.0)),
+    }
 
 
 def axis_key_annotations(scene: dict, style: dict) -> list[dict]:
@@ -2935,6 +3142,8 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None) ->
     aspectmode = "cube" if is_cube else "data"
 
     ui_revision = style.get("uirevision", str(scene.get("name", "scene")))
+    compass_ctx = compass_clientside_context(scene, style)
+    layout_meta = {"compass": compass_ctx} if compass_ctx else {}
     layout_kwargs = dict(
         title=title_arg,
         showlegend=False,
@@ -2951,6 +3160,7 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None) ->
             uirevision=ui_revision,
             bgcolor=style.get("background", "#FFFFFF"),
         ),
+        meta=layout_meta,
     )
     key_annotations, key_shapes = compose_axis_key_layout(scene, style)
     if key_annotations:
