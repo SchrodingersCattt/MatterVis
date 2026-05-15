@@ -73,10 +73,15 @@
   function xyzFrom(obj, fallback) {
     if (!obj) return fallback.slice();
     if (Array.isArray(obj)) return [Number(obj[0]) || 0, Number(obj[1]) || 0, Number(obj[2]) || 0];
+    function coord(value, fallbackValue) {
+      if (value === undefined || value === null) return fallbackValue;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : fallbackValue;
+    }
     return [
-      Number(obj.x) || (fallback ? fallback[0] : 0),
-      Number(obj.y) || (fallback ? fallback[1] : 0),
-      Number(obj.z) || (fallback ? fallback[2] : 0),
+      coord(obj.x, fallback ? fallback[0] : 0),
+      coord(obj.y, fallback ? fallback[1] : 0),
+      coord(obj.z, fallback ? fallback[2] : 0),
     ];
   }
 

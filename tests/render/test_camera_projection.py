@@ -402,6 +402,26 @@ def test_compass_overlay_js_uses_svg_layer_not_plotly_relayout_for_drag():
     )
 
 
+def test_compass_overlay_js_preserves_zero_camera_coordinates():
+    """Zero is a valid Plotly camera coordinate and must not fall back.
+
+    Regression: ``Number(obj.y) || fallback[1]`` rewrote
+    ``camera.up={x: 0, y: 0, z: 1}`` to ``[0, 1, 1]``, so the SVG compass
+    projected axes with a different screen-up vector than the gl3d scene.
+    """
+    import pathlib
+
+    js_path = pathlib.Path(
+        __file__
+    ).resolve().parent.parent.parent / "crystal_viewer" / "assets" / "compass_overlay.js"
+    src = js_path.read_text()
+
+    assert "Number(obj.x) ||" not in src
+    assert "Number(obj.y) ||" not in src
+    assert "Number(obj.z) ||" not in src
+    assert "value === undefined || value === null" in src
+
+
 def test_compass_overlay_python_skipped_for_dash_interactive_path():
     """The interactive Dash app must NOT bake the compass into Plotly
     annotations -- compass_overlay.js renders it live in a sibling
