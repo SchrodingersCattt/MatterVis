@@ -542,8 +542,11 @@
       else window.clearTimeout(dragPollRaf);
       dragPollRaf = null;
     }
-    /* Final redraw with the post-mouseup committed camera. */
-    redrawCompass(gd, null, false);
+    /* Wheel zoom does not reliably commit layout.scene.camera before this
+       debounce fires. Finish from the live WebGL camera so the compass does
+       not snap back to the pre-wheel layout camera. */
+    const finalCamera = liveSceneCamera(gd);
+    redrawCompass(gd, finalCamera, true);
   }
   let wheelStopTimer = null;
   function pulseDragPollOnWheel(gd) {

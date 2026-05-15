@@ -420,6 +420,12 @@ def test_compass_overlay_js_uses_svg_layer_not_plotly_relayout_for_drag():
         "mouseup; a drag can end outside the graph div if the user "
         "releases the button in the page margin."
     )
+    assert "const finalCamera = liveSceneCamera(gd);" in src
+    assert "redrawCompass(gd, finalCamera, true);" in src, (
+        "wheel/drag poll shutdown must finish from the live WebGL camera; "
+        "layout.scene.camera may still be stale after wheel zoom and would "
+        "make the compass snap back."
+    )
 
     # 6) Scoped observer (no document-wide spam).
     assert "scopedObserver" in src and "graphRoot()" in src
