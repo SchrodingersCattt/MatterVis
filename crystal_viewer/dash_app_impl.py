@@ -2697,6 +2697,13 @@ class ViewerBackend:
         else:
             state = copy.deepcopy(self.current_state)
         patch = patch or {}
+
+        def _display_signature(value: dict[str, Any]) -> tuple[str, bool, bool]:
+            return (
+                str(value.get("display_mode", "")),
+                "unit_cell_box" in (value.get("display_options") or []),
+                bool(value.get("topology_enabled", False)),
+            )
         if "scene_id" in patch and patch["scene_id"] in self.scene_store.scenes:
             scene_id = str(patch["scene_id"])
             state = self.scene_state(scene_id)
@@ -2709,6 +2716,7 @@ class ViewerBackend:
             state["scene_id"] = scene_id
             scene = self.scene_store.get(scene_id)
             state["scene_label"] = scene.label
+        display_signature_before = _display_signature(state)
         for key in ("atom_scale", "bond_radius", "minor_opacity", "axis_scale", "cutoff"):
             if key in patch and patch[key] is not None:
                 state[key] = float(patch[key])
@@ -2823,6 +2831,20 @@ class ViewerBackend:
             migrated = _legacy_monochrome_group(existing_ids)
             if migrated is not None:
                 state["atom_groups"] = existing_groups + [migrated]
+        display_signature_after = _display_signature(state)
+        if (
+            any(key in patch for key in ("display_mode", "display_options", "topology_enabled"))
+            and display_signature_after != display_signature_before
+        ):
+            # Plotly cameras live in the normalized scene cube. Reusing one
+            # after a display-signature change remaps the eye through a new
+            # cube scale and makes the model look squished.
+            state["camera"] = None
+            if "camera_revision" not in patch:
+                try:
+                    state["camera_revision"] = int(state.get("camera_revision", 0) or 0) + 1
+                except (TypeError, ValueError):
+                    state["camera_revision"] = 1
         if "camera" in patch and patch["camera"] is not None:
             state["camera"] = patch["camera"]
         # ``camera_revision`` is the uirevision-bump counter written by
