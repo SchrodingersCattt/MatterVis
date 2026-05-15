@@ -43,6 +43,7 @@ from .presets import (
     workspace_root,
 )
 from .renderer import build_figure, compose_axis_key_layout, style_from_controls, topology_histogram_figure, topology_results_markdown
+from .renderer_viewport import _scene_ranges, figure_axis_layout
 from .scene import scene_json
 from .scenes import Scene, SceneStore
 from .topology import analyze_topology, extract_coordination_shell
@@ -75,11 +76,22 @@ def _camera_store_payload(scene_id: Optional[str], camera: Optional[dict[str, An
     return {"scene_id": scene_id, "camera": copy.deepcopy(camera)}
 
 
-def _camera_figure_patch(camera: Optional[dict[str, Any]], uirevision: Optional[str] = None) -> Patch:
+def _camera_figure_patch(
+    scene: dict[str, Any],
+    style: dict[str, Any],
+    camera: Optional[dict[str, Any]],
+    topology_data: Optional[dict[str, Any]] = None,
+) -> Patch:
     patch = Patch()
-    patch["layout"]["scene"]["camera"] = copy.deepcopy(camera)
-    if uirevision is not None:
-        patch["layout"]["scene"]["uirevision"] = str(uirevision)
+    xr, yr, zr = _scene_ranges(
+        scene,
+        style,
+        topology_data=topology_data if style.get("topology_enabled", False) else None,
+    )
+    scene_layout = figure_axis_layout(scene, style, xr, yr, zr)
+    scene_layout["camera"] = copy.deepcopy(camera)
+    for key, value in scene_layout.items():
+        patch["layout"]["scene"][key] = value
     return patch
 
 
@@ -6924,9 +6936,10 @@ def create_app(
         scene = backend.scene_for_state(state)
         style = backend.style_for_state(state, scene=scene)
         camera_payload = _camera_store_payload(scene_id, camera)
+        topology_data = backend.topology_for_state(state) if style.get("topology_enabled", False) else None
         return (
             camera_payload,
-            _camera_figure_patch(camera, style.get("uirevision")),
+            _camera_figure_patch(scene, style, camera, topology_data=topology_data),
             _fast_view_metadata(backend, state, camera_payload),
         )
 
@@ -6971,9 +6984,10 @@ def create_app(
         scene = backend.scene_for_state(state)
         style = backend.style_for_state(state, scene=scene)
         camera_payload = _camera_store_payload(scene_id, camera)
+        topology_data = backend.topology_for_state(state) if style.get("topology_enabled", False) else None
         return (
             camera_payload,
-            _camera_figure_patch(camera, style.get("uirevision")),
+            _camera_figure_patch(scene, style, camera, topology_data=topology_data),
             _fast_view_metadata(backend, state, camera_payload),
         )
 

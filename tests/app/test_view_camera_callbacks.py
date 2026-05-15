@@ -3,6 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from crystal_viewer.app import create_app
+from crystal_viewer.dash_app_impl import _camera_figure_patch
+from crystal_viewer.loader import build_loaded_crystal
+from crystal_viewer.presets import DEFAULT_STYLE
 
 
 def _outputs(callback):
@@ -51,3 +54,28 @@ def test_projection_buttons_patch_graph_camera_directly(tmp_path: Path):
     outputs = _outputs(callbacks[0])
     assert ("crystal-graph", "figure") in outputs
     assert ("fast-view-metadata", "children") in outputs
+
+
+def test_camera_patch_carries_viewport_aspect_contract():
+    bundle = build_loaded_crystal(name="SY", cif_path="scripts/data/SY.cif", title="SY")
+    style = {
+        **DEFAULT_STYLE,
+        **bundle.scene.get("style", {}),
+        "display_mode": "unit_cell",
+        "show_axes": False,
+        "show_axis_key": False,
+    }
+    camera = {"eye": {"x": 1.25, "y": 1.25, "z": 1.25}, "center": {"x": 0, "y": 0, "z": 0}}
+
+    patch = _camera_figure_patch(bundle.scene, style, camera)
+    operations = {
+        tuple(operation["location"]): operation["params"]["value"]
+        for operation in patch.to_plotly_json()["operations"]
+    }
+
+    assert operations[("layout", "scene", "camera")] == camera
+    assert operations[("layout", "scene", "aspectmode")] == "manual"
+    assert ("layout", "scene", "aspectratio") in operations
+    assert ("layout", "scene", "xaxis") in operations
+    assert ("layout", "scene", "yaxis") in operations
+    assert ("layout", "scene", "zaxis") in operations
