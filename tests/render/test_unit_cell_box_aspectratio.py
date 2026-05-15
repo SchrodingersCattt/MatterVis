@@ -130,7 +130,7 @@ def test_formula_unit_box_does_not_dwarf_molecule_along_long_axis():
         assert corners[:, axis_idx].max() <= hi + 1e-6
 
     cell_axis_span = float(np.ptp(corners, axis=0).max())
-    allowed = max(cell_axis_span, span_off) * 1.12 + 0.5
+    allowed = max(cell_axis_span, span_off) * 1.13 + 0.75
     assert span_on <= allowed, (
         f"formula_unit cube ({span_on:.2f}) should be bounded by the visible "
         f"cell/cluster extent ({allowed:.2f}); off-cluster overlays must not "

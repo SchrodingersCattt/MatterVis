@@ -4,14 +4,22 @@ import math
 from pathlib import Path
 
 from crystal_viewer.dash_app_impl import ViewerBackend
+from crystal_viewer.loader import build_loaded_crystal
 from crystal_viewer.renderer_viewport import _plotly_camera_from_scene
 
 
 def _backend() -> ViewerBackend:
     backend = ViewerBackend(
         preset_path=str(Path(".local") / "missing-test-preset.json"),
-        names=["SY"],
+        names=[],
     )
+    backend.bundles["SY"] = build_loaded_crystal(
+        name="SY",
+        cif_path="scripts/data/SY.cif",
+        title="SY",
+    )
+    backend.catalog["SY"] = {"path": "scripts/data/SY.cif", "title": "SY"}
+    backend.structure_names = ["SY"]
     # Keep tests independent of any persisted interactive scene tab.
     backend.scene_store.active_id = None
     backend.current_state = backend.default_state("SY")
