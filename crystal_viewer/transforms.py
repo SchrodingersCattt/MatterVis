@@ -95,6 +95,7 @@ from __future__ import annotations
 
 import copy
 import math
+from collections import defaultdict
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -692,6 +693,8 @@ def rebuild_scene_with_atoms(
             }
         )
 
+    fragment_table, atom_fragment_labels = _fragment_table_from_current_bonds(draw_atoms, bonds)
+
     label_items = legacy_scene._label_payload(ops, draw_atoms, view_x, view_y, view_z)
     bounds = legacy_scene._compute_bounds(
         draw_atoms,
@@ -713,10 +716,159 @@ def rebuild_scene_with_atoms(
     out["draw_atoms"] = draw_atoms
     out["bonds"] = bonds
     out["label_items"] = label_items
+    out["fragment_table"] = fragment_table
+    out["atom_fragment_labels"] = atom_fragment_labels
     out["bounds"] = bounds
     out["projected_axes"] = projected_axes
     out["has_minor"] = any(bool(atom.get("is_minor")) for atom in draw_atoms)
     return out
+
+
+def _component_formula(component_atoms: Sequence[Dict[str, Any]]) -> tuple[str, set[str], int]:
+    heavy_atoms = [atom for atom in component_atoms if atom.get("elem") != "H"]
+    elem_counts: dict[str, int] = {}
+    for atom in heavy_atoms:
+        elem = str(atom.get("elem") or "?")
+        elem_counts[elem] = elem_counts.get(elem, 0) + 1
+    elem_set = set(elem_counts)
+    heavy_count = len(heavy_atoms)
+    ordered: list[tuple[str, int]] = []
+    for elem in ("C", "N"):
+        if elem in elem_counts:
+            ordered.append((elem, elem_counts.pop(elem)))
+    ordered.extend(sorted(elem_counts.items()))
+    formula = "".join(f"{elem}{count}" if count > 1 else elem for elem, count in ordered) or "?"
+    return formula, elem_set, heavy_count
+
+
+def _fragment_table_from_current_bonds(
+    atoms: Sequence[Dict[str, Any]],
+    bonds: Sequence[Dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Build fragment rows from the manifested post-transform bond graph."""
+    if not atoms:
+        return [], []
+
+    adj: dict[int, set[int]] = defaultdict(set)
+    for bond in bonds:
+        try:
+            i = int(bond["i"])
+            j = int(bond["j"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if 0 <= i < len(atoms) and 0 <= j < len(atoms):
+            adj[i].add(j)
+            adj[j].add(i)
+
+    components: list[list[int]] = []
+    seen: set[int] = set()
+    for idx in range(len(atoms)):
+        if idx in seen:
+            continue
+        stack = [idx]
+        seen.add(idx)
+        component: list[int] = []
+        while stack:
+            current = stack.pop()
+            component.append(current)
+            for neighbour in adj.get(current, ()):
+                if neighbour not in seen:
+                    seen.add(neighbour)
+                    stack.append(neighbour)
+        components.append(sorted(component))
+
+    fragments = []
+    for component in components:
+        component_atoms = [atoms[idx] for idx in component]
+        formula, elem_set, heavy_count = _component_formula(component_atoms)
+        center_atoms = [atom for atom in component_atoms if atom.get("elem") != "H"] or component_atoms
+        center_cart = np.mean([np.asarray(atom["cart"], dtype=float) for atom in center_atoms], axis=0)
+        frac_values = [
+            np.asarray(atom.get("frac"), dtype=float)
+            for atom in center_atoms
+            if atom.get("frac") is not None
+        ]
+        center_frac = np.mean(frac_values, axis=0) if frac_values else np.zeros(3, dtype=float)
+        fragments.append(
+            {
+                "site_indices": component,
+                "source_molecule_index": None,
+                "center": [float(x) for x in center_cart],
+                "frac_center": [float(x) for x in center_frac],
+                "elem_set": sorted(elem_set),
+                "heavy_atom_count": int(heavy_count),
+                "cluster_size": len(component_atoms),
+                "species": "".join(sorted(elem_set)) or "?",
+                "formula": formula,
+            }
+        )
+
+    x_fragments = [frag for frag in fragments if "Cl" in frag["elem_set"]]
+    non_x = [frag for frag in fragments if frag not in x_fragments]
+    NON_METAL_HEAVY = {
+        "H", "B", "C", "N", "O", "F",
+        "Si", "P", "S", "Cl",
+        "Ge", "As", "Se", "Br",
+        "Sb", "Te", "I",
+    }
+    organic_or_metal = []
+    for frag in non_x:
+        elems = set(frag["elem_set"])
+        is_single_metal = frag["heavy_atom_count"] == 1 and not (elems & NON_METAL_HEAVY)
+        is_organic = bool(elems & {"C", "N"})
+        if is_single_metal or is_organic:
+            organic_or_metal.append(frag)
+        else:
+            frag["type"] = "?"
+    if organic_or_metal:
+        sizes = sorted({frag["heavy_atom_count"] for frag in organic_or_metal})
+        if len(sizes) >= 2:
+            smallest = sizes[0]
+            for frag in organic_or_metal:
+                frag["type"] = "B" if frag["heavy_atom_count"] == smallest else "A"
+        else:
+            for frag in organic_or_metal:
+                frag["type"] = "A"
+    for frag in x_fragments:
+        frag["type"] = "X"
+
+    type_order = {"B": 0, "A": 1, "X": 2, "?": 3}
+    fragments.sort(
+        key=lambda frag: (
+            type_order.get(frag.get("type"), 9),
+            *[float(x % 1.0) for x in frag["frac_center"]],
+            frag["heavy_atom_count"],
+            frag["cluster_size"],
+        )
+    )
+
+    counters: dict[str, int] = defaultdict(int)
+    atom_fragment_labels = ["?"] * len(atoms)
+    final_table = []
+    for frag_idx, frag in enumerate(fragments):
+        frag_type = frag.get("type", "?")
+        label_index = counters[frag_type]
+        counters[frag_type] += 1
+        for site_idx in frag["site_indices"]:
+            atom_fragment_labels[site_idx] = frag_type
+        final_table.append(
+            {
+                "index": frag_idx,
+                "type": frag_type,
+                "label": f"{frag_type}{label_index}",
+                "species": frag["species"],
+                "formula": frag["formula"],
+                "elem_set": frag["elem_set"],
+                "center": frag["center"],
+                "frac_center": frag["frac_center"],
+                "site_indices": frag["site_indices"],
+                "source_molecule_index": None,
+                "source": "transform",
+                "heavy_atom_count": frag["heavy_atom_count"],
+                "cluster_size": frag["cluster_size"],
+            }
+        )
+    return final_table, atom_fragment_labels
 
 
 def _normalise_repeat_params(params: Dict[str, Any]) -> Tuple[int, int, int]:

@@ -737,18 +737,22 @@ def build_bundle_scene(
     )
     if transformed is base_scene:
         return base_scene
-    fragment_table, atom_fragment_labels = _fragment_table_from_atoms(
-        bundle.name,
-        transformed["draw_atoms"],
-        transformed.get("cell") or base_scene["cell"],
-        transformed.get("M") if transformed.get("M") is not None else base_scene["M"],
-        molcrys_analysis=bundle.molcrys_analysis,
-        use_source_indices=False,
-        include_minor=True,
-    )
     transformed = dict(transformed)
-    transformed["fragment_table"] = fragment_table
-    transformed["atom_fragment_labels"] = atom_fragment_labels
+    if (
+        not transformed.get("fragment_table")
+        or len(transformed.get("atom_fragment_labels") or []) != len(transformed.get("draw_atoms") or [])
+    ):
+        fragment_table, atom_fragment_labels = _fragment_table_from_atoms(
+            bundle.name,
+            transformed["draw_atoms"],
+            transformed.get("cell") or base_scene["cell"],
+            transformed.get("M") if transformed.get("M") is not None else base_scene["M"],
+            molcrys_analysis=bundle.molcrys_analysis,
+            use_source_indices=False,
+            include_minor=True,
+        )
+        transformed["fragment_table"] = fragment_table
+        transformed["atom_fragment_labels"] = atom_fragment_labels
     transformed["cif_path"] = base_scene.get("cif_path")
     transformed["view_direction"] = base_scene.get("view_direction")
     transformed["up"] = base_scene.get("up")
