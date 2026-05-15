@@ -78,16 +78,11 @@ def test_formula_unit_does_not_inherit_lattice_aspect():
 
 
 def test_formula_unit_box_does_not_dwarf_molecule_along_long_axis():
-    """``formula_unit`` mode draws a single ~10-Å cluster carved out of a
-    much larger crystal cell. Older ``_scene_ranges`` glued the eight cell
-    corners onto the bounding box even in non-``unit_cell`` modes, so on
-    SY (|b|=24.7) the scene cube ballooned to ~25 Å on every side and the
-    cluster shrank to ~40% of the viewport ("Reset 后又拉长" / "molecule
-    is squished into a corner"). Pin: enabling ``Unit Cell Box`` in
-    ``formula_unit`` must NOT extend any axis range by more than the
-    cluster's own bounds + a small pad. The cell wireframe still draws
-    (Plotly clips overflow at the cube boundary, which is the intended
-    aesthetic — molecule wins, box loses).
+    """``formula_unit`` mode still draws the *full* unit-cell wireframe when
+    the Unit Cell Box toggle is enabled. The viewport must therefore include
+    the eight cell corners; otherwise Plotly clips the box and ASU/formula
+    views show an incomplete cell. Keep the separate invariant that topology
+    ``extra_overlays`` do not own non-unit-cell viewports (pinned below).
     """
     bundle = build_loaded_crystal(name="SY", cif_path="scripts/data/SY.cif", title="SY")
     base = {**_sy_base_style(bundle), "display_mode": "formula_unit"}
@@ -95,28 +90,51 @@ def test_formula_unit_box_does_not_dwarf_molecule_along_long_axis():
     fig_off = build_figure(bundle.scene, base)
     fig_on = build_figure(bundle.scene, {**base, "show_unit_cell": True})
 
-    def _max_span(fig):
+    def _ranges_and_spans(fig):
         sa = fig.layout.scene.to_plotly_json()
+        ranges = []
         spans = []
         for axis in ("xaxis", "yaxis", "zaxis"):
             r = sa[axis]["range"]
-            spans.append(float(r[1]) - float(r[0]))
-        return max(spans)
+            lo, hi = float(r[0]), float(r[1])
+            ranges.append((lo, hi))
+            spans.append(hi - lo)
+        return ranges, spans
 
-    span_off = _max_span(fig_off)
-    span_on = _max_span(fig_on)
-    assert math.isclose(span_off, span_on, rel_tol=1e-6, abs_tol=1e-6), (
-        f"formula_unit scene cube must NOT grow when the cell box is "
-        f"toggled (off={span_off:.2f}, on={span_on:.2f}); the molecule "
-        f"otherwise looks pushed-aside in a long cell."
+    ranges_off, spans_off = _ranges_and_spans(fig_off)
+    ranges_on, spans_on = _ranges_and_spans(fig_on)
+    span_off = max(spans_off)
+    span_on = max(spans_on)
+    assert span_on >= span_off - 1e-6, (
+        f"showing the unit-cell box should not shrink the viewport "
+        f"(off={span_off:.2f}, on={span_on:.2f})."
     )
 
-    lengths = np.linalg.norm(np.asarray(bundle.scene["M"], dtype=float), axis=1)
-    longest_cell = float(lengths.max())
-    assert span_on < 0.85 * longest_cell, (
-        f"formula_unit cube ({span_on:.2f}) must not be dictated by the "
-        f"longest cell axis ({longest_cell:.2f}); allowing it would dwarf "
-        f"a single formula-unit cluster on long-cell structures like SY."
+    M = np.asarray(bundle.scene["M"], dtype=float)
+    a, b, c = M
+    corners = np.array(
+        [
+            np.zeros(3),
+            a,
+            b,
+            c,
+            a + b,
+            a + c,
+            b + c,
+            a + b + c,
+        ],
+        dtype=float,
+    )
+    for axis_idx, (lo, hi) in enumerate(ranges_on):
+        assert corners[:, axis_idx].min() >= lo - 1e-6
+        assert corners[:, axis_idx].max() <= hi + 1e-6
+
+    cell_axis_span = float(np.ptp(corners, axis=0).max())
+    allowed = max(cell_axis_span, span_off) * 1.12 + 0.5
+    assert span_on <= allowed, (
+        f"formula_unit cube ({span_on:.2f}) should be bounded by the visible "
+        f"cell/cluster extent ({allowed:.2f}); off-cluster overlays must not "
+        f"drive this range."
     )
 
 

@@ -180,19 +180,15 @@ def _visible_atoms(scene: dict, style: dict):
 def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
     """Compute ``[xr, yr, zr]`` axis ranges for the Plotly scene.
 
-    In ``unit_cell`` mode the scene cube must enclose the full lattice (and
-    every polyhedron drawn inside it), so cell corners + topology overlays
-    are folded into the bounds. In every other mode (``formula_unit``,
-    ``asymmetric_unit``, ``cluster``) the *atoms* own the scene cube — the
-    cell box and ``extra_overlays`` (other formula-unit replicas of the
-    chosen polyhedron) are visualization aids that may extend across the
-    whole cell, but allowing them to grow the cube turns a 10 Å cluster
-    into a tiny dot in a 24 Å scene. That is exactly the "Reset 后又拉长"
-    regression: Reset bumps the camera revision, so Plotly applies the
-    new (oversized) layout cube instead of the user's manually re-fit
-    rotation, and the molecule looks comparatively flat / pushed-aside.
-    Only the on-focus topology center + shell are folded in, since they
-    sit on the atoms anyway.
+    When the unit-cell box is visible, the scene cube must include the full
+    lattice corners regardless of display mode; otherwise ASU / formula-unit
+    views draw a full wireframe and then clip it at the atom-owned viewport.
+
+    Topology ``extra_overlays`` are different: in non-``unit_cell`` modes they
+    point at other formula-unit replicas scattered across the cell. Letting
+    those grow the cube turns a 10 Å cluster into a tiny dot in a 24 Å scene.
+    Only the on-focus topology center + shell are folded in for those modes,
+    since they sit on the atoms anyway.
     """
     override = scene.get("viewport")
     if override:
@@ -220,7 +216,7 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
     cell_owns_cube = mode == "unit_cell"
 
     extras = []
-    if cell_owns_cube and style.get("show_unit_cell", False) and scene.get("M") is not None:
+    if style.get("show_unit_cell", False) and scene.get("M") is not None:
         M = np.asarray(scene.get("M"), dtype=float)
         if M.ndim == 2 and M.shape[0] >= 3 and M.shape[1] == 3:
             a = np.array(M[0], dtype=float)
