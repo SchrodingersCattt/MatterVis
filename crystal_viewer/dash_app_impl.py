@@ -2200,7 +2200,7 @@ class ViewerBackend:
                 file=sys.stderr,
             )
         self.scene_store.ensure(self.structure_names, default_state_factory=self.default_state)
-        if len(self.scene_store.scenes) != scene_count_before:
+        if removed_scene_ids or len(self.scene_store.scenes) != scene_count_before:
             try:
                 self.scene_store.save()
             except OSError as exc:  # pragma: no cover - disk-full / read-only mount
