@@ -208,6 +208,44 @@ def test_compass_arrow_lengths_use_equal_basis_vectors():
     assert math.isclose(pix_lens[1] / pix_lens[0], 1.0, rel_tol=1e-3)
 
 
+def test_compass_arrow_lengths_follow_unit_basis_projection():
+    """Equal 3D basis vectors still foreshorten under camera projection."""
+    from crystal_viewer.renderer import _camera_axis_projections
+
+    scene = {
+        "name": "test",
+        "title": "Test",
+        "M": np.diag([8.09, 24.72, 10.20]),
+        "view_direction": np.array([1.0, 0.0, 1.0]),
+        "up": np.array([0.0, 0.0, 1.0]),
+        "draw_atoms": [],
+        "bonds": [],
+        "label_items": [],
+    }
+    style = {
+        **DEFAULT_STYLE,
+        "show_axis_key": True,
+        "show_axes": False,
+        "camera": {
+            "eye": {"x": 1.0, "y": 0.0, "z": 1.0},
+            "center": {"x": 0.0, "y": 0.0, "z": 0.0},
+            "up": {"x": 0.0, "y": 0.0, "z": 1.0},
+        },
+    }
+    fig = build_figure(scene, style)
+    arrows = _compass_arrows(fig)
+    assert len(arrows) == 3
+
+    expected_proj = _camera_axis_projections(scene, style)
+    expected_lens = [math.hypot(*xy) for xy in expected_proj if math.hypot(*xy) > 1e-9]
+    expected_ratio = max(expected_lens) / min(expected_lens)
+
+    pix_lens = [math.hypot(float(ann.ax), float(ann.ay)) for ann in arrows]
+    actual_ratio = max(pix_lens) / min(pix_lens)
+    assert expected_ratio > 1.2
+    assert math.isclose(actual_ratio, expected_ratio, rel_tol=1e-3)
+
+
 def test_compass_projection_rescales_to_cube_for_aspectmode_data():
     """``aspectmode="data"`` (the default for anisotropic cells like SY)
     means Plotly's camera operates in normalised cube coords, not data
