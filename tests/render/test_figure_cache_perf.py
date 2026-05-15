@@ -86,12 +86,20 @@ def _compass_shapes(fig) -> list[dict]:
     return out
 
 
-def test_cached_figure_refreshes_compass_under_live_camera(tmp_path):
-    """Regression for the "axis错了" report: a cached figure was
-    serving stale paper-coord compass arrows because the in-figure
-    overlay is camera-dependent. ``figure_for_state`` now re-projects
-    the compass after the cache hit so the arrows match the requested
-    camera even when the heavy mesh body is reused verbatim.
+def test_cached_figure_skips_baked_compass_in_dash_path(tmp_path):
+    """Architecture pin (was "axis错了" / "compass 不动" / "拖拽分子不转"):
+
+    The Dash-served figure must NOT carry compass arrows in
+    ``layout.annotations`` because ``compass_overlay.js`` now paints
+    them live into a sibling SVG layer. Baking them into Plotly
+    annotations forces a ``Plotly.relayout`` per drag frame, which
+    interrupts gl3d's render and freezes the molecule rotation
+    (verified via Playwright: 6 mid-drag screenshots all
+    byte-identical when the compass was Plotly-baked).
+
+    Instead the compass *meta* (lattice matrix + sizing) lives on
+    ``layout.meta.compass`` so the JS can reproject without a
+    server round-trip.
     """
     backend = _make_backend(tmp_path)
     state = backend.get_state()
@@ -103,8 +111,22 @@ def test_cached_figure_refreshes_compass_under_live_camera(tmp_path):
     }
     fig_first, _ = backend.figure_for_state(state)
     first_arrows = _compass_shapes(fig_first)
-    assert first_arrows, "expected compass arrows on initial render"
+    assert first_arrows == [], (
+        "Dash-served figure must NOT bake compass arrows into "
+        "layout.annotations; the SVG overlay handles them live."
+    )
+    # The JS-consumed payload must still be present.
+    meta = getattr(fig_first.layout, "meta", None)
+    if hasattr(meta, "to_plotly_json"):
+        meta = meta.to_plotly_json()
+    assert isinstance(meta, dict) and meta.get("compass"), (
+        "layout.meta.compass must be populated so compass_overlay.js "
+        "can reproject the triad client-side."
+    )
 
+    # Second render with a different camera: figure body cache may
+    # hit, but neither figure has compass annotations and meta still
+    # exists.
     state_far = dict(state)
     state_far["camera"] = {
         "eye": {"x": 0.0, "y": 2.0, "z": 0.5},
@@ -113,10 +135,8 @@ def test_cached_figure_refreshes_compass_under_live_camera(tmp_path):
     }
     fig_second, _ = backend.figure_for_state(state_far)
     second_arrows = _compass_shapes(fig_second)
-    assert second_arrows, "expected compass arrows on second render"
-    assert first_arrows != second_arrows, (
-        "compass arrows should reproject when the live camera changes "
-        "even when the figure-body cache hits"
+    assert second_arrows == [], (
+        "Cached figure must also stay free of baked compass annotations."
     )
 
 

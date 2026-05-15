@@ -1,0 +1,243 @@
+from __future__ import annotations
+
+import math
+
+import numpy as np
+
+from crystal_viewer.loader import build_loaded_crystal
+from crystal_viewer.presets import DEFAULT_STYLE
+from crystal_viewer.renderer import build_figure
+
+
+def _aspect_tuple(fig):
+    ar = fig.layout.scene.aspectratio
+    return (float(ar.x), float(ar.y), float(ar.z))
+
+
+def _sy_base_style(bundle):
+    return {
+        **DEFAULT_STYLE,
+        **bundle.scene.get("style", {}),
+        "show_axes": False,
+        "show_axis_key": False,
+        "show_unit_cell": False,
+    }
+
+
+def test_unit_cell_mode_pins_manual_lattice_aspectratio():
+    """In ``display_mode='unit_cell'`` the scene IS the cell, so the user
+    expects the box to render with true lattice proportions (long c-axis
+    looks long) and the on/off Unit Cell Box toggle must not jiggle the
+    aspect (otherwise the structure visibly squishes when the wire box
+    is hidden). Pin both invariants: aspectmode='manual' AND aspectratio
+    matches ``|a|:|b|:|c|`` AND the value is identical box-on vs box-off.
+    """
+    bundle = build_loaded_crystal(name="SY", cif_path="scripts/data/SY.cif", title="SY")
+    base = {**_sy_base_style(bundle), "display_mode": "unit_cell"}
+
+    fig_off = build_figure(bundle.scene, base)
+    fig_on = build_figure(bundle.scene, {**base, "show_unit_cell": True})
+
+    assert fig_off.layout.scene.aspectmode == "manual"
+    assert fig_on.layout.scene.aspectmode == "manual"
+    assert _aspect_tuple(fig_off) == _aspect_tuple(fig_on)
+
+    lengths = np.linalg.norm(np.asarray(bundle.scene["M"], dtype=float), axis=1)
+    expected = tuple(float(v / lengths.max()) for v in lengths)
+    for actual, want in zip(_aspect_tuple(fig_on), expected):
+        assert math.isclose(actual, want, rel_tol=1e-6, abs_tol=1e-6)
+
+
+def test_formula_unit_does_not_inherit_lattice_aspect():
+    """``display_mode='formula_unit'`` shows a molecular cluster carved out
+    of the unit cell; the cluster's bounding box is roughly equiaxed even
+    when the host cell is wildly anisotropic (SY: |c|=24.7 Å vs |a|=8.1
+    Å). The earlier ``mode != 'cluster'`` predicate in
+    ``figure_axis_layout`` blanket-applied the cell's manual aspectratio
+    here too, which stretched the molecules along the long c axis and
+    produced the visible "扁" regression. The fix narrows manual aspect
+    to ``mode == 'unit_cell'``; this test pins that behaviour and
+    asserts the toggle is purely a visibility change.
+    """
+    bundle = build_loaded_crystal(name="SY", cif_path="scripts/data/SY.cif", title="SY")
+    base = {**_sy_base_style(bundle), "display_mode": "formula_unit"}
+
+    fig_off = build_figure(bundle.scene, base)
+    fig_on = build_figure(bundle.scene, {**base, "show_unit_cell": True})
+
+    assert fig_off.layout.scene.aspectmode != "manual", (
+        "formula_unit must not pin manual lattice aspect; the molecule "
+        "would otherwise be squished along anisotropic cell axes."
+    )
+    assert fig_on.layout.scene.aspectmode != "manual", (
+        "toggling Unit Cell Box must not turn on manual lattice aspect."
+    )
+    assert fig_off.layout.scene.aspectmode == fig_on.layout.scene.aspectmode, (
+        "box on/off must not switch between aspect modes."
+    )
+
+
+def test_formula_unit_box_does_not_dwarf_molecule_along_long_axis():
+    """``formula_unit`` mode draws a single ~10-Å cluster carved out of a
+    much larger crystal cell. Older ``_scene_ranges`` glued the eight cell
+    corners onto the bounding box even in non-``unit_cell`` modes, so on
+    SY (|b|=24.7) the scene cube ballooned to ~25 Å on every side and the
+    cluster shrank to ~40% of the viewport ("Reset 后又拉长" / "molecule
+    is squished into a corner"). Pin: enabling ``Unit Cell Box`` in
+    ``formula_unit`` must NOT extend any axis range by more than the
+    cluster's own bounds + a small pad. The cell wireframe still draws
+    (Plotly clips overflow at the cube boundary, which is the intended
+    aesthetic — molecule wins, box loses).
+    """
+    bundle = build_loaded_crystal(name="SY", cif_path="scripts/data/SY.cif", title="SY")
+    base = {**_sy_base_style(bundle), "display_mode": "formula_unit"}
+
+    fig_off = build_figure(bundle.scene, base)
+    fig_on = build_figure(bundle.scene, {**base, "show_unit_cell": True})
+
+    def _max_span(fig):
+        sa = fig.layout.scene.to_plotly_json()
+        spans = []
+        for axis in ("xaxis", "yaxis", "zaxis"):
+            r = sa[axis]["range"]
+            spans.append(float(r[1]) - float(r[0]))
+        return max(spans)
+
+    span_off = _max_span(fig_off)
+    span_on = _max_span(fig_on)
+    assert math.isclose(span_off, span_on, rel_tol=1e-6, abs_tol=1e-6), (
+        f"formula_unit scene cube must NOT grow when the cell box is "
+        f"toggled (off={span_off:.2f}, on={span_on:.2f}); the molecule "
+        f"otherwise looks pushed-aside in a long cell."
+    )
+
+    lengths = np.linalg.norm(np.asarray(bundle.scene["M"], dtype=float), axis=1)
+    longest_cell = float(lengths.max())
+    assert span_on < 0.85 * longest_cell, (
+        f"formula_unit cube ({span_on:.2f}) must not be dictated by the "
+        f"longest cell axis ({longest_cell:.2f}); allowing it would dwarf "
+        f"a single formula-unit cluster on long-cell structures like SY."
+    )
+
+
+def test_formula_unit_polyhedra_extras_do_not_extend_scene_cube():
+    """When the user enables a per-instance polyhedra overlay
+    (``extra_overlays``) in ``formula_unit`` mode, the overlays sit at
+    the OTHER formula-unit replicas — scattered across the entire cell.
+    Letting those points push the scene cube out is what shrinks the
+    on-focus cluster to a dot in the middle of the viewport. The
+    ``cell_owns_cube`` predicate in ``_scene_ranges`` excludes
+    ``extra_overlays`` from non-``unit_cell`` modes; this test pins it.
+    """
+    bundle = build_loaded_crystal(name="SY", cif_path="scripts/data/SY.cif", title="SY")
+    base = {
+        **_sy_base_style(bundle),
+        "display_mode": "formula_unit",
+        # ``build_figure`` only forwards topology_data when the overlay is
+        # actually enabled; without this the test would silently pass even
+        # if ``_scene_ranges`` were broken for non-unit_cell modes.
+        "topology_enabled": True,
+    }
+
+    # Anchor the focus polyhedron ON the actual molecule cluster (the
+    # focus shell sits on the atoms by construction in the real data
+    # path; only ``extra_overlays`` -- the OTHER replicas -- are off in
+    # the cell). Use the visible-atom centroid so this test isolates the
+    # ``extra_overlays`` exclusion behaviour from the focus-shell path.
+    from crystal_viewer.renderer_viewport import _visible_atoms
+    atom_carts = np.array(
+        [a["cart"] for a in _visible_atoms(bundle.scene, base)],
+        dtype=float,
+    )
+    cluster_center = atom_carts.mean(axis=0)
+    M = np.asarray(bundle.scene["M"], dtype=float)
+    b = M[1]
+    fake_topology = {
+        "center_coords": cluster_center,
+        "shell_coords": [cluster_center],
+        # Off-cluster replicas at +b/2 and -b/2 of the cluster centroid.
+        # In ``unit_cell`` mode these would push the y range to ~|b|;
+        # in ``formula_unit`` mode they MUST be ignored or the molecule
+        # would be dwarfed.
+        "extra_overlays": [
+            {"center_coords": cluster_center + b * 0.5,
+             "shell_coords": [cluster_center + b * 0.9]},
+            {"center_coords": cluster_center - b * 0.5,
+             "shell_coords": [cluster_center - b * 0.9]},
+        ],
+    }
+
+    fig_no_topo = build_figure(bundle.scene, base)
+    fig_with_topo = build_figure(bundle.scene, base, topology_data=fake_topology)
+
+    def _spans(fig):
+        sa = fig.layout.scene.to_plotly_json()
+        return tuple(float(sa[ax]["range"][1] - sa[ax]["range"][0]) for ax in ("xaxis", "yaxis", "zaxis"))
+
+    s0 = _spans(fig_no_topo)
+    s1 = _spans(fig_with_topo)
+    for axis_name, a0, a1 in zip("xyz", s0, s1):
+        assert math.isclose(a0, a1, rel_tol=1e-3, abs_tol=1e-3), (
+            f"formula_unit cube along {axis_name} grew from {a0:.2f} to "
+            f"{a1:.2f} when extra_overlays were added; molecules would be "
+            f"pushed to one side of the viewport. extra_overlays must NOT "
+            f"extend the scene cube outside ``unit_cell`` mode."
+        )
+
+
+def test_unit_cell_mode_still_includes_polyhedra_extras():
+    """The mirror of the above: in ``unit_cell`` mode the user *wants* the
+    cube to encompass every polyhedron the overlay draws. ``cell_owns_cube``
+    must therefore stay True for ``unit_cell``; pin that path so a regression
+    in the new predicate doesn't silently clip the polyhedra view in the
+    natural unit-cell rendering.
+    """
+    bundle = build_loaded_crystal(name="SY", cif_path="scripts/data/SY.cif", title="SY")
+    base = {
+        **_sy_base_style(bundle),
+        "display_mode": "unit_cell",
+        "show_unit_cell": True,
+        "topology_enabled": True,
+    }
+
+    M = np.asarray(bundle.scene["M"], dtype=float)
+    far = M[0] + M[1] * 2.0 + M[2]
+    fake_topology = {
+        "center_coords": M.sum(axis=0) * 0.5,
+        "shell_coords": [M.sum(axis=0) * 0.5],
+        "extra_overlays": [{"center_coords": far, "shell_coords": [far]}],
+    }
+
+    fig = build_figure(bundle.scene, base, topology_data=fake_topology)
+    sa = fig.layout.scene.to_plotly_json()
+    yr = sa["yaxis"]["range"]
+    assert (float(yr[1]) - float(yr[0])) > 1.5 * float(np.linalg.norm(M[1])), (
+        "unit_cell mode must still let extra_overlays push the cube out "
+        "(polyhedra at far replicas were clipped otherwise)."
+    )
+
+
+def test_cluster_without_lattice_falls_back_to_auto_aspectmode():
+    scene = {
+        "name": "cluster",
+        "title": "Cluster",
+        "view_direction": np.array([0.0, 0.0, 1.0]),
+        "up": np.array([0.0, 1.0, 0.0]),
+        "display_mode": "cluster",
+        "draw_atoms": [],
+        "bonds": [],
+        "label_items": [],
+    }
+
+    fig = build_figure(
+        scene,
+        {
+            **DEFAULT_STYLE,
+            "show_axes": False,
+            "show_axis_key": False,
+            "show_unit_cell": False,
+        },
+    )
+
+    assert fig.layout.scene.aspectmode == "cube"
+    assert "aspectratio" not in fig.layout.scene.to_plotly_json()

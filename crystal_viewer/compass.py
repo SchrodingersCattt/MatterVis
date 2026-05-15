@@ -76,13 +76,13 @@ def camera_screen_basis(camera: dict) -> tuple[np.ndarray, np.ndarray]:
         raise ValueError("camera.eye coincides with camera.center")
     view /= n
 
-    right = np.cross(up, view)
+    right = np.cross(view, up)
     rn = float(np.linalg.norm(right))
     if rn < 1e-12:
         raise ValueError("camera.up is parallel to the view direction")
     right /= rn
 
-    screen_up = np.cross(view, right)
+    screen_up = np.cross(right, view)
     screen_up /= float(np.linalg.norm(screen_up))
     return right, screen_up
 
