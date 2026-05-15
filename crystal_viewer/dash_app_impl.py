@@ -75,6 +75,14 @@ def _camera_store_payload(scene_id: Optional[str], camera: Optional[dict[str, An
     return {"scene_id": scene_id, "camera": copy.deepcopy(camera)}
 
 
+def _camera_figure_patch(camera: Optional[dict[str, Any]], uirevision: Optional[str] = None) -> Patch:
+    patch = Patch()
+    patch["layout"]["scene"]["camera"] = copy.deepcopy(camera)
+    if uirevision is not None:
+        patch["layout"]["scene"]["uirevision"] = str(uirevision)
+    return patch
+
+
 def _camera_from_store(camera_state: Optional[dict[str, Any]], scene_id: Optional[str]) -> Optional[dict[str, Any]]:
     if not isinstance(camera_state, dict):
         return None
@@ -6865,13 +6873,16 @@ def create_app(
     #
     # Both callbacks call into ``backend.camera_action`` (the same path
     # exercised by ``POST /api/v2/camera/action``), then push the new
-    # camera into ``camera-state-store`` only. The browser-side fast path
-    # has already relaid out the Plotly scene, so touching
-    # ``agent-state-store`` would just trigger a wasteful full-figure
-    # rebuild for a layout-only change.
+    # camera into ``camera-state-store`` and patch the Plotly layout
+    # directly. The browser-side fast path usually does the same relayout
+    # first, but the Dash Patch is the correctness fallback that prevents
+    # the SVG compass from updating while the WebGL scene keeps the old
+    # camera.
     # ------------------------------------------------------------------
     @app.callback(
         Output("camera-state-store", "data", allow_duplicate=True),
+        Output("crystal-graph", "figure", allow_duplicate=True),
+        Output("fast-view-metadata", "children", allow_duplicate=True),
         Input("view-align-a", "n_clicks"),
         Input("view-align-b", "n_clicks"),
         Input("view-align-c", "n_clicks"),
@@ -6885,7 +6896,7 @@ def create_app(
     def apply_view_action(_a, _b, _c, _astar, _bstar, _cstar, _reset, scene_id):
         triggered = getattr(callback_context, "triggered_id", None)
         if not triggered:
-            return no_update
+            return no_update, no_update, no_update
         scene_id = scene_id or backend.active_scene_id()
         button_to_axis = {
             "view-align-a": "a",
@@ -6906,10 +6917,18 @@ def create_app(
                     axis=button_to_axis[triggered],
                 )
             else:
-                return no_update
+                return no_update, no_update, no_update
         except Exception:  # pragma: no cover - best-effort, surface in console
-            return no_update
-        return _camera_store_payload(scene_id, camera)
+            return no_update, no_update, no_update
+        state = backend.get_state(scene_id)
+        scene = backend.scene_for_state(state)
+        style = backend.style_for_state(state, scene=scene)
+        camera_payload = _camera_store_payload(scene_id, camera)
+        return (
+            camera_payload,
+            _camera_figure_patch(camera, style.get("uirevision")),
+            _fast_view_metadata(backend, state, camera_payload),
+        )
 
     @app.callback(
         Output("view-projection", "value", allow_duplicate=True),
@@ -6928,25 +6947,35 @@ def create_app(
 
     @app.callback(
         Output("camera-state-store", "data", allow_duplicate=True),
+        Output("crystal-graph", "figure", allow_duplicate=True),
+        Output("fast-view-metadata", "children", allow_duplicate=True),
         Input("view-projection", "value"),
         State("scene-tabs", "value"),
         prevent_initial_call=True,
     )
     def apply_view_projection(projection, scene_id):
         if not projection:
-            return no_update
+            return no_update, no_update, no_update
         scene_id = scene_id or backend.active_scene_id()
         # Skip the redraw if the user clicked the radio that was
         # already selected -- avoids ratcheting the figure JSON cache
         # for a no-op.
         current = backend.get_state(scene_id).get("projection", "perspective")
         if str(projection) == str(current):
-            return no_update
+            return no_update, no_update, no_update
         try:
             camera = backend.set_projection(projection, scene_id=scene_id, broadcast=False)
         except Exception:  # pragma: no cover
-            return no_update
-        return _camera_store_payload(scene_id, camera)
+            return no_update, no_update, no_update
+        state = backend.get_state(scene_id)
+        scene = backend.scene_for_state(state)
+        style = backend.style_for_state(state, scene=scene)
+        camera_payload = _camera_store_payload(scene_id, camera)
+        return (
+            camera_payload,
+            _camera_figure_patch(camera, style.get("uirevision")),
+            _fast_view_metadata(backend, state, camera_payload),
+        )
 
     @app.callback(
         Output("camera-state-store", "data", allow_duplicate=True),
