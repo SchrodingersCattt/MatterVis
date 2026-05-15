@@ -116,6 +116,7 @@ def build_row_figure(
 def build_figure(scene: dict, style: dict, topology_data: dict | None = None) -> go.Figure:
     style = validate_style_schema(style)
     xr, yr, zr = _scene_ranges(scene, style, topology_data=topology_data if style.get("topology_enabled", False) else None)
+    style["_topology_viewport_ranges"] = [list(xr), list(yr), list(zr)]
     # Mesh3d atoms are 3D world-coordinate spheres -- they grow when the
     # camera dollies in, which is what users expect from "zoom". Scatter3d
     # markers are pixel-fixed and break that expectation (the user reported

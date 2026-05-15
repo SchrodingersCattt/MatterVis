@@ -1916,6 +1916,48 @@ def _merged_hull_edges(overlays: list, color: str):
     return [trace]
 
 
+def _viewport_ranges_from_style(style: dict | None) -> np.ndarray | None:
+    raw = (style or {}).get("_topology_viewport_ranges")
+    if raw is None:
+        return None
+    try:
+        ranges = np.asarray(raw, dtype=float)
+    except (TypeError, ValueError):
+        return None
+    if ranges.shape != (3, 2) or not np.all(np.isfinite(ranges)):
+        return None
+    return ranges
+
+
+def _viewport_cache_key(style: dict | None) -> tuple:
+    ranges = _viewport_ranges_from_style(style)
+    if ranges is None:
+        return ()
+    return tuple(tuple(round(float(value), 6) for value in axis) for axis in ranges)
+
+
+def _overlay_within_viewport(overlay: dict, ranges: np.ndarray | None) -> bool:
+    if ranges is None:
+        return True
+    coords, _hull = _overlay_coords_and_hull(overlay)
+    points = []
+    center = overlay.get("center_coords")
+    if center is not None:
+        try:
+            points.append(np.asarray(center, dtype=float))
+        except (TypeError, ValueError):
+            return False
+    if len(coords):
+        points.extend(np.asarray(coords, dtype=float))
+    if not points:
+        return False
+    arr = np.asarray(points, dtype=float)
+    if arr.ndim != 2 or arr.shape[1] != 3 or not np.all(np.isfinite(arr)):
+        return False
+    tol = 1e-6
+    return bool(np.all(arr >= ranges[:, 0][None, :] - tol) and np.all(arr <= ranges[:, 1][None, :] + tol))
+
+
 def _multi_spec_cache_key(topology_data: dict, fallback_color: str) -> tuple:
     """Build a hashable key for the renderer's painter caches that
     captures every per-spec colour and per-overlay instance override
@@ -1956,8 +1998,9 @@ def topology_background_traces(topology_data: dict | None, style: dict | None = 
         return []
     style = style or {}
     fallback_color = str(style.get("topology_hull_color", "#7C5CBF"))
+    viewport_ranges = _viewport_ranges_from_style(style)
     cache = topology_data.setdefault("_background_dict_cache", {})
-    cache_key = _multi_spec_cache_key(topology_data, fallback_color)
+    cache_key = (_multi_spec_cache_key(topology_data, fallback_color), _viewport_cache_key(style))
     if cache_key in cache:
         return cache[cache_key]
     primary_opacity = 0.22
@@ -1980,6 +2023,8 @@ def topology_background_traces(topology_data: dict | None, style: dict | None = 
                     continue
                 if not overlay.get("visible", True):
                     continue
+                if not overlay.get("is_analysis_anchor") and not _overlay_within_viewport(overlay, viewport_ranges):
+                    continue
                 opacity = primary_opacity if overlay.get("is_analysis_anchor") else extra_opacity
                 color = str(overlay.get("color") or spec_color)
                 overlays_by_color.setdefault(color, []).append((overlay, opacity))
@@ -1994,7 +2039,7 @@ def topology_background_traces(topology_data: dict | None, style: dict | None = 
         if topology_data.get("shell_coords"):
             overlays_with_opacity.append((topology_data, primary_opacity))
         for extra in topology_data.get("extra_overlays") or []:
-            if extra.get("shell_coords"):
+            if extra.get("shell_coords") and _overlay_within_viewport(extra, viewport_ranges):
                 overlays_with_opacity.append((extra, extra_opacity))
         traces.extend(_merged_hull_mesh(overlays_with_opacity, color=fallback_color))
         traces.extend(_merged_hull_edges([overlay for overlay, _ in overlays_with_opacity], color=fallback_color))
@@ -2016,8 +2061,9 @@ def topology_foreground_traces(topology_data: dict | None, style: dict | None = 
         return []
     style = style or {}
     fallback_color = str(style.get("topology_hull_color", "#7C5CBF"))
+    viewport_ranges = _viewport_ranges_from_style(style)
     cache = topology_data.setdefault("_foreground_dict_cache", {})
-    cache_key = _multi_spec_cache_key(topology_data, fallback_color)
+    cache_key = (_multi_spec_cache_key(topology_data, fallback_color), _viewport_cache_key(style))
     if cache_key in cache:
         return cache[cache_key]
 
@@ -2066,6 +2112,8 @@ def topology_foreground_traces(topology_data: dict | None, style: dict | None = 
                     continue
                 if not overlay.get("visible", True):
                     continue
+                if not _overlay_within_viewport(overlay, viewport_ranges):
+                    continue
                 center = overlay.get("center_coords")
                 coords = overlay.get("shell_coords") or []
                 if center is None or len(coords) == 0:
@@ -2087,6 +2135,8 @@ def topology_foreground_traces(topology_data: dict | None, style: dict | None = 
             center = extra.get("center_coords")
             coords = extra.get("shell_coords") or []
             if center is None or len(coords) == 0:
+                continue
+            if not _overlay_within_viewport(extra, viewport_ranges):
                 continue
             extra_centers.append(center)
         if extra_centers:

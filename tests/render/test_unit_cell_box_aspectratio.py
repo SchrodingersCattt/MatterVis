@@ -302,6 +302,82 @@ def test_unit_cell_mode_polyhedra_extras_do_not_extend_scene_cube():
     _assert_cartesian_scale_is_isometric(fig_with_topo)
 
 
+def test_off_viewport_polyhedra_extras_are_not_drawn_as_clipped_edges():
+    scene = {
+        "name": "synthetic",
+        "title": "Synthetic",
+        "M": np.diag([10.0, 8.0, 6.0]),
+        "display_mode": "unit_cell",
+        "view_direction": np.array([0.0, 0.0, 1.0]),
+        "up": np.array([0.0, 1.0, 0.0]),
+        "draw_atoms": [
+            {
+                "cart": [2.0, 2.0, 2.0],
+                "atom_radius": 0.2,
+                "elem": "C",
+                "label": "C1",
+                "is_minor": False,
+                "color": "#444444",
+                "color_light": "#777777",
+                "disorder_alpha": 1.0,
+                "_depth_t": 0.5,
+            }
+        ],
+        "bonds": [],
+        "label_items": [],
+    }
+    style = {
+        **DEFAULT_STYLE,
+        "display_mode": "unit_cell",
+        "show_unit_cell": True,
+        "show_axes": False,
+        "show_axis_key": False,
+        "topology_enabled": True,
+    }
+    inside = {
+        "center_coords": [5.0, 4.0, 3.0],
+        "shell_coords": [[4.0, 4.0, 3.0], [6.0, 4.0, 3.0], [5.0, 3.0, 3.0], [5.0, 4.0, 4.0]],
+        "hull": {"simplices": [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]]},
+        "is_analysis_anchor": True,
+    }
+    outside = {
+        "center_coords": [40.0, 4.0, 3.0],
+        "shell_coords": [[39.0, 4.0, 3.0], [41.0, 4.0, 3.0], [40.0, 3.0, 3.0], [40.0, 4.0, 4.0]],
+        "hull": {"simplices": [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]]},
+        "is_analysis_anchor": False,
+    }
+    topology_data = {
+        "center_coords": inside["center_coords"],
+        "shell_coords": inside["shell_coords"],
+        "distances": [1.0, 1.0, 1.0, 1.0],
+        "hull": inside["hull"],
+        "analysis_spec_id": "spec",
+        "spec_results": [
+            {
+                "spec_id": "spec",
+                "name": "test",
+                "color": "#7C5CBF",
+                "overlays": [inside, outside],
+            }
+        ],
+    }
+
+    fig = build_figure(scene, style, topology_data=topology_data)
+    ranges = _axis_ranges(fig)
+    coordination_values = []
+    for trace in fig.data:
+        if not str(getattr(trace, "name", "")).startswith("coordination-"):
+            continue
+        for values in (getattr(trace, "x", None), getattr(trace, "y", None), getattr(trace, "z", None)):
+            if values is None:
+                continue
+            coordination_values.extend(float(value) for value in values if np.isfinite(value))
+
+    assert coordination_values
+    assert max(coordination_values) < 12.0
+    assert ranges[0][1] < 12.0
+
+
 def test_cluster_without_lattice_falls_back_to_auto_aspectmode():
     scene = {
         "name": "cluster",
