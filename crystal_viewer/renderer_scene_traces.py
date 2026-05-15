@@ -6,6 +6,7 @@ from typing import Dict, Iterable, Tuple
 import numpy as np
 import plotly.graph_objects as go
 
+from .disorder import bond_effective_opacity, minor_opacity_for
 from . import perf_log
 from .presets import ORTEP_MODES
 
@@ -63,15 +64,7 @@ def validate_style_schema(style: dict) -> dict:
 
 
 def _minor_opacity_for(style: dict, is_minor: bool) -> float:
-    if not is_minor:
-        return float(style.get("major_opacity", 1.0))
-    fade = (
-        style.get("disorder") == "opacity"
-        or bool(style.get("force_minor_fade", False))
-    )
-    if fade:
-        return max(0.05, float(style.get("minor_opacity", 0.35)))
-    return 1.0
+    return minor_opacity_for(style, is_minor)
 
 
 def _stamp_trace(
@@ -183,18 +176,40 @@ def _bond_opacity_group_id(bond: dict) -> str | None:
     return text or None
 
 
-def _latency_meta(role: str, *, is_minor: bool | None = None, opacity_group: str | None = None) -> dict:
+def _latency_meta(
+    role: str,
+    *,
+    is_minor: bool | None = None,
+    opacity_group: str | None = None,
+    opacity_scale: float | None = None,
+) -> dict:
     meta = {"mv_role": role}
     if is_minor is not None:
         meta["mv_minor"] = bool(is_minor)
     if opacity_group:
         meta["mv_opacity_group"] = str(opacity_group)
+    if opacity_scale is not None:
+        meta["mv_opacity_scale"] = float(opacity_scale)
     return meta
 
 
-def _annotate_trace(trace, role: str, *, is_minor: bool | None = None, opacity_group: str | None = None):
+def _annotate_trace(
+    trace,
+    role: str,
+    *,
+    is_minor: bool | None = None,
+    opacity_group: str | None = None,
+    opacity_scale: float | None = None,
+):
     if trace is not None:
-        trace.update(meta=_latency_meta(role, is_minor=is_minor, opacity_group=opacity_group))
+        trace.update(
+            meta=_latency_meta(
+                role,
+                is_minor=is_minor,
+                opacity_group=opacity_group,
+                opacity_scale=opacity_scale,
+            )
+        )
     return trace
 
 
@@ -246,8 +261,12 @@ def _style_trace_dicts(trace_dicts: list[dict], style: dict) -> list[dict]:
             else:
                 copied["opacity"] = opacity
         elif role == "bond":
-            opacity = bond_group_opacity.get(str(group_id), _minor_opacity_for(style, is_minor))
-            copied["opacity"] = opacity
+            pseudo_bond = {"is_minor": is_minor}
+            if str(group_id) in bond_group_opacity:
+                pseudo_bond["_render_opacity_scale"] = bond_group_opacity[str(group_id)]
+            elif "mv_opacity_scale" in meta:
+                pseudo_bond["_render_opacity_scale"] = meta.get("mv_opacity_scale")
+            copied["opacity"] = bond_effective_opacity(pseudo_bond, style)
         out.append(copied)
     return out
 
@@ -345,7 +364,7 @@ def _camera_axis_projections(scene: dict, style: dict) -> list[list[float]] | No
     # using the same per-axis half-ranges Plotly applies when laying
     # the scene cube out. Without this rescaling the oblique-camera
     # compass on SY draws b as far longer than a even when on screen
-    # they're nearly equal length -- exactly the "几何不对" complaint.
+    # they are nearly equal length.
     cube_scale = _axis_cube_scale(scene, style)
     if cube_scale is not None:
         # Each lattice row gets divided per-axis by the data half-range
@@ -1023,11 +1042,14 @@ def _bond_mesh_traces(scene: dict, style: dict):
                 j=triangles[:, 1],
                 k=triangles[:, 2],
                 color=color,
-                opacity=_minor_opacity_for(style, is_minor) * opacity_scale,
+                opacity=bond_effective_opacity(
+                    {"is_minor": is_minor, "_render_opacity_scale": opacity_scale},
+                    style,
+                ),
                 hoverinfo="skip",
                 showlegend=False,
                 flatshading=False,
-            ), "bond", is_minor=is_minor, opacity_group=opacity_group)
+            ), "bond", is_minor=is_minor, opacity_group=opacity_group, opacity_scale=opacity_scale)
         )
     return traces
 
@@ -1109,13 +1131,20 @@ def _atom_mesh_traces(scene: dict, style: dict):
 
 
 def _bond_scatter_traces(scene: dict, style: dict):
-    groups: Dict[Tuple[str, bool], list[list[float]]] = {}
-    for color, is_minor, start, end in _bond_segments(scene, style):
-        groups.setdefault((color, is_minor), []).append([start, end])
+    groups: Dict[Tuple[str, bool, str | None], dict] = {}
+    for color, is_minor, start, end, _radius_scale, opacity_scale, opacity_group in _bond_segments(
+        scene, style, with_scales=True
+    ):
+        groups.setdefault(
+            (color, is_minor, opacity_group),
+            {"segments": [], "opacity_scale": opacity_scale},
+        )["segments"].append([start, end])
 
     traces = []
     base_width = max(4.0, 24.0 * float(style["bond_radius"]))
-    for (color, is_minor), segments in groups.items():
+    for (color, is_minor, opacity_group), payload in groups.items():
+        segments = payload["segments"]
+        opacity_scale = float(payload["opacity_scale"])
         xs, ys, zs = [], [], []
         for start, end in segments:
             xs.extend([float(start[0]), float(end[0]), None])
@@ -1132,10 +1161,13 @@ def _bond_scatter_traces(scene: dict, style: dict):
                     width=base_width * (float(style.get("minor_bond_scale", 0.82)) if is_minor else 1.0),
                     dash="dash" if is_minor and style.get("disorder") == "dashed_bonds" else "solid",
                 ),
-                opacity=_minor_opacity_for(style, is_minor),
+                opacity=bond_effective_opacity(
+                    {"is_minor": is_minor, "_render_opacity_scale": opacity_scale},
+                    style,
+                ),
                 hoverinfo="skip",
                 showlegend=False,
-            ), "bond", is_minor=is_minor)
+            ), "bond", is_minor=is_minor, opacity_group=opacity_group, opacity_scale=opacity_scale)
         )
     return traces
 
@@ -1297,21 +1329,39 @@ def _wireframe_atom_traces(scene: dict, style: dict):
 
 
 def _wireframe_bond_traces(scene: dict, style: dict):
-    groups: Dict[Tuple[str, bool], list[tuple[np.ndarray, np.ndarray]]] = {}
-    for color, is_minor, start, end in _bond_segments(scene, style):
-        groups.setdefault((color, is_minor), []).append((start, end))
+    groups: Dict[Tuple[str, bool, str | None], dict] = {}
+    for color, is_minor, start, end, _radius_scale, opacity_scale, opacity_group in _bond_segments(
+        scene, style, with_scales=True
+    ):
+        groups.setdefault(
+            (color, is_minor, opacity_group),
+            {"segments": [], "opacity_scale": opacity_scale},
+        )["segments"].append((start, end))
     traces = []
-    for (color, is_minor), segments in groups.items():
+    for (color, is_minor, opacity_group), payload in groups.items():
+        segments = payload["segments"]
+        opacity_scale = float(payload["opacity_scale"])
         trace = _segment_cylinder_trace(
             segments,
             radius=max(0.01, 0.40 * float(style["bond_radius"])),
             color=color,
-            opacity=_minor_opacity_for(style, is_minor),
+            opacity=bond_effective_opacity(
+                {"is_minor": is_minor, "_render_opacity_scale": opacity_scale},
+                style,
+            ),
             sides=4,
             name="wireframe-bonds",
         )
         if trace is not None:
-            traces.append(_annotate_trace(trace, "bond", is_minor=is_minor))
+            traces.append(
+                _annotate_trace(
+                    trace,
+                    "bond",
+                    is_minor=is_minor,
+                    opacity_group=opacity_group,
+                    opacity_scale=opacity_scale,
+                )
+            )
     return traces
 
 

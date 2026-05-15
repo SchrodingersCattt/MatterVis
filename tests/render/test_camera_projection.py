@@ -290,8 +290,8 @@ def test_compass_overlay_js_uses_svg_layer_not_plotly_relayout_for_drag():
     orbit controller with the LAST COMMITTED camera (default eye, since
     Plotly does not commit until mouseup -- plotly/plotly.js#6359).
 
-    Visible regression: "拖拽期间分子不动 / mid-drag screenshots
-    byte-identical". Verified via Playwright: 6 mid-drag screenshots
+    Visible regression: mid-drag screenshots stayed byte-identical while the
+    molecule should have been rotating. Verified via Playwright: 6 mid-drag screenshots
     all hashed to the same digest while the GL canvas was supposed to
     be rotating.
 
@@ -327,6 +327,20 @@ def test_compass_overlay_js_uses_svg_layer_not_plotly_relayout_for_drag():
         "compass_overlay.js must expose a redrawCompass() entry that "
         "operates on the SVG layer; the dragPollTick reads the live "
         "camera and calls this every frame."
+    )
+    assert "layoutSceneCamera" in src, (
+        "compass_overlay.js must prefer the committed layout camera for "
+        "normal redraws after Dash figure updates; internal gl cameras are "
+        "only authoritative during active drags."
+    )
+    assert "preferLiveCamera" in src, (
+        "compass_overlay.js must keep live internal-camera reads behind an "
+        "explicit drag-path flag, otherwise scope/polyhedra rebuilds can "
+        "redraw the compass from a stale internal camera."
+    )
+    assert "cameraFromRelayout" in src, (
+        "compass_overlay.js must consume camera payloads from Plotly relayout "
+        "events when they are provided."
     )
 
     # 2) The hot path (per-frame drag tick + redraw) must NOT call

@@ -87,7 +87,7 @@ def _compass_shapes(fig) -> list[dict]:
 
 
 def test_cached_figure_skips_baked_compass_in_dash_path(tmp_path):
-    """Architecture pin (was "axis错了" / "compass 不动" / "拖拽分子不转"):
+    """Architecture pin for stale compass and drag-rotation regressions:
 
     The Dash-served figure must NOT carry compass arrows in
     ``layout.annotations`` because ``compass_overlay.js`` now paints

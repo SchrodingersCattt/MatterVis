@@ -104,11 +104,11 @@ The only explicit bridge back into the legacy column-vector convention is:
 - `crystal_viewer/scene.py:156-158`, where `_continuous_components` constructs
   `legacy_M = M.T` for `pc.assemble_component_p1`.
 
-The cell aspect formula is implemented in `cell_aspect_ratio`:
+The lattice-length summary is implemented in `cell_aspect_ratio`:
 
 - `crystal_viewer/renderer_viewport.py:31-40` reads `scene["M"]`, computes
   `lens = np.linalg.norm(M, axis=1)`, divides by `lens.max()`, and returns a
-  Plotly `{"x", "y", "z"}` dict.
+  `{"x", "y", "z"}` dict.
 
 The unit-cell wireframe uses the rows directly:
 
@@ -125,10 +125,11 @@ outside a clearly named legacy adapter should be reviewed as a likely
 convention leak.
 
 `cell_aspect_ratio` uses only row-vector norms.  This correctly represents
-axis lengths but not interaxial angles; Plotly's `aspectratio` has no shear
-component, so skewed cells cannot be represented by aspect ratio alone.  The
-actual cell geometry remains correct because traces are emitted in Cartesian
-coordinates.  Aspect only controls the rendered scene cube.
+lattice-vector lengths but not interaxial angles, and it is not the renderer's
+anti-flattening rule.  Plotly scales Cartesian x/y/z axes, so the final
+renderer aspect is derived from emitted Cartesian axis ranges in
+`docs/derivations/camera.md`.  The actual cell geometry remains correct because
+traces are emitted in Cartesian coordinates.
 
 The reciprocal-lattice formula is not currently a first-class MatterVis API.
 If it is introduced later, it should follow the row-matrix convention
@@ -142,6 +143,7 @@ If it is introduced later, it should follow the row-matrix convention
   `frac_to_cart(shift, M)`.
 - Conversion to legacy column-vector matrices is allowed only at explicit
   legacy boundaries.
-- `cell_aspect_ratio(scene)` is a display-scale helper, not a geometry
-  transform.  It must never rewrite atom coordinates or lattice vectors.
+- `cell_aspect_ratio(scene)` is a lattice-summary helper, not a geometry
+  transform and not the final Plotly aspect contract. It must never rewrite
+  atom coordinates or lattice vectors.
 

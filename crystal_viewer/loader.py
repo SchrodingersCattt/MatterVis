@@ -160,13 +160,62 @@ def build_empty_bundle(
 DEFAULT_UNWRAP_MAX_ATOMS = 500
 
 
+def _partial_occupancy_value(atom: dict[str, Any]) -> float:
+    try:
+        return float(atom.get("occ", 1.0))
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def _blank_disorder_tags(atom: dict[str, Any]) -> bool:
+    dg = str(atom.get("dg") or ".").strip()
+    da = str(atom.get("da") or ".").strip()
+    return dg in (".", "?", "") and da in (".", "?", "")
+
+
+def _site_label(atom: dict[str, Any]) -> str:
+    return str(atom.get("_asym_label") or atom.get("label") or "")
+
+
+def _occupancy_disorder_label_stem(label: str) -> str:
+    match = re.match(r"^([A-Za-z]+[0-9]+)", label)
+    return match.group(1) if match else label
+
+
+def _occupancy_only_disorder_indices(raw_atoms) -> set[int]:
+    """Return indices likely belonging to blank-tag occupancy disorder.
+
+    A single partial-occupancy site with blank disorder tags is ambiguous:
+    it may be an ordered atom on a special position. SHELX occupancy-only
+    disorder usually appears as sibling labels such as H3A/H3B or C8/C8A,
+    so require at least two distinct source labels with the same stem before
+    invoking the ordered-replica solver or tagging atoms minor.
+    """
+    by_stem: dict[str, dict[str, list[int]]] = defaultdict(lambda: defaultdict(list))
+    for idx, atom in enumerate(raw_atoms):
+        if _partial_occupancy_value(atom) >= 0.999 or not _blank_disorder_tags(atom):
+            continue
+        label = _site_label(atom)
+        if not label:
+            continue
+        by_stem[_occupancy_disorder_label_stem(label)][label].append(idx)
+
+    out: set[int] = set()
+    for labels in by_stem.values():
+        if len(labels) < 2:
+            continue
+        for indices in labels.values():
+            out.update(indices)
+    return out
+
+
 def _has_shelx_occupancy_disorder(raw_atoms) -> bool:
     """Return True if ``raw_atoms`` contains any SHELX-style disorder
     that needs MolCrysKit's optimal-replica picker to resolve.
 
     Two patterns trigger this:
 
-    1. *Occupancy-only* disorder: ``occ < 1`` with both
+    1. *Occupancy-only* disorder: sibling labels with ``occ < 1`` and both
        ``_atom_site_disorder_group`` and ``_atom_site_disorder_assembly``
        blank (both default to "."). SHELX often writes rotamer pairs
        (NH4+ in DAP-4, perchlorate H atoms in SY's older revisions)
@@ -186,19 +235,13 @@ def _has_shelx_occupancy_disorder(raw_atoms) -> bool:
     sees one consistent set per disorder site.
     """
     for atom in raw_atoms:
-        try:
-            occ = float(atom.get("occ", 1.0))
-        except (TypeError, ValueError):
-            occ = 1.0
+        occ = _partial_occupancy_value(atom)
         if occ >= 0.999:
             continue
         dg = str(atom.get("dg") or ".").strip()
-        da = str(atom.get("da") or ".").strip()
-        if dg in (".", "?", "") and da in (".", "?", ""):
-            return True
         if dg.startswith("-") and dg not in ("-",):
             return True
-    return False
+    return bool(_occupancy_only_disorder_indices(raw_atoms))
 
 
 def _tag_shelx_occupancy_disorder(raw_atoms, cif_path: str, M):
@@ -220,9 +263,9 @@ generate_ordered_replicas_from_disordered_sites` for the optimal
     All steps are wrapped in a single ``try`` block: if MolCrysKit
     can't resolve the disorder for any reason (missing dependency,
     parser error, CIF rejected by ``scan_cif_disorder``) we leave
-    ``raw_atoms`` untouched and the ``is_minor`` heuristic in
-    ``crystal_viewer.legacy.plot_crystal`` still does best-effort
-    classification.
+    ``raw_atoms`` untouched. Blank partial occupancy alone is not enough
+    evidence to mark atoms minor because ordered special-position sites
+    use the same CIF shape.
     """
     if not _has_shelx_occupancy_disorder(raw_atoms):
         return raw_atoms
@@ -248,14 +291,14 @@ generate_ordered_replicas_from_disordered_sites` for the optimal
         out = [dict(atom) for atom in raw_atoms]
 
         disordered_idx: list[int] = []
+        occupancy_only_idx = _occupancy_only_disorder_indices(out)
         for idx, atom in enumerate(out):
-            try:
-                occ = float(atom.get("occ", 1.0))
-            except (TypeError, ValueError):
-                occ = 1.0
+            occ = _partial_occupancy_value(atom)
             if occ >= 0.999 or "_is_minor" in atom:
                 continue
-            disordered_idx.append(idx)
+            dg = str(atom.get("dg") or ".").strip()
+            if idx in occupancy_only_idx or (dg.startswith("-") and dg not in ("-",)):
+                disordered_idx.append(idx)
 
         if not disordered_idx:
             return out

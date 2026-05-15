@@ -58,34 +58,39 @@ camera vector \(\vec d_q\) corresponds to a data-space direction
 
 where \(\odot\) is elementwise multiplication.
 
-### Manual Cell Aspect
+### Isometric Aspect Contract
 
-For unit-cell display, the desired Plotly aspect component is the normalized
-lattice-axis length:
+MatterVis must preserve Cartesian distances in every rendered molecular scene.
+That means one Angstrom along Cartesian x, y, and z must map to the same
+rendered scene-cube length. In the notation above, the no-flattening invariant
+is:
 
 \[
-a_k =
-\frac{\lVert M_{k,:}\rVert}
-{\max_j\lVert M_{j,:}\rVert}.
+\sigma_x=\sigma_y=\sigma_z.
 \]
 
-Then a data-space vector \(\vec v_x\) must be converted to cube space before
-camera-plane projection:
+For `aspectmode="manual"`, this is enforced by deriving aspect components from
+the final Cartesian axis half-spans:
 
 \[
-\vec v_q = \vec v_x \oslash \vec\sigma,
+a_k=\frac{h_k}{\max_j h_j},
 \qquad
-\sigma_k=\frac{h_k}{a_k}.
+\sigma_k=\frac{h_k}{a_k}=\max_j h_j.
 \]
 
-For non-unit-cell displays, MatterVis chooses content-first rendering:
-axis ranges are equalized and Plotly uses `aspectmode="cube"`.  The content
-retains a 1:1:1 data aspect in the viewport, while long or skewed unit-cell
-wireframes may be clipped or leave whitespace depending on the range policy.
+For `aspectmode="cube"`, MatterVis first equalizes the ranges so
+\(h_x=h_y=h_z\), which gives the same invariant.
+
+This is deliberately not the same as using lattice-vector lengths
+\(\lVert M_{k,:}\rVert\) as Plotly aspect components. Plotly scales Cartesian
+x/y/z axes, not lattice-vector directions. For skewed cells, padding, topology
+overlays, or complete boundary molecules, lattice lengths and final Cartesian
+axis ranges can diverge. The final range-derived aspect is the authoritative
+anti-flattening contract.
 
 ### Axis Ranges
 
-Start with the visible atom hull:
+For molecule-focused views, start with the visible atom hull:
 
 \[
 \vec m_\mathrm{atom}
@@ -102,17 +107,27 @@ Additional points may expand the hull:
 - focus topology center and shell points;
 - unit-cell corners \(0,\vec a,\vec b,\vec c,\vec a+\vec b,\vec a+\vec c,
   \vec b+\vec c,\vec a+\vec b+\vec c\);
-- extra topology overlays.
+- focused topology center and shell points.
 
 The current policy is mode-dependent:
 
 \[
-\text{cell corners included}
-\iff
-\text{display\_mode}=\texttt{unit\_cell}
-\land
-\texttt{show\_unit\_cell}.
+\texttt{display\_mode}=\texttt{unit\_cell}
+\Rightarrow
+\text{cell corners own the base viewport}.
 \]
+
+\[
+\texttt{show\_unit\_cell}
+\Rightarrow
+\text{cell corners are included as range extras in every display mode}.
+\]
+
+This separates the rendered atom set from viewport ownership. Unit-cell mode
+may draw complete molecule images just outside the box so boundary fragments
+remain chemically contiguous, but those outside images do not own the base
+viewport. Otherwise the real unit cell can collapse into a thin strip inside an
+oversized atom hull.
 
 After the min/max hull is formed, MatterVis pads it:
 
@@ -258,16 +273,18 @@ Default camera creation:
 - `crystal_viewer/renderer_viewport.py:19-28` creates a Plotly camera from
   `scene["view_direction"]`, `scene["up"]`, and `camera_eye_distance`.
 
-Cell aspect:
+Aspect:
 
-- `crystal_viewer/renderer_viewport.py:31-40` implements the normalized
-  lattice-length aspect formula.
-- `crystal_viewer/renderer_viewport.py:43-55` gates manual cell aspect to
+- `crystal_viewer/renderer_viewport.py:31-45` keeps a lattice-length summary
+  helper for callers that need it.
+- `crystal_viewer/renderer_viewport.py:48-64` derives manual Plotly aspect from
+  final Cartesian axis ranges.
+- `crystal_viewer/renderer_viewport.py:67-82` gates manual range aspect to
   `display_mode == "unit_cell"`.
 
 Cube scale:
 
-- `crystal_viewer/renderer_viewport.py:58-83` computes manual scale
+- `crystal_viewer/renderer_viewport.py:85-110` computes manual scale
   \(\sigma_k=h_k/a_k\).
 - `crystal_viewer/renderer_viewport.py:137-170` falls back to viewport or
   bounds-derived scale for non-manual scenes.
@@ -280,8 +297,8 @@ Ranges and equalization:
   axis ranges.
 - `crystal_viewer/renderer_viewport.py:219-239` includes unit-cell corners only
   when `cell_owns_cube` is true.
-- `crystal_viewer/renderer_viewport.py:240-252` includes focus topology in all
-  modes but `extra_overlays` only when the cell owns the cube.
+- `crystal_viewer/renderer_viewport.py:240-252` includes focused topology in
+  the range but excludes `extra_overlays` from viewport ownership.
 - `crystal_viewer/renderer_viewport.py:277-304` equalizes axis ranges to the
   longest span.
 - `crystal_viewer/renderer_viewport.py:307-331` writes the final Plotly
@@ -316,14 +333,18 @@ Compass:
   stay inside the figure edge.
 - `crystal_viewer/renderer_compass.py:155-168` emits the same paper/pixel
   arrow structure as the lower-level compass helper.
+- `crystal_viewer/assets/compass_overlay.js` renders the interactive Dash
+  compass into a sibling SVG. Normal redraws use the committed
+  `layout.scene.camera`; only active drag polling reads Plotly's internal
+  `intScene.getCamera()`.
 
 ## Audit Notes
 
 ### Bug 1: ASU / Formula Cell Box Is Incomplete
 
-The unit-cell wireframe and the viewport use different ownership rules.
-
-The wireframe always draws the full lattice parallelepiped from
+The fixed contract is that a visible unit-cell wireframe must have its eight
+corners represented in the viewport calculation. The wireframe always draws the
+full lattice parallelepiped from
 
 \[
 \{0,\vec a,\vec b,\vec c,\vec a+\vec b,\vec a+\vec c,\vec b+\vec c,
@@ -332,42 +353,43 @@ The wireframe always draws the full lattice parallelepiped from
 
 That is implemented in `crystal_viewer/renderer_scene_traces.py:1626-1647`.
 
-But `_scene_ranges` includes those eight corners only when
+but let `_scene_ranges` omit those corners in non-unit-cell modes. If a lattice
+corner \(C\) satisfied
 
 \[
-\text{display\_mode}=\texttt{unit\_cell}.
+\lvert C_k-\mu_k\rvert > L/2
 \]
 
-That condition is implemented in `crystal_viewer/renderer_viewport.py:219-239`.
-For `formula_unit`, `asymmetric_unit`, and `cluster`, the atom hull owns the
-scene cube even if `show_unit_cell=True`.
+for any equalized axis center \(\mu_k\) and half-span \(L/2\), Plotly clipped
+the wireframe.
 
-Therefore, if a lattice corner \(C\) satisfies
+The repair is:
 
 \[
-|C_k-\mu_k| > L/2
+\texttt{show\_unit\_cell}\Rightarrow
+\text{include eight cell corners in range extras}.
 \]
 
-for any equalized axis center \(\mu_k\) and half-span \(L/2\), Plotly clips the
-wireframe.  The cell matrix is still correct; the range contract clips it.
+Topology `extra_overlays` are visual annotations for other replicas; they do
+not own the main viewport.
 
-The minimal formula-level repair is:
+### Bug 2: Unit Cell Can Be Flattened By Outside Complete Fragments
+
+Unit-cell mode can draw complete molecules outside the box to avoid chopped
+boundary fragments. If the range hull is computed from all drawn atoms, then an
+outside image at Cartesian position \(x_o\) can make:
 
 \[
-\text{show\_unit\_cell}\Rightarrow
-\text{include eight cell corners in range extras},
+\max_i x_i-\min_i x_i \gg \max_\text{cell} x-\min_\text{cell} x.
 \]
 
-for every display mode.  The separate `extra_overlays` topology expansion can
-remain gated to `unit_cell` so molecule-focused displays are not dwarfed by
-polyhedron replicas.
+Even if the later aspect formula is isometric, the visible cell becomes tiny in
+an oversized viewport and looks flattened. The unit-cell viewport therefore
+starts from the eight cell corners and excludes both outside complete molecule
+images and topology extra overlays from ownership. They may still render; they
+just do not define the base viewport.
 
-This deliberately changes the old aesthetic rule "molecule wins, box loses".
-Tests that assert formula-unit boxes may be clipped should be rewritten to
-assert the new invariant: enabling the box may enlarge ranges to include the
-box, but topology `extra_overlays` still do not enlarge non-unit-cell views.
-
-### Bug 2: Display Changes Can Squish The View
+### Bug 3: Display Changes Can Squish The View
 
 When display mode changes, the figure is rebuilt with a new range/aspect
 normalization.  The code then reapplies the stored camera cube vector without
@@ -422,6 +444,9 @@ and should delegate to the authoritative implementation.
 
 - Axis ranges, aspect mode, aspect ratio, and initial camera belong to one
   layout calculation: `figure_axis_layout`.
+- Final layout must preserve Cartesian data-unit scale:
+  \(\sigma_x=\sigma_y=\sigma_z\). For manual aspect, this means
+  \(h_x/a_x=h_y/a_y=h_z/a_z\); for cube aspect, ranges must be equalized first.
 - A stored Plotly camera is a scene-cube camera.  It may be reused across a
   rebuild only if the cube scale is unchanged or if the camera is remapped by
   \(\vec\sigma^{(o)}\oslash\vec\sigma^{(n)}\).
@@ -429,10 +454,14 @@ and should delegate to the authoritative implementation.
   \(\vec\sigma\) must reset or revision-bump the camera.
 - The compass must project lattice vectors after converting them with the same
   cube scale that the main scene uses.
+- The interactive compass must use the committed Plotly layout camera after
+  Dash figure rebuilds. Plotly's internal live camera is valid for drag-frame
+  polling only; using it after scope/polyhedra rebuilds can leave the compass
+  on a stale orientation.
 - If `show_unit_cell=True`, the range policy must explicitly say whether the
   full cell owns the viewport.  Drawing a full cell while excluding its corners
   from the range is a clipping contract, not an accidental visual effect.
 - Topology focus points and topology extra overlays are separate viewport
-  concepts.  Fixing unit-cell clipping must not automatically let every overlay
-  replica grow molecule-focused views.
+  concepts. Extra overlay replicas are annotations and must not grow the main
+  viewport in any display mode.
 

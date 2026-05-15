@@ -19,6 +19,24 @@ writes through one reducer dispatcher.
 Callbacks may emit operations, not patched state dicts.  A central dispatcher
 applies operations and writes stores.
 
+## Phase 1.5 Bridge: Scene Tabs
+
+The current branch pulls `scene-tabs.children` and `scene-tabs.value` ahead of
+the full reducer migration:
+
+- `manage_scene_tabs_dom` is the only Dash callback that writes the tab DOM.
+  It rebuilds `scene-tabs.children`, `scene-tab-close-row.children`, and
+  `scene-tabs.value` from `backend.scene_options()` / `backend.active_scene_id()`.
+- Scene CRUD callbacks mutate the backend `SceneStore` and emit
+  `scene-event-store.data`; they do not patch tab children or value.
+- Native upload JavaScript writes `native-upload-sync.data` only.  It no longer
+  calls `set_props("scene-tabs", ...)`.
+- `sync_agent_state` still updates control props on tab switches and agent
+  polls, but it no longer writes the tab DOM.
+
+This is not the final operation reducer, but it establishes the invariant that
+the visible scene list has one writer and one source of truth.
+
 ## Current Risk Pattern
 
 Today, these concerns are split:
@@ -30,6 +48,8 @@ Today, these concerns are split:
 - REST and WebSocket handlers patch backend state out-of-band.
 - camera capture writes backend state while browser camera store remains
   authoritative during drags.
+- scene tabs have been moved out of this mixed-writer bucket; new tab DOM
+  writes must go through `manage_scene_tabs_dom`.
 
 This makes the real state transition depend on callback scheduling.  Two
 callbacks can observe the same old state and write incompatible new states.

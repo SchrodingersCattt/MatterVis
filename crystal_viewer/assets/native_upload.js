@@ -76,10 +76,10 @@
    * Strategy: poll ``GET /api/v2/scenes`` until the new structure
    * name appears in the scene list (the server-side upload handler
    * always calls ``create_scene`` so the new tab is guaranteed to
-   * exist). Then switch ``scene-tabs`` to that new scene id via
-   * ``dash_clientside.set_props`` so the user lands on their upload
-   * immediately, and clear the status. Hard timeout at 30 s so the
-   * status never sticks forever even if the server changes shape.
+   * exist). Then poke ``native-upload-sync`` again and let Dash's
+   * single scene-tab writer switch to the backend's active scene.
+   * Hard timeout at 30 s so the status never sticks forever even if
+   * the server changes shape.
    */
   function waitForSceneAndSwitch(uploadedNames) {
     if (!uploadedNames || !uploadedNames.length) return;
@@ -102,11 +102,7 @@
             }
           }
           if (target && target.id) {
-            if (window.dash_clientside && typeof window.dash_clientside.set_props === "function") {
-              try {
-                window.dash_clientside.set_props("scene-tabs", { value: target.id });
-              } catch (_err) { /* tolerated; the next poll will pick it up */ }
-            }
+            triggerDashSync({ status: "success", names: uploadedNames });
             setStatus("Loaded: " + uploadedNames.join(", "), "success");
             return;
           }

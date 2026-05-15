@@ -20,6 +20,30 @@ Gate:
 - display-mode changes no longer reuse stale cube-space camera;
 - topology `extra_overlays` still do not expand non-unit-cell viewports.
 
+## Phase 1.5: Scene-Tabs Single Writer
+
+Status: implemented in this branch as an accelerated fix for upload/tab
+state corruption.
+
+Scope:
+
+- add `scene-event-store` as the browser event edge for scene CRUD;
+- make `manage_scene_tabs_dom` the only writer for `scene-tabs.children` and
+  `scene-tabs.value`;
+- make duplicate / rename / close / close-others callbacks mutate the backend
+  `SceneStore` and emit an event instead of patching tab DOM directly;
+- remove scene-tab DOM outputs from `sync_agent_state`;
+- keep native upload polling, but stop JavaScript from calling
+  `set_props("scene-tabs", ...)`.
+
+Gate:
+
+- callback-map tests prove `scene-tabs.children` and `scene-tabs.value` each
+  have one writer;
+- upload append, close-others, and per-row close paths update
+  `backend.scene_options()`;
+- `sync_agent_state` no longer outputs either scene-tab prop.
+
 ## Phase 2: State Selectors
 
 Scope:

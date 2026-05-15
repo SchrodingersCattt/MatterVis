@@ -29,7 +29,12 @@ def _plotly_camera_from_scene(scene: dict, style: dict) -> dict:
 
 
 def cell_aspect_ratio(scene: dict) -> dict | None:
-    """Return Plotly manual aspectratio from row-vector lattice lengths."""
+    """Return normalized row-vector lattice lengths.
+
+    This is a lattice summary helper. The renderer's no-flattening contract is
+    based on final Cartesian axis ranges, because Plotly scales Cartesian x/y/z
+    axes rather than lattice-vector directions.
+    """
     M = np.asarray(scene.get("M"), dtype=float) if scene.get("M") is not None else None
     if M is None or M.ndim != 2 or M.shape != (3, 3):
         return None
@@ -40,17 +45,37 @@ def cell_aspect_ratio(scene: dict) -> dict | None:
     return {"x": float(lens[0]), "y": float(lens[1]), "z": float(lens[2])}
 
 
-def _should_use_manual_cell_aspect(mode: str | None) -> bool:
-    """Whether the layout should pin ``aspectmode='manual'`` to the cell ratio.
+def _range_aspect_ratio(xr, yr, zr) -> dict | None:
+    """Return a manual aspectratio that preserves Cartesian data-unit scale."""
+    try:
+        spans = np.array(
+            [
+                float(xr[1]) - float(xr[0]),
+                float(yr[1]) - float(yr[0]),
+                float(zr[1]) - float(zr[0]),
+            ],
+            dtype=float,
+        )
+    except (TypeError, ValueError, IndexError):
+        return None
+    if not np.all(np.isfinite(spans)) or float(spans.max()) < 1e-9:
+        return None
+    scaled = spans / float(spans.max())
+    return {"x": float(scaled[0]), "y": float(scaled[1]), "z": float(scaled[2])}
 
-    Only ``display_mode='unit_cell'`` benefits from a lattice-locked aspect:
-    the box toggle stays aspect-invariant and a long ``c`` axis renders long.
+
+def _should_use_manual_range_aspect(mode: str | None) -> bool:
+    """Whether layout should write a manual isometric range aspect.
+
+    Only ``display_mode='unit_cell'`` needs anisotropic screen axes: the user
+    expects the whole cell viewport to stay visible. The aspect components must
+    come from the final Cartesian ranges, not lattice-vector norms, because
+    Plotly scales the Cartesian x/y/z axes.
     Every other mode (``formula_unit``, ``asymmetric_unit``, ``cluster``)
-    fits content first; applying the cell ratio there squishes molecules
-    along anisotropic axes (SY: ``|c|=24`` vs ``|a|=|b|≈10``), which is the
-    "formula 模式扁平" regression. Keep this predicate the single source of
-    truth so ``figure_axis_layout`` and ``_manual_aspect_scale`` cannot drift
-    apart and leave the compass projection inconsistent with the renderer.
+    is made isometric by equalizing ranges and using ``aspectmode='cube'``.
+    Keep this predicate the single source of truth so ``figure_axis_layout`` and
+    ``_manual_aspect_scale`` cannot drift apart and leave the compass
+    projection inconsistent with the renderer.
     """
     return mode == "unit_cell"
 
@@ -63,12 +88,12 @@ def _manual_aspect_scale(scene: dict, style: dict, topology_data: dict | None = 
     ``half_range / aspectratio`` before projecting through the camera basis.
     """
     mode = style.get("display_mode", scene.get("display_mode"))
-    if not _should_use_manual_cell_aspect(mode):
-        return None
-    aspect = cell_aspect_ratio(scene)
-    if aspect is None:
+    if not _should_use_manual_range_aspect(mode):
         return None
     xr, yr, zr = _scene_ranges(scene, style, topology_data=topology_data)
+    aspect = _range_aspect_ratio(xr, yr, zr)
+    if aspect is None:
+        return None
     halves = np.array(
         [
             (float(xr[1]) - float(xr[0])) / 2.0,
@@ -184,11 +209,10 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
     lattice corners regardless of display mode; otherwise ASU / formula-unit
     views draw a full wireframe and then clip it at the atom-owned viewport.
 
-    Topology ``extra_overlays`` are different: in non-``unit_cell`` modes they
-    point at other formula-unit replicas scattered across the cell. Letting
-    those grow the cube turns a 10 Å cluster into a tiny dot in a 24 Å scene.
-    Only the on-focus topology center + shell are folded in for those modes,
-    since they sit on the atoms anyway.
+    Topology ``extra_overlays`` point at other formula-unit replicas scattered
+    across the cell. Letting those grow the cube turns the focused structure
+    into a tiny object in an oversized viewport, so only the focused topology
+    center + shell are folded into the range.
     """
     override = scene.get("viewport")
     if override:
@@ -198,12 +222,44 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
             [float(override["z"][0]), float(override["z"][1])],
         ]
 
+    mode = style.get("display_mode", scene.get("display_mode"))
+    cell_owns_cube = mode == "unit_cell"
+
+    def _cell_corners() -> list[np.ndarray]:
+        if scene.get("M") is None:
+            return []
+        M = np.asarray(scene.get("M"), dtype=float)
+        if M.ndim != 2 or M.shape[0] < 3 or M.shape[1] != 3:
+            return []
+        a = np.array(M[0], dtype=float)
+        b = np.array(M[1], dtype=float)
+        c = np.array(M[2], dtype=float)
+        return [
+            np.zeros(3, dtype=float),
+            a,
+            b,
+            c,
+            a + b,
+            a + c,
+            b + c,
+            a + b + c,
+        ]
+
     atoms = _visible_atoms(scene, style)
     atom_scale = float(style.get("atom_scale", 1.0))
 
     atom_mins = None
     atom_maxs = None
-    if atoms:
+    cell_corners = _cell_corners()
+    if cell_owns_cube and cell_corners:
+        # In unit-cell mode the viewport is the cell, not the spread of
+        # complete molecular images that may be drawn to keep boundary
+        # fragments chemically contiguous. Letting those outside images own the
+        # range makes the actual cell collapse into a thin strip.
+        corners_arr = np.array(cell_corners, dtype=float)
+        atom_mins = corners_arr.min(axis=0)
+        atom_maxs = corners_arr.max(axis=0)
+    elif atoms:
         carts = np.array([atom["cart"] for atom in atoms], dtype=float)
         radii = np.array(
             [max(float(atom.get("atom_radius", 0.18)), 0.05) for atom in atoms],
@@ -212,40 +268,15 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
         atom_mins = (carts - radii[:, None]).min(axis=0)
         atom_maxs = (carts + radii[:, None]).max(axis=0)
 
-    mode = style.get("display_mode", scene.get("display_mode"))
-    cell_owns_cube = mode == "unit_cell"
-
     extras = []
-    if style.get("show_unit_cell", False) and scene.get("M") is not None:
-        M = np.asarray(scene.get("M"), dtype=float)
-        if M.ndim == 2 and M.shape[0] >= 3 and M.shape[1] == 3:
-            a = np.array(M[0], dtype=float)
-            b = np.array(M[1], dtype=float)
-            c = np.array(M[2], dtype=float)
-            for corner in (
-                np.zeros(3, dtype=float),
-                a,
-                b,
-                c,
-                a + b,
-                a + c,
-                b + c,
-                a + b + c,
-            ):
-                extras.append(corner)
+    if style.get("show_unit_cell", False):
+        extras.extend(cell_corners)
     if topology_data:
         center = topology_data.get("center_coords")
         if center is not None:
             extras.append(np.array(center, dtype=float))
         for point in topology_data.get("shell_coords") or []:
             extras.append(np.array(point, dtype=float))
-        if cell_owns_cube:
-            for overlay in topology_data.get("extra_overlays") or []:
-                ovc = overlay.get("center_coords")
-                if ovc is not None:
-                    extras.append(np.array(ovc, dtype=float))
-                for point in overlay.get("shell_coords") or []:
-                    extras.append(np.array(point, dtype=float))
     if extras:
         extras_arr = np.array(extras, dtype=float)
         extras_min = extras_arr.min(axis=0)
@@ -301,10 +332,10 @@ def _equalize_axis_ranges(xr, yr, zr):
 
 
 def figure_axis_layout(scene: dict, style: dict, xr, yr, zr) -> dict:
-    """Build the Plotly ``scene`` layout with stable lattice aspect."""
-    aspect = cell_aspect_ratio(scene)
+    """Build the Plotly ``scene`` layout with stable Cartesian data scale."""
     mode = style.get("display_mode", scene.get("display_mode"))
-    if aspect is not None and _should_use_manual_cell_aspect(mode):
+    aspect = _range_aspect_ratio(xr, yr, zr)
+    if aspect is not None and _should_use_manual_range_aspect(mode):
         aspect_kwargs = {"aspectmode": "manual", "aspectratio": aspect}
     else:
         # Equalise per-axis ranges so the rendered scene cube is 1:1:1
@@ -312,7 +343,8 @@ def figure_axis_layout(scene: dict, style: dict, xr, yr, zr) -> dict:
         # ``show_unit_cell=True`` in ``formula_unit`` mode would widen the
         # ranges to the cell corners (e.g. SY's 8:24:10 box) and
         # ``aspectmode='cube'`` / ``'data'`` would then stretch every atom
-        # along the long axis — exactly the "勾上 box 又扁" regression.
+        # along the long axis -- exactly the "box toggle flattens the model"
+        # regression.
         xr, yr, zr = _equalize_axis_ranges(xr, yr, zr)
         aspect_kwargs = {"aspectmode": "cube"}
 
