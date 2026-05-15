@@ -55,12 +55,37 @@ def _mck_polyhedron_record(
     cutoff: float,
     *,
     ligand_species: tuple[str, ...] | None = None,
+    level: str = "molecule",
+    center_species: str | None = None,
 ) -> dict[str, Any] | None:
     if not ligand_species:
         raise ValueError(
-            "MolCrysKit molecule-level polyhedra require an explicit ligand_species; "
+            "MolCrysKit polyhedra require an explicit ligand_species; "
             "MatterVis no longer derives ligand shells locally."
         )
+    ligand_formula = next((str(item) for item in ligand_species if item), None)
+    if level == "atom":
+        central_symbol = str(center_species or "").strip()
+        if not central_symbol:
+            elems = center_fragment.get("elem_set") or []
+            central_symbol = str(elems[0]) if elems else ""
+        if not central_symbol or not ligand_formula:
+            raise ValueError("Atom-level topology requires center_species and ligand_species element symbols.")
+        crystal = molcrys_bridge.molecular_crystal_from_bundle(bundle)
+        records = find_polyhedra(
+            crystal,
+            central_symbol,
+            ligand_formula,
+            level="atom",
+            cutoff=float(cutoff),
+        )
+        if not records:
+            return None
+        center = np.array(center_fragment.get("center", [0.0, 0.0, 0.0]), dtype=float)
+        records.sort(
+            key=lambda rec: float(np.linalg.norm(np.array(rec.get("center_position", [0.0, 0.0, 0.0]), dtype=float) - center))
+        )
+        return records[0]
     source_molecule_index = center_fragment.get("source_molecule_index")
     if source_molecule_index is None:
         raise ValueError(
@@ -68,7 +93,6 @@ def _mck_polyhedron_record(
             "does not carry a MolCrysKit source_molecule_index."
         )
     center_formula = center_fragment.get("formula") or center_fragment.get("species")
-    ligand_formula = next((str(item) for item in ligand_species if item), None)
     if not center_formula or not ligand_formula:
         raise ValueError("Both center and ligand formulas are required for MolCrysKit polyhedra.")
     crystal = molcrys_bridge.molecular_crystal_from_bundle(bundle)
@@ -99,6 +123,8 @@ def _extract_coordination_shell_static(
     cutoff: float,
     *,
     ligand_species: tuple[str, ...] | None = None,
+    level: str = "molecule",
+    center_species: str | None = None,
 ) -> dict[str, Any]:
     fragments = classify_fragments(bundle)
     center_fragment = next((frag for frag in fragments if int(frag["index"]) == int(center_index)), None)
@@ -109,6 +135,8 @@ def _extract_coordination_shell_static(
         center_fragment,
         cutoff,
         ligand_species=ligand_species,
+        level=level,
+        center_species=center_species,
     )
     if record is None:
         source_center = np.array(center_fragment["center"], dtype=float)
@@ -121,7 +149,7 @@ def _extract_coordination_shell_static(
         # neighbours found" instead of an entirely blank row.
         gap_info: dict[str, Any] = {
             "coordination_number": 0,
-            "mode": "molecule",
+            "mode": level,
             "primary_gap_cn": 0,
             "gap_index": None,
             "gap_value": None,
@@ -169,7 +197,7 @@ def _extract_coordination_shell_static(
             "image_shift": offset,
         }
         for idx, coord, dist, offset in zip(
-            (record or {}).get("shell_molecule_indices") or [],
+            (record or {}).get("shell_molecule_indices") or (record or {}).get("shell_indices") or [],
             source_shell_coords.tolist(),
             shell_distances,
             (record or {}).get("shell_offsets") or [],
@@ -180,6 +208,7 @@ def _extract_coordination_shell_static(
         "default_label": center_fragment.get("label", f"site-{center_index}"),
         "default_type": center_fragment.get("type", "?"),
         "center_formula": center_fragment.get("formula") or center_fragment.get("species"),
+        "analysis_level": level,
         "source_center_coords": source_center,
         "cutoff": float(cutoff),
         "neighbor_pool_size": len(shell),
@@ -203,6 +232,8 @@ def extract_coordination_shell(
     display_label: str | None = None,
     display_type: str | None = None,
     ligand_species: Iterable[str] | None = None,
+    level: str = "molecule",
+    center_species: str | None = None,
 ) -> dict[str, Any]:
     ligand_tuple = tuple(str(item) for item in ligand_species) if ligand_species else None
     static = _extract_coordination_shell_static(
@@ -210,6 +241,8 @@ def extract_coordination_shell(
         int(center_index),
         float(cutoff),
         ligand_species=ligand_tuple,
+        level=level,
+        center_species=center_species,
     )
     source_center = np.asarray(static["source_center_coords"], dtype=float)
     plot_center = source_center if display_center is None else np.array(display_center, dtype=float)
@@ -230,6 +263,7 @@ def extract_coordination_shell(
         "center_label": display_label or static["default_label"],
         "center_type": display_type or static["default_type"],
         "center_formula": static["center_formula"],
+        "analysis_level": static["analysis_level"],
         "center_coords": plot_center.tolist(),
         "source_center_coords": source_center.tolist(),
         "cutoff": float(cutoff),
@@ -256,6 +290,8 @@ def _analyze_topology_uncached(
     display_type,
     *,
     ligand_species: tuple[str, ...] | None = None,
+    level: str = "molecule",
+    center_species: str | None = None,
 ) -> dict[str, Any]:
     shell = extract_coordination_shell(
         bundle,
@@ -265,6 +301,8 @@ def _analyze_topology_uncached(
         display_label=display_label,
         display_type=display_type,
         ligand_species=ligand_species,
+        level=level,
+        center_species=center_species,
     )
     center = shell["center_coords"]
     shell_coords = shell["shell_coords"]
@@ -283,6 +321,9 @@ def _analyze_topology_uncached(
     return {
         **shell,
         "shape": shape,
+        "analysis_level": level,
+        "packing_shell_label": shape.get("primary_label") if level == "molecule" else None,
+        "coordination_polyhedron_label": shape.get("primary_label") if level == "atom" else None,
         "planarity": planarity,
         "prism_analysis": prism,
     }
@@ -380,6 +421,8 @@ def analyze_topology(
     display_label: str | None = None,
     display_type: str | None = None,
     ligand_species: Iterable[str] | None = None,
+    level: str = "molecule",
+    center_species: str | None = None,
 ) -> dict[str, Any]:
     """Cached primary-site analysis. The heavy ``planarity_analysis`` pass
     runs ``itertools.combinations`` of size 5 over the shell, which gets
@@ -392,6 +435,7 @@ def analyze_topology(
     ``find_polyhedra(level="molecule")`` implementation.
     """
     ligand_tuple = tuple(str(item) for item in ligand_species) if ligand_species else None
+    level = str(level or "molecule")
     cache = getattr(bundle, "_analyze_topology_cache", None)
     if cache is None:
         cache = {}
@@ -402,14 +446,18 @@ def analyze_topology(
                 bundle, center_index, cutoff,
                 display_center, display_label, display_type,
                 ligand_species=ligand_tuple,
+                level=level,
+                center_species=center_species,
             )
-    key = (int(center_index), float(cutoff), ligand_tuple)
+    key = (int(center_index), float(cutoff), ligand_tuple, level, center_species)
     cached = cache.get(key)
     if cached is None:
         cached = _analyze_topology_uncached(
             bundle, center_index, cutoff,
             None, None, None,  # cache on the static result; overlay display fields below
             ligand_species=ligand_tuple,
+            level=level,
+            center_species=center_species,
         )
         cache[key] = cached
     # Display fields shift per call (camera / formula-unit centering); patch

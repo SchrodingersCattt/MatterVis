@@ -7,6 +7,31 @@ Each transform takes a base scene and produces a new scene whose
 applied. Transforms compose in **list order**: each entry's input is
 the output of the previous one.
 
+## Display-Mode Interaction
+
+Transforms operate on the scene that will be rendered. A fresh scene
+often starts in `display_mode="formula_unit"`, which intentionally
+trims the structure before rendering. That is not a useful input for
+geometry-expanding transforms such as `repeat`, `grow_radius`,
+`grow_bonds`, `complete_fragment`, `complete_polyhedron`,
+`by_symmetry`, or `slab`.
+
+When a transform is added through `POST /api/v2/transforms` while the
+scene is still in `formula_unit`, MatterVis now auto-promotes the
+scene to `unit_cell` by default and echoes:
+
+```json
+{
+  "display_mode_auto_promoted": "formula_unit -> unit_cell",
+  "warnings": ["display_mode=formula_unit trims transform output; ..."]
+}
+```
+
+Pass `?auto_promote=false` to keep the old behaviour; the response will
+still include a warning. Molecular-crystal slab cuts also return a
+warning because they can slice covalent fragments and are primarily
+intended for extended inorganic solids.
+
 This file is the contract for that surface. Renaming an endpoint or
 changing the persisted spec shape is a back-incompatible change —
 bump the API version per `../AGENTS.md`.

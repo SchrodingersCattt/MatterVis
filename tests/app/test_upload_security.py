@@ -95,3 +95,12 @@ def test_extension_is_forced_to_cif(backend: ViewerBackend, upload_dir: Path) ->
     written = Path(bundle.cif_path).resolve()
     assert written.parent == upload_dir
     assert written.suffix == ".cif"
+
+
+def test_reupload_same_bytes_is_idempotent(backend: ViewerBackend) -> None:
+    first = backend.add_uploaded_file_bytes(_VALID_CIF, "candidate.cif")
+    second = backend.add_uploaded_file_bytes(_VALID_CIF, "candidate_again.cif")
+
+    assert first.name == second.name
+    assert backend.structure_names.count(first.name) == 1
+    assert getattr(second, "_upload_existing", False) is True

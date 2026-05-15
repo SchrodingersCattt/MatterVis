@@ -67,6 +67,22 @@ def test_transforms_post_repeat_creates_and_lists(tmp_path: Path):
     assert [item["id"] for item in listing["transforms"]] == [spec["id"]]
 
 
+def test_transform_auto_promotes_formula_unit_display_mode(tmp_path: Path):
+    client = _client(tmp_path)
+    assert client.get("/api/v2/state").get_json()["display_mode"] == "formula_unit"
+
+    response = client.post(
+        "/api/v2/transforms",
+        json={"kind": "repeat", "params": {"a": 2, "b": 1, "c": 1}},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["display_mode_auto_promoted"] == "formula_unit -> unit_cell"
+    assert body["warnings"]
+    assert client.get("/api/v2/state").get_json()["display_mode"] == "unit_cell"
+
+
 def test_transforms_patch_toggles_enabled(tmp_path: Path):
     client = _client(tmp_path)
     spec = client.post(

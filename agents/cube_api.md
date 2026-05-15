@@ -10,6 +10,8 @@ column widths) lives in caller code, not here.
 - I/O
   - `read_cube(path) -> CubeData`
   - `tile_cube(cube, neg, pos)` — extend volumetric data over PBC.
+  - `tile_cube_data(cube, neg, pos) -> CubeData` — convenience wrapper
+    that preserves atoms/axes and returns a full tiled cube object.
 - Primitives (compose your own figure)
   - `orbital_mesh_traces(cube, *, isovalue, ...)` — marching-cubes
     Mesh3d isosurfaces, with built-in noise filtering.
@@ -88,4 +90,8 @@ These are stable across versions; rely on them.
 
 See `scripts/06_cp2k_cube_orbital.py` for an end-to-end recipe
 covering CP2K cube I/O, MolCrysKit-based PBC unwrapping, tiling +
-mesh filtering, opaque orbital panels, and paper-coord compass.
+mesh filtering, opaque orbital panels, and paper-coord compass. The CLI
+accepts `--no-mesh`, `--show-bonds/--no-bonds`,
+`--show-cell-box/--no-cell`, `--opacity`, phase colours, and the same
+`--atom-mask-radius` / `--min-volume-voxels` cleanup knobs exposed by
+the Python API.

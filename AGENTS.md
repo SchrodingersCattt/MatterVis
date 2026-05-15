@@ -228,6 +228,10 @@ has grown the exact hook named here.
   The vendored legacy parser still returns the old column-vector
   matrix; convert it once at the boundary and do not pass column
   matrices into new code.
+- MatterVis may perform minimal CIF symmetry expansion at the loader
+ boundary when a CIF declares a non-P1 space group but omits explicit
+ symmetry-operation rows. This is a rendering precondition, not
+ chemistry; do not move it into MolCrysKit or duplicate it elsewhere.
 
 When `molcrys_kit` is updated and a function you call gets
 deprecated:

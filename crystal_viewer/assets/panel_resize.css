@@ -20,6 +20,30 @@
   margin-left: 6px;
 }
 
+.scene-batch-close-btn {
+  background: #ffffff;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  color: #475467;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+}
+
+.scene-batch-close-btn:hover {
+  background: #fef3f2;
+  border-color: #f97066;
+  color: #b42318;
+}
+
+.scene-batch-close-btn:disabled {
+  background: #f9fafb;
+  border-color: #eaecf0;
+  color: #98a2b3;
+  cursor: not-allowed;
+}
+
 .scene-tab-close-row {
   display: flex;
   gap: 6px;
