@@ -6,6 +6,7 @@ from typing import Dict, Iterable, Tuple
 import numpy as np
 import plotly.graph_objects as go
 
+from .disorder import bond_effective_opacity, minor_opacity_for
 from . import perf_log
 from .presets import ORTEP_MODES
 
@@ -63,15 +64,7 @@ def validate_style_schema(style: dict) -> dict:
 
 
 def _minor_opacity_for(style: dict, is_minor: bool) -> float:
-    if not is_minor:
-        return float(style.get("major_opacity", 1.0))
-    fade = (
-        style.get("disorder") == "opacity"
-        or bool(style.get("force_minor_fade", False))
-    )
-    if fade:
-        return max(0.05, float(style.get("minor_opacity", 0.35)))
-    return 1.0
+    return minor_opacity_for(style, is_minor)
 
 
 def _stamp_trace(
@@ -183,18 +176,40 @@ def _bond_opacity_group_id(bond: dict) -> str | None:
     return text or None
 
 
-def _latency_meta(role: str, *, is_minor: bool | None = None, opacity_group: str | None = None) -> dict:
+def _latency_meta(
+    role: str,
+    *,
+    is_minor: bool | None = None,
+    opacity_group: str | None = None,
+    opacity_scale: float | None = None,
+) -> dict:
     meta = {"mv_role": role}
     if is_minor is not None:
         meta["mv_minor"] = bool(is_minor)
     if opacity_group:
         meta["mv_opacity_group"] = str(opacity_group)
+    if opacity_scale is not None:
+        meta["mv_opacity_scale"] = float(opacity_scale)
     return meta
 
 
-def _annotate_trace(trace, role: str, *, is_minor: bool | None = None, opacity_group: str | None = None):
+def _annotate_trace(
+    trace,
+    role: str,
+    *,
+    is_minor: bool | None = None,
+    opacity_group: str | None = None,
+    opacity_scale: float | None = None,
+):
     if trace is not None:
-        trace.update(meta=_latency_meta(role, is_minor=is_minor, opacity_group=opacity_group))
+        trace.update(
+            meta=_latency_meta(
+                role,
+                is_minor=is_minor,
+                opacity_group=opacity_group,
+                opacity_scale=opacity_scale,
+            )
+        )
     return trace
 
 
@@ -246,8 +261,12 @@ def _style_trace_dicts(trace_dicts: list[dict], style: dict) -> list[dict]:
             else:
                 copied["opacity"] = opacity
         elif role == "bond":
-            opacity = bond_group_opacity.get(str(group_id), _minor_opacity_for(style, is_minor))
-            copied["opacity"] = opacity
+            pseudo_bond = {"is_minor": is_minor}
+            if str(group_id) in bond_group_opacity:
+                pseudo_bond["_render_opacity_scale"] = bond_group_opacity[str(group_id)]
+            elif "mv_opacity_scale" in meta:
+                pseudo_bond["_render_opacity_scale"] = meta.get("mv_opacity_scale")
+            copied["opacity"] = bond_effective_opacity(pseudo_bond, style)
         out.append(copied)
     return out
 
@@ -345,7 +364,7 @@ def _camera_axis_projections(scene: dict, style: dict) -> list[list[float]] | No
     # using the same per-axis half-ranges Plotly applies when laying
     # the scene cube out. Without this rescaling the oblique-camera
     # compass on SY draws b as far longer than a even when on screen
-    # they're nearly equal length -- exactly the "几何不对" complaint.
+    # they are nearly equal length.
     cube_scale = _axis_cube_scale(scene, style)
     if cube_scale is not None:
         # Each lattice row gets divided per-axis by the data half-range
@@ -1023,11 +1042,14 @@ def _bond_mesh_traces(scene: dict, style: dict):
                 j=triangles[:, 1],
                 k=triangles[:, 2],
                 color=color,
-                opacity=_minor_opacity_for(style, is_minor) * opacity_scale,
+                opacity=bond_effective_opacity(
+                    {"is_minor": is_minor, "_render_opacity_scale": opacity_scale},
+                    style,
+                ),
                 hoverinfo="skip",
                 showlegend=False,
                 flatshading=False,
-            ), "bond", is_minor=is_minor, opacity_group=opacity_group)
+            ), "bond", is_minor=is_minor, opacity_group=opacity_group, opacity_scale=opacity_scale)
         )
     return traces
 
@@ -1109,13 +1131,20 @@ def _atom_mesh_traces(scene: dict, style: dict):
 
 
 def _bond_scatter_traces(scene: dict, style: dict):
-    groups: Dict[Tuple[str, bool], list[list[float]]] = {}
-    for color, is_minor, start, end in _bond_segments(scene, style):
-        groups.setdefault((color, is_minor), []).append([start, end])
+    groups: Dict[Tuple[str, bool, str | None], dict] = {}
+    for color, is_minor, start, end, _radius_scale, opacity_scale, opacity_group in _bond_segments(
+        scene, style, with_scales=True
+    ):
+        groups.setdefault(
+            (color, is_minor, opacity_group),
+            {"segments": [], "opacity_scale": opacity_scale},
+        )["segments"].append([start, end])
 
     traces = []
     base_width = max(4.0, 24.0 * float(style["bond_radius"]))
-    for (color, is_minor), segments in groups.items():
+    for (color, is_minor, opacity_group), payload in groups.items():
+        segments = payload["segments"]
+        opacity_scale = float(payload["opacity_scale"])
         xs, ys, zs = [], [], []
         for start, end in segments:
             xs.extend([float(start[0]), float(end[0]), None])
@@ -1132,10 +1161,13 @@ def _bond_scatter_traces(scene: dict, style: dict):
                     width=base_width * (float(style.get("minor_bond_scale", 0.82)) if is_minor else 1.0),
                     dash="dash" if is_minor and style.get("disorder") == "dashed_bonds" else "solid",
                 ),
-                opacity=_minor_opacity_for(style, is_minor),
+                opacity=bond_effective_opacity(
+                    {"is_minor": is_minor, "_render_opacity_scale": opacity_scale},
+                    style,
+                ),
                 hoverinfo="skip",
                 showlegend=False,
-            ), "bond", is_minor=is_minor)
+            ), "bond", is_minor=is_minor, opacity_group=opacity_group, opacity_scale=opacity_scale)
         )
     return traces
 
@@ -1297,21 +1329,39 @@ def _wireframe_atom_traces(scene: dict, style: dict):
 
 
 def _wireframe_bond_traces(scene: dict, style: dict):
-    groups: Dict[Tuple[str, bool], list[tuple[np.ndarray, np.ndarray]]] = {}
-    for color, is_minor, start, end in _bond_segments(scene, style):
-        groups.setdefault((color, is_minor), []).append((start, end))
+    groups: Dict[Tuple[str, bool, str | None], dict] = {}
+    for color, is_minor, start, end, _radius_scale, opacity_scale, opacity_group in _bond_segments(
+        scene, style, with_scales=True
+    ):
+        groups.setdefault(
+            (color, is_minor, opacity_group),
+            {"segments": [], "opacity_scale": opacity_scale},
+        )["segments"].append((start, end))
     traces = []
-    for (color, is_minor), segments in groups.items():
+    for (color, is_minor, opacity_group), payload in groups.items():
+        segments = payload["segments"]
+        opacity_scale = float(payload["opacity_scale"])
         trace = _segment_cylinder_trace(
             segments,
             radius=max(0.01, 0.40 * float(style["bond_radius"])),
             color=color,
-            opacity=_minor_opacity_for(style, is_minor),
+            opacity=bond_effective_opacity(
+                {"is_minor": is_minor, "_render_opacity_scale": opacity_scale},
+                style,
+            ),
             sides=4,
             name="wireframe-bonds",
         )
         if trace is not None:
-            traces.append(_annotate_trace(trace, "bond", is_minor=is_minor))
+            traces.append(
+                _annotate_trace(
+                    trace,
+                    "bond",
+                    is_minor=is_minor,
+                    opacity_group=opacity_group,
+                    opacity_scale=opacity_scale,
+                )
+            )
     return traces
 
 
@@ -1866,6 +1916,48 @@ def _merged_hull_edges(overlays: list, color: str):
     return [trace]
 
 
+def _viewport_ranges_from_style(style: dict | None) -> np.ndarray | None:
+    raw = (style or {}).get("_topology_viewport_ranges")
+    if raw is None:
+        return None
+    try:
+        ranges = np.asarray(raw, dtype=float)
+    except (TypeError, ValueError):
+        return None
+    if ranges.shape != (3, 2) or not np.all(np.isfinite(ranges)):
+        return None
+    return ranges
+
+
+def _viewport_cache_key(style: dict | None) -> tuple:
+    ranges = _viewport_ranges_from_style(style)
+    if ranges is None:
+        return ()
+    return tuple(tuple(round(float(value), 6) for value in axis) for axis in ranges)
+
+
+def _overlay_within_viewport(overlay: dict, ranges: np.ndarray | None) -> bool:
+    if ranges is None:
+        return True
+    coords, _hull = _overlay_coords_and_hull(overlay)
+    points = []
+    center = overlay.get("center_coords")
+    if center is not None:
+        try:
+            points.append(np.asarray(center, dtype=float))
+        except (TypeError, ValueError):
+            return False
+    if len(coords):
+        points.extend(np.asarray(coords, dtype=float))
+    if not points:
+        return False
+    arr = np.asarray(points, dtype=float)
+    if arr.ndim != 2 or arr.shape[1] != 3 or not np.all(np.isfinite(arr)):
+        return False
+    tol = 1e-6
+    return bool(np.all(arr >= ranges[:, 0][None, :] - tol) and np.all(arr <= ranges[:, 1][None, :] + tol))
+
+
 def _multi_spec_cache_key(topology_data: dict, fallback_color: str) -> tuple:
     """Build a hashable key for the renderer's painter caches that
     captures every per-spec colour and per-overlay instance override
@@ -1906,8 +1998,9 @@ def topology_background_traces(topology_data: dict | None, style: dict | None = 
         return []
     style = style or {}
     fallback_color = str(style.get("topology_hull_color", "#7C5CBF"))
+    viewport_ranges = _viewport_ranges_from_style(style)
     cache = topology_data.setdefault("_background_dict_cache", {})
-    cache_key = _multi_spec_cache_key(topology_data, fallback_color)
+    cache_key = (_multi_spec_cache_key(topology_data, fallback_color), _viewport_cache_key(style))
     if cache_key in cache:
         return cache[cache_key]
     primary_opacity = 0.22
@@ -1930,6 +2023,8 @@ def topology_background_traces(topology_data: dict | None, style: dict | None = 
                     continue
                 if not overlay.get("visible", True):
                     continue
+                if not overlay.get("is_analysis_anchor") and not _overlay_within_viewport(overlay, viewport_ranges):
+                    continue
                 opacity = primary_opacity if overlay.get("is_analysis_anchor") else extra_opacity
                 color = str(overlay.get("color") or spec_color)
                 overlays_by_color.setdefault(color, []).append((overlay, opacity))
@@ -1944,7 +2039,7 @@ def topology_background_traces(topology_data: dict | None, style: dict | None = 
         if topology_data.get("shell_coords"):
             overlays_with_opacity.append((topology_data, primary_opacity))
         for extra in topology_data.get("extra_overlays") or []:
-            if extra.get("shell_coords"):
+            if extra.get("shell_coords") and _overlay_within_viewport(extra, viewport_ranges):
                 overlays_with_opacity.append((extra, extra_opacity))
         traces.extend(_merged_hull_mesh(overlays_with_opacity, color=fallback_color))
         traces.extend(_merged_hull_edges([overlay for overlay, _ in overlays_with_opacity], color=fallback_color))
@@ -1966,8 +2061,9 @@ def topology_foreground_traces(topology_data: dict | None, style: dict | None = 
         return []
     style = style or {}
     fallback_color = str(style.get("topology_hull_color", "#7C5CBF"))
+    viewport_ranges = _viewport_ranges_from_style(style)
     cache = topology_data.setdefault("_foreground_dict_cache", {})
-    cache_key = _multi_spec_cache_key(topology_data, fallback_color)
+    cache_key = (_multi_spec_cache_key(topology_data, fallback_color), _viewport_cache_key(style))
     if cache_key in cache:
         return cache[cache_key]
 
@@ -2016,6 +2112,8 @@ def topology_foreground_traces(topology_data: dict | None, style: dict | None = 
                     continue
                 if not overlay.get("visible", True):
                     continue
+                if not _overlay_within_viewport(overlay, viewport_ranges):
+                    continue
                 center = overlay.get("center_coords")
                 coords = overlay.get("shell_coords") or []
                 if center is None or len(coords) == 0:
@@ -2037,6 +2135,8 @@ def topology_foreground_traces(topology_data: dict | None, style: dict | None = 
             center = extra.get("center_coords")
             coords = extra.get("shell_coords") or []
             if center is None or len(coords) == 0:
+                continue
+            if not _overlay_within_viewport(extra, viewport_ranges):
                 continue
             extra_centers.append(center)
         if extra_centers:

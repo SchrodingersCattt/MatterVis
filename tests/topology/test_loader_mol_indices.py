@@ -16,8 +16,8 @@ Plus unit tests for the pieces:
 
 * ``CrystalAnalysis.bond_pairs`` is the flattened molecule-graph edge
   list with sorted ``(i, j)`` ordering.
-* ``is_minor`` recognises SHELX-style ``occ < 0.5 + dg='.' + da='.'``
-  alternative-image atoms.
+* ``is_minor`` only trusts explicit disorder provenance or PART markers;
+  blank partial occupancy alone may be an ordered special-position site.
 * ``_has_shelx_occupancy_disorder`` distinguishes the SHELX-occupancy
   pattern from PART-style or fully-resolved CIFs.
 """
@@ -109,20 +109,25 @@ def test_sy_topology_table_has_no_orphan_hydrogens():
 
 
 # --------------------------------------------------------------------- #
-# 4) is_minor SHELX heuristic                                           #
+# 4) loader-authored minor disorder flag                                #
 # --------------------------------------------------------------------- #
 @pytest.mark.parametrize(
     "atom, expected",
     [
         # Fully-occupied, no disorder tags -> major.
         ({"label": "C1", "elem": "C", "occ": 1.0, "dg": ".", "da": "."}, False),
-        # SHELX PART 1/2 with occ != 0.5 -> dg drives the call.
+        # Raw PART strings alone are not render-fade provenance.
         ({"label": "C1A", "elem": "C", "occ": 0.6, "dg": "1", "da": "A"}, False),
-        ({"label": "C1B", "elem": "C", "occ": 0.4, "dg": "2", "da": "A"}, True),
-        # Negative-PART minor (legacy SY pattern) -> minor.
-        ({"label": "C1B", "elem": "C", "occ": 0.4, "dg": "-1", "da": "."}, True),
-        # SHELX occupancy-only minor: occ < 0.5 with dg='.' and da='.'.
-        ({"label": "H3X", "elem": "H", "occ": 0.3, "dg": ".", "da": "."}, True),
+        ({"label": "C1B", "elem": "C", "occ": 0.4, "dg": "2", "da": "A"}, False),
+        ({"label": "C1B", "elem": "C", "occ": 0.4, "dg": "-1", "da": "."}, False),
+        # Loader-resolved disorder is mirrored onto _is_minor.
+        ({"label": "C1B", "elem": "C", "occ": 0.4, "dg": "2", "da": "A", "_is_minor": True}, True),
+        ({"label": "C1B", "elem": "C", "occ": 0.4, "dg": "-1", "da": ".", "_is_minor": True}, True),
+        # Partial occupancy alone can be an ordered special-position atom.
+        # The loader must tag occupancy-only disorder explicitly via
+        # _is_minor before it is rendered or analysed as minor.
+        ({"label": "H3X", "elem": "H", "occ": 0.3, "dg": ".", "da": "."}, False),
+        ({"label": "H3X", "elem": "H", "occ": 0.3, "dg": ".", "da": ".", "_is_minor": True}, True),
         # Edge case: occ exactly 0.5 with dg='.' -> ambiguous, currently
         # treated as major (one of a 0.5/0.5 pair). The auto-disorder
         # resolver in ``build_loaded_crystal`` is what tags one of the
@@ -130,14 +135,13 @@ def test_sy_topology_table_has_no_orphan_hydrogens():
         ({"label": "H3A", "elem": "H", "occ": 0.5, "dg": ".", "da": "."}, False),
     ],
 )
-def test_is_minor_shelx_heuristic(atom, expected):
+def test_is_minor_reads_loader_flag_only(atom, expected):
     assert pc.is_minor(atom) is expected
 
 
-def test_is_minor_explicit_flag_wins_over_heuristic():
-    # _is_minor takes precedence over occ + dg.
+def test_is_minor_explicit_flag_is_the_single_source_of_truth():
     minor = {"label": "X", "elem": "C", "occ": 1.0, "_is_minor": True}
-    major = {"label": "X", "elem": "C", "occ": 0.2, "dg": ".", "da": ".", "_is_major": True}
+    major = {"label": "X", "elem": "C", "occ": 0.2, "dg": "2", "da": "A", "_is_minor": False}
     assert pc.is_minor(minor) is True
     assert pc.is_minor(major) is False
 
@@ -146,10 +150,15 @@ def test_is_minor_explicit_flag_wins_over_heuristic():
 # 5) _has_shelx_occupancy_disorder detection                            #
 # --------------------------------------------------------------------- #
 def test_has_shelx_occupancy_disorder_distinguishes_patterns():
-    # SHELX-occupancy pattern: occ<1 with blank disorder tags.
+    # SHELX occupancy-only pattern: sibling labels, occ<1, blank disorder tags.
     shelx = [
-        {"elem": "H", "occ": 0.5, "dg": ".", "da": "."},
-        {"elem": "N", "occ": 1.0, "dg": ".", "da": "."},
+        {"label": "H3A", "elem": "H", "occ": 0.5, "dg": ".", "da": "."},
+        {"label": "H3B", "elem": "H", "occ": 0.5, "dg": ".", "da": "."},
+    ]
+    # Ordered special-position pattern: one partial site, blank disorder tags.
+    ordered_special_position = [
+        {"label": "Cu1", "elem": "Cu", "occ": 0.25, "dg": ".", "da": "."},
+        {"label": "N1", "elem": "N", "occ": 1.0, "dg": ".", "da": "."},
     ]
     # PART-style: occ<1 but dg encodes the alternative.
     part_style = [
@@ -163,6 +172,7 @@ def test_has_shelx_occupancy_disorder_distinguishes_patterns():
     ]
 
     assert _has_shelx_occupancy_disorder(shelx) is True
+    assert _has_shelx_occupancy_disorder(ordered_special_position) is False
     assert _has_shelx_occupancy_disorder(part_style) is False
     assert _has_shelx_occupancy_disorder(ordered) is False
 
@@ -195,7 +205,7 @@ def test_analysis_bond_pairs_match_mol_indices_membership():
 # 7) SY ethylenediamine should be split, not fused                      #
 # --------------------------------------------------------------------- #
 def test_sy_ethylenediamine_not_fused():
-    """Regression for the "SY 乙二胺粘连" bug. SHELX -PART disorder +
+    """Regression for SY ethylenediamine fusion. SHELX -PART disorder +
     Pa-3 symmetry expansion creates 8 N3 + 8 N2 atoms that overlap at
     0.15 A pairs (alternative orientations of the same nucleus).
     MolCrysKit's neighbour-list bonded the alternates together,
@@ -286,7 +296,7 @@ def test_dap4_nh4_count_correct():
 # 9) "Black cage" -- cross-orientation ghost bonds are filtered          #
 # --------------------------------------------------------------------- #
 def test_no_cross_orientation_ghost_bonds_in_unit_cell_scene():
-    """The "套了一层黑色线" complaint: ``find_bonds`` doesn't know
+    """Regression for cross-orientation ghost bonds: ``find_bonds`` doesn't know
     about ``_is_minor`` and would happily bond a major N3 (kept
     orientation) to a minor C4 (discarded orientation) at 0.83 A
     apart. The renderer drew those as full opaque lines, making

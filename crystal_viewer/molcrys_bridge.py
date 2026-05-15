@@ -20,6 +20,8 @@ import re
 import numpy as np
 from molcrys_kit.utils.geometry import cart_to_frac, frac_to_cart
 
+from .disorder import atom_is_minor
+
 
 def _require_molcryskit():
     """Import MolCrysKit lazily and surface a clean error if missing."""
@@ -124,30 +126,13 @@ def _ase_atoms_from_raw(raw_atoms, M, mk):
 
 
 def _is_minor_atom(atom) -> bool:
-    """SHELX-aware "is this a minor disorder image?" check.
+    """Return whether the loader marked this atom as a minor disorder image.
 
-    Mirrors :func:`crystal_viewer.legacy.plot_crystal.is_minor` without
-    importing the legacy module (we don't want molcrys_bridge to
-    depend on the legacy renderer).
+    Raw CIF disorder tags are intentionally ignored here. Ordered
+    special-position atoms and unresolved PART records are not safe evidence
+    for fading or molecule exclusion without loader-side provenance.
     """
-    if "_is_minor" in atom:
-        return bool(atom["_is_minor"])
-    dg = str(atom.get("dg") or "").strip()
-    if dg == "2":
-        return True
-    if dg.startswith("-") and dg not in ("-",):
-        return True
-    if atom.get("_is_major"):
-        return False
-    da = str(atom.get("da") or "").strip()
-    if dg in (".", "?", "") and da in (".", "?", ""):
-        try:
-            occ = float(atom.get("occ", 1.0))
-        except (TypeError, ValueError):
-            occ = 1.0
-        if occ < 0.5 - 1e-6:
-            return True
-    return False
+    return atom_is_minor(atom)
 
 
 def _minor_index_set(raw_atoms) -> set[int]:

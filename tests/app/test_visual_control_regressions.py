@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from crystal_viewer.app import ViewerBackend
+from crystal_viewer.dash_app_impl import _display_options_can_fast_patch
 from crystal_viewer.loader import build_empty_bundle
 from crystal_viewer.presets import DEFAULT_STYLE
 from crystal_viewer.renderer import build_figure
@@ -78,3 +79,10 @@ def test_display_scope_persists_after_selection(tmp_path):
     backend.patch_state({"display_mode": "unit_cell"}, scene_id=scene_id)
 
     assert backend.get_state(scene_id)["display_mode"] == "unit_cell"
+
+
+def test_only_label_and_axis_options_use_fast_display_patch():
+    assert _display_options_can_fast_patch(["labels"], ["labels", "axes"])
+    assert not _display_options_can_fast_patch([], ["unit_cell_box"])
+    assert not _display_options_can_fast_patch(["minor_only"], [])
+    assert not _display_options_can_fast_patch([], ["minor_wireframe"])

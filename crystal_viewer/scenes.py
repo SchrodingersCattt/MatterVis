@@ -209,7 +209,7 @@ class SceneStore:
         return scene
 
     def prune(self, valid_structures: Iterable[str]) -> list[str]:
-        """Drop scenes whose ``structure_name`` is not in ``valid_structures``.
+        """Drop or repair scenes whose structure pointer is invalid.
 
         The persisted store can outlive the catalog: an upload from a
         previous session goes to ``tempfile.gettempdir()`` and is
@@ -225,6 +225,15 @@ class SceneStore:
         valid = {str(item) for item in valid_structures}
         removed: list[str] = []
         for scene_id, scene in list(self.scenes.items()):
+            patch_structure = str(scene.state_patch.get("structure") or "").strip()
+            if (
+                patch_structure
+                and patch_structure in valid
+                and patch_structure != scene.structure_name
+            ):
+                scene.structure_name = patch_structure
+                scene.state_patch["structure"] = patch_structure
+                scene.updated_at = _now()
             if scene.structure_name not in valid:
                 removed.append(scene_id)
                 self.scenes.pop(scene_id, None)

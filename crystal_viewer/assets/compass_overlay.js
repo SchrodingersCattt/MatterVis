@@ -47,6 +47,8 @@
       drag_poll_redraws: 0,
       svg_redraws: 0,
       svg_redraws_with_camera: 0,
+      svg_redraws_with_layout_camera: 0,
+      svg_redraws_with_live_camera: 0,
       strip_attempts: 0,
       strip_completed: 0,
       last_attach_skip_reason: null,
@@ -71,10 +73,15 @@
   function xyzFrom(obj, fallback) {
     if (!obj) return fallback.slice();
     if (Array.isArray(obj)) return [Number(obj[0]) || 0, Number(obj[1]) || 0, Number(obj[2]) || 0];
+    function coord(value, fallbackValue) {
+      if (value === undefined || value === null) return fallbackValue;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : fallbackValue;
+    }
     return [
-      Number(obj.x) || (fallback ? fallback[0] : 0),
-      Number(obj.y) || (fallback ? fallback[1] : 0),
-      Number(obj.z) || (fallback ? fallback[2] : 0),
+      coord(obj.x, fallback ? fallback[0] : 0),
+      coord(obj.y, fallback ? fallback[1] : 0),
+      coord(obj.z, fallback ? fallback[2] : 0),
     ];
   }
 
@@ -113,6 +120,9 @@
       } else {
         v = row;
       }
+      const n = Math.hypot(v[0], v[1], v[2]);
+      if (!isFinite(n) || n < 1e-12) return null;
+      v = [v[0] / n, v[1] / n, v[2] / n];
       out.push([dot(v, basis.right), dot(v, basis.screenUp)]);
     }
     return out;
@@ -125,6 +135,19 @@
       try { meta = JSON.parse(meta); } catch (err) { return null; }
     }
     return (meta && meta.compass) ? meta.compass : null;
+  }
+
+  function hasCompleteCamera(camera) {
+    return !!(camera && camera.eye && camera.center && camera.up);
+  }
+
+  function layoutSceneCamera(gd) {
+    if (!gd) return null;
+    const layoutScene = gd.layout && gd.layout.scene ? gd.layout.scene : null;
+    if (layoutScene && hasCompleteCamera(layoutScene.camera)) return layoutScene.camera;
+    const fullScene = gd._fullLayout && gd._fullLayout.scene ? gd._fullLayout.scene : null;
+    if (fullScene && hasCompleteCamera(fullScene.camera)) return fullScene.camera;
+    return null;
   }
 
   /* SVG layer management.
@@ -401,14 +424,29 @@
     return null;
   }
 
-  function redrawCompass(gd, eventCamera) {
+  function redrawCompass(gd, eventCamera, preferLiveCamera) {
     if (window.__mv_compass_diag) window.__mv_compass_diag.svg_redraws += 1;
     if (!gd || !gd.layout) return;
     const ctx = compassFromMeta(gd.layout);
     if (!ctx || !ctx.M) return;
-    const camera = eventCamera || liveSceneCamera(gd);
+    let camera = eventCamera || null;
+    let cameraSource = camera ? "event" : null;
+    if (!camera && preferLiveCamera) {
+      camera = liveSceneCamera(gd);
+      cameraSource = camera ? "live" : null;
+    }
+    if (!camera) {
+      camera = layoutSceneCamera(gd);
+      cameraSource = camera ? "layout" : null;
+    }
+    if (!camera && !preferLiveCamera) {
+      camera = liveSceneCamera(gd);
+      cameraSource = camera ? "live" : null;
+    }
     if (!camera) return;
     if (window.__mv_compass_diag) window.__mv_compass_diag.svg_redraws_with_camera += 1;
+    if (window.__mv_compass_diag && cameraSource === "layout") window.__mv_compass_diag.svg_redraws_with_layout_camera += 1;
+    if (window.__mv_compass_diag && cameraSource === "live") window.__mv_compass_diag.svg_redraws_with_live_camera += 1;
     const basis = cameraScreenBasis(camera);
     if (!basis) return;
     const projections = projectLattice(ctx.M, basis, ctx.cube_scale);
@@ -433,7 +471,7 @@
       scheduled = null;
       scheduledGd = null;
       scheduledCamera = null;
-      redrawCompass(g, c);
+      redrawCompass(g, c, false);
     });
   }
 
@@ -451,6 +489,30 @@
     }
     return v(camera.eye).concat(v(camera.up), v(camera.center)).join(",");
   }
+
+  function cameraFromRelayout(eventData) {
+    if (!eventData || typeof eventData !== "object") return null;
+    if (hasCompleteCamera(eventData["scene.camera"])) return eventData["scene.camera"];
+    if (eventData.scene && hasCompleteCamera(eventData.scene.camera)) return eventData.scene.camera;
+    const base = {};
+    let changed = false;
+    const groups = ["eye", "center", "up"];
+    const axes = ["x", "y", "z"];
+    for (let gi = 0; gi < groups.length; gi++) {
+      const group = groups[gi];
+      for (let ai = 0; ai < axes.length; ai++) {
+        const axis = axes[ai];
+        const key = "scene.camera." + group + "." + axis;
+        if (Object.prototype.hasOwnProperty.call(eventData, key)) {
+          if (!base[group]) base[group] = {};
+          base[group][axis] = Number(eventData[key]);
+          changed = true;
+        }
+      }
+    }
+    return changed && hasCompleteCamera(base) ? base : null;
+  }
+
   function dragPollTick(gd) {
     if (!dragPollActive) return;
     if (window.__mv_compass_diag) window.__mv_compass_diag.drag_poll_ticks += 1;
@@ -459,7 +521,7 @@
     if (key && key !== dragPollLastKey) {
       dragPollLastKey = key;
       if (window.__mv_compass_diag) window.__mv_compass_diag.drag_poll_redraws += 1;
-      redrawCompass(gd, camera);
+      redrawCompass(gd, camera, true);
     }
     dragPollRaf = window.requestAnimationFrame
       ? window.requestAnimationFrame(function () { dragPollTick(gd); })
@@ -481,7 +543,7 @@
       dragPollRaf = null;
     }
     /* Final redraw with the post-mouseup committed camera. */
-    redrawCompass(gd, null);
+    redrawCompass(gd, null, false);
   }
   let wheelStopTimer = null;
   function pulseDragPollOnWheel(gd) {
@@ -539,8 +601,8 @@
 
     /* Plotly events: mouseup commit and (when emitted) per-frame
        drag updates. Both go to scheduleRedraw which coalesces. */
-    gd.on("plotly_relayout", function () { scheduleRedraw(gd, null); });
-    gd.on("plotly_relayouting", function () { scheduleRedraw(gd, null); });
+    gd.on("plotly_relayout", function (eventData) { scheduleRedraw(gd, cameraFromRelayout(eventData)); });
+    gd.on("plotly_relayouting", function (eventData) { scheduleRedraw(gd, cameraFromRelayout(eventData)); });
     gd.on("plotly_afterplot", function () { scheduleRedraw(gd, null); });
 
     /* DOM-level drag arming. Window-level mouseup so we still
@@ -571,7 +633,7 @@
        rotation. */
     setTimeout(function () {
       stripPlotlyCompassOnce(gd);
-      redrawCompass(gd, null);
+      redrawCompass(gd, null, false);
     }, 0);
   }
 
@@ -589,7 +651,7 @@
     if (after > before) {
       /* Schedule one more redraw a tick later so the gl3d scene's
          _scene is fully built before we sample its camera. */
-      setTimeout(function () { redrawCompass(graphDiv(), null); }, 200);
+      setTimeout(function () { redrawCompass(graphDiv(), null, false); }, 200);
       return;
     }
     if (Date.now() > attachRetryDeadline) return;

@@ -100,6 +100,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 from molcrys_kit.utils.geometry import cart_to_frac, frac_to_cart
 
+from .disorder import atom_is_minor, bond_is_minor
+
 
 # Transform kinds the dispatcher recognises. Anything else is rejected
 # at the normaliser layer (api.py) before reaching this module so the
@@ -643,7 +645,7 @@ def rebuild_scene_with_atoms(
         z_span = max(z_max - z_min, 1e-6)
         for atom, depth in zip(draw_atoms, depths):
             atom["_depth_t"] = float((depth - z_min) / z_span)
-            atom["is_minor"] = bool(ops.is_minor(atom))
+            atom["is_minor"] = atom_is_minor(atom)
             atom["disorder_alpha"] = float(ops.disorder_alpha(atom))
             atom.setdefault("color", ops.elem_color(atom["elem"]))
             atom.setdefault("color_light", ops.elem_color_light(atom["elem"]))
@@ -684,7 +686,8 @@ def rebuild_scene_with_atoms(
                 "color_j": aj["color"],
                 "alpha_i": ai["disorder_alpha"],
                 "alpha_j": aj["disorder_alpha"],
-                "is_minor": bool(ai["is_minor"] or aj["is_minor"]),
+                # Derived only from loader-authored atom ``_is_minor`` flags.
+                "is_minor": bond_is_minor(ai, aj),
                 "depth_t": float((ai["_depth_t"] + aj["_depth_t"]) / 2.0),
             }
         )

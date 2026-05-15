@@ -75,6 +75,14 @@ def _camera_store_payload(scene_id: Optional[str], camera: Optional[dict[str, An
     return {"scene_id": scene_id, "camera": copy.deepcopy(camera)}
 
 
+def _camera_figure_patch(camera: Optional[dict[str, Any]], uirevision: Optional[str] = None) -> Patch:
+    patch = Patch()
+    patch["layout"]["scene"]["camera"] = copy.deepcopy(camera)
+    if uirevision is not None:
+        patch["layout"]["scene"]["uirevision"] = str(uirevision)
+    return patch
+
+
 def _camera_from_store(camera_state: Optional[dict[str, Any]], scene_id: Optional[str]) -> Optional[dict[str, Any]]:
     if not isinstance(camera_state, dict):
         return None
@@ -183,6 +191,12 @@ def _fast_style_patch_for_figure(
                 patch["data"][idx]["opacity"] = minor_alpha
             changed = True
     return patch if changed else no_update
+
+
+def _display_options_can_fast_patch(prev_options: Iterable[str] | None, next_options: Iterable[str] | None) -> bool:
+    """Only cosmetic label/axis toggles are safe for trace-only patching."""
+    changed = set(prev_options or []) ^ set(next_options or [])
+    return changed.issubset({"labels", "axes"})
 
 
 def _minor_opacity_disabled(disorder: Optional[str]) -> bool:
@@ -2191,7 +2205,11 @@ class ViewerBackend:
         # been dropped). Without prune, ``scene_state(active_id)``
         # below dereferences an unknown ``structure_name`` and crashes
         # the entire app at startup with a blank page.
-        scene_count_before = len(self.scene_store.scenes)
+        scene_store_before = json.dumps(
+            _json_safe(self.scene_store.list()),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
         removed_scene_ids = self.scene_store.prune(self.structure_names)
         if removed_scene_ids:
             print(
@@ -2200,7 +2218,12 @@ class ViewerBackend:
                 file=sys.stderr,
             )
         self.scene_store.ensure(self.structure_names, default_state_factory=self.default_state)
-        if len(self.scene_store.scenes) != scene_count_before:
+        scene_store_after = json.dumps(
+            _json_safe(self.scene_store.list()),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        if removed_scene_ids or scene_store_after != scene_store_before:
             try:
                 self.scene_store.save()
             except OSError as exc:  # pragma: no cover - disk-full / read-only mount
@@ -2697,6 +2720,13 @@ class ViewerBackend:
         else:
             state = copy.deepcopy(self.current_state)
         patch = patch or {}
+
+        def _display_signature(value: dict[str, Any]) -> tuple[str, bool, bool]:
+            return (
+                str(value.get("display_mode", "")),
+                "unit_cell_box" in (value.get("display_options") or []),
+                bool(value.get("topology_enabled", False)),
+            )
         if "scene_id" in patch and patch["scene_id"] in self.scene_store.scenes:
             scene_id = str(patch["scene_id"])
             state = self.scene_state(scene_id)
@@ -2709,6 +2739,7 @@ class ViewerBackend:
             state["scene_id"] = scene_id
             scene = self.scene_store.get(scene_id)
             state["scene_label"] = scene.label
+        display_signature_before = _display_signature(state)
         for key in ("atom_scale", "bond_radius", "minor_opacity", "axis_scale", "cutoff"):
             if key in patch and patch[key] is not None:
                 state[key] = float(patch[key])
@@ -2823,6 +2854,20 @@ class ViewerBackend:
             migrated = _legacy_monochrome_group(existing_ids)
             if migrated is not None:
                 state["atom_groups"] = existing_groups + [migrated]
+        display_signature_after = _display_signature(state)
+        if (
+            any(key in patch for key in ("display_mode", "display_options", "topology_enabled"))
+            and display_signature_after != display_signature_before
+        ):
+            # Plotly cameras live in the normalized scene cube. Reusing one
+            # after a display-signature change remaps the eye through a new
+            # cube scale and makes the model look squished.
+            state["camera"] = None
+            if "camera_revision" not in patch:
+                try:
+                    state["camera_revision"] = int(state.get("camera_revision", 0) or 0) + 1
+                except (TypeError, ValueError):
+                    state["camera_revision"] = 1
         if "camera" in patch and patch["camera"] is not None:
             state["camera"] = patch["camera"]
         # ``camera_revision`` is the uirevision-bump counter written by
@@ -3003,9 +3048,7 @@ class ViewerBackend:
         # If the same revision string covered an old state with a 25 Å
         # cube and a new state with a 12 Å cube, Plotly would silently
         # "preserve UI state" for the cube too, which is what made the
-        # molecule look squashed after switching back to ``formula_unit``
-        # ("打开 hydrogens 再关掉就正常，但操作 unit cell 又扁了" was a
-        # downstream symptom of this).
+        # molecule look squashed after switching back to ``formula_unit``.
         layout_signature = "{mode}|box={box}|topo={topo}".format(
             mode=str(state.get("display_mode", scene.get("display_mode", ""))),
             box=int(bool("unit_cell_box" in (state.get("display_options") or []))),
@@ -3080,7 +3123,12 @@ class ViewerBackend:
         safe = secure_filename(filename or "") or "upload.cif"
         if not safe.lower().endswith(".cif"):
             safe = f"{safe}.cif"
-        path = os.path.realpath(os.path.join(upload_dir, safe))
+        # Persist by content hash as well as display filename. Different
+        # uploads often share a simple name like ``DP.cif``; writing the raw
+        # filename would let a later upload overwrite the CIF backing an
+        # existing manifest record and corrupt restored scenes after restart.
+        storage_name = f"{digest[:16]}_{safe}"
+        path = os.path.realpath(os.path.join(upload_dir, storage_name))
         if os.path.commonpath([path, upload_dir]) != upload_dir:
             raise ValueError(f"unsafe upload filename: {filename!r}")
         with perf_log.time_block(
@@ -4129,8 +4177,7 @@ class ViewerBackend:
             # current at the time. The corner axis-key compass is a
             # paper-coord overlay whose arrows are pre-projected from
             # that camera, so reusing the cache verbatim freezes the
-            # compass at a stale angle (visible bug:
-            # https://… "axis错了" report). Refresh the compass +
+            # compass at a stale angle. Refresh the compass +
             # disorder legend under the *live* camera, which is cheap
             # (a handful of trig ops, no mesh rebuild).
             try:
@@ -4665,6 +4712,7 @@ def create_app(
                 style={"display": "none"},
             ),
             dcc.Store(id="native-upload-sync", data={"seq": 0}),
+            dcc.Store(id="scene-event-store", data={"seq": 0}),
             dcc.Download(id="export-download"),
             dcc.Interval(id="status-dismiss-timer", interval=5000, n_intervals=0, disabled=True),
             # 5 s is a deliberate compromise: long enough to avoid
@@ -5549,82 +5597,89 @@ def create_app(
         return opts_out, value_out
 
     @app.callback(
-        Output("scene-tabs", "children", allow_duplicate=True),
-        Output("scene-tabs", "value", allow_duplicate=True),
-        Output("status", "children", allow_duplicate=True),
+        Output("scene-event-store", "data"),
+        Output("status", "children"),
         Input("scene-new-tab-btn", "n_clicks"),
         Input("scene-rename-btn", "n_clicks"),
         Input("scene-tab-close-active", "n_clicks"),
         Input("scene-close-others-btn", "n_clicks"),
+        Input({"type": "tab-close", "scene_id": ALL}, "n_clicks"),
         State("scene-tabs", "value"),
         State("scene-tab-rename-input", "value"),
         prevent_initial_call=True,
     )
-    def mutate_scene_tabs(_, __, ___, ____, active_scene_id, label):
-        triggered = callback_context.triggered[0]["prop_id"].split(".")[0] if callback_context.triggered else None
-        if not active_scene_id:
-            return no_update, no_update, no_update
+    def dispatch_scene_tab_event(_, __, ___, ____, close_clicks, active_scene_id, label):
+        triggered = getattr(callback_context, "triggered_id", None)
+        if isinstance(triggered, dict):
+            if not close_clicks or not any(close_clicks):
+                return no_update, no_update
+            action = "close-row"
+        else:
+            action = str(triggered or "")
+        if not active_scene_id and action != "close-row":
+            return no_update, no_update
+
+        message = no_update
         try:
-            if triggered == "scene-new-tab-btn":
+            if action == "scene-new-tab-btn":
                 scene = backend.duplicate_scene(active_scene_id)
-                return backend.scene_tabs(), scene["id"], f"Duplicated scene: {scene['label']}"
-            if triggered == "scene-rename-btn":
+                message = f"Duplicated scene: {scene['label']}"
+            elif action == "scene-rename-btn":
                 scene = backend.update_scene(active_scene_id, {"label": label or ""})
-                return backend.scene_tabs(), scene["id"], f"Renamed scene: {scene['label']}"
-            if triggered == "scene-tab-close-active":
+                message = f"Renamed scene: {scene['label']}"
+            elif action == "scene-tab-close-active":
                 if len(backend.scene_options()) <= 1:
-                    return no_update, active_scene_id, "At least one scene tab must remain."
+                    return no_update, "At least one scene tab must remain."
                 backend.delete_scene(active_scene_id)
-                return backend.scene_tabs(), backend.active_scene_id(), "Closed scene."
-            if triggered == "scene-close-others-btn":
+                message = "Closed scene."
+            elif action == "scene-close-others-btn":
                 if len(backend.scene_options()) <= 1:
-                    return no_update, active_scene_id, "Only one scene open — nothing to close."
+                    return no_update, "Only one scene open — nothing to close."
                 result = backend.delete_other_scenes(active_scene_id)
                 n = len(result.get("removed") or [])
-                return backend.scene_tabs(), backend.active_scene_id(), f"Closed {n} other scene{'s' if n != 1 else ''}."
+                message = f"Closed {n} other scene{'s' if n != 1 else ''}."
+            elif action == "close-row":
+                scene_id = triggered.get("scene_id") if isinstance(triggered, dict) else None
+                if not scene_id:
+                    return no_update, no_update
+                if len(backend.scene_options()) <= 1:
+                    return no_update, "At least one scene tab must remain."
+                backend.delete_scene(scene_id)
+                message = "Closed scene."
+            else:
+                return no_update, no_update
         except Exception as exc:
-            return no_update, active_scene_id, f"Scene action failed: {exc}"
-        return no_update, active_scene_id, no_update
+            return no_update, f"Scene action failed: {exc}"
+
+        return {
+            "seq": time.time(),
+            "active_id": backend.active_scene_id(),
+            "version": backend.version,
+            "action": action,
+        }, message
 
     @app.callback(
-        Output("scene-tabs", "children", allow_duplicate=True),
-        Output("scene-tab-close-row", "children", allow_duplicate=True),
-        Output("scene-tabs", "value", allow_duplicate=True),
-        Output("status-banner", "children", allow_duplicate=True),
-        Output("status-banner", "className", allow_duplicate=True),
-        Output("status-dismiss-timer", "disabled", allow_duplicate=True),
-        Output("status-dismiss-timer", "n_intervals", allow_duplicate=True),
-        Input({"type": "tab-close", "scene_id": ALL}, "n_clicks"),
-        State("scene-tabs", "value"),
+        Output("scene-tabs", "children"),
+        Output("scene-tab-close-row", "children"),
+        Output("scene-tabs", "value"),
+        Input("scene-event-store", "data"),
+        Input("native-upload-sync", "data"),
+        Input("agent-state-poll", "n_intervals"),
         prevent_initial_call=True,
     )
-    def close_scene_tab(close_clicks, active_scene_id):
-        if not close_clicks or not any(close_clicks):
-            return (no_update,) * 7
-        triggered = getattr(callback_context, "triggered_id", None)
-        if not isinstance(triggered, dict):
-            return (no_update,) * 7
-        scene_id = triggered.get("scene_id")
-        if not scene_id:
-            return (no_update,) * 7
-        if len(backend.scene_options()) <= 1:
-            message, class_name = _status_message("At least one scene tab must remain.", "warning")
-            return no_update, no_update, active_scene_id, message, class_name, False, 0
-        try:
-            backend.delete_scene(scene_id)
-        except Exception as exc:
-            message, class_name = _status_message(f"Scene action failed: {exc}", "error")
-            return no_update, no_update, active_scene_id, message, class_name, False, 0
-        message, class_name = _status_message("Closed scene.", "success")
-        return backend.scene_tabs(), backend.scene_close_buttons(), backend.active_scene_id(), message, class_name, False, 0
+    def manage_scene_tabs_dom(_scene_event, _native_upload_sync, _n_intervals):
+        """Single writer for the scene tab DOM.
 
-    @app.callback(
-        Output("scene-tab-close-row", "children", allow_duplicate=True),
-        Input("scene-tabs", "children"),
-        prevent_initial_call=True,
-    )
-    def refresh_scene_close_buttons(_):
-        return backend.scene_close_buttons()
+        Scene CRUD callbacks and native upload only mutate the backend store
+        and emit events. This dispatcher rebuilds the visible tabs from
+        ``backend.scene_options()`` so tab labels, close buttons, and active
+        value cannot be written from competing callbacks.
+        """
+        options = backend.scene_options()
+        if not options:
+            return no_update, no_update, no_update
+        active_id = backend.active_scene_id() or options[0]["id"]
+        return backend.scene_tabs(), backend.scene_close_buttons(), active_id
 
     @app.callback(
         Output("status-banner", "children", allow_duplicate=True),
@@ -5647,19 +5702,11 @@ def create_app(
         return text, _status_class(level), False, 0
 
     # IMPORTANT: tab-switching (scene-tabs.value) and the agent-state
-    # poll (agent-state-poll.n_intervals) MUST share one callback that
-    # writes to the control props below. Splitting them into two
-    # callbacks -- with one using allow_duplicate=True -- triggers a
-    # Dash 2.18 bug where the *user-event* listener on every prop in
-    # the duplicate set is silently disabled: checkboxes, sliders and
-    # dropdowns still update the DOM but their onChange never reaches
-    # the server, so ``capture_state`` never fires. Concretely we saw
-    # all of Labels/Display Scope/Material/Style/Disorder turn into
-    # dead UI while the figure froze. Keeping a single non-duplicate
-    # writer per prop restores the dispatch.
+    # poll (agent-state-poll.n_intervals) still share this callback for
+    # the *control props*. The scene tab DOM itself is handled by
+    # ``manage_scene_tabs_dom`` above, which is the only writer for
+    # ``scene-tabs.children`` / ``scene-tabs.value``.
     @app.callback(
-        Output("scene-tabs", "children", allow_duplicate=True),
-        Output("scene-tabs", "value", allow_duplicate=True),
         Output("scene-tab-rename-input", "value"),
         Output("display-mode-selector", "value"),
         Output("display-options", "value"),
@@ -5686,17 +5733,13 @@ def create_app(
             if callback_context.triggered
             else None
         )
-        n_outputs = 17
+        n_outputs = 15
         if triggered == "scene-tabs":
             if not scene_id:
                 return (no_update,) * n_outputs
             backend.set_active_scene(scene_id, broadcast=False)
             state = backend.get_state(scene_id)
-            return (
-                no_update,
-                no_update,
-                *scene_control_outputs(state),
-            )
+            return scene_control_outputs(state)
         state = backend.pop_pending_state()
         if not state:
             return (no_update,) * n_outputs
@@ -5713,11 +5756,7 @@ def create_app(
         # camera change to the browser.
         outputs = list(scene_control_outputs(state))
         outputs[-1] = no_update  # camera-state-store slot
-        return (
-            backend.scene_tabs(),
-            state.get("scene_id") or backend.active_scene_id(),
-            *outputs,
-        )
+        return tuple(outputs)
 
     @app.callback(
         Output("agent-state-store", "data", allow_duplicate=True),
@@ -5777,7 +5816,15 @@ def create_app(
             "topology_enabled": "enabled" in (topology_toggle or []),
             "fast_rendering": material == "flat",
         }
-        if triggered in {"display-options", "axis-scale-slider", "minor-opacity-slider"} and not hydrogens_changed:
+        fast_display_options = (
+            triggered != "display-options"
+            or _display_options_can_fast_patch(prev_options, next_options)
+        )
+        if (
+            triggered in {"display-options", "axis-scale-slider", "minor-opacity-slider"}
+            and not hydrogens_changed
+            and fast_display_options
+        ):
             # Style-only controls are patched directly onto the current
             # Plotly figure by ``patch_fast_style_controls`` below. Persist
             # their state for API callers, but do not touch
@@ -5836,6 +5883,8 @@ def create_app(
         prev_options = set(prev.get("display_options") or [])
         next_options = set(display_options or [])
         if ("hydrogens" in prev_options) != ("hydrogens" in next_options):
+            return no_update, no_update
+        if not _display_options_can_fast_patch(prev_options, next_options):
             return no_update, no_update
         patch_payload = {
             "display_options": list(display_options or []),
@@ -6824,13 +6873,16 @@ def create_app(
     #
     # Both callbacks call into ``backend.camera_action`` (the same path
     # exercised by ``POST /api/v2/camera/action``), then push the new
-    # camera into ``camera-state-store`` only. The browser-side fast path
-    # has already relaid out the Plotly scene, so touching
-    # ``agent-state-store`` would just trigger a wasteful full-figure
-    # rebuild for a layout-only change.
+    # camera into ``camera-state-store`` and patch the Plotly layout
+    # directly. The browser-side fast path usually does the same relayout
+    # first, but the Dash Patch is the correctness fallback that prevents
+    # the SVG compass from updating while the WebGL scene keeps the old
+    # camera.
     # ------------------------------------------------------------------
     @app.callback(
         Output("camera-state-store", "data", allow_duplicate=True),
+        Output("crystal-graph", "figure", allow_duplicate=True),
+        Output("fast-view-metadata", "children", allow_duplicate=True),
         Input("view-align-a", "n_clicks"),
         Input("view-align-b", "n_clicks"),
         Input("view-align-c", "n_clicks"),
@@ -6844,7 +6896,7 @@ def create_app(
     def apply_view_action(_a, _b, _c, _astar, _bstar, _cstar, _reset, scene_id):
         triggered = getattr(callback_context, "triggered_id", None)
         if not triggered:
-            return no_update
+            return no_update, no_update, no_update
         scene_id = scene_id or backend.active_scene_id()
         button_to_axis = {
             "view-align-a": "a",
@@ -6865,10 +6917,18 @@ def create_app(
                     axis=button_to_axis[triggered],
                 )
             else:
-                return no_update
+                return no_update, no_update, no_update
         except Exception:  # pragma: no cover - best-effort, surface in console
-            return no_update
-        return _camera_store_payload(scene_id, camera)
+            return no_update, no_update, no_update
+        state = backend.get_state(scene_id)
+        scene = backend.scene_for_state(state)
+        style = backend.style_for_state(state, scene=scene)
+        camera_payload = _camera_store_payload(scene_id, camera)
+        return (
+            camera_payload,
+            _camera_figure_patch(camera, style.get("uirevision")),
+            _fast_view_metadata(backend, state, camera_payload),
+        )
 
     @app.callback(
         Output("view-projection", "value", allow_duplicate=True),
@@ -6887,25 +6947,35 @@ def create_app(
 
     @app.callback(
         Output("camera-state-store", "data", allow_duplicate=True),
+        Output("crystal-graph", "figure", allow_duplicate=True),
+        Output("fast-view-metadata", "children", allow_duplicate=True),
         Input("view-projection", "value"),
         State("scene-tabs", "value"),
         prevent_initial_call=True,
     )
     def apply_view_projection(projection, scene_id):
         if not projection:
-            return no_update
+            return no_update, no_update, no_update
         scene_id = scene_id or backend.active_scene_id()
         # Skip the redraw if the user clicked the radio that was
         # already selected -- avoids ratcheting the figure JSON cache
         # for a no-op.
         current = backend.get_state(scene_id).get("projection", "perspective")
         if str(projection) == str(current):
-            return no_update
+            return no_update, no_update, no_update
         try:
             camera = backend.set_projection(projection, scene_id=scene_id, broadcast=False)
         except Exception:  # pragma: no cover
-            return no_update
-        return _camera_store_payload(scene_id, camera)
+            return no_update, no_update, no_update
+        state = backend.get_state(scene_id)
+        scene = backend.scene_for_state(state)
+        style = backend.style_for_state(state, scene=scene)
+        camera_payload = _camera_store_payload(scene_id, camera)
+        return (
+            camera_payload,
+            _camera_figure_patch(camera, style.get("uirevision")),
+            _fast_view_metadata(backend, state, camera_payload),
+        )
 
     @app.callback(
         Output("camera-state-store", "data", allow_duplicate=True),

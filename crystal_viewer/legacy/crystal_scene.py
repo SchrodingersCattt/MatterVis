@@ -7,6 +7,11 @@ from typing import Any, Dict, Iterable, Optional
 
 import numpy as np
 
+try:
+    from ..disorder import atom_is_minor, bond_is_minor
+except ImportError:  # pragma: no cover - allows direct script execution
+    from crystal_viewer.disorder import atom_is_minor, bond_is_minor  # type: ignore
+
 
 DEFAULT_STYLE = {
     "atom_scale": 1.0,
@@ -215,7 +220,7 @@ def _label_payload(ops: Any, draw_atoms, view_x, view_y, view_z):
     for at in label_atoms_all:
         sy_val = float(at["cart"] @ view_y)
         lbl = at["label"]
-        cur_minor = bool(ops.is_minor(at))
+        cur_minor = atom_is_minor(at)
         if lbl not in seen_labels:
             seen_labels[lbl] = (at, sy_val, cur_minor)
             continue
@@ -245,7 +250,7 @@ def _label_payload(ops: Any, draw_atoms, view_x, view_y, view_z):
             "atom_cart": at["cart"].copy(),
             "label_cart": lpos_3d.copy(),
             "text": at["label"],
-            "is_minor": bool(ops.is_minor(at)),
+            "is_minor": atom_is_minor(at),
         })
     return label_items
 
@@ -282,7 +287,7 @@ def build_scene_from_atoms(
         z_span = max(z_max - z_min, 1e-6)
         for at, d in zip(draw_atoms, depths):
             at["_depth_t"] = float((d - z_min) / z_span)
-            at["is_minor"] = bool(ops.is_minor(at))
+            at["is_minor"] = atom_is_minor(at)
             at["disorder_alpha"] = float(ops.disorder_alpha(at))
             at["color"] = ops.elem_color(at["elem"])
             at["color_light"] = ops.elem_color_light(at["elem"])
@@ -302,7 +307,8 @@ def build_scene_from_atoms(
             "color_j": aj["color"],
             "alpha_i": ai["disorder_alpha"],
             "alpha_j": aj["disorder_alpha"],
-            "is_minor": bool(ai["is_minor"] or aj["is_minor"]),
+            # Derived only from loader-authored atom ``_is_minor`` flags.
+            "is_minor": bond_is_minor(ai, aj),
             "depth_t": float((ai["_depth_t"] + aj["_depth_t"]) / 2.0),
         })
 

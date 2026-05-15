@@ -147,9 +147,11 @@ Concrete rules:
   `molcrys_kit.analysis.disorder.\
 generate_ordered_replicas_from_disordered_sites`.** Two patterns
   both need the optimal-replica picker:
-    1. `occ < 1` with `_atom_site_disorder_group` and
-       `_atom_site_disorder_assembly` blank (DAP-4 H3A/H3B at
-       occ=0.5).
+    1. Sibling labels such as H3A/H3B with `occ < 1` and
+       `_atom_site_disorder_group` / `_atom_site_disorder_assembly`
+       blank. A single blank-tag partial-occupancy site is not enough
+       evidence because ordered special-position atoms use the same CIF
+       shape.
     2. `occ < 1` with `dg` starting with `"-"` (SHELX -PART
        convention, SY's en cation: every alternate's symmetry
        equivalent is the *other* half of the disorder pair).
@@ -351,8 +353,9 @@ goal is "don't repeat known failures", not blame.
     so SHELX-occupancy CIFs auto-resolve via
     `generate_ordered_replicas_from_disordered_sites(method="optimal")`
     and the discarded rotamer image gets `_is_minor=True`.
-  - Patch `is_minor` to recognise the SHELX `occ<0.5 + dg='.' + da='.'`
-    pattern as a fallback when the auto-resolver can't be used.
+  - Patch `is_minor` to trust explicit `_is_minor` / PART markers, not
+    blank partial occupancy alone; otherwise ordered special-position
+    atoms render as false minor disorder.
 - **Permanent rule:** when MolCrysKit already computes a quantity
   (molecule grouping, bond graph, ordered replica, …), MatterVis must
   consume it as the single source of truth. Re-deriving the same

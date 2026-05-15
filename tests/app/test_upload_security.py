@@ -85,7 +85,7 @@ def test_normal_filename_still_works(backend: ViewerBackend, upload_dir: Path) -
     bundle = backend.add_uploaded_file_bytes(_VALID_CIF, "my_struct.cif")
     written = Path(bundle.cif_path).resolve()
     assert written.parent == upload_dir
-    assert written.name == "my_struct.cif"
+    assert written.name.endswith("_my_struct.cif")
     # And the bundle should be registered under a sane name.
     assert bundle.name == "my_struct"
 
@@ -95,6 +95,20 @@ def test_extension_is_forced_to_cif(backend: ViewerBackend, upload_dir: Path) ->
     written = Path(bundle.cif_path).resolve()
     assert written.parent == upload_dir
     assert written.suffix == ".cif"
+    assert written.name.endswith("_no_extension.cif")
+
+
+def test_same_filename_different_bytes_do_not_overwrite(backend: ViewerBackend) -> None:
+    first = backend.add_uploaded_file_bytes(_VALID_CIF, "same_name.cif")
+    second = backend.add_uploaded_file_bytes(
+        _VALID_CIF.replace(b"C1 C 0.0 0.0 0.0 1.0", b"N1 N 0.5 0.5 0.5 1.0"),
+        "same_name.cif",
+    )
+
+    assert first.name == "same_name"
+    assert second.name == "same_name_2"
+    assert first.cif_path != second.cif_path
+    assert Path(first.cif_path).read_bytes() != Path(second.cif_path).read_bytes()
 
 
 def test_reupload_same_bytes_is_idempotent(backend: ViewerBackend) -> None:

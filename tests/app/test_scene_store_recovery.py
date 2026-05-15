@@ -125,3 +125,24 @@ def test_prune_keeps_valid_and_demotes_active_to_first_survivor() -> None:
     assert removed == ["ghost"]
     assert store.order == ["live"]
     assert store.active_id == "live"
+
+
+def test_prune_repairs_state_patch_structure_mismatch() -> None:
+    Scene = __import__("crystal_viewer.scenes", fromlist=["Scene"]).Scene
+    store = SceneStore("/tmp/unused.json")
+    store.scenes = {
+        "mixed": Scene(
+            id="mixed",
+            label="DP",
+            structure_name="SY",
+            state_patch={"structure": "DP", "display_mode": "formula_unit"},
+        )
+    }
+    store.order = ["mixed"]
+    store.active_id = "mixed"
+
+    removed = store.prune(["SY", "DP"])
+
+    assert removed == []
+    assert store.scenes["mixed"].structure_name == "DP"
+    assert store.scenes["mixed"].state_patch["structure"] == "DP"
