@@ -90,8 +90,7 @@ def axis_key_overlay(scene: dict, style: dict) -> tuple[list[dict], list[dict]]:
             continue
         ux = dx_world / n
         uy = dy_world / n
-        rel = n / max_norm
-        wanted_px = (pixel_length + label_pixel_offset + edge_margin_px) * rel
+        wanted_px = pixel_length + label_pixel_offset + edge_margin_px
         if wanted_px <= 0:
             continue
         if ux > 0:
@@ -107,7 +106,6 @@ def axis_key_overlay(scene: dict, style: dict) -> tuple[list[dict], list[dict]]:
         if allowed_px < wanted_px:
             cap = min(cap, pixel_length * (allowed_px / wanted_px))
     pixel_length = max(cap, 12.0)
-    scale_px = pixel_length / max_norm
 
     dot_threshold = float(style.get("axis_key_dot_threshold", 0.05))
     dot_radius = float(style.get("axis_key_dot_radius_px", 4.0))
@@ -152,8 +150,8 @@ def axis_key_overlay(scene: dict, style: dict) -> tuple[list[dict], list[dict]]:
             ))
             continue
 
-        dx_px = dx_world * scale_px
-        dy_px = dy_world * scale_px
+        dx_px = dx_world / norm * pixel_length
+        dy_px = dy_world / norm * pixel_length
         tip_x = anchor_x + dx_px / fig_w
         tip_y = anchor_y + dy_px / fig_h
 

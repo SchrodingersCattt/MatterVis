@@ -120,6 +120,9 @@
       } else {
         v = row;
       }
+      const n = Math.hypot(v[0], v[1], v[2]);
+      if (!isFinite(n) || n < 1e-12) return null;
+      v = [v[0] / n, v[1] / n, v[2] / n];
       out.push([dot(v, basis.right), dot(v, basis.screenUp)]);
     }
     return out;
@@ -261,8 +264,7 @@
       if (n < 1e-12) continue;
       const ux = projections[i][0] / n;
       const uy = projections[i][1] / n;
-      const rel = n / maxNorm;
-      const wanted = (pixelLength + labelOffset) * rel;
+      const wanted = pixelLength + labelOffset;
       if (wanted <= 0) continue;
       let allowed = Infinity;
       if (ux > 0) allowed = Math.min(allowed, availRight / ux);
@@ -272,7 +274,6 @@
       if (allowed < wanted) cap = Math.min(cap, pixelLength * (allowed / wanted));
     }
     const effectivePixelLength = Math.max(cap, 12.0);
-    const scalePx = effectivePixelLength / maxNorm;
 
     clearSvg(svg);
 
@@ -321,8 +322,8 @@
 
       /* dyWorld is in screen-up basis (positive = up). SVG y points
          down. Flip sign when laying out arrow tip in pixel space. */
-      const dxPx = dxWorld * scalePx;
-      const dyPx = dyWorld * scalePx;
+      const dxPx = dxWorld / norm * effectivePixelLength;
+      const dyPx = dyWorld / norm * effectivePixelLength;
       const tipX = anchorPx + dxPx;
       const tipY = anchorPy - dyPx;
 

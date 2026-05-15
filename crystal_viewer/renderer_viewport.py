@@ -109,7 +109,7 @@ def _manual_aspect_scale(scene: dict, style: dict, topology_data: dict | None = 
 
 
 def _camera_axis_projections(scene: dict, style: dict) -> list[list[float]] | None:
-    """Reproject lattice axes onto the live camera's screen plane."""
+    """Reproject unit lattice-basis directions onto the camera screen plane."""
     camera = style.get("camera")
     if not isinstance(camera, dict):
         return None
@@ -153,8 +153,12 @@ def _camera_axis_projections(scene: dict, style: dict) -> list[list[float]] | No
 
     cube_scale = _axis_cube_scale(scene, style)
     M_cube = M[:3] / cube_scale[None, :] if cube_scale is not None else M[:3]
+    norms = np.linalg.norm(M_cube, axis=1)
+    if not np.all(np.isfinite(norms)) or np.any(norms < 1e-12):
+        return None
+    basis_dirs = M_cube / norms[:, None]
     return [
-        [float(np.dot(M_cube[i], right)), float(np.dot(M_cube[i], screen_up))]
+        [float(np.dot(basis_dirs[i], right)), float(np.dot(basis_dirs[i], screen_up))]
         for i in range(3)
     ]
 

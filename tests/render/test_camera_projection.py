@@ -172,10 +172,12 @@ def test_compass_arrows_share_single_anchor():
         )
 
 
-def test_compass_arrow_lengths_track_lattice_anisotropy():
-    """Projected arrow pixel-lengths must preserve relative |a|:|b|:|c|
-    magnitudes. For an orthorhombic cell viewed straight down +z, the
-    b/a length ratio on screen should match the cell's b/a ratio.
+def test_compass_arrow_lengths_use_equal_basis_vectors():
+    """Compass arrows show basis-vector directions, not lattice lengths.
+
+    For an orthorhombic cell viewed straight down +z, a and b should render
+    with equal visible length even when |b| is roughly 3x |a|. The c basis
+    vector collapses to a dot because it points into the camera.
     """
     scene = {
         "name": "test",
@@ -203,19 +205,15 @@ def test_compass_arrow_lengths_track_lattice_anisotropy():
     # down z).
     assert len(arrows) == 2
     pix_lens = sorted(math.hypot(float(ann.ax), float(ann.ay)) for ann in arrows)
-    assert math.isclose(pix_lens[1] / pix_lens[0], 24.72 / 8.09, rel_tol=1e-3)
+    assert math.isclose(pix_lens[1] / pix_lens[0], 1.0, rel_tol=1e-3)
 
 
 def test_compass_projection_rescales_to_cube_for_aspectmode_data():
     """``aspectmode="data"`` (the default for anisotropic cells like SY)
     means Plotly's camera operates in normalised cube coords, not data
-    coords. Without the aspect-mode correction, the compass arrow for
-    ``b`` on SY draws ~3x longer than ``a`` because |b|=24.72 vs
-    |a|=8.09 in data space -- but on the actual rendered scene they
-    appear roughly EQUAL on screen because Plotly maps the long b
-    axis onto the same cube extent as a. Pin the corrected projection
-    so the compass tracks what the user sees, not what the cell
-    formula says.
+    coords. The compass first maps lattice rows into the same cube space
+    before normalising them to unit basis directions, so it tracks visible
+    direction without encoding cell-axis lengths.
     """
     from crystal_viewer.renderer import _camera_axis_projections
 
@@ -238,11 +236,8 @@ def test_compass_projection_rescales_to_cube_for_aspectmode_data():
     a_xy, b_xy, _c_xy = proj
     a_len = math.hypot(*a_xy)
     b_len = math.hypot(*b_xy)
-    # After cube rescaling both axes span the same cube extent so
-    # their projected lengths agree to within a few percent (small
-    # differences come from the radius-padding in scene["bounds"]).
-    # Before the fix, b_len/a_len was 24.72 / 8.09 ≈ 3.06, so a 5%
-    # tolerance is more than enough to catch a regression.
+    # After cube rescaling and basis normalisation, both visible basis
+    # directions have unit projected length when viewed along +z.
     ratio = max(b_len, a_len) / max(min(b_len, a_len), 1e-12)
     assert ratio < 1.10, (
         f"expected b_len ~= a_len under aspectmode=data; got "
@@ -253,9 +248,9 @@ def test_compass_projection_rescales_to_cube_for_aspectmode_data():
 def test_compass_projection_skips_cube_rescaling_for_cube_aspectmode():
     """When :func:`uniform_viewport` stamps a shared cube on a scene
     (or every axis happens to span the same range) Plotly renders
-    with ``aspectmode="cube"``. In that case data == cube already, so
-    re-rescaling lattice vectors by the half-ranges would WRONGLY
-    shrink anisotropic axes to unit length on screen.
+    with ``aspectmode="cube"``. In that case data == cube already, and
+    the compass still normalises the lattice rows to unit basis directions
+    so it does not encode cell lengths.
     """
     from crystal_viewer.renderer import _camera_axis_projections
 
@@ -277,8 +272,7 @@ def test_compass_projection_skips_cube_rescaling_for_cube_aspectmode():
     proj = _camera_axis_projections(scene, style)
     a_len = math.hypot(*proj[0])
     b_len = math.hypot(*proj[1])
-    # Real anisotropy preserved: b is ~3.06x a on a cube-mode scene.
-    assert math.isclose(b_len / a_len, 24.72 / 8.09, rel_tol=1e-3)
+    assert math.isclose(b_len / a_len, 1.0, rel_tol=1e-3)
 
 
 def test_compass_overlay_js_uses_svg_layer_not_plotly_relayout_for_drag():
@@ -487,14 +481,11 @@ def test_compass_metadata_stashed_for_clientside_reprojection():
 
 
 def test_compass_projects_orthogonal_axes_to_orthogonal_screen_vectors():
-    """Regression: ``_camera_axis_projections`` used to take ``view = eye``
-    instead of ``view = center - eye`` and pre-normalised every lattice
-    vector. The combined bug made SY's compass draw the ``a`` and ``b``
-    arrows into the same screen quadrant with near-equal lengths, even
-    though SY is orthorhombic with ``|b| = 3 |a|``. Pin the math by
-    asserting that for a diagonal cell viewed straight down ``+z``, the
-    projected basis is genuinely orthogonal AND magnitudes track the
-    real ``|a|``, ``|b|``, ``|c|``.
+    """The compass projects unit basis directions with the right view sign.
+
+    For a diagonal cell viewed straight down +z, a and b must remain
+    orthogonal on screen, but their lengths are equal because the compass
+    is a basis-direction triad rather than a cell-length scale bar.
     """
     from crystal_viewer.renderer import _camera_axis_projections
 
@@ -514,21 +505,19 @@ def test_compass_projects_orthogonal_axes_to_orthogonal_screen_vectors():
     # Looking -z with up=+y: a projects to screen-right (since right = view x
     # up = (0,0,-1) x (0,1,0) = (1,0,0)), b projects to screen-up, c
     # collapses to the origin.
-    assert math.isclose(a_xy[0], 8.09, rel_tol=0, abs_tol=1e-4)
+    assert math.isclose(a_xy[0], 1.0, rel_tol=0, abs_tol=1e-4)
     assert math.isclose(a_xy[1], 0.0, rel_tol=0, abs_tol=1e-4)
     assert math.isclose(b_xy[0], 0.0, rel_tol=0, abs_tol=1e-4)
-    assert math.isclose(b_xy[1], 24.72, rel_tol=0, abs_tol=1e-4)
+    assert math.isclose(b_xy[1], 1.0, rel_tol=0, abs_tol=1e-4)
     assert math.isclose(c_xy[0], 0.0, rel_tol=0, abs_tol=1e-4)
     assert math.isclose(c_xy[1], 0.0, rel_tol=0, abs_tol=1e-4)
 
     # a perp b on screen.
     assert math.isclose(a_xy[0] * b_xy[0] + a_xy[1] * b_xy[1], 0.0, abs_tol=1e-4)
 
-    # Magnitudes must track real cell anisotropy; the pre-fix normalisation
-    # would have collapsed all three to unit length.
     a_len = math.hypot(*a_xy)
     b_len = math.hypot(*b_xy)
-    assert math.isclose(b_len / a_len, 24.72 / 8.09, rel_tol=1e-4)
+    assert math.isclose(b_len / a_len, 1.0, rel_tol=1e-4)
 
 
 def test_compass_uses_view_minus_eye_not_eye():
