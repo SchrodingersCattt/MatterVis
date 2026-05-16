@@ -1002,10 +1002,7 @@ def _polyhedra_table_rows(
                                         step=0.05,
                                         value=float(spec.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC)),
                                         debounce=True,
-                                        title=(
-                                            "Maximum shell-centroid offset as a fraction of shell radius. "
-                                            "Larger values make enclosure less strict."
-                                        ),
+                                        placeholder="0.15",
                                         style={"width": "100%", "fontSize": "11px"},
                                     ),
                                 ],

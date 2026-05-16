@@ -29,6 +29,7 @@ from crystal_viewer.app import (
     ViewerBackend,
     _normalize_polyhedron_spec,
     _normalize_polyhedron_specs,
+    _polyhedra_table_rows,
 )
 from crystal_viewer import topology as topology_module
 from crystal_viewer.presets import default_preset_path
@@ -75,6 +76,27 @@ def test_normalize_polyhedron_spec_accepts_packing_shell_knobs():
     assert spec is not None
     assert spec["enforce_enclosure"] is False
     assert spec["centroid_offset_frac"] == 0.65
+
+
+def test_polyhedra_table_rows_accept_packing_shell_controls():
+    rows = _polyhedra_table_rows(
+        [
+            {
+                "id": "spec_a",
+                "name": "A shell",
+                "center_species": "C2N2",
+                "ligand_species": "ClO4",
+                "color": "#7c5cbf",
+                "enabled": True,
+                "enforce_enclosure": False,
+                "centroid_offset_frac": 0.65,
+                "instance_overrides": {},
+            }
+        ],
+        [{"label": "C2N2", "value": "C2N2"}, {"label": "ClO4", "value": "ClO4"}],
+    )
+
+    assert len(rows) == 1
 
 
 def test_normalize_polyhedron_spec_rejects_invalid_color_to_fallback():
