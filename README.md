@@ -299,16 +299,16 @@ hand-curated fragment rather than a crystallographic asymmetric unit.
 crystal_viewer/
 ├── __init__.py          # re-exports create_app
 ├── __main__.py          # `python -m crystal_viewer` entry point
-├── app.py               # Dash layout, callbacks, ViewerBackend
-├── api.py               # REST + WebSocket blueprint
+├── app/                 # Dash layout, callbacks, ViewerBackend internals
+├── api/                 # REST + WebSocket blueprints
+├── render/              # Plotly viewport / traces / cache internals
 ├── loader.py            # CIF parsing and fragment bundle loading
-├── scene.py             # thin wrapper around the vendored scene helpers
+├── scene.py             # cell/cluster scene builder
 ├── renderer.py          # Plotly trace generation (atoms, bonds, hull, axes)
 ├── topology.py          # coordination-shell extraction & shape analysis
-├── ideal_polyhedra.py   # reference polyhedra for CN 8-12
 ├── presets.py           # preset / style / catalog IO
 ├── assets/              # Dash CSS + JS for the panel layout
-└── legacy/              # vendored static-export modules
+└── static_publication/  # matplotlib publication exporter
 scripts/                # runnable demo scripts (see section above)
 docs/                    # README showcase images + scores.md
 ```

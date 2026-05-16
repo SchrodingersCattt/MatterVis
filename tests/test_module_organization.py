@@ -10,7 +10,6 @@ RELAXED_LINE_LIMITS = {
     # These modules are mature, cohesive entry points that are just over the
     # general cap. Keep them visible so future growth is intentional.
     "loader.py": 1200,
-    "static_publication/plot_crystal.py": 2200,
     "transforms.py": 1200,
 }
 KNOWN_OVERSIZE_DURING_SPLIT = {}

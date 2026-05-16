@@ -12,26 +12,28 @@ MatterVis/
 ├── README.md            ← user-facing pitch
 ├── agents/              ← caller-facing API contracts (REST, programmatic)
 ├── crystal_viewer/      ← the library + Dash app
-│   ├── api.py           ← REST/WebSocket facade; routes live in `api_v*_*.py`
-│   ├── app.py           ← public Dash entrypoint facade
-│   ├── app_*.py         ← Dash layout factory, state normalizers, UI helpers
-│   ├── dash_callbacks_*.py ← grouped Dash callback registrations
+│   ├── api/             ← REST/WebSocket facade + v1/v2 route modules
+│   ├── app/             ← Dash entrypoint, callbacks, UI helpers, backend mixins
+│   ├── render/          ← Plotly viewport, mesh, trace, topology, style, cache helpers
 │   ├── atom_groups.py   ← per-scene atom styling rules
+│   ├── bonds.py         ← manifested-scene bond perception helpers
 │   ├── bond_groups.py   ← per-scene bond styling rules
+│   ├── cif_parse.py     ← minimal CIF symmetry expansion / static parser bridge
 │   ├── compass.py       ← camera-projected paper-coord indicators
 │   ├── cube.py          ← static cube/orbital figures (I/O, isosurfaces, atoms, bonds)
-│   ├── ideal_polyhedra.py
-│   ├── legacy/          ← vendored matplotlib pipeline; do not extend
+│   ├── formula_unit.py  ← formula-unit selection and P1 component assembly
+│   ├── geometry.py      ← lattice/view/bond-vector math helpers
 │   ├── loader.py        ← structure ingestion
+│   ├── palette.py       ← default element colours/radii exposed read-only
 │   ├── presets.py
 │   ├── scenes.py        ← tab/session scene state
 │   ├── ortep.py         ← thermal ellipsoid geometry + traces
 │   ├── renderer.py      ← public Plotly figure facade
-│   ├── renderer_*.py    ← viewport, mesh, trace, topology, style, cache helpers
 │   ├── scene.py         ← cell/cluster scene builder
+│   ├── static_publication/ ← matplotlib publication exporter; do not extend casually
 │   ├── topology.py      ← coordination polyhedra geometry & analysis
 │   ├── transforms.py    ← supercell / grow / slab structure mutations
-│   └── viewer_backend*.py ← scene store, figure/cache orchestration, exports
+│   └── viewer_backend.py ← public ViewerBackend compatibility facade
 ├── docs/                ← sphinx sources, score tables
 ├── scripts/             ← runnable scripts that exercise the public API
 │   └── private/         ← local/private analysis scripts; keep unpublished data ignored
@@ -186,9 +188,10 @@ generate_ordered_replicas_from_disordered_sites`.** Two patterns
   Without that, the ASE neighbour-list bonds a kept N to a discarded N
   at 0.15 A and fuses two cations into one species again.
 - **Cross-orientation bonds must be filtered at scene build time.**
-  The legacy `find_bonds` in `crystal_viewer/legacy/plot_crystal.py`
-  doesn't know about `_is_minor` and would draw bonds between major
-  and minor atoms — the "套了一层黑色线" / "black cage" complaint.
+  The manifested-scene `find_bonds` helper in `crystal_viewer/bonds.py`
+  intentionally stays chemistry-light and must not decide visibility
+  from `_is_minor`; otherwise it would draw bonds between major and
+  minor atoms — the "套了一层黑色线" / "black cage" complaint.
   `build_scene_from_atoms` in `crystal_viewer/scene.py` skips any
   bond whose endpoints disagree on `is_minor`. Bonds between two
   major atoms render normally; bonds between two minor atoms render
@@ -231,7 +234,7 @@ has grown the exact hook named here.
   "outline ink".
 - MatterVis stores every live lattice matrix as row vectors
   (`cart = frac @ M`), matching ASE, pymatgen, and `molcrys_kit`.
-  The vendored legacy parser still returns the old column-vector
+  The static-publication CIF parser still returns the old column-vector
   matrix; convert it once at the boundary and do not pass column
   matrices into new code.
 - MatterVis may perform minimal CIF symmetry expansion at the loader

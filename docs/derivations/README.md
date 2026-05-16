@@ -49,7 +49,7 @@ Fractional coordinates are row vectors.  The conversion is
 
 This is the same convention used by ASE, pymatgen, and MolCrysKit.  The legacy
 parser still returns the old column-vector matrix; MatterVis converts it once
-at the loader boundary with `M = legacy_M.T` in `crystal_viewer/scene.py:614`.
+at the loader boundary with `M = legacy_M.T` in `crystal_viewer/scene.py`.
 Any later `M.T` should be treated as an explicit bridge back into legacy code,
 not as a second convention.
 
@@ -135,7 +135,7 @@ There must be exactly one row/column convention conversion at any boundary.
 The normal MatterVis path is row-vector `M`.  Exceptions must be narrow and
 named:
 
-- `crystal_viewer/scene.py:614` converts the legacy parser output into row
+- `crystal_viewer/scene.py` converts the static-publication parser output into row
   vectors.
 - `crystal_viewer/scene.py:156` passes `M.T` back into a legacy helper that
   still expects column vectors.
