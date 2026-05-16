@@ -479,7 +479,7 @@ def test_compass_overlay_python_skipped_for_dash_interactive_path():
     export pipelines (cube.export_static, scripts/) leave the flag
     unset and keep the baked compass for kaleido.
     """
-    from crystal_viewer.renderer_compass import axis_key_overlay
+    from crystal_viewer.render.compass import axis_key_overlay
 
     scene = {
         "M": np.eye(3) * 5,

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from crystal_viewer.app.dash_impl import ViewerBackend
 from crystal_viewer.loader import build_loaded_crystal
-from crystal_viewer.renderer_viewport import _plotly_camera_from_scene
+from crystal_viewer.render.viewport import _plotly_camera_from_scene
 
 
 def _backend() -> ViewerBackend:

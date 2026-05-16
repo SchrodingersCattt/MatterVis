@@ -1,7 +1,7 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
-from .renderer_common import *
+from .common import *
 
 def validate_style_schema(style: dict) -> dict:
     material = str(style.get("material", "mesh"))

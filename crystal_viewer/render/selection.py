@@ -1,8 +1,8 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
-from .renderer_common import *
-from .renderer_style import *
+from .common import *
+from .style import *
 
 def _atom_selection_trace(scene: dict, style: dict, hidden_labels: set | None = None):
     xs, ys, zs, sizes, labels, customdata = [], [], [], [], [], []

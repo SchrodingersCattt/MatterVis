@@ -1,14 +1,14 @@
 # ruff: noqa: F401,F405
 from __future__ import annotations
 
-from .renderer_scene_traces import *  # noqa: F403
-from .renderer_compass import (
+from .render.scene_traces import *  # noqa: F403
+from .render.compass import (
     _COMPASS_ITEM_NAME,
     axis_key_overlay,
     compass_clientside_context,
     compose_axis_key_layout,
 )
-from .renderer_viewport import (
+from .render.viewport import (
     _axis_cube_scale,
     _camera_axis_projections,
     _normalize,

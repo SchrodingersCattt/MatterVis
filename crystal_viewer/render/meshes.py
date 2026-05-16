@@ -1,7 +1,7 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
-from .renderer_common import *
+from .common import *
 
 def _unit_sphere(lat_steps: int = 9, lon_steps: int = 14) -> Tuple[np.ndarray, np.ndarray]:
     vertices = []

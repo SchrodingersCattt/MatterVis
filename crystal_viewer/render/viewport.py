@@ -141,7 +141,7 @@ def _camera_axis_projections(scene: dict, style: dict) -> list[list[float]] | No
         "up": {"x": float(up[0]), "y": float(up[1]), "z": float(up[2])},
     }
     try:
-        from .compass import camera_screen_basis
+        from ..compass import camera_screen_basis
 
         right, screen_up = camera_screen_basis(canonical)
     except (ValueError, KeyError, TypeError):

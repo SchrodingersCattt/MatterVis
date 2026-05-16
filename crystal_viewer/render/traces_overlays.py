@@ -1,10 +1,10 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
-from .renderer_common import *
-from .renderer_meshes import *
-from .renderer_style import *
-from .renderer_serialize import _round_coord_arrays
+from .common import *
+from .meshes import *
+from .style import *
+from .serialize import _round_coord_arrays
 
 def _ring_segments(center: np.ndarray, radius: float, axis: np.ndarray, *, segments: int = 14):
     """Generate (start, end) line segments forming a circular ring of

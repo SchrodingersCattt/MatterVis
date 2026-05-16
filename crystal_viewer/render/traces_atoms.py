@@ -1,10 +1,10 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
-from .renderer_common import *
-from .renderer_meshes import *
-from .renderer_style import *
-from .renderer_traces_overlays import _dashed_segments, _ring_segments, _segment_cylinder_trace
+from .common import *
+from .meshes import *
+from .style import *
+from .traces_overlays import _dashed_segments, _ring_segments, _segment_cylinder_trace
 
 def _bond_segments(scene: dict, style: dict, *, with_scales: bool = False):
     """Yield ``(color, is_minor, start, end)`` tuples for every bond half.

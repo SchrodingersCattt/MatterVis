@@ -1,16 +1,16 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
-from .renderer_cache import *
-from .renderer_common import *
-from .renderer_meshes import *
-from .renderer_selection import *
-from .renderer_serialize import *
-from .renderer_style import *
-from .renderer_topology import *
-from .renderer_traces_atoms import *
-from .renderer_traces_overlays import *
-from .renderer_viewport import (
+from .cache import *
+from .common import *
+from .meshes import *
+from .selection import *
+from .serialize import *
+from .style import *
+from .topology import *
+from .traces_atoms import *
+from .traces_overlays import *
+from .viewport import (
     _axis_cube_scale,
     _camera_axis_projections,
     _normalize,

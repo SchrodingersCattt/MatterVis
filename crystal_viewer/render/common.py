@@ -7,9 +7,9 @@ from typing import Dict, Iterable, Tuple
 import numpy as np
 import plotly.graph_objects as go
 
-from . import perf_log
-from .disorder import bond_effective_opacity, minor_opacity_for
-from .presets import ORTEP_MODES
+from .. import perf_log
+from ..disorder import bond_effective_opacity, minor_opacity_for
+from ..presets import ORTEP_MODES
 
 MATERIAL_DISPATCH = {"flat": "_scatter_atom_base", "mesh": "_mesh3d_atom_base"}
 STYLE_DISPATCH = {

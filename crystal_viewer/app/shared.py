@@ -43,7 +43,7 @@ from ..presets import (
     workspace_root,
 )
 from ..renderer import build_figure, compose_axis_key_layout, style_from_controls, topology_histogram_figure, topology_results_markdown
-from ..renderer_viewport import _scene_ranges, figure_axis_layout
+from ..render.viewport import _scene_ranges, figure_axis_layout
 from ..scene import scene_json
 from ..scenes import Scene, SceneStore
 from ..topology import DEFAULT_CENTROID_OFFSET_FRAC, analyze_topology, extract_coordination_shell

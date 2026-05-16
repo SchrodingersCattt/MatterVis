@@ -1,7 +1,7 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
-from .renderer_common import *
+from .common import *
 
 def _traces_to_dicts(traces) -> list[dict]:
     """Materialise a list of plotly trace objects (or pre-built dicts)

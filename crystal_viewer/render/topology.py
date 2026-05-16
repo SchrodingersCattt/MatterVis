@@ -1,11 +1,11 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
-from .renderer_common import *
-from .renderer_meshes import *
-from .renderer_style import *
-from .renderer_serialize import _trace_to_json_safe_dict
-from .renderer_traces_overlays import _dashed_segments, _segment_cylinder_trace
+from .common import *
+from .meshes import *
+from .style import *
+from .serialize import _trace_to_json_safe_dict
+from .traces_overlays import _dashed_segments, _segment_cylinder_trace
 
 def _overlay_coords_and_hull(overlay) -> tuple[np.ndarray, dict]:
     if isinstance(overlay, dict):

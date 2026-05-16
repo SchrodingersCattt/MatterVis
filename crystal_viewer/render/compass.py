@@ -4,7 +4,7 @@ import math
 
 import numpy as np
 
-from .renderer_viewport import _axis_cube_scale, _camera_axis_projections
+from .viewport import _axis_cube_scale, _camera_axis_projections
 
 
 # Plotly preserves free-form ``name`` on annotations/shapes; per-item
