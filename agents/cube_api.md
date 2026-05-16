@@ -5,6 +5,47 @@ density…) are produced by helpers in `crystal_viewer.cube`. The library
 is **journal-agnostic** — project-specific styling (typography, dpi,
 column widths) lives in caller code, not here.
 
+## Panel construction at a glance
+
+```mermaid
+flowchart LR
+    CUBE["cube file (.cube)"] --> READ["read_cube"]
+    READ --> DATA["CubeData<br/>(grid + atoms + axes)"]
+    DATA --> TILE["tile_cube_data<br/>(optional PBC extend)"]
+    TILE --> CLEAN["orbital_mesh_traces<br/>filters:<br/>min_volume_voxels<br/>atom_mask_radius"]
+    DATA --> CLEAN
+    DATA --> ATOMS["atom_sphere_traces"]
+    DATA --> BONDS["bond_traces"]
+    DATA --> CELLT["cell_box_trace"]
+    CLEAN --> ORDER["trace order:<br/>cell, orbital, bonds, atoms"]
+    ATOMS --> ORDER
+    BONDS --> ORDER
+    CELLT --> ORDER
+    ORDER --> PANEL["build_orbital_panel_figure"]
+    PANEL --> EXPORT["export_static<br/>use_mesh=True (publication)"]
+    PANEL -. "interactive only" .-> ISO["go.Isosurface fallback"]
+```
+
+Pick the lowest layer that lets you ship the figure: feed `read_cube`
+into your own composition when the wrapper does not fit, but keep the
+default trace order or half-transparent orbitals will render on top of
+opaque atoms.
+
+## Opacity / ambient discipline
+
+Plotly Mesh3d only z-orders correctly when `opacity == 1.0`. Below 1.0
+it falls back to alpha-blending, which compounds as `(1 − α)^N` through
+overlapping HOMO/LUMO lobes and washes out atoms behind them.
+
+```mermaid
+flowchart LR
+    A["atom_sphere_traces<br/>opacity = 1.0<br/>ambient ≥ 0.75"] --> S["Stable depth-buffer<br/>compositing"]
+    B["bond_traces<br/>opacity = 1.0<br/>ambient ≥ 0.75"] --> S
+    O["orbital_mesh_traces<br/>opacity ≥ 0.95"] --> S
+    S --> P["Print-legible panel"]
+    LOW["opacity < 0.95"] -. avoid for static export .-> GHOST["(1−α)^N ghosting<br/>pale atoms inside lobes"]
+```
+
 ## Public surface
 
 - I/O

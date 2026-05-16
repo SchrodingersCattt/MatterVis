@@ -5,6 +5,30 @@ directly. The scene API is the lowest-effort path from a CIF (or an ASE
 `Atoms`) to a publication-ready Plotly figure of crystal/cluster
 geometry.
 
+## Pipeline at a glance
+
+```mermaid
+flowchart LR
+    CIF["CIF file<br/>or ASE Atoms"] --> LOAD["loader<br/>+ MolCrysKit analysis<br/>(PBC unwrap, mol grouping)"]
+    LOAD --> RAW["raw_atoms"]
+    RAW --> BUILD["build_scene_from_atoms<br/>(display_mode + H filter)"]
+    BUILD --> SCENE["scene dict<br/>{draw_atoms, bonds, cell, style}"]
+    SCENE --> SKIN["apply_element_colors<br/>(in-place scene re-skin)"]
+    SKIN --> UV["uniform_viewport<br/>(optional, for N-up grids)"]
+    UV --> FIG["build_figure"]
+    FIG --> OUT["Plotly Figure"]
+
+    BUILD -. "cluster mode skips<br/>formula-unit + PBC bond imaging" .-> SCENE
+```
+
+- `display_mode="cluster"` is the only path that bypasses formula-unit
+  trimming and periodic bond imaging — every parsed atom is drawn and
+  bonds come from stored Cartesian coordinates only.
+- `apply_element_colors` mutates the scene it is given; pass the same
+  dict to several scenes if you want them to share a palette.
+- `uniform_viewport` is only needed when you want N panels to render at
+  the same length-per-pixel; single-figure callers can skip it.
+
 ## Builders
 
 ### `crystal_viewer.scene.build_scene_from_cif(...)`

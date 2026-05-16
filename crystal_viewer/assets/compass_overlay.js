@@ -480,6 +480,8 @@
   let dragPollActive = false;
   let dragPollRaf = null;
   let dragPollLastKey = null;
+  let dragArm = null;
+  const DRAG_POLL_THRESHOLD_PX = 3;
   function dragCameraKey(camera) {
     if (!camera) return null;
     function v(obj) {
@@ -534,6 +536,30 @@
     if (window.__mv_compass_diag) window.__mv_compass_diag.drag_poll_starts += 1;
     dragPollTick(gd);
   }
+  function pointerXY(event) {
+    if (!event) return null;
+    const x = Number(event.clientX);
+    const y = Number(event.clientY);
+    return Number.isFinite(x) && Number.isFinite(y) ? [x, y] : null;
+  }
+  function armDragPoll(event) {
+    if (event && event.button !== undefined && event.button !== 0) return;
+    const xy = pointerXY(event);
+    if (!xy) return;
+    dragArm = { x: xy[0], y: xy[1] };
+  }
+  function maybeStartDragPollFromMove(gd, event) {
+    if (!dragArm || dragPollActive) return;
+    const xy = pointerXY(event);
+    if (!xy) return;
+    const dx = xy[0] - dragArm.x;
+    const dy = xy[1] - dragArm.y;
+    if (Math.hypot(dx, dy) < DRAG_POLL_THRESHOLD_PX) return;
+    startDragPoll(gd);
+  }
+  function clearDragArm() {
+    dragArm = null;
+  }
   function stopDragPoll(gd) {
     if (!dragPollActive) return;
     dragPollActive = false;
@@ -542,8 +568,11 @@
       else window.clearTimeout(dragPollRaf);
       dragPollRaf = null;
     }
-    /* Final redraw with the post-mouseup committed camera. */
-    redrawCompass(gd, null, false);
+    /* Wheel zoom does not reliably commit layout.scene.camera before this
+       debounce fires. Finish from the live WebGL camera so the compass does
+       not snap back to the pre-wheel layout camera. */
+    const finalCamera = liveSceneCamera(gd);
+    redrawCompass(gd, finalCamera, true);
   }
   let wheelStopTimer = null;
   function pulseDragPollOnWheel(gd) {
@@ -607,9 +636,10 @@
 
     /* DOM-level drag arming. Window-level mouseup so we still
        disarm if the user releases outside the graph div. */
-    const onMouseDown = function () { startDragPoll(gd); };
-    const onMouseUp = function () { stopDragPoll(gd); };
-    const onPointerCancel = function () { stopDragPoll(gd); };
+    const onMouseDown = function (event) { armDragPoll(event); };
+    const onMouseMove = function (event) { maybeStartDragPollFromMove(gd, event); };
+    const onMouseUp = function () { clearDragArm(); stopDragPoll(gd); };
+    const onPointerCancel = function () { clearDragArm(); stopDragPoll(gd); };
     const onWheel = function () { pulseDragPollOnWheel(gd); };
     if (gd.addEventListener) {
       gd.addEventListener("mousedown", onMouseDown);
@@ -617,6 +647,8 @@
       gd.addEventListener("wheel", onWheel, { passive: true });
     }
     if (window.addEventListener) {
+      window.addEventListener("mousemove", onMouseMove);
+      window.addEventListener("pointermove", onMouseMove);
       window.addEventListener("mouseup", onMouseUp);
       window.addEventListener("pointerup", onMouseUp);
       window.addEventListener("blur", onPointerCancel);

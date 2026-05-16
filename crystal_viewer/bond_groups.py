@@ -214,9 +214,17 @@ def bond_groups_cache_key(bond_groups: Optional[Sequence[Dict[str, Any]]]) -> Tu
             (
                 bool(selector.get("all", False)),
                 tuple(sorted(str(e) for e in selector.get("between_elements", []) or [])),
+                tuple(
+                    tuple(sorted(str(label) for label in pair))
+                    for pair in selector.get("labels", []) or []
+                    if isinstance(pair, (list, tuple))
+                ),
+                selector.get("is_minor"),
                 str(group.get("color") or ""),
                 bool(group.get("visible", True)),
+                float(group.get("opacity")) if group.get("opacity") is not None else None,
                 float(group.get("radius_scale")) if group.get("radius_scale") is not None else None,
+                bool(group.get("enabled", True)),
             )
         )
     return tuple(parts)

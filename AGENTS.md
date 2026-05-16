@@ -12,8 +12,10 @@ MatterVis/
 ├── README.md            ← user-facing pitch
 ├── agents/              ← caller-facing API contracts (REST, programmatic)
 ├── crystal_viewer/      ← the library + Dash app
-│   ├── api.py           ← REST handlers
-│   ├── app.py           ← Dash UI bindings (callbacks, layouts)
+│   ├── api.py           ← REST/WebSocket facade; routes live in `api_v*_*.py`
+│   ├── app.py           ← public Dash entrypoint facade
+│   ├── app_*.py         ← Dash layout factory, state normalizers, UI helpers
+│   ├── dash_callbacks_*.py ← grouped Dash callback registrations
 │   ├── atom_groups.py   ← per-scene atom styling rules
 │   ├── bond_groups.py   ← per-scene bond styling rules
 │   ├── compass.py       ← camera-projected paper-coord indicators
@@ -24,10 +26,12 @@ MatterVis/
 │   ├── presets.py
 │   ├── scenes.py        ← tab/session scene state
 │   ├── ortep.py         ← thermal ellipsoid geometry + traces
-│   ├── renderer.py      ← `build_figure` Plotly assembly + `uniform_viewport`
+│   ├── renderer.py      ← public Plotly figure facade
+│   ├── renderer_*.py    ← viewport, mesh, trace, topology, style, cache helpers
 │   ├── scene.py         ← cell/cluster scene builder
 │   ├── topology.py      ← coordination polyhedra geometry & analysis
-│   └── transforms.py    ← supercell / grow / slab structure mutations
+│   ├── transforms.py    ← supercell / grow / slab structure mutations
+│   └── viewer_backend*.py ← scene store, figure/cache orchestration, exports
 ├── docs/                ← sphinx sources, score tables
 ├── scripts/             ← runnable scripts that exercise the public API
 │   └── private/         ← local/private analysis scripts; keep unpublished data ignored
@@ -407,7 +411,8 @@ both files.
 
 - Coordination polyhedra are a per-scene named-row table
  (`state["polyhedron_specs"] = [{id, name, center_species,
- ligand_species, color, enabled}, ...]`). Empty list (default for a
+ ligand_species, color, enabled, enforce_enclosure,
+ centroid_offset_frac}, ...]`). Empty list (default for a
  fresh scene) means **no overlay** — MV no longer auto-derives
  ligand shells from `topology_species_keys`; users must register
  explicit centre/ligand pairs (or load a preset that does). The
@@ -419,8 +424,9 @@ both files.
  back-compat fallback when `spec_results` is absent.
 - `_topology_state_cache` is keyed on geometry-only fields
  (`(structure, display_mode, hydrogens, site_index, cutoff,
- spec_geometry_key, transforms_key)` where `spec_geometry_key` only
- carries `(center_species, ligand_species)` per spec). Per-spec
+ spec_geometry_key, transforms_key)` where `spec_geometry_key`
+ carries `(center_species, ligand_species, enforce_enclosure,
+ centroid_offset_frac)` per spec). Per-spec
  colour is NOT in the geometry cache key — it lives on the renderer's
  painter cache instead, so swapping colours stays a cheap re-paint.
 - `analyze_topology` / `extract_coordination_shell` accept an
@@ -433,9 +439,11 @@ both files.
   `cutoff` into MCK's `hard_cutoff=` — that reproduces the CN=37
   surprise this whole pipeline was rewritten to avoid (see the SY
   perchlorate regression notes in `tests/topology/`).
-  The topology cache key includes ligand restriction; do not collapse
+  `enforce_enclosure` and `centroid_offset_frac` are per-spec packing
+  shell knobs forwarded to MolCrysKit. The topology cache key includes
+  ligand restriction and those packing knobs; do not collapse
   it back to `(center_index, cutoff)` or two specs sharing a centre but
-  differing in ligand will poison each other's shell.
+  differing in ligand or shell mode will poison each other's shell.
 - Polyhedron specs may carry `instance_overrides`, a dict keyed on
  `fragment_label` whose values are partial style dicts
  (`{"color": ..., "visible": ...}`). The renderer applies these
@@ -539,9 +547,8 @@ both files.
   imaging. Bonds come purely from stored Cartesian coordinates;
   the 100 Å dummy cells that some CIF exporters emit around clusters
   are ignored.
-- `apply_element_colors` is non-destructive: it returns a new scene
-  or edits a single passed scene; it never mutates the module
-  palette.
+- `apply_element_colors` mutates the scene object it is given and
+  returns it for chaining; it never mutates the module palette.
 - `uniform_viewport` stamps a shared world-cube on a list of scenes
   so N-up grids render at one length-per-pixel.
 - `build_figure` honours `show_title`, `axes_labels`,

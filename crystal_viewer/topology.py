@@ -57,6 +57,8 @@ def _mck_polyhedron_record(
     ligand_species: tuple[str, ...] | None = None,
     level: str = "molecule",
     center_species: str | None = None,
+    enforce_enclosure: bool = True,
+    centroid_offset_frac: float = DEFAULT_CENTROID_OFFSET_FRAC,
 ) -> dict[str, Any] | None:
     if not ligand_species:
         raise ValueError(
@@ -78,6 +80,8 @@ def _mck_polyhedron_record(
             ligand_formula,
             level="atom",
             cutoff=float(cutoff),
+            enforce_enclosure=bool(enforce_enclosure),
+            centroid_offset_frac=float(centroid_offset_frac),
         )
         if not records:
             return None
@@ -113,6 +117,8 @@ def _mck_polyhedron_record(
         center_kind="centroid",
         cutoff=float(cutoff),
         central_indices=[int(source_molecule_index)],
+        enforce_enclosure=bool(enforce_enclosure),
+        centroid_offset_frac=float(centroid_offset_frac),
     )
     return records[0] if records else None
 
@@ -125,6 +131,8 @@ def _extract_coordination_shell_static(
     ligand_species: tuple[str, ...] | None = None,
     level: str = "molecule",
     center_species: str | None = None,
+    enforce_enclosure: bool = True,
+    centroid_offset_frac: float = DEFAULT_CENTROID_OFFSET_FRAC,
 ) -> dict[str, Any]:
     fragments = classify_fragments(bundle)
     center_fragment = next((frag for frag in fragments if int(frag["index"]) == int(center_index)), None)
@@ -137,6 +145,8 @@ def _extract_coordination_shell_static(
         ligand_species=ligand_species,
         level=level,
         center_species=center_species,
+        enforce_enclosure=enforce_enclosure,
+        centroid_offset_frac=centroid_offset_frac,
     )
     if record is None:
         source_center = np.array(center_fragment["center"], dtype=float)
@@ -234,6 +244,8 @@ def extract_coordination_shell(
     ligand_species: Iterable[str] | None = None,
     level: str = "molecule",
     center_species: str | None = None,
+    enforce_enclosure: bool = True,
+    centroid_offset_frac: float = DEFAULT_CENTROID_OFFSET_FRAC,
 ) -> dict[str, Any]:
     ligand_tuple = tuple(str(item) for item in ligand_species) if ligand_species else None
     static = _extract_coordination_shell_static(
@@ -243,6 +255,8 @@ def extract_coordination_shell(
         ligand_species=ligand_tuple,
         level=level,
         center_species=center_species,
+        enforce_enclosure=enforce_enclosure,
+        centroid_offset_frac=centroid_offset_frac,
     )
     source_center = np.asarray(static["source_center_coords"], dtype=float)
     plot_center = source_center if display_center is None else np.array(display_center, dtype=float)
@@ -292,6 +306,8 @@ def _analyze_topology_uncached(
     ligand_species: tuple[str, ...] | None = None,
     level: str = "molecule",
     center_species: str | None = None,
+    enforce_enclosure: bool = True,
+    centroid_offset_frac: float = DEFAULT_CENTROID_OFFSET_FRAC,
 ) -> dict[str, Any]:
     shell = extract_coordination_shell(
         bundle,
@@ -303,6 +319,8 @@ def _analyze_topology_uncached(
         ligand_species=ligand_species,
         level=level,
         center_species=center_species,
+        enforce_enclosure=enforce_enclosure,
+        centroid_offset_frac=centroid_offset_frac,
     )
     center = shell["center_coords"]
     shell_coords = shell["shell_coords"]
@@ -423,11 +441,13 @@ def analyze_topology(
     ligand_species: Iterable[str] | None = None,
     level: str = "molecule",
     center_species: str | None = None,
+    enforce_enclosure: bool = True,
+    centroid_offset_frac: float = DEFAULT_CENTROID_OFFSET_FRAC,
 ) -> dict[str, Any]:
     """Cached primary-site analysis. The heavy ``planarity_analysis`` pass
     runs ``itertools.combinations`` of size 5 over the shell, which gets
     expensive for CN=12 / large neighbour pools. We key the cache on
-    ``(center_index, cutoff, ligand_species)`` -- the
+    ``(center_index, cutoff, ligand_species, packing-shell knobs)`` -- the
     full bundle topology is immutable once loaded -- so flipping species
     checkboxes back and forth no longer redoes the work, but two named
     polyhedron specs with different ligand restrictions get distinct cache
@@ -448,8 +468,18 @@ def analyze_topology(
                 ligand_species=ligand_tuple,
                 level=level,
                 center_species=center_species,
+                enforce_enclosure=enforce_enclosure,
+                centroid_offset_frac=centroid_offset_frac,
             )
-    key = (int(center_index), float(cutoff), ligand_tuple, level, center_species)
+    key = (
+        int(center_index),
+        float(cutoff),
+        ligand_tuple,
+        level,
+        center_species,
+        bool(enforce_enclosure),
+        float(centroid_offset_frac),
+    )
     cached = cache.get(key)
     if cached is None:
         cached = _analyze_topology_uncached(
@@ -458,6 +488,8 @@ def analyze_topology(
             ligand_species=ligand_tuple,
             level=level,
             center_species=center_species,
+            enforce_enclosure=enforce_enclosure,
+            centroid_offset_frac=centroid_offset_frac,
         )
         cache[key] = cached
     # Display fields shift per call (camera / formula-unit centering); patch

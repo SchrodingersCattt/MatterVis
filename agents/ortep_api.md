@@ -22,6 +22,29 @@ anisotropic data falls back to `_atom_site_U_iso_or_equiv`.
 - Wrapper:
   `build_ortep_panel_figure`.
 
+The render path branches on the `material` + `style` combination, so a
+caller picks the visual language by setting two style keys; everything
+upstream is shared:
+
+```mermaid
+flowchart LR
+    U["ADP tensor U<br/>(from CIF aniso, or U_iso fallback)"] --> AXES["ellipsoid_principal_axes<br/>(pure math)"]
+    AXES --> MESH["material=mesh, style=ortep<br/>ortep_mesh3d (real 3D Mesh3d)"]
+    AXES --> BILL["material=flat, style=ortep<br/>ortep_billboard_polygon (camera-facing)"]
+    MESH --> MT["ortep_atom_mesh_traces"]
+    BILL --> BT["ortep_atom_billboard_traces"]
+    MT --> WRAP["build_ortep_panel_figure"]
+    BT --> WRAP
+    AXES --> AXT["ortep_axis_dash_traces<br/>(optional spokes)"]
+    AXES --> SHADE["ortep_octant_shade_traces<br/>(optional shading)"]
+    AXT --> WRAP
+    SHADE --> WRAP
+```
+
+This is the same `math → trace builder → wrapper` shape used by
+`cube`, `compass`, and `scene`: callers who outgrow the wrapper drop
+one layer down, never monkey-patch the wrapper.
+
 ## Style keys
 
 - `ortep_probability` — default `0.5`, matching the common 50%

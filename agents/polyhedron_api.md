@@ -22,7 +22,29 @@ Every spec is a flat dict with these fields:
 | `ligand_species` | string \| null | Explicit ligand formula for MolCrysKit molecule-level packing polyhedra. `null` persists but is not rendered; MatterVis no longer derives auto-ligand shells locally. |
 | `color` | string | Hull / shell colour; six-digit hex (`#RRGGBB`). Auto-assigned from a colour-blind-friendly palette when omitted. |
 | `enabled` | bool | `false` rows persist but are skipped at render time. |
+| `enforce_enclosure` | bool | Packing-shell mode. `true` (default) keeps MolCrysKit's gap+enclosure expansion; `false` stops at the distance-gap shell. |
+| `centroid_offset_frac` | number | MolCrysKit centering tolerance passed to `find_polyhedra`; default is `0.15`. Larger values make the enclosure check less strict. |
 | `instance_overrides` | object | **Phase 4.** Per-fragment override map: `{fragment_label: {color, visible}}`. Empty `{}` means every matched fragment inherits the spec-level colour and visibility. Keys are the fragment-table labels exposed in `topology_data["spec_results"][i]["overlays"][j]["center_label"]`. |
+
+### Pipeline at a glance
+
+The renderer splits each spec into two halves: a **geometry** half
+(expensive shell analysis, cached on the bundle) and a **paint** half
+(per-spec colour + instance overrides, applied as a cheap re-stamp on
+every call). Editing a colour or hiding one fragment never invalidates
+the geometry cache.
+
+```mermaid
+flowchart LR
+  A["state.polyhedron_specs<br/>(list of rows)"] --> G["spec_geometry_key<br/>(center_species, ligand_species,<br/>enforce_enclosure, centroid_offset_frac)"]
+  A --> P["per-row paint:<br/>color, instance_overrides<br/>(NOT in geometry key)"]
+  G --> K["_topology_state_cache key:<br/>(structure, display_mode, hydrogens,<br/>site_index, cutoff, spec_geometry_key,<br/>transforms_key)"]
+  K --> M["analyze_topology -><br/>find_polyhedra(level=molecule)<br/>via molcrys_kit"]
+  M --> R["cached_geometry<br/>(spec_results: hulls, overlays)"]
+  R --> S["_attach_spec_colors<br/>(stamps per-spec color +<br/>per-overlay overrides)"]
+  P --> S
+  S --> F["renderer.build_figure<br/>(painter cache keyed on<br/>per-spec color tuple)"]
+```
 
 ### State integration
 
@@ -88,6 +110,8 @@ Body:
   "ligand_species": null,
   "color": "#FF6A00",
   "enabled": true,
+  "enforce_enclosure": true,
+  "centroid_offset_frac": 0.15,
   "id": "optional-stable-id"
 }
 ```
@@ -193,6 +217,8 @@ directly (no Dash app), the renderer pulls per-spec colours from
     "color": "#RRGGBB",
     "center_species": "...",
     "ligand_species": "..." | None,
+    "enforce_enclosure": True,
+    "centroid_offset_frac": 0.15,
     "overlays": [
         {
             "center_coords": [x, y, z],
@@ -249,6 +275,14 @@ prevent. If we ever want to surface the extended A--X12 perovskite
 cuboctahedron (or any other "show me everything within X Å"
 analysis), it should be a separate, explicitly-named spec field, not
 overloaded onto `cutoff`.
+
+```mermaid
+flowchart LR
+  S["state cutoff (MV)"] --> M["find_polyhedra(level=molecule)"]
+  M -->|"cutoff= kwarg<br/>(candidate search radius)"| G["gap+enclosure picks<br/>natural first shell"]
+  H["hard_cutoff= kwarg<br/>(intentionally NOT plumbed)"] -.->|"would force<br/>fill-the-ball mode"| M
+  G --> R["record fields:<br/>mode = 'gap+enclosure'<br/>search_cutoff = state cutoff<br/>hard_cutoff = null"]
+```
 
 MatterVis only applies display-coordinate offsets and renderer colours
 to the returned `shell_coords`; it does not maintain a separate

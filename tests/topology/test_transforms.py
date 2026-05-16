@@ -363,7 +363,7 @@ def test_rebuild_scene_redetects_bonds_in_replica():
     """
     from crystal_viewer.transforms import rebuild_scene_with_atoms, replicate_atoms
 
-    M = np.diag([3.0, 3.0, 3.0])
+    M = np.diag([10.0, 10.0, 10.0])
     pb = {
         "elem": "Pb",
         "label": "Pb1",
@@ -380,7 +380,7 @@ def test_rebuild_scene_redetects_bonds_in_replica():
         "elem": "Cl",
         "label": "Cl1",
         "cart": np.array([1.0, 0.0, 0.0]),
-        "frac": np.array([1.0 / 3.0, 0.0, 0.0]),
+        "frac": np.array([0.1, 0.0, 0.0]),
         "occ": 1.0,
         "da": "",
         "dg": "",
@@ -391,7 +391,7 @@ def test_rebuild_scene_redetects_bonds_in_replica():
     base_scene = {
         "draw_atoms": [pb, cl],
         "bonds": [],
-        "cell": (3.0, 3.0, 3.0, 90.0, 90.0, 90.0),
+        "cell": (10.0, 10.0, 10.0, 90.0, 90.0, 90.0),
         "M": M,
         "view_x": np.array([1.0, 0.0, 0.0]),
         "view_y": np.array([0.0, 1.0, 0.0]),
@@ -412,6 +412,74 @@ def test_rebuild_scene_redetects_bonds_in_replica():
     # And the original ``label`` field must be restored after detection.
     replica_labels = {a["label"] for a in out["draw_atoms"] if a.get("_image_shift") == (1, 0, 0)}
     assert replica_labels == {"Pb1[1,0,0]", "Cl1[1,0,0]"}
+    assert len(out["fragment_table"]) == 2
+    assert sorted(frag["cluster_size"] for frag in out["fragment_table"]) == [2, 2]
+    assert len(out["atom_fragment_labels"]) == len(out["draw_atoms"])
+
+
+def test_build_bundle_scene_preserves_transform_fragment_table(monkeypatch):
+    """Transform scenes must not be regrouped by the raw crystal molecule graph."""
+    from crystal_viewer.loader import LoadedCrystal, build_bundle_scene
+
+    M = np.diag([10.0, 10.0, 10.0])
+    pb = {
+        "elem": "Pb",
+        "label": "Pb1",
+        "cart": np.array([0.0, 0.0, 0.0]),
+        "frac": np.array([0.0, 0.0, 0.0]),
+        "occ": 1.0,
+        "da": "",
+        "dg": "",
+    }
+    cl = {
+        "elem": "Cl",
+        "label": "Cl1",
+        "cart": np.array([1.0, 0.0, 0.0]),
+        "frac": np.array([0.1, 0.0, 0.0]),
+        "occ": 1.0,
+        "da": "",
+        "dg": "",
+    }
+    base_scene = {
+        "name": "synthetic",
+        "title": "synthetic",
+        "draw_atoms": [pb, cl],
+        "bonds": [],
+        "cell": (10.0, 10.0, 10.0, 90.0, 90.0, 90.0),
+        "M": M,
+        "view_x": np.array([1.0, 0.0, 0.0]),
+        "view_y": np.array([0.0, 1.0, 0.0]),
+        "view_z": np.array([0.0, 0.0, 1.0]),
+        "style": {},
+        "fragment_table": [],
+        "atom_fragment_labels": [],
+    }
+    bundle = LoadedCrystal(
+        name="synthetic",
+        title="synthetic",
+        cif_path="",
+        scene=base_scene,
+        raw_atoms=[pb, cl],
+        cell=base_scene["cell"],
+        M=M,
+        view_direction=[0.0, 0.0, 1.0],
+        up=[0.0, 1.0, 0.0],
+        scene_cache={("unit_cell", False): base_scene},
+        molcrys_analysis=object(),
+    )
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("transformed scenes must keep their current-bond fragment table")
+
+    monkeypatch.setattr("crystal_viewer.loader._fragment_table_from_atoms", fail_if_called)
+    out = build_bundle_scene(
+        bundle,
+        display_mode="unit_cell",
+        transforms=[{"id": "t1", "kind": "repeat", "params": {"a": 2, "b": 1, "c": 1}, "enabled": True}],
+    )
+
+    assert len(out["draw_atoms"]) == 4
+    assert sorted(frag["cluster_size"] for frag in out["fragment_table"]) == [2, 2]
 
 
 def test_supercell_shorthand_one_one_one_clears_repeat():

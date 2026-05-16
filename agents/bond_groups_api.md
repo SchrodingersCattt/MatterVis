@@ -36,6 +36,22 @@ keys must match (AND semantics).**
 
 Matching is exact and case-sensitive on element symbols and labels.
 
+### Selector to render-tag pipeline
+
+Selector keys are AND-combined per bond; rules run in list order with
+later-wins semantics on each tag field independently. Element pairs
+match set-wise (`["O","H"]` matches both O-H and H-O); label pairs
+match order-independently within each pair.
+
+```mermaid
+flowchart LR
+  S["selector keys<br/>(all, between_elements,<br/>labels, is_minor)"] -->|AND per key| M["bond_matches_selector<br/>(per bond)"]
+  N["between_elements: set-equal<br/>labels: pair order-independent"] -.-> M
+  M --> R["rules run in list order<br/>(later-wins per field)"]
+  R --> T["per-bond tags written by<br/>tag_bonds_with_groups:<br/>_render_color,<br/>_render_visible,<br/>_render_opacity_scale,<br/>_render_radius_scale"]
+  T --> C["renderer consumes tags<br/>(_bond_segments -><br/>_bond_mesh_traces)"]
+```
+
 ## REST surface
 
 Endpoints are scoped to a single scene. The target scene is resolved
@@ -99,6 +115,14 @@ group exactly once.
   `bond_groups_cache_key(bond_groups)`. Any add / edit / reorder
   reliably re-renders.
 
+```mermaid
+flowchart LR
+  T["tagged bonds<br/>(_render_* fields)"] --> S["_bond_segments<br/>(skip invisible bonds,<br/>prefer _render_color)"]
+  S --> B["bucket by<br/>(color, is_minor,<br/>radius_bin, opacity_bin)"]
+  B --> M["_bond_mesh_traces<br/>(one Mesh3d per bucket)"]
+  M --> R["try / finally:<br/>restore original bonds list<br/>after the render pass<br/>(downstream MUST NOT rely on<br/>_render_* outside a render)"]
+```
+
 ## Picking integration
 
 Each bond also gets an invisible `Scatter3d` selection trace at its
@@ -139,9 +163,10 @@ curl -s -X POST http://localhost:50001/api/v2/bond_groups \
 ## Invariants
 
 - `bond_groups_cache_key` is the canonical hashable summary of the
-  list. It includes selector, colour, visibility, opacity, radius
-  scale, and enabled flags; it excludes `id` and `name` so a row
-  rename is a cheap re-paint.
+  list and is used directly by the renderer cache. It includes the full
+  selector contract (`all`, `between_elements`, `labels`, `is_minor`),
+  colour, visibility, opacity, radius scale, and enabled flags; it
+  excludes `id` and `name` so a row rename does not invalidate geometry.
 - Disabled rows persist verbatim through the API. Toggling
   `enabled` is a one-field `PATCH`.
 - Per-bond style fields (`_render_*`) are scratch space the renderer

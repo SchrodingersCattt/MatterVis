@@ -41,9 +41,11 @@ the visible scene list has one writer and one source of truth.
 
 Today, these concerns are split:
 
-- `capture_state` writes display/style/topology state.
-- `manage_polyhedra`, `manage_atom_groups`, `manage_bond_groups`, and
-  `manage_transforms` each write `agent-state-store`.
+- `dash_callbacks_state.capture_state` writes display/style/topology state.
+- `dash_callbacks_editors.manage_polyhedra`,
+  `dash_callbacks_editors.manage_atom_groups`,
+  `dash_callbacks_editors.manage_bond_groups`, and
+  `dash_callbacks_editors.manage_transforms` each write `agent-state-store`.
 - right-click actions write state directly.
 - REST and WebSocket handlers patch backend state out-of-band.
 - camera capture writes backend state while browser camera store remains
@@ -53,6 +55,31 @@ Today, these concerns are split:
 
 This makes the real state transition depend on callback scheduling.  Two
 callbacks can observe the same old state and write incompatible new states.
+
+The picture below enumerates today's writers of `agent-state-store.data` after
+the callback module split.  Solid edges are the one
+non-`allow_duplicate` writer (`sync_agent_state`); dashed edges are
+`allow_duplicate=True` writers that race against each other and against the
+backend-pushed pending-state path:
+
+```mermaid
+flowchart LR
+    sync["sync_agent_state (primary Output)"] --> store["agent-state-store.data"]
+    cap["capture_state"] -. "allow_duplicate" .-> store
+    mp["manage_polyhedra"] -. "allow_duplicate" .-> store
+    ag["manage_atom_groups"] -. "allow_duplicate" .-> store
+    bg["manage_bond_groups"] -. "allow_duplicate" .-> store
+    tr["manage_transforms"] -. "allow_duplicate" .-> store
+    rca["apply_rightclick_action"] -. "allow_duplicate" .-> store
+    rcc["apply_rightclick_color"] -. "allow_duplicate" .-> store
+    rest["REST handlers"] --> pending["backend.pending_state"]
+    ws["WebSocket handlers"] --> pending
+    pending -. "next agent-state-poll tick" .-> sync
+```
+
+Any one of those writers can observe a stale snapshot, compute a new dict, and
+clobber the others.  The redesign collapses every dashed edge into a single
+operation queue consumed by the reducer dispatcher (next section).
 
 ## Target Callback Graph
 
@@ -79,6 +106,35 @@ During mouse drag, the browser owns the live camera.  When an operation changes
 viewport signature, the reducer must either remap the camera or clear it and
 bump `camera_revision`.  The figure callback must not independently decide to
 reuse a stale browser camera if the reducer has declared it incompatible.
+
+The race today looks like this: the browser is writing `camera-state-store`
+from `relayoutData` while a REST patch concurrently mutates backend state, and
+the figure callback reads both sources independently.  Whichever store fires
+last decides what the user sees, and the figure may end up with a camera saved
+against an incompatible viewport signature.
+
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant CamStore as "camera-state-store"
+    participant Backend
+    participant Figure as "figure callback"
+    Browser->>CamStore: relayoutData mid-drag
+    CamStore->>Figure: new camera payload
+    par concurrent REST or WS
+        Backend->>Backend: patch_state changes display_mode
+        Backend->>Backend: viewport signature changes
+    end
+    Figure->>Backend: read latest state
+    Figure->>CamStore: read latest camera
+    Figure-->>Browser: redraw with last-writer-wins camera
+    Note over Figure,Browser: stale browser camera can be<br/>applied to incompatible viewport
+```
+
+Under the target rule the reducer owns the compatibility decision: a viewport
+change emits a `camera_layout` invalidation, and the figure callback only
+reuses the browser camera when the resolver confirms its signature still
+matches.
 
 ## Reverse Hooks
 
