@@ -48,7 +48,7 @@ from ..scene import scene_json
 from ..scenes import Scene, SceneStore
 from ..topology import DEFAULT_CENTROID_OFFSET_FRAC, analyze_topology, extract_coordination_shell
 
-PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
+PACKAGE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORKSPACE_DIR = workspace_root(PACKAGE_DIR)
 DEFAULT_PRESET_PATH = default_preset_path(WORKSPACE_DIR)
 STATIC_PUBLICATION_MODULE = "crystal_viewer.static_publication.plot_crystal"
