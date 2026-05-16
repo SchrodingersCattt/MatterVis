@@ -412,6 +412,17 @@ def test_compass_overlay_js_uses_svg_layer_not_plotly_relayout_for_drag():
     assert "function dragPollTick" in src
     assert "startDragPoll" in src and "stopDragPoll" in src
     assert 'addEventListener("mousedown"' in src
+    assert "DRAG_POLL_THRESHOLD_PX" in src
+    assert "function armDragPoll" in src
+    assert "function maybeStartDragPollFromMove" in src
+    assert (
+        'window.addEventListener("mousemove"' in src
+        or "window.addEventListener('mousemove'" in src
+    ), (
+        "plain clicks on atoms must not start live-camera polling; "
+        "drag polling should start only after mouse movement crosses "
+        "the threshold."
+    )
     assert (
         'window.addEventListener("mouseup"' in src
         or "window.addEventListener('mouseup'" in src

@@ -7262,7 +7262,15 @@ def create_app(
             # table can stay stale when the user adds / removes a
             # named polyhedron or atom-group rule.
             tuple(
-                (s.get("id"), s.get("center_species"), s.get("ligand_species"), s.get("color"), bool(s.get("enabled", True)))
+                (
+                    s.get("id"),
+                    s.get("center_species"),
+                    s.get("ligand_species"),
+                    s.get("color"),
+                    bool(s.get("enabled", True)),
+                    bool(s.get("enforce_enclosure", True)),
+                    float(s.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC)),
+                )
                 for s in (state.get("polyhedron_specs") or [])
             ),
             tuple(
