@@ -297,7 +297,7 @@ Notes for callers:
   per-structure style path. The same `.local/` jail and
   `allow_external=true` escape hatch apply.
 - `POST /export`
-  Triggers the vendored `crystal_viewer.legacy.plot_crystal` exporter
+  Triggers the vendored `crystal_viewer.static_publication.plot_crystal` exporter
   with the current preset.
 - `GET /perf?since=N&limit=M`
   Tail of the in-process perf-event ring buffer. Returns

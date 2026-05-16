@@ -51,7 +51,8 @@ from .topology import DEFAULT_CENTROID_OFFSET_FRAC, analyze_topology, extract_co
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKSPACE_DIR = workspace_root(PACKAGE_DIR)
 DEFAULT_PRESET_PATH = default_preset_path(WORKSPACE_DIR)
-LEGACY_EXPORT_MODULE = "crystal_viewer.legacy.plot_crystal"
+STATIC_PUBLICATION_MODULE = "crystal_viewer.static_publication.plot_crystal"
+LEGACY_EXPORT_MODULE = STATIC_PUBLICATION_MODULE
 PLACEHOLDER_STRUCTURE = "__upload__"
 _POLY_SHELL_MODE_ENCLOSURE = "gap_enclosure"
 _POLY_SHELL_MODE_GAP = "gap"

@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-from crystal_viewer.legacy import plot_crystal as pc
+from crystal_viewer.static_publication import plot_crystal as pc
 from crystal_viewer.loader import (
     _has_shelx_occupancy_disorder,
     build_loaded_crystal,

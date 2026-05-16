@@ -13,8 +13,8 @@ from .presets import DEFAULT_STYLE, deep_merge, default_preset, json_safe
 
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKSPACE_DIR = os.path.dirname(PACKAGE_DIR)
-from .legacy import crystal_scene as legacy_scene  # noqa: E402
-from .legacy import plot_crystal as pc  # noqa: E402
+from .static_publication import crystal_scene as legacy_scene  # noqa: E402
+from .static_publication import plot_crystal as pc  # noqa: E402
 
 
 def scene_ops():

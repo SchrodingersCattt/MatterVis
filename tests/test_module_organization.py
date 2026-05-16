@@ -10,6 +10,7 @@ RELAXED_LINE_LIMITS = {
     # These modules are mature, cohesive entry points that are just over the
     # general cap. Keep them visible so future growth is intentional.
     "loader.py": 1200,
+    "static_publication/plot_crystal.py": 2200,
     "transforms.py": 1200,
 }
 KNOWN_OVERSIZE_DURING_SPLIT = {}
@@ -21,9 +22,12 @@ def _line_count(path: Path) -> int:
 
 def test_crystal_viewer_modules_stay_small_enough() -> None:
     failures: list[str] = []
-    for path in sorted(CRYSTAL_VIEWER.glob("*.py")):
+    for path in sorted(CRYSTAL_VIEWER.rglob("*.py")):
+        rel_path = path.relative_to(CRYSTAL_VIEWER).as_posix()
         limit = (
-            KNOWN_OVERSIZE_DURING_SPLIT.get(path.name)
+            KNOWN_OVERSIZE_DURING_SPLIT.get(rel_path)
+            or KNOWN_OVERSIZE_DURING_SPLIT.get(path.name)
+            or RELAXED_LINE_LIMITS.get(rel_path)
             or RELAXED_LINE_LIMITS.get(path.name)
             or HARD_LINE_LIMIT
         )

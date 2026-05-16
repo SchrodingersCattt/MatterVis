@@ -214,7 +214,7 @@ shell together so reviewers can switch between them without reloading:
 
 ### 4. `04_static_publication.py` — ORTEP-style Matplotlib export
 
-Runs the vendored `crystal_viewer.legacy.plot_crystal` renderer (same code
+Runs the vendored `crystal_viewer.static_publication.plot_crystal` renderer (same code
 used by `POST /api/v1/export`) to produce high-DPI PNG + PDF suitable for
 Nature-style figures:
 

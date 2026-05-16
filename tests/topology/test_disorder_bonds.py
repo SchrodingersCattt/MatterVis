@@ -1,6 +1,6 @@
 import numpy as np
 
-from crystal_viewer.legacy import plot_crystal as pc
+from crystal_viewer.static_publication import plot_crystal as pc
 
 
 def _atom(label, elem, cart, partners):

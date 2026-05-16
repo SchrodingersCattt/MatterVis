@@ -24,8 +24,8 @@ import matplotlib.image as mpimg  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 from plotly.subplots import make_subplots  # noqa: E402
 
-from crystal_viewer.legacy import plot_crystal as pc  # noqa: E402
-from crystal_viewer.legacy.crystal_scene import build_structure_scene  # noqa: E402
+from crystal_viewer.static_publication import plot_crystal as pc  # noqa: E402
+from crystal_viewer.static_publication.crystal_scene import build_structure_scene  # noqa: E402
 from crystal_viewer.loader import build_bundle_scene, build_loaded_crystal  # noqa: E402
 from crystal_viewer.renderer import build_figure, topology_histogram_figure  # noqa: E402
 from crystal_viewer.scene import scene_style  # noqa: E402
@@ -179,7 +179,7 @@ def render_publication(out: Path) -> Path:
         scene["view_y"],
     )
     fig.suptitle(
-        "ORTEP-style export via crystal_viewer.legacy.plot_crystal",
+        "ORTEP-style export via crystal_viewer.static_publication.plot_crystal",
         fontsize=10,
         y=0.97,
     )
