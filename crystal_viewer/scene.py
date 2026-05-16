@@ -2,23 +2,42 @@ from __future__ import annotations
 
 import copy
 import os
+from types import SimpleNamespace
 from typing import Any, Dict, Optional
 
 import numpy as np
 from molcrys_kit.utils.geometry import frac_to_cart
 
-from .disorder import atom_is_minor, bond_is_minor
+from .bonds import bonds_conflict, find_bonds
+from .cif_parse import parse_asu
+from .disorder import atom_is_minor, bond_is_minor, disorder_alpha, is_minor
+from .formula_unit import assemble_component_p1, cluster_atoms, select_formula_unit
+from .geometry import _nearest_pbc_cart, view_rotation
+from .palette import atom_r, elem_color, elem_color_light
 from .presets import DEFAULT_STYLE, deep_merge, default_preset, json_safe
+from .publication_view import auto_view_dir
+from .static_publication.plot_crystal import _compute_label_positions
 
 
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKSPACE_DIR = os.path.dirname(PACKAGE_DIR)
 from .static_publication import crystal_scene as legacy_scene  # noqa: E402
-from .static_publication import plot_crystal as pc  # noqa: E402
 
 
 def scene_ops():
-    return pc._scene_ops()
+    return SimpleNamespace(
+        parse_asu=parse_asu,
+        select_formula_unit=select_formula_unit,
+        find_bonds=find_bonds,
+        auto_view_dir=auto_view_dir,
+        view_rotation=view_rotation,
+        disorder_alpha=disorder_alpha,
+        is_minor=is_minor,
+        elem_color=elem_color,
+        elem_color_light=elem_color_light,
+        atom_r=atom_r,
+        compute_label_positions=_compute_label_positions,
+    )
 
 
 def _resolve_element_color(elem: str, base: str, overrides: Dict[str, str]) -> str:
@@ -152,11 +171,11 @@ def _asymmetric_unit_atoms(atoms):
 def _continuous_components(ops: Any, atoms, M, cell):
     atoms_out = [dict(atom) for atom in atoms]
     bond_pairs = ops.find_bonds(atoms_out, cell=cell)
-    clusters = pc.cluster_atoms(atoms_out, bonds=bond_pairs)
+    clusters = cluster_atoms(atoms_out, bonds=bond_pairs)
     ordered = [sorted(idxs) for _, idxs in sorted(clusters.items(), key=lambda item: min(item[1]))]
     legacy_M = np.asarray(M, dtype=float).T
     for idxs in ordered:
-        atoms_out = pc.assemble_component_p1(atoms_out, idxs, bond_pairs, legacy_M)
+        atoms_out = assemble_component_p1(atoms_out, idxs, bond_pairs, legacy_M)
     return atoms_out, ordered
 
 
@@ -460,7 +479,7 @@ def _bond_endpoints(ai, aj, cell, display_mode: str):
         # expressed in Cartesian coordinates with no periodic imaging.
         end = np.array(aj["cart"], dtype=float)
     else:
-        end = np.array(pc._nearest_pbc_cart(ai["cart"], aj["cart"], cell), dtype=float)
+        end = np.array(_nearest_pbc_cart(ai["cart"], aj["cart"], cell), dtype=float)
     return start, end
 
 
@@ -526,7 +545,7 @@ def build_scene_from_atoms(
         # Skip only bonds between mutually exclusive disorder groups. A plain
         # major/minor mismatch is still valid for ordered hubs with disordered
         # substituents (e.g. HPEP Cl/N centers bonded to PART-2 branches).
-        if pc.bonds_conflict(ai, aj):
+        if bonds_conflict(ai, aj):
             continue
         start, end = _bond_endpoints(ai, aj, cell, display_mode=display_mode)
         bonds.append(
