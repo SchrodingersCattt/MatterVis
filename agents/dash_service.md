@@ -9,6 +9,106 @@ preset save/load.
 
 `/api/v1` is a deprecated active-scene shim for one transition release.
 
+## Surface map
+
+All caller traffic lands on the Flask blueprint at `/api/v2`, which
+delegates to `ViewerBackend`. Mutations write through to the
+`SceneStore` (per-tab `Scene` objects, persisted under `.local/`) and
+arm a `pending_state` payload that the WebSocket fans out to every
+connected client on its next tick.
+
+```mermaid
+flowchart LR
+    CLIENT["HTTP / WS client<br/>(curl, Playwright, agent)"]
+    CLIENT -->|REST| API["/api/v2 blueprint"]
+    CLIENT <-->|WS| WS["/api/v2/ws<br/>(flask-sock)"]
+
+    subgraph RES["Resource groups under /api/v2"]
+        STATE["/state, /camera, /camera/action"]
+        SCENES["/scenes, /scenes/active, /scenes/{id}/duplicate"]
+        STRUCT["/upload, /structures, /scene/{name}"]
+        OVERLAY["/polyhedra (+ instance_overrides)<br/>/atom_groups<br/>/bond_groups<br/>/transforms<br/>(+ supercell shorthand on /state)"]
+        TOPO["/topology"]
+        EXPORT["/screenshot, /export,<br/>/preset/save, /preset/load"]
+        OBS["/healthz, /perf, /perf/clear"]
+    end
+
+    API --> STATE
+    API --> SCENES
+    API --> STRUCT
+    API --> OVERLAY
+    API --> TOPO
+    API --> EXPORT
+    API --> OBS
+
+    STATE --> BACK["ViewerBackend"]
+    SCENES --> BACK
+    STRUCT --> BACK
+    OVERLAY --> BACK
+    TOPO --> BACK
+    EXPORT --> BACK
+    OBS --> BACK
+    WS --> BACK
+    BACK --> STORE["SceneStore<br/>(per-tab Scene rows,<br/>.local/ persisted)"]
+    BACK -. "arms" .-> PEND["pending_state queue"]
+    PEND --> WS
+```
+
+The `supercell` field on `POST /state` is **not** a separate resource:
+the backend rewrites it into a single `repeat` transform appended to
+the active scene's `transforms` list (overwriting any previous
+shorthand-issued `repeat`), so it shows up later under
+`GET /transforms`. Use the shorthand for one-line "2×2×2" scripts; use
+`/transforms` directly when you need to mix `repeat` with `grow_bonds`,
+`slab`, etc.
+
+## Live update contract
+
+The WebSocket is the **only** push channel; REST mutations don't reply
+with the full re-rendered figure. Callers that want the figure must
+either subscribe to `/api/v2/ws` and consume the `version`-bumped
+snapshot, or poll `GET /screenshot?at_version=N` with the version
+returned by the mutating call.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant API as REST /api/v2
+    participant B as ViewerBackend
+    participant S as SceneStore
+    participant W as WS /api/v2/ws
+
+    C->>W: connect
+    W-->>C: snapshot {version: N, state, structures}
+    C->>W: {"type":"subscribe_figure","enabled":true}
+
+    C->>API: POST /state {"atom_scale": 1.2, "scene_id": "s2"}
+    API->>B: apply patch (scene_id=s2)
+    B->>S: mutate scene row, bump version → N+1
+    B-->>B: arm pending_state = deepcopy(current_state)
+    API-->>C: 200 OK
+
+    loop WS tick (~0.5s)
+        W->>B: pop_pending_state()
+        B-->>W: snapshot {version: N+1, state, structures, figure?}
+        W-->>C: push snapshot
+    end
+
+    C->>C: rebuild Plotly figure from snapshot
+```
+
+Notes for callers:
+
+- `pending_state` is armed on every state-mutating call (REST or
+  WebSocket `set_state`), and consumed once per WS tick — clients see
+  one push per version, not one push per call.
+- `subscribe_figure` is opt-in: the default snapshot omits the rendered
+  figure to keep the WS frame small; flip it on when you need live
+  thumbnails.
+- For one-shot "wait for my change to land" scripts, the synchronous
+  `GET /screenshot?at_version=N` path is simpler than running the WS;
+  it blocks until the backend reaches version `N`.
+
 ## REST endpoints
 
 - `GET /state`
@@ -238,7 +338,41 @@ configure Python `requests` with `session.trust_env = False` (or
 ## Stable UI element IDs
 
 Use these when scripting through Selenium / Playwright / Dash testing
-hooks rather than the REST surface.
+hooks rather than the REST surface. These IDs are scraped by external
+automation; renaming any of them is a public-API break.
+
+```mermaid
+flowchart LR
+    subgraph TABS["Scene tabs"]
+        T1["scene-tabs"]
+        T2["scene-tab-{id}"]
+        T3["scene-tab-close-{id}"]
+        T4["scene-new-tab-btn"]
+        T5["scene-tab-rename-input"]
+    end
+    subgraph INPUTS["Display + render controls"]
+        I1["display-mode-selector"]
+        I2["material-selector"]
+        I3["style-selector"]
+        I4["disorder-selector"]
+        I5["atom-scale-slider / bond-radius-slider"]
+    end
+    subgraph EDITORS["Per-scene editors (pattern-matched rows)"]
+        E1["polyhedra-add-btn<br/>polyhedra-rows-container"]
+        E2["atom-groups-add-btn<br/>atom-groups-rows-container"]
+        E3["bond-groups-add-btn<br/>bond-groups-rows-container"]
+        E4["transforms-add-btn<br/>transforms-rows-container"]
+    end
+    subgraph VIEW["View tools + outputs"]
+        V1["view-align-{a,b,c,astar,bstar,cstar}<br/>view-reset"]
+        V2["view-projection"]
+        V3["crystal-graph"]
+        V4["topology-histogram / topology-results"]
+        V5["save-preset-btn / export-btn"]
+    end
+```
+
+The full list (authoritative; the diagram only groups them):
 
 - `scene-tabs`: scene tab row
 - `scene-tab-{id}`: individual scene tab

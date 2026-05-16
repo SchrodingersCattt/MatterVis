@@ -64,6 +64,23 @@ recognised keys is **rejected** at the normaliser layer
 silently matches nothing was the most common Phase 2 footgun in
 testing.
 
+### Selector to render-tag pipeline
+
+Selector keys are AND-combined per atom; rules run in list order with
+later-wins semantics on each tag field independently. When no rule
+matches an atom, the renderer falls back to the element palette (and
+to the legacy `monochrome` flag when set).
+
+```mermaid
+flowchart LR
+  S["selector keys<br/>(all, elements, is_minor,<br/>labels, atom_indices,<br/>fragment_labels, fragment_indices)"] -->|AND per key| M["atom_matches_selector<br/>(per atom)"]
+  M --> R["rules run in list order<br/>(later-wins per field)"]
+  R --> T["per-atom tags written by<br/>tag_atoms_with_groups:<br/>_render_color, _render_color_light,<br/>_render_visible, _render_opacity_scale,<br/>_render_material, _render_style"]
+  N["no rule overrode this atom"] -.-> F["fallback chain:<br/>element palette<br/>+ legacy monochrome flag"]
+  T --> C["renderer consumes tags<br/>(atom trace builder +<br/>_bond_segments)"]
+  F --> C
+```
+
 ### Application order
 
 Groups apply in **list order** with **later-wins** semantics on
@@ -118,6 +135,16 @@ atoms ball-stick except O atoms as ORTEP ellipsoids" with one rule:
 scene-level `material`/`style`. The bond endpoint *colour* still
 respects per-atom `_render_color` so a recoloured atom and the
 adjacent bond half stay visually consistent.
+
+```mermaid
+flowchart TD
+  A["tagged atoms<br/>(_render_* fields written)"] --> P["partition_atoms_by_render_pipeline<br/>by (effective_material, effective_style)<br/>(hidden atoms dropped here)"]
+  P --> B1["bucket (mesh, ball_stick)<br/>-> _atom_mesh_traces"]
+  P --> B2["bucket (mesh, ortep)<br/>-> ortep_atom_mesh_traces"]
+  P --> B3["bucket (flat, *)<br/>-> _atom_scatter_traces"]
+  P --> B4["bucket (*, wireframe)<br/>-> _wireframe_atom_traces"]
+  S["bonds: scene-level<br/>(NOT partitioned per-atom)"] --> BD["_bond_segments<br/>prefers _render_color of each<br/>endpoint and skips bonds<br/>touching hidden atoms"]
+```
 
 ## REST surface
 

@@ -112,7 +112,7 @@ The lattice-length summary is implemented in `cell_aspect_ratio`:
 
 The unit-cell wireframe uses the rows directly:
 
-- `crystal_viewer/renderer_scene_traces.py:1626-1639` assigns
+- `crystal_viewer/renderer_traces_overlays.py` assigns
   `a = scene["M"][0]`, `b = scene["M"][1]`, `c = scene["M"][2]`, then enumerates
   the eight corners \(0,\vec a,\vec b,\vec c,\vec a+\vec b,\vec a+\vec c,
   \vec b+\vec c,\vec a+\vec b+\vec c\).

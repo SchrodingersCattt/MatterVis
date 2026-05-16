@@ -4,6 +4,31 @@ Display modes decide which atom images are materialized and how bonds choose
 their endpoints.  They must not change the lattice convention: the scene keeps
 the same row-vector `M` unless a transform explicitly replaces the cell.
 
+The four modes branch from the same loader inputs and converge again at the
+hydrogen filter and bond-detection step:
+
+```mermaid
+flowchart TD
+    In["bundle inputs<br/>raw_atoms · unwrapped_atoms<br/>formula_unit_atoms · molcrys_analysis<br/>show_hydrogen"] --> Sel{"display_mode"}
+    Sel -->|"asymmetric_unit"| ASU["_asymmetric_unit_atoms<br/>dedup by (label, elem, dg, da)<br/>no PBC images"]
+    Sel -->|"formula_unit"| FU["bundle.formula_unit_atoms (cached)<br/>or molcrys_bridge.select_formula_unit<br/>per-species GCD counts<br/>+ compact PBC translation"]
+    Sel -->|"unit_cell"| UC["unwrapped_atoms<br/>+ _expand_boundary_replicas<br/>(canonical mirrors · MCK drift)"]
+    Sel -->|"cluster"| CL["raw atoms verbatim<br/>no FU selection<br/>no PBC imaging"]
+    ASU --> Hfilt["filter elem == 'H' unless show_hydrogen"]
+    FU --> Hfilt
+    UC --> Hfilt
+    CL --> Hfilt
+    Hfilt --> B{"effective_cell for find_bonds"}
+    B -->|"display_mode == cluster"| Bdir["cell = None<br/>direct Cartesian endpoints<br/>no nearest-image lookup"]
+    B -->|"otherwise"| Bpbc["cell = bundle.cell<br/>PBC bond perception<br/>_bond_endpoints chooses nearest image"]
+    Bdir --> Out["scene draw_atoms + bonds"]
+    Bpbc --> Out
+```
+
+The `cluster` branch is intentionally a short-circuit: it skips formula-unit
+stoichiometry and PBC bond imaging entirely, because the stored Cartesian
+coordinates are already the final geometry.
+
 ## Derivation
 
 Let the raw atom set be

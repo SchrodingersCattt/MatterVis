@@ -33,6 +33,69 @@ individual state keys.
 | `SetPolyhedronInstanceOverride` | `polyhedron_specs.instance_overrides` | figure body only |
 | `SelectTopologySite` | `topology_site_index` | topology, figure body, side panel |
 
+The table above is the contract; the diagram below makes the fan-out visible.
+Operations on the left emit one or more invalidation tokens on the right.
+Operations that should be cheap (camera, color-only polyhedron edits, label
+toggles) must light up only `figure_body` or `camera_layout`; operations that
+truly change geometry light up the heavier-left invalidations as well.
+
+```mermaid
+flowchart LR
+    subgraph Ops["Operations (grouped)"]
+        opLoad["LoadStructure / SwitchScene"]
+        opDisplayHeavy["SetDisplayMode<br/>SetDisplayOptions:hydrogens"]
+        opDisplayLight["SetDisplayOptions: labels / axes / unit_cell_box"]
+        opTransform["SetTransforms"]
+        opCutoff["SetNumericStyle:cutoff"]
+        opStyle["SetRenderStyle<br/>SetNumericStyle (scales / opacities)"]
+        opGroups["SetAtomGroups / SetBondGroups"]
+        opPolyGeom["SetPolyhedronSpecs (geometry fields)"]
+        opPolyColor["SetPolyhedronSpecs (color only)<br/>SetPolyhedronInstanceOverride"]
+        opSelect["SelectTopologySite"]
+        opCam["SetCamera / ResetCamera / SetProjection"]
+    end
+    subgraph Inv["Invalidations"]
+        invScene["scene_geometry"]
+        invTrans["transform_geometry"]
+        invTopo["topology_geometry"]
+        invFig["figure_body"]
+        invCam["camera_layout"]
+        invSide["side_panel"]
+    end
+    opLoad --> invScene
+    opLoad --> invTrans
+    opLoad --> invTopo
+    opLoad --> invFig
+    opLoad --> invCam
+    opLoad --> invSide
+    opDisplayHeavy --> invScene
+    opDisplayHeavy --> invTrans
+    opDisplayHeavy --> invTopo
+    opDisplayHeavy --> invFig
+    opDisplayHeavy --> invCam
+    opDisplayHeavy --> invSide
+    opDisplayLight --> invFig
+    opDisplayLight --> invCam
+    opTransform --> invTrans
+    opTransform --> invTopo
+    opTransform --> invFig
+    opTransform --> invCam
+    opTransform --> invSide
+    opCutoff --> invTopo
+    opCutoff --> invFig
+    opCutoff --> invSide
+    opStyle --> invFig
+    opGroups --> invFig
+    opPolyGeom --> invTopo
+    opPolyGeom --> invFig
+    opPolyGeom --> invSide
+    opPolyColor --> invFig
+    opSelect --> invTopo
+    opSelect --> invFig
+    opSelect --> invSide
+    opCam --> invCam
+```
+
 ## Display Option Diff
 
 `display_options` must be diffed token by token:
@@ -61,6 +124,38 @@ individual state keys.
   build.
 
 Each of these must become an explicit operation contract or disappear.
+
+The dashed edges below are the implicit writes that the current callback mesh
+relies on. Every dashed arrow is a place where callback ordering decides which
+value wins, which is the root reason small UI tweaks ship as regressions and
+get patched after the fact.
+
+```mermaid
+flowchart LR
+    opDisplay["SetDisplayMode"]
+    opTransform["add transform<br/>(implicit display_mode promote)"]
+    opStyleMat["SetRenderStyle: material=flat"]
+    opSupercell["REST supercell shorthand"]
+    opMono["display_options: monochrome"]
+    opBrowserCam["browser camera-state-store"]
+    opRestPatch["REST PatchState (camera=...)"]
+
+    sTopoSite["topology_site_index"]
+    sTransforms["transforms"]
+    sDisplayMode["display_mode"]
+    sFastRender["fast_rendering"]
+    sAtomGroups["atom_groups"]
+    sCamera["camera"]
+
+    opDisplay -.->|implicit reset| sTopoSite
+    opTransform -.->|promotes to unit_cell| sDisplayMode
+    opTransform -.->|via display_mode reset| sTopoSite
+    opStyleMat -.->|written by Dash capture| sFastRender
+    opSupercell -.->|deletes existing repeats| sTransforms
+    opMono -.->|appends migration rule| sAtomGroups
+    opRestPatch -->|intended writer| sCamera
+    opBrowserCam -.->|overrides on next build| sCamera
+```
 
 ## Target Reducer Shape
 

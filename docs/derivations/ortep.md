@@ -4,6 +4,26 @@ ORTEP rendering converts atomic displacement parameters into probability
 ellipsoids.  MatterVis has two rendering languages for the same mathematics:
 3D ellipsoid meshes and camera-facing 2D billboard ellipses.
 
+Both render paths share the same eigendecomposition step; only the projection
+and the probability radius differ:
+
+```mermaid
+flowchart LR
+    Atom["atom dict<br/>U (ADP) or uiso fallback"] --> Clamp["_clamp_u_for_visualisation<br/>per-element eigenvalue cap<br/>(visual only · CIF data untouched)"]
+    Clamp --> Eig["ellipsoid_principal_axes<br/>U = V Λ Vᵀ · sort λ desc<br/>L = k_3D(p) · √λ"]
+    Eig --> Style{"(material, style)"}
+    Style -->|"mesh, ortep"| M3D["ortep_mesh3d<br/>spherical lat/lon mesh<br/>real 3D Mesh3d"]
+    Style -->|"flat, ortep"| BB["ortep_billboard_polygon<br/>U₂ = P U Pᵀ on (view_x, view_y)<br/>radius k_2D(p) = √(−2 ln(1−p))"]
+    M3D --> MeshTraces["ortep_atom_mesh_traces<br/>(batched by color · opacity)"]
+    BB --> BBTraces["ortep_atom_billboard_traces<br/>+ axis dashes · outlines"]
+    Eig --> Axes["ortep_principal_axis_segments<br/>± L_i V_:i"]
+    Eig --> Octs["ortep_octant_shading<br/>front-lit if d · v̂ ≥ 0"]
+```
+
+The two probability radii (`k_3D` for the mesh, `k_2D` for the billboard) are
+not interchangeable: a 50% mesh ellipsoid and a 50% billboard ellipse use
+different scalars because the projected covariance is two-dimensional.
+
 ## Derivation
 
 ### ADP Tensor

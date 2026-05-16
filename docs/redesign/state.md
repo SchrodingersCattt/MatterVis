@@ -62,6 +62,43 @@ treated as durable scene intent.
 | `topology_fragment_type`, `topology_show_all_sites` | Legacy request aliases normalized into stored keys. |
 | `supercell` | REST shorthand normalized into a `repeat` transform. |
 
+### Taxonomy at a Glance
+
+The three categories above should partition every key the viewer carries.
+Stored values are the only durable truth; derived values fall out of stored
+values via selectors; ephemeral values enter from out-of-band channels (REST
+aliases, browser events, polling metadata) and either get migrated into stored
+form or vanish at the end of the request scope.
+
+```mermaid
+flowchart LR
+    subgraph Stored["Stored (user intent)"]
+        sIdentity["scene_id / scene_label / structure"]
+        sDisplay["display_mode / display_options"]
+        sStyle["material / style / disorder<br/>atom_scale / bond_radius / minor_opacity"]
+        sLists["transforms / atom_groups / bond_groups / polyhedron_specs"]
+        sTopo["cutoff / topology_site_index / topology_enabled"]
+        sCam["projection / camera / camera_revision"]
+    end
+    subgraph Derived["Derived (recomputed)"]
+        dFlags["show_hydrogen / show_unit_cell<br/>show_axes / show_labels"]
+        dRender["monochrome / fast_rendering"]
+        dPanel["fragment_options / topology_payload"]
+        dFig["uirevision / figure"]
+    end
+    subgraph Ephemeral["Ephemeral (out-of-band)"]
+        eMeta["version / server_started_at"]
+        eBrowser["camera-state-store / pending_state"]
+        eEvent["click / hover / right-click target"]
+        eAlias["topology_fragment_type / topology_show_all_sites / supercell"]
+    end
+    Stored -->|selector| Derived
+    Derived -->|cache key| dFig
+    eAlias -.->|migrated at API boundary| Stored
+    eBrowser -.->|overlay applied post-cache| dFig
+    eMeta -.->|excluded from figure cache key| dFig
+```
+
 ## Current Gaps
 
 `normalize_state` currently performs too many roles:
@@ -74,6 +111,32 @@ treated as durable scene intent.
 - monochrome-to-atom-group migration;
 - camera compatibility handling;
 - projection synchronization.
+
+The diagram below shows the same eight roles fanning out of a single function.
+Every arrow is a place where the patch shape implicitly mutates an unrelated
+stored key; the reducer redesign aims to make each branch its own named
+operation with declared invalidations.
+
+```mermaid
+flowchart LR
+    patch["Incoming patch dict"] --> norm["normalize_state(...)"]
+    norm --> r1["Scene switch & structure default"]
+    norm --> r2["Legacy alias migration<br/>(topology_fragment_type,<br/>topology_show_all_sites)"]
+    norm --> r3["Style normalization<br/>(material / style / disorder / scales)"]
+    norm --> r4["Topology selection reset<br/>(display_mode change → site_index=None)"]
+    norm --> r5["Supercell shorthand<br/>(replaces existing repeat transforms)"]
+    norm --> r6["Monochrome flag<br/>→ appended atom_group rule"]
+    norm --> r7["Camera compatibility<br/>+ camera_revision bump"]
+    norm --> r8["Projection sync<br/>(top-level ↔ camera.projection.type)"]
+    r1 --> stored["Stored Scene State"]
+    r2 --> stored
+    r3 --> stored
+    r4 --> stored
+    r5 --> stored
+    r6 --> stored
+    r7 --> stored
+    r8 --> stored
+```
 
 The target reducer should split those into named operations with explicit
 invalidations.

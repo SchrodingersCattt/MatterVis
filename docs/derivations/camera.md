@@ -6,6 +6,24 @@ normalized scene cube, then interprets `scene.camera` inside that normalized
 space.  Therefore axis ranges, aspect mode, camera reuse, and compass
 projection are one mathematical system.
 
+The viewport pipeline below shows where the cube scale \(\vec\sigma\) is
+produced and where every downstream consumer (layout, compass projection,
+camera compatibility check) reads it.  All three consumers MUST agree on the
+same \(\vec\sigma\) or the rendered scene drifts from the camera frame.
+
+```mermaid
+flowchart LR
+    A["scene<br/>(bounds · M · viewport · draw_atoms)"] --> R["_scene_ranges<br/>atom hull · cell corners (when owned or shown)<br/>topology focus · padding"]
+    S["style<br/>(display_mode · show_unit_cell · atom_scale)"] --> R
+    T["topology_data<br/>(focus center + shell)"] --> R
+    R --> AS["aspect / equalisation<br/>unit_cell → manual aspectratio<br/>else → _equalize_axis_ranges + cube"]
+    AS --> Layout["figure_axis_layout<br/>{xr, yr, zr, aspect, camera, uirevision}"]
+    R --> CS["_axis_cube_scale<br/>σ_k = h_k / a_k"]
+    CS --> CP["_camera_axis_projections<br/>compass uses M / σ"]
+    CS --> Compat["camera compatibility check<br/>σ_old ≠ σ_new ⇒ reset/remap"]
+    Layout --> Fig["fig.update_layout(scene=...)"]
+```
+
 ## Derivation
 
 ### Plotly Scene-Cube Model
@@ -310,18 +328,16 @@ Figure assembly:
 - `crystal_viewer/renderer.py:116-118` calls `_scene_ranges` before building
   traces.
 - `crystal_viewer/renderer.py:201` installs `figure_axis_layout`.
-- `crystal_viewer/renderer_scene_traces.py:1623-1656` draws the full unit-cell
+- `crystal_viewer/renderer_traces_overlays.py` draws the full unit-cell
   box from the eight lattice corners whenever `scene["M"]` exists; visibility
   is controlled later by style.
 
 Camera persistence and overwrite:
 
-- `crystal_viewer/dash_app_impl.py:4099-4122` excludes `camera` from the figure
-  cache key.
-- `crystal_viewer/dash_app_impl.py:4145-4147` applies the live camera on a
-  cached figure.
-- `crystal_viewer/dash_app_impl.py:4171-4174` builds a fresh figure and then
-  overwrites `scene_camera` with `state["camera"]`.
+- `crystal_viewer/viewer_backend_camera.py` excludes compatible `camera` from
+  the figure cache key.
+- `crystal_viewer/viewer_backend_camera.py` applies the live camera on cached
+  and freshly built figures.
 
 Compass:
 
@@ -351,7 +367,7 @@ full lattice parallelepiped from
 \vec a+\vec b+\vec c\}.
 \]
 
-That is implemented in `crystal_viewer/renderer_scene_traces.py:1626-1647`.
+That is implemented in `crystal_viewer/renderer_traces_overlays.py`.
 
 but let `_scene_ranges` omit those corners in non-unit-cell modes. If a lattice
 corner \(C\) satisfied
@@ -432,13 +448,40 @@ for the compass (`renderer_viewport.py:129-133`).  The missing piece is applying
 the same old/new cube-scale reasoning to the camera itself when the viewport
 signature changes.
 
-### Duplicated Viewport Math
+The current reducer follows policy 2 (clear + revision bump).
+`normalize_state` watches a `display_signature` tuple
+`(display_mode, "unit_cell_box" in display_options, topology_enabled)` and on
+any change drops `state["camera"]` to `None` and increments
+`state["camera_revision"]`:
 
-The active Dash path imports `_scene_ranges`, `_axis_cube_scale`, and
-`uniform_viewport` from `renderer_viewport.py` after the star import from
-`renderer_scene_traces.py`.  That makes `renderer_viewport.py` authoritative
-for `build_figure`.  Any duplicate helper left in trace modules is drift risk
-and should delegate to the authoritative implementation.
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant N as normalize_state
+    participant S as state
+    participant F as figure_axis_layout
+    U->>N: patch (display_mode / display_options / topology_enabled)
+    N->>S: read display_signature_before
+    N->>S: apply patch
+    N->>S: compute display_signature_after
+    alt signature unchanged
+        N-->>S: keep state.camera (reuse next render)
+    else signature changed
+        N->>S: state.camera = None
+        N->>S: state.camera_revision += 1
+        Note over S,F: policy 2 (current): uirevision bumps and default camera is rederived. Policy 1 would remap eye/up by σ_old / σ_new instead.
+    end
+    F->>S: read camera (or default if None)
+    F-->>U: figure with new ranges, σ, camera
+```
+
+### Viewport Math Ownership
+
+The renderer split leaves `_scene_ranges`, `_axis_cube_scale`, and
+`uniform_viewport` in `renderer_viewport.py`.  `renderer_scene_traces.py` is now
+a compatibility facade, so new viewport math must go directly into
+`renderer_viewport.py` and trace modules must consume it rather than defining
+shadow helpers.
 
 ## Invariants
 

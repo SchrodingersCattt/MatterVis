@@ -47,6 +47,32 @@ It returns:
 `figure_axis_layout`, camera remapping, and compass projection all consume that
 object.  They do not each rederive ranges independently.
 
+```mermaid
+flowchart TD
+    scene["scene"] --> resolver["resolve_viewport()"]
+    styleIn["style"] --> resolver
+    topo["topology_data"] --> resolver
+    camera["stored camera"] --> compat["camera compatibility check"]
+    resolver --> ranges["axis ranges"]
+    resolver --> aspect["aspectmode + aspectratio"]
+    resolver --> cube["cube scale sigma"]
+    resolver --> sig["viewport signature"]
+    sig --> compat
+    ranges --> axis["figure_axis_layout (single writer)"]
+    aspect --> axis
+    cube --> compass["compass projection"]
+    cube --> remap["camera remapping"]
+    compat --> axis
+    axis --> figure["Plotly figure"]
+    compass --> figure
+    remap --> figure
+```
+
+`figure_axis_layout` is the only node that writes `aspectmode`,
+`aspectratio`, axis ranges, default layout camera, and `uirevision`.  Compass
+projection and camera remapping read the same cube-scale vector, so the
+compass cannot point one way while the main scene is framed another.
+
 ## Cell Box And Topology Ownership
 
 When `show_unit_cell=True`, the eight cell corners own viewport inclusion in
@@ -74,13 +100,37 @@ as a pure helper:
 remap_camera(camera, old_viewport, new_viewport) -> camera
 ```
 
-## Current Duplicate Logic
+## Resolved Duplicate Logic
 
-`renderer.py` imports helper names from `renderer_scene_traces` and then
-overrides viewport helpers from `renderer_viewport`.  The active Dash path uses
-`renderer_viewport`, but duplicate helper names in trace modules are drift
-risk.  The target architecture keeps viewport math in one module and has trace
-modules import it explicitly.
+The renderer split turned `renderer_scene_traces.py` into a compatibility
+facade.  Viewport math now lives in `renderer_viewport.py`; trace construction
+is split across focused `renderer_*` modules; `renderer.py` remains the public
+`build_figure` facade.
+
+```mermaid
+flowchart LR
+    renderer["renderer.py"]
+    facade["renderer_scene_traces.py facade"]
+    viewport["renderer_viewport.py"]
+    styleModule["renderer_style.py"]
+    meshes["renderer_meshes.py"]
+    traces["renderer_traces_atoms.py / renderer_traces_overlays.py"]
+    topology["renderer_topology.py"]
+    cache["renderer_cache.py"]
+    renderer --> facade
+    facade --> viewport
+    facade --> styleModule
+    facade --> meshes
+    facade --> traces
+    facade --> topology
+    facade --> cache
+    viewport --> layout["figure_axis_layout"]
+    cache --> figure["build_figure mesh payload"]
+```
+
+`renderer_scene_traces.py` no longer owns duplicate viewport helpers; it only
+re-exports the split modules for compatibility.  Future renderer changes should
+land in the focused module directly, not in the facade.
 
 ## Reverse Hooks
 

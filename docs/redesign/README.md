@@ -8,6 +8,33 @@ The geometry contract lives in `docs/derivations/`.  This directory builds on
 that math and defines how user operations, caches, Dash callbacks, rendering,
 and migration stages should compose without hidden side effects.
 
+## Layered Architecture
+
+The redesign is one downward pipeline.  Every horizontal level only reads from
+the level above it; the only way to mutate persisted state is to go all the way
+back to the top.
+
+```mermaid
+flowchart TD
+    user["User / UI Controls"] --> opEnv["Operation Envelope"]
+    rest["REST POST /api/v2/..."] --> opEnv
+    ws["WebSocket Messages"] --> opEnv
+    opEnv --> reducer["Reducer Dispatcher"]
+    reducer --> stored["Stored State (agent-state-store)"]
+    reducer --> inval["Invalidations"]
+    stored --> selectors["Selectors (derived state)"]
+    inval --> caches["Cache Layers"]
+    selectors --> resolver["Render Resolver"]
+    caches --> resolver
+    resolver --> figure["Plotly Figure"]
+```
+
+Stored state owns user intent.  Selectors recompute derived view state on
+demand.  Caches react to invalidation facts emitted by the reducer.  The render
+resolver is a pure read; it never writes back.  When a caller "fixes a bug" by
+mutating stored state from inside a selector, a cache, or the renderer, the
+patch is in the wrong layer.
+
 ## Documents
 
 - `state.md`: stored, derived, and ephemeral state categories.
@@ -16,6 +43,34 @@ and migration stages should compose without hidden side effects.
 - `callbacks.md`: Dash callback ownership and single-writer rules.
 - `rendering.md`: figure construction, viewport ownership, and camera rules.
 - `migration.md`: phased PR roadmap for replacing the current callback mesh.
+
+## Current vs Target Shape
+
+The bugs that motivated this redesign are not local: they are the predictable
+behaviour of a multi-writer mesh.  The target shape is a single reducer with a
+read-only render path.
+
+```mermaid
+flowchart LR
+    subgraph current ["Current: multi-writer mesh"]
+        c_ui["UI controls"] --> c_store["agent-state-store"]
+        c_rows["editor table rows"] --> c_store
+        c_rest["REST handlers"] --> c_store
+        c_ws["WebSocket handlers"] --> c_store
+        c_rc["right-click actions"] --> c_store
+        c_store --> c_fig["figure callback"]
+        c_store --> c_panel["side panel"]
+    end
+    subgraph target ["Target: single reducer + selectors"]
+        t_ui["UI controls"] --> t_op["Operation"]
+        t_rest["REST / WS"] --> t_op
+        t_op --> t_red["Reducer"]
+        t_red --> t_store["agent-state-store"]
+        t_store --> t_sel["Selectors"]
+        t_sel --> t_fig["figure (read-only)"]
+        t_sel --> t_panel["side panel (read-only)"]
+    end
+```
 
 ## Design Principles
 

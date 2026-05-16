@@ -148,6 +148,27 @@ slab so the periodic images don't collide. Slab atoms replace the
 home cell entirely, and the cell parameters are reset to the slab
 basis.
 
+#### Kind matrix at a glance
+
+Each `kind` consumes the previous transform's output scene and
+returns a new scene. The atom-count safety ceiling
+(`MAX_ATOMS_AFTER_TRANSFORM`, currently 50 000) applies after every
+step.
+
+```mermaid
+flowchart LR
+  IN["input scene<br/>(draw_atoms, M, cell)"] --> D{"dispatch on<br/>transform.kind"}
+  D --> K1["repeat<br/>params: a, b, c"]
+  D --> K2["grow_radius<br/>params: seeds, radius"]
+  D --> K3["grow_bonds<br/>params: seeds, hops"]
+  D --> K4["complete_fragment<br/>params: seeds, max_hops"]
+  D --> K5["complete_polyhedron<br/>params: seeds, cutoff"]
+  D --> K6["by_symmetry<br/>params: seeds, ops"]
+  D --> K7["slab<br/>params: miller, layers,<br/>min_thickness, vacuum"]
+  K1 & K2 & K3 & K4 & K5 & K6 & K7 --> R["rebuild_scene_with_atoms<br/>(re-detect bonds, recompute bounds,<br/>regenerate fragment labels)"]
+  R --> OUT["output scene<br/>(feeds next transform or renderer)"]
+```
+
 ### `seeds` selector grammar
 
 Mirrors `crystal_viewer.atom_groups`:
@@ -306,6 +327,18 @@ post-transform scene is cached on a separate
 `(display_mode, show_hydrogen, transforms_cache_key(transforms))`.
 Toggling a transform's `enabled` flag is a hash-lookup, not a
 recompute.
+
+```mermaid
+flowchart LR
+  T["state.transforms<br/>(ordered list)"] --> K["transforms_cache_key<br/>(kind, enabled, sorted params;<br/>excludes id and name)"]
+  K --> C["_transformed_scene_cache<br/>key=(display_mode, show_hydrogen,<br/>transforms_cache_key)"]
+  T --> A["apply_transforms<br/>iterates in list order"]
+  A --> O["apply_one_transform<br/>(dispatch on kind)"]
+  O --> R["rebuild_scene_with_atoms<br/>(re-detect bonds, recompute<br/>bounds, regenerate labels)"]
+  R --> S["post-transform scene"]
+  S --> C
+  C --> F["renderer.build_figure<br/>(figure-JSON cache also keys on<br/>transforms_cache_key)"]
+```
 
 ## Invariants
 

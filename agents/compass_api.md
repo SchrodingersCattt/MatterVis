@@ -20,6 +20,24 @@ occlusion problem entirely.
 The module is split into four tiers; pick the lowest tier that meets
 your needs.
 
+```mermaid
+flowchart LR
+    CAM["Plotly camera dict"] --> L1["camera_screen_basis<br/>(pure math)"]
+    L1 --> L2["project_to_screen<br/>(pure math)"]
+    L2 --> L3["paper_arrow_annotations<br/>(2D block)"]
+    LAT["lattice vectors"] --> L4["lattice_compass_annotations<br/>(convenience wrapper)"]
+    CAM --> L4
+    L4 --> L3
+    L3 --> ANN["Plotly annotations<br/>(axref/ayref = 'pixel')"]
+```
+
+- Crystal axes triad on every panel → call `lattice_compass_annotations`.
+- k-paths, dipole/force vectors, custom direction sets → compose layers
+  1–3 directly; layer 4 hard-codes lattice vectors and would otherwise
+  fight you.
+- Pixel y points DOWN; the wrappers flip the sign on `ay` for you, but
+  if you compose layers 1–3 by hand you must do the same.
+
 1. `camera_screen_basis(camera) -> (right, up)`
    Pure camera math. Returns `(right, up)` unit vectors in data
    space (i.e. the 3D directions that point right and up on the

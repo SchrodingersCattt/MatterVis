@@ -10,6 +10,25 @@ The base scene comes from the display-mode selector; each transform returns a
 new scene-like dict whose atom list, bonds, bounds, labels, and fragment table
 are rebuilt for the manifested Cartesian coordinates.
 
+The end-to-end pipeline from parsed atoms to a rendered figure is:
+
+```mermaid
+flowchart LR
+    A["raw_atoms (loader)"] --> B["build_scene_from_atoms<br/>display-mode + show_hydrogen filter"]
+    B --> C["base_scene<br/>cached at (display_mode, show_hydrogen)"]
+    C --> D{"apply_transforms<br/>ordered list"}
+    D -->|"each enabled spec"| E["apply_one_transform<br/>kind dispatch"]
+    E --> F["rebuild_scene_with_atoms<br/>re-detect bonds (cell=None)<br/>recompute bounds + label_items<br/>regenerate fragment_table"]
+    F -->|"becomes next input scene"| D
+    D --> G["transformed scene<br/>cached at (display_mode, show_hydrogen, transforms_cache_key)"]
+    G --> H["renderer (build_figure)"]
+```
+
+The base-scene cache key omits the transform list so toggling transforms
+on/off never re-runs display-mode selection; the post-transform cache key adds
+`transforms_cache_key(transforms)` so a row rename or `enabled=False` flip
+hits without rebuilding geometry.
+
 ## Derivation
 
 ### Common Image Translation
@@ -179,6 +198,36 @@ The slab transform delegates crystallographic slab generation to MolCrysKit:
 MatterVis then rebuilds the scene with the returned atom coordinates and
 replaces the lattice by \(M_\mathrm{slab}\).  This is the only transform in the
 current list that is expected to replace `M`.
+
+### Transform Kinds Overview
+
+The seven recognised `kind` values share the same dispatch and merge path; they
+differ only in which seed/parameter rule produces the extra atoms (or, for
+`slab`, the wholesale replacement set).
+
+```mermaid
+flowchart TD
+    P["transform spec<br/>{id, name, kind, params, enabled}"] --> K{"kind"}
+    K -->|"repeat"| R["replicate_atoms<br/>(N_a, N_b, N_c) replicas<br/>home keeps labels<br/>others suffixed [na,nb,nc]"]
+    K -->|"grow_radius"| GR["atoms_within_radius<br/>seeds + radius<br/>image grid by lattice norms"]
+    K -->|"grow_bonds"| GB["atoms_within_bonds<br/>seeds + hops<br/>BFS over halo bond graph"]
+    K -->|"complete_fragment"| CF["atoms_completing_fragment<br/>BFS until convergence<br/>halo capped at 24 Å"]
+    K -->|"complete_polyhedron"| CP["atoms_completing_polyhedron<br/>centers + cutoff<br/>radius growth incl. seeds"]
+    K -->|"by_symmetry"| BS["atoms_under_symmetry<br/>seeds + (R, t)<br/>frac' = R · frac + t"]
+    K -->|"slab"| SL["slab_atoms_from_bundle<br/>delegates to MolCrysKit<br/>replaces M with slab_M"]
+    R --> MG["_merge_atoms or wholesale<br/>+ rebuild_scene_with_atoms"]
+    GR --> MG
+    GB --> MG
+    CF --> MG
+    CP --> MG
+    BS --> MG
+    SL --> MG
+```
+
+`transforms_cache_key` hashes only the geometry-affecting fields per spec
+(`kind`, `enabled`, sorted `params` keys).  `id` and `name` are intentionally
+excluded so a row rename hits the cache; flipping `enabled` re-keys but the
+disabled spec is skipped inside `apply_transforms` itself.
 
 ## Current Code Mapping
 

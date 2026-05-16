@@ -3,6 +3,33 @@
 The state-machine rewrite should not land as one giant PR.  The current app is
 large and user-facing; each phase below has a narrow invariant gate.
 
+## Phase Progression
+
+```mermaid
+flowchart LR
+    p1["Phase 1<br/>Geometry + Viewport"]:::done
+    p15["Phase 1.5<br/>Scene-tabs single writer"]:::done
+    p2["Phase 2<br/>Selectors"]:::pending
+    p3["Phase 3<br/>Operation Reducer"]:::pending
+    p4["Phase 4<br/>Cache Centralization"]:::pending
+    p5["Phase 5<br/>Rendering Resolver"]:::pending
+    p6["Phase 6<br/>Callback Simplification"]:::done
+    p1 -- "viewport corner gate" --> p15
+    p15 -- "one tab DOM writer" --> p2
+    p2 -- "selector cache-key gate" --> p3
+    p3 -- "one agent-state writer" --> p4
+    p4 -- "named selector keys" --> p5
+    p5 -- "one viewport writer" --> p6
+    classDef done fill:#d4edda,stroke:#155724,color:#155724;
+    classDef pending fill:#f8f9fa,stroke:#6c757d,color:#212529;
+```
+
+Green phases (1, 1.5, and the structural half of 6) have landed in this
+branch. Each arrow label is the invariant test that must pass before the next
+phase starts; if a Phase 3 PR is reviewed and the Phase 2 selectors are not yet
+in place, the reviewer should push back rather than thread operation handling
+through ad hoc selectors.
+
 ## Phase 1: Geometry And Viewport Baseline
 
 Status: started by the viewport/camera fixes in this branch.
@@ -109,12 +136,15 @@ Gate:
 
 ## Phase 6: Callback Simplification
 
+Status: structural split implemented in this branch; reducer ownership is still
+pending.
+
 Scope:
 
 - remove `allow_duplicate=True` state writers where the reducer dispatcher has
   taken ownership;
-- split the 7000-line Dash implementation into state, operations, callbacks,
-  and view-model modules;
+- keep the split Dash implementation in `app_*`, `dash_callbacks_*`, and
+  `viewer_backend*` modules rather than regrowing `dash_app_impl.py`;
 - keep public REST and stable Dash IDs unchanged unless a version bump is
   planned.
 
