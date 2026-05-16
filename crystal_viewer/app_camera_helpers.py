@@ -44,7 +44,7 @@ def _camera_from_store(camera_state: Optional[dict[str, Any]], scene_id: Optiona
 
 
 def _status_message(message: str, level: str = "info") -> tuple[str, str]:
-    return message, _status_class(level)
+    return message, f"status-banner status-banner--{level}"
 
 
 def _structure_summary(scene: dict) -> str:

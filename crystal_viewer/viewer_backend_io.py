@@ -57,7 +57,11 @@ class _IOBackendMixin:
 
         upload_dir = os.path.realpath(os.path.join(tempfile.gettempdir(), "crystal_viewer_uploads"))
         os.makedirs(upload_dir, exist_ok=True)
+        raw_basename = os.path.basename(filename or "")
         safe = secure_filename(filename or "") or "upload.cif"
+        leading_underscores = re.match(r"^_+", raw_basename)
+        if leading_underscores and not safe.startswith("_"):
+            safe = f"{leading_underscores.group(0)}{safe}"
         if not safe.lower().endswith(".cif"):
             safe = f"{safe}.cif"
         # Persist by content hash as well as display filename. Different
