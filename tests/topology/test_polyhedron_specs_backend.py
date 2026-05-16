@@ -25,10 +25,12 @@ from pathlib import Path
 import pytest
 
 from crystal_viewer.app import (
+    DEFAULT_CENTROID_OFFSET_FRAC,
     ViewerBackend,
     _normalize_polyhedron_spec,
     _normalize_polyhedron_specs,
 )
+from crystal_viewer import topology as topology_module
 from crystal_viewer.presets import default_preset_path
 
 
@@ -54,6 +56,25 @@ def test_normalize_polyhedron_spec_assigns_id_and_lowercases_color():
     assert spec["enabled"] is True
     assert spec["name"] == "ClO4"
     assert spec["id"] in existing
+    assert spec["enforce_enclosure"] is True
+    assert spec["centroid_offset_frac"] == DEFAULT_CENTROID_OFFSET_FRAC
+
+
+def test_normalize_polyhedron_spec_accepts_packing_shell_knobs():
+    spec = _normalize_polyhedron_spec(
+        {
+            "center_species": "C2N2",
+            "ligand_species": "ClO4",
+            "enforce_enclosure": False,
+            "centroid_offset_frac": "0.65",
+        },
+        fallback_color="#7C5CBF",
+        existing_ids=set(),
+    )
+
+    assert spec is not None
+    assert spec["enforce_enclosure"] is False
+    assert spec["centroid_offset_frac"] == 0.65
 
 
 def test_normalize_polyhedron_spec_rejects_invalid_color_to_fallback():
@@ -138,12 +159,21 @@ def test_add_polyhedron_spec_rejects_missing_center(backend: ViewerBackend):
 def test_update_polyhedron_spec_keeps_id_and_overrides_fields(backend: ViewerBackend):
     spec = backend.add_polyhedron_spec(center_species="ClO4", color="#FF0000")
     updated = backend.update_polyhedron_spec(
-        spec["id"], {"color": "#00FF00", "name": "renamed", "enabled": False}
+        spec["id"],
+        {
+            "color": "#00FF00",
+            "name": "renamed",
+            "enabled": False,
+            "enforce_enclosure": False,
+            "centroid_offset_frac": 0.5,
+        },
     )
     assert updated["id"] == spec["id"]
     assert updated["color"] == "#00ff00"
     assert updated["name"] == "renamed"
     assert updated["enabled"] is False
+    assert updated["enforce_enclosure"] is False
+    assert updated["centroid_offset_frac"] == 0.5
 
 
 def test_update_polyhedron_spec_unknown_id_raises(backend: ViewerBackend):
@@ -214,3 +244,32 @@ def test_disabled_specs_drop_from_effective_list(backend: ViewerBackend):
     ]
     effective = backend._effective_polyhedron_specs(state)
     assert [spec["center_species"] for spec in effective] == ["Y"]
+
+
+def test_mck_polyhedron_record_passes_packing_shell_knobs(monkeypatch):
+    captured = {}
+
+    def fake_find_polyhedra(*args, **kwargs):
+        captured["kwargs"] = kwargs
+        return [{"center_position": [0.0, 0.0, 0.0], "shell_coords": [], "shell_distances": []}]
+
+    monkeypatch.setattr(topology_module.molcrys_bridge, "molecular_crystal_from_bundle", lambda bundle: object())
+    monkeypatch.setattr(topology_module, "find_polyhedra", fake_find_polyhedra)
+
+    record = topology_module._mck_polyhedron_record(
+        object(),
+        {
+            "index": 0,
+            "center": [0.0, 0.0, 0.0],
+            "formula": "C2N2",
+            "source_molecule_index": 4,
+        },
+        10.0,
+        ligand_species=("ClO4",),
+        enforce_enclosure=False,
+        centroid_offset_frac=0.7,
+    )
+
+    assert record is not None
+    assert captured["kwargs"]["enforce_enclosure"] is False
+    assert captured["kwargs"]["centroid_offset_frac"] == 0.7

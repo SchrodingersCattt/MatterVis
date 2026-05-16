@@ -46,7 +46,7 @@ from .renderer import build_figure, compose_axis_key_layout, style_from_controls
 from .renderer_viewport import _scene_ranges, figure_axis_layout
 from .scene import scene_json
 from .scenes import Scene, SceneStore
-from .topology import analyze_topology, extract_coordination_shell
+from .topology import DEFAULT_CENTROID_OFFSET_FRAC, analyze_topology, extract_coordination_shell
 
 
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -54,6 +54,8 @@ WORKSPACE_DIR = workspace_root(PACKAGE_DIR)
 DEFAULT_PRESET_PATH = default_preset_path(WORKSPACE_DIR)
 LEGACY_EXPORT_MODULE = "crystal_viewer.legacy.plot_crystal"
 PLACEHOLDER_STRUCTURE = "__upload__"
+_POLY_SHELL_MODE_ENCLOSURE = "gap_enclosure"
+_POLY_SHELL_MODE_GAP = "gap"
 
 
 class ApiError(RuntimeError):
@@ -267,6 +269,25 @@ def _coerce_species_value(value: Any) -> Optional[str]:
     return text or None
 
 
+def _coerce_polyhedron_enforce_enclosure(raw: Any) -> bool:
+    if isinstance(raw, str):
+        text = raw.strip().lower()
+        if text in {"gap", "gap_only", "false", "0", "no", "off"}:
+            return False
+        if text in {"gap_enclosure", "enclosure", "true", "1", "yes", "on"}:
+            return True
+    return bool(raw) if raw is not None else True
+
+
+def _coerce_centroid_offset_frac(raw: Any) -> float:
+    value = _coerce_optional_float(
+        raw,
+        lo=0.0,
+        hi=10.0,
+    )
+    return float(DEFAULT_CENTROID_OFFSET_FRAC if value is None else value)
+
+
 def _normalize_polyhedron_spec(
     raw: Any,
     *,
@@ -295,6 +316,10 @@ def _normalize_polyhedron_spec(
     color = _coerce_hex_color(raw.get("color"), fallback_color)
     enabled = bool(raw.get("enabled", True))
     instance_overrides = _coerce_instance_overrides(raw.get("instance_overrides"))
+    enforce_enclosure = _coerce_polyhedron_enforce_enclosure(raw.get("enforce_enclosure", True))
+    centroid_offset_frac = _coerce_centroid_offset_frac(
+        raw.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC)
+    )
     return {
         "id": spec_id,
         "name": name,
@@ -309,6 +334,8 @@ def _normalize_polyhedron_spec(
         # visible: bool}}``. Empty dict means every fragment matched by
         # this spec inherits the spec-level colour and visibility.
         "instance_overrides": instance_overrides,
+        "enforce_enclosure": enforce_enclosure,
+        "centroid_offset_frac": centroid_offset_frac,
     }
 
 
@@ -878,63 +905,123 @@ def _polyhedra_table_rows(
     ligand_options = [{"label": "(auto)", "value": _AUTO_LIGAND_VALUE}] + list(species_options)
     rows = []
     for spec in specs:
+        shell_mode = (
+            _POLY_SHELL_MODE_ENCLOSURE
+            if spec.get("enforce_enclosure", True)
+            else _POLY_SHELL_MODE_GAP
+        )
         rows.append(
             html.Div(
                 [
-                    dcc.Input(
-                        id={"type": "poly-row-color", "spec_id": spec["id"]},
-                        type="color",
-                        value=str(spec.get("color") or "#7C5CBF"),
+                    html.Div(
+                        [
+                            dcc.Input(
+                                id={"type": "poly-row-color", "spec_id": spec["id"]},
+                                type="color",
+                                value=str(spec.get("color") or "#7C5CBF"),
+                                style={
+                                    "width": "30px",
+                                    "height": "26px",
+                                    "padding": "0",
+                                    "border": "1px solid #BBB",
+                                    "verticalAlign": "middle",
+                                },
+                                debounce=False,
+                            ),
+                            dcc.Dropdown(
+                                id={"type": "poly-row-center", "spec_id": spec["id"]},
+                                options=species_options,
+                                value=str(spec.get("center_species") or ""),
+                                clearable=False,
+                                style={"flex": "1", "minWidth": "70px", "fontSize": "12px"},
+                            ),
+                            html.Span("->", style={"color": "#888", "fontSize": "12px"}),
+                            dcc.Dropdown(
+                                id={"type": "poly-row-ligand", "spec_id": spec["id"]},
+                                options=ligand_options,
+                                value=str(spec.get("ligand_species") or _AUTO_LIGAND_VALUE),
+                                clearable=False,
+                                style={"flex": "1", "minWidth": "70px", "fontSize": "12px"},
+                            ),
+                            dcc.Checklist(
+                                id={"type": "poly-row-enabled", "spec_id": spec["id"]},
+                                options=[{"label": "", "value": "yes"}],
+                                value=["yes"] if spec.get("enabled", True) else [],
+                                style={"display": "inline-block", "marginLeft": "4px"},
+                            ),
+                            html.Button(
+                                "x",
+                                id={"type": "poly-row-delete", "spec_id": spec["id"]},
+                                n_clicks=0,
+                                style={
+                                    "background": "transparent",
+                                    "border": "1px solid #DDD",
+                                    "color": "#A00",
+                                    "padding": "0 8px",
+                                    "cursor": "pointer",
+                                    "lineHeight": "20px",
+                                    "borderRadius": "3px",
+                                },
+                                title="Remove this polyhedron row",
+                            ),
+                        ],
                         style={
-                            "width": "30px",
-                            "height": "26px",
-                            "padding": "0",
-                            "border": "1px solid #BBB",
-                            "verticalAlign": "middle",
+                            "display": "flex",
+                            "alignItems": "center",
+                            "gap": "4px",
                         },
-                        debounce=False,
                     ),
-                    dcc.Dropdown(
-                        id={"type": "poly-row-center", "spec_id": spec["id"]},
-                        options=species_options,
-                        value=str(spec.get("center_species") or ""),
-                        clearable=False,
-                        style={"flex": "1", "minWidth": "70px", "fontSize": "12px"},
-                    ),
-                    html.Span("\u2192", style={"color": "#888", "fontSize": "12px"}),
-                    dcc.Dropdown(
-                        id={"type": "poly-row-ligand", "spec_id": spec["id"]},
-                        options=ligand_options,
-                        value=str(spec.get("ligand_species") or _AUTO_LIGAND_VALUE),
-                        clearable=False,
-                        style={"flex": "1", "minWidth": "70px", "fontSize": "12px"},
-                    ),
-                    dcc.Checklist(
-                        id={"type": "poly-row-enabled", "spec_id": spec["id"]},
-                        options=[{"label": "", "value": "yes"}],
-                        value=["yes"] if spec.get("enabled", True) else [],
-                        style={"display": "inline-block", "marginLeft": "4px"},
-                    ),
-                    html.Button(
-                        "\u00d7",
-                        id={"type": "poly-row-delete", "spec_id": spec["id"]},
-                        n_clicks=0,
-                        style={
-                            "background": "transparent",
-                            "border": "1px solid #DDD",
-                            "color": "#A00",
-                            "padding": "0 8px",
-                            "cursor": "pointer",
-                            "lineHeight": "20px",
-                            "borderRadius": "3px",
-                        },
-                        title="Remove this polyhedron row",
+                    html.Details(
+                        [
+                            html.Summary(
+                                "Packing shell options",
+                                style={"cursor": "pointer", "fontSize": "10px", "color": "#666"},
+                            ),
+                            html.Div(
+                                [
+                                    html.Label("Shell closure", style={"fontSize": "10px", "color": "#555"}),
+                                    dcc.Dropdown(
+                                        id={"type": "poly-row-shell-mode", "spec_id": spec["id"]},
+                                        options=[
+                                            {"label": "Gap + enclosure", "value": _POLY_SHELL_MODE_ENCLOSURE},
+                                            {"label": "Gap only", "value": _POLY_SHELL_MODE_GAP},
+                                        ],
+                                        value=shell_mode,
+                                        clearable=False,
+                                        style={"fontSize": "11px"},
+                                    ),
+                                    html.Label(
+                                        "Centering tolerance",
+                                        style={"fontSize": "10px", "color": "#555", "marginTop": "4px"},
+                                    ),
+                                    dcc.Input(
+                                        id={"type": "poly-row-centroid-offset", "spec_id": spec["id"]},
+                                        type="number",
+                                        min=0,
+                                        max=10,
+                                        step=0.05,
+                                        value=float(spec.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC)),
+                                        debounce=True,
+                                        title=(
+                                            "Maximum shell-centroid offset as a fraction of shell radius. "
+                                            "Larger values make enclosure less strict."
+                                        ),
+                                        style={"width": "100%", "fontSize": "11px"},
+                                    ),
+                                ],
+                                style={
+                                    "display": "grid",
+                                    "gridTemplateColumns": "1fr",
+                                    "gap": "2px",
+                                    "padding": "4px 0 0 34px",
+                                },
+                            ),
+                        ],
+                        open=False,
                     ),
                 ],
                 style={
-                    "display": "flex",
-                    "alignItems": "center",
-                    "gap": "4px",
+                    "display": "block",
                     "marginBottom": "4px",
                 },
             )
@@ -3358,6 +3445,8 @@ class ViewerBackend:
         name: Optional[str] = None,
         color: Optional[str] = None,
         enabled: bool = True,
+        enforce_enclosure: bool = True,
+        centroid_offset_frac: Optional[float] = DEFAULT_CENTROID_OFFSET_FRAC,
         scene_id: Optional[str] = None,
         spec_id: Optional[str] = None,
     ) -> dict[str, Any]:
@@ -3372,6 +3461,8 @@ class ViewerBackend:
                 "ligand_species": ligand_species,
                 "color": color,
                 "enabled": enabled,
+                "enforce_enclosure": enforce_enclosure,
+                "centroid_offset_frac": centroid_offset_frac,
             },
             fallback_color=fallback_color,
             existing_ids=existing_ids,
@@ -3927,6 +4018,8 @@ class ViewerBackend:
             (
                 spec["center_species"],
                 spec.get("ligand_species") or None,
+                bool(spec.get("enforce_enclosure", True)),
+                float(spec.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC)),
             )
             for spec in effective_specs
         )
@@ -4007,6 +4100,10 @@ class ViewerBackend:
             analysis_spec_index = center_to_spec_indices[primary_formula][0]
         analysis_spec = effective_specs[analysis_spec_index]
         analysis_ligand = analysis_spec.get("ligand_species") or None
+        analysis_enforce_enclosure = bool(analysis_spec.get("enforce_enclosure", True))
+        analysis_centroid_offset_frac = float(
+            analysis_spec.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC)
+        )
 
         primary = analyze_topology(
             bundle,
@@ -4016,6 +4113,8 @@ class ViewerBackend:
             display_label=display_fragment.get("label") if display_fragment else None,
             display_type=display_fragment.get("type") if display_fragment else None,
             ligand_species=[analysis_ligand] if analysis_ligand else None,
+            enforce_enclosure=analysis_enforce_enclosure,
+            centroid_offset_frac=analysis_centroid_offset_frac,
         )
 
         # Build per-spec overlay lists. For each fragment whose formula
@@ -4033,6 +4132,8 @@ class ViewerBackend:
             center_species = spec["center_species"]
             ligand = spec.get("ligand_species") or None
             ligand_arg = [ligand] if ligand else None
+            enforce_enclosure = bool(spec.get("enforce_enclosure", True))
+            centroid_offset_frac = float(spec.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC))
             overlays: list[dict[str, Any]] = []
             for frag in scene.get("fragment_table") or []:
                 formula_key = frag.get("formula") or frag.get("species")
@@ -4067,6 +4168,8 @@ class ViewerBackend:
                         display_label=frag.get("label"),
                         display_type=frag.get("type"),
                         ligand_species=ligand_arg,
+                        enforce_enclosure=enforce_enclosure,
+                        centroid_offset_frac=centroid_offset_frac,
                     )
                 except Exception:
                     continue
@@ -4098,6 +4201,8 @@ class ViewerBackend:
                     "name": spec["name"],
                     "center_species": center_species,
                     "ligand_species": ligand,
+                    "enforce_enclosure": enforce_enclosure,
+                    "centroid_offset_frac": centroid_offset_frac,
                     "overlays": overlays,
                 }
             )
@@ -4572,6 +4677,8 @@ class ViewerBackend:
         center_species: Optional[str] = None,
         ligand_species: Optional[str] = None,
         level: str = "molecule",
+        enforce_enclosure: bool = True,
+        centroid_offset_frac: Optional[float] = DEFAULT_CENTROID_OFFSET_FRAC,
     ) -> dict[str, Any]:
         if cutoff <= 0 or cutoff > 1000:
             raise ApiError("cutoff must be in the range (0, 1000]", status_code=400)
@@ -4606,6 +4713,8 @@ class ViewerBackend:
                     ligand_species=[ligand_species] if ligand_species else None,
                     level="atom",
                     center_species=center_species,
+                    enforce_enclosure=enforce_enclosure,
+                    centroid_offset_frac=_coerce_centroid_offset_frac(centroid_offset_frac),
                 )
             except ValueError as exc:
                 raise ApiError(str(exc), status_code=400) from exc
@@ -4622,6 +4731,8 @@ class ViewerBackend:
                         "center_species": center_species,
                         "ligand_species": ligand_species,
                         "enabled": True,
+                        "enforce_enclosure": enforce_enclosure,
+                        "centroid_offset_frac": centroid_offset_frac,
                     }
                 ],
                 fallback_color=state.get("topology_hull_color", "#7C5CBF"),
@@ -5937,6 +6048,8 @@ def create_app(
         Input({"type": "poly-row-center", "spec_id": ALL}, "value"),
         Input({"type": "poly-row-ligand", "spec_id": ALL}, "value"),
         Input({"type": "poly-row-enabled", "spec_id": ALL}, "value"),
+        Input({"type": "poly-row-shell-mode", "spec_id": ALL}, "value"),
+        Input({"type": "poly-row-centroid-offset", "spec_id": ALL}, "value"),
         Input({"type": "poly-row-delete", "spec_id": ALL}, "n_clicks"),
         State({"type": "poly-row-color", "spec_id": ALL}, "id"),
         prevent_initial_call=True,
@@ -5948,6 +6061,8 @@ def create_app(
         centers,
         ligands,
         enableds,
+        shell_modes,
+        centroid_offsets,
         deletes,
         color_ids,
     ):
@@ -6030,6 +6145,16 @@ def create_app(
                         "center_species": centers[index] if index < len(centers) else base.get("center_species"),
                         "ligand_species": ligand_value,
                         "enabled": "yes" in (enableds[index] if index < len(enableds) else []),
+                        "enforce_enclosure": (
+                            (shell_modes[index] if index < len(shell_modes) else _POLY_SHELL_MODE_ENCLOSURE)
+                            != _POLY_SHELL_MODE_GAP
+                        ),
+                        "centroid_offset_frac": (
+                            centroid_offsets[index]
+                            if index < len(centroid_offsets) and centroid_offsets[index] is not None
+                            else base.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC)
+                        ),
+                        "instance_overrides": base.get("instance_overrides", {}),
                     }
                 )
             try:

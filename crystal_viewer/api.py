@@ -193,6 +193,8 @@ def register_api(dash_app, backend) -> None:
                 center_species=payload.get("center_species"),
                 ligand_species=payload.get("ligand_species"),
                 level=payload.get("level", "molecule"),
+                enforce_enclosure=payload.get("enforce_enclosure", True),
+                centroid_offset_frac=payload.get("centroid_offset_frac"),
             )
         )
 
@@ -263,8 +265,8 @@ def register_api(dash_app, backend) -> None:
     # ----- polyhedron specs (Phase 1) -----------------------------------
     #
     # Per-scene named-row data model for coordination polymers. Each spec
-    # = {id, name, center_species, ligand_species (None=auto), color,
-    # enabled}. Empty list (DELETE-all or never-set) falls back to the
+    # = {id, name, center_species, ligand_species, color, enabled,
+    # packing-shell knobs}. Empty list (DELETE-all or never-set) falls back to the
     # legacy ``topology_species_keys`` + shared ``topology_hull_color``
     # behaviour. See ``agents/polyhedron_api.md``.
 
@@ -292,6 +294,8 @@ def register_api(dash_app, backend) -> None:
                 name=payload.get("name"),
                 color=payload.get("color"),
                 enabled=bool(payload.get("enabled", True)),
+                enforce_enclosure=payload.get("enforce_enclosure", True),
+                centroid_offset_frac=payload.get("centroid_offset_frac"),
                 scene_id=_polyhedra_scene_id(),
                 spec_id=payload.get("id"),
             )
@@ -714,6 +718,8 @@ def register_api(dash_app, backend) -> None:
                 center_species=payload.get("center_species"),
                 ligand_species=payload.get("ligand_species"),
                 level=payload.get("level", "molecule"),
+                enforce_enclosure=payload.get("enforce_enclosure", True),
+                centroid_offset_frac=payload.get("centroid_offset_frac"),
             )
         )
 

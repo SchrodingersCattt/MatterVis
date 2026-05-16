@@ -22,6 +22,8 @@ Every spec is a flat dict with these fields:
 | `ligand_species` | string \| null | Explicit ligand formula for MolCrysKit molecule-level packing polyhedra. `null` persists but is not rendered; MatterVis no longer derives auto-ligand shells locally. |
 | `color` | string | Hull / shell colour; six-digit hex (`#RRGGBB`). Auto-assigned from a colour-blind-friendly palette when omitted. |
 | `enabled` | bool | `false` rows persist but are skipped at render time. |
+| `enforce_enclosure` | bool | Packing-shell mode. `true` (default) keeps MolCrysKit's gap+enclosure expansion; `false` stops at the distance-gap shell. |
+| `centroid_offset_frac` | number | MolCrysKit centering tolerance passed to `find_polyhedra`; default is `0.15`. Larger values make the enclosure check less strict. |
 | `instance_overrides` | object | **Phase 4.** Per-fragment override map: `{fragment_label: {color, visible}}`. Empty `{}` means every matched fragment inherits the spec-level colour and visibility. Keys are the fragment-table labels exposed in `topology_data["spec_results"][i]["overlays"][j]["center_label"]`. |
 
 ### State integration
@@ -88,6 +90,8 @@ Body:
   "ligand_species": null,
   "color": "#FF6A00",
   "enabled": true,
+  "enforce_enclosure": true,
+  "centroid_offset_frac": 0.15,
   "id": "optional-stable-id"
 }
 ```
@@ -193,6 +197,8 @@ directly (no Dash app), the renderer pulls per-spec colours from
     "color": "#RRGGBB",
     "center_species": "...",
     "ligand_species": "..." | None,
+    "enforce_enclosure": True,
+    "centroid_offset_frac": 0.15,
     "overlays": [
         {
             "center_coords": [x, y, z],
