@@ -12,10 +12,7 @@ RELAXED_LINE_LIMITS = {
     "loader.py": 1200,
     "transforms.py": 1200,
 }
-KNOWN_OVERSIZE_DURING_SPLIT = {
-    # Commit 3 removes this exception.
-    "renderer_scene_traces.py": 2700,
-}
+KNOWN_OVERSIZE_DURING_SPLIT = {}
 
 
 def _line_count(path: Path) -> int:

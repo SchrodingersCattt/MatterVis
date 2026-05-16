@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from .app_shared import *
 
+_HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
+
 def _coerce_hex_color(value: Any, fallback: str) -> str:
     """Reject anything that isn't ``#rrggbb`` so a malformed payload from a
     careless caller can't sneak ``red`` or ``rgba(...)`` into the data

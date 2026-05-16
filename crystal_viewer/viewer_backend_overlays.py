@@ -4,6 +4,7 @@ from __future__ import annotations
 from .app_shared import *
 from .app_normalizers import *
 from .app_rightclick import _normalize_polyhedron_specs
+from .app_style_helpers import _POLYHEDRON_AUTO_COLORS
 
 
 class _OverlaysBackendMixin:
