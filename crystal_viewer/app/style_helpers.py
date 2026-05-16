@@ -1,8 +1,8 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
-from .app_shared import *
-from .app_camera_helpers import _camera_from_store, _coerce_projection, _plotly_camera
+from .shared import *
+from .camera_helpers import _camera_from_store, _coerce_projection, _plotly_camera
 
 def _json_safe(value: Any) -> Any:
     if isinstance(value, np.ndarray):

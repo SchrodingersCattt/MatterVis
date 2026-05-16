@@ -1,10 +1,10 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
-from .app_shared import *
-from .app_normalizers import *
-from .app_rightclick import _normalize_polyhedron_specs
-from .app_style_helpers import _POLYHEDRON_AUTO_COLORS
+from .shared import *
+from .normalizers import *
+from .rightclick import _normalize_polyhedron_specs
+from .style_helpers import _POLYHEDRON_AUTO_COLORS
 
 
 class _OverlaysBackendMixin:
@@ -391,7 +391,7 @@ class _OverlaysBackendMixin:
                     "validate the result before using it as a surface model."
                 )
         if transform["kind"] == "repeat":
-            from .transforms import MAX_ATOMS_AFTER_TRANSFORM
+            from ..transforms import MAX_ATOMS_AFTER_TRANSFORM
 
             scene = self.scene_for_state(state)
             atom_count = len(scene.get("draw_atoms") or [])

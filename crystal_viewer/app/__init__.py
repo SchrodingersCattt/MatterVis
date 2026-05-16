@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 # Thin public entrypoint. Keep the old ``crystal_viewer.app`` symbol surface
-# intact while the implementation lives in ``dash_app_impl``.
-from . import dash_app_impl as _dash_app_impl
+# intact while the implementation lives in ``app.dash_impl``.
+from . import dash_impl as _dash_app_impl
 
 globals().update({
     name: getattr(_dash_app_impl, name)

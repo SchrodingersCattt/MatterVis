@@ -1,14 +1,14 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
-from .app_shared import *
-from .app_camera_helpers import *
-from .app_style_helpers import *
-from .app_normalizers import *
-from .app_editor_tables import *
-from .app_editor_transforms import *
-from .app_rightclick import *
-from .viewer_backend import ViewerBackend
+from .shared import *
+from .camera_helpers import *
+from .style_helpers import *
+from .normalizers import *
+from .editor_tables import *
+from .editor_transforms import *
+from .rightclick import *
+from .backend import ViewerBackend
 
 
 def register_editor_callbacks(app, backend):

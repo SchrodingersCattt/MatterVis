@@ -1,9 +1,9 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
-from .app_shared import *
-from .app_normalizers import *
-from .app_style_helpers import _POLYHEDRON_AUTO_COLORS
+from .shared import *
+from .normalizers import *
+from .style_helpers import _POLYHEDRON_AUTO_COLORS
 
 def _dispatch_rightclick_action(
     backend: Any,

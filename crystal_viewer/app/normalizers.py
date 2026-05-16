@@ -1,7 +1,7 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
-from .app_shared import *
+from .shared import *
 
 _HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
@@ -451,7 +451,7 @@ def _normalize_transform(
     if not isinstance(raw, dict):
         return None
     kind = str(raw.get("kind") or "").strip()
-    from .transforms import KNOWN_TRANSFORM_KINDS
+    from ..transforms import KNOWN_TRANSFORM_KINDS
 
     if kind not in KNOWN_TRANSFORM_KINDS:
         return None

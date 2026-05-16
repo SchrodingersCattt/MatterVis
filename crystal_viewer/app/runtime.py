@@ -1,7 +1,7 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
-from .app_shared import *
+from .shared import *
 
 def _install_callback_audit(app) -> None:
     """Log every /_dash-update-component request: which inputs changed

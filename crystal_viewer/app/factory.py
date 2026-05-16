@@ -1,17 +1,17 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
-from .app_shared import *
-from .api import register_api
-from .app_camera_helpers import *
-from .app_editor_tables import *
-from .app_editor_transforms import *
-from .app_runtime import _install_callback_audit, _start_cache_prewarm
-from .app_style_helpers import *
-from .dash_callbacks_editors import register_editor_callbacks
-from .dash_callbacks_state import register_state_callbacks
-from .dash_callbacks_view import register_view_callbacks
-from .viewer_backend import ViewerBackend
+from .shared import *
+from ..api import register_api
+from .camera_helpers import *
+from .editor_tables import *
+from .editor_transforms import *
+from .runtime import _install_callback_audit, _start_cache_prewarm
+from .style_helpers import *
+from .callbacks_editors import register_editor_callbacks
+from .callbacks_state import register_state_callbacks
+from .callbacks_view import register_view_callbacks
+from .backend import ViewerBackend
 
 
 def create_app(

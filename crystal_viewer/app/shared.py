@@ -29,9 +29,9 @@ except ImportError as exc:  # pragma: no cover - user-facing fallback
         "Install it with `python -m pip install dash`."
     ) from exc
 
-from . import perf_log
-from .loader import LoadedCrystal, build_bundle_scene, build_empty_bundle, build_loaded_crystal, load_uploaded_cif
-from .presets import (
+from .. import perf_log
+from ..loader import LoadedCrystal, build_bundle_scene, build_empty_bundle, build_loaded_crystal, load_uploaded_cif
+from ..presets import (
     DEFAULT_CATALOG,
     DEFAULT_STYLE,
     LOCAL_STATE_DIRNAME,
@@ -42,11 +42,11 @@ from .presets import (
     save_preset,
     workspace_root,
 )
-from .renderer import build_figure, compose_axis_key_layout, style_from_controls, topology_histogram_figure, topology_results_markdown
-from .renderer_viewport import _scene_ranges, figure_axis_layout
-from .scene import scene_json
-from .scenes import Scene, SceneStore
-from .topology import DEFAULT_CENTROID_OFFSET_FRAC, analyze_topology, extract_coordination_shell
+from ..renderer import build_figure, compose_axis_key_layout, style_from_controls, topology_histogram_figure, topology_results_markdown
+from ..renderer_viewport import _scene_ranges, figure_axis_layout
+from ..scene import scene_json
+from ..scenes import Scene, SceneStore
+from ..topology import DEFAULT_CENTROID_OFFSET_FRAC, analyze_topology, extract_coordination_shell
 
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKSPACE_DIR = workspace_root(PACKAGE_DIR)

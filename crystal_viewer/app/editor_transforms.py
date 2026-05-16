@@ -1,8 +1,8 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
-from .app_shared import *
-from .app_normalizers import *
+from .shared import *
+from .normalizers import *
 
 def _seed_selector_to_text(seeds: dict[str, Any] | None) -> str:
     if not isinstance(seeds, dict) or not seeds:

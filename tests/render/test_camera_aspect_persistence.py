@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from crystal_viewer.dash_app_impl import ViewerBackend
+from crystal_viewer.app.dash_impl import ViewerBackend
 from crystal_viewer.loader import build_loaded_crystal
 from crystal_viewer.renderer_viewport import _plotly_camera_from_scene
 

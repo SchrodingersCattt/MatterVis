@@ -1,9 +1,9 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
-from .app_shared import *
-from .app_normalizers import *
-from .app_rightclick import _normalize_polyhedron_specs
+from .shared import *
+from .normalizers import *
+from .rightclick import _normalize_polyhedron_specs
 
 
 class _TopologyBackendMixin:
@@ -241,7 +241,7 @@ class _TopologyBackendMixin:
         # in the geometry cache key. Per-spec colours and
         # ``instance_overrides`` stay OUT of the key (they only affect
         # the renderer's painter cache; see ``_attach_spec_colors``).
-        from .transforms import transforms_cache_key
+        from ..transforms import transforms_cache_key
 
         transforms_key = transforms_cache_key(state.get("transforms") or [])
         cache_key = (
