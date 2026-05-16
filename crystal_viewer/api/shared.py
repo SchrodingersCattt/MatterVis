@@ -7,7 +7,7 @@ import time
 from flask import Blueprint, Response, jsonify, request
 from werkzeug.exceptions import HTTPException
 
-from . import perf_log
+from .. import perf_log
 
 try:
     from flask_sock import Sock

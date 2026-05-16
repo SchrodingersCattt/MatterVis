@@ -1,7 +1,7 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
-from .api_shared import *
+from .shared import *
 
 
 def register_state_routes(v2, backend) -> dict:

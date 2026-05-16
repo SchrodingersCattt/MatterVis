@@ -1,14 +1,14 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
-from .api_shared import Blueprint, register_error_handler
-from .api_v1_legacy import register_v1_routes
-from .api_v2_export import register_export_routes
-from .api_v2_overlays import register_overlay_routes
-from .api_v2_perf import register_perf_routes
-from .api_v2_scenes import register_scene_routes
-from .api_v2_state import register_state_routes
-from .api_ws import handle_ws_message, register_ws_routes
+from .shared import Blueprint, register_error_handler
+from .v1_legacy import register_v1_routes
+from .v2_export import register_export_routes
+from .v2_overlays import register_overlay_routes
+from .v2_perf import register_perf_routes
+from .v2_scenes import register_scene_routes
+from .v2_state import register_state_routes
+from .ws import handle_ws_message, register_ws_routes
 
 
 def register_api(dash_app, backend) -> None:
