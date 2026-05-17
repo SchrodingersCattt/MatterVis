@@ -10,12 +10,12 @@ from molcrys_kit.utils.geometry import frac_to_cart
 
 from ..structure.bonds import bonds_conflict, find_bonds
 from ..structure.cif_parse import parse_asu
-from ..disorder import atom_is_minor, bond_is_minor, disorder_alpha, is_minor
+from ..style.disorder import atom_is_minor, bond_is_minor, disorder_alpha, is_minor
 from ..structure.formula_unit import assemble_component_p1, cluster_atoms, select_formula_unit
 from ..structure.geometry import _nearest_pbc_cart, view_rotation
-from ..palette import atom_r, elem_color, elem_color_light
+from ..style.palette import atom_r, elem_color, elem_color_light
 from ..presets import DEFAULT_STYLE, deep_merge, default_preset, json_safe
-from ..publication_view import auto_view_dir
+from ..static_publication.publication_view import auto_view_dir
 from ..static_publication.plot_crystal import _compute_label_positions
 
 

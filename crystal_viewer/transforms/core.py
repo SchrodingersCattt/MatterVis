@@ -101,7 +101,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 from molcrys_kit.utils.geometry import cart_to_frac, frac_to_cart
 
-from ..disorder import atom_is_minor, bond_is_minor
+from ..style.disorder import atom_is_minor, bond_is_minor
 
 
 # Transform kinds the dispatcher recognises. Anything else is rejected

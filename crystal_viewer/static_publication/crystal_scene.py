@@ -8,9 +8,9 @@ from typing import Any, Dict, Iterable, Optional
 import numpy as np
 
 try:
-    from ..disorder import atom_is_minor, bond_is_minor
+    from ..style.disorder import atom_is_minor, bond_is_minor
 except ImportError:  # pragma: no cover - allows direct script execution
-    from crystal_viewer.disorder import atom_is_minor, bond_is_minor  # type: ignore
+    from crystal_viewer.style.disorder import atom_is_minor, bond_is_minor  # type: ignore
 
 
 DEFAULT_STYLE = {

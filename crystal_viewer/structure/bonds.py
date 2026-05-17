@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..disorder import _disorder_group_id
+from ..style.disorder import _disorder_group_id
 from .geometry import _nearest_pbc_cart, bond_vector_mic
-from ..palette import cov_r
+from ..style.palette import cov_r
 
 def bonds_conflict(ai, aj):
     """

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from .static_publication import publication_view as _impl
+from . import analysis as _analysis
 globals().update({
-    name: getattr(_impl, name)
-    for name in dir(_impl)
+    name: getattr(_analysis, name)
+    for name in dir(_analysis)
     if not name.startswith("__")
 })
 

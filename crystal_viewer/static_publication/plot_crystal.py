@@ -43,19 +43,19 @@ except ImportError:  # pragma: no cover - allows direct script execution
 try:
     from ..structure.bonds import *
     from ..structure.cif_parse import *
-    from ..disorder import *
+    from ..style.disorder import *
     from ..structure.formula_unit import *
     from ..structure.geometry import *
-    from ..palette import *
-    from ..publication_view import *
+    from ..style.palette import *
+    from ..static_publication.publication_view import *
 except ImportError:  # pragma: no cover - allows direct script execution
     from crystal_viewer.structure.bonds import *  # type: ignore
     from crystal_viewer.structure.cif_parse import *  # type: ignore
-    from crystal_viewer.disorder import *  # type: ignore
+    from crystal_viewer.style.disorder import *  # type: ignore
     from crystal_viewer.structure.formula_unit import *  # type: ignore
     from crystal_viewer.structure.geometry import *  # type: ignore
-    from crystal_viewer.palette import *  # type: ignore
-    from crystal_viewer.publication_view import *  # type: ignore
+    from crystal_viewer.style.palette import *  # type: ignore
+    from crystal_viewer.static_publication.publication_view import *  # type: ignore
 
 # ── 3D ellipsoid polygon (billboard facing viewer) ──────────────────────────
 def ellipsoid_3d_polygon(at, view_x, view_y, n_pts=48, size_scale=1.0):

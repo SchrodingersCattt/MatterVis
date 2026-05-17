@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from typing import Any, Iterable
 
 import numpy as np
@@ -16,7 +17,7 @@ from molcrys_kit.analysis.packing_shell import (
 from molcrys_kit.analysis.shape import classify_shell
 from molcrys_kit.structures.polyhedra import convex_hull_payload, ideal_polyhedra_for_cn
 
-from .structure import molcrys_bridge
+from ..structure import molcrys_bridge
 
 __all__ = [
     "DEFAULT_CENTROID_OFFSET_FRAC",
@@ -74,7 +75,9 @@ def _mck_polyhedron_record(
         if not central_symbol or not ligand_formula:
             raise ValueError("Atom-level topology requires center_species and ligand_species element symbols.")
         crystal = molcrys_bridge.molecular_crystal_from_bundle(bundle)
-        records = find_polyhedra(
+        public_module = sys.modules.get("crystal_viewer.topology")
+        find_polyhedra_impl = getattr(public_module, "find_polyhedra", find_polyhedra)
+        records = find_polyhedra_impl(
             crystal,
             central_symbol,
             ligand_formula,
@@ -109,7 +112,9 @@ def _mck_polyhedron_record(
     # caller ever wants the over-shell CN=12 / CN=4 cuboctahedron /
     # square-planar interpretations we should expose ``hard_cutoff`` as a
     # separate per-spec field, not by hijacking the search radius.
-    records = find_polyhedra(
+    public_module = sys.modules.get("crystal_viewer.topology")
+    find_polyhedra_impl = getattr(public_module, "find_polyhedra", find_polyhedra)
+    records = find_polyhedra_impl(
         crystal,
         molcrys_bridge.formula_to_moiety(str(center_formula)),
         molcrys_bridge.formula_to_moiety(ligand_formula),

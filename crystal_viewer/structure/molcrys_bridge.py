@@ -20,7 +20,7 @@ import re
 import numpy as np
 from molcrys_kit.utils.geometry import cart_to_frac, frac_to_cart
 
-from ..disorder import atom_is_minor
+from ..style.disorder import atom_is_minor
 
 
 def _require_molcryskit():

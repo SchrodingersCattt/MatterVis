@@ -75,7 +75,7 @@ def build_row_figure(
         hidden_labels_row: set = set()
         atom_groups_row = style_norm.get("atom_groups") or []
         if atom_groups_row:
-            from .atom_groups import hidden_atom_label_set, tag_atoms_with_groups
+            from .style.atom_groups import hidden_atom_label_set, tag_atoms_with_groups
 
             tagged_row = tag_atoms_with_groups(scene["draw_atoms"], atom_groups_row)
             hidden_labels_row = hidden_atom_label_set(tagged_row)
@@ -139,7 +139,7 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None) ->
     hidden_labels: set = set()
     atom_groups = style.get("atom_groups") or []
     if atom_groups:
-        from .atom_groups import hidden_atom_label_set, tag_atoms_with_groups
+        from .style.atom_groups import hidden_atom_label_set, tag_atoms_with_groups
 
         tagged = tag_atoms_with_groups(scene["draw_atoms"], atom_groups)
         hidden_labels = hidden_atom_label_set(tagged)

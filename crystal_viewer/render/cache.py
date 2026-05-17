@@ -6,7 +6,7 @@ from .style import *
 from .traces_atoms import *
 from .traces_overlays import _minor_outline_traces
 from .serialize import _round_coord_arrays
-from ..bond_groups import bond_groups_cache_key
+from ..style.bond_groups import bond_groups_cache_key
 
 def _hashable_selector(selector: dict | None) -> tuple:
     if not isinstance(selector, dict):
@@ -138,7 +138,7 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
     # _render_opacity_scale set by a matching rule survives into the
     # mesh trace bucket key.
     if bond_groups:
-        from ..bond_groups import tag_bonds_with_groups
+        from ..style.bond_groups import tag_bonds_with_groups
 
         original_bonds = scene["bonds"]
         scene["bonds"] = tag_bonds_with_groups(
@@ -159,7 +159,7 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
     scene_material = str(style.get("material", "mesh"))
     scene_style = str(style.get("style", "ball_stick"))
     if atom_groups:
-        from ..atom_groups import (
+        from ..style.atom_groups import (
             partition_atoms_by_render_pipeline,
             tag_atoms_with_groups,
         )
