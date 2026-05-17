@@ -6,12 +6,7 @@ from pathlib import Path
 CRYSTAL_VIEWER = Path(__file__).resolve().parents[1] / "crystal_viewer"
 
 HARD_LINE_LIMIT = 1000
-RELAXED_LINE_LIMITS = {
-    # These modules are mature, cohesive entry points that are just over the
-    # general cap. Keep them visible so future growth is intentional.
-    "loader.py": 1200,
-    "transforms.py": 1200,
-}
+RELAXED_LINE_LIMITS = {}
 KNOWN_OVERSIZE_DURING_SPLIT = {}
 
 

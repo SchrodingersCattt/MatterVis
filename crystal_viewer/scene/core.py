@@ -8,20 +8,20 @@ from typing import Any, Dict, Optional
 import numpy as np
 from molcrys_kit.utils.geometry import frac_to_cart
 
-from .structure.bonds import bonds_conflict, find_bonds
-from .structure.cif_parse import parse_asu
-from .disorder import atom_is_minor, bond_is_minor, disorder_alpha, is_minor
-from .structure.formula_unit import assemble_component_p1, cluster_atoms, select_formula_unit
-from .structure.geometry import _nearest_pbc_cart, view_rotation
-from .palette import atom_r, elem_color, elem_color_light
-from .presets import DEFAULT_STYLE, deep_merge, default_preset, json_safe
-from .publication_view import auto_view_dir
-from .static_publication.plot_crystal import _compute_label_positions
+from ..structure.bonds import bonds_conflict, find_bonds
+from ..structure.cif_parse import parse_asu
+from ..disorder import atom_is_minor, bond_is_minor, disorder_alpha, is_minor
+from ..structure.formula_unit import assemble_component_p1, cluster_atoms, select_formula_unit
+from ..structure.geometry import _nearest_pbc_cart, view_rotation
+from ..palette import atom_r, elem_color, elem_color_light
+from ..presets import DEFAULT_STYLE, deep_merge, default_preset, json_safe
+from ..publication_view import auto_view_dir
+from ..static_publication.plot_crystal import _compute_label_positions
 
 
-PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
+PACKAGE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORKSPACE_DIR = os.path.dirname(PACKAGE_DIR)
-from .static_publication import crystal_scene as legacy_scene  # noqa: E402
+from ..static_publication import crystal_scene as legacy_scene  # noqa: E402
 
 
 def scene_ops():
@@ -239,7 +239,7 @@ def _selected_atoms_for_mode(ops: Any, atoms, M, cell, display_mode: str, formul
     # heuristic.  See crystal_viewer/molcrys_bridge.py.
     if formula_unit_atoms is not None:
         return [dict(atom) for atom in formula_unit_atoms]
-    from .structure import molcrys_bridge
+    from ..structure import molcrys_bridge
     return molcrys_bridge.select_formula_unit(atoms, M)
 
 
@@ -637,7 +637,7 @@ def build_scene_from_cif(
     R = ops.view_rotation(view_dir, up)
     formula_unit_atoms = None
     if display_mode == "formula_unit":
-        from .structure import molcrys_bridge
+        from ..structure import molcrys_bridge
         formula_unit_atoms = molcrys_bridge.select_formula_unit(atoms, M)
     scene = build_scene_from_atoms(
         name=name,

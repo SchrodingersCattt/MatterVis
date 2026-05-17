@@ -13,10 +13,10 @@ from typing import Any, Dict, Iterable, Optional
 import numpy as np
 from molcrys_kit.utils.geometry import cart_to_frac
 
-from . import perf_log
-from .presets import get_default_catalog, workspace_root
-from .structure import molcrys_bridge
-from .scene import build_scene_from_atoms, legacy_scene, scene_json, scene_metadata, scene_ops
+from .. import perf_log
+from ..presets import get_default_catalog, workspace_root
+from ..structure import molcrys_bridge
+from ..scene import build_scene_from_atoms, legacy_scene, scene_json, scene_metadata, scene_ops
 
 
 @dataclass
@@ -715,7 +715,7 @@ def build_bundle_scene(
     if not transforms:
         return base_scene
 
-    from .transforms import apply_transforms, transforms_cache_key
+    from ..transforms import apply_transforms, transforms_cache_key
 
     transformed_cache = getattr(bundle, "_transformed_scene_cache", None)
     if transformed_cache is None:
@@ -969,70 +969,3 @@ def build_loaded_crystal(
     return bundle
 
 
-def load_default_catalog(
-    *,
-    root_dir: Optional[str] = None,
-    names: Optional[Iterable[str]] = None,
-    preset: Optional[Dict[str, Any]] = None,
-) -> Dict[str, LoadedCrystal]:
-    catalog = get_default_catalog(root_dir=root_dir or workspace_root())
-    selected = list(names) if names else list(catalog.keys())
-    loaded = {}
-    for name in selected:
-        entry = catalog[name]
-        loaded[name] = build_loaded_crystal(
-            name=name,
-            cif_path=entry["cif_path"],
-            title=entry["title"],
-            preset=preset,
-            source="catalog",
-        )
-    return loaded
-
-
-def infer_uploaded_name(filename: str, existing_names: Iterable[str]) -> str:
-    stem = os.path.splitext(os.path.basename(filename))[0]
-    return _unique_name(_slugify(stem), existing_names)
-
-
-def write_uploaded_cif(contents: str, filename: str, upload_dir: Optional[str] = None) -> str:
-    if not contents.startswith("data:"):
-        raise ValueError("Dash upload contents must be a data URL.")
-    header, encoded = contents.split(",", 1)
-    if "base64" not in header:
-        raise ValueError("Only base64 CIF uploads are supported.")
-    data = base64.b64decode(encoded)
-    target_dir = upload_dir or os.path.join(tempfile.gettempdir(), "crystal_viewer_uploads")
-    os.makedirs(target_dir, exist_ok=True)
-    safe_name = _slugify(filename)
-    path = os.path.join(target_dir, safe_name)
-    with open(path, "wb") as handle:
-        handle.write(data)
-    return path
-
-
-def load_uploaded_cif(
-    *,
-    contents: str,
-    filename: str,
-    existing_names: Iterable[str],
-    preset: Optional[Dict[str, Any]] = None,
-    upload_dir: Optional[str] = None,
-) -> LoadedCrystal:
-    cif_path = write_uploaded_cif(contents, filename, upload_dir=upload_dir)
-    name = infer_uploaded_name(filename, existing_names)
-    title = os.path.splitext(os.path.basename(filename))[0]
-    return build_loaded_crystal(name=name, cif_path=cif_path, title=title, preset=preset, source="upload")
-
-
-def bundle_json(bundle: LoadedCrystal) -> Dict[str, Any]:
-    return {
-        "name": bundle.name,
-        "title": bundle.title,
-        "cif_path": bundle.cif_path,
-        "scene": scene_json(bundle.scene),
-        "fragment_table": copy.deepcopy(bundle.fragment_table),
-        "topology_fragment_table": copy.deepcopy(bundle.topology_fragment_table),
-        "unwrap_overflow": copy.deepcopy(bundle.unwrap_overflow),
-        "source": bundle.source,
-    }
