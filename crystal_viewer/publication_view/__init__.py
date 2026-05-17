@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .style import palette as _impl
+from ..static_publication import publication_view as _impl
 globals().update({
     name: getattr(_impl, name)
     for name in dir(_impl)

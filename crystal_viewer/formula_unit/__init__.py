@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .static_publication import publication_view as _impl
+from ..structure import formula_unit as _impl
 globals().update({
     name: getattr(_impl, name)
     for name in dir(_impl)

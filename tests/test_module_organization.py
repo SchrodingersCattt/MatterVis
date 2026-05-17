@@ -8,6 +8,7 @@ CRYSTAL_VIEWER = Path(__file__).resolve().parents[1] / "crystal_viewer"
 HARD_LINE_LIMIT = 1000
 RELAXED_LINE_LIMITS = {}
 KNOWN_OVERSIZE_DURING_SPLIT = {}
+ALLOWED_TOP_LEVEL_PY = {"__init__.py", "__main__.py"}
 
 
 def _line_count(path: Path) -> int:
@@ -30,3 +31,8 @@ def test_crystal_viewer_modules_stay_small_enough() -> None:
             failures.append(f"{path.relative_to(CRYSTAL_VIEWER.parent)} has {count} lines > {limit}")
 
     assert not failures, "\n".join(failures)
+
+
+def test_crystal_viewer_top_level_stays_folder_first() -> None:
+    top_level_py = {path.name for path in CRYSTAL_VIEWER.glob("*.py")}
+    assert top_level_py <= ALLOWED_TOP_LEVEL_PY

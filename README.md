@@ -302,11 +302,21 @@ crystal_viewer/
 ├── app/                 # Dash layout, callbacks, ViewerBackend internals
 ├── api/                 # REST + WebSocket blueprints
 ├── render/              # Plotly viewport / traces / cache internals
-├── loader.py            # CIF parsing and fragment bundle loading
-├── scene.py             # cell/cluster scene builder
-├── renderer.py          # Plotly trace generation (atoms, bonds, hull, axes)
-├── topology.py          # coordination-shell extraction & shape analysis
-├── presets.py           # preset / style / catalog IO
+├── structure/           # CIF parsing, bonds, formula units, MolCrysKit bridge
+├── loader/              # CIF/fragment bundle loading facade + upload helpers
+├── scene/               # cell/cluster scene builder facade
+├── transforms/          # repeat/grow/slab transform primitives and pipeline
+├── topology/            # coordination-shell extraction & shape analysis
+├── style/               # atom/bond rules, palette, disorder render helpers
+├── cube/                # cube/orbital I/O, meshes, traces, export facade
+├── ortep/               # thermal ellipsoid math, billboards, traces
+├── compass/             # camera-projected lattice direction annotations
+├── renderer/            # public Plotly facade for atoms, bonds, hulls, axes
+├── presets/             # preset / style / catalog IO
+├── scenes/              # tab/session scene state
+├── perf_log/            # lightweight server event log facade
+├── depth_sort/          # matplotlib depth-order helpers
+├── viewer_backend/      # public ViewerBackend compatibility facade
 ├── assets/              # Dash CSS + JS for the panel layout
 └── static_publication/  # matplotlib publication exporter
 scripts/                # runnable demo scripts (see section above)

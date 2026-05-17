@@ -338,7 +338,9 @@ def _analyze_topology_uncached(
     # the per-call cost under ~200 ms for CN<=12; the result is bundle-cached
     # via ``_analyze_topology_cache`` so it only runs once per (centre,
     # cutoff, ligand) tuple.
-    shape = _classify_shell_payload(shell_coords, center)
+    public_module = sys.modules.get("crystal_viewer.topology")
+    classify_shell_payload_impl = getattr(public_module, "_classify_shell_payload", _classify_shell_payload)
+    shape = classify_shell_payload_impl(shell_coords, center)
     planarity = planarity_analysis(shell_coords, group_size=min(5, len(shell_coords)) if shell_coords else 5)
     prism = detect_prism_vs_antiprism(shell_coords)
     return {

@@ -182,58 +182,58 @@ to atom \(i\):
 
 Mode dispatch is centralized in `_selected_atoms_for_mode`:
 
-- `crystal_viewer/scene.py:200-223` handles `unit_cell`,
+- `crystal_viewer/scene/core.py:200-223` handles `unit_cell`,
   `asymmetric_unit`, `cluster`, and the default `formula_unit`.
-- `crystal_viewer/loader.py:625-637` passes `bundle.formula_unit_atoms` only
+- `crystal_viewer/loader/core.py:625-637` passes `bundle.formula_unit_atoms` only
   when `display_mode == "formula_unit"` and passes `bundle.unwrapped_atoms`
   for continuous molecule coordinates.
 
 The asymmetric-unit key is implemented directly:
 
-- `crystal_viewer/scene.py:134-148` keeps the first atom for
+- `crystal_viewer/scene/core.py:134-148` keeps the first atom for
   `(label, elem, dg, da)`.
 
 Formula-unit chemistry and compact translation are delegated to MolCrysKit:
 
-- `crystal_viewer/molcrys_bridge.py:250-302` builds a `CrystalAnalysis` from
+- `crystal_viewer/structure/molcrys_bridge.py:250-302` builds a `CrystalAnalysis` from
   MolCrysKit molecule identification and stoichiometry.
-- `crystal_viewer/molcrys_bridge.py:362-371` describes the greedy selection:
+- `crystal_viewer/structure/molcrys_bridge.py:362-371` describes the greedy selection:
   anchor on the heaviest species and select proximity-first molecules for the
   remaining per-FU counts.
-- `crystal_viewer/molcrys_bridge.py:311-324` computes the best integer PBC
+- `crystal_viewer/structure/molcrys_bridge.py:311-324` computes the best integer PBC
   translation around the anchor.
-- `crystal_viewer/molcrys_bridge.py:327-340` applies that translation to every
+- `crystal_viewer/structure/molcrys_bridge.py:327-340` applies that translation to every
   atom in the molecule and recomputes fractional coordinates.
-- `crystal_viewer/molcrys_bridge.py:416-444` updates the running anchor
+- `crystal_viewer/structure/molcrys_bridge.py:416-444` updates the running anchor
   centroid after adding each selected molecule.
 
 Cluster mode is intentionally direct:
 
-- `crystal_viewer/scene.py:212-216` returns the stored atoms as Cartesian
+- `crystal_viewer/scene/core.py:212-216` returns the stored atoms as Cartesian
   cluster atoms.
-- `crystal_viewer/scene.py:519-520` passes `cell=None` to bond detection only
+- `crystal_viewer/scene/core.py:519-520` passes `cell=None` to bond detection only
   for `display_mode == "cluster"`.
 
 Unit-cell boundary replicas are implemented by `_expand_boundary_replicas`:
 
-- `crystal_viewer/scene.py:264-290` defines the per-axis canonical shift sets
+- `crystal_viewer/scene/core.py:264-290` defines the per-axis canonical shift sets
   and their Cartesian product.
-- `crystal_viewer/scene.py:292-299` applies the strict atom-level tolerance.
-- `crystal_viewer/scene.py:301-322` unions atom-level exact shifts with the
+- `crystal_viewer/scene/core.py:292-299` applies the strict atom-level tolerance.
+- `crystal_viewer/scene/core.py:301-322` unions atom-level exact shifts with the
   looser fragment-centroid face shifts.
-- `crystal_viewer/scene.py:360-384` computes the MolCrysKit drift vector
+- `crystal_viewer/scene/core.py:360-384` computes the MolCrysKit drift vector
   by rounding centroid differences.
-- `crystal_viewer/scene.py:399-435` applies the drift-corrected effective
+- `crystal_viewer/scene/core.py:399-435` applies the drift-corrected effective
   shifts to grouped molecules.
-- `crystal_viewer/scene.py:437-451` applies atom-level replicas for atoms that
+- `crystal_viewer/scene/core.py:437-451` applies atom-level replicas for atoms that
   do not have a MolCrysKit molecule index.
 
 Bond endpoint policy is implemented by `_bond_endpoints`:
 
-- `crystal_viewer/scene.py:455-463` uses direct endpoints for formula-unit,
+- `crystal_viewer/scene/core.py:455-463` uses direct endpoints for formula-unit,
   cluster, and already-unwrapped pairs, otherwise delegates to the legacy
   nearest-PBC-image helper.
-- `crystal_viewer/scene.py:522-544` stores those endpoints on each bond.
+- `crystal_viewer/scene/core.py:522-544` stores those endpoints on each bond.
 
 ## Audit Notes
 

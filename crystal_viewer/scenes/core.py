@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
-from .presets import json_safe
+from ..presets import json_safe
 
 
 SCENE_STORE_FILENAME = "crystal_view_scenes.json"

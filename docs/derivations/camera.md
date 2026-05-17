@@ -325,9 +325,9 @@ Ranges and equalization:
 
 Figure assembly:
 
-- `crystal_viewer/renderer.py:116-118` calls `_scene_ranges` before building
+- `crystal_viewer/renderer/core.py:116-118` calls `_scene_ranges` before building
   traces.
-- `crystal_viewer/renderer.py:201` installs `figure_axis_layout`.
+- `crystal_viewer/renderer/core.py:201` installs `figure_axis_layout`.
 - `crystal_viewer/render/traces_overlays.py` draws the full unit-cell
   box from the eight lattice corners whenever `scene["M"]` exists; visibility
   is controlled later by style.
@@ -341,9 +341,9 @@ Camera persistence and overwrite:
 
 Compass:
 
-- `crystal_viewer/compass.py:46-87` implements the screen basis.
-- `crystal_viewer/compass.py:90-102` projects 3D vectors onto that basis.
-- `crystal_viewer/compass.py:171-190` normalizes arrows to pixels and flips the
+- `crystal_viewer/compass/core.py:46-87` implements the screen basis.
+- `crystal_viewer/compass/core.py:90-102` projects 3D vectors onto that basis.
+- `crystal_viewer/compass/core.py:171-190` normalizes arrows to pixels and flips the
   tail sign for Plotly pixel-y semantics.
 - `crystal_viewer/render/compass.py:74-110` caps baked compass arrows so they
   stay inside the figure edge.

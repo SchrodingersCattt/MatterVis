@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .style import bond_groups as _impl
+from ..structure import cif_parse as _impl
 globals().update({
     name: getattr(_impl, name)
     for name in dir(_impl)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .style import atom_groups as _impl
+from ..style import disorder as _impl
 globals().update({
     name: getattr(_impl, name)
     for name in dir(_impl)
