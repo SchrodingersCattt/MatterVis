@@ -6,7 +6,7 @@ from typing import Iterable
 import numpy as np
 import plotly.graph_objects as go
 
-from .presets import ORTEP_MODES
+from ..presets import ORTEP_MODES
 
 
 CHI2_3D_50 = 2.3659738843753377
@@ -913,7 +913,7 @@ def ortep_silhouette_outline_traces(scene: dict, style: dict):
 
 
 def build_ortep_panel_figure(scene: dict, *, probability: float = 0.5, show_axes: bool = True, shade_octants: bool = False, **kwargs):
-    from .renderer import build_figure
+    from ..renderer import build_figure
 
     style = {
         "material": kwargs.pop("material", "mesh"),
