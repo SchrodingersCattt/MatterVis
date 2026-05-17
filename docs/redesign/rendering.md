@@ -102,21 +102,21 @@ remap_camera(camera, old_viewport, new_viewport) -> camera
 
 ## Resolved Duplicate Logic
 
-The renderer split turned `renderer_scene_traces.py` into a compatibility
-facade.  Viewport math now lives in `renderer_viewport.py`; trace construction
-is split across focused `renderer_*` modules; `renderer.py` remains the public
+The renderer split turned `render/scene_traces.py` into a compatibility
+facade.  Viewport math now lives in `render/viewport.py`; trace construction
+is split across focused `render/*` modules; `renderer.py` remains the public
 `build_figure` facade.
 
 ```mermaid
 flowchart LR
     renderer["renderer.py"]
-    facade["renderer_scene_traces.py facade"]
-    viewport["renderer_viewport.py"]
-    styleModule["renderer_style.py"]
-    meshes["renderer_meshes.py"]
-    traces["renderer_traces_atoms.py / renderer_traces_overlays.py"]
-    topology["renderer_topology.py"]
-    cache["renderer_cache.py"]
+    facade["render/scene_traces.py facade"]
+    viewport["render/viewport.py"]
+    styleModule["render/style.py"]
+    meshes["render/meshes.py"]
+    traces["render/traces_atoms.py / render/traces_overlays.py"]
+    topology["render/topology.py"]
+    cache["render/cache.py"]
     renderer --> facade
     facade --> viewport
     facade --> styleModule
@@ -128,7 +128,7 @@ flowchart LR
     cache --> figure["build_figure mesh payload"]
 ```
 
-`renderer_scene_traces.py` no longer owns duplicate viewport helpers; it only
+`render/scene_traces.py` no longer owns duplicate viewport helpers; it only
 re-exports the split modules for compatibility.  Future renderer changes should
 land in the focused module directly, not in the facade.
 

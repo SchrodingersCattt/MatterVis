@@ -41,11 +41,11 @@ the visible scene list has one writer and one source of truth.
 
 Today, these concerns are split:
 
-- `dash_callbacks_state.capture_state` writes display/style/topology state.
-- `dash_callbacks_editors.manage_polyhedra`,
-  `dash_callbacks_editors.manage_atom_groups`,
-  `dash_callbacks_editors.manage_bond_groups`, and
-  `dash_callbacks_editors.manage_transforms` each write `agent-state-store`.
+- `app/callbacks_state.py::capture_state` writes display/style/topology state.
+- `app/callbacks_editors.py::manage_polyhedra`,
+  `app/callbacks_editors.py::manage_atom_groups`,
+  `app/callbacks_editors.py::manage_bond_groups`, and
+  `app/callbacks_editors.py::manage_transforms` each write `agent-state-store`.
 - right-click actions write state directly.
 - REST and WebSocket handlers patch backend state out-of-band.
 - camera capture writes backend state while browser camera store remains

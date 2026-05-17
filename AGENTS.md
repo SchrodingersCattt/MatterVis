@@ -12,26 +12,23 @@ MatterVis/
 ├── README.md            ← user-facing pitch
 ├── agents/              ← caller-facing API contracts (REST, programmatic)
 ├── crystal_viewer/      ← the library + Dash app
-│   ├── api.py           ← REST/WebSocket facade; routes live in `api_v*_*.py`
-│   ├── app.py           ← public Dash entrypoint facade
-│   ├── app_*.py         ← Dash layout factory, state normalizers, UI helpers
-│   ├── dash_callbacks_*.py ← grouped Dash callback registrations
-│   ├── atom_groups.py   ← per-scene atom styling rules
-│   ├── bond_groups.py   ← per-scene bond styling rules
-│   ├── compass.py       ← camera-projected paper-coord indicators
-│   ├── cube.py          ← static cube/orbital figures (I/O, isosurfaces, atoms, bonds)
-│   ├── ideal_polyhedra.py
-│   ├── legacy/          ← vendored matplotlib pipeline; do not extend
-│   ├── loader.py        ← structure ingestion
-│   ├── presets.py
-│   ├── scenes.py        ← tab/session scene state
-│   ├── ortep.py         ← thermal ellipsoid geometry + traces
-│   ├── renderer.py      ← public Plotly figure facade
-│   ├── renderer_*.py    ← viewport, mesh, trace, topology, style, cache helpers
-│   ├── scene.py         ← cell/cluster scene builder
-│   ├── topology.py      ← coordination polyhedra geometry & analysis
-│   ├── transforms.py    ← supercell / grow / slab structure mutations
-│   └── viewer_backend*.py ← scene store, figure/cache orchestration, exports
+│   ├── api/             ← REST/WebSocket facade + v1/v2 route modules
+│   ├── app/             ← Dash entrypoint, callbacks, UI helpers, backend mixins
+│   ├── render/          ← Plotly viewport, mesh, trace, topology, style, cache helpers
+│   ├── structure/       ← CIF parsing, bond perception, formula-unit, lattice helpers
+│   ├── loader/          ← structure ingestion facade + bundle/upload internals
+│   ├── scene/           ← cell/cluster scene builder facade + core implementation
+│   ├── transforms/      ← repeat/grow/slab transform primitives + pipeline
+│   ├── topology/        ← coordination-shell extraction & shape analysis
+│   ├── style/           ← atom/bond groups, palette, disorder styling helpers
+│   ├── cube/            ← cube/orbital I/O, meshes, traces, export facade
+│   ├── ortep/           ← thermal ellipsoid math, mesh, billboard, traces
+│   ├── compass/         ← camera-projected paper-coord indicators
+│   ├── presets/         ← preset / style / catalog IO
+│   ├── scenes/          ← tab/session scene state
+│   ├── renderer/        ← public Plotly figure facade
+│   ├── static_publication/ ← matplotlib publication exporter; do not extend casually
+│   └── viewer_backend/  ← public ViewerBackend compatibility facade
 ├── docs/                ← sphinx sources, score tables
 ├── scripts/             ← runnable scripts that exercise the public API
 │   └── private/         ← local/private analysis scripts; keep unpublished data ignored
@@ -130,13 +127,13 @@ Concrete rules:
 - **Molecular fragmentation is `MolecularCrystal.unwrap*` _and_
   `mol_indices`.** Do not re-implement minimum-image unwrapping,
   fragment completion, or bond-graph traversal across periodic
-  boundaries in `crystal_viewer/scene.py` or `loader.py`. The
+  boundaries in `crystal_viewer/scene/core.py` or `loader/core.py`. The
   `unit_cell` display mode in particular must keep delegating to
   `molcrys_kit` for unwrapped coordinates so molecules don't get
   chopped at cell faces.
 
   The fragment-table builder (`_fragment_table_from_atoms` in
-  `crystal_viewer/loader.py`) consumes
+  `crystal_viewer/loader/core.py`) consumes
   `molcrys_analysis.mol_indices` directly — the molecule grouping is
   what defines a fragment, full stop. Do not reintroduce a parallel
   `ops.find_bonds(atom_pool, cell=cell)` → `_cluster_components` path
@@ -186,17 +183,18 @@ generate_ordered_replicas_from_disordered_sites`.** Two patterns
   Without that, the ASE neighbour-list bonds a kept N to a discarded N
   at 0.15 A and fuses two cations into one species again.
 - **Cross-orientation bonds must be filtered at scene build time.**
-  The legacy `find_bonds` in `crystal_viewer/legacy/plot_crystal.py`
-  doesn't know about `_is_minor` and would draw bonds between major
-  and minor atoms — the "套了一层黑色线" / "black cage" complaint.
-  `build_scene_from_atoms` in `crystal_viewer/scene.py` skips any
+  The manifested-scene `find_bonds` helper in `crystal_viewer/structure/bonds.py`
+  intentionally stays chemistry-light and must not decide visibility
+  from `_is_minor`; otherwise it would draw bonds between major and
+  minor atoms — the "套了一层黑色线" / "black cage" complaint.
+  `build_scene_from_atoms` in `crystal_viewer/scene/core.py` skips any
   bond whose endpoints disagree on `is_minor`. Bonds between two
   major atoms render normally; bonds between two minor atoms render
   faded (so the discarded orientation still draws as a contiguous
   shape, just translucent).
 - **Slab generation is
   `molcrys_kit.operations.surface.generate_topological_slab`.**
-  `crystal_viewer/transforms.py` is a thin Dash adapter; if a slab
+  `crystal_viewer/transforms/core.py` is a thin Dash adapter; if a slab
   parameter is missing here, add it as a passthrough kwarg, don't
   duplicate the math.
 - **Sanitise before returning.** `analyze_topology()`'s contract
@@ -204,7 +202,7 @@ generate_ordered_replicas_from_disordered_sites`.** Two patterns
   registry-internal namedtuples (`FaceInfo`, `EdgeInfo`) under
   `topology.faces` / `topology.edges`; strip those before
   surfacing the dict to callers (see `_sanitize_shape_payload` in
-  `crystal_viewer/topology.py`).
+  `crystal_viewer/topology/analysis.py`).
 
 ### MatterVis-only code that is intentionally not upstream chemistry
 
@@ -231,7 +229,7 @@ has grown the exact hook named here.
   "outline ink".
 - MatterVis stores every live lattice matrix as row vectors
   (`cart = frac @ M`), matching ASE, pymatgen, and `molcrys_kit`.
-  The vendored legacy parser still returns the old column-vector
+  The static-publication CIF parser still returns the old column-vector
   matrix; convert it once at the boundary and do not pass column
   matrices into new code.
 - MatterVis may perform minimal CIF symmetry expansion at the loader
@@ -291,7 +289,7 @@ goal is "don't repeat known failures", not blame.
      surface, and the tests — none of which the chemistry needed.
 - **Right fix (this PR):** replace the deprecated
   `angular_rmsd_vs_ideals` call site in
-  `crystal_viewer/topology.py` with `shape.classify_shell`
+  `crystal_viewer/topology/analysis.py` with `shape.classify_shell`
   (`max_strip=0` to keep labels clean), surface
   `primary_label` / `label_modifier` / `cshm_value` in the
   analysis-text panel, and leave the `polyhedron_specs` shape and

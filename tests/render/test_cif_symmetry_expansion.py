@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from crystal_viewer.legacy.plot_crystal import parse_asu
+from crystal_viewer.static_publication.plot_crystal import parse_asu
 
 
 def test_parse_asu_expands_space_group_when_symops_missing(tmp_path):

@@ -4,7 +4,7 @@ Run from the repository root:
 
     python scripts/04_static_publication.py
 
-Uses ``crystal_viewer.legacy.plot_crystal``  -  the same code that powers
+Uses ``crystal_viewer.static_publication.plot_crystal``  -  the same code that powers
 ``POST /api/v1/export``  -  to draw a high-DPI Axes3D figure that prints well
 in greyscale.
 """
@@ -20,8 +20,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-from crystal_viewer.legacy import plot_crystal as pc  # noqa: E402
-from crystal_viewer.legacy.crystal_scene import build_structure_scene  # noqa: E402
+from crystal_viewer.static_publication import plot_crystal as pc  # noqa: E402
+from crystal_viewer.static_publication.crystal_scene import build_structure_scene  # noqa: E402
 
 
 HERE = Path(__file__).resolve().parent

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from crystal_viewer.app import create_app
-from crystal_viewer.dash_app_impl import _camera_figure_patch
+from crystal_viewer.app.dash_impl import _camera_figure_patch
 from crystal_viewer.loader import build_loaded_crystal
 from crystal_viewer.presets import DEFAULT_STYLE
 

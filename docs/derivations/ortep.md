@@ -232,51 +232,51 @@ This preserves eigenvectors and ellipsoid shape while reducing all radii by
 
 Constants and probability scaling:
 
-- `crystal_viewer/ortep.py:12-15` defines the 50% chi-square constants and
+- `crystal_viewer/ortep/core.py:12-15` defines the 50% chi-square constants and
   default Uiso values.
-- `crystal_viewer/ortep.py:40-52` implements `_probability_scale`: exact 2D
+- `crystal_viewer/ortep/core.py:40-52` implements `_probability_scale`: exact 2D
   formula, exact 3D default for 50%, and Wilson-Hilferty approximation for
   other 3D probabilities.
-- `crystal_viewer/ortep.py:55-72` implements the normal quantile approximation
+- `crystal_viewer/ortep/core.py:55-72` implements the normal quantile approximation
   used by Wilson-Hilferty.
 
 Tensor validation and axes:
 
-- `crystal_viewer/ortep.py:75-87` validates or builds the \(U\) matrix:
+- `crystal_viewer/ortep/core.py:75-87` validates or builds the \(U\) matrix:
   3x3 shape, symmetry, positive semidefinite eigenvalues, and symmetrization.
-- `crystal_viewer/ortep.py:90-97` diagonalizes \(U\), sorts eigenvalues
+- `crystal_viewer/ortep/core.py:90-97` diagonalizes \(U\), sorts eigenvalues
   descending, clips tiny negative values, and computes semi-axis lengths.
 
 3D mesh:
 
-- `crystal_viewer/ortep.py:100-133` generates vertices from spherical
+- `crystal_viewer/ortep/core.py:100-133` generates vertices from spherical
   lat/lon samples and returns triangle indices.
 
 2D billboard:
 
-- `crystal_viewer/ortep.py:136-155` forms
+- `crystal_viewer/ortep/core.py:136-155` forms
   `P = np.array([view_x, view_y])`, computes `U2 = P @ mat @ P.T`,
   diagonalizes it, scales by the 2D probability radius, maps 2D eigenvectors
   back through `view_x` / `view_y`, and emits a polygon.
 
 Principal axes and octants:
 
-- `crystal_viewer/ortep.py:158-161` emits the three principal-axis segments.
-- `crystal_viewer/ortep.py:164-175` evaluates eight sign triples and marks
+- `crystal_viewer/ortep/core.py:158-161` emits the three principal-axis segments.
+- `crystal_viewer/ortep/core.py:164-175` evaluates eight sign triples and marks
   an octant lit if its direction dots positively with the view direction.
 
 Visual clamp:
 
-- `crystal_viewer/ortep.py:26-37` defines per-element and default visual Uiso
+- `crystal_viewer/ortep/core.py:26-37` defines per-element and default visual Uiso
   caps.
-- `crystal_viewer/ortep.py:192-213` clamps isotropic Uiso directly and scales
+- `crystal_viewer/ortep/core.py:192-213` clamps isotropic Uiso directly and scales
   anisotropic \(U\) by `cap / max_eig`.
-- `crystal_viewer/ortep.py:216-220` chooses fallback Uiso values and applies
+- `crystal_viewer/ortep/core.py:216-220` chooses fallback Uiso values and applies
   the clamp for each atom.
 
 Renderer integration:
 
-- `crystal_viewer/ortep.py:293-347` starts ORTEP mesh batching by color and
+- `crystal_viewer/ortep/core.py:293-347` starts ORTEP mesh batching by color and
   opacity, using `ortep_probability` from style.
 - The API contract for caller-facing ORTEP behavior is summarized separately in
   `agents/ortep_api.md`.

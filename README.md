@@ -214,7 +214,7 @@ shell together so reviewers can switch between them without reloading:
 
 ### 4. `04_static_publication.py` — ORTEP-style Matplotlib export
 
-Runs the vendored `crystal_viewer.legacy.plot_crystal` renderer (same code
+Runs the vendored `crystal_viewer.static_publication.plot_crystal` renderer (same code
 used by `POST /api/v1/export`) to produce high-DPI PNG + PDF suitable for
 Nature-style figures:
 
@@ -299,16 +299,26 @@ hand-curated fragment rather than a crystallographic asymmetric unit.
 crystal_viewer/
 ├── __init__.py          # re-exports create_app
 ├── __main__.py          # `python -m crystal_viewer` entry point
-├── app.py               # Dash layout, callbacks, ViewerBackend
-├── api.py               # REST + WebSocket blueprint
-├── loader.py            # CIF parsing and fragment bundle loading
-├── scene.py             # thin wrapper around the vendored scene helpers
-├── renderer.py          # Plotly trace generation (atoms, bonds, hull, axes)
-├── topology.py          # coordination-shell extraction & shape analysis
-├── ideal_polyhedra.py   # reference polyhedra for CN 8-12
-├── presets.py           # preset / style / catalog IO
+├── app/                 # Dash layout, callbacks, ViewerBackend internals
+├── api/                 # REST + WebSocket blueprints
+├── render/              # Plotly viewport / traces / cache internals
+├── structure/           # CIF parsing, bonds, formula units, MolCrysKit bridge
+├── loader/              # CIF/fragment bundle loading facade + upload helpers
+├── scene/               # cell/cluster scene builder facade
+├── transforms/          # repeat/grow/slab transform primitives and pipeline
+├── topology/            # coordination-shell extraction & shape analysis
+├── style/               # atom/bond rules, palette, disorder render helpers
+├── cube/                # cube/orbital I/O, meshes, traces, export facade
+├── ortep/               # thermal ellipsoid math, billboards, traces
+├── compass/             # camera-projected lattice direction annotations
+├── renderer/            # public Plotly facade for atoms, bonds, hulls, axes
+├── presets/             # preset / style / catalog IO
+├── scenes/              # tab/session scene state
+├── perf_log/            # lightweight server event log facade
+├── depth_sort/          # matplotlib depth-order helpers
+├── viewer_backend/      # public ViewerBackend compatibility facade
 ├── assets/              # Dash CSS + JS for the panel layout
-└── legacy/              # vendored static-export modules
+└── static_publication/  # matplotlib publication exporter
 scripts/                # runnable demo scripts (see section above)
 docs/                    # README showcase images + scores.md
 ```

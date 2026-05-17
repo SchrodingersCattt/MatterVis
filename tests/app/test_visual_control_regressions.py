@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from crystal_viewer.app import ViewerBackend
-from crystal_viewer.dash_app_impl import _display_options_can_fast_patch
+from crystal_viewer.app.dash_impl import _display_options_can_fast_patch
 from crystal_viewer.loader import build_empty_bundle
 from crystal_viewer.presets import DEFAULT_STYLE
 from crystal_viewer.renderer import build_figure

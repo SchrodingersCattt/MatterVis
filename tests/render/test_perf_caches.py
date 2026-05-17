@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from crystal_viewer.legacy import plot_crystal
+from crystal_viewer.static_publication import plot_crystal
 
 
 def _dap4_loaded_crystal():

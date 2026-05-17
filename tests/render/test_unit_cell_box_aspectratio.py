@@ -7,7 +7,7 @@ import numpy as np
 from crystal_viewer.loader import build_bundle_scene, build_loaded_crystal
 from crystal_viewer.presets import DEFAULT_STYLE
 from crystal_viewer.renderer import build_figure
-from crystal_viewer.renderer_viewport import _scene_ranges
+from crystal_viewer.render.viewport import _scene_ranges
 
 
 def _aspect_tuple(fig):
@@ -227,7 +227,7 @@ def test_formula_unit_polyhedra_extras_do_not_extend_scene_cube():
     # path; only ``extra_overlays`` -- the OTHER replicas -- are off in
     # the cell). Use the visible-atom centroid so this test isolates the
     # ``extra_overlays`` exclusion behaviour from the focus-shell path.
-    from crystal_viewer.renderer_viewport import _visible_atoms
+    from crystal_viewer.render.viewport import _visible_atoms
     atom_carts = np.array(
         [a["cart"] for a in _visible_atoms(bundle.scene, base)],
         dtype=float,

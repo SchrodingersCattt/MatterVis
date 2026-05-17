@@ -49,7 +49,7 @@ Fractional coordinates are row vectors.  The conversion is
 
 This is the same convention used by ASE, pymatgen, and MolCrysKit.  The legacy
 parser still returns the old column-vector matrix; MatterVis converts it once
-at the loader boundary with `M = legacy_M.T` in `crystal_viewer/scene.py:614`.
+at the loader boundary with `M = legacy_M.T` in `crystal_viewer/scene/core.py`.
 Any later `M.T` should be treated as an explicit bridge back into legacy code,
 not as a second convention.
 
@@ -68,7 +68,7 @@ where `scene["view_x"] = \hat v_x` points screen-right,
 `scene["view_y"] = \hat v_y` points screen-up, and
 `scene["view_z"] = \hat v_z` is the depth direction used for sorting and label
 placement.  The frame is produced by the legacy view helper and stored on the
-scene in `crystal_viewer/scene.py:503-505`.
+scene in `crystal_viewer/scene/core.py:503-505`.
 
 Plotly cameras are written as
 
@@ -91,7 +91,7 @@ The screen basis used by the compass is
 \]
 
 This is implemented by `camera_screen_basis` in
-`crystal_viewer/compass.py:46-87`.
+`crystal_viewer/compass/core.py:46-87`.
 
 For Plotly axis ranges, let
 
@@ -135,9 +135,9 @@ There must be exactly one row/column convention conversion at any boundary.
 The normal MatterVis path is row-vector `M`.  Exceptions must be narrow and
 named:
 
-- `crystal_viewer/scene.py:614` converts the legacy parser output into row
+- `crystal_viewer/scene/core.py` converts the static-publication parser output into row
   vectors.
-- `crystal_viewer/scene.py:156` passes `M.T` back into a legacy helper that
+- `crystal_viewer/scene/core.py:156` passes `M.T` back into a legacy helper that
   still expects column vectors.
 
 Any new geometry code should take row-vector `M`, fractional row vectors, and

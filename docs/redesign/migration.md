@@ -126,7 +126,7 @@ Scope:
   signature;
 - make figure layout, compass projection, and camera remapping consume that
   resolver;
-- delete or delegate duplicate viewport helpers outside `renderer_viewport.py`.
+- delete or delegate duplicate viewport helpers outside `render/viewport.py`.
 
 Gate:
 
@@ -143,8 +143,8 @@ Scope:
 
 - remove `allow_duplicate=True` state writers where the reducer dispatcher has
   taken ownership;
-- keep the split Dash implementation in `app_*`, `dash_callbacks_*`, and
-  `viewer_backend*` modules rather than regrowing `dash_app_impl.py`;
+- keep the split Dash implementation in `app/*`, `app/callbacks_*`, and
+  `app/backend*` modules rather than regrowing `app/dash_impl.py`;
 - keep public REST and stable Dash IDs unchanged unless a version bump is
   planned.
 

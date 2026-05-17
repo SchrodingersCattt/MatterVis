@@ -106,10 +106,10 @@ Current callback-local caches should disappear or be promoted to declared cache
 selectors.  The module split fixed two stale-key regressions, but the pattern is
 still migration debt:
 
-- `dash_callbacks_view.update_view._topo_cache_key` now includes
+- `app/callbacks_view.py::update_view._topo_cache_key` now includes
   `transforms`, `bond_groups`, and `cutoff`, but it is still an inline tuple
   owned by a callback rather than a named selector.
-- `dash_callbacks_state.refresh_fragment_options._cache` now includes
+- `app/callbacks_state.py::refresh_fragment_options._cache` now includes
   `transforms_cache_key(transforms)`, but it is still callback-local state.
 
 ## Invalidations
