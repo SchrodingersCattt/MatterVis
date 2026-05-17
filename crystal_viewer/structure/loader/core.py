@@ -205,11 +205,54 @@ def _occupancy_only_disorder_indices(raw_atoms) -> set[int]:
     return out
 
 
+def _explicit_assembly_disorder_indices(raw_atoms) -> set[int]:
+    """Return indices of atoms participating in the third SHELX disorder
+    shape: partial occupancy with non-blank
+    ``_atom_site_disorder_assembly`` AND
+    ``_atom_site_disorder_group``, restricted to assemblies that
+    actually carry multiple competing groups.
+
+    This is what Olex2 / SHELX honestly write for two-position disorder
+    (HPEP: A/1+A/2, B/1+B/2, C/1+C/2 with paired occupancies summing to
+    ~1.0). The older detector only looked for the SHELX "-PART"
+    sign convention (``dg = "-1"``) and the blank-tag rotamer form, so
+    HPEP-shaped CIFs rendered every disorder twin at full opacity --
+    the user-visible "无序的透明度没了" bug.
+
+    A single (assembly, group) bucket on its own (e.g. one
+    half-occupied site sitting on a special position with a single
+    explicit group) is *not* enough evidence to flag the atom as a
+    disorder twin; we require at least two distinct group ids inside
+    the same assembly so an ordered special-position site doesn't get
+    mistaken for one half of a vanished partner.
+    """
+    by_assembly: dict[str, dict[str, list[int]]] = defaultdict(lambda: defaultdict(list))
+    for idx, atom in enumerate(raw_atoms):
+        if _partial_occupancy_value(atom) >= 0.999:
+            continue
+        dg = str(atom.get("dg") or ".").strip()
+        da = str(atom.get("da") or ".").strip()
+        if dg in (".", "?", "") or da in (".", "?", ""):
+            continue
+        by_assembly[da][dg].append(idx)
+    out: set[int] = set()
+    for groups in by_assembly.values():
+        if len(groups) < 2:
+            continue
+        for indices in groups.values():
+            out.update(indices)
+    return out
+
+
+def _has_explicit_assembly_disorder(raw_atoms) -> bool:
+    return bool(_explicit_assembly_disorder_indices(raw_atoms))
+
+
 def _has_shelx_occupancy_disorder(raw_atoms) -> bool:
     """Return True if ``raw_atoms`` contains any SHELX-style disorder
     that needs MolCrysKit's optimal-replica picker to resolve.
 
-    Two patterns trigger this:
+    Three patterns trigger this:
 
     1. *Occupancy-only* disorder: sibling labels with ``occ < 1`` and both
        ``_atom_site_disorder_group`` and ``_atom_site_disorder_assembly``
@@ -224,10 +267,16 @@ def _has_shelx_occupancy_disorder(raw_atoms) -> bool:
        distinguishes them. MolCrysKit's neighbour-list will then bond
        the two alternatives together (N3 / N2 at 0.15 A apart in SY),
        fusing two chemically distinct cations into one species.
+    3. *Explicit assembly + group* disorder: ``occ < 1`` with non-blank
+       ``_atom_site_disorder_assembly`` AND ``_atom_site_disorder_group``
+       where the same assembly has multiple competing groups (Olex2's
+       standard A/1+A/2, B/1+B/2 form, e.g. HPEP). Without this branch
+       the loader silently treats both alternatives as full-occupancy
+       major atoms and the disorder='opacity' style has nothing to fade.
 
-    In either case ``parse_asu`` alone cannot resolve the disorder, so
-    we hand the CIF to MolCrysKit's optimal-replica picker and tag the
-    non-chosen alternates with ``_is_minor=True`` so the bond graph
+    In all three cases ``parse_asu`` alone cannot resolve the disorder,
+    so we hand the CIF to MolCrysKit's optimal-replica picker and tag
+    the non-chosen alternates with ``_is_minor=True`` so the bond graph
     sees one consistent set per disorder site.
     """
     for atom in raw_atoms:
@@ -237,6 +286,8 @@ def _has_shelx_occupancy_disorder(raw_atoms) -> bool:
         dg = str(atom.get("dg") or ".").strip()
         if dg.startswith("-") and dg not in ("-",):
             return True
+    if _has_explicit_assembly_disorder(raw_atoms):
+        return True
     return bool(_occupancy_only_disorder_indices(raw_atoms))
 
 
@@ -288,12 +339,17 @@ generate_ordered_replicas_from_disordered_sites` for the optimal
 
         disordered_idx: list[int] = []
         occupancy_only_idx = _occupancy_only_disorder_indices(out)
+        explicit_assembly_idx = _explicit_assembly_disorder_indices(out)
         for idx, atom in enumerate(out):
             occ = _partial_occupancy_value(atom)
             if occ >= 0.999 or "_is_minor" in atom:
                 continue
             dg = str(atom.get("dg") or ".").strip()
-            if idx in occupancy_only_idx or (dg.startswith("-") and dg not in ("-",)):
+            if (
+                idx in occupancy_only_idx
+                or idx in explicit_assembly_idx
+                or (dg.startswith("-") and dg not in ("-",))
+            ):
                 disordered_idx.append(idx)
 
         if not disordered_idx:

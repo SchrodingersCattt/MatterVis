@@ -428,16 +428,60 @@ class _TopologyBackendMixin:
         primary["analysis_spec_id"] = analysis_spec["id"]
         return primary
 
+    @staticmethod
+    def _spec_paint_key(effective_specs: list[dict[str, Any]]) -> tuple:
+        """Hashable summary of every styling field that the renderer's
+        painter cache (keyed on per-spec colour + per-instance overrides)
+        actually reads. Geometry-affecting fields are intentionally
+        absent here; they're already in the geometry-level cache key.
+        """
+        items: list = []
+        for spec in effective_specs or []:
+            spec_id = str(spec.get("id") or "")
+            color = str(spec.get("color") or "#7C5CBF")
+            overrides_raw = spec.get("instance_overrides") or {}
+            overrides_tuple = tuple(
+                (
+                    str(label),
+                    str((overrides_raw.get(label) or {}).get("color") or ""),
+                    bool((overrides_raw.get(label) or {}).get("visible", True)),
+                )
+                for label in sorted(overrides_raw.keys())
+            )
+            items.append((spec_id, color, overrides_tuple))
+        return tuple(items)
+
     def _attach_spec_colors(
         self,
         cached_geometry: dict[str, Any],
         effective_specs: list[dict[str, Any]],
     ) -> dict[str, Any]:
         """Re-stamp per-spec colours and per-fragment instance overrides
-        onto a geometry payload pulled from the bundle cache. The
-        geometry dict is shared across colour changes; we copy a small
-        wrapper so the renderer's painter cache (keyed on the colour
-        tuple) doesn't get polluted by stale values."""
+        onto a geometry payload pulled from the bundle cache.
+
+        The geometry dict is shared across colour permutations; this
+        method returns a thin wrapper around it. Critically, when the
+        SAME paint key (colours + per-instance overrides) hits this
+        function twice on the same geometry, we return the **same
+        wrapper instance** so the renderer's painter caches
+        (``_background_dict_cache`` / ``_foreground_dict_cache`` on
+        ``topology_data``) survive across calls.
+
+        Without this, every slider tweak that doesn't touch polyhedron
+        colours (atom_scale, bond_radius, ...) was triggering a fresh
+        ~150 ms re-tessellation of every hull-edge cylinder, because
+        ``topology_data`` started painter caches from scratch on every
+        call.
+        """
+        paint_key = self._spec_paint_key(effective_specs)
+        wrapper_cache = cached_geometry.get("_paint_wrapper_cache")
+        if wrapper_cache is None:
+            wrapper_cache = {}
+            cached_geometry["_paint_wrapper_cache"] = wrapper_cache
+        cached_wrapper = wrapper_cache.get(paint_key)
+        if cached_wrapper is not None:
+            return cached_wrapper
+
         color_by_id = {spec["id"]: spec.get("color", "#7C5CBF") for spec in effective_specs}
         overrides_by_id: dict[str, dict[str, dict[str, Any]]] = {
             spec["id"]: dict(spec.get("instance_overrides") or {}) for spec in effective_specs
@@ -469,10 +513,20 @@ class _TopologyBackendMixin:
             spec_results.append(recoloured)
         out = dict(cached_geometry)
         out["spec_results"] = spec_results
-        # Drop any painter caches the renderer attached to a sibling
-        # colour permutation -- the new wrapper starts clean.
+        # Brand-new wrapper -> brand-new painter caches. The renderer
+        # populates these on first paint and they are reused for every
+        # subsequent build_figure call sharing the same paint key.
         out.pop("_background_dict_cache", None)
         out.pop("_foreground_dict_cache", None)
+        # Don't carry the wrapper-cache forward through the wrapper itself;
+        # it lives on the geometry dict only.
+        out.pop("_paint_wrapper_cache", None)
+        # Bound the wrapper cache so a user spamming colours doesn't
+        # wedge memory. Painter caches are small (a few hundred KB per
+        # entry) but bounded retention keeps things predictable.
+        if len(wrapper_cache) >= 8:
+            wrapper_cache.pop(next(iter(wrapper_cache)))
+        wrapper_cache[paint_key] = out
         return out
 
 

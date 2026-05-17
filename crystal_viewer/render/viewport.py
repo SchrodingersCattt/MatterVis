@@ -256,13 +256,50 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
     atom_maxs = None
     cell_corners = _cell_corners()
     if cell_owns_cube and cell_corners:
-        # In unit-cell mode the viewport is the cell, not the spread of
-        # complete molecular images that may be drawn to keep boundary
-        # fragments chemically contiguous. Letting those outside images own the
-        # range makes the actual cell collapse into a thin strip.
+        # In unit-cell mode the viewport is anchored on the cell, not the
+        # spread of complete molecular images that may be drawn to keep
+        # boundary fragments chemically contiguous. Letting those outside
+        # images own the range makes the actual cell collapse into a
+        # thin strip (the regression pinned by
+        # ``test_unit_cell_viewport_is_owned_by_cell_not_outside_complete_fragments``).
+        #
+        # However, "anchored on the cell" is not the same as "rigidly clipped
+        # to the cell". A cation whose centroid sits in the cell will still
+        # have its tail (methyl, phenyl, ...) poke a fraction of an Å past
+        # the wall after molecule unwrapping; clipping the viewport at the
+        # cell wall renders that tail as half-an-atom getting truncated at
+        # the box edge -- the exact "很多截断" complaint on MPEP.
+        #
+        # Compromise: include atoms whose centre lies within ~15% of the
+        # cell span past any wall (typical bond-length poke), and reject
+        # anything farther out as an explicit far-replica outlier. The
+        # 15% slack still keeps the x=100-outlier contract -- a 10 Å
+        # cell admits ±1.5 Å and rejects everything past 11.5 Å.
         corners_arr = np.array(cell_corners, dtype=float)
-        atom_mins = corners_arr.min(axis=0)
-        atom_maxs = corners_arr.max(axis=0)
+        cell_min = corners_arr.min(axis=0)
+        cell_max = corners_arr.max(axis=0)
+        atom_mins = cell_min.copy()
+        atom_maxs = cell_max.copy()
+        if atoms:
+            carts = np.array([atom["cart"] for atom in atoms], dtype=float)
+            radii = np.array(
+                [max(float(atom.get("atom_radius", 0.18)), 0.05) for atom in atoms],
+                dtype=float,
+            ) * atom_scale
+            cell_span = np.maximum(cell_max - cell_min, 1e-6)
+            slack = 0.15 * cell_span
+            keep = np.all(carts >= cell_min - slack, axis=1) & np.all(
+                carts <= cell_max + slack, axis=1
+            )
+            if keep.any():
+                kept = carts[keep]
+                kept_radii = radii[keep]
+                atom_mins = np.minimum(
+                    atom_mins, (kept - kept_radii[:, None]).min(axis=0)
+                )
+                atom_maxs = np.maximum(
+                    atom_maxs, (kept + kept_radii[:, None]).max(axis=0)
+                )
     elif atoms:
         carts = np.array([atom["cart"] for atom in atoms], dtype=float)
         radii = np.array(
