@@ -538,6 +538,106 @@ def test_partially_overlapping_polyhedra_are_kept_when_pbc_neighbours_poke_out()
     )
 
 
+def test_unit_cell_viewport_grows_to_cover_every_visible_polyhedron():
+    """The viewport ranges in ``unit_cell`` mode must cover every overlay
+    that ``_overlay_within_viewport`` will eventually keep, not just the
+    analysis anchor's centre + shell. ``_scene_ranges`` previously only
+    folded the anchor's coords into ``extras``, which left non-anchor
+    overlays whose bounding box poked past the cell + slack to render
+    clipped at the canvas edge (the "画布截断" follow-up report on MPEP
+    after the slack/intersect viewport rewrite).
+
+    Synthetic scene: 10 x 8 x 6 cell, anchor inside, plus three
+    non-anchor overlays whose centres sit at ``z = -1``, ``y = 9`` and
+    ``x = 11`` -- each just outside the cell wall but well inside the
+    legitimate molecule-level packing-shell radius. The viewport must
+    encompass all of them.
+    """
+    scene = {
+        "name": "synthetic",
+        "title": "Synthetic",
+        "M": np.diag([10.0, 8.0, 6.0]),
+        "display_mode": "unit_cell",
+        "view_direction": np.array([0.0, 0.0, 1.0]),
+        "up": np.array([0.0, 1.0, 0.0]),
+        "draw_atoms": [
+            {
+                "cart": [5.0, 4.0, 3.0],
+                "atom_radius": 0.2,
+                "elem": "C",
+                "label": "C1",
+                "is_minor": False,
+                "color": "#444444",
+                "color_light": "#777777",
+                "disorder_alpha": 1.0,
+                "_depth_t": 0.5,
+            }
+        ],
+        "bonds": [],
+        "label_items": [],
+    }
+    style = {
+        **DEFAULT_STYLE,
+        "display_mode": "unit_cell",
+        "show_unit_cell": True,
+        "show_axes": False,
+        "show_axis_key": False,
+        "topology_enabled": True,
+    }
+    anchor = {
+        "center_coords": [5.0, 4.0, 3.0],
+        "shell_coords": [[4.0, 4.0, 3.0], [6.0, 4.0, 3.0], [5.0, 3.0, 3.0], [5.0, 4.0, 4.0]],
+        "hull": {"simplices": [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]]},
+        "is_analysis_anchor": True,
+    }
+    poke_z_low = {
+        "center_coords": [5.0, 4.0, -1.0],
+        "shell_coords": [[4.0, 4.0, -1.5], [6.0, 4.0, -1.5], [5.0, 3.0, -0.5], [5.0, 5.0, -0.5]],
+        "hull": {"simplices": [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]]},
+        "is_analysis_anchor": False,
+    }
+    poke_y_high = {
+        "center_coords": [5.0, 9.0, 3.0],
+        "shell_coords": [[4.5, 9.5, 2.5], [5.5, 9.5, 2.5], [5.0, 8.5, 3.5], [5.0, 9.0, 3.5]],
+        "hull": {"simplices": [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]]},
+        "is_analysis_anchor": False,
+    }
+    poke_x_high = {
+        "center_coords": [11.0, 4.0, 3.0],
+        "shell_coords": [[10.5, 4.0, 3.0], [11.5, 4.0, 3.0], [11.0, 3.5, 3.0], [11.0, 4.5, 3.0]],
+        "hull": {"simplices": [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]]},
+        "is_analysis_anchor": False,
+    }
+    topology_data = {
+        "center_coords": anchor["center_coords"],
+        "shell_coords": anchor["shell_coords"],
+        "distances": [1.0, 1.0, 1.0, 1.0],
+        "hull": anchor["hull"],
+        "analysis_spec_id": "spec",
+        "spec_results": [
+            {
+                "spec_id": "spec",
+                "name": "test",
+                "color": "#7C5CBF",
+                "overlays": [anchor, poke_z_low, poke_y_high, poke_x_high],
+            }
+        ],
+    }
+
+    xr, yr, zr = _scene_ranges(scene, style, topology_data=topology_data)
+    assert xr[1] >= 11.5, (
+        f"viewport x_max={xr[1]:.2f} must cover the +x poke overlay "
+        f"(shell vertex at x=11.5); without the spec_results sweep it "
+        f"snapped to the cell+slack 0.15 boundary at ~11.5."
+    )
+    assert yr[1] >= 9.5, (
+        f"viewport y_max={yr[1]:.2f} must cover the +y poke overlay"
+    )
+    assert zr[0] <= -1.5, (
+        f"viewport z_min={zr[0]:.2f} must cover the -z poke overlay"
+    )
+
+
 def test_cluster_without_lattice_falls_back_to_auto_aspectmode():
     scene = {
         "name": "cluster",
