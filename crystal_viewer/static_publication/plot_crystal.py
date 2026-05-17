@@ -41,19 +41,19 @@ except ImportError:  # pragma: no cover - allows direct script execution
 # Shared publication helpers live at the package top level so the
 # interactive renderer and the matplotlib exporter use one source of truth.
 try:
-    from ..bonds import *
-    from ..cif_parse import *
+    from ..structure.bonds import *
+    from ..structure.cif_parse import *
     from ..disorder import *
-    from ..formula_unit import *
-    from ..geometry import *
+    from ..structure.formula_unit import *
+    from ..structure.geometry import *
     from ..palette import *
     from ..publication_view import *
 except ImportError:  # pragma: no cover - allows direct script execution
-    from crystal_viewer.bonds import *  # type: ignore
-    from crystal_viewer.cif_parse import *  # type: ignore
+    from crystal_viewer.structure.bonds import *  # type: ignore
+    from crystal_viewer.structure.cif_parse import *  # type: ignore
     from crystal_viewer.disorder import *  # type: ignore
-    from crystal_viewer.formula_unit import *  # type: ignore
-    from crystal_viewer.geometry import *  # type: ignore
+    from crystal_viewer.structure.formula_unit import *  # type: ignore
+    from crystal_viewer.structure.geometry import *  # type: ignore
     from crystal_viewer.palette import *  # type: ignore
     from crystal_viewer.publication_view import *  # type: ignore
 

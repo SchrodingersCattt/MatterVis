@@ -16,7 +16,7 @@ from molcrys_kit.analysis.packing_shell import (
 from molcrys_kit.analysis.shape import classify_shell
 from molcrys_kit.structures.polyhedra import convex_hull_payload, ideal_polyhedra_for_cn
 
-from . import molcrys_bridge
+from .structure import molcrys_bridge
 
 __all__ = [
     "DEFAULT_CENTROID_OFFSET_FRAC",

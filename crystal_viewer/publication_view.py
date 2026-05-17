@@ -4,10 +4,10 @@ from collections import OrderedDict
 
 import numpy as np
 
-from .bonds import find_bonds
+from .structure.bonds import find_bonds
 from .disorder import is_major
-from .formula_unit import cluster_atoms, select_formula_unit
-from .geometry import view_rotation
+from .structure.formula_unit import cluster_atoms, select_formula_unit
+from .structure.geometry import view_rotation
 from .palette import cov_r
 
 def best_inplane_rotation(R, atoms, M, cell):

@@ -15,7 +15,7 @@ from molcrys_kit.utils.geometry import cart_to_frac
 
 from . import perf_log
 from .presets import get_default_catalog, workspace_root
-from . import molcrys_bridge
+from .structure import molcrys_bridge
 from .scene import build_scene_from_atoms, legacy_scene, scene_json, scene_metadata, scene_ops
 
 
