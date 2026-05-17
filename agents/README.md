@@ -44,6 +44,18 @@ The same routing as a quick table:
 | Recolour, hide, thin out, or fade chemical bonds by selector | [`bond_groups_api.md`](bond_groups_api.md) |
 | Repeat a unit cell, grow by radius / bonds, complete fragments / polyhedra, or generate a slab | [`transforms_api.md`](transforms_api.md) |
 
+## Repo ownership for agents
+
+When you are modifying MatterVis rather than just calling it, keep the
+top-level ownership boundaries clear:
+
+| Directory | Owns |
+|---|---|
+| `crystal_viewer/` | Python library code (`structure`, `ops`, `analysis`, `render`, `scene`, `math`, `utils`) |
+| `api/` | REST/WebSocket route modules for scripts and agents |
+| `app/` | Dash Python BFF: layouts, callbacks, and `ViewerBackend` |
+| `frontend/` | Browser-only JavaScript and CSS loaded by Dash |
+
 ## Layered API stack
 
 Every static-figure module in MatterVis follows the same three-layer

@@ -144,6 +144,11 @@ class _CoreBackendMixin:
             # ``agents/transforms_api.md`` for the schema. Empty list =
             # no transform; ``apply_transforms`` short-circuits.
             "transforms": [],
+            # Manual 2D overlay placement overrides. Paper-anchored
+            # entries move viewport components such as the compass; world-
+            # anchored entries store a target plus pixel offset so labels
+            # reproject when the camera changes.
+            "overlay_overrides": [],
             "fast_rendering": bool(style.get("fast_rendering", False)),
             "camera": scene.get("camera"),
             # Phase 4: camera projection mode mirrored onto state so a

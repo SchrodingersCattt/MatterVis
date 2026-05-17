@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .core import (
+from crystal_viewer.math.projection import (
     project_to_screen,
 )
 

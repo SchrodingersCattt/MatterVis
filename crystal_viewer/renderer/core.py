@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from ..render.scene_traces import *  # noqa: F403
+from ..render.style import style_from_controls
+from ..render.topology import topology_histogram_figure, topology_results_markdown
 from ..render.compass import (
     _COMPASS_ITEM_NAME,
     axis_key_overlay,

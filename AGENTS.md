@@ -11,24 +11,18 @@ MatterVis/
 ├── AGENTS.md            ← you are here (developer contract)
 ├── README.md            ← user-facing pitch
 ├── agents/              ← caller-facing API contracts (REST, programmatic)
-├── crystal_viewer/      ← the library + Dash app
-│   ├── api/             ← REST/WebSocket facade + v1/v2 route modules
-│   ├── app/             ← Dash entrypoint, callbacks, UI helpers, backend mixins
-│   ├── render/          ← Plotly viewport, mesh, trace, topology, style, cache helpers
-│   ├── structure/       ← CIF parsing, bond perception, formula-unit, lattice helpers
-│   ├── loader/          ← structure ingestion facade + bundle/upload internals
-│   ├── scene/           ← cell/cluster scene builder facade + core implementation
-│   ├── transforms/      ← repeat/grow/slab transform primitives + pipeline
-│   ├── topology/        ← coordination-shell extraction & shape analysis
-│   ├── style/           ← atom/bond groups, palette, disorder styling helpers
-│   ├── cube/            ← cube/orbital I/O, meshes, traces, export facade
-│   ├── ortep/           ← thermal ellipsoid math, mesh, billboard, traces
-│   ├── compass/         ← camera-projected paper-coord indicators
-│   ├── presets/         ← preset / style / catalog IO
-│   ├── scenes/          ← tab/session scene state
-│   ├── renderer/        ← public Plotly figure facade
-│   ├── static_publication/ ← matplotlib publication exporter; do not extend casually
-│   └── viewer_backend/  ← public ViewerBackend compatibility facade
+├── crystal_viewer/      ← Python library (structure / ops / analysis / render / scene / math / utils)
+│   ├── structure/       ← CIF parsing, bond perception, formula-unit, loader, snapshot bridges
+│   ├── ops/             ← source-side and display-side operation adapters
+│   ├── analysis/        ← read-only topology / coordination / shape analysis
+│   ├── render/          ← scene assembly, styles, traces, overlays, viewport, static export
+│   ├── scene/           ← per-tab state schema + scene-store helpers
+│   ├── math/            ← domain-neutral projection / rotation / ellipsoid / PBC primitives
+│   ├── utils/           ← perf logging and JSON-safe utility helpers
+│   └── renderer/        ← public Plotly figure compatibility facade
+├── api/                 ← REST/WebSocket service layer for agents and scripts
+├── app/                 ← Dash UI Python BFF (callbacks, layouts, ViewerBackend)
+├── frontend/            ← browser-only JS/CSS assets loaded by Dash
 ├── docs/                ← sphinx sources, score tables
 ├── scripts/             ← runnable scripts that exercise the public API
 │   └── private/         ← local/private analysis scripts; keep unpublished data ignored
@@ -81,6 +75,37 @@ should be rejected and rewritten.
    *deprecated* helper feels like reuse but is just delayed
    reinvention — you'll have to re-do the work the next time the
    author drops it. See `Working with molcrys_kit` below.
+7. **Keep top-level ownership single-purpose.** `crystal_viewer/` is
+   the Python library, `api/` is the REST/WebSocket service surface,
+   `app/` is the Dash Python BFF, and `frontend/` is browser-only
+   JS/CSS. Do not put browser code under `crystal_viewer/`, do not put
+   Python service code under `frontend/`, and explain any PR that must
+   cross more than one of these ownership roots.
+8. **Operations split into source and display paths.** `ops/source/*`
+   consumes and returns real `MolecularCrystal` source objects and
+   re-enters rendering through the loader. `ops/display/*` consumes and
+   returns scene dicts containing manifested Cartesian atoms for cheap
+   visual augmentations. Display operations must never produce
+   `MolecularCrystal`; source operations must not directly build Plotly
+   traces.
+9. **`math/` is domain-neutral.** Projection, rotation, ellipsoid, and
+   nearest-image primitives can live there. Coordination numbers,
+   covalent-radius choices, species labels, and fragment semantics
+   belong in `structure/` or `analysis/`, never in `math/`.
+10. **Scene state is not scene assembly.** Per-tab editable state
+   (`atom_groups`, `bond_groups`, `transforms`, `polyhedron_specs`,
+   `overlay_overrides`) lives in `scene/`. The rendered scene assembly
+   step that turns atoms/bonds/cell/style into a drawable scene lives
+   in `render/assembly.py`.
+11. **Manual 2D overlays use explicit anchors.** Paper-fixed overlays
+   (compass, scale bars, legends) store paper coordinates. World-
+   anchored overlays (atom, bond, polyhedron labels) store a target
+   plus pixel offset and are reprojected after camera changes. The
+   painter lives under `render/overlay/`.
+12. **Snapshots are the reverse loader bridge.** `structure/snapshot.py`
+   is the home for scene-dict-to-`MolecularCrystal` conversion so a
+   displayed supercell/grown cluster can later become a real saved
+   structure without blurring `ops/source` and `ops/display`.
 
 ## Working with `molcrys_kit`
 

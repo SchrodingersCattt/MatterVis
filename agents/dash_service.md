@@ -132,6 +132,9 @@ Notes for callers:
   results panel), `topology_enabled`, `topology_hull_color`,
   `transforms` (full ordered list of structure mutations; see
   `transforms_api.md`),
+  `overlay_overrides` (manual 2D component placement entries; paper
+  anchors for fixed viewport components, world anchors plus pixel
+  offsets for labels),
   `supercell` (`{a,b,c}` shorthand that gets rewritten as a single
   `repeat` transform — overwrites any existing `repeat` transform
   rather than stacking),
@@ -263,6 +266,15 @@ Notes for callers:
   See [`transforms_api.md`](transforms_api.md). The simplest case
   ("just give me a 2×2×2 view") can use the `supercell` shorthand on
   `POST /state` instead.
+- `GET /overlay_overrides` / `POST /overlay_overrides` /
+  `PATCH /overlay_overrides/{id}` / `DELETE /overlay_overrides/{id}` /
+  `POST /overlay_overrides/reorder`
+  Manual placement rules for 2D overlays. Paper-anchored entries
+  (`{"kind": "compass", "anchor": "paper", "paper_xy": [0.85, 0.85]}`)
+  stay fixed on the viewport. World-anchored entries
+  (`{"kind": "atom_label", "anchor": "world", "target_id": "Pb1",
+  "pixel_offset": [10, -15]}`) follow the target through camera
+  reprojection while preserving the user's pixel drag.
 - `POST /polyhedra/{id}/instance_overrides/{fragment_label}`
   Body: `{"color": "#hex", "visible": true|false}`. Pins a single
   matched polyhedron (e.g. one specific Pb cluster) to a different

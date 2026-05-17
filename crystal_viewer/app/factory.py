@@ -40,7 +40,10 @@ def create_app(
         backend.current_state = backend.default_state(backend.structure_names[0])
     if backend.scene_store.active_id:
         backend.current_state = backend.scene_state(backend.scene_store.active_id)
-    app = Dash(__name__, assets_folder=os.path.join(PACKAGE_DIR, "assets"))
+    app = Dash(
+        __name__,
+        assets_folder=os.path.join(WORKSPACE_DIR, "frontend", "assets"),
+    )
     app.crystal_backend = backend
 
     # gzip + brotli the JSON figure responses. ``update_view`` ships
