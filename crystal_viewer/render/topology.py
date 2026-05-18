@@ -531,6 +531,8 @@ def topology_results_markdown(topology_data: dict | None) -> str:
         f"Center: {topology_data.get('center_label', '?')} ({center_descriptor})",
         f"CN: {cn}" + (f"   |   gap = {gap:.3f} \u00c5" if gap is not None else ""),
     ]
+    for warning in topology_data.get("warnings") or []:
+        lines.append(f"Warning: {warning}")
     if enclosure_expanded and primary_gap_cn is not None:
         lines.append(
             f"  (gap-only CN was {primary_gap_cn}; expanded so the hull "

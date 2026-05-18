@@ -27,7 +27,7 @@ def _async_topology_state(backend: ViewerBackend) -> dict:
     return state
 
 
-def test_async_figure_path_does_not_wait_for_cold_topology(tmp_path: Path):
+def test_async_figure_path_repaints_base_scene_for_cold_topology(tmp_path: Path):
     backend = ViewerBackend(preset_path=default_preset_path(), root_dir=str(tmp_path))
     backend.resolve_topology_site = lambda **_kwargs: 0  # type: ignore[method-assign]
 
@@ -48,9 +48,9 @@ def test_async_figure_path_does_not_wait_for_cold_topology(tmp_path: Path):
 
     assert fig is not None
     assert topology is None
-    assert isinstance(fig, dict)
-    assert fig.get("_mattervis_pending") is True
-    assert elapsed_ms < 100.0
+    assert not (isinstance(fig, dict) and fig.get("_mattervis_pending"))
+    assert hasattr(fig, "to_plotly_json")
+    assert elapsed_ms < 1000.0
 
 
 def test_async_figure_path_repaints_when_topology_geometry_is_warm(tmp_path: Path):

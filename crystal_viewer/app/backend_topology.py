@@ -9,6 +9,7 @@ from .rightclick import _normalize_polyhedron_specs
 
 
 _TOPOLOGY_CACHE_LIMIT = 8
+_DISORDER_CENTER_DEDUPE_TOL = 0.75
 
 
 def _pbc_distance_for_bundle(bundle: LoadedCrystal, frac_a, frac_b) -> float:
@@ -82,6 +83,68 @@ def compute_topology_geometry_payload(payload: dict[str, Any]) -> Optional[dict[
     )
 
 
+def _fragment_minor_score(scene: dict[str, Any], fragment: dict[str, Any]) -> tuple[bool, int, int]:
+    atoms = scene.get("draw_atoms") or []
+    flags = []
+    for site_idx in fragment.get("site_indices") or []:
+        try:
+            atom = atoms[int(site_idx)]
+        except (TypeError, ValueError, IndexError):
+            continue
+        flags.append(bool(atom.get("is_minor", atom.get("_is_minor", False))))
+    minor_count = sum(1 for flag in flags if flag)
+    return (
+        bool(flags) and minor_count == len(flags),
+        minor_count,
+        int(fragment.get("index", 0) or 0),
+    )
+
+
+def _dedupe_disorder_center_fragments(
+    bundle,
+    scene: dict[str, Any],
+    fragments: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Collapse PART/orientation alternatives that share a molecular centre.
+
+    Disorder alternatives can appear as separate display fragments with
+    near-identical centres. Rendering all of them tiles overlapping
+    polyhedra. Keep the best representative, preferring the major
+    orientation, while leaving genuinely distinct molecules alone.
+    """
+    representatives: list[dict[str, Any]] = []
+    for fragment in fragments:
+        formula = fragment.get("formula") or fragment.get("species")
+        frac = fragment.get("frac_center", [0.0, 0.0, 0.0])
+        duplicate_at: int | None = None
+        for index, representative in enumerate(representatives):
+            rep_formula = representative.get("formula") or representative.get("species")
+            if rep_formula != formula:
+                continue
+            distance = _pbc_distance_for_bundle(
+                bundle,
+                frac,
+                representative.get("frac_center", [0.0, 0.0, 0.0]),
+            )
+            if distance <= _DISORDER_CENTER_DEDUPE_TOL:
+                duplicate_at = index
+                break
+        if duplicate_at is None:
+            representatives.append(fragment)
+            continue
+        current = representatives[duplicate_at]
+        if _fragment_minor_score(scene, fragment) < _fragment_minor_score(scene, current):
+            representatives[duplicate_at] = fragment
+    return representatives
+
+
+def _overlay_drawable_hull_size(overlay: dict[str, Any]) -> int:
+    shell = overlay.get("shell_coords") or []
+    hull = overlay.get("hull") or {}
+    simplices = hull.get("simplices") or []
+    return len(shell) if len(shell) >= 4 and len(simplices) > 0 else 0
+
+
 def compute_topology_geometry(
     *,
     bundle,
@@ -131,6 +194,7 @@ def compute_topology_geometry(
 
     spec_results: list[dict[str, Any]] = []
     legacy_extras: list[dict[str, Any]] = []
+    warnings: list[str] = []
     for index, spec in enumerate(effective_specs):
         center_species = spec["center_species"]
         ligand = spec.get("ligand_species") or None
@@ -138,10 +202,13 @@ def compute_topology_geometry(
         enforce_enclosure = bool(spec.get("enforce_enclosure", True))
         centroid_offset_frac = float(spec.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC))
         overlays: list[dict[str, Any]] = []
-        for frag in scene.get("fragment_table") or []:
-            formula_key = frag.get("formula") or frag.get("species")
-            if formula_key != center_species:
-                continue
+        candidate_fragments = [
+            frag
+            for frag in (scene.get("fragment_table") or [])
+            if (frag.get("formula") or frag.get("species")) == center_species
+        ]
+        center_fragments = _dedupe_disorder_center_fragments(bundle, scene, candidate_fragments)
+        for frag in center_fragments:
             is_anchor = (
                 index == analysis_spec_index
                 and primary_display_index is not None
@@ -207,11 +274,27 @@ def compute_topology_geometry(
                 "overlays": overlays,
             }
         )
+        drawable_count = sum(1 for overlay in overlays if _overlay_drawable_hull_size(overlay))
+        if center_fragments and drawable_count == 0:
+            max_shell = max((len(overlay.get("shell_coords") or []) for overlay in overlays), default=0)
+            mode = "Gap + enclosure" if enforce_enclosure else "Gap only"
+            warnings.append(
+                f"{spec.get('name') or center_species}: no drawable polyhedron for "
+                f"{center_species} -> {ligand or '(auto)'} ({mode}); "
+                f"largest shell has {max_shell} ligand point(s), need at least 4 non-coplanar points."
+            )
+        elif len(center_fragments) < len(candidate_fragments):
+            warnings.append(
+                f"{spec.get('name') or center_species}: collapsed "
+                f"{len(candidate_fragments) - len(center_fragments)} overlapping disorder/PART centre(s)."
+            )
 
     primary = dict(primary)
     if legacy_extras:
         primary["extra_overlays"] = legacy_extras
     primary["spec_results"] = spec_results
+    if warnings:
+        primary["warnings"] = warnings
     primary["analysis_spec_id"] = analysis_spec["id"]
     return primary
 

@@ -164,3 +164,28 @@ def test_ws_figure_broadcast_rejects_stale_polyhedron_state(tmp_path):
         assert backend.latest_figure_broadcast() is None
     finally:
         backend._render_worker.shutdown()
+
+
+def test_ws_figure_broadcast_allows_camera_revision_drift(tmp_path):
+    backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    scene_id = backend.active_scene_id()
+    try:
+        render_state = backend.get_state(scene_id)
+        current_state = dict(render_state)
+        current_state["camera_revision"] = int(current_state.get("camera_revision", 0) or 0) + 1
+        backend.patch_state(
+            {"camera_revision": current_state["camera_revision"]},
+            scene_id=scene_id,
+            broadcast=False,
+        )
+        valid = {
+            "data": [{"type": "scatter3d", "x": [0], "y": [0], "z": [0]}],
+            "layout": {"scene": {"camera": {}}},
+        }
+
+        payload = backend.broadcast_figure(scene_id=scene_id, figure=valid, state=render_state)
+
+        assert payload["type"] == "figure"
+        assert backend.latest_figure_broadcast()["figure"] == valid
+    finally:
+        backend._render_worker.shutdown()

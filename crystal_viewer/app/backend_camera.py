@@ -139,12 +139,6 @@ class _CameraBackendMixin:
                         )
             else:
                 topology_data = self.topology_for_state(state, click_data=click_data)
-        if async_topology and topology_pending:
-            fig = {"data": [], "layout": {}, "_mattervis_pending": True}
-            camera = _plotly_camera(state.get("camera"))
-            if camera:
-                fig["layout"]["scene"] = {"camera": camera}
-            return fig, None
         with perf_log.time_block(
             "build_figure",
             kind="event",
