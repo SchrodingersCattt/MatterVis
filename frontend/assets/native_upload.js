@@ -81,51 +81,45 @@
    * Hard timeout at 30 s so the status never sticks forever even if
    * the server changes shape.
    */
+  let activeSceneWait = null;
+
   function waitForSceneAndSwitch(uploadedNames) {
     if (!uploadedNames || !uploadedNames.length) return;
+    if (activeSceneWait && typeof activeSceneWait.close === "function") {
+      activeSceneWait.close();
+    }
     const wanted = new Set(uploadedNames);
     const deadline = Date.now() + 30000;
-    function tick() {
-      fetch("/api/v2/scenes", { headers: { Accept: "application/json" } })
-        .then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (payload) {
-          if (!payload) throw new Error("no scenes payload");
-          const scenes = payload.scenes || [];
-          let target = null;
-          for (let i = scenes.length - 1; i >= 0; i -= 1) {
-            const sc = scenes[i];
-            const patch = (sc && sc.state_patch) || {};
-            const structure = patch.structure || sc.label;
-            if (structure && wanted.has(structure)) {
-              target = sc;
-              break;
-            }
-          }
-          if (target && target.id) {
-            triggerDashSync({ status: "success", names: uploadedNames });
-            setStatus("Loaded: " + uploadedNames.join(", "), "success");
-            return;
-          }
-          if (Date.now() > deadline) {
-            setStatus(
-              "Uploaded: " + uploadedNames.join(", ") +
-              ". The new scene is registered but the UI did not auto-switch -- " +
-              "click the new tab in the Scenes list to view it.",
-              "info"
-            );
-            return;
-          }
-          window.setTimeout(tick, 250);
-        })
-        .catch(function () {
-          if (Date.now() > deadline) {
-            setStatus("Uploaded: " + uploadedNames.join(", "), "success");
-            return;
-          }
-          window.setTimeout(tick, 500);
-        });
+    if (!window.WebSocket) {
+      triggerDashSync({ status: "success", names: uploadedNames });
+      setStatus("Loaded: " + uploadedNames.join(", "), "success");
+      return;
     }
-    tick();
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(proto + "//" + window.location.host + "/api/v2/ws");
+    activeSceneWait = ws;
+    const timeout = window.setTimeout(function () {
+      if (activeSceneWait === ws) activeSceneWait = null;
+      try { ws.close(); } catch (_err) {}
+      setStatus("Uploaded: " + uploadedNames.join(", "), "success");
+      triggerDashSync({ status: "success", names: uploadedNames });
+    }, Math.max(1000, deadline - Date.now()));
+    ws.addEventListener("message", function (event) {
+      let payload = null;
+      try {
+        payload = JSON.parse(event.data || "{}");
+      } catch (_err) {
+        return;
+      }
+      const state = payload && payload.state;
+      if (state && wanted.has(state.structure)) {
+        window.clearTimeout(timeout);
+        if (activeSceneWait === ws) activeSceneWait = null;
+        try { ws.close(); } catch (_err) {}
+        triggerDashSync({ status: "success", names: uploadedNames });
+        setStatus("Loaded: " + uploadedNames.join(", "), "success");
+      }
+    });
   }
 
   function uploadOne(file, index, total) {

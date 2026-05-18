@@ -121,3 +121,17 @@ honours:
 See `scripts/04_static_publication.py` for an end-to-end recipe that
 combines `build_scene_from_cif` + `uniform_viewport` + `build_figure` +
 `export_static` into a publication PDF.
+
+## Interactive scene-state persistence
+
+The Dash service treats `ViewerBackend.record_state()` and
+`patch_state()` as fire-and-forget memory updates. They update the
+active per-tab `Scene` immediately, mark the `SceneStore` dirty, and
+return without writing `.local/crystal_view_scenes.json` on the request
+thread. A background debounce worker performs the disk save, and
+explicit preset/export flows flush before producing their artifacts.
+
+For UI/browser mutations, prefer `/api/v2/intent` or
+`ViewerBackend.apply_intent()` over writing multiple Dash stores
+directly; the reducer gives each client an ordered mutation stream and
+keeps tab, camera, and style edits from racing one another.

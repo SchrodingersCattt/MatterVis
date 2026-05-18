@@ -333,6 +333,8 @@ def register_view_callbacks(app, backend):
         if not triggered:
             return no_update, no_update, no_update
         scene_id = scene_id or backend.active_scene_id()
+        if scene_id and scene_id not in backend.scene_store.scenes:
+            return no_update, no_update, no_update
         button_to_axis = {
             "view-align-a": "a",
             "view-align-b": "b",
@@ -393,6 +395,8 @@ def register_view_callbacks(app, backend):
         if not projection:
             return no_update, no_update, no_update
         scene_id = scene_id or backend.active_scene_id()
+        if scene_id and scene_id not in backend.scene_store.scenes:
+            return no_update, no_update, no_update
         # Skip the redraw if the user clicked the radio that was
         # already selected -- avoids ratcheting the figure JSON cache
         # for a no-op.
@@ -422,6 +426,8 @@ def register_view_callbacks(app, backend):
         prevent_initial_call=True,
     )
     def capture_camera(relayout_data, camera_state, scene_id):
+        if scene_id and scene_id not in backend.scene_store.scenes:
+            return no_update
         camera = _camera_from_relayout_data(
             relayout_data,
             _camera_from_store(camera_state, scene_id) or backend.get_state(scene_id).get("camera"),
@@ -436,7 +442,9 @@ def register_view_callbacks(app, backend):
         # re-renders with whatever camera was captured at that exact
         # moment, snapping the user's view back periodically. See
         # ``tests/app/test_camera_capture_no_poll_echo.py``.
-        backend.patch_state({"camera": camera}, scene_id=scene_id, broadcast=False)
+        backend.apply_intent(
+            {"type": "set_camera", "scene_id": scene_id, "payload": {"camera": camera}}
+        )
         return _camera_store_payload(scene_id, camera)
 
     @app.callback(
@@ -540,7 +548,18 @@ def register_view_callbacks(app, backend):
         camera = _camera_from_store(camera_state, state.get("scene_id"))
         if camera:
             state["camera"] = camera
-        fig, topology_data = backend.figure_for_state(state)
+        fig, topology_data = backend.figure_for_state(state, async_topology=True)
+        if isinstance(fig, dict) and fig.get("_mattervis_pending"):
+            perf_log.record(
+                "callback:update_view",
+                duration_ms=(time.monotonic() - cb_start) * 1000.0,
+                kind="cb",
+                info={
+                    "scene_id": state.get("scene_id"),
+                    "figure": "pending",
+                },
+            )
+            return no_update, no_update, no_update, no_update
         # The right-hand sidebar only changes when the *topology* state
         # or the chosen scene changes. Keep a memo on the callback
         # itself so toggling Labels / Axes / Atom Scale -- which all

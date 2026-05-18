@@ -1,9 +1,219 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
+from collections import OrderedDict
+
 from .shared import *
 from .normalizers import *
 from .rightclick import _normalize_polyhedron_specs
+
+
+_TOPOLOGY_CACHE_LIMIT = 8
+
+
+def _pbc_distance_for_bundle(bundle: LoadedCrystal, frac_a, frac_b) -> float:
+    return float(
+        minimum_image_distance(
+            np.array(frac_b, dtype=float),
+            np.array(frac_a, dtype=float),
+            np.array(bundle.M, dtype=float),
+        )
+    )
+
+
+def map_display_fragment_to_topology_for_bundle(
+    bundle: LoadedCrystal,
+    display_fragment: dict | None,
+) -> Optional[dict[str, Any]]:
+    if display_fragment is None:
+        return None
+    source_molecule_index = display_fragment.get("source_molecule_index")
+    if source_molecule_index is not None:
+        matched = next(
+            (
+                fragment
+                for fragment in bundle.topology_fragment_table
+                if fragment.get("source_molecule_index") == source_molecule_index
+            ),
+            None,
+        )
+        if matched is not None:
+            return matched
+    display_formula = display_fragment.get("formula") or display_fragment.get("species")
+    candidates = [
+        fragment
+        for fragment in bundle.topology_fragment_table
+        if (fragment.get("formula") or fragment.get("species")) == display_formula
+    ]
+    if not candidates:
+        candidates = [
+            fragment
+            for fragment in bundle.topology_fragment_table
+            if fragment.get("type") == display_fragment.get("type")
+        ]
+    if not candidates:
+        candidates = list(bundle.topology_fragment_table)
+    if not candidates:
+        return None
+    display_frac = np.array(display_fragment.get("frac_center", [0.0, 0.0, 0.0]), dtype=float)
+    ranked = []
+    for fragment in candidates:
+        ranked.append(
+            (
+                _pbc_distance_for_bundle(
+                    bundle,
+                    display_frac,
+                    fragment.get("frac_center", [0.0, 0.0, 0.0]),
+                ),
+                fragment,
+            )
+        )
+    ranked.sort(key=lambda item: item[0])
+    return ranked[0][1]
+
+
+def compute_topology_geometry_payload(payload: dict[str, Any]) -> Optional[dict[str, Any]]:
+    return compute_topology_geometry(
+        bundle=payload["bundle"],
+        scene=payload["scene"],
+        effective_specs=payload["effective_specs"],
+        site_index=int(payload["site_index"]),
+        cutoff=float(payload["cutoff"]),
+    )
+
+
+def compute_topology_geometry(
+    *,
+    bundle,
+    scene: dict[str, Any],
+    effective_specs: list[dict[str, Any]],
+    site_index: int,
+    cutoff: float,
+) -> Optional[dict[str, Any]]:
+    display_fragment = next(
+        (fragment for fragment in scene.get("fragment_table", []) if int(fragment["index"]) == int(site_index)),
+        None,
+    )
+    topology_fragment = map_display_fragment_to_topology_for_bundle(bundle, display_fragment)
+    if topology_fragment is None:
+        return None
+
+    center_to_spec_indices: dict[str, list[int]] = {}
+    for index, spec in enumerate(effective_specs):
+        center_to_spec_indices.setdefault(spec["center_species"], []).append(index)
+
+    primary_display_index = int(display_fragment["index"]) if display_fragment else None
+    primary_formula = (
+        (display_fragment.get("formula") or display_fragment.get("species"))
+        if display_fragment else None
+    )
+    analysis_spec_index = 0
+    if primary_formula and primary_formula in center_to_spec_indices:
+        analysis_spec_index = center_to_spec_indices[primary_formula][0]
+    analysis_spec = effective_specs[analysis_spec_index]
+    analysis_ligand = analysis_spec.get("ligand_species") or None
+    analysis_enforce_enclosure = bool(analysis_spec.get("enforce_enclosure", True))
+    analysis_centroid_offset_frac = float(
+        analysis_spec.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC)
+    )
+
+    primary = analyze_topology(
+        bundle,
+        center_index=int(topology_fragment["index"]),
+        cutoff=cutoff,
+        display_center=display_fragment.get("center") if display_fragment else None,
+        display_label=display_fragment.get("label") if display_fragment else None,
+        display_type=display_fragment.get("type") if display_fragment else None,
+        ligand_species=[analysis_ligand] if analysis_ligand else None,
+        enforce_enclosure=analysis_enforce_enclosure,
+        centroid_offset_frac=analysis_centroid_offset_frac,
+    )
+
+    spec_results: list[dict[str, Any]] = []
+    legacy_extras: list[dict[str, Any]] = []
+    for index, spec in enumerate(effective_specs):
+        center_species = spec["center_species"]
+        ligand = spec.get("ligand_species") or None
+        ligand_arg = [ligand] if ligand else None
+        enforce_enclosure = bool(spec.get("enforce_enclosure", True))
+        centroid_offset_frac = float(spec.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC))
+        overlays: list[dict[str, Any]] = []
+        for frag in scene.get("fragment_table") or []:
+            formula_key = frag.get("formula") or frag.get("species")
+            if formula_key != center_species:
+                continue
+            is_anchor = (
+                index == analysis_spec_index
+                and primary_display_index is not None
+                and int(frag["index"]) == primary_display_index
+            )
+            if is_anchor:
+                overlays.append(
+                    {
+                        "center_coords": primary["center_coords"],
+                        "center_label": primary.get("center_label"),
+                        "shell_coords": primary["shell_coords"],
+                        "distances": primary["distances"],
+                        "hull": primary.get("hull"),
+                        "is_analysis_anchor": True,
+                    }
+                )
+                continue
+            mapped = map_display_fragment_to_topology_for_bundle(bundle, frag)
+            if mapped is None:
+                continue
+            try:
+                extra = extract_coordination_shell(
+                    bundle,
+                    center_index=int(mapped["index"]),
+                    cutoff=cutoff,
+                    display_center=frag.get("center"),
+                    display_label=frag.get("label"),
+                    display_type=frag.get("type"),
+                    ligand_species=ligand_arg,
+                    enforce_enclosure=enforce_enclosure,
+                    centroid_offset_frac=centroid_offset_frac,
+                )
+            except Exception:
+                continue
+            if not extra.get("shell_coords"):
+                continue
+            overlay = {
+                "center_coords": extra.get("center_coords"),
+                "center_label": extra.get("center_label"),
+                "shell_coords": extra.get("shell_coords"),
+                "distances": extra.get("distances"),
+                "hull": extra.get("hull"),
+                "is_analysis_anchor": False,
+            }
+            overlays.append(overlay)
+            legacy_extras.append(
+                {
+                    "center_coords": overlay["center_coords"],
+                    "center_label": overlay["center_label"],
+                    "shell_coords": overlay["shell_coords"],
+                    "distances": overlay["distances"],
+                    "hull": overlay.get("hull"),
+                }
+            )
+        spec_results.append(
+            {
+                "spec_id": spec["id"],
+                "name": spec["name"],
+                "center_species": center_species,
+                "ligand_species": ligand,
+                "enforce_enclosure": enforce_enclosure,
+                "centroid_offset_frac": centroid_offset_frac,
+                "overlays": overlays,
+            }
+        )
+
+    primary = dict(primary)
+    if legacy_extras:
+        primary["extra_overlays"] = legacy_extras
+    primary["spec_results"] = spec_results
+    primary["analysis_spec_id"] = analysis_spec["id"]
+    return primary
 
 
 class _TopologyBackendMixin:
@@ -40,54 +250,10 @@ class _TopologyBackendMixin:
         return next((fragment for fragment in scene.get("fragment_table", []) if int(fragment["index"]) == int(display_index)), None)
 
     def _pbc_distance(self, bundle: LoadedCrystal, frac_a, frac_b) -> float:
-        return float(
-            minimum_image_distance(
-                np.array(frac_b, dtype=float),
-                np.array(frac_a, dtype=float),
-                np.array(bundle.M, dtype=float),
-            )
-        )
+        return _pbc_distance_for_bundle(bundle, frac_a, frac_b)
 
     def map_display_fragment_to_topology(self, bundle: LoadedCrystal, display_fragment: dict | None) -> Optional[dict[str, Any]]:
-        if display_fragment is None:
-            return None
-        source_molecule_index = display_fragment.get("source_molecule_index")
-        if source_molecule_index is not None:
-            matched = next(
-                (
-                    fragment
-                    for fragment in bundle.topology_fragment_table
-                    if fragment.get("source_molecule_index") == source_molecule_index
-                ),
-                None,
-            )
-            if matched is not None:
-                return matched
-        # Prefer matching by stoichiometric formula (the species-checkbox
-        # identity); fall back to A/B/X type for older payloads where the
-        # formula field hasn't been populated yet.
-        display_formula = display_fragment.get("formula") or display_fragment.get("species")
-        candidates = [
-            fragment
-            for fragment in bundle.topology_fragment_table
-            if (fragment.get("formula") or fragment.get("species")) == display_formula
-        ]
-        if not candidates:
-            candidates = [
-                fragment
-                for fragment in bundle.topology_fragment_table
-                if fragment.get("type") == display_fragment.get("type")
-            ]
-        if not candidates:
-            candidates = list(bundle.topology_fragment_table)
-        if not candidates:
-            return None
-        display_frac = np.array(display_fragment.get("frac_center", [0.0, 0.0, 0.0]), dtype=float)
-        ranked = []
-        for fragment in candidates:
-            ranked.append((self._pbc_distance(bundle, display_frac, fragment.get("frac_center", [0.0, 0.0, 0.0])), fragment))
-        ranked.sort(key=lambda item: item[0])
-        return ranked[0][1]
+        return map_display_fragment_to_topology_for_bundle(bundle, display_fragment)
 
     def resolve_topology_site(
         self,
@@ -171,13 +337,34 @@ class _TopologyBackendMixin:
             return [dict(spec) for spec in explicit if spec.get("enabled", True)]
         return []
 
-    def topology_for_state(
+    def _topology_cache(self, bundle) -> OrderedDict:
+        cache = getattr(bundle, "_topology_state_cache", None)
+        if not isinstance(cache, OrderedDict):
+            cache = OrderedDict(cache or {})
+            bundle._topology_state_cache = cache
+        if not hasattr(bundle, "_topology_state_cache_lock"):
+            bundle._topology_state_cache_lock = threading.Lock()
+        return cache
+
+    def _store_topology_geometry(self, structure: str, cache_key: tuple, geometry: Optional[dict[str, Any]]) -> None:
+        if geometry is None:
+            return
+        bundle = self.get_bundle(structure)
+        cache = self._topology_cache(bundle)
+        with bundle._topology_state_cache_lock:
+            cache[cache_key] = geometry
+            cache.move_to_end(cache_key)
+            while len(cache) > _TOPOLOGY_CACHE_LIMIT:
+                cache.popitem(last=False)
+
+    def _topology_context(
         self,
         state: dict[str, Any],
         click_data: Optional[dict[str, Any]] = None,
         *,
         strict: bool = False,
-    ):
+        scene: Optional[dict[str, Any]] = None,
+    ) -> Optional[dict[str, Any]]:
         if not state.get("topology_enabled", False):
             if strict:
                 raise TopologyUnavailable(
@@ -187,7 +374,7 @@ class _TopologyBackendMixin:
             return None
         structure = state["structure"]
         bundle = self.get_bundle(structure)
-        scene = self.scene_for_state(state)
+        scene = self.scene_for_state(state) if scene is None else scene
         effective_specs = self._effective_polyhedron_specs(state)
         if not effective_specs:
             if strict:
@@ -253,28 +440,87 @@ class _TopologyBackendMixin:
             spec_geometry_key,
             transforms_key,
         )
-        cache = getattr(bundle, "_topology_state_cache", None)
-        if cache is None:
-            cache = {}
-            bundle._topology_state_cache = cache
-        cached_geometry = cache.get(cache_key)
-        if cached_geometry is None:
-            cached_geometry = self._compute_topology_geometry(
-                bundle=bundle,
-                scene=scene,
-                effective_specs=effective_specs,
-                site_index=site_index,
-                cutoff=cutoff,
-            )
-            cache[cache_key] = cached_geometry
+        return {
+            "structure": structure,
+            "bundle": bundle,
+            "scene": scene,
+            "effective_specs": effective_specs,
+            "site_index": int(site_index),
+            "cutoff": cutoff,
+            "cache_key": cache_key,
+        }
+
+    def topology_for_state_sync(
+        self,
+        state: dict[str, Any],
+        click_data: Optional[dict[str, Any]] = None,
+        *,
+        strict: bool = False,
+    ):
+        context = self._topology_context(state, click_data=click_data, strict=strict)
+        if context is None:
+            return None
+        bundle = context["bundle"]
+        cache = self._topology_cache(bundle)
+        with bundle._topology_state_cache_lock:
+            cached_geometry = cache.get(context["cache_key"])
+            if cached_geometry is not None:
+                cache.move_to_end(context["cache_key"])
         if cached_geometry is None:
             if strict:
                 raise TopologyUnavailable("topology analysis produced no geometry for the requested fragment")
             return None
-        # Re-attach the per-render colour overrides on every call. The
-        # geometry payload is shared across colour permutations; we only
-        # ever copy a small list of dicts, never the heavy hull arrays.
-        return self._attach_spec_colors(cached_geometry, effective_specs)
+        return self._attach_spec_colors(cached_geometry, context["effective_specs"])
+
+    def topology_request(
+        self,
+        state: dict[str, Any],
+        click_data: Optional[dict[str, Any]] = None,
+    ) -> bool:
+        context = self._topology_context(state, click_data=click_data, strict=False)
+        if context is None:
+            return False
+        bundle = context["bundle"]
+        cache = self._topology_cache(bundle)
+        with bundle._topology_state_cache_lock:
+            cached_geometry = cache.get(context["cache_key"])
+        if cached_geometry is not None:
+            return False
+        worker = getattr(self, "_render_worker", None)
+        if worker is None:
+            return False
+        return worker.request_topology(dict(state), context)
+
+    def topology_for_state(
+        self,
+        state: dict[str, Any],
+        click_data: Optional[dict[str, Any]] = None,
+        *,
+        strict: bool = False,
+    ):
+        context = self._topology_context(state, click_data=click_data, strict=strict)
+        if context is None:
+            return None
+        bundle = context["bundle"]
+        cache = self._topology_cache(bundle)
+        with bundle._topology_state_cache_lock:
+            cached_geometry = cache.get(context["cache_key"])
+            if cached_geometry is not None:
+                cache.move_to_end(context["cache_key"])
+        if cached_geometry is None:
+            cached_geometry = self._compute_topology_geometry(
+                bundle=context["bundle"],
+                scene=context["scene"],
+                effective_specs=context["effective_specs"],
+                site_index=context["site_index"],
+                cutoff=context["cutoff"],
+            )
+            self._store_topology_geometry(context["structure"], context["cache_key"], cached_geometry)
+        if cached_geometry is None:
+            if strict:
+                raise TopologyUnavailable("topology analysis produced no geometry for the requested fragment")
+            return None
+        return self._attach_spec_colors(cached_geometry, context["effective_specs"])
 
     def _compute_topology_geometry(
         self,
@@ -285,148 +531,13 @@ class _TopologyBackendMixin:
         site_index: int,
         cutoff: float,
     ) -> Optional[dict[str, Any]]:
-        display_fragment = self._display_fragment(scene, site_index)
-        topology_fragment = self.map_display_fragment_to_topology(bundle, display_fragment)
-        if topology_fragment is None:
-            return None
-
-        # Group enabled specs by (center_species -> [spec_index_in_specs, ...])
-        # so each fragment in the scene knows which spec(s) own it.
-        # Multiple specs may share a centre species but request different
-        # ligand restrictions (e.g. "Pb -> Cl" red vs "Pb -> Br" blue in
-        # mixed-halide perovskites); the same fragment then participates
-        # in both spec_results.
-        center_to_spec_indices: dict[str, list[int]] = {}
-        for index, spec in enumerate(effective_specs):
-            center_to_spec_indices.setdefault(spec["center_species"], []).append(index)
-
-        primary_display_index = int(display_fragment["index"]) if display_fragment else None
-        primary_formula = (
-            (display_fragment.get("formula") or display_fragment.get("species"))
-            if display_fragment else None
-        )
-        # Pick the spec that "owns" the analysis anchor. Preference goes
-        # to a spec whose center species matches the clicked fragment;
-        # if none match, fall back to the first enabled spec so the
-        # right-hand histogram still has data to render.
-        analysis_spec_index = 0
-        if primary_formula and primary_formula in center_to_spec_indices:
-            analysis_spec_index = center_to_spec_indices[primary_formula][0]
-        analysis_spec = effective_specs[analysis_spec_index]
-        analysis_ligand = analysis_spec.get("ligand_species") or None
-        analysis_enforce_enclosure = bool(analysis_spec.get("enforce_enclosure", True))
-        analysis_centroid_offset_frac = float(
-            analysis_spec.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC)
-        )
-
-        primary = analyze_topology(
-            bundle,
-            center_index=int(topology_fragment["index"]),
+        return compute_topology_geometry(
+            bundle=bundle,
+            scene=scene,
+            effective_specs=effective_specs,
+            site_index=site_index,
             cutoff=cutoff,
-            display_center=display_fragment.get("center") if display_fragment else None,
-            display_label=display_fragment.get("label") if display_fragment else None,
-            display_type=display_fragment.get("type") if display_fragment else None,
-            ligand_species=[analysis_ligand] if analysis_ligand else None,
-            enforce_enclosure=analysis_enforce_enclosure,
-            centroid_offset_frac=analysis_centroid_offset_frac,
         )
-
-        # Build per-spec overlay lists. For each fragment whose formula
-        # matches a spec's center species, run the lighter
-        # ``extract_coordination_shell`` (skips planarity / prism /
-        # shape-classification passes -- those only matter for the
-        # analysis anchor).
-        # The same fragment may appear in multiple specs if those specs
-        # share its centre species but differ in ligand selection; the
-        # cache hit on (center_index, cutoff, ligand_species) makes the
-        # repeat call cheap.
-        spec_results: list[dict[str, Any]] = []
-        legacy_extras: list[dict[str, Any]] = []
-        for index, spec in enumerate(effective_specs):
-            center_species = spec["center_species"]
-            ligand = spec.get("ligand_species") or None
-            ligand_arg = [ligand] if ligand else None
-            enforce_enclosure = bool(spec.get("enforce_enclosure", True))
-            centroid_offset_frac = float(spec.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC))
-            overlays: list[dict[str, Any]] = []
-            for frag in scene.get("fragment_table") or []:
-                formula_key = frag.get("formula") or frag.get("species")
-                if formula_key != center_species:
-                    continue
-                is_anchor = (
-                    index == analysis_spec_index
-                    and primary_display_index is not None
-                    and int(frag["index"]) == primary_display_index
-                )
-                if is_anchor:
-                    overlays.append(
-                        {
-                            "center_coords": primary["center_coords"],
-                            "center_label": primary.get("center_label"),
-                            "shell_coords": primary["shell_coords"],
-                            "distances": primary["distances"],
-                            "hull": primary.get("hull"),
-                            "is_analysis_anchor": True,
-                        }
-                    )
-                    continue
-                mapped = self.map_display_fragment_to_topology(bundle, frag)
-                if mapped is None:
-                    continue
-                try:
-                    extra = extract_coordination_shell(
-                        bundle,
-                        center_index=int(mapped["index"]),
-                        cutoff=cutoff,
-                        display_center=frag.get("center"),
-                        display_label=frag.get("label"),
-                        display_type=frag.get("type"),
-                        ligand_species=ligand_arg,
-                        enforce_enclosure=enforce_enclosure,
-                        centroid_offset_frac=centroid_offset_frac,
-                    )
-                except Exception:
-                    continue
-                if not extra.get("shell_coords"):
-                    # Empty shell would render as nothing anyway; skip
-                    # the entry so renderer caches stay tidy.
-                    continue
-                overlay = {
-                    "center_coords": extra.get("center_coords"),
-                    "center_label": extra.get("center_label"),
-                    "shell_coords": extra.get("shell_coords"),
-                    "distances": extra.get("distances"),
-                    "hull": extra.get("hull"),
-                    "is_analysis_anchor": False,
-                }
-                overlays.append(overlay)
-                legacy_extras.append(
-                    {
-                        "center_coords": overlay["center_coords"],
-                        "center_label": overlay["center_label"],
-                        "shell_coords": overlay["shell_coords"],
-                        "distances": overlay["distances"],
-                        "hull": overlay.get("hull"),
-                    }
-                )
-            spec_results.append(
-                {
-                    "spec_id": spec["id"],
-                    "name": spec["name"],
-                    "center_species": center_species,
-                    "ligand_species": ligand,
-                    "enforce_enclosure": enforce_enclosure,
-                    "centroid_offset_frac": centroid_offset_frac,
-                    "overlays": overlays,
-                }
-            )
-
-        primary = dict(primary)
-        if legacy_extras:
-            primary["extra_overlays"] = legacy_extras
-        primary["spec_results"] = spec_results
-        primary["analysis_spec_id"] = analysis_spec["id"]
-        return primary
 
     @staticmethod
     def _spec_paint_key(effective_specs: list[dict[str, Any]]) -> tuple:

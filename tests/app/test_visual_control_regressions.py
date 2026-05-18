@@ -86,3 +86,81 @@ def test_only_label_and_axis_options_use_fast_display_patch():
     assert not _display_options_can_fast_patch([], ["unit_cell_box"])
     assert not _display_options_can_fast_patch(["minor_only"], [])
     assert not _display_options_can_fast_patch([], ["minor_wireframe"])
+
+
+def test_ws_figure_broadcast_rejects_empty_2d_payload(tmp_path):
+    backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    scene_id = backend.active_scene_id()
+    try:
+        ignored = backend.broadcast_figure(
+            scene_id=scene_id,
+            figure={"data": [], "layout": {"scene": {"camera": {}}}},
+        )
+
+        assert ignored["type"] == "figure_ignored"
+        assert backend.latest_figure_broadcast() is None
+
+        valid = {
+            "data": [{"type": "scatter3d", "x": [0], "y": [0], "z": [0]}],
+            "layout": {"scene": {"camera": {}}},
+        }
+        payload = backend.broadcast_figure(scene_id=scene_id, figure=valid)
+        assert payload["type"] == "figure"
+        assert backend.websocket_snapshot(include_figure=True)["figure"] == valid
+
+        other_scene = "stale-scene"
+        backend.broadcast_figure(scene_id=other_scene, figure=valid)
+        assert "figure" not in backend.websocket_snapshot(include_figure=True)
+    finally:
+        backend._render_worker.shutdown()
+
+
+def test_ws_figure_broadcast_rejects_stale_polyhedron_state(tmp_path):
+    backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    scene_id = backend.active_scene_id()
+    try:
+        old_state = backend.get_state(scene_id)
+        old_state.update(
+            {
+                "topology_enabled": True,
+                "polyhedron_specs": [
+                    {
+                        "id": "spec_a",
+                        "name": "Old",
+                        "center_species": "N",
+                        "ligand_species": "C5N6FeO",
+                        "color": "#7C5CBF",
+                        "enabled": True,
+                    }
+                ],
+            }
+        )
+        backend.patch_state(
+            {
+                "topology_enabled": True,
+                "polyhedron_specs": [
+                    {
+                        "id": "spec_a",
+                        "name": "New",
+                        "center_species": "C4NO",
+                        "ligand_species": "C5N6FeO",
+                        "color": "#7C5CBF",
+                        "enabled": True,
+                    }
+                ],
+            },
+            scene_id=scene_id,
+            broadcast=False,
+        )
+        valid = {
+            "data": [{"type": "scatter3d", "x": [0], "y": [0], "z": [0]}],
+            "layout": {"scene": {"camera": {}}},
+        }
+
+        ignored = backend.broadcast_figure(scene_id=scene_id, figure=valid, state=old_state)
+
+        assert ignored["type"] == "figure_ignored"
+        assert ignored["reason"] == "stale-state"
+        assert backend.latest_figure_broadcast() is None
+    finally:
+        backend._render_worker.shutdown()

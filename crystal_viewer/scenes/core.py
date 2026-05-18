@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -108,6 +109,8 @@ class SceneStore:
         self.scenes: dict[str, Scene] = {}
         self.order: list[str] = []
         self.active_id: str | None = None
+        self._dirty = False
+        self._lock = threading.RLock()
 
     @classmethod
     def default_path(cls, root_dir: str) -> str:
@@ -134,15 +137,26 @@ class SceneStore:
         return store
 
     def save(self) -> None:
-        os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
-        payload = {
-            "version": 1,
-            "active_id": self.active_id,
-            "order": list(self.order),
-            "scenes": [self.scenes[scene_id].to_dict() for scene_id in self.order],
-        }
+        with self._lock:
+            os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
+            payload = {
+                "version": 1,
+                "active_id": self.active_id,
+                "order": list(self.order),
+                "scenes": [self.scenes[scene_id].to_dict() for scene_id in self.order],
+            }
         with open(self.path, "w", encoding="utf-8") as handle:
             json.dump(json_safe(payload), handle, indent=2, ensure_ascii=False)
+        with self._lock:
+            self._dirty = False
+
+    def mark_dirty(self) -> None:
+        with self._lock:
+            self._dirty = True
+
+    def is_dirty(self) -> bool:
+        with self._lock:
+            return bool(self._dirty)
 
     def ensure(self, structures: Iterable[str], *, default_state_factory=None) -> None:
         structures = [str(item) for item in structures]
