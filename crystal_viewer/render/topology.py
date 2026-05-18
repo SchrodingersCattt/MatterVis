@@ -229,13 +229,43 @@ def _viewport_ranges_from_style(style: dict | None) -> np.ndarray | None:
 
 
 def _viewport_cache_key(style: dict | None) -> tuple:
+    """Hashable summary of the topology painter viewport for cache keys.
+
+    Quantised to 0.5 angstrom buckets: the viewport drives a
+    bounding-box intersection test on each overlay
+    (:func:`_overlay_within_viewport`), so sub-angstrom drift -- the
+    kind a user gets from nudging the atom-scale slider 1.0 -> 1.05 --
+    must NOT invalidate this cache. Re-tessellating a few hundred
+    hull-edge cylinders on every slider step was the dominant left
+    sidebar latency complaint ("右边非常迟钝").
+    """
     ranges = _viewport_ranges_from_style(style)
     if ranges is None:
         return ()
-    return tuple(tuple(round(float(value), 6) for value in axis) for axis in ranges)
+    bucket = 0.5
+    return tuple(
+        tuple(round(float(value) / bucket) for value in axis) for axis in ranges
+    )
 
 
 def _overlay_within_viewport(overlay: dict, ranges: np.ndarray | None) -> bool:
+    """Predicate: should this non-anchor overlay be drawn?
+
+    An overlay is kept when its axis-aligned bounding box (centre +
+    shell points) **intersects** the scene viewport along every axis.
+    The previous predicate required the bounding box to be fully
+    *contained* in the viewport, which silently dropped every
+    molecule-level packing-shell tile whose neighbours reached into the
+    next PBC image -- e.g. on MPEP the C5N2 -> ClO4 spec ships 4
+    fragments but only the analysis anchor survived because the other
+    three had at least one ClO4 image just outside the unit cell along
+    z. Visually that matched "polyhedra are missing for most of the
+    displayed cations" exactly. The intersection predicate keeps every
+    overlay that at least *touches* the camera frustum and lets Plotly
+    handle the partial-clip painting; overlays that are entirely
+    outside one axis (the regression case from PR #f20ad88: a far
+    replica at x=40 in a viewport ending at ~10) are still rejected.
+    """
     if ranges is None:
         return True
     coords, _hull = _overlay_coords_and_hull(overlay)
@@ -254,7 +284,12 @@ def _overlay_within_viewport(overlay: dict, ranges: np.ndarray | None) -> bool:
     if arr.ndim != 2 or arr.shape[1] != 3 or not np.all(np.isfinite(arr)):
         return False
     tol = 1e-6
-    return bool(np.all(arr >= ranges[:, 0][None, :] - tol) and np.all(arr <= ranges[:, 1][None, :] + tol))
+    overlay_min = arr.min(axis=0)
+    overlay_max = arr.max(axis=0)
+    return bool(
+        np.all(overlay_max >= ranges[:, 0] - tol)
+        and np.all(overlay_min <= ranges[:, 1] + tol)
+    )
 
 
 def _multi_spec_cache_key(topology_data: dict, fallback_color: str) -> tuple:

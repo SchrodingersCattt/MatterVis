@@ -256,13 +256,50 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
     atom_maxs = None
     cell_corners = _cell_corners()
     if cell_owns_cube and cell_corners:
-        # In unit-cell mode the viewport is the cell, not the spread of
-        # complete molecular images that may be drawn to keep boundary
-        # fragments chemically contiguous. Letting those outside images own the
-        # range makes the actual cell collapse into a thin strip.
+        # In unit-cell mode the viewport is anchored on the cell, not the
+        # spread of complete molecular images that may be drawn to keep
+        # boundary fragments chemically contiguous. Letting those outside
+        # images own the range makes the actual cell collapse into a
+        # thin strip (the regression pinned by
+        # ``test_unit_cell_viewport_is_owned_by_cell_not_outside_complete_fragments``).
+        #
+        # However, "anchored on the cell" is not the same as "rigidly clipped
+        # to the cell". A cation whose centroid sits in the cell will still
+        # have its tail (methyl, phenyl, ...) poke a fraction of an Å past
+        # the wall after molecule unwrapping; clipping the viewport at the
+        # cell wall renders that tail as half-an-atom getting truncated at
+        # the box edge -- the exact "很多截断" complaint on MPEP.
+        #
+        # Compromise: include atoms whose centre lies within ~15% of the
+        # cell span past any wall (typical bond-length poke), and reject
+        # anything farther out as an explicit far-replica outlier. The
+        # 15% slack still keeps the x=100-outlier contract -- a 10 Å
+        # cell admits ±1.5 Å and rejects everything past 11.5 Å.
         corners_arr = np.array(cell_corners, dtype=float)
-        atom_mins = corners_arr.min(axis=0)
-        atom_maxs = corners_arr.max(axis=0)
+        cell_min = corners_arr.min(axis=0)
+        cell_max = corners_arr.max(axis=0)
+        atom_mins = cell_min.copy()
+        atom_maxs = cell_max.copy()
+        if atoms:
+            carts = np.array([atom["cart"] for atom in atoms], dtype=float)
+            radii = np.array(
+                [max(float(atom.get("atom_radius", 0.18)), 0.05) for atom in atoms],
+                dtype=float,
+            ) * atom_scale
+            cell_span = np.maximum(cell_max - cell_min, 1e-6)
+            slack = 0.15 * cell_span
+            keep = np.all(carts >= cell_min - slack, axis=1) & np.all(
+                carts <= cell_max + slack, axis=1
+            )
+            if keep.any():
+                kept = carts[keep]
+                kept_radii = radii[keep]
+                atom_mins = np.minimum(
+                    atom_mins, (kept - kept_radii[:, None]).min(axis=0)
+                )
+                atom_maxs = np.maximum(
+                    atom_maxs, (kept + kept_radii[:, None]).max(axis=0)
+                )
     elif atoms:
         carts = np.array([atom["cart"] for atom in atoms], dtype=float)
         radii = np.array(
@@ -272,15 +309,71 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
         atom_mins = (carts - radii[:, None]).min(axis=0)
         atom_maxs = (carts + radii[:, None]).max(axis=0)
 
-    extras = []
+    extras: list[np.ndarray] = []
     if style.get("show_unit_cell", False):
         extras.extend(cell_corners)
+
+    # Gate that decides whether a given overlay's bbox should grow the
+    # viewport. Use the same "near the cell" predicate the atom kept-mask
+    # uses (cell + 0.15 * span slack on every axis) so that a far-replica
+    # overlay whose centre sits at e.g. x=40 -- the contract pinned by
+    # ``test_off_viewport_polyhedra_extras_are_not_drawn_as_clipped_edges``
+    # -- can never balloon the viewport. Cluster mode falls through with
+    # ``None`` and accepts every overlay; the legacy single-spec path
+    # (no `spec_results`) likewise has no far-replica problem so it stays
+    # unconditional.
+    overlay_bounds: tuple[np.ndarray, np.ndarray] | None = None
+    if cell_owns_cube and cell_corners:
+        corners_arr = np.array(cell_corners, dtype=float)
+        cell_min = corners_arr.min(axis=0)
+        cell_max = corners_arr.max(axis=0)
+        cell_span = np.maximum(cell_max - cell_min, 1e-6)
+        slack = 0.15 * cell_span
+        overlay_bounds = (cell_min - slack, cell_max + slack)
+
+    def _overlay_near_cell(coords: np.ndarray) -> bool:
+        if overlay_bounds is None:
+            return True
+        if coords.size == 0:
+            return False
+        ov_min = coords.min(axis=0)
+        ov_max = coords.max(axis=0)
+        lo, hi = overlay_bounds
+        return bool(np.all(ov_max >= lo) and np.all(ov_min <= hi))
+
     if topology_data:
+        # The analysis anchor's center + shell come first because the legacy
+        # single-spec path lives there; multi-spec callers (the modern
+        # ``polyhedron_specs`` table) attach every overlay (anchor + ghosts)
+        # under ``spec_results[*].overlays``. Without folding *every*
+        # near-cell overlay into the viewport, non-anchor polyhedra -- the
+        # ClO4 tetrahedra straddling cell faces on MPEP / DAP-4 etc. --
+        # can stick 1-2 angstrom past the cell + slack region and render
+        # clipped at the canvas edge ("画布截断" report on MPEP after the
+        # slack/intersect viewport rewrite).
         center = topology_data.get("center_coords")
         if center is not None:
             extras.append(np.array(center, dtype=float))
         for point in topology_data.get("shell_coords") or []:
             extras.append(np.array(point, dtype=float))
+        for entry in topology_data.get("spec_results") or []:
+            for overlay in entry.get("overlays") or []:
+                if not overlay.get("visible", True):
+                    continue
+                ov_points = []
+                ov_center = overlay.get("center_coords")
+                if ov_center is not None:
+                    ov_points.append(np.array(ov_center, dtype=float))
+                for point in overlay.get("shell_coords") or []:
+                    ov_points.append(np.array(point, dtype=float))
+                if not ov_points:
+                    continue
+                ov_arr = np.asarray(ov_points, dtype=float)
+                if ov_arr.ndim != 2 or ov_arr.shape[1] != 3:
+                    continue
+                if not _overlay_near_cell(ov_arr):
+                    continue
+                extras.extend(ov_arr)
     if extras:
         extras_arr = np.array(extras, dtype=float)
         extras_min = extras_arr.min(axis=0)

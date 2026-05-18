@@ -1,9 +1,24 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
+import plotly.graph_objects as go
+
 from .shared import *
 from .camera_helpers import *
 from .style_helpers import *
+
+
+def _figure_from_cached_dict(cached_dict: dict) -> go.Figure:
+    """Reconstruct a ``go.Figure`` from a JSON-style dict snapshot.
+
+    The figure cache stores ``fig.to_plotly_json()`` rather than a
+    deep-copied ``go.Figure`` because Plotly's validator chain makes
+    ``copy.deepcopy(go.Figure)`` ~10x slower than copying the
+    equivalent plain dict and reconstructing with ``_validate=False``.
+    See the cache hit branch of ``figure_for_state`` for the why.
+    """
+    snapshot = copy.deepcopy(cached_dict)
+    return go.Figure(snapshot, _validate=False)
 
 
 class _CameraBackendMixin:
@@ -33,9 +48,19 @@ class _CameraBackendMixin:
                 cache_key = json.dumps(_json_safe(key_state), sort_keys=True, separators=(",", ":"))
             except Exception:
                 cache_key = None
+        # Cache stores plain JSON-style dicts (``fig.to_plotly_json()``)
+        # NOT ``go.Figure`` instances. Profiling: ``copy.deepcopy(fig)``
+        # is ~225 ms for an HPEP scene with 25 traces because Plotly's
+        # validator mixin walks every property on every nested object;
+        # ``copy.deepcopy(fig.to_plotly_json())`` of the same payload is
+        # ~25 ms (10x cheaper). The ``go.Figure`` is reconstructed from
+        # the cached dict on every hit / new build via the
+        # ``_validate=False`` constructor. This was the dominant left-
+        # sidebar latency complaint ("右边非常迟钝"): each slider tweak
+        # invalidated this cache and paid 2 deepcopies on the way out.
         if cache_key is not None and cache_key in self._figure_cache:
-            cached_fig, cached_topology = self._figure_cache[cache_key]
-            fig = copy.deepcopy(cached_fig)
+            cached_fig_dict, cached_topology = self._figure_cache[cache_key]
+            fig = _figure_from_cached_dict(cached_fig_dict)
             # The cached figure was built with whatever camera was
             # current at the time. The corner axis-key compass is a
             # paper-coord overlay whose arrows are pre-projected from
@@ -48,16 +73,28 @@ class _CameraBackendMixin:
                     scene_for_overlay = self.scene_for_state(state)
                 style_for_overlay = self.style_for_state(state, scene=scene_for_overlay)
                 annotations, shapes = compose_axis_key_layout(scene_for_overlay, style_for_overlay)
+                # Plotly's ``_validate=False`` reconstruction path is
+                # picky about ``annotations=None`` and ``shapes=None``:
+                # subsequent ``fig.layout.annotations`` access raises
+                # ``TypeError: 'NoneType' object is not iterable``
+                # because the lazy compound-array initialiser tries to
+                # iterate the stored value. Pass an empty list instead.
                 fig.update_layout(
-                    annotations=annotations or None,
-                    shapes=shapes or None,
+                    annotations=annotations or [],
+                    shapes=shapes or [],
                 )
                 camera = _plotly_camera(state.get("camera"))
                 if camera:
                     fig.update_layout(scene_camera=camera)
             except Exception:  # pragma: no cover - defensive, fall back to verbatim cache
                 pass
-            return fig, copy.deepcopy(cached_topology)
+            # ``topology_data`` is read-only for callers (histogram,
+            # results-markdown, structure-summary). The renderer's
+            # painter caches live on it but they only grow; sharing
+            # the same dict across callers keeps the caches warm
+            # across cache hits and saves ~25 ms of redundant
+            # deepcopy on the hot slider path.
+            return fig, cached_topology
         with perf_log.time_block("scene_for_state", kind="event", scene_id=scene_id):
             scene = self.scene_for_state(state)
         atom_count = len(scene.get("draw_atoms", []))
@@ -83,7 +120,16 @@ class _CameraBackendMixin:
         if camera:
             fig.update_layout(scene_camera=camera)
         if cache_key is not None:
-            self._figure_cache[cache_key] = (copy.deepcopy(fig), copy.deepcopy(topology_data))
+            # ``topology_data`` is the wrapper produced by
+            # ``_attach_spec_colors`` and is keyed on the same paint
+            # key as the figure cache; storing the live reference (not
+            # a deep copy) lets the renderer's painter caches inside
+            # it stay warm across cache hits without paying ~25 ms of
+            # ``copy.deepcopy`` on every miss.
+            self._figure_cache[cache_key] = (
+                fig.to_plotly_json(),
+                topology_data,
+            )
             self._figure_cache_order.append(cache_key)
             while len(self._figure_cache_order) > 16:
                 old_key = self._figure_cache_order.pop(0)

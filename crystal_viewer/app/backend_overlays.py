@@ -471,6 +471,122 @@ class _OverlaysBackendMixin:
         self.patch_state({"transforms": ordered}, scene_id=scene_id)
         return ordered
 
+    # ---- overlay_overrides CRUD ----------------------------------------
+    #
+    # Manual 2D viewport components mirror the other per-scene lists.
+    # Paper-anchored entries store paper coordinates; world-anchored
+    # entries store a target plus pixel offset and are reprojected by
+    # the overlay painter.
+
+    def list_overlay_overrides(self, scene_id: Optional[str] = None) -> list[dict[str, Any]]:
+        return list(self.get_state(scene_id).get("overlay_overrides") or [])
+
+    def _resolve_overlay_overrides(self, scene_id: Optional[str]) -> tuple[Optional[str], list[dict[str, Any]]]:
+        scene_id = scene_id or self.active_scene_id()
+        return scene_id, [
+            dict(item) for item in (self.get_state(scene_id).get("overlay_overrides") or [])
+        ]
+
+    def _normalize_overlay_override(
+        self,
+        raw: dict[str, Any],
+        *,
+        existing_ids: set[str],
+    ) -> dict[str, Any] | None:
+        if not isinstance(raw, dict):
+            return None
+        kind = str(raw.get("kind") or "").strip()
+        if not kind:
+            return None
+        anchor = str(raw.get("anchor") or "paper").strip()
+        if anchor not in {"paper", "world"}:
+            raise ValueError("overlay override anchor must be 'paper' or 'world'")
+        override_id = str(raw.get("id") or "").strip()
+        if not override_id or override_id in existing_ids:
+            override_id = f"overlay_{uuid.uuid4().hex[:10]}"
+            while override_id in existing_ids:  # pragma: no cover - astronomically unlikely
+                override_id = f"overlay_{uuid.uuid4().hex[:10]}"
+        existing_ids.add(override_id)
+        out = dict(raw)
+        out["id"] = override_id
+        out["kind"] = kind
+        out["anchor"] = anchor
+        return out
+
+    def add_overlay_override(
+        self,
+        override: dict[str, Any],
+        *,
+        scene_id: Optional[str] = None,
+        override_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        scene_id, overrides = self._resolve_overlay_overrides(scene_id)
+        raw = dict(override or {})
+        if override_id is not None:
+            raw["id"] = override_id
+        item = self._normalize_overlay_override(raw, existing_ids={o["id"] for o in overrides})
+        if item is None:
+            raise ValueError("invalid overlay override payload")
+        overrides.append(item)
+        self.patch_state({"overlay_overrides": overrides}, scene_id=scene_id)
+        return item
+
+    def update_overlay_override(
+        self,
+        override_id: str,
+        patch: dict[str, Any],
+        *,
+        scene_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        scene_id, overrides = self._resolve_overlay_overrides(scene_id)
+        for index, item in enumerate(overrides):
+            if item["id"] == override_id:
+                merged = dict(item)
+                merged.update(patch or {})
+                merged["id"] = override_id
+                replacement = self._normalize_overlay_override(
+                    merged,
+                    existing_ids={o["id"] for o in overrides if o["id"] != override_id},
+                )
+                if replacement is None:
+                    raise ValueError("invalid overlay override patch")
+                overrides[index] = replacement
+                self.patch_state({"overlay_overrides": overrides}, scene_id=scene_id)
+                return replacement
+        raise KeyError(f"unknown overlay override id: {override_id!r}")
+
+    def remove_overlay_override(
+        self,
+        override_id: str,
+        *,
+        scene_id: Optional[str] = None,
+    ) -> bool:
+        scene_id, overrides = self._resolve_overlay_overrides(scene_id)
+        before = len(overrides)
+        overrides = [item for item in overrides if item["id"] != override_id]
+        if len(overrides) == before:
+            return False
+        self.patch_state({"overlay_overrides": overrides}, scene_id=scene_id)
+        return True
+
+    def reorder_overlay_overrides(
+        self,
+        ordered_ids: Iterable[str],
+        *,
+        scene_id: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        scene_id, overrides = self._resolve_overlay_overrides(scene_id)
+        index_by_id = {item["id"]: item for item in overrides}
+        wanted = [str(item) for item in ordered_ids]
+        if set(wanted) != set(index_by_id):
+            raise ValueError(
+                "reorder list must contain exactly the existing overlay override ids; "
+                f"got {wanted!r}, have {sorted(index_by_id)}"
+            )
+        ordered = [index_by_id[item_id] for item_id in wanted]
+        self.patch_state({"overlay_overrides": ordered}, scene_id=scene_id)
+        return ordered
+
     # ---- polyhedron instance overrides --------------------------------
     #
     # A per-fragment override of the spec-level colour / visibility.

@@ -113,6 +113,42 @@ def test_unit_cell_viewport_is_owned_by_cell_not_outside_complete_fragments():
     assert zr[0] <= 0.0 <= zr[1] and zr[0] <= 6.0 <= zr[1]
 
 
+def test_unit_cell_viewport_includes_unwrapped_boundary_fragments():
+    """In ``unit_cell`` mode the renderer keeps molecules chemically
+    contiguous by drawing the atoms outside the cell that "complete" a
+    boundary fragment (typical methyl / phenyl tails of a cation whose
+    centroid sits in the cell but whose tail wraps past the wall). The
+    viewport must include those atoms, otherwise the user sees half-a-CH3
+    truncated at the cell edge -- the "很多截断" complaint observed on
+    MPEP. ``_scene_ranges`` lets boundary atoms within ~15% of the cell
+    span past any wall extend the viewport; far-replica outliers (~10x
+    that distance) are still rejected by the contract test above.
+    """
+    scene = {
+        "M": np.diag([10.0, 8.0, 6.0]),
+        "display_mode": "unit_cell",
+        "draw_atoms": [
+            {"cart": [2.0, 2.0, 2.0], "atom_radius": 0.2, "is_minor": False},
+            # tail atom poked +1.0 Å past the +x wall (well within the
+            # 15% slack of a 10 Å cell, must extend the viewport):
+            {"cart": [11.0, 4.0, 3.0], "atom_radius": 0.4, "is_minor": False},
+            # tail atom poked -0.6 Å past the -y wall:
+            {"cart": [3.0, -0.6, 2.0], "atom_radius": 0.3, "is_minor": False},
+        ],
+    }
+    style = {**DEFAULT_STYLE, "display_mode": "unit_cell", "show_unit_cell": True}
+    xr, yr, zr = _scene_ranges(scene, style)
+    assert xr[1] >= 11.0 + 0.4 - 1e-6, (
+        f"viewport x_max ({xr[1]:.3f}) must wrap the +x boundary tail at "
+        f"x=11.0 + radius 0.4; otherwise the methyl/phenyl group renders "
+        f"as a half-clipped sphere at the cell edge."
+    )
+    assert yr[0] <= -0.6 - 0.3 + 1e-6, (
+        f"viewport y_min ({yr[0]:.3f}) must wrap the -y boundary tail at "
+        f"y=-0.6 - radius 0.3."
+    )
+
+
 def test_formula_unit_does_not_inherit_lattice_aspect():
     """``display_mode='formula_unit'`` shows a molecular cluster carved out
     of the unit cell; the cluster's bounding box is roughly equiaxed even
@@ -376,6 +412,230 @@ def test_off_viewport_polyhedra_extras_are_not_drawn_as_clipped_edges():
     assert coordination_values
     assert max(coordination_values) < 12.0
     assert ranges[0][1] < 12.0
+
+
+def test_partially_overlapping_polyhedra_are_kept_when_pbc_neighbours_poke_out():
+    """Per-fragment polyhedra in ``unit_cell`` mode have centres inside
+    the cell but their MolCrysKit-supplied shell may include PBC-image
+    neighbours that poke a fraction of an Angstrom past the cell wall.
+    The viewport-clip predicate must not drop those overlays wholesale,
+    or the user only ever sees the analysis anchor's polyhedron and
+    every other tile vanishes (regression observed on MPEP C5N2 ->
+    ClO4: 4 fragments displayed, only the anchor rendered because the
+    other three had a single neighbour at z=18.9 vs cell zmax=16.6).
+
+    Off-viewport replicas (centre and entire shell firmly outside the
+    viewport) must still be filtered: that contract is pinned by
+    ``test_off_viewport_polyhedra_extras_are_not_drawn_as_clipped_edges``
+    above and we re-assert it here for symmetry.
+    """
+    scene = {
+        "name": "synthetic",
+        "title": "Synthetic",
+        "M": np.diag([10.0, 8.0, 6.0]),
+        "display_mode": "unit_cell",
+        "view_direction": np.array([0.0, 0.0, 1.0]),
+        "up": np.array([0.0, 1.0, 0.0]),
+        "draw_atoms": [
+            {
+                "cart": [2.0, 2.0, 2.0],
+                "atom_radius": 0.2,
+                "elem": "C",
+                "label": "C1",
+                "is_minor": False,
+                "color": "#444444",
+                "color_light": "#777777",
+                "disorder_alpha": 1.0,
+                "_depth_t": 0.5,
+            }
+        ],
+        "bonds": [],
+        "label_items": [],
+    }
+    style = {
+        **DEFAULT_STYLE,
+        "display_mode": "unit_cell",
+        "show_unit_cell": True,
+        "show_axes": False,
+        "show_axis_key": False,
+        "topology_enabled": True,
+    }
+    anchor = {
+        "center_coords": [5.0, 4.0, 3.0],
+        "shell_coords": [[4.0, 4.0, 3.0], [6.0, 4.0, 3.0], [5.0, 3.0, 3.0], [5.0, 4.0, 4.0]],
+        "hull": {"simplices": [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]]},
+        "is_analysis_anchor": True,
+    }
+    # Centre is firmly inside the cell, but one shell vertex peeks out
+    # along +z to 7.5 (cell zmax = 6.0). The previous "fully contained"
+    # predicate dropped this overlay; the new "intersects" predicate
+    # must keep it because the polyhedron is still mostly visible.
+    pbc_poke = {
+        "center_coords": [5.0, 4.0, 3.0],
+        "shell_coords": [
+            [4.0, 4.0, 3.0],
+            [6.0, 4.0, 3.0],
+            [5.0, 3.0, 3.0],
+            [5.0, 4.0, 7.5],
+        ],
+        "hull": {"simplices": [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]]},
+        "is_analysis_anchor": False,
+    }
+    far_replica = {
+        "center_coords": [40.0, 4.0, 3.0],
+        "shell_coords": [[39.0, 4.0, 3.0], [41.0, 4.0, 3.0], [40.0, 3.0, 3.0], [40.0, 4.0, 4.0]],
+        "hull": {"simplices": [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]]},
+        "is_analysis_anchor": False,
+    }
+    topology_data = {
+        "center_coords": anchor["center_coords"],
+        "shell_coords": anchor["shell_coords"],
+        "distances": [1.0, 1.0, 1.0, 1.0],
+        "hull": anchor["hull"],
+        "analysis_spec_id": "spec",
+        "spec_results": [
+            {
+                "spec_id": "spec",
+                "name": "test",
+                "color": "#7C5CBF",
+                "overlays": [anchor, pbc_poke, far_replica],
+            }
+        ],
+    }
+
+    fig = build_figure(scene, style, topology_data=topology_data)
+    coord_values_z: list[float] = []
+    for trace in fig.data:
+        if not str(getattr(trace, "name", "")).startswith("coordination-"):
+            continue
+        zs = getattr(trace, "z", None)
+        if zs is None:
+            continue
+        coord_values_z.extend(float(v) for v in zs if np.isfinite(v))
+
+    assert coord_values_z, (
+        "polyhedra with PBC-image neighbours that poke just past the "
+        "cell boundary should still draw (regression: only the anchor "
+        "rendered on MPEP)"
+    )
+    # Anchor + pbc_poke contribute z values up to 7.5; far_replica
+    # would dump x ~= 40 traces if it were not filtered. Assert both:
+    assert max(coord_values_z) >= 7.0, (
+        "the slightly off-cell pbc_poke shell vertex should appear in "
+        "the coordination edges/lines"
+    )
+    coord_values_x: list[float] = []
+    for trace in fig.data:
+        if not str(getattr(trace, "name", "")).startswith("coordination-"):
+            continue
+        xs = getattr(trace, "x", None)
+        if xs is None:
+            continue
+        coord_values_x.extend(float(v) for v in xs if np.isfinite(v))
+    assert max(coord_values_x) < 20.0, (
+        "the far_replica overlay (centre at x=40) must still be "
+        "filtered out of the rendered coordination traces"
+    )
+
+
+def test_unit_cell_viewport_grows_to_cover_every_visible_polyhedron():
+    """The viewport ranges in ``unit_cell`` mode must cover every overlay
+    that ``_overlay_within_viewport`` will eventually keep, not just the
+    analysis anchor's centre + shell. ``_scene_ranges`` previously only
+    folded the anchor's coords into ``extras``, which left non-anchor
+    overlays whose bounding box poked past the cell + slack to render
+    clipped at the canvas edge (the "画布截断" follow-up report on MPEP
+    after the slack/intersect viewport rewrite).
+
+    Synthetic scene: 10 x 8 x 6 cell, anchor inside, plus three
+    non-anchor overlays whose centres sit at ``z = -1``, ``y = 9`` and
+    ``x = 11`` -- each just outside the cell wall but well inside the
+    legitimate molecule-level packing-shell radius. The viewport must
+    encompass all of them.
+    """
+    scene = {
+        "name": "synthetic",
+        "title": "Synthetic",
+        "M": np.diag([10.0, 8.0, 6.0]),
+        "display_mode": "unit_cell",
+        "view_direction": np.array([0.0, 0.0, 1.0]),
+        "up": np.array([0.0, 1.0, 0.0]),
+        "draw_atoms": [
+            {
+                "cart": [5.0, 4.0, 3.0],
+                "atom_radius": 0.2,
+                "elem": "C",
+                "label": "C1",
+                "is_minor": False,
+                "color": "#444444",
+                "color_light": "#777777",
+                "disorder_alpha": 1.0,
+                "_depth_t": 0.5,
+            }
+        ],
+        "bonds": [],
+        "label_items": [],
+    }
+    style = {
+        **DEFAULT_STYLE,
+        "display_mode": "unit_cell",
+        "show_unit_cell": True,
+        "show_axes": False,
+        "show_axis_key": False,
+        "topology_enabled": True,
+    }
+    anchor = {
+        "center_coords": [5.0, 4.0, 3.0],
+        "shell_coords": [[4.0, 4.0, 3.0], [6.0, 4.0, 3.0], [5.0, 3.0, 3.0], [5.0, 4.0, 4.0]],
+        "hull": {"simplices": [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]]},
+        "is_analysis_anchor": True,
+    }
+    poke_z_low = {
+        "center_coords": [5.0, 4.0, -1.0],
+        "shell_coords": [[4.0, 4.0, -1.5], [6.0, 4.0, -1.5], [5.0, 3.0, -0.5], [5.0, 5.0, -0.5]],
+        "hull": {"simplices": [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]]},
+        "is_analysis_anchor": False,
+    }
+    poke_y_high = {
+        "center_coords": [5.0, 9.0, 3.0],
+        "shell_coords": [[4.5, 9.5, 2.5], [5.5, 9.5, 2.5], [5.0, 8.5, 3.5], [5.0, 9.0, 3.5]],
+        "hull": {"simplices": [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]]},
+        "is_analysis_anchor": False,
+    }
+    poke_x_high = {
+        "center_coords": [11.0, 4.0, 3.0],
+        "shell_coords": [[10.5, 4.0, 3.0], [11.5, 4.0, 3.0], [11.0, 3.5, 3.0], [11.0, 4.5, 3.0]],
+        "hull": {"simplices": [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]]},
+        "is_analysis_anchor": False,
+    }
+    topology_data = {
+        "center_coords": anchor["center_coords"],
+        "shell_coords": anchor["shell_coords"],
+        "distances": [1.0, 1.0, 1.0, 1.0],
+        "hull": anchor["hull"],
+        "analysis_spec_id": "spec",
+        "spec_results": [
+            {
+                "spec_id": "spec",
+                "name": "test",
+                "color": "#7C5CBF",
+                "overlays": [anchor, poke_z_low, poke_y_high, poke_x_high],
+            }
+        ],
+    }
+
+    xr, yr, zr = _scene_ranges(scene, style, topology_data=topology_data)
+    assert xr[1] >= 11.5, (
+        f"viewport x_max={xr[1]:.2f} must cover the +x poke overlay "
+        f"(shell vertex at x=11.5); without the spec_results sweep it "
+        f"snapped to the cell+slack 0.15 boundary at ~11.5."
+    )
+    assert yr[1] >= 9.5, (
+        f"viewport y_max={yr[1]:.2f} must cover the +y poke overlay"
+    )
+    assert zr[0] <= -1.5, (
+        f"viewport z_min={zr[0]:.2f} must cover the -z poke overlay"
+    )
 
 
 def test_cluster_without_lattice_falls_back_to_auto_aspectmode():

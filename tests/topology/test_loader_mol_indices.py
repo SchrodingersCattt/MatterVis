@@ -160,10 +160,26 @@ def test_has_shelx_occupancy_disorder_distinguishes_patterns():
         {"label": "Cu1", "elem": "Cu", "occ": 0.25, "dg": ".", "da": "."},
         {"label": "N1", "elem": "N", "occ": 1.0, "dg": ".", "da": "."},
     ]
-    # PART-style: occ<1 but dg encodes the alternative.
-    part_style = [
+    # Olex2 / SHELX explicit assembly+group disorder (HPEP shape):
+    # occ<1 with non-blank ``_atom_site_disorder_assembly`` AND
+    # ``_atom_site_disorder_group``, where the same assembly carries
+    # multiple competing groups. Earlier the detector ignored this
+    # shape, so HPEP-style CIFs rendered every disorder twin at full
+    # opacity ("无序的透明度没了" bug).
+    explicit_assembly = [
         {"elem": "C", "occ": 0.6, "dg": "1", "da": "A"},
         {"elem": "C", "occ": 0.4, "dg": "2", "da": "A"},
+    ]
+    # A single half-occupied site sitting alone inside an assembly is
+    # ambiguous: it might be an ordered special-position atom, not a
+    # vanished partner. Don't flag those.
+    single_assembly_partner = [
+        {"elem": "C", "occ": 0.5, "dg": "1", "da": "A"},
+        {"elem": "N", "occ": 1.0, "dg": ".", "da": "."},
+    ]
+    # SHELX -PART convention (negative dg).
+    part_negative = [
+        {"elem": "C", "occ": 0.6, "dg": "-1", "da": "."},
     ]
     # Fully ordered.
     ordered = [
@@ -173,7 +189,9 @@ def test_has_shelx_occupancy_disorder_distinguishes_patterns():
 
     assert _has_shelx_occupancy_disorder(shelx) is True
     assert _has_shelx_occupancy_disorder(ordered_special_position) is False
-    assert _has_shelx_occupancy_disorder(part_style) is False
+    assert _has_shelx_occupancy_disorder(explicit_assembly) is True
+    assert _has_shelx_occupancy_disorder(single_assembly_partner) is False
+    assert _has_shelx_occupancy_disorder(part_negative) is True
     assert _has_shelx_occupancy_disorder(ordered) is False
 
 
@@ -346,3 +364,83 @@ def test_hpep_minor_branches_keep_ordered_hub_bonds():
 
     for pair in (("Cl3", "O10A"), ("Cl3", "O11A"), ("Cl3", "O12A"), ("N1", "C1A"), ("N2", "C2A")):
         assert frozenset(pair) in label_pairs
+
+
+def test_hpep_explicit_assembly_disorder_atoms_get_minor_flag():
+    """End-to-end regression for the "无序的透明度没了" bug.
+
+    HPEP's CIF uses Olex2's standard explicit assembly+group disorder
+    (A/1+A/2, B/1+B/2, C/1+C/2 with paired occupancies summing to 1).
+    Previously the loader's disorder detector only looked for the
+    SHELX -PART sign convention (``dg = "-1"``) and the blank-tag
+    rotamer form, so neither alternative carried ``_is_minor`` and the
+    disorder='opacity' style had nothing to fade. The renderer must:
+
+    * tag the loser of every assembly pair with ``_is_minor=True``,
+    * carry that flag onto draw_atoms / bonds via ``is_minor``,
+    * report ``has_minor=True`` to the analysis text panel,
+    * fade those atoms' alpha to 0.22 in the scene dict so the legacy
+      static publication path also keeps disorder visible.
+    """
+    if not Path("scripts/data/HPEP.cif").exists():
+        pytest.skip("local HPEP CIF fixture is not present")
+
+    bundle = build_loaded_crystal(
+        name="HPEP", cif_path="scripts/data/HPEP.cif", title="HPEP"
+    )
+    raw_minor = sum(1 for a in bundle.raw_atoms if a.get("_is_minor"))
+    assert raw_minor > 0, (
+        "HPEP has explicit A/1+A/2, B/1+B/2, C/1+C/2 disorder; the "
+        "loader must have tagged at least one alternative as minor"
+    )
+
+    scene = bundle.scene
+    draw = scene.get("draw_atoms") or []
+    draw_minor = sum(1 for a in draw if a.get("is_minor"))
+    assert draw_minor > 0
+    assert scene.get("has_minor") is True
+    minors_alpha = {round(float(a.get("disorder_alpha", 1.0)), 3) for a in draw if a.get("is_minor")}
+    assert minors_alpha == {0.22}
+
+
+def test_hpep_minor_atoms_get_faded_opacity_in_render_traces():
+    """Mesh3d traces for HPEP minors must ship with the configured
+    ``minor_opacity`` when ``disorder='opacity'``. Buckets are split on
+    ``(is_minor, opacity)`` so a regression that silently routes
+    minors through the major bucket would fuse them into a single
+    opacity=1.0 trace.
+    """
+    if not Path("scripts/data/HPEP.cif").exists():
+        pytest.skip("local HPEP CIF fixture is not present")
+
+    from crystal_viewer.render.style import style_from_controls
+    from crystal_viewer.renderer import build_figure
+
+    bundle = build_loaded_crystal(
+        name="HPEP", cif_path="scripts/data/HPEP.cif", title="HPEP"
+    )
+    style = style_from_controls(
+        atom_scale=1.0,
+        bond_radius=0.2,
+        minor_opacity=0.35,
+        axis_scale=0.15,
+        options=["unit_cell_box"],
+        material="mesh",
+        render_style="ball_stick",
+        disorder="opacity",
+    )
+    fig = build_figure(bundle.scene, style)
+    minor_opacities: set[float] = set()
+    major_opacities: set[float] = set()
+    for tr in fig.data:
+        meta = getattr(tr, "meta", None) or {}
+        if meta.get("mv_role") != "atom":
+            continue
+        if bool(meta.get("mv_minor", False)):
+            minor_opacities.add(float(getattr(tr, "opacity", 1.0)))
+        else:
+            major_opacities.add(float(getattr(tr, "opacity", 1.0)))
+
+    assert minor_opacities, "no minor atom Mesh3d traces emitted for HPEP"
+    assert minor_opacities == {0.35}, minor_opacities
+    assert major_opacities == {1.0}, major_opacities

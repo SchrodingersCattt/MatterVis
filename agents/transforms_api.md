@@ -7,6 +7,18 @@ Each transform takes a base scene and produces a new scene whose
 applied. Transforms compose in **list order**: each entry's input is
 the output of the previous one.
 
+Internally the implementation now keeps an explicit source/display
+split:
+
+- `crystal_viewer.ops.source` is for real `MolecularCrystal` in/out
+  operations such as a future saveable slab or true supercell.
+- `crystal_viewer.ops.display` is for fast scene-dict in/out
+  operations used by the current transform pipeline.
+
+The REST transform list remains display-side today for compatibility;
+source-side outputs re-enter the viewer through the loader before they
+are rendered.
+
 ## Display-Mode Interaction
 
 Transforms operate on the scene that will be rendered. A fresh scene

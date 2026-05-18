@@ -11,7 +11,7 @@ geometry.
 flowchart LR
     CIF["CIF file<br/>or ASE Atoms"] --> LOAD["loader<br/>+ MolCrysKit analysis<br/>(PBC unwrap, mol grouping)"]
     LOAD --> RAW["raw_atoms"]
-    RAW --> BUILD["build_scene_from_atoms<br/>(display_mode + H filter)"]
+    RAW --> BUILD["render.assembly<br/>build_scene_from_atoms<br/>(display_mode + H filter)"]
     BUILD --> SCENE["scene dict<br/>{draw_atoms, bonds, cell, style}"]
     SCENE --> SKIN["apply_element_colors<br/>(in-place scene re-skin)"]
     SKIN --> UV["uniform_viewport<br/>(optional, for N-up grids)"]
@@ -49,11 +49,16 @@ Parses a CIF and returns a scene dict consumable by
   Cartesian coordinates. The 100 Å dummy cells that CIF exporters
   sometimes write around clusters are ignored.
 
-### `crystal_viewer.scene.build_scene_from_atoms(atoms, *, style=None, ...)`
+### `crystal_viewer.render.assembly.build_scene_from_atoms(atoms, *, style=None, ...)`
 
 ASE `Atoms` → scene dict. Accepts the same `display_mode` values. When
 `style["element_colors"]` is provided, the element palette is applied
 automatically.
+
+`crystal_viewer.scene.build_scene_from_atoms` remains available as a
+compatibility import, but new code should treat scene assembly as part
+of the render pipeline. The `scene/` namespace is reserved for per-tab
+state and scene-store helpers.
 
 ## Style helpers
 
