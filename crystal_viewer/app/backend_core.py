@@ -245,7 +245,7 @@ class _CoreBackendMixin:
         key_state = {
             k: v
             for k, v in state.items()
-            if k not in ("version", "server_started_at", "camera")
+            if k not in ("version", "server_started_at", "camera", "camera_revision")
         }
         return json.dumps(_json_safe(key_state), sort_keys=True, separators=(",", ":"))
 

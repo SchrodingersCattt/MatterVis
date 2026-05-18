@@ -31,8 +31,10 @@ from crystal_viewer.app import (
     _normalize_polyhedron_specs,
     _polyhedra_table_rows,
 )
+from crystal_viewer.app.backend_topology import _dedupe_disorder_center_fragments
 from crystal_viewer import topology as topology_module
 from crystal_viewer.presets import default_preset_path
+from crystal_viewer.render.topology import topology_results_markdown
 
 
 @pytest.fixture
@@ -295,3 +297,55 @@ def test_mck_polyhedron_record_passes_packing_shell_knobs(monkeypatch):
     assert record is not None
     assert captured["kwargs"]["enforce_enclosure"] is False
     assert captured["kwargs"]["centroid_offset_frac"] == 0.7
+
+
+def test_disorder_center_dedupe_prefers_major_orientation():
+    bundle = type("Bundle", (), {"M": [[10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 10.0]]})()
+    scene = {
+        "draw_atoms": [
+            {"is_minor": True},
+            {"is_minor": True},
+            {"is_minor": False},
+            {"is_minor": False},
+            {"is_minor": False},
+        ]
+    }
+    fragments = [
+        {
+            "index": 10,
+            "formula": "C4NO",
+            "frac_center": [0.10, 0.20, 0.30],
+            "site_indices": [0, 1],
+        },
+        {
+            "index": 11,
+            "formula": "C4NO",
+            "frac_center": [0.105, 0.205, 0.305],
+            "site_indices": [2, 3],
+        },
+        {
+            "index": 12,
+            "formula": "C4NO",
+            "frac_center": [0.50, 0.50, 0.50],
+            "site_indices": [4],
+        },
+    ]
+
+    deduped = _dedupe_disorder_center_fragments(bundle, scene, fragments)
+
+    assert [fragment["index"] for fragment in deduped] == [11, 12]
+
+
+def test_topology_results_markdown_surfaces_warnings():
+    md = topology_results_markdown(
+        {
+            "center_label": "A0",
+            "center_formula": "C4NO",
+            "coordination_number": 1,
+            "warnings": [
+                "C4NO: no drawable polyhedron for C4NO -> C4NO (Gap only); largest shell has 1 ligand point(s), need at least 4 non-coplanar points."
+            ],
+        }
+    )
+
+    assert "Warning: C4NO: no drawable polyhedron" in md
