@@ -67,44 +67,39 @@ def _prewarm_bundle_async(backend: ViewerBackend, structure_name: str) -> None:
             defaults = backend.default_state(structure_name)
         except Exception:
             return
-        old_scene = getattr(bundle, "scene", None)
-        try:
-            for display_mode in ("formula_unit", "asymmetric_unit", "unit_cell", "cluster"):
-                for show_hydrogen in (False, True):
-                    try:
-                        scene = build_bundle_scene(
-                            bundle,
-                            display_mode=display_mode,
-                            show_hydrogen=show_hydrogen,
-                            preset=backend.preset,
+        for display_mode in ("formula_unit", "asymmetric_unit", "unit_cell", "cluster"):
+            for show_hydrogen in (False, True):
+                try:
+                    scene = build_bundle_scene(
+                        bundle,
+                        display_mode=display_mode,
+                        show_hydrogen=show_hydrogen,
+                        preset=backend.preset,
+                    )
+                    style = dict(scene.get("style", {}))
+                    options = list(defaults.get("display_options") or [])
+                    if show_hydrogen and "hydrogens" not in options:
+                        options.append("hydrogens")
+                    elif not show_hydrogen:
+                        options = [opt for opt in options if opt != "hydrogens"]
+                    style.update(
+                        style_from_controls(
+                            defaults["atom_scale"],
+                            defaults["bond_radius"],
+                            defaults["minor_opacity"],
+                            defaults["axis_scale"],
+                            options,
+                            material=defaults.get("material"),
+                            render_style=defaults.get("style"),
+                            disorder=defaults.get("disorder"),
+                            ortep_mode=defaults.get("ortep_mode"),
                         )
-                        style = dict(scene.get("style", {}))
-                        options = list(defaults.get("display_options") or [])
-                        if show_hydrogen and "hydrogens" not in options:
-                            options.append("hydrogens")
-                        elif not show_hydrogen:
-                            options = [opt for opt in options if opt != "hydrogens"]
-                        style.update(
-                            style_from_controls(
-                                defaults["atom_scale"],
-                                defaults["bond_radius"],
-                                defaults["minor_opacity"],
-                                defaults["axis_scale"],
-                                options,
-                                material=defaults.get("material"),
-                                render_style=defaults.get("style"),
-                                disorder=defaults.get("disorder"),
-                                ortep_mode=defaults.get("ortep_mode"),
-                            )
-                        )
-                        style["display_mode"] = display_mode
-                        style["topology_enabled"] = False
-                        build_figure(scene, style, topology_data=None)
-                    except Exception:
-                        continue
-        finally:
-            if old_scene is not None:
-                bundle.scene = old_scene
+                    )
+                    style["display_mode"] = display_mode
+                    style["topology_enabled"] = False
+                    build_figure(scene, style, topology_data=None)
+                except Exception:
+                    continue
 
     try:
         _PREWARM_EXECUTOR.submit(_job)

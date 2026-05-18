@@ -106,6 +106,16 @@ should be rejected and rewritten.
    is the home for scene-dict-to-`MolecularCrystal` conversion so a
    displayed supercell/grown cluster can later become a real saved
    structure without blurring `ops/source` and `ops/display`.
+13. **The interactive render pipeline is asynchronous.** Dash / Flask
+   request callbacks must not run MolCrysKit topology recomputation or
+   long Plotly figure assembly on the request thread. Cold topology
+   work is queued through `app/render_worker.py` and delivered over
+   `/api/v2/ws`; `update_view` may return a placeholder figure while
+   the worker fills the real overlay. Scene-state persistence is also
+   debounced off-thread: UI callbacks mark the `SceneStore` dirty but
+   must not call `SceneStore.save()` while holding `ViewerBackend._lock`.
+   Browser-originated mutations should flow through `/api/v2/intent`
+   / `ViewerBackend.apply_intent` so ordering is explicit.
 
 ## Working with `molcrys_kit`
 

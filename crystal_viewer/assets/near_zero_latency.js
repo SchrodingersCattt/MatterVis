@@ -144,14 +144,21 @@
 
   function syncCamera(action, payload, camera) {
     const m = readMeta() || {};
-    const body = Object.assign({ action: action, scene_id: m.scene_id, broadcast: false }, payload || {});
-    fetch("/api/v2/camera/action", {
+    const revision = Number(m.camera_revision || 0) + 1;
+    const body = {
+      type: "set_camera",
+      scene_id: m.scene_id,
+      payload: Object.assign({ camera: camera, camera_revision: revision, action: action }, payload || {}),
+      client_id: "browser",
+      client_seq: Date.now(),
+    };
+    fetch("/api/v2/intent", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
       keepalive: true,
     }).catch(function () {});
-    meta = Object.assign({}, m, { camera: camera, camera_revision: Number(m.camera_revision || 0) + 1 });
+    meta = Object.assign({}, m, { camera: camera, camera_revision: revision });
     setDashStore("camera-state-store", { scene_id: m.scene_id, camera: camera });
   }
 

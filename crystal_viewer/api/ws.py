@@ -13,6 +13,7 @@ def register_ws_routes(server, backend) -> None:
     @sock.route("/api/v2/ws")
     def ws_state(socket):
         last_version = -1
+        last_figure_seq = 0
         include_figure = False
         while True:
             snapshot = backend.websocket_snapshot(include_figure=include_figure)
@@ -20,6 +21,10 @@ def register_ws_routes(server, backend) -> None:
             if version != last_version:
                 socket.send(json.dumps(snapshot, ensure_ascii=False))
                 last_version = version
+            if include_figure:
+                for payload in backend.figure_broadcasts_since(last_figure_seq):
+                    socket.send(json.dumps(payload, ensure_ascii=False))
+                    last_figure_seq = max(last_figure_seq, int(payload.get("figure_seq", 0) or 0))
             try:
                 message = socket.receive(timeout=0.5)
             except TypeError:
@@ -52,7 +57,12 @@ def handle_ws_message(backend, payload: dict) -> None:
       tests can assert on the result; production callers ignore the
       return value.
     """
-    if not isinstance(payload, dict) or payload.get("type") != "set_state":
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("type") == "intent":
+        inner = payload.get("payload", {}) or {}
+        return backend.apply_intent(inner)
+    if payload.get("type") != "set_state":
         return None
     inner = payload.get("payload", {}) or {}
     scene_id = (

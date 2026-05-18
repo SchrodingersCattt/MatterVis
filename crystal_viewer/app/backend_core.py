@@ -1,11 +1,15 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
+import atexit
+from collections import OrderedDict
+
 from .shared import *
 from .normalizers import *
 from .camera_helpers import *
 from .style_helpers import *
 from .rightclick import _normalize_polyhedron_specs
+from .render_worker import AsyncRenderWorker
 
 
 class _CoreBackendMixin:
@@ -66,8 +70,23 @@ class _CoreBackendMixin:
         self.pending_state: Optional[dict[str, Any]] = None
         self._first_figure_ready = threading.Event()
         self.version = 0
-        self._figure_cache: dict[str, tuple[Any, Any]] = {}
-        self._figure_cache_order: list[str] = []
+        self._figure_cache_lock = threading.Lock()
+        self._figure_cache: OrderedDict[str, tuple[Any, Any]] = OrderedDict()
+        self._figure_broadcast_lock = threading.Lock()
+        self._figure_broadcast_seq = 0
+        self._figure_broadcasts: list[dict[str, Any]] = []
+        self._render_worker = AsyncRenderWorker(self)
+        self._persist_event = threading.Event()
+        self._persist_stop = threading.Event()
+        self._persist_thread = threading.Thread(
+            target=self._persist_scene_store_loop,
+            name="mattervis-scene-store-persist",
+            daemon=True,
+        )
+        self._persist_thread.start()
+        atexit.register(self.flush_scene_store)
+        self._intent_lock = threading.Lock()
+        self._intent_seq_by_client: dict[str, int] = {}
 
     def default_state(self, structure: str) -> dict[str, Any]:
         bundle = self.get_bundle(structure)
@@ -180,8 +199,220 @@ class _CoreBackendMixin:
         (new upload, structure deleted, preset reload) -- ``cache_key``
         won't change but the cached fig now refers to stale geometry.
         """
-        self._figure_cache.clear()
-        self._figure_cache_order.clear()
+        with self._figure_cache_lock:
+            self._figure_cache.clear()
+
+    def broadcast_figure(
+        self,
+        *,
+        scene_id: Optional[str],
+        figure: dict[str, Any],
+        topology_data: Optional[dict[str, Any]] = None,
+        state: Optional[dict[str, Any]] = None,
+        reason: str = "render-ready",
+    ) -> dict[str, Any]:
+        if not self._figure_payload_has_scene3d(figure):
+            return {
+                "type": "figure_ignored",
+                "scene_id": scene_id,
+                "reason": "missing-3d-scene",
+            }
+        if not self._figure_state_matches_current(scene_id, state):
+            return {
+                "type": "figure_ignored",
+                "scene_id": scene_id,
+                "reason": "stale-state",
+            }
+        with self._figure_broadcast_lock:
+            self._figure_broadcast_seq += 1
+            payload = {
+                "type": "figure",
+                "figure_seq": self._figure_broadcast_seq,
+                "figure_version": self.version,
+                "version": self.version,
+                "scene_id": scene_id,
+                "reason": reason,
+                "figure": figure,
+                "state": copy.deepcopy(state) if isinstance(state, dict) else None,
+                "topology": copy.deepcopy(topology_data) if isinstance(topology_data, dict) else None,
+            }
+            self._figure_broadcasts.append(payload)
+            self._figure_broadcasts = self._figure_broadcasts[-32:]
+            return payload
+
+    @staticmethod
+    def _figure_state_cache_key(state: dict[str, Any]) -> str:
+        key_state = {
+            k: v
+            for k, v in state.items()
+            if k not in ("version", "server_started_at", "camera")
+        }
+        return json.dumps(_json_safe(key_state), sort_keys=True, separators=(",", ":"))
+
+    def _figure_state_matches_current(
+        self,
+        scene_id: Optional[str],
+        state: Optional[dict[str, Any]],
+    ) -> bool:
+        if not isinstance(state, dict) or not scene_id:
+            return True
+        try:
+            current = self.get_state(scene_id)
+        except Exception:
+            return False
+        try:
+            return self._figure_state_cache_key(state) == self._figure_state_cache_key(current)
+        except Exception:
+            return False
+
+    @staticmethod
+    def _figure_payload_has_scene3d(figure: Any) -> bool:
+        if not isinstance(figure, dict):
+            return False
+        layout = figure.get("layout")
+        if not isinstance(layout, dict) or not isinstance(layout.get("scene"), dict):
+            return False
+        data = figure.get("data") or []
+        if not isinstance(data, list):
+            return False
+        return any(
+            isinstance(trace, dict)
+            and str(trace.get("type") or "").lower() in {"mesh3d", "scatter3d", "cone"}
+            for trace in data
+        )
+
+    def broadcast_render_error(self, *, scene_id: Optional[str], error: str) -> dict[str, Any]:
+        with self._figure_broadcast_lock:
+            self._figure_broadcast_seq += 1
+            payload = {
+                "type": "render_error",
+                "figure_seq": self._figure_broadcast_seq,
+                "version": self.version,
+                "scene_id": scene_id,
+                "error": error,
+            }
+            self._figure_broadcasts.append(payload)
+            self._figure_broadcasts = self._figure_broadcasts[-32:]
+            return payload
+
+    def figure_broadcasts_since(self, seq: int = 0) -> list[dict[str, Any]]:
+        with self._figure_broadcast_lock:
+            return [
+                copy.deepcopy(payload)
+                for payload in self._figure_broadcasts
+                if int(payload.get("figure_seq", 0) or 0) > int(seq)
+            ]
+
+    def latest_figure_broadcast(self) -> Optional[dict[str, Any]]:
+        with self._figure_broadcast_lock:
+            if not self._figure_broadcasts:
+                return None
+            return copy.deepcopy(self._figure_broadcasts[-1])
+
+    def _request_scene_store_save(self) -> None:
+        try:
+            self.scene_store.mark_dirty()
+        except Exception:
+            pass
+        self._persist_event.set()
+
+    def _persist_scene_store_loop(self) -> None:
+        while not self._persist_stop.is_set():
+            self._persist_event.wait(timeout=1.0)
+            if self._persist_stop.is_set():
+                break
+            if not self._persist_event.is_set():
+                continue
+            self._persist_event.clear()
+            time.sleep(0.5)
+            if self._persist_event.is_set():
+                continue
+            self.flush_scene_store()
+
+    def flush_scene_store(self) -> None:
+        if not getattr(self, "scene_store", None):
+            return
+        try:
+            if self.scene_store.is_dirty():
+                self.scene_store.save()
+        except OSError as exc:  # pragma: no cover - disk-full / read-only mount
+            print(f"[crystal_viewer] could not persist scene store: {exc}", file=sys.stderr)
+
+    def apply_intent(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("intent payload must be an object")
+        client_id = str(payload.get("client_id") or "default")
+        if "client_seq" in payload and payload["client_seq"] is not None:
+            client_seq = int(payload["client_seq"])
+            with self._intent_lock:
+                previous = self._intent_seq_by_client.get(client_id, -1)
+                if client_seq <= previous:
+                    raise ApiError(
+                        f"out-of-order intent for client {client_id}: {client_seq} <= {previous}",
+                        status_code=409,
+                    )
+                self._intent_seq_by_client[client_id] = client_seq
+        intent_type = str(payload.get("type") or "")
+        data = payload.get("payload") or {}
+        if not isinstance(data, dict):
+            raise ValueError("intent payload.payload must be an object")
+        scene_id = payload.get("scene_id") or data.get("scene_id") or self.scene_store.active_id
+        details: dict[str, Any] = {}
+
+        if intent_type in {"set_style", "set_display_options"}:
+            state = self.patch_state(data, scene_id=scene_id, broadcast=False)
+        elif intent_type in {"patch_state", "apply_transform"}:
+            state = self.patch_state(data, scene_id=scene_id)
+        elif intent_type == "set_camera":
+            camera = data.get("camera", data)
+            patch = {"camera": camera}
+            if "camera_revision" in data:
+                patch["camera_revision"] = data["camera_revision"]
+            state = self.patch_state(patch, scene_id=scene_id, broadcast=False)
+        elif intent_type == "set_active_scene":
+            target = data.get("scene_id") or scene_id
+            self.set_active_scene(str(target), broadcast=True)
+            state = self.get_state(str(target))
+        elif intent_type == "crud_scene":
+            action = str(data.get("action") or "")
+            if action == "duplicate":
+                scene = self.duplicate_scene(str(scene_id))
+                details["scene"] = scene
+                state = self.get_state(scene["id"])
+            elif action == "rename":
+                details["scene"] = self.update_scene(str(scene_id), {"label": data.get("label", "")})
+                state = self.get_state(str(scene_id))
+            elif action == "delete":
+                details["removed"] = self.delete_scene(str(scene_id))
+                state = self.get_state()
+            elif action == "delete_others":
+                details.update(self.delete_other_scenes(str(scene_id)))
+                state = self.get_state(str(scene_id))
+            elif action == "reorder":
+                self.reorder_scenes(data.get("order") or [])
+                state = self.get_state(scene_id)
+            else:
+                raise ValueError(f"unknown crud_scene action: {action}")
+        elif intent_type in {"crud_polyhedron", "crud_atom_group", "crud_bond_group"}:
+            key = {
+                "crud_polyhedron": "polyhedron_specs",
+                "crud_atom_group": "atom_groups",
+                "crud_bond_group": "bond_groups",
+            }[intent_type]
+            state = self.patch_state({key: data.get(key, data.get("items", []))}, scene_id=scene_id)
+        elif intent_type == "upload_complete":
+            state = self.get_state(scene_id)
+            self.pending_state = copy.deepcopy(state)
+        else:
+            raise ValueError(f"unknown intent type: {intent_type}")
+
+        return {
+            "ok": True,
+            "type": intent_type,
+            "version": self.version,
+            "state": state,
+            **details,
+        }
 
     def wait_for_version(self, version: int, *, timeout: float = 30.0) -> bool:
         deadline = time.monotonic() + max(0.0, float(timeout))
@@ -327,6 +558,7 @@ class _CoreBackendMixin:
             structure_name=structure,
             state_patch=base_state,
             camera=base_state.get("camera"),
+            save=False,
         )
         self.current_state = self.scene_state(scene.id)
         self.pending_state = copy.deepcopy(self.current_state)
@@ -334,31 +566,34 @@ class _CoreBackendMixin:
         payload = scene.to_dict()
         payload["requested_label"] = str(requested_label)
         payload["label_renamed"] = payload["label"] != str(requested_label)
+        self._request_scene_store_save()
         return payload
 
     def update_scene(self, scene_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         scene = self.scene_store.get(scene_id)
         if "label" in payload and len(payload) == 1:
-            scene = self.scene_store.rename(scene_id, payload["label"])
+            scene = self.scene_store.rename(scene_id, payload["label"], save=False)
         else:
             patch = dict(payload)
             if "state" in patch:
                 state_patch = patch.pop("state") or {}
                 state_patch = self.normalize_state(state_patch, scene_id=scene_id)
                 patch.update(state_patch)
-            scene = self.scene_store.patch_scene(scene_id, patch)
+            scene = self.scene_store.patch_scene(scene_id, patch, save=False)
         if self.scene_store.active_id == scene_id:
             self.current_state = self.scene_state(scene_id)
             self.pending_state = copy.deepcopy(self.current_state)
         self._bump_version()
+        self._request_scene_store_save()
         return scene.to_dict()
 
     def delete_scene(self, scene_id: str) -> dict[str, Any]:
-        removed = self.scene_store.remove(scene_id)
+        removed = self.scene_store.remove(scene_id, save=False)
         if self.scene_store.active_id:
             self.current_state = self.scene_state(self.scene_store.active_id)
         self.pending_state = copy.deepcopy(self.current_state)
         self._bump_version()
+        self._request_scene_store_save()
         return removed.to_dict()
 
     def delete_other_scenes(self, keep_id: str) -> dict[str, Any]:
@@ -375,24 +610,27 @@ class _CoreBackendMixin:
             raise KeyError(f"Unknown scene id: {keep_id}")
         removed: list[dict[str, Any]] = []
         for scene_id in [sid for sid in list(self.scene_store.scenes.keys()) if sid != keep_id]:
-            removed.append(self.scene_store.remove(scene_id).to_dict())
+            removed.append(self.scene_store.remove(scene_id, save=False).to_dict())
         self.scene_store.active_id = keep_id
         self.current_state = self.scene_state(keep_id)
         self.pending_state = copy.deepcopy(self.current_state)
         if removed:
             self._bump_version()
+            self._request_scene_store_save()
         return {"kept": self.scene_store.get(keep_id).to_dict(), "removed": removed}
 
     def duplicate_scene(self, scene_id: str, label: Optional[str] = None) -> dict[str, Any]:
-        scene = self.scene_store.duplicate(scene_id, label=label)
+        scene = self.scene_store.duplicate(scene_id, label=label, save=False)
         self.current_state = self.scene_state(scene.id)
         self.pending_state = copy.deepcopy(self.current_state)
         self._bump_version()
+        self._request_scene_store_save()
         return scene.to_dict()
 
     def reorder_scenes(self, order: Iterable[str]) -> list[str]:
-        order = self.scene_store.reorder(order)
+        order = self.scene_store.reorder(order, save=False)
         self._bump_version()
+        self._request_scene_store_save()
         return order
 
     def set_active_scene(self, scene_id: str, *, broadcast: bool = True) -> dict[str, Any]:
@@ -407,11 +645,12 @@ class _CoreBackendMixin:
         # triggers a full ``update_view`` for nothing -- doubling the
         # 1 MB-per-frame transfer cost on every click that carries a
         # ``scene-tabs.value`` Input.
-        scene = self.scene_store.set_active(scene_id)
+        scene = self.scene_store.set_active(scene_id, save=False)
         self.current_state = self.scene_state(scene.id)
         if broadcast:
             self.pending_state = copy.deepcopy(self.current_state)
         self._bump_version()
+        self._request_scene_store_save()
         return scene.to_dict()
 
     @staticmethod
@@ -769,13 +1008,14 @@ class _CoreBackendMixin:
                 scene_payload = copy.deepcopy(self.current_state)
                 scene_payload.pop("scene_id", None)
                 scene_payload.pop("scene_label", None)
-                self.scene_store.patch_scene(target_scene_id, scene_payload)
+                self.scene_store.patch_scene(target_scene_id, scene_payload, save=False)
             if broadcast:
                 self.pending_state = copy.deepcopy(self.current_state)
             self._bump_version()
             state = copy.deepcopy(self.current_state)
             state["version"] = self.version
             state["server_started_at"] = self.server_started_iso()
+            self._request_scene_store_save()
             return state
 
     def pop_pending_state(self) -> Optional[dict[str, Any]]:
@@ -792,8 +1032,9 @@ class _CoreBackendMixin:
                 scene_payload = copy.deepcopy(self.current_state)
                 scene_payload.pop("scene_id", None)
                 scene_payload.pop("scene_label", None)
-                self.scene_store.patch_scene(target_scene_id, scene_payload)
+                self.scene_store.patch_scene(target_scene_id, scene_payload, save=False)
             self._bump_version()
+            self._request_scene_store_save()
 
     def show_hydrogen_for_state(self, state: Optional[dict[str, Any]] = None) -> bool:
         state = self.current_state if state is None else state

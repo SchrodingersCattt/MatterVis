@@ -87,6 +87,8 @@ def register_state_callbacks(app, backend):
         # the ``display-options`` Input, but recomputing the options
         # would do nothing useful and ``backend.fragment_options`` can
         # easily hit ~1s on dense unit cells. Short-circuit those.
+        if scene_id and scene_id not in backend.scene_store.scenes:
+            return no_update, no_update
         hydrogens_on = "hydrogens" in (display_options or [])
         active_state = backend.get_state(scene_id)
         transforms_key = transforms_cache_key(active_state.get("transforms") or [])
@@ -152,20 +154,30 @@ def register_state_callbacks(app, backend):
         message = no_update
         try:
             if action == "scene-new-tab-btn":
-                scene = backend.duplicate_scene(active_scene_id)
+                result = backend.apply_intent(
+                    {"type": "crud_scene", "scene_id": active_scene_id, "payload": {"action": "duplicate"}}
+                )
+                scene = result.get("scene") or backend.scene_store.get(result["state"]["scene_id"]).to_dict()
                 message = f"Duplicated scene: {scene['label']}"
             elif action == "scene-rename-btn":
-                scene = backend.update_scene(active_scene_id, {"label": label or ""})
+                backend.apply_intent(
+                    {"type": "crud_scene", "scene_id": active_scene_id, "payload": {"action": "rename", "label": label or ""}}
+                )
+                scene = backend.scene_store.get(active_scene_id).to_dict()
                 message = f"Renamed scene: {scene['label']}"
             elif action == "scene-tab-close-active":
                 if len(backend.scene_options()) <= 1:
                     return no_update, "At least one scene tab must remain."
-                backend.delete_scene(active_scene_id)
+                backend.apply_intent(
+                    {"type": "crud_scene", "scene_id": active_scene_id, "payload": {"action": "delete"}}
+                )
                 message = "Closed scene."
             elif action == "scene-close-others-btn":
                 if len(backend.scene_options()) <= 1:
                     return no_update, "Only one scene open — nothing to close."
-                result = backend.delete_other_scenes(active_scene_id)
+                result = backend.apply_intent(
+                    {"type": "crud_scene", "scene_id": active_scene_id, "payload": {"action": "delete_others"}}
+                )
                 n = len(result.get("removed") or [])
                 message = f"Closed {n} other scene{'s' if n != 1 else ''}."
             elif action == "close-row":
@@ -174,7 +186,9 @@ def register_state_callbacks(app, backend):
                     return no_update, no_update
                 if len(backend.scene_options()) <= 1:
                     return no_update, "At least one scene tab must remain."
-                backend.delete_scene(scene_id)
+                backend.apply_intent(
+                    {"type": "crud_scene", "scene_id": scene_id, "payload": {"action": "delete"}}
+                )
                 message = "Closed scene."
             else:
                 return no_update, no_update
@@ -309,9 +323,11 @@ def register_state_callbacks(app, backend):
         )
         n_outputs = 15
         if triggered == "scene-tabs":
-            if not scene_id:
+            if not scene_id or scene_id not in backend.scene_store.scenes:
                 return (no_update,) * n_outputs
-            backend.set_active_scene(scene_id, broadcast=False)
+            backend.apply_intent(
+                {"type": "set_active_scene", "scene_id": scene_id, "payload": {"scene_id": scene_id}}
+            )
             state = backend.get_state(scene_id)
             return scene_control_outputs(state)
         state = backend.pop_pending_state()
@@ -367,6 +383,8 @@ def register_state_callbacks(app, backend):
         triggered = callback_context.triggered[0]["prop_id"].split(".")[0] if callback_context.triggered else None
         if triggered == "scene-tabs":
             return no_update
+        if scene_id and scene_id not in backend.scene_store.scenes:
+            return no_update
         if scene_id:
             backend.set_active_scene(scene_id, broadcast=False)
         prev = backend.get_state(scene_id)
@@ -405,7 +423,9 @@ def register_state_callbacks(app, backend):
             # ``agent-state-store`` or the full-figure callback.
             if all(prev.get(k) == v for k, v in patch.items() if k != "scene_id"):
                 return no_update
-            backend.record_state(patch)
+            backend.apply_intent(
+                {"type": "set_style", "scene_id": scene_id, "payload": patch}
+            )
             perf_log.record(
                 "callback:capture_state",
                 kind="cb",
@@ -424,7 +444,9 @@ def register_state_callbacks(app, backend):
         # every figure render, doubling the 1.4 MB-per-frame cost.
         if all(prev.get(k) == v for k, v in patch.items() if k != "scene_id"):
             return no_update
-        backend.record_state(patch)
+        backend.apply_intent(
+            {"type": "set_style", "scene_id": scene_id, "payload": patch}
+        )
         perf_log.record(
             "callback:capture_state",
             kind="cb",
@@ -453,6 +475,8 @@ def register_state_callbacks(app, backend):
         flip trace visibility/opacity, so a small Dash Patch is enough.
         """
         scene_id = scene_id or backend.active_scene_id()
+        if scene_id and scene_id not in backend.scene_store.scenes:
+            return no_update, no_update
         prev = backend.get_state(scene_id)
         prev_options = set(prev.get("display_options") or [])
         next_options = set(display_options or [])
@@ -465,7 +489,9 @@ def register_state_callbacks(app, backend):
             "axis_scale": axis_scale,
             "minor_opacity": minor_opacity,
         }
-        backend.record_state(patch_payload, scene_id=scene_id)
+        backend.apply_intent(
+            {"type": "set_style", "scene_id": scene_id, "payload": patch_payload}
+        )
         fig_patch = _fast_style_patch_for_figure(
             current_figure,
             display_options=display_options,

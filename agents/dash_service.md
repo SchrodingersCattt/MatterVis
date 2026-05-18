@@ -15,7 +15,9 @@ All caller traffic lands on the Flask blueprint at `/api/v2`, which
 delegates to `ViewerBackend`. Mutations write through to the
 `SceneStore` (per-tab `Scene` objects, persisted under `.local/`) and
 arm a `pending_state` payload that the WebSocket fans out to every
-connected client on its next tick.
+connected client on its next tick. Browser-originated mutations should
+prefer `/intent`, which routes through the reducer and rejects
+out-of-order client sequence numbers.
 
 ```mermaid
 flowchart LR
@@ -25,6 +27,7 @@ flowchart LR
 
     subgraph RES["Resource groups under /api/v2"]
         STATE["/state, /camera, /camera/action"]
+        INTENT["/intent<br/>ordered UI reducer"]
         SCENES["/scenes, /scenes/active, /scenes/{id}/duplicate"]
         STRUCT["/upload, /structures, /scene/{name}"]
         OVERLAY["/polyhedra (+ instance_overrides)<br/>/atom_groups<br/>/bond_groups<br/>/transforms<br/>(+ supercell shorthand on /state)"]
@@ -34,6 +37,7 @@ flowchart LR
     end
 
     API --> STATE
+    API --> INTENT
     API --> SCENES
     API --> STRUCT
     API --> OVERLAY
@@ -42,6 +46,7 @@ flowchart LR
     API --> OBS
 
     STATE --> BACK["ViewerBackend"]
+    INTENT --> BACK
     SCENES --> BACK
     STRUCT --> BACK
     OVERLAY --> BACK
@@ -85,6 +90,7 @@ sequenceDiagram
     C->>API: POST /state {"atom_scale": 1.2, "scene_id": "s2"}
     API->>B: apply patch (scene_id=s2)
     B->>S: mutate scene row, bump version → N+1
+    B-->>B: mark SceneStore dirty (debounced save)
     B-->>B: arm pending_state = deepcopy(current_state)
     API-->>C: 200 OK
 
@@ -102,9 +108,14 @@ Notes for callers:
 - `pending_state` is armed on every state-mutating call (REST or
   WebSocket `set_state`), and consumed once per WS tick — clients see
   one push per version, not one push per call.
-- `subscribe_figure` is opt-in: the default snapshot omits the rendered
-  figure to keep the WS frame small; flip it on when you need live
-  thumbnails.
+- `subscribe_figure` pushes completed figure deltas as separate
+  `{"type":"figure","figure_seq":...,"figure":...}` frames. Figure
+  delivery is asynchronous: a REST or Dash state mutation may return
+  before cold topology/polyhedra overlays have been recomputed.
+- Scene persistence is debounced. A successful mutation updates memory
+  immediately and schedules `.local/crystal_view_scenes.json` for a
+  background save; explicit preset/export paths still flush before
+  writing their own artifacts.
 - For one-shot "wait for my change to land" scripts, the synchronous
   `GET /screenshot?at_version=N` path is simpler than running the WS;
   it blocks until the backend reaches version `N`.
@@ -158,6 +169,21 @@ Notes for callers:
   `display_mode` accepts `formula_unit`, `unit_cell`, `asymmetric_unit`,
   or `cluster` (free molecular cluster — every parsed atom is drawn,
   no formula-unit trim, no periodic imaging of bonds).
+- `POST /intent`
+  Ordered mutation reducer for browser and automation clients that want
+  one canonical state-machine path. Body:
+  `{"type": "...", "payload": {...}, "scene_id": "...",
+  "client_id": "browser", "client_seq": 42}`. `client_seq` is optional,
+  but when provided it must strictly increase per `client_id`; stale or
+  replayed intents return `409`.
+
+  Supported `type` values:
+  `set_style`, `set_display_options`, `patch_state`, `set_camera`,
+  `set_active_scene`, `crud_scene`, `crud_polyhedron`,
+  `crud_atom_group`, `crud_bond_group`, `apply_transform`, and
+  `upload_complete`. The response is
+  `{"ok": true, "version": N, "state": {...}}` plus action-specific
+  details such as `scene` or `removed`.
 - `GET /camera`
   Returns the current Plotly camera.
 - `POST /camera`

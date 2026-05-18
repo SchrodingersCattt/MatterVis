@@ -28,10 +28,11 @@ class _IOBackendMixin:
                 preset=self.preset,
             )
         with perf_log.time_block("upload:create_scene", kind="event", structure=bundle.name):
-            self._drop_placeholder()
-            self.bundles[bundle.name] = bundle
-            self.structure_names.append(bundle.name)
-            self.create_scene(structure=bundle.name, label=bundle.name)
+            with self._lock:
+                self._drop_placeholder()
+                self.bundles[bundle.name] = bundle
+                self.structure_names.append(bundle.name)
+                self.create_scene(structure=bundle.name, label=bundle.name)
             _prewarm_bundle_async(self, bundle.name)
         return bundle
 
@@ -99,10 +100,11 @@ class _IOBackendMixin:
         ):
             bundle = build_loaded_crystal(name=safe_name, cif_path=path, title=stem, preset=self.preset, source="upload")
         with perf_log.time_block("upload:create_scene", kind="event", structure=bundle.name):
-            self._drop_placeholder()
-            self.bundles[bundle.name] = bundle
-            self.structure_names.append(bundle.name)
-            self.create_scene(structure=bundle.name, label=bundle.name)
+            with self._lock:
+                self._drop_placeholder()
+                self.bundles[bundle.name] = bundle
+                self.structure_names.append(bundle.name)
+                self.create_scene(structure=bundle.name, label=bundle.name)
             _prewarm_bundle_async(self, bundle.name)
         self.upload_manifest.setdefault("uploads", {})[digest] = {
             "name": bundle.name,
@@ -247,9 +249,17 @@ class _IOBackendMixin:
             "structures": self.list_structures(),
         }
         if include_figure:
-            fig, _ = self.figure_for_state(state)
-            snapshot["figure"] = fig.to_plotly_json()
-            snapshot["figure_version"] = self.version
+            latest = self.latest_figure_broadcast()
+            if (
+                latest
+                and latest.get("scene_id") == state.get("scene_id")
+                and self._figure_payload_has_scene3d(latest.get("figure"))
+                and self._figure_state_matches_current(latest.get("scene_id"), latest.get("state"))
+            ):
+                snapshot["figure"] = latest["figure"]
+                snapshot["figure_version"] = latest.get("figure_version", self.version)
+                snapshot["figure_seq"] = latest.get("figure_seq")
+                snapshot["scene_id"] = latest.get("scene_id")
         return snapshot
 
 

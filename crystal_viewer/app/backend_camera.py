@@ -22,7 +22,13 @@ def _figure_from_cached_dict(cached_dict: dict) -> go.Figure:
 
 
 class _CameraBackendMixin:
-    def figure_for_state(self, state: Optional[dict[str, Any]] = None, click_data: Optional[dict[str, Any]] = None):
+    def figure_for_state(
+        self,
+        state: Optional[dict[str, Any]] = None,
+        click_data: Optional[dict[str, Any]] = None,
+        *,
+        async_topology: bool = False,
+    ):
         state = self.get_state() if state is None else state
         scene_id = state.get("scene_id")
         cache_key = None
@@ -41,11 +47,7 @@ class _CameraBackendMixin:
                 # lets back-to-back tab switches and reverted slider
                 # tweaks reuse the previously built figure instead of
                 # paying the ~430 ms ``build_figure`` cost every time.
-                key_state = {
-                    k: v for k, v in state.items()
-                    if k not in ("version", "server_started_at", "camera")
-                }
-                cache_key = json.dumps(_json_safe(key_state), sort_keys=True, separators=(",", ":"))
+                cache_key = self._figure_state_cache_key(state)
             except Exception:
                 cache_key = None
         # Cache stores plain JSON-style dicts (``fig.to_plotly_json()``)
@@ -58,8 +60,14 @@ class _CameraBackendMixin:
         # ``_validate=False`` constructor. This was the dominant left-
         # sidebar latency complaint ("右边非常迟钝"): each slider tweak
         # invalidated this cache and paid 2 deepcopies on the way out.
-        if cache_key is not None and cache_key in self._figure_cache:
-            cached_fig_dict, cached_topology = self._figure_cache[cache_key]
+        cached_entry = None
+        if cache_key is not None:
+            with self._figure_cache_lock:
+                cached_entry = self._figure_cache.get(cache_key)
+                if cached_entry is not None:
+                    self._figure_cache.move_to_end(cache_key)
+        if cached_entry is not None:
+            cached_fig_dict, cached_topology = cached_entry
             fig = _figure_from_cached_dict(cached_fig_dict)
             # The cached figure was built with whatever camera was
             # current at the time. The corner axis-key compass is a
@@ -106,7 +114,37 @@ class _CameraBackendMixin:
             scene_id=scene_id,
             n_specs=len((state.get("polyhedron_specs") or [])),
         ):
-            topology_data = self.topology_for_state(state, click_data=click_data)
+            topology_pending = False
+            if async_topology:
+                context = self._topology_context(state, click_data=click_data, scene=scene)
+                if context is None:
+                    topology_data = None
+                else:
+                    bundle = context["bundle"]
+                    cache = self._topology_cache(bundle)
+                    with bundle._topology_state_cache_lock:
+                        cached_geometry = cache.get(context["cache_key"])
+                        if cached_geometry is not None:
+                            cache.move_to_end(context["cache_key"])
+                    if cached_geometry is None:
+                        worker = getattr(self, "_render_worker", None)
+                        topology_pending = bool(
+                            worker is not None and worker.request_topology(dict(state), context)
+                        )
+                        topology_data = None
+                    else:
+                        topology_data = self._attach_spec_colors(
+                            cached_geometry,
+                            context["effective_specs"],
+                        )
+            else:
+                topology_data = self.topology_for_state(state, click_data=click_data)
+        if async_topology and topology_pending:
+            fig = {"data": [], "layout": {}, "_mattervis_pending": True}
+            camera = _plotly_camera(state.get("camera"))
+            if camera:
+                fig["layout"]["scene"] = {"camera": camera}
+            return fig, None
         with perf_log.time_block(
             "build_figure",
             kind="event",
@@ -119,21 +157,21 @@ class _CameraBackendMixin:
         camera = _plotly_camera(state.get("camera"))
         if camera:
             fig.update_layout(scene_camera=camera)
-        if cache_key is not None:
+        if cache_key is not None and not topology_pending:
             # ``topology_data`` is the wrapper produced by
             # ``_attach_spec_colors`` and is keyed on the same paint
             # key as the figure cache; storing the live reference (not
             # a deep copy) lets the renderer's painter caches inside
             # it stay warm across cache hits without paying ~25 ms of
             # ``copy.deepcopy`` on every miss.
-            self._figure_cache[cache_key] = (
-                fig.to_plotly_json(),
-                topology_data,
-            )
-            self._figure_cache_order.append(cache_key)
-            while len(self._figure_cache_order) > 16:
-                old_key = self._figure_cache_order.pop(0)
-                self._figure_cache.pop(old_key, None)
+            with self._figure_cache_lock:
+                self._figure_cache[cache_key] = (
+                    fig.to_plotly_json(),
+                    topology_data,
+                )
+                self._figure_cache.move_to_end(cache_key)
+                while len(self._figure_cache) > 16:
+                    self._figure_cache.popitem(last=False)
         return fig, topology_data
 
     def render_current_png(
