@@ -23,6 +23,10 @@ def register_editor_callbacks(app, backend):
         Input({"type": "poly-row-enabled", "spec_id": ALL}, "value"),
         Input({"type": "poly-row-shell-mode", "spec_id": ALL}, "value"),
         Input({"type": "poly-row-centroid-offset", "spec_id": ALL}, "value"),
+        Input({"type": "poly-row-level", "spec_id": ALL}, "value"),
+        Input({"type": "poly-row-center-kind", "spec_id": ALL}, "value"),
+        Input({"type": "poly-row-hard-cutoff", "spec_id": ALL}, "value"),
+        Input({"type": "poly-row-fallback-max", "spec_id": ALL}, "value"),
         Input({"type": "poly-row-delete", "spec_id": ALL}, "n_clicks"),
         State({"type": "poly-row-color", "spec_id": ALL}, "id"),
         prevent_initial_call=True,
@@ -36,6 +40,10 @@ def register_editor_callbacks(app, backend):
         enableds,
         shell_modes,
         centroid_offsets,
+        levels,
+        center_kinds,
+        hard_cutoffs,
+        fallback_maxes,
         deletes,
         color_ids,
     ):
@@ -127,6 +135,28 @@ def register_editor_callbacks(app, backend):
                             if index < len(centroid_offsets) and centroid_offsets[index] is not None
                             else base.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC)
                         ),
+                        # Phase 5: new MCK 0.4 knobs. None values fall through
+                        # to the normaliser's defaults (level=molecule,
+                        # center_kind=centroid, hard_cutoff=None,
+                        # fallback_max=None) so a fresh spec still works.
+                        "level": (
+                            levels[index] if index < len(levels) and levels[index] else base.get("level")
+                        ),
+                        "center_kind": (
+                            center_kinds[index]
+                            if index < len(center_kinds) and center_kinds[index]
+                            else base.get("center_kind")
+                        ),
+                        "hard_cutoff": (
+                            hard_cutoffs[index]
+                            if index < len(hard_cutoffs)
+                            else base.get("hard_cutoff")
+                        ),
+                        "fallback_max": (
+                            fallback_maxes[index]
+                            if index < len(fallback_maxes)
+                            else base.get("fallback_max")
+                        ),
                         "instance_overrides": base.get("instance_overrides", {}),
                     }
                 )
@@ -144,7 +174,12 @@ def register_editor_callbacks(app, backend):
                     "scene_id": scene_id,
                 },
             )
-            # ``no_update`` for children to avoid mid-edit React tear-down.
+            # Level toggles flip the disabled state of center_kind /
+            # hard_cutoff inside the row, so they must trigger a rebuild.
+            # Other inline edits keep ``no_update`` for children to avoid
+            # mid-edit React tear-down.
+            if triggered_label == "poly-row-level":
+                return _rebuild(), backend.get_state()
             return no_update, backend.get_state()
 
         return no_update, no_update

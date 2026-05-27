@@ -36,6 +36,11 @@ from crystal_viewer.app import (
 
 
 def _walk(node):
+    # Dash supports ``app.layout`` being a callable (returns a fresh
+    # Component on each initial-load request). Unwrap once so the rest
+    # of these tests keep walking the component tree they expect.
+    if callable(node):
+        node = node()
     yield node
     for child in (getattr(node, "children", None) or []):
         if isinstance(child, str):

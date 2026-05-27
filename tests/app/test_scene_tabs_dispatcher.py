@@ -28,6 +28,10 @@ C1 C 0.0 0.0 0.0 1.0
 
 
 def _walk(component):
+    # Dash supports a callable ``app.layout``; unwrap so the test
+    # traversal keeps seeing the component tree it expects.
+    if callable(component):
+        component = component()
     yield component
     children = getattr(component, "children", None)
     if children is None:

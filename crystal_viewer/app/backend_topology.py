@@ -179,6 +179,10 @@ def compute_topology_geometry(
     analysis_centroid_offset_frac = float(
         analysis_spec.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC)
     )
+    analysis_level = str(analysis_spec.get("level") or "molecule")
+    analysis_center_kind = str(analysis_spec.get("center_kind") or "centroid")
+    analysis_hard_cutoff = analysis_spec.get("hard_cutoff")
+    analysis_fallback_max = analysis_spec.get("fallback_max")
 
     primary = analyze_topology(
         bundle,
@@ -190,6 +194,10 @@ def compute_topology_geometry(
         ligand_species=[analysis_ligand] if analysis_ligand else None,
         enforce_enclosure=analysis_enforce_enclosure,
         centroid_offset_frac=analysis_centroid_offset_frac,
+        level=analysis_level,
+        center_kind=analysis_center_kind,
+        hard_cutoff=analysis_hard_cutoff,
+        fallback_max=analysis_fallback_max,
     )
 
     spec_results: list[dict[str, Any]] = []
@@ -201,6 +209,10 @@ def compute_topology_geometry(
         ligand_arg = [ligand] if ligand else None
         enforce_enclosure = bool(spec.get("enforce_enclosure", True))
         centroid_offset_frac = float(spec.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC))
+        spec_level = str(spec.get("level") or "molecule")
+        spec_center_kind = str(spec.get("center_kind") or "centroid")
+        spec_hard_cutoff = spec.get("hard_cutoff")
+        spec_fallback_max = spec.get("fallback_max")
         overlays: list[dict[str, Any]] = []
         candidate_fragments = [
             frag
@@ -240,6 +252,10 @@ def compute_topology_geometry(
                     ligand_species=ligand_arg,
                     enforce_enclosure=enforce_enclosure,
                     centroid_offset_frac=centroid_offset_frac,
+                    level=spec_level,
+                    center_kind=spec_center_kind,
+                    hard_cutoff=spec_hard_cutoff,
+                    fallback_max=spec_fallback_max,
                 )
             except Exception:
                 continue
@@ -271,6 +287,10 @@ def compute_topology_geometry(
                 "ligand_species": ligand,
                 "enforce_enclosure": enforce_enclosure,
                 "centroid_offset_frac": centroid_offset_frac,
+                "level": spec_level,
+                "center_kind": spec_center_kind,
+                "hard_cutoff": spec_hard_cutoff,
+                "fallback_max": spec_fallback_max,
                 "overlays": overlays,
             }
         )
@@ -504,6 +524,14 @@ class _TopologyBackendMixin:
                 spec.get("ligand_species") or None,
                 bool(spec.get("enforce_enclosure", True)),
                 float(spec.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC)),
+                # MCK 0.4 radial / level knobs: each tuple must change the
+                # cache key because they change the shell topology itself
+                # (cf. SY perchlorate CN=6 vs CN=12 cuboctahedron when
+                # ``hard_cutoff`` flips ``None`` -> 8.0).
+                str(spec.get("level") or "molecule"),
+                str(spec.get("center_kind") or "centroid"),
+                spec.get("hard_cutoff"),
+                spec.get("fallback_max"),
             )
             for spec in effective_specs
         )

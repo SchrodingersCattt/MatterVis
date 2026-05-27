@@ -16,7 +16,8 @@ pillow
 ase
 networkx
 # Molecule identification, disorder handling, per-formula-unit stoichiometry,
-# and molecule-level packing polyhedra. Pinned to MCK's disorder-aware
-# identify_molecules change (skips cross-PART bonds while preserving whole
-# major/minor fragments for rendering).
-molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@a1ac70477895bbdfcab695ed92c0ac4840193274
+# and molecule-level packing polyhedra. Pinned to MCK 0.4.0 (cluster carver,
+# disorder-aware identify_molecules, decoupled disorder symmetry copies,
+# and the gap+enclosure vs hard_cutoff radial knob split that MV's polyhedron
+# editor exposes per spec).
+molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@62fc7e78095634819fad54a29c459a7dad285833

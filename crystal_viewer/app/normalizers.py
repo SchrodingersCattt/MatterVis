@@ -72,6 +72,60 @@ def _coerce_centroid_offset_frac(raw: Any) -> float:
     return float(DEFAULT_CENTROID_OFFSET_FRAC if value is None else value)
 
 
+_POLY_VALID_LEVELS = ("molecule", "atom")
+_POLY_VALID_CENTER_KINDS = ("centroid", "com", "heavy_centroid")
+
+
+def _coerce_polyhedron_level(raw: Any) -> str:
+    """Default to the historical MV behaviour (molecule-level shells)."""
+    if isinstance(raw, str):
+        text = raw.strip().lower()
+        if text in _POLY_VALID_LEVELS:
+            return text
+    return "molecule"
+
+
+def _coerce_polyhedron_center_kind(raw: Any) -> str:
+    if isinstance(raw, str):
+        text = raw.strip().lower()
+        if text in _POLY_VALID_CENTER_KINDS:
+            return text
+    return "centroid"
+
+
+def _coerce_polyhedron_hard_cutoff(raw: Any) -> Optional[float]:
+    """``None`` keeps MV in the natural gap+enclosure first shell. A
+    positive float opts that spec into MCK's historical "fill the ball"
+    mode (CN=12 cuboctahedron, etc.). Negative / zero / non-numeric
+    values collapse back to ``None`` so a stray ``0`` from the UI
+    can't silently turn a spec into an empty hard sphere."""
+    if raw is None:
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0.0:
+        return None
+    return max(0.1, min(50.0, value))
+
+
+def _coerce_polyhedron_fallback_max(raw: Any) -> Optional[int]:
+    """Upper bound on the chosen CN. ``None`` means MCK's default."""
+    if raw is None:
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        try:
+            value = int(float(raw))
+        except (TypeError, ValueError):
+            return None
+    if value < 1:
+        return None
+    return max(1, min(64, value))
+
+
 def _normalize_polyhedron_spec(
     raw: Any,
     *,
@@ -104,6 +158,14 @@ def _normalize_polyhedron_spec(
     centroid_offset_frac = _coerce_centroid_offset_frac(
         raw.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC)
     )
+    level = _coerce_polyhedron_level(raw.get("level"))
+    center_kind = _coerce_polyhedron_center_kind(raw.get("center_kind"))
+    # ``hard_cutoff`` is only meaningful at molecule level (atom level uses
+    # ``cutoff=`` as the hard cap directly; passing both raises in MCK).
+    hard_cutoff = _coerce_polyhedron_hard_cutoff(raw.get("hard_cutoff"))
+    if level == "atom":
+        hard_cutoff = None
+    fallback_max = _coerce_polyhedron_fallback_max(raw.get("fallback_max"))
     return {
         "id": spec_id,
         "name": name,
@@ -120,6 +182,14 @@ def _normalize_polyhedron_spec(
         "instance_overrides": instance_overrides,
         "enforce_enclosure": enforce_enclosure,
         "centroid_offset_frac": centroid_offset_frac,
+        # Phase 5 -- expose the MCK 0.4 radial / level knobs per spec so
+        # the UI can switch between A--B atom shells (e.g. Pb--I CN=6)
+        # and molecule packing shells (e.g. NH4 -> ClO4 CN=6 vs the
+        # historical CN=12 cuboctahedron). See ``agents/polyhedron_api.md``.
+        "level": level,
+        "center_kind": center_kind,
+        "hard_cutoff": hard_cutoff,
+        "fallback_max": fallback_max,
     }
 
 
