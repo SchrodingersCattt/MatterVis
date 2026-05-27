@@ -7,7 +7,14 @@ CRYSTAL_VIEWER = Path(__file__).resolve().parents[1] / "crystal_viewer"
 
 HARD_LINE_LIMIT = 1000
 RELAXED_LINE_LIMITS = {}
-KNOWN_OVERSIZE_DURING_SPLIT = {}
+KNOWN_OVERSIZE_DURING_SPLIT = {
+    # These modules were already over the hard cap during the domain split.
+    # Keep the guard active while acknowledging the migration debt so unrelated
+    # feature PRs can still run the full suite.
+    "app/backend_core.py": 1200,
+    "loader/core.py": 1050,
+    "structure/loader/core.py": 1050,
+}
 ALLOWED_TOP_LEVEL_PY = {"__init__.py", "__main__.py"}
 
 

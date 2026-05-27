@@ -117,6 +117,11 @@ DEFAULT_STYLE = {
     "element_colors_light": {},
 }
 
+# Global config owns the effective default style. The literal above remains as
+# the historical table of record for readers of this file; this live mapping is
+# what callers import so config reloads are visible to `dict(DEFAULT_STYLE)`.
+from ..config import DEFAULT_STYLE as DEFAULT_STYLE  # noqa: E402,F811
+
 ORTEP_MODES = {
     "ortep_solid": {
         "ortep_show_principal_axes": False,

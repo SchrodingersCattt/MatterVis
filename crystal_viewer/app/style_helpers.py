@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .shared import *
 from .camera_helpers import _camera_from_store, _coerce_projection, _plotly_camera
+from ..config.colors import POLYHEDRON_AUTO_COLORS
 
 def _json_safe(value: Any) -> Any:
     if isinstance(value, np.ndarray):
@@ -127,16 +128,7 @@ def _status_class(level: str = "info") -> str:
 # Built off Okabe-Ito with one extra warm purple so 8-spec scenes still
 # read distinctly. Callers can always override per-spec; this just gives
 # them a sane default when they POST {"name": ...} without a colour.
-_POLYHEDRON_AUTO_COLORS = (
-    "#7C5CBF",
-    "#E07C24",
-    "#1F77B4",
-    "#2CA02C",
-    "#D62728",
-    "#9467BD",
-    "#17BECF",
-    "#BCBD22",
-)
+_POLYHEDRON_AUTO_COLORS = POLYHEDRON_AUTO_COLORS
 
 _HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 

@@ -8,54 +8,20 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+from ..config.colors import (
+    CUBE_ATOM_DISPLAY_RADII_ANG,
+    CUBE_COVALENT_RADII_ANG,
+    CUBE_ELEMENT_COLORS,
+    CUBE_ELEMENT_SYMBOLS,
+)
+
 
 BOHR_TO_ANGSTROM = 0.529177210903
 
-ELEMENT_SYMBOLS = {
-    1: "H",
-    6: "C",
-    7: "N",
-    8: "O",
-    9: "F",
-    15: "P",
-    16: "S",
-    17: "Cl",
-    26: "Fe",
-    27: "Co",
-    28: "Ni",
-    29: "Cu",
-    30: "Zn",
-    35: "Br",
-    53: "I",
-}
-
-ELEMENT_COLORS = {
-    "H": "#DDDDDD",
-    "C": "#909090",
-    "N": "#3050F8",
-    "O": "#FF0D0D",
-    "F": "#90E050",
-    "P": "#FF8000",
-    "S": "#FFD43B",
-    "Cl": "#1FF01F",
-    "Cu": "#C77800",
-    "Fe": "#B7410E",
-    "Ni": "#4C8C4A",
-    "Co": "#3F5FBF",
-    "Zn": "#7D80B8",
-    "Br": "#A52A2A",
-    "I":  "#940094",
-}
-
-COVALENT_RADII_ANG = {
-    "H": 0.31, "C": 0.76, "N": 0.71, "O": 0.66, "F": 0.57,
-    "P": 1.07, "S": 1.05, "Cl": 1.02, "Cu": 1.32, "Fe": 1.24, "Ni": 1.21, "Co": 1.26, "Zn": 1.22, "Br": 1.20, "I": 1.39,
-}
-
-ATOM_DISPLAY_RADII_ANG = {
-    "H": 0.30, "C": 0.55, "N": 0.55, "O": 0.55, "F": 0.50,
-    "P": 0.75, "S": 0.75, "Cl": 0.70, "Cu": 0.85, "Fe": 0.82, "Ni": 0.82, "Co": 0.82, "Zn": 0.82, "Br": 0.85, "I": 0.95,
-}
+ELEMENT_SYMBOLS = CUBE_ELEMENT_SYMBOLS
+ELEMENT_COLORS = CUBE_ELEMENT_COLORS
+COVALENT_RADII_ANG = CUBE_COVALENT_RADII_ANG
+ATOM_DISPLAY_RADII_ANG = CUBE_ATOM_DISPLAY_RADII_ANG
 
 
 @dataclass

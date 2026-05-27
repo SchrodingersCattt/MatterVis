@@ -28,6 +28,7 @@ flowchart LR
     OVERLAY --> AG["atom_groups_api.md"]
     OVERLAY --> BG["bond_groups_api.md"]
     OVERLAY --> TR["transforms_api.md"]
+    LIVE --> CONFIG["config_api.md"]
 ```
 
 The same routing as a quick table:
@@ -43,6 +44,7 @@ The same routing as a quick table:
 | Apply per-element / per-group colour, visibility, or render-style overrides | [`atom_groups_api.md`](atom_groups_api.md) |
 | Recolour, hide, thin out, or fade chemical bonds by selector | [`bond_groups_api.md`](bond_groups_api.md) |
 | Repeat a unit cell, grow by radius / bonds, complete fragments / polyhedra, or generate a slab | [`transforms_api.md`](transforms_api.md) |
+| Read or override global MatterVis defaults | [`config_api.md`](config_api.md) |
 
 ## Repo ownership for agents
 

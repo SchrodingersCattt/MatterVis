@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import sys
 from typing import Any, Iterable
 
@@ -17,6 +18,7 @@ from molcrys_kit.analysis.packing_shell import (
 from molcrys_kit.analysis.shape import classify_shell
 from molcrys_kit.structures.polyhedra import convex_hull_payload, ideal_polyhedra_for_cn
 
+from ..config import current_config
 from ..structure import molcrys_bridge
 
 __all__ = [
@@ -33,6 +35,25 @@ __all__ = [
     "ideal_polyhedra_for_cn",
     "planarity_analysis",
 ]
+
+
+def _mck_override_kwargs(func) -> dict[str, object]:
+    """Return explicit MolCrysKit override kwargs supported by ``func``."""
+    overrides = current_config().mck_overrides.values
+    raw = {
+        "gap_threshold": overrides.get("gap_threshold"),
+        "enclosure_expand_max": overrides.get("enclosure_expand_max"),
+        "default_search_cutoff": overrides.get("default_search_cutoff"),
+    }
+    try:
+        params = inspect.signature(func).parameters
+    except (TypeError, ValueError):
+        params = {}
+    return {
+        key: value
+        for key, value in raw.items()
+        if value is not None and (not params or key in params)
+    }
 
 
 def classify_fragments(bundle) -> list[dict[str, Any]]:
@@ -85,6 +106,7 @@ def _mck_polyhedron_record(
             cutoff=float(cutoff),
             enforce_enclosure=bool(enforce_enclosure),
             centroid_offset_frac=float(centroid_offset_frac),
+            **_mck_override_kwargs(find_polyhedra_impl),
         )
         if not records:
             return None
@@ -124,6 +146,7 @@ def _mck_polyhedron_record(
         central_indices=[int(source_molecule_index)],
         enforce_enclosure=bool(enforce_enclosure),
         centroid_offset_frac=float(centroid_offset_frac),
+        **_mck_override_kwargs(find_polyhedra_impl),
     )
     return records[0] if records else None
 
