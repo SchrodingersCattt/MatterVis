@@ -896,7 +896,7 @@ def create_app(
 def _build_parser():
     parser = argparse.ArgumentParser(description="Standalone crystal viewer with topology analysis.")
     parser.add_argument("--preset", default=DEFAULT_PRESET_PATH, help="Preset JSON to load and save.")
-    parser.add_argument("--host", default="127.0.0.1", help="Host to bind.")
+    parser.add_argument("--host", default="0.0.0.0", help="Host to bind.")
     parser.add_argument("--port", type=int, default=50001, help="Port to expose.")
     parser.add_argument("--structure", nargs="*", help="Serve only selected catalog structure(s).")
     parser.add_argument(
