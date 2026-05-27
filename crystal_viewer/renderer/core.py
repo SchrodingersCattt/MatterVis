@@ -158,6 +158,13 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None) ->
     trace_dicts.extend(mesh_payload["minor_bond_dicts"])
     trace_dicts.extend(mesh_payload["atom_dicts"])
     trace_dicts.extend(mesh_payload["minor_outline_dicts"])
+    selection_trace = selection_outline_trace(
+        scene,
+        style,
+        selected_labels=set((style.get("selection") or {}).get("atom_labels") or []),
+    )
+    if selection_trace is not None:
+        trace_dicts.extend(_traces_to_dicts([selection_trace]))
     trace_dicts.extend(_traces_to_dicts(_contact_traces(scene, style)))
     # _highlight_traces (fake specular dots) are deliberately *not* added.
     # They were Scatter3d markers with pixel-fixed sizes -- in the static

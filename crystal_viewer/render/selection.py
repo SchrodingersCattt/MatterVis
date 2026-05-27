@@ -2,7 +2,45 @@ from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
 from .common import *
+from .meshes import _append_mesh, _sphere_mesh
 from .style import *
+
+
+def selection_outline_trace(
+    scene: dict,
+    style: dict,
+    *,
+    selected_labels: set[str] | None = None,
+):
+    selected = set(selected_labels or [])
+    if not selected:
+        return None
+    payload = {"x": [], "y": [], "z": [], "i": [], "j": [], "k": []}
+    atom_scale = float(style.get("atom_scale", 1.0))
+    for atom in scene.get("draw_atoms") or []:
+        if str(atom.get("label") or "") not in selected:
+            continue
+        if not _atom_render_visible(atom):
+            continue
+        radius = max(float(atom.get("atom_radius", 0.18)), 0.05) * atom_scale * 1.18
+        vertices, triangles = _sphere_mesh(atom.get("cart", [0.0, 0.0, 0.0]), radius, lat_steps=8, lon_steps=12)
+        _append_mesh(payload, vertices, triangles)
+    if not payload["x"]:
+        return None
+    return _annotate_trace(go.Mesh3d(
+        x=payload["x"],
+        y=payload["y"],
+        z=payload["z"],
+        i=payload["i"],
+        j=payload["j"],
+        k=payload["k"],
+        color=str(style.get("selection_highlight", "#FFD24A")),
+        opacity=float(style.get("selection_opacity", 0.55)),
+        flatshading=False,
+        hoverinfo="skip",
+        showlegend=False,
+        name="selection-outline",
+    ), "selection")
 
 def _atom_selection_trace(scene: dict, style: dict, hidden_labels: set | None = None):
     xs, ys, zs, sizes, labels, customdata = [], [], [], [], [], []

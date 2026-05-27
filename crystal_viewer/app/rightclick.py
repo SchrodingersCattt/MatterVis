@@ -25,9 +25,67 @@ def _dispatch_rightclick_action(
         )
         return
 
+    if action == "select_clear":
+        backend.clear_selection(scene_id=scene_id)
+        return
+    if action == "select_all":
+        backend.select_all(scene_id=scene_id)
+        return
+    if action == "select_invert":
+        backend.invert_selection(scene_id=scene_id)
+        return
+    if action == "selection_to_group":
+        backend.promote_selection_to_atom_group(
+            name=target.get("name") or "selection",
+            color=color or target.get("color"),
+            scene_id=scene_id,
+        )
+        return
+    if action == "selection_hide":
+        backend.hide_selection(scene_id=scene_id)
+        return
+    if action == "selection_focus_camera":
+        backend.focus_selection_camera(scene_id=scene_id)
+        return
+    if action == "select_box":
+        backend.select_box(
+            target.get("rect_pixels") or [],
+            target.get("viewport_size") or target.get("viewport") or [],
+            additive=bool(target.get("additive", False)),
+            scene_id=scene_id,
+        )
+        return
+
     if not kind or kind == "_global":
         # Bare keyboard shortcut without a hovered target. ``r`` /
         # ``R`` were handled above; everything else needs a target.
+        return
+
+    if action in {"select", "select_add", "select_toggle", "select_remove"}:
+        label = payload.get("label")
+        if not label:
+            return
+        labels = [str(label)]
+        if action == "select":
+            backend.set_selection(labels, scene_id=scene_id)
+        elif action == "select_add":
+            backend.add_to_selection(labels, scene_id=scene_id)
+        elif action == "select_toggle":
+            backend.toggle_selection(labels, scene_id=scene_id)
+        elif action == "select_remove":
+            backend.remove_from_selection(labels, scene_id=scene_id)
+        return
+
+    if action == "select_fragment":
+        frag = payload.get("fragment_label")
+        if frag:
+            backend.select_fragment(str(frag), scene_id=scene_id)
+        return
+
+    if action == "select_element":
+        elem = payload.get("element")
+        if elem:
+            backend.select_element(str(elem), scene_id=scene_id)
         return
 
     if action == "hide":

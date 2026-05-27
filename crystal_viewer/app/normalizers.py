@@ -24,6 +24,35 @@ def _coerce_species_value(value: Any) -> Optional[str]:
     return text or None
 
 
+def _normalize_selection(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {"atom_labels": [], "active_label": None, "order": []}
+
+    def _labels(values: Any) -> list[str]:
+        if values is None:
+            return []
+        if isinstance(values, str):
+            values = [values]
+        out: list[str] = []
+        seen: set[str] = set()
+        for value in values if isinstance(values, (list, tuple, set)) else []:
+            label = str(value).strip()
+            if label and label not in seen:
+                out.append(label)
+                seen.add(label)
+        return out
+
+    atom_labels = _labels(raw.get("atom_labels"))
+    order = [label for label in _labels(raw.get("order")) if label in set(atom_labels)]
+    for label in atom_labels:
+        if label not in order:
+            order.append(label)
+    active = str(raw.get("active_label") or "").strip() or None
+    if active not in atom_labels:
+        active = atom_labels[-1] if atom_labels else None
+    return {"atom_labels": atom_labels, "active_label": active, "order": order}
+
+
 def _coerce_polyhedron_enforce_enclosure(raw: Any) -> bool:
     if isinstance(raw, str):
         text = raw.strip().lower()
