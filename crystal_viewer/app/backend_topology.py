@@ -434,10 +434,20 @@ class _TopologyBackendMixin:
         MatterVis no longer synthesises auto-ligand specs from
         ``topology_species_keys``; molecule-level packing shells are delegated
         to MolCrysKit and require explicit centre/ligand formulas.
+
+        Phase 6: returns *all* specs (enabled or disabled). The renderer
+        decides per-spec visibility via the ``meta.spec_id`` tag the
+        overlay traces carry, and the figure cache key strips the
+        ``enabled`` flag (see ``_figure_state_cache_key``). That way
+        toggling the row checkbox is a cache HIT + trace-visibility
+        patch (~30 ms) instead of a cache MISS + full rebuild
+        (200-400 ms on the user's DAP-4321 scene). MolCrysKit still
+        runs ``find_polyhedra`` for every spec, but the result is
+        cached on the bundle so the cost is paid once per geometry.
         """
         explicit = list(state.get("polyhedron_specs") or [])
         if explicit:
-            return [dict(spec) for spec in explicit if spec.get("enabled", True)]
+            return [dict(spec) for spec in explicit]
         return []
 
     def _topology_cache(self, bundle) -> OrderedDict:

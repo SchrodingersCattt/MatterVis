@@ -464,6 +464,22 @@ both files.
  fallback_max)` per spec). Per-spec
  colour is NOT in the geometry cache key — it lives on the renderer's
  painter cache instead, so swapping colours stays a cheap re-paint.
+- **Spec-level `enabled` is patched onto trace visibility *after* the
+ figure cache, not filtered upstream.** `_effective_polyhedron_specs`
+ returns ALL specs (enabled or not) so the topology pipeline and the
+ figure cache key (`_figure_state_cache_key` strips `enabled` from
+ `polyhedron_specs`) both stay invariant to the row checkbox.
+ The renderer stamps `meta={"spec_id": ..., "kind": "polyhedron"}`
+ on every overlay trace (hull mesh, hull edges, centre markers,
+ connecting lines, shell-distance markers); `figure_for_state`'s
+ `_apply_polyhedron_visibility_patch` walks `fig.data` after each
+ cache lookup and flips `trace.visible` per the live spec's
+ `enabled` flag. Per-fragment `instance_overrides[label].visible`
+ is intentionally NOT in this fast path: fragments are bucketed
+ by colour into merged traces, so per-fragment hide/show stays
+ cache-busting. Do NOT reintroduce an upstream enabled filter
+ here — it bakes the absence into the figure body and turns every
+ row toggle back into a 200-400 ms full `build_figure` rebuild.
 - `analyze_topology` / `extract_coordination_shell` accept an
   optional `ligand_species` keyword (required, no auto-derivation)
   and delegate molecule-level PBC image enumeration to

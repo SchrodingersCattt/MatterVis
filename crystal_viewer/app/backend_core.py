@@ -249,6 +249,24 @@ class _CoreBackendMixin:
             for k, v in state.items()
             if k not in ("version", "server_started_at", "camera", "camera_revision")
         }
+        # Phase 6: ``polyhedron_specs[i].enabled`` is honoured via a
+        # post-cache trace-visibility patch (see ``figure_for_state``
+        # below + the ``meta.spec_id`` tag the renderer stamps on
+        # every polyhedron overlay). Stripping just ``enabled`` from
+        # the key turns "toggle the row checkbox" from a 200-400 ms
+        # full ``build_figure`` rebuild into a ~30 ms cache hit + a
+        # tiny patch over ``fig.data``. Per-fragment
+        # ``instance_overrides[label].visible`` is intentionally
+        # NOT stripped: the renderer still buckets fragments by
+        # colour into merged traces, so per-fragment visibility
+        # cannot be patched at trace level and must stay
+        # cache-busting.
+        specs = key_state.get("polyhedron_specs")
+        if isinstance(specs, list):
+            key_state["polyhedron_specs"] = [
+                {k: v for k, v in spec.items() if k != "enabled"} if isinstance(spec, dict) else spec
+                for spec in specs
+            ]
         return json.dumps(_json_safe(key_state), sort_keys=True, separators=(",", ":"))
 
     def _figure_state_matches_current(

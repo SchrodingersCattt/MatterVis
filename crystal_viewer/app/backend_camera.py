@@ -21,6 +21,54 @@ def _figure_from_cached_dict(cached_dict: dict) -> go.Figure:
     return go.Figure(snapshot, _validate=False)
 
 
+def _polyhedron_enabled_map(state: dict[str, Any] | None) -> dict[str, bool]:
+    """``{spec_id: enabled}`` lookup used by the post-cache trace-
+    visibility patch in ``figure_for_state``. Specs without an id
+    are skipped because the renderer can't route a trace to them.
+    """
+    if not state:
+        return {}
+    out: dict[str, bool] = {}
+    for spec in state.get("polyhedron_specs") or []:
+        if not isinstance(spec, dict):
+            continue
+        spec_id = spec.get("id")
+        if not spec_id:
+            continue
+        out[str(spec_id)] = bool(spec.get("enabled", True))
+    return out
+
+
+def _apply_polyhedron_visibility_patch(fig: go.Figure, state: dict[str, Any] | None) -> None:
+    """Post-cache patch: walk ``fig.data``, find every trace tagged
+    with ``meta={"spec_id": ..., "kind": "polyhedron"}`` and force
+    ``trace.visible`` to match the current spec's ``enabled`` flag.
+
+    This is what makes spec-level ``enabled`` toggles cheap. The
+    figure cache key drops ``enabled`` (see
+    ``_figure_state_cache_key``) so two states differing only in a
+    row's checkbox land on the SAME cached figure; this loop then
+    flips the relevant traces' ``visible`` attribute in place
+    (~hundreds of microseconds for a ~30-trace figure) instead of
+    rebuilding 200-400 ms of Mesh3d arrays.
+    """
+    enabled_map = _polyhedron_enabled_map(state)
+    if not enabled_map:
+        return
+    for trace in fig.data:
+        meta = getattr(trace, "meta", None)
+        if not isinstance(meta, dict):
+            continue
+        if meta.get("kind") != "polyhedron":
+            continue
+        spec_id = meta.get("spec_id")
+        if not spec_id:
+            continue
+        # Plotly accepts ``True`` / ``False`` / ``"legendonly"`` for
+        # ``visible``; we only need on/off here.
+        trace.visible = bool(enabled_map.get(str(spec_id), True))
+
+
 class _CameraBackendMixin:
     def figure_for_state(
         self,
@@ -96,6 +144,12 @@ class _CameraBackendMixin:
                     fig.update_layout(scene_camera=camera)
             except Exception:  # pragma: no cover - defensive, fall back to verbatim cache
                 pass
+            # Phase 6: spec-level ``enabled`` is patched onto trace
+            # visibility here so the figure cache can stay
+            # invariant to row-checkbox toggles (see
+            # ``_figure_state_cache_key`` for the matching key
+            # change). Cheap walk, no Mesh3d rebuild.
+            _apply_polyhedron_visibility_patch(fig, state)
             # ``topology_data`` is read-only for callers (histogram,
             # results-markdown, structure-summary). The renderer's
             # painter caches live on it but they only grow; sharing
@@ -158,6 +212,11 @@ class _CameraBackendMixin:
             # a deep copy) lets the renderer's painter caches inside
             # it stay warm across cache hits without paying ~25 ms of
             # ``copy.deepcopy`` on every miss.
+            #
+            # The cached snapshot is taken BEFORE the visibility patch
+            # below: the cache stores the canonical "all enabled"
+            # figure shape, so subsequent hits with different
+            # ``enabled`` combinations all land on the same entry.
             with self._figure_cache_lock:
                 self._figure_cache[cache_key] = (
                     fig.to_plotly_json(),
@@ -166,6 +225,11 @@ class _CameraBackendMixin:
                 self._figure_cache.move_to_end(cache_key)
                 while len(self._figure_cache) > 16:
                     self._figure_cache.popitem(last=False)
+        # Apply the live ``enabled`` flags to this fresh build too --
+        # the figure cache snapshot above stored the un-patched
+        # version, so we need to mirror the cache-hit branch's
+        # behaviour for the current response.
+        _apply_polyhedron_visibility_patch(fig, state)
         return fig, topology_data
 
     def render_current_png(

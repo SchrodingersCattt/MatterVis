@@ -260,14 +260,26 @@ def test_explicit_polyhedron_specs_override_legacy_fields(backend: ViewerBackend
     assert effective[0]["color"] == "#aabbcc"
 
 
-def test_disabled_specs_drop_from_effective_list(backend: ViewerBackend):
+def test_effective_specs_keep_disabled_for_instant_toggle(backend: ViewerBackend):
+    """Phase 6: ``_effective_polyhedron_specs`` returns *all* specs
+    (enabled or not). The renderer respects ``enabled`` via a
+    post-cache trace-visibility patch (see
+    ``backend_camera._apply_polyhedron_visibility_patch``); keeping
+    disabled specs in the topology pipeline is what makes both the
+    topology cache key and the figure cache key invariant to the
+    row checkbox, so toggling enabled becomes a cache hit instead
+    of a 200-400 ms full rebuild.
+    """
     state = backend.get_state()
     state["polyhedron_specs"] = [
         {"id": "a", "center_species": "X", "color": "#000000", "enabled": False, "name": "x"},
         {"id": "b", "center_species": "Y", "color": "#000000", "enabled": True, "name": "y"},
     ]
     effective = backend._effective_polyhedron_specs(state)
-    assert [spec["center_species"] for spec in effective] == ["Y"]
+    # All specs are kept; the enabled flag still rides on each
+    # entry for downstream consumers (REST, UI, visibility patch).
+    assert [spec["center_species"] for spec in effective] == ["X", "Y"]
+    assert [spec.get("enabled", True) for spec in effective] == [False, True]
 
 
 def test_mck_polyhedron_record_passes_packing_shell_knobs(monkeypatch):
