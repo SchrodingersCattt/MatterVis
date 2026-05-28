@@ -11,33 +11,43 @@ from .rightclick import *
 from .backend import ViewerBackend
 
 
+# Editor callbacks used to swallow backend exceptions silently
+# (``except Exception: return no_update, no_update``), which made
+# the UI look dead whenever ``add_transform`` / ``add_polyhedron``
+# / ``patch_state`` raised (e.g. the MAX_ATOMS_AFTER_TRANSFORM cap
+# or an MCK shape rejection). ``surface_editor_error`` routes the
+# exception text into the hidden ``#status`` Div via
+# ``ctx.set_props`` -- the existing ``mirror_legacy_status`` callback
+# styles that string into the visible banner, so the user gets a
+# real explanation instead of "click does nothing". The perf log
+# records the original exception type + message for the Server log
+# panel.
+#
+# Lifted to module scope so unit tests can drive it directly without
+# spinning up a Dash callback context. The module-private alias
+# ``_surface_error`` keeps the historical name available inside
+# ``register_editor_callbacks`` (where it is referenced ~15 times)
+# without each call site having to import the new name.
+def surface_editor_error(prefix: str, exc: BaseException) -> None:
+    text = str(exc) or exc.__class__.__name__
+    if len(text) > 240:
+        text = text[:237] + "..."
+    message = f"{prefix} failed: {text}"
+    try:
+        callback_context.set_props("status", {"children": message})
+    except Exception:
+        # Dash < 2.17 lacks set_props; fall back to perf-log only.
+        pass
+    perf_log.record(
+        "callback:editor_error",
+        duration_ms=0.0,
+        kind="cb",
+        info={"prefix": prefix, "error": text, "type": exc.__class__.__name__},
+    )
+
+
 def register_editor_callbacks(app, backend):
-    # Editor callbacks used to swallow backend exceptions silently
-    # (``except Exception: return no_update, no_update``), which made
-    # the UI look dead whenever ``add_transform`` / ``add_polyhedron``
-    # / ``patch_state`` raised (e.g. the MAX_ATOMS_AFTER_TRANSFORM cap
-    # or an MCK shape rejection). We now route the exception text
-    # into the hidden ``#status`` Div via ``ctx.set_props`` -- the
-    # existing ``mirror_legacy_status`` callback styles that string
-    # into the visible banner, so the user gets a real explanation
-    # instead of "click does nothing". The perf log records the
-    # original exception type + message for the Server log panel.
-    def _surface_error(prefix: str, exc: BaseException) -> None:
-        text = str(exc) or exc.__class__.__name__
-        if len(text) > 240:
-            text = text[:237] + "..."
-        message = f"{prefix} failed: {text}"
-        try:
-            callback_context.set_props("status", {"children": message})
-        except Exception:
-            # Dash < 2.17 lacks set_props; fall back to perf-log only.
-            pass
-        perf_log.record(
-            "callback:editor_error",
-            duration_ms=0.0,
-            kind="cb",
-            info={"prefix": prefix, "error": text, "type": exc.__class__.__name__},
-        )
+    _surface_error = surface_editor_error
 
     @app.callback(
         Output("polyhedra-rows-container", "children", allow_duplicate=True),
