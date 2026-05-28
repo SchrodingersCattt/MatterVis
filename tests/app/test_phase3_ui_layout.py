@@ -35,29 +35,18 @@ from crystal_viewer.app import (
 )
 
 
-def _walk(node):
-    # Dash supports ``app.layout`` being a callable (returns a fresh
-    # Component on each initial-load request). Unwrap once so the rest
-    # of these tests keep walking the component tree they expect.
-    if callable(node):
-        node = node()
-    yield node
-    for child in (getattr(node, "children", None) or []):
-        if isinstance(child, str):
-            continue
-        yield from _walk(child)
-
-
-def _ids(layout) -> set:
-    out = set()
-    for node in _walk(layout):
-        nid = getattr(node, "id", None)
-        if isinstance(nid, str):
-            out.add(nid)
-    return out
+from _layout_helpers import (  # noqa: E402  shared helpers
+    layout_ids as _ids,
+    walk_layout as _walk,
+)
 
 
 def _options(layout, target_id: str) -> list[dict]:
+    """Specialised helper kept local: pulls the ``options`` list from
+    the Dropdown / Checklist component matching ``target_id``. Not
+    worth elevating to ``conftest`` because only this file uses it
+    and the contract ("first component wins, options is a list[dict]")
+    is dropdown-specific."""
     for node in _walk(layout):
         if getattr(node, "id", None) == target_id:
             return list(getattr(node, "options", None) or [])

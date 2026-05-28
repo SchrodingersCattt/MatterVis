@@ -5,17 +5,9 @@ from dash import dcc
 from crystal_viewer.app import _status_class, _status_message, create_app
 
 
-def _has_component_id(component, target_id) -> bool:
-    if callable(component):
-        component = component()
-    if getattr(component, "id", None) == target_id:
-        return True
-    children = getattr(component, "children", None)
-    if children is None:
-        return False
-    if not isinstance(children, (list, tuple)):
-        children = [children]
-    return any(_has_component_id(child, target_id) for child in children)
+from _layout_helpers import (  # noqa: E402  shared helper
+    has_component_id as _has_component_id,
+)
 
 
 def test_status_message_assigns_level_class():

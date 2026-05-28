@@ -8,20 +8,10 @@ from crystal_viewer.loader import build_loaded_crystal
 from crystal_viewer.presets import DEFAULT_STYLE
 
 
-def _outputs(callback):
-    out = callback.get("output")
-    items = out if isinstance(out, list) else [out]
-    pairs = set()
-    for item in items:
-        cid = getattr(item, "component_id", None)
-        prop = getattr(item, "component_property", None)
-        if isinstance(cid, str) and isinstance(prop, str):
-            pairs.add((cid, prop))
-    return pairs
-
-
-def _inputs(callback):
-    return {(str(item.get("id")), item.get("property")) for item in callback.get("inputs", [])}
+from _layout_helpers import (  # noqa: E402  shared helpers
+    callback_inputs as _inputs,
+    callback_outputs as _outputs,
+)
 
 
 def test_view_buttons_patch_graph_camera_directly(tmp_path: Path):

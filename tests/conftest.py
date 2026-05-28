@@ -10,6 +10,15 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# Expose ``tests/`` itself on sys.path so shared helper modules under
+# ``tests/`` (e.g. ``tests/_layout_helpers.py``) resolve via the bare
+# ``import _layout_helpers`` / ``from _layout_helpers import x``
+# pattern. ``tests/`` is intentionally NOT a package -- adding
+# ``__init__.py`` would change pytest's collection rootdir.
+_TESTS_DIR = Path(__file__).resolve().parent
+if str(_TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TESTS_DIR))
+
 
 @pytest.fixture(autouse=True)
 def _isolated_local_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

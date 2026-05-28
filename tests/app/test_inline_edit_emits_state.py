@@ -26,23 +26,9 @@ import dash
 from crystal_viewer.app import create_app
 
 
-def _outputs_for_callback_with_input(app: dash.Dash, input_id: str) -> set[tuple[str, str]]:
-    """Find the callback that takes ``input_id`` (string id) as one of
-    its triggers and return the set of (component, prop) it writes."""
-    for cb in app.callback_map.values():
-        for inp in cb.get("inputs", []):
-            if inp.get("id") == input_id:
-                outputs = cb.get("output")
-                if not isinstance(outputs, list):
-                    outputs = [outputs]
-                seen = set()
-                for o in outputs:
-                    cid = getattr(o, "component_id", None)
-                    cprop = getattr(o, "component_property", None)
-                    if isinstance(cid, str) and isinstance(cprop, str):
-                        seen.add((cid, cprop))
-                return seen
-    return set()
+from _layout_helpers import (  # noqa: E402  shared helper
+    outputs_for_callback_with_input as _outputs_for_callback_with_input,
+)
 
 
 def test_manage_polyhedra_pushes_agent_state_directly():
