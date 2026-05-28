@@ -3,11 +3,13 @@ from __future__ import annotations
 
 from .shared import Blueprint, register_error_handler
 from .v1_legacy import register_v1_routes
+from .v2_config import register_config_routes
 from .v2_export import register_export_routes
 from .v2_intent import register_intent_routes
 from .v2_overlays import register_overlay_routes
 from .v2_perf import register_perf_routes
 from .v2_scenes import register_scene_routes
+from .v2_selection import register_selection_routes
 from .v2_state import register_state_routes
 from .ws import handle_ws_message, register_ws_routes
 
@@ -21,6 +23,8 @@ def register_api(dash_app, backend) -> None:
     for register in (
         register_scene_routes,
         register_state_routes,
+        register_config_routes,
+        register_selection_routes,
         register_export_routes,
         register_intent_routes,
         register_overlay_routes,

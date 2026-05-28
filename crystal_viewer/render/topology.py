@@ -46,7 +46,7 @@ def _hull_edges(coords: np.ndarray, hull: dict) -> list[tuple[int, int]]:
 
 
 
-def shell_center_lines(center, shell_coords):
+def shell_center_lines(center, shell_coords, *, spec_id: str | None = None):
     center = np.array(center, dtype=float)
     coords = np.array(shell_coords, dtype=float)
     if len(coords) == 0:
@@ -66,10 +66,14 @@ def shell_center_lines(center, shell_coords):
         sides=4,
         name="coordination-lines",
     )
-    return [trace] if trace is not None else []
+    if trace is None:
+        return []
+    if spec_id:
+        trace.update(meta={"spec_id": str(spec_id), "kind": "polyhedron"})
+    return [trace]
 
 
-def _world_sphere_marker_trace(centers, *, radius, color, opacity=0.9):
+def _world_sphere_marker_trace(centers, *, radius, color, opacity=0.9, spec_id: str | None = None):
     """Mesh3d-based "marker" sphere set. Unlike Scatter3d markers, the
     radius is in world (Å) coordinates so the on-screen size grows when
     the camera dollies in -- i.e. the markers actually feel like part of
@@ -81,6 +85,7 @@ def _world_sphere_marker_trace(centers, *, radius, color, opacity=0.9):
     for center in centers:
         vertices, triangles = _sphere_mesh(center, float(radius), lat_steps=8, lon_steps=12)
         _append_mesh(payload, vertices, triangles)
+    meta = {"spec_id": str(spec_id), "kind": "polyhedron"} if spec_id else None
     return go.Mesh3d(
         x=payload["x"],
         y=payload["y"],
@@ -93,10 +98,11 @@ def _world_sphere_marker_trace(centers, *, radius, color, opacity=0.9):
         hoverinfo="skip",
         showlegend=False,
         flatshading=False,
+        meta=meta,
     )
 
 
-def shell_atom_traces(shell_coords, distances, color="#7C5CBF"):
+def shell_atom_traces(shell_coords, distances, color="#7C5CBF", *, spec_id: str | None = None):
     coords = np.array(shell_coords, dtype=float)
     if len(coords) == 0:
         return []
@@ -111,6 +117,7 @@ def shell_atom_traces(shell_coords, distances, color="#7C5CBF"):
     for pos, r in zip(coords, radii):
         vertices, triangles = _sphere_mesh(pos, float(r), lat_steps=8, lon_steps=12)
         _append_mesh(payload, vertices, triangles)
+    meta = {"spec_id": str(spec_id), "kind": "polyhedron"} if spec_id else None
     return [
         go.Mesh3d(
             x=payload["x"],
@@ -124,16 +131,23 @@ def shell_atom_traces(shell_coords, distances, color="#7C5CBF"):
             hoverinfo="skip",
             showlegend=False,
             flatshading=False,
+            meta=meta,
         )
     ]
 
 
-def _merged_hull_mesh(overlays: list[tuple[list, float]], color: str):
+def _merged_hull_mesh(overlays: list[tuple[list, float]], color: str, *, spec_id: str | None = None):
     """Pack any number of (shell_coords, opacity) overlays into the
     minimum number of Mesh3d traces -- one per distinct opacity value.
     With 40+ tiled polyhedra each contributing its own ConvexHull this
     drops the Plotly trace count by ~2x while keeping the same on-
-    screen look (semi-transparent hulls layered front-to-back)."""
+    screen look (semi-transparent hulls layered front-to-back).
+
+    When ``spec_id`` is given every emitted trace carries
+    ``meta={"spec_id": spec_id, "kind": "polyhedron"}`` so
+    ``figure_for_state``'s post-cache patch can flip ``visible`` per
+    spec without rebuilding the figure (Phase 6 instant-toggle path).
+    """
     bins: dict[float, dict] = {}
     for overlay, opacity in overlays:
         coords, hull = _overlay_coords_and_hull(overlay)
@@ -151,6 +165,7 @@ def _merged_hull_mesh(overlays: list[tuple[list, float]], color: str):
         bin_payload["j"].extend((simplices[:, 1] + base).tolist())
         bin_payload["k"].extend((simplices[:, 2] + base).tolist())
     traces = []
+    meta = {"spec_id": str(spec_id), "kind": "polyhedron"} if spec_id else None
     for opacity, payload in bins.items():
         if not payload["x"]:
             continue
@@ -168,12 +183,13 @@ def _merged_hull_mesh(overlays: list[tuple[list, float]], color: str):
                 hoverinfo="skip",
                 showlegend=False,
                 name="coordination-hull",
+                meta=meta,
             )
         )
     return traces
 
 
-def _merged_hull_edges(overlays: list, color: str):
+def _merged_hull_edges(overlays: list, color: str, *, spec_id: str | None = None):
     """All polyhedron edges in the scene packed into a single
     ``Scatter3d`` line trace using NaN-separated segments.
 
@@ -201,6 +217,7 @@ def _merged_hull_edges(overlays: list, color: str):
             zs.extend([float(p0[2]), float(p1[2]), float("nan")])
     if not xs:
         return []
+    meta = {"spec_id": str(spec_id), "kind": "polyhedron"} if spec_id else None
     trace = go.Scatter3d(
         x=xs,
         y=ys,
@@ -211,6 +228,7 @@ def _merged_hull_edges(overlays: list, color: str):
         hoverinfo="skip",
         showlegend=False,
         name="coordination-edges",
+        meta=meta,
     )
     return [trace]
 
@@ -344,12 +362,20 @@ def topology_background_traces(topology_data: dict | None, style: dict | None = 
     spec_results = topology_data.get("spec_results") or []
     if spec_results:
         for entry in spec_results:
+            spec_id = str(entry.get("spec_id") or "")
             spec_color = str(entry.get("color") or fallback_color)
             # Bucket overlays by the colour they will paint with: any
             # ``instance_overrides`` entry can swap a single fragment to
             # a different hue, and we want every solid colour to take
             # exactly one merged-mesh trace (otherwise the per-shape
             # cylinder counts explode for tiled polyhedra).
+            #
+            # Phase 6: spec-level ``enabled`` is now cache-invariant
+            # (post-cache trace-visibility patch in
+            # ``figure_for_state``), but per-fragment
+            # ``instance_overrides[label].visible`` still gets
+            # filtered here -- the figure cache key drops it too,
+            # because the post-cache patch can re-evaluate it.
             overlays_by_color: dict[str, list[tuple[list, float]]] = {}
             for overlay in entry.get("overlays") or []:
                 shell = overlay.get("shell_coords")
@@ -363,8 +389,8 @@ def topology_background_traces(topology_data: dict | None, style: dict | None = 
                 color = str(overlay.get("color") or spec_color)
                 overlays_by_color.setdefault(color, []).append((overlay, opacity))
             for color, group in overlays_by_color.items():
-                traces.extend(_merged_hull_mesh(group, color=color))
-                traces.extend(_merged_hull_edges([overlay for overlay, _ in group], color=color))
+                traces.extend(_merged_hull_mesh(group, color=color, spec_id=spec_id))
+                traces.extend(_merged_hull_edges([overlay for overlay, _ in group], color=color, spec_id=spec_id))
     else:
         # Legacy single-colour path: callers (or test fixtures) that
         # construct a topology_data dict by hand still see the original
@@ -418,18 +444,22 @@ def topology_foreground_traces(topology_data: dict | None, style: dict | None = 
         else:
             anchor_color = str(spec_results[0].get("color") or fallback_color)
 
+    anchor_spec_id = topology_data.get("analysis_spec_id") if spec_results else None
     if primary_center is not None and len(primary_coords) > 0:
-        traces.extend(shell_center_lines(primary_center, primary_coords))
+        traces.extend(shell_center_lines(primary_center, primary_coords, spec_id=anchor_spec_id))
         primary_marker = _world_sphere_marker_trace(
             [primary_center],
             radius=0.55,
             color="#E07C24",
             opacity=0.95,
+            spec_id=anchor_spec_id,
         )
         if primary_marker is not None:
             traces.append(primary_marker)
         if primary_distances:
-            traces.extend(shell_atom_traces(primary_coords, primary_distances, color=anchor_color))
+            traces.extend(shell_atom_traces(
+                primary_coords, primary_distances, color=anchor_color, spec_id=anchor_spec_id,
+            ))
 
     if spec_results:
         # One faint marker cluster per spec covering its non-anchor
@@ -438,7 +468,13 @@ def topology_foreground_traces(topology_data: dict | None, style: dict | None = 
         # paint individual fragments a different colour or hide them
         # entirely; we honour those here so the centre marker matches
         # the hull beneath.
+        #
+        # Phase 6: spec-level ``enabled`` is honoured via the
+        # post-cache trace-visibility patch in ``figure_for_state``;
+        # per-fragment ``instance_overrides[label].visible`` is
+        # still filtered here, matching the background-traces path.
         for entry in spec_results:
+            spec_id = str(entry.get("spec_id") or "")
             spec_color = str(entry.get("color") or fallback_color)
             centers_by_color: dict[str, list[list[float]]] = {}
             for overlay in entry.get("overlays") or []:
@@ -460,6 +496,7 @@ def topology_foreground_traces(topology_data: dict | None, style: dict | None = 
                     radius=0.32,
                     color=color,
                     opacity=0.55,
+                    spec_id=spec_id,
                 )
                 if extra_marker is not None:
                     traces.append(extra_marker)

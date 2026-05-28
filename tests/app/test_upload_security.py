@@ -118,3 +118,88 @@ def test_reupload_same_bytes_is_idempotent(backend: ViewerBackend) -> None:
     assert first.name == second.name
     assert backend.structure_names.count(first.name) == 1
     assert getattr(second, "_upload_existing", False) is True
+
+
+def test_reupload_existing_creates_scene_when_none_points_at_structure(
+    backend: ViewerBackend,
+) -> None:
+    """Bug: the upload manifest persists across restarts. After a restart
+    the structure is back in ``structure_names`` but no scene references
+    it, so the legacy short-circuit returned the existing bundle without
+    creating or switching to a scene. The browser's ``native_upload.js``
+    then sat on ``"Updating scene..."`` until its 30 s timeout because
+    ``state.structure`` never changed. Re-upload must produce a visible
+    scene tab pointing at the existing structure."""
+    backend.add_uploaded_file_bytes(_VALID_CIF, "shown.cif")
+    structure = "shown"
+
+    # Simulate "structure restored from manifest, scene long gone".
+    scene_ids = [
+        sid
+        for sid, sc in backend.scene_store.scenes.items()
+        if sc.structure_name == structure
+    ]
+    for sid in scene_ids:
+        backend.scene_store.remove(sid, save=False)
+    assert structure in backend.structure_names
+    assert not any(
+        sc.structure_name == structure for sc in backend.scene_store.scenes.values()
+    )
+
+    initial_version = backend.version
+    bundle = backend.add_uploaded_file_bytes(_VALID_CIF, "shown.cif")
+
+    assert getattr(bundle, "_upload_existing", False) is True
+    matching = [
+        sc
+        for sc in backend.scene_store.scenes.values()
+        if sc.structure_name == structure
+    ]
+    assert len(matching) == 1
+    assert backend.active_scene_id() == matching[0].id
+    assert backend.get_state()["structure"] == structure
+    assert backend.version > initial_version
+
+
+def test_reupload_existing_switches_active_scene_when_scene_already_exists(
+    backend: ViewerBackend,
+) -> None:
+    """When a scene already references the re-uploaded structure, the
+    server must switch the active scene to it rather than silently
+    accepting the upload. Otherwise the browser's upload watcher sees no
+    ``state.structure`` change and the new tab never lights up."""
+    backend.add_uploaded_file_bytes(_VALID_CIF, "stable.cif")
+    structure = "stable"
+    original_scene_id = next(
+        sid
+        for sid, sc in backend.scene_store.scenes.items()
+        if sc.structure_name == structure
+    )
+
+    # Drop a second, unrelated scene in front so the upload path has to
+    # *switch* the active scene, not just confirm it.
+    other_bytes = _VALID_CIF.replace(b"C1 C 0.0 0.0 0.0 1.0", b"O1 O 0.1 0.1 0.1 1.0")
+    other = backend.add_uploaded_file_bytes(other_bytes, "decoy.cif")
+    other_scene_id = next(
+        sid
+        for sid, sc in backend.scene_store.scenes.items()
+        if sc.structure_name == other.name
+    )
+    backend.set_active_scene(other_scene_id, broadcast=False)
+    assert backend.active_scene_id() == other_scene_id
+
+    initial_version = backend.version
+    bundle = backend.add_uploaded_file_bytes(_VALID_CIF, "stable.cif")
+
+    assert getattr(bundle, "_upload_existing", False) is True
+    matching = [
+        sc
+        for sc in backend.scene_store.scenes.values()
+        if sc.structure_name == structure
+    ]
+    # No duplicate scene was created for the existing structure.
+    assert len(matching) == 1
+    assert matching[0].id == original_scene_id
+    assert backend.active_scene_id() == original_scene_id
+    assert backend.get_state()["structure"] == structure
+    assert backend.version > initial_version

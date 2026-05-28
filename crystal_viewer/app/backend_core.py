@@ -10,6 +10,7 @@ from .camera_helpers import *
 from .style_helpers import *
 from .rightclick import _normalize_polyhedron_specs
 from .render_worker import AsyncRenderWorker
+from ..config import current_config
 
 
 class _CoreBackendMixin:
@@ -168,6 +169,7 @@ class _CoreBackendMixin:
             # anchored entries store a target plus pixel offset so labels
             # reproject when the camera changes.
             "overlay_overrides": [],
+            "selection": {"atom_labels": [], "active_label": None, "order": []},
             "fast_rendering": bool(style.get("fast_rendering", False)),
             "camera": scene.get("camera"),
             # Phase 4: camera projection mode mirrored onto state so a
@@ -247,6 +249,24 @@ class _CoreBackendMixin:
             for k, v in state.items()
             if k not in ("version", "server_started_at", "camera", "camera_revision")
         }
+        # Phase 6: ``polyhedron_specs[i].enabled`` is honoured via a
+        # post-cache trace-visibility patch (see ``figure_for_state``
+        # below + the ``meta.spec_id`` tag the renderer stamps on
+        # every polyhedron overlay). Stripping just ``enabled`` from
+        # the key turns "toggle the row checkbox" from a 200-400 ms
+        # full ``build_figure`` rebuild into a ~30 ms cache hit + a
+        # tiny patch over ``fig.data``. Per-fragment
+        # ``instance_overrides[label].visible`` is intentionally
+        # NOT stripped: the renderer still buckets fragments by
+        # colour into merged traces, so per-fragment visibility
+        # cannot be patched at trace level and must stay
+        # cache-busting.
+        specs = key_state.get("polyhedron_specs")
+        if isinstance(specs, list):
+            key_state["polyhedron_specs"] = [
+                {k: v for k, v in spec.items() if k != "enabled"} if isinstance(spec, dict) else spec
+                for spec in specs
+            ]
         return json.dumps(_json_safe(key_state), sort_keys=True, separators=(",", ":"))
 
     def _figure_state_matches_current(
@@ -883,6 +903,8 @@ class _CoreBackendMixin:
             state["bond_groups"] = _normalize_bond_groups(patch.get("bond_groups") or [])
         if "transforms" in patch:
             state["transforms"] = _normalize_transforms(patch.get("transforms") or [])
+        if "selection" in patch:
+            state["selection"] = _normalize_selection(patch.get("selection"))
         # ``supercell`` is a v2 shorthand: ``{"a": Na, "b": Nb, "c": Nc}``
         # is rewritten to a single ``repeat`` transform appended to the
         # transforms list. Keeps the AI scripting path one-line for the
@@ -1099,6 +1121,8 @@ class _CoreBackendMixin:
         # scene is mutable); this entry is the single source of truth
         # for downstream callers.
         style["bond_groups"] = list(state.get("bond_groups") or [])
+        style["selection"] = copy.deepcopy(state.get("selection") or {"atom_labels": [], "active_label": None, "order": []})
+        style["selection_highlight"] = current_config().colors.get("selection_highlight", "#FFD24A")
         # Phase 4 (view tools): persist the camera projection choice
         # onto the style dict so the renderer's
         # ``_plotly_camera_from_scene`` picks orthographic vs.

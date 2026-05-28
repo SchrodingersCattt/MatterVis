@@ -30,6 +30,10 @@ def register_overlay_routes(v2, backend) -> dict:
                 enabled=bool(payload.get("enabled", True)),
                 enforce_enclosure=payload.get("enforce_enclosure", True),
                 centroid_offset_frac=payload.get("centroid_offset_frac"),
+                level=payload.get("level"),
+                center_kind=payload.get("center_kind"),
+                hard_cutoff=payload.get("hard_cutoff"),
+                fallback_max=payload.get("fallback_max"),
                 scene_id=_polyhedra_scene_id(),
                 spec_id=payload.get("id"),
             )

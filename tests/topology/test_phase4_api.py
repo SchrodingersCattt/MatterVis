@@ -189,6 +189,94 @@ def test_bond_groups_delete_then_404(tmp_path: Path):
     assert again.status_code == 404
 
 
+def test_bond_groups_reorder_swaps_groups(tmp_path: Path):
+    """``POST /api/v2/bond_groups/reorder`` must persist the new
+    list order and the rendering pipeline relies on bond_group rule
+    ordering for "later wins on overlapping bonds" semantics
+    (``agents/bond_groups_api.md`` -> Selector grammar). Without this
+    test, a future refactor that drops the reorder route or its
+    backend wiring would silently regress to alphabetical ordering
+    and stomp the user's manual rule order.
+    """
+    client = _client(tmp_path)
+    first = client.post(
+        "/api/v2/bond_groups",
+        json={"selector": {"all": True}, "color": "#111111"},
+    ).get_json()
+    second = client.post(
+        "/api/v2/bond_groups",
+        json={"selector": {"between_elements": ["O", "H"]}, "color": "#222222"},
+    ).get_json()
+    third = client.post(
+        "/api/v2/bond_groups",
+        json={"selector": {"is_minor": True}, "color": "#333333"},
+    ).get_json()
+
+    initial = client.get("/api/v2/bond_groups").get_json()["groups"]
+    assert [g["id"] for g in initial] == [first["id"], second["id"], third["id"]]
+
+    response = client.post(
+        "/api/v2/bond_groups/reorder",
+        json={"order": [third["id"], first["id"], second["id"]]},
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert "groups" in payload
+    assert [g["id"] for g in payload["groups"]] == [
+        third["id"],
+        first["id"],
+        second["id"],
+    ]
+
+    # GET reflects the persisted order, not just the response body.
+    again = client.get("/api/v2/bond_groups").get_json()["groups"]
+    assert [g["id"] for g in again] == [third["id"], first["id"], second["id"]]
+
+
+def test_bond_groups_reorder_rejects_missing_order_key(tmp_path: Path):
+    """Reorder requires an ``"order"`` list. Other shapes must 400
+    so a malformed payload doesn't accidentally clear the list or
+    leave it in a half-applied state."""
+    client = _client(tmp_path)
+    client.post(
+        "/api/v2/bond_groups",
+        json={"selector": {"all": True}, "color": "#000000"},
+    )
+    response = client.post("/api/v2/bond_groups/reorder", json={"items": []})
+    assert response.status_code == 400
+    assert "order" in (response.get_json() or {}).get("error", "")
+
+
+def test_bond_groups_reorder_rejects_partial_id_set(tmp_path: Path):
+    """Reorder requires the full set of existing ids. If the client
+    sends a strict subset (or a ghost id), the backend raises
+    ``ValueError`` and the route surfaces it as 400 -- otherwise
+    the missing groups would silently disappear from the rule
+    table on the next render."""
+    client = _client(tmp_path)
+    a = client.post(
+        "/api/v2/bond_groups",
+        json={"selector": {"all": True}, "color": "#aaaaaa"},
+    ).get_json()
+    b = client.post(
+        "/api/v2/bond_groups",
+        json={"selector": {"between_elements": ["O", "H"]}, "color": "#bbbbbb"},
+    ).get_json()
+
+    # Missing one id (subset)
+    short = client.post(
+        "/api/v2/bond_groups/reorder", json={"order": [a["id"]]}
+    )
+    assert short.status_code == 400
+
+    # Ghost id
+    ghost = client.post(
+        "/api/v2/bond_groups/reorder",
+        json={"order": [a["id"], b["id"], "ghost-id"]},
+    )
+    assert ghost.status_code == 400
+
+
 # ---- polyhedron instance overrides ------------------------------------
 
 

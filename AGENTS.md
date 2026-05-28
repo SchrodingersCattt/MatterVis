@@ -445,7 +445,8 @@ both files.
 - Coordination polyhedra are a per-scene named-row table
  (`state["polyhedron_specs"] = [{id, name, center_species,
  ligand_species, color, enabled, enforce_enclosure,
- centroid_offset_frac}, ...]`). Empty list (default for a
+ centroid_offset_frac, level, center_kind, hard_cutoff,
+ fallback_max}, ...]`). Empty list (default for a
  fresh scene) means **no overlay** — MV no longer auto-derives
  ligand shells from `topology_species_keys`; users must register
  explicit centre/ligand pairs (or load a preset that does). The
@@ -459,9 +460,26 @@ both files.
  (`(structure, display_mode, hydrogens, site_index, cutoff,
  spec_geometry_key, transforms_key)` where `spec_geometry_key`
  carries `(center_species, ligand_species, enforce_enclosure,
- centroid_offset_frac)` per spec). Per-spec
+ centroid_offset_frac, level, center_kind, hard_cutoff,
+ fallback_max)` per spec). Per-spec
  colour is NOT in the geometry cache key — it lives on the renderer's
  painter cache instead, so swapping colours stays a cheap re-paint.
+- **Spec-level `enabled` is patched onto trace visibility *after* the
+ figure cache, not filtered upstream.** `_effective_polyhedron_specs`
+ returns ALL specs (enabled or not) so the topology pipeline and the
+ figure cache key (`_figure_state_cache_key` strips `enabled` from
+ `polyhedron_specs`) both stay invariant to the row checkbox.
+ The renderer stamps `meta={"spec_id": ..., "kind": "polyhedron"}`
+ on every overlay trace (hull mesh, hull edges, centre markers,
+ connecting lines, shell-distance markers); `figure_for_state`'s
+ `_apply_polyhedron_visibility_patch` walks `fig.data` after each
+ cache lookup and flips `trace.visible` per the live spec's
+ `enabled` flag. Per-fragment `instance_overrides[label].visible`
+ is intentionally NOT in this fast path: fragments are bucketed
+ by colour into merged traces, so per-fragment hide/show stays
+ cache-busting. Do NOT reintroduce an upstream enabled filter
+ here — it bakes the absence into the figure body and turns every
+ row toggle back into a 200-400 ms full `build_figure` rebuild.
 - `analyze_topology` / `extract_coordination_shell` accept an
   optional `ligand_species` keyword (required, no auto-derivation)
   and delegate molecule-level PBC image enumeration to
@@ -472,11 +490,18 @@ both files.
   `cutoff` into MCK's `hard_cutoff=` — that reproduces the CN=37
   surprise this whole pipeline was rewritten to avoid (see the SY
   perchlorate regression notes in `tests/topology/`).
-  `enforce_enclosure` and `centroid_offset_frac` are per-spec packing
-  shell knobs forwarded to MolCrysKit. The topology cache key includes
-  ligand restriction and those packing knobs; do not collapse
-  it back to `(center_index, cutoff)` or two specs sharing a centre but
-  differing in ligand or shell mode will poison each other's shell.
+  `enforce_enclosure`, `centroid_offset_frac`, `level`, `center_kind`,
+  `hard_cutoff` and `fallback_max` are per-spec packing-shell knobs
+  forwarded to MolCrysKit (per MCK 0.4's `find_polyhedra` signature).
+  The topology cache key includes ligand restriction and **every** one
+  of those knobs; do not collapse it back to `(center_index, cutoff)`
+  or two specs sharing a centre but differing in any one of them will
+  poison each other's shell. `hard_cutoff` opts a molecule-level spec
+  back into MCK's historical "fill the ball" mode (CN=12 cuboctahedron,
+  CN=4 square-planar, etc.); leaving it `None` keeps the natural
+  first-shell answer. Atom-level rows never carry `hard_cutoff`
+  (the normaliser drops it; MCK rejects the combination because
+  atom-level `cutoff=` already is the hard cap).
 - Polyhedron specs may carry `instance_overrides`, a dict keyed on
  `fragment_label` whose values are partial style dicts
  (`{"color": ..., "visible": ...}`). The renderer applies these

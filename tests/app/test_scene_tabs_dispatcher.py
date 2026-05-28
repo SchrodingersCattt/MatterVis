@@ -27,40 +27,12 @@ C1 C 0.0 0.0 0.0 1.0
 """
 
 
-def _walk(component):
-    yield component
-    children = getattr(component, "children", None)
-    if children is None:
-        return
-    if isinstance(children, (list, tuple)):
-        for child in children:
-            yield from _walk(child)
-    else:
-        yield from _walk(children)
-
-
-def _outputs(callback):
-    out = callback.get("output")
-    items = out if isinstance(out, list) else [out]
-    pairs = set()
-    for item in items:
-        cid = getattr(item, "component_id", None)
-        prop = getattr(item, "component_property", None)
-        if isinstance(cid, str) and isinstance(prop, str):
-            pairs.add((cid, prop))
-    return pairs
-
-
-def _inputs(callback):
-    return {(str(item.get("id")), item.get("property")) for item in callback.get("inputs", [])}
-
-
-def _callbacks_with_output(app, component_id: str, prop: str):
-    return [
-        callback
-        for callback in app.callback_map.values()
-        if (component_id, prop) in _outputs(callback)
-    ]
+from _layout_helpers import (  # noqa: E402  shared helpers
+    callback_inputs as _inputs,
+    callback_outputs as _outputs,
+    callbacks_with_output as _callbacks_with_output,
+    walk_layout as _walk,
+)
 
 
 def test_layout_contains_scene_event_store(tmp_path: Path):

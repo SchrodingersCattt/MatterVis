@@ -54,6 +54,34 @@ class _IOBackendMixin:
             if existing_name in self.structure_names:
                 bundle = self.get_bundle(existing_name)
                 setattr(bundle, "_upload_existing", True)
+                # The upload is idempotent at the *structure* level
+                # (no ``_2`` / ``_3`` suffixes for repeat CIF bytes —
+                # see ``agents/dash_service.md``), but the user still
+                # clicked "Upload" expecting to *see* the structure.
+                # Without the scene-store touch-up below the response
+                # comes back 200 OK, the browser sets "Updating
+                # scene..." and the ``waitForSceneAndSwitch`` watcher
+                # in ``native_upload.js`` sits there until its 30 s
+                # timeout fires because the active scene never points
+                # at ``existing_name``. If a scene already references
+                # the structure, switch the active scene to it;
+                # otherwise materialise a fresh scene tab. Either way
+                # ``state.structure`` becomes ``existing_name`` so the
+                # WebSocket snapshot and the Dash ``native-upload-sync``
+                # callback both see the change and the tab appears.
+                with self._lock:
+                    target_scene_id = next(
+                        (
+                            scene_id
+                            for scene_id, scene in self.scene_store.scenes.items()
+                            if scene.structure_name == existing_name
+                        ),
+                        None,
+                    )
+                    if target_scene_id:
+                        self.set_active_scene(target_scene_id, broadcast=True)
+                    else:
+                        self.create_scene(structure=existing_name, label=existing_name)
                 return bundle
 
         upload_dir = os.path.realpath(os.path.join(tempfile.gettempdir(), "crystal_viewer_uploads"))

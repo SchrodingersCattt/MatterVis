@@ -61,6 +61,11 @@ def register_view_callbacks(app, backend):
             elem = payload.get("element") or ""
             header_text = f"Atom \u00b7 {label} ({elem})"
             items.extend([
+                html.Button("Select atom", id="rcm-action-select", n_clicks=0, className="rightclick-menu__item"),
+                html.Button("Add to selection", id="rcm-action-select-add", n_clicks=0, className="rightclick-menu__item"),
+                html.Button("Select fragment", id="rcm-action-select-fragment", n_clicks=0, className="rightclick-menu__item"),
+                html.Button(f"Select all {elem}", id="rcm-action-select-element", n_clicks=0, className="rightclick-menu__item"),
+                html.Div(className="rightclick-menu__divider"),
                 html.Div(
                     [
                         html.Label("Colour", htmlFor="rcm-color-picker"),
@@ -110,6 +115,7 @@ def register_view_callbacks(app, backend):
                     n_clicks=0,
                     className="rightclick-menu__item",
                 ),
+                html.Button("Promote selection to group", id="rcm-action-selection-promote", n_clicks=0, className="rightclick-menu__item"),
             ])
         elif kind == "polyhedron":
             label = payload.get("fragment_label") or "(polyhedron)"
@@ -167,6 +173,11 @@ def register_view_callbacks(app, backend):
                     n_clicks=0,
                     className="rightclick-menu__item",
                 ),
+                html.Button("", id="rcm-action-select", n_clicks=0, style={"display": "none"}),
+                html.Button("", id="rcm-action-select-add", n_clicks=0, style={"display": "none"}),
+                html.Button("", id="rcm-action-select-fragment", n_clicks=0, style={"display": "none"}),
+                html.Button("", id="rcm-action-select-element", n_clicks=0, style={"display": "none"}),
+                html.Button("", id="rcm-action-selection-promote", n_clicks=0, style={"display": "none"}),
             ])
         elif kind == "bond":
             label = payload.get("label_pair") or "(bond)"
@@ -203,6 +214,11 @@ def register_view_callbacks(app, backend):
                 html.Button("", id="rcm-action-grow-radius", n_clicks=0, style={"display": "none"}),
                 html.Button("", id="rcm-action-complete-fragment", n_clicks=0, style={"display": "none"}),
                 html.Button("", id="rcm-action-analyze", n_clicks=0, style={"display": "none"}),
+                html.Button("", id="rcm-action-select", n_clicks=0, style={"display": "none"}),
+                html.Button("", id="rcm-action-select-add", n_clicks=0, style={"display": "none"}),
+                html.Button("", id="rcm-action-select-fragment", n_clicks=0, style={"display": "none"}),
+                html.Button("", id="rcm-action-select-element", n_clicks=0, style={"display": "none"}),
+                html.Button("", id="rcm-action-selection-promote", n_clicks=0, style={"display": "none"}),
             ])
         else:
             return [], empty_style, hidden_class
@@ -226,6 +242,11 @@ def register_view_callbacks(app, backend):
         Input("rcm-action-complete-fragment", "n_clicks"),
         Input("rcm-action-analyze", "n_clicks"),
         Input("rcm-action-promote", "n_clicks"),
+        Input("rcm-action-select", "n_clicks"),
+        Input("rcm-action-select-add", "n_clicks"),
+        Input("rcm-action-select-fragment", "n_clicks"),
+        Input("rcm-action-select-element", "n_clicks"),
+        Input("rcm-action-selection-promote", "n_clicks"),
         Input("rightclick-target", "data"),
         State("scene-tabs", "value"),
         prevent_initial_call=True,
@@ -237,6 +258,11 @@ def register_view_callbacks(app, backend):
         complete_clicks,
         analyze_clicks,
         promote_clicks,
+        select_clicks,
+        select_add_clicks,
+        select_fragment_clicks,
+        select_element_clicks,
+        selection_promote_clicks,
         target,
         active_scene_id,
     ):
@@ -261,6 +287,11 @@ def register_view_callbacks(app, backend):
                 "rcm-action-complete-fragment": "complete_fragment",
                 "rcm-action-analyze": "analyze",
                 "rcm-action-promote": "promote_to_group",
+                "rcm-action-select": "select",
+                "rcm-action-select-add": "select_add",
+                "rcm-action-select-fragment": "select_fragment",
+                "rcm-action-select-element": "select_element",
+                "rcm-action-selection-promote": "selection_to_group",
             }
             action = mapping.get(triggered)
             if action is None:

@@ -9,6 +9,10 @@
  *   R      Clear the repeat transform (back to home cell)
  *   g      Grow by 1 bond hop from the hovered atom (or "all" if none)
  *   G      Grow by radius 4 angstrom from the hovered atom
+ *   a      Add hovered atom to the current selection
+ *   m      Select hovered atom's fragment
+ *   e      Select all atoms of hovered atom's element
+ *   f      Focus camera on the current selection
  *   h      Hide the hovered atom / bond / polyhedron
  *   c      Open the colour picker for the hovered target
  *   p      Promote the hovered atom to an atom-group rule
@@ -115,9 +119,20 @@
   }
 
   document.addEventListener("keydown", function (event) {
-    if (event.altKey || event.ctrlKey || event.metaKey) return;
     if (isTypingTarget(event.target)) return;
     const key = event.key;
+    if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+      if (key.toLowerCase() === "a") {
+        if (pushAction("select_all")) event.preventDefault();
+        return;
+      }
+      if (key.toLowerCase() === "i") {
+        if (pushAction("select_invert")) event.preventDefault();
+        return;
+      }
+      return;
+    }
+    if (event.altKey) return;
     if (key === "?" || (event.shiftKey && key === "/")) {
       event.preventDefault();
       toggleHelp();
@@ -125,6 +140,7 @@
     }
     if (key === "Escape") {
       toggleHelp(false);
+      pushAction("select_clear");
       return;
     }
     let dispatched = false;
@@ -149,6 +165,18 @@
         break;
       case "p":
         dispatched = pushAction("promote_to_group");
+        break;
+      case "a":
+        dispatched = pushAction("select_add");
+        break;
+      case "m":
+        dispatched = pushAction("select_fragment");
+        break;
+      case "e":
+        dispatched = pushAction("select_element");
+        break;
+      case "f":
+        dispatched = pushAction("selection_focus_camera");
         break;
       default:
         return;

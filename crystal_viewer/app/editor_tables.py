@@ -77,6 +77,10 @@ def _polyhedra_table_rows(
             if spec.get("enforce_enclosure", True)
             else _POLY_SHELL_MODE_GAP
         )
+        level_value = str(spec.get("level") or "molecule")
+        center_kind_value = str(spec.get("center_kind") or "centroid")
+        hard_cutoff_value = spec.get("hard_cutoff")
+        fallback_max_value = spec.get("fallback_max")
         rows.append(
             html.Div(
                 [
@@ -146,7 +150,21 @@ def _polyhedra_table_rows(
                             ),
                             html.Div(
                                 [
-                                    html.Label("Shell closure", style={"fontSize": "10px", "color": "#555"}),
+                                    html.Label("Level", style={"fontSize": "10px", "color": "#555"}),
+                                    dcc.Dropdown(
+                                        id={"type": "poly-row-level", "spec_id": spec["id"]},
+                                        options=[
+                                            {"label": "Molecule packing", "value": "molecule"},
+                                            {"label": "Atom A--B shell", "value": "atom"},
+                                        ],
+                                        value=level_value,
+                                        clearable=False,
+                                        style={"fontSize": "11px"},
+                                    ),
+                                    html.Label(
+                                        "Shell closure",
+                                        style={"fontSize": "10px", "color": "#555", "marginTop": "4px"},
+                                    ),
                                     dcc.Dropdown(
                                         id={"type": "poly-row-shell-mode", "spec_id": spec["id"]},
                                         options=[
@@ -170,6 +188,59 @@ def _polyhedra_table_rows(
                                         value=float(spec.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC)),
                                         debounce=True,
                                         placeholder="0.15",
+                                        style={"width": "100%", "fontSize": "11px"},
+                                    ),
+                                    html.Label(
+                                        "Centre kind (molecule level)",
+                                        style={"fontSize": "10px", "color": "#555", "marginTop": "4px"},
+                                    ),
+                                    dcc.Dropdown(
+                                        id={"type": "poly-row-center-kind", "spec_id": spec["id"]},
+                                        options=[
+                                            {"label": "Centroid", "value": "centroid"},
+                                            {"label": "Centre of mass", "value": "com"},
+                                            {"label": "Heavy-atom centroid", "value": "heavy_centroid"},
+                                        ],
+                                        value=center_kind_value,
+                                        clearable=False,
+                                        disabled=(level_value == "atom"),
+                                        style={"fontSize": "11px"},
+                                    ),
+                                    html.Label(
+                                        "Hard cutoff (\u00c5, optional)",
+                                        style={"fontSize": "10px", "color": "#555", "marginTop": "4px"},
+                                        title=(
+                                            "Molecule level only. Leave blank for the natural first shell "
+                                            "(MCK gap+enclosure). Set a value to fill the ball (CN=12 "
+                                            "cuboctahedron etc.) like MCK's historical mode."
+                                        ),
+                                    ),
+                                    dcc.Input(
+                                        id={"type": "poly-row-hard-cutoff", "spec_id": spec["id"]},
+                                        type="number",
+                                        min=0.1,
+                                        max=50.0,
+                                        step=0.1,
+                                        value=(float(hard_cutoff_value) if hard_cutoff_value is not None else None),
+                                        debounce=True,
+                                        placeholder="(natural shell)",
+                                        disabled=(level_value == "atom"),
+                                        style={"width": "100%", "fontSize": "11px"},
+                                    ),
+                                    html.Label(
+                                        "Fallback max CN",
+                                        style={"fontSize": "10px", "color": "#555", "marginTop": "4px"},
+                                        title="Upper bound on the chosen coordination number (1-64).",
+                                    ),
+                                    dcc.Input(
+                                        id={"type": "poly-row-fallback-max", "spec_id": spec["id"]},
+                                        type="number",
+                                        min=1,
+                                        max=64,
+                                        step=1,
+                                        value=(int(fallback_max_value) if fallback_max_value is not None else None),
+                                        debounce=True,
+                                        placeholder="(MCK default)",
                                         style={"width": "100%", "fontSize": "11px"},
                                     ),
                                 ],

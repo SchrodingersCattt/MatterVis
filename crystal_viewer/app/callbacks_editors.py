@@ -11,7 +11,44 @@ from .rightclick import *
 from .backend import ViewerBackend
 
 
+# Editor callbacks used to swallow backend exceptions silently
+# (``except Exception: return no_update, no_update``), which made
+# the UI look dead whenever ``add_transform`` / ``add_polyhedron``
+# / ``patch_state`` raised (e.g. the MAX_ATOMS_AFTER_TRANSFORM cap
+# or an MCK shape rejection). ``surface_editor_error`` routes the
+# exception text into the hidden ``#status`` Div via
+# ``ctx.set_props`` -- the existing ``mirror_legacy_status`` callback
+# styles that string into the visible banner, so the user gets a
+# real explanation instead of "click does nothing". The perf log
+# records the original exception type + message for the Server log
+# panel.
+#
+# Lifted to module scope so unit tests can drive it directly without
+# spinning up a Dash callback context. The module-private alias
+# ``_surface_error`` keeps the historical name available inside
+# ``register_editor_callbacks`` (where it is referenced ~15 times)
+# without each call site having to import the new name.
+def surface_editor_error(prefix: str, exc: BaseException) -> None:
+    text = str(exc) or exc.__class__.__name__
+    if len(text) > 240:
+        text = text[:237] + "..."
+    message = f"{prefix} failed: {text}"
+    try:
+        callback_context.set_props("status", {"children": message})
+    except Exception:
+        # Dash < 2.17 lacks set_props; fall back to perf-log only.
+        pass
+    perf_log.record(
+        "callback:editor_error",
+        duration_ms=0.0,
+        kind="cb",
+        info={"prefix": prefix, "error": text, "type": exc.__class__.__name__},
+    )
+
+
 def register_editor_callbacks(app, backend):
+    _surface_error = surface_editor_error
+
     @app.callback(
         Output("polyhedra-rows-container", "children", allow_duplicate=True),
         Output("agent-state-store", "data", allow_duplicate=True),
@@ -23,6 +60,10 @@ def register_editor_callbacks(app, backend):
         Input({"type": "poly-row-enabled", "spec_id": ALL}, "value"),
         Input({"type": "poly-row-shell-mode", "spec_id": ALL}, "value"),
         Input({"type": "poly-row-centroid-offset", "spec_id": ALL}, "value"),
+        Input({"type": "poly-row-level", "spec_id": ALL}, "value"),
+        Input({"type": "poly-row-center-kind", "spec_id": ALL}, "value"),
+        Input({"type": "poly-row-hard-cutoff", "spec_id": ALL}, "value"),
+        Input({"type": "poly-row-fallback-max", "spec_id": ALL}, "value"),
         Input({"type": "poly-row-delete", "spec_id": ALL}, "n_clicks"),
         State({"type": "poly-row-color", "spec_id": ALL}, "id"),
         prevent_initial_call=True,
@@ -36,6 +77,10 @@ def register_editor_callbacks(app, backend):
         enableds,
         shell_modes,
         centroid_offsets,
+        levels,
+        center_kinds,
+        hard_cutoffs,
+        fallback_maxes,
         deletes,
         color_ids,
     ):
@@ -81,7 +126,8 @@ def register_editor_callbacks(app, backend):
                     enabled=True,
                     scene_id=scene_id,
                 )
-            except Exception:
+            except Exception as exc:
+                _surface_error("Add polyhedron", exc)
                 return no_update, no_update
             return _rebuild(), backend.get_state()
 
@@ -127,13 +173,36 @@ def register_editor_callbacks(app, backend):
                             if index < len(centroid_offsets) and centroid_offsets[index] is not None
                             else base.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC)
                         ),
+                        # Phase 5: new MCK 0.4 knobs. None values fall through
+                        # to the normaliser's defaults (level=molecule,
+                        # center_kind=centroid, hard_cutoff=None,
+                        # fallback_max=None) so a fresh spec still works.
+                        "level": (
+                            levels[index] if index < len(levels) and levels[index] else base.get("level")
+                        ),
+                        "center_kind": (
+                            center_kinds[index]
+                            if index < len(center_kinds) and center_kinds[index]
+                            else base.get("center_kind")
+                        ),
+                        "hard_cutoff": (
+                            hard_cutoffs[index]
+                            if index < len(hard_cutoffs)
+                            else base.get("hard_cutoff")
+                        ),
+                        "fallback_max": (
+                            fallback_maxes[index]
+                            if index < len(fallback_maxes)
+                            else base.get("fallback_max")
+                        ),
                         "instance_overrides": base.get("instance_overrides", {}),
                     }
                 )
             try:
                 backend.patch_state({"polyhedron_specs": new_specs}, scene_id=scene_id, broadcast=False)
-            except Exception:
-                return no_update, no_update
+            except Exception as exc:
+                _surface_error("Update polyhedron", exc)
+                return _rebuild(), no_update
             perf_log.record(
                 "callback:manage_polyhedra",
                 duration_ms=(time.monotonic() - cb_start) * 1000.0,
@@ -144,7 +213,12 @@ def register_editor_callbacks(app, backend):
                     "scene_id": scene_id,
                 },
             )
-            # ``no_update`` for children to avoid mid-edit React tear-down.
+            # Level toggles flip the disabled state of center_kind /
+            # hard_cutoff inside the row, so they must trigger a rebuild.
+            # Other inline edits keep ``no_update`` for children to avoid
+            # mid-edit React tear-down.
+            if triggered_label == "poly-row-level":
+                return _rebuild(), backend.get_state()
             return no_update, backend.get_state()
 
         return no_update, no_update
@@ -214,7 +288,8 @@ def register_editor_callbacks(app, backend):
         if triggered == "atom-groups-add-btn":
             try:
                 backend.add_atom_group(selector={"all": True}, color="#888888", scene_id=scene_id)
-            except Exception:
+            except Exception as exc:
+                _surface_error("Add atom group", exc)
                 return no_update, no_update
             return _rebuild(), backend.get_state()
 
@@ -273,8 +348,9 @@ def register_editor_callbacks(app, backend):
                 )
             try:
                 backend.patch_state({"atom_groups": new_groups}, scene_id=scene_id, broadcast=False)
-            except Exception:
-                return no_update, no_update
+            except Exception as exc:
+                _surface_error("Update atom group", exc)
+                return _rebuild(), no_update
             perf_log.record(
                 "callback:manage_atom_groups",
                 duration_ms=(time.monotonic() - cb_start) * 1000.0,
@@ -350,7 +426,8 @@ def register_editor_callbacks(app, backend):
         if triggered == "bond-groups-add-btn":
             try:
                 backend.add_bond_group(selector={"all": True}, scene_id=scene_id)
-            except Exception:
+            except Exception as exc:
+                _surface_error("Add bond group", exc)
                 return no_update, no_update
             return _rebuild(), backend.get_state()
 
@@ -390,8 +467,9 @@ def register_editor_callbacks(app, backend):
                 )
             try:
                 backend.patch_state({"bond_groups": new_groups}, scene_id=scene_id, broadcast=False)
-            except Exception:
-                return no_update, no_update
+            except Exception as exc:
+                _surface_error("Update bond group", exc)
+                return _rebuild(), no_update
             perf_log.record(
                 "callback:manage_bond_groups",
                 duration_ms=(time.monotonic() - cb_start) * 1000.0,
@@ -509,8 +587,9 @@ def register_editor_callbacks(app, backend):
                     {"supercell": {"a": n, "b": n, "c": n}},
                     scene_id=scene_id,
                 )
-            except Exception:
-                return no_update, no_update
+            except Exception as exc:
+                _surface_error(f"Repeat {n}x{n}x{n}", exc)
+                return _rebuild(), no_update
             return _rebuild(), backend.get_state()
 
         if triggered == "transforms-clear-repeat":
@@ -519,21 +598,30 @@ def register_editor_callbacks(app, backend):
                     {"supercell": {"a": 1, "b": 1, "c": 1}},
                     scene_id=scene_id,
                 )
-            except Exception:
-                return no_update, no_update
+            except Exception as exc:
+                _surface_error("Clear repeat", exc)
+                return _rebuild(), no_update
             return _rebuild(), backend.get_state()
 
         if triggered == "transforms-clear-btn":
             try:
                 backend.patch_state({"transforms": []}, scene_id=scene_id)
-            except Exception:
-                return no_update, no_update
+            except Exception as exc:
+                _surface_error("Clear all transforms", exc)
+                return _rebuild(), no_update
             return _rebuild(), backend.get_state()
 
         if triggered == "transforms-add-btn":
             kind = kind_select or "repeat"
+            # Defaults are intentionally chosen to be no-ops or
+            # near-no-ops so an "Add" click never blows past the
+            # MAX_ATOMS_AFTER_TRANSFORM cap when the pipeline already
+            # carries a supercell. ``repeat 1x1x1`` is a harmless
+            # placeholder the user can edit in-place; the legacy
+            # 2x2x2 default fired the cap for any structure already
+            # multiplied >= 2x in the previous transform.
             defaults_by_kind = {
-                "repeat": {"a": 2, "b": 2, "c": 2},
+                "repeat": {"a": 1, "b": 1, "c": 1},
                 "grow_radius": {"seeds": {"all": True}, "radius": 4.0},
                 "grow_bonds": {"seeds": {"all": True}, "hops": 1},
                 "complete_fragment": {"seeds": {"all": True}, "max_hops": 32},
@@ -547,8 +635,9 @@ def register_editor_callbacks(app, backend):
                     params=defaults_by_kind.get(kind, {}),
                     scene_id=scene_id,
                 )
-            except Exception:
-                return no_update, no_update
+            except Exception as exc:
+                _surface_error(f"Add {kind} transform", exc)
+                return _rebuild(), no_update
             return _rebuild(), backend.get_state()
 
         if isinstance(triggered, dict) and triggered.get("type") == "trf-row-delete":
@@ -571,8 +660,9 @@ def register_editor_callbacks(app, backend):
             ids[i], ids[j] = ids[j], ids[i]
             try:
                 backend.reorder_transforms(ids, scene_id=scene_id)
-            except Exception:
-                return no_update, no_update
+            except Exception as exc:
+                _surface_error("Reorder transforms", exc)
+                return _rebuild(), no_update
             return _rebuild(), backend.get_state()
 
         # Inline edit (enabled toggle or any param change) -------------
@@ -643,8 +733,9 @@ def register_editor_callbacks(app, backend):
                 )
             try:
                 backend.patch_state({"transforms": new_transforms}, scene_id=scene_id, broadcast=False)
-            except Exception:
-                return no_update, no_update
+            except Exception as exc:
+                _surface_error("Update transform", exc)
+                return _rebuild(), no_update
             perf_log.record(
                 "callback:manage_transforms",
                 duration_ms=(time.monotonic() - cb_start) * 1000.0,

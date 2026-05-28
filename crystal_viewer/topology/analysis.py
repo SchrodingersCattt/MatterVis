@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import sys
 from typing import Any, Iterable
 
@@ -17,6 +18,7 @@ from molcrys_kit.analysis.packing_shell import (
 from molcrys_kit.analysis.shape import classify_shell
 from molcrys_kit.structures.polyhedra import convex_hull_payload, ideal_polyhedra_for_cn
 
+from ..config import current_config
 from ..structure import molcrys_bridge
 
 __all__ = [
@@ -33,6 +35,25 @@ __all__ = [
     "ideal_polyhedra_for_cn",
     "planarity_analysis",
 ]
+
+
+def _mck_override_kwargs(func) -> dict[str, object]:
+    """Return explicit MolCrysKit override kwargs supported by ``func``."""
+    overrides = current_config().mck_overrides.values
+    raw = {
+        "gap_threshold": overrides.get("gap_threshold"),
+        "enclosure_expand_max": overrides.get("enclosure_expand_max"),
+        "default_search_cutoff": overrides.get("default_search_cutoff"),
+    }
+    try:
+        params = inspect.signature(func).parameters
+    except (TypeError, ValueError):
+        params = {}
+    return {
+        key: value
+        for key, value in raw.items()
+        if value is not None and (not params or key in params)
+    }
 
 
 def classify_fragments(bundle) -> list[dict[str, Any]]:
@@ -60,6 +81,9 @@ def _mck_polyhedron_record(
     center_species: str | None = None,
     enforce_enclosure: bool = True,
     centroid_offset_frac: float = DEFAULT_CENTROID_OFFSET_FRAC,
+    center_kind: str = "centroid",
+    hard_cutoff: float | None = None,
+    fallback_max: int | None = None,
 ) -> dict[str, Any] | None:
     if not ligand_species:
         raise ValueError(
@@ -77,6 +101,13 @@ def _mck_polyhedron_record(
         crystal = molcrys_bridge.molecular_crystal_from_bundle(bundle)
         public_module = sys.modules.get("crystal_viewer.topology")
         find_polyhedra_impl = getattr(public_module, "find_polyhedra", find_polyhedra)
+        # ``hard_cutoff`` is rejected at atom level by MCK: ``cutoff=`` is
+        # already the hard radial cap on this level. The normaliser
+        # already drops ``hard_cutoff`` whenever level=='atom'; defend
+        # here too so a direct caller (script / REST) can't break MCK.
+        atom_kwargs: dict[str, Any] = {}
+        if fallback_max is not None:
+            atom_kwargs["fallback_max"] = int(fallback_max)
         records = find_polyhedra_impl(
             crystal,
             central_symbol,
@@ -85,6 +116,8 @@ def _mck_polyhedron_record(
             cutoff=float(cutoff),
             enforce_enclosure=bool(enforce_enclosure),
             centroid_offset_frac=float(centroid_offset_frac),
+            **atom_kwargs,
+            **_mck_override_kwargs(find_polyhedra_impl),
         )
         if not records:
             return None
@@ -105,25 +138,29 @@ def _mck_polyhedron_record(
     crystal = molcrys_bridge.molecular_crystal_from_bundle(bundle)
     # On level="molecule", MCK's ``cutoff`` IS the candidate search radius
     # that feeds gap+enclosure (per MCK PR #32). MV's state-level ``cutoff``
-    # is also a search radius, so the kwarg name lines up after the MCK
-    # split. Do NOT pass ``hard_cutoff`` here -- that would force MCK back
-    # into the historical "fill the ball" mode and reproduce the CN=37
-    # surprise on SY (cf. ``test_topology_cutoff_is_search_radius``). If a
-    # caller ever wants the over-shell CN=12 / CN=4 cuboctahedron /
-    # square-planar interpretations we should expose ``hard_cutoff`` as a
-    # separate per-spec field, not by hijacking the search radius.
+    # is the search radius too, so the kwarg name lines up after the MCK
+    # split. ``hard_cutoff`` is opt-in per-spec for the historical
+    # "fill the ball" mode (CN=12 cuboctahedron on the SY perchlorate, for
+    # example); leaving it ``None`` keeps the natural first-shell answer.
     public_module = sys.modules.get("crystal_viewer.topology")
     find_polyhedra_impl = getattr(public_module, "find_polyhedra", find_polyhedra)
+    extra_kwargs: dict[str, Any] = {}
+    if hard_cutoff is not None:
+        extra_kwargs["hard_cutoff"] = float(hard_cutoff)
+    if fallback_max is not None:
+        extra_kwargs["fallback_max"] = int(fallback_max)
     records = find_polyhedra_impl(
         crystal,
         molcrys_bridge.formula_to_moiety(str(center_formula)),
         molcrys_bridge.formula_to_moiety(ligand_formula),
         level="molecule",
-        center_kind="centroid",
+        center_kind=str(center_kind or "centroid"),
         cutoff=float(cutoff),
         central_indices=[int(source_molecule_index)],
         enforce_enclosure=bool(enforce_enclosure),
         centroid_offset_frac=float(centroid_offset_frac),
+        **extra_kwargs,
+        **_mck_override_kwargs(find_polyhedra_impl),
     )
     return records[0] if records else None
 
@@ -138,6 +175,9 @@ def _extract_coordination_shell_static(
     center_species: str | None = None,
     enforce_enclosure: bool = True,
     centroid_offset_frac: float = DEFAULT_CENTROID_OFFSET_FRAC,
+    center_kind: str = "centroid",
+    hard_cutoff: float | None = None,
+    fallback_max: int | None = None,
 ) -> dict[str, Any]:
     fragments = classify_fragments(bundle)
     center_fragment = next((frag for frag in fragments if int(frag["index"]) == int(center_index)), None)
@@ -152,6 +192,9 @@ def _extract_coordination_shell_static(
         center_species=center_species,
         enforce_enclosure=enforce_enclosure,
         centroid_offset_frac=centroid_offset_frac,
+        center_kind=center_kind,
+        hard_cutoff=hard_cutoff,
+        fallback_max=fallback_max,
     )
     if record is None:
         source_center = np.array(center_fragment["center"], dtype=float)
@@ -251,6 +294,9 @@ def extract_coordination_shell(
     center_species: str | None = None,
     enforce_enclosure: bool = True,
     centroid_offset_frac: float = DEFAULT_CENTROID_OFFSET_FRAC,
+    center_kind: str = "centroid",
+    hard_cutoff: float | None = None,
+    fallback_max: int | None = None,
 ) -> dict[str, Any]:
     ligand_tuple = tuple(str(item) for item in ligand_species) if ligand_species else None
     static = _extract_coordination_shell_static(
@@ -262,6 +308,9 @@ def extract_coordination_shell(
         center_species=center_species,
         enforce_enclosure=enforce_enclosure,
         centroid_offset_frac=centroid_offset_frac,
+        center_kind=center_kind,
+        hard_cutoff=hard_cutoff,
+        fallback_max=fallback_max,
     )
     source_center = np.asarray(static["source_center_coords"], dtype=float)
     plot_center = source_center if display_center is None else np.array(display_center, dtype=float)
@@ -313,6 +362,9 @@ def _analyze_topology_uncached(
     center_species: str | None = None,
     enforce_enclosure: bool = True,
     centroid_offset_frac: float = DEFAULT_CENTROID_OFFSET_FRAC,
+    center_kind: str = "centroid",
+    hard_cutoff: float | None = None,
+    fallback_max: int | None = None,
 ) -> dict[str, Any]:
     shell = extract_coordination_shell(
         bundle,
@@ -326,6 +378,9 @@ def _analyze_topology_uncached(
         center_species=center_species,
         enforce_enclosure=enforce_enclosure,
         centroid_offset_frac=centroid_offset_frac,
+        center_kind=center_kind,
+        hard_cutoff=hard_cutoff,
+        fallback_max=fallback_max,
     )
     center = shell["center_coords"]
     shell_coords = shell["shell_coords"]
@@ -450,6 +505,9 @@ def analyze_topology(
     center_species: str | None = None,
     enforce_enclosure: bool = True,
     centroid_offset_frac: float = DEFAULT_CENTROID_OFFSET_FRAC,
+    center_kind: str = "centroid",
+    hard_cutoff: float | None = None,
+    fallback_max: int | None = None,
 ) -> dict[str, Any]:
     """Cached primary-site analysis. The heavy ``planarity_analysis`` pass
     runs ``itertools.combinations`` of size 5 over the shell, which gets
@@ -463,6 +521,9 @@ def analyze_topology(
     """
     ligand_tuple = tuple(str(item) for item in ligand_species) if ligand_species else None
     level = str(level or "molecule")
+    center_kind = str(center_kind or "centroid")
+    hard_cap = float(hard_cutoff) if hard_cutoff is not None else None
+    fallback = int(fallback_max) if fallback_max is not None else None
     cache = getattr(bundle, "_analyze_topology_cache", None)
     if cache is None:
         cache = {}
@@ -477,6 +538,9 @@ def analyze_topology(
                 center_species=center_species,
                 enforce_enclosure=enforce_enclosure,
                 centroid_offset_frac=centroid_offset_frac,
+                center_kind=center_kind,
+                hard_cutoff=hard_cap,
+                fallback_max=fallback,
             )
     key = (
         int(center_index),
@@ -486,17 +550,25 @@ def analyze_topology(
         center_species,
         bool(enforce_enclosure),
         float(centroid_offset_frac),
+        # MCK 0.4 knobs participate in the cache key because each one
+        # changes the chosen shell (and therefore the shape classification).
+        center_kind,
+        hard_cap,
+        fallback,
     )
     cached = cache.get(key)
     if cached is None:
         cached = _analyze_topology_uncached(
             bundle, center_index, cutoff,
-            None, None, None,  # cache on the static result; overlay display fields below
+            None, None, None,
             ligand_species=ligand_tuple,
             level=level,
             center_species=center_species,
             enforce_enclosure=enforce_enclosure,
             centroid_offset_frac=centroid_offset_frac,
+            center_kind=center_kind,
+            hard_cutoff=hard_cap,
+            fallback_max=fallback,
         )
         cache[key] = cached
     # Display fields shift per call (camera / formula-unit centering); patch

@@ -24,6 +24,10 @@ Every spec is a flat dict with these fields:
 | `enabled` | bool | `false` rows persist but are skipped at render time. |
 | `enforce_enclosure` | bool | Packing-shell mode. `true` (default) keeps MolCrysKit's gap+enclosure expansion; `false` stops at the distance-gap shell. |
 | `centroid_offset_frac` | number | MolCrysKit centering tolerance passed to `find_polyhedra`; default is `0.15`. Larger values make the enclosure check less strict. |
+| `level` | string | **Phase 5.** Either `"molecule"` (default, packing-shell semantics) or `"atom"` (A--B element shell). Atom-level requires `center_species` / `ligand_species` to be element symbols (`"Pb"`, `"I"`). Molecule-level keeps the formula-key behaviour above. |
+| `center_kind` | string | **Phase 5.** Molecule-level only: `"centroid"` (default), `"com"` (mass-weighted), or `"heavy_centroid"`. Forwarded to `find_polyhedra(center_kind=...)`; ignored at atom level. |
+| `hard_cutoff` | number \| null | **Phase 5.** Molecule-level only. `null` (default) keeps the natural first shell from MCK's gap+enclosure heuristic. A positive float (e.g. `8.0`) opts that spec into MCK's historical "fill the ball" mode and reproduces classic CN=12 cuboctahedra / CN=4 square-planar interpretations. Silently dropped on atom-level rows (MCK rejects the combination). |
+| `fallback_max` | int \| null | **Phase 5.** Optional upper bound on the chosen coordination number (1--64). `null` keeps MCK's own default. |
 | `instance_overrides` | object | **Phase 4.** Per-fragment override map: `{fragment_label: {color, visible}}`. Empty `{}` means every matched fragment inherits the spec-level colour and visibility. Keys are the fragment-table labels exposed in `topology_data["spec_results"][i]["overlays"][j]["center_label"]`. |
 
 ### Pipeline at a glance
@@ -36,7 +40,7 @@ the geometry cache.
 
 ```mermaid
 flowchart LR
-  A["state.polyhedron_specs<br/>(list of rows)"] --> G["spec_geometry_key<br/>(center_species, ligand_species,<br/>enforce_enclosure, centroid_offset_frac)"]
+  A["state.polyhedron_specs<br/>(list of rows)"] --> G["spec_geometry_key<br/>(center_species, ligand_species,<br/>enforce_enclosure, centroid_offset_frac,<br/>level, center_kind, hard_cutoff, fallback_max)"]
   A --> P["per-row paint:<br/>color, instance_overrides<br/>(NOT in geometry key)"]
   G --> K["_topology_state_cache key:<br/>(structure, display_mode, hydrogens,<br/>site_index, cutoff, spec_geometry_key,<br/>transforms_key)"]
   K --> M["analyze_topology -><br/>find_polyhedra(level=molecule)<br/>via molcrys_kit"]

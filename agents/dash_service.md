@@ -237,10 +237,16 @@ Notes for callers:
   in `.local/crystal_view_uploads.json` by SHA-256 and restored on
   service restart when the on-disk file still exists. Re-uploading the
   same bytes is idempotent: the existing structure is returned with
-  `existing: true` instead of creating `_2`, `_3`, ... names. The
-  response keeps legacy `atom_count` and also exposes
-  `parsed_atom_count`, `displayed_atom_count`, and `asu_atom_count` so
-  clients can distinguish CIF parsing from the current display slice.
+  `existing: true` instead of creating `_2`, `_3`, ... names. In that
+  case the service also makes the structure visible to the caller —
+  if a scene tab already references it the active scene switches to
+  that tab, otherwise a fresh scene tab is materialised. Either path
+  bumps the state version, so a WebSocket subscriber or `GET /state`
+  poller will see `structure` equal the uploaded name immediately
+  after the response. The response keeps legacy `atom_count` and also
+  exposes `parsed_atom_count`, `displayed_atom_count`, and
+  `asu_atom_count` so clients can distinguish CIF parsing from the
+  current display slice.
 - `GET /structures`
   Lists the loaded catalog and uploaded structures.
 - `GET /scene/{name}`
