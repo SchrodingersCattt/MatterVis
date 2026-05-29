@@ -6,6 +6,47 @@ from .meshes import _append_mesh, _sphere_mesh
 from .style import *
 
 
+def _atom_outline_payload(
+    scene: dict,
+    style: dict,
+    *,
+    labels: set[str] | None = None,
+    source_indices: set[int] | None = None,
+    radius_scale: float = 1.18,
+) -> dict[str, list]:
+    """Build outline-sphere mesh for the atoms selected by ``labels``
+    (scene labels) and/or ``source_indices`` (raw-atom ``_source_index``).
+
+    ``source_indices`` is the precise per-atom selector: scene labels
+    collapse across symmetry copies, so highlighting by label would draw
+    the wrong / shared set when distinct raw atoms share a label. An atom
+    matches if it satisfies *either* selector that was provided.
+    """
+    payload = {"x": [], "y": [], "z": [], "i": [], "j": [], "k": []}
+    labels = labels or set()
+    source_indices = source_indices or set()
+    if not labels and not source_indices:
+        return payload
+    atom_scale = float(style.get("atom_scale", 1.0))
+    for atom in scene.get("draw_atoms") or []:
+        matched = bool(labels) and str(atom.get("label") or "") in labels
+        if not matched and source_indices:
+            source = atom.get("_source_index")
+            if source is not None:
+                try:
+                    matched = int(source) in source_indices
+                except (TypeError, ValueError):
+                    matched = False
+        if not matched:
+            continue
+        if not _atom_render_visible(atom):
+            continue
+        radius = max(float(atom.get("atom_radius", 0.18)), 0.05) * atom_scale * radius_scale
+        vertices, triangles = _sphere_mesh(atom.get("cart", [0.0, 0.0, 0.0]), radius, lat_steps=8, lon_steps=12)
+        _append_mesh(payload, vertices, triangles)
+    return payload
+
+
 def selection_outline_trace(
     scene: dict,
     style: dict,
@@ -15,16 +56,7 @@ def selection_outline_trace(
     selected = set(selected_labels or [])
     if not selected:
         return None
-    payload = {"x": [], "y": [], "z": [], "i": [], "j": [], "k": []}
-    atom_scale = float(style.get("atom_scale", 1.0))
-    for atom in scene.get("draw_atoms") or []:
-        if str(atom.get("label") or "") not in selected:
-            continue
-        if not _atom_render_visible(atom):
-            continue
-        radius = max(float(atom.get("atom_radius", 0.18)), 0.05) * atom_scale * 1.18
-        vertices, triangles = _sphere_mesh(atom.get("cart", [0.0, 0.0, 0.0]), radius, lat_steps=8, lon_steps=12)
-        _append_mesh(payload, vertices, triangles)
+    payload = _atom_outline_payload(scene, style, labels=selected, radius_scale=1.18)
     if not payload["x"]:
         return None
     return _annotate_trace(go.Mesh3d(
@@ -41,6 +73,41 @@ def selection_outline_trace(
         showlegend=False,
         name="selection-outline",
     ), "selection")
+
+
+def disorder_preview_outline_trace(
+    scene: dict,
+    style: dict | None = None,
+    *,
+    highlight_labels: set[str] | None = None,
+    highlight_source_indices: set[int] | None = None,
+    color: str = "#FFD400",
+    opacity: float = 0.55,
+    name: str = "disorder-preview-outline",
+):
+    style = style or {}
+    payload = _atom_outline_payload(
+        scene,
+        style,
+        labels=set(highlight_labels or []),
+        source_indices=set(highlight_source_indices or []),
+        radius_scale=1.24,
+    )
+    return _annotate_trace(go.Mesh3d(
+        x=payload["x"],
+        y=payload["y"],
+        z=payload["z"],
+        i=payload["i"],
+        j=payload["j"],
+        k=payload["k"],
+        color=str(color),
+        opacity=float(opacity),
+        flatshading=False,
+        hoverinfo="skip",
+        showlegend=False,
+        visible=bool(payload["x"]),
+        name=name,
+    ), "disorder_preview")
 
 def _atom_selection_trace(scene: dict, style: dict, hidden_labels: set | None = None):
     xs, ys, zs, sizes, labels, customdata = [], [], [], [], [], []

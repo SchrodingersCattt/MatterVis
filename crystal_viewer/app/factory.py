@@ -6,9 +6,11 @@ from ..api import register_api
 from .camera_helpers import *
 from .editor_tables import *
 from .editor_transforms import *
+from .editor_operations import *
 from .runtime import _install_callback_audit, _start_cache_prewarm
 from .style_helpers import *
 from .callbacks_editors import register_editor_callbacks
+from .callbacks_disorder import register_disorder_callbacks
 from .callbacks_state import register_state_callbacks
 from .callbacks_view import register_view_callbacks
 from .backend import ViewerBackend
@@ -86,6 +88,7 @@ def create_app(
         # 5 s "default screen" window between page reload and the
         # first poll tick.
         first_state = backend.get_state()
+        disorder_resolve = first_state.get("disorder_resolve") or {}
         first_figure, first_topology = backend.figure_for_state(first_state)
         first_scene = backend.scene_for_state(first_state)
         return html.Div(
@@ -107,6 +110,10 @@ def create_app(
                 ),
                 dcc.Store(id="native-upload-sync", data={"seq": 0}),
                 dcc.Store(id="scene-event-store", data={"seq": 0}),
+                dcc.Store(id="disorder-replicas-store", data={"replicas": [], "scene_id": None, "status": "idle"}),
+                dcc.Store(id="disorder-hover-id", data=None),
+                dcc.Store(id="disorder-preview-sink", data=None),
+                dcc.Store(id="disorder-persist-sink", data=None),
                 dcc.Download(id="export-download"),
                 dcc.Interval(id="status-dismiss-timer", interval=5000, n_intervals=0, disabled=True),
                 # 5 s is a deliberate compromise: long enough to avoid
@@ -765,6 +772,13 @@ def create_app(
                                     n_clicks=0,
                                     title="Show or hide analysis panel",
                                 ),
+                                html.Button(
+                                    "Operation",
+                                    id="operation-panel-toggle",
+                                    className="analysis-panel-toggle operation-panel-toggle",
+                                    n_clicks=0,
+                                    title="Show operation panel",
+                                ),
                                 html.Div(
                                     [
                                         html.Div("Analysis", className="analysis-panel-title"),
@@ -780,40 +794,51 @@ def create_app(
                         ),
                         html.Div(
                             [
-                                html.Section(
+                                html.Div(
                                     [
-                                        html.Div("Topology", className="analysis-section-title"),
-                                        html.Label(
-                                            "Analyze fragment",
-                                            htmlFor="topology-site-index",
-                                            className="analysis-label",
-                                        ),
-                                        dcc.Dropdown(
-                                            id="topology-site-index",
-                                            options=backend.fragment_options(first_state),
-                                            value=first_state.get("topology_site_index"),
-                                            placeholder="(first match of selected species, or click in viewer)",
-                                            clearable=True,
-                                            className="analysis-control",
-                                        ),
-                                        html.Div(
-                                            "Display tiling and analysis are independent: switch the analysed "
-                                            "fragment here without changing what is drawn.",
-                                            className="analysis-help",
-                                        ),
-                                        dcc.Graph(
-                                            id="topology-histogram",
-                                            figure=topology_histogram_figure(first_topology),
-                                            className="analysis-graph",
-                                            style={"height": "260px"},
-                                        ),
-                                        html.Pre(
-                                            id="topology-results",
-                                            children=topology_results_markdown(first_topology),
-                                            className="analysis-results",
+                                        html.Section(
+                                            [
+                                                html.Div("Topology", className="analysis-section-title"),
+                                                html.Label(
+                                                    "Analyze fragment",
+                                                    htmlFor="topology-site-index",
+                                                    className="analysis-label",
+                                                ),
+                                                dcc.Dropdown(
+                                                    id="topology-site-index",
+                                                    options=backend.fragment_options(first_state),
+                                                    value=first_state.get("topology_site_index"),
+                                                    placeholder="(first match of selected species, or click in viewer)",
+                                                    clearable=True,
+                                                    className="analysis-control",
+                                                ),
+                                                html.Div(
+                                                    "Display tiling and analysis are independent: switch the analysed "
+                                                    "fragment here without changing what is drawn.",
+                                                    className="analysis-help",
+                                                ),
+                                                dcc.Graph(
+                                                    id="topology-histogram",
+                                                    figure=topology_histogram_figure(first_topology),
+                                                    className="analysis-graph",
+                                                    style={"height": "260px"},
+                                                ),
+                                                html.Pre(
+                                                    id="topology-results",
+                                                    children=topology_results_markdown(first_topology),
+                                                    className="analysis-results",
+                                                ),
+                                            ],
+                                            className="analysis-section",
                                         ),
                                     ],
-                                    className="analysis-section",
+                                    id="analysis-panel-content",
+                                    className="analysis-tab-content",
+                                ),
+                                html.Div(
+                                    [_operation_panel_section(disorder_resolve)],
+                                    id="operation-panel-content",
+                                    className="analysis-tab-content analysis-tab-content--hidden",
                                 ),
                             ],
                             className="analysis-panel-body",
@@ -884,6 +909,7 @@ def create_app(
 
     register_state_callbacks(app, backend)
     register_editor_callbacks(app, backend)
+    register_disorder_callbacks(app, backend)
     register_view_callbacks(app, backend)
     register_api(app, backend)
     if str(os.environ.get("MATTERVIS_PREWARM", "1")).lower() not in {"0", "false", "no", "off"}:

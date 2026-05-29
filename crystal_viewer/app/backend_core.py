@@ -164,6 +164,8 @@ class _CoreBackendMixin:
             # ``agents/transforms_api.md`` for the schema. Empty list =
             # no transform; ``apply_transforms`` short-circuits.
             "transforms": [],
+            "disorder_resolve": {"method": "enumerate", "count": 5, "seed": None},
+            "disorder_replicas": [],
             # Manual 2D overlay placement overrides. Paper-anchored
             # entries move viewport components such as the compass; world-
             # anchored entries store a target plus pixel offset so labels
@@ -247,7 +249,7 @@ class _CoreBackendMixin:
         key_state = {
             k: v
             for k, v in state.items()
-            if k not in ("version", "server_started_at", "camera", "camera_revision")
+            if k not in ("version", "server_started_at", "camera", "camera_revision", "disorder_resolve", "disorder_replicas")
         }
         # Phase 6: ``polyhedron_specs[i].enabled`` is honoured via a
         # post-cache trace-visibility patch (see ``figure_for_state``
@@ -905,6 +907,14 @@ class _CoreBackendMixin:
             state["transforms"] = _normalize_transforms(patch.get("transforms") or [])
         if "selection" in patch:
             state["selection"] = _normalize_selection(patch.get("selection"))
+        if "disorder_resolve" in patch:
+            state["disorder_resolve"] = _normalize_disorder_resolve(
+                patch.get("disorder_resolve"),
+                state.get("disorder_resolve"),
+            )
+        if "disorder_replicas" in patch:
+            replicas = patch.get("disorder_replicas") or []
+            state["disorder_replicas"] = replicas if isinstance(replicas, list) else []
         # ``supercell`` is a v2 shorthand: ``{"a": Na, "b": Nb, "c": Nc}``
         # is rewritten to a single ``repeat`` transform appended to the
         # transforms list. Keeps the AI scripting path one-line for the

@@ -165,6 +165,7 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None) ->
     )
     if selection_trace is not None:
         trace_dicts.extend(_traces_to_dicts([selection_trace]))
+    trace_dicts.extend(_traces_to_dicts([disorder_preview_outline_trace(scene, style, highlight_labels=set())]))
     trace_dicts.extend(_traces_to_dicts(_contact_traces(scene, style)))
     # _highlight_traces (fake specular dots) are deliberately *not* added.
     # They were Scatter3d markers with pixel-fixed sizes -- in the static
