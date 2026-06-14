@@ -632,7 +632,7 @@
        drag updates. Both go to scheduleRedraw which coalesces. */
     gd.on("plotly_relayout", function (eventData) { scheduleRedraw(gd, cameraFromRelayout(eventData)); });
     gd.on("plotly_relayouting", function (eventData) { scheduleRedraw(gd, cameraFromRelayout(eventData)); });
-    gd.on("plotly_afterplot", function () { scheduleRedraw(gd, null); });
+    gd.on("plotly_afterplot", function () { redrawCompass(gd, null, true); });
 
     /* DOM-level drag arming. Window-level mouseup so we still
        disarm if the user releases outside the graph div. */
