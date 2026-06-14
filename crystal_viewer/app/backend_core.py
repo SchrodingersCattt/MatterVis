@@ -1086,6 +1086,9 @@ class _CoreBackendMixin:
             preset=self.preset,
             transforms=transforms,
         )
+        scene_label = state.get("scene_label")
+        if scene_label:
+            scene["display_title"] = str(scene_label)
         bundle.scene = scene
         bundle.fragment_table = scene.get("fragment_table", bundle.fragment_table)
         return scene

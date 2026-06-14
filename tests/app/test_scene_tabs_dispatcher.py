@@ -177,6 +177,29 @@ def test_scene_tabs_dom_caches_fingerprint_so_poll_does_not_tear_down_react_tree
     )
 
 
+def test_update_view_allows_scene_switch_during_graph_interaction(tmp_path: Path):
+    """A drag / wheel frame may set ``graph-interaction-store.active``.
+    That should defer redundant redraws for the same scene, but it must not
+    suppress a tab switch; otherwise the tab label changes while the graph
+    stays on the previous material.
+    """
+    import inspect
+
+    app = create_app(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    callbacks = [
+        callback
+        for callback in _callbacks_with_output(app, "crystal-graph", "figure")
+        if ("agent-state-store", "data") in _inputs(callback)
+        and ("graph-interaction-store", "data") in _inputs(callback)
+    ]
+    assert len(callbacks) == 1
+    source = inspect.getsource(callbacks[0]["callback"])
+
+    assert "last_rendered_scene_id" in source
+    assert "interaction_active and last_rendered_scene_id == scene_id" in source
+    assert "_last_rendered_scene_id = state.get(\"scene_id\")" in source
+
+
 def test_backend_upload_append_and_close_actions_drive_scene_options(tmp_path: Path):
     backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
     first_scene = backend.active_scene_id()

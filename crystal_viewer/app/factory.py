@@ -110,6 +110,7 @@ def create_app(
                 ),
                 dcc.Store(id="native-upload-sync", data={"seq": 0}),
                 dcc.Store(id="scene-event-store", data={"seq": 0}),
+                dcc.Store(id="graph-interaction-store", data={"active": False, "ts": 0}),
                 dcc.Store(id="disorder-replicas-store", data={"replicas": [], "scene_id": None, "status": "idle"}),
                 dcc.Store(id="disorder-hover-id", data=None),
                 dcc.Store(id="disorder-preview-sink", data=None),
@@ -741,7 +742,12 @@ def create_app(
                 html.Div(
                     [
                         dcc.Loading(
-                            dcc.Graph(id="crystal-graph", figure=first_figure, style={"height": "100vh"}),
+                            dcc.Graph(
+                                id="crystal-graph",
+                                figure=first_figure,
+                                style={"height": "100%", "width": "100%"},
+                                config={"responsive": True},
+                            ),
                             type="circle",
                             color="#7C5CBF",
                             # Avoid a spinner flash on every short callback
@@ -755,10 +761,18 @@ def create_app(
                             # registered.
                             delay_show=300,
                             delay_hide=0,
+                            style={"height": "100%", "width": "100%"},
+                            parent_style={"height": "100%", "width": "100%"},
                         )
                     ],
                     id="center-panel",
-                    style={"flex": "1", "minWidth": 0},
+                    style={
+                        "flex": "1 1 auto",
+                        "minWidth": 0,
+                        "minHeight": 0,
+                        "height": "100vh",
+                        "overflow": "hidden",
+                    },
                 ),
                 html.Div(id="right-splitter", className="panel-splitter"),
                 html.Div(
@@ -901,7 +915,12 @@ def create_app(
                 ),
             ],
             id="viewer-root",
-            style={"display": "flex", "height": "100vh", "backgroundColor": "#FFFFFF"},
+            style={
+                "display": "flex",
+                "height": "100vh",
+                "overflow": "hidden",
+                "backgroundColor": "#FFFFFF",
+            },
         )
 
     app.layout = _serve_layout
