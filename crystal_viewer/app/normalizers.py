@@ -53,6 +53,24 @@ def _normalize_selection(raw: Any) -> dict[str, Any]:
     return {"atom_labels": atom_labels, "active_label": active, "order": order}
 
 
+def _normalize_disorder_resolve(raw: Any, current: dict[str, Any] | None = None) -> dict[str, Any]:
+    current = current or {}
+    raw = raw if isinstance(raw, dict) else {}
+    method = str(raw.get("method") or current.get("method") or "enumerate")
+    if method not in {"optimal", "enumerate", "random"}:
+        method = "enumerate"
+    try:
+        count = int(raw.get("count", current.get("count", 5)) or 5)
+    except (TypeError, ValueError):
+        count = 5
+    seed_value = raw.get("seed", current.get("seed"))
+    try:
+        seed = None if seed_value in (None, "") else int(seed_value)
+    except (TypeError, ValueError):
+        seed = None
+    return {"method": method, "count": max(1, min(count, 128)), "seed": seed}
+
+
 def _coerce_polyhedron_enforce_enclosure(raw: Any) -> bool:
     if isinstance(raw, str):
         text = raw.strip().lower()

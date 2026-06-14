@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from crystal_viewer.app import create_app
+from _layout_helpers import find_component
 
 
 @pytest.fixture
@@ -55,3 +56,22 @@ def test_layout_reflects_added_scene(app_and_backend):
     # The two layout objects must not be identical -- if they were, Dash
     # would have served the cached snapshot.
     assert refreshed_layout is not initial_layout
+
+
+def test_graph_fills_center_panel(app_and_backend):
+    app, _ = app_and_backend
+    layout = app.layout()
+
+    root = find_component(layout, "viewer-root")
+    center = find_component(layout, "center-panel")
+    loading = center.children[0]
+    graph = find_component(layout, "crystal-graph")
+
+    assert root.style["overflow"] == "hidden"
+    assert center.style["height"] == "100vh"
+    assert center.style["overflow"] == "hidden"
+    assert center.style["minHeight"] == 0
+    assert loading.style == {"height": "100%", "width": "100%"}
+    assert loading.parent_style == {"height": "100%", "width": "100%"}
+    assert graph.style == {"height": "100%", "width": "100%"}
+    assert graph.config.get("responsive") is True

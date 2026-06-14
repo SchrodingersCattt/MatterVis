@@ -165,6 +165,7 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None) ->
     )
     if selection_trace is not None:
         trace_dicts.extend(_traces_to_dicts([selection_trace]))
+    trace_dicts.extend(_traces_to_dicts([disorder_preview_outline_trace(scene, style, highlight_labels=set())]))
     trace_dicts.extend(_traces_to_dicts(_contact_traces(scene, style)))
     # _highlight_traces (fake specular dots) are deliberately *not* added.
     # They were Scatter3d markers with pixel-fixed sizes -- in the static
@@ -195,7 +196,8 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None) ->
     fig = go.Figure(data=trace_dicts, _validate=False)
 
     show_title = bool(style.get("show_title", True))
-    title_arg = dict(text=scene["title"], x=0.5) if show_title else None
+    title_text = scene.get("display_title") or scene.get("title") or scene.get("name") or ""
+    title_arg = dict(text=str(title_text), x=0.5) if show_title else None
     top_margin = 50 if show_title else 0
 
     ui_revision = style.get("uirevision", str(scene.get("name", "scene")))
@@ -208,7 +210,10 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None) ->
         paper_bgcolor=style.get("background", "#FFFFFF"),
         plot_bgcolor=style.get("background", "#FFFFFF"),
         margin=dict(l=0, r=0, t=top_margin, b=0),
-        scene=figure_axis_layout(scene, style, xr, yr, zr),
+        scene={
+            **figure_axis_layout(scene, style, xr, yr, zr),
+            "domain": {"x": [0, 1], "y": [0, 1]},
+        },
         meta=layout_meta,
     )
     key_annotations, key_shapes = compose_axis_key_layout(scene, style)

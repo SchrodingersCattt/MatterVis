@@ -57,7 +57,25 @@
       const gd = graphDiv();
       if (!gd) return;
       if (seq) lastFigureSeq = seq;
-      window.Plotly.react(gd, payload.figure.data || [], payload.figure.layout || {});
+      // Background re-renders (topology-ready / prewarm) are same-scene
+      // figure pushes. The user's live camera comes from mouse-drag
+      // rotation, which is NOT persisted server-side (only axis-button
+      // moves are), so the incoming layout carries a stale/default
+      // scene.camera. Preserve the current on-screen camera across the
+      // react so async pushes never reset the view.
+      const layout = payload.figure.layout || {};
+      try {
+        const liveCam =
+          gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene.camera;
+        if (liveCam) {
+          layout.scene = Object.assign({}, layout.scene || {}, {
+            camera: JSON.parse(JSON.stringify(liveCam)),
+          });
+        }
+      } catch (err) {
+        /* best effort: fall back to server-provided camera */
+      }
+      window.Plotly.react(gd, payload.figure.data || [], layout);
     });
     ws.addEventListener("close", function () {
       window.setTimeout(connect, 1500);

@@ -37,3 +37,14 @@ def test_backend_figures_use_each_scene_camera(tmp_path):
     assert fig_a.layout.scene.camera.center.x == CAMERA_A["center"]["x"]
     assert fig_b.layout.scene.camera.eye.x == CAMERA_B["eye"]["x"]
     assert fig_b.layout.scene.camera.center.x == CAMERA_B["center"]["x"]
+
+
+def test_backend_figure_title_prefers_scene_label(tmp_path):
+    backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    scene_id = backend.active_scene_id()
+    backend.update_scene(scene_id, {"label": "1_HTP"})
+
+    state = backend.get_state(scene_id)
+    fig, _ = backend.figure_for_state(state)
+
+    assert fig.layout.title.text == "1_HTP"

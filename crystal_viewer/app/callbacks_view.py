@@ -13,6 +13,11 @@ from .backend import ViewerBackend
 
 
 def register_view_callbacks(app, backend):
+    # Throttle high-frequency drag relayout frames so camera persistence
+    # does not bump backend version on every mouse-move.
+    _last_camera_commit_by_scene: dict[str, float] = {}
+    _camera_commit_min_interval_s = 0.25
+
     @app.callback(
         Output("rightclick-target", "data", allow_duplicate=True),
         Input("rightclick-target-fallback", "value"),
@@ -457,13 +462,34 @@ def register_view_callbacks(app, backend):
         prevent_initial_call=True,
     )
     def capture_camera(relayout_data, camera_state, scene_id):
+        scene_id = scene_id or backend.active_scene_id()
         if scene_id and scene_id not in backend.scene_store.scenes:
             return no_update
+        relayout = relayout_data if isinstance(relayout_data, dict) else {}
+        full_camera_payload = bool(
+            isinstance(relayout.get("scene.camera"), dict)
+            or (
+                isinstance(relayout.get("scene"), dict)
+                and isinstance((relayout.get("scene") or {}).get("camera"), dict)
+            )
+        )
+        current_camera = _camera_from_store(camera_state, scene_id) or backend.get_state(scene_id).get("camera")
         camera = _camera_from_relayout_data(
-            relayout_data,
-            _camera_from_store(camera_state, scene_id) or backend.get_state(scene_id).get("camera"),
+            relayout,
+            current_camera,
         )
         if not camera:
+            return no_update
+        if isinstance(current_camera, dict) and camera == current_camera:
+            return no_update
+        scene_key = str(scene_id or "")
+        now = time.monotonic()
+        last_commit = _last_camera_commit_by_scene.get(scene_key, 0.0)
+        # Dragging emits dotted partial camera updates every frame; persisting
+        # each one churns backend version and WS snapshots. Keep the server in
+        # sync at ~4 Hz during motion, but always persist full-camera payloads
+        # (mouseup/programmatic relayout) immediately.
+        if not full_camera_payload and (now - last_commit) < _camera_commit_min_interval_s:
             return no_update
         # ``broadcast=False`` is essential here: the browser is the
         # source of truth for the camera, so we must NOT arm
@@ -476,6 +502,7 @@ def register_view_callbacks(app, backend):
         backend.apply_intent(
             {"type": "set_camera", "scene_id": scene_id, "payload": {"camera": camera}}
         )
+        _last_camera_commit_by_scene[scene_key] = now
         return _camera_store_payload(scene_id, camera)
 
     @app.callback(
@@ -560,10 +587,12 @@ def register_view_callbacks(app, backend):
         Output("topology-results", "children"),
         Output("structure-summary", "children"),
         Input("agent-state-store", "data"),
+        Input("graph-interaction-store", "data"),
         State("camera-state-store", "data"),
     )
     def update_view(
         agent_state,
+        interaction_state,
         camera_state,
     ):
         # ``update_view`` is the dominant cost when the user pokes a
@@ -576,6 +605,17 @@ def register_view_callbacks(app, backend):
         # tell which leg is slow without re-profiling.
         cb_start = time.monotonic()
         state = backend.normalize_state(agent_state or backend.get_state())
+        scene_id = state.get("scene_id")
+        interaction_active = bool((interaction_state or {}).get("active"))
+        last_rendered_scene_id = getattr(update_view, "_last_rendered_scene_id", None)
+        if interaction_active and last_rendered_scene_id == scene_id:
+            perf_log.record(
+                "callback:update_view",
+                duration_ms=(time.monotonic() - cb_start) * 1000.0,
+                kind="cb",
+                info={"scene_id": scene_id, "figure": "deferred_interaction"},
+            )
+            return no_update, no_update, no_update, no_update
         camera = _camera_from_store(camera_state, state.get("scene_id"))
         if camera:
             state["camera"] = camera
@@ -665,6 +705,7 @@ def register_view_callbacks(app, backend):
                     "side_panel": "cached",
                 },
             )
+            update_view._last_rendered_scene_id = state.get("scene_id")
             return fig, no_update, no_update, no_update
         update_view._topo_cache_key = topo_key
         with perf_log.time_block("update_view:side_panel", kind="event"):
@@ -677,6 +718,7 @@ def register_view_callbacks(app, backend):
             kind="cb",
             info={"scene_id": state.get("scene_id"), "side_panel": "rebuilt"},
         )
+        update_view._last_rendered_scene_id = state.get("scene_id")
         return fig, histogram, md, summary
 
     @app.callback(
