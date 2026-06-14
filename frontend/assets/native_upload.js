@@ -62,6 +62,28 @@
     store.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
+  async function forceActiveSceneFromServer(payload) {
+    try {
+      const response = await fetch("/api/v2/scenes", { cache: "no-store" });
+      if (!response.ok) {
+        return;
+      }
+      const scenesPayload = await response.json();
+      const activeId = scenesPayload && scenesPayload.active_id;
+      if (!activeId || !window.dash_clientside || typeof window.dash_clientside.set_props !== "function") {
+        return;
+      }
+      // The upload handler has already made the new scene active server-side.
+      // Make the browser tab selection explicit too; relying only on the
+      // pending_state/native-upload-sync callback can lose a race with the
+      // 5s poll or a concurrent store update on large uploads.
+      window.dash_clientside.set_props("scene-tabs", { value: activeId });
+      triggerDashSync(payload || { status: "success", names: [] });
+    } catch (_err) {
+      // Best effort; the normal Dash sync path still runs.
+    }
+  }
+
   /* Active wait for the server to register the new scene tab.
    *
    * Without this, the "Updating scene..." status (set in
@@ -116,7 +138,9 @@
         window.clearTimeout(timeout);
         if (activeSceneWait === ws) activeSceneWait = null;
         try { ws.close(); } catch (_err) {}
-        triggerDashSync({ status: "success", names: uploadedNames });
+        const payload = { status: "success", names: uploadedNames };
+        triggerDashSync(payload);
+        forceActiveSceneFromServer(payload);
         setStatus("Loaded: " + uploadedNames.join(", "), "success");
       }
     });
@@ -184,7 +208,9 @@
         setStatus("Processing complete: " + names.join(", "), "success");
       }
       setStatus("Uploaded CIF(s): " + names.join(", ") + ". Updating scene...", "success");
-      triggerDashSync({ status: "success", names: names });
+      const payload = { status: "success", names: names };
+      triggerDashSync(payload);
+      forceActiveSceneFromServer(payload);
       // Belt-and-braces: actively wait for the scene tab to appear
       // and switch to it. Without this the status text never clears.
       waitForSceneAndSwitch(names);

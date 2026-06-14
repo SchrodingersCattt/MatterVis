@@ -10,22 +10,43 @@ from typing import Any
 from .backend_topology import compute_topology_geometry_payload
 
 
+# Opt-in process-based topology worker via environment variable.
+# Thread-first is the default because sending full ``LoadedCrystal`` /
+# ``MolecularCrystal`` / pymatgen objects across process boundaries
+# relies on third-party pickle support, which historically caused
+# silent repeated fallbacks.  Set ``MATTERVIS_TOPOLOGY_WORKER=process``
+# for CPU-isolated topology on hosts where MolCrysKit objects are
+# reliably picklable.
+_TOPOLOGY_WORKER_MODE = os.environ.get("MATTERVIS_TOPOLOGY_WORKER", "thread")
+
+
 class AsyncRenderWorker:
     """Background topology/figure pipeline.
 
-    Flask request threads only enqueue work. The expensive MolCrysKit
-    topology pass runs in a process pool when the payload is picklable,
-    and final Plotly JSON assembly runs in a daemon thread before the
-    result is pushed to WebSocket subscribers.
+    Flask request threads only enqueue work.  The expensive MolCrysKit
+    topology pass runs in a background thread pool by default; an
+    optional process-pool mode is available via
+    ``MATTERVIS_TOPOLOGY_WORKER=process``.
+
+    Final Plotly JSON assembly always runs in a daemon thread before
+    the result is pushed to WebSocket subscribers.
     """
 
     def __init__(self, backend):
         self.backend = backend
         max_workers = max(1, min(4, os.cpu_count() or 1))
-        self._process_pool = ProcessPoolExecutor(
-            max_workers=max_workers,
-            mp_context=None,
-        )
+        if _TOPOLOGY_WORKER_MODE == "process":
+            self._compute_pool = ProcessPoolExecutor(
+                max_workers=max_workers,
+                mp_context=None,
+            )
+            self._use_process = True
+        else:
+            self._compute_pool = ThreadPoolExecutor(
+                max_workers=max_workers,
+                thread_name_prefix="mattervis-topology-compute",
+            )
+            self._use_process = False
         self._finalize_pool = ThreadPoolExecutor(
             max_workers=2,
             thread_name_prefix="mattervis-render-finalize",
@@ -49,8 +70,10 @@ class AsyncRenderWorker:
             "cutoff": float(context["cutoff"]),
         }
         try:
-            future = self._process_pool.submit(compute_topology_geometry_payload, payload)
+            future = self._compute_pool.submit(compute_topology_geometry_payload, payload)
         except Exception:
+            # Submission failure (e.g. process pool couldn't pickle).
+            # Fall back to direct computation in the finalizer thread.
             future = Future()
             self._finalize_pool.submit(self._compute_fallback, future, payload)
         future.add_done_callback(
@@ -84,10 +107,9 @@ class AsyncRenderWorker:
             try:
                 geometry = future.result()
             except Exception:
-                # Pickling a third-party object can fail in some MCK /
-                # pymatgen versions. Retain the invariant that request
-                # threads never block by recomputing in this background
-                # finalizer thread instead of falling back synchronously.
+                # Worker failure (pickle, OOM, or MolCrysKit crash).
+                # Recompute in this finalizer thread so the invariant
+                # "request thread never blocks" still holds.
                 geometry = compute_topology_geometry_payload(payload)
             if geometry is None:
                 return
@@ -149,4 +171,4 @@ class AsyncRenderWorker:
 
     def shutdown(self) -> None:
         self._finalize_pool.shutdown(wait=False, cancel_futures=True)
-        self._process_pool.shutdown(wait=False, cancel_futures=True)
+        self._compute_pool.shutdown(wait=False, cancel_futures=True)

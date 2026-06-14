@@ -90,49 +90,117 @@ def _replica_rows(replicas: list[dict[str, Any]], *, status: str = "ok") -> list
     return rows
 
 
-# Pure-browser hover preview. ``disorder_hover.js`` writes the hovered
-# replica id into ``disorder-hover-id``; this clientside callback reads
-# the pre-computed per-replica mesh out of ``disorder-replicas-store``
-# and swaps it onto the ``disorder-preview-outline`` trace with a single
-# ``Plotly.restyle``. No server round trip, no figure rebuild.
+# Pure-browser preview path:
+#
+# 1. When ``disorder-replicas-store`` changes after Resolve, inject one
+#    transparent Mesh3d trace per replica. This is the only point where preview
+#    geometry is added to Plotly.
+# 2. Hover only flips opacity on those already-existing traces. It never edits
+#    ``x/y/z/i/j/k`` geometry or ``visible``. In Plotly gl3d, both geometry
+#    edits and ``visible=false -> true`` can re-enter scene setup and snap the
+#    camera before any restore can run.
+_PREPARE_PREVIEW_JS = """
+function(store) {
+    var nope = window.dash_clientside.no_update;
+    var gd = document.querySelector('#crystal-graph .js-plotly-plot')
+             || document.getElementById('crystal-graph');
+    if (!gd || !window.Plotly || !gd.data) { return nope; }
+
+    var prefix = 'disorder-preview-outline:';
+    var oldIndices = [];
+    for (var i = 0; i < gd.data.length; i++) {
+        if (String(gd.data[i].name || '').indexOf(prefix) === 0) {
+            oldIndices.push(i);
+        }
+    }
+
+    function liveViewport() {
+        try {
+            var sc = gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
+            if (!sc || typeof sc.getCamera !== 'function') { return null; }
+            return {
+                scene: sc,
+                camera: JSON.parse(JSON.stringify(sc.getCamera())),
+                aspectratio: sc.glplot && sc.glplot.getAspectratio && sc.glplot.getAspectratio(),
+            };
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function restoreViewport(viewport) {
+        if (!viewport || !viewport.scene || !viewport.camera) { return; }
+        try {
+            viewport.scene.setViewport({
+                camera: viewport.camera,
+                aspectratio: viewport.aspectratio
+                    || (viewport.scene.glplot && viewport.scene.glplot.getAspectratio && viewport.scene.glplot.getAspectratio()),
+            });
+        } catch (e) {}
+    }
+
+    var traces = [];
+    if (store && store.replicas) {
+        for (var r = 0; r < store.replicas.length; r++) {
+            var rep = store.replicas[r] || {};
+            var mesh = rep.preview_mesh || {};
+            var replicaId = String(rep.id || '');
+            if (!replicaId || !mesh.x || !mesh.x.length) { continue; }
+            traces.push({
+                type: 'mesh3d',
+                name: prefix + replicaId,
+                x: mesh.x || [],
+                y: mesh.y || [],
+                z: mesh.z || [],
+                i: mesh.i || [],
+                j: mesh.j || [],
+                k: mesh.k || [],
+                color: '#FFD400',
+                opacity: 0,
+                flatshading: false,
+                hoverinfo: 'skip',
+                showlegend: false,
+                visible: true,
+                meta: {kind: 'disorder-preview-outline', replica_id: replicaId},
+            });
+        }
+    }
+
+    var viewport = liveViewport();
+    var p = Promise.resolve();
+    if (oldIndices.length) {
+        p = p.then(function() { return window.Plotly.deleteTraces(gd, oldIndices); });
+    }
+    if (traces.length) {
+        p = p.then(function() { return window.Plotly.addTraces(gd, traces); });
+    }
+    p.then(function() {
+        window.requestAnimationFrame(function() { restoreViewport(viewport); });
+    });
+    return nope;
+}
+"""
+
 _HOVER_PREVIEW_JS = """
 function(replicaId, store) {
     var nope = window.dash_clientside.no_update;
     var gd = document.querySelector('#crystal-graph .js-plotly-plot')
              || document.getElementById('crystal-graph');
     if (!gd || !window.Plotly || !gd.data) { return nope; }
-    var traceIndex = -1;
+    var prefix = 'disorder-preview-outline:';
+    var indices = [];
+    var opacity = [];
     for (var t = 0; t < gd.data.length; t++) {
-        if (gd.data[t].name === 'disorder-preview-outline') { traceIndex = t; break; }
+        var name = String(gd.data[t].name || '');
+        if (name.indexOf(prefix) !== 0) { continue; }
+        indices.push(t);
+        opacity.push(Boolean(replicaId) && name === prefix + String(replicaId) ? 0.55 : 0);
     }
-    if (traceIndex < 0) { return nope; }
-    var mesh = {x: [], y: [], z: [], i: [], j: [], k: []};
-    var visible = false;
-    if (replicaId && store && store.replicas) {
-        for (var r = 0; r < store.replicas.length; r++) {
-            var rep = store.replicas[r];
-            if (String(rep.id) === String(replicaId) && rep.preview_mesh) {
-                mesh = rep.preview_mesh;
-                visible = !!(mesh.x && mesh.x.length > 0);
-                break;
-            }
-        }
+    if (!indices.length) {
+        // Trace preparation may still be in flight right after Resolve.
+        return nope;
     }
-    // Data-only restyle: the figure layout pins an explicit scene.camera,
-    // fixed axis ranges and a stable uirevision, so changing this trace's
-    // mesh does NOT move the camera. We intentionally do NOT call
-    // Plotly.relayout here -- a programmatic relayout fires plotly_relayout
-    // -> the dcc.Graph relayoutData -> the server `capture_camera` callback,
-    // adding a server round-trip on every hover.
-    window.Plotly.restyle(gd, {
-        x: [mesh.x || []],
-        y: [mesh.y || []],
-        z: [mesh.z || []],
-        i: [mesh.i || []],
-        j: [mesh.j || []],
-        k: [mesh.k || []],
-        visible: visible
-    }, [traceIndex]);
+    window.Plotly.restyle(gd, {opacity: opacity}, indices);
     return nope;
 }
 """
@@ -158,8 +226,8 @@ def register_disorder_callbacks(app, backend):
         # axis-button moves (NOT mouse-drag rotation). The result was a
         # full rebuild that reset the user's view and felt slow. The
         # disorder preview lives entirely in ``disorder-replicas-store``
-        # (browser) + the always-present ``disorder-preview-outline``
-        # trace, so no figure rebuild is needed.
+        # (browser) + per-replica preview traces injected by the client, so no
+        # figure rebuild is needed.
         scene_id = scene_id or backend.active_scene_id()
         if scene_id and scene_id not in backend.scene_store.scenes:
             return no_update, no_update
@@ -217,8 +285,15 @@ def register_disorder_callbacks(app, backend):
         return store, _replica_rows(replicas, status=status)
 
     app.clientside_callback(
+        _PREPARE_PREVIEW_JS,
+        Output("disorder-preview-sink", "data", allow_duplicate=True),
+        Input("disorder-replicas-store", "data"),
+        prevent_initial_call=True,
+    )
+
+    app.clientside_callback(
         _HOVER_PREVIEW_JS,
-        Output("disorder-preview-sink", "data"),
+        Output("disorder-preview-sink", "data", allow_duplicate=True),
         Input("disorder-hover-id", "data"),
         State("disorder-replicas-store", "data"),
         prevent_initial_call=True,

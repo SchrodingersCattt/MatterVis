@@ -12,6 +12,13 @@ from .rightclick import _normalize_polyhedron_specs
 from .render_worker import AsyncRenderWorker
 from ..config import current_config
 
+# Maximum number of distinct figure cache entries.  A bounded LRU
+# (least-recently-used) eviction policy kicks in when the cache
+# exceeds this limit; the oldest entry is dropped.  16 entries
+# comfortably covers typical tab-switch + display-mode + slider
+# patterns without unbounded memory growth.
+FIGURE_CACHE_MAX = 16
+
 
 class _CoreBackendMixin:
     def __init__(self, preset_path: str, names: Optional[Iterable[str]] = None, root_dir: Optional[str] = None):

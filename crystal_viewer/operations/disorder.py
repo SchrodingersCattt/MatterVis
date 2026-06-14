@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Any
+from typing import Any, Iterable
 
 
 _VALID_METHODS = {"optimal", "enumerate", "random"}
@@ -121,9 +121,25 @@ def resolve_disorder(
     if not replica_sets:
         return []
 
-    optimal = set(optimal_sets[0]) if optimal_sets else set(replica_sets[0])
     raw_atoms = list(getattr(bundle, "raw_atoms", []) or [])
     disorder_sites = _disorder_raw_indices(raw_atoms)
+
+    # MCK kept indices live in ``scan_cif_disorder`` space, which does not line
+    # up with MatterVis ``raw_atoms`` (DAN-2: 1249 vs 1081). Bridge every index
+    # we touch (optimal + all replicas) to raw-atom positions by coordinate so
+    # the diff and the highlight are computed in the same space the renderer
+    # resolves via ``_source_index``.
+    from ..structure.disorder_index import map_mck_indices_to_raw
+
+    all_mck_indices: set[int] = set()
+    for kept_tuple in (*optimal_sets, *replica_sets):
+        all_mck_indices.update(int(i) for i in kept_tuple)
+    idx_map = map_mck_indices_to_raw(cif_path, raw_atoms, all_mck_indices)
+
+    def _to_raw(indices: Iterable[int]) -> set[int]:
+        return {idx_map[int(i)] for i in indices if int(i) in idx_map}
+
+    optimal = _to_raw(optimal_sets[0]) if optimal_sets else _to_raw(replica_sets[0])
 
     out: list[dict[str, Any]] = []
     seen: set[tuple[int, ...]] = set()
@@ -131,7 +147,7 @@ def resolve_disorder(
         if kept_tuple in seen:
             continue
         seen.add(kept_tuple)
-        kept = set(kept_tuple)
+        kept = _to_raw(kept_tuple)
         added = sorted(kept - optimal)
         dropped = sorted(optimal - kept)
         if added:

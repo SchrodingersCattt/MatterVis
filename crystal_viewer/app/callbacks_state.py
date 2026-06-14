@@ -331,6 +331,13 @@ def register_state_callbacks(app, backend):
             state = backend.get_state(scene_id)
             return scene_control_outputs(state)
         state = backend.pop_pending_state()
+        # Upload completion emits ``native-upload-sync`` from the browser.
+        # Depending on callback ordering, ``pending_state`` may already have
+        # been consumed by a near-simultaneous poll tick. Native-upload is a
+        # user-visible "must refresh now" event, so fall back to current state
+        # instead of turning this edge into a no-op.
+        if not state and triggered == "native-upload-sync":
+            state = backend.get_state()
         if not state:
             return (no_update,) * n_outputs
         # Defence-in-depth against the camera-snap-back bug: even when

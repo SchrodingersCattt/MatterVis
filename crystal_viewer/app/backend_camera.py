@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from .shared import *
 from .camera_helpers import *
 from .style_helpers import *
+from .backend_core import FIGURE_CACHE_MAX
 
 
 def _figure_from_cached_dict(cached_dict: dict) -> go.Figure:
@@ -223,7 +224,7 @@ class _CameraBackendMixin:
                     topology_data,
                 )
                 self._figure_cache.move_to_end(cache_key)
-                while len(self._figure_cache) > 16:
+                while len(self._figure_cache) > FIGURE_CACHE_MAX:
                     self._figure_cache.popitem(last=False)
         # Apply the live ``enabled`` flags to this fresh build too --
         # the figure cache snapshot above stored the un-patched
