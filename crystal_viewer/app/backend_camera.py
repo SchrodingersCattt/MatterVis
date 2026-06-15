@@ -27,17 +27,7 @@ def _polyhedron_enabled_map(state: dict[str, Any] | None) -> dict[str, bool]:
     visibility patch in ``figure_for_state``. Specs without an id
     are skipped because the renderer can't route a trace to them.
     """
-    if not state:
-        return {}
-    out: dict[str, bool] = {}
-    for spec in state.get("polyhedron_specs") or []:
-        if not isinstance(spec, dict):
-            continue
-        spec_id = spec.get("id")
-        if not spec_id:
-            continue
-        out[str(spec_id)] = bool(spec.get("enabled", True))
-    return out
+    return _polyhedron_enabled_lookup(state)
 
 
 def _apply_polyhedron_visibility_patch(fig: go.Figure, state: dict[str, Any] | None) -> None:

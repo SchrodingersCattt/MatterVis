@@ -99,6 +99,53 @@ def _fast_style_patch_for_figure(
     return patch if changed else no_update
 
 
+def _polyhedron_enabled_lookup(state: Optional[dict[str, Any]]) -> dict[str, bool]:
+    """Return ``{spec_id: enabled}`` for the current named-polyhedra rows.
+
+    Kept in ``style_helpers`` so both the backend cache-hit path and the
+    Dash-side figure patch path use the same interpretation of a row checkbox.
+    """
+    out: dict[str, bool] = {}
+    topology_enabled = bool((state or {}).get("topology_enabled", True))
+    for spec in (state or {}).get("polyhedron_specs") or []:
+        if not isinstance(spec, dict) or not spec.get("id"):
+            continue
+        out[str(spec["id"])] = topology_enabled and bool(spec.get("enabled", True))
+    return out
+
+
+def _polyhedron_visibility_patch_for_figure(
+    figure: Optional[dict[str, Any]],
+    state: Optional[dict[str, Any]],
+) -> Patch | Any:
+    """Patch existing polyhedron traces to the live row enabled flags.
+
+    This is intentionally a tiny ``visible``-only Dash Patch.  It is used as
+    a safety net when a full render is deferred during a graph drag/wheel: the
+    row checkbox still gives immediate feedback for already-rendered topology
+    traces instead of appearing dead until the deferred rebuild catches up.
+    """
+    if not isinstance(figure, dict):
+        return no_update
+    enabled = _polyhedron_enabled_lookup(state)
+    if not enabled:
+        return no_update
+    patch = Patch()
+    changed = False
+    for idx, trace in enumerate(figure.get("data") or []):
+        if not isinstance(trace, dict):
+            continue
+        meta = trace.get("meta") if isinstance(trace.get("meta"), dict) else {}
+        if meta.get("kind") != "polyhedron":
+            continue
+        spec_id = meta.get("spec_id")
+        if not spec_id:
+            continue
+        patch["data"][idx]["visible"] = bool(enabled.get(str(spec_id), True))
+        changed = True
+    return patch if changed else no_update
+
+
 def _display_options_can_fast_patch(prev_options: Iterable[str] | None, next_options: Iterable[str] | None) -> bool:
     """Only cosmetic label/axis toggles are safe for trace-only patching."""
     changed = set(prev_options or []) ^ set(next_options or [])

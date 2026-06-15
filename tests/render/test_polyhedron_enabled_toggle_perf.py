@@ -161,6 +161,63 @@ def test_apply_visibility_patch_flips_disabled_spec_traces(tmp_path):
     assert fig.data[2].visible is None or fig.data[2].visible is True
 
 
+def test_dash_polyhedron_visibility_patch_flips_existing_figure_traces(tmp_path):
+    """The interaction-defer path in ``update_view`` patches existing
+    polyhedron traces instead of returning a full figure.  That prevents a
+    checked/unchecked row from looking inert while the user is rotating the
+    3D scene.
+    """
+    from crystal_viewer.app.style_helpers import _polyhedron_visibility_patch_for_figure
+
+    fig = {
+        "data": [
+            {"type": "scatter3d", "meta": {"spec_id": "p1", "kind": "polyhedron"}},
+            {"type": "mesh3d", "meta": {"spec_id": "p2", "kind": "polyhedron"}},
+            {"type": "scatter3d", "meta": {"mv_role": "atom"}},
+        ]
+    }
+    state = {
+        "polyhedron_specs": [
+            {"id": "p1", "enabled": True},
+            {"id": "p2", "enabled": False},
+        ]
+    }
+
+    patch = _polyhedron_visibility_patch_for_figure(fig, state)
+    ops = patch.to_plotly_json()["operations"]
+
+    assert {tuple(op["location"]): op["params"]["value"] for op in ops} == {
+        ("data", 0, "visible"): True,
+        ("data", 1, "visible"): False,
+    }
+
+
+def test_dash_polyhedron_visibility_patch_hides_all_when_overlay_disabled(tmp_path):
+    from crystal_viewer.app.style_helpers import _polyhedron_visibility_patch_for_figure
+
+    fig = {
+        "data": [
+            {"type": "scatter3d", "meta": {"spec_id": "p1", "kind": "polyhedron"}},
+            {"type": "mesh3d", "meta": {"spec_id": "p2", "kind": "polyhedron"}},
+        ]
+    }
+    state = {
+        "topology_enabled": False,
+        "polyhedron_specs": [
+            {"id": "p1", "enabled": True},
+            {"id": "p2", "enabled": True},
+        ],
+    }
+
+    patch = _polyhedron_visibility_patch_for_figure(fig, state)
+    ops = patch.to_plotly_json()["operations"]
+
+    assert {tuple(op["location"]): op["params"]["value"] for op in ops} == {
+        ("data", 0, "visible"): False,
+        ("data", 1, "visible"): False,
+    }
+
+
 def _backend_with_dap4(tmp_path):
     """Build a real DAP-4-backed ``ViewerBackend`` for end-to-end
     topology-cache invariance assertions.

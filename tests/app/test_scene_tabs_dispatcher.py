@@ -196,7 +196,7 @@ def test_update_view_allows_scene_switch_during_graph_interaction(tmp_path: Path
     source = inspect.getsource(callbacks[0]["callback"])
 
     assert "last_rendered_scene_id" in source
-    assert "interaction_active and last_rendered_scene_id == scene_id" in source
+    assert "interaction_active and last_rendered_scene_id == scene_id and not topology_changed" in source
     assert "_last_rendered_scene_id = state.get(\"scene_id\")" in source
 
 
