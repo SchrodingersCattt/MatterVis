@@ -149,3 +149,85 @@ def test_preset_load_invalidates_figure_cache(tmp_path):
     preset_payload = backend.save_preset("regression.json")
     backend.load_preset_from_path(preset_payload["path"], allow_external=True)
     assert backend._figure_cache == {}
+
+
+def test_figure_cache_evicts_oldest_when_full(tmp_path):
+    """When the figure cache exceeds ``FIGURE_CACHE_MAX`` distinct
+    entries, the least-recently-used entry is evicted.
+    """
+    backend = _make_backend(tmp_path)
+
+    # Clear the cache so we start from a known empty state.
+    with backend._figure_cache_lock:
+        backend._figure_cache.clear()
+
+    base_state = backend.get_state()
+
+    # Fill past ``FIGURE_CACHE_MAX`` with one-call-per-entry variation
+    # on a cache-key-affecting field to force distinct entries.
+    from crystal_viewer.app.backend_core import FIGURE_CACHE_MAX
+
+    keys_in_order: list[str] = []
+    for i in range(FIGURE_CACHE_MAX + 3):
+        state = dict(base_state)
+        # A unique label on a style key that participates in
+        # ``_figure_state_cache_key`` forces a new cache entry.
+        state["_test_label"] = f"entry_{i:03d}"
+        key = backend._figure_state_cache_key(state)
+        keys_in_order.append(key)
+        backend.figure_for_state(state)
+
+    with backend._figure_cache_lock:
+        # The first few keys (FIFO oldest) must have been evicted.
+        evicted = [k for k in keys_in_order[:3] if k not in backend._figure_cache]
+        assert len(evicted) >= 1, (
+            f"Expected at least one evicted key, but cache has "
+            f"{len(backend._figure_cache)} entries out of "
+            f"{len(keys_in_order)} inserted"
+        )
+        # The newest keys must still be present.
+        assert keys_in_order[-1] in backend._figure_cache, (
+            "Most-recently-inserted entry must survive eviction"
+        )
+
+
+def test_figure_cache_hit_moves_to_mru(tmp_path):
+    """A cache hit moves the accessed entry to most-recently-used
+    position so it survives future evictions longer.
+    """
+    backend = _make_backend(tmp_path)
+
+    # Clear cache to start clean.
+    with backend._figure_cache_lock:
+        backend._figure_cache.clear()
+
+    base_state = backend.get_state()
+
+    # Insert N distinct entries.
+    N = 5
+    keys_in_order: list[str] = []
+    for i in range(N):
+        state = dict(base_state)
+        state["_test_label"] = f"entry_{i:03d}"
+        key = backend._figure_state_cache_key(state)
+        keys_in_order.append(key)
+        backend.figure_for_state(state)
+
+    with backend._figure_cache_lock:
+        assert all(k in backend._figure_cache for k in keys_in_order), (
+            "All {N} entries must fit in cache"
+        )
+
+    # Access the oldest entry (first inserted).  This is a cache hit
+    # that should promote it to the MRU position so it is no longer
+    # the next to be evicted.
+    oldest_state = dict(base_state)
+    oldest_state["_test_label"] = "entry_000"
+    backend.figure_for_state(oldest_state)
+
+    with backend._figure_cache_lock:
+        first_key = next(iter(backend._figure_cache.keys()))
+        assert first_key != keys_in_order[0], (
+            "Cache-hit entry must be promoted to MRU; "
+            "the oldest key should no longer be at the eviction head"
+        )

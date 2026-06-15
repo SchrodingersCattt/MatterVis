@@ -588,11 +588,13 @@ def register_view_callbacks(app, backend):
         Output("structure-summary", "children"),
         Input("agent-state-store", "data"),
         Input("graph-interaction-store", "data"),
+        State("crystal-graph", "figure"),
         State("camera-state-store", "data"),
     )
     def update_view(
         agent_state,
         interaction_state,
+        current_figure,
         camera_state,
     ):
         # ``update_view`` is the dominant cost when the user pokes a
@@ -608,37 +610,7 @@ def register_view_callbacks(app, backend):
         scene_id = state.get("scene_id")
         interaction_active = bool((interaction_state or {}).get("active"))
         last_rendered_scene_id = getattr(update_view, "_last_rendered_scene_id", None)
-        if interaction_active and last_rendered_scene_id == scene_id:
-            perf_log.record(
-                "callback:update_view",
-                duration_ms=(time.monotonic() - cb_start) * 1000.0,
-                kind="cb",
-                info={"scene_id": scene_id, "figure": "deferred_interaction"},
-            )
-            return no_update, no_update, no_update, no_update
-        camera = _camera_from_store(camera_state, state.get("scene_id"))
-        if camera:
-            state["camera"] = camera
-        fig, topology_data = backend.figure_for_state(state, async_topology=True)
-        if isinstance(fig, dict) and fig.get("_mattervis_pending"):
-            perf_log.record(
-                "callback:update_view",
-                duration_ms=(time.monotonic() - cb_start) * 1000.0,
-                kind="cb",
-                info={
-                    "scene_id": state.get("scene_id"),
-                    "figure": "pending",
-                },
-            )
-            return no_update, no_update, no_update, no_update
-        # The right-hand sidebar only changes when the *topology* state
-        # or the chosen scene changes. Keep a memo on the callback
-        # itself so toggling Labels / Axes / Atom Scale -- which all
-        # leave the topology untouched -- skips serialising the
-        # histogram + markdown + structure summary every time. Each of
-        # these is only ~1-3 kB but they re-render on the client, and
-        # the markdown table tear-down was visible in the CPU profile.
-        topo_key = (
+        topo_key_preview = (
             state.get("scene_id"),
             state.get("structure"),
             state.get("display_mode"),
@@ -648,12 +620,6 @@ def register_view_callbacks(app, backend):
             state.get("cutoff"),
             "hydrogens" in (state.get("display_options") or []),
             transforms_cache_key(state.get("transforms") or []),
-            # Phase 1/2: per-scene specs and atom-group rules both
-            # affect what the right-side analysis panel reads (which
-            # spec owns the histogram, which atoms are hidden from
-            # the structure summary). Without these the markdown
-            # table can stay stale when the user adds / removes a
-            # named polyhedron or atom-group rule.
             tuple(
                 (
                     s.get("id"),
@@ -695,6 +661,54 @@ def register_view_callbacks(app, backend):
             ),
         )
         prev_key = getattr(update_view, "_topo_cache_key", None)
+        topology_changed = prev_key != topo_key_preview
+        if interaction_active and last_rendered_scene_id == scene_id and not topology_changed:
+            perf_log.record(
+                "callback:update_view",
+                duration_ms=(time.monotonic() - cb_start) * 1000.0,
+                kind="cb",
+                info={"scene_id": scene_id, "figure": "deferred_interaction"},
+            )
+            return no_update, no_update, no_update, no_update
+        if interaction_active and last_rendered_scene_id == scene_id and topology_changed:
+            patched = _polyhedron_visibility_patch_for_figure(current_figure, state)
+            if patched is not no_update:
+                perf_log.record(
+                    "callback:update_view",
+                    duration_ms=(time.monotonic() - cb_start) * 1000.0,
+                    kind="cb",
+                    info={
+                        "scene_id": scene_id,
+                        "figure": "deferred_interaction_polyhedra_patch",
+                    },
+                )
+                return patched, no_update, no_update, no_update
+        camera = _camera_from_store(camera_state, state.get("scene_id"))
+        if camera:
+            state["camera"] = camera
+        # Topology overlay toggles are user-visible correctness changes.  Do
+        # them synchronously so the checkbox never leaves a stale no-overlay
+        # frame waiting on the background topology/websocket fast lane.
+        fig, topology_data = backend.figure_for_state(state, async_topology=not topology_changed)
+        if isinstance(fig, dict) and fig.get("_mattervis_pending"):
+            perf_log.record(
+                "callback:update_view",
+                duration_ms=(time.monotonic() - cb_start) * 1000.0,
+                kind="cb",
+                info={
+                    "scene_id": state.get("scene_id"),
+                    "figure": "pending",
+                },
+            )
+            return no_update, no_update, no_update, no_update
+        # The right-hand sidebar only changes when the *topology* state
+        # or the chosen scene changes. Keep a memo on the callback
+        # itself so toggling Labels / Axes / Atom Scale -- which all
+        # leave the topology untouched -- skips serialising the
+        # histogram + markdown + structure summary every time. Each of
+        # these is only ~1-3 kB but they re-render on the client, and
+        # the markdown table tear-down was visible in the CPU profile.
+        topo_key = topo_key_preview
         if prev_key == topo_key:
             perf_log.record(
                 "callback:update_view",

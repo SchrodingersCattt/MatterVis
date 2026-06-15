@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from .shared import *
 from .camera_helpers import *
 from .style_helpers import *
+from .backend_core import FIGURE_CACHE_MAX
 
 
 def _figure_from_cached_dict(cached_dict: dict) -> go.Figure:
@@ -26,17 +27,7 @@ def _polyhedron_enabled_map(state: dict[str, Any] | None) -> dict[str, bool]:
     visibility patch in ``figure_for_state``. Specs without an id
     are skipped because the renderer can't route a trace to them.
     """
-    if not state:
-        return {}
-    out: dict[str, bool] = {}
-    for spec in state.get("polyhedron_specs") or []:
-        if not isinstance(spec, dict):
-            continue
-        spec_id = spec.get("id")
-        if not spec_id:
-            continue
-        out[str(spec_id)] = bool(spec.get("enabled", True))
-    return out
+    return _polyhedron_enabled_lookup(state)
 
 
 def _apply_polyhedron_visibility_patch(fig: go.Figure, state: dict[str, Any] | None) -> None:
@@ -223,7 +214,7 @@ class _CameraBackendMixin:
                     topology_data,
                 )
                 self._figure_cache.move_to_end(cache_key)
-                while len(self._figure_cache) > 16:
+                while len(self._figure_cache) > FIGURE_CACHE_MAX:
                     self._figure_cache.popitem(last=False)
         # Apply the live ``enabled`` flags to this fresh build too --
         # the figure cache snapshot above stored the un-patched

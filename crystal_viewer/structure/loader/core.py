@@ -334,7 +334,16 @@ generate_ordered_replicas_from_disordered_sites` for the optimal
         if not isinstance(first, tuple) or len(first) != 2:
             return raw_atoms
         _crystal, kept_indices = first
-        kept_raw = {int(idx) for idx in kept_indices}
+        # MCK's ``kept_indices`` index into ``scan_cif_disorder`` sites, whose
+        # symmetry expansion does NOT line up with MatterVis ``raw_atoms``
+        # (DAN-2: 1249 vs 1081). Bridge them by coordinate so the chosen major
+        # orientation is the one MCK actually selected -- a positional
+        # ``idx in kept_indices`` test silently drops every kept index beyond
+        # ``len(raw_atoms)`` and mis-flags its true coordinate match.
+        from ..disorder_index import map_mck_indices_to_raw
+
+        idx_map = map_mck_indices_to_raw(cif_path, raw_atoms, kept_indices)
+        kept_raw = set(idx_map.values())
         out = [dict(atom) for atom in raw_atoms]
 
         disordered_idx: list[int] = []

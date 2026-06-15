@@ -196,8 +196,18 @@ def test_update_view_allows_scene_switch_during_graph_interaction(tmp_path: Path
     source = inspect.getsource(callbacks[0]["callback"])
 
     assert "last_rendered_scene_id" in source
-    assert "interaction_active and last_rendered_scene_id == scene_id" in source
+    assert "interaction_active and last_rendered_scene_id == scene_id and not topology_changed" in source
     assert "_last_rendered_scene_id = state.get(\"scene_id\")" in source
+
+
+def test_compass_afterplot_prefers_live_camera():
+    """A click/right-click on a point can trigger Plotly afterplot without
+    committing ``layout.scene.camera``. The SVG compass must read the live
+    WebGL camera in that path, or it snaps back until the next drag frame.
+    """
+    script = Path("frontend/assets/compass_overlay.js").read_text(encoding="utf-8")
+
+    assert 'gd.on("plotly_afterplot", function () { redrawCompass(gd, null, true); });' in script
 
 
 def test_backend_upload_append_and_close_actions_drive_scene_options(tmp_path: Path):
