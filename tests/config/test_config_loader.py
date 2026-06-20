@@ -10,6 +10,7 @@ def test_builtin_config_is_read_only_and_exposes_defaults():
     cfg = load_config()
 
     assert cfg.style.get("atom_scale") == 1.0
+    assert cfg.style.get("bond_radius") == 0.15
     assert cfg.colors.get("elements")["C"] == "#5E5E5E"
     with pytest.raises(TypeError):
         cfg.colors.values["selection_highlight"] = "#000000"  # type: ignore[index]

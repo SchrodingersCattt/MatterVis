@@ -15,7 +15,7 @@ except ImportError:  # pragma: no cover - allows direct script execution
 
 DEFAULT_STYLE = {
     "atom_scale": 1.0,
-    "bond_radius": 0.16,
+    "bond_radius": 0.15,
     "major_opacity": 1.0,
     "minor_opacity": 0.35,
     "minor_wireframe": False,
