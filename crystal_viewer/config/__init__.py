@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import re
 from collections.abc import Iterator, Mapping
 from typing import Any
 
@@ -66,17 +67,25 @@ def current_config() -> Config:
     return _CURRENT_CONFIG
 
 
+def _normalize_element_symbol(symbol: str) -> str:
+    match = re.match(r"\s*([A-Z][a-z]?)", str(symbol or ""))
+    return match.group(1) if match else str(symbol or "")
+
+
 def element_color(symbol: str, *, light: bool = False) -> str:
+    symbol = _normalize_element_symbol(symbol)
     palette = _CURRENT_CONFIG.colors.get("elements_light" if light else "elements", {})
     return str(palette.get(symbol, palette.get("default", "#808080")))
 
 
 def atom_radius(symbol: str) -> float:
+    symbol = _normalize_element_symbol(symbol)
     radii = _CURRENT_CONFIG.colors.get("atom_radius", {})
     return float(radii.get(symbol, radii.get("default", 0.18)))
 
 
 def covalent_radius(symbol: str) -> float:
+    symbol = _normalize_element_symbol(symbol)
     radii = _CURRENT_CONFIG.colors.get("covalent_radius", {})
     return float(radii.get(symbol, 0.80))
 
