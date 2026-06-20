@@ -44,7 +44,7 @@ def _finite_positive(value: float) -> bool:
 
 
 def _display_radius_from_covalent_radius(radius: float) -> float:
-    return round(max(0.08, min(0.28, radius * 0.22)), 3)
+    return round(max(0.15, min(0.28, radius * 0.22)), 3)
 
 
 def _cube_display_radius_from_covalent_radius(radius: float) -> float:
@@ -100,7 +100,7 @@ _SCENE_DISPLAY_RADIUS_OVERRIDES = {
     # Hydrogen needs a visual-size override rather than a literal covalent
     # scaling; otherwise H spheres are smaller than the bond cylinders in
     # ball-stick scenes and become nearly invisible.
-    "H": 0.14,
+    "H": 0.16,
     "Cu": 0.22,
     "Fe": 0.22,
     "Ni": 0.22,

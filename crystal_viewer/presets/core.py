@@ -11,7 +11,7 @@ import numpy as np
 DEFAULT_STYLE = {
     "display_mode": "formula_unit",
     "atom_scale": 1.0,
-    "bond_radius": 0.16,
+    "bond_radius": 0.15,
     "material": "mesh",
     "style": "ball_stick",
     "disorder": "outline_rings",

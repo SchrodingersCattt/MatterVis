@@ -28,6 +28,7 @@ def test_periodic_element_tables_cover_ase_symbols():
     assert ATOM_RADIUS["Ag"] > ATOM_RADIUS["default"]
     assert CUBE_ELEMENT_SYMBOLS[47] == "Ag"
     assert CUBE_ELEMENT_SYMBOLS[118] == "Og"
+    assert min(value for key, value in ATOM_RADIUS.items() if key != "default") >= 0.15
 
 
 def test_mattervis_hand_tuned_element_overrides_are_preserved():
@@ -54,7 +55,7 @@ def test_mattervis_hand_tuned_element_overrides_are_preserved():
     assert ELEMENT_COLORS_LIGHT["Zn"] == "#A6A8D0"
 
     assert ATOM_RADIUS["C"] == 0.18
-    assert ATOM_RADIUS["H"] == 0.14
+    assert ATOM_RADIUS["H"] == 0.16
     assert ATOM_RADIUS["Cl"] == 0.24
     assert ATOM_RADIUS["Fe"] == 0.22
 
