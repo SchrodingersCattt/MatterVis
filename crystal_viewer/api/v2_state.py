@@ -102,4 +102,6 @@ def register_state_routes(v2, backend) -> dict:
         )
 
 
-    return locals()
+    handlers = locals()
+    handlers["upload_cif"] = upload_structure
+    return handlers

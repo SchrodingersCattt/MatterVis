@@ -287,7 +287,6 @@ def create_app(
                                     id="scene-cif-upload-input",
                                     type="file",
                                     multiple=True,
-                                    accept=".cif,.extxyz,.xyz",
                                     style={"display": "none"},
                                 ),
                                 html.Div(
