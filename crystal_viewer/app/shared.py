@@ -30,7 +30,15 @@ except ImportError as exc:  # pragma: no cover - user-facing fallback
     ) from exc
 
 from .. import perf_log
-from ..loader import LoadedCrystal, build_bundle_scene, build_empty_bundle, build_loaded_crystal, load_uploaded_cif
+from ..loader import (
+    LoadedCrystal,
+    build_bundle_scene,
+    build_empty_bundle,
+    build_loaded_crystal,
+    infer_source_format,
+    load_uploaded_cif,
+    load_uploaded_structure,
+)
 from ..presets import (
     DEFAULT_CATALOG,
     DEFAULT_STYLE,

@@ -506,6 +506,8 @@ class _CoreBackendMixin:
                     title=str(record.get("title") or name),
                     preset=self.preset,
                     source="upload",
+                    source_format=str(record.get("source_format") or "") or None,
+                    frame_index=record.get("source_frame_index"),
                 )
             except Exception:
                 uploads.pop(digest, None)

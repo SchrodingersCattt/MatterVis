@@ -12,16 +12,16 @@ class _IOBackendMixin:
     def add_uploaded_bundle(self, contents: str, filename: str) -> LoadedCrystal:
         # Charge the three legs (decode + parse via gemmi, register
         # bundle, create scene) separately so the perf log makes the
-        # actual bottleneck obvious. Empirically the ``load_uploaded_cif``
+        # actual bottleneck obvious. Empirically the structure loader
         # call dominates for non-trivial structures (CIF parsing +
         # symmetry expansion + bond perception).
         with perf_log.time_block(
-            "upload:load_uploaded_cif",
+            "upload:load_uploaded_structure",
             kind="event",
             filename=filename,
             data_url_bytes=len(contents or ""),
         ):
-            bundle = load_uploaded_cif(
+            bundle = load_uploaded_structure(
                 contents=contents,
                 filename=filename,
                 existing_names=self.structure_names,
@@ -91,8 +91,11 @@ class _IOBackendMixin:
         leading_underscores = re.match(r"^_+", raw_basename)
         if leading_underscores and not safe.startswith("_"):
             safe = f"{leading_underscores.group(0)}{safe}"
-        if not safe.lower().endswith(".cif"):
+        allowed_suffixes = (".cif", ".extxyz", ".xyz")
+        if not os.path.splitext(safe)[1]:
             safe = f"{safe}.cif"
+        elif not safe.lower().endswith(allowed_suffixes):
+            raise ValueError("unsupported structure file extension; expected .cif, .extxyz, or .xyz")
         # Persist by content hash as well as display filename. Different
         # uploads often share a simple name like ``DP.cif``; writing the raw
         # filename would let a later upload overwrite the CIF backing an
@@ -124,9 +127,17 @@ class _IOBackendMixin:
             "upload:build_loaded_crystal",
             kind="event",
             structure=safe_name,
-            cif_path=path,
+            source_path=path,
         ):
-            bundle = build_loaded_crystal(name=safe_name, cif_path=path, title=stem, preset=self.preset, source="upload")
+            source_format = infer_source_format(path)
+            bundle = build_loaded_crystal(
+                name=safe_name,
+                cif_path=path,
+                title=stem,
+                preset=self.preset,
+                source="upload",
+                source_format=source_format,
+            )
         with perf_log.time_block("upload:create_scene", kind="event", structure=bundle.name):
             with self._lock:
                 self._drop_placeholder()
@@ -140,6 +151,10 @@ class _IOBackendMixin:
             "sha256": digest,
             "original_filename": filename,
             "title": stem,
+            "source_format": bundle.source_format,
+            "source_path": bundle.source_path or bundle.cif_path,
+            "source_frame_index": bundle.source_frame_index,
+            "source_frame_count": bundle.source_frame_count,
         }
         try:
             self._save_upload_manifest()

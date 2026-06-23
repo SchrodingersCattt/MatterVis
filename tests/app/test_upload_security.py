@@ -42,6 +42,12 @@ _atom_site_occupancy
 C1 C 0.0 0.0 0.0 1.0
 """
 
+_VALID_EXTXYZ = b'''2
+Lattice="8.0 0.0 0.0 0.0 8.0 0.0 0.0 0.0 8.0" Properties=species:S:1:pos:R:3:molecule_index:I:1 pbc="T T T"
+C 0.0 0.0 0.0 0
+O 1.2 0.0 0.0 0
+'''
+
 
 @pytest.fixture
 def backend(tmp_path: Path) -> ViewerBackend:
@@ -96,6 +102,19 @@ def test_extension_is_forced_to_cif(backend: ViewerBackend, upload_dir: Path) ->
     assert written.parent == upload_dir
     assert written.suffix == ".cif"
     assert written.name.endswith("_no_extension.cif")
+
+
+def test_extxyz_extension_is_preserved(backend: ViewerBackend, upload_dir: Path) -> None:
+    bundle = backend.add_uploaded_file_bytes(_VALID_EXTXYZ, "sample.extxyz")
+    written = Path(bundle.cif_path).resolve()
+    assert written.parent == upload_dir
+    assert written.suffix == ".extxyz"
+    assert bundle.source_format == "extxyz"
+
+
+def test_unknown_extension_is_rejected(backend: ViewerBackend) -> None:
+    with pytest.raises(ValueError, match="unsupported structure file extension"):
+        backend.add_uploaded_file_bytes(_VALID_CIF, "sample.txt")
 
 
 def test_same_filename_different_bytes_do_not_overwrite(backend: ViewerBackend) -> None:

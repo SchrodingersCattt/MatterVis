@@ -9,6 +9,7 @@ from .core import (  # noqa: F401
     build_bundle_scene,
     build_empty_bundle,
     build_loaded_crystal,
+    infer_source_format,
     # perf_log is a module-level name in core.py (from ``from .. import perf_log``)
     # and callers do ``from crystal_viewer.loader import perf_log``.
     perf_log,
@@ -18,6 +19,8 @@ from .uploads import (  # noqa: F401
     infer_uploaded_name,
     load_default_catalog,
     load_uploaded_cif,
+    load_uploaded_structure,
+    write_uploaded_structure,
     write_uploaded_cif,
 )
 
@@ -30,10 +33,13 @@ __all__ = [
     "build_bundle_scene",
     "build_empty_bundle",
     "build_loaded_crystal",
+    "infer_source_format",
     "bundle_json",
     "infer_uploaded_name",
     "load_default_catalog",
     "load_uploaded_cif",
+    "load_uploaded_structure",
     "perf_log",
     "write_uploaded_cif",
+    "write_uploaded_structure",
 ]

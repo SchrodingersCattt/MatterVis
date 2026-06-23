@@ -287,6 +287,116 @@ def analyze(raw_atoms, M, *, max_atoms=None):
     )
 
 
+def _molecule_index_groups(crystal) -> list[list[int]]:
+    try:
+        atoms = crystal.to_ase()
+    except Exception:
+        return []
+    mol_idx = getattr(atoms, "arrays", {}).get("molecule_index")
+    if mol_idx is None:
+        return []
+    values = np.asarray(mol_idx, dtype=int)
+    if values.ndim != 1 or values.shape[0] != len(atoms):
+        return []
+    return [
+        np.where(values == int(value))[0].astype(int).tolist()
+        for value in sorted(np.unique(values))
+    ]
+
+
+def _info_index_groups(crystal) -> list[list[int]]:
+    groups: list[list[int]] = []
+    for molecule in getattr(crystal, "molecules", []) or []:
+        indices = molecule.info.get("atom_indices") if hasattr(molecule, "info") else None
+        if indices is None:
+            return []
+        groups.append([int(i) for i in indices])
+    return groups
+
+
+def _fallback_index_groups(crystal) -> list[list[int]]:
+    groups: list[list[int]] = []
+    offset = 0
+    for molecule in getattr(crystal, "molecules", []) or []:
+        n_atoms = len(molecule)
+        groups.append(list(range(offset, offset + n_atoms)))
+        offset += n_atoms
+    return groups
+
+
+def _valid_index_groups(groups, n_atoms: int) -> bool:
+    flat = [int(i) for group in groups for i in group]
+    return len(flat) == n_atoms and sorted(flat) == list(range(n_atoms))
+
+
+def _positions_for_groups(crystal, groups: list[list[int]]) -> list[np.ndarray]:
+    positions_by_group: list[np.ndarray] = []
+    unwrapped = None
+    try:
+        unwrapped = crystal.get_unwrapped_molecules()
+    except Exception:
+        unwrapped = None
+    molecules = list(unwrapped or getattr(crystal, "molecules", []) or [])
+    for idx, indices in enumerate(groups):
+        molecule = molecules[idx] if idx < len(molecules) else None
+        positions = np.asarray(molecule.get_positions(), dtype=float) if molecule is not None else np.empty((0, 3))
+        if positions.ndim != 2 or positions.shape[0] != len(indices):
+            positions = np.empty((0, 3), dtype=float)
+        positions_by_group.append(positions)
+    return positions_by_group
+
+
+def _bond_pairs_from_crystal(crystal) -> list[tuple[int, int]]:
+    pairs: set[tuple[int, int]] = set()
+    for molecule in getattr(crystal, "molecules", []) or []:
+        for i, j in (getattr(molecule, "info", {}) or {}).get("bond_pairs") or []:
+            a, b = int(i), int(j)
+            if a > b:
+                a, b = b, a
+            pairs.add((a, b))
+    return sorted(pairs)
+
+
+def analyze_from_crystal(crystal, *, raw_atoms=None, max_atoms=None):
+    """Build :class:`CrystalAnalysis` from an existing MolCrysKit crystal.
+
+    This is used by file formats (currently extxyz) where MolCrysKit is the
+    authoritative reader. The returned molecule indices are validated against
+    the flattened atom order that MatterVis uses for ``raw_atoms`` so formula
+    unit selection, unwrapping and fragment tables keep the same provenance
+    contract as the CIF path.
+    """
+    mk = _require_molcryskit()
+    n_atoms = len(raw_atoms) if raw_atoms is not None else 0
+    if n_atoms <= 0:
+        try:
+            n_atoms = len(crystal.to_ase())
+        except Exception:
+            n_atoms = sum(len(mol) for mol in getattr(crystal, "molecules", []) or [])
+
+    groups = _molecule_index_groups(crystal)
+    if not _valid_index_groups(groups, n_atoms):
+        groups = _info_index_groups(crystal)
+    if not _valid_index_groups(groups, n_atoms):
+        groups = _fallback_index_groups(crystal)
+    if not _valid_index_groups(groups, n_atoms):
+        raise ValueError("MolCrysKit crystal molecule indices do not align with flattened atom order.")
+
+    mol_cart_positions = _positions_for_groups(crystal, groups)
+    if any(pos.shape[0] != len(indices) for pos, indices in zip(mol_cart_positions, groups)):
+        raise ValueError("MolCrysKit crystal molecule coordinates do not align with molecule indices.")
+
+    analyzer = mk["StoichiometryAnalyzer"](crystal)
+    return CrystalAnalysis(
+        crystal=crystal,
+        mol_indices=[[int(i) for i in group] for group in groups],
+        mol_cart_positions=mol_cart_positions,
+        species_map=copy.deepcopy(analyzer.species_map),
+        per_fu=copy.deepcopy(analyzer.get_simplest_unit()),
+        bond_pairs=_bond_pairs_from_crystal(crystal),
+    )
+
+
 def _centroid(raw_atoms, indices, cart_positions=None):
     if cart_positions is not None:
         return np.mean(np.asarray(cart_positions, dtype=float), axis=0)

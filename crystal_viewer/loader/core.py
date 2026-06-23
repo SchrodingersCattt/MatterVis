@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import base64
 import copy
 from collections import defaultdict
-import os
 import re
-import tempfile
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any, Dict, Iterable, Optional
@@ -14,9 +11,9 @@ import numpy as np
 from molcrys_kit.utils.geometry import cart_to_frac
 
 from .. import perf_log
-from ..presets import get_default_catalog, workspace_root
+from ..structure.extxyz import is_extxyz_path, parse_extxyz
 from ..structure import molcrys_bridge
-from ..scene import build_scene_from_atoms, legacy_scene, scene_json, scene_metadata, scene_ops
+from ..scene import build_scene_from_atoms, legacy_scene, scene_metadata, scene_ops
 
 
 @dataclass
@@ -42,6 +39,10 @@ class LoadedCrystal:
     fragment_table_cache: dict[tuple[Any, ...], tuple[list[dict[str, Any]], list[str]]] = field(default_factory=dict)
     atom_fragment_labels: list[str] = field(default_factory=list)
     source: str = "catalog"
+    source_path: str = ""
+    source_format: str = "cif"
+    source_frame_index: int | None = None
+    source_frame_count: int | None = None
     # Per-bundle cache for scenes after a transforms pipeline has been
     # applied. Key is ``(display_mode, show_hydrogen, transforms_cache_key)``;
     # value is the post-transform scene dict (already including a refreshed
@@ -53,6 +54,10 @@ class LoadedCrystal:
         meta = scene_metadata(self.scene)
         meta.update({
             "source": self.source,
+            "source_path": self.source_path or self.cif_path,
+            "source_format": self.source_format,
+            "source_frame_index": self.source_frame_index,
+            "source_frame_count": self.source_frame_count,
             "fragment_count": len(self.topology_fragment_table or self.fragment_table),
             "has_topology": bool(self.topology_fragment_table or self.fragment_table),
             "parsed_atom_count": len(self.raw_atoms or []),
@@ -132,6 +137,10 @@ def build_empty_bundle(
         "preset_entry": {},
         "display_mode": "formula_unit",
         "cif_path": None,
+        "source_path": None,
+        "source_format": "cif",
+        "source_frame_index": None,
+        "source_frame_count": None,
         "view_direction": np.array([0.0, 0.0, 1.0], dtype=float),
         "up": np.array([0.0, 1.0, 0.0], dtype=float),
         "fragment_table": [],
@@ -154,6 +163,8 @@ def build_empty_bundle(
         fragment_table_cache={("scene", "formula_unit", False): ([], [])},
         atom_fragment_labels=[],
         source="placeholder",
+        source_path="",
+        source_format="cif",
     )
 
 
@@ -736,6 +747,10 @@ def build_bundle_scene(
             unwrapped_atoms=bundle.unwrapped_atoms,
         )
         base_scene["cif_path"] = bundle.cif_path
+        base_scene["source_path"] = bundle.source_path or bundle.cif_path
+        base_scene["source_format"] = bundle.source_format
+        base_scene["source_frame_index"] = bundle.source_frame_index
+        base_scene["source_frame_count"] = bundle.source_frame_count
         base_scene["view_direction"] = view_dir
         base_scene["up"] = up
         base_scene["unwrap_overflow"] = copy.deepcopy(bundle.unwrap_overflow)
@@ -810,6 +825,10 @@ def build_bundle_scene(
         transformed["fragment_table"] = fragment_table
         transformed["atom_fragment_labels"] = atom_fragment_labels
     transformed["cif_path"] = base_scene.get("cif_path")
+    transformed["source_path"] = base_scene.get("source_path")
+    transformed["source_format"] = base_scene.get("source_format")
+    transformed["source_frame_index"] = base_scene.get("source_frame_index")
+    transformed["source_frame_count"] = base_scene.get("source_frame_count")
     transformed["view_direction"] = base_scene.get("view_direction")
     transformed["up"] = base_scene.get("up")
     transformed["unwrap_overflow"] = []
@@ -860,6 +879,13 @@ def _upload_default_view(name: str, preset: Optional[Dict[str, Any]]) -> tuple[n
     return _UPLOAD_DEFAULT_VIEW_DIR.copy(), _UPLOAD_DEFAULT_UP.copy()
 
 
+def infer_source_format(path: str, explicit: str | None = None) -> str:
+    value = str(explicit or "").strip().lower()
+    if value in {"cif", "extxyz"}:
+        return value
+    return "extxyz" if is_extxyz_path(path) else "cif"
+
+
 def build_loaded_crystal(
     *,
     name: str,
@@ -867,6 +893,8 @@ def build_loaded_crystal(
     title: Optional[str] = None,
     preset: Optional[Dict[str, Any]] = None,
     source: str = "catalog",
+    source_format: str | None = None,
+    frame_index: int | None = None,
 ) -> LoadedCrystal:
     # Each sub-block is wrapped in a ``perf_log.time_block`` so the
     # /api/v1/perf endpoint shows exactly which leg of an upload is
@@ -876,16 +904,32 @@ def build_loaded_crystal(
 
     ops = scene_ops()
     preset = preset or {}
-    with perf_log.time_block("loader:parse_asu", kind="event", structure=name, cif_path=cif_path):
-        raw_atoms, cell, legacy_M = ops.parse_asu(cif_path)
-        M = np.asarray(legacy_M, dtype=float).T
-    with perf_log.time_block(
-        "loader:resolve_shelx_disorder",
-        kind="event",
-        structure=name,
-        cif_path=cif_path,
-    ):
-        raw_atoms = _tag_shelx_occupancy_disorder(raw_atoms, cif_path, M)
+    resolved_format = infer_source_format(cif_path, source_format)
+    source_frame_index = None
+    source_frame_count = None
+    extxyz_crystal = None
+    legacy_M = None
+    if resolved_format == "extxyz":
+        with perf_log.time_block("loader:parse_extxyz", kind="event", structure=name, source_path=cif_path):
+            extxyz_result = parse_extxyz(cif_path, frame_index=0 if frame_index is None else frame_index)
+            raw_atoms = extxyz_result.raw_atoms
+            cell = extxyz_result.cell
+            M = np.asarray(extxyz_result.M, dtype=float)
+            legacy_M = M.T
+            extxyz_crystal = extxyz_result.crystal
+            source_frame_index = extxyz_result.source_frame_index
+            source_frame_count = extxyz_result.source_frame_count
+    else:
+        with perf_log.time_block("loader:parse_asu", kind="event", structure=name, cif_path=cif_path):
+            raw_atoms, cell, legacy_M = ops.parse_asu(cif_path)
+            M = np.asarray(legacy_M, dtype=float).T
+        with perf_log.time_block(
+            "loader:resolve_shelx_disorder",
+            kind="event",
+            structure=name,
+            cif_path=cif_path,
+        ):
+            raw_atoms = _tag_shelx_occupancy_disorder(raw_atoms, cif_path, M)
     n_atoms = len(raw_atoms) if raw_atoms is not None else 0
     with perf_log.time_block(
         "loader:molcrys_analyze",
@@ -893,7 +937,10 @@ def build_loaded_crystal(
         structure=name,
         n_atoms=n_atoms,
     ):
-        molcrys_analysis = molcrys_bridge.analyze(raw_atoms, M)
+        if extxyz_crystal is not None:
+            molcrys_analysis = molcrys_bridge.analyze_from_crystal(extxyz_crystal, raw_atoms=raw_atoms)
+        else:
+            molcrys_analysis = molcrys_bridge.analyze(raw_atoms, M)
     with perf_log.time_block("loader:select_formula_unit", kind="event", structure=name):
         formula_unit_atoms = molcrys_bridge.select_formula_unit(raw_atoms, M, analysis=molcrys_analysis)
     with perf_log.time_block("loader:unwrap_atoms", kind="event", structure=name):
@@ -946,6 +993,10 @@ def build_loaded_crystal(
             unwrapped_atoms=unwrapped_atoms,
         )
     initial_scene["cif_path"] = cif_path
+    initial_scene["source_path"] = cif_path
+    initial_scene["source_format"] = resolved_format
+    initial_scene["source_frame_index"] = source_frame_index
+    initial_scene["source_frame_count"] = source_frame_count
     initial_scene["view_direction"] = np.array(view_dir, dtype=float)
     initial_scene["up"] = np.array(up, dtype=float)
     initial_scene["unwrap_overflow"] = copy.deepcopy(unwrap_overflow)
@@ -1021,6 +1072,10 @@ def build_loaded_crystal(
         fragment_table_cache=fragment_table_cache,
         atom_fragment_labels=atom_fragment_labels,
         source=source,
+        source_path=cif_path,
+        source_format=resolved_format,
+        source_frame_index=source_frame_index,
+        source_frame_count=source_frame_count,
     )
     return bundle
 

@@ -39,7 +39,7 @@ def register_state_routes(v2, backend) -> dict:
         return jsonify({"camera": backend.camera_action(action, scene_id=_scene_id_from_request(), broadcast=broadcast, **rest)})
 
     @v2.post("/upload")
-    def upload_cif():
+    def upload_structure():
         if "file" not in request.files:
             return jsonify({"error": "missing multipart file field 'file'"}), 400
         file = request.files["file"]

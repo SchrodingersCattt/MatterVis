@@ -1,8 +1,8 @@
-/* Native CIF upload for MatterVis.
+/* Native structure-file upload for MatterVis.
  *
  * Dash's dcc.Upload reads each file into a base64 data URL on the browser
  * main thread, then ships that giant string through Dash's callback channel.
- * Large CIFs make the page look frozen before the server ever sees a byte.
+ * Large structure files make the page look frozen before the server ever sees a byte.
  *
  * This script keeps the UI responsive by posting the raw File object directly
  * to /api/v2/upload as multipart/form-data. When the server finishes parsing
@@ -183,7 +183,7 @@
         names.push(meta.name || file.name);
         setStatus("Processing complete: " + names.join(", "), "success");
       }
-      setStatus("Uploaded CIF(s): " + names.join(", ") + ". Updating scene...", "success");
+      setStatus("Uploaded structure file(s): " + names.join(", ") + ". Updating scene...", "success");
       triggerDashSync({ status: "success", names: names });
       // Belt-and-braces: actively wait for the scene tab to appear
       // and switch to it. Without this the status text never clears.

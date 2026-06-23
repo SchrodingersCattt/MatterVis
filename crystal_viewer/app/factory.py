@@ -21,22 +21,25 @@ def create_app(
     names=None,
     root_dir: Optional[str] = None,
     cif_paths: Optional[Iterable[str]] = None,
+    structure_paths: Optional[Iterable[str]] = None,
 ) -> Dash:
     backend = ViewerBackend(preset_path=preset_path, names=names, root_dir=root_dir)
-    for cif_path in cif_paths or []:
+    preload_paths = list(cif_paths or []) + list(structure_paths or [])
+    for cif_path in preload_paths:
         bundle = build_loaded_crystal(
             name=os.path.splitext(os.path.basename(cif_path))[0],
             cif_path=cif_path,
             title=os.path.splitext(os.path.basename(cif_path))[0],
             preset=backend.preset,
             source="cli",
+            source_format=infer_source_format(cif_path),
         )
         backend.bundles[bundle.name] = bundle
         if bundle.name not in backend.structure_names:
             backend.structure_names.append(bundle.name)
         if not any(scene["structure_name"] == bundle.name for scene in backend.scene_options()):
             backend.create_scene(structure=bundle.name, label=bundle.name)
-    if cif_paths:
+    if preload_paths:
         backend._drop_placeholder()
     if backend.structure_names and backend.current_state.get("structure") not in backend.structure_names:
         backend.current_state = backend.default_state(backend.structure_names[0])
@@ -277,21 +280,22 @@ def create_app(
                             children=_structure_summary(first_scene),
                             style={"marginBottom": "12px", "fontSize": "13px", "color": "#444444"},
                         ),
-                        html.Label("Upload CIF"),
+                        html.Label("Upload structure file"),
                         html.Div(
                             [
                                 dcc.Input(
                                     id="scene-cif-upload-input",
                                     type="file",
                                     multiple=True,
+                                    accept=".cif,.extxyz,.xyz",
                                     style={"display": "none"},
                                 ),
                                 html.Div(
-                                    "Drag and drop CIF, or click to upload",
+                                    "Drag and drop CIF/extxyz, or click to upload",
                                     id="scene-cif-upload",
                                     role="button",
                                     tabIndex=0,
-                                    **{"aria-label": "Upload CIF"},
+                                    **{"aria-label": "Upload structure file"},
                                     style={
                                         "border": "1px dashed #999999",
                                         "padding": "10px",
@@ -948,7 +952,13 @@ def _build_parser():
         "--cif",
         action="append",
         default=[],
-        help="Optional CIF path to preload. Repeat the flag to preload multiple files: --cif a.cif --cif b.cif.",
+        help="Optional structure path to preload (legacy flag name). Repeat the flag to preload multiple files.",
+    )
+    parser.add_argument(
+        "--structure-file",
+        action="append",
+        default=[],
+        help="Optional CIF/extxyz path to preload. Repeat the flag to preload multiple files.",
     )
     parser.add_argument("--api-only", action="store_true", help="Reserved for automation mode; still serves the same app.")
     return parser
@@ -956,7 +966,13 @@ def _build_parser():
 
 def main(argv=None):
     args = _build_parser().parse_args(argv)
-    app = create_app(args.preset, names=args.structure, root_dir=WORKSPACE_DIR, cif_paths=args.cif or [])
+    app = create_app(
+        args.preset,
+        names=args.structure,
+        root_dir=WORKSPACE_DIR,
+        cif_paths=args.cif or [],
+        structure_paths=args.structure_file or [],
+    )
     print(f"Serving crystal viewer at http://{args.host}:{args.port}")
     app.run(host=args.host, port=args.port, debug=False, threaded=True)
 

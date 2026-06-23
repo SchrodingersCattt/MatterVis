@@ -32,6 +32,10 @@ def scene_metadata(scene: dict[str, Any]) -> dict[str, Any]:
         "atom_count": len(scene.get("draw_atoms", [])),
         "bond_count": len(scene.get("bonds", [])),
         "cif_path": scene.get("cif_path"),
+        "source_path": scene.get("source_path") or scene.get("cif_path"),
+        "source_format": scene.get("source_format", "cif"),
+        "source_frame_index": scene.get("source_frame_index"),
+        "source_frame_count": scene.get("source_frame_count"),
     }
 
 

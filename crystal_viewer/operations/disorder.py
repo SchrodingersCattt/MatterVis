@@ -104,6 +104,8 @@ def resolve_disorder(
     ``_source_index`` back to ``raw_atoms``, so the renderer maps these by
     index -- the proven, label/coordinate-independent path.
     """
+    if str(getattr(bundle, "source_format", "cif") or "cif").lower() != "cif":
+        return []
     cif_path = str(getattr(bundle, "cif_path", "") or "")
     if not cif_path:
         return []
