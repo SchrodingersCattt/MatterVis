@@ -175,9 +175,8 @@ def test_find_polyhedra_receives_hard_cutoff_and_center_kind(monkeypatch):
         return []
 
     # The analysis module resolves ``find_polyhedra`` via
-    # ``getattr(crystal_viewer.topology, "find_polyhedra", ...)`` so
-    # tests inject their fake on the public module.
-    monkeypatch.setattr(topology_public, "find_polyhedra", fake_find_polyhedra)
+    # ``getattr(crystal_viewer.topology, "find_polyhedra", ...)`` with fallback
+    # to the molcrys_kit import. Test injects on the analysis module directly.
     monkeypatch.setattr(topology_analysis, "find_polyhedra", fake_find_polyhedra)
 
     class _StubBundle:
@@ -239,7 +238,6 @@ def test_find_polyhedra_atom_level_skips_hard_cutoff(monkeypatch):
         captured["kwargs"] = kwargs
         return []
 
-    monkeypatch.setattr(topology_public, "find_polyhedra", fake_find_polyhedra)
     monkeypatch.setattr(topology_analysis, "find_polyhedra", fake_find_polyhedra)
 
     class _StubBundle:

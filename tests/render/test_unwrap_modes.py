@@ -3,7 +3,7 @@ from __future__ import annotations
 import gemmi
 import numpy as np
 
-from crystal_viewer import molcrys_bridge
+from crystal_viewer.structure import molcrys_bridge
 from crystal_viewer.loader import _unwrapped_atoms_from_atoms
 from crystal_viewer.scene import build_scene_from_atoms, scene_ops
 

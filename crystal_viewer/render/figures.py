@@ -1,16 +1,16 @@
 # ruff: noqa: F401,F405
 from __future__ import annotations
 
-from ..render.scene_traces import *  # noqa: F403
-from ..render.style import style_from_controls
-from ..render.topology import topology_histogram_figure, topology_results_markdown
-from ..render.compass import (
+from .scene_traces import *  # noqa: F403
+from .style import style_from_controls
+from .topology import topology_histogram_figure, topology_results_markdown
+from .compass import (
     _COMPASS_ITEM_NAME,
     axis_key_overlay,
     compass_clientside_context,
     compose_axis_key_layout,
 )
-from ..render.viewport import (
+from .viewport import (
     _axis_cube_scale,
     _camera_axis_projections,
     _normalize,
@@ -22,10 +22,11 @@ from ..render.viewport import (
     uniform_viewport,
 )
 
+
 def build_row_figure(
     scene_style_pairs: list[tuple[dict, dict]],
     bgcolor: str = "#FFFFFF",
-) -> go.Figure:
+) -> "go.Figure":
     """Pack N scenes side-by-side in a 1×N Plotly subplot figure.
 
     Each scene gets its own 3D scene (``scene``, ``scene2``, …) with an
@@ -45,11 +46,12 @@ def build_row_figure(
     go.Figure
         A multi-column Plotly figure ready for ``write_image``.
     """
+    from plotly.graph_objects import Figure as go_Figure
     from plotly.subplots import make_subplots
 
     n = len(scene_style_pairs)
     if n == 0:
-        return go.Figure()
+        return go_Figure()
 
     # Build the subplot template to get the correct domain layout.
     fig_template = make_subplots(
@@ -111,11 +113,13 @@ def build_row_figure(
         margin={"l": 0, "r": 0, "t": 0, "b": 0},
     )
 
-    fig = go.Figure(data=all_trace_dicts, layout=layout_dict, _validate=False)
+    fig = go_Figure(data=all_trace_dicts, layout=layout_dict, _validate=False)
     return fig
 
 
-def build_figure(scene: dict, style: dict, topology_data: dict | None = None) -> go.Figure:
+def build_figure(scene: dict, style: dict, topology_data: dict | None = None) -> "go.Figure":
+    from plotly.graph_objects import Figure as go_Figure
+
     style = validate_style_schema(style)
     xr, yr, zr = _scene_ranges(scene, style, topology_data=topology_data if style.get("topology_enabled", False) else None)
     style["_topology_viewport_ranges"] = [list(xr), list(yr), list(zr)]
@@ -193,7 +197,7 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None) ->
     # ``to_plotly_json()`` upstream, so skipping here is safe and shaves
     # another ~50% off the warm rebuild path on small / medium scenes.
     trace_dicts = _style_trace_dicts(trace_dicts, style)
-    fig = go.Figure(data=trace_dicts, _validate=False)
+    fig = go_Figure(data=trace_dicts, _validate=False)
 
     show_title = bool(style.get("show_title", True))
     title_text = scene.get("display_title") or scene.get("title") or scene.get("name") or ""

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import re
+import threading
 from collections.abc import Iterator, Mapping
 from typing import Any
 
@@ -9,27 +10,31 @@ from .loader import delete_user_config, load_config, write_user_config
 from .schema import Config
 
 _CURRENT_CONFIG: Config = load_config()
+_CONFIG_LOCK = threading.RLock()
 
 
 class ConfigProxy:
-    """Read-only facade over the currently loaded global config."""
+    """Read-only facade over the currently loaded global config (thread-safe)."""
 
     def __getattr__(self, name: str) -> Any:
-        return getattr(_CURRENT_CONFIG, name)
+        with _CONFIG_LOCK:
+            return getattr(_CURRENT_CONFIG, name)
 
     def as_dict(self) -> dict[str, Any]:
-        return _CURRENT_CONFIG.as_dict()
+        with _CONFIG_LOCK:
+            return _CURRENT_CONFIG.as_dict()
 
 
 class ConfigMapping(Mapping[str, Any]):
-    """Live mapping view for legacy module constants such as DEFAULT_STYLE."""
+    """Live mapping view for legacy module constants such as DEFAULT_STYLE (thread-safe)."""
 
     def __init__(self, section: str):
         self.section = section
 
     @property
     def _values(self) -> Mapping[str, Any]:
-        return getattr(_CURRENT_CONFIG, self.section).values
+        with _CONFIG_LOCK:
+            return getattr(_CURRENT_CONFIG, self.section).values
 
     def __getitem__(self, key: str) -> Any:
         return self._values[key]
@@ -44,10 +49,12 @@ class ConfigMapping(Mapping[str, Any]):
         return self._values.get(key, default)
 
     def __deepcopy__(self, memo: dict) -> dict[str, Any]:
-        return copy.deepcopy(getattr(_CURRENT_CONFIG, self.section).as_dict(), memo)
+        with _CONFIG_LOCK:
+            return copy.deepcopy(getattr(_CURRENT_CONFIG, self.section).as_dict(), memo)
 
     def copy(self) -> dict[str, Any]:
-        return getattr(_CURRENT_CONFIG, self.section).as_dict()
+        with _CONFIG_LOCK:
+            return getattr(_CURRENT_CONFIG, self.section).as_dict()
 
 
 CONFIG = ConfigProxy()
@@ -59,12 +66,14 @@ MCK_OVERRIDES = ConfigMapping("mck_overrides")
 
 def reload_config(path: str | None = None, *, overrides: Mapping[str, Any] | None = None) -> Config:
     global _CURRENT_CONFIG
-    _CURRENT_CONFIG = load_config(path, overrides=overrides)
-    return _CURRENT_CONFIG
+    with _CONFIG_LOCK:
+        _CURRENT_CONFIG = load_config(path, overrides=overrides)
+        return _CURRENT_CONFIG
 
 
 def current_config() -> Config:
-    return _CURRENT_CONFIG
+    with _CONFIG_LOCK:
+        return _CURRENT_CONFIG
 
 
 def _normalize_element_symbol(symbol: str) -> str:
@@ -74,19 +83,22 @@ def _normalize_element_symbol(symbol: str) -> str:
 
 def element_color(symbol: str, *, light: bool = False) -> str:
     symbol = _normalize_element_symbol(symbol)
-    palette = _CURRENT_CONFIG.colors.get("elements_light" if light else "elements", {})
+    with _CONFIG_LOCK:
+        palette = _CURRENT_CONFIG.colors.get("elements_light" if light else "elements", {})
     return str(palette.get(symbol, palette.get("default", "#808080")))
 
 
 def atom_radius(symbol: str) -> float:
     symbol = _normalize_element_symbol(symbol)
-    radii = _CURRENT_CONFIG.colors.get("atom_radius", {})
+    with _CONFIG_LOCK:
+        radii = _CURRENT_CONFIG.colors.get("atom_radius", {})
     return float(radii.get(symbol, radii.get("default", 0.18)))
 
 
 def covalent_radius(symbol: str) -> float:
     symbol = _normalize_element_symbol(symbol)
-    radii = _CURRENT_CONFIG.colors.get("covalent_radius", {})
+    with _CONFIG_LOCK:
+        radii = _CURRENT_CONFIG.colors.get("covalent_radius", {})
     return float(radii.get(symbol, 0.80))
 
 

@@ -1063,18 +1063,6 @@ class _CoreBackendMixin:
             self.pending_state = None
             return copy.deepcopy(pending) if pending else None
 
-    def record_state(self, patch: Optional[dict[str, Any]], scene_id: Optional[str] = None) -> None:
-        with self._lock:
-            target_scene_id = scene_id or (patch or {}).get("scene_id") or self.scene_store.active_id
-            self.current_state = self.normalize_state(patch, scene_id=target_scene_id)
-            if target_scene_id:
-                scene_payload = copy.deepcopy(self.current_state)
-                scene_payload.pop("scene_id", None)
-                scene_payload.pop("scene_label", None)
-                self.scene_store.patch_scene(target_scene_id, scene_payload, save=False)
-            self._bump_version()
-            self._request_scene_store_save()
-
     def show_hydrogen_for_state(self, state: Optional[dict[str, Any]] = None) -> bool:
         state = self.current_state if state is None else state
         return "hydrogens" in set(state.get("display_options", []))
