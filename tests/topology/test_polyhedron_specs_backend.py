@@ -33,6 +33,7 @@ from crystal_viewer.app import (
 )
 from crystal_viewer.app.backend_topology import _dedupe_disorder_center_fragments
 from crystal_viewer import topology as topology_module
+from crystal_viewer.structure import molcrys_bridge as _molcrys_bridge_module
 from crystal_viewer.presets import default_preset_path
 from crystal_viewer.render.topology import topology_results_markdown
 
@@ -289,10 +290,12 @@ def test_mck_polyhedron_record_passes_packing_shell_knobs(monkeypatch):
         captured["kwargs"] = kwargs
         return [{"center_position": [0.0, 0.0, 0.0], "shell_coords": [], "shell_distances": []}]
 
-    monkeypatch.setattr(topology_module.molcrys_bridge, "molecular_crystal_from_bundle", lambda bundle: object())
-    monkeypatch.setattr(topology_module, "find_polyhedra", fake_find_polyhedra)
+    monkeypatch.setattr(topology_module.analysis, "molcrys_bridge", _molcrys_bridge_module)
+    # Patch molecular_crystal_from_bundle on the molcrys_bridge *module* (not the import alias).
+    monkeypatch.setattr(_molcrys_bridge_module, "molecular_crystal_from_bundle", lambda bundle: object())
+    monkeypatch.setattr(topology_module.analysis, "find_polyhedra", fake_find_polyhedra)
 
-    record = topology_module._mck_polyhedron_record(
+    record = topology_module.analysis._mck_polyhedron_record(
         object(),
         {
             "index": 0,

@@ -77,11 +77,4 @@ def register_export_routes(v2, backend) -> dict:
     # legacy ``topology_species_keys`` + shared ``topology_hull_color``
     # behaviour. See ``agents/polyhedron_api.md``.
 
-    def _polyhedra_scene_id() -> str | None:
-        # Body and querystring both supported so simple curl-driven
-        # agents can stay on either; matches the convention used by
-        # ``/topology`` and ``/screenshot``.
-        return _scene_id_from_request()
-
-
     return locals()

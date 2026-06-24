@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from crystal_viewer import molcrys_bridge
+from crystal_viewer.structure import molcrys_bridge
 from crystal_viewer.topology import detect_coordination_number
 
 
