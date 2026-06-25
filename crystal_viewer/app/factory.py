@@ -111,6 +111,8 @@ def create_app(
                 dcc.Store(id="native-upload-sync", data={"seq": 0}),
                 dcc.Store(id="scene-event-store", data={"seq": 0}),
                 dcc.Store(id="graph-interaction-store", data={"active": False, "ts": 0}),
+                dcc.Store(id="compass-relayout-sink", data=None),
+                html.Div(id="compass-relayout-dummy", style={"display": "none"}),
                 dcc.Store(id="disorder-replicas-store", data={"replicas": [], "scene_id": None, "status": "idle"}),
                 dcc.Store(id="disorder-hover-id", data=None),
                 dcc.Store(id="disorder-preview-sink", data=None),

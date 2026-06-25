@@ -26,6 +26,24 @@ def _fast_view_metadata(backend: "ViewerBackend", state: dict[str, Any], camera_
     scene_id = state.get("scene_id")
     scene = backend.scene_for_state(state)
     camera = _camera_from_store(camera_state, scene_id) or state.get("camera") or scene.get("camera")
+    display_options = list(state.get("display_options") or [])
+    axis_scale = float(state.get("axis_scale", 1.0) or 1.0)
+
+    # Pre-compute cube-scale-corrected unit basis directions for the
+    # client-side compass (mattervis.js reads this blob and reprojects
+    # with the live WebGL camera, avoiding any Dash callback that would
+    # trip dcc.Loading).
+    from ..render.viewport import _axis_cube_scale
+
+    M_arr = np.asarray(scene.get("M"), dtype=float)
+    basis_dirs = None
+    if M_arr.ndim == 2 and M_arr.shape[0] >= 3 and M_arr.shape[1] == 3:
+        cube_scale = _axis_cube_scale(scene, {})
+        M_cube = M_arr[:3] / cube_scale[None, :] if cube_scale is not None else M_arr[:3]
+        norms = np.linalg.norm(M_cube, axis=1)
+        if np.all(np.isfinite(norms)) and np.all(norms > 1e-12):
+            basis_dirs = (M_cube / norms[:, None]).tolist()
+
     payload = {
         "scene_id": scene_id,
         "M": _json_safe(scene.get("M")),
@@ -33,9 +51,11 @@ def _fast_view_metadata(backend: "ViewerBackend", state: dict[str, Any], camera_
         "default_camera": _json_safe(backend.default_camera(state)),
         "projection": _coerce_projection(state.get("projection", "perspective")),
         "camera_revision": int(state.get("camera_revision", 0) or 0),
-        "display_options": list(state.get("display_options") or []),
-        "axis_scale": float(state.get("axis_scale", 1.0) or 1.0),
+        "display_options": display_options,
+        "axis_scale": axis_scale,
         "minor_opacity": float(state.get("minor_opacity", 0.35) or 0.35),
+        "basis_dirs": basis_dirs,
+        "axis_labels": scene.get("axis_labels") or ["a", "b", "c"],
     }
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 

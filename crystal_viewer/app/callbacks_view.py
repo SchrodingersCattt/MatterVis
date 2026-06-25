@@ -582,22 +582,28 @@ def register_view_callbacks(app, backend):
         return rows, {"seq": latest, "events": merged}
 
     # ------------------------------------------------------------------
-    # Compass patch: the baked Plotly compass annotations ride on
-    # ``layout.annotations`` / ``layout.shapes``.  ``update_view``
-    # skips full rebuilds during/after drag to avoid the
-    # ``dcc.Loading`` spinner, so the compass would freeze at the
-    # pre-drag camera.  This callback recomputes only the compass
-    # layer (cheap — a few trig calls) from ``camera-state-store``
-    # and patches it in-place under 300 ms.
+    # Compass update: ``update_view`` skips full figure rebuilds during
+    # user interaction to avoid ``dcc.Loading``.  The compass (paper-
+    # coord annotations/shapes in Plotly layout) is updated here via a
+    # two-step pipeline:
+    #
+    # 1. Server-side: on ``camera-state-store`` change (drag mouseup /
+    #    align button / REST camera), compute the compass JSON.  Output
+    #    goes to ``compass-relayout-sink`` (a dcc.Store) — NOT to
+    #    ``crystal-graph.figure``, so ``dcc.Loading`` never fires.
+    # 2. Client-side (clientside_callback below): on ``compass-relayout-
+    #    sink`` change, read the JSON and call ``Plotly.relayout(gd,
+    #    {annotations, shapes})``.  gl3d handles layout-only relayout
+    #    without rebuilding the WebGL scene, so there is zero frame
+    #    drop.
     # ------------------------------------------------------------------
     @app.callback(
-        Output("crystal-graph", "figure", allow_duplicate=True),
+        Output("compass-relayout-sink", "data"),
         Input("camera-state-store", "data"),
-        State("crystal-graph", "figure"),
         State("agent-state-store", "data"),
         prevent_initial_call=True,
     )
-    def _patch_compass_on_camera_change(camera_state, current_figure, agent_state):
+    def _build_compass_relayout_payload(camera_state, agent_state):
         if not isinstance(camera_state, dict):
             return no_update
         camera = camera_state.get("camera")
@@ -614,10 +620,30 @@ def register_view_callbacks(app, backend):
             annotations, shapes = compose_axis_key_layout(scene, style)
         except Exception:
             return no_update
-        patch = Patch()
-        patch["layout"]["annotations"] = annotations or []
-        patch["layout"]["shapes"] = shapes or []
-        return patch
+        return {"annotations": annotations or [], "shapes": shapes or []}
+
+    # clientside: Plotly.relayout compass without touching Dash figure
+    app.clientside_callback(
+        """
+        function(payload) {
+            if (!payload) return window.dash_clientside.no_update;
+            var gd = document.querySelector("#crystal-graph .js-plotly-plot")
+                  || document.getElementById("crystal-graph");
+            if (!gd || !window.Plotly || typeof window.Plotly.relayout !== "function") {
+                return window.dash_clientside.no_update;
+            }
+            try {
+                window.Plotly.relayout(gd, {
+                    annotations: payload.annotations || [],
+                    shapes: payload.shapes || []
+                });
+            } catch (_) {}
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("compass-relayout-dummy", "children"),
+        Input("compass-relayout-sink", "data"),
+    )
 
     @app.callback(
         Output("crystal-graph", "figure"),
