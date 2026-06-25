@@ -200,14 +200,26 @@ def test_update_view_allows_scene_switch_during_graph_interaction(tmp_path: Path
     assert "_last_rendered_scene_id = state.get(\"scene_id\")" in source
 
 
-def test_compass_afterplot_prefers_live_camera():
-    """A click/right-click on a point can trigger Plotly afterplot without
-    committing ``layout.scene.camera``. The SVG compass must read the live
-    WebGL camera in that path, or it snaps back until the next drag frame.
+def test_update_view_skips_interaction_settled_noop(tmp_path: Path):
+    """The browser sends ``graph-interaction-store.active=false`` after
+    every rotate/zoom gesture.  That edge is only a gate release; it must not
+    rebuild ``crystal-graph.figure`` and flash the Dash loading overlay.
     """
-    script = Path("frontend/assets/compass_overlay.js").read_text(encoding="utf-8")
+    import inspect
 
-    assert 'gd.on("plotly_afterplot", function () { redrawCompass(gd, null, true); });' in script
+    app = create_app(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    callbacks = [
+        callback
+        for callback in _callbacks_with_output(app, "crystal-graph", "figure")
+        if ("agent-state-store", "data") in _inputs(callback)
+        and ("graph-interaction-store", "data") in _inputs(callback)
+    ]
+    assert len(callbacks) == 1
+    source = inspect.getsource(callbacks[0]["callback"])
+
+    assert 'triggered == "graph-interaction-store"' in source
+    assert 'not interaction_active and last_rendered_scene_id == scene_id' in source
+    assert '"skip_interaction_settled"' in source
 
 
 def test_backend_upload_append_and_close_actions_drive_scene_options(tmp_path: Path):

@@ -606,10 +606,26 @@ def register_view_callbacks(app, backend):
         # ``topology_for_state``, ``build_figure``) so the user can
         # tell which leg is slow without re-profiling.
         cb_start = time.monotonic()
+        triggered = getattr(callback_context, "triggered_id", None)
         state = backend.normalize_state(agent_state or backend.get_state())
         scene_id = state.get("scene_id")
         interaction_active = bool((interaction_state or {}).get("active"))
         last_rendered_scene_id = getattr(update_view, "_last_rendered_scene_id", None)
+        if triggered == "graph-interaction-store" and not interaction_active and last_rendered_scene_id == scene_id:
+            # The browser emits ``graph-interaction-store.active=false``
+            # when a drag/wheel gesture settles.  That edge only exists
+            # to re-enable deferred updates; it is NOT a data change and
+            # should not rebuild ``crystal-graph.figure``.  Otherwise the
+            # ``dcc.Loading`` wrapper enters loading state right after
+            # every zoom/rotate, which looks like the page gets covered
+            # by a loading overlay even for a no-op camera-only gesture.
+            perf_log.record(
+                "callback:update_view",
+                duration_ms=(time.monotonic() - cb_start) * 1000.0,
+                kind="cb",
+                info={"scene_id": scene_id, "figure": "skip_interaction_settled"},
+            )
+            return no_update, no_update, no_update, no_update
         topo_key_preview = (
             state.get("scene_id"),
             state.get("structure"),

@@ -28,7 +28,20 @@
 
   // ── Interaction state (graph_interaction_store.js) ─────────────
   let interactionActive = false, settleTimer = null;
+  let lastFigureSeq = 0, pendingFigurePush = null;
   function setInteraction(active) { setDashStore("graph-interaction-store", {active:!!active, ts:Date.now()}); }
+  function applyFigurePush(data, layout) {
+    var gd = graphDiv(); if (!gd||!window.Plotly) return;
+    var lay = layout||{};
+    try { var lc = gd._fullLayout&&gd._fullLayout.scene&&gd._fullLayout.scene.camera; if (lc) lay.scene=Object.assign({},lay.scene||{},{camera:JSON.parse(JSON.stringify(lc))}); } catch(_){}
+    window.Plotly.react(gd, data||[], lay);
+  }
+  function flushPendingFigurePush() {
+    if (!pendingFigurePush) return;
+    var p = pendingFigurePush;
+    pendingFigurePush = null;
+    applyFigurePush(p.data, p.layout);
+  }
   function markActive() {
     if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
     if (!interactionActive) { interactionActive = true; setInteraction(true); }
@@ -37,7 +50,7 @@
     if (settleTimer) clearTimeout(settleTimer);
     settleTimer = setTimeout(function () {
       settleTimer = null;
-      if (interactionActive) { interactionActive = false; setInteraction(false); }
+      if (interactionActive) { interactionActive = false; setInteraction(false); flushPendingFigurePush(); }
     }, 220);
   }
   function inGraph(target) { return !!(target && target.closest && target.closest("#crystal-graph")); }
@@ -168,7 +181,6 @@
   // ── WS figure fast lane (ws_figure.js) ──────────────────────────
   (function connectWS() {
     if (window.MATTERVIS_WS_FIGURE === false || !window.WebSocket || !window.Plotly) return;
-    let lastFigureSeq = 0, pendingPush = null;
     function currentSceneId() {
       const node = document.getElementById("fast-view-metadata");
       const text = node ? (node.textContent||"").trim() : "";
@@ -181,13 +193,6 @@
       if (!lay || typeof lay!=="object"||!lay.scene||typeof lay.scene!=="object") return false;
       return data.some(function(t){var ty=String((t&&t.type)||"").toLowerCase();return ty==="mesh3d"||ty==="scatter3d"||ty==="cone"||!!(t&&t.z);});
     }
-    function applyPush(data, layout) {
-      var gd = graphDiv(); if (!gd||!window.Plotly) return;
-      var lay = layout||{};
-      try { var lc = gd._fullLayout&&gd._fullLayout.scene&&gd._fullLayout.scene.camera; if (lc) lay.scene=Object.assign({},lay.scene||{},{camera:JSON.parse(JSON.stringify(lc))}); } catch(_){}
-      window.Plotly.react(gd, data||[], lay);
-    }
-    function flushPending() { if (pendingPush) { var p=pendingPush; pendingPush=null; applyPush(p.data,p.layout); } }
     var proto = window.location.protocol==="https:"?"wss:":"ws:";
     var ws = new WebSocket(proto+"//"+window.location.host+"/api/v2/ws");
     ws.addEventListener("open",function(){ws.send(JSON.stringify({type:"subscribe_figure",enabled:true}));});
@@ -197,8 +202,8 @@
       var cur=currentSceneId(); if (cur&&p.scene_id&&String(p.scene_id)!==cur) return;
       var seq=Number(p.figure_seq||p.figure_version||0); if (seq&&seq<=lastFigureSeq) return;
       if (seq) lastFigureSeq=seq;
-      if (interactionActive) { pendingPush={data:p.figure.data||[],layout:p.figure.layout||{},seq:seq}; return; }
-      applyPush(p.figure.data||[], p.figure.layout||{});
+      if (interactionActive) { pendingFigurePush={data:p.figure.data||[],layout:p.figure.layout||{},seq:seq}; return; }
+      applyFigurePush(p.figure.data||[], p.figure.layout||{});
     });
     ws.addEventListener("close",function(){setTimeout(connectWS,1500);});
   })();
@@ -216,6 +221,7 @@
   document.addEventListener("pointerup", function() { if (interactionActive) markInactiveSoon(); });
   document.addEventListener("pointercancel", function() { if (interactionActive) markInactiveSoon(); });
   document.addEventListener("wheel", function(e) { if (inGraph(e.target)) { markActive(); markInactiveSoon(); } }, {passive:true, capture:true});
+  window.addEventListener("blur", function() { if (interactionActive) { interactionActive = false; setInteraction(false); flushPendingFigurePush(); } });
 
   // ── Init ────────────────────────────────────────────────────────
   function init() { rebindAll(); }

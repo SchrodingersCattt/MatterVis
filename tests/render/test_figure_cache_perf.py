@@ -86,20 +86,11 @@ def _compass_shapes(fig) -> list[dict]:
     return out
 
 
-def test_cached_figure_skips_baked_compass_in_dash_path(tmp_path):
-    """Architecture pin for stale compass and drag-rotation regressions:
+def test_cached_figure_bakes_compass_in_dash_path(tmp_path):
+    """Architecture pin for the Plotly-native compass path.
 
-    The Dash-served figure must NOT carry compass arrows in
-    ``layout.annotations`` because ``compass_overlay.js`` now paints
-    them live into a sibling SVG layer. Baking them into Plotly
-    annotations forces a ``Plotly.relayout`` per drag frame, which
-    interrupts gl3d's render and freezes the molecule rotation
-    (verified via Playwright: 6 mid-drag screenshots all
-    byte-identical when the compass was Plotly-baked).
-
-    Instead the compass *meta* (lattice matrix + sizing) lives on
-    ``layout.meta.compass`` so the JS can reproject without a
-    server round-trip.
+    The SVG overlay was removed, so both fresh and cached Dash figures
+    must carry compass arrows in ``layout.annotations``.
     """
     backend = _make_backend(tmp_path)
     state = backend.get_state()
