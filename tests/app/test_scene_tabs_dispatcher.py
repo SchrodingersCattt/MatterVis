@@ -177,54 +177,56 @@ def test_scene_tabs_dom_caches_fingerprint_so_poll_does_not_tear_down_react_tree
     )
 
 
-def test_update_view_allows_scene_switch_during_graph_interaction(tmp_path: Path):
-    """A drag / wheel frame may set ``graph-interaction-store.active``.
-    That should defer redundant redraws for the same scene, but it must not
-    suppress a tab switch; otherwise the tab label changes while the graph
-    stays on the previous material.
-    """
-    import inspect
+def test_update_view_not_wired_to_graph_interaction_store(tmp_path: Path):
+    """``graph-interaction-store`` must NOT appear as an Input on any
+    callback that outputs ``crystal-graph.figure``.
 
+    The store fires on every pointerdown / wheel / pointerup gesture
+    and was previously wired to ``update_view``.  Each fire triggered a
+    full ``normalize_state`` + ``topo_key_preview`` + ``figure_for_state``
+    round-trip that tripped ``dcc.Loading``'s 300 ms spinner threshold,
+    so every drag/zoom flash the loading overlay.
+
+    Its only legitimate consumer is the WS figure fast lane in
+    ``mattervis.js``, which gates deferred pushes purely in JS without
+    any server round-trip.
+    """
     app = create_app(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
-    callbacks = [
+    wired = [
         callback
         for callback in _callbacks_with_output(app, "crystal-graph", "figure")
-        if ("agent-state-store", "data") in _inputs(callback)
-        and ("graph-interaction-store", "data") in _inputs(callback)
+        if ("graph-interaction-store", "data") in _inputs(callback)
     ]
-    assert len(callbacks) == 1
-    source = inspect.getsource(callbacks[0]["callback"])
-
-    assert "last_rendered_scene_id" in source
-    assert "interaction_active and last_rendered_scene_id == scene_id and not topology_changed" in source
-    assert "_last_rendered_scene_id = state.get(\"scene_id\")" in source
+    assert len(wired) == 0, (
+        "graph-interaction-store must not be an Input to any "
+        "crystal-graph.figure callback"
+    )
 
 
-def test_update_view_skips_graph_interaction_store_trigger(tmp_path: Path):
-    """The browser writes ``graph-interaction-store`` on every pointer
-    down/up and wheel event.  ``update_view`` must immediately no-op
-    when triggered by that store — no expensive ``normalize_state`` or
-    ``topo_key_preview`` — otherwise the callback runs long enough to
-    trip ``dcc.Loading``'s 300 ms threshold and the user sees a
-    loading spinner on every drag/zoom gesture.
-    """
-    import inspect
-
+def test_update_view_only_triggers_on_agent_state(tmp_path: Path):
+    """``update_view`` must have exactly one Input: ``agent-state-store``.
+    No other events (poll intervals, interaction stores, upload signals)
+    should cascade through the expensive full-figure path."""
     app = create_app(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
-    callbacks = [
-        callback
-        for callback in _callbacks_with_output(app, "crystal-graph", "figure")
-        if ("agent-state-store", "data") in _inputs(callback)
-        and ("graph-interaction-store", "data") in _inputs(callback)
-    ]
-    assert len(callbacks) == 1
-    source = inspect.getsource(callbacks[0]["callback"])
-
-    assert 'triggered == "graph-interaction-store"' in source
-    assert '"skip_interaction_store"' in source
-    # The early return must happen *before* ``normalize_state`` or
-    # ``topo_key_preview``, so no state/scene computation fires.
-    assert 'backend.normalize_state' not in source.split('if triggered == "graph-interaction-store"')[1].split('return no_update')[0]
+    # Find callbacks that write to crystal-graph.figure AND take
+    # agent-state-store as Input, but do NOT have allow_duplicate.
+    candidates = []
+    for cb in _callbacks_with_output(app, "crystal-graph", "figure"):
+        if ("agent-state-store", "data") not in _inputs(cb):
+            continue
+        # Exclude allow_duplicate callbacks (view buttons, projection
+        # toggle, compass patch, etc.).  The primary update_view is the
+        # ONLY non-allow_duplicate writer.
+        outputs = cb["output"] if isinstance(cb["output"], list) else [cb["output"]]
+        if any(getattr(o, "allow_duplicate", False) for o in outputs):
+            continue
+        candidates.append(cb)
+    assert len(candidates) == 1, f"expected exactly 1 primary figure writer; got {len(candidates)}"
+    inputs = _inputs(candidates[0])
+    assert ("graph-interaction-store", "data") not in inputs, (
+        f"graph-interaction-store must NOT be an Input to the primary "
+        f"figure callback; got inputs={inputs}"
+    )
 
 
 def test_backend_upload_append_and_close_actions_drive_scene_options(tmp_path: Path):

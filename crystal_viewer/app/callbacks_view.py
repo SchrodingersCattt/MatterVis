@@ -651,13 +651,11 @@ def register_view_callbacks(app, backend):
         Output("topology-results", "children"),
         Output("structure-summary", "children"),
         Input("agent-state-store", "data"),
-        Input("graph-interaction-store", "data"),
         State("crystal-graph", "figure"),
         State("camera-state-store", "data"),
     )
     def update_view(
         agent_state,
-        interaction_state,
         current_figure,
         camera_state,
     ):
@@ -669,31 +667,18 @@ def register_view_callbacks(app, backend):
         # internally with three sub-blocks (``scene_for_state``,
         # ``topology_for_state``, ``build_figure``) so the user can
         # tell which leg is slow without re-profiling.
+        #
+        # ``graph-interaction-store`` is intentionally NOT an Input.
+        # Its sole purpose is gate deferred WS figure pushes in
+        # ``mattervis.js``.  Listing it here would trigger
+        # ``update_view`` on every pointerdown/wheel/pointerup,
+        # tripping ``dcc.Loading``'s spinner every time the user
+        # drags or zooms.  The WS fast lane already decouples async
+        # pushes from live interaction in JS; no server-side gate is
+        # needed.
         cb_start = time.monotonic()
-        triggered = getattr(callback_context, "triggered_id", None)
-        # The ``graph-interaction-store`` Input exists ONLY to gate
-        # WebSocket figure pushes (see ``mattervis.js``).  It is not a
-        # data change -- when the user drags / zooms / wheels the
-        # browser fires ``active=true`` on every pointerdown/wheel AND
-        # ``active=false`` when the gesture settles, each of which
-        # would run ``normalize_state`` + the big ``topo_key_preview``
-        # tuple before hitting the deferred-interaction guard below.
-        # That work alone pushes the callback past ``dcc.Loading``'s
-        # 300 ms ``delay_show``, so every drag frame flashes the
-        # loading spinner.  Short-circuit immediately; the compass is
-        # updated separately by ``_patch_compass_on_camera_change``.
-        if triggered == "graph-interaction-store":
-            perf_log.record(
-                "callback:update_view",
-                duration_ms=(time.monotonic() - cb_start) * 1000.0,
-                kind="cb",
-                info={"figure": "skip_interaction_store"},
-            )
-            return no_update, no_update, no_update, no_update
         state = backend.normalize_state(agent_state or backend.get_state())
         scene_id = state.get("scene_id")
-        interaction_active = bool((interaction_state or {}).get("active"))
-        last_rendered_scene_id = getattr(update_view, "_last_rendered_scene_id", None)
         topo_key_preview = (
             state.get("scene_id"),
             state.get("structure"),
@@ -746,27 +731,6 @@ def register_view_callbacks(app, backend):
         )
         prev_key = getattr(update_view, "_topo_cache_key", None)
         topology_changed = prev_key != topo_key_preview
-        if interaction_active and last_rendered_scene_id == scene_id and not topology_changed:
-            perf_log.record(
-                "callback:update_view",
-                duration_ms=(time.monotonic() - cb_start) * 1000.0,
-                kind="cb",
-                info={"scene_id": scene_id, "figure": "deferred_interaction"},
-            )
-            return no_update, no_update, no_update, no_update
-        if interaction_active and last_rendered_scene_id == scene_id and topology_changed:
-            patched = _polyhedron_visibility_patch_for_figure(current_figure, state)
-            if patched is not no_update:
-                perf_log.record(
-                    "callback:update_view",
-                    duration_ms=(time.monotonic() - cb_start) * 1000.0,
-                    kind="cb",
-                    info={
-                        "scene_id": scene_id,
-                        "figure": "deferred_interaction_polyhedra_patch",
-                    },
-                )
-                return patched, no_update, no_update, no_update
         camera = _camera_from_store(camera_state, state.get("scene_id"))
         if camera:
             state["camera"] = camera
