@@ -494,45 +494,9 @@ def test_compass_overlay_python_skipped_for_dash_interactive_path():
     style_static = {"show_axis_key": True}
     static_ann, static_sh = axis_key_overlay(scene, style_static)
     assert static_ann or static_sh, (
-        "axis_key_overlay must still produce annotations/shapes for "
-        "the static-export path (no axis_key_via_svg_overlay flag)."
+        "axis_key_overlay must produce annotations/shapes "
+        "for all paths (compass is always baked into Plotly layout)."
     )
-
-    style_interactive = {"show_axis_key": True, "axis_key_via_svg_overlay": True}
-    interactive_ann, interactive_sh = axis_key_overlay(scene, style_interactive)
-    assert interactive_ann == [] and interactive_sh == [], (
-        "axis_key_overlay MUST short-circuit to ([], []) when "
-        "axis_key_via_svg_overlay is set; otherwise the SVG overlay "
-        "in compass_overlay.js will visually collide with the "
-        "Plotly-baked compass and the per-rebuild relayout will "
-        "freeze the gl3d render."
-    )
-
-
-def test_compass_metadata_stashed_for_clientside_reprojection():
-    """The clientside JS handler in ``compass_overlay.js`` consumes
-    ``fig.layout.meta.compass`` (lattice matrix + sizing knobs) to
-    reproject the triad on every camera drag. Lock the contract so
-    Python-side refactors that drop the meta payload break loudly
-    rather than silently freezing the compass in the browser.
-    """
-    bundle = build_loaded_crystal(name="SY", cif_path="scripts/data/SY.cif", title="SY")
-    style = {
-        **DEFAULT_STYLE,
-        **bundle.scene.get("style", {}),
-        "show_axis_key": True,
-        "show_axes": False,
-    }
-    fig = build_figure(bundle.scene, style)
-    meta = getattr(fig.layout, "meta", None)
-    if hasattr(meta, "to_plotly_json"):
-        meta = meta.to_plotly_json()
-    assert isinstance(meta, dict)
-    compass = meta.get("compass")
-    assert compass is not None
-    assert "M" in compass and len(compass["M"]) == 3
-    assert compass.get("labels") and len(compass["labels"]) >= 3
-    assert "anchor" in compass and len(compass["anchor"]) == 2
 
 
 def test_compass_projects_orthogonal_axes_to_orthogonal_screen_vectors():

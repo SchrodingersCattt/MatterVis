@@ -5,7 +5,6 @@ from ..render.viewport import uniform_viewport
 from ..render.compass import (
     _COMPASS_ITEM_NAME,
     axis_key_overlay,
-    compass_clientside_context,
     compose_axis_key_layout,
 )
 from ..render.style import style_from_controls, validate_style_schema
