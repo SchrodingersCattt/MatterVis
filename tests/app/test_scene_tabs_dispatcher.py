@@ -200,10 +200,13 @@ def test_update_view_allows_scene_switch_during_graph_interaction(tmp_path: Path
     assert "_last_rendered_scene_id = state.get(\"scene_id\")" in source
 
 
-def test_update_view_skips_interaction_settled_noop(tmp_path: Path):
-    """The browser sends ``graph-interaction-store.active=false`` after
-    every rotate/zoom gesture.  That edge is only a gate release; it must not
-    rebuild ``crystal-graph.figure`` and flash the Dash loading overlay.
+def test_update_view_skips_graph_interaction_store_trigger(tmp_path: Path):
+    """The browser writes ``graph-interaction-store`` on every pointer
+    down/up and wheel event.  ``update_view`` must immediately no-op
+    when triggered by that store — no expensive ``normalize_state`` or
+    ``topo_key_preview`` — otherwise the callback runs long enough to
+    trip ``dcc.Loading``'s 300 ms threshold and the user sees a
+    loading spinner on every drag/zoom gesture.
     """
     import inspect
 
@@ -218,8 +221,10 @@ def test_update_view_skips_interaction_settled_noop(tmp_path: Path):
     source = inspect.getsource(callbacks[0]["callback"])
 
     assert 'triggered == "graph-interaction-store"' in source
-    assert 'not interaction_active and last_rendered_scene_id == scene_id' in source
-    assert '"skip_interaction_settled"' in source
+    assert '"skip_interaction_store"' in source
+    # The early return must happen *before* ``normalize_state`` or
+    # ``topo_key_preview``, so no state/scene computation fires.
+    assert 'backend.normalize_state' not in source.split('if triggered == "graph-interaction-store"')[1].split('return no_update')[0]
 
 
 def test_backend_upload_append_and_close_actions_drive_scene_options(tmp_path: Path):

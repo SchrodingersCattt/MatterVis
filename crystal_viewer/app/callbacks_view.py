@@ -581,6 +581,44 @@ def register_view_callbacks(app, backend):
         latest = merged[-1]["seq"] if merged else int(cursor.get("seq", 0))
         return rows, {"seq": latest, "events": merged}
 
+    # ------------------------------------------------------------------
+    # Compass patch: the baked Plotly compass annotations ride on
+    # ``layout.annotations`` / ``layout.shapes``.  ``update_view``
+    # skips full rebuilds during/after drag to avoid the
+    # ``dcc.Loading`` spinner, so the compass would freeze at the
+    # pre-drag camera.  This callback recomputes only the compass
+    # layer (cheap — a few trig calls) from ``camera-state-store``
+    # and patches it in-place under 300 ms.
+    # ------------------------------------------------------------------
+    @app.callback(
+        Output("crystal-graph", "figure", allow_duplicate=True),
+        Input("camera-state-store", "data"),
+        State("crystal-graph", "figure"),
+        State("agent-state-store", "data"),
+        prevent_initial_call=True,
+    )
+    def _patch_compass_on_camera_change(camera_state, current_figure, agent_state):
+        if not isinstance(camera_state, dict):
+            return no_update
+        camera = camera_state.get("camera")
+        if not isinstance(camera, dict):
+            return no_update
+        state = backend.normalize_state(agent_state or backend.get_state())
+        scene_id = state.get("scene_id")
+        if camera_state.get("scene_id") != scene_id:
+            return no_update
+        try:
+            scene = backend.scene_for_state(state)
+            style = backend.style_for_state(state, scene=scene)
+            style["camera"] = camera
+            annotations, shapes = compose_axis_key_layout(scene, style)
+        except Exception:
+            return no_update
+        patch = Patch()
+        patch["layout"]["annotations"] = annotations or []
+        patch["layout"]["shapes"] = shapes or []
+        return patch
+
     @app.callback(
         Output("crystal-graph", "figure"),
         Output("topology-histogram", "figure"),
@@ -607,25 +645,29 @@ def register_view_callbacks(app, backend):
         # tell which leg is slow without re-profiling.
         cb_start = time.monotonic()
         triggered = getattr(callback_context, "triggered_id", None)
-        state = backend.normalize_state(agent_state or backend.get_state())
-        scene_id = state.get("scene_id")
-        interaction_active = bool((interaction_state or {}).get("active"))
-        last_rendered_scene_id = getattr(update_view, "_last_rendered_scene_id", None)
-        if triggered == "graph-interaction-store" and not interaction_active and last_rendered_scene_id == scene_id:
-            # The browser emits ``graph-interaction-store.active=false``
-            # when a drag/wheel gesture settles.  That edge only exists
-            # to re-enable deferred updates; it is NOT a data change and
-            # should not rebuild ``crystal-graph.figure``.  Otherwise the
-            # ``dcc.Loading`` wrapper enters loading state right after
-            # every zoom/rotate, which looks like the page gets covered
-            # by a loading overlay even for a no-op camera-only gesture.
+        # The ``graph-interaction-store`` Input exists ONLY to gate
+        # WebSocket figure pushes (see ``mattervis.js``).  It is not a
+        # data change -- when the user drags / zooms / wheels the
+        # browser fires ``active=true`` on every pointerdown/wheel AND
+        # ``active=false`` when the gesture settles, each of which
+        # would run ``normalize_state`` + the big ``topo_key_preview``
+        # tuple before hitting the deferred-interaction guard below.
+        # That work alone pushes the callback past ``dcc.Loading``'s
+        # 300 ms ``delay_show``, so every drag frame flashes the
+        # loading spinner.  Short-circuit immediately; the compass is
+        # updated separately by ``_patch_compass_on_camera_change``.
+        if triggered == "graph-interaction-store":
             perf_log.record(
                 "callback:update_view",
                 duration_ms=(time.monotonic() - cb_start) * 1000.0,
                 kind="cb",
-                info={"scene_id": scene_id, "figure": "skip_interaction_settled"},
+                info={"figure": "skip_interaction_store"},
             )
             return no_update, no_update, no_update, no_update
+        state = backend.normalize_state(agent_state or backend.get_state())
+        scene_id = state.get("scene_id")
+        interaction_active = bool((interaction_state or {}).get("active"))
+        last_rendered_scene_id = getattr(update_view, "_last_rendered_scene_id", None)
         topo_key_preview = (
             state.get("scene_id"),
             state.get("structure"),
