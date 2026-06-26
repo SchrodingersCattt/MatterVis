@@ -622,7 +622,10 @@ def register_view_callbacks(app, backend):
             return no_update
         return {"annotations": annotations or [], "shapes": shapes or []}
 
-    # clientside: Plotly.relayout compass without touching Dash figure
+    # clientside: Plotly.relayout compass without touching Dash figure.
+    # Must also pass the live WebGL camera, otherwise gl3d reads the
+    # stored layout.scene.camera (stale default from last figure build)
+    # and snaps the user's drag/zoom view back on every mouseup.
     app.clientside_callback(
         """
         function(payload) {
@@ -633,10 +636,17 @@ def register_view_callbacks(app, backend):
                 return window.dash_clientside.no_update;
             }
             try {
-                window.Plotly.relayout(gd, {
+                var relayout = {
                     annotations: payload.annotations || [],
                     shapes: payload.shapes || []
-                });
+                };
+                // Preserve the live WebGL camera so the user's current
+                // drag/zoom view is not reset to the stored default.
+                var lc = gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene.camera;
+                if (lc) {
+                    relayout["scene.camera"] = JSON.parse(JSON.stringify(lc));
+                }
+                window.Plotly.relayout(gd, relayout);
             } catch (_) {}
             return window.dash_clientside.no_update;
         }
