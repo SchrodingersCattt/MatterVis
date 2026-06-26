@@ -109,6 +109,25 @@ def axis_key_overlay(scene: dict, style: dict) -> tuple[list[dict], list[dict]]:
 
     annotations: list[dict] = []
     shapes: list[dict] = []
+
+    # Origin dot: a small filled circle at the shared tail point so the
+    # three arrows are visually connected.
+    origin_r_x = 2.5 / fig_w
+    origin_r_y = 2.5 / fig_h
+    shapes.append(dict(
+        type="circle",
+        xref="paper",
+        yref="paper",
+        x0=anchor_x - origin_r_x,
+        x1=anchor_x + origin_r_x,
+        y0=anchor_y - origin_r_y,
+        y1=anchor_y + origin_r_y,
+        fillcolor=color_default,
+        line=dict(color=color_default, width=0),
+        layer="above",
+        name=_COMPASS_ITEM_NAME,
+    ))
+
     for label in order:
         dx_world, dy_world = deltas[label]
         norm = norms[label]
