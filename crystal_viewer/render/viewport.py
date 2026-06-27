@@ -432,18 +432,11 @@ def figure_axis_layout(scene: dict, style: dict, xr, yr, zr) -> dict:
     """Build the Plotly ``scene`` layout with stable Cartesian data scale."""
     mode = style.get("display_mode", scene.get("display_mode"))
     aspect = _range_aspect_ratio(xr, yr, zr)
+    
     if aspect is not None and _should_use_manual_range_aspect(mode):
         aspect_kwargs = {"aspectmode": "manual", "aspectratio": aspect}
     else:
-        # Equalise per-axis ranges so the rendered scene cube is 1:1:1
-        # regardless of whether the unit-cell box is enabled. Without this,
-        # ``show_unit_cell=True`` in ``formula_unit`` mode would widen the
-        # ranges to the cell corners (e.g. SY's 8:24:10 box) and
-        # ``aspectmode='cube'`` / ``'data'`` would then stretch every atom
-        # along the long axis -- exactly the "box toggle flattens the model"
-        # regression.
-        xr, yr, zr = _equalize_axis_ranges(xr, yr, zr)
-        aspect_kwargs = {"aspectmode": "cube"}
+        aspect_kwargs = {"aspectmode": "data"}
 
     return {
         "xaxis": {"visible": False, "range": xr},
