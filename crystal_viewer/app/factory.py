@@ -117,9 +117,13 @@ def create_app(
                 dcc.Store(id="disorder-persist-sink", data=None),
                 dcc.Download(id="export-download"),
                 dcc.Interval(id="status-dismiss-timer", interval=5000, n_intervals=0, disabled=True),
-                # 30 s fallback poll — the WS fast lane in mattervis.js
-                # pushes state changes immediately, so this interval only
-                # serves as a safety net for missed pushes or reconnects.
+                # 5 s is a deliberate compromise: long enough to avoid
+                # interleaving a poll between every two user clicks (which
+                # otherwise re-pumps the whole control set through the
+                # cascade), short enough that REST API mutations show up
+                # in the UI within one human reaction time. When the API
+                # path becomes WebSocket-driven we'll be able to take this
+                # interval up to 30 s and let pushed messages do the work.
                 dcc.Interval(id="agent-state-poll", interval=30000, n_intervals=0),
                 html.Div(id="state-sync-sentinel", style={"display": "none"}),
                 # Phase 4: right-click + keyboard shortcut wiring -----------

@@ -164,7 +164,7 @@ def parse_asu(path):
     # checked within the same label (different labels can legitimately sit
     # close on special positions or disorder-related sites).
     _seen_by_label: dict[str, list[np.ndarray]] = {}
-    DEDUP_TOL = 0.15
+    _DEDUP_TOL = 0.15
 
     for asu_at in asu_atoms:
         frac0 = asu_at['frac']
@@ -193,14 +193,16 @@ def parse_asu(path):
             label_carts = _seen_by_label.get(label)
             if label_carts is not None:
                 dup = any(
-                    np.linalg.norm(cart_new - sc) < DEDUP_TOL
+                    np.linalg.norm(cart_new - sc) < _DEDUP_TOL
                     for sc in label_carts
                 )
             else:
                 dup = False
             if dup:
                 continue
-            _seen_by_label.setdefault(label, []).append(cart_new.copy())
+            if label not in _seen_by_label:
+                _seen_by_label[label] = []
+            _seen_by_label[label].append(cart_new.copy())
 
             U_cart = None
             if asu_at['label'] in aniso:

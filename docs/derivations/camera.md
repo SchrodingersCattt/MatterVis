@@ -349,7 +349,7 @@ Compass:
   stay inside the figure edge.
 - `crystal_viewer/render/compass.py:155-168` emits the same paper/pixel
   arrow structure as the lower-level compass helper.
-- `frontend/assets/mattervis.js` renders the interactive Dash
+- `crystal_viewer/assets/compass_overlay.js` renders the interactive Dash
   compass into a sibling SVG. Normal redraws use the committed
   `layout.scene.camera`; only active drag polling reads Plotly's internal
   `intScene.getCamera()`.
