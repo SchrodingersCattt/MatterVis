@@ -8,6 +8,7 @@ from .normalizers import *
 from .editor_tables import *
 from .editor_transforms import *
 from .rightclick import *
+from .status_helpers import status_banner_payload
 from ..transforms import transforms_cache_key
 from .backend import ViewerBackend
 
@@ -280,14 +281,8 @@ def register_state_callbacks(app, backend):
     def mirror_legacy_status(message):
         if not message:
             return no_update, no_update, no_update, no_update
-        text = str(message)
-        level = "success"
-        lowered = text.lower()
-        if "failed" in lowered or "error" in lowered:
-            level = "error"
-        elif "must" in lowered or "warning" in lowered:
-            level = "warning"
-        return text, _status_class(level), False, 0
+        text, class_name = status_banner_payload(message)
+        return text, class_name, False, 0
 
     # IMPORTANT: tab-switching (scene-tabs.value) and the agent-state
     # poll (agent-state-poll.n_intervals) still share this callback for
