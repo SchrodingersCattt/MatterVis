@@ -159,7 +159,12 @@ def parse_asu(path):
         except: pass
 
     atoms = []
-    seen_cart = []
+    # Per-label spatial lookup for O(N·k) dedup instead of O(N²) linear scan.
+    # Each label gets its own list of Cartesian positions; duplicates are only
+    # checked within the same label (different labels can legitimately sit
+    # close on special positions or disorder-related sites).
+    _seen_by_label: dict[str, list[np.ndarray]] = {}
+    _DEDUP_TOL = 0.15
 
     for asu_at in asu_atoms:
         frac0 = asu_at['frac']
@@ -171,7 +176,7 @@ def parse_asu(path):
         # to all 8 unit-cell sites. The 7 nitrogen images then had no
         # carbon neighbour anywhere in the structure and surfaced as
         # bogus lone-N "fragments" in the topology UI. Special-position
-        # overlaps are still handled by the ``seen_cart`` dedup below.
+        # overlaps are still handled by the dedup below.
         ops = symops
         for symop_index, op in enumerate(ops):
             frac_new = np.array(op.apply_to_xyz(list(frac0)), dtype=float)
@@ -182,13 +187,22 @@ def parse_asu(path):
             # label*. Different labels can legitimately sit very close on
             # special positions or disorder-related sites; dropping them here
             # silently deletes raw CIF sites and can break rings/bond tables.
-            dup = any(
-                prev_label == asu_at['label'] and np.linalg.norm(cart_new - sc) < 0.15
-                for prev_label, sc in seen_cart
-            )
+            # Uses per-label list — O(k) per atom where k = images of the
+            # same label (typically ≤ symops), giving O(N·k) total.
+            label = asu_at['label']
+            label_carts = _seen_by_label.get(label)
+            if label_carts is not None:
+                dup = any(
+                    np.linalg.norm(cart_new - sc) < _DEDUP_TOL
+                    for sc in label_carts
+                )
+            else:
+                dup = False
             if dup:
                 continue
-            seen_cart.append((asu_at['label'], cart_new))
+            if label not in _seen_by_label:
+                _seen_by_label[label] = []
+            _seen_by_label[label].append(cart_new.copy())
 
             U_cart = None
             if asu_at['label'] in aniso:
