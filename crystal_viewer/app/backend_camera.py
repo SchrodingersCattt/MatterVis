@@ -18,6 +18,9 @@ def _figure_from_cached_dict(cached_dict: dict) -> go.Figure:
     equivalent plain dict and reconstructing with ``_validate=False``.
     See the cache hit branch of ``figure_for_state`` for the why.
     """
+    # Cached figure dicts are canonical cache entries shared across hits.
+    # Reconstruct from a deep snapshot so per-request layout patches stay
+    # request-local and never mutate the cache owner's copy.
     snapshot = copy.deepcopy(cached_dict)
     return go.Figure(snapshot, _validate=False)
 
@@ -235,6 +238,8 @@ class _CameraBackendMixin:
     ) -> bytes:
         state = self.get_state(scene_id)
         if fast:
+            # Fast PNG tweaks are request-local UI state; clone the canonical
+            # scene snapshot before forcing flat material / fast rendering.
             state = copy.deepcopy(state)
             state["material"] = "flat"
             state["fast_rendering"] = True

@@ -1,14 +1,28 @@
 from __future__ import annotations
-# ruff: noqa: F401,F403,F405
 
-from .shared import *
-from .camera_helpers import *
-from .style_helpers import *
-from .normalizers import *
-from .editor_tables import *
-from .editor_transforms import *
-from .rightclick import *
+import time
+from typing import Any
+
+from dash import ALL, Input, Output, State, callback_context, no_update
+
+from .. import perf_log
+from ..topology import DEFAULT_CENTROID_OFFSET_FRAC
 from .backend import ViewerBackend
+from .editor_tables import (
+    _ATOM_GROUP_INHERIT,
+    _ATOM_GROUP_KIND_ALL,
+    _ATOM_GROUP_KIND_MAJOR,
+    _ATOM_GROUP_KIND_MINOR,
+    _BOND_GROUP_KIND_ALL,
+    _BOND_GROUP_KIND_MAJOR,
+    _BOND_GROUP_KIND_MINOR,
+    _atom_groups_table_rows,
+    _bond_groups_table_rows,
+    _polyhedra_table_rows,
+)
+from .editor_transforms import _seed_text_to_selector, _transforms_table_rows
+from .normalizers import _AUTO_LIGAND_VALUE
+from .status_helpers import surface_callback_error
 
 
 # Editor callbacks used to swallow backend exceptions silently
@@ -29,21 +43,231 @@ from .backend import ViewerBackend
 # ``register_editor_callbacks`` (where it is referenced ~15 times)
 # without each call site having to import the new name.
 def surface_editor_error(prefix: str, exc: BaseException) -> None:
-    text = str(exc) or exc.__class__.__name__
-    if len(text) > 240:
-        text = text[:237] + "..."
-    message = f"{prefix} failed: {text}"
-    try:
-        callback_context.set_props("status", {"children": message})
-    except Exception:
-        # Dash < 2.17 lacks set_props; fall back to perf-log only.
-        pass
-    perf_log.record(
-        "callback:editor_error",
-        duration_ms=0.0,
-        kind="cb",
-        info={"prefix": prefix, "error": text, "type": exc.__class__.__name__},
-    )
+    surface_callback_error(prefix, exc, callback_ctx=callback_context)
+
+
+def _build_polyhedron_specs(
+    *,
+    color_ids: list[dict[str, Any]],
+    colors,
+    centers,
+    ligands,
+    enableds,
+    shell_modes,
+    centroid_offsets,
+    levels,
+    center_kinds,
+    hard_cutoffs,
+    fallback_maxes,
+    existing: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    new_specs: list[dict[str, Any]] = []
+    for index, id_dict in enumerate(color_ids):
+        spec_id = id_dict.get("spec_id")
+        base = existing.get(spec_id, {})
+        ligand_value = ligands[index] if index < len(ligands) else _AUTO_LIGAND_VALUE
+        if ligand_value == _AUTO_LIGAND_VALUE:
+            ligand_value = None
+        new_specs.append(
+            {
+                "id": spec_id,
+                "name": base.get("name") or "",
+                "color": colors[index] if index < len(colors) else base.get("color"),
+                "center_species": centers[index] if index < len(centers) else base.get("center_species"),
+                "ligand_species": ligand_value,
+                "enabled": "yes" in (enableds[index] if index < len(enableds) else []),
+                "enforce_enclosure": (
+                    (shell_modes[index] if index < len(shell_modes) else _POLY_SHELL_MODE_ENCLOSURE)
+                    != _POLY_SHELL_MODE_GAP
+                ),
+                "centroid_offset_frac": (
+                    centroid_offsets[index]
+                    if index < len(centroid_offsets) and centroid_offsets[index] is not None
+                    else base.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC)
+                ),
+                "level": (
+                    levels[index] if index < len(levels) and levels[index] else base.get("level")
+                ),
+                "center_kind": (
+                    center_kinds[index]
+                    if index < len(center_kinds) and center_kinds[index]
+                    else base.get("center_kind")
+                ),
+                "hard_cutoff": (
+                    hard_cutoffs[index]
+                    if index < len(hard_cutoffs)
+                    else base.get("hard_cutoff")
+                ),
+                "fallback_max": (
+                    fallback_maxes[index]
+                    if index < len(fallback_maxes)
+                    else base.get("fallback_max")
+                ),
+                "instance_overrides": base.get("instance_overrides", {}),
+            }
+        )
+    return new_specs
+
+
+def _build_atom_groups(
+    *,
+    color_ids: list[dict[str, Any]],
+    visibles,
+    colors,
+    kinds,
+    elements_lists,
+    opacities,
+    materials,
+    styles,
+) -> list[dict[str, Any]]:
+    new_groups: list[dict[str, Any]] = []
+    for index, id_dict in enumerate(color_ids):
+        group_id = id_dict.get("group_id")
+        kind_value = kinds[index] if index < len(kinds) else _ATOM_GROUP_KIND_ALL
+        if kind_value == _ATOM_GROUP_KIND_ALL:
+            selector: dict[str, Any] = {"all": True}
+        elif kind_value == _ATOM_GROUP_KIND_MINOR:
+            selector = {"is_minor": True}
+        elif kind_value == _ATOM_GROUP_KIND_MAJOR:
+            selector = {"is_minor": False}
+        else:
+            selector = {
+                "elements": list(elements_lists[index]) if index < len(elements_lists) and elements_lists[index] else []
+            }
+        opacity_value = opacities[index] if index < len(opacities) else 1.0
+        opacity_payload = None if opacity_value is None or float(opacity_value) >= 0.999 else float(opacity_value)
+        material_value = materials[index] if index < len(materials) else _ATOM_GROUP_INHERIT
+        style_value = styles[index] if index < len(styles) else _ATOM_GROUP_INHERIT
+        new_groups.append(
+            {
+                "id": group_id,
+                "selector": selector,
+                "color": colors[index] if index < len(colors) else None,
+                "visible": "yes" in (visibles[index] if index < len(visibles) else ["yes"]),
+                "opacity": opacity_payload,
+                "material": None if material_value == _ATOM_GROUP_INHERIT else material_value,
+                "style": None if style_value == _ATOM_GROUP_INHERIT else style_value,
+            }
+        )
+    return new_groups
+
+
+def _build_bond_groups(
+    *,
+    color_ids: list[dict[str, Any]],
+    visibles,
+    colors,
+    kinds,
+    elements_lists,
+    opacities,
+    radius_scales,
+) -> list[dict[str, Any]]:
+    new_groups: list[dict[str, Any]] = []
+    for index, id_dict in enumerate(color_ids):
+        group_id = id_dict.get("group_id")
+        kind_value = kinds[index] if index < len(kinds) else _BOND_GROUP_KIND_ALL
+        if kind_value == _BOND_GROUP_KIND_ALL:
+            selector: dict[str, Any] = {"all": True}
+        elif kind_value == _BOND_GROUP_KIND_MINOR:
+            selector = {"is_minor": True}
+        elif kind_value == _BOND_GROUP_KIND_MAJOR:
+            selector = {"is_minor": False}
+        else:
+            elements = [str(e) for e in (elements_lists[index] if index < len(elements_lists) else []) if e]
+            selector = {"between_elements": elements} if elements else {"all": True}
+        new_groups.append(
+            {
+                "id": group_id,
+                "selector": selector,
+                "color": colors[index] if index < len(colors) else None,
+                "visible": "yes" in (visibles[index] if index < len(visibles) else []),
+                "opacity": float(opacities[index]) if index < len(opacities) and opacities[index] is not None else None,
+                "radius_scale": float(radius_scales[index]) if index < len(radius_scales) and radius_scales[index] is not None else None,
+                "enabled": True,
+            }
+        )
+    return new_groups
+
+
+def _build_transforms(
+    *,
+    enabled_ids: list[dict[str, Any]],
+    enableds,
+    param_a,
+    param_b,
+    param_c,
+    param_seeds,
+    param_radius,
+    param_hops,
+    param_maxhops,
+    param_cutoff,
+    param_ops,
+    param_miller0,
+    param_miller1,
+    param_miller2,
+    param_layers,
+    param_vacuum,
+    existing: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    new_transforms: list[dict[str, Any]] = []
+    for index, id_dict in enumerate(enabled_ids):
+        transform_id = id_dict.get("transform_id")
+        base = existing.get(transform_id)
+        if base is None:
+            continue
+        kind = base.get("kind") or "repeat"
+        params: dict[str, Any] = {}
+        if kind == "repeat":
+            params = {
+                "a": int(param_a[index]) if index < len(param_a) and param_a[index] is not None else int(base["params"].get("a", 1) or 1),
+                "b": int(param_b[index]) if index < len(param_b) and param_b[index] is not None else int(base["params"].get("b", 1) or 1),
+                "c": int(param_c[index]) if index < len(param_c) and param_c[index] is not None else int(base["params"].get("c", 1) or 1),
+            }
+        elif kind in ("grow_radius", "grow_bonds", "complete_fragment", "complete_polyhedron", "by_symmetry"):
+            seeds_text = param_seeds[index] if index < len(param_seeds) else None
+            seeds = _seed_text_to_selector(seeds_text) if seeds_text is not None else base["params"].get("seeds") or {}
+            params["seeds"] = seeds
+            if kind == "grow_radius":
+                params["radius"] = float(param_radius[index]) if index < len(param_radius) and param_radius[index] is not None else float(base["params"].get("radius", 0.0) or 0.0)
+            elif kind == "grow_bonds":
+                params["hops"] = int(param_hops[index]) if index < len(param_hops) and param_hops[index] is not None else int(base["params"].get("hops", 1) or 1)
+            elif kind == "complete_fragment":
+                params["max_hops"] = int(param_maxhops[index]) if index < len(param_maxhops) and param_maxhops[index] is not None else int(base["params"].get("max_hops", 32) or 32)
+            elif kind == "complete_polyhedron":
+                params["cutoff"] = float(param_cutoff[index]) if index < len(param_cutoff) and param_cutoff[index] is not None else float(base["params"].get("cutoff", 4.0) or 4.0)
+            elif kind == "by_symmetry":
+                ops_text = param_ops[index] if index < len(param_ops) else None
+                if ops_text:
+                    try:
+                        import json as _json
+                        params["ops"] = _json.loads(ops_text)
+                    except (ValueError, TypeError):
+                        params["ops"] = base["params"].get("ops") or []
+                else:
+                    params["ops"] = base["params"].get("ops") or []
+        elif kind == "slab":
+            miller = [
+                int(param_miller0[index]) if index < len(param_miller0) and param_miller0[index] is not None else (base["params"].get("miller") or [0, 0, 1])[0],
+                int(param_miller1[index]) if index < len(param_miller1) and param_miller1[index] is not None else (base["params"].get("miller") or [0, 0, 1])[1],
+                int(param_miller2[index]) if index < len(param_miller2) and param_miller2[index] is not None else (base["params"].get("miller") or [0, 0, 1])[2],
+            ]
+            layers_val = param_layers[index] if index < len(param_layers) and param_layers[index] is not None else base["params"].get("layers")
+            vacuum_val = param_vacuum[index] if index < len(param_vacuum) and param_vacuum[index] is not None else base["params"].get("vacuum", 10.0)
+            params = {
+                "miller": miller,
+                "layers": int(layers_val) if layers_val is not None else None,
+                "vacuum": float(vacuum_val or 10.0),
+            }
+        new_transforms.append(
+            {
+                "id": transform_id,
+                "name": base.get("name") or "",
+                "kind": kind,
+                "params": params,
+                "enabled": "yes" in (enableds[index] if index < len(enableds) else []),
+            }
+        )
+    return new_transforms
 
 
 def register_editor_callbacks(app, backend):
@@ -149,55 +373,20 @@ def register_editor_callbacks(app, backend):
                 spec["id"]: spec
                 for spec in backend.list_polyhedron_specs(scene_id=scene_id)
             }
-            new_specs: list[dict[str, Any]] = []
-            for index, id_dict in enumerate(color_ids):
-                spec_id = id_dict.get("spec_id")
-                base = existing.get(spec_id, {})
-                ligand_value = ligands[index] if index < len(ligands) else _AUTO_LIGAND_VALUE
-                if ligand_value == _AUTO_LIGAND_VALUE:
-                    ligand_value = None
-                new_specs.append(
-                    {
-                        "id": spec_id,
-                        "name": base.get("name") or "",
-                        "color": colors[index] if index < len(colors) else base.get("color"),
-                        "center_species": centers[index] if index < len(centers) else base.get("center_species"),
-                        "ligand_species": ligand_value,
-                        "enabled": "yes" in (enableds[index] if index < len(enableds) else []),
-                        "enforce_enclosure": (
-                            (shell_modes[index] if index < len(shell_modes) else _POLY_SHELL_MODE_ENCLOSURE)
-                            != _POLY_SHELL_MODE_GAP
-                        ),
-                        "centroid_offset_frac": (
-                            centroid_offsets[index]
-                            if index < len(centroid_offsets) and centroid_offsets[index] is not None
-                            else base.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC)
-                        ),
-                        # Phase 5: new MCK 0.4 knobs. None values fall through
-                        # to the normaliser's defaults (level=molecule,
-                        # center_kind=centroid, hard_cutoff=None,
-                        # fallback_max=None) so a fresh spec still works.
-                        "level": (
-                            levels[index] if index < len(levels) and levels[index] else base.get("level")
-                        ),
-                        "center_kind": (
-                            center_kinds[index]
-                            if index < len(center_kinds) and center_kinds[index]
-                            else base.get("center_kind")
-                        ),
-                        "hard_cutoff": (
-                            hard_cutoffs[index]
-                            if index < len(hard_cutoffs)
-                            else base.get("hard_cutoff")
-                        ),
-                        "fallback_max": (
-                            fallback_maxes[index]
-                            if index < len(fallback_maxes)
-                            else base.get("fallback_max")
-                        ),
-                        "instance_overrides": base.get("instance_overrides", {}),
-                    }
-                )
+            new_specs = _build_polyhedron_specs(
+                color_ids=color_ids,
+                colors=colors,
+                centers=centers,
+                ligands=ligands,
+                enableds=enableds,
+                shell_modes=shell_modes,
+                centroid_offsets=centroid_offsets,
+                levels=levels,
+                center_kinds=center_kinds,
+                hard_cutoffs=hard_cutoffs,
+                fallback_maxes=fallback_maxes,
+                existing=existing,
+            )
             try:
                 backend.patch_state({"polyhedron_specs": new_specs}, scene_id=scene_id, broadcast=False)
             except Exception as exc:
@@ -317,35 +506,16 @@ def register_editor_callbacks(app, backend):
         if isinstance(triggered, dict) and triggered.get("type", "").startswith("ag-row-"):
             if not color_ids:
                 return no_update, no_update
-            new_groups: list[dict[str, Any]] = []
-            for index, id_dict in enumerate(color_ids):
-                group_id = id_dict.get("group_id")
-                kind_value = kinds[index] if index < len(kinds) else _ATOM_GROUP_KIND_ALL
-                if kind_value == _ATOM_GROUP_KIND_ALL:
-                    selector: dict[str, Any] = {"all": True}
-                elif kind_value == _ATOM_GROUP_KIND_MINOR:
-                    selector = {"is_minor": True}
-                elif kind_value == _ATOM_GROUP_KIND_MAJOR:
-                    selector = {"is_minor": False}
-                else:
-                    selector = {
-                        "elements": list(elements_lists[index]) if index < len(elements_lists) and elements_lists[index] else []
-                    }
-                opacity_value = opacities[index] if index < len(opacities) else 1.0
-                opacity_payload = None if opacity_value is None or float(opacity_value) >= 0.999 else float(opacity_value)
-                material_value = materials[index] if index < len(materials) else _ATOM_GROUP_INHERIT
-                style_value = styles[index] if index < len(styles) else _ATOM_GROUP_INHERIT
-                new_groups.append(
-                    {
-                        "id": group_id,
-                        "selector": selector,
-                        "color": colors[index] if index < len(colors) else None,
-                        "visible": "yes" in (visibles[index] if index < len(visibles) else ["yes"]),
-                        "opacity": opacity_payload,
-                        "material": None if material_value == _ATOM_GROUP_INHERIT else material_value,
-                        "style": None if style_value == _ATOM_GROUP_INHERIT else style_value,
-                    }
-                )
+            new_groups = _build_atom_groups(
+                color_ids=color_ids,
+                visibles=visibles,
+                colors=colors,
+                kinds=kinds,
+                elements_lists=elements_lists,
+                opacities=opacities,
+                materials=materials,
+                styles=styles,
+            )
             try:
                 backend.patch_state({"atom_groups": new_groups}, scene_id=scene_id, broadcast=False)
             except Exception as exc:
@@ -441,30 +611,15 @@ def register_editor_callbacks(app, backend):
         if isinstance(triggered, dict) and triggered.get("type", "").startswith("bg-row-"):
             if not color_ids:
                 return no_update, no_update
-            new_groups: list[dict[str, Any]] = []
-            for index, id_dict in enumerate(color_ids):
-                group_id = id_dict.get("group_id")
-                kind_value = kinds[index] if index < len(kinds) else _BOND_GROUP_KIND_ALL
-                if kind_value == _BOND_GROUP_KIND_ALL:
-                    selector: dict[str, Any] = {"all": True}
-                elif kind_value == _BOND_GROUP_KIND_MINOR:
-                    selector = {"is_minor": True}
-                elif kind_value == _BOND_GROUP_KIND_MAJOR:
-                    selector = {"is_minor": False}
-                else:
-                    elements = [str(e) for e in (elements_lists[index] if index < len(elements_lists) else []) if e]
-                    selector = {"between_elements": elements} if elements else {"all": True}
-                new_groups.append(
-                    {
-                        "id": group_id,
-                        "selector": selector,
-                        "color": colors[index] if index < len(colors) else None,
-                        "visible": "yes" in (visibles[index] if index < len(visibles) else []),
-                        "opacity": float(opacities[index]) if index < len(opacities) and opacities[index] is not None else None,
-                        "radius_scale": float(radius_scales[index]) if index < len(radius_scales) and radius_scales[index] is not None else None,
-                        "enabled": True,
-                    }
-                )
+            new_groups = _build_bond_groups(
+                color_ids=color_ids,
+                visibles=visibles,
+                colors=colors,
+                kinds=kinds,
+                elements_lists=elements_lists,
+                opacities=opacities,
+                radius_scales=radius_scales,
+            )
             try:
                 backend.patch_state({"bond_groups": new_groups}, scene_id=scene_id, broadcast=False)
             except Exception as exc:
@@ -673,64 +828,25 @@ def register_editor_callbacks(app, backend):
             if not enabled_ids:
                 return no_update, no_update
             existing = {t["id"]: t for t in backend.list_transforms(scene_id=scene_id)}
-            new_transforms: list[dict[str, Any]] = []
-            for index, id_dict in enumerate(enabled_ids):
-                transform_id = id_dict.get("transform_id")
-                base = existing.get(transform_id)
-                if base is None:
-                    continue
-                kind = base.get("kind") or "repeat"
-                params: dict[str, Any] = {}
-                if kind == "repeat":
-                    params = {
-                        "a": int(param_a[index]) if index < len(param_a) and param_a[index] is not None else int(base["params"].get("a", 1) or 1),
-                        "b": int(param_b[index]) if index < len(param_b) and param_b[index] is not None else int(base["params"].get("b", 1) or 1),
-                        "c": int(param_c[index]) if index < len(param_c) and param_c[index] is not None else int(base["params"].get("c", 1) or 1),
-                    }
-                elif kind in ("grow_radius", "grow_bonds", "complete_fragment", "complete_polyhedron", "by_symmetry"):
-                    seeds_text = param_seeds[index] if index < len(param_seeds) else None
-                    seeds = _seed_text_to_selector(seeds_text) if seeds_text is not None else base["params"].get("seeds") or {}
-                    params["seeds"] = seeds
-                    if kind == "grow_radius":
-                        params["radius"] = float(param_radius[index]) if index < len(param_radius) and param_radius[index] is not None else float(base["params"].get("radius", 0.0) or 0.0)
-                    elif kind == "grow_bonds":
-                        params["hops"] = int(param_hops[index]) if index < len(param_hops) and param_hops[index] is not None else int(base["params"].get("hops", 1) or 1)
-                    elif kind == "complete_fragment":
-                        params["max_hops"] = int(param_maxhops[index]) if index < len(param_maxhops) and param_maxhops[index] is not None else int(base["params"].get("max_hops", 32) or 32)
-                    elif kind == "complete_polyhedron":
-                        params["cutoff"] = float(param_cutoff[index]) if index < len(param_cutoff) and param_cutoff[index] is not None else float(base["params"].get("cutoff", 4.0) or 4.0)
-                    elif kind == "by_symmetry":
-                        ops_text = param_ops[index] if index < len(param_ops) else None
-                        if ops_text:
-                            try:
-                                import json as _json
-                                params["ops"] = _json.loads(ops_text)
-                            except (ValueError, TypeError):
-                                params["ops"] = base["params"].get("ops") or []
-                        else:
-                            params["ops"] = base["params"].get("ops") or []
-                elif kind == "slab":
-                    miller = [
-                        int(param_miller0[index]) if index < len(param_miller0) and param_miller0[index] is not None else (base["params"].get("miller") or [0, 0, 1])[0],
-                        int(param_miller1[index]) if index < len(param_miller1) and param_miller1[index] is not None else (base["params"].get("miller") or [0, 0, 1])[1],
-                        int(param_miller2[index]) if index < len(param_miller2) and param_miller2[index] is not None else (base["params"].get("miller") or [0, 0, 1])[2],
-                    ]
-                    layers_val = param_layers[index] if index < len(param_layers) and param_layers[index] is not None else base["params"].get("layers")
-                    vacuum_val = param_vacuum[index] if index < len(param_vacuum) and param_vacuum[index] is not None else base["params"].get("vacuum", 10.0)
-                    params = {
-                        "miller": miller,
-                        "layers": int(layers_val) if layers_val is not None else None,
-                        "vacuum": float(vacuum_val or 10.0),
-                    }
-                new_transforms.append(
-                    {
-                        "id": transform_id,
-                        "name": base.get("name") or "",
-                        "kind": kind,
-                        "params": params,
-                        "enabled": "yes" in (enableds[index] if index < len(enableds) else []),
-                    }
-                )
+            new_transforms = _build_transforms(
+                enabled_ids=enabled_ids,
+                enableds=enableds,
+                param_a=param_a,
+                param_b=param_b,
+                param_c=param_c,
+                param_seeds=param_seeds,
+                param_radius=param_radius,
+                param_hops=param_hops,
+                param_maxhops=param_maxhops,
+                param_cutoff=param_cutoff,
+                param_ops=param_ops,
+                param_miller0=param_miller0,
+                param_miller1=param_miller1,
+                param_miller2=param_miller2,
+                param_layers=param_layers,
+                param_vacuum=param_vacuum,
+                existing=existing,
+            )
             try:
                 backend.patch_state({"transforms": new_transforms}, scene_id=scene_id, broadcast=False)
             except Exception as exc:

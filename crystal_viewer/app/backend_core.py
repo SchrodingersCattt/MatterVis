@@ -590,6 +590,9 @@ class _CoreBackendMixin:
             save=False,
         )
         self.current_state = self.scene_state(scene.id)
+        # ``pending_state`` is a derived broadcast snapshot. Keep it detached
+        # from the canonical scene state so poll-driven UI sync cannot alias
+        # later in-process mutations.
         self.pending_state = copy.deepcopy(self.current_state)
         self._bump_version()
         payload = scene.to_dict()
@@ -611,6 +614,8 @@ class _CoreBackendMixin:
             scene = self.scene_store.patch_scene(scene_id, patch, save=False)
         if self.scene_store.active_id == scene_id:
             self.current_state = self.scene_state(scene_id)
+            # Poll clients consume ``pending_state`` asynchronously; take a
+            # full snapshot instead of sharing the canonical active-scene dict.
             self.pending_state = copy.deepcopy(self.current_state)
         self._bump_version()
         self._request_scene_store_save()
