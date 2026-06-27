@@ -218,7 +218,7 @@ def compass_clientside_context(scene: dict, style: dict) -> dict | None:
     if show_axes and not show_axis_key:
         pixel_length = max(20.0, float(style.get("axis_scale", 0.14)) * 360.0)
     else:
-        pixel_length = float(style.get("axis_key_pixel_length", 50.0))
+        pixel_length = float(style.get("axis_key_pixel_length", 65.0))
     cube_scale = _axis_cube_scale(scene, style)
     cube_scale_payload = (
         [float(cube_scale[0]), float(cube_scale[1]), float(cube_scale[2])]

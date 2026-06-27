@@ -26,6 +26,9 @@ def _fast_view_metadata(backend: "ViewerBackend", state: dict[str, Any], camera_
     scene_id = state.get("scene_id")
     scene = backend.scene_for_state(state)
     camera = _camera_from_store(camera_state, scene_id) or state.get("camera") or scene.get("camera")
+    display_options = list(state.get("display_options") or [])
+    axis_scale = float(state.get("axis_scale", 1.0) or 1.0)
+
     payload = {
         "scene_id": scene_id,
         "M": _json_safe(scene.get("M")),
@@ -33,8 +36,8 @@ def _fast_view_metadata(backend: "ViewerBackend", state: dict[str, Any], camera_
         "default_camera": _json_safe(backend.default_camera(state)),
         "projection": _coerce_projection(state.get("projection", "perspective")),
         "camera_revision": int(state.get("camera_revision", 0) or 0),
-        "display_options": list(state.get("display_options") or []),
-        "axis_scale": float(state.get("axis_scale", 1.0) or 1.0),
+        "display_options": display_options,
+        "axis_scale": axis_scale,
         "minor_opacity": float(state.get("minor_opacity", 0.35) or 0.35),
     }
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))

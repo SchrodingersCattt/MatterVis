@@ -1170,16 +1170,9 @@ class _CoreBackendMixin:
             rev=int(state.get("camera_revision", 0) or 0),
             sig=layout_signature,
         )
-        # The interactive Dash app paints the corner compass via
-        # ``compass_overlay.js`` into a sibling SVG layer. Skip baking
-        # the same compass into ``layout.annotations`` / ``layout.shapes``
-        # here so that JS does not have to keep stripping them on every
-        # figure rebuild (each strip would cost a ``Plotly.relayout``
-        # which freezes the gl3d render -- see commentary at the top
-        # of ``crystal_viewer/assets/compass_overlay.js`` and the
-        # ``axis_key_overlay`` docstring). Static export pipelines
-        # (``cube.export_static``, ``scripts/``) build their own style
-        # without this flag and keep the baked compass for kaleido.
+        # The interactive Dash app uses a separate SVG overlay for the
+        # compass to avoid Plotly.relayout calls that interrupt gl3d's
+        # render cycle during drag.
         style["axis_key_via_svg_overlay"] = True
         return style
 

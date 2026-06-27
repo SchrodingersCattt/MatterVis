@@ -124,7 +124,7 @@ def create_app(
                 # in the UI within one human reaction time. When the API
                 # path becomes WebSocket-driven we'll be able to take this
                 # interval up to 30 s and let pushed messages do the work.
-                dcc.Interval(id="agent-state-poll", interval=5000, n_intervals=0),
+                dcc.Interval(id="agent-state-poll", interval=30000, n_intervals=0),
                 html.Div(id="state-sync-sentinel", style={"display": "none"}),
                 # Phase 4: right-click + keyboard shortcut wiring -----------
                 # The JS in ``assets/right_click_menu.js`` writes the

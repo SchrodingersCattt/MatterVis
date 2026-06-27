@@ -337,7 +337,7 @@ def test_compass_overlay_js_uses_svg_layer_not_plotly_relayout_for_drag():
     import pathlib
     js_path = pathlib.Path(
         __file__
-    ).resolve().parent.parent.parent / "crystal_viewer" / "assets" / "compass_overlay.js"
+    ).resolve().parent.parent.parent / "frontend" / "assets" / "mattervis.js"
     src = js_path.read_text()
 
     # 1) The SVG overlay layer must exist and be the rendering target.
@@ -462,7 +462,7 @@ def test_compass_overlay_js_preserves_zero_camera_coordinates():
 
     js_path = pathlib.Path(
         __file__
-    ).resolve().parent.parent.parent / "crystal_viewer" / "assets" / "compass_overlay.js"
+    ).resolve().parent.parent.parent / "frontend" / "assets" / "mattervis.js"
     src = js_path.read_text()
 
     assert "Number(obj.x) ||" not in src
