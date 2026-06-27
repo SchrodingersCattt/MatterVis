@@ -1170,9 +1170,9 @@ class _CoreBackendMixin:
             rev=int(state.get("camera_revision", 0) or 0),
             sig=layout_signature,
         )
-        # Compass annotations are always baked into the Plotly figure now
-        # (previously the SVG overlay handled them separately).
-        # Static export pipelines and interactive Dash both consume the
-        # same baked annotations.
+        # The interactive Dash app uses a separate SVG overlay for the
+        # compass to avoid Plotly.relayout calls that interrupt gl3d's
+        # render cycle during drag.
+        style["axis_key_via_svg_overlay"] = True
         return style
 

@@ -15,16 +15,21 @@ _COMPASS_ITEM_NAME = "mv_compass"
 def axis_key_overlay(scene: dict, style: dict) -> tuple[list[dict], list[dict]]:
     """Build Plotly paper-coord annotations + shapes for a corner compass.
 
-    Compass annotations are always baked into the Plotly figure.
-    Previously the interactive Dash app used a separate SVG overlay
-    (``compass_overlay.js``) to avoid ``Plotly.relayout`` calls that
-    interrupted gl3d's render cycle during drag. That overlay has been
-    removed; the compass updates on ``relayoutData`` (mouseup) via
-    a ``clientside_callback``.
+    When ``style["axis_key_via_svg_overlay"]`` is truthy the function
+    short-circuits to ``([], [])``. The interactive Dash app sets this
+    flag so the compass is rendered live by ``compass_overlay.js``
+    into a sibling SVG layer instead of baked into the Plotly layout
+    every frame -- baking forces ``Plotly.relayout`` calls that
+    interrupt gl3d's render cycle and freeze rotation drags
+    (plotly/plotly.js#6359 in v3). Static export pipelines
+    (``cube.export_static``, ``scripts/``) leave the flag unset and
+    keep the baked compass for kaleido.
     """
     show_axes = bool(style.get("show_axes", False))
     show_axis_key = bool(style.get("show_axis_key", False))
     if not (show_axes or show_axis_key):
+        return [], []
+    if style.get("axis_key_via_svg_overlay"):
         return [], []
     projections = _camera_axis_projections(scene, style) or scene.get("projected_axes")
     if not projections or len(projections) < 3:
@@ -109,25 +114,6 @@ def axis_key_overlay(scene: dict, style: dict) -> tuple[list[dict], list[dict]]:
 
     annotations: list[dict] = []
     shapes: list[dict] = []
-
-    # Origin dot: a small filled circle at the shared tail point so the
-    # three arrows are visually connected.
-    origin_r_x = 2.5 / fig_w
-    origin_r_y = 2.5 / fig_h
-    shapes.append(dict(
-        type="circle",
-        xref="paper",
-        yref="paper",
-        x0=anchor_x - origin_r_x,
-        x1=anchor_x + origin_r_x,
-        y0=anchor_y - origin_r_y,
-        y1=anchor_y + origin_r_y,
-        fillcolor=color_default,
-        line=dict(color=color_default, width=0),
-        layer="above",
-        name=_COMPASS_ITEM_NAME,
-    ))
-
     for label in order:
         dx_world, dy_world = deltas[label]
         norm = norms[label]
@@ -208,6 +194,52 @@ def axis_key_overlay(scene: dict, style: dict) -> tuple[list[dict], list[dict]]:
         ))
 
     return annotations, shapes
+
+
+def compass_clientside_context(scene: dict, style: dict) -> dict | None:
+    """Serialise the inputs the clientside callback needs for reprojection."""
+    show_axes = bool(style.get("show_axes", False))
+    show_axis_key = bool(style.get("show_axis_key", False))
+    if not (show_axes or show_axis_key):
+        return None
+    M = np.asarray(scene.get("M"), dtype=float) if scene.get("M") is not None else None
+    if M is None or M.ndim != 2 or M.shape != (3, 3):
+        return None
+    axes_labels = list(style.get("axes_labels") or scene.get("axis_labels") or ["a", "b", "c"])[:3]
+    if len(axes_labels) < 3:
+        return None
+    palette = style.get("axis_key_colors")
+    color_default = style.get("axis_key_color", "#2F2F2F")
+    if isinstance(palette, (list, tuple)) and len(palette) >= 3:
+        colors = [str(palette[i]) for i in range(3)]
+    else:
+        colors = [color_default, color_default, color_default]
+    anchor = style.get("axis_key_anchor") or [0.08, 0.12]
+    if show_axes and not show_axis_key:
+        pixel_length = max(20.0, float(style.get("axis_scale", 0.14)) * 360.0)
+    else:
+        pixel_length = float(style.get("axis_key_pixel_length", 65.0))
+    cube_scale = _axis_cube_scale(scene, style)
+    cube_scale_payload = (
+        [float(cube_scale[0]), float(cube_scale[1]), float(cube_scale[2])]
+        if cube_scale is not None
+        else None
+    )
+    return {
+        "M": [[float(M[i, j]) for j in range(3)] for i in range(3)],
+        "cube_scale": cube_scale_payload,
+        "labels": list(axes_labels),
+        "colors": colors,
+        "anchor": [float(anchor[0]), float(anchor[1])],
+        "pixel_length": float(pixel_length),
+        "line_width": float(style.get("axis_key_line_width", 2.0)),
+        "arrowhead": int(style.get("axis_key_arrow_head", 3)),
+        "label_pixel_offset": float(style.get("axis_key_label_pixel_offset", 10.0)),
+        "font_size": float(style.get("axis_key_font_size", 14)),
+        "italic": bool(style.get("axis_key_italic", True)),
+        "dot_threshold": float(style.get("axis_key_dot_threshold", 0.05)),
+        "dot_radius_px": float(style.get("axis_key_dot_radius_px", 4.0)),
+    }
 
 
 def compose_axis_key_layout(scene: dict, style: dict) -> tuple[list[dict], list[dict]]:

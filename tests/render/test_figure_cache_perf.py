@@ -86,11 +86,20 @@ def _compass_shapes(fig) -> list[dict]:
     return out
 
 
-def test_cached_figure_bakes_compass_in_dash_path(tmp_path):
-    """Architecture pin for the Plotly-native compass path.
+def test_cached_figure_skips_baked_compass_in_dash_path(tmp_path):
+    """Architecture pin for stale compass and drag-rotation regressions:
 
-    The SVG overlay was removed, so both fresh and cached Dash figures
-    must carry compass arrows in ``layout.annotations``.
+    The Dash-served figure must NOT carry compass arrows in
+    ``layout.annotations`` because ``compass_overlay.js`` now paints
+    them live into a sibling SVG layer. Baking them into Plotly
+    annotations forces a ``Plotly.relayout`` per drag frame, which
+    interrupts gl3d's render and freezes the molecule rotation
+    (verified via Playwright: 6 mid-drag screenshots all
+    byte-identical when the compass was Plotly-baked).
+
+    Instead the compass *meta* (lattice matrix + sizing) lives on
+    ``layout.meta.compass`` so the JS can reproject without a
+    server round-trip.
     """
     backend = _make_backend(tmp_path)
     state = backend.get_state()
@@ -102,13 +111,22 @@ def test_cached_figure_bakes_compass_in_dash_path(tmp_path):
     }
     fig_first, _ = backend.figure_for_state(state)
     first_arrows = _compass_shapes(fig_first)
-    assert len(first_arrows) > 0, (
-        "Dash-served figure MUST bake compass arrows into "
-        "layout.annotations (compass_overlay.js has been removed)."
+    assert first_arrows == [], (
+        "Dash-served figure must NOT bake compass arrows into "
+        "layout.annotations; the SVG overlay handles them live."
+    )
+    # The JS-consumed payload must still be present.
+    meta = getattr(fig_first.layout, "meta", None)
+    if hasattr(meta, "to_plotly_json"):
+        meta = meta.to_plotly_json()
+    assert isinstance(meta, dict) and meta.get("compass"), (
+        "layout.meta.compass must be populated so compass_overlay.js "
+        "can reproject the triad client-side."
     )
 
     # Second render with a different camera: figure body cache may
-    # hit, compass is still baked.
+    # hit, but neither figure has compass annotations and meta still
+    # exists.
     state_far = dict(state)
     state_far["camera"] = {
         "eye": {"x": 0.0, "y": 2.0, "z": 0.5},
@@ -117,8 +135,8 @@ def test_cached_figure_bakes_compass_in_dash_path(tmp_path):
     }
     fig_second, _ = backend.figure_for_state(state_far)
     second_arrows = _compass_shapes(fig_second)
-    assert len(second_arrows) > 0, (
-        "Cached figure must also bake compass annotations (compass_overlay.js removed)."
+    assert second_arrows == [], (
+        "Cached figure must also stay free of baked compass annotations."
     )
 
 

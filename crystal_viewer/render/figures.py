@@ -7,6 +7,7 @@ from .topology import topology_histogram_figure, topology_results_markdown
 from .compass import (
     _COMPASS_ITEM_NAME,
     axis_key_overlay,
+    compass_clientside_context,
     compose_axis_key_layout,
 )
 from .viewport import (
@@ -204,6 +205,8 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None) ->
     top_margin = 50 if show_title else 0
 
     ui_revision = style.get("uirevision", str(scene.get("name", "scene")))
+    compass_ctx = compass_clientside_context(scene, style)
+    layout_meta = {"compass": compass_ctx} if compass_ctx else {}
     layout_kwargs = dict(
         title=title_arg,
         showlegend=False,
@@ -215,6 +218,7 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None) ->
             **figure_axis_layout(scene, style, xr, yr, zr),
             "domain": {"x": [0, 1], "y": [0, 1]},
         },
+        meta=layout_meta,
     )
     key_annotations, key_shapes = compose_axis_key_layout(scene, style)
     if key_annotations:
