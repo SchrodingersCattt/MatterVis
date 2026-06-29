@@ -334,58 +334,5 @@ class _OverlaysBackendMixin:
         self.patch_state({"overlay_overrides": ordered}, scene_id=scene_id)
         return ordered
 
-    # ---- polyhedron instance overrides --------------------------------
-    #
-    # A per-fragment override of the spec-level colour / visibility.
-    # Applies on top of the existing spec colour without mutating it,
-    # so the right-click "Set this one cyan" path stays scoped to the
-    # picked instance only.
-
-    def set_polyhedron_instance_override(
-        self,
-        spec_id: str,
-        fragment_label: str,
-        override: dict[str, Any],
-        *,
-        scene_id: Optional[str] = None,
-    ) -> dict[str, Any]:
-        scene_id, specs = self._resolve_specs(scene_id)
-        for index, spec in enumerate(specs):
-            if spec["id"] != spec_id:
-                continue
-            current = dict(spec.get("instance_overrides") or {})
-            cleaned: dict[str, Any] = {}
-            color = override.get("color") if isinstance(override, dict) else None
-            if color:
-                hex_color = _coerce_hex_color(color, "")
-                if hex_color:
-                    cleaned["color"] = hex_color
-            if isinstance(override, dict) and "visible" in override:
-                cleaned["visible"] = bool(override["visible"])
-            if cleaned:
-                current[str(fragment_label)] = cleaned
-            else:
-                current.pop(str(fragment_label), None)
-            spec_patch = dict(spec)
-            spec_patch["instance_overrides"] = current
-            specs[index] = spec_patch
-            self.patch_state({"polyhedron_specs": specs}, scene_id=scene_id)
-            return spec_patch
-        raise KeyError(f"unknown polyhedron spec id: {spec_id!r}")
-
-    def clear_polyhedron_instance_override(
-        self,
-        spec_id: str,
-        fragment_label: str,
-        *,
-        scene_id: Optional[str] = None,
-    ) -> dict[str, Any]:
-        return self.set_polyhedron_instance_override(
-            spec_id,
-            fragment_label,
-            {},
-            scene_id=scene_id,
-        )
-
     # ---- topology computation -----------------------------------------
 

@@ -175,8 +175,10 @@ def register_operations_callbacks(app, backend):
         if triggered == "transforms-preset-2x" or triggered == "transforms-preset-3x":
             n = 2 if triggered == "transforms-preset-2x" else 3
             try:
-                backend.patch_state(
-                    {"supercell": {"a": n, "b": n, "c": n}},
+                backend.add_transform(
+                    "repeat",
+                    {"a": n, "b": n, "c": n},
+                    name=f"Repeat {n}x{n}x{n}",
                     scene_id=scene_id,
                 )
             except Exception as exc:
@@ -186,10 +188,10 @@ def register_operations_callbacks(app, backend):
 
         if triggered == "transforms-clear-repeat":
             try:
-                backend.patch_state(
-                    {"supercell": {"a": 1, "b": 1, "c": 1}},
-                    scene_id=scene_id,
-                )
+                transforms = list(backend.list_transforms(scene_id=scene_id))
+                for t in transforms:
+                    if t.get("kind") == "repeat":
+                        backend.remove_transform(t["id"], scene_id=scene_id)
             except Exception as exc:
                 _surface_error("Clear repeat", exc)
                 return _rebuild(), no_update
