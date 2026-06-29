@@ -183,10 +183,6 @@ def parse_asu(path):
             frac_basic = _wrap_frac01(frac_new)
             cart_new = M @ frac_basic
 
-            # Deduplicate only symmetry images of the *same crystallographic
-            # label*. Different labels can legitimately sit very close on
-            # special positions or disorder-related sites; dropping them here
-            # silently deletes raw CIF sites and can break rings/bond tables.
             # Uses per-label list — O(k) per atom where k = images of the
             # same label (typically ≤ symops), giving O(N·k) total.
             label = asu_at['label']

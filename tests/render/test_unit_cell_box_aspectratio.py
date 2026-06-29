@@ -29,10 +29,12 @@ def _assert_cartesian_scale_is_isometric(fig):
     if fig.layout.scene.aspectmode == "manual":
         aspect = np.array(_aspect_tuple(fig), dtype=float)
         scale = spans / np.maximum(aspect, 1e-12)
-    else:
-        assert fig.layout.scene.aspectmode == "cube"
+        assert np.allclose(scale, scale[0], rtol=1e-6, atol=1e-6), scale
+    elif fig.layout.scene.aspectmode == "cube":
         scale = spans
-    assert np.allclose(scale, scale[0], rtol=1e-6, atol=1e-6), scale
+        assert np.allclose(scale, scale[0], rtol=1e-6, atol=1e-6), scale
+    else:
+        assert fig.layout.scene.aspectmode == "data"
 
 
 def _sy_base_style(bundle):
@@ -166,9 +168,8 @@ def test_formula_unit_does_not_inherit_lattice_aspect():
     fig_off = build_figure(bundle.scene, base)
     fig_on = build_figure(bundle.scene, {**base, "show_unit_cell": True})
 
-    assert fig_off.layout.scene.aspectmode != "manual", (
-        "formula_unit must not pin manual lattice aspect; the molecule "
-        "would otherwise be squished along anisotropic cell axes."
+    assert fig_off.layout.scene.aspectmode == "data", (
+        "formula_unit now uses data aspect to prevent near clipping plane truncation."
     )
     assert fig_on.layout.scene.aspectmode != "manual", (
         "toggling Unit Cell Box must not turn on manual lattice aspect."
@@ -660,5 +661,5 @@ def test_cluster_without_lattice_falls_back_to_auto_aspectmode():
         },
     )
 
-    assert fig.layout.scene.aspectmode == "cube"
+    assert fig.layout.scene.aspectmode == "data"
     assert "aspectratio" not in fig.layout.scene.to_plotly_json()
