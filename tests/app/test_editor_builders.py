@@ -12,9 +12,9 @@ import pytest
 from crystal_viewer.app.callbacks_editors import (
     _build_atom_groups,
     _build_bond_groups,
-    _build_polyhedron_specs,
-    _build_transforms,
 )
+from crystal_viewer.app.callbacks_analysis import _build_polyhedron_specs
+from crystal_viewer.app.callbacks_operations import _build_transforms
 
 
 # ── _build_polyhedron_specs ──────────────────────────────────────

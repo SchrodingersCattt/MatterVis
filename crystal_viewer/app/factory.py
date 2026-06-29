@@ -10,6 +10,8 @@ from .editor_operations import *
 from .runtime import _install_callback_audit, _start_cache_prewarm
 from .style_helpers import *
 from .callbacks_editors import register_editor_callbacks
+from .callbacks_analysis import register_analysis_callbacks
+from .callbacks_operations import register_operations_callbacks
 from .callbacks_disorder import register_disorder_callbacks
 from .callbacks_state import register_state_callbacks
 from .callbacks_view import register_view_callbacks
@@ -924,6 +926,8 @@ def create_app(
 
     register_state_callbacks(app, backend)
     register_editor_callbacks(app, backend)
+    register_analysis_callbacks(app, backend)
+    register_operations_callbacks(app, backend)
     register_disorder_callbacks(app, backend)
     register_view_callbacks(app, backend)
     register_api(app, backend)

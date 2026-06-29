@@ -19,6 +19,18 @@ def _dispatch_rightclick_action(
 ) -> None:
     if action in ("supercell_2x", "supercell_clear"):
         n = 2 if action == "supercell_2x" else 1
+        # Warn when the current display mode is "formula_unit" — a
+        # repeat transform on formula_unit tiles formula units, not
+        # unit cells, producing unexpected atom counts.
+        state = backend.get_state(scene_id)
+        if state.get("display_mode") == "formula_unit":
+            from .status_helpers import surface_callback_error
+            import warnings
+            warnings.warn(
+                "Supercell applied on display_mode=formula_unit. "
+                "The repeat tiles formula units — switch to 'Unit cell' "
+                "display mode for the expected supercell behaviour."
+            )
         backend.patch_state(
             {"supercell": {"a": n, "b": n, "c": n}},
             scene_id=scene_id,
