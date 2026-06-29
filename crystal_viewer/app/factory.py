@@ -758,43 +758,6 @@ def create_app(
                                             ],
                                             className="analysis-section",
                                         ),
-                                    ],
-                                    [
-                                        html.Section(
-                                            [
-                                                html.Div("Topology", className="analysis-section-title"),
-                                                html.Label(
-                                                    "Analyze fragment",
-                                                    htmlFor="topology-site-index",
-                                                    className="analysis-label",
-                                                ),
-                                                dcc.Dropdown(
-                                                    id="topology-site-index",
-                                                    options=backend.fragment_options(first_state),
-                                                    value=first_state.get("topology_site_index"),
-                                                    placeholder="(first match of selected species, or click in viewer)",
-                                                    clearable=True,
-                                                    className="analysis-control",
-                                                ),
-                                                html.Div(
-                                                    "Display tiling and analysis are independent: switch the analysed "
-                                                    "fragment here without changing what is drawn.",
-                                                    className="analysis-help",
-                                                ),
-                                                dcc.Graph(
-                                                    id="topology-histogram",
-                                                    figure=topology_histogram_figure(first_topology),
-                                                    className="analysis-graph",
-                                                    style={"height": "260px"},
-                                                ),
-                                                html.Pre(
-                                                    id="topology-results",
-                                                    children=topology_results_markdown(first_topology),
-                                                    className="analysis-results",
-                                                ),
-                                            ],
-                                            className="analysis-section",
-                                        ),
                                         html.Section(
                                             [
                                                 html.Div("Polyhedra", className="analysis-section-title"),
