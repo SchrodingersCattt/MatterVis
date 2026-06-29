@@ -22,6 +22,7 @@ from .editor_tables import (
 )
 from .editor_transforms import _seed_text_to_selector, _transforms_table_rows
 from .normalizers import _AUTO_LIGAND_VALUE
+from .shared import _POLY_SHELL_MODE_ENCLOSURE, _POLY_SHELL_MODE_GAP
 from .status_helpers import surface_callback_error
 
 
