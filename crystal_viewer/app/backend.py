@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .shared import ApiError, TopologyUnavailable
+from .backend_analysis import _AnalysisBackendMixin
 from .backend_camera import _CameraBackendMixin
 from .backend_core import _CoreBackendMixin
 from .backend_io import _IOBackendMixin
@@ -15,6 +16,7 @@ class ViewerBackend(
     _OperationsBackendMixin,
     _OverlaysBackendMixin,
     _SelectionBackendMixin,
+    _AnalysisBackendMixin,
     _TopologyBackendMixin,
     _CameraBackendMixin,
     _IOBackendMixin,

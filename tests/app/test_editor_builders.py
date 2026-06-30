@@ -12,9 +12,9 @@ import pytest
 from crystal_viewer.app.callbacks_editors import (
     _build_atom_groups,
     _build_bond_groups,
-    _build_polyhedron_specs,
-    _build_transforms,
 )
+from crystal_viewer.app.callbacks_analysis import _build_polyhedron_specs
+from crystal_viewer.app.callbacks_operations import _build_transforms
 
 
 # ── _build_polyhedron_specs ──────────────────────────────────────
@@ -211,3 +211,108 @@ class TestBuildTransforms:
             existing={},
         )
         assert len(transforms) == 0
+
+
+# ── regression: transform path parity ───────────────────────────
+#
+# After the refactor, all supercell / repeat creation paths must route
+# through backend.add_transform() so formula_unit auto-promotion and
+# validation fire regardless of entry point (preset button, keyboard
+# shortcut, right-click menu).
+
+class TestTransformPathParity:
+    """Verify that _normalize_transform handles edge cases correctly
+    and that the builder produces valid output for all transform kinds."""
+
+    def test_repeat_params_default_to_one(self):
+        existing = {
+            "t1": {
+                "name": "",
+                "kind": "repeat",
+                "params": {},
+            }
+        }
+        transforms = _build_transforms(
+            enabled_ids=[{"transform_id": "t1"}],
+            enableds=[["yes"]],
+            param_a=[None],
+            param_b=[None],
+            param_c=[None],
+            param_seeds=[None],
+            param_radius=[None],
+            param_hops=[None],
+            param_maxhops=[None],
+            param_cutoff=[None],
+            param_ops=[None],
+            param_miller0=[None],
+            param_miller1=[None],
+            param_miller2=[None],
+            param_layers=[None],
+            param_vacuum=[None],
+            existing=existing,
+        )
+        t = transforms[0]
+        assert t["params"]["a"] == 1
+        assert t["params"]["b"] == 1
+        assert t["params"]["c"] == 1
+
+    def test_grow_radius_defaults(self):
+        existing = {
+            "t1": {
+                "name": "",
+                "kind": "grow_radius",
+                "params": {"seeds": {"all": True}},
+            }
+        }
+        transforms = _build_transforms(
+            enabled_ids=[{"transform_id": "t1"}],
+            enableds=[["yes"]],
+            param_a=[None],
+            param_b=[None],
+            param_c=[None],
+            param_seeds=[None],
+            param_radius=[None],
+            param_hops=[None],
+            param_maxhops=[None],
+            param_cutoff=[None],
+            param_ops=[None],
+            param_miller0=[None],
+            param_miller1=[None],
+            param_miller2=[None],
+            param_layers=[None],
+            param_vacuum=[None],
+            existing=existing,
+        )
+        t = transforms[0]
+        assert t["params"]["radius"] == 0.0
+
+    def test_slab_defaults(self):
+        existing = {
+            "t1": {
+                "name": "",
+                "kind": "slab",
+                "params": {},
+            }
+        }
+        transforms = _build_transforms(
+            enabled_ids=[{"transform_id": "t1"}],
+            enableds=[["yes"]],
+            param_a=[None],
+            param_b=[None],
+            param_c=[None],
+            param_seeds=[None],
+            param_radius=[None],
+            param_hops=[None],
+            param_maxhops=[None],
+            param_cutoff=[None],
+            param_ops=[None],
+            param_miller0=[None],
+            param_miller1=[None],
+            param_miller2=[None],
+            param_layers=[None],
+            param_vacuum=[None],
+            existing=existing,
+        )
+        t = transforms[0]
+        assert t["params"]["miller"] == [0, 0, 1]
+        assert t["params"]["vacuum"] == 10.0

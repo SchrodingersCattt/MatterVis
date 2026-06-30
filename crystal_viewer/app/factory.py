@@ -10,6 +10,8 @@ from .editor_operations import *
 from .runtime import _install_callback_audit, _start_cache_prewarm
 from .style_helpers import *
 from .callbacks_editors import register_editor_callbacks
+from .callbacks_analysis import register_analysis_callbacks
+from .callbacks_operations import register_operations_callbacks
 from .callbacks_disorder import register_disorder_callbacks
 from .callbacks_state import register_state_callbacks
 from .callbacks_view import register_view_callbacks
@@ -492,53 +494,30 @@ def create_app(
                             updatemode="mouseup",
                         ),
                         html.Hr(),
-                        html.H4("Polyhedra"),
-                        dcc.Checklist(
-                            id="topology-toggle",
-                            options=[{"label": "Show polyhedra overlay", "value": "enabled"}],
-                            value=["enabled"] if first_state.get("topology_enabled", False) else [],
-                        ),
                         html.Div(
                             [
-                                html.Div(
-                                    "Each row defines one MolCrysKit molecule-level packing polyhedron: "
-                                    "centre species + explicit ligand species + colour. The overlay "
-                                    "tiles every matching site in the structure.",
-                                    style={"fontSize": "11px", "color": "#777", "marginTop": "4px"},
+                                html.Button(
+                                    "Polyhedra & Analysis →",
+                                    id="analysis-panel-toggle-quick",
+                                    n_clicks=0,
+                                    style={
+                                        "width": "100%",
+                                        "padding": "8px 12px",
+                                        "fontSize": "13px",
+                                        "cursor": "pointer",
+                                        "backgroundColor": "#EDE9FE",
+                                        "border": "1px solid #C4B5FD",
+                                        "borderRadius": "4px",
+                                    },
+                                    title="Configure polyhedra and view analysis results (right panel).",
                                 ),
-                                # ---- Named polyhedra table ----
-                                html.Div(
-                                    [
-                                        html.H4(
-                                            "Named polyhedra",
-                                            style={"display": "inline-block", "marginRight": "8px"},
-                                        ),
-                                        html.Button(
-                                            "+ Add",
-                                            id="polyhedra-add-btn",
-                                            n_clicks=0,
-                                            style={
-                                                "fontSize": "12px",
-                                                "padding": "2px 8px",
-                                                "verticalAlign": "middle",
-                                                "cursor": "pointer",
-                                            },
-                                            title="Add a named polyhedron row (centre + explicit ligand restriction + colour).",
-                                        ),
-                                    ],
-                                    style={"display": "flex", "alignItems": "center", "marginTop": "8px"},
-                                ),
-                                html.Div(
-                                    id="polyhedra-rows-container",
-                                    children=_polyhedra_table_rows(
-                                        first_state.get("polyhedron_specs") or [],
-                                        backend.species_options(first_state["structure"]),
-                                    ),
-                                    style={"marginTop": "6px"},
+                                dcc.Checklist(
+                                    id="topology-toggle",
+                                    options=[{"label": "Show polyhedra overlay", "value": "enabled"}],
+                                    value=["enabled"] if first_state.get("topology_enabled", False) else [],
+                                    style={"display": "inline-block", "marginTop": "4px"},
                                 ),
                             ],
-                            id="polyhedra-controls",
-                            style=_polyhedra_controls_style(first_state.get("topology_enabled", False)),
                         ),
                         html.Hr(),
                         # ---- Phase 3: Atom groups table ----
@@ -634,83 +613,21 @@ def create_app(
                             style={"marginTop": "6px"},
                         ),
                         html.Hr(),
-                        # ---- Phase 4: Transforms pipeline ----
-                        html.Div(
-                            [
-                                html.H4(
-                                    "Transforms",
-                                    style={"display": "inline-block", "marginRight": "8px"},
-                                ),
-                                dcc.Dropdown(
-                                    id="transforms-kind-select",
-                                    options=[
-                                        {"label": label, "value": kind}
-                                        for kind, label in _TRANSFORM_KIND_NAMES.items()
-                                    ],
-                                    value="repeat",
-                                    clearable=False,
-                                    style={"width": "150px", "fontSize": "12px", "display": "inline-block", "marginRight": "4px"},
-                                ),
-                                html.Button(
-                                    "+ Add",
-                                    id="transforms-add-btn",
-                                    n_clicks=0,
-                                    style={
-                                        "fontSize": "12px",
-                                        "padding": "2px 8px",
-                                        "verticalAlign": "middle",
-                                        "cursor": "pointer",
-                                    },
-                                    title="Append a new transform of the selected kind. Default params = a sane no-op.",
-                                ),
-                            ],
-                            style={"display": "flex", "alignItems": "center", "gap": "4px", "flexWrap": "wrap"},
+                        html.Button(
+                            "Transforms & Operation →",
+                            id="operation-panel-toggle-quick",
+                            n_clicks=0,
+                            style={
+                                "width": "100%",
+                                "padding": "8px 12px",
+                                "fontSize": "13px",
+                                "cursor": "pointer",
+                                "backgroundColor": "#FEF3C7",
+                                "border": "1px solid #FCD34D",
+                                "borderRadius": "4px",
+                            },
+                            title="Configure display transforms, disorder resolve, and structural operations (right panel).",
                         ),
-                        html.Div(
-                            [
-                                html.Button(
-                                    "2\u00d72\u00d72",
-                                    id="transforms-preset-2x",
-                                    n_clicks=0,
-                                    style={"fontSize": "12px", "padding": "2px 8px", "marginRight": "4px", "cursor": "pointer"},
-                                    title="Quick preset: append a repeat 2\u00d72\u00d72 (or replace the existing repeat).",
-                                ),
-                                html.Button(
-                                    "3\u00d73\u00d73",
-                                    id="transforms-preset-3x",
-                                    n_clicks=0,
-                                    style={"fontSize": "12px", "padding": "2px 8px", "marginRight": "4px", "cursor": "pointer"},
-                                    title="Quick preset: repeat 3\u00d73\u00d73.",
-                                ),
-                                html.Button(
-                                    "Home cell",
-                                    id="transforms-clear-repeat",
-                                    n_clicks=0,
-                                    style={"fontSize": "12px", "padding": "2px 8px", "marginRight": "4px", "cursor": "pointer"},
-                                    title="Drop any repeat transform (back to single home cell).",
-                                ),
-                                html.Button(
-                                    "Clear all",
-                                    id="transforms-clear-btn",
-                                    n_clicks=0,
-                                    style={"fontSize": "12px", "padding": "2px 8px", "cursor": "pointer", "color": "#A00"},
-                                    title="Drop every transform (back to the raw scene).",
-                                ),
-                            ],
-                            style={"marginTop": "6px"},
-                        ),
-                        html.Div(
-                            "Transforms run top \u2192 bottom; each sees the previous one\u2019s output. "
-                            "Seed format: \u2018all\u2019, \u2018elem:Pb,Cl\u2019, \u2018label:Pb1\u2019, \u2018index:0,5\u2019, "
-                            "\u2018frag:A0\u2019. Bare \u2018Pb,Cl\u2019 = elements.",
-                            style={"fontSize": "11px", "color": "#777", "marginTop": "4px"},
-                        ),
-                        html.Div(
-                            id="transforms-rows-container",
-                            children=_transforms_table_rows(first_state.get("transforms") or []),
-                            style={"marginTop": "6px"},
-                        ),
-                        html.Hr(),
                         html.Div(style={"height": "12px"}),
                         html.Button("Save Preset", id="save-preset-btn", n_clicks=0),
                         html.Button("Export Static Figure", id="export-btn", n_clicks=0, style={"marginLeft": "8px"}),
@@ -841,12 +758,128 @@ def create_app(
                                             ],
                                             className="analysis-section",
                                         ),
+                                        html.Section(
+                                            [
+                                                html.Div("Polyhedra", className="analysis-section-title"),
+                                                html.Div(
+                                                    "Each row defines one MolCrysKit molecule-level packing polyhedron: "
+                                                    "centre species + explicit ligand species + colour. The overlay "
+                                                    "tiles every matching site in the structure.",
+                                                    style={"fontSize": "11px", "color": "#777", "marginTop": "4px"},
+                                                ),
+                                                html.Div(
+                                                    [
+                                                        html.Button(
+                                                            "+ Add",
+                                                            id="polyhedra-add-btn",
+                                                            n_clicks=0,
+                                                            style={
+                                                                "fontSize": "12px",
+                                                                "padding": "2px 8px",
+                                                                "verticalAlign": "middle",
+                                                                "cursor": "pointer",
+                                                            },
+                                                            title="Add a named polyhedron row (centre + explicit ligand restriction + colour).",
+                                                        ),
+                                                    ],
+                                                    style={"marginTop": "8px"},
+                                                ),
+                                                html.Div(
+                                                    id="polyhedra-rows-container",
+                                                    children=_polyhedra_table_rows(
+                                                        first_state.get("polyhedron_specs") or [],
+                                                        backend.species_options(first_state["structure"]),
+                                                    ),
+                                                    style={"marginTop": "6px"},
+                                                ),
+                                            ],
+                                            className="analysis-section",
+                                        ),
                                     ],
                                     id="analysis-panel-content",
                                     className="analysis-tab-content",
                                 ),
                                 html.Div(
-                                    [_operation_panel_section(disorder_resolve)],
+                                    [
+                                        _operation_panel_section(disorder_resolve),
+                                        html.Section(
+                                            [
+                                                html.Div("Display Transforms", className="analysis-section-title"),
+                                                html.Div(
+                                                    "Transforms run top → bottom; each sees the previous one’s output. "
+                                                    "Seed format: ‘all’, ‘elem:Pb,Cl’, ‘label:Pb1’, ‘index:0,5’, "
+                                                    "‘frag:A0’. Bare ‘Pb,Cl’ = elements.",
+                                                    style={"fontSize": "11px", "color": "#777", "marginTop": "4px"},
+                                                ),
+                                                html.Div(
+                                                    [
+                                                        dcc.Dropdown(
+                                                            id="transforms-kind-select",
+                                                            options=[
+                                                                {"label": label, "value": kind}
+                                                                for kind, label in _TRANSFORM_KIND_NAMES.items()
+                                                            ],
+                                                            value="repeat",
+                                                            clearable=False,
+                                                            style={"width": "140px", "fontSize": "12px", "display": "inline-block", "marginRight": "4px"},
+                                                        ),
+                                                        html.Button(
+                                                            "+ Add",
+                                                            id="transforms-add-btn",
+                                                            n_clicks=0,
+                                                            style={
+                                                                "fontSize": "12px",
+                                                                "padding": "2px 8px",
+                                                                "verticalAlign": "middle",
+                                                                "cursor": "pointer",
+                                                            },
+                                                            title="Append a new transform of the selected kind. Default params = a sane no-op.",
+                                                        ),
+                                                    ],
+                                                    style={"display": "flex", "alignItems": "center", "gap": "4px", "marginTop": "6px"},
+                                                ),
+                                                html.Div(
+                                                    [
+                                                        html.Button(
+                                                            "2×2×2",
+                                                            id="transforms-preset-2x",
+                                                            n_clicks=0,
+                                                            style={"fontSize": "11px", "padding": "2px 6px", "marginRight": "4px", "cursor": "pointer"},
+                                                            title="Quick preset: append a repeat 2×2×2 (or replace the existing repeat).",
+                                                        ),
+                                                        html.Button(
+                                                            "3×3×3",
+                                                            id="transforms-preset-3x",
+                                                            n_clicks=0,
+                                                            style={"fontSize": "11px", "padding": "2px 6px", "marginRight": "4px", "cursor": "pointer"},
+                                                            title="Quick preset: repeat 3×3×3.",
+                                                        ),
+                                                        html.Button(
+                                                            "Home cell",
+                                                            id="transforms-clear-repeat",
+                                                            n_clicks=0,
+                                                            style={"fontSize": "11px", "padding": "2px 6px", "marginRight": "4px", "cursor": "pointer"},
+                                                            title="Drop any repeat transform (back to single home cell).",
+                                                        ),
+                                                        html.Button(
+                                                            "Clear all",
+                                                            id="transforms-clear-btn",
+                                                            n_clicks=0,
+                                                            style={"fontSize": "11px", "padding": "2px 6px", "cursor": "pointer", "color": "#A00"},
+                                                            title="Drop every transform (back to the raw scene).",
+                                                        ),
+                                                    ],
+                                                    style={"marginTop": "6px"},
+                                                ),
+                                                html.Div(
+                                                    id="transforms-rows-container",
+                                                    children=_transforms_table_rows(first_state.get("transforms") or []),
+                                                    style={"marginTop": "6px"},
+                                                ),
+                                            ],
+                                            className="analysis-section operation-section",
+                                        ),
+                                    ],
                                     id="operation-panel-content",
                                     className="analysis-tab-content analysis-tab-content--hidden",
                                 ),
@@ -924,6 +957,8 @@ def create_app(
 
     register_state_callbacks(app, backend)
     register_editor_callbacks(app, backend)
+    register_analysis_callbacks(app, backend)
+    register_operations_callbacks(app, backend)
     register_disorder_callbacks(app, backend)
     register_view_callbacks(app, backend)
     register_api(app, backend)

@@ -86,6 +86,8 @@
     bindSplitter("right-splitter", "right-panel", "right");
     bindPanelTab("analysis-panel-toggle", "analysis");
     bindPanelTab("operation-panel-toggle", "operation");
+    bindPanelTab("analysis-panel-toggle-quick", "analysis");
+    bindPanelTab("operation-panel-toggle-quick", "operation");
     const panel = document.getElementById("right-panel");
     if (panel && !panel.dataset.activeTab) {
       setActiveTab(panel, "analysis");
