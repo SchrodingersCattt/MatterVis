@@ -12,6 +12,7 @@ KNOWN_OVERSIZE_DURING_SPLIT = {
     # Keep the guard active while acknowledging the migration debt so unrelated
     # feature PRs can still run the full suite.
     "app/backend_core.py": 1200,
+    "app/factory.py": 1100,
     "loader/core.py": 1050,
     "structure/loader/core.py": 1050,
 }

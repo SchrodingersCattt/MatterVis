@@ -206,3 +206,61 @@ def register_analysis_callbacks(app, backend):
             return no_update, backend.get_state()
 
         return no_update, no_update
+
+    @app.callback(
+        Output("bfdh-results-container", "children"),
+        Input("bfdh-run-btn", "n_clicks"),
+        Input("scene-tabs", "value"),
+        State("bfdh-max-index", "value"),
+        State("bfdh-top-n", "value"),
+        prevent_initial_call=True,
+    )
+    def run_bfdh_analysis(n_clicks, active_scene_id, max_index, top_n):
+        triggered = getattr(callback_context, "triggered_id", None)
+        if triggered == "scene-tabs":
+            return ""
+        if not n_clicks:
+            return no_update
+
+        scene_id = active_scene_id or backend.active_scene_id()
+        try:
+            max_idx = int(max_index) if max_index is not None else 2
+            n = int(top_n) if top_n is not None else 10
+        except (TypeError, ValueError):
+            max_idx, n = 2, 10
+
+        result = backend.run_bfdh_analysis(scene_id=scene_id, max_index=max_idx, top_n=n)
+        if result["status"] == "error":
+            _surface_error("BFDH Analysis", Exception("\n".join(result["warnings"])))
+            return html.Div("Analysis failed.", style={"color": "#A00"})
+
+        facets = result.get("facets") or []
+        if not facets:
+            return html.Div("No facets found.", style={"color": "#777"})
+
+        from dash import html
+        rows = []
+        # Header
+        rows.append(
+            html.Tr([
+                html.Th("hkl", style={"textAlign": "left", "padding": "2px 4px", "borderBottom": "1px solid #ccc"}),
+                html.Th("d_hkl (Å)", style={"textAlign": "right", "padding": "2px 4px", "borderBottom": "1px solid #ccc"}),
+                html.Th("Importance", style={"textAlign": "right", "padding": "2px 4px", "borderBottom": "1px solid #ccc"}),
+                html.Th("Mult", style={"textAlign": "right", "padding": "2px 4px", "borderBottom": "1px solid #ccc"}),
+            ])
+        )
+        for f in facets:
+            hkl_str = f"({f['miller_index'][0]}, {f['miller_index'][1]}, {f['miller_index'][2]})"
+            rows.append(
+                html.Tr([
+                    html.Td(hkl_str, style={"padding": "2px 4px"}),
+                    html.Td(f"{f['d_hkl']:.3f}", style={"textAlign": "right", "padding": "2px 4px"}),
+                    html.Td(f"{f['relative_morphological_importance']:.3f}", style={"textAlign": "right", "padding": "2px 4px"}),
+                    html.Td(str(f.get("multiplicity", 1)), style={"textAlign": "right", "padding": "2px 4px"}),
+                ])
+            )
+
+        return html.Table(
+            rows,
+            style={"width": "100%", "borderCollapse": "collapse", "marginTop": "4px"}
+        )
