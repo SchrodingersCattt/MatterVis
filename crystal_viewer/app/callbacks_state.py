@@ -465,11 +465,10 @@ def register_state_callbacks(app, backend):
         Input("display-options", "value"),
         Input("axis-scale-slider", "value"),
         Input("minor-opacity-slider", "value"),
-        State("crystal-graph", "figure"),
         State("scene-tabs", "value"),
         prevent_initial_call=True,
     )
-    def patch_fast_style_controls(display_options, axis_scale, minor_opacity, current_figure, scene_id):
+    def patch_fast_style_controls(display_options, axis_scale, minor_opacity, scene_id):
         """Patch style-only trace attributes without rebuilding the figure.
 
         Hydrogens remain on the full scene path because they change the atom
@@ -486,6 +485,12 @@ def register_state_callbacks(app, backend):
             return no_update, no_update
         if not _display_options_can_fast_patch(prev_options, next_options):
             return no_update, no_update
+        
+        # Fetch the figure from backend cache instead of pulling 1-2MB of JSON
+        # from the browser on every slider tick.
+        fig, _ = backend.figure_for_state(prev)
+        current_figure = fig.to_plotly_json()
+
         patch_payload = {
             "display_options": list(display_options or []),
             "axis_scale": axis_scale,
