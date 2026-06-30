@@ -795,6 +795,60 @@ def create_app(
                                             ],
                                             className="analysis-section",
                                         ),
+                                        html.Section(
+                                            [
+                                                html.Div("BFDH Morphology", className="analysis-section-title"),
+                                                html.Div(
+                                                    "Simulate crystal morphology using the Bravais-Friedel-Donnay-Harker (BFDH) method.",
+                                                    style={"fontSize": "11px", "color": "#777", "marginTop": "4px"},
+                                                ),
+                                                html.Div(
+                                                    [
+                                                        html.Label("Max Index", style={"fontSize": "11px", "marginRight": "4px"}),
+                                                        dcc.Input(
+                                                            id="bfdh-max-index",
+                                                            type="number",
+                                                            min=1,
+                                                            max=5,
+                                                            step=1,
+                                                            value=2,
+                                                            style={"width": "40px", "fontSize": "11px", "marginRight": "12px"},
+                                                        ),
+                                                        html.Label("Top N", style={"fontSize": "11px", "marginRight": "4px"}),
+                                                        dcc.Input(
+                                                            id="bfdh-top-n",
+                                                            type="number",
+                                                            min=1,
+                                                            max=50,
+                                                            step=1,
+                                                            value=10,
+                                                            style={"width": "40px", "fontSize": "11px", "marginRight": "12px"},
+                                                        ),
+                                                        html.Button(
+                                                            "Run BFDH",
+                                                            id="bfdh-run-btn",
+                                                            n_clicks=0,
+                                                            style={
+                                                                "fontSize": "12px",
+                                                                "padding": "2px 8px",
+                                                                "cursor": "pointer",
+                                                            },
+                                                        ),
+                                                    ],
+                                                    style={"display": "flex", "alignItems": "center", "marginTop": "8px"},
+                                                ),
+                                                dcc.Loading(
+                                                    id="bfdh-loading",
+                                                    type="dot",
+                                                    color="#2f6df6",
+                                                    children=html.Div(
+                                                        id="bfdh-results-container",
+                                                        style={"marginTop": "8px", "fontSize": "11px"},
+                                                    ),
+                                                ),
+                                            ],
+                                            className="analysis-section",
+                                        ),
                                     ],
                                     id="analysis-panel-content",
                                     className="analysis-tab-content",

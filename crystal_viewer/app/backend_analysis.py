@@ -299,5 +299,44 @@ class _AnalysisBackendMixin:
             "drawable_spec_count": drawable_specs,
         }
 
+    def run_bfdh_analysis(
+        self,
+        scene_id: Optional[str] = None,
+        *,
+        max_index: int = 2,
+        top_n: int = 10,
+    ) -> dict[str, Any]:
+        """Run BFDH morphology analysis synchronously and return the results.
+
+        Returns:
+        ``{"facets": [...], "status": "ok"|"error", "warnings": [...]}``
+        """
+        state = self.get_state(scene_id)
+        structure = str(state.get("structure") or "")
+        bundle = self.get_bundle(structure)
+        crystal = getattr(bundle, "crystal", None)
+
+        if crystal is None:
+            return {
+                "facets": [],
+                "status": "error",
+                "warnings": ["BFDH analysis requires bundle.crystal (MolecularCrystal)."],
+            }
+
+        try:
+            from molcrys_kit.analysis import enumerate_bfdh_facets
+            facets = enumerate_bfdh_facets(crystal, max_index=max_index, top_n=top_n)
+            return {
+                "facets": [f.as_dict() for f in facets],
+                "status": "ok",
+                "warnings": [],
+            }
+        except Exception as exc:
+            return {
+                "facets": [],
+                "status": "error",
+                "warnings": [f"BFDH analysis failed: {exc}"],
+            }
+
 
 __all__ = ["_AnalysisBackendMixin"]
