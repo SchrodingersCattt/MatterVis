@@ -494,32 +494,6 @@ def create_app(
                             updatemode="mouseup",
                         ),
                         html.Hr(),
-                        html.Div(
-                            [
-                                html.Button(
-                                    "Polyhedra & Analysis →",
-                                    id="analysis-panel-toggle-quick",
-                                    n_clicks=0,
-                                    style={
-                                        "width": "100%",
-                                        "padding": "8px 12px",
-                                        "fontSize": "13px",
-                                        "cursor": "pointer",
-                                        "backgroundColor": "#EDE9FE",
-                                        "border": "1px solid #C4B5FD",
-                                        "borderRadius": "4px",
-                                    },
-                                    title="Configure polyhedra and view analysis results (right panel).",
-                                ),
-                                dcc.Checklist(
-                                    id="topology-toggle",
-                                    options=[{"label": "Show polyhedra overlay", "value": "enabled"}],
-                                    value=["enabled"] if first_state.get("topology_enabled", False) else [],
-                                    style={"display": "inline-block", "marginTop": "4px"},
-                                ),
-                            ],
-                        ),
-                        html.Hr(),
                         # ---- Phase 3: Atom groups table ----
                         html.Div(
                             [
@@ -613,21 +587,6 @@ def create_app(
                             style={"marginTop": "6px"},
                         ),
                         html.Hr(),
-                        html.Button(
-                            "Transforms & Operation →",
-                            id="operation-panel-toggle-quick",
-                            n_clicks=0,
-                            style={
-                                "width": "100%",
-                                "padding": "8px 12px",
-                                "fontSize": "13px",
-                                "cursor": "pointer",
-                                "backgroundColor": "#FEF3C7",
-                                "border": "1px solid #FCD34D",
-                                "borderRadius": "4px",
-                            },
-                            title="Configure display transforms, disorder resolve, and structural operations (right panel).",
-                        ),
                         html.Div(style={"height": "12px"}),
                         html.Button("Save Preset", id="save-preset-btn", n_clicks=0),
                         html.Button("Export Static Figure", id="export-btn", n_clicks=0, style={"marginLeft": "8px"}),
@@ -761,6 +720,12 @@ def create_app(
                                         html.Section(
                                             [
                                                 html.Div("Polyhedra", className="analysis-section-title"),
+                                                dcc.Checklist(
+                                                    id="topology-toggle",
+                                                    options=[{"label": "Show polyhedra overlay", "value": "enabled"}],
+                                                    value=["enabled"] if first_state.get("topology_enabled", False) else [],
+                                                    style={"display": "inline-block", "marginTop": "4px", "marginBottom": "4px"},
+                                                ),
                                                 html.Div(
                                                     "Each row defines one MolCrysKit molecule-level packing polyhedron: "
                                                     "centre species + explicit ligand species + colour. The overlay "
