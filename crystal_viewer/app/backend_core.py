@@ -178,6 +178,8 @@ class _CoreBackendMixin:
             # anchored entries store a target plus pixel offset so labels
             # reproject when the camera changes.
             "overlay_overrides": [],
+            "bfdh_morphology": None,
+            "bfdh_morphology_color": "#4f7cff",
             "selection": {"atom_labels": [], "active_label": None, "order": []},
             "fast_rendering": bool(style.get("fast_rendering", False)),
             "camera": scene.get("camera"),
@@ -484,6 +486,8 @@ class _CoreBackendMixin:
             json.dump(self.upload_manifest, handle, indent=2, ensure_ascii=False)
 
     def _restore_uploaded_bundles(self) -> None:
+        """Register previously-uploaded structures into ``self.catalog``
+        for lazy loading via :meth:`get_bundle`."""
         uploads = self.upload_manifest.get("uploads") or {}
         changed = False
         for digest, record in list(uploads.items()):
@@ -499,20 +503,13 @@ class _CoreBackendMixin:
                 continue
             if name in self.structure_names:
                 continue
-            try:
-                bundle = build_loaded_crystal(
-                    name=name,
-                    cif_path=path,
-                    title=str(record.get("title") or name),
-                    preset=self.preset,
-                    source="upload",
-                )
-            except Exception:
-                uploads.pop(digest, None)
-                changed = True
-                continue
-            self.bundles[bundle.name] = bundle
-            self.structure_names.append(bundle.name)
+            # Register into catalog for lazy loading via get_bundle().
+            self.catalog[name] = {
+                "cif_path": path,
+                "title": str(record.get("title") or name),
+                "source": "upload",
+            }
+            self.structure_names.append(name)
         if changed:
             try:
                 self._save_upload_manifest()
@@ -520,7 +517,15 @@ class _CoreBackendMixin:
                 pass
 
     def list_structures(self) -> list[dict[str, Any]]:
-        return [self.get_bundle(name).metadata() for name in self.structure_names]
+        result = []
+        for name in self.structure_names:
+            if name in self.bundles:
+                result.append(self.bundles[name].metadata())
+            else:
+                entry = self.catalog.get(name, {})
+                result.append({"name": name, "title": entry.get("title", name),
+                               "source": entry.get("source", "catalog"), "loaded": False})
+        return result
 
     def structure_options(self) -> list[dict[str, str]]:
         return [
@@ -792,12 +797,13 @@ class _CoreBackendMixin:
             raise KeyError(name)
 
         entry = self.catalog[name]
+        source = entry.get("source", "catalog")
         built = build_loaded_crystal(
             name=name,
             cif_path=entry["cif_path"],
-            title=entry["title"],
+            title=entry.get("title") or entry.get("name", name),
             preset=self.preset,
-            source="catalog",
+            source=source,
         )
 
         with self._bundle_lock:
@@ -957,6 +963,14 @@ class _CoreBackendMixin:
             state["transforms"] = existing
         if "fast_rendering" in patch:
             state["fast_rendering"] = bool(patch["fast_rendering"])
+        if "bfdh_morphology" in patch:
+            morphology = patch.get("bfdh_morphology")
+            if isinstance(morphology, dict):
+                state["bfdh_morphology"] = copy.deepcopy(morphology)
+            else:
+                state["bfdh_morphology"] = None
+        if "bfdh_morphology_color" in patch and patch["bfdh_morphology_color"]:
+            state["bfdh_morphology_color"] = str(patch["bfdh_morphology_color"])
         # ---- legacy migration: monochrome=True --> atom_group rule ----
         #
         # Old presets / agent scripts may still set ``monochrome=True``
@@ -1096,6 +1110,8 @@ class _CoreBackendMixin:
     def style_for_state(self, state: Optional[dict[str, Any]] = None, scene: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         state = self.current_state if state is None else state
         scene = self.scene_for_state(state) if scene is None else scene
+        if state.get("bfdh_morphology") is not None:
+            scene["bfdh_morphology"] = copy.deepcopy(state.get("bfdh_morphology"))
         style = dict(scene.get("style", {}))
         style.update(
             style_from_controls(
@@ -1144,6 +1160,7 @@ class _CoreBackendMixin:
             state.get("projection", style.get("projection", "perspective")),
             fallback=str(style.get("projection", "perspective")),
         )
+        style["bfdh_morphology_color"] = str(state.get("bfdh_morphology_color", "#4f7cff"))
         if isinstance(state.get("camera"), dict):
             style["camera"] = copy.deepcopy(state["camera"])
         # Plotly's ``layout.scene.uirevision`` makes the WebGL camera

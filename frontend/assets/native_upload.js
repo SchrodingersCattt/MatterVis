@@ -155,11 +155,18 @@
       xhr.open("POST", "/api/v2/upload", true);
       xhr.upload.onprogress = function (event) {
         if (event.lengthComputable) {
-          const pct = Math.round((event.loaded / event.total) * 100);
-          setStatus(
-            "Uploading " + file.name + " (" + index + "/" + total + "): " + pct + "%...",
-            "info"
-          );
+          var pct = Math.round((event.loaded / event.total) * 100);
+          if (pct >= 100) {
+            setStatus(
+              "Processing " + file.name + " (" + index + "/" + total + ")...",
+              "info"
+            );
+          } else {
+            setStatus(
+              "Uploading " + file.name + " (" + index + "/" + total + "): " + pct + "%...",
+              "info"
+            );
+          }
         } else {
           setStatus("Uploading " + file.name + " (" + index + "/" + total + ")...", "info");
         }
