@@ -16,7 +16,7 @@ KNOWN_OVERSIZE_DURING_SPLIT = {
     "loader/core.py": 1050,
     "structure/loader/core.py": 1050,
 }
-ALLOWED_TOP_LEVEL_PY = {"__init__.py", "__main__.py"}
+ALLOWED_TOP_LEVEL_PY = {"__init__.py", "__main__.py", "cli.py"}
 
 
 def _line_count(path: Path) -> int:

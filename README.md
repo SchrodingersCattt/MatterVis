@@ -51,20 +51,41 @@ labels directly -- it lists the stoichiometric formulas it detects (e.g.
 `C6N2 ×2`, `ClO4 ×4`, `N ×1`) so the same controls work for non-perovskite
 crystals.
 
+## Quick render (CLI)
+
+Generate publication-quality figures from CIF files without launching the
+browser:
+
+```bash
+# PNG with default ball-and-stick style
+python -m crystal_viewer render structure.cif -o figure.png
+
+# PDF, full unit cell, ORTEP hatch shading in greyscale
+python -m crystal_viewer render structure.cif -o figure.pdf \
+  --view unit_cell --style ortep --ortep-mode ortep_hatch --monochrome
+
+# Interactive HTML for supplementary information
+python -m crystal_viewer render structure.cif -o si_figure.html \
+  --show-hydrogen --show-labels
+```
+
+See [`docs/cli.md`](docs/cli.md) for the full flag reference, common
+recipes, and advanced `--config` JSON usage.
+
 ## Launch the browser viewer
 
 ```bash
-python -m crystal_viewer --cif scripts/data/DAP-4.cif
-# Serving crystal viewer at http://127.0.0.1:8051
+python -m crystal_viewer serve --cif scripts/data/DAP-4.cif
+# Serving crystal viewer at http://0.0.0.0:50001
 ```
 
 Additional flags:
 
 ```bash
-python -m crystal_viewer --port 8051            # pick a port
-python -m crystal_viewer --host 0.0.0.0         # bind on all interfaces
-python -m crystal_viewer --structure DAP-4      # limit catalog to one name
-python -m crystal_viewer --cif a.cif --cif b.cif --cif c.cif
+python -m crystal_viewer serve --port 8051            # pick a port
+python -m crystal_viewer serve --host 127.0.0.1       # bind to localhost only
+python -m crystal_viewer serve --structure DAP-4      # limit catalog to one name
+python -m crystal_viewer serve --cif a.cif --cif b.cif --cif c.cif
 ```
 
 `--cif` is `action="append"` -- repeat the flag once per CIF file you want to
@@ -88,7 +109,7 @@ common gotchas:
 Putting it together for a Bohrium dev box:
 
 ```bash
-python -m crystal_viewer.app --host 0.0.0.0 --port 50001 \
+python -m crystal_viewer serve --host 0.0.0.0 --port 50001 \
   --cif scripts/data/DAP-4.cif --cif scripts/data/SY.cif
 # Reachable at http://<your-id>.bohrium.tech:50001/
 ```
