@@ -676,10 +676,11 @@ def _apply_scene_axes(ax, scene):
     xmid = (mins[0] + maxs[0]) / 2
     ymid = (mins[1] + maxs[1]) / 2
     zmid = (mins[2] + maxs[2]) / 2
-    max_half = max(half_x, half_y, half_z)
-    ax.set_xlim(xmid - max_half, xmid + max_half)
-    ax.set_ylim(ymid - max_half, ymid + max_half)
-    ax.set_zlim(zmid - max_half, zmid + max_half)
+    # 方案B: set both limits and box_aspect to the screen_ranges so
+    # the aspect ratio is consistent → no anisotropic distortion.
+    ax.set_xlim(xmid - half_x, xmid + half_x)
+    ax.set_ylim(ymid - half_y, ymid + half_y)
+    ax.set_zlim(zmid - half_z, zmid + half_z)
     ax.set_box_aspect([sx_range, sy_range, sz_range])
     ax.set_title(scene['title'], fontsize=10, fontweight='bold', pad=5)
     if scene['has_minor']:

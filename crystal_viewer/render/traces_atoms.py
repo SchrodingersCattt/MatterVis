@@ -84,12 +84,10 @@ def _bond_mesh_traces(scene: dict, style: dict):
     """Build the bond Mesh3d traces, bucketed by ``(color, is_minor,
     radius_bin, opacity_bin)`` so per-bond ``_render_radius_scale`` /
     ``_render_opacity_scale`` (set by ``tag_bonds_with_groups``)
-    survive the one-trace-per-colour grouping. Plotly bakes opacity
-    onto the trace, not per-vertex; the same is true of ``color``;
-    so we have to expand the bucket key to keep their distinct
-    cosmetic values from collapsing."""
+    survive the one-trace-per-colour grouping."""
     groups: Dict[Tuple[str, bool, int, str | None], dict] = {}
     base_radius = max(0.04, float(style["bond_radius"]))
+    mesh_lighting = style.get("mesh_lighting")
     for color, is_minor, start, end, radius_scale, opacity_scale, opacity_group in _bond_segments(
         scene, style, with_scales=True
     ):
@@ -116,48 +114,50 @@ def _bond_mesh_traces(scene: dict, style: dict):
         )
         if len(vertices) == 0:
             continue
+        mesh_kwargs = dict(
+            x=vertices[:, 0],
+            y=vertices[:, 1],
+            z=vertices[:, 2],
+            i=triangles[:, 0],
+            j=triangles[:, 1],
+            k=triangles[:, 2],
+            color=color,
+            opacity=bond_effective_opacity(
+                {"is_minor": is_minor, "_render_opacity_scale": opacity_scale},
+                style,
+            ),
+            hoverinfo="skip",
+            showlegend=False,
+            flatshading=False,
+        )
+        if mesh_lighting:
+            mesh_kwargs["lighting"] = mesh_lighting
         traces.append(
-            _annotate_trace(go.Mesh3d(
-                x=vertices[:, 0],
-                y=vertices[:, 1],
-                z=vertices[:, 2],
-                i=triangles[:, 0],
-                j=triangles[:, 1],
-                k=triangles[:, 2],
-                color=color,
-                opacity=bond_effective_opacity(
-                    {"is_minor": is_minor, "_render_opacity_scale": opacity_scale},
-                    style,
-                ),
-                hoverinfo="skip",
-                showlegend=False,
-                flatshading=False,
-            ), "bond", is_minor=is_minor, opacity_group=opacity_group, opacity_scale=opacity_scale)
+            _annotate_trace(go.Mesh3d(**mesh_kwargs), "bond", is_minor=is_minor, opacity_group=opacity_group, opacity_scale=opacity_scale)
         )
     return traces
 
 
 def _atom_mesh_traces(scene: dict, style: dict):
-    # Per-atom tessellation budget. The over-the-wire cost of one
-    # sphere is ``(lat-1)*lon + 2`` Mesh3d verts × (3 × 4 B for
-    # f32 coords + faces). For a 200-atom DAP-4 unit cell with
-    # topology overlay the figure JSON used to be ~1.4 MB; dropping
-    # subdivision halves the vertex count and gets the brotli-
-    # compressed wire size into the ~120 kB range, where a Labels
-    # toggle round-trips in well under a second on most consumer
-    # connections. The visual difference vs the old 6/10 default
-    # is invisible at the camera distance forced by a dense unit
-    # cell. Users who insist on perfectly smooth balls pick the
-    # "formula unit" Display Scope (n_atoms < 60).
-    n_atoms = len(scene.get("draw_atoms", []))
-    if n_atoms > 400:
-        lat_steps, lon_steps = 3, 6
-    elif n_atoms > 150:
-        lat_steps, lon_steps = 4, 7
-    elif n_atoms > 60:
-        lat_steps, lon_steps = 5, 9
+    # Per-atom tessellation budget. User can override with
+    # ortep_lat_steps / ortep_lon_steps (shared key name with ORTEP
+    # for simplicity — controls sphere density in ball-stick too).
+    user_lat = style.get("ortep_lat_steps")
+    user_lon = style.get("ortep_lon_steps")
+    if user_lat is not None and user_lon is not None:
+        lat_steps, lon_steps = int(user_lat), int(user_lon)
     else:
-        lat_steps, lon_steps = 6, 10
+        n_atoms = len(scene.get("draw_atoms", []))
+        if n_atoms > 400:
+            lat_steps, lon_steps = 3, 6
+        elif n_atoms > 150:
+            lat_steps, lon_steps = 4, 7
+        elif n_atoms > 60:
+            lat_steps, lon_steps = 5, 9
+        else:
+            lat_steps, lon_steps = 6, 10
+
+    mesh_lighting = style.get("mesh_lighting")
     # Bucket key extends to (color, is_minor, opacity_scale_bin) so
     # per-group ``opacity`` overrides survive the Mesh3d
     # one-trace-per-colour grouping (Plotly bakes opacity into the
@@ -195,20 +195,23 @@ def _atom_mesh_traces(scene: dict, style: dict):
             lat_steps=lat_steps,
             lon_steps=lon_steps,
         )
+        mesh_kwargs = dict(
+            x=vertices[:, 0],
+            y=vertices[:, 1],
+            z=vertices[:, 2],
+            i=triangles[:, 0],
+            j=triangles[:, 1],
+            k=triangles[:, 2],
+            color=color,
+            opacity=payload["opacity"],
+            hoverinfo="skip",
+            showlegend=False,
+            flatshading=False,
+        )
+        if mesh_lighting:
+            mesh_kwargs["lighting"] = mesh_lighting
         traces.append(
-            _annotate_trace(go.Mesh3d(
-                x=vertices[:, 0],
-                y=vertices[:, 1],
-                z=vertices[:, 2],
-                i=triangles[:, 0],
-                j=triangles[:, 1],
-                k=triangles[:, 2],
-                color=color,
-                opacity=payload["opacity"],
-                hoverinfo="skip",
-                showlegend=False,
-                flatshading=False,
-            ), "atom", is_minor=is_minor, opacity_group=opacity_group)
+            _annotate_trace(go.Mesh3d(**mesh_kwargs), "atom", is_minor=is_minor, opacity_group=opacity_group)
         )
     return traces
 

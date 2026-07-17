@@ -124,6 +124,18 @@ def _grow_local_environment(atoms, anchor_idxs, candidate_clusters, M, max_count
     return selected, chosen
 
 # ── Select one formula unit ──────────────────────────────────────────────────
+
+# Transition metals and common coordination-complex metals
+_METAL_ELEMENTS = frozenset([
+    "Sc", "Ti", "V", "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn",
+    "Y", "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Ag", "Cd",
+    "La", "Hf", "Ta", "W", "Re", "Os", "Ir", "Pt", "Au", "Hg",
+    "Ce", "Pr", "Nd", "Sm", "Eu", "Gd", "Tb", "Dy", "Ho", "Er",
+    "Tm", "Yb", "Lu", "Ac", "Th", "U", "Np", "Pu",
+    "Al", "Ga", "In", "Tl", "Sn", "Pb", "Bi",
+])
+
+
 def select_formula_unit(atoms, M, cell):
     atoms = [dict(a) for a in atoms]
     bond_pairs = find_bonds(atoms, cell=cell)
@@ -133,29 +145,35 @@ def select_formula_unit(atoms, M, cell):
 
     organic_clusters = {}
     anion_clusters = {}
+    metal_clusters = {}
     for root, idxs in clusters.items():
         elems = set(atoms[i]['elem'] for i in idxs if atoms[i]['elem'] != 'H')
-        if 'Cl' in elems:
+        has_metal = bool(elems & _METAL_ELEMENTS)
+        if has_metal:
+            metal_clusters[root] = idxs
+        elif 'Cl' in elems or 'Br' in elems or 'I' in elems:
             anion_clusters[root] = idxs
         elif 'C' in elems or 'N' in elems:
             organic_clusters[root] = idxs
 
-    if not organic_clusters:
+    if not organic_clusters and not metal_clusters:
         return atoms, list(range(len(atoms)))
 
-    org_list = sorted(organic_clusters.items(),
-                      key=lambda kv: len(kv[1]), reverse=True)
-    anchor_root, anchor_idxs = org_list[0]
+    # Pick the anchor from the largest cluster (organic or metal)
+    all_molecular = list(organic_clusters.items()) + list(metal_clusters.items())
+    all_molecular.sort(key=lambda kv: len(kv[1]), reverse=True)
+    anchor_root, anchor_idxs = all_molecular[0]
     anchor_size = len(anchor_idxs)
     anchor_labels = frozenset(atoms[i]['label'] for i in anchor_idxs)
 
     selected_org_idxs = list(anchor_idxs)
 
-    if len(org_list) >= 2:
+    # Grow additional molecular clusters (both organic and metal)
+    if len(all_molecular) >= 2:
         preferred = []
         fallback = []
-        for root, idxs in org_list[1:]:
-            if len(idxs) < anchor_size * 0.35:
+        for root, idxs in all_molecular[1:]:
+            if len(idxs) < anchor_size * 0.25:
                 continue
             clabels = frozenset(atoms[i]['label'] for i in idxs)
             item = (root, idxs)
@@ -165,8 +183,10 @@ def select_formula_unit(atoms, M, cell):
                 preferred.append(item)
         candidates = preferred if preferred else fallback
         if candidates:
+            # Allow up to 3 additional molecular partners (covers structures
+            # with separate cation + anion complex + counterion clusters)
             selected_org_idxs, chosen_org = _grow_local_environment(
-                atoms, selected_org_idxs, candidates, M, max_count=1)
+                atoms, selected_org_idxs, candidates, M, max_count=3)
 
     selected_idxs = list(selected_org_idxs)
     anion_candidates = [(root, idxs) for root, idxs in anion_clusters.items() if len(idxs) >= 4]

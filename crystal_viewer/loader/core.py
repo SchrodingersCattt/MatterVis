@@ -338,7 +338,13 @@ generate_ordered_replicas_from_disordered_sites` for the optimal
         if not isinstance(first, tuple) or len(first) != 2:
             return raw_atoms
         _crystal, kept_indices = first
-        kept_raw = {int(idx) for idx in kept_indices}
+        # Bridge MCK's DisorderInfo index space → raw_atoms via geometric
+        # matching.  The two CIF parsers expand symmetry independently,
+        # so their index spaces are NOT aligned (see disorder_index.py).
+        from ..structure.disorder_index import map_mck_indices_to_raw
+
+        idx_map = map_mck_indices_to_raw(cif_path, raw_atoms, kept_indices)
+        kept_raw = set(idx_map.values())
         out = [dict(atom) for atom in raw_atoms]
 
         disordered_idx: list[int] = []

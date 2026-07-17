@@ -42,6 +42,13 @@ def _bond_allowed_by_table(ai, aj):
         return True
     if partners_j and ai['label'] in partners_j:
         return True
+    # Symmetry-expanded disorder atoms (labels like "C6B?") are absent
+    # from the CIF _geom_bond table which only lists ASU labels ("C6A").
+    # Fall back to distance-based bonding when BOTH atoms carry a
+    # synthetic disorder group but neither lists the other as a partner.
+    if ai.get('_mv_auto_disorder_group') and aj.get('_mv_auto_disorder_group'):
+        if not partners_i and not partners_j:
+            return True
     return False
 
 

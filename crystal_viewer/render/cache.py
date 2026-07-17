@@ -106,6 +106,9 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
     atom_groups = style.get("atom_groups") or []
     bond_groups = style.get("bond_groups") or []
     cache = scene.setdefault("_mesh_trace_cache", {})
+    # mesh_lighting as a hashable tuple (or None) for caching.
+    _ml = style.get("mesh_lighting")
+    _ml_key = tuple(sorted(_ml.items())) if isinstance(_ml, dict) else None
     key = (
         bool(use_fast),
         str(style.get("material", "mesh")),
@@ -126,6 +129,11 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
         bool(style.get("ortep_octant_hatching", False)),
         str(style.get("force_bond_color", "")),
         str(style.get("ortep_atom_fill_color", "#FFFFFF")),
+        # New mesh-quality keys (PR#50+)
+        style.get("ortep_lat_steps"),
+        style.get("ortep_lon_steps"),
+        _ml_key,
+        style.get("ortep_hydrogen_radius"),
         _atom_groups_cache_key(atom_groups),
         bond_groups_cache_key(bond_groups),
     )
