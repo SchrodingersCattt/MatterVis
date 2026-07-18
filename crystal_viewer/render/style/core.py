@@ -122,17 +122,32 @@ def _atom_effective_opacity(atom: dict, style: dict) -> float:
     to drift to ~0.18, which read as "disappearing" rather than
     "halved" -- and a user setting opacity=0 expects an invisible atom,
     not "0 × something".
+
+    When ``disorder == "opacity"``, partial-occupancy atoms use their
+    crystallographic occupancy as opacity (occ=0.526 → alpha=0.526).
     """
-    is_minor = bool(atom.get("is_minor", False))
-    base = _minor_opacity_for(style, is_minor)
+    # Explicit atom_group override takes priority over everything.
     scale = atom.get("_render_opacity_scale", 1.0)
     try:
         scale_f = max(0.0, min(1.0, float(scale)))
     except (TypeError, ValueError):
         scale_f = 1.0
-    if scale_f >= 0.999:
-        return base
-    return scale_f
+    if scale_f < 0.999:
+        return scale_f
+
+    # In disorder="opacity" mode, use crystallographic occupancy directly.
+    if style.get("disorder") == "opacity" or style.get("force_minor_fade"):
+        occ = atom.get("occ", 1.0)
+        try:
+            occ_f = float(occ)
+        except (TypeError, ValueError):
+            occ_f = 1.0
+        if occ_f < 0.999:
+            return max(0.05, occ_f)
+
+    # Full-occupancy atoms or non-opacity disorder modes.
+    is_minor = bool(atom.get("is_minor", False))
+    return _minor_opacity_for(style, is_minor)
 
 
 def _atom_opacity_group_id(atom: dict) -> str | None:
