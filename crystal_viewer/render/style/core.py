@@ -243,7 +243,13 @@ def _style_trace_dicts(trace_dicts: list[dict], style: dict) -> list[dict]:
             copied["visible"] = True
         group_id = meta.get("mv_opacity_group")
         if role == "atom":
-            opacity = atom_group_opacity.get(str(group_id), _minor_opacity_for(style, is_minor))
+            if str(group_id) in atom_group_opacity:
+                opacity = atom_group_opacity[str(group_id)]
+            else:
+                # Preserve the trace's own opacity (set by _atom_mesh_traces
+                # using _atom_effective_opacity which respects occ in
+                # disorder='opacity' mode).  Only override when absent.
+                opacity = copied.get("opacity") if copied.get("opacity") is not None else _minor_opacity_for(style, is_minor)
             if copied.get("type") == "scatter3d":
                 marker = dict(copied.get("marker") or {})
                 marker["opacity"] = opacity
@@ -251,12 +257,17 @@ def _style_trace_dicts(trace_dicts: list[dict], style: dict) -> list[dict]:
             else:
                 copied["opacity"] = opacity
         elif role == "bond":
-            pseudo_bond = {"is_minor": is_minor}
             if str(group_id) in bond_group_opacity:
-                pseudo_bond["_render_opacity_scale"] = bond_group_opacity[str(group_id)]
-            elif "mv_opacity_scale" in meta:
-                pseudo_bond["_render_opacity_scale"] = meta.get("mv_opacity_scale")
-            copied["opacity"] = bond_effective_opacity(pseudo_bond, style)
+                pseudo_bond = {"is_minor": is_minor, "_render_opacity_scale": bond_group_opacity[str(group_id)]}
+                copied["opacity"] = bond_effective_opacity(pseudo_bond, style)
+            else:
+                # Preserve the trace's existing opacity (set by
+                # _bond_mesh_traces using bond_effective_opacity with occ).
+                if copied.get("opacity") is None:
+                    pseudo_bond = {"is_minor": is_minor}
+                    if "mv_opacity_scale" in meta:
+                        pseudo_bond["_render_opacity_scale"] = meta.get("mv_opacity_scale")
+                    copied["opacity"] = bond_effective_opacity(pseudo_bond, style)
         out.append(copied)
     return out
 

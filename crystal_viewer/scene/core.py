@@ -158,6 +158,7 @@ def build_scene_from_atoms(
                 "alpha_i": ai["disorder_alpha"],
                 "alpha_j": aj["disorder_alpha"],
                 "is_minor": bond_is_minor(ai, aj),
+                "occ": min(float(ai.get("occ", 1.0)), float(aj.get("occ", 1.0))),
                 "depth_t": float((ai["_depth_t"] + aj["_depth_t"]) / 2.0),
             }
         )
