@@ -33,8 +33,22 @@ def validate_style_schema(style: dict) -> dict:
         normalized.update(ORTEP_MODES[normalized["ortep_mode"]])
     if ortep_mode_minor is not None:
         normalized["ortep_mode_minor"] = str(ortep_mode_minor)
-    normalized["fast_rendering"] = bool(normalized.get("fast_rendering", False)) or material == "flat"
+    normalized["fast_rendering"] = bool(normalized.get("fast_rendering", False)) or (material == "flat" and render_style != "ortep")
     normalized["minor_wireframe"] = bool(normalized.get("minor_wireframe", False)) or disorder == "outline_rings"
+
+    # Classic 2D ORTEP publication mode: flat + ortep activates the
+    # open-ellipsoid pipeline (white fill + silhouette + octant hatch +
+    # black bond lines + orthographic projection).
+    if material == "flat" and render_style == "ortep":
+        normalized["ortep_silhouette_outline"] = True
+        normalized["ortep_octant_hatching"] = True
+        normalized["ortep_atom_fill"] = True
+        normalized["force_bond_color"] = normalized.get("force_bond_color") or "#000000"
+        normalized["projection"] = "orthographic"
+        if not normalized.get("ortep_hydrogen_radius"):
+            normalized["ortep_hydrogen_radius"] = 0.15
+        normalized["monochrome"] = True
+
     return normalized
 
 
