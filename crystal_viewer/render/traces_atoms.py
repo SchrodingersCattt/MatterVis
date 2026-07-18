@@ -65,10 +65,12 @@ def _bond_segments(scene: dict, style: dict, *, with_scales: bool = False):
             (c_j, bond["is_minor"], mid, end),
         ]
         for color, is_minor, seg_start, seg_end in halves:
-            if is_minor and style.get("disorder") == "dashed_bonds":
+            if (bond_occ < 0.999 or is_minor) and style.get("disorder") == "dashed_bonds":
                 length = float(np.linalg.norm(seg_end - seg_start))
-                dash_len = max(0.08, 0.22 * length)
-                gap_len = max(0.05, 0.14 * length)
+                # Gap scales with disorder intensity: lower occ → bigger gaps
+                intensity = 1.0 - bond_occ
+                dash_len = max(0.08, 0.22 * length * bond_occ)
+                gap_len = max(0.05, 0.14 * length * (1.0 + intensity))
                 for dash_start, dash_end in _dashed_segments([(seg_start, seg_end)], dash_len=dash_len, gap_len=gap_len):
                     if with_scales:
                         yield color, is_minor, dash_start, dash_end, radius_scale, opacity_scale, opacity_group, bond_occ
@@ -178,7 +180,9 @@ def _atom_mesh_traces(scene: dict, style: dict):
             continue
         if not _atom_render_visible(atom):
             continue
-        color = _atom_render_color(atom, style, light=atom["is_minor"])
+        occ = float(atom.get("occ", 1.0))
+        is_partial = occ < 0.999
+        color = _atom_render_color(atom, style, light=is_partial)
         eff_opacity = _atom_effective_opacity(atom, style)
         opacity_group = _atom_opacity_group_id(atom)
         # Quantise opacity to 2 decimals so near-identical slider values
@@ -236,6 +240,7 @@ def _bond_scatter_traces(scene: dict, style: dict):
     for (color, is_minor, opacity_group), payload in groups.items():
         segments = payload["segments"]
         opacity_scale = float(payload["opacity_scale"])
+        bond_occ = float(payload.get("occ", 1.0))
         xs, ys, zs = [], [], []
         for start, end in segments:
             xs.extend([float(start[0]), float(end[0]), None])
@@ -250,10 +255,10 @@ def _bond_scatter_traces(scene: dict, style: dict):
                 line=dict(
                     color=color,
                     width=base_width * (float(style.get("minor_bond_scale", 0.82)) if is_minor else 1.0),
-                    dash="dash" if is_minor and style.get("disorder") == "dashed_bonds" else "solid",
+                    dash="dash" if (bond_occ < 0.999 or is_minor) and style.get("disorder") == "dashed_bonds" else "solid",
                 ),
                 opacity=bond_effective_opacity(
-                    {"is_minor": is_minor, "_render_opacity_scale": opacity_scale},
+                    {"is_minor": is_minor, "_render_opacity_scale": opacity_scale, "occ": bond_occ},
                     style,
                 ),
                 hoverinfo="skip",
@@ -271,7 +276,9 @@ def _atom_scatter_traces(scene: dict, style: dict):
             continue
         if not _atom_render_visible(atom):
             continue
-        color = _atom_render_color(atom, style, light=atom["is_minor"])
+        occ = float(atom.get("occ", 1.0))
+        is_partial = occ < 0.999
+        color = _atom_render_color(atom, style, light=is_partial)
         eff_opacity = _atom_effective_opacity(atom, style)
         opacity_group = _atom_opacity_group_id(atom)
         # Per-trace key = (element, is_minor, effective_color, effective_opacity_bin).
@@ -398,7 +405,8 @@ def _wireframe_atom_traces(scene: dict, style: dict):
         if not _atom_render_visible(atom):
             continue
         radius = max(0.05, float(atom["atom_radius"]) * float(style["atom_scale"]))
-        key = (_atom_render_color(atom, style, light=atom["is_minor"]), atom["is_minor"])
+        occ = float(atom.get("occ", 1.0))
+        key = (_atom_render_color(atom, style, light=(occ < 0.999)), atom["is_minor"])
         bucket = groups.setdefault(key, [])
         center = np.asarray(atom["cart"], dtype=float)
         for axis in axes:

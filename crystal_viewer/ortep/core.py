@@ -261,7 +261,10 @@ def _mode_flag(atom: dict, style: dict, key: str, default: bool) -> bool:
 def _minor_axes_outline_only(atom: dict, style: dict) -> bool:
     # Keep historic ortep_axes behaviour for normal calls. Only the explicit
     # per-minor mode gets the publication convention of unfilled minor sites.
-    return _atom_is_minor(atom) and style.get("ortep_mode_minor") == "ortep_axes"
+    # Trigger on occ < 1 OR legacy is_minor flag (for test fixtures without occ).
+    occ = float(atom.get("occ", 1.0))
+    is_disorder = occ < 0.999 or _atom_is_minor(atom)
+    return is_disorder and style.get("ortep_mode_minor") == "ortep_axes"
 
 
 def _ortep_outline_trace(segments, *, color: str, width: float, name: str):
@@ -321,15 +324,28 @@ def ortep_atom_mesh_traces(scene: dict, style: dict):
     # Subdivision budget mirrors ``_atom_mesh_traces``. ORTEP scenes
     # are typically denser than ball-stick (every atom carries an
     # ellipsoid plus principal-axis dashes) so we step down a tier.
-    n_atoms = sum(1 for a in scene.get("draw_atoms", []) if not show_minor_only or a.get("is_minor"))
-    if n_atoms > 400:
-        lat_steps, lon_steps = 4, 8
-    elif n_atoms > 150:
-        lat_steps, lon_steps = 5, 10
-    elif n_atoms > 60:
-        lat_steps, lon_steps = 7, 12
+    # User can override via ortep_lat_steps / ortep_lon_steps style keys.
+    user_lat = style.get("ortep_lat_steps")
+    user_lon = style.get("ortep_lon_steps")
+    if user_lat is not None and user_lon is not None:
+        lat_steps, lon_steps = int(user_lat), int(user_lon)
     else:
-        lat_steps, lon_steps = 10, 18
+        n_atoms = sum(1 for a in scene.get("draw_atoms", []) if not show_minor_only or a.get("is_minor"))
+        if n_atoms > 400:
+            lat_steps, lon_steps = 4, 8
+        elif n_atoms > 150:
+            lat_steps, lon_steps = 5, 10
+        elif n_atoms > 60:
+            lat_steps, lon_steps = 7, 12
+        else:
+            lat_steps, lon_steps = 10, 18
+
+    # Fixed H-atom sphere radius (Å) in ORTEP mode. When set, hydrogen
+    # atoms are rendered as small spheres instead of ADP ellipsoids.
+    h_radius = style.get("ortep_hydrogen_radius")
+
+    # Mesh3d lighting passthrough.
+    mesh_lighting = style.get("mesh_lighting")
 
     # group_key = (color, opacity). Same color but different opacity
     # (because of the half-occupied-disorder fade) needs distinct
@@ -349,17 +365,25 @@ def ortep_atom_mesh_traces(scene: dict, style: dict):
             ring, _, _ = ortep_billboard_polygon(atom["cart"], U, view_x, view_y, probability=probability, uiso=uiso)
             outline_segments.append(ring)
             continue
-        opacity = minor_opacity if (is_minor and fade_minor) else major_opacity
+        occ = float(atom.get("occ", 1.0))
+        is_partial = occ < 0.999 or is_minor
+        opacity = occ if (is_partial and fade_minor) else major_opacity
         color = _atom_color(atom, style)
         key = (color, opacity)
         bucket = groups.setdefault(key, {"verts": [], "tris": [], "vert_offset": 0})
-        verts, tris = ortep_mesh3d(
-            atom["cart"], U,
-            probability=probability,
-            lat_steps=lat_steps,
-            lon_steps=lon_steps,
-            uiso=uiso,
-        )
+        # H atoms with ortep_hydrogen_radius: fixed-size sphere, skip ellipsoid.
+        elem = _atom_element(atom)
+        if h_radius is not None and elem in ("H", "D"):
+            from ..render.meshes import _sphere_mesh
+            verts, tris = _sphere_mesh(atom["cart"], float(h_radius), lat_steps=lat_steps, lon_steps=lon_steps)
+        else:
+            verts, tris = ortep_mesh3d(
+                atom["cart"], U,
+                probability=probability,
+                lat_steps=lat_steps,
+                lon_steps=lon_steps,
+                uiso=uiso,
+            )
         bucket["verts"].append(verts)
         bucket["tris"].append(tris + bucket["vert_offset"])
         bucket["vert_offset"] += len(verts)
@@ -370,22 +394,23 @@ def ortep_atom_mesh_traces(scene: dict, style: dict):
             continue
         verts = np.concatenate(bucket["verts"], axis=0)
         tris = np.concatenate(bucket["tris"], axis=0)
-        traces.append(
-            go.Mesh3d(
-                x=verts[:, 0],
-                y=verts[:, 1],
-                z=verts[:, 2],
-                i=tris[:, 0],
-                j=tris[:, 1],
-                k=tris[:, 2],
-                color=color,
-                opacity=opacity,
-                name=f"{color} ORTEP",
-                hoverinfo="skip",
-                showlegend=False,
-                flatshading=False,
-            )
+        mesh_kwargs = dict(
+            x=verts[:, 0],
+            y=verts[:, 1],
+            z=verts[:, 2],
+            i=tris[:, 0],
+            j=tris[:, 1],
+            k=tris[:, 2],
+            color=color,
+            opacity=opacity,
+            name=f"{color} ORTEP",
+            hoverinfo="skip",
+            showlegend=False,
+            flatshading=False,
         )
+        if mesh_lighting:
+            mesh_kwargs["lighting"] = mesh_lighting
+        traces.append(go.Mesh3d(**mesh_kwargs))
     outline_trace = _ortep_outline_trace(
         outline_segments,
         color=style.get("ortep_axis_color", "#222222"),
