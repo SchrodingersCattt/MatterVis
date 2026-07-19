@@ -33,8 +33,22 @@ def validate_style_schema(style: dict) -> dict:
         normalized.update(ORTEP_MODES[normalized["ortep_mode"]])
     if ortep_mode_minor is not None:
         normalized["ortep_mode_minor"] = str(ortep_mode_minor)
-    normalized["fast_rendering"] = bool(normalized.get("fast_rendering", False)) or material == "flat"
+    normalized["fast_rendering"] = bool(normalized.get("fast_rendering", False)) or (material == "flat" and render_style != "ortep")
     normalized["minor_wireframe"] = bool(normalized.get("minor_wireframe", False)) or disorder == "outline_rings"
+
+    # Classic 2D ORTEP publication mode: flat + ortep activates the
+    # open-ellipsoid pipeline (white fill + silhouette + octant hatch +
+    # black bond lines + orthographic projection).
+    if material == "flat" and render_style == "ortep":
+        normalized["ortep_silhouette_outline"] = True
+        normalized["ortep_octant_hatching"] = True
+        normalized["ortep_atom_fill"] = True
+        normalized["force_bond_color"] = normalized.get("force_bond_color") or "#000000"
+        normalized["projection"] = "orthographic"
+        if not normalized.get("ortep_hydrogen_radius"):
+            normalized["ortep_hydrogen_radius"] = 0.15
+        normalized["monochrome"] = True
+
     return normalized
 
 
@@ -122,17 +136,32 @@ def _atom_effective_opacity(atom: dict, style: dict) -> float:
     to drift to ~0.18, which read as "disappearing" rather than
     "halved" -- and a user setting opacity=0 expects an invisible atom,
     not "0 × something".
+
+    When ``disorder == "opacity"``, partial-occupancy atoms use their
+    crystallographic occupancy as opacity (occ=0.526 → alpha=0.526).
     """
-    is_minor = bool(atom.get("is_minor", False))
-    base = _minor_opacity_for(style, is_minor)
+    # Explicit atom_group override takes priority over everything.
     scale = atom.get("_render_opacity_scale", 1.0)
     try:
         scale_f = max(0.0, min(1.0, float(scale)))
     except (TypeError, ValueError):
         scale_f = 1.0
-    if scale_f >= 0.999:
-        return base
-    return scale_f
+    if scale_f < 0.999:
+        return scale_f
+
+    # In disorder="opacity" mode, use crystallographic occupancy directly.
+    if style.get("disorder") == "opacity" or style.get("force_minor_fade"):
+        occ = atom.get("occ", 1.0)
+        try:
+            occ_f = float(occ)
+        except (TypeError, ValueError):
+            occ_f = 1.0
+        if occ_f < 0.999:
+            return max(0.05, occ_f)
+
+    # Full-occupancy atoms or non-opacity disorder modes.
+    is_minor = bool(atom.get("is_minor", False))
+    return _minor_opacity_for(style, is_minor)
 
 
 def _atom_opacity_group_id(atom: dict) -> str | None:
@@ -228,7 +257,13 @@ def _style_trace_dicts(trace_dicts: list[dict], style: dict) -> list[dict]:
             copied["visible"] = True
         group_id = meta.get("mv_opacity_group")
         if role == "atom":
-            opacity = atom_group_opacity.get(str(group_id), _minor_opacity_for(style, is_minor))
+            if str(group_id) in atom_group_opacity:
+                opacity = atom_group_opacity[str(group_id)]
+            else:
+                # Preserve the trace's own opacity (set by _atom_mesh_traces
+                # using _atom_effective_opacity which respects occ in
+                # disorder='opacity' mode).  Only override when absent.
+                opacity = copied.get("opacity") if copied.get("opacity") is not None else _minor_opacity_for(style, is_minor)
             if copied.get("type") == "scatter3d":
                 marker = dict(copied.get("marker") or {})
                 marker["opacity"] = opacity
@@ -236,12 +271,17 @@ def _style_trace_dicts(trace_dicts: list[dict], style: dict) -> list[dict]:
             else:
                 copied["opacity"] = opacity
         elif role == "bond":
-            pseudo_bond = {"is_minor": is_minor}
             if str(group_id) in bond_group_opacity:
-                pseudo_bond["_render_opacity_scale"] = bond_group_opacity[str(group_id)]
-            elif "mv_opacity_scale" in meta:
-                pseudo_bond["_render_opacity_scale"] = meta.get("mv_opacity_scale")
-            copied["opacity"] = bond_effective_opacity(pseudo_bond, style)
+                pseudo_bond = {"is_minor": is_minor, "_render_opacity_scale": bond_group_opacity[str(group_id)]}
+                copied["opacity"] = bond_effective_opacity(pseudo_bond, style)
+            else:
+                # Preserve the trace's existing opacity (set by
+                # _bond_mesh_traces using bond_effective_opacity with occ).
+                if copied.get("opacity") is None:
+                    pseudo_bond = {"is_minor": is_minor}
+                    if "mv_opacity_scale" in meta:
+                        pseudo_bond["_render_opacity_scale"] = meta.get("mv_opacity_scale")
+                    copied["opacity"] = bond_effective_opacity(pseudo_bond, style)
         out.append(copied)
     return out
 

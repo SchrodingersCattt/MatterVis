@@ -59,23 +59,26 @@ def _bond_segments(scene: dict, style: dict, *, with_scales: bool = False):
         radius_scale = float(bond.get("_render_radius_scale", 1.0) or 1.0)
         opacity_scale = float(bond.get("_render_opacity_scale", 1.0) or 1.0)
         opacity_group = _bond_opacity_group_id(bond)
+        bond_occ = float(bond.get("occ", 1.0))
         halves = [
             (c_i, bond["is_minor"], start, mid),
             (c_j, bond["is_minor"], mid, end),
         ]
         for color, is_minor, seg_start, seg_end in halves:
-            if is_minor and style.get("disorder") == "dashed_bonds":
+            if (bond_occ < 0.999 or is_minor) and style.get("disorder") == "dashed_bonds":
                 length = float(np.linalg.norm(seg_end - seg_start))
-                dash_len = max(0.08, 0.22 * length)
-                gap_len = max(0.05, 0.14 * length)
+                # Gap scales with disorder intensity: lower occ → bigger gaps
+                intensity = 1.0 - bond_occ
+                dash_len = max(0.08, 0.22 * length * bond_occ)
+                gap_len = max(0.05, 0.14 * length * (1.0 + intensity))
                 for dash_start, dash_end in _dashed_segments([(seg_start, seg_end)], dash_len=dash_len, gap_len=gap_len):
                     if with_scales:
-                        yield color, is_minor, dash_start, dash_end, radius_scale, opacity_scale, opacity_group
+                        yield color, is_minor, dash_start, dash_end, radius_scale, opacity_scale, opacity_group, bond_occ
                     else:
                         yield color, is_minor, dash_start, dash_end
             else:
                 if with_scales:
-                    yield color, is_minor, seg_start, seg_end, radius_scale, opacity_scale, opacity_group
+                    yield color, is_minor, seg_start, seg_end, radius_scale, opacity_scale, opacity_group, bond_occ
                 else:
                     yield color, is_minor, seg_start, seg_end
 
@@ -84,28 +87,30 @@ def _bond_mesh_traces(scene: dict, style: dict):
     """Build the bond Mesh3d traces, bucketed by ``(color, is_minor,
     radius_bin, opacity_bin)`` so per-bond ``_render_radius_scale`` /
     ``_render_opacity_scale`` (set by ``tag_bonds_with_groups``)
-    survive the one-trace-per-colour grouping. Plotly bakes opacity
-    onto the trace, not per-vertex; the same is true of ``color``;
-    so we have to expand the bucket key to keep their distinct
-    cosmetic values from collapsing."""
-    groups: Dict[Tuple[str, bool, int, str | None], dict] = {}
+    survive the one-trace-per-colour grouping."""
+    groups: Dict[Tuple[str, bool, int, str | None, str], dict] = {}
     base_radius = max(0.04, float(style["bond_radius"]))
-    for color, is_minor, start, end, radius_scale, opacity_scale, opacity_group in _bond_segments(
+    mesh_lighting = style.get("mesh_lighting")
+    for color, is_minor, start, end, radius_scale, opacity_scale, opacity_group, bond_occ in _bond_segments(
         scene, style, with_scales=True
     ):
         # Bin to two decimals so e.g. a 1.50 vs 1.51 slider tick doesn't
         # fragment the trace list. Same trick is used in _atom_mesh_traces.
         radius_bin = int(round(float(radius_scale) * 100))
-        key = (color, is_minor, radius_bin, opacity_group)
+        eff_opacity = bond_effective_opacity(
+            {"is_minor": is_minor, "_render_opacity_scale": opacity_scale, "occ": bond_occ},
+            style,
+        )
+        opacity_bin = f"{eff_opacity:.2f}"
+        key = (color, is_minor, radius_bin, opacity_group, opacity_bin)
         groups.setdefault(
             key,
-            {"segments": [], "radius_scale": radius_scale, "opacity_scale": opacity_scale, "opacity_group": opacity_group},
+            {"segments": [], "radius_scale": radius_scale, "opacity_scale": opacity_scale, "opacity_group": opacity_group, "opacity": eff_opacity},
         )["segments"].append((start, end))
 
     traces = []
-    for (color, is_minor, _r_bin, opacity_group), payload in groups.items():
+    for (color, is_minor, _r_bin, opacity_group, _opc_bin), payload in groups.items():
         radius_scale = float(payload["radius_scale"])
-        opacity_scale = float(payload["opacity_scale"])
         radius = base_radius * radius_scale * (
             float(style.get("minor_bond_scale", 0.82)) if is_minor else 1.0
         )
@@ -116,48 +121,47 @@ def _bond_mesh_traces(scene: dict, style: dict):
         )
         if len(vertices) == 0:
             continue
+        mesh_kwargs = dict(
+            x=vertices[:, 0],
+            y=vertices[:, 1],
+            z=vertices[:, 2],
+            i=triangles[:, 0],
+            j=triangles[:, 1],
+            k=triangles[:, 2],
+            color=color,
+            opacity=payload["opacity"],
+            hoverinfo="skip",
+            showlegend=False,
+            flatshading=False,
+        )
+        if mesh_lighting:
+            mesh_kwargs["lighting"] = mesh_lighting
         traces.append(
-            _annotate_trace(go.Mesh3d(
-                x=vertices[:, 0],
-                y=vertices[:, 1],
-                z=vertices[:, 2],
-                i=triangles[:, 0],
-                j=triangles[:, 1],
-                k=triangles[:, 2],
-                color=color,
-                opacity=bond_effective_opacity(
-                    {"is_minor": is_minor, "_render_opacity_scale": opacity_scale},
-                    style,
-                ),
-                hoverinfo="skip",
-                showlegend=False,
-                flatshading=False,
-            ), "bond", is_minor=is_minor, opacity_group=opacity_group, opacity_scale=opacity_scale)
+            _annotate_trace(go.Mesh3d(**mesh_kwargs), "bond", is_minor=is_minor, opacity_group=opacity_group)
         )
     return traces
 
 
 def _atom_mesh_traces(scene: dict, style: dict):
-    # Per-atom tessellation budget. The over-the-wire cost of one
-    # sphere is ``(lat-1)*lon + 2`` Mesh3d verts × (3 × 4 B for
-    # f32 coords + faces). For a 200-atom DAP-4 unit cell with
-    # topology overlay the figure JSON used to be ~1.4 MB; dropping
-    # subdivision halves the vertex count and gets the brotli-
-    # compressed wire size into the ~120 kB range, where a Labels
-    # toggle round-trips in well under a second on most consumer
-    # connections. The visual difference vs the old 6/10 default
-    # is invisible at the camera distance forced by a dense unit
-    # cell. Users who insist on perfectly smooth balls pick the
-    # "formula unit" Display Scope (n_atoms < 60).
-    n_atoms = len(scene.get("draw_atoms", []))
-    if n_atoms > 400:
-        lat_steps, lon_steps = 3, 6
-    elif n_atoms > 150:
-        lat_steps, lon_steps = 4, 7
-    elif n_atoms > 60:
-        lat_steps, lon_steps = 5, 9
+    # Per-atom tessellation budget. User can override with
+    # ortep_lat_steps / ortep_lon_steps (shared key name with ORTEP
+    # for simplicity — controls sphere density in ball-stick too).
+    user_lat = style.get("ortep_lat_steps")
+    user_lon = style.get("ortep_lon_steps")
+    if user_lat is not None and user_lon is not None:
+        lat_steps, lon_steps = int(user_lat), int(user_lon)
     else:
-        lat_steps, lon_steps = 6, 10
+        n_atoms = len(scene.get("draw_atoms", []))
+        if n_atoms > 400:
+            lat_steps, lon_steps = 3, 6
+        elif n_atoms > 150:
+            lat_steps, lon_steps = 4, 7
+        elif n_atoms > 60:
+            lat_steps, lon_steps = 5, 9
+        else:
+            lat_steps, lon_steps = 6, 10
+
+    mesh_lighting = style.get("mesh_lighting")
     # Bucket key extends to (color, is_minor, opacity_scale_bin) so
     # per-group ``opacity`` overrides survive the Mesh3d
     # one-trace-per-colour grouping (Plotly bakes opacity into the
@@ -170,16 +174,21 @@ def _atom_mesh_traces(scene: dict, style: dict):
     # trace, not per-vertex). Quantise the opacity to two decimals so a
     # slider that emits 0.523 vs 0.524 doesn't fragment the trace
     # list and tank the figure-JSON cache hit rate.
-    groups: Dict[Tuple[str, bool, str | None], dict] = {}
+    groups: Dict[Tuple[str, bool, str | None, str], dict] = {}
     for atom in scene["draw_atoms"]:
         if style.get("show_minor_only", False) and not atom["is_minor"]:
             continue
         if not _atom_render_visible(atom):
             continue
-        color = _atom_render_color(atom, style, light=atom["is_minor"])
+        occ = float(atom.get("occ", 1.0))
+        is_partial = occ < 0.999
+        color = _atom_render_color(atom, style, light=is_partial)
         eff_opacity = _atom_effective_opacity(atom, style)
         opacity_group = _atom_opacity_group_id(atom)
-        key = (color, atom["is_minor"], opacity_group)
+        # Quantise opacity to 2 decimals so near-identical slider values
+        # don't fragment traces and tank cache hit rate.
+        opacity_bin = f"{eff_opacity:.2f}"
+        key = (color, atom["is_minor"], opacity_group, opacity_bin)
         groups.setdefault(key, {"centers": [], "radii": [], "opacity": eff_opacity, "opacity_group": opacity_group})
         radius = float(atom["atom_radius"]) * float(style["atom_scale"])
         if atom["is_minor"]:
@@ -188,39 +197,42 @@ def _atom_mesh_traces(scene: dict, style: dict):
         groups[key]["radii"].append(radius)
 
     traces = []
-    for (color, is_minor, opacity_group), payload in groups.items():
+    for (color, is_minor, opacity_group, _opc_bin), payload in groups.items():
         vertices, triangles = _sphere_mesh_batch(
             payload["centers"],
             payload["radii"],
             lat_steps=lat_steps,
             lon_steps=lon_steps,
         )
+        mesh_kwargs = dict(
+            x=vertices[:, 0],
+            y=vertices[:, 1],
+            z=vertices[:, 2],
+            i=triangles[:, 0],
+            j=triangles[:, 1],
+            k=triangles[:, 2],
+            color=color,
+            opacity=payload["opacity"],
+            hoverinfo="skip",
+            showlegend=False,
+            flatshading=False,
+        )
+        if mesh_lighting:
+            mesh_kwargs["lighting"] = mesh_lighting
         traces.append(
-            _annotate_trace(go.Mesh3d(
-                x=vertices[:, 0],
-                y=vertices[:, 1],
-                z=vertices[:, 2],
-                i=triangles[:, 0],
-                j=triangles[:, 1],
-                k=triangles[:, 2],
-                color=color,
-                opacity=payload["opacity"],
-                hoverinfo="skip",
-                showlegend=False,
-                flatshading=False,
-            ), "atom", is_minor=is_minor, opacity_group=opacity_group)
+            _annotate_trace(go.Mesh3d(**mesh_kwargs), "atom", is_minor=is_minor, opacity_group=opacity_group)
         )
     return traces
 
 
 def _bond_scatter_traces(scene: dict, style: dict):
     groups: Dict[Tuple[str, bool, str | None], dict] = {}
-    for color, is_minor, start, end, _radius_scale, opacity_scale, opacity_group in _bond_segments(
+    for color, is_minor, start, end, _radius_scale, opacity_scale, opacity_group, bond_occ in _bond_segments(
         scene, style, with_scales=True
     ):
         groups.setdefault(
             (color, is_minor, opacity_group),
-            {"segments": [], "opacity_scale": opacity_scale},
+            {"segments": [], "opacity_scale": opacity_scale, "occ": bond_occ},
         )["segments"].append([start, end])
 
     traces = []
@@ -228,6 +240,7 @@ def _bond_scatter_traces(scene: dict, style: dict):
     for (color, is_minor, opacity_group), payload in groups.items():
         segments = payload["segments"]
         opacity_scale = float(payload["opacity_scale"])
+        bond_occ = float(payload.get("occ", 1.0))
         xs, ys, zs = [], [], []
         for start, end in segments:
             xs.extend([float(start[0]), float(end[0]), None])
@@ -242,10 +255,10 @@ def _bond_scatter_traces(scene: dict, style: dict):
                 line=dict(
                     color=color,
                     width=base_width * (float(style.get("minor_bond_scale", 0.82)) if is_minor else 1.0),
-                    dash="dash" if is_minor and style.get("disorder") == "dashed_bonds" else "solid",
+                    dash="dash" if (bond_occ < 0.999 or is_minor) and style.get("disorder") == "dashed_bonds" else "solid",
                 ),
                 opacity=bond_effective_opacity(
-                    {"is_minor": is_minor, "_render_opacity_scale": opacity_scale},
+                    {"is_minor": is_minor, "_render_opacity_scale": opacity_scale, "occ": bond_occ},
                     style,
                 ),
                 hoverinfo="skip",
@@ -263,7 +276,9 @@ def _atom_scatter_traces(scene: dict, style: dict):
             continue
         if not _atom_render_visible(atom):
             continue
-        color = _atom_render_color(atom, style, light=atom["is_minor"])
+        occ = float(atom.get("occ", 1.0))
+        is_partial = occ < 0.999
+        color = _atom_render_color(atom, style, light=is_partial)
         eff_opacity = _atom_effective_opacity(atom, style)
         opacity_group = _atom_opacity_group_id(atom)
         # Per-trace key = (element, is_minor, effective_color, effective_opacity_bin).
@@ -390,7 +405,8 @@ def _wireframe_atom_traces(scene: dict, style: dict):
         if not _atom_render_visible(atom):
             continue
         radius = max(0.05, float(atom["atom_radius"]) * float(style["atom_scale"]))
-        key = (_atom_render_color(atom, style, light=atom["is_minor"]), atom["is_minor"])
+        occ = float(atom.get("occ", 1.0))
+        key = (_atom_render_color(atom, style, light=(occ < 0.999)), atom["is_minor"])
         bucket = groups.setdefault(key, [])
         center = np.asarray(atom["cart"], dtype=float)
         for axis in axes:
@@ -413,12 +429,12 @@ def _wireframe_atom_traces(scene: dict, style: dict):
 
 def _wireframe_bond_traces(scene: dict, style: dict):
     groups: Dict[Tuple[str, bool, str | None], dict] = {}
-    for color, is_minor, start, end, _radius_scale, opacity_scale, opacity_group in _bond_segments(
+    for color, is_minor, start, end, _radius_scale, opacity_scale, opacity_group, bond_occ in _bond_segments(
         scene, style, with_scales=True
     ):
         groups.setdefault(
             (color, is_minor, opacity_group),
-            {"segments": [], "opacity_scale": opacity_scale},
+            {"segments": [], "opacity_scale": opacity_scale, "occ": bond_occ},
         )["segments"].append((start, end))
     traces = []
     for (color, is_minor, opacity_group), payload in groups.items():

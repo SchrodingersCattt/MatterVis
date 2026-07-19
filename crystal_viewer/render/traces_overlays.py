@@ -36,9 +36,10 @@ def _minor_outline_traces(scene: dict, style: dict):
     once the structure shrank."""
     if style.get("disorder") not in ("outline_rings", "color_shift") and not style.get("minor_wireframe", False):
         return []
-    groups: Dict[str, list[tuple[np.ndarray, float]]] = {}
+    groups: Dict[str, list[tuple[np.ndarray, float, float]]] = {}
     for atom in scene["draw_atoms"]:
-        if not atom["is_minor"]:
+        occ = float(atom.get("occ", 1.0))
+        if occ >= 0.999 and not atom.get("is_minor"):
             continue
         if not _atom_render_visible(atom):
             continue
@@ -47,10 +48,10 @@ def _minor_outline_traces(scene: dict, style: dict):
         ring_scale = 1.34 if style.get("minor_wireframe", False) else 1.20
         radius = float(atom["atom_radius"]) * float(style["atom_scale"]) * ring_scale
         color = _atom_render_color(atom, style, light=True)
-        groups.setdefault(color, []).append((np.asarray(atom["cart"], dtype=float), radius))
+        groups.setdefault(color, []).append((np.asarray(atom["cart"], dtype=float), radius, occ))
     if not groups:
         return []
-    cylinder_radius = 0.022 if style.get("minor_wireframe", False) else 0.014
+    base_cylinder_radius = 0.022 if style.get("minor_wireframe", False) else 0.014
     axes = [
         np.array([1.0, 0.0, 0.0]),
         np.array([0.0, 1.0, 0.0]),
@@ -59,19 +60,22 @@ def _minor_outline_traces(scene: dict, style: dict):
     traces = []
     for color, minors in groups.items():
         segments: list[tuple[np.ndarray, np.ndarray]] = []
-        for center, radius in minors:
+        for center, radius, occ in minors:
+            # Thicker ring for lower occupancy: intensity = 1 - occ
+            cylinder_radius = base_cylinder_radius * (1.0 + 2.0 * (1.0 - occ))
             for axis in axes:
-                segments.extend(_ring_segments(center, radius, axis, segments=14))
-        trace = _segment_cylinder_trace(
-            segments,
-            radius=cylinder_radius,
-            color=color,
-            opacity=0.95,
-            sides=4,
-            name="minor-outline",
-        )
-        if trace is not None:
-            traces.append(_annotate_trace(trace, "minor_overlay", is_minor=True))
+                ring_segs = _ring_segments(center, radius, axis, segments=14)
+                # Build per-atom trace so each ring can have its own thickness
+                atom_trace = _segment_cylinder_trace(
+                    ring_segs,
+                    radius=cylinder_radius,
+                    color=color,
+                    opacity=0.95,
+                    sides=4,
+                    name="minor-outline",
+                )
+                if atom_trace is not None:
+                    traces.append(_annotate_trace(atom_trace, "minor_overlay", is_minor=True))
     return traces
 
 

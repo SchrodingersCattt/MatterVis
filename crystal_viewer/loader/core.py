@@ -338,7 +338,13 @@ generate_ordered_replicas_from_disordered_sites` for the optimal
         if not isinstance(first, tuple) or len(first) != 2:
             return raw_atoms
         _crystal, kept_indices = first
-        kept_raw = {int(idx) for idx in kept_indices}
+        # Bridge MCK's DisorderInfo index space → raw_atoms via geometric
+        # matching.  The two CIF parsers expand symmetry independently,
+        # so their index spaces are NOT aligned (see disorder_index.py).
+        from ..structure.disorder_index import map_mck_indices_to_raw
+
+        idx_map = map_mck_indices_to_raw(cif_path, raw_atoms, kept_indices)
+        kept_raw = set(idx_map.values())
         out = [dict(atom) for atom in raw_atoms]
 
         disordered_idx: list[int] = []
@@ -358,6 +364,48 @@ generate_ordered_replicas_from_disordered_sites` for the optimal
 
         if not disordered_idx:
             return out
+
+        # --- Validate MCK's choice against crystallographic occupancy ---
+        # For explicit-assembly disorder (CIFs with non-blank
+        # _atom_site_disorder_assembly + _atom_site_disorder_group),
+        # the "kept" (major) set MUST correspond to the higher-
+        # occupancy group — this is a hard crystallographic invariant.
+        # MCK's 'optimal' method uses structural/connectivity criteria
+        # that can contradict occupancy (observed on GAGCIF01: it kept
+        # occ=0.474 B over occ=0.526 A, rendering both cations as
+        # semi-transparent).  When the choice is inverted, correct it
+        # and log a warning.
+        if explicit_assembly_idx:
+            kept_occs = [
+                _partial_occupancy_value(out[i])
+                for i in disordered_idx
+                if i in kept_raw and i in explicit_assembly_idx
+            ]
+            disc_occs = [
+                _partial_occupancy_value(out[i])
+                for i in disordered_idx
+                if i not in kept_raw and i in explicit_assembly_idx
+            ]
+            if kept_occs and disc_occs:
+                avg_kept = sum(kept_occs) / len(kept_occs)
+                avg_disc = sum(disc_occs) / len(disc_occs)
+                if avg_kept < avg_disc - 1e-4:
+                    import logging
+
+                    logging.getLogger(__name__).warning(
+                        "MCK optimal-replica chose lower-occupancy group "
+                        "(avg_kept=%.4f < avg_disc=%.4f) for %s; "
+                        "overriding with occupancy-based assignment.",
+                        avg_kept,
+                        avg_disc,
+                        cif_path,
+                    )
+                    # Flip: for explicit-assembly atoms use occupancy
+                    # to determine major/minor directly.
+                    kept_raw = {
+                        i for i in disordered_idx
+                        if i not in kept_raw and i in explicit_assembly_idx
+                    } | (kept_raw - explicit_assembly_idx)
 
         # Explicit major / minor labels on every disordered atom: a
         # chosen atom must have ``_is_minor=False`` set (NOT just

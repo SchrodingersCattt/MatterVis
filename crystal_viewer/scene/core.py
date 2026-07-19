@@ -15,8 +15,8 @@ from ..structure.formula_unit import cluster_atoms, select_formula_unit
 from ..structure.geometry import _nearest_pbc_cart, view_rotation
 from ..style.palette import atom_r, elem_color, elem_color_light
 from ..presets import DEFAULT_STYLE, deep_merge, default_preset, json_safe
-from ..static_publication.publication_view import auto_view_dir
-from ..static_publication.plot_crystal import _compute_label_positions
+from ..legacy.publication_view import auto_view_dir
+from ..legacy.plot_crystal import _compute_label_positions
 
 # ── New layered modules ──────────────────────────────────────────────
 from ..render.display_modes import selected_atoms_for_mode
@@ -45,7 +45,7 @@ _expand_boundary_replicas = expand_boundary_replicas
 
 PACKAGE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORKSPACE_DIR = os.path.dirname(PACKAGE_DIR)
-from ..static_publication import crystal_scene as legacy_scene  # noqa: E402
+from ..legacy import crystal_scene as legacy_scene  # noqa: E402
 
 __all__ = [
     "apply_element_colors",
@@ -158,6 +158,7 @@ def build_scene_from_atoms(
                 "alpha_i": ai["disorder_alpha"],
                 "alpha_j": aj["disorder_alpha"],
                 "is_minor": bond_is_minor(ai, aj),
+                "occ": min(float(ai.get("occ", 1.0)), float(aj.get("occ", 1.0))),
                 "depth_t": float((ai["_depth_t"] + aj["_depth_t"]) / 2.0),
             }
         )

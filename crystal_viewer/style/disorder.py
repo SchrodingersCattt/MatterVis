@@ -36,7 +36,18 @@ def bond_effective_opacity(bond: Mapping[str, Any], style: Mapping[str, Any]) ->
         scale_f = max(0.0, min(1.0, float(scale)))
     except (TypeError, ValueError):
         scale_f = 1.0
-    return minor_opacity_for(style, bool(bond.get("is_minor", False))) * scale_f
+    if scale_f < 0.999:
+        return scale_f
+    # In disorder="opacity" mode, use crystallographic occupancy.
+    if style.get("disorder") == "opacity" or style.get("force_minor_fade"):
+        occ = bond.get("occ", 1.0)
+        try:
+            occ_f = float(occ)
+        except (TypeError, ValueError):
+            occ_f = 1.0
+        if occ_f < 0.999:
+            return max(0.05, occ_f)
+    return minor_opacity_for(style, bool(bond.get("is_minor", False)))
 
 
 # ── Disorder helpers ────────────────────────────────────────────────────────
