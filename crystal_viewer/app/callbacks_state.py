@@ -408,7 +408,6 @@ def register_state_callbacks(app, backend):
             "axis_scale": axis_scale,
             "topology_site_index": None if display_changed or site_index in ("", None) else int(site_index),
             "topology_enabled": "enabled" in (topology_toggle or []),
-            "fast_rendering": material == "flat",
         }
         fast_display_options = (
             triggered != "display-options"

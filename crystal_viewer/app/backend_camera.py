@@ -195,7 +195,13 @@ class _CameraBackendMixin:
             bonds=bond_count,
             replicas=replica_count,
         ):
-            fig = build_figure(scene, self.style_for_state(state, scene=scene), topology_data=topology_data)
+            style = self.style_for_state(state, scene=scene)
+            # Flat + ORTEP: render via Matplotlib 2D and embed as a static
+            # image in a Plotly figure (the web viewer needs a go.Figure).
+            if style.get("material") == "flat" and style.get("style") == "ortep":
+                fig = self._flat_ortep_figure(scene, style)
+            else:
+                fig = build_figure(scene, style, topology_data=topology_data)
         camera = _plotly_camera(state.get("camera"))
         if camera:
             fig.update_layout(scene_camera=camera)
@@ -225,6 +231,44 @@ class _CameraBackendMixin:
         # behaviour for the current response.
         _apply_polyhedron_visibility_patch(fig, state)
         return fig, topology_data
+
+    def _flat_ortep_figure(self, scene: dict, style: dict) -> "go.Figure":
+        """Render flat+ortep via Matplotlib and embed as a static image in a Plotly figure."""
+        import io
+        import base64
+        import matplotlib.pyplot as plt
+        from ..ortep.flat_render import render_ortep_flat
+
+        mpl_fig = render_ortep_flat(scene, style)
+        buf = io.BytesIO()
+        mpl_fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+        plt.close(mpl_fig)
+        buf.seek(0)
+        encoded = base64.b64encode(buf.read()).decode("ascii")
+
+        fig = go.Figure()
+        fig.add_layout_image(
+            dict(
+                source=f"data:image/png;base64,{encoded}",
+                xref="paper", yref="paper",
+                x=0, y=1, sizex=1, sizey=1,
+                xanchor="left", yanchor="top",
+                layer="below",
+            )
+        )
+        fig.update_layout(
+            xaxis=dict(visible=False, range=[0, 1]),
+            yaxis=dict(visible=False, range=[0, 1]),
+            paper_bgcolor="white",
+            plot_bgcolor="white",
+            margin=dict(l=0, r=0, t=0, b=0),
+            annotations=[dict(
+                text="2D ORTEP Publication Mode — use Export for vector PDF",
+                xref="paper", yref="paper", x=0.5, y=0.02,
+                showarrow=False, font=dict(size=10, color="#666"),
+            )],
+        )
+        return fig
 
     def render_current_png(
         self,
