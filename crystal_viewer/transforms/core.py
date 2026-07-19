@@ -623,7 +623,7 @@ def rebuild_scene_with_atoms(
     (atom_scale on bounds computation, element_colors). Callers that
     don't care can pass ``None``.
     """
-    from ..static_publication import crystal_scene as legacy_scene
+    from ..legacy import crystal_scene as legacy_scene
     from ..scene import scene_ops
 
     ops = scene_ops()

@@ -28,7 +28,8 @@ from pathlib import Path
 
 import pytest
 
-from crystal_viewer.static_publication import plot_crystal as pc
+from crystal_viewer.structure.bonds import bonds_conflict
+from crystal_viewer.style.disorder import is_minor
 from crystal_viewer.loader import (
     _has_shelx_occupancy_disorder,
     build_loaded_crystal,
@@ -136,14 +137,14 @@ def test_sy_topology_table_has_no_orphan_hydrogens():
     ],
 )
 def test_is_minor_reads_loader_flag_only(atom, expected):
-    assert pc.is_minor(atom) is expected
+    assert is_minor(atom) is expected
 
 
 def test_is_minor_explicit_flag_is_the_single_source_of_truth():
     minor = {"label": "X", "elem": "C", "occ": 1.0, "_is_minor": True}
     major = {"label": "X", "elem": "C", "occ": 0.2, "dg": "2", "da": "A", "_is_minor": False}
-    assert pc.is_minor(minor) is True
-    assert pc.is_minor(major) is False
+    assert is_minor(minor) is True
+    assert is_minor(major) is False
 
 
 # --------------------------------------------------------------------- #
@@ -336,7 +337,7 @@ def test_no_cross_orientation_ghost_bonds_in_unit_cell_scene():
     for b in bonds:
         ai = draw_atoms[b["i"]]
         aj = draw_atoms[b["j"]]
-        assert not pc.bonds_conflict(ai, aj), (
+        assert not bonds_conflict(ai, aj), (
             f"cross-orientation bond between atoms "
             f"{ai.get('label')} (group={ai.get('_mv_auto_disorder_group') or ai.get('dg')}) and "
             f"{aj.get('label')} (group={aj.get('_mv_auto_disorder_group') or aj.get('dg')})"

@@ -1,6 +1,7 @@
 import numpy as np
 
-from crystal_viewer.static_publication import plot_crystal as pc
+from crystal_viewer.structure.bonds import find_bonds
+from crystal_viewer.structure.cif_parse import parse_asu
 
 
 def _atom(label, elem, cart, partners):
@@ -26,7 +27,7 @@ def test_duplicate_disorder_labels_keep_nearest_alternative_bonds_only():
         _atom("F4", "F", [1.35, 1.02, 0.0], ["C2"]),
     ]
 
-    bonds = {tuple(pair) for pair in pc.find_bonds(atoms)}
+    bonds = {tuple(pair) for pair in find_bonds(atoms)}
 
     assert bonds == {(0, 2), (1, 3)}
 
@@ -56,7 +57,7 @@ C1 C 0.1 0.2 0.3 1
 C2 C 0.1 0.2 0.3 1
 """)
 
-    atoms, _, _ = pc.parse_asu(str(cif))
+    atoms, _, _ = parse_asu(str(cif))
     labels = [atom["label"] for atom in atoms]
 
     assert labels.count("C1") == 1

@@ -24,10 +24,8 @@ import matplotlib.image as mpimg  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 from plotly.subplots import make_subplots  # noqa: E402
 
-from crystal_viewer.static_publication import plot_crystal as pc  # noqa: E402
-from crystal_viewer.static_publication.crystal_scene import build_structure_scene  # noqa: E402
 from crystal_viewer.loader import build_bundle_scene, build_loaded_crystal  # noqa: E402
-from crystal_viewer.renderer import build_figure, topology_histogram_figure  # noqa: E402
+from crystal_viewer.renderer import build_figure, render, topology_histogram_figure  # noqa: E402
 from crystal_viewer.scene import scene_style  # noqa: E402
 from crystal_viewer.topology import analyze_topology  # noqa: E402
 
@@ -150,41 +148,17 @@ def render_three_modes(out: Path) -> Path:
 
 
 def render_publication(out: Path) -> Path:
-    ops = pc._scene_ops()
-    scene = build_structure_scene(
-        ops,
-        name="DAP-4",
-        cif_path=str(CIF),
-        title=r"DAP-4  (P1, $a$=14.43 Å)",
-    )
-    fig = plt.figure(figsize=(6.5, 6.0), dpi=240)
-    ax = fig.add_subplot(111, projection="3d")
-    pc.draw_scene(ax, scene)
-    fig.canvas.draw()
-    pc.add_axes_overlay(
-        ax,
-        scene["R"],
-        scene["M"],
-        scene["draw_atoms"],
-        scene["view_x"],
-        scene["view_y"],
-    )
-    pc.draw_labels_2d(
-        ax,
-        [
-            (item["atom_cart"], item["label_cart"], item["text"], item["is_minor"])
-            for item in scene["label_items"]
-        ],
-        scene["view_x"],
-        scene["view_y"],
-    )
-    fig.suptitle(
-        "ORTEP-style export via crystal_viewer.static_publication.plot_crystal",
-        fontsize=10,
-        y=0.97,
-    )
-    fig.savefig(str(out), bbox_inches="tight", facecolor="white", dpi=240)
-    plt.close(fig)
+    bundle = _bundle()
+    scene = build_bundle_scene(bundle, display_mode="formula_unit")
+    result = render(scene, {
+        "material": "flat",
+        "style": "ortep",
+        "show_hydrogen": False,
+        "show_labels": True,
+        "ortep_probability": 0.5,
+        "bond_radius": 0.12,
+    })
+    result.save(str(out), dpi=240)
     print(f"  -> {out.relative_to(REPO_ROOT)}  ({out.stat().st_size // 1024} KB)")
     return out
 

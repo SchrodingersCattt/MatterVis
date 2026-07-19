@@ -49,6 +49,12 @@ def _bond_allowed_by_table(ai, aj):
     if ai.get('_mv_auto_disorder_group') and aj.get('_mv_auto_disorder_group'):
         if not partners_i and not partners_j:
             return True
+    # Allow bonding within the same disorder orientation regardless of
+    # bond table — atoms in the same PART must always be able to bond.
+    dg_i = ai.get('_mv_auto_disorder_group')
+    dg_j = aj.get('_mv_auto_disorder_group')
+    if dg_i and dg_j and dg_i == dg_j:
+        return True
     return False
 
 
