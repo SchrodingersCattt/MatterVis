@@ -4,6 +4,7 @@ from __future__ import annotations
 from .scene_traces import *  # noqa: F403
 from .style import style_from_controls
 from .topology import topology_histogram_figure, topology_results_markdown
+from .morphology import _morphology_traces
 from .compass import (
     _COMPASS_ITEM_NAME,
     axis_key_overlay,
@@ -93,6 +94,7 @@ def build_row_figure(
         trace_dicts.extend(_traces_to_dicts(_label_traces(scene, style_norm, hidden_labels=hidden_labels_row)))
         trace_dicts.extend(_traces_to_dicts(_axis_traces(scene, style_norm)))
         trace_dicts.extend(_traces_to_dicts(_unit_cell_traces(scene, style_norm)))
+        trace_dicts.extend(_traces_to_dicts(_morphology_traces(scene, style_norm)))
         trace_dicts.append(
             _round_coord_arrays(_atom_selection_trace(scene, style_norm, hidden_labels=hidden_labels_row).to_plotly_json())
         )
@@ -182,6 +184,7 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None) ->
     trace_dicts.extend(_traces_to_dicts(_label_traces(scene, style, hidden_labels=hidden_labels)))
     trace_dicts.extend(_traces_to_dicts(_axis_traces(scene, style)))
     trace_dicts.extend(_traces_to_dicts(_unit_cell_traces(scene, style)))
+    trace_dicts.extend(_traces_to_dicts(_morphology_traces(scene, style)))
     if topology_on:
         trace_dicts.extend(_traces_to_dicts(topology_foreground_traces(topology_data, style)))
     trace_dicts.append(_round_coord_arrays(_atom_selection_trace(scene, style, hidden_labels=hidden_labels).to_plotly_json()))

@@ -229,7 +229,19 @@ def register_analysis_callbacks(app, backend):
         except (TypeError, ValueError):
             max_idx, n = 2, 10
 
+        t0 = time.perf_counter()
         result = backend.run_bfdh_analysis(scene_id=scene_id, max_index=max_idx, top_n=n)
+        perf_log.record(
+            "bfdh:run_analysis",
+            duration_ms=(time.perf_counter() - t0) * 1000.0,
+            kind="event",
+            info={
+                "scene_id": scene_id,
+                "max_index": max_idx,
+                "top_n": n,
+                "facet_count": len(result.get("wulff_facets") or []),
+            },
+        )
         if result["status"] == "error":
             _surface_error("BFDH Analysis", Exception("\n".join(result["warnings"])))
             return html.Div("Analysis failed.", style={"color": "#A00"})
@@ -237,6 +249,17 @@ def register_analysis_callbacks(app, backend):
         facets = result.get("facets") or []
         if not facets:
             return html.Div("No facets found.", style={"color": "#777"})
+
+        wulff_facets = result.get("wulff_facets") or []
+        if wulff_facets:
+            backend.patch_state({
+                "bfdh_morphology": {
+                    "facets": wulff_facets,
+                    "enabled": True,
+                    "scale": 1.0,
+                    "opacity": 0.3
+                }
+            }, scene_id=scene_id, broadcast=False)
 
         from dash import html
         rows = []
@@ -264,3 +287,34 @@ def register_analysis_callbacks(app, backend):
             rows,
             style={"width": "100%", "borderCollapse": "collapse", "marginTop": "4px"}
         )
+
+    @app.callback(
+        Output("bfdh-morphology-enabled", "value"),
+        Input("bfdh-morphology-enabled", "value"),
+        Input("bfdh-morphology-scale", "value"),
+        Input("bfdh-morphology-opacity", "value"),
+        Input("bfdh-morphology-color", "value"),
+        State("scene-tabs", "value"),
+        prevent_initial_call=True,
+    )
+    def update_bfdh_morphology_controls(enabled_val, scale, opacity, color, active_scene_id):
+        scene_id = active_scene_id or backend.active_scene_id()
+        state = backend.get_state(scene_id)
+        morph = state.get("bfdh_morphology")
+        patch: dict[str, Any] = {}
+        if morph:
+            morph = dict(morph)
+            morph["enabled"] = bool(enabled_val and "enabled" in enabled_val)
+            morph["scale"] = float(scale)
+            morph["opacity"] = float(opacity)
+            patch["bfdh_morphology"] = morph
+        if color:
+            from .normalizers import _coerce_hex_color
+
+            patch["bfdh_morphology_color"] = _coerce_hex_color(
+                color,
+                str(state.get("bfdh_morphology_color", "#4f7cff")),
+            )
+        if patch:
+            backend.patch_state(patch, scene_id=scene_id, broadcast=False)
+        return no_update

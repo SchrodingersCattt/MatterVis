@@ -325,9 +325,48 @@ class _AnalysisBackendMixin:
 
         try:
             from molcrys_kit.analysis import enumerate_bfdh_facets
+            from pymatgen.core.lattice import Lattice
+            from pymatgen.analysis.wulff import WulffShape
+            import numpy as np
+
             facets = enumerate_bfdh_facets(crystal, max_index=max_index, top_n=top_n)
+            
+            wulff_facets = []
+            if facets:
+                try:
+                    lattice = Lattice(crystal.lattice)
+                    miller_list = [f.miller_index for f in facets]
+                    # Use d_hkl directly as "energy". In Wulff construction,
+                    # face distance from centre = 1/energy. With energy=d_hkl
+                    # the output vertices are in Angstrom scale, and the face
+                    # ranking is identical to energy=1/d_hkl (same visible
+                    # set, only the coordinate scale differs).
+                    e_surf_list = [f.d_hkl for f in facets]
+                    
+                    wulff = WulffShape(lattice, miller_list, e_surf_list)
+                    
+                    for facet in wulff.facets:
+                        triangles = []
+                        all_pts = []
+                        for tri in facet.points:
+                            tri_pts = [v.tolist() for v in tri]
+                            triangles.append(tri_pts)
+                            all_pts.extend(tri_pts)
+                        
+                        if all_pts:
+                            centroid = np.mean(all_pts, axis=0).tolist()
+                            wulff_facets.append({
+                                "miller": facet.miller,
+                                "triangles": triangles,
+                                "centroid": centroid
+                            })
+                except Exception as wulff_exc:
+                    # WulffShape might fail if facets don't enclose a 3D volume
+                    pass
+
             return {
                 "facets": [f.as_dict() for f in facets],
+                "wulff_facets": wulff_facets,
                 "status": "ok",
                 "warnings": [],
             }
