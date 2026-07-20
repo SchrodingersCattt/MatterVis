@@ -812,6 +812,63 @@ def create_app(
                                                         style={"marginTop": "8px", "fontSize": "11px"},
                                                     ),
                                                 ),
+                                                html.Div(
+                                                    [
+                                                        dcc.Checklist(
+                                                            id="bfdh-morphology-enabled",
+                                                            options=[{"label": " Show 3D Morphology", "value": "enabled"}],
+                                                            value=["enabled"],
+                                                            style={"fontSize": "11px"},
+                                                        ),
+                                                    ],
+                                                    style={"marginTop": "8px"},
+                                                ),
+                                                html.Div(
+                                                    [
+                                                        html.Label("Scale", style={"fontSize": "11px", "width": "40px"}),
+                                                        dcc.Slider(
+                                                            id="bfdh-morphology-scale",
+                                                            min=0.5,
+                                                            max=5.0,
+                                                            step=0.1,
+                                                            value=1.0,
+                                                            marks={0.5: "0.5x", 1: "1x", 2: "2x", 5: "5x"},
+                                                        ),
+                                                    ],
+                                                    style={"marginTop": "8px"},
+                                                ),
+                                                html.Div(
+                                                    [
+                                                        html.Label("Opacity", style={"fontSize": "11px", "width": "40px"}),
+                                                        dcc.Slider(
+                                                            id="bfdh-morphology-opacity",
+                                                            min=0.1,
+                                                            max=1.0,
+                                                            step=0.1,
+                                                            value=0.8,
+                                                            marks={0.1: "0.1", 0.5: "0.5", 1.0: "1.0"},
+                                                        ),
+                                                    ],
+                                                    style={"marginTop": "8px"},
+                                                ),
+                                                html.Div(
+                                                    [
+                                                        html.Label("Color", style={"fontSize": "11px", "marginRight": "8px"}),
+                                                        dcc.Input(
+                                                            id="bfdh-morphology-color",
+                                                            type="color",
+                                                            value="#4f7cff",
+                                                            debounce=False,
+                                                            style={
+                                                                "width": "36px",
+                                                                "height": "24px",
+                                                                "padding": "0",
+                                                                "border": "1px solid #BBB",
+                                                            },
+                                                        ),
+                                                    ],
+                                                    style={"marginTop": "8px", "display": "flex", "alignItems": "center"},
+                                                ),
                                             ],
                                             className="analysis-section",
                                         ),
