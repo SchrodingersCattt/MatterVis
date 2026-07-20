@@ -127,6 +127,17 @@ def _build_render_parser(subparsers: argparse._SubParsersAction) -> argparse.Arg
         help="Path to a JSON file with full style overrides. CLI flags take precedence over config values.",
     )
 
+    # View-direction scoring weights
+    p.add_argument(
+        "--view-weights", metavar="JSON",
+        help=(
+            'JSON dict of auto-view scoring weight overrides. '
+            'Keys: organic_plane, organic_depth, aspect, robust_sep, '
+            'close_contact, occlusion, cluster_crowding, elev_pen. '
+            'Example: \'{"occlusion": 3.0, "elev_pen": 0.5}\''
+        ),
+    )
+
     return p
 
 
@@ -194,10 +205,21 @@ def _render_main(args: argparse.Namespace) -> None:
     name = cif_path.stem
     print(f"Loading {cif_path.name} ...")
 
+    # Parse view-weights JSON if provided
+    view_weights = None
+    if args.view_weights:
+        try:
+            view_weights = json.loads(args.view_weights)
+            if not isinstance(view_weights, dict):
+                sys.exit("Error: --view-weights must be a JSON object.")
+        except json.JSONDecodeError as exc:
+            sys.exit(f"Error: invalid JSON in --view-weights: {exc}")
+
     bundle = build_loaded_crystal(
         name=name,
         cif_path=str(cif_path),
         title=name,
+        view_weights=view_weights,
     )
 
     scene = build_bundle_scene(

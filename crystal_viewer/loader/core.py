@@ -926,6 +926,7 @@ def build_loaded_crystal(
     title: Optional[str] = None,
     preset: Optional[Dict[str, Any]] = None,
     source: str = "catalog",
+    view_weights: Optional[Dict[str, float]] = None,
 ) -> LoadedCrystal:
     # Each sub-block is wrapped in a ``perf_log.time_block`` so the
     # /api/v1/perf endpoint shows exactly which leg of an upload is
@@ -981,7 +982,7 @@ def build_loaded_crystal(
             view_dir, up = _upload_default_view(name, preset)
     else:
         with perf_log.time_block("loader:resolve_view", kind="event", structure=name):
-            view_dir, up = legacy_scene._resolve_view(ops, name, raw_atoms, legacy_M, cell, preset)
+            view_dir, up = legacy_scene._resolve_view(ops, name, raw_atoms, legacy_M, cell, preset, view_weights=view_weights)
     R = ops.view_rotation(view_dir, up)
     final_title = title or name
     with perf_log.time_block(
