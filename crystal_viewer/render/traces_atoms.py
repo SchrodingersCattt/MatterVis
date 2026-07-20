@@ -65,7 +65,7 @@ def _bond_segments(scene: dict, style: dict, *, with_scales: bool = False):
             (c_j, bond["is_minor"], mid, end),
         ]
         for color, is_minor, seg_start, seg_end in halves:
-            if (bond_occ < 0.999 or is_minor) and style.get("disorder") == "dashed_bonds":
+            if is_minor and style.get("disorder") == "dashed_bonds":
                 length = float(np.linalg.norm(seg_end - seg_start))
                 # Gap scales with disorder intensity: lower occ → bigger gaps
                 intensity = 1.0 - bond_occ
@@ -236,7 +236,7 @@ def _bond_scatter_traces(scene: dict, style: dict):
         )["segments"].append([start, end])
 
     traces = []
-    base_width = max(4.0, 24.0 * float(style["bond_radius"]))
+    base_width = max(4.0, 72.0 * float(style["bond_radius"]) * float(style.get("scatter_bond_scale", 1.0)))
     for (color, is_minor, opacity_group), payload in groups.items():
         segments = payload["segments"]
         opacity_scale = float(payload["opacity_scale"])
@@ -255,7 +255,7 @@ def _bond_scatter_traces(scene: dict, style: dict):
                 line=dict(
                     color=color,
                     width=base_width * (float(style.get("minor_bond_scale", 0.82)) if is_minor else 1.0),
-                    dash="dash" if (bond_occ < 0.999 or is_minor) and style.get("disorder") == "dashed_bonds" else "solid",
+                    dash="dash" if is_minor and style.get("disorder") == "dashed_bonds" else "solid",
                 ),
                 opacity=bond_effective_opacity(
                     {"is_minor": is_minor, "_render_opacity_scale": opacity_scale, "occ": bond_occ},
@@ -291,7 +291,7 @@ def _atom_scatter_traces(scene: dict, style: dict):
             key,
             {"x": [], "y": [], "z": [], "size": [], "text": [], "color": color, "customdata": [], "opacity": eff_opacity},
         )
-        base_size = max(10.0, 95.0 * atom["atom_radius"] * float(style["atom_scale"]))
+        base_size = max(10.0, 95.0 * atom["atom_radius"] * float(style["atom_scale"]) * float(style.get("scatter_atom_scale", 0.8)))
         groups[key]["x"].append(float(atom["cart"][0]))
         groups[key]["y"].append(float(atom["cart"][1]))
         groups[key]["z"].append(float(atom["cart"][2]))
