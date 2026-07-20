@@ -119,7 +119,7 @@ def build_row_figure(
     return fig
 
 
-def build_figure(scene: dict, style: dict, topology_data: dict | None = None) -> "go.Figure":
+def build_figure(scene: dict, style: dict, topology_data: dict | None = None, *, force_quality: bool = False) -> "go.Figure":
     from plotly.graph_objects import Figure as go_Figure
 
     style = validate_style_schema(style)
@@ -136,7 +136,11 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None) ->
     # flat+ortep is excluded: it uses the open-ORTEP billboard pipeline,
     # not the scatter fast-path.
     is_flat_ortep = style.get("material") == "flat" and style.get("style") == "ortep"
-    use_fast = bool(style.get("fast_rendering", False)) or (style.get("material") == "flat" and not is_flat_ortep) or len(scene.get("draw_atoms", [])) > 2000
+    use_fast = (
+        bool(style.get("fast_rendering", False))
+        or (style.get("material") == "flat" and not is_flat_ortep)
+        or (len(scene.get("draw_atoms", [])) > 2000 and not force_quality)
+    )
 
     mesh_payload = _cached_atom_bond_meshes(scene, style, use_fast=use_fast)
     topology_on = bool(style.get("topology_enabled", False)) and topology_data is not None

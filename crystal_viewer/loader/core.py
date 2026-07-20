@@ -345,6 +345,19 @@ generate_ordered_replicas_from_disordered_sites` for the optimal
 
         idx_map = map_mck_indices_to_raw(cif_path, raw_atoms, kept_indices)
         kept_raw = set(idx_map.values())
+
+        if not kept_raw and kept_indices:
+            import logging
+            logging.getLogger(__name__).error(
+                "map_mck_indices_to_raw returned empty for %s "
+                "(%d kept_indices could not be matched to raw_atoms). "
+                "Disorder tagging will be skipped to avoid marking all "
+                "atoms as minor.",
+                cif_path,
+                len(kept_indices),
+            )
+            return raw_atoms
+
         out = [dict(atom) for atom in raw_atoms]
 
         disordered_idx: list[int] = []

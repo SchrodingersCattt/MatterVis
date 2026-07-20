@@ -324,7 +324,7 @@ def create_app(
                             options=[
                                 {"label": "Labels", "value": "labels"},
                                 {"label": "Axes", "value": "axes"},
-                                {"label": "Minor Only", "value": "minor_only"},
+                                {"label": "Disorder Only", "value": "minor_only"},
                                 {"label": "Hydrogens", "value": "hydrogens"},
                                 {"label": "Unit Cell Box", "value": "unit_cell_box"},
                                 # Phase 3: legacy "Monochrome atoms" toggle
