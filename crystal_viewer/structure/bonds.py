@@ -32,6 +32,10 @@ def _bond_cutoff(ai, aj):
     return cov_r(ei) + cov_r(ej) + 0.42
 
 
+# Track whether we already warned about incomplete H bond tables.
+_WARNED_H_BOND_TABLE: set = set()
+
+
 def _bond_allowed_by_table(ai, aj):
     partners_i = ai.get('_bond_partners', ())
     partners_j = aj.get('_bond_partners', ())
@@ -42,6 +46,26 @@ def _bond_allowed_by_table(ai, aj):
         return True
     if partners_j and ai['label'] in partners_j:
         return True
+    # ── H fallback ──────────────────────────────────────────────────
+    # Many CIFs have _geom_bond tables that omit H bonds entirely
+    # (riding-model H, constrained solvent H, etc.). When at least one
+    # atom is H and it has no bond_partners listed, fall back to the
+    # distance criterion rather than silently blocking all H bonds.
+    if 'H' in (ai['elem'], aj['elem']):
+        h_atom = ai if ai['elem'] == 'H' else aj
+        if not h_atom.get('_bond_partners'):
+            import warnings
+            key = id(h_atom.get('_has_bond_table'))
+            if key not in _WARNED_H_BOND_TABLE:
+                _WARNED_H_BOND_TABLE.add(key)
+                warnings.warn(
+                    "CIF _geom_bond table present but H atom "
+                    f"{h_atom.get('label', '?')} has no bond partners listed; "
+                    "falling back to distance-based H bonding.",
+                    stacklevel=2,
+                )
+            return True
+    # ── Disorder fallback ───────────────────────────────────────────
     # Symmetry-expanded disorder atoms (labels like "C6B?") are absent
     # from the CIF _geom_bond table which only lists ASU labels ("C6A").
     # Fall back to distance-based bonding when BOTH atoms carry a
