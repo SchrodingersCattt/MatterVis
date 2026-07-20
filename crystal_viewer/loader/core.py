@@ -497,10 +497,21 @@ def _unwrapped_atoms_from_molcrys(
     mol_indices = getattr(molcrys_analysis, "mol_indices", None) or []
     mol_cart_positions = getattr(molcrys_analysis, "mol_cart_positions", None) or []
 
+    # Compute cell diagonal length for framework detection
+    _cell_diag = np.linalg.norm(M_arr.sum(axis=0))
+
     for mol_idx, (indices, cart_positions) in enumerate(zip(mol_indices, mol_cart_positions)):
         coords = np.asarray(cart_positions, dtype=float)
         if coords.ndim != 2 or coords.shape[0] != len(indices):
             continue
+
+        # Skip unwrapping for framework/network molecules whose bounding
+        # box exceeds the cell diagonal — these are MOFs or coordination
+        # polymers that should stay wrapped inside the unit cell.
+        span = coords.max(axis=0) - coords.min(axis=0)
+        if np.linalg.norm(span) > _cell_diag * 0.9:
+            continue
+
         for local_idx, raw_idx in enumerate(indices):
             if raw_idx < 0 or raw_idx >= len(out):
                 continue
