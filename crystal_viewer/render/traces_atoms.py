@@ -226,21 +226,24 @@ def _atom_mesh_traces(scene: dict, style: dict):
 
 
 def _bond_scatter_traces(scene: dict, style: dict):
-    groups: Dict[Tuple[str, bool, str | None], dict] = {}
+    groups: Dict[Tuple[str, bool, str | None, str], dict] = {}
     for color, is_minor, start, end, _radius_scale, opacity_scale, opacity_group, bond_occ in _bond_segments(
         scene, style, with_scales=True
     ):
+        eff_opacity = bond_effective_opacity(
+            {"is_minor": is_minor, "_render_opacity_scale": opacity_scale, "occ": bond_occ},
+            style,
+        )
+        opacity_bin = f"{eff_opacity:.2f}"
         groups.setdefault(
-            (color, is_minor, opacity_group),
-            {"segments": [], "opacity_scale": opacity_scale, "occ": bond_occ},
+            (color, is_minor, opacity_group, opacity_bin),
+            {"segments": [], "opacity_scale": opacity_scale, "occ": bond_occ, "opacity": eff_opacity},
         )["segments"].append([start, end])
 
     traces = []
     base_width = max(4.0, 72.0 * float(style["bond_radius"]) * float(style.get("scatter_bond_scale", 1.0)))
-    for (color, is_minor, opacity_group), payload in groups.items():
+    for (color, is_minor, opacity_group, _opc_bin), payload in groups.items():
         segments = payload["segments"]
-        opacity_scale = float(payload["opacity_scale"])
-        bond_occ = float(payload.get("occ", 1.0))
         xs, ys, zs = [], [], []
         for start, end in segments:
             xs.extend([float(start[0]), float(end[0]), None])
@@ -257,13 +260,10 @@ def _bond_scatter_traces(scene: dict, style: dict):
                     width=base_width * (float(style.get("minor_bond_scale", 0.82)) if is_minor else 1.0),
                     dash="dash" if is_minor and style.get("disorder") == "dashed_bonds" else "solid",
                 ),
-                opacity=bond_effective_opacity(
-                    {"is_minor": is_minor, "_render_opacity_scale": opacity_scale, "occ": bond_occ},
-                    style,
-                ),
+                opacity=payload["opacity"],
                 hoverinfo="skip",
                 showlegend=False,
-            ), "bond", is_minor=is_minor, opacity_group=opacity_group, opacity_scale=opacity_scale)
+            ), "bond", is_minor=is_minor, opacity_group=opacity_group)
         )
     return traces
 
