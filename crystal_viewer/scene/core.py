@@ -139,7 +139,13 @@ def build_scene_from_atoms(
             atom["atom_radius"] = float(ops.atom_r(atom["elem"]))
 
     effective_cell = None if display_mode == "cluster" else cell
-    bond_pairs = ops.find_bonds(draw_atoms, cell=effective_cell)
+    # Pass M so that the KDTree pre-filter generates ghost images for
+    # cross-cell bonds in framework structures (atoms that were NOT
+    # unwrapped retain their wrapped cart positions and may have bonded
+    # neighbours on the other side of the cell boundary).  Without M
+    # the KDTree uses non-PBC Cartesian distances and misses these pairs.
+    effective_M = None if display_mode == "cluster" else M
+    bond_pairs = ops.find_bonds(draw_atoms, M=effective_M, cell=effective_cell)
     bonds = []
     for i, j in bond_pairs:
         ai = draw_atoms[i]
@@ -147,6 +153,13 @@ def build_scene_from_atoms(
         if bonds_conflict(ai, aj):
             continue
         start, end = _bond_endpoints(ai, aj, cell, display_mode=display_mode)
+        # Skip bonds whose rendered length far exceeds a covalent bond —
+        # these are cross-cell PBC bonds where one atom sits near one face
+        # and the other near the opposite face. The bond is real but its
+        # visual representation would span the entire cell as a long line.
+        rendered_len = float(np.linalg.norm(end - start))
+        if rendered_len > 3.5:
+            continue
         bonds.append(
             {
                 "i": i,
