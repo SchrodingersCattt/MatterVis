@@ -126,7 +126,7 @@ def _structure_entry(preset: Dict[str, Any], name: str) -> Dict[str, Any]:
     return preset.get("structures", {}).get(name, {})
 
 
-def _resolve_view(ops: Any, name: str, atoms, M, cell, preset: Dict[str, Any]):
+def _resolve_view(ops: Any, name: str, atoms, M, cell, preset: Dict[str, Any], view_weights: Optional[Dict[str, float]] = None):
     entry = _structure_entry(preset, name)
     camera = entry.get("camera", {})
     if camera.get("position") and camera.get("focal_point") and camera.get("up"):
@@ -134,7 +134,7 @@ def _resolve_view(ops: Any, name: str, atoms, M, cell, preset: Dict[str, Any]):
     if entry.get("view_direction"):
         up = entry.get("up", [0.0, 1.0, 0.0])
         return np.array(entry["view_direction"], dtype=float), np.array(up, dtype=float)
-    return ops.auto_view_dir(atoms, M, cell, compound_name=name)
+    return ops.auto_view_dir(atoms, M, cell, compound_name=name, weights=view_weights)
 
 
 def _camera_from_bounds(bounds, view_y, view_z):

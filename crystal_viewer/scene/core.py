@@ -15,7 +15,7 @@ from ..structure.formula_unit import cluster_atoms, select_formula_unit
 from ..structure.geometry import _nearest_pbc_cart, view_rotation
 from ..style.palette import atom_r, elem_color, elem_color_light
 from ..presets import DEFAULT_STYLE, deep_merge, default_preset, json_safe
-from ..legacy.publication_view import auto_view_dir
+from ..viewpoint import auto_view_dir
 from ..legacy.plot_crystal import _compute_label_positions
 
 # ── New layered modules ──────────────────────────────────────────────
