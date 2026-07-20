@@ -402,8 +402,8 @@ def create_app(
                                 dcc.Dropdown(
                                     id="material-selector",
                                     options=[
-                                        {"label": "Mesh 3D", "value": "mesh"},
-                                        {"label": "Flat billboard", "value": "flat"},
+                                        {"label": "3D Mesh", "value": "mesh"},
+                                        {"label": "2D Flat", "value": "flat"},
                                     ],
                                     value=first_state.get("material", "mesh"),
                                     clearable=False,
@@ -445,6 +445,7 @@ def create_app(
                                 {"label": "Solid ellipsoids", "value": "ortep_solid"},
                                 {"label": "Principal axes", "value": "ortep_axes"},
                                 {"label": "Octant shading", "value": "ortep_octant"},
+                                {"label": "Publication hatch", "value": "ortep_hatch"},
                             ],
                             value=first_state.get("ortep_mode", "ortep_axes"),
                             clearable=False,

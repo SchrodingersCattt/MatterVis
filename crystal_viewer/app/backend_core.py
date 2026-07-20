@@ -1132,7 +1132,7 @@ class _CoreBackendMixin:
         style["disorder"] = state.get("disorder", style.get("disorder", "outline_rings"))
         style["ortep_mode"] = state.get("ortep_mode", style.get("ortep_mode", "ortep_axes"))
         style["label_mode"] = state.get("label_mode", style.get("label_mode", "unique_sites"))
-        style["fast_rendering"] = bool(state.get("fast_rendering", False)) or style["material"] == "flat"
+        style["fast_rendering"] = bool(state.get("fast_rendering", False))
         style["topology_enabled"] = bool(state.get("topology_enabled", False))
         style["topology_hull_color"] = str(state.get("topology_hull_color", "#7C5CBF"))
         # Phase 2: per-scene atom-group rules ride along on the style

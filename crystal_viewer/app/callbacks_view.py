@@ -732,8 +732,30 @@ def register_view_callbacks(app, backend):
     def save_or_export(_, __):
         triggered = callback_context.triggered[0]["prop_id"].split(".")[0] if callback_context.triggered else None
         if triggered == "export-btn":
+            state = backend.get_state()
+            scene_label = state.get("scene_label") or "mattervis"
+            material = state.get("material", "mesh")
+            render_style = state.get("style", "ball_stick")
+
+            if material == "flat" and render_style == "ortep":
+                # Flat + ORTEP: export as PDF via Matplotlib 2D renderer
+                import io
+                from crystal_viewer.render.api import render as unified_render
+                from crystal_viewer.scene import scene_style as _ss
+                scene = backend.scene_for_state(state)
+                style = backend.style_for_state(state, scene=scene)
+                result = unified_render(scene, style)
+                buf = io.BytesIO()
+                result.mpl_figure.savefig(buf, format="pdf", bbox_inches="tight")
+                import matplotlib.pyplot as plt
+                plt.close(result.mpl_figure)
+                buf.seek(0)
+                filename = f"{scene_label.replace(os.sep, '_')}_ortep.pdf"
+                message, class_name = _status_message(f"Export ready: {filename}", "success")
+                return message, class_name, dcc.send_bytes(buf.getvalue, filename), False, 0
+
+            # Default: PNG export via Plotly
             png = backend.render_current_png(backend.active_scene_id())
-            scene_label = backend.get_state().get("scene_label") or "mattervis"
             filename = f"{scene_label.replace(os.sep, '_')}.png"
             message, class_name = _status_message(f"Export ready: {filename}", "success")
             return message, class_name, dcc.send_bytes(lambda buffer: buffer.write(png), filename), False, 0
