@@ -25,11 +25,15 @@ def register_ws_routes(server, backend) -> None:
                 for payload in backend.figure_broadcasts_since(last_figure_seq):
                     socket.send(json.dumps(payload, ensure_ascii=False))
                     last_figure_seq = max(last_figure_seq, int(payload.get("figure_seq", 0) or 0))
+            # Use a shorter poll interval when there are pending figure
+            # broadcasts to reduce latency for cache-hit tab switches.
+            has_pending = bool(backend.figure_broadcasts_since(last_figure_seq)) if include_figure else False
+            poll_timeout = 0.05 if has_pending else 0.5
             try:
-                message = socket.receive(timeout=0.5)
+                message = socket.receive(timeout=poll_timeout)
             except TypeError:
                 message = None
-                time.sleep(0.5)
+                time.sleep(poll_timeout)
             if message:
                 try:
                     payload = json.loads(message)
