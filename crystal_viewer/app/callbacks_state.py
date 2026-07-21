@@ -305,6 +305,7 @@ def register_state_callbacks(app, backend):
         Output("topology-toggle", "value"),
         Output("agent-state-store", "data"),
         Output("camera-state-store", "data"),
+        Output("scene-switch-seq", "data"),
         Input("agent-state-poll", "n_intervals"),
         Input("native-upload-sync", "data"),
         Input("scene-tabs", "value"),
@@ -316,7 +317,7 @@ def register_state_callbacks(app, backend):
             if callback_context.triggered
             else None
         )
-        n_outputs = 15
+        n_outputs = 16
         if triggered == "scene-tabs":
             if not scene_id or scene_id not in backend.scene_store.scenes:
                 return (no_update,) * n_outputs
@@ -324,7 +325,42 @@ def register_state_callbacks(app, backend):
                 {"type": "set_active_scene", "scene_id": scene_id, "payload": {"scene_id": scene_id}}
             )
             state = backend.get_state(scene_id)
-            return scene_control_outputs(state)
+            # Try to push the figure immediately via WebSocket if cached.
+            try:
+                cache_key = backend._figure_state_cache_key(state)
+                with backend._figure_cache_lock:
+                    cached_entry = backend._figure_cache.get(cache_key)
+                    if cached_entry is not None:
+                        backend._figure_cache.move_to_end(cache_key)
+            except Exception:
+                cached_entry = None
+            if cached_entry is not None:
+                from .backend_camera import _figure_from_cached_dict, _plotly_camera
+                fig = _figure_from_cached_dict(cached_entry[0])
+                camera = _plotly_camera(state.get("camera"))
+                if camera:
+                    fig.update_layout(scene_camera=camera)
+                backend.broadcast_figure(
+                    scene_id=scene_id,
+                    figure=fig.to_plotly_json(),
+                    topology_data=cached_entry[1],
+                    state=state,
+                    reason="tab-switch-cache-hit",
+                )
+                perf_log.record(
+                    "tab-switch:ws-push",
+                    kind="event",
+                    info={"scene_id": scene_id, "cache_hit": True},
+                )
+                # Mark on the backend so update_view can skip redundant rebuild.
+                backend._tab_switch_ws_pushed = (scene_id, time.monotonic())
+            else:
+                backend._tab_switch_ws_pushed = None
+            # Always emit a unique seq to guarantee update_view fires
+            # as a fallback (in case WS is not connected).
+            seq = getattr(sync_agent_state, "_switch_seq", 0) + 1
+            sync_agent_state._switch_seq = seq
+            return (*scene_control_outputs(state), {"seq": seq, "scene_id": scene_id})
         state = backend.pop_pending_state()
         # Upload completion emits ``native-upload-sync`` from the browser.
         # Depending on callback ordering, ``pending_state`` may already have
@@ -348,7 +384,7 @@ def register_state_callbacks(app, backend):
         # camera change to the browser.
         outputs = list(scene_control_outputs(state))
         outputs[-1] = no_update  # camera-state-store slot
-        return tuple(outputs)
+        return (*outputs, no_update)  # scene-switch-seq unchanged
 
     @app.callback(
         Output("agent-state-store", "data", allow_duplicate=True),
