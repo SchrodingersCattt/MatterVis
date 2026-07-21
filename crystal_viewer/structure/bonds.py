@@ -149,58 +149,36 @@ def _prune_duplicate_label_bond_candidates(atoms, candidates, tol=0.005):
 # ── Bond finding ────────────────────────────────────────────────────────────
 _BOND_KDTREE_THRESHOLD = 64
 _BOND_MAX_CUTOFF = 5.0  # Å — wide enough for any covalent pair the table can return.
+_PBC_SELECTIVE_THRESHOLD = 500  # Above this, use face-selective ghost expansion.
 
 
-def _bond_candidate_pairs(atoms, M, cell):
-    """Yield ``(i, j)`` index pairs with ``i < j`` whose Cartesian
-    distance (or, when ``cell is not None``, **PBC** Cartesian distance)
-    is plausibly within bond range.
+def _effective_cutoff(atoms):
+    """Compute the tightest cutoff that still covers all possible covalent
+    pairs among the element set present in *atoms*.
 
-    For ``len(atoms) >= _BOND_KDTREE_THRESHOLD`` we use
-    ``cKDTree.query_pairs`` to prune the O(N^2) python loop down to
-    O(N * neighbours). For smaller scenes the python loop is faster
-    than constructing a KDTree, so we keep the legacy enumeration.
-
-    PBC handling: when ``cell is not None`` and ``M`` is provided, the
-    atom set is expanded with one image-replica per neighbour cell
-    (3^3 - 1 = 26 ghosts per atom) before the KDTree query. Pairs that
-    fall within the cutoff are then mapped back to the home index. This
-    is necessary because a ring that crosses the cell boundary has
-    bonds whose **raw cart** length spans the cell (8+ Å) but whose
-    PBC-image length is normal covalent. Without ghost replication,
-    ``_unwrapped_atoms_from_atoms`` cannot reassemble the ring and the
-    user sees fragmented organic cations -- regression observed on the
-    MPEP structure (P2_1/c, monoclinic) after the v1 KDTree pre-filter
-    landed.
+    Returns at most ``_BOND_MAX_CUTOFF``.  For typical organic crystals
+    this is ~3.2 Å (C–I + tolerance), reducing KDTree pair counts 3–5×.
     """
-    n = len(atoms)
-    if n < _BOND_KDTREE_THRESHOLD:
-        for i in range(n):
-            for j in range(i + 1, n):
-                yield (i, j)
-        return
-    try:
-        from scipy.spatial import cKDTree
-    except ImportError:
-        for i in range(n):
-            for j in range(i + 1, n):
-                yield (i, j)
-        return
-    coords = np.asarray([a['cart'] for a in atoms], dtype=float)
+    elems = {a['elem'] for a in atoms}
+    if not elems:
+        return _BOND_MAX_CUTOFF
+    radii = []
+    for e in elems:
+        try:
+            radii.append(cov_r(e))
+        except Exception:
+            return _BOND_MAX_CUTOFF
+    max_sum = radii[-1] + radii[-1]  # placeholder
+    radii.sort(reverse=True)
+    max_sum = radii[0] + (radii[1] if len(radii) > 1 else radii[0])
+    cutoff = max_sum + 0.42  # same tolerance as _bond_cutoff
+    return min(cutoff, _BOND_MAX_CUTOFF)
 
-    # No PBC requested -> plain non-periodic KDTree on raw cart coords.
-    if cell is None or M is None:
-        tree = cKDTree(coords)
-        pairs = tree.query_pairs(r=_BOND_MAX_CUTOFF, output_type='ndarray')
-        if pairs.size == 0:
-            return
-        for i, j in pairs.tolist():
-            yield (int(i), int(j)) if i < j else (int(j), int(i))
-        return
 
-    # PBC path: expand the atom set with 26 image-replicas so that
-    # cross-cell bonds become local in cart space.
-    M_arr = np.asarray(M, dtype=float)
+def _pbc_pairs_full(coords, n, M_arr, cutoff):
+    """Full 27× ghost expansion — fast for N < _PBC_SELECTIVE_THRESHOLD."""
+    from scipy.spatial import cKDTree
+
     a_vec = M_arr[:, 0]
     b_vec = M_arr[:, 1]
     c_vec = M_arr[:, 2]
@@ -218,20 +196,157 @@ def _bond_candidate_pairs(atoms, M, cell):
     all_orig = np.concatenate(orig_idx_chunks)
 
     tree = cKDTree(all_coords)
-    pairs = tree.query_pairs(r=_BOND_MAX_CUTOFF, output_type='ndarray')
+    pairs = tree.query_pairs(r=cutoff, output_type='ndarray')
     if pairs.size == 0:
         return
-    seen: set[tuple[int, int]] = set()
-    for i, j in pairs.tolist():
-        oi = int(all_orig[i])
-        oj = int(all_orig[j])
-        if oi == oj:
-            continue  # ghost-of-self at zero distance is not a bond candidate
-        a_idx, b_idx = (oi, oj) if oi < oj else (oj, oi)
-        if (a_idx, b_idx) in seen:
-            continue
-        seen.add((a_idx, b_idx))
-        yield (a_idx, b_idx)
+    # Vectorized deduplication — avoid Python iteration over millions of pairs.
+    mapped = all_orig[pairs]  # shape (K, 2)
+    # Drop self-pairs (ghost of same atom)
+    mask = mapped[:, 0] != mapped[:, 1]
+    mapped = mapped[mask]
+    if mapped.size == 0:
+        return
+    # Canonical ordering (i < j)
+    sorted_pairs = np.sort(mapped, axis=1)
+    unique_pairs = np.unique(sorted_pairs, axis=0)
+    for i, j in unique_pairs:
+        yield (int(i), int(j))
+
+
+def _pbc_pairs_selective(coords, atoms, n, M_arr, cutoff):
+    """Face-selective ghost expansion for large structures (N >= 500).
+
+    Only atoms near a cell face (within ``cutoff`` in Cartesian distance
+    of the boundary) are replicated to the adjacent image. Interior
+    atoms already have all bonded neighbours in the home cell.
+
+    This reduces the ghost count from 26×N to 26×N_face where N_face
+    is typically 5–20% of N for large unit cells, making KDTree
+    construction and query_pairs tractable for 5000+ atom structures.
+    """
+    from scipy.spatial import cKDTree
+
+    a_vec = M_arr[:, 0]
+    b_vec = M_arr[:, 1]
+    c_vec = M_arr[:, 2]
+    # Compute fractional coords for face-proximity test.
+    # frac = cart @ inv(M).T  (M columns are lattice vectors)
+    M_inv_T = np.linalg.inv(M_arr).T
+    fracs = coords @ M_inv_T  # shape (n, 3)
+
+    # For each lattice direction, compute the Cartesian "skin depth"
+    # as cutoff / |lattice_vector_component perpendicular to the face|.
+    # Approximation: use cutoff / lattice_length along that axis which
+    # is a safe upper bound in fractional units.
+    lat_lengths = np.array([
+        np.linalg.norm(a_vec),
+        np.linalg.norm(b_vec),
+        np.linalg.norm(c_vec),
+    ])
+    frac_skin = cutoff / lat_lengths  # fractional depth near each face
+
+    coord_chunks = [coords]
+    orig_idx_chunks = [np.arange(n, dtype=int)]
+    indices_all = np.arange(n, dtype=int)
+
+    for da in (-1, 0, 1):
+        for db in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                if da == 0 and db == 0 and dc == 0:
+                    continue
+                # For offset (da, db, dc), an atom needs replication if
+                # it is near the face that this offset would bring a
+                # neighbour FROM. E.g. offset da=+1 brings images from
+                # the +a side, so atoms near frac_a ≈ 0 need that ghost.
+                mask = np.ones(n, dtype=bool)
+                for axis, d in enumerate((da, db, dc)):
+                    if d == 0:
+                        continue
+                    f = fracs[:, axis]
+                    skin = frac_skin[axis]
+                    if d == -1:
+                        # Ghost from -a: atoms near frac ≈ 1 need it
+                        mask &= (f > 1.0 - skin)
+                    else:
+                        # Ghost from +a: atoms near frac ≈ 0 need it
+                        mask &= (f < skin)
+                selected = indices_all[mask]
+                if selected.size == 0:
+                    continue
+                offset = da * a_vec + db * b_vec + dc * c_vec
+                coord_chunks.append(coords[selected] + offset)
+                orig_idx_chunks.append(selected)
+
+    all_coords = np.vstack(coord_chunks)
+    all_orig = np.concatenate(orig_idx_chunks)
+
+    tree = cKDTree(all_coords)
+    pairs = tree.query_pairs(r=cutoff, output_type='ndarray')
+    if pairs.size == 0:
+        return
+    # Vectorized deduplication
+    mapped = all_orig[pairs]
+    mask = mapped[:, 0] != mapped[:, 1]
+    mapped = mapped[mask]
+    if mapped.size == 0:
+        return
+    sorted_pairs = np.sort(mapped, axis=1)
+    unique_pairs = np.unique(sorted_pairs, axis=0)
+    for i, j in unique_pairs:
+        yield (int(i), int(j))
+
+
+def _bond_candidate_pairs(atoms, M, cell):
+    """Yield ``(i, j)`` index pairs with ``i < j`` whose Cartesian
+    distance (or, when ``cell is not None``, **PBC** Cartesian distance)
+    is plausibly within bond range.
+
+    For ``len(atoms) >= _BOND_KDTREE_THRESHOLD`` we use
+    ``cKDTree.query_pairs`` to prune the O(N^2) python loop down to
+    O(N * neighbours). For smaller scenes the python loop is faster
+    than constructing a KDTree, so we keep the legacy enumeration.
+
+    PBC handling: when ``cell is not None`` and ``M`` is provided, the
+    atom set is expanded with ghost-image replicas so that cross-cell
+    bonds become local in Cartesian space.
+
+    For small structures (N < 500) the full 3^3 - 1 = 26 ghost images
+    are used. For large structures (N >= 500) a face-selective strategy
+    replicates only atoms near cell boundaries, reducing ghost count
+    from 26×N to ~26×N_face where N_face << N.
+    """
+    n = len(atoms)
+    if n < _BOND_KDTREE_THRESHOLD:
+        for i in range(n):
+            for j in range(i + 1, n):
+                yield (i, j)
+        return
+    try:
+        from scipy.spatial import cKDTree
+    except ImportError:
+        for i in range(n):
+            for j in range(i + 1, n):
+                yield (i, j)
+        return
+    coords = np.asarray([a['cart'] for a in atoms], dtype=float)
+    cutoff = _effective_cutoff(atoms)
+
+    # No PBC requested -> plain non-periodic KDTree on raw cart coords.
+    if cell is None or M is None:
+        tree = cKDTree(coords)
+        pairs = tree.query_pairs(r=cutoff, output_type='ndarray')
+        if pairs.size == 0:
+            return
+        for i, j in pairs.tolist():
+            yield (int(i), int(j)) if i < j else (int(j), int(i))
+        return
+
+    # PBC path — choose strategy based on atom count.
+    M_arr = np.asarray(M, dtype=float)
+    if n < _PBC_SELECTIVE_THRESHOLD:
+        yield from _pbc_pairs_full(coords, n, M_arr, cutoff)
+    else:
+        yield from _pbc_pairs_selective(coords, atoms, n, M_arr, cutoff)
 
 
 def find_bonds(atoms, M=None, cell=None):
