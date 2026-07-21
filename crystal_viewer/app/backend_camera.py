@@ -70,6 +70,7 @@ class _CameraBackendMixin:
         click_data: Optional[dict[str, Any]] = None,
         *,
         async_topology: bool = False,
+        async_figure: bool = False,
     ):
         state = self.get_state() if state is None else state
         scene_id = state.get("scene_id")
@@ -151,6 +152,24 @@ class _CameraBackendMixin:
             # across cache hits and saves ~25 ms of redundant
             # deepcopy on the hot slider path.
             return fig, cached_topology
+
+        # --- CACHE MISS ---
+        # If async_figure is requested, offload the full build to a
+        # background thread and return a skeleton figure immediately.
+        if async_figure:
+            worker = getattr(self, "_render_worker", None)
+            if worker is not None:
+                worker.request_figure_build(dict(state))
+                perf_log.record(
+                    "figure_for_state:async-submitted",
+                    kind="event",
+                    info={"scene_id": scene_id},
+                )
+                # Return a minimal skeleton figure (unit cell box only)
+                # so the Dash callback returns immediately.
+                skeleton = self._skeleton_figure(state)
+                return skeleton, None
+
         with perf_log.time_block("scene_for_state", kind="event", scene_id=scene_id):
             scene = self.scene_for_state(state)
         atom_count = len(scene.get("draw_atoms", []))
@@ -231,6 +250,35 @@ class _CameraBackendMixin:
         # behaviour for the current response.
         _apply_polyhedron_visibility_patch(fig, state)
         return fig, topology_data
+
+    def _skeleton_figure(self, state: dict[str, Any]) -> "go.Figure":
+        """Build a lightweight placeholder figure for async rendering.
+
+        Contains only the unit cell box and compass annotations so the
+        user sees something immediately while the full figure builds in
+        the background.
+        """
+        scene = self.scene_for_state(state)
+        style = self.style_for_state(state, scene=scene)
+        from ..render.figures import _unit_cell_traces, _axis_traces, _scene_ranges
+        from ..render.figures import _style_trace_dicts, _traces_to_dicts
+        from ..render.viewport import figure_axis_layout
+        xr, yr, zr = _scene_ranges(scene, style, topology_data=None)
+        trace_dicts: list[dict] = []
+        trace_dicts.extend(_traces_to_dicts(_unit_cell_traces(scene, style)))
+        trace_dicts.extend(_traces_to_dicts(_axis_traces(scene, style)))
+        trace_dicts = _style_trace_dicts(trace_dicts, style)
+        fig = go.Figure(data=trace_dicts, _validate=False)
+        scene_layout = figure_axis_layout(scene, style, xr, yr, zr)
+        camera = _plotly_camera(state.get("camera"))
+        if camera:
+            scene_layout["camera"] = camera
+        fig.update_layout(
+            scene=scene_layout,
+            margin=dict(l=0, r=0, t=0, b=0),
+            showlegend=False,
+        )
+        return fig
 
     def _flat_ortep_figure(self, scene: dict, style: dict) -> "go.Figure":
         """Render flat+ortep via Matplotlib and embed as a static image in a Plotly figure."""

@@ -687,7 +687,16 @@ def register_view_callbacks(app, backend):
         # Topology overlay toggles are user-visible correctness changes.  Do
         # them synchronously so the checkbox never leaves a stale no-overlay
         # frame waiting on the background topology/websocket fast lane.
-        fig, topology_data = backend.figure_for_state(state, async_topology=not topology_changed)
+        #
+        # async_figure: when the scene changes (tab switch), allow the
+        # figure to be built in the background so this callback returns
+        # immediately with a skeleton placeholder.
+        scene_changed = getattr(update_view, "_last_rendered_scene_id", None) != scene_id
+        fig, topology_data = backend.figure_for_state(
+            state,
+            async_topology=not topology_changed,
+            async_figure=scene_changed,
+        )
         if isinstance(fig, dict) and fig.get("_mattervis_pending"):
             perf_log.record(
                 "callback:update_view",

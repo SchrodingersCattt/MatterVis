@@ -119,24 +119,26 @@ def _bond_mesh_traces(scene: dict, style: dict):
         )
         if len(vertices) == 0:
             continue
-        mesh_kwargs = dict(
-            x=vertices[:, 0],
-            y=vertices[:, 1],
-            z=vertices[:, 2],
-            i=triangles[:, 0],
-            j=triangles[:, 1],
-            k=triangles[:, 2],
-            color=color,
-            opacity=payload["opacity"],
-            hoverinfo="skip",
-            showlegend=False,
-            flatshading=False,
-        )
+        # Build raw dict directly — avoids go.Mesh3d() validator overhead
+        # (~100ms per trace for large meshes).
+        trace_dict = {
+            "type": "mesh3d",
+            "x": np.round(vertices[:, 0], 3).tolist(),
+            "y": np.round(vertices[:, 1], 3).tolist(),
+            "z": np.round(vertices[:, 2], 3).tolist(),
+            "i": triangles[:, 0].tolist(),
+            "j": triangles[:, 1].tolist(),
+            "k": triangles[:, 2].tolist(),
+            "color": color,
+            "opacity": payload["opacity"],
+            "hoverinfo": "skip",
+            "showlegend": False,
+            "flatshading": False,
+            "meta": _latency_meta("bond", is_minor=is_minor, opacity_group=opacity_group),
+        }
         if mesh_lighting:
-            mesh_kwargs["lighting"] = mesh_lighting
-        traces.append(
-            _annotate_trace(go.Mesh3d(**mesh_kwargs), "bond", is_minor=is_minor, opacity_group=opacity_group)
-        )
+            trace_dict["lighting"] = mesh_lighting
+        traces.append(trace_dict)
     return traces
 
 
@@ -200,24 +202,25 @@ def _atom_mesh_traces(scene: dict, style: dict):
             lat_steps=lat_steps,
             lon_steps=lon_steps,
         )
-        mesh_kwargs = dict(
-            x=vertices[:, 0],
-            y=vertices[:, 1],
-            z=vertices[:, 2],
-            i=triangles[:, 0],
-            j=triangles[:, 1],
-            k=triangles[:, 2],
-            color=color,
-            opacity=payload["opacity"],
-            hoverinfo="skip",
-            showlegend=False,
-            flatshading=False,
-        )
+        # Build raw dict directly — avoids go.Mesh3d() validator overhead.
+        trace_dict = {
+            "type": "mesh3d",
+            "x": np.round(vertices[:, 0], 3).tolist(),
+            "y": np.round(vertices[:, 1], 3).tolist(),
+            "z": np.round(vertices[:, 2], 3).tolist(),
+            "i": triangles[:, 0].tolist(),
+            "j": triangles[:, 1].tolist(),
+            "k": triangles[:, 2].tolist(),
+            "color": color,
+            "opacity": payload["opacity"],
+            "hoverinfo": "skip",
+            "showlegend": False,
+            "flatshading": False,
+            "meta": _latency_meta("atom", is_minor=is_minor, opacity_group=opacity_group),
+        }
         if mesh_lighting:
-            mesh_kwargs["lighting"] = mesh_lighting
-        traces.append(
-            _annotate_trace(go.Mesh3d(**mesh_kwargs), "atom", is_minor=is_minor, opacity_group=opacity_group)
-        )
+            trace_dict["lighting"] = mesh_lighting
+        traces.append(trace_dict)
     return traces
 
 

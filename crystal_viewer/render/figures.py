@@ -139,7 +139,7 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None, *,
     use_fast = (
         bool(style.get("fast_rendering", False))
         or (style.get("material") == "flat" and not is_flat_ortep)
-        or (len(scene.get("draw_atoms", [])) > 2000 and not force_quality)
+        or (len(scene.get("draw_atoms", [])) > 800 and not force_quality)
     )
 
     mesh_payload = _cached_atom_bond_meshes(scene, style, use_fast=use_fast)
