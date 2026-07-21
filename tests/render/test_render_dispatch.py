@@ -33,6 +33,7 @@ def _scene_template():
             "is_minor": True,
             "uiso": 0.04,
             "U": None,
+            "occ": 0.5,
         },
     ]
     scene["bonds"] = [
@@ -44,6 +45,7 @@ def _scene_template():
             "color_i": "#555555",
             "color_j": "#B85060",
             "is_minor": True,
+            "occ": 0.5,
         }
     ]
     return scene

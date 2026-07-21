@@ -26,7 +26,7 @@ def _bond_segments(scene: dict, style: dict, *, with_scales: bool = False):
     atoms = scene.get("draw_atoms") or []
     n_atoms = len(atoms)
     for bond in scene["bonds"]:
-        if style.get("show_minor_only", False) and not bond["is_minor"]:
+        if style.get("show_minor_only", False) and float(bond.get("occ", 1.0)) >= 0.999:
             continue
         # Phase 4: bond_groups can mark a bond invisible directly. We
         # honour both the bond-level ``_render_visible`` (set by
@@ -65,7 +65,7 @@ def _bond_segments(scene: dict, style: dict, *, with_scales: bool = False):
             (c_j, bond["is_minor"], mid, end),
         ]
         for color, is_minor, seg_start, seg_end in halves:
-            if is_minor and style.get("disorder") == "dashed_bonds":
+            if bond_occ < 0.999 and style.get("disorder") == "dashed_bonds":
                 length = float(np.linalg.norm(seg_end - seg_start))
                 # Gap scales with disorder intensity: lower occ → bigger gaps
                 intensity = 1.0 - bond_occ
@@ -111,9 +111,7 @@ def _bond_mesh_traces(scene: dict, style: dict):
     traces = []
     for (color, is_minor, _r_bin, opacity_group, _opc_bin), payload in groups.items():
         radius_scale = float(payload["radius_scale"])
-        radius = base_radius * radius_scale * (
-            float(style.get("minor_bond_scale", 0.82)) if is_minor else 1.0
-        )
+        radius = base_radius * radius_scale
         vertices, triangles = _cylinder_mesh_batch(
             payload["segments"],
             radius,
@@ -176,7 +174,7 @@ def _atom_mesh_traces(scene: dict, style: dict):
     # list and tank the figure-JSON cache hit rate.
     groups: Dict[Tuple[str, bool, str | None, str], dict] = {}
     for atom in scene["draw_atoms"]:
-        if style.get("show_minor_only", False) and not atom["is_minor"]:
+        if style.get("show_minor_only", False) and float(atom.get("occ", 1.0)) >= 0.999:
             continue
         if not _atom_render_visible(atom):
             continue
@@ -191,8 +189,6 @@ def _atom_mesh_traces(scene: dict, style: dict):
         key = (color, atom["is_minor"], opacity_group, opacity_bin)
         groups.setdefault(key, {"centers": [], "radii": [], "opacity": eff_opacity, "opacity_group": opacity_group})
         radius = float(atom["atom_radius"]) * float(style["atom_scale"])
-        if atom["is_minor"]:
-            radius *= 1.12
         groups[key]["centers"].append(atom["cart"])
         groups[key]["radii"].append(radius)
 
@@ -244,6 +240,7 @@ def _bond_scatter_traces(scene: dict, style: dict):
     base_width = max(4.0, 72.0 * float(style["bond_radius"]) * float(style.get("scatter_bond_scale", 1.0)))
     for (color, is_minor, opacity_group, _opc_bin), payload in groups.items():
         segments = payload["segments"]
+        bond_occ = float(payload.get("occ", 1.0))
         xs, ys, zs = [], [], []
         for start, end in segments:
             xs.extend([float(start[0]), float(end[0]), None])
@@ -257,8 +254,8 @@ def _bond_scatter_traces(scene: dict, style: dict):
                 mode="lines",
                 line=dict(
                     color=color,
-                    width=base_width * (float(style.get("minor_bond_scale", 0.82)) if is_minor else 1.0),
-                    dash="dash" if is_minor and style.get("disorder") == "dashed_bonds" else "solid",
+                    width=base_width,
+                    dash="dash" if bond_occ < 0.999 and style.get("disorder") == "dashed_bonds" else "solid",
                 ),
                 opacity=payload["opacity"],
                 hoverinfo="skip",
@@ -272,7 +269,7 @@ def _atom_scatter_traces(scene: dict, style: dict):
     groups: Dict[Tuple[str, bool, str, str | None], dict] = {}
     fragment_labels = scene.get("atom_fragment_labels") or []
     for idx, atom in enumerate(scene["draw_atoms"]):
-        if style.get("show_minor_only", False) and not atom["is_minor"]:
+        if style.get("show_minor_only", False) and float(atom.get("occ", 1.0)) >= 0.999:
             continue
         if not _atom_render_visible(atom):
             continue
