@@ -66,8 +66,11 @@ def _shift_hull_payload(hull: dict[str, Any] | None, delta: np.ndarray) -> dict[
         return {"vertices": [], "simplices": [], "edges": []}
     out = dict(hull)
     vertices = hull.get("vertices") or []
-    if vertices:
-        out["vertices"] = (np.asarray(vertices, dtype=float) + delta).tolist()
+    arr = np.asarray(vertices, dtype=float) if len(vertices) else np.empty((0, 3))
+    if arr.size > 0 and arr.ndim == 2 and arr.shape[1] == 3:
+        out["vertices"] = (arr + delta).tolist()
+    else:
+        out["vertices"] = []
     return out
 
 

@@ -169,6 +169,50 @@ class AsyncRenderWorker:
 
         self._finalize_pool.submit(_job)
 
+    def request_figure_build(self, state: dict[str, Any]) -> bool:
+        """Submit a full figure build to the background pool.
+
+        Returns True if the build was submitted (or already running).
+        The completed figure is pushed to clients via WebSocket
+        ``broadcast_figure(reason="figure-ready")``.
+        """
+        try:
+            render_key = json.dumps(
+                {
+                    key: value
+                    for key, value in state.items()
+                    if key not in {"version", "server_started_at", "camera"}
+                },
+                sort_keys=True,
+                default=str,
+                separators=(",", ":"),
+            )
+        except Exception:
+            render_key = repr(sorted(state.items()))
+        with self._lock:
+            if render_key in self._pending_render:
+                return True
+            self._pending_render.add(render_key)
+
+        def _job() -> None:
+            try:
+                fig, topology_data = self.backend.figure_for_state(state, async_topology=False)
+                self.backend.broadcast_figure(
+                    scene_id=state.get("scene_id"),
+                    figure=fig.to_plotly_json(),
+                    topology_data=topology_data,
+                    state=state,
+                    reason="figure-ready",
+                )
+            except Exception:
+                pass
+            finally:
+                with self._lock:
+                    self._pending_render.discard(render_key)
+
+        self._finalize_pool.submit(_job)
+        return True
+
     def shutdown(self) -> None:
         self._finalize_pool.shutdown(wait=False, cancel_futures=True)
         self._compute_pool.shutdown(wait=False, cancel_futures=True)

@@ -89,6 +89,14 @@ def _atom_traces_for_partition(
     return _atom_mesh_traces(sub_scene, sub_style)
 
 
+def _trace_to_dict(tr) -> dict:
+    """Convert a trace to a plain dict. Handles both raw dicts (from
+    the optimized mesh path) and Plotly trace objects."""
+    if isinstance(tr, dict):
+        return tr
+    return tr.to_plotly_json()
+
+
 def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
     """Cache atom + bond mesh trace dicts on the scene. Building Mesh3d
     objects (sphere tessellation + Plotly array validation) is by far the
@@ -236,10 +244,10 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
             minor_outline = _minor_outline_traces(scene, style)
             minor_bonds = _minor_bond_wireframe_traces(scene, style)
             payload = {
-                "atom_dicts": [_round_coord_arrays(tr.to_plotly_json()) for tr in atom_traces],
-                "bond_dicts": [_round_coord_arrays(tr.to_plotly_json()) for tr in bond_traces],
-                "minor_outline_dicts": [_round_coord_arrays(tr.to_plotly_json()) for tr in minor_outline],
-                "minor_bond_dicts": [_round_coord_arrays(tr.to_plotly_json()) for tr in minor_bonds],
+                "atom_dicts": [_round_coord_arrays(_trace_to_dict(tr)) for tr in atom_traces],
+                "bond_dicts": [_round_coord_arrays(_trace_to_dict(tr)) for tr in bond_traces],
+                "minor_outline_dicts": [_round_coord_arrays(_trace_to_dict(tr)) for tr in minor_outline],
+                "minor_bond_dicts": [_round_coord_arrays(_trace_to_dict(tr)) for tr in minor_bonds],
             }
             cache[key] = payload
             return payload
@@ -310,10 +318,10 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
     minor_outline = _minor_outline_traces(scene, style)
     minor_bonds = _minor_bond_wireframe_traces(scene, style)
     payload = {
-        "atom_dicts": [_round_coord_arrays(tr.to_plotly_json()) for tr in atom_traces],
-        "bond_dicts": [_round_coord_arrays(tr.to_plotly_json()) for tr in bond_traces],
-        "minor_outline_dicts": [_round_coord_arrays(tr.to_plotly_json()) for tr in minor_outline],
-        "minor_bond_dicts": [_round_coord_arrays(tr.to_plotly_json()) for tr in minor_bonds],
+        "atom_dicts": [_round_coord_arrays(_trace_to_dict(tr)) for tr in atom_traces],
+        "bond_dicts": [_round_coord_arrays(_trace_to_dict(tr)) for tr in bond_traces],
+        "minor_outline_dicts": [_round_coord_arrays(_trace_to_dict(tr)) for tr in minor_outline],
+        "minor_bond_dicts": [_round_coord_arrays(_trace_to_dict(tr)) for tr in minor_bonds],
     }
     cache[key] = payload
     if original_bonds is not None:
