@@ -222,7 +222,7 @@ def _atom_mesh_traces(scene: dict, style: dict):
 
 
 def _bond_scatter_traces(scene: dict, style: dict):
-    groups: Dict[Tuple[str, bool, str | None, str], dict] = {}
+    groups: Dict[Tuple[str, bool, str | None, str, str], dict] = {}
     for color, is_minor, start, end, _radius_scale, opacity_scale, opacity_group, bond_occ in _bond_segments(
         scene, style, with_scales=True
     ):
@@ -231,14 +231,15 @@ def _bond_scatter_traces(scene: dict, style: dict):
             style,
         )
         opacity_bin = f"{eff_opacity:.2f}"
+        occ_bin = f"{bond_occ:.2f}"
         groups.setdefault(
-            (color, is_minor, opacity_group, opacity_bin),
+            (color, is_minor, opacity_group, opacity_bin, occ_bin),
             {"segments": [], "opacity_scale": opacity_scale, "occ": bond_occ, "opacity": eff_opacity},
         )["segments"].append([start, end])
 
     traces = []
     base_width = max(4.0, 72.0 * float(style["bond_radius"]) * float(style.get("scatter_bond_scale", 1.0)))
-    for (color, is_minor, opacity_group, _opc_bin), payload in groups.items():
+    for (color, is_minor, opacity_group, _opc_bin, _occ_bin), payload in groups.items():
         segments = payload["segments"]
         bond_occ = float(payload.get("occ", 1.0))
         xs, ys, zs = [], [], []

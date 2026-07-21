@@ -69,7 +69,7 @@ DEFAULT_STYLE = {
     "topology_enabled": False,
     "monochrome": False,
     "ortep_probability": 0.5,
-    "ortep_mode": "ortep_axes",
+    "ortep_mode": "ortep_solid",
     "ortep_mode_minor": None,
     "ortep_show_principal_axes": True,
     "ortep_axis_color": "#222222",
