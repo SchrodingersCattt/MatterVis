@@ -12,7 +12,7 @@ def test_style_schema_round_trips_and_enums_are_public():
     assert set(MATERIAL_DISPATCH) == {"flat", "mesh"}
     assert "ortep" in STYLE_DISPATCH
     assert "outline_rings" in DISORDER_DISPATCH
-    assert set(ORTEP_MODES) == {"ortep_solid", "ortep_axes", "ortep_octant", "ortep_hatch"}
+    assert set(ORTEP_MODES) == {"ortep_solid", "ortep_octant", "ortep_hatch"}
 
 
 @pytest.mark.parametrize(
@@ -27,12 +27,10 @@ def test_style_schema_rejects_unknown_values(key, value):
 @pytest.mark.parametrize(
     ("mode", "expected"),
     [
-        ("ortep_octant", {"ortep_octant_shading": True, "ortep_show_principal_axes": False}),
-        ("ortep_axes",   {"ortep_octant_shading": False, "ortep_show_principal_axes": True}),
-        ("ortep_solid",  {"ortep_octant_shading": False, "ortep_show_principal_axes": False}),
+        ("ortep_octant", {"ortep_octant_shading": True}),
+        ("ortep_solid",  {"ortep_octant_shading": False}),
         ("ortep_hatch",  {"ortep_octant_hatching": True, "ortep_silhouette_outline": True,
-                          "ortep_atom_fill": True, "ortep_octant_shading": False,
-                          "ortep_show_principal_axes": False}),
+                          "ortep_atom_fill": True, "ortep_octant_shading": False}),
     ],
 )
 def test_ortep_mode_flags(mode, expected):

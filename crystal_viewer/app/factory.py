@@ -443,11 +443,10 @@ def create_app(
                             id="ortep-mode-selector",
                             options=[
                                 {"label": "Solid ellipsoids", "value": "ortep_solid"},
-                                {"label": "Principal axes", "value": "ortep_axes"},
                                 {"label": "Octant shading", "value": "ortep_octant"},
                                 {"label": "Publication hatch", "value": "ortep_hatch"},
                             ],
-                            value=first_state.get("ortep_mode", "ortep_axes"),
+                            value=first_state.get("ortep_mode", "ortep_solid"),
                             clearable=False,
                             style={"marginBottom": "10px"},
                         ),

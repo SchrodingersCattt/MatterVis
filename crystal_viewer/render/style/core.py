@@ -32,8 +32,7 @@ def validate_style_schema(style: dict) -> dict:
         normalized["ortep_mode"] = str(ortep_mode)
         normalized.update(ORTEP_MODES[normalized["ortep_mode"]])
     elif render_style == "ortep":
-        # No ortep_mode specified: default to solid (no principal axes, no octant)
-        normalized["ortep_show_principal_axes"] = False
+        # No ortep_mode specified: default to solid (no octant)
         normalized["ortep_octant_shading"] = False
     if ortep_mode_minor is not None:
         normalized["ortep_mode_minor"] = str(ortep_mode_minor)

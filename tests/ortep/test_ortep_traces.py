@@ -10,7 +10,6 @@ from crystal_viewer.ortep import (
     MAX_ORTEP_UISO_BY_ELEMENT,
     _atom_u,
     ortep_atom_mesh_traces,
-    ortep_axis_dash_traces,
     ortep_octant_shade_traces,
 )
 
@@ -28,10 +27,8 @@ def test_ortep_traces_include_mesh_and_optional_axes():
             "uiso": 0.04,
         }
     ]
-    style = {"ortep_probability": 0.5, "ortep_show_principal_axes": True}
+    style = {"ortep_probability": 0.5}
     assert ortep_atom_mesh_traces(scene, style)
-    assert ortep_axis_dash_traces(scene, style)
-    assert not ortep_axis_dash_traces(scene, {**style, "ortep_show_principal_axes": False})
     assert ortep_octant_shade_traces(scene, {**style, "ortep_octant_shading": True})
 
 
