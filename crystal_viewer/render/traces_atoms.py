@@ -121,14 +121,15 @@ def _bond_mesh_traces(scene: dict, style: dict):
             continue
         # Build raw dict directly — avoids go.Mesh3d() validator overhead
         # (~100ms per trace for large meshes).
+        n_verts = len(vertices)
         trace_dict = {
             "type": "mesh3d",
-            "x": np.round(vertices[:, 0], 3).tolist(),
-            "y": np.round(vertices[:, 1], 3).tolist(),
-            "z": np.round(vertices[:, 2], 3).tolist(),
-            "i": triangles[:, 0].tolist(),
-            "j": triangles[:, 1].tolist(),
-            "k": triangles[:, 2].tolist(),
+            "x": np.ascontiguousarray(vertices[:, 0], dtype=np.float32),
+            "y": np.ascontiguousarray(vertices[:, 1], dtype=np.float32),
+            "z": np.ascontiguousarray(vertices[:, 2], dtype=np.float32),
+            "i": np.ascontiguousarray(triangles[:, 0], dtype=np.int16 if n_verts < 32768 else np.int32),
+            "j": np.ascontiguousarray(triangles[:, 1], dtype=np.int16 if n_verts < 32768 else np.int32),
+            "k": np.ascontiguousarray(triangles[:, 2], dtype=np.int16 if n_verts < 32768 else np.int32),
             "color": color,
             "opacity": payload["opacity"],
             "hoverinfo": "skip",
@@ -203,14 +204,15 @@ def _atom_mesh_traces(scene: dict, style: dict):
             lon_steps=lon_steps,
         )
         # Build raw dict directly — avoids go.Mesh3d() validator overhead.
+        n_verts = len(vertices)
         trace_dict = {
             "type": "mesh3d",
-            "x": np.round(vertices[:, 0], 3).tolist(),
-            "y": np.round(vertices[:, 1], 3).tolist(),
-            "z": np.round(vertices[:, 2], 3).tolist(),
-            "i": triangles[:, 0].tolist(),
-            "j": triangles[:, 1].tolist(),
-            "k": triangles[:, 2].tolist(),
+            "x": np.ascontiguousarray(vertices[:, 0], dtype=np.float32),
+            "y": np.ascontiguousarray(vertices[:, 1], dtype=np.float32),
+            "z": np.ascontiguousarray(vertices[:, 2], dtype=np.float32),
+            "i": np.ascontiguousarray(triangles[:, 0], dtype=np.int16 if n_verts < 32768 else np.int32),
+            "j": np.ascontiguousarray(triangles[:, 1], dtype=np.int16 if n_verts < 32768 else np.int32),
+            "k": np.ascontiguousarray(triangles[:, 2], dtype=np.int16 if n_verts < 32768 else np.int32),
             "color": color,
             "opacity": payload["opacity"],
             "hoverinfo": "skip",
@@ -250,22 +252,24 @@ def _bond_scatter_traces(scene: dict, style: dict):
             xs.extend([float(start[0]), float(end[0]), None])
             ys.extend([float(start[1]), float(end[1]), None])
             zs.extend([float(start[2]), float(end[2]), None])
-        traces.append(
-            _annotate_trace(go.Scatter3d(
-                x=xs,
-                y=ys,
-                z=zs,
-                mode="lines",
-                line=dict(
-                    color=color,
-                    width=base_width,
-                    dash="dash" if bond_occ < 0.999 and style.get("disorder") == "dashed_bonds" else "solid",
-                ),
-                opacity=payload["opacity"],
-                hoverinfo="skip",
-                showlegend=False,
-            ), "bond", is_minor=is_minor, opacity_group=opacity_group)
-        )
+        # Raw dict avoids go.Scatter3d() validator overhead.
+        trace_dict = {
+            "type": "scatter3d",
+            "x": xs,
+            "y": ys,
+            "z": zs,
+            "mode": "lines",
+            "line": {
+                "color": color,
+                "width": base_width,
+                "dash": "dash" if bond_occ < 0.999 and style.get("disorder") == "dashed_bonds" else "solid",
+            },
+            "opacity": payload["opacity"],
+            "hoverinfo": "skip",
+            "showlegend": False,
+            "meta": _latency_meta("bond", is_minor=is_minor, opacity_group=opacity_group),
+        }
+        traces.append(trace_dict)
     return traces
 
 
@@ -312,25 +316,27 @@ def _atom_scatter_traces(scene: dict, style: dict):
 
     traces = []
     for (elem, is_minor, _color, opacity_group), payload in groups.items():
-        traces.append(
-            _annotate_trace(go.Scatter3d(
-                x=payload["x"],
-                y=payload["y"],
-                z=payload["z"],
-                mode="markers",
-                text=payload["text"],
-                customdata=payload["customdata"],
-                hovertemplate="%{text}<extra></extra>",
-                marker=dict(
-                    size=payload["size"],
-                    color=payload["color"],
-                    opacity=payload["opacity"],
-                    line=dict(color="#444444" if is_minor else payload["color"], width=3.5 if is_minor else 0),
-                ),
-                showlegend=False,
-                name=f"{elem}{' minor' if is_minor else ''}",
-            ), "atom", is_minor=is_minor, opacity_group=opacity_group)
-        )
+        # Raw dict avoids go.Scatter3d() validator overhead.
+        trace_dict = {
+            "type": "scatter3d",
+            "x": payload["x"],
+            "y": payload["y"],
+            "z": payload["z"],
+            "mode": "markers",
+            "text": payload["text"],
+            "customdata": payload["customdata"],
+            "hovertemplate": "%{text}<extra></extra>",
+            "marker": {
+                "size": payload["size"],
+                "color": payload["color"],
+                "opacity": payload["opacity"],
+                "line": {"color": "#444444" if is_minor else payload["color"], "width": 3.5 if is_minor else 0},
+            },
+            "showlegend": False,
+            "name": f"{elem}{' minor' if is_minor else ''}",
+            "meta": _latency_meta("atom", is_minor=is_minor, opacity_group=opacity_group),
+        }
+        traces.append(trace_dict)
     return traces
 
 

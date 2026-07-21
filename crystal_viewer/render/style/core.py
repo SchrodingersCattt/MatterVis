@@ -17,9 +17,12 @@ def validate_style_schema(style: dict) -> dict:
     if disorder not in DISORDER_DISPATCH:
         raise ValueError(f"unknown disorder mode: {disorder}")
     if ortep_mode is not None and str(ortep_mode) not in ORTEP_MODES:
-        raise ValueError(f"unknown ORTEP mode: {ortep_mode}")
+        # Legacy mode names (e.g. "ortep_axes", "principal_axes") may
+        # persist in scene stores from older versions. Fall back to the
+        # default solid mode rather than crashing.
+        ortep_mode = "ortep_solid"
     if ortep_mode_minor is not None and str(ortep_mode_minor) not in ORTEP_MODES:
-        raise ValueError(f"unknown minor ORTEP mode: {ortep_mode_minor}")
+        ortep_mode_minor = None
     if projection not in ("perspective", "orthographic"):
         raise ValueError(f"unknown projection: {projection}")
     normalized = dict(style)
