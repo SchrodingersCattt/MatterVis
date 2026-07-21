@@ -89,6 +89,46 @@ def create_app(
         # still the steady-state sync path; this just removes the
         # 5 s "default screen" window between page reload and the
         # first poll tick.
+        try:
+            return _serve_layout_inner()
+        except Exception:
+            import traceback
+            tb = traceback.format_exc()
+            try:
+                from .. import perf_log
+                perf_log.record("_serve_layout:CRASH", kind="error", info={"traceback": tb[:2000]})
+            except Exception:
+                pass
+            # Return a minimal fallback layout so the user can at least
+            # see the error and switch scenes / upload a new CIF.
+            first_state = backend.get_state()
+            return html.Div([
+                dcc.Store(id="agent-state-store", data=first_state),
+                dcc.Store(id="camera-state-store", data=_camera_store_payload(first_state.get("scene_id"), first_state.get("camera"))),
+                dcc.Store(id="fast-ui-event-store", data=None),
+                html.Div(id="fast-view-metadata", children="", style={"display": "none"}),
+                dcc.Store(id="native-upload-sync", data={"seq": 0}),
+                dcc.Store(id="scene-event-store", data={"seq": 0}),
+                dcc.Store(id="graph-interaction-store", data={"active": False, "ts": 0}),
+                dcc.Store(id="disorder-replicas-store", data={"replicas": [], "scene_id": None, "status": "idle"}),
+                dcc.Store(id="disorder-hover-id", data=None),
+                dcc.Store(id="disorder-preview-sink", data=None),
+                dcc.Store(id="disorder-persist-sink", data=None),
+                dcc.Download(id="export-download"),
+                dcc.Interval(id="status-dismiss-timer", interval=5000, n_intervals=0, disabled=True),
+                dcc.Interval(id="agent-state-poll", interval=30000, n_intervals=0),
+                html.Div(id="state-sync-sentinel", style={"display": "none"}),
+                dcc.Store(id="rightclick-target", data=None),
+                dcc.Input(id="rightclick-target-fallback", type="hidden", value="", debounce=False),
+                html.Div(id="rightclick-menu", className="rightclick-menu rightclick-menu--hidden", children=[], style={"top": "0px", "left": "0px"}),
+                html.Div(id="kbd-help", className="kbd-help kbd-help--hidden", children=[]),
+                html.Div(
+                    f"⚠️ Layout generation failed. Check Server log for details.\n\n{tb[:500]}",
+                    style={"whiteSpace": "pre-wrap", "padding": "2em", "color": "#c00", "fontFamily": "monospace"},
+                ),
+            ])
+
+    def _serve_layout_inner():
         first_state = backend.get_state()
         disorder_resolve = first_state.get("disorder_resolve") or {}
         first_figure, first_topology = backend.figure_for_state(first_state)
