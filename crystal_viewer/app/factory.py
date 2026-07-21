@@ -364,7 +364,7 @@ def create_app(
                             options=[
                                 {"label": "Labels", "value": "labels"},
                                 {"label": "Axes", "value": "axes"},
-                                {"label": "Minor Only", "value": "minor_only"},
+                                {"label": "Disorder Only", "value": "minor_only"},
                                 {"label": "Hydrogens", "value": "hydrogens"},
                                 {"label": "Unit Cell Box", "value": "unit_cell_box"},
                                 # Phase 3: legacy "Monochrome atoms" toggle
@@ -483,11 +483,10 @@ def create_app(
                             id="ortep-mode-selector",
                             options=[
                                 {"label": "Solid ellipsoids", "value": "ortep_solid"},
-                                {"label": "Principal axes", "value": "ortep_axes"},
                                 {"label": "Octant shading", "value": "ortep_octant"},
                                 {"label": "Publication hatch", "value": "ortep_hatch"},
                             ],
-                            value=first_state.get("ortep_mode", "ortep_axes"),
+                            value=first_state.get("ortep_mode", "ortep_solid"),
                             clearable=False,
                             style={"marginBottom": "10px"},
                         ),

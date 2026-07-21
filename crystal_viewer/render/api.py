@@ -18,6 +18,8 @@ class FigureResult:
     def save(self, path: str, *, width: int = 800, height: int = 700, dpi: int = 300, scale: int = 2):
         """Save the figure to a file (PNG, PDF, SVG, etc.)."""
         if self._mpl is not None:
+            # Resize matplotlib figure to match requested pixel dimensions
+            self._mpl.set_size_inches(width / dpi, height / dpi)
             self._mpl.savefig(path, dpi=dpi, bbox_inches="tight")
             import matplotlib.pyplot as plt
             plt.close(self._mpl)
@@ -41,7 +43,7 @@ class FigureResult:
         return self._mpl
 
 
-def render(scene: dict, style: dict, **kwargs) -> FigureResult:
+def render(scene: dict, style: dict, *, force_quality: bool = True, **kwargs) -> FigureResult:
     """Render a scene. Dispatches to the correct backend based on style.
 
     Parameters
@@ -50,6 +52,9 @@ def render(scene: dict, style: dict, **kwargs) -> FigureResult:
         MatterVis scene dict (from build_bundle_scene or build_scene_from_cif).
     style : dict
         Style dict. Key fields: material, style, disorder, ortep_probability, etc.
+    force_quality : bool
+        When True (default for scripts/CLI), bypass atom-count fast-rendering
+        fallback. Set False for interactive web use.
 
     Returns
     -------
@@ -69,5 +74,5 @@ def render(scene: dict, style: dict, **kwargs) -> FigureResult:
         return FigureResult(mpl_fig=fig)
 
     from .figures import build_figure
-    fig = build_figure(scene, full_style, **kwargs)
+    fig = build_figure(scene, full_style, force_quality=force_quality, **kwargs)
     return FigureResult(plotly_fig=fig)

@@ -69,11 +69,8 @@ DEFAULT_STYLE = {
     "topology_enabled": False,
     "monochrome": False,
     "ortep_probability": 0.5,
-    "ortep_mode": "ortep_axes",
+    "ortep_mode": "ortep_solid",
     "ortep_mode_minor": None,
-    "ortep_show_principal_axes": True,
-    "ortep_axis_color": "#222222",
-    "ortep_axis_linewidth": 1.6,
     "ortep_octant_shading": False,
     "ortep_octant_shadow_color": "#000000",
     "ortep_octant_shadow_alpha": 0.18,
@@ -124,22 +121,15 @@ from ..config import DEFAULT_STYLE as DEFAULT_STYLE  # noqa: E402,F811
 
 ORTEP_MODES = {
     "ortep_solid": {
-        "ortep_show_principal_axes": False,
-        "ortep_octant_shading": False,
-    },
-    "ortep_axes": {
-        "ortep_show_principal_axes": True,
         "ortep_octant_shading": False,
     },
     "ortep_octant": {
-        "ortep_show_principal_axes": False,
         "ortep_octant_shading": True,
     },
     # Classic ORTEP-III publication look: white open ellipsoid + dark
     # silhouette outline + parallel hatch lines on one octant facing the
     # camera + three boundary arcs framing the hatch.
     "ortep_hatch": {
-        "ortep_show_principal_axes": False,
         "ortep_octant_shading": False,
         "ortep_octant_hatching": True,
         "ortep_silhouette_outline": True,

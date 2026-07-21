@@ -109,11 +109,8 @@ BUILTIN_STYLE: dict[str, Any] = {
     "topology_enabled": False,
     "monochrome": False,
     "ortep_probability": 0.5,
-    "ortep_mode": "ortep_axes",
+    "ortep_mode": "ortep_solid",
     "ortep_mode_minor": None,
-    "ortep_show_principal_axes": True,
-    "ortep_axis_color": "#222222",
-    "ortep_axis_linewidth": 1.6,
     "ortep_octant_shading": False,
     "ortep_octant_shadow_color": "#000000",
     "ortep_octant_shadow_alpha": 0.18,
@@ -132,6 +129,15 @@ BUILTIN_STYLE: dict[str, Any] = {
     "ortep_z_lift_fill": 0.04,
     "ortep_z_lift_hatch": 0.06,
     "ortep_z_lift_outline": 0.07,
+    # Mesh density for ORTEP ellipsoids and ball-stick spheres.
+    # None = auto-LOD based on atom count; explicit int overrides.
+    "ortep_lat_steps": None,
+    "ortep_lon_steps": None,
+    # Plotly Mesh3d lighting dict. None = Plotly default.
+    # Example: {"ambient": 0.5, "diffuse": 0.9, "specular": 0.2, "roughness": 0.8, "fresnel": 0.06}
+    "mesh_lighting": None,
+    # Fixed sphere radius (Å) for H atoms in ORTEP mode. None = use ADP ellipsoid.
+    "ortep_hydrogen_radius": None,
     "force_bond_color": "",
     "element_colors": {},
     "element_colors_light": {},

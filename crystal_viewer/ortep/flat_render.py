@@ -145,15 +145,25 @@ def render_ortep_flat(scene: dict, style: dict | None = None) -> plt.Figure:
     figsize = style.get("figsize", (7, 6))
     dpi = int(style.get("dpi", 150))
 
-    # View basis
-    view_x = np.asarray(scene.get("view_x", [1.0, 0.0, 0.0]), dtype=float)
-    view_y = np.asarray(scene.get("view_y", [0.0, 1.0, 0.0]), dtype=float)
-    view_z = np.cross(view_x, view_y)
-    nrm = np.linalg.norm(view_z)
-    if nrm > 1e-9:
-        view_z = view_z / nrm
+    # View basis — recompute from view_direction if present so that
+    # callers who override scene["view_direction"] get consistent results.
+    view_dir = scene.get("view_direction")
+    up = scene.get("up")
+    if view_dir is not None:
+        from ..math.rotation import view_rotation
+        R = view_rotation(view_dir, up)
+        view_x = R[0]
+        view_y = R[1]
+        view_z = R[2]
     else:
-        view_z = np.array([0.0, 0.0, 1.0])
+        view_x = np.asarray(scene.get("view_x", [1.0, 0.0, 0.0]), dtype=float)
+        view_y = np.asarray(scene.get("view_y", [0.0, 1.0, 0.0]), dtype=float)
+        view_z = np.cross(view_x, view_y)
+        nrm = np.linalg.norm(view_z)
+        if nrm > 1e-9:
+            view_z = view_z / nrm
+        else:
+            view_z = np.array([0.0, 0.0, 1.0])
 
     atoms = scene.get("draw_atoms", [])
     bonds = scene.get("bonds", [])
@@ -308,9 +318,10 @@ def render_ortep_flat(scene: dict, style: dict | None = None) -> plt.Figure:
                 color="black", zorder=5,
             )
 
-    # Auto-range
+    # Auto-range with generous margin based on largest ellipse
     ax.autoscale_view()
-    margin = 0.5
+    all_semi = [max(w, h) / 2.0 for (_, _, w, h, _) in atom_ellipses.values()] if atom_ellipses else [1.0]
+    margin = max(all_semi) + 0.5
     xlim = ax.get_xlim()
     ylim = ax.get_ylim()
     ax.set_xlim(xlim[0] - margin, xlim[1] + margin)

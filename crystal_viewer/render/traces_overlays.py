@@ -39,7 +39,7 @@ def _minor_outline_traces(scene: dict, style: dict):
     groups: Dict[str, list[tuple[np.ndarray, float, float]]] = {}
     for atom in scene["draw_atoms"]:
         occ = float(atom.get("occ", 1.0))
-        if occ >= 0.999 and not atom.get("is_minor"):
+        if occ >= 0.999:
             continue
         if not _atom_render_visible(atom):
             continue

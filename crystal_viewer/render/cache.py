@@ -256,7 +256,6 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
             ortep_atom_billboard_traces,
             ortep_atom_mesh_traces,
             ortep_atom_fill_traces,
-            ortep_axis_dash_traces,
             ortep_octant_shade_traces,
             ortep_octant_hatch_traces,
             ortep_silhouette_outline_traces,
@@ -299,7 +298,6 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
                 _bond_scatter_traces(scene, style) if use_fast
                 else _bond_mesh_traces(scene, style)
             )
-        atom_traces.extend(ortep_axis_dash_traces(scene, style))
         atom_traces.extend(ortep_octant_shade_traces(scene, style))
         atom_traces.extend(ortep_octant_hatch_traces(scene, style))
         atom_traces.extend(ortep_silhouette_outline_traces(scene, style))
