@@ -18,6 +18,8 @@ class FigureResult:
     def save(self, path: str, *, width: int = 800, height: int = 700, dpi: int = 300, scale: int = 2):
         """Save the figure to a file (PNG, PDF, SVG, etc.)."""
         if self._mpl is not None:
+            # Resize matplotlib figure to match requested pixel dimensions
+            self._mpl.set_size_inches(width / dpi, height / dpi)
             self._mpl.savefig(path, dpi=dpi, bbox_inches="tight")
             import matplotlib.pyplot as plt
             plt.close(self._mpl)
