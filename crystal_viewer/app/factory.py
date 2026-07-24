@@ -660,7 +660,7 @@ def create_app(
                                 id="crystal-graph",
                                 figure=first_figure,
                                 style={"height": "100%", "width": "100%"},
-                                config={"responsive": True},
+                                config={"responsive": True, "doubleClick": False},
                             ),
                             type="circle",
                             color="#7C5CBF",
