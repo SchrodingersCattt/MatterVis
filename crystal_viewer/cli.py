@@ -384,6 +384,18 @@ def _build_tui_parser(subparsers: argparse._SubParsersAction) -> argparse.Argume
         help="Show minor disorder atoms (dimmed). Hidden by default.",
     )
     p.add_argument(
+        "--hide-partial", action="store_true", default=False,
+        help="Hide partial-occupancy atoms (occ < 1). Shown by default.",
+    )
+    p.add_argument(
+        "--zoom", type=float, default=1.0,
+        help="Viewport zoom factor (>1 to zoom in). Default: 1.0.",
+    )
+    p.add_argument(
+        "--center", default=None,
+        help="Center view on atom label (e.g. Fe1) or fractional coords (e.g. 0.5,0.5,0.5).",
+    )
+    p.add_argument(
         "--no-bonds", action="store_true", default=False,
         help="Hide bonds.",
     )
@@ -421,6 +433,15 @@ def _tui_main(args: argparse.Namespace) -> None:
 
     cam = Camera.from_view_name(args.view, crystal)
 
+    # Apply --center if specified
+    if args.center:
+        cam = _apply_center(cam, args.center, crystal)
+
+    # Apply --zoom
+    if args.zoom != 1.0:
+        from dataclasses import replace as _replace
+        cam = _replace(cam, viewport_zoom=args.zoom)
+
     if not args.interaction:
         # Static output mode
         pts_2d, depth = project_points(cam, crystal.cart_coords)
@@ -437,6 +458,7 @@ def _tui_main(args: argparse.Namespace) -> None:
                 show_bonds=not args.no_bonds,
                 show_cell=not args.no_cell,
                 show_minor=args.show_minor,
+                zoom=cam.viewport_zoom,
             )
         print(output)
     else:
@@ -451,6 +473,30 @@ def _tui_main(args: argparse.Namespace) -> None:
             show_minor=args.show_minor,
         )
         app.run()
+
+
+def _apply_center(cam, center_str: str, crystal):
+    """Shift camera target to center on a label or fractional coord."""
+    from dataclasses import replace as _replace
+    import numpy as np
+
+    # Try as atom label first
+    for atom in crystal.atoms:
+        if atom.label == center_str or atom.display_label == center_str:
+            return _replace(cam, target=np.array(atom.cart, dtype=float))
+
+    # Try as fractional coords (x,y,z)
+    parts = center_str.split(",")
+    if len(parts) == 3 and crystal.lattice is not None:
+        try:
+            frac = np.array([float(p) for p in parts])
+            cart = crystal.lattice.matrix.T @ frac
+            return _replace(cam, target=cart)
+        except ValueError:
+            pass
+
+    print(f"Warning: --center '{center_str}' not found, using default.", file=sys.stderr)
+    return cam
 
 
 def _apply_display_filter(crystal, mode: str):

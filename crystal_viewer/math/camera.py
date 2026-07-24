@@ -52,6 +52,7 @@ class Camera:
     target: np.ndarray = None  # type: ignore[assignment]
     projection: ProjectionMode = ProjectionMode.ORTHOGRAPHIC
     fov_deg: float = 50.0
+    viewport_zoom: float = 1.0  # >1 crops viewport (zoom into center)
 
     def __post_init__(self):
         if self.target is None:
@@ -141,9 +142,14 @@ class Camera:
         return replace(self, target=self.target + offset)
 
     def zoom(self, factor: float) -> "Camera":
-        """Zoom by scaling the distance. factor > 1 zooms in."""
-        new_dist = max(self.distance / factor, 0.1)
-        return replace(self, distance=new_dist)
+        """Zoom by scaling viewport_zoom. factor > 1 zooms in."""
+        new_zoom = max(self.viewport_zoom * factor, 0.5)
+        new_zoom = min(new_zoom, 20.0)
+        return replace(self, viewport_zoom=new_zoom)
+
+    def reset_zoom(self) -> "Camera":
+        """Reset zoom to 1.0."""
+        return replace(self, viewport_zoom=1.0)
 
     def toggle_projection(self) -> "Camera":
         """Toggle between orthographic and perspective."""

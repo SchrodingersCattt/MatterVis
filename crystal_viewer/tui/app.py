@@ -83,6 +83,7 @@ class CrystalTUI(App):
         Binding("l", "toggle_label", "Label", show=True),
         Binding("m", "toggle_mono", "Mono", show=True),
         Binding("n", "toggle_minor", "Minor", show=True),
+        Binding("r", "reset_view", "Reset", show=True),
         Binding("q", "quit", "Quit", show=True),
     ]
 
@@ -137,15 +138,17 @@ class CrystalTUI(App):
             show_bonds=self._show_bonds,
             show_cell=self._show_cell,
             show_minor=self._show_minor,
+            zoom=self.camera.viewport_zoom,
         )
         canvas.frame_text = frame
 
     def _update_title(self) -> None:
         proj = self.camera.projection.value[:5]
+        zoom_str = f" ×{self.camera.viewport_zoom:.1f}" if self.camera.viewport_zoom != 1.0 else ""
         self.sub_title = (
             f"{self.crystal.formula} | "
             f"az={self.camera.azimuth:.0f}° el={self.camera.elevation:.0f}° | "
-            f"{proj} | {self._label_mode}"
+            f"{proj} | {self._label_mode}{zoom_str}"
         )
 
     # ── Actions ─────────────────────────────────────────────────────────
@@ -221,4 +224,9 @@ class CrystalTUI(App):
     def action_toggle_minor(self) -> None:
         self._show_minor = not self._show_minor
         self._redraw()
+
+    def action_reset_view(self) -> None:
+        """Reset zoom and pan to default."""
+        self.camera = Camera.from_view_name("diagonal", self.crystal)
+        self._update_title()
         self._redraw()
