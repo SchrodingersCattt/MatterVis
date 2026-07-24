@@ -29,6 +29,20 @@
   // ── Interaction state (graph_interaction_store.js) ─────────────
   let interactionActive = false, settleTimer = null;
   let lastFigureSeq = 0, pendingFigurePush = null;
+  let sceneTabIntentId = null, sceneTabIntentAt = 0;
+  function sceneIdFromTabNode(node) {
+    if (!node || !node.id || node.id.indexOf("scene-tab-") !== 0) return null;
+    if (node.id.indexOf("scene-tab-close-") === 0) return null;
+    if (node.id === "scene-tabs" || node.id === "scene-tab-close-row") return null;
+    return node.id.slice("scene-tab-".length);
+  }
+  function noteSceneTabIntent(target) {
+    const node = target && target.closest ? target.closest("[id^='scene-tab-']") : null;
+    const sceneId = sceneIdFromTabNode(node);
+    if (!sceneId) return;
+    sceneTabIntentId = sceneId;
+    sceneTabIntentAt = Date.now();
+  }
   function setInteraction(active) { setDashStore("graph-interaction-store", {active:!!active, ts:Date.now()}); }
   function applyFigurePush(data, layout) {
     var gd = graphDiv(); if (!gd||!window.Plotly) return;
@@ -178,19 +192,28 @@
     });
   }
 
+  function bindSceneTabIntent() {
+    const root = document.getElementById("scene-tabs");
+    if (!root || root.dataset.mvSceneIntentBound === "1") return;
+    root.dataset.mvSceneIntentBound = "1";
+    root.addEventListener("pointerdown", function (event) { noteSceneTabIntent(event.target); }, true);
+    root.addEventListener("mousedown", function (event) { noteSceneTabIntent(event.target); }, true);
+    root.addEventListener("click", function (event) { noteSceneTabIntent(event.target); }, true);
+  }
+
   // ── WS figure fast lane (ws_figure.js) ──────────────────────────
   (function connectWS() {
     if (window.MATTERVIS_WS_FIGURE === false || !window.WebSocket || !window.Plotly) return;
     function selectedSceneId() {
+      if (sceneTabIntentId && Date.now() - sceneTabIntentAt < 10000) return sceneTabIntentId;
       const root = document.getElementById("scene-tabs");
       if (!root) return null;
       const selected = root.querySelector("[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active");
       if (!selected) return null;
-      const node = selected.id && selected.id.indexOf("scene-tab-") === 0
+      const node = sceneIdFromTabNode(selected)
         ? selected
         : (selected.closest ? selected.closest("[id^='scene-tab-']") : null);
-      if (!node || !node.id || node.id.indexOf("scene-tab-close-") === 0) return null;
-      return node.id.indexOf("scene-tab-") === 0 ? node.id.slice("scene-tab-".length) : null;
+      return sceneIdFromTabNode(node);
     }
     function currentSceneId() {
       const tabScene = selectedSceneId();
@@ -222,6 +245,7 @@
       var seq=Number(p.figure_seq||p.figure_version||0); if (seq&&seq<=lastFigureSeq) return;
       if (seq) lastFigureSeq=seq;
       if (interactionActive) { pendingFigurePush={data:p.figure.data||[],layout:p.figure.layout||{},seq:seq}; return; }
+      if (sceneTabIntentId && p.scene_id && String(p.scene_id) === sceneTabIntentId) sceneTabIntentAt = 0;
       applyFigurePush(p.figure.data||[], p.figure.layout||{});
     });
     ws.addEventListener("close",function(){setTimeout(connectWS,1500);});
@@ -232,6 +256,7 @@
     bindRightClick();
     bindBoxSelect();
     bindDisorderHover();
+    bindSceneTabIntent();
   }
   new MutationObserver(rebindAll).observe(document.documentElement, {childList:true, subtree:true});
 
