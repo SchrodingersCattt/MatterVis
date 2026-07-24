@@ -309,6 +309,8 @@ def _serve_main(args: argparse.Namespace) -> None:
 _TUI_FORMATS = ("ascii", "structured")
 _TUI_PROJECTIONS = ("orthographic", "perspective")
 _TUI_VIEWS = ("auto", "a", "b", "c", "diagonal", "ab", "ac", "bc")
+_TUI_LABELS = ("element", "label", "molecule", "dot")
+_TUI_DISPLAYS = ("auto", "formula_unit", "unit_cell", "asymmetric_unit")
 
 
 def _build_tui_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -369,6 +371,19 @@ def _build_tui_parser(subparsers: argparse._SubParsersAction) -> argparse.Argume
         help="Initial view direction (default: auto → diagonal).",
     )
     p.add_argument(
+        "--label", choices=_TUI_LABELS, default="label",
+        help="Atom label mode (default: label). 'element'=Fe/O, 'label'=Fe1/O2, "
+             "'molecule'=Fe1⁰/O2¹ (with mol index), 'dot'=● colored.",
+    )
+    p.add_argument(
+        "--display", choices=_TUI_DISPLAYS, default="auto",
+        help="Display mode (default: auto). 'auto' selects formula_unit for >80 atoms.",
+    )
+    p.add_argument(
+        "--show-minor", action="store_true", default=False,
+        help="Show minor disorder atoms (dimmed). Hidden by default.",
+    )
+    p.add_argument(
         "--no-bonds", action="store_true", default=False,
         help="Hide bonds.",
     )
@@ -390,6 +405,20 @@ def _tui_main(args: argparse.Namespace) -> None:
     from .math.camera import Camera, project_points
 
     crystal = load_for_tui(filepath)
+
+    # Display mode: auto-select formula_unit for dense structures
+    display_mode = args.display
+    if display_mode == "auto" and crystal.n_atoms > 80:
+        # Use formula_unit subset if available via MCK
+        crystal = _apply_display_filter(crystal, "formula_unit")
+    elif display_mode in ("formula_unit", "asymmetric_unit"):
+        crystal = _apply_display_filter(crystal, display_mode)
+
+    # Map --compact to label_mode="dot" for backward compat
+    label_mode = args.label
+    if args.compact and label_mode == "label":
+        label_mode = "dot"
+
     cam = Camera.from_view_name(args.view, crystal)
 
     if not args.interaction:
@@ -400,13 +429,14 @@ def _tui_main(args: argparse.Namespace) -> None:
             from .tui.serializer import serialize_crystal
             output = serialize_crystal(crystal, cam, pts_2d)
         else:
-            from .tui.renderer import render_ascii_frame
-            output = render_ascii_frame(
+            from .tui.compositor import compose_frame
+            output = compose_frame(
                 crystal, cam, pts_2d, depth,
                 width=args.width, height=args.height,
-                mono=args.mono, compact=args.compact,
+                mono=args.mono, label_mode=label_mode,
                 show_bonds=not args.no_bonds,
                 show_cell=not args.no_cell,
+                show_minor=args.show_minor,
             )
         print(output)
     else:
@@ -417,9 +447,95 @@ def _tui_main(args: argparse.Namespace) -> None:
             initial_view=args.view,
             show_bonds=not args.no_bonds,
             show_cell=not args.no_cell,
-            compact=args.compact,
+            label_mode=label_mode,
+            show_minor=args.show_minor,
         )
         app.run()
+
+
+def _apply_display_filter(crystal, mode: str):
+    """Filter crystal atoms to a display subset."""
+    from .tui.crystal_ir import CrystalIR, AtomIR, BondIR
+
+    if mode == "formula_unit":
+        # Keep only atoms belonging to one formula unit (one molecule per species)
+        if not crystal.species_map:
+            return crystal  # No MCK data, show everything
+
+        # Pick one molecule per species
+        keep_mol_indices: set[int] = set()
+        for species_id, mol_indices in crystal.species_map.items():
+            if mol_indices:
+                keep_mol_indices.add(mol_indices[0])
+
+        if not keep_mol_indices:
+            return crystal
+
+        # Filter atoms
+        keep_atom_set = {
+            i for i, atom in enumerate(crystal.atoms)
+            if atom.molecule_index in keep_mol_indices
+        }
+        return _filter_crystal(crystal, keep_atom_set)
+
+    elif mode == "asymmetric_unit":
+        # Keep only one symop copy of each label
+        seen_labels: set[str] = set()
+        keep_atom_set: set[int] = set()
+        for i, atom in enumerate(crystal.atoms):
+            if atom.label not in seen_labels:
+                seen_labels.add(atom.label)
+                keep_atom_set.add(i)
+        return _filter_crystal(crystal, keep_atom_set)
+
+    return crystal
+
+
+def _filter_crystal(crystal, keep_indices: set[int]):
+    """Create a new CrystalIR with only the specified atom indices."""
+    from .tui.crystal_ir import CrystalIR, AtomIR, BondIR
+    import numpy as np
+
+    # Build index remapping
+    old_to_new: dict[int, int] = {}
+    new_atoms = []
+    for new_idx, old_idx in enumerate(sorted(keep_indices)):
+        old_to_new[old_idx] = new_idx
+        atom = crystal.atoms[old_idx]
+        new_atoms.append(AtomIR(
+            element=atom.element,
+            cart=atom.cart,
+            frac=atom.frac,
+            label=atom.label,
+            occupancy=atom.occupancy,
+            index=new_idx,
+            molecule_index=atom.molecule_index,
+            disorder_group=atom.disorder_group,
+            is_minor=atom.is_minor,
+        ))
+
+    # Filter bonds (both endpoints must be in the kept set)
+    new_bonds = []
+    for bond in crystal.bonds:
+        if bond.i in old_to_new and bond.j in old_to_new:
+            new_bonds.append(BondIR(
+                i=old_to_new[bond.i],
+                j=old_to_new[bond.j],
+                distance=bond.distance,
+            ))
+
+    return CrystalIR(
+        title=crystal.title,
+        formula=crystal.formula,
+        spacegroup=crystal.spacegroup,
+        source_path=crystal.source_path,
+        lattice=crystal.lattice,
+        atoms=new_atoms,
+        bonds=new_bonds,
+        n_molecules=crystal.n_molecules,
+        species_map=crystal.species_map,
+        metadata=crystal.metadata,
+    )
 
 
 # ---------------------------------------------------------------------------

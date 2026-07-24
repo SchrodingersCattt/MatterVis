@@ -105,6 +105,12 @@ def serialize_crystal(
         lines.append(
             f"    cart: [{atom.cart[0]:.3f}, {atom.cart[1]:.3f}, {atom.cart[2]:.3f}]"
         )
+        if atom.molecule_index >= 0:
+            lines.append(f"    molecule: {atom.molecule_index}")
+        if atom.is_minor:
+            lines.append(f"    disorder: minor")
+        elif atom.disorder_group != 0:
+            lines.append(f"    disorder_group: {atom.disorder_group}")
         # Coordination info
         nbrs = neighbors.get(atom.index, [])
         if nbrs:

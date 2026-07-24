@@ -63,9 +63,19 @@ class AtomIR:
     element: str
     cart: np.ndarray       # Cartesian position (3,)
     frac: np.ndarray       # Fractional coordinates (3,)
-    label: str = ""
+    label: str = ""        # CIF _atom_site_label (e.g. "Fe1", "O2", "C3A")
     occupancy: float = 1.0
     index: int = 0         # Index in the atoms list
+
+    # MCK-derived fields
+    molecule_index: int = -1    # Which molecule this atom belongs to (-1 = unassigned)
+    disorder_group: int = 0    # CIF disorder group (0 = ordered)
+    is_minor: bool = False     # Minor disorder image (should be dimmed/hidden)
+
+    @property
+    def display_label(self) -> str:
+        """Short label for terminal display (e.g. 'Fe1', 'O2')."""
+        return self.label or self.element
 
 
 @dataclass
@@ -95,6 +105,10 @@ class CrystalIR:
     lattice: Lattice | None = None
     atoms: list[AtomIR] = field(default_factory=list)
     bonds: list[BondIR] = field(default_factory=list)
+
+    # MCK molecule grouping
+    n_molecules: int = 0
+    species_map: dict[str, list[int]] = field(default_factory=dict)
 
     # Metadata (extensible)
     metadata: dict[str, Any] = field(default_factory=dict)

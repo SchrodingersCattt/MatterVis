@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from .crystal_ir import CrystalIR
 
 from ..math.camera import Camera, ProjectionMode, project_points
-from .renderer import render_ascii_frame
+from .compositor import compose_frame, LABEL_MODES
 
 
 # ── Constants ───────────────────────────────────────────────────────────────
@@ -80,8 +80,9 @@ class CrystalTUI(App):
         Binding("p", "toggle_proj", "Projection", show=True),
         Binding("c", "toggle_cell", "Cell", show=True),
         Binding("b", "toggle_bonds", "Bonds", show=True),
+        Binding("l", "toggle_label", "Label", show=True),
         Binding("m", "toggle_mono", "Mono", show=True),
-        Binding("t", "toggle_compact", "Symbol/Dot", show=True),
+        Binding("n", "toggle_minor", "Minor", show=True),
         Binding("q", "quit", "Quit", show=True),
     ]
 
@@ -93,6 +94,8 @@ class CrystalTUI(App):
         initial_view: str = "auto",
         show_bonds: bool = True,
         show_cell: bool = True,
+        label_mode: str = "label",
+        show_minor: bool = False,
         compact: bool = False,
     ):
         super().__init__()
@@ -101,7 +104,8 @@ class CrystalTUI(App):
         self._mono = mono
         self._show_bonds = show_bonds
         self._show_cell = show_cell
-        self._compact = compact
+        self._label_mode = label_mode if not compact else "dot"
+        self._show_minor = show_minor
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -126,12 +130,13 @@ class CrystalTUI(App):
 
         pts_2d, depth = project_points(self.camera, self.crystal.cart_coords)
 
-        frame = render_ascii_frame(
+        frame = compose_frame(
             self.crystal, self.camera, pts_2d, depth,
             width=w, height=h,
-            mono=self._mono, compact=self._compact,
+            mono=self._mono, label_mode=self._label_mode,
             show_bonds=self._show_bonds,
             show_cell=self._show_cell,
+            show_minor=self._show_minor,
         )
         canvas.frame_text = frame
 
@@ -140,7 +145,7 @@ class CrystalTUI(App):
         self.sub_title = (
             f"{self.crystal.formula} | "
             f"az={self.camera.azimuth:.0f}° el={self.camera.elevation:.0f}° | "
-            f"{proj}"
+            f"{proj} | {self._label_mode}"
         )
 
     # ── Actions ─────────────────────────────────────────────────────────
@@ -206,6 +211,14 @@ class CrystalTUI(App):
         self._mono = not self._mono
         self._redraw()
 
-    def action_toggle_compact(self) -> None:
-        self._compact = not self._compact
+    def action_toggle_label(self) -> None:
+        """Cycle through label modes: element → label → molecule → dot."""
+        idx = LABEL_MODES.index(self._label_mode) if self._label_mode in LABEL_MODES else 0
+        self._label_mode = LABEL_MODES[(idx + 1) % len(LABEL_MODES)]
+        self._update_title()
+        self._redraw()
+
+    def action_toggle_minor(self) -> None:
+        self._show_minor = not self._show_minor
+        self._redraw()
         self._redraw()

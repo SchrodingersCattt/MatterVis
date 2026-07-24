@@ -41,15 +41,22 @@ def load_for_tui(path: str) -> CrystalIR:
         )
 
 
-# ── CIF loader (reuses existing MatterVis parser) ──────────────────────────
+# ── CIF loader (reuses existing MatterVis parser + MCK) ─────────────────────
 
 
 def _load_cif(path: str, name: str) -> CrystalIR:
-    """Load CIF via existing cif_parse.parse_asu + find_bonds."""
+    """Load CIF via parse_asu + MCK molecule analysis.
+
+    Uses MolCrysKit for:
+    - Disorder-aware bond detection (bond_pairs)
+    - Molecule grouping (molecule_index per atom)
+    - Species identification
+    """
     import gemmi
 
     from ..structure.cif_parse import parse_asu
-    from ..structure.bonds import find_bonds
+    from ..structure.molcrys_bridge import analyze as mck_analyze
+    from ..style.disorder import atom_is_minor
 
     atoms_raw, cell, M = parse_asu(path)
 
@@ -63,9 +70,38 @@ def _load_cif(path: str, name: str) -> CrystalIR:
         matrix=M,
     )
 
-    # Convert atoms
+    # Run MCK analysis for molecule grouping + bonds
+    mck_analysis = None
+    mol_index_map: dict[int, int] = {}  # raw_atom_idx → molecule_index
+    bond_pairs: list[tuple[int, int]] = []
+    species_map: dict[str, list[int]] = {}
+    n_molecules = 0
+
+    try:
+        mck_analysis = mck_analyze(atoms_raw, M)
+        # Build atom → molecule mapping
+        for mol_idx, indices in enumerate(mck_analysis.mol_indices):
+            for atom_idx in indices:
+                mol_index_map[atom_idx] = mol_idx
+        n_molecules = len(mck_analysis.mol_indices)
+        bond_pairs = mck_analysis.bond_pairs
+        species_map = {k: list(v) for k, v in mck_analysis.species_map.items()}
+    except Exception:
+        # Fallback: use simple find_bonds if MCK fails
+        from ..structure.bonds import find_bonds
+        bond_pairs = find_bonds(atoms_raw, M=M, cell=cell)
+
+    # Convert atoms with MCK enrichment
     atoms = []
     for i, at in enumerate(atoms_raw):
+        dg_raw = str(at.get("dg", "") or "").strip()
+        dg = 0
+        if dg_raw not in ("", ".", "?"):
+            try:
+                dg = int(float(dg_raw))
+            except (TypeError, ValueError):
+                pass
+
         atoms.append(AtomIR(
             element=at["elem"],
             cart=np.array(at["cart"], dtype=float),
@@ -73,14 +109,18 @@ def _load_cif(path: str, name: str) -> CrystalIR:
             label=at.get("label", ""),
             occupancy=at.get("occ", 1.0),
             index=i,
+            molecule_index=mol_index_map.get(i, -1),
+            disorder_group=dg,
+            is_minor=atom_is_minor(at),
         ))
 
-    # Find bonds
+    # Build bonds from MCK bond_pairs (disorder-aware)
     bonds = []
-    bond_pairs = find_bonds(atoms_raw, M=M, cell=cell)
-    for i, j in bond_pairs:
-        d = float(np.linalg.norm(atoms[i].cart - atoms[j].cart))
-        bonds.append(BondIR(i=i, j=j, distance=d))
+    for pair in bond_pairs:
+        i, j = pair[0], pair[1]
+        if i < len(atoms) and j < len(atoms):
+            d = float(np.linalg.norm(atoms[i].cart - atoms[j].cart))
+            bonds.append(BondIR(i=i, j=j, distance=d))
 
     # Compose formula from element counts
     formula = _compose_formula(atoms)
@@ -93,6 +133,8 @@ def _load_cif(path: str, name: str) -> CrystalIR:
         lattice=lattice,
         atoms=atoms,
         bonds=bonds,
+        n_molecules=n_molecules,
+        species_map=species_map,
     )
 
 
