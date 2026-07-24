@@ -127,13 +127,13 @@ class CrystalTUI(App):
         key = event.key
         handled = True
         if char == "j" or key == "j":
-            self.camera = self.camera.pan(dx=-PAN_STEP)
-        elif char == "l" or key == "l":
             self.camera = self.camera.pan(dx=PAN_STEP)
+        elif char == "l" or key == "l":
+            self.camera = self.camera.pan(dx=-PAN_STEP)
         elif char == "i" or key == "i":
-            self.camera = self.camera.pan(dy=PAN_STEP)
-        elif char == "k" or key == "k":
             self.camera = self.camera.pan(dy=-PAN_STEP)
+        elif char == "k" or key == "k":
+            self.camera = self.camera.pan(dy=PAN_STEP)
         elif char == "w" or key == "w":
             self.camera = self.camera.rotate(d_elev=ROTATE_STEP)
             self._update_title()
