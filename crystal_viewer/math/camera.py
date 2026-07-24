@@ -48,6 +48,7 @@ class Camera:
 
     azimuth: float = 30.0
     elevation: float = 20.0
+    roll: float = 0.0  # rotation around view axis (degrees)
     distance: float = 1.0
     target: np.ndarray = None  # type: ignore[assignment]
     projection: ProjectionMode = ProjectionMode.ORTHOGRAPHIC
@@ -73,8 +74,16 @@ class Camera:
 
     @property
     def rotation_matrix(self) -> np.ndarray:
-        """3×3 rotation matrix [right; up; forward] from view direction."""
-        return view_rotation(self.view_direction)
+        """3×3 rotation matrix [right; up; forward] with roll applied."""
+        R = view_rotation(self.view_direction)
+        if abs(self.roll) > 0.01:
+            # Apply roll: rotate the right and up vectors around forward
+            angle = np.radians(self.roll)
+            c, s = np.cos(angle), np.sin(angle)
+            right = R[0] * c + R[1] * s
+            up = -R[0] * s + R[1] * c
+            R = np.array([right, up, R[2]])
+        return R
 
     # ── Factory ─────────────────────────────────────────────────────────
 
@@ -124,11 +133,12 @@ class Camera:
 
     # ── Transforms ──────────────────────────────────────────────────────
 
-    def rotate(self, d_azim: float = 0.0, d_elev: float = 0.0) -> "Camera":
+    def rotate(self, d_azim: float = 0.0, d_elev: float = 0.0, d_roll: float = 0.0) -> "Camera":
         """Return a new camera rotated by the given increments (degrees)."""
         new_elev = np.clip(self.elevation + d_elev, -89.0, 89.0)
         new_azim = (self.azimuth + d_azim) % 360.0
-        return replace(self, azimuth=new_azim, elevation=new_elev)
+        new_roll = (self.roll + d_roll) % 360.0
+        return replace(self, azimuth=new_azim, elevation=new_elev, roll=new_roll)
 
     def pan(self, dx: float = 0.0, dy: float = 0.0) -> "Camera":
         """Pan the camera in the screen plane.

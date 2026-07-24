@@ -396,6 +396,18 @@ def _build_tui_parser(subparsers: argparse._SubParsersAction) -> argparse.Argume
         help="Center view on atom label (e.g. Fe1) or fractional coords (e.g. 0.5,0.5,0.5).",
     )
     p.add_argument(
+        "--azimuth", type=float, default=None,
+        help="Camera azimuth angle in degrees (overrides --view).",
+    )
+    p.add_argument(
+        "--elevation", type=float, default=None,
+        help="Camera elevation angle in degrees (overrides --view).",
+    )
+    p.add_argument(
+        "--roll", type=float, default=None,
+        help="Camera roll angle in degrees.",
+    )
+    p.add_argument(
         "--no-bonds", action="store_true", default=False,
         help="Hide bonds.",
     )
@@ -430,13 +442,21 @@ def _tui_main(args: argparse.Namespace) -> None:
 
     cam = Camera.from_view_name(args.view, crystal)
 
+    # Apply explicit camera angles (agent-friendly: override --view)
+    from dataclasses import replace as _replace
+    if args.azimuth is not None:
+        cam = _replace(cam, azimuth=args.azimuth)
+    if args.elevation is not None:
+        cam = _replace(cam, elevation=args.elevation)
+    if args.roll is not None:
+        cam = _replace(cam, roll=args.roll)
+
     # Apply --center if specified
     if args.center:
         cam = _apply_center(cam, args.center, crystal)
 
     # Apply --zoom
     if args.zoom != 1.0:
-        from dataclasses import replace as _replace
         cam = _replace(cam, viewport_zoom=args.zoom)
 
     if not args.interaction:

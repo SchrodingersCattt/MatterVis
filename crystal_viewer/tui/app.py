@@ -67,18 +67,22 @@ class CrystalTUI(App):
     """
 
     BINDINGS = [
-        Binding("w", "rotate_up", "Rotate ↑", show=False),
-        Binding("s", "rotate_down", "Rotate ↓", show=False),
-        Binding("a", "rotate_left", "Rotate ←", show=False),
-        Binding("d", "rotate_right", "Rotate →", show=False),
-        Binding("k", "pan_up", "Pan ↑", show=False),
-        Binding("j", "pan_down", "Pan ↓", show=False),
-        Binding("h", "pan_left", "Pan ←", show=False),
+        # W/S = pitch (elevation), Q/E = yaw (azimuth), A/D = roll
+        Binding("w", "pitch_up", "Pitch ↑", show=False),
+        Binding("s", "pitch_down", "Pitch ↓", show=False),
+        Binding("q", "yaw_left", "Yaw ←", show=False),
+        Binding("e", "yaw_right", "Yaw →", show=False),
+        Binding("a", "roll_left", "Roll ↺", show=False),
+        Binding("d", "roll_right", "Roll ↻", show=False),
+        # I/K = pan up/down, J/L = pan left/right
+        Binding("i", "pan_up", "Pan ↑", show=False),
+        Binding("k", "pan_down", "Pan ↓", show=False),
+        Binding("j", "pan_left", "Pan ←", show=False),
         Binding("l", "pan_right", "Pan →", show=False),
+        # [ ] = zoom
         Binding("bracket_left", "zoom_out", "Zoom -", show=False),
         Binding("bracket_right", "zoom_in", "Zoom +", show=False),
-        Binding("plus,equal", "zoom_in", "Zoom +", show=False),
-        Binding("minus", "zoom_out", "Zoom -", show=False),
+        # Toggles
         Binding("p", "toggle_proj", "Projection", show=True),
         Binding("c", "toggle_cell", "Cell", show=True),
         Binding("b", "toggle_bonds", "Bonds", show=True),
@@ -86,7 +90,7 @@ class CrystalTUI(App):
         Binding("m", "toggle_mono", "Mono", show=True),
         Binding("n", "toggle_minor", "Minor", show=True),
         Binding("r", "reset_view", "Reset", show=True),
-        Binding("q", "quit", "Quit", show=True),
+        Binding("Q", "quit", "Quit", show=True),
     ]
 
     def __init__(
@@ -147,31 +151,42 @@ class CrystalTUI(App):
     def _update_title(self) -> None:
         proj = self.camera.projection.value[:5]
         zoom_str = f" ×{self.camera.viewport_zoom:.1f}" if self.camera.viewport_zoom != 1.0 else ""
+        roll_str = f" r={self.camera.roll:.0f}°" if abs(self.camera.roll) > 0.5 else ""
         self.sub_title = (
             f"{self.crystal.formula} | "
-            f"az={self.camera.azimuth:.0f}° el={self.camera.elevation:.0f}° | "
+            f"az={self.camera.azimuth:.0f}° el={self.camera.elevation:.0f}°{roll_str} | "
             f"{proj} | {self._label_mode}{zoom_str}"
         )
 
     # ── Actions ─────────────────────────────────────────────────────────
 
-    def action_rotate_up(self) -> None:
+    def action_pitch_up(self) -> None:
         self.camera = self.camera.rotate(d_elev=ROTATE_STEP)
         self._update_title()
         self._redraw()
 
-    def action_rotate_down(self) -> None:
+    def action_pitch_down(self) -> None:
         self.camera = self.camera.rotate(d_elev=-ROTATE_STEP)
         self._update_title()
         self._redraw()
 
-    def action_rotate_left(self) -> None:
+    def action_yaw_left(self) -> None:
         self.camera = self.camera.rotate(d_azim=-ROTATE_STEP)
         self._update_title()
         self._redraw()
 
-    def action_rotate_right(self) -> None:
+    def action_yaw_right(self) -> None:
         self.camera = self.camera.rotate(d_azim=ROTATE_STEP)
+        self._update_title()
+        self._redraw()
+
+    def action_roll_left(self) -> None:
+        self.camera = self.camera.rotate(d_roll=-ROTATE_STEP)
+        self._update_title()
+        self._redraw()
+
+    def action_roll_right(self) -> None:
+        self.camera = self.camera.rotate(d_roll=ROTATE_STEP)
         self._update_title()
         self._redraw()
 
@@ -193,10 +208,12 @@ class CrystalTUI(App):
 
     def action_zoom_in(self) -> None:
         self.camera = self.camera.zoom(ZOOM_FACTOR)
+        self._update_title()
         self._redraw()
 
     def action_zoom_out(self) -> None:
         self.camera = self.camera.zoom(1.0 / ZOOM_FACTOR)
+        self._update_title()
         self._redraw()
 
     def action_toggle_proj(self) -> None:
