@@ -26,7 +26,7 @@ from .compositor import compose_frame, LABEL_MODES
 # ── Constants ───────────────────────────────────────────────────────────────
 
 ROTATE_STEP = 10.0   # degrees per keypress
-PAN_STEP = 0.25      # viewport units per keypress
+PAN_STEP = 0.1       # viewport units per keypress
 ZOOM_FACTOR = 1.3    # multiplicative zoom per keypress
 
 
