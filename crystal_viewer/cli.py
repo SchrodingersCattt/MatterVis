@@ -303,6 +303,126 @@ def _serve_main(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# TUI subcommand
+# ---------------------------------------------------------------------------
+
+_TUI_FORMATS = ("ascii", "structured")
+_TUI_PROJECTIONS = ("orthographic", "perspective")
+_TUI_VIEWS = ("auto", "a", "b", "c", "diagonal", "ab", "ac", "bc")
+
+
+def _build_tui_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    p = subparsers.add_parser(
+        "tui",
+        help="Terminal-based crystal structure viewer.",
+        description=(
+            "View a crystal structure in the terminal. Default is interactive "
+            "(Textual TUI). Use --no-interaction for static output suitable "
+            "for piping to LLMs or scripts."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  %(prog)s structure.cif\n"
+            "  %(prog)s structure.cif --no-interaction --mono\n"
+            "  %(prog)s structure.cif --no-interaction --format structured\n"
+            "  %(prog)s POSCAR --no-interaction --view c\n"
+        ),
+    )
+    p.add_argument("FILE", help="Crystal structure file (.cif, .vasp, .poscar, .extxyz).")
+    p.add_argument(
+        "--interaction", "--interactive",
+        action="store_true", default=True, dest="interaction",
+        help="Launch interactive TUI (default).",
+    )
+    p.add_argument(
+        "--no-interaction", "--no-interactive",
+        action="store_false", dest="interaction",
+        help="Print static output to stdout (for LLM/script piping).",
+    )
+    p.add_argument(
+        "--mono", action="store_true", default=False,
+        help="Force monochrome output (no ANSI color codes).",
+    )
+    p.add_argument(
+        "--format", choices=_TUI_FORMATS, default="ascii",
+        help="Non-interactive output format (default: ascii).",
+    )
+    p.add_argument(
+        "--compact", action="store_true", default=False,
+        help="Use single-char dot mode instead of element symbols.",
+    )
+    p.add_argument(
+        "--projection", choices=_TUI_PROJECTIONS, default="orthographic",
+        help="Initial projection mode (default: orthographic).",
+    )
+    p.add_argument(
+        "--width", type=int, default=None,
+        help="Override terminal grid width (auto-detect if omitted).",
+    )
+    p.add_argument(
+        "--height", type=int, default=None,
+        help="Override terminal grid height (auto-detect if omitted).",
+    )
+    p.add_argument(
+        "--view", choices=_TUI_VIEWS, default="auto",
+        help="Initial view direction (default: auto → diagonal).",
+    )
+    p.add_argument(
+        "--no-bonds", action="store_true", default=False,
+        help="Hide bonds.",
+    )
+    p.add_argument(
+        "--no-cell", action="store_true", default=False,
+        help="Hide unit cell edges.",
+    )
+    return p
+
+
+def _tui_main(args: argparse.Namespace) -> None:
+    """Execute the tui subcommand."""
+    filepath = args.FILE
+    if not Path(filepath).exists():
+        print(f"Error: file not found: {filepath}", file=sys.stderr)
+        sys.exit(1)
+
+    from .tui.loader_adapter import load_for_tui
+    from .math.camera import Camera, project_points
+
+    crystal = load_for_tui(filepath)
+    cam = Camera.from_view_name(args.view, crystal)
+
+    if not args.interaction:
+        # Static output mode
+        pts_2d, depth = project_points(cam, crystal.cart_coords)
+
+        if args.format == "structured":
+            from .tui.serializer import serialize_crystal
+            output = serialize_crystal(crystal, cam, pts_2d)
+        else:
+            from .tui.renderer import render_ascii_frame
+            output = render_ascii_frame(
+                crystal, cam, pts_2d, depth,
+                width=args.width, height=args.height,
+                mono=args.mono, compact=args.compact,
+                show_bonds=not args.no_bonds,
+                show_cell=not args.no_cell,
+            )
+        print(output)
+    else:
+        # Interactive TUI mode
+        from .tui.app import CrystalTUI
+        app = CrystalTUI(
+            crystal=crystal, mono=args.mono,
+            initial_view=args.view,
+            show_bonds=not args.no_bonds,
+            show_cell=not args.no_cell,
+            compact=args.compact,
+        )
+        app.run()
+
+
+# ---------------------------------------------------------------------------
 # Top-level CLI router
 # ---------------------------------------------------------------------------
 
@@ -316,6 +436,7 @@ def main(argv: Optional[list[str]] = None) -> None:
 
     _build_render_parser(subparsers)
     _build_serve_parser(subparsers)
+    _build_tui_parser(subparsers)
 
     args = parser.parse_args(argv)
 
@@ -326,6 +447,8 @@ def main(argv: Optional[list[str]] = None) -> None:
         _render_main(args)
     elif args.command == "serve":
         _serve_main(args)
+    elif args.command == "tui":
+        _tui_main(args)
     else:
         parser.print_help()
         sys.exit(1)
