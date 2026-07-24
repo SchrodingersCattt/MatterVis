@@ -15,6 +15,7 @@ matplotlib
 pillow
 ase
 networkx
+textual
 # Molecule identification, disorder handling, per-formula-unit stoichiometry,
 # and molecule-level packing polyhedra. Pinned to MCK 0.4.0 (cluster carver,
 # disorder-aware identify_molecules, decoupled disorder symmetry copies,

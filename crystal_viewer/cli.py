@@ -303,6 +303,305 @@ def _serve_main(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# TUI subcommand
+# ---------------------------------------------------------------------------
+
+_TUI_FORMATS = ("ascii", "structured")
+_TUI_PROJECTIONS = ("orthographic", "perspective")
+_TUI_VIEWS = ("auto", "a", "b", "c", "diagonal", "ab", "ac", "bc")
+_TUI_LABELS = ("element", "label", "molecule", "dot")
+_TUI_DISPLAYS = ("auto", "formula_unit", "unit_cell", "asymmetric_unit")
+
+
+def _build_tui_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    p = subparsers.add_parser(
+        "tui",
+        help="Terminal-based crystal structure viewer.",
+        description=(
+            "View a crystal structure in the terminal. Default is interactive "
+            "(Textual TUI). Use --no-interaction for static output suitable "
+            "for piping to LLMs or scripts."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  %(prog)s structure.cif\n"
+            "  %(prog)s structure.cif --no-interaction --mono\n"
+            "  %(prog)s structure.cif --no-interaction --format structured\n"
+            "  %(prog)s POSCAR --no-interaction --view c\n"
+        ),
+    )
+    p.add_argument("FILE", help="Crystal structure file (.cif, .vasp, .poscar, .extxyz).")
+    p.add_argument(
+        "--interaction", "--interactive",
+        action="store_true", default=True, dest="interaction",
+        help="Launch interactive TUI (default).",
+    )
+    p.add_argument(
+        "--no-interaction", "--no-interactive",
+        action="store_false", dest="interaction",
+        help="Print static output to stdout (for LLM/script piping).",
+    )
+    p.add_argument(
+        "--mono", action="store_true", default=False,
+        help="Force monochrome output (no ANSI color codes).",
+    )
+    p.add_argument(
+        "--format", choices=_TUI_FORMATS, default="ascii",
+        help="Non-interactive output format (default: ascii).",
+    )
+    p.add_argument(
+        "--compact", action="store_true", default=False,
+        help="Use single-char dot mode instead of element symbols.",
+    )
+    p.add_argument(
+        "--projection", choices=_TUI_PROJECTIONS, default="orthographic",
+        help="Initial projection mode (default: orthographic).",
+    )
+    p.add_argument(
+        "--width", type=int, default=None,
+        help="Override terminal grid width (auto-detect if omitted).",
+    )
+    p.add_argument(
+        "--height", type=int, default=None,
+        help="Override terminal grid height (auto-detect if omitted).",
+    )
+    p.add_argument(
+        "--view", choices=_TUI_VIEWS, default="auto",
+        help="Initial view direction (default: auto → diagonal).",
+    )
+    p.add_argument(
+        "--label", choices=_TUI_LABELS, default="label",
+        help="Atom label mode (default: label). 'element'=Fe/O, 'label'=Fe1/O2, "
+             "'molecule'=Fe1⁰/O2¹ (with mol index), 'dot'=● colored.",
+    )
+    p.add_argument(
+        "--display", choices=_TUI_DISPLAYS, default="auto",
+        help="Display mode (default: auto). 'auto' selects formula_unit for >80 atoms.",
+    )
+    p.add_argument(
+        "--show-minor", action="store_true", default=False,
+        help="Show minor disorder atoms (dimmed). Hidden by default.",
+    )
+    p.add_argument(
+        "--hide-partial", action="store_true", default=False,
+        help="Hide partial-occupancy atoms (occ < 1). Shown by default.",
+    )
+    p.add_argument(
+        "--zoom", type=float, default=1.0,
+        help="Viewport zoom factor (>1 to zoom in). Default: 1.0.",
+    )
+    p.add_argument(
+        "--center", default=None,
+        help="Center view on atom label (e.g. Fe1) or fractional coords (e.g. 0.5,0.5,0.5).",
+    )
+    p.add_argument(
+        "--azimuth", type=float, default=None,
+        help="Camera azimuth angle in degrees (overrides --view).",
+    )
+    p.add_argument(
+        "--elevation", type=float, default=None,
+        help="Camera elevation angle in degrees (overrides --view).",
+    )
+    p.add_argument(
+        "--roll", type=float, default=None,
+        help="Camera roll angle in degrees.",
+    )
+    p.add_argument(
+        "--no-bonds", action="store_true", default=False,
+        help="Hide bonds.",
+    )
+    p.add_argument(
+        "--no-cell", action="store_true", default=False,
+        help="Hide unit cell edges.",
+    )
+    return p
+
+
+def _tui_main(args: argparse.Namespace) -> None:
+    """Execute the tui subcommand."""
+    filepath = args.FILE
+    if not Path(filepath).exists():
+        print(f"Error: file not found: {filepath}", file=sys.stderr)
+        sys.exit(1)
+
+    from .tui.loader_adapter import load_for_tui
+    from .math.camera import Camera, project_points
+
+    crystal = load_for_tui(filepath)
+
+    # Display mode filtering (auto = show everything; explicit picks subset)
+    display_mode = args.display
+    if display_mode in ("formula_unit", "asymmetric_unit"):
+        crystal = _apply_display_filter(crystal, display_mode)
+
+    # Map --compact to label_mode="dot" for backward compat
+    label_mode = args.label
+    if args.compact and label_mode == "label":
+        label_mode = "dot"
+
+    cam = Camera.from_view_name(args.view, crystal)
+
+    # Apply explicit camera angles (agent-friendly: override --view)
+    from dataclasses import replace as _replace
+    if args.azimuth is not None:
+        cam = _replace(cam, azimuth=args.azimuth)
+    if args.elevation is not None:
+        cam = _replace(cam, elevation=args.elevation)
+    if args.roll is not None:
+        cam = _replace(cam, roll=args.roll)
+
+    # Apply --center if specified
+    if args.center:
+        cam = _apply_center(cam, args.center, crystal)
+
+    # Apply --zoom
+    if args.zoom != 1.0:
+        cam = _replace(cam, viewport_zoom=args.zoom)
+
+    if not args.interaction:
+        # Static output mode
+        pts_2d, depth = project_points(cam, crystal.cart_coords)
+
+        if args.format == "structured":
+            from .tui.serializer import serialize_crystal
+            output = serialize_crystal(crystal, cam, pts_2d)
+        else:
+            from .tui.compositor import compose_frame
+            output = compose_frame(
+                crystal, cam, pts_2d, depth,
+                width=args.width, height=args.height,
+                mono=args.mono, label_mode=label_mode,
+                show_bonds=not args.no_bonds,
+                show_cell=not args.no_cell,
+                show_minor=args.show_minor,
+                zoom=cam.viewport_zoom,
+            )
+        print(output)
+    else:
+        # Interactive TUI mode
+        from .tui.app import CrystalTUI
+        app = CrystalTUI(
+            crystal=crystal, mono=args.mono,
+            initial_view=args.view,
+            show_bonds=not args.no_bonds,
+            show_cell=not args.no_cell,
+            label_mode=label_mode,
+            show_minor=args.show_minor,
+        )
+        app.run()
+
+
+def _apply_center(cam, center_str: str, crystal):
+    """Shift camera target to center on a label or fractional coord."""
+    from dataclasses import replace as _replace
+    import numpy as np
+
+    # Try as atom label first
+    for atom in crystal.atoms:
+        if atom.label == center_str or atom.display_label == center_str:
+            return _replace(cam, target=np.array(atom.cart, dtype=float))
+
+    # Try as fractional coords (x,y,z)
+    parts = center_str.split(",")
+    if len(parts) == 3 and crystal.lattice is not None:
+        try:
+            frac = np.array([float(p) for p in parts])
+            cart = crystal.lattice.matrix.T @ frac
+            return _replace(cam, target=cart)
+        except ValueError:
+            pass
+
+    print(f"Warning: --center '{center_str}' not found, using default.", file=sys.stderr)
+    return cam
+
+
+def _apply_display_filter(crystal, mode: str):
+    """Filter crystal atoms to a display subset."""
+    from .tui.crystal_ir import CrystalIR, AtomIR, BondIR
+
+    if mode == "formula_unit":
+        # Keep only atoms belonging to one formula unit (one molecule per species)
+        if not crystal.species_map:
+            return crystal  # No MCK data, show everything
+
+        # Pick one molecule per species
+        keep_mol_indices: set[int] = set()
+        for species_id, mol_indices in crystal.species_map.items():
+            if mol_indices:
+                keep_mol_indices.add(mol_indices[0])
+
+        if not keep_mol_indices:
+            return crystal
+
+        # Filter atoms
+        keep_atom_set = {
+            i for i, atom in enumerate(crystal.atoms)
+            if atom.molecule_index in keep_mol_indices
+        }
+        return _filter_crystal(crystal, keep_atom_set)
+
+    elif mode == "asymmetric_unit":
+        # Keep only one symop copy of each label
+        seen_labels: set[str] = set()
+        keep_atom_set: set[int] = set()
+        for i, atom in enumerate(crystal.atoms):
+            if atom.label not in seen_labels:
+                seen_labels.add(atom.label)
+                keep_atom_set.add(i)
+        return _filter_crystal(crystal, keep_atom_set)
+
+    return crystal
+
+
+def _filter_crystal(crystal, keep_indices: set[int]):
+    """Create a new CrystalIR with only the specified atom indices."""
+    from .tui.crystal_ir import CrystalIR, AtomIR, BondIR
+    import numpy as np
+
+    # Build index remapping
+    old_to_new: dict[int, int] = {}
+    new_atoms = []
+    for new_idx, old_idx in enumerate(sorted(keep_indices)):
+        old_to_new[old_idx] = new_idx
+        atom = crystal.atoms[old_idx]
+        new_atoms.append(AtomIR(
+            element=atom.element,
+            cart=atom.cart,
+            frac=atom.frac,
+            label=atom.label,
+            occupancy=atom.occupancy,
+            index=new_idx,
+            molecule_index=atom.molecule_index,
+            disorder_group=atom.disorder_group,
+            is_minor=atom.is_minor,
+        ))
+
+    # Filter bonds (both endpoints must be in the kept set)
+    new_bonds = []
+    for bond in crystal.bonds:
+        if bond.i in old_to_new and bond.j in old_to_new:
+            new_bonds.append(BondIR(
+                i=old_to_new[bond.i],
+                j=old_to_new[bond.j],
+                distance=bond.distance,
+            ))
+
+    return CrystalIR(
+        title=crystal.title,
+        formula=crystal.formula,
+        spacegroup=crystal.spacegroup,
+        source_path=crystal.source_path,
+        lattice=crystal.lattice,
+        atoms=new_atoms,
+        bonds=new_bonds,
+        n_molecules=crystal.n_molecules,
+        species_map=crystal.species_map,
+        metadata=crystal.metadata,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Top-level CLI router
 # ---------------------------------------------------------------------------
 
@@ -316,6 +615,7 @@ def main(argv: Optional[list[str]] = None) -> None:
 
     _build_render_parser(subparsers)
     _build_serve_parser(subparsers)
+    _build_tui_parser(subparsers)
 
     args = parser.parse_args(argv)
 
@@ -326,6 +626,8 @@ def main(argv: Optional[list[str]] = None) -> None:
         _render_main(args)
     elif args.command == "serve":
         _serve_main(args)
+    elif args.command == "tui":
+        _tui_main(args)
     else:
         parser.print_help()
         sys.exit(1)

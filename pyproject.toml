@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "matter-vis"
+version = "0.1.0"
+description = "Publication-quality crystal structure visualization + terminal viewer"
+requires-python = ">=3.9"
+dependencies = [
+    "dash",
+    "plotly",
+    "numpy",
+    "scipy",
+    "gemmi",
+    "pymatgen",
+    "kaleido",
+    "flask-sock",
+    "flask-compress",
+    "matplotlib",
+    "pillow",
+    "ase",
+    "networkx",
+    "textual",
+    "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@62fc7e78095634819fad54a29c459a7dad285833",
+]
+
+[project.scripts]
+matvis = "crystal_viewer.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["crystal_viewer*"]
