@@ -123,38 +123,39 @@ class CrystalTUI(App):
 
     def on_key(self, event) -> None:
         """Direct key handler — bypasses binding resolution for movement keys."""
-        key = event.character or event.key
+        char = event.character
+        key = event.key
         handled = True
-        if key == "j":
+        if char == "j" or key == "j":
             self.camera = self.camera.pan(dx=-PAN_STEP)
-        elif key == "l":
+        elif char == "l" or key == "l":
             self.camera = self.camera.pan(dx=PAN_STEP)
-        elif key == "i":
+        elif char == "i" or key == "i":
             self.camera = self.camera.pan(dy=PAN_STEP)
-        elif key == "k":
+        elif char == "k" or key == "k":
             self.camera = self.camera.pan(dy=-PAN_STEP)
-        elif key == "w":
+        elif char == "w" or key == "w":
             self.camera = self.camera.rotate(d_elev=ROTATE_STEP)
             self._update_title()
-        elif key == "s":
+        elif char == "s" or key == "s":
             self.camera = self.camera.rotate(d_elev=-ROTATE_STEP)
             self._update_title()
-        elif key == "q":
+        elif char == "q" or key == "q":
             self.camera = self.camera.rotate(d_azim=-ROTATE_STEP)
             self._update_title()
-        elif key == "e":
+        elif char == "e" or key == "e":
             self.camera = self.camera.rotate(d_azim=ROTATE_STEP)
             self._update_title()
-        elif key == "a":
+        elif char == "a" or key == "a":
             self.camera = self.camera.rotate(d_roll=-ROTATE_STEP)
             self._update_title()
-        elif key == "d":
+        elif char == "d" or key == "d":
             self.camera = self.camera.rotate(d_roll=ROTATE_STEP)
             self._update_title()
-        elif key == "[":
+        elif char == "[" or key == "left_square_bracket":
             self.camera = self.camera.zoom(1.0 / ZOOM_FACTOR)
             self._update_title()
-        elif key == "]":
+        elif char == "]" or key == "right_square_bracket":
             self.camera = self.camera.zoom(ZOOM_FACTOR)
             self._update_title()
         else:
