@@ -64,6 +64,9 @@ def register_state_routes(v2, backend) -> dict:
         meta = bundle.metadata()
         if getattr(bundle, "_upload_existing", False):
             meta["existing"] = True
+        if getattr(bundle, "_upload_pending", False):
+            meta["status"] = "pending"
+            meta["job_id"] = getattr(bundle, "_upload_job_id", None)
         return jsonify(meta)
 
     @v2.get("/structures")

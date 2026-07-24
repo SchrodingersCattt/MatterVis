@@ -83,4 +83,10 @@ def _isolated_local_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         if hasattr(module, "LOCAL_STATE_DIRNAME"):
             monkeypatch.setattr(module, "LOCAL_STATE_DIRNAME", abs_local)
 
+    # Force synchronous upload mode in tests so bundle is ready before
+    # the upload call returns. The async background path is tested
+    # explicitly in dedicated integration tests.
+    from crystal_viewer.app import backend_io as bio_module
+    monkeypatch.setattr(bio_module._IOBackendMixin, "_upload_sync_mode", True, raising=False)
+
     yield isolated_local

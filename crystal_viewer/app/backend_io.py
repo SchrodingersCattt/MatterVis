@@ -54,21 +54,6 @@ class _IOBackendMixin:
             if existing_name in self.structure_names:
                 bundle = self.get_bundle(existing_name)
                 setattr(bundle, "_upload_existing", True)
-                # The upload is idempotent at the *structure* level
-                # (no ``_2`` / ``_3`` suffixes for repeat CIF bytes —
-                # see ``agents/dash_service.md``), but the user still
-                # clicked "Upload" expecting to *see* the structure.
-                # Without the scene-store touch-up below the response
-                # comes back 200 OK, the browser sets "Updating
-                # scene..." and the ``waitForSceneAndSwitch`` watcher
-                # in ``native_upload.js`` sits there until its 30 s
-                # timeout fires because the active scene never points
-                # at ``existing_name``. If a scene already references
-                # the structure, switch the active scene to it;
-                # otherwise materialise a fresh scene tab. Either way
-                # ``state.structure`` becomes ``existing_name`` so the
-                # WebSocket snapshot and the Dash ``native-upload-sync``
-                # callback both see the change and the tab appears.
                 with self._lock:
                     target_scene_id = next(
                         (
@@ -93,10 +78,6 @@ class _IOBackendMixin:
             safe = f"{leading_underscores.group(0)}{safe}"
         if not safe.lower().endswith(".cif"):
             safe = f"{safe}.cif"
-        # Persist by content hash as well as display filename. Different
-        # uploads often share a simple name like ``DP.cif``; writing the raw
-        # filename would let a later upload overwrite the CIF backing an
-        # existing manifest record and corrupt restored scenes after restart.
         storage_name = f"{digest[:16]}_{safe}"
         path = os.path.realpath(os.path.join(upload_dir, storage_name))
         if os.path.commonpath([path, upload_dir]) != upload_dir:
@@ -115,11 +96,55 @@ class _IOBackendMixin:
         while safe_name in self.structure_names:
             safe_name = f"{stem}_{suffix}"
             suffix += 1
-        # ``build_loaded_crystal`` parses the CIF (gemmi), expands
-        # symmetry, builds bonds and -- if the preset asks for it --
-        # runs molcryskit topology analysis. For a 1.6 MB CIF this is
-        # by far the slowest leg of the upload (~15 s). Charging it
-        # separately makes the bottleneck unambiguous in the log.
+
+        # ── Async upload: defer build_loaded_crystal to background ──
+        # Check whether the caller wants the legacy synchronous path
+        # (used by tests that assert the bundle is ready before the call
+        # returns). Default is async for real-time responsiveness.
+        sync_mode = bool(getattr(self, "_upload_sync_mode", False))
+        if sync_mode:
+            return self._upload_sync(safe_name, path, stem, filename, digest)
+
+        # Create placeholder scene tab immediately so the UI shows
+        # something while the background job runs. The scene_store
+        # keeps a pending entry until the bundle is ready.
+        with self._lock:
+            self._drop_placeholder()
+            # Reserve the name so concurrent uploads don't collide.
+            self.structure_names.append(safe_name)
+            scene_payload = self.create_scene(structure=safe_name, label=safe_name)
+
+        # Persist manifest early (idempotent protection for restarts).
+        self.upload_manifest.setdefault("uploads", {})[digest] = {
+            "name": safe_name,
+            "path": path,
+            "sha256": digest,
+            "original_filename": filename,
+            "title": stem,
+            "status": "pending",
+        }
+        try:
+            self._save_upload_manifest()
+        except OSError:
+            pass
+
+        # Submit the heavy work to the background executor.
+        job_id = f"upload_{digest[:12]}"
+        self._submit_load_job(job_id, safe_name, path, stem, filename, digest)
+
+        # Return a lightweight placeholder bundle so the API returns
+        # immediately. The real bundle will replace it once ready.
+        placeholder = build_empty_bundle(name=safe_name)
+        placeholder.source = "upload"
+        placeholder.cif_path = path
+        setattr(placeholder, "_upload_existing", False)
+        setattr(placeholder, "_upload_pending", True)
+        setattr(placeholder, "_upload_job_id", job_id)
+        self.bundles[safe_name] = placeholder
+        return placeholder
+
+    def _upload_sync(self, safe_name: str, path: str, stem: str, filename: str, digest: str) -> LoadedCrystal:
+        """Legacy synchronous upload path used by tests and --cif CLI."""
         with perf_log.time_block(
             "upload:build_loaded_crystal",
             kind="event",
@@ -147,6 +172,51 @@ class _IOBackendMixin:
             print(f"[crystal_viewer] could not persist upload manifest: {exc}", file=sys.stderr)
         setattr(bundle, "_upload_existing", False)
         return bundle
+
+    def _submit_load_job(self, job_id: str, safe_name: str, path: str, stem: str, filename: str, digest: str) -> None:
+        """Submit the heavy CIF parse + scene build to a background thread."""
+        load_executor = getattr(self, "_load_executor", None)
+        if load_executor is None:
+            # Lazy-create; keep max_workers=1 so uploads are serialised
+            # and don't compete with the topology/render pools.
+            from concurrent.futures import ThreadPoolExecutor
+            self._load_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mattervis-upload")
+            load_executor = self._load_executor
+
+        def _job():
+            try:
+                with perf_log.time_block(
+                    "upload:build_loaded_crystal",
+                    kind="event",
+                    structure=safe_name,
+                    cif_path=path,
+                ):
+                    bundle = build_loaded_crystal(name=safe_name, cif_path=path, title=stem, preset=self.preset, source="upload")
+                with perf_log.time_block("upload:register_bundle", kind="event", structure=bundle.name):
+                    with self._lock:
+                        self.bundles[bundle.name] = bundle
+                    # Patch the pending manifest entry.
+                    record = (self.upload_manifest.get("uploads") or {}).get(digest)
+                    if isinstance(record, dict):
+                        record.pop("status", None)
+                    try:
+                        self._save_upload_manifest()
+                    except OSError:
+                        pass
+                    # Arm pending_state so the browser picks up the scene.
+                    state = self.get_state(self.scene_store.active_id)
+                    self.pending_state = copy.deepcopy(state)
+                    self._bump_version()
+                _prewarm_bundle_async(self, bundle.name)
+            except Exception as exc:
+                print(f"[crystal_viewer] background upload failed for {safe_name}: {type(exc).__name__}: {exc}", file=sys.stderr)
+                # Mark manifest as failed so callers can observe it.
+                record = (self.upload_manifest.get("uploads") or {}).get(digest)
+                if isinstance(record, dict):
+                    record["status"] = "error"
+                    record["error"] = f"{type(exc).__name__}: {exc}"
+
+        load_executor.submit(_job)
 
 
     def _safe_preset_path(self, path: Optional[str], *, allow_external: bool = False) -> Optional[str]:

@@ -275,9 +275,17 @@ class _CameraBackendMixin:
             scene_layout["camera"] = camera
         fig.update_layout(
             scene=scene_layout,
+            meta={
+                "mattervis_pending": True,
+                "scene_id": state.get("scene_id"),
+            },
             margin=dict(l=0, r=0, t=0, b=0),
             showlegend=False,
         )
+        try:
+            fig._mattervis_pending = True
+        except Exception:
+            pass
         return fig
 
     def _flat_ortep_figure(self, scene: dict, style: dict) -> "go.Figure":
