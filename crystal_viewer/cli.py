@@ -418,12 +418,9 @@ def _tui_main(args: argparse.Namespace) -> None:
 
     crystal = load_for_tui(filepath)
 
-    # Display mode: auto-select formula_unit for dense structures
+    # Display mode filtering (auto = show everything; explicit picks subset)
     display_mode = args.display
-    if display_mode == "auto" and crystal.n_atoms > 80:
-        # Use formula_unit subset if available via MCK
-        crystal = _apply_display_filter(crystal, "formula_unit")
-    elif display_mode in ("formula_unit", "asymmetric_unit"):
+    if display_mode in ("formula_unit", "asymmetric_unit"):
         crystal = _apply_display_filter(crystal, display_mode)
 
     # Map --compact to label_mode="dot" for backward compat

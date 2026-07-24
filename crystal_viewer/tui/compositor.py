@@ -373,7 +373,7 @@ def compose_frame(
                 (a.placed_col, a.text, a.color, a.is_partial)
             )
 
-    # Compose final string
+    # Compose final string — color by RUNS to avoid per-char escape alignment issues
     output_lines: list[str] = []
     for row_idx in range(height):
         braille_row = braille_lines[row_idx] if row_idx < len(braille_lines) else ""
@@ -386,16 +386,31 @@ def compose_frame(
             else:
                 stripped = braille_row.rstrip()
                 if stripped:
+                    # Single color for entire braille row
                     output_lines.append(f"\033[38;5;{CELL_COLOR}m{stripped}\033[0m")
                 else:
                     output_lines.append("")
         else:
             row_labels.sort(key=lambda x: x[0])
+            # Build the row by collecting runs of braille vs label text
             parts: list[str] = []
             col = 0
             li = 0
+            braille_run: list[str] = []  # accumulate braille chars
+
+            def _flush_braille():
+                nonlocal braille_run
+                if braille_run:
+                    text = "".join(braille_run)
+                    if mono:
+                        parts.append(text)
+                    else:
+                        parts.append(f"\033[38;5;{CELL_COLOR}m{text}\033[0m")
+                    braille_run = []
+
             while col < width:
                 if li < len(row_labels) and row_labels[li][0] == col:
+                    _flush_braille()
                     lcol, ltext, lcolor, is_partial = row_labels[li]
                     if mono:
                         parts.append(ltext)
@@ -408,14 +423,9 @@ def compose_frame(
                     li += 1
                 else:
                     ch = braille_row[col] if col < len(braille_row) else " "
-                    if mono:
-                        parts.append(ch)
-                    else:
-                        if ch.strip() and ord(ch) >= 0x2800:
-                            parts.append(f"\033[38;5;{CELL_COLOR}m{ch}\033[0m")
-                        else:
-                            parts.append(ch)
+                    braille_run.append(ch)
                     col += 1
+            _flush_braille()
             output_lines.append("".join(parts).rstrip())
 
     while output_lines and not output_lines[-1]:
