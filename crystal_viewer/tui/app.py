@@ -37,12 +37,14 @@ class CrystalCanvas(Static):
     """Widget that displays the pre-rendered crystal frame.
 
     Uses Rich Text with no_wrap to prevent reflow of braille+ANSI content.
+    Non-scrollable so it doesn't steal j/k/i/l keys.
     """
+
+    can_focus = False
 
     frame_text: reactive[str] = reactive("")
 
     def render(self) -> Text:
-        # Parse ANSI escape codes into Rich Text; disable wrapping
         t = Text.from_ansi(self.frame_text, no_wrap=True, overflow="crop")
         return t
 
@@ -61,6 +63,7 @@ class CrystalTUI(App):
     #canvas {
         width: 1fr;
         height: 1fr;
+        overflow: hidden hidden;
     }
     Header {
         dock: top;
@@ -74,20 +77,20 @@ class CrystalTUI(App):
 
     BINDINGS = [
         # W/S = pitch (elevation), Q/E = yaw (azimuth), A/D = roll
-        Binding("w", "pitch_up", "Pitch ↑", show=False),
-        Binding("s", "pitch_down", "Pitch ↓", show=False),
-        Binding("q", "yaw_left", "Yaw ←", show=False),
-        Binding("e", "yaw_right", "Yaw →", show=False),
-        Binding("a", "roll_left", "Roll ↺", show=False),
-        Binding("d", "roll_right", "Roll ↻", show=False),
+        Binding("w", "pitch_up", "Pitch ↑", show=False, priority=True),
+        Binding("s", "pitch_down", "Pitch ↓", show=False, priority=True),
+        Binding("q", "yaw_left", "Yaw ←", show=False, priority=True),
+        Binding("e", "yaw_right", "Yaw →", show=False, priority=True),
+        Binding("a", "roll_left", "Roll ↺", show=False, priority=True),
+        Binding("d", "roll_right", "Roll ↻", show=False, priority=True),
         # I/K = pan up/down, J/L = pan left/right
-        Binding("i", "pan_up", "Pan ↑", show=False),
-        Binding("k", "pan_down", "Pan ↓", show=False),
-        Binding("j", "pan_left", "Pan ←", show=False),
-        Binding("l", "pan_right", "Pan →", show=False),
+        Binding("i", "pan_up", "Pan ↑", show=False, priority=True),
+        Binding("k", "pan_down", "Pan ↓", show=False, priority=True),
+        Binding("j", "pan_left", "Pan ←", show=False, priority=True),
+        Binding("l", "pan_right", "Pan →", show=False, priority=True),
         # [ ] = zoom
-        Binding("left_square_bracket", "zoom_out", "Zoom -", show=False),
-        Binding("right_square_bracket", "zoom_in", "Zoom +", show=False),
+        Binding("left_square_bracket", "zoom_out", "Zoom -", show=False, priority=True),
+        Binding("right_square_bracket", "zoom_in", "Zoom +", show=False, priority=True),
         # Toggles
         Binding("p", "toggle_proj", "Projection", show=True),
         Binding("c", "toggle_cell", "Cell", show=True),
