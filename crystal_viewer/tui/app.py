@@ -86,8 +86,8 @@ class CrystalTUI(App):
         Binding("j", "pan_left", "Pan ←", show=False),
         Binding("l", "pan_right", "Pan →", show=False),
         # [ ] = zoom
-        Binding("bracket_left", "zoom_out", "Zoom -", show=False),
-        Binding("bracket_right", "zoom_in", "Zoom +", show=False),
+        Binding("left_square_bracket", "zoom_out", "Zoom -", show=False),
+        Binding("right_square_bracket", "zoom_in", "Zoom +", show=False),
         # Toggles
         Binding("p", "toggle_proj", "Projection", show=True),
         Binding("c", "toggle_cell", "Cell", show=True),
