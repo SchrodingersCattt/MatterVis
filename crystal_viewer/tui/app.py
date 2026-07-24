@@ -184,6 +184,8 @@ class CrystalTUI(App):
             show_cell=self._show_cell,
             show_minor=self._show_minor,
             zoom=self.camera.viewport_zoom,
+            pan_x=self.camera.pan_x,
+            pan_y=self.camera.pan_y,
         )
         canvas.frame_text = frame
 

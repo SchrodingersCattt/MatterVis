@@ -54,6 +54,8 @@ class Camera:
     projection: ProjectionMode = ProjectionMode.ORTHOGRAPHIC
     fov_deg: float = 50.0
     viewport_zoom: float = 1.0  # >1 crops viewport (zoom into center)
+    pan_x: float = 0.0  # 2D viewport pan offset (in projected data units)
+    pan_y: float = 0.0
 
     def __post_init__(self):
         if self.target is None:
@@ -141,15 +143,12 @@ class Camera:
         return replace(self, azimuth=new_azim, elevation=new_elev, roll=new_roll)
 
     def pan(self, dx: float = 0.0, dy: float = 0.0) -> "Camera":
-        """Pan the camera in the screen plane.
+        """Pan the viewport in 2D screen space.
 
-        dx/dy are in world-coordinate units along screen-right/up.
+        dx/dy shift the viewport window over the projected scene.
+        Positive dx = scene moves left (viewport moves right).
         """
-        R = self.rotation_matrix
-        right = R[0]  # screen-right in world space
-        up = R[1]     # screen-up in world space
-        offset = right * dx + up * dy
-        return replace(self, target=self.target + offset)
+        return replace(self, pan_x=self.pan_x + dx, pan_y=self.pan_y + dy)
 
     def zoom(self, factor: float) -> "Camera":
         """Zoom by scaling viewport_zoom. factor > 1 zooms in."""

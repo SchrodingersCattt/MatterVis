@@ -94,6 +94,8 @@ def _compute_viewport(
     width: int,
     height: int,
     zoom: float = 1.0,
+    pan_x: float = 0.0,
+    pan_y: float = 0.0,
 ) -> Viewport:
     """Compute aspect-correct viewport. zoom>1 crops to center region."""
     all_arrays = [pts_2d] if len(pts_2d) > 0 else []
@@ -129,6 +131,13 @@ def _compute_viewport(
         x_max = cx + x_range / 2
         y_min = cy - y_range / 2
         y_max = cy + y_range / 2
+
+    # Apply 2D pan offset (shift viewport window)
+    if pan_x != 0.0 or pan_y != 0.0:
+        x_min += pan_x
+        x_max += pan_x
+        y_min += pan_y
+        y_max += pan_y
 
     # Uniform scale: fit both axes, preserving aspect.
     # X axis: cols = x_range * scale
@@ -208,6 +217,8 @@ def compose_frame(
     show_cell: bool = True,
     show_minor: bool = True,
     zoom: float = 1.0,
+    pan_x: float = 0.0,
+    pan_y: float = 0.0,
 ) -> str:
     """Render crystal in ORTEP style with label relaxation."""
     if width is None or height is None:
@@ -230,7 +241,7 @@ def compose_frame(
         cell_verts_2d, _ = _proj(camera, verts)
         extra_pts.append(cell_verts_2d)
 
-    viewport = _compute_viewport(pts_2d, extra_pts, width, height, zoom)
+    viewport = _compute_viewport(pts_2d, extra_pts, width, height, zoom, pan_x, pan_y)
     canvas = BrailleCanvas(width, height)
 
     # ── Layer 1: Cell edges (dashed braille) ────────────────────────────
