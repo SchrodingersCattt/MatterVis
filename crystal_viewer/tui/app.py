@@ -76,22 +76,8 @@ class CrystalTUI(App):
     """
 
     BINDINGS = [
-        # W/S = pitch (elevation), Q/E = yaw (azimuth), A/D = roll
-        Binding("w", "pitch_up", "Pitch ↑", show=False, priority=True),
-        Binding("s", "pitch_down", "Pitch ↓", show=False, priority=True),
-        Binding("q", "yaw_left", "Yaw ←", show=False, priority=True),
-        Binding("e", "yaw_right", "Yaw →", show=False, priority=True),
-        Binding("a", "roll_left", "Roll ↺", show=False, priority=True),
-        Binding("d", "roll_right", "Roll ↻", show=False, priority=True),
-        # I/K = pan up/down, J/L = pan left/right
-        Binding("i", "pan_up", "Pan ↑", show=False, priority=True),
-        Binding("k", "pan_down", "Pan ↓", show=False, priority=True),
-        Binding("j", "pan_left", "Pan ←", show=False, priority=True),
-        Binding("l", "pan_right", "Pan →", show=False, priority=True),
-        # [ ] = zoom
-        Binding("left_square_bracket", "zoom_out", "Zoom -", show=False, priority=True),
-        Binding("right_square_bracket", "zoom_in", "Zoom +", show=False, priority=True),
-        # Toggles
+        # Movement keys handled via on_key() for reliability.
+        # Only toggles and quit use the binding system.
         Binding("p", "toggle_proj", "Projection", show=True),
         Binding("c", "toggle_cell", "Cell", show=True),
         Binding("b", "toggle_bonds", "Bonds", show=True),
@@ -135,6 +121,50 @@ class CrystalTUI(App):
     def on_resize(self) -> None:
         self._redraw()
 
+    def on_key(self, event) -> None:
+        """Direct key handler — bypasses binding resolution for movement keys."""
+        key = event.character or event.key
+        handled = True
+        if key == "j":
+            self.camera = self.camera.pan(dx=-PAN_STEP)
+        elif key == "l":
+            self.camera = self.camera.pan(dx=PAN_STEP)
+        elif key == "i":
+            self.camera = self.camera.pan(dy=PAN_STEP)
+        elif key == "k":
+            self.camera = self.camera.pan(dy=-PAN_STEP)
+        elif key == "w":
+            self.camera = self.camera.rotate(d_elev=ROTATE_STEP)
+            self._update_title()
+        elif key == "s":
+            self.camera = self.camera.rotate(d_elev=-ROTATE_STEP)
+            self._update_title()
+        elif key == "q":
+            self.camera = self.camera.rotate(d_azim=-ROTATE_STEP)
+            self._update_title()
+        elif key == "e":
+            self.camera = self.camera.rotate(d_azim=ROTATE_STEP)
+            self._update_title()
+        elif key == "a":
+            self.camera = self.camera.rotate(d_roll=-ROTATE_STEP)
+            self._update_title()
+        elif key == "d":
+            self.camera = self.camera.rotate(d_roll=ROTATE_STEP)
+            self._update_title()
+        elif key == "[":
+            self.camera = self.camera.zoom(1.0 / ZOOM_FACTOR)
+            self._update_title()
+        elif key == "]":
+            self.camera = self.camera.zoom(ZOOM_FACTOR)
+            self._update_title()
+        else:
+            handled = False
+
+        if handled:
+            event.prevent_default()
+            event.stop()
+            self._redraw()
+
     # ── Rendering ───────────────────────────────────────────────────────
 
     def _redraw(self) -> None:
@@ -167,63 +197,7 @@ class CrystalTUI(App):
             f"{proj} | {self._label_mode}{zoom_str}"
         )
 
-    # ── Actions ─────────────────────────────────────────────────────────
-
-    def action_pitch_up(self) -> None:
-        self.camera = self.camera.rotate(d_elev=ROTATE_STEP)
-        self._update_title()
-        self._redraw()
-
-    def action_pitch_down(self) -> None:
-        self.camera = self.camera.rotate(d_elev=-ROTATE_STEP)
-        self._update_title()
-        self._redraw()
-
-    def action_yaw_left(self) -> None:
-        self.camera = self.camera.rotate(d_azim=-ROTATE_STEP)
-        self._update_title()
-        self._redraw()
-
-    def action_yaw_right(self) -> None:
-        self.camera = self.camera.rotate(d_azim=ROTATE_STEP)
-        self._update_title()
-        self._redraw()
-
-    def action_roll_left(self) -> None:
-        self.camera = self.camera.rotate(d_roll=-ROTATE_STEP)
-        self._update_title()
-        self._redraw()
-
-    def action_roll_right(self) -> None:
-        self.camera = self.camera.rotate(d_roll=ROTATE_STEP)
-        self._update_title()
-        self._redraw()
-
-    def action_pan_up(self) -> None:
-        self.camera = self.camera.pan(dy=PAN_STEP)
-        self._redraw()
-
-    def action_pan_down(self) -> None:
-        self.camera = self.camera.pan(dy=-PAN_STEP)
-        self._redraw()
-
-    def action_pan_left(self) -> None:
-        self.camera = self.camera.pan(dx=-PAN_STEP)
-        self._redraw()
-
-    def action_pan_right(self) -> None:
-        self.camera = self.camera.pan(dx=PAN_STEP)
-        self._redraw()
-
-    def action_zoom_in(self) -> None:
-        self.camera = self.camera.zoom(ZOOM_FACTOR)
-        self._update_title()
-        self._redraw()
-
-    def action_zoom_out(self) -> None:
-        self.camera = self.camera.zoom(1.0 / ZOOM_FACTOR)
-        self._update_title()
-        self._redraw()
+    # ── Actions (toggle bindings only; movement is in on_key) ─────────
 
     def action_toggle_proj(self) -> None:
         self.camera = self.camera.toggle_projection()
