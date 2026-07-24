@@ -181,7 +181,20 @@
   // ── WS figure fast lane (ws_figure.js) ──────────────────────────
   (function connectWS() {
     if (window.MATTERVIS_WS_FIGURE === false || !window.WebSocket || !window.Plotly) return;
+    function selectedSceneId() {
+      const root = document.getElementById("scene-tabs");
+      if (!root) return null;
+      const selected = root.querySelector("[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active");
+      if (!selected) return null;
+      const node = selected.id && selected.id.indexOf("scene-tab-") === 0
+        ? selected
+        : (selected.closest ? selected.closest("[id^='scene-tab-']") : null);
+      if (!node || !node.id || node.id.indexOf("scene-tab-close-") === 0) return null;
+      return node.id.indexOf("scene-tab-") === 0 ? node.id.slice("scene-tab-".length) : null;
+    }
     function currentSceneId() {
+      const tabScene = selectedSceneId();
+      if (tabScene) return tabScene;
       const node = document.getElementById("fast-view-metadata");
       const text = node ? (node.textContent||"").trim() : "";
       if (!text) return null;
