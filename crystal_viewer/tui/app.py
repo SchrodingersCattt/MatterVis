@@ -12,6 +12,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import Footer, Header, Static
 from textual.reactive import reactive
+from rich.text import Text
 
 import numpy as np
 
@@ -33,12 +34,17 @@ ZOOM_FACTOR = 1.3    # multiplicative zoom per keypress
 
 
 class CrystalCanvas(Static):
-    """Widget that displays the ASCII-rendered crystal structure."""
+    """Widget that displays the pre-rendered crystal frame.
+
+    Uses Rich Text with no_wrap to prevent reflow of braille+ANSI content.
+    """
 
     frame_text: reactive[str] = reactive("")
 
-    def render(self) -> str:
-        return self.frame_text
+    def render(self) -> Text:
+        # Parse ANSI escape codes into Rich Text; disable wrapping
+        t = Text.from_ansi(self.frame_text, no_wrap=True, overflow="crop")
+        return t
 
 
 # ── Main App ────────────────────────────────────────────────────────────────
