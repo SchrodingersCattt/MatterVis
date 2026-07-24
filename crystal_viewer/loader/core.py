@@ -295,6 +295,95 @@ def _has_shelx_occupancy_disorder(raw_atoms) -> bool:
     return bool(_occupancy_only_disorder_indices(raw_atoms))
 
 
+def _normal_disorder_tag(value: Any) -> str:
+    return str(value or ".").strip()
+
+
+def _has_shelx_part_disorder(raw_atoms) -> bool:
+    for atom in raw_atoms:
+        if _partial_occupancy_value(atom) >= 0.999:
+            continue
+        dg = _normal_disorder_tag(atom.get("dg"))
+        if dg.startswith("-") and dg not in ("-",):
+            return True
+    return False
+
+
+def _simple_explicit_assembly_major_groups(raw_atoms) -> dict[str, set[str]] | None:
+    """Return occupancy-major groups for simple explicit assemblies.
+
+    This is a fast path for the common Olex2/SHELX shape where a CIF
+    already carries ``_atom_site_disorder_assembly`` +
+    ``_atom_site_disorder_group`` and one group has a strictly larger
+    crystallographic occupancy than the others. In that case the major
+    orientation is determined by the CIF itself; running MolCrysKit's
+    ordered-replica optimiser first and then overriding it by occupancy
+    wastes seconds on large structures.
+
+    Equal-occupancy groups and mixed disorder forms return ``None`` so
+    the existing full MolCrysKit fallback still owns chemically
+    ambiguous cases.
+    """
+    if _has_shelx_part_disorder(raw_atoms) or _occupancy_only_disorder_indices(raw_atoms):
+        return None
+    by_assembly: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    for atom in raw_atoms:
+        occ = _partial_occupancy_value(atom)
+        dg = _normal_disorder_tag(atom.get("dg"))
+        da = _normal_disorder_tag(atom.get("da"))
+        # Conservative first cut: only use the cheap occupancy-major
+        # assignment when the CIF describes the whole structure as explicit
+        # alternatives. Partial-site disorder embedded in otherwise ordered
+        # atoms can affect molecule grouping/formula-unit selection; leave
+        # those cases to MolCrysKit's full ordered-replica path.
+        if occ >= 0.999 or dg in (".", "?", "") or da in (".", "?", ""):
+            return None
+        if dg in (".", "?", "") or da in (".", "?", ""):
+            continue
+        by_assembly[da][dg].append(occ)
+    if not by_assembly:
+        return None
+
+    major_by_assembly: dict[str, set[str]] = {}
+    for da, groups in by_assembly.items():
+        if len(groups) < 2:
+            continue
+        averages = {
+            dg: sum(values) / len(values)
+            for dg, values in groups.items()
+            if values
+        }
+        if len(averages) < 2:
+            continue
+        ranked = sorted(averages.items(), key=lambda item: item[1], reverse=True)
+        if ranked[0][1] <= ranked[1][1] + 1e-4:
+            return None
+        major_by_assembly[da] = {ranked[0][0]}
+    return major_by_assembly or None
+
+
+def _tag_simple_explicit_assembly_disorder(
+    raw_atoms,
+    major_by_assembly: dict[str, set[str]],
+):
+    out = [dict(atom) for atom in raw_atoms]
+    for atom in out:
+        if _partial_occupancy_value(atom) >= 0.999:
+            continue
+        dg = _normal_disorder_tag(atom.get("dg"))
+        da = _normal_disorder_tag(atom.get("da"))
+        majors = major_by_assembly.get(da)
+        if not majors or dg in (".", "?", ""):
+            continue
+        atom["_is_minor"] = dg not in majors
+        # Synthetic fields are intentionally assembly-local: bond
+        # conflict checks should reject A/major ↔ A/minor, but should
+        # not make independent disorder assemblies conflict globally.
+        atom["_mv_auto_disorder_assembly"] = da
+        atom["_mv_auto_disorder_group"] = dg
+    return out
+
+
 def _tag_shelx_occupancy_disorder(raw_atoms, cif_path: str, M):
     """If ``raw_atoms`` contains SHELX-style occupancy disorder,
     consult :func:`molcrys_kit.analysis.disorder.\
@@ -320,6 +409,10 @@ generate_ordered_replicas_from_disordered_sites` for the optimal
     """
     if not _has_shelx_occupancy_disorder(raw_atoms):
         return raw_atoms
+
+    simple_major_groups = _simple_explicit_assembly_major_groups(raw_atoms)
+    if simple_major_groups:
+        return _tag_simple_explicit_assembly_disorder(raw_atoms, simple_major_groups)
 
     try:
         try:

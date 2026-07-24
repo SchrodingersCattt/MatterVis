@@ -193,12 +193,18 @@
       if (!lay || typeof lay!=="object"||!lay.scene||typeof lay.scene!=="object") return false;
       return data.some(function(t){var ty=String((t&&t.type)||"").toLowerCase();return ty==="mesh3d"||ty==="scatter3d"||ty==="cone"||!!(t&&t.z);});
     }
+    function isPendingFigure(fig) {
+      if (!fig) return false;
+      if (fig._mattervis_pending) return true;
+      const meta = fig.layout && fig.layout.meta;
+      return !!(meta && typeof meta==="object" && meta.mattervis_pending);
+    }
     var proto = window.location.protocol==="https:"?"wss:":"ws:";
     var ws = new WebSocket(proto+"//"+window.location.host+"/api/v2/ws");
     ws.addEventListener("open",function(){ws.send(JSON.stringify({type:"subscribe_figure",enabled:true}));});
     ws.addEventListener("message",function(e){
       var p; try { p=JSON.parse(e.data||"{}"); } catch(_){return;}
-      if (!p.figure||p.figure._mattervis_pending||!has3DScene(p.figure)) return;
+      if (!p.figure||isPendingFigure(p.figure)||!has3DScene(p.figure)) return;
       var cur=currentSceneId(); if (cur&&p.scene_id&&String(p.scene_id)!==cur) return;
       var seq=Number(p.figure_seq||p.figure_version||0); if (seq&&seq<=lastFigureSeq) return;
       if (seq) lastFigureSeq=seq;
@@ -277,6 +283,8 @@
       drag_poll_redraws: 0,
       svg_redraws: 0,
       svg_redraws_with_camera: 0,
+      svg_redraws_while_drag: 0,
+      svg_redraws_with_event_camera: 0,
       svg_redraws_with_layout_camera: 0,
       svg_redraws_with_live_camera: 0,
       strip_attempts: 0,
@@ -284,6 +292,8 @@
       last_attach_skip_reason: null,
     };
   }
+  window.__mv_compass_diag.svg_redraws_while_drag = window.__mv_compass_diag.svg_redraws_while_drag || 0;
+  window.__mv_compass_diag.svg_redraws_with_event_camera = window.__mv_compass_diag.svg_redraws_with_event_camera || 0;
   window.__mv_compass_diag.iife_loaded += 1;
 
   function graphRoot() { return document.getElementById("crystal-graph"); }
@@ -659,22 +669,30 @@
     if (!gd || !gd.layout) return;
     const ctx = compassFromMeta(gd.layout);
     if (!ctx || !ctx.M) return;
+    const dragActive = dragPollActive || !!dragArm;
+    const preferLive = !!preferLiveCamera || dragActive;
     let camera = eventCamera || null;
     let cameraSource = camera ? "event" : null;
-    if (!camera && preferLiveCamera) {
+    if (!camera && preferLive) {
       camera = liveSceneCamera(gd);
       cameraSource = camera ? "live" : null;
     }
-    if (!camera) {
+    if (!camera && !preferLive) {
       camera = layoutSceneCamera(gd);
       cameraSource = camera ? "layout" : null;
     }
-    if (!camera && !preferLiveCamera) {
+    if (!camera && !preferLive) {
       camera = liveSceneCamera(gd);
       cameraSource = camera ? "live" : null;
     }
+    if (!camera && preferLive) {
+      camera = layoutSceneCamera(gd);
+      cameraSource = camera ? "layout" : null;
+    }
     if (!camera) return;
     if (window.__mv_compass_diag) window.__mv_compass_diag.svg_redraws_with_camera += 1;
+    if (window.__mv_compass_diag && dragActive) window.__mv_compass_diag.svg_redraws_while_drag += 1;
+    if (window.__mv_compass_diag && cameraSource === "event") window.__mv_compass_diag.svg_redraws_with_event_camera += 1;
     if (window.__mv_compass_diag && cameraSource === "layout") window.__mv_compass_diag.svg_redraws_with_layout_camera += 1;
     if (window.__mv_compass_diag && cameraSource === "live") window.__mv_compass_diag.svg_redraws_with_live_camera += 1;
     const basis = cameraScreenBasis(camera);
@@ -701,7 +719,7 @@
       scheduled = null;
       scheduledGd = null;
       scheduledCamera = null;
-      redrawCompass(g, c, false);
+      redrawCompass(g, c, dragPollActive || !!dragArm);
     });
   }
 

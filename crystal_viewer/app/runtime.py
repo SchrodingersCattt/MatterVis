@@ -64,10 +64,22 @@ def _prewarm_bundle_async(backend: ViewerBackend, structure_name: str) -> None:
     def _job():
         try:
             bundle = backend.get_bundle(structure_name)
+            # Skip prewarm for pending upload placeholders.
+            if getattr(bundle, "_upload_pending", False):
+                return
             defaults = backend.default_state(structure_name)
         except Exception:
             return
-        for display_mode in ("formula_unit", "asymmetric_unit", "unit_cell", "cluster"):
+        # Adaptive prewarm: large structures only get the two most
+        # commonly-needed display modes. This keeps the background CPU
+        # budget low so user interaction right after upload stays responsive.
+        n_atoms = len(getattr(bundle, "raw_atoms", None) or [])
+        aggressive = str(os.environ.get("MATTERVIS_PREWARM_AGGRESSIVE", "0")).lower() in {"1", "true", "yes", "on"}
+        if aggressive or n_atoms <= 400:
+            modes = ("formula_unit", "asymmetric_unit", "unit_cell", "cluster")
+        else:
+            modes = ("formula_unit", "unit_cell")
+        for display_mode in modes:
             for show_hydrogen in (False, True):
                 try:
                     scene = build_bundle_scene(
@@ -100,6 +112,9 @@ def _prewarm_bundle_async(backend: ViewerBackend, structure_name: str) -> None:
                     build_figure(scene, style, topology_data=None)
                 except Exception:
                     continue
+            # Yield between display modes so interactive render jobs
+            # can preempt prewarm on the finalize pool.
+            time.sleep(0.1)
 
     try:
         _PREWARM_EXECUTOR.submit(_job)

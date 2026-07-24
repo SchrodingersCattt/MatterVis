@@ -697,7 +697,42 @@ def register_view_callbacks(app, backend):
             async_topology=not topology_changed,
             async_figure=scene_changed,
         )
-        if isinstance(fig, dict) and fig.get("_mattervis_pending"):
+
+        pending_figure = False
+        if isinstance(fig, dict):
+            pending_figure = bool(fig.get("_mattervis_pending"))
+            layout_meta = (fig.get("layout") or {}).get("meta") if isinstance(fig.get("layout"), dict) else None
+            if isinstance(layout_meta, dict):
+                pending_figure = pending_figure or bool(layout_meta.get("mattervis_pending"))
+        else:
+            pending_figure = bool(getattr(fig, "_mattervis_pending", False))
+            try:
+                layout_meta = fig.layout.meta
+                if isinstance(layout_meta, dict):
+                    pending_figure = pending_figure or bool(layout_meta.get("mattervis_pending"))
+            except Exception:
+                pass
+        if pending_figure:
+            topo_key = topo_key_preview
+            if prev_key == topo_key:
+                update_view._last_rendered_scene_id = state.get("scene_id")
+                perf_log.record(
+                    "callback:update_view",
+                    duration_ms=(time.monotonic() - cb_start) * 1000.0,
+                    kind="cb",
+                    info={
+                        "scene_id": state.get("scene_id"),
+                        "figure": "pending",
+                        "side_panel": "cached",
+                    },
+                )
+                return no_update, no_update, no_update, no_update
+            update_view._topo_cache_key = topo_key
+            with perf_log.time_block("update_view:side_panel", kind="event"):
+                summary = _structure_summary(backend.scene_for_state(state))
+                histogram = topology_histogram_figure(topology_data)
+                md = topology_results_markdown(topology_data)
+            update_view._last_rendered_scene_id = state.get("scene_id")
             perf_log.record(
                 "callback:update_view",
                 duration_ms=(time.monotonic() - cb_start) * 1000.0,
@@ -705,9 +740,10 @@ def register_view_callbacks(app, backend):
                 info={
                     "scene_id": state.get("scene_id"),
                     "figure": "pending",
+                    "side_panel": "rebuilt",
                 },
             )
-            return no_update, no_update, no_update, no_update
+            return no_update, histogram, md, summary
         # The right-hand sidebar only changes when the *topology* state
         # or the chosen scene changes. Keep a memo on the callback
         # itself so toggling Labels / Axes / Atom Scale -- which all
