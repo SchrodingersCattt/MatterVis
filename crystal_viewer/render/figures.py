@@ -167,6 +167,10 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None, *,
     trace_dicts: list[dict] = []
     if topology_on:
         trace_dicts.extend(_traces_to_dicts(topology_background_traces(topology_data, style)))
+    # Isosurface overlay: inserted before bonds/atoms so the molecular
+    # skeleton renders on top of the translucent orbital lobes.
+    from .traces_isosurface import isosurface_overlay_traces
+    trace_dicts.extend(isosurface_overlay_traces(scene, style))
     trace_dicts.extend(mesh_payload["bond_dicts"])
     trace_dicts.extend(mesh_payload["minor_bond_dicts"])
     trace_dicts.extend(mesh_payload["atom_dicts"])

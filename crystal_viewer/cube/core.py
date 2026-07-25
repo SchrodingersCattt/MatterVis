@@ -693,6 +693,12 @@ def build_orbital_panel_figure(
 
     Useful for publication-quality side-by-side rendering of HOCO/LUCO,
     spin-up/spin-down, or any pair/triplet of orbitals.
+
+    .. deprecated::
+        This standalone rendering path uses its own color/material/bond
+        system. Prefer :func:`build_cube_figure` which routes the structure
+        through the standard crystal pipeline (MCK bonds, unified style,
+        display modes) with the isosurface as an overlay.
     """
     n = len(cubes)
     if n == 0:

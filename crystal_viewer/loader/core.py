@@ -42,6 +42,7 @@ class LoadedCrystal:
     fragment_table_cache: dict[tuple[Any, ...], tuple[list[dict[str, Any]], list[str]]] = field(default_factory=dict)
     atom_fragment_labels: list[str] = field(default_factory=list)
     source: str = "catalog"
+    cube_data: Any | None = None
     # Per-bundle cache for scenes after a transforms pipeline has been
     # applied. Key is ``(display_mode, show_hydrogen, transforms_cache_key)``;
     # value is the post-transform scene dict (already including a refreshed

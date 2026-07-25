@@ -347,6 +347,9 @@ def compose_frame(
     # Sort back-to-front for drawing (far first)
     atoms_draw.sort(key=lambda a: a.depth)
 
+    # ── Layer 1.5: Density blobs (behind bonds/atoms, stippled fill) ────
+    _draw_density_blobs(canvas, viewport, camera, crystal)
+
     # ── Layer 2: Bonds (circle-edge to circle-edge) ─────────────────────
     if show_bonds and crystal.bonds:
         pos_map = {a.idx: a for a in atoms_draw}
@@ -555,6 +558,69 @@ def _color_run_to_ansi(cells: list[tuple[str, int]]) -> str:
         text = "".join(cur_chars)
         parts.append(f"\033[38;5;{cur_color}m{text}\033[0m")
     return "".join(parts)
+
+
+# ── Density blob drawing ────────────────────────────────────────────────────
+
+# ANSI 256 colors for orbital lobes
+_BLOB_POS_COLOR = 208   # orange (positive lobe)
+_BLOB_NEG_COLOR = 33    # blue (negative lobe)
+
+
+def _draw_density_blobs(
+    canvas: "BrailleCanvas",
+    viewport: "_Viewport",
+    camera: "Camera",
+    crystal: "CrystalIR",
+) -> None:
+    """Draw stippled density blobs for cube isosurface lobes.
+
+    Uses a sparse dot pattern to simulate translucency — structural
+    geometry drawn on top will overwrite the dots, keeping atoms/bonds
+    legible through the orbital cloud.
+    """
+    blobs = crystal.metadata.get("density_blobs")
+    if not blobs:
+        return
+
+    from ..math.camera import project_points as _proj
+
+    centers = np.array([b["center"] for b in blobs], dtype=float)
+    pts_2d, blob_depth = _proj(camera, centers)
+
+    for i, blob in enumerate(blobs):
+        x2d, y2d = float(pts_2d[i][0]), float(pts_2d[i][1])
+        px_x, px_y = viewport.to_px(x2d, y2d)
+        # Convert world-space radius to subpixel radius
+        screen_r = max(2, int(blob["radius"] * viewport.scale * 2))
+        # Cap radius to avoid flooding the canvas
+        screen_r = min(screen_r, min(canvas.px_width, canvas.px_height) // 3)
+
+        color = _BLOB_POS_COLOR if blob.get("sign", 1) > 0 else _BLOB_NEG_COLOR
+        density = 0.25  # sparse fill for translucency effect
+
+        _draw_stippled_disk(canvas, px_x, px_y, screen_r, color=color, density=density)
+
+
+def _draw_stippled_disk(
+    canvas: "BrailleCanvas",
+    cx: int, cy: int, radius: int,
+    *, color: int = 0, density: float = 0.3,
+) -> None:
+    """Draw a filled disk with deterministic stipple pattern.
+
+    Uses a simple hash to decide which pixels to set, giving a repeatable
+    translucent appearance without importing random.
+    """
+    r2 = radius * radius
+    for dy in range(-radius, radius + 1):
+        for dx in range(-radius, radius + 1):
+            if dx * dx + dy * dy > r2:
+                continue
+            # Deterministic stipple: hash of position
+            h = ((dx * 7919 + dy * 104729) & 0xFFFF) / 65535.0
+            if h < density:
+                canvas.set_pixel(cx + dx, cy + dy, color=color)
 
 
 # ── Circle drawing ──────────────────────────────────────────────────────────
