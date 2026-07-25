@@ -40,12 +40,16 @@ class BrailleCanvas:
         Height in terminal characters.
     """
 
-    __slots__ = ("width", "height", "_buffer")
+    __slots__ = ("width", "height", "_buffer", "_color_buffer")
 
     def __init__(self, width: int, height: int) -> None:
         self.width = width
         self.height = height
         self._buffer = [[0] * width for _ in range(height)]
+        # Per-cell color attribution (ANSI 256 code). 0 = default.
+        # Last-writer-wins: because atoms are drawn back-to-front,
+        # the front atom's color naturally overwrites the back atom's.
+        self._color_buffer = [[0] * width for _ in range(height)]
 
     @property
     def px_width(self) -> int:
@@ -62,9 +66,19 @@ class BrailleCanvas:
         for row in self._buffer:
             for i in range(len(row)):
                 row[i] = 0
+        for row in self._color_buffer:
+            for i in range(len(row)):
+                row[i] = 0
 
-    def set_pixel(self, x: int, y: int) -> None:
-        """Set a subpixel at (x, y). Origin is top-left."""
+    def set_pixel(self, x: int, y: int, *, color: int = 0) -> None:
+        """Set a subpixel at (x, y). Origin is top-left.
+
+        Parameters
+        ----------
+        color : int
+            ANSI 256 color code to attribute to this cell.
+            Last-writer-wins per cell (painter's algorithm).
+        """
         if x < 0 or x >= self.px_width or y < 0 or y >= self.px_height:
             return
         cell_col = x >> 1       # x // 2
@@ -72,6 +86,8 @@ class BrailleCanvas:
         sub_col = x & 1        # x % 2
         sub_row = y & 3        # y % 4
         self._buffer[cell_row][cell_col] |= _BRAILLE_MAP[sub_row][sub_col]
+        if color:
+            self._color_buffer[cell_row][cell_col] = color
 
     def get_pixel(self, x: int, y: int) -> bool:
         """Check if a subpixel is set."""
@@ -83,7 +99,9 @@ class BrailleCanvas:
         sub_row = y & 3
         return bool(self._buffer[cell_row][cell_col] & _BRAILLE_MAP[sub_row][sub_col])
 
-    def draw_line(self, x0: int, y0: int, x1: int, y1: int) -> None:
+    def draw_line(
+        self, x0: int, y0: int, x1: int, y1: int, *, color: int = 0
+    ) -> None:
         """Draw a line using Bresenham's algorithm in subpixel space."""
         dx = abs(x1 - x0)
         dy = -abs(y1 - y0)
@@ -92,7 +110,7 @@ class BrailleCanvas:
         err = dx + dy
 
         while True:
-            self.set_pixel(x0, y0)
+            self.set_pixel(x0, y0, color=color)
             if x0 == x1 and y0 == y1:
                 break
             e2 = err << 1  # 2 * err
@@ -104,7 +122,15 @@ class BrailleCanvas:
                 y0 += sy
 
     def draw_dashed_line(
-        self, x0: int, y0: int, x1: int, y1: int, dash: int = 3, gap: int = 2
+        self,
+        x0: int,
+        y0: int,
+        x1: int,
+        y1: int,
+        dash: int = 3,
+        gap: int = 2,
+        *,
+        color: int = 0,
     ) -> None:
         """Draw a dashed line (for minor-disorder bonds).
 
@@ -114,6 +140,8 @@ class BrailleCanvas:
             Subpixels drawn per dash segment.
         gap : int
             Subpixels skipped per gap segment.
+        color : int
+            ANSI 256 color code for this line.
         """
         dx = abs(x1 - x0)
         dy = -abs(y1 - y0)
@@ -125,7 +153,7 @@ class BrailleCanvas:
 
         while True:
             if (count % cycle) < dash:
-                self.set_pixel(x0, y0)
+                self.set_pixel(x0, y0, color=color)
             count += 1
             if x0 == x1 and y0 == y1:
                 break
@@ -165,3 +193,24 @@ class BrailleCanvas:
         while lines and not lines[-1]:
             lines.pop()
         return "\n".join(lines)
+
+    def render_colored(self) -> list[list[tuple[str, int]]]:
+        """Render canvas with per-cell color attribution.
+
+        Returns
+        -------
+        list of rows, each row is a list of (char, color) tuples.
+        Color 0 means "use default/CELL_COLOR".
+        """
+        result: list[list[tuple[str, int]]] = []
+        for row_idx in range(self.height):
+            row_data: list[tuple[str, int]] = []
+            for col_idx in range(self.width):
+                bits = self._buffer[row_idx][col_idx]
+                color = self._color_buffer[row_idx][col_idx]
+                if bits == 0:
+                    row_data.append((" ", 0))
+                else:
+                    row_data.append((chr(_BRAILLE_BASE + bits), color))
+            result.append(row_data)
+        return result
