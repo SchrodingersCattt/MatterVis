@@ -19,17 +19,27 @@ from .core import (  # noqa: F401
     tile_cube,
     tile_cube_data,
 )
+from .bridge import (  # noqa: F401
+    build_cube_figure,
+    cube_lattice_matrix,
+    cube_to_cell,
+    cube_to_raw_atoms,
+)
 
 __all__ = [
     "CubeAtom",
     "CubeData",
     "atom_sphere_traces",
     "bond_traces",
+    "build_cube_figure",
     "build_orbital_figure",
     "build_orbital_panel_figure",
     "cell_box_trace",
     "cube_atom_trace",
     "cube_grid",
+    "cube_lattice_matrix",
+    "cube_to_cell",
+    "cube_to_raw_atoms",
     "default_isovalue",
     "export_static",
     "mask_to_atoms",

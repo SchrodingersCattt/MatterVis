@@ -4,6 +4,7 @@ Supported formats:
 - CIF (.cif) — via existing MatterVis parser (gemmi-based)
 - POSCAR/VASP (.vasp, .poscar, POSCAR, CONTCAR) — via pymatgen
 - Extended XYZ (.extxyz, .xyz) — via ASE
+- Gaussian/CP2K cube (.cube) — structure + volumetric density metadata
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ def load_for_tui(path: str) -> CrystalIR:
     """Load a crystal structure file and return a CrystalIR.
 
     Dispatches to the appropriate parser based on file extension.
+    Also computes coordination polyhedra for metal centers.
     """
     p = Path(path)
     if not p.exists():
@@ -29,16 +31,28 @@ def load_for_tui(path: str) -> CrystalIR:
     name = p.stem
 
     if ext == ".cif":
-        return _load_cif(str(p), name)
+        ir = _load_cif(str(p), name)
+    elif ext == ".cube":
+        ir = _load_cube(str(p), name)
     elif ext in (".vasp", ".poscar") or p.name.upper() in ("POSCAR", "CONTCAR"):
-        return _load_poscar(str(p), name)
+        ir = _load_poscar(str(p), name)
     elif ext in (".extxyz", ".xyz"):
-        return _load_extxyz(str(p), name)
+        ir = _load_extxyz(str(p), name)
     else:
         raise ValueError(
             f"Unsupported file format: {ext!r}. "
-            f"Supported: .cif, .vasp, .poscar, .extxyz, .xyz"
+            f"Supported: .cif, .cube, .vasp, .poscar, .extxyz, .xyz"
         )
+
+    # Compute polyhedra for metal centers (stored in metadata)
+    try:
+        polyhedra = compute_polyhedra(ir)
+        if polyhedra:
+            ir.metadata["polyhedra"] = polyhedra
+    except Exception:
+        pass  # Polyhedra are optional
+
+    return ir
 
 
 # ── CIF loader (reuses existing MatterVis parser + MCK) ─────────────────────
@@ -191,6 +205,143 @@ def _load_extxyz(path: str, name: str) -> CrystalIR:
     return _from_ase_atoms(atoms_ase, name, path)
 
 
+# ── Cube file loader ────────────────────────────────────────────────────────
+
+
+def _load_cube(path: str, name: str) -> CrystalIR:
+    """Load Gaussian/CP2K .cube file.
+
+    Structure goes through MCK bond detection (same as CIF).
+    Volumetric data is stored in metadata for TUI density blob rendering.
+    """
+    from ..cube import read_cube
+    from ..cube.bridge import cube_lattice_matrix, cube_to_raw_atoms
+    from ..structure.bonds import find_bonds
+
+    cube = read_cube(path)
+    M = cube_lattice_matrix(cube)
+    raw_atoms = cube_to_raw_atoms(cube)
+
+    # Build lattice from matrix
+    a_vec, b_vec, c_vec = M[0], M[1], M[2]
+    a = float(np.linalg.norm(a_vec))
+    b = float(np.linalg.norm(b_vec))
+    c = float(np.linalg.norm(c_vec))
+    alpha = float(np.degrees(np.arccos(np.clip(np.dot(b_vec, c_vec) / (b * c), -1, 1))))
+    beta = float(np.degrees(np.arccos(np.clip(np.dot(a_vec, c_vec) / (a * c), -1, 1))))
+    gamma = float(np.degrees(np.arccos(np.clip(np.dot(a_vec, b_vec) / (a * b), -1, 1))))
+    lattice = Lattice(a=a, b=b, c=c, alpha=alpha, beta=beta, gamma=gamma, matrix=M)
+
+    # MCK bond detection
+    import gemmi
+    cell = gemmi.UnitCell(a, b, c, alpha, beta, gamma)
+    bond_pairs: list[tuple[int, int]] = []
+    try:
+        from ..structure.molcrys_bridge import analyze as mck_analyze
+        mck_analysis = mck_analyze(raw_atoms, M)
+        bond_pairs = mck_analysis.bond_pairs
+    except Exception:
+        try:
+            bond_pairs = find_bonds(raw_atoms, M=M, cell=cell)
+        except Exception:
+            pass
+
+    # Convert to AtomIR
+    atoms = []
+    for i, at in enumerate(raw_atoms):
+        atoms.append(AtomIR(
+            element=at["elem"],
+            cart=np.array(at["cart"], dtype=float),
+            frac=np.array(at["frac"], dtype=float),
+            label=at.get("label", f"{at['elem']}{i+1}"),
+            occupancy=1.0,
+            index=i,
+        ))
+
+    bonds = []
+    for pair in bond_pairs:
+        i, j = pair[0], pair[1]
+        if i < len(atoms) and j < len(atoms):
+            d = float(np.linalg.norm(atoms[i].cart - atoms[j].cart))
+            bonds.append(BondIR(i=i, j=j, distance=d))
+
+    formula = _compose_formula(atoms)
+
+    ir = CrystalIR(
+        title=name,
+        formula=formula,
+        spacegroup="",
+        source_path=path,
+        lattice=lattice,
+        atoms=atoms,
+        bonds=bonds,
+    )
+
+    # Store cube data for density blob rendering
+    ir.metadata["cube_data"] = cube
+
+    # Pre-compute density blobs (bounding spheres of isosurface lobes)
+    try:
+        blobs = _extract_density_blobs(cube)
+        if blobs:
+            ir.metadata["density_blobs"] = blobs
+    except Exception:
+        pass
+
+    return ir
+
+
+def _extract_density_blobs(cube) -> list[dict]:
+    """Extract approximate bounding spheres for + and - isosurface lobes.
+
+    Uses connected-component labeling on the thresholded volume to identify
+    distinct lobes, then computes their centroid and bounding radius in
+    Cartesian space.
+    """
+    from ..cube.core import default_isovalue
+
+    try:
+        from scipy.ndimage import label as ndi_label
+    except ImportError:
+        return []
+
+    iso = default_isovalue(cube.values)
+    blobs = []
+
+    for sign, threshold in [(+1, iso), (-1, -iso)]:
+        if sign > 0:
+            mask = cube.values > threshold
+        else:
+            mask = cube.values < threshold
+        if not mask.any():
+            continue
+
+        labeled, n_features = ndi_label(mask)
+        for comp_id in range(1, n_features + 1):
+            # Find voxel indices of this component
+            indices = np.argwhere(labeled == comp_id)
+            if len(indices) < 4:
+                continue
+            # Convert voxel indices to Cartesian coordinates
+            # Each voxel (i, j, k) → origin + i*axes[0] + j*axes[1] + k*axes[2]
+            cart_points = (
+                cube.origin[None, :]
+                + indices[:, 0:1] * cube.axes[0][None, :]
+                + indices[:, 1:2] * cube.axes[1][None, :]
+                + indices[:, 2:3] * cube.axes[2][None, :]
+            )
+            center = cart_points.mean(axis=0)
+            radius = float(np.max(np.linalg.norm(cart_points - center, axis=1)))
+            blobs.append({
+                "center": center,
+                "radius": radius,
+                "sign": sign,
+                "n_voxels": len(indices),
+            })
+
+    return blobs
+
+
 # ── Conversion helpers ──────────────────────────────────────────────────────
 
 
@@ -326,3 +477,79 @@ def _compose_formula(atoms: list[AtomIR]) -> str:
         else:
             parts.append(f"{elem}{n}")
     return "".join(parts)
+
+
+# ── Polyhedra computation for TUI ───────────────────────────────────────────
+
+# Elements considered as potential coordination centers
+_METAL_CENTERS = frozenset(
+    # Transition metals (3d, 4d, 5d)
+    "Sc Ti V Cr Mn Fe Co Ni Cu Zn "
+    "Y Zr Nb Mo Tc Ru Rh Pd Ag Cd "
+    "Hf Ta W Re Os Ir Pt Au Hg "
+    # Lanthanides
+    "La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu "
+    # Actinides (common)
+    "U Th "
+    # Post-transition metals commonly coordinated
+    "Al Ga In Tl Sn Pb Bi".split()
+)
+
+
+def compute_polyhedra(ir: CrystalIR) -> list[dict]:
+    """Compute coordination polyhedra for metal centers using existing bonds.
+
+    Returns a list of dicts, each with:
+        center_idx, center_element, center_label, cn,
+        shell_indices, hull_edges
+
+    Uses bonds already in ir.bonds to determine coordination shells,
+    then computes 3D convex hull of shell atoms for wireframe rendering.
+    """
+    if not ir.bonds:
+        return []
+
+    # Build adjacency from bonds
+    from collections import defaultdict
+    neighbors: dict[int, list[int]] = defaultdict(list)
+    for bond in ir.bonds:
+        neighbors[bond.i].append(bond.j)
+        neighbors[bond.j].append(bond.i)
+
+    results: list[dict] = []
+
+    for idx, atom in enumerate(ir.atoms):
+        if atom.element not in _METAL_CENTERS:
+            continue
+        shell = neighbors.get(idx, [])
+        if len(shell) < 4:
+            continue  # Need ≥4 for a meaningful polyhedron
+
+        # Get shell atom Cartesian coordinates
+        shell_coords = np.array([ir.atoms[i].cart for i in shell])
+
+        # Compute 3D convex hull
+        try:
+            from scipy.spatial import ConvexHull
+            hull = ConvexHull(shell_coords)
+        except Exception:
+            continue  # Degenerate (coplanar) or scipy unavailable
+
+        # Extract edges from simplices
+        edge_set: set[tuple[int, int]] = set()
+        for simplex in hull.simplices:
+            a, b, c = int(simplex[0]), int(simplex[1]), int(simplex[2])
+            edge_set.add(tuple(sorted((a, b))))
+            edge_set.add(tuple(sorted((b, c))))
+            edge_set.add(tuple(sorted((a, c))))
+
+        results.append({
+            "center_idx": idx,
+            "center_element": atom.element,
+            "center_label": atom.display_label,
+            "cn": len(shell),
+            "shell_indices": shell,
+            "hull_edges": sorted(edge_set),
+        })
+
+    return results

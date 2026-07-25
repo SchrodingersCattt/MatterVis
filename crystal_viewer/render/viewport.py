@@ -384,6 +384,20 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
             atom_mins = np.minimum(atom_mins, extras_min)
             atom_maxs = np.maximum(atom_maxs, extras_max)
 
+    # Expand viewport to include isosurface mesh extents when present.
+    # Without this, low-isovalue surfaces that extend beyond the atom
+    # positions get clipped at the Plotly axis boundary.
+    cube_data = scene.get("cube_data")
+    if cube_data is not None and style.get("isosurface_enabled", True):
+        from .traces_isosurface import isosurface_mesh_extents
+        iso_min, iso_max = isosurface_mesh_extents(scene, style)
+        if iso_min is not None:
+            if atom_mins is None:
+                atom_mins, atom_maxs = iso_min, iso_max
+            else:
+                atom_mins = np.minimum(atom_mins, iso_min)
+                atom_maxs = np.maximum(atom_maxs, iso_max)
+
     if atom_mins is None:
         return [[-1.0, 1.0], [-1.0, 1.0], [-1.0, 1.0]]
 
