@@ -20,6 +20,7 @@ def load_for_tui(path: str) -> CrystalIR:
     """Load a crystal structure file and return a CrystalIR.
 
     Dispatches to the appropriate parser based on file extension.
+    Also computes coordination polyhedra for metal centers.
     """
     p = Path(path)
     if not p.exists():
@@ -29,16 +30,26 @@ def load_for_tui(path: str) -> CrystalIR:
     name = p.stem
 
     if ext == ".cif":
-        return _load_cif(str(p), name)
+        ir = _load_cif(str(p), name)
     elif ext in (".vasp", ".poscar") or p.name.upper() in ("POSCAR", "CONTCAR"):
-        return _load_poscar(str(p), name)
+        ir = _load_poscar(str(p), name)
     elif ext in (".extxyz", ".xyz"):
-        return _load_extxyz(str(p), name)
+        ir = _load_extxyz(str(p), name)
     else:
         raise ValueError(
             f"Unsupported file format: {ext!r}. "
             f"Supported: .cif, .vasp, .poscar, .extxyz, .xyz"
         )
+
+    # Compute polyhedra for metal centers (stored in metadata)
+    try:
+        polyhedra = compute_polyhedra(ir)
+        if polyhedra:
+            ir.metadata["polyhedra"] = polyhedra
+    except Exception:
+        pass  # Polyhedra are optional
+
+    return ir
 
 
 # ── CIF loader (reuses existing MatterVis parser + MCK) ─────────────────────
@@ -326,3 +337,79 @@ def _compose_formula(atoms: list[AtomIR]) -> str:
         else:
             parts.append(f"{elem}{n}")
     return "".join(parts)
+
+
+# ── Polyhedra computation for TUI ───────────────────────────────────────────
+
+# Elements considered as potential coordination centers
+_METAL_CENTERS = frozenset(
+    # Transition metals (3d, 4d, 5d)
+    "Sc Ti V Cr Mn Fe Co Ni Cu Zn "
+    "Y Zr Nb Mo Tc Ru Rh Pd Ag Cd "
+    "Hf Ta W Re Os Ir Pt Au Hg "
+    # Lanthanides
+    "La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu "
+    # Actinides (common)
+    "U Th "
+    # Post-transition metals commonly coordinated
+    "Al Ga In Tl Sn Pb Bi".split()
+)
+
+
+def compute_polyhedra(ir: CrystalIR) -> list[dict]:
+    """Compute coordination polyhedra for metal centers using existing bonds.
+
+    Returns a list of dicts, each with:
+        center_idx, center_element, center_label, cn,
+        shell_indices, hull_edges
+
+    Uses bonds already in ir.bonds to determine coordination shells,
+    then computes 3D convex hull of shell atoms for wireframe rendering.
+    """
+    if not ir.bonds:
+        return []
+
+    # Build adjacency from bonds
+    from collections import defaultdict
+    neighbors: dict[int, list[int]] = defaultdict(list)
+    for bond in ir.bonds:
+        neighbors[bond.i].append(bond.j)
+        neighbors[bond.j].append(bond.i)
+
+    results: list[dict] = []
+
+    for idx, atom in enumerate(ir.atoms):
+        if atom.element not in _METAL_CENTERS:
+            continue
+        shell = neighbors.get(idx, [])
+        if len(shell) < 4:
+            continue  # Need ≥4 for a meaningful polyhedron
+
+        # Get shell atom Cartesian coordinates
+        shell_coords = np.array([ir.atoms[i].cart for i in shell])
+
+        # Compute 3D convex hull
+        try:
+            from scipy.spatial import ConvexHull
+            hull = ConvexHull(shell_coords)
+        except Exception:
+            continue  # Degenerate (coplanar) or scipy unavailable
+
+        # Extract edges from simplices
+        edge_set: set[tuple[int, int]] = set()
+        for simplex in hull.simplices:
+            a, b, c = int(simplex[0]), int(simplex[1]), int(simplex[2])
+            edge_set.add(tuple(sorted((a, b))))
+            edge_set.add(tuple(sorted((b, c))))
+            edge_set.add(tuple(sorted((a, c))))
+
+        results.append({
+            "center_idx": idx,
+            "center_element": atom.element,
+            "center_label": atom.display_label,
+            "cn": len(shell),
+            "shell_indices": shell,
+            "hull_edges": sorted(edge_set),
+        })
+
+    return results

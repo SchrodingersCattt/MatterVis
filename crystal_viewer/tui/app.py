@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from .crystal_ir import CrystalIR
 
 from ..math.camera import Camera, ProjectionMode, project_points
-from .compositor import compose_frame, LABEL_MODES
+from .compositor import compose_frame, LABEL_MODES, DISPLAY_LEVELS
 
 
 # ── Constants ───────────────────────────────────────────────────────────────
@@ -84,6 +84,7 @@ class CrystalTUI(App):
         Binding("t", "toggle_label", "Label", show=True),
         Binding("m", "toggle_mono", "Mono", show=True),
         Binding("n", "toggle_minor", "Minor", show=True),
+        Binding("L", "cycle_level", "Level", show=True),
         Binding("r", "reset_view", "Reset", show=True),
         Binding("Q", "quit", "Quit", show=True),
     ]
@@ -108,6 +109,7 @@ class CrystalTUI(App):
         self._show_cell = show_cell
         self._label_mode = label_mode if not compact else "dot"
         self._show_minor = show_minor
+        self._display_level = "atom"
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -187,6 +189,7 @@ class CrystalTUI(App):
             zoom=self.camera.viewport_zoom,
             pan_x=self.camera.pan_x,
             pan_y=self.camera.pan_y,
+            display_level=self._display_level,
         )
         canvas.frame_text = frame
 
@@ -194,10 +197,11 @@ class CrystalTUI(App):
         proj = self.camera.projection.value[:5]
         zoom_str = f" ×{self.camera.viewport_zoom:.1f}" if self.camera.viewport_zoom != 1.0 else ""
         roll_str = f" r={self.camera.roll:.0f}°" if abs(self.camera.roll) > 0.5 else ""
+        level_str = f" [{self._display_level}]" if self._display_level != "atom" else ""
         self.sub_title = (
             f"{self.crystal.formula} | "
             f"az={self.camera.azimuth:.0f}° el={self.camera.elevation:.0f}°{roll_str} | "
-            f"{proj} | {self._label_mode}{zoom_str}"
+            f"{proj} | {self._label_mode}{zoom_str}{level_str}"
         )
 
     # ── Actions (toggle bindings only; movement is in on_key) ─────────
@@ -228,6 +232,13 @@ class CrystalTUI(App):
 
     def action_toggle_minor(self) -> None:
         self._show_minor = not self._show_minor
+        self._redraw()
+
+    def action_cycle_level(self) -> None:
+        """Cycle display level: atom → molecule → polyhedra."""
+        idx = DISPLAY_LEVELS.index(self._display_level) if self._display_level in DISPLAY_LEVELS else 0
+        self._display_level = DISPLAY_LEVELS[(idx + 1) % len(DISPLAY_LEVELS)]
+        self._update_title()
         self._redraw()
 
     def action_reset_view(self) -> None:
