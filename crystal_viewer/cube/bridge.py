@@ -84,6 +84,7 @@ def build_cube_figure(
     *,
     isovalue: float | None = None,
     opacity: float | None = None,
+    camera: dict[str, Any] | None = None,
     style: dict[str, Any] | None = None,
     display_mode: str = "formula_unit",
     show_hydrogen: bool = False,
@@ -104,6 +105,11 @@ def build_cube_figure(
         of absolute non-zero values.
     opacity : float, optional
         Isosurface opacity (0–1). Default 0.55.
+    camera : dict, optional
+        Plotly camera dict used for both the 3D scene and the projected
+        lattice compass. Pass the final camera here rather than mutating
+        ``fig.layout.scene.camera`` afterwards; the compass is baked into
+        static figures when the figure is built.
     style : dict, optional
         Style overrides (isosurface_*, atom_scale, bond_radius, etc.).
     display_mode : str
@@ -117,10 +123,10 @@ def build_cube_figure(
     """
     from pathlib import Path as _Path
 
-    from ..loader.cube_adapter import load_cube_file
-    from ..loader.core import build_bundle_scene
-    from ..render.figures import build_figure
     from ..config.schema import BUILTIN_STYLE
+    from ..loader.core import build_bundle_scene
+    from ..loader.cube_adapter import load_cube_file
+    from ..render.figures import build_figure
 
     cube_path = _Path(path)
     bundle = load_cube_file(cube_path)
@@ -138,6 +144,8 @@ def build_cube_figure(
         merged_style["isosurface_isovalue"] = isovalue
     if opacity is not None:
         merged_style["isosurface_opacity"] = opacity
+    if camera is not None:
+        merged_style["camera"] = camera
     if style:
         merged_style.update(style)
 

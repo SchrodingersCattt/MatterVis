@@ -575,6 +575,59 @@ def test_compass_projects_orthogonal_axes_to_orthogonal_screen_vectors():
     assert math.isclose(b_len / a_len, 1.0, rel_tol=1e-4)
 
 
+def test_cube_camera_argument_projects_compass_with_final_camera(tmp_path):
+    """The cube wrapper must bake its compass using the caller's camera.
+
+    A previous caller had to replace ``fig.layout.scene.camera`` after
+    construction.  The cell then used the new orthographic camera while the
+    paper-coordinate compass kept the wrapper's original diagonal camera, so
+    its arrows were no longer parallel to the visible cell edges.
+    """
+    from crystal_viewer.cube import build_cube_figure
+
+    path = tmp_path / "monoclinic.cube"
+    values = np.zeros((8, 8, 8), dtype=float)
+    values[3:5, 3:5, 3:5] = 1.0
+    axes = np.array(
+        [[0.5, 0.0, 0.0], [0.0, 0.5, 0.0], [-0.15, 0.0, 0.48]],
+        dtype=float,
+    )
+    with path.open("w") as handle:
+        handle.write("monoclinic compass regression\nsynthetic\n")
+        handle.write("    1 0.0 0.0 0.0\n")
+        for n, axis in zip(values.shape, axes):
+            handle.write(f"{n:5d} {axis[0]:12.6f} {axis[1]:12.6f} {axis[2]:12.6f}\n")
+        handle.write("    6     6.000000     0.500000     0.500000     0.500000\n")
+        flat = values.ravel()
+        for start in range(0, flat.size, 6):
+            handle.write("".join(f"{value:13.5e}" for value in flat[start : start + 6]) + "\n")
+
+    camera = {
+        "eye": {"x": 0.0, "y": 0.0, "z": 1.8},
+        "center": {"x": 0.0, "y": 0.0, "z": 0.0},
+        "up": {"x": 0.0, "y": 1.0, "z": 0.0},
+        "projection": {"type": "orthographic"},
+    }
+    fig = build_cube_figure(
+        path,
+        isovalue=0.5,
+        camera=camera,
+        display_mode="unit_cell",
+        show_hydrogen=True,
+    )
+
+    arrows = _compass_arrows(fig)
+    assert len(arrows) == 3
+    horizontal = [ann for ann in arrows if abs(float(ann.ay)) < 1e-6]
+    vertical = [ann for ann in arrows if abs(float(ann.ax)) < 1e-6]
+    # Looking along +z makes a and monoclinic c parallel to the visible
+    # horizontal cell edges; b remains parallel to the vertical edge.
+    assert len(horizontal) == 2
+    assert len(vertical) == 1
+    assert fig.layout.scene.camera.projection.type == "orthographic"
+    assert math.isclose(float(fig.layout.scene.camera.eye.z), 1.8)
+
+
 def test_compass_uses_view_minus_eye_not_eye():
     """A camera viewing the origin from ``+z`` and the same camera viewing
     from ``-z`` are mirror images: their screen ``right`` flips sign, so
