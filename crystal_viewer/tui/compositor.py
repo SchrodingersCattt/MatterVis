@@ -13,7 +13,7 @@ Design:
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -97,7 +97,9 @@ def _compute_viewport(
     pan_x: float = 0.0,
     pan_y: float = 0.0,
 ) -> Viewport:
-    """Compute aspect-correct viewport. zoom>1 crops to center region."""
+    """Compute an aspect-correct viewport for any positive zoom."""
+    if zoom <= 0:
+        raise ValueError("zoom must be greater than zero")
     all_arrays = [pts_2d] if len(pts_2d) > 0 else []
     all_arrays.extend(p for p in extra_pts if len(p) > 0)
 
@@ -121,16 +123,15 @@ def _compute_viewport(
     x_range = x_max - x_min
     y_range = y_max - y_min
 
-    # Apply zoom (crop to center)
-    if zoom > 1.0:
-        cx = (x_min + x_max) / 2
-        cy = (y_min + y_max) / 2
-        x_range /= zoom
-        y_range /= zoom
-        x_min = cx - x_range / 2
-        x_max = cx + x_range / 2
-        y_min = cy - y_range / 2
-        y_max = cy + y_range / 2
+    # Apply zoom around the fitted center. Values below one zoom out.
+    cx = (x_min + x_max) / 2
+    cy = (y_min + y_max) / 2
+    x_range /= zoom
+    y_range /= zoom
+    x_min = cx - x_range / 2
+    x_max = cx + x_range / 2
+    y_min = cy - y_range / 2
+    y_max = cy + y_range / 2
 
     # Apply 2D pan offset (shift viewport window)
     if pan_x != 0.0 or pan_y != 0.0:
@@ -201,7 +202,7 @@ def _tier_color(element_color: int, tier: int) -> int:
 
 # ── Display levels ──────────────────────────────────────────────────────────
 
-DISPLAY_LEVELS = ("atom", "molecule", "polyhedra")
+DISPLAY_LEVELS = ("atom", "molecule")
 
 
 # ── Label relaxation ────────────────────────────────────────────────────────
@@ -268,7 +269,7 @@ def compose_frame(
     Parameters
     ----------
     display_level : str
-        Visualization level: "atom" (default), "molecule", or "polyhedra".
+        Visualization level: "atom" (default) or "molecule".
     """
     if width is None or height is None:
         try:
@@ -278,8 +279,8 @@ def compose_frame(
         except OSError:
             width = width or 80
             height = height or 40
-    width = max(width, 30)
-    height = max(height, 15)
+    width = max(width, 1)
+    height = max(height, 1)
 
     # ── Viewport ────────────────────────────────────────────────────────
     extra_pts: list[np.ndarray] = []
@@ -306,12 +307,6 @@ def compose_frame(
             crystal, camera, pts_2d, depth, viewport, canvas,
             width, height, mono, show_minor,
         )
-    elif display_level == "polyhedra":
-        return _compose_polyhedra_frame(
-            crystal, camera, pts_2d, depth, viewport, canvas,
-            width, height, mono, show_minor,
-        )
-
     # ── Depth tier computation ───────────────────────────────────────
     depth_min = float(depth.min()) if len(depth) > 0 else 0.0
     depth_max = float(depth.max()) if len(depth) > 0 else 1.0
@@ -321,6 +316,8 @@ def compose_frame(
     if len(pts_2d) > 0:
         for idx in range(min(len(crystal.atoms), len(pts_2d))):
             atom = crystal.atoms[idx]
+            if not show_minor and atom.is_minor:
+                continue
             x2d, y2d = float(pts_2d[idx][0]), float(pts_2d[idx][1])
             row, col = viewport.to_grid(x2d, y2d)
             px_x, px_y = viewport.to_px(x2d, y2d)
@@ -352,23 +349,35 @@ def compose_frame(
 
     # ── Layer 2: Bonds (circle-edge to circle-edge) ─────────────────────
     if show_bonds and crystal.bonds:
+        from ..math.camera import project_points as _proj
+
         pos_map = {a.idx: a for a in atoms_draw}
         for bond in crystal.bonds:
             a1 = pos_map.get(bond.i)
             a2 = pos_map.get(bond.j)
             if a1 is None or a2 is None:
                 continue
-            dx = a2.px_x - a1.px_x
-            dy = a2.px_y - a1.px_y
+            if bond.start is not None and bond.end is not None:
+                endpoints_2d, _ = _proj(
+                    camera,
+                    np.asarray([bond.start, bond.end], dtype=float),
+                )
+                start_px = viewport.to_px(*endpoints_2d[0])
+                end_px = viewport.to_px(*endpoints_2d[1])
+            else:
+                start_px = (a1.px_x, a1.px_y)
+                end_px = (a2.px_x, a2.px_y)
+            dx = end_px[0] - start_px[0]
+            dy = end_px[1] - start_px[1]
             length = (dx * dx + dy * dy) ** 0.5
             if length < 2:
                 continue
             ux, uy = dx / length, dy / length
             # Shorten to circle edges
-            sx = int(a1.px_x + ux * (a1.radius + 1))
-            sy = int(a1.px_y + uy * (a1.radius + 1))
-            ex = int(a2.px_x - ux * (a2.radius + 1))
-            ey = int(a2.px_y - uy * (a2.radius + 1))
+            sx = int(start_px[0] + ux * (a1.radius + 1))
+            sy = int(start_px[1] + uy * (a1.radius + 1))
+            ex = int(end_px[0] - ux * (a2.radius + 1))
+            ey = int(end_px[1] - uy * (a2.radius + 1))
             gap = ((ex - sx) ** 2 + (ey - sy) ** 2) ** 0.5
             if gap < 2:
                 continue
@@ -398,6 +407,8 @@ def compose_frame(
     occupied: set[tuple[int, int]] = set()
 
     for a in label_order:
+        if len(a.text) > width:
+            a.text = a.text[:width]
         lw = len(a.text)
         placed = False
 
@@ -518,7 +529,6 @@ def compose_frame(
         output_lines.pop()
     return "\n".join(output_lines)
 
-
 # ── Color-run helpers ───────────────────────────────────────────────────────
 
 
@@ -569,7 +579,7 @@ _BLOB_NEG_COLOR = 33    # blue (negative lobe)
 
 def _draw_density_blobs(
     canvas: "BrailleCanvas",
-    viewport: "_Viewport",
+    viewport: "Viewport",
     camera: "Camera",
     crystal: "CrystalIR",
 ) -> None:
@@ -779,7 +789,9 @@ def _compose_molecule_frame(
     lbl_map: dict[int, list[tuple[int, str, int]]] = {}
     for row, col, text, color in labels_to_place:
         if 0 <= row < height:
-            lbl_map.setdefault(row, []).append((col - len(text) // 2, text, color))
+            text = text[:width]
+            start = max(0, min(width - len(text), col - len(text) // 2))
+            lbl_map.setdefault(row, []).append((start, text, color))
 
     for row_idx in range(height):
         row_data = colored_rows[row_idx] if row_idx < len(colored_rows) else []
@@ -823,126 +835,6 @@ def _compose_molecule_frame(
                         braille_run.append((" ", 0))
                     col += 1
             _flush()
-            output_lines.append("".join(parts).rstrip())
-
-    while output_lines and not output_lines[-1]:
-        output_lines.pop()
-    return "\n".join(output_lines)
-
-
-# ── Polyhedra-level rendering ───────────────────────────────────────────────
-
-
-def _compose_polyhedra_frame(
-    crystal: "CrystalIR",
-    camera: "Camera",
-    pts_2d: np.ndarray,
-    depth: np.ndarray,
-    viewport: "Viewport",
-    canvas: "BrailleCanvas",
-    width: int,
-    height: int,
-    mono: bool,
-    show_minor: bool,
-) -> str:
-    """Render polyhedra view: coordination polyhedra wireframes."""
-    from .renderer import ELEMENT_COLORS, DEFAULT_COLOR
-
-    # Draw small dots for all atoms as reference
-    for idx in range(min(len(crystal.atoms), len(pts_2d))):
-        px_x, px_y = viewport.to_px(float(pts_2d[idx][0]), float(pts_2d[idx][1]))
-        canvas.set_pixel(px_x, px_y, color=_BACK_TIER_COLOR)
-
-    # Access precomputed polyhedra from crystal metadata
-    polyhedra = crystal.metadata.get("polyhedra", [])
-
-    labels_to_place: list[tuple[int, int, str, int]] = []
-
-    for poly in polyhedra:
-        center_idx = poly["center_idx"]
-        hull_edges = poly["hull_edges"]
-        shell_indices = poly["shell_indices"]
-        center_elem = poly["center_element"]
-        cn = poly["cn"]
-
-        color = ELEMENT_COLORS.get(center_elem, DEFAULT_COLOR)
-
-        # Project hull vertices (shell atom positions) through camera
-        # hull_edges reference into shell_indices
-        for edge_i, edge_j in hull_edges:
-            ai = shell_indices[edge_i]
-            aj = shell_indices[edge_j]
-            if ai >= len(pts_2d) or aj >= len(pts_2d):
-                continue
-            p0 = viewport.to_px(float(pts_2d[ai][0]), float(pts_2d[ai][1]))
-            p1 = viewport.to_px(float(pts_2d[aj][0]), float(pts_2d[aj][1]))
-            canvas.draw_line(p0[0], p0[1], p1[0], p1[1], color=color)
-
-        # Draw center atom as a larger circle
-        if center_idx < len(pts_2d):
-            px_x, px_y = viewport.to_px(
-                float(pts_2d[center_idx][0]), float(pts_2d[center_idx][1])
-            )
-            _draw_circle(canvas, px_x, px_y, 5, color=color)
-
-            # Label
-            row, col = viewport.to_grid(
-                float(pts_2d[center_idx][0]), float(pts_2d[center_idx][1])
-            )
-            label = f"{center_elem}{cn}"
-            labels_to_place.append((row, col, label, color))
-
-    # Build output
-    colored_rows = canvas.render_colored()
-    output_lines: list[str] = []
-
-    lbl_map: dict[int, list[tuple[int, str, int]]] = {}
-    for row, col, text, color in labels_to_place:
-        if 0 <= row < height:
-            lbl_map.setdefault(row, []).append((col - len(text) // 2, text, color))
-
-    for row_idx in range(height):
-        row_data = colored_rows[row_idx] if row_idx < len(colored_rows) else []
-        row_labels = lbl_map.get(row_idx)
-
-        if not row_labels:
-            if mono:
-                output_lines.append("".join(ch for ch, _ in row_data).rstrip())
-            else:
-                output_lines.append(_build_colored_braille_line(row_data))
-        else:
-            row_labels.sort(key=lambda x: x[0])
-            parts: list[str] = []
-            col = 0
-            li = 0
-            braille_run: list[tuple[str, int]] = []
-
-            def _flush_poly():
-                nonlocal braille_run
-                if braille_run:
-                    if mono:
-                        parts.append("".join(ch for ch, _ in braille_run))
-                    else:
-                        parts.append(_color_run_to_ansi(braille_run))
-                    braille_run = []
-
-            while col < width:
-                if li < len(row_labels) and row_labels[li][0] == col:
-                    _flush_poly()
-                    lcol, ltext, lcolor = row_labels[li]
-                    if mono:
-                        parts.append(ltext)
-                    else:
-                        parts.append(f"\033[1;38;5;{lcolor}m{ltext}\033[0m")
-                    col += len(ltext)
-                    li += 1
-                else:
-                    if col < len(row_data):
-                        braille_run.append(row_data[col])
-                    else:
-                        braille_run.append((" ", 0))
-                    col += 1
-            _flush_poly()
             output_lines.append("".join(parts).rstrip())
 
     while output_lines and not output_lines[-1]:

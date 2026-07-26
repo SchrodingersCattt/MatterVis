@@ -9,7 +9,6 @@ Supported formats:
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import numpy as np
@@ -17,11 +16,13 @@ import numpy as np
 from .crystal_ir import AtomIR, BondIR, CrystalIR, Lattice
 
 
-def load_for_tui(path: str) -> CrystalIR:
+def load_for_tui(path: str, *, display_mode: str = "unit_cell") -> CrystalIR:
     """Load a crystal structure file and return a CrystalIR.
 
     Dispatches to the appropriate parser based on file extension.
-    Also computes coordination polyhedra for metal centers.
+    CIF files reuse MatterVis's canonical loader and scene assembly so the
+    terminal view observes the same disorder, formula-unit, and PBC bond
+    semantics as the browser and static renderers.
     """
     p = Path(path)
     if not p.exists():
@@ -31,7 +32,7 @@ def load_for_tui(path: str) -> CrystalIR:
     name = p.stem
 
     if ext == ".cif":
-        ir = _load_cif(str(p), name)
+        ir = _load_cif(str(p), name, display_mode=display_mode)
     elif ext == ".cube":
         ir = _load_cube(str(p), name)
     elif ext in (".vasp", ".poscar") or p.name.upper() in ("POSCAR", "CONTCAR"):
@@ -44,111 +45,128 @@ def load_for_tui(path: str) -> CrystalIR:
             f"Supported: .cif, .cube, .vasp, .poscar, .extxyz, .xyz"
         )
 
-    # Compute polyhedra for metal centers (stored in metadata)
-    try:
-        polyhedra = compute_polyhedra(ir)
-        if polyhedra:
-            ir.metadata["polyhedra"] = polyhedra
-    except Exception:
-        pass  # Polyhedra are optional
-
     return ir
 
 
 # ── CIF loader (reuses existing MatterVis parser + MCK) ─────────────────────
 
 
-def _load_cif(path: str, name: str) -> CrystalIR:
-    """Load CIF via parse_asu + MCK molecule analysis.
+def _load_cif(path: str, name: str, *, display_mode: str) -> CrystalIR:
+    """Load a CIF through the canonical MatterVis loader."""
+    from ..loader import build_bundle_scene, build_loaded_crystal
 
-    Uses MolCrysKit for:
-    - Disorder-aware bond detection (bond_pairs)
-    - Molecule grouping (molecule_index per atom)
-    - Species identification
-    """
-    import gemmi
-
-    from ..structure.cif_parse import parse_asu
-    from ..structure.molcrys_bridge import analyze as mck_analyze
-    from ..style.disorder import atom_is_minor
-
-    atoms_raw, cell, M = parse_asu(path)
-
-    # Extract spacegroup name from CIF
-    spacegroup = _extract_spacegroup_from_cif(path)
-
-    # Build lattice
-    lattice = Lattice(
-        a=cell.a, b=cell.b, c=cell.c,
-        alpha=cell.alpha, beta=cell.beta, gamma=cell.gamma,
-        matrix=M,
+    bundle = build_loaded_crystal(
+        name=name,
+        cif_path=path,
+        title=name,
+        source="upload",
+    )
+    scene = build_bundle_scene(
+        bundle,
+        display_mode=display_mode,
+        show_hydrogen=True,
+        preset={},
+    )
+    return _crystal_ir_from_scene(
+        scene,
+        source_path=path,
+        spacegroup=_extract_spacegroup_from_cif(path),
+        species_map={key: list(value) for key, value in bundle.molcrys_analysis.species_map.items()},
+        per_formula_unit=dict(bundle.molcrys_analysis.per_fu),
+        n_molecules=len(bundle.molcrys_analysis.mol_indices),
     )
 
-    # Run MCK analysis for molecule grouping + bonds
-    mck_analysis = None
-    mol_index_map: dict[int, int] = {}  # raw_atom_idx → molecule_index
-    bond_pairs: list[tuple[int, int]] = []
-    species_map: dict[str, list[int]] = {}
-    n_molecules = 0
 
-    try:
-        mck_analysis = mck_analyze(atoms_raw, M)
-        # Build atom → molecule mapping
-        for mol_idx, indices in enumerate(mck_analysis.mol_indices):
-            for atom_idx in indices:
-                mol_index_map[atom_idx] = mol_idx
-        n_molecules = len(mck_analysis.mol_indices)
-        bond_pairs = mck_analysis.bond_pairs
-        species_map = {k: list(v) for k, v in mck_analysis.species_map.items()}
-    except Exception:
-        # Fallback: use simple find_bonds if MCK fails
-        from ..structure.bonds import find_bonds
-        bond_pairs = find_bonds(atoms_raw, M=M, cell=cell)
+def _crystal_ir_from_scene(
+    scene: dict,
+    *,
+    source_path: str,
+    spacegroup: str,
+    species_map: dict[str, list[int]],
+    per_formula_unit: dict[str, int],
+    n_molecules: int,
+) -> CrystalIR:
+    """Adapt a canonical scene into the terminal renderer's compact IR."""
+    cell = scene["cell"]
+    lattice = Lattice(
+        a=cell.a,
+        b=cell.b,
+        c=cell.c,
+        alpha=cell.alpha,
+        beta=cell.beta,
+        gamma=cell.gamma,
+        matrix=np.asarray(scene["M"], dtype=float),
+    )
 
-    # Convert atoms with MCK enrichment
-    atoms = []
-    for i, at in enumerate(atoms_raw):
-        dg_raw = str(at.get("dg", "") or "").strip()
+    source_species: dict[int, str] = {
+        int(molecule_index): species_id
+        for species_id, molecule_indices in species_map.items()
+        for molecule_index in molecule_indices
+    }
+    atom_to_molecule: dict[int, int] = {}
+    molecule_species: dict[int, str] = {}
+    for display_molecule_index, fragment in enumerate(scene.get("fragment_table", [])):
+        source_molecule_index = fragment.get("source_molecule_index")
+        if source_molecule_index is None:
+            continue
+        source_molecule_index = int(source_molecule_index)
+        molecule_species[display_molecule_index] = source_species.get(
+            source_molecule_index,
+            str(fragment.get("formula") or fragment.get("species") or display_molecule_index),
+        )
+        for atom_index in fragment.get("site_indices", []):
+            atom_to_molecule[int(atom_index)] = display_molecule_index
+
+    atoms: list[AtomIR] = []
+    for index, atom in enumerate(scene.get("draw_atoms", [])):
         dg = 0
+        dg_raw = str(atom.get("dg", "") or "").strip()
         if dg_raw not in ("", ".", "?"):
             try:
                 dg = int(float(dg_raw))
-            except (TypeError, ValueError):
+            except ValueError:
                 pass
-
         atoms.append(AtomIR(
-            element=at["elem"],
-            cart=np.array(at["cart"], dtype=float),
-            frac=np.array(at["frac"], dtype=float),
-            label=at.get("label", ""),
-            occupancy=at.get("occ", 1.0),
-            index=i,
-            molecule_index=mol_index_map.get(i, -1),
+            element=str(atom["elem"]),
+            cart=np.asarray(atom["cart"], dtype=float),
+            frac=np.asarray(atom["frac"], dtype=float),
+            label=str(atom.get("label", "")),
+            occupancy=float(atom.get("occ", 1.0)),
+            index=index,
+            molecule_index=atom_to_molecule.get(index, -1),
             disorder_group=dg,
-            is_minor=atom_is_minor(at),
+            is_minor=bool(atom.get("is_minor", False)),
         ))
 
-    # Build bonds from MCK bond_pairs (disorder-aware)
-    bonds = []
-    for pair in bond_pairs:
-        i, j = pair[0], pair[1]
-        if i < len(atoms) and j < len(atoms):
-            d = float(np.linalg.norm(atoms[i].cart - atoms[j].cart))
-            bonds.append(BondIR(i=i, j=j, distance=d))
+    bonds: list[BondIR] = []
+    for bond in scene.get("bonds", []):
+        start = np.asarray(bond["start"], dtype=float)
+        end = np.asarray(bond["end"], dtype=float)
+        bonds.append(BondIR(
+            i=int(bond["i"]),
+            j=int(bond["j"]),
+            distance=float(np.linalg.norm(end - start)),
+            start=start,
+            end=end,
+        ))
 
-    # Compose formula from element counts
+    display_species_map: dict[str, list[int]] = {}
+    for display_molecule_index, species_id in molecule_species.items():
+        display_species_map.setdefault(species_id, []).append(display_molecule_index)
+
     formula = _compose_formula(atoms)
-
     return CrystalIR(
-        title=name,
+        title=str(scene.get("title") or scene.get("name") or Path(source_path).stem),
         formula=formula,
         spacegroup=spacegroup,
-        source_path=path,
+        source_path=source_path,
         lattice=lattice,
         atoms=atoms,
         bonds=bonds,
         n_molecules=n_molecules,
-        species_map=species_map,
+        species_map=display_species_map or species_map,
+        per_formula_unit=per_formula_unit,
+        metadata={"display_mode": scene.get("display_mode", "unit_cell")},
     )
 
 
@@ -477,79 +495,3 @@ def _compose_formula(atoms: list[AtomIR]) -> str:
         else:
             parts.append(f"{elem}{n}")
     return "".join(parts)
-
-
-# ── Polyhedra computation for TUI ───────────────────────────────────────────
-
-# Elements considered as potential coordination centers
-_METAL_CENTERS = frozenset(
-    # Transition metals (3d, 4d, 5d)
-    "Sc Ti V Cr Mn Fe Co Ni Cu Zn "
-    "Y Zr Nb Mo Tc Ru Rh Pd Ag Cd "
-    "Hf Ta W Re Os Ir Pt Au Hg "
-    # Lanthanides
-    "La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu "
-    # Actinides (common)
-    "U Th "
-    # Post-transition metals commonly coordinated
-    "Al Ga In Tl Sn Pb Bi".split()
-)
-
-
-def compute_polyhedra(ir: CrystalIR) -> list[dict]:
-    """Compute coordination polyhedra for metal centers using existing bonds.
-
-    Returns a list of dicts, each with:
-        center_idx, center_element, center_label, cn,
-        shell_indices, hull_edges
-
-    Uses bonds already in ir.bonds to determine coordination shells,
-    then computes 3D convex hull of shell atoms for wireframe rendering.
-    """
-    if not ir.bonds:
-        return []
-
-    # Build adjacency from bonds
-    from collections import defaultdict
-    neighbors: dict[int, list[int]] = defaultdict(list)
-    for bond in ir.bonds:
-        neighbors[bond.i].append(bond.j)
-        neighbors[bond.j].append(bond.i)
-
-    results: list[dict] = []
-
-    for idx, atom in enumerate(ir.atoms):
-        if atom.element not in _METAL_CENTERS:
-            continue
-        shell = neighbors.get(idx, [])
-        if len(shell) < 4:
-            continue  # Need ≥4 for a meaningful polyhedron
-
-        # Get shell atom Cartesian coordinates
-        shell_coords = np.array([ir.atoms[i].cart for i in shell])
-
-        # Compute 3D convex hull
-        try:
-            from scipy.spatial import ConvexHull
-            hull = ConvexHull(shell_coords)
-        except Exception:
-            continue  # Degenerate (coplanar) or scipy unavailable
-
-        # Extract edges from simplices
-        edge_set: set[tuple[int, int]] = set()
-        for simplex in hull.simplices:
-            a, b, c = int(simplex[0]), int(simplex[1]), int(simplex[2])
-            edge_set.add(tuple(sorted((a, b))))
-            edge_set.add(tuple(sorted((b, c))))
-            edge_set.add(tuple(sorted((a, c))))
-
-        results.append({
-            "center_idx": idx,
-            "center_element": atom.element,
-            "center_label": atom.display_label,
-            "cn": len(shell),
-            "shell_indices": shell,
-            "hull_edges": sorted(edge_set),
-        })
-
-    return results

@@ -24,6 +24,7 @@ def serialize_crystal(
     include_art: bool = True,
     art_width: int = 60,
     art_height: int = 25,
+    show_minor: bool = True,
 ) -> str:
     """Serialize a crystal structure for agent/LLM consumption.
 
@@ -53,13 +54,37 @@ def serialize_crystal(
         Structured text output.
     """
     lines: list[str] = []
+    visible_indices = {
+        index
+        for index, atom in enumerate(crystal.atoms)
+        if show_minor or not atom.is_minor
+    }
+    visible_atoms = [
+        atom for index, atom in enumerate(crystal.atoms) if index in visible_indices
+    ]
+
+    counts: dict[str, int] = {}
+    for atom in visible_atoms:
+        counts[atom.element] = counts.get(atom.element, 0) + 1
+
+    def _formula_sort_key(element: str) -> tuple[int, str]:
+        if element == "C":
+            return (0, element)
+        if element == "H":
+            return (1, element)
+        return (2, element)
+
+    formula = "".join(
+        element if count == 1 else f"{element}{count}"
+        for element, count in sorted(counts.items(), key=lambda item: _formula_sort_key(item[0]))
+    )
 
     # ── Header ──────────────────────────────────────────────────────────
     lines.append("crystal:")
-    lines.append(f"  formula: {crystal.formula}")
+    lines.append(f"  formula: {formula}")
     if crystal.spacegroup:
         lines.append(f"  spacegroup: {crystal.spacegroup}")
-    lines.append(f"  n_atoms: {crystal.n_atoms}")
+    lines.append(f"  n_atoms: {len(visible_atoms)}")
     lines.append(f"  source: {crystal.source_path}")
     lines.append("")
 
@@ -77,7 +102,6 @@ def serialize_crystal(
         lines.append("")
 
     # ── Composition ─────────────────────────────────────────────────────
-    counts = crystal.element_counts()
     if counts:
         lines.append("composition:")
         for elem, n in sorted(counts.items()):
@@ -89,6 +113,8 @@ def serialize_crystal(
     # Build neighbor map from bonds
     neighbors: dict[int, list[tuple[str, float]]] = {}
     for bond in crystal.bonds:
+        if bond.i not in visible_indices or bond.j not in visible_indices:
+            continue
         neighbors.setdefault(bond.i, []).append(
             (crystal.atoms[bond.j].element, bond.distance)
         )
@@ -96,7 +122,7 @@ def serialize_crystal(
             (crystal.atoms[bond.i].element, bond.distance)
         )
 
-    for atom in crystal.atoms:
+    for atom in visible_atoms:
         lines.append(f"  - label: {atom.label}")
         lines.append(f"    element: {atom.element}")
         lines.append(
@@ -108,7 +134,7 @@ def serialize_crystal(
         if atom.molecule_index >= 0:
             lines.append(f"    molecule: {atom.molecule_index}")
         if atom.is_minor:
-            lines.append(f"    disorder: minor")
+            lines.append("    disorder: minor")
         elif atom.disorder_group != 0:
             lines.append(f"    disorder_group: {atom.disorder_group}")
         # Coordination info
@@ -126,11 +152,16 @@ def serialize_crystal(
         lines.append("")
 
     # ── Bond summary ────────────────────────────────────────────────────
-    if crystal.bonds:
+    visible_bonds = [
+        bond
+        for bond in crystal.bonds
+        if bond.i in visible_indices and bond.j in visible_indices
+    ]
+    if visible_bonds:
         lines.append("bonds:")
         # Group by element pair
         bond_groups: dict[tuple[str, str], list[float]] = {}
-        for bond in crystal.bonds:
+        for bond in visible_bonds:
             e1 = crystal.atoms[bond.i].element
             e2 = crystal.atoms[bond.j].element
             key = tuple(sorted([e1, e2]))
@@ -154,14 +185,16 @@ def serialize_crystal(
 
     # ── ASCII art ───────────────────────────────────────────────────────
     if include_art and len(pts_2d) > 0:
-        from .renderer import render_ascii_frame
+        from .compositor import compose_frame
         from ..math.camera import project_points
 
-        art = render_ascii_frame(
-            crystal, camera, pts_2d, np.zeros(len(pts_2d)),
+        _, depth = project_points(camera, crystal.cart_coords)
+        art = compose_frame(
+            crystal, camera, pts_2d, depth,
             width=art_width, height=art_height,
-            mono=True, compact=False,
+            mono=True, label_mode="label",
             show_bonds=True, show_cell=True,
+            show_minor=show_minor,
         )
         lines.append("  art: |")
         for art_line in art.split("\n"):

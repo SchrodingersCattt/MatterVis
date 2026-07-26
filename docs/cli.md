@@ -137,7 +137,44 @@ python -m crystal_viewer serve [options]
 | `--preset` | — | Preset JSON to load |
 | `--api-only` | — | Reserved for automation mode |
 
----
+## `tui`
+
+Open a crystal in the terminal without starting the Dash service:
+
+```bash
+matvis tui structure.cif
+```
+
+Use `--no-interaction` for deterministic stdout suitable for scripts or
+agents. `--format structured` adds cell, atom, bond-summary, and camera data.
+
+```bash
+matvis tui structure.cif --no-interaction --format structured \
+  --display formula_unit --projection orthographic
+```
+
+Important options:
+
+- `--display unit_cell|formula_unit|asymmetric_unit` uses MatterVis's
+  canonical loader/display selection for CIF files.
+- `--view a|b|c|diagonal|ab|ac|bc` or explicit
+  `--azimuth/--elevation/--roll` selects the initial camera.
+- `--projection orthographic|perspective`, `--zoom`, and `--center` are
+  honored by both static and interactive modes.
+- `--show-minor` displays minor disorder alternatives; `--hide-partial`
+  removes partial-occupancy sites.
+- `--width` and `--height` bound static output exactly.
+
+Interactive controls: `q/e` orbit horizontally, `w/s` vertically, `a/d`
+roll, arrows or `i/j/k/l` pan, and `+/-` or `[/]` zoom. `b`, `c`, `t`, `m`,
+and `n` toggle bonds, cell, labels, monochrome, and minor disorder. `Shift+L`
+switches between atom and molecule views; `r` restores the startup camera.
+
+The earlier automatic terminal polyhedron level was removed because it used a
+local metal table and convex hull rather than MatterVis/MolCrysKit's canonical
+coordination analysis. Use the documented polyhedron API for analytical
+polyhedra.
+
 
 ## Common recipes
 
