@@ -90,8 +90,8 @@ def run_tui(
             initial_level=(
                 "molecule"
                 if display_mode == "auto"
-                and crystal.metadata.get("display_mode") == "formula_unit"
                 and crystal.species_map
+                and crystal.n_atoms > 64
                 else "atom"
             ),
         )

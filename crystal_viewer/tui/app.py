@@ -20,7 +20,13 @@ if TYPE_CHECKING:
     from .crystal_ir import CrystalIR
 
 from ..math.camera import Camera, project_points
-from .compositor import compose_frame, LABEL_MODES, DISPLAY_LEVELS, resolve_label_mode
+from .compositor import (
+    compose_frame,
+    LABEL_MODES,
+    DISPLAY_LEVELS,
+    resolve_label_mode,
+    resolve_molecule_detail,
+)
 
 
 # ── Constants ───────────────────────────────────────────────────────────────
@@ -222,6 +228,11 @@ class CrystalTUI(App):
         zoom_str = f" ×{self.camera.viewport_zoom:.1f}" if self.camera.viewport_zoom != 1.0 else ""
         roll_str = f" r={self.camera.roll:.0f}°" if abs(self.camera.roll) > 0.5 else ""
         level_str = f" [{self._display_level}]" if self._display_level != "atom" else ""
+        if self._display_level == "molecule":
+            level_str = (
+                " [molecule:"
+                f"{resolve_molecule_detail(molecule_count=sum(len(v) for v in self.crystal.species_map.values()), width=max(width, 1), height=max(height, 1))}]"
+            )
         self.sub_title = (
             f"{self.crystal.formula} {self.crystal.n_atoms} atoms "
             f"[{self.crystal.metadata.get('display_mode', 'structure')}] | "

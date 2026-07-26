@@ -83,6 +83,19 @@ def resolve_label_mode(
     return "label"
 
 
+def resolve_molecule_detail(
+    *,
+    molecule_count: int,
+    width: int,
+    height: int,
+) -> str:
+    """Choose hulls for sparse views and centroids for dense packing maps."""
+    density = molecule_count / max(width * height, 1)
+    if molecule_count > 32 or density >= 0.025:
+        return "centroid"
+    return "hull"
+
+
 # ── Viewport (uniform scale, correct aspect) ───────────────────────────────
 
 # Terminal char cell is ~2× taller than wide
@@ -773,6 +786,11 @@ def _compose_molecule_frame(
             if not show_minor and atom.is_minor:
                 continue
             mol_groups.setdefault(atom.molecule_index, []).append(idx)
+    molecule_detail = resolve_molecule_detail(
+        molecule_count=len(mol_groups),
+        width=width,
+        height=height,
+    )
 
     # Reverse species_map for labeling: mol_idx → species formula
     mol_formula: dict[int, str] = {}
@@ -788,8 +806,8 @@ def _compose_molecule_frame(
     mol_depths.sort(key=lambda x: x[1])  # far first
 
     # Draw each molecule outline
-    labels_to_place: list[tuple[int, int, str, int]] = []  # (row, col, text, color)
-    for mol_idx, _ in mol_depths:
+    label_candidates: dict[str, list[tuple[float, int, int, int]]] = {}
+    for mol_idx, molecule_depth in mol_depths:
         atom_indices = mol_groups[mol_idx]
         if len(atom_indices) < 2:
             continue
@@ -799,33 +817,42 @@ def _compose_molecule_frame(
         # Get 2D projected coordinates for this molecule's atoms
         mol_pts = [(float(pts_2d[i][0]), float(pts_2d[i][1])) for i in atom_indices]
 
-        # Draw small dots for individual atoms (1px, dimmed)
-        for x, y in mol_pts:
-            px_x, px_y = viewport.to_px(x, y)
-            canvas.set_pixel(px_x, px_y, color=_BACK_TIER_COLOR)
-
-        # Compute 2D convex hull
-        if len(mol_pts) < 3:
-            # Just draw a line between the two points
-            p0 = viewport.to_px(*mol_pts[0])
-            p1 = viewport.to_px(*mol_pts[1])
-            canvas.draw_line(p0[0], p0[1], p1[0], p1[1], color=color)
-        else:
-            hull_indices = convex_hull_2d(mol_pts)
-            if len(hull_indices) >= 3:
-                # Draw hull edges
-                for k in range(len(hull_indices)):
-                    i0 = hull_indices[k]
-                    i1 = hull_indices[(k + 1) % len(hull_indices)]
-                    p0 = viewport.to_px(*mol_pts[i0])
-                    p1 = viewport.to_px(*mol_pts[i1])
-                    canvas.draw_line(p0[0], p0[1], p1[0], p1[1], color=color)
-
         # Centroid for label placement
         cx = sum(x for x, y in mol_pts) / len(mol_pts)
         cy = sum(y for x, y in mol_pts) / len(mol_pts)
+        if molecule_detail == "centroid":
+            px_x, px_y = viewport.to_px(cx, cy)
+            _draw_circle(canvas, px_x, px_y, 2, color=color)
+        else:
+            # Draw individual atom hints and a projected molecular hull.
+            for x, y in mol_pts:
+                px_x, px_y = viewport.to_px(x, y)
+                canvas.set_pixel(px_x, px_y, color=_BACK_TIER_COLOR)
+            if len(mol_pts) < 3:
+                p0 = viewport.to_px(*mol_pts[0])
+                p1 = viewport.to_px(*mol_pts[1])
+                canvas.draw_line(p0[0], p0[1], p1[0], p1[1], color=color)
+            else:
+                hull_indices = convex_hull_2d(mol_pts)
+                if len(hull_indices) >= 3:
+                    for k in range(len(hull_indices)):
+                        i0 = hull_indices[k]
+                        i1 = hull_indices[(k + 1) % len(hull_indices)]
+                        p0 = viewport.to_px(*mol_pts[i0])
+                        p1 = viewport.to_px(*mol_pts[i1])
+                        canvas.draw_line(p0[0], p0[1], p1[0], p1[1], color=color)
+
         row, col = viewport.to_grid(cx, cy)
         formula = mol_formula.get(mol_idx, f"M{mol_idx}")
+        label_candidates.setdefault(formula, []).append(
+            (molecule_depth, row, col, color)
+        )
+
+    # One label per species is enough to identify the full unit-cell packing;
+    # choose the front-most instance so text does not cover every replica.
+    labels_to_place: list[tuple[int, int, str, int]] = []
+    for formula, candidates in label_candidates.items():
+        _, row, col, color = max(candidates, key=lambda item: item[0])
         labels_to_place.append((row, col, _display_species_name(formula), color))
 
     # Build output with labels

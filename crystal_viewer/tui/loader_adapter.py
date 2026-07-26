@@ -63,9 +63,7 @@ def _load_cif(path: str, name: str, *, display_mode: str) -> CrystalIR:
     )
     resolved_display_mode = display_mode
     if display_mode == "auto":
-        resolved_display_mode = (
-            "formula_unit" if len(bundle.raw_atoms) > 80 else "unit_cell"
-        )
+        resolved_display_mode = "unit_cell"
     scene = build_bundle_scene(
         bundle,
         display_mode=resolved_display_mode,

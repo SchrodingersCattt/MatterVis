@@ -377,7 +377,7 @@ def _build_tui_parser(subparsers: argparse._SubParsersAction) -> argparse.Argume
     )
     p.add_argument(
         "--display", choices=_TUI_DISPLAYS, default="auto",
-        help="Display mode (default: auto; large CIFs use formula_unit).",
+        help="Display mode (default: auto, canonical unit_cell).",
     )
     p.add_argument(
         "--show-minor", action="store_true", default=False,
@@ -519,8 +519,8 @@ def _tui_main(args: argparse.Namespace) -> None:
             initial_level=(
                 "molecule"
                 if args.display == "auto"
-                and crystal.metadata.get("display_mode") == "formula_unit"
                 and crystal.species_map
+                and crystal.n_atoms > 64
                 else "atom"
             ),
         )

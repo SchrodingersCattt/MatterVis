@@ -17,6 +17,7 @@ from crystal_viewer.tui.compositor import (
     _compute_viewport,
     compose_frame,
     resolve_label_mode,
+    resolve_molecule_detail,
 )
 from crystal_viewer.tui.crystal_ir import AtomIR, CrystalIR
 from crystal_viewer.tui.loader_adapter import load_for_tui
@@ -76,8 +77,8 @@ def test_canonical_cif_display_modes_and_bonds() -> None:
     formula = load_for_tui(str(DAP4), display_mode="formula_unit")
     asymmetric = load_for_tui(str(DAP4), display_mode="asymmetric_unit")
 
-    assert automatic.n_atoms == 42
-    assert automatic.metadata["display_mode"] == "formula_unit"
+    assert automatic.n_atoms == 581
+    assert automatic.metadata["display_mode"] == "unit_cell"
     assert formula.n_atoms == 42
     assert formula.element_counts() == {"C": 6, "H": 18, "N": 3, "Cl": 3, "O": 12}
     assert formula.per_formula_unit == {
@@ -140,6 +141,30 @@ def test_adaptive_labels_make_crowded_views_readable() -> None:
     assert resolve_label_mode(
         "label", atom_count=336, width=80, height=24, zoom=1.0
     ) == "label"
+
+
+def test_unit_cell_molecule_view_labels_each_species_once() -> None:
+    crystal = load_for_tui(str(DAP4))
+    camera = Camera.from_view_name("diagonal", crystal)
+    points, depth = project_points(camera, crystal.cart_coords)
+    frame = compose_frame(
+        crystal,
+        camera,
+        points,
+        depth,
+        width=100,
+        height=26,
+        mono=True,
+        display_level="molecule",
+    )
+    assert frame.count("C6H14N2") == 1
+    assert frame.count("ClO4") == 1
+    assert frame.count("H4N") == 1
+    assert resolve_molecule_detail(
+        molecule_count=sum(len(v) for v in crystal.species_map.values()),
+        width=100,
+        height=26,
+    ) == "centroid"
 
 
 @pytest.mark.parametrize("width,height", [(12, 6), (20, 8), (40, 12)])
@@ -254,7 +279,8 @@ def test_textual_can_start_in_readable_molecule_level(monkeypatch) -> None:
     monkeypatch.setattr("crystal_viewer.tui.app.CrystalTUI", FakeApp)
     main(["tui", str(DAP4)])
     assert captured["ran"] is True
-    assert captured["crystal"].n_atoms == 42
+    assert captured["crystal"].n_atoms == 581
+    assert captured["crystal"].metadata["display_mode"] == "unit_cell"
     assert captured["initial_level"] == "molecule"
 
 
