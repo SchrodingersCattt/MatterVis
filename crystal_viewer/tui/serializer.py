@@ -192,7 +192,7 @@ def serialize_crystal(
         art = compose_frame(
             crystal, camera, pts_2d, depth,
             width=art_width, height=art_height,
-            mono=True, label_mode="label",
+            mono=True, label_mode="auto",
             show_bonds=True, show_cell=True,
             show_minor=show_minor,
         )

@@ -24,7 +24,7 @@ def run_tui(
     width: int | None = None,
     height: int | None = None,
     view: str = "auto",
-    display_mode: str = "unit_cell",
+    display_mode: str = "auto",
     show_minor: bool = False,
 ) -> None:
     """Launch the terminal crystal viewer.
@@ -87,5 +87,12 @@ def run_tui(
             initial_view=view,
             camera=cam,
             show_minor=show_minor,
+            initial_level=(
+                "molecule"
+                if display_mode == "auto"
+                and crystal.metadata.get("display_mode") == "formula_unit"
+                and crystal.species_map
+                else "atom"
+            ),
         )
         app.run()

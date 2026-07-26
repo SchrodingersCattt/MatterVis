@@ -157,6 +157,12 @@ Important options:
 
 - `--display unit_cell|formula_unit|asymmetric_unit` uses MatterVis's
   canonical loader/display selection for CIF files.
+- The default `--display auto` uses a formula unit for CIFs above 80 source
+  atoms and starts the interactive viewer at molecule level; press `Shift+L`
+  for atom level, or pass `--display unit_cell` to inspect every cell image.
+- The default `--label auto` keeps labels on sparse views, shortens them to
+  element symbols at medium density, and uses coloured dots when crowded.
+  Explicit `--label label|element|molecule|dot` always wins.
 - `--view a|b|c|diagonal|ab|ac|bc` or explicit
   `--azimuth/--elevation/--roll` selects the initial camera.
 - `--projection orthographic|perspective`, `--zoom`, and `--center` are

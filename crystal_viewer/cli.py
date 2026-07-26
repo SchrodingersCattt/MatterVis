@@ -309,7 +309,7 @@ def _serve_main(args: argparse.Namespace) -> None:
 _TUI_FORMATS = ("ascii", "structured")
 _TUI_PROJECTIONS = ("orthographic", "perspective")
 _TUI_VIEWS = ("auto", "a", "b", "c", "diagonal", "ab", "ac", "bc")
-_TUI_LABELS = ("element", "label", "molecule", "dot")
+_TUI_LABELS = ("auto", "element", "label", "molecule", "dot")
 _TUI_DISPLAYS = ("auto", "formula_unit", "unit_cell", "asymmetric_unit")
 
 
@@ -371,13 +371,13 @@ def _build_tui_parser(subparsers: argparse._SubParsersAction) -> argparse.Argume
         help="Initial view direction (default: auto → diagonal).",
     )
     p.add_argument(
-        "--label", choices=_TUI_LABELS, default="label",
-        help="Atom label mode (default: label). 'element'=Fe/O, 'label'=Fe1/O2, "
+        "--label", choices=_TUI_LABELS, default="auto",
+        help="Atom label mode (default: auto). 'element'=Fe/O, 'label'=Fe1/O2, "
              "'molecule'=Fe1⁰/O2¹ (with mol index), 'dot'=● colored.",
     )
     p.add_argument(
         "--display", choices=_TUI_DISPLAYS, default="auto",
-        help="Display mode (default: auto, equivalent to unit_cell).",
+        help="Display mode (default: auto; large CIFs use formula_unit).",
     )
     p.add_argument(
         "--show-minor", action="store_true", default=False,
@@ -439,11 +439,7 @@ def _tui_main(args: argparse.Namespace) -> None:
         sys.exit(2)
 
     display_mode = args.display
-    loader_display_mode = (
-        display_mode
-        if display_mode in ("formula_unit", "unit_cell", "asymmetric_unit")
-        else "unit_cell"
-    )
+    loader_display_mode = display_mode if Path(filepath).suffix.lower() == ".cif" else "unit_cell"
     crystal = load_for_tui(filepath, display_mode=loader_display_mode)
 
     keep_atom_set = {
@@ -462,7 +458,7 @@ def _tui_main(args: argparse.Namespace) -> None:
 
     # Map --compact to label_mode="dot" for backward compat
     label_mode = args.label
-    if args.compact and label_mode == "label":
+    if args.compact and label_mode in ("auto", "label"):
         label_mode = "dot"
 
     from dataclasses import replace as _replace
@@ -520,6 +516,13 @@ def _tui_main(args: argparse.Namespace) -> None:
             show_cell=not args.no_cell,
             label_mode=label_mode,
             show_minor=args.show_minor,
+            initial_level=(
+                "molecule"
+                if args.display == "auto"
+                and crystal.metadata.get("display_mode") == "formula_unit"
+                and crystal.species_map
+                else "atom"
+            ),
         )
         app.run()
 

@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 # ── Label modes ─────────────────────────────────────────────────────────────
 
-LABEL_MODES = ("element", "label", "molecule", "dot")
+LABEL_MODES = ("auto", "label", "element", "molecule", "dot")
 
 _SUPERSCRIPTS = "⁰¹²³⁴⁵⁶⁷⁸⁹"
 
@@ -37,6 +37,14 @@ def _superscript(n: int) -> str:
     if n < 0:
         return ""
     return "".join(_SUPERSCRIPTS[int(c)] for c in str(n))
+
+
+def _display_species_name(species_id: str) -> str:
+    """Hide MCK's trailing graph-discriminator suffix in terminal labels."""
+    base, separator, suffix = species_id.rpartition("_")
+    if separator and base and suffix.isdigit():
+        return base
+    return species_id
 
 
 def _atom_label_text(atom, label_mode: str) -> str:
@@ -52,6 +60,27 @@ def _atom_label_text(atom, label_mode: str) -> str:
             return base + _superscript(atom.molecule_index)
         return base
     return atom.element
+
+
+def resolve_label_mode(
+    label_mode: str,
+    *,
+    atom_count: int,
+    width: int,
+    height: int,
+    zoom: float,
+) -> str:
+    """Resolve adaptive labels without changing the scientific atom set."""
+    if label_mode != "auto":
+        return label_mode
+    _ = zoom  # Zoom currently changes framing, not automatic label policy.
+    visible_cells = max(width * height, 1)
+    density = atom_count / visible_cells
+    if density >= 0.08 or atom_count > 160:
+        return "dot"
+    if density >= 0.02 or atom_count > 32:
+        return "element"
+    return "label"
 
 
 # ── Viewport (uniform scale, correct aspect) ───────────────────────────────
@@ -170,11 +199,17 @@ _BACK_TIER_COLOR = 236  # dark grey (ANSI 256)
 _MID_TIER_COLOR = 244   # medium grey
 
 
-def _atom_radius(element: str, depth_tier: int = _TIER_MID) -> int:
+def _atom_radius(
+    element: str,
+    depth_tier: int = _TIER_MID,
+    detail_scale: float = 1.0,
+) -> int:
     """Depth-dependent atom circle radius (subpixels)."""
     if element == "H":
-        return _RADIUS_H[depth_tier]
-    return _RADIUS_BASE[depth_tier]
+        base = _RADIUS_H[depth_tier]
+    else:
+        base = _RADIUS_BASE[depth_tier]
+    return max(1, int(round(base * detail_scale)))
 
 
 def _depth_tier(depth_val: float, depth_min: float, depth_max: float) -> int:
@@ -281,6 +316,18 @@ def compose_frame(
             height = height or 40
     width = max(width, 1)
     height = max(height, 1)
+    visible_atom_count = sum(show_minor or not atom.is_minor for atom in crystal.atoms)
+    resolved_label_mode = resolve_label_mode(
+        label_mode,
+        atom_count=visible_atom_count,
+        width=width,
+        height=height,
+        zoom=zoom,
+    )
+    detail_scale = {
+        "dot": 0.45,
+        "element": 0.7,
+    }.get(resolved_label_mode, 1.0)
 
     # ── Viewport ────────────────────────────────────────────────────────
     extra_pts: list[np.ndarray] = []
@@ -322,11 +369,11 @@ def compose_frame(
             row, col = viewport.to_grid(x2d, y2d)
             px_x, px_y = viewport.to_px(x2d, y2d)
             tier = _depth_tier(float(depth[idx]), depth_min, depth_max)
-            radius = _atom_radius(atom.element, tier)
+            radius = _atom_radius(atom.element, tier, detail_scale)
 
-            text = _atom_label_text(atom, label_mode)
+            text = _atom_label_text(atom, resolved_label_mode)
             is_partial = atom.occupancy < 0.99
-            if is_partial and label_mode != "dot":
+            if is_partial and resolved_label_mode != "dot":
                 text += "*"
 
             color = ELEMENT_COLORS.get(atom.element, DEFAULT_COLOR)
@@ -779,7 +826,7 @@ def _compose_molecule_frame(
         cy = sum(y for x, y in mol_pts) / len(mol_pts)
         row, col = viewport.to_grid(cx, cy)
         formula = mol_formula.get(mol_idx, f"M{mol_idx}")
-        labels_to_place.append((row, col, formula, color))
+        labels_to_place.append((row, col, _display_species_name(formula), color))
 
     # Build output with labels
     colored_rows = canvas.render_colored()

@@ -16,7 +16,7 @@ import numpy as np
 from .crystal_ir import AtomIR, BondIR, CrystalIR, Lattice
 
 
-def load_for_tui(path: str, *, display_mode: str = "unit_cell") -> CrystalIR:
+def load_for_tui(path: str, *, display_mode: str = "auto") -> CrystalIR:
     """Load a crystal structure file and return a CrystalIR.
 
     Dispatches to the appropriate parser based on file extension.
@@ -61,9 +61,14 @@ def _load_cif(path: str, name: str, *, display_mode: str) -> CrystalIR:
         title=name,
         source="upload",
     )
+    resolved_display_mode = display_mode
+    if display_mode == "auto":
+        resolved_display_mode = (
+            "formula_unit" if len(bundle.raw_atoms) > 80 else "unit_cell"
+        )
     scene = build_bundle_scene(
         bundle,
-        display_mode=display_mode,
+        display_mode=resolved_display_mode,
         show_hydrogen=True,
         preset={},
     )
@@ -74,6 +79,7 @@ def _load_cif(path: str, name: str, *, display_mode: str) -> CrystalIR:
         species_map={key: list(value) for key, value in bundle.molcrys_analysis.species_map.items()},
         per_formula_unit=dict(bundle.molcrys_analysis.per_fu),
         n_molecules=len(bundle.molcrys_analysis.mol_indices),
+        source_atom_count=len(bundle.raw_atoms),
     )
 
 
@@ -85,6 +91,7 @@ def _crystal_ir_from_scene(
     species_map: dict[str, list[int]],
     per_formula_unit: dict[str, int],
     n_molecules: int,
+    source_atom_count: int,
 ) -> CrystalIR:
     """Adapt a canonical scene into the terminal renderer's compact IR."""
     cell = scene["cell"]
@@ -166,7 +173,11 @@ def _crystal_ir_from_scene(
         n_molecules=n_molecules,
         species_map=display_species_map or species_map,
         per_formula_unit=per_formula_unit,
-        metadata={"display_mode": scene.get("display_mode", "unit_cell")},
+        metadata={
+            "display_mode": scene.get("display_mode", "unit_cell"),
+            "source_atom_count": source_atom_count,
+            "display_atom_count": len(atoms),
+        },
     )
 
 

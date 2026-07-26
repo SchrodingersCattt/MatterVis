@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from .crystal_ir import CrystalIR
 
 from ..math.camera import Camera, project_points
-from .compositor import compose_frame, LABEL_MODES, DISPLAY_LEVELS
+from .compositor import compose_frame, LABEL_MODES, DISPLAY_LEVELS, resolve_label_mode
 
 
 # ── Constants ───────────────────────────────────────────────────────────────
@@ -98,9 +98,10 @@ class CrystalTUI(App):
         camera: Camera | None = None,
         show_bonds: bool = True,
         show_cell: bool = True,
-        label_mode: str = "label",
+        label_mode: str = "auto",
         show_minor: bool = False,
         compact: bool = False,
+        initial_level: str = "atom",
     ):
         super().__init__()
         self.crystal = crystal
@@ -111,7 +112,9 @@ class CrystalTUI(App):
         self._show_cell = show_cell
         self._label_mode = label_mode if not compact else "dot"
         self._show_minor = show_minor
-        self._display_level = "atom"
+        self._display_level = (
+            initial_level if initial_level in DISPLAY_LEVELS else "atom"
+        )
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -123,6 +126,7 @@ class CrystalTUI(App):
         self._redraw()
 
     def on_resize(self) -> None:
+        self._update_title()
         self._redraw()
 
     def on_key(self, event) -> None:
@@ -199,13 +203,30 @@ class CrystalTUI(App):
 
     def _update_title(self) -> None:
         proj = self.camera.projection.value[:5]
+        try:
+            size = self.query_one("#canvas", CrystalCanvas).size
+            width = size.width or self.size.width
+            height = size.height or max(self.size.height - 2, 1)
+            resolved_label = resolve_label_mode(
+                self._label_mode,
+                atom_count=sum(
+                    self._show_minor or not atom.is_minor
+                    for atom in self.crystal.atoms
+                ),
+                width=max(width, 1),
+                height=max(height, 1),
+                zoom=self.camera.viewport_zoom,
+            )
+        except Exception:
+            resolved_label = self._label_mode
         zoom_str = f" ×{self.camera.viewport_zoom:.1f}" if self.camera.viewport_zoom != 1.0 else ""
         roll_str = f" r={self.camera.roll:.0f}°" if abs(self.camera.roll) > 0.5 else ""
         level_str = f" [{self._display_level}]" if self._display_level != "atom" else ""
         self.sub_title = (
-            f"{self.crystal.formula} | "
+            f"{self.crystal.formula} {self.crystal.n_atoms} atoms "
+            f"[{self.crystal.metadata.get('display_mode', 'structure')}] | "
             f"az={self.camera.azimuth:.0f}° el={self.camera.elevation:.0f}°{roll_str} | "
-            f"{proj} | {self._label_mode}{zoom_str}{level_str}"
+            f"{proj} | {resolved_label}{zoom_str}{level_str}"
         )
 
     # ── Actions (toggle bindings only; movement is in on_key) ─────────

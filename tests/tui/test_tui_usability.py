@@ -12,7 +12,12 @@ import pytest
 from crystal_viewer.cli import main
 from crystal_viewer.math.camera import Camera, ProjectionMode, project_points
 from crystal_viewer.tui.app import CrystalTUI
-from crystal_viewer.tui.compositor import DISPLAY_LEVELS, _compute_viewport, compose_frame
+from crystal_viewer.tui.compositor import (
+    DISPLAY_LEVELS,
+    _compute_viewport,
+    compose_frame,
+    resolve_label_mode,
+)
 from crystal_viewer.tui.crystal_ir import AtomIR, CrystalIR
 from crystal_viewer.tui.loader_adapter import load_for_tui
 from crystal_viewer.tui import run_tui
@@ -67,9 +72,12 @@ def _small_crystal() -> CrystalIR:
 
 
 def test_canonical_cif_display_modes_and_bonds() -> None:
+    automatic = load_for_tui(str(DAP4))
     formula = load_for_tui(str(DAP4), display_mode="formula_unit")
     asymmetric = load_for_tui(str(DAP4), display_mode="asymmetric_unit")
 
+    assert automatic.n_atoms == 42
+    assert automatic.metadata["display_mode"] == "formula_unit"
     assert formula.n_atoms == 42
     assert formula.element_counts() == {"C": 6, "H": 18, "N": 3, "Cl": 3, "O": 12}
     assert formula.per_formula_unit == {
@@ -120,6 +128,18 @@ def test_viewport_zoom_works_in_both_directions() -> None:
 
     with pytest.raises(ValueError, match="zoom must be greater than zero"):
         _compute_viewport(points, [], 80, 24, zoom=0.0)
+
+
+def test_adaptive_labels_make_crowded_views_readable() -> None:
+    assert resolve_label_mode(
+        "auto", atom_count=336, width=80, height=24, zoom=1.0
+    ) == "dot"
+    assert resolve_label_mode(
+        "auto", atom_count=42, width=80, height=24, zoom=1.0
+    ) == "element"
+    assert resolve_label_mode(
+        "label", atom_count=336, width=80, height=24, zoom=1.0
+    ) == "label"
 
 
 @pytest.mark.parametrize("width,height", [(12, 6), (20, 8), (40, 12)])
@@ -199,6 +219,8 @@ def test_textual_app_preserves_prepared_camera_and_reset() -> None:
         app = CrystalTUI(crystal, mono=True, camera=initial)
         async with app.run_test(size=(40, 12)) as pilot:
             await pilot.pause()
+            assert "2 atoms" in app.sub_title
+            assert "label" in app.sub_title
             assert app.camera.projection is ProjectionMode.PERSPECTIVE
             assert app.camera.viewport_zoom == pytest.approx(1.7)
             await pilot.press("e", "+", "r")
@@ -212,6 +234,28 @@ def test_textual_app_preserves_prepared_camera_and_reset() -> None:
 
 def test_only_canonical_display_levels_are_exposed() -> None:
     assert DISPLAY_LEVELS == ("atom", "molecule")
+
+
+def test_textual_can_start_in_readable_molecule_level(monkeypatch) -> None:
+    crystal = _small_crystal()
+    app = CrystalTUI(crystal, mono=True, initial_level="molecule")
+    assert app._display_level == "molecule"
+
+    captured = {}
+
+    class FakeApp:
+        def __init__(self, *, crystal, initial_level, **kwargs):
+            captured["crystal"] = crystal
+            captured["initial_level"] = initial_level
+
+        def run(self):
+            captured["ran"] = True
+
+    monkeypatch.setattr("crystal_viewer.tui.app.CrystalTUI", FakeApp)
+    main(["tui", str(DAP4)])
+    assert captured["ran"] is True
+    assert captured["crystal"].n_atoms == 42
+    assert captured["initial_level"] == "molecule"
 
 
 def test_minor_atoms_remain_available_for_interactive_toggle(tmp_path) -> None:
