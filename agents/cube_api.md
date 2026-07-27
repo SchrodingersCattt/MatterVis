@@ -62,6 +62,9 @@ flowchart LR
     Mesh3d cylinders, MIC-aware.
   - `cell_box_trace(lattice, *, origin)` — wireframe parallelepiped.
 - Wrappers (one-shot panel figures)
+  - `build_cube_figure(path, *, camera=..., ...)` — unified cube renderer;
+    pass the final camera here so the cell and paper-coordinate compass
+    are projected from the same view.
   - `build_orbital_panel_figure(cubes, *, ...)` — N-up panel figure
     with shared camera and ranges.
   - `sign_legend_annotations(...)` — paper-coord +/− swatches.
@@ -94,6 +97,11 @@ These are stable across versions; rely on them.
   `use_mesh=True` (marching-cubes Mesh3d). `go.Isosurface` is an
   interactive-only fallback because Kaleido currently rasterises it
   inconsistently across versions.
+- **Camera/compass alignment.** Supply the final Plotly camera through
+  `build_cube_figure(..., camera=camera)` or the `style` mapping. Do not
+  replace `fig.layout.scene.camera` after construction: static compass
+  annotations are projected and baked at build time, so post-hoc camera
+  mutation would leave the compass stale relative to the unit-cell box.
 - **Atom + bond geometry are bright + opaque by default.**
   `atom_sphere_traces` and `bond_traces` emit `Mesh3d` primitives at
   `opacity=1.0` with `ambient ≥ 0.75` so phenyl-heavy or

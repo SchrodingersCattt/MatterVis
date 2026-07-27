@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import Iterable
+from collections.abc import Iterable
 
 import numpy as np
 
@@ -17,6 +17,38 @@ def _normalize(vec: Iterable[float], fallback: Iterable[float]) -> np.ndarray:
 
 
 def _plotly_camera_from_scene(scene: dict, style: dict) -> dict:
+    explicit = style.get("camera")
+    if isinstance(explicit, dict):
+        def _xyz(group: str, fallback: tuple[float, float, float]) -> dict[str, float]:
+            raw = explicit.get(group) or {}
+            if isinstance(raw, dict):
+                return {
+                    axis: float(raw.get(axis, fallback[i]))
+                    for i, axis in enumerate(("x", "y", "z"))
+                }
+            try:
+                values = [float(value) for value in raw]
+            except (TypeError, ValueError):
+                values = list(fallback)
+            if len(values) != 3:
+                values = list(fallback)
+            return {axis: values[i] for i, axis in enumerate(("x", "y", "z"))}
+
+        projection = explicit.get("projection") or {}
+        projection_type = (
+            projection.get("type")
+            if isinstance(projection, dict)
+            else projection
+        )
+        return {
+            "eye": _xyz("eye", (0.0, 0.0, 1.8)),
+            "center": _xyz("center", (0.0, 0.0, 0.0)),
+            "up": _xyz("up", (0.0, 1.0, 0.0)),
+            "projection": {
+                "type": str(projection_type or style.get("projection", "perspective"))
+            },
+        }
+
     eye_distance = float(style.get("camera_eye_distance", 1.8))
     eye = _normalize(scene.get("view_direction", [0.0, 0.0, 1.0]), [0.0, 0.0, 1.0]) * eye_distance
     up = _normalize(scene.get("up", [0.0, 1.0, 0.0]), [0.0, 1.0, 0.0])
