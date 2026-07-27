@@ -605,6 +605,11 @@ def _filter_crystal(crystal, keep_indices: set[int]):
             label=atom.label,
             occupancy=atom.occupancy,
             index=new_idx,
+            source_index=atom.source_index,
+            source_instance_id=atom.source_instance_id,
+            symmetry_operation_index=atom.symmetry_operation_index,
+            image_shift=atom.image_shift,
+            display_copy_id=atom.display_copy_id,
             molecule_index=atom.molecule_index,
             disorder_group=atom.disorder_group,
             is_minor=atom.is_minor,
@@ -620,20 +625,37 @@ def _filter_crystal(crystal, keep_indices: set[int]):
                 distance=bond.distance,
                 start=bond.start,
                 end=bond.end,
+                start_display_copy_id=bond.start_display_copy_id,
+                end_display_copy_id=bond.end_display_copy_id,
+                image_relation=bond.image_relation,
             ))
 
+    metadata = dict(crystal.metadata)
+    metadata["display_atom_count"] = len(new_atoms)
+    surviving_molecules = {
+        atom.molecule_index for atom in new_atoms if atom.molecule_index >= 0
+    }
+    species_map = {
+        species: [index for index in indices if index in surviving_molecules]
+        for species, indices in crystal.species_map.items()
+    }
+    species_map = {species: indices for species, indices in species_map.items() if indices}
     return CrystalIR(
         title=crystal.title,
         formula=_compose_formula(new_atoms),
         spacegroup=crystal.spacegroup,
         source_path=crystal.source_path,
+        canonical_formula=crystal.canonical_formula,
+        canonical_composition=dict(crystal.canonical_composition),
+        source_site_atom_count=crystal.source_site_atom_count,
+        expanded_atom_count=crystal.expanded_atom_count,
         lattice=crystal.lattice,
         atoms=new_atoms,
         bonds=new_bonds,
-        n_molecules=crystal.n_molecules,
-        species_map=crystal.species_map,
+        n_molecules=len(surviving_molecules),
+        species_map=species_map,
         per_formula_unit=crystal.per_formula_unit,
-        metadata=crystal.metadata,
+        metadata=metadata,
     )
 
 

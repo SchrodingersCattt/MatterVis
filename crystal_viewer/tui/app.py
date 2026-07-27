@@ -27,6 +27,7 @@ from .compositor import (
     resolve_label_mode,
     resolve_molecule_detail,
 )
+from .summary import build_scope_summary
 
 
 # ── Constants ───────────────────────────────────────────────────────────────
@@ -233,9 +234,20 @@ class CrystalTUI(App):
                 " [molecule:"
                 f"{resolve_molecule_detail(molecule_count=sum(len(v) for v in self.crystal.species_map.values()), width=max(width, 1), height=max(height, 1))}]"
             )
+        summary = build_scope_summary(
+            self.crystal,
+            show_minor=self._show_minor,
+            display_level=self._display_level,
+        )
+        count_parts = []
+        if summary["expanded_atom_count"] is not None:
+            count_parts.append(f"{summary['expanded_atom_count']} expanded")
+        count_parts.append(f"{summary['display_atom_count']} displayed")
+        if summary["visible_atom_count"] != summary["display_atom_count"]:
+            count_parts.append(f"{summary['visible_atom_count']} visible")
         self.sub_title = (
-            f"{self.crystal.formula} {self.crystal.n_atoms} atoms "
-            f"[{self.crystal.metadata.get('display_mode', 'structure')}] | "
+            f"{summary['canonical_formula']} {'/'.join(count_parts)} "
+            f"[{summary['display_mode']}] | "
             f"az={self.camera.azimuth:.0f}° el={self.camera.elevation:.0f}°{roll_str} | "
             f"{proj} | {resolved_label}{zoom_str}{level_str}"
         )
@@ -268,6 +280,7 @@ class CrystalTUI(App):
 
     def action_toggle_minor(self) -> None:
         self._show_minor = not self._show_minor
+        self._update_title()
         self._redraw()
 
     def action_cycle_level(self) -> None:

@@ -66,6 +66,13 @@ class AtomIR:
     label: str = ""        # CIF _atom_site_label (e.g. "Fe1", "O2", "C3A")
     occupancy: float = 1.0
     index: int = 0         # Index in the atoms list
+    source_index: int = -1
+    source_instance_id: str = ""
+    symmetry_operation_index: int = 0
+    image_shift: tuple[int, int, int] = (0, 0, 0)
+    display_copy_id: str = ""
+    source_molecule_index: int = -1
+    display_fragment_id: str = ""
 
     # MCK-derived fields
     molecule_index: int = -1    # Which molecule this atom belongs to (-1 = unassigned)
@@ -87,6 +94,9 @@ class BondIR:
     distance: float = 0.0
     start: np.ndarray | None = None
     end: np.ndarray | None = None
+    start_display_copy_id: str = ""
+    end_display_copy_id: str = ""
+    image_relation: tuple[int, int, int] = (0, 0, 0)
 
 
 @dataclass
@@ -102,6 +112,10 @@ class CrystalIR:
     formula: str = ""
     spacegroup: str = ""
     source_path: str = ""
+    canonical_formula: str = ""
+    canonical_composition: dict[str, int] = field(default_factory=dict)
+    source_site_atom_count: int | None = None
+    expanded_atom_count: int | None = None
 
     # Geometry
     lattice: Lattice | None = None

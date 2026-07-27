@@ -70,6 +70,7 @@ def _load_cif(path: str, name: str, *, display_mode: str) -> CrystalIR:
         show_hydrogen=True,
         preset={},
     )
+    canonical_composition = _element_counts_from_raw(bundle.raw_atoms)
     return _crystal_ir_from_scene(
         scene,
         source_path=path,
@@ -77,7 +78,10 @@ def _load_cif(path: str, name: str, *, display_mode: str) -> CrystalIR:
         species_map={key: list(value) for key, value in bundle.molcrys_analysis.species_map.items()},
         per_formula_unit=dict(bundle.molcrys_analysis.per_fu),
         n_molecules=len(bundle.molcrys_analysis.mol_indices),
-        source_atom_count=len(bundle.raw_atoms),
+        source_site_atom_count=_cif_source_site_count(path),
+        expanded_atom_count=len(bundle.raw_atoms),
+        canonical_composition=canonical_composition,
+        source_atoms=bundle.raw_atoms,
     )
 
 
@@ -89,7 +93,10 @@ def _crystal_ir_from_scene(
     species_map: dict[str, list[int]],
     per_formula_unit: dict[str, int],
     n_molecules: int,
-    source_atom_count: int,
+    source_site_atom_count: int,
+    expanded_atom_count: int,
+    canonical_composition: dict[str, int],
+    source_atoms: list[dict],
 ) -> CrystalIR:
     """Adapt a canonical scene into the terminal renderer's compact IR."""
     cell = scene["cell"]
@@ -109,6 +116,8 @@ def _crystal_ir_from_scene(
         for molecule_index in molecule_indices
     }
     atom_to_molecule: dict[int, int] = {}
+    atom_to_fragment: dict[int, str] = {}
+    atom_to_source_molecule: dict[int, int] = {}
     molecule_species: dict[int, str] = {}
     for display_molecule_index, fragment in enumerate(scene.get("fragment_table", [])):
         source_molecule_index = fragment.get("source_molecule_index")
@@ -121,6 +130,10 @@ def _crystal_ir_from_scene(
         )
         for atom_index in fragment.get("site_indices", []):
             atom_to_molecule[int(atom_index)] = display_molecule_index
+            atom_to_fragment[int(atom_index)] = str(
+                fragment.get("label") or f"fragment:{display_molecule_index}"
+            )
+            atom_to_source_molecule[int(atom_index)] = source_molecule_index
 
     atoms: list[AtomIR] = []
     for index, atom in enumerate(scene.get("draw_atoms", [])):
@@ -131,6 +144,8 @@ def _crystal_ir_from_scene(
                 dg = int(float(dg_raw))
             except ValueError:
                 pass
+        source_index = int(atom.get("_source_index", index))
+        image_shift = _source_to_display_shift(atom, source_index, source_atoms)
         atoms.append(AtomIR(
             element=str(atom["elem"]),
             cart=np.asarray(atom["cart"], dtype=float),
@@ -138,6 +153,15 @@ def _crystal_ir_from_scene(
             label=str(atom.get("label", "")),
             occupancy=float(atom.get("occ", 1.0)),
             index=index,
+            source_index=source_index,
+            source_instance_id=str(
+                atom.get("_raw_instance_id") or f"{atom.get('label', '')}@sym{atom.get('_symop_index', 0)}"
+            ),
+            symmetry_operation_index=int(atom.get("_symop_index", 0)),
+            image_shift=image_shift,
+            display_copy_id=_display_copy_id(atom, source_index, image_shift),
+            source_molecule_index=atom_to_source_molecule.get(index, -1),
+            display_fragment_id=atom_to_fragment.get(index, ""),
             molecule_index=atom_to_molecule.get(index, -1),
             disorder_group=dg,
             is_minor=bool(atom.get("is_minor", False)),
@@ -147,12 +171,20 @@ def _crystal_ir_from_scene(
     for bond in scene.get("bonds", []):
         start = np.asarray(bond["start"], dtype=float)
         end = np.asarray(bond["end"], dtype=float)
+        atom_i = atoms[int(bond["i"])]
+        atom_j = atoms[int(bond["j"])]
         bonds.append(BondIR(
             i=int(bond["i"]),
             j=int(bond["j"]),
             distance=float(np.linalg.norm(end - start)),
             start=start,
             end=end,
+            start_display_copy_id=atom_i.display_copy_id,
+            end_display_copy_id=atom_j.display_copy_id,
+            image_relation=tuple(
+                atom_j.image_shift[axis] - atom_i.image_shift[axis]
+                for axis in range(3)
+            ),
         ))
 
     display_species_map: dict[str, list[int]] = {}
@@ -165,6 +197,10 @@ def _crystal_ir_from_scene(
         formula=formula,
         spacegroup=spacegroup,
         source_path=source_path,
+        canonical_formula=_formula_from_counts(canonical_composition),
+        canonical_composition=canonical_composition,
+        source_site_atom_count=source_site_atom_count,
+        expanded_atom_count=expanded_atom_count,
         lattice=lattice,
         atoms=atoms,
         bonds=bonds,
@@ -173,10 +209,58 @@ def _crystal_ir_from_scene(
         per_formula_unit=per_formula_unit,
         metadata={
             "display_mode": scene.get("display_mode", "unit_cell"),
-            "source_atom_count": source_atom_count,
+            "source_site_atom_count": source_site_atom_count,
+            "expanded_atom_count": expanded_atom_count,
             "display_atom_count": len(atoms),
         },
     )
+
+
+def _display_copy_id(
+    atom: dict,
+    source_index: int,
+    image_shift: tuple[int, int, int],
+) -> str:
+    instance = str(
+        atom.get("_raw_instance_id")
+        or f"{atom.get('label', '')}@sym{atom.get('_symop_index', 0)}"
+    )
+    return (
+        f"{instance}/source:{source_index}/"
+        f"image:{image_shift[0]},{image_shift[1]},{image_shift[2]}"
+    )
+
+
+def _source_to_display_shift(
+    atom: dict,
+    source_index: int,
+    source_atoms: list[dict],
+) -> tuple[int, int, int]:
+    if 0 <= source_index < len(source_atoms):
+        source_frac = np.asarray(source_atoms[source_index]["frac"], dtype=float)
+    else:
+        wrapped = atom.get("_wrapped_frac")
+        if wrapped is None:
+            explicit = atom.get("_image_shift") or (0, 0, 0)
+            return tuple(int(value) for value in explicit)
+        source_frac = np.asarray(wrapped, dtype=float)
+    display_frac = np.asarray(atom["frac"], dtype=float)
+    return tuple(int(value) for value in np.rint(display_frac - source_frac))
+
+
+def _cif_source_site_count(path: str) -> int:
+    import gemmi
+
+    block = gemmi.cif.read(path).sole_block()
+    return len(list(block.find_loop("_atom_site_label")))
+
+
+def _element_counts_from_raw(atoms: list[dict]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for atom in atoms:
+        element = str(atom["elem"])
+        counts[element] = counts.get(element, 0) + 1
+    return counts
 
 
 def _extract_spacegroup_from_cif(path: str) -> str:
@@ -276,13 +360,17 @@ def _load_cube(path: str, name: str) -> CrystalIR:
     # Convert to AtomIR
     atoms = []
     for i, at in enumerate(raw_atoms):
+        label = at.get("label", f"{at['elem']}{i+1}")
         atoms.append(AtomIR(
             element=at["elem"],
             cart=np.array(at["cart"], dtype=float),
             frac=np.array(at["frac"], dtype=float),
-            label=at.get("label", f"{at['elem']}{i+1}"),
+            label=label,
             occupancy=1.0,
             index=i,
+            source_index=i,
+            source_instance_id=f"{label}@source:{i}",
+            display_copy_id=f"source:{i}/image:0,0,0",
         ))
 
     bonds = []
@@ -293,15 +381,26 @@ def _load_cube(path: str, name: str) -> CrystalIR:
             bonds.append(BondIR(i=i, j=j, distance=d))
 
     formula = _compose_formula(atoms)
+    counts = _counts_from_atoms(atoms)
 
     ir = CrystalIR(
         title=name,
         formula=formula,
         spacegroup="",
         source_path=path,
+        canonical_formula=formula,
+        canonical_composition=counts,
+        source_site_atom_count=len(atoms),
+        expanded_atom_count=len(atoms),
         lattice=lattice,
         atoms=atoms,
         bonds=bonds,
+        metadata={
+            "display_mode": "structure",
+            "source_site_atom_count": len(atoms),
+            "expanded_atom_count": len(atoms),
+            "display_atom_count": len(atoms),
+        },
     )
 
     # Store cube data for density blob rendering
@@ -394,6 +493,9 @@ def _from_pymatgen_structure(struct, name: str, path: str) -> CrystalIR:
         atoms.append(AtomIR(
             element=elem, cart=cart, frac=frac,
             label=f"{elem}{i+1}", occupancy=1.0, index=i,
+            source_index=i,
+            source_instance_id=f"{elem}{i+1}@source:{i}",
+            display_copy_id=f"source:{i}/image:0,0,0",
         ))
         atoms_raw.append({
             "elem": elem, "cart": cart, "frac": frac,
@@ -416,6 +518,7 @@ def _from_pymatgen_structure(struct, name: str, path: str) -> CrystalIR:
         pass  # Bonds are optional for TUI
 
     formula = _compose_formula(atoms)
+    counts = _counts_from_atoms(atoms)
     spacegroup = ""
     try:
         from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
@@ -429,9 +532,19 @@ def _from_pymatgen_structure(struct, name: str, path: str) -> CrystalIR:
         formula=formula,
         spacegroup=spacegroup,
         source_path=path,
+        canonical_formula=formula,
+        canonical_composition=counts,
+        source_site_atom_count=len(atoms),
+        expanded_atom_count=len(atoms),
         lattice=lattice,
         atoms=atoms,
         bonds=bonds,
+        metadata={
+            "display_mode": "structure",
+            "source_site_atom_count": len(atoms),
+            "expanded_atom_count": len(atoms),
+            "display_atom_count": len(atoms),
+        },
     )
 
 
@@ -464,26 +577,51 @@ def _from_ase_atoms(atoms_ase, name: str, path: str) -> CrystalIR:
         atoms.append(AtomIR(
             element=sym, cart=pos, frac=frac,
             label=f"{sym}{i+1}", occupancy=1.0, index=i,
+            source_index=i,
+            source_instance_id=f"{sym}{i+1}@source:{i}",
+            display_copy_id=f"source:{i}/image:0,0,0",
         ))
 
     formula = _compose_formula(atoms)
+    counts = _counts_from_atoms(atoms)
 
     return CrystalIR(
         title=name,
         formula=formula,
         spacegroup="",
         source_path=path,
+        canonical_formula=formula,
+        canonical_composition=counts,
+        source_site_atom_count=len(atoms),
+        expanded_atom_count=len(atoms),
         lattice=lattice,
         atoms=atoms,
         bonds=[],  # Skip bonds for extxyz (no topology data)
+        metadata={
+            "display_mode": "structure",
+            "source_site_atom_count": len(atoms),
+            "expanded_atom_count": len(atoms),
+            "display_atom_count": len(atoms),
+        },
     )
 
 
 def _compose_formula(atoms: list[AtomIR]) -> str:
-    """Build a reduced formula string from atom list."""
+    """Build an absolute composition formula from an atom list."""
+    counts = _counts_from_atoms(atoms)
+
+    return _formula_from_counts(counts)
+
+
+def _counts_from_atoms(atoms: list[AtomIR]) -> dict[str, int]:
     counts: dict[str, int] = {}
-    for a in atoms:
-        counts[a.element] = counts.get(a.element, 0) + 1
+    for atom in atoms:
+        counts[atom.element] = counts.get(atom.element, 0) + 1
+    return counts
+
+
+def _formula_from_counts(counts: dict[str, int]) -> str:
+    """Build an absolute composition formula from element counts."""
 
     if not counts:
         return ""
