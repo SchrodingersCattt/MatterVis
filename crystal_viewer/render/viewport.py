@@ -19,8 +19,7 @@ def _normalize(vec: Iterable[float], fallback: Iterable[float]) -> np.ndarray:
 def _plotly_camera_from_scene(scene: dict, style: dict) -> dict:
     explicit = style.get("camera")
     if isinstance(explicit, dict):
-        def _xyz(group: str, fallback: tuple[float, float, float]) -> dict[str, float]:
-            raw = explicit.get(group) or {}
+        def _xyz_value(raw, fallback: tuple[float, float, float]) -> dict[str, float]:
             if isinstance(raw, dict):
                 return {
                     axis: float(raw.get(axis, fallback[i]))
@@ -34,6 +33,41 @@ def _plotly_camera_from_scene(scene: dict, style: dict) -> dict:
                 values = list(fallback)
             return {axis: values[i] for i, axis in enumerate(("x", "y", "z"))}
 
+        def _xyz(group: str, fallback: tuple[float, float, float]) -> dict[str, float]:
+            return _xyz_value(explicit.get(group), fallback)
+
+        if "eye" in explicit:
+            eye = _xyz("eye", (0.0, 0.0, 1.8))
+            center = _xyz("center", (0.0, 0.0, 0.0))
+            up = _xyz("up", (0.0, 1.0, 0.0))
+        elif "position" in explicit or "focal_point" in explicit:
+            position = _xyz_value(explicit.get("position"), (0.0, 0.0, 1.0))
+            focal = _xyz_value(explicit.get("focal_point"), (0.0, 0.0, 0.0))
+            view_direction = np.array(
+                [position[axis] - focal[axis] for axis in ("x", "y", "z")],
+                dtype=float,
+            )
+            eye_distance = float(style.get("camera_eye_distance", 1.8))
+            eye_vector = _normalize(view_direction, (0.0, 0.0, 1.0)) * eye_distance
+            up_raw = explicit.get("up")
+            up_vector = _normalize(
+                up_raw if up_raw is not None else (0.0, 1.0, 0.0),
+                (0.0, 1.0, 0.0),
+            )
+            eye = {
+                axis: float(eye_vector[i])
+                for i, axis in enumerate(("x", "y", "z"))
+            }
+            center = {"x": 0.0, "y": 0.0, "z": 0.0}
+            up = {
+                axis: float(up_vector[i])
+                for i, axis in enumerate(("x", "y", "z"))
+            }
+        else:
+            eye = _xyz("eye", (0.0, 0.0, 1.8))
+            center = _xyz("center", (0.0, 0.0, 0.0))
+            up = _xyz("up", (0.0, 1.0, 0.0))
+
         projection = explicit.get("projection") or {}
         projection_type = (
             projection.get("type")
@@ -41,9 +75,9 @@ def _plotly_camera_from_scene(scene: dict, style: dict) -> dict:
             else projection
         )
         return {
-            "eye": _xyz("eye", (0.0, 0.0, 1.8)),
-            "center": _xyz("center", (0.0, 0.0, 0.0)),
-            "up": _xyz("up", (0.0, 1.0, 0.0)),
+            "eye": eye,
+            "center": center,
+            "up": up,
             "projection": {
                 "type": str(projection_type or style.get("projection", "perspective"))
             },
@@ -142,9 +176,7 @@ def _manual_aspect_scale(scene: dict, style: dict, topology_data: dict | None = 
 
 def _camera_axis_projections(scene: dict, style: dict) -> list[list[float]] | None:
     """Reproject unit lattice-basis directions onto the camera screen plane."""
-    camera = style.get("camera")
-    if not isinstance(camera, dict):
-        return None
+    camera = _plotly_camera_from_scene(scene, style)
     eye_raw = camera.get("eye") or {}
     up_raw = camera.get("up") or {}
     center_raw = camera.get("center") or {}
