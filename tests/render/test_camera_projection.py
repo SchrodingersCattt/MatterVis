@@ -628,6 +628,51 @@ def test_cube_camera_argument_projects_compass_with_final_camera(tmp_path):
     assert math.isclose(float(fig.layout.scene.camera.eye.z), 1.8)
 
 
+def test_legacy_app_camera_projects_viewport_and_compass_consistently():
+    """The app's position/focal-point camera must not fall back to +z.
+
+    ``style_for_state`` passes the persisted legacy camera representation to
+    the renderer.  The viewport and static compass must canonicalize that
+    representation once and use the same Plotly camera basis.
+    """
+    from crystal_viewer.renderer import _camera_axis_projections
+
+    bundle = build_loaded_crystal(
+        name="DAP-4", cif_path="scripts/data/DAP-4.cif", title="DAP-4"
+    )
+    scene = bundle.scene
+    legacy_camera = scene["camera"]
+    style = {
+        **DEFAULT_STYLE,
+        **scene.get("style", {}),
+        "camera": legacy_camera,
+        "show_axes": True,
+        "show_axis_key": False,
+    }
+
+    fig = build_figure(scene, style)
+    camera = fig.layout.scene.camera.to_plotly_json()
+
+    position = np.asarray(legacy_camera["position"], dtype=float)
+    focal = np.asarray(legacy_camera["focal_point"], dtype=float)
+    expected_eye = position - focal
+    expected_eye = expected_eye / np.linalg.norm(expected_eye) * float(
+        style["camera_eye_distance"]
+    )
+    actual_eye = np.array(
+        [camera["eye"][axis] for axis in ("x", "y", "z")], dtype=float
+    )
+    assert np.allclose(actual_eye, expected_eye)
+
+    legacy_projection = _camera_axis_projections(scene, style)
+    canonical_projection = _camera_axis_projections(
+        scene, {**style, "camera": camera}
+    )
+    assert legacy_projection is not None
+    assert np.allclose(legacy_projection, canonical_projection)
+    assert _compass_arrows(fig) or _compass_dot_shapes(fig)
+
+
 def test_compass_uses_view_minus_eye_not_eye():
     """A camera viewing the origin from ``+z`` and the same camera viewing
     from ``-z`` are mirror images: their screen ``right`` flips sign, so
