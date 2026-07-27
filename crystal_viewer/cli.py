@@ -309,7 +309,7 @@ def _serve_main(args: argparse.Namespace) -> None:
 _TUI_FORMATS = ("ascii", "structured")
 _TUI_PROJECTIONS = ("orthographic", "perspective")
 _TUI_VIEWS = ("auto", "a", "b", "c", "diagonal", "ab", "ac", "bc")
-_TUI_LABELS = ("element", "label", "molecule", "dot")
+_TUI_LABELS = ("auto", "element", "label", "molecule", "dot")
 _TUI_DISPLAYS = ("auto", "formula_unit", "unit_cell", "asymmetric_unit")
 
 
@@ -371,13 +371,13 @@ def _build_tui_parser(subparsers: argparse._SubParsersAction) -> argparse.Argume
         help="Initial view direction (default: auto → diagonal).",
     )
     p.add_argument(
-        "--label", choices=_TUI_LABELS, default="label",
-        help="Atom label mode (default: label). 'element'=Fe/O, 'label'=Fe1/O2, "
+        "--label", choices=_TUI_LABELS, default="auto",
+        help="Atom label mode (default: auto). 'element'=Fe/O, 'label'=Fe1/O2, "
              "'molecule'=Fe1⁰/O2¹ (with mol index), 'dot'=● colored.",
     )
     p.add_argument(
         "--display", choices=_TUI_DISPLAYS, default="auto",
-        help="Display mode (default: auto). 'auto' selects formula_unit for >80 atoms.",
+        help="Display mode (default: auto, canonical unit_cell).",
     )
     p.add_argument(
         "--show-minor", action="store_true", default=False,
@@ -426,24 +426,47 @@ def _tui_main(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     from .tui.loader_adapter import load_for_tui
-    from .math.camera import Camera, project_points
+    from .math.camera import Camera, ProjectionMode, project_points
 
-    crystal = load_for_tui(filepath)
+    if args.zoom <= 0:
+        print("Error: --zoom must be greater than zero.", file=sys.stderr)
+        sys.exit(2)
+    if args.width is not None and args.width <= 0:
+        print("Error: --width must be greater than zero.", file=sys.stderr)
+        sys.exit(2)
+    if args.height is not None and args.height <= 0:
+        print("Error: --height must be greater than zero.", file=sys.stderr)
+        sys.exit(2)
 
-    # Display mode filtering (auto = show everything; explicit picks subset)
     display_mode = args.display
-    if display_mode in ("formula_unit", "asymmetric_unit"):
+    loader_display_mode = display_mode if Path(filepath).suffix.lower() == ".cif" else "unit_cell"
+    crystal = load_for_tui(filepath, display_mode=loader_display_mode)
+
+    keep_atom_set = {
+        index
+        for index, atom in enumerate(crystal.atoms)
+        if (not args.hide_partial or atom.occupancy >= 0.99)
+    }
+    if len(keep_atom_set) != crystal.n_atoms:
+        crystal = _filter_crystal(crystal, keep_atom_set)
+
+    # Non-CIF formats do not have canonical display slices.
+    if Path(filepath).suffix.lower() != ".cif" and display_mode in (
+        "formula_unit", "asymmetric_unit"
+    ):
         crystal = _apply_display_filter(crystal, display_mode)
 
     # Map --compact to label_mode="dot" for backward compat
     label_mode = args.label
-    if args.compact and label_mode == "label":
+    if args.compact and label_mode in ("auto", "label"):
         label_mode = "dot"
 
+    from dataclasses import replace as _replace
+
     cam = Camera.from_view_name(args.view, crystal)
+    cam = _replace(cam, projection=ProjectionMode(args.projection))
 
     # Apply explicit camera angles (agent-friendly: override --view)
-    from dataclasses import replace as _replace
     if args.azimuth is not None:
         cam = _replace(cam, azimuth=args.azimuth)
     if args.elevation is not None:
@@ -456,8 +479,7 @@ def _tui_main(args: argparse.Namespace) -> None:
         cam = _apply_center(cam, args.center, crystal)
 
     # Apply --zoom
-    if args.zoom != 1.0:
-        cam = _replace(cam, viewport_zoom=args.zoom)
+    cam = _replace(cam, viewport_zoom=args.zoom)
 
     if not args.interaction:
         # Static output mode
@@ -465,7 +487,12 @@ def _tui_main(args: argparse.Namespace) -> None:
 
         if args.format == "structured":
             from .tui.serializer import serialize_crystal
-            output = serialize_crystal(crystal, cam, pts_2d)
+            output = serialize_crystal(
+                crystal,
+                cam,
+                pts_2d,
+                show_minor=args.show_minor,
+            )
         else:
             from .tui.compositor import compose_frame
             output = compose_frame(
@@ -484,10 +511,18 @@ def _tui_main(args: argparse.Namespace) -> None:
         app = CrystalTUI(
             crystal=crystal, mono=args.mono,
             initial_view=args.view,
+            camera=cam,
             show_bonds=not args.no_bonds,
             show_cell=not args.no_cell,
             label_mode=label_mode,
             show_minor=args.show_minor,
+            initial_level=(
+                "molecule"
+                if args.display == "auto"
+                and crystal.species_map
+                and crystal.n_atoms > 64
+                else "atom"
+            ),
         )
         app.run()
 
@@ -507,7 +542,7 @@ def _apply_center(cam, center_str: str, crystal):
     if len(parts) == 3 and crystal.lattice is not None:
         try:
             frac = np.array([float(p) for p in parts])
-            cart = crystal.lattice.matrix.T @ frac
+            cart = frac @ crystal.lattice.matrix
             return _replace(cam, target=cart)
         except ValueError:
             pass
@@ -518,18 +553,16 @@ def _apply_center(cam, center_str: str, crystal):
 
 def _apply_display_filter(crystal, mode: str):
     """Filter crystal atoms to a display subset."""
-    from .tui.crystal_ir import CrystalIR, AtomIR, BondIR
-
     if mode == "formula_unit":
         # Keep only atoms belonging to one formula unit (one molecule per species)
         if not crystal.species_map:
             return crystal  # No MCK data, show everything
 
-        # Pick one molecule per species
+        # Pick the canonical per-formula-unit count for each species.
         keep_mol_indices: set[int] = set()
         for species_id, mol_indices in crystal.species_map.items():
-            if mol_indices:
-                keep_mol_indices.add(mol_indices[0])
+            count = max(int(crystal.per_formula_unit.get(species_id, 1)), 0)
+            keep_mol_indices.update(mol_indices[:count])
 
         if not keep_mol_indices:
             return crystal
@@ -557,7 +590,7 @@ def _apply_display_filter(crystal, mode: str):
 def _filter_crystal(crystal, keep_indices: set[int]):
     """Create a new CrystalIR with only the specified atom indices."""
     from .tui.crystal_ir import CrystalIR, AtomIR, BondIR
-    import numpy as np
+    from .tui.loader_adapter import _compose_formula
 
     # Build index remapping
     old_to_new: dict[int, int] = {}
@@ -585,11 +618,13 @@ def _filter_crystal(crystal, keep_indices: set[int]):
                 i=old_to_new[bond.i],
                 j=old_to_new[bond.j],
                 distance=bond.distance,
+                start=bond.start,
+                end=bond.end,
             ))
 
     return CrystalIR(
         title=crystal.title,
-        formula=crystal.formula,
+        formula=_compose_formula(new_atoms),
         spacegroup=crystal.spacegroup,
         source_path=crystal.source_path,
         lattice=crystal.lattice,
@@ -597,6 +632,7 @@ def _filter_crystal(crystal, keep_indices: set[int]):
         bonds=new_bonds,
         n_molecules=crystal.n_molecules,
         species_map=crystal.species_map,
+        per_formula_unit=crystal.per_formula_unit,
         metadata=crystal.metadata,
     )
 

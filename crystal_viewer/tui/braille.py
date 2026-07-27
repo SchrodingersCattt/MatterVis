@@ -9,8 +9,6 @@ MIT-compatible, zero external dependencies, pure Python + numpy.
 
 from __future__ import annotations
 
-import numpy as np
-
 
 # Subpixel (row, col) → bit mask in the braille codepoint offset.
 # Layout:

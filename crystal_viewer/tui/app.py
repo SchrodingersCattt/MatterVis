@@ -8,19 +8,25 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from dataclasses import replace
+
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import Footer, Header, Static
 from textual.reactive import reactive
 from rich.text import Text
 
-import numpy as np
-
 if TYPE_CHECKING:
     from .crystal_ir import CrystalIR
 
-from ..math.camera import Camera, ProjectionMode, project_points
-from .compositor import compose_frame, LABEL_MODES, DISPLAY_LEVELS
+from ..math.camera import Camera, project_points
+from .compositor import (
+    compose_frame,
+    LABEL_MODES,
+    DISPLAY_LEVELS,
+    resolve_label_mode,
+    resolve_molecule_detail,
+)
 
 
 # ── Constants ───────────────────────────────────────────────────────────────
@@ -95,21 +101,26 @@ class CrystalTUI(App):
         *,
         mono: bool = False,
         initial_view: str = "auto",
+        camera: Camera | None = None,
         show_bonds: bool = True,
         show_cell: bool = True,
-        label_mode: str = "label",
+        label_mode: str = "auto",
         show_minor: bool = False,
         compact: bool = False,
+        initial_level: str = "atom",
     ):
         super().__init__()
         self.crystal = crystal
-        self.camera = Camera.from_view_name(initial_view, crystal)
+        self.camera = camera or Camera.from_view_name(initial_view, crystal)
+        self._initial_camera = replace(self.camera)
         self._mono = mono
         self._show_bonds = show_bonds
         self._show_cell = show_cell
         self._label_mode = label_mode if not compact else "dot"
         self._show_minor = show_minor
-        self._display_level = "atom"
+        self._display_level = (
+            initial_level if initial_level in DISPLAY_LEVELS else "atom"
+        )
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -121,6 +132,7 @@ class CrystalTUI(App):
         self._redraw()
 
     def on_resize(self) -> None:
+        self._update_title()
         self._redraw()
 
     def on_key(self, event) -> None:
@@ -128,13 +140,13 @@ class CrystalTUI(App):
         char = event.character
         key = event.key
         handled = True
-        if char == "j" or key == "j":
+        if char == "j" or key in ("j", "left"):
             self.camera = self.camera.pan(dx=PAN_STEP)
-        elif char == "l" or key == "l":
+        elif char == "l" or key in ("l", "right"):
             self.camera = self.camera.pan(dx=-PAN_STEP)
-        elif char == "i" or key == "i":
+        elif char == "i" or key in ("i", "up"):
             self.camera = self.camera.pan(dy=-PAN_STEP)
-        elif char == "k" or key == "k":
+        elif char == "k" or key in ("k", "down"):
             self.camera = self.camera.pan(dy=PAN_STEP)
         elif char == "w" or key == "w":
             self.camera = self.camera.rotate(d_elev=ROTATE_STEP)
@@ -154,10 +166,12 @@ class CrystalTUI(App):
         elif char == "d" or key == "d":
             self.camera = self.camera.rotate(d_roll=ROTATE_STEP)
             self._update_title()
-        elif char == "[" or key == "left_square_bracket":
+        elif char in ("[", "-") or key in ("left_square_bracket", "minus"):
             self.camera = self.camera.zoom(1.0 / ZOOM_FACTOR)
             self._update_title()
-        elif char == "]" or key == "right_square_bracket":
+        elif char in ("]", "+", "=") or key in (
+            "right_square_bracket", "plus", "equals_sign"
+        ):
             self.camera = self.camera.zoom(ZOOM_FACTOR)
             self._update_title()
         else:
@@ -174,8 +188,8 @@ class CrystalTUI(App):
         """Re-project and re-render the crystal."""
         canvas = self.query_one("#canvas", CrystalCanvas)
         size = canvas.size
-        w = max(size.width - 2, 20)
-        h = max(size.height - 2, 10)
+        w = max(size.width, 1)
+        h = max(size.height, 1)
 
         pts_2d, depth = project_points(self.camera, self.crystal.cart_coords)
 
@@ -195,13 +209,35 @@ class CrystalTUI(App):
 
     def _update_title(self) -> None:
         proj = self.camera.projection.value[:5]
+        try:
+            size = self.query_one("#canvas", CrystalCanvas).size
+            width = size.width or self.size.width
+            height = size.height or max(self.size.height - 2, 1)
+            resolved_label = resolve_label_mode(
+                self._label_mode,
+                atom_count=sum(
+                    self._show_minor or not atom.is_minor
+                    for atom in self.crystal.atoms
+                ),
+                width=max(width, 1),
+                height=max(height, 1),
+                zoom=self.camera.viewport_zoom,
+            )
+        except Exception:
+            resolved_label = self._label_mode
         zoom_str = f" ×{self.camera.viewport_zoom:.1f}" if self.camera.viewport_zoom != 1.0 else ""
         roll_str = f" r={self.camera.roll:.0f}°" if abs(self.camera.roll) > 0.5 else ""
         level_str = f" [{self._display_level}]" if self._display_level != "atom" else ""
+        if self._display_level == "molecule":
+            level_str = (
+                " [molecule:"
+                f"{resolve_molecule_detail(molecule_count=sum(len(v) for v in self.crystal.species_map.values()), width=max(width, 1), height=max(height, 1))}]"
+            )
         self.sub_title = (
-            f"{self.crystal.formula} | "
+            f"{self.crystal.formula} {self.crystal.n_atoms} atoms "
+            f"[{self.crystal.metadata.get('display_mode', 'structure')}] | "
             f"az={self.camera.azimuth:.0f}° el={self.camera.elevation:.0f}°{roll_str} | "
-            f"{proj} | {self._label_mode}{zoom_str}{level_str}"
+            f"{proj} | {resolved_label}{zoom_str}{level_str}"
         )
 
     # ── Actions (toggle bindings only; movement is in on_key) ─────────
@@ -235,14 +271,14 @@ class CrystalTUI(App):
         self._redraw()
 
     def action_cycle_level(self) -> None:
-        """Cycle display level: atom → molecule → polyhedra."""
+        """Cycle display level: atom → molecule."""
         idx = DISPLAY_LEVELS.index(self._display_level) if self._display_level in DISPLAY_LEVELS else 0
         self._display_level = DISPLAY_LEVELS[(idx + 1) % len(DISPLAY_LEVELS)]
         self._update_title()
         self._redraw()
 
     def action_reset_view(self) -> None:
-        """Reset zoom and pan to default."""
-        self.camera = Camera.from_view_name("diagonal", self.crystal)
+        """Restore the camera supplied at startup."""
+        self.camera = replace(self._initial_camera)
         self._update_title()
         self._redraw()

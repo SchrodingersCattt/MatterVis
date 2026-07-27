@@ -9,6 +9,8 @@ Entry point: ``matvis tui <file>``
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 __all__ = ["run_tui"]
 
 
@@ -22,6 +24,8 @@ def run_tui(
     width: int | None = None,
     height: int | None = None,
     view: str = "auto",
+    display_mode: str = "auto",
+    show_minor: bool = False,
 ) -> None:
     """Launch the terminal crystal viewer.
 
@@ -41,29 +45,54 @@ def run_tui(
         Override terminal grid dimensions (auto-detect if None).
     view : str
         Initial view direction: "auto", "a", "b", "c", or "diagonal".
+    display_mode : str
+        CIF display slice: "unit_cell", "formula_unit", or "asymmetric_unit".
+    show_minor : bool
+        Show minor disorder alternatives. Hidden by default.
     """
     from .loader_adapter import load_for_tui
 
-    crystal = load_for_tui(path)
+    crystal = load_for_tui(path, display_mode=display_mode)
+
+    from ..math.camera import Camera, ProjectionMode, project_points
+
+    cam = Camera.from_view_name(view, crystal)
+    cam = replace(cam, projection=ProjectionMode(projection))
 
     if not interactive:
         from .serializer import serialize_crystal
-        from .renderer import render_ascii_frame
-        from ..math.camera import Camera, project_points
-
-        cam = Camera.from_view_name(view, crystal)
+        from .compositor import compose_frame
         pts_2d, depth = project_points(cam, crystal.cart_coords)
 
         if format == "structured":
-            print(serialize_crystal(crystal, cam, pts_2d))
+            print(serialize_crystal(
+                crystal,
+                cam,
+                pts_2d,
+                show_minor=show_minor,
+            ))
         else:
-            frame = render_ascii_frame(
+            frame = compose_frame(
                 crystal, cam, pts_2d, depth,
                 width=width, height=height, mono=mono,
+                show_minor=show_minor,
             )
             print(frame)
     else:
         from .app import CrystalTUI
 
-        app = CrystalTUI(crystal=crystal, mono=mono, initial_view=view)
+        app = CrystalTUI(
+            crystal=crystal,
+            mono=mono,
+            initial_view=view,
+            camera=cam,
+            show_minor=show_minor,
+            initial_level=(
+                "molecule"
+                if display_mode == "auto"
+                and crystal.species_map
+                and crystal.n_atoms > 64
+                else "atom"
+            ),
+        )
         app.run()

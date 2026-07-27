@@ -13,7 +13,7 @@ Design:
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 # ── Label modes ─────────────────────────────────────────────────────────────
 
-LABEL_MODES = ("element", "label", "molecule", "dot")
+LABEL_MODES = ("auto", "label", "element", "molecule", "dot")
 
 _SUPERSCRIPTS = "⁰¹²³⁴⁵⁶⁷⁸⁹"
 
@@ -37,6 +37,14 @@ def _superscript(n: int) -> str:
     if n < 0:
         return ""
     return "".join(_SUPERSCRIPTS[int(c)] for c in str(n))
+
+
+def _display_species_name(species_id: str) -> str:
+    """Hide MCK's trailing graph-discriminator suffix in terminal labels."""
+    base, separator, suffix = species_id.rpartition("_")
+    if separator and base and suffix.isdigit():
+        return base
+    return species_id
 
 
 def _atom_label_text(atom, label_mode: str) -> str:
@@ -52,6 +60,40 @@ def _atom_label_text(atom, label_mode: str) -> str:
             return base + _superscript(atom.molecule_index)
         return base
     return atom.element
+
+
+def resolve_label_mode(
+    label_mode: str,
+    *,
+    atom_count: int,
+    width: int,
+    height: int,
+    zoom: float,
+) -> str:
+    """Resolve adaptive labels without changing the scientific atom set."""
+    if label_mode != "auto":
+        return label_mode
+    _ = zoom  # Zoom currently changes framing, not automatic label policy.
+    visible_cells = max(width * height, 1)
+    density = atom_count / visible_cells
+    if density >= 0.08 or atom_count > 160:
+        return "dot"
+    if density >= 0.02 or atom_count > 32:
+        return "element"
+    return "label"
+
+
+def resolve_molecule_detail(
+    *,
+    molecule_count: int,
+    width: int,
+    height: int,
+) -> str:
+    """Choose hulls for sparse views and centroids for dense packing maps."""
+    density = molecule_count / max(width * height, 1)
+    if molecule_count > 32 or density >= 0.025:
+        return "centroid"
+    return "hull"
 
 
 # ── Viewport (uniform scale, correct aspect) ───────────────────────────────
@@ -97,7 +139,9 @@ def _compute_viewport(
     pan_x: float = 0.0,
     pan_y: float = 0.0,
 ) -> Viewport:
-    """Compute aspect-correct viewport. zoom>1 crops to center region."""
+    """Compute an aspect-correct viewport for any positive zoom."""
+    if zoom <= 0:
+        raise ValueError("zoom must be greater than zero")
     all_arrays = [pts_2d] if len(pts_2d) > 0 else []
     all_arrays.extend(p for p in extra_pts if len(p) > 0)
 
@@ -121,16 +165,15 @@ def _compute_viewport(
     x_range = x_max - x_min
     y_range = y_max - y_min
 
-    # Apply zoom (crop to center)
-    if zoom > 1.0:
-        cx = (x_min + x_max) / 2
-        cy = (y_min + y_max) / 2
-        x_range /= zoom
-        y_range /= zoom
-        x_min = cx - x_range / 2
-        x_max = cx + x_range / 2
-        y_min = cy - y_range / 2
-        y_max = cy + y_range / 2
+    # Apply zoom around the fitted center. Values below one zoom out.
+    cx = (x_min + x_max) / 2
+    cy = (y_min + y_max) / 2
+    x_range /= zoom
+    y_range /= zoom
+    x_min = cx - x_range / 2
+    x_max = cx + x_range / 2
+    y_min = cy - y_range / 2
+    y_max = cy + y_range / 2
 
     # Apply 2D pan offset (shift viewport window)
     if pan_x != 0.0 or pan_y != 0.0:
@@ -169,11 +212,17 @@ _BACK_TIER_COLOR = 236  # dark grey (ANSI 256)
 _MID_TIER_COLOR = 244   # medium grey
 
 
-def _atom_radius(element: str, depth_tier: int = _TIER_MID) -> int:
+def _atom_radius(
+    element: str,
+    depth_tier: int = _TIER_MID,
+    detail_scale: float = 1.0,
+) -> int:
     """Depth-dependent atom circle radius (subpixels)."""
     if element == "H":
-        return _RADIUS_H[depth_tier]
-    return _RADIUS_BASE[depth_tier]
+        base = _RADIUS_H[depth_tier]
+    else:
+        base = _RADIUS_BASE[depth_tier]
+    return max(1, int(round(base * detail_scale)))
 
 
 def _depth_tier(depth_val: float, depth_min: float, depth_max: float) -> int:
@@ -201,7 +250,7 @@ def _tier_color(element_color: int, tier: int) -> int:
 
 # ── Display levels ──────────────────────────────────────────────────────────
 
-DISPLAY_LEVELS = ("atom", "molecule", "polyhedra")
+DISPLAY_LEVELS = ("atom", "molecule")
 
 
 # ── Label relaxation ────────────────────────────────────────────────────────
@@ -268,7 +317,7 @@ def compose_frame(
     Parameters
     ----------
     display_level : str
-        Visualization level: "atom" (default), "molecule", or "polyhedra".
+        Visualization level: "atom" (default) or "molecule".
     """
     if width is None or height is None:
         try:
@@ -278,8 +327,20 @@ def compose_frame(
         except OSError:
             width = width or 80
             height = height or 40
-    width = max(width, 30)
-    height = max(height, 15)
+    width = max(width, 1)
+    height = max(height, 1)
+    visible_atom_count = sum(show_minor or not atom.is_minor for atom in crystal.atoms)
+    resolved_label_mode = resolve_label_mode(
+        label_mode,
+        atom_count=visible_atom_count,
+        width=width,
+        height=height,
+        zoom=zoom,
+    )
+    detail_scale = {
+        "dot": 0.45,
+        "element": 0.7,
+    }.get(resolved_label_mode, 1.0)
 
     # ── Viewport ────────────────────────────────────────────────────────
     extra_pts: list[np.ndarray] = []
@@ -306,12 +367,6 @@ def compose_frame(
             crystal, camera, pts_2d, depth, viewport, canvas,
             width, height, mono, show_minor,
         )
-    elif display_level == "polyhedra":
-        return _compose_polyhedra_frame(
-            crystal, camera, pts_2d, depth, viewport, canvas,
-            width, height, mono, show_minor,
-        )
-
     # ── Depth tier computation ───────────────────────────────────────
     depth_min = float(depth.min()) if len(depth) > 0 else 0.0
     depth_max = float(depth.max()) if len(depth) > 0 else 1.0
@@ -321,15 +376,17 @@ def compose_frame(
     if len(pts_2d) > 0:
         for idx in range(min(len(crystal.atoms), len(pts_2d))):
             atom = crystal.atoms[idx]
+            if not show_minor and atom.is_minor:
+                continue
             x2d, y2d = float(pts_2d[idx][0]), float(pts_2d[idx][1])
             row, col = viewport.to_grid(x2d, y2d)
             px_x, px_y = viewport.to_px(x2d, y2d)
             tier = _depth_tier(float(depth[idx]), depth_min, depth_max)
-            radius = _atom_radius(atom.element, tier)
+            radius = _atom_radius(atom.element, tier, detail_scale)
 
-            text = _atom_label_text(atom, label_mode)
+            text = _atom_label_text(atom, resolved_label_mode)
             is_partial = atom.occupancy < 0.99
-            if is_partial and label_mode != "dot":
+            if is_partial and resolved_label_mode != "dot":
                 text += "*"
 
             color = ELEMENT_COLORS.get(atom.element, DEFAULT_COLOR)
@@ -352,23 +409,35 @@ def compose_frame(
 
     # ── Layer 2: Bonds (circle-edge to circle-edge) ─────────────────────
     if show_bonds and crystal.bonds:
+        from ..math.camera import project_points as _proj
+
         pos_map = {a.idx: a for a in atoms_draw}
         for bond in crystal.bonds:
             a1 = pos_map.get(bond.i)
             a2 = pos_map.get(bond.j)
             if a1 is None or a2 is None:
                 continue
-            dx = a2.px_x - a1.px_x
-            dy = a2.px_y - a1.px_y
+            if bond.start is not None and bond.end is not None:
+                endpoints_2d, _ = _proj(
+                    camera,
+                    np.asarray([bond.start, bond.end], dtype=float),
+                )
+                start_px = viewport.to_px(*endpoints_2d[0])
+                end_px = viewport.to_px(*endpoints_2d[1])
+            else:
+                start_px = (a1.px_x, a1.px_y)
+                end_px = (a2.px_x, a2.px_y)
+            dx = end_px[0] - start_px[0]
+            dy = end_px[1] - start_px[1]
             length = (dx * dx + dy * dy) ** 0.5
             if length < 2:
                 continue
             ux, uy = dx / length, dy / length
             # Shorten to circle edges
-            sx = int(a1.px_x + ux * (a1.radius + 1))
-            sy = int(a1.px_y + uy * (a1.radius + 1))
-            ex = int(a2.px_x - ux * (a2.radius + 1))
-            ey = int(a2.px_y - uy * (a2.radius + 1))
+            sx = int(start_px[0] + ux * (a1.radius + 1))
+            sy = int(start_px[1] + uy * (a1.radius + 1))
+            ex = int(end_px[0] - ux * (a2.radius + 1))
+            ey = int(end_px[1] - uy * (a2.radius + 1))
             gap = ((ex - sx) ** 2 + (ey - sy) ** 2) ** 0.5
             if gap < 2:
                 continue
@@ -398,6 +467,8 @@ def compose_frame(
     occupied: set[tuple[int, int]] = set()
 
     for a in label_order:
+        if len(a.text) > width:
+            a.text = a.text[:width]
         lw = len(a.text)
         placed = False
 
@@ -518,7 +589,6 @@ def compose_frame(
         output_lines.pop()
     return "\n".join(output_lines)
 
-
 # ── Color-run helpers ───────────────────────────────────────────────────────
 
 
@@ -569,7 +639,7 @@ _BLOB_NEG_COLOR = 33    # blue (negative lobe)
 
 def _draw_density_blobs(
     canvas: "BrailleCanvas",
-    viewport: "_Viewport",
+    viewport: "Viewport",
     camera: "Camera",
     crystal: "CrystalIR",
 ) -> None:
@@ -716,6 +786,11 @@ def _compose_molecule_frame(
             if not show_minor and atom.is_minor:
                 continue
             mol_groups.setdefault(atom.molecule_index, []).append(idx)
+    molecule_detail = resolve_molecule_detail(
+        molecule_count=len(mol_groups),
+        width=width,
+        height=height,
+    )
 
     # Reverse species_map for labeling: mol_idx → species formula
     mol_formula: dict[int, str] = {}
@@ -731,8 +806,8 @@ def _compose_molecule_frame(
     mol_depths.sort(key=lambda x: x[1])  # far first
 
     # Draw each molecule outline
-    labels_to_place: list[tuple[int, int, str, int]] = []  # (row, col, text, color)
-    for mol_idx, _ in mol_depths:
+    label_candidates: dict[str, list[tuple[float, int, int, int]]] = {}
+    for mol_idx, molecule_depth in mol_depths:
         atom_indices = mol_groups[mol_idx]
         if len(atom_indices) < 2:
             continue
@@ -742,34 +817,43 @@ def _compose_molecule_frame(
         # Get 2D projected coordinates for this molecule's atoms
         mol_pts = [(float(pts_2d[i][0]), float(pts_2d[i][1])) for i in atom_indices]
 
-        # Draw small dots for individual atoms (1px, dimmed)
-        for x, y in mol_pts:
-            px_x, px_y = viewport.to_px(x, y)
-            canvas.set_pixel(px_x, px_y, color=_BACK_TIER_COLOR)
-
-        # Compute 2D convex hull
-        if len(mol_pts) < 3:
-            # Just draw a line between the two points
-            p0 = viewport.to_px(*mol_pts[0])
-            p1 = viewport.to_px(*mol_pts[1])
-            canvas.draw_line(p0[0], p0[1], p1[0], p1[1], color=color)
-        else:
-            hull_indices = convex_hull_2d(mol_pts)
-            if len(hull_indices) >= 3:
-                # Draw hull edges
-                for k in range(len(hull_indices)):
-                    i0 = hull_indices[k]
-                    i1 = hull_indices[(k + 1) % len(hull_indices)]
-                    p0 = viewport.to_px(*mol_pts[i0])
-                    p1 = viewport.to_px(*mol_pts[i1])
-                    canvas.draw_line(p0[0], p0[1], p1[0], p1[1], color=color)
-
         # Centroid for label placement
         cx = sum(x for x, y in mol_pts) / len(mol_pts)
         cy = sum(y for x, y in mol_pts) / len(mol_pts)
+        if molecule_detail == "centroid":
+            px_x, px_y = viewport.to_px(cx, cy)
+            _draw_circle(canvas, px_x, px_y, 2, color=color)
+        else:
+            # Draw individual atom hints and a projected molecular hull.
+            for x, y in mol_pts:
+                px_x, px_y = viewport.to_px(x, y)
+                canvas.set_pixel(px_x, px_y, color=_BACK_TIER_COLOR)
+            if len(mol_pts) < 3:
+                p0 = viewport.to_px(*mol_pts[0])
+                p1 = viewport.to_px(*mol_pts[1])
+                canvas.draw_line(p0[0], p0[1], p1[0], p1[1], color=color)
+            else:
+                hull_indices = convex_hull_2d(mol_pts)
+                if len(hull_indices) >= 3:
+                    for k in range(len(hull_indices)):
+                        i0 = hull_indices[k]
+                        i1 = hull_indices[(k + 1) % len(hull_indices)]
+                        p0 = viewport.to_px(*mol_pts[i0])
+                        p1 = viewport.to_px(*mol_pts[i1])
+                        canvas.draw_line(p0[0], p0[1], p1[0], p1[1], color=color)
+
         row, col = viewport.to_grid(cx, cy)
         formula = mol_formula.get(mol_idx, f"M{mol_idx}")
-        labels_to_place.append((row, col, formula, color))
+        label_candidates.setdefault(formula, []).append(
+            (molecule_depth, row, col, color)
+        )
+
+    # One label per species is enough to identify the full unit-cell packing;
+    # choose the front-most instance so text does not cover every replica.
+    labels_to_place: list[tuple[int, int, str, int]] = []
+    for formula, candidates in label_candidates.items():
+        _, row, col, color = max(candidates, key=lambda item: item[0])
+        labels_to_place.append((row, col, _display_species_name(formula), color))
 
     # Build output with labels
     colored_rows = canvas.render_colored()
@@ -779,7 +863,9 @@ def _compose_molecule_frame(
     lbl_map: dict[int, list[tuple[int, str, int]]] = {}
     for row, col, text, color in labels_to_place:
         if 0 <= row < height:
-            lbl_map.setdefault(row, []).append((col - len(text) // 2, text, color))
+            text = text[:width]
+            start = max(0, min(width - len(text), col - len(text) // 2))
+            lbl_map.setdefault(row, []).append((start, text, color))
 
     for row_idx in range(height):
         row_data = colored_rows[row_idx] if row_idx < len(colored_rows) else []
@@ -823,126 +909,6 @@ def _compose_molecule_frame(
                         braille_run.append((" ", 0))
                     col += 1
             _flush()
-            output_lines.append("".join(parts).rstrip())
-
-    while output_lines and not output_lines[-1]:
-        output_lines.pop()
-    return "\n".join(output_lines)
-
-
-# ── Polyhedra-level rendering ───────────────────────────────────────────────
-
-
-def _compose_polyhedra_frame(
-    crystal: "CrystalIR",
-    camera: "Camera",
-    pts_2d: np.ndarray,
-    depth: np.ndarray,
-    viewport: "Viewport",
-    canvas: "BrailleCanvas",
-    width: int,
-    height: int,
-    mono: bool,
-    show_minor: bool,
-) -> str:
-    """Render polyhedra view: coordination polyhedra wireframes."""
-    from .renderer import ELEMENT_COLORS, DEFAULT_COLOR
-
-    # Draw small dots for all atoms as reference
-    for idx in range(min(len(crystal.atoms), len(pts_2d))):
-        px_x, px_y = viewport.to_px(float(pts_2d[idx][0]), float(pts_2d[idx][1]))
-        canvas.set_pixel(px_x, px_y, color=_BACK_TIER_COLOR)
-
-    # Access precomputed polyhedra from crystal metadata
-    polyhedra = crystal.metadata.get("polyhedra", [])
-
-    labels_to_place: list[tuple[int, int, str, int]] = []
-
-    for poly in polyhedra:
-        center_idx = poly["center_idx"]
-        hull_edges = poly["hull_edges"]
-        shell_indices = poly["shell_indices"]
-        center_elem = poly["center_element"]
-        cn = poly["cn"]
-
-        color = ELEMENT_COLORS.get(center_elem, DEFAULT_COLOR)
-
-        # Project hull vertices (shell atom positions) through camera
-        # hull_edges reference into shell_indices
-        for edge_i, edge_j in hull_edges:
-            ai = shell_indices[edge_i]
-            aj = shell_indices[edge_j]
-            if ai >= len(pts_2d) or aj >= len(pts_2d):
-                continue
-            p0 = viewport.to_px(float(pts_2d[ai][0]), float(pts_2d[ai][1]))
-            p1 = viewport.to_px(float(pts_2d[aj][0]), float(pts_2d[aj][1]))
-            canvas.draw_line(p0[0], p0[1], p1[0], p1[1], color=color)
-
-        # Draw center atom as a larger circle
-        if center_idx < len(pts_2d):
-            px_x, px_y = viewport.to_px(
-                float(pts_2d[center_idx][0]), float(pts_2d[center_idx][1])
-            )
-            _draw_circle(canvas, px_x, px_y, 5, color=color)
-
-            # Label
-            row, col = viewport.to_grid(
-                float(pts_2d[center_idx][0]), float(pts_2d[center_idx][1])
-            )
-            label = f"{center_elem}{cn}"
-            labels_to_place.append((row, col, label, color))
-
-    # Build output
-    colored_rows = canvas.render_colored()
-    output_lines: list[str] = []
-
-    lbl_map: dict[int, list[tuple[int, str, int]]] = {}
-    for row, col, text, color in labels_to_place:
-        if 0 <= row < height:
-            lbl_map.setdefault(row, []).append((col - len(text) // 2, text, color))
-
-    for row_idx in range(height):
-        row_data = colored_rows[row_idx] if row_idx < len(colored_rows) else []
-        row_labels = lbl_map.get(row_idx)
-
-        if not row_labels:
-            if mono:
-                output_lines.append("".join(ch for ch, _ in row_data).rstrip())
-            else:
-                output_lines.append(_build_colored_braille_line(row_data))
-        else:
-            row_labels.sort(key=lambda x: x[0])
-            parts: list[str] = []
-            col = 0
-            li = 0
-            braille_run: list[tuple[str, int]] = []
-
-            def _flush_poly():
-                nonlocal braille_run
-                if braille_run:
-                    if mono:
-                        parts.append("".join(ch for ch, _ in braille_run))
-                    else:
-                        parts.append(_color_run_to_ansi(braille_run))
-                    braille_run = []
-
-            while col < width:
-                if li < len(row_labels) and row_labels[li][0] == col:
-                    _flush_poly()
-                    lcol, ltext, lcolor = row_labels[li]
-                    if mono:
-                        parts.append(ltext)
-                    else:
-                        parts.append(f"\033[1;38;5;{lcolor}m{ltext}\033[0m")
-                    col += len(ltext)
-                    li += 1
-                else:
-                    if col < len(row_data):
-                        braille_run.append(row_data[col])
-                    else:
-                        braille_run.append((" ", 0))
-                    col += 1
-            _flush_poly()
             output_lines.append("".join(parts).rstrip())
 
     while output_lines and not output_lines[-1]:

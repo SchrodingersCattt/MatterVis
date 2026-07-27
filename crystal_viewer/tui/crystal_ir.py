@@ -85,6 +85,8 @@ class BondIR:
     i: int       # Index of first atom
     j: int       # Index of second atom
     distance: float = 0.0
+    start: np.ndarray | None = None
+    end: np.ndarray | None = None
 
 
 @dataclass
@@ -112,6 +114,7 @@ class CrystalIR:
 
     # Metadata (extensible)
     metadata: dict[str, Any] = field(default_factory=dict)
+    per_formula_unit: dict[str, int] = field(default_factory=dict)
 
     # ── Derived properties ──────────────────────────────────────────────
 
