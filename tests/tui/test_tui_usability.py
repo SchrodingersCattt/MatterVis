@@ -22,6 +22,7 @@ from crystal_viewer.tui.compositor import (
 from crystal_viewer.tui.crystal_ir import AtomIR, CrystalIR
 from crystal_viewer.tui.loader_adapter import load_for_tui
 from crystal_viewer.tui import run_tui
+from crystal_viewer.tui.summary import build_scope_summary
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -79,6 +80,14 @@ def test_canonical_cif_display_modes_and_bonds() -> None:
 
     assert automatic.n_atoms == 581
     assert automatic.metadata["display_mode"] == "unit_cell"
+    assert automatic.source_site_atom_count == 336
+    assert automatic.expanded_atom_count == 336
+    assert automatic.canonical_formula == "C48H144Cl24N24O96"
+    assert automatic.metadata["display_atom_count"] == 581
+    assert len({atom.display_copy_id for atom in automatic.atoms}) == 581
+    display_ids = {atom.display_copy_id for atom in automatic.atoms}
+    assert all(bond.start_display_copy_id in display_ids for bond in automatic.bonds)
+    assert all(bond.end_display_copy_id in display_ids for bond in automatic.bonds)
     assert formula.n_atoms == 42
     assert formula.element_counts() == {"C": 6, "H": 18, "N": 3, "Cl": 3, "O": 12}
     assert formula.per_formula_unit == {
@@ -244,7 +253,7 @@ def test_textual_app_preserves_prepared_camera_and_reset() -> None:
         app = CrystalTUI(crystal, mono=True, camera=initial)
         async with app.run_test(size=(40, 12)) as pilot:
             await pilot.pause()
-            assert "2 atoms" in app.sub_title
+            assert "2 displayed" in app.sub_title
             assert "label" in app.sub_title
             assert app.camera.projection is ProjectionMode.PERSPECTIVE
             assert app.camera.viewport_zoom == pytest.approx(1.7)
@@ -305,6 +314,32 @@ def test_minor_atoms_remain_available_for_interactive_toggle(tmp_path) -> None:
     assert "C1B" not in hidden
     assert "C1B*" in shown
 
+    hidden_summary = build_scope_summary(crystal, show_minor=False)
+    shown_summary = build_scope_summary(crystal, show_minor=True)
+    assert hidden_summary["display_atom_count"] == 3
+    assert hidden_summary["visible_atom_count"] == 2
+    assert hidden_summary["visible_formula"] == "CN"
+    assert shown_summary["visible_atom_count"] == 3
+    assert shown_summary["visible_formula"] == "C2N"
+
+
+def test_minor_toggle_refreshes_scoped_title(tmp_path) -> None:
+    path = tmp_path / "disorder.cif"
+    path.write_text(DISORDER_CIF, encoding="utf-8")
+    crystal = load_for_tui(str(path), display_mode="unit_cell")
+
+    async def exercise() -> None:
+        app = CrystalTUI(crystal, mono=True, show_minor=False)
+        async with app.run_test(size=(60, 16)) as pilot:
+            await pilot.pause()
+            assert "3 displayed/2 visible" in app.sub_title
+            await pilot.press("n")
+            await pilot.pause()
+            assert "3 displayed" in app.sub_title
+            assert "/2 visible" not in app.sub_title
+
+    asyncio.run(exercise())
+
 
 def test_narrow_frames_truncate_long_labels() -> None:
     crystal = _small_crystal()
@@ -348,3 +383,43 @@ def test_structured_and_public_helper_share_minor_visibility(tmp_path) -> None:
     assert "  n_atoms: 3\n" in shown.getvalue()
     assert "  formula: CN\n" in hidden.getvalue()
     assert "  formula: C2N\n" in shown.getvalue()
+    assert "  display_mode: unit_cell\n" in hidden.getvalue()
+    assert "  display_atom_count: 3\n" in hidden.getvalue()
+    assert "  visible_atom_count: 2\n" in hidden.getvalue()
+    assert "  canonical_formula: C2N\n" in hidden.getvalue()
+    assert "  display_formula: C2N\n" in hidden.getvalue()
+    assert "  visible_formula: CN\n" in hidden.getvalue()
+    assert "canonical_composition:\n  C: 2\n  N: 1\n" in hidden.getvalue()
+    assert "display_composition:\n  C: 2\n  N: 1\n" in hidden.getvalue()
+    assert "visible_composition:\n  C: 1\n  N: 1\n" in hidden.getvalue()
+    assert "composition:\n  C: 1\n  N: 1\n" in hidden.getvalue()
+
+
+def test_non_cif_ir_has_deterministic_identity_and_scopes(tmp_path) -> None:
+    path = tmp_path / "pair.xyz"
+    path.write_text("2\npair\nC 0 0 0\nO 1.2 0 0\n", encoding="utf-8")
+    crystal = load_for_tui(str(path))
+    assert crystal.source_site_atom_count == 2
+    assert crystal.expanded_atom_count == 2
+    assert crystal.canonical_formula == "CO"
+    assert crystal.metadata["display_atom_count"] == 2
+    assert [atom.source_index for atom in crystal.atoms] == [0, 1]
+    assert len({atom.display_copy_id for atom in crystal.atoms}) == 2
+
+
+def test_filtered_molecule_summary_drops_removed_groups() -> None:
+    from crystal_viewer.cli import _filter_crystal
+
+    crystal = load_for_tui(str(DAP4), display_mode="formula_unit")
+    first_molecule = next(atom.molecule_index for atom in crystal.atoms if atom.molecule_index >= 0)
+    keep = {
+        index
+        for index, atom in enumerate(crystal.atoms)
+        if atom.molecule_index == first_molecule
+    }
+    filtered = _filter_crystal(crystal, keep)
+    summary = build_scope_summary(filtered, show_minor=True, display_level="molecule")
+    assert filtered.n_molecules == 1
+    assert sum(len(indices) for indices in filtered.species_map.values()) == 1
+    assert summary["visible_marker_count"] == 1
+    assert filtered.metadata["display_atom_count"] == filtered.n_atoms

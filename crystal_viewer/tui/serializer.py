@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from .summary import build_scope_summary
+
 if TYPE_CHECKING:
     from .crystal_ir import CrystalIR
     from ..math.camera import Camera
@@ -63,29 +65,34 @@ def serialize_crystal(
         atom for index, atom in enumerate(crystal.atoms) if index in visible_indices
     ]
 
-    counts: dict[str, int] = {}
-    for atom in visible_atoms:
-        counts[atom.element] = counts.get(atom.element, 0) + 1
-
-    def _formula_sort_key(element: str) -> tuple[int, str]:
-        if element == "C":
-            return (0, element)
-        if element == "H":
-            return (1, element)
-        return (2, element)
-
-    formula = "".join(
-        element if count == 1 else f"{element}{count}"
-        for element, count in sorted(counts.items(), key=lambda item: _formula_sort_key(item[0]))
-    )
+    summary = build_scope_summary(crystal, show_minor=show_minor)
+    counts = summary["visible_composition"]
 
     # ── Header ──────────────────────────────────────────────────────────
     lines.append("crystal:")
-    lines.append(f"  formula: {formula}")
+    lines.append(f"  formula: {summary['visible_formula']}")
     if crystal.spacegroup:
         lines.append(f"  spacegroup: {crystal.spacegroup}")
     lines.append(f"  n_atoms: {len(visible_atoms)}")
     lines.append(f"  source: {crystal.source_path}")
+    lines.append("")
+
+    lines.append("observation:")
+    lines.append(f"  display_mode: {summary['display_mode']}")
+    lines.append(f"  display_level: {summary['display_level']}")
+    for field in (
+        "source_site_atom_count",
+        "expanded_atom_count",
+        "display_atom_count",
+        "visible_atom_count",
+        "visible_marker_count",
+    ):
+        value = summary[field]
+        if value is not None:
+            lines.append(f"  {field}: {value}")
+    lines.append(f"  canonical_formula: {summary['canonical_formula']}")
+    lines.append(f"  display_formula: {summary['display_formula']}")
+    lines.append(f"  visible_formula: {summary['visible_formula']}")
     lines.append("")
 
     # ── Unit cell ───────────────────────────────────────────────────────
@@ -101,8 +108,22 @@ def serialize_crystal(
         lines.append(f"  volume: {lat.volume:.2f}")
         lines.append("")
 
-    # ── Composition ─────────────────────────────────────────────────────
+    # ── Scoped composition ──────────────────────────────────────────────
+    lines.append("canonical_composition:")
+    for elem, n in sorted(summary["canonical_composition"].items()):
+        lines.append(f"  {elem}: {n}")
+    lines.append("")
+
+    lines.append("display_composition:")
+    for elem, n in sorted(summary["display_composition"].items()):
+        lines.append(f"  {elem}: {n}")
+    lines.append("")
+
     if counts:
+        lines.append("visible_composition:")
+        for elem, n in sorted(counts.items()):
+            lines.append(f"  {elem}: {n}")
+        lines.append("")
         lines.append("composition:")
         for elem, n in sorted(counts.items()):
             lines.append(f"  {elem}: {n}")
