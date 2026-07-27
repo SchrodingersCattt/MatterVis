@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mattervis.local/schemas/tui-benchmark/identity_manifest.schema.json",
+  "title": "MatterVis TUI benchmark identity manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source_sites", "expanded_instances", "display_copies", "molecules", "fragments"],
+  "properties": {
+    "source_sites": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_site_id", "cif_row_index", "original_label"],
+        "properties": {
+          "source_site_id": {"type": "string", "minLength": 1},
+          "cif_row_index": {"type": "integer", "minimum": 0},
+          "original_label": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "expanded_instances": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["expanded_instance_id", "source_site_id", "symmetry_operation_index", "symmetry_operation", "source_index"],
+        "properties": {
+          "expanded_instance_id": {"type": "string", "minLength": 1},
+          "source_site_id": {"type": "string", "minLength": 1},
+          "symmetry_operation_index": {"type": "integer", "minimum": 0},
+          "symmetry_operation": {"type": "string", "minLength": 1},
+          "source_index": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "display_copies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["display_copy_id", "expanded_instance_id", "image_shift"],
+        "properties": {
+          "display_copy_id": {"type": "string", "minLength": 1},
+          "expanded_instance_id": {"type": "string", "minLength": 1},
+          "image_shift": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": {"type": "integer"}
+          }
+        }
+      }
+    },
+    "molecules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["molecule_id", "species_id", "expanded_instance_ids"],
+        "properties": {
+          "molecule_id": {"type": "string", "minLength": 1},
+          "species_id": {"type": "string", "minLength": 1},
+          "expanded_instance_ids": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "fragments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fragment_id", "expanded_instance_ids"],
+        "properties": {
+          "fragment_id": {"type": "string", "minLength": 1},
+          "molecule_id": {"type": ["string", "null"]},
+          "expanded_instance_ids": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    }
+  }
+}

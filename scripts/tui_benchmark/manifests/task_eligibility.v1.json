@@ -1,0 +1,118 @@
+{
+  "schema": "mattervis.tui-benchmark.eligibility/v1",
+  "arms": ["IMG", "TUI-ART", "TUI-INT", "TUI-STRUCT", "CIF", "ASE", "PMG", "MCK", "MV-API", "TUI-V1"],
+  "tasks": [
+    {
+      "task_id": "Q03",
+      "suite": "end_to_end",
+      "arms": {
+        "IMG": {"status": "abstention_test", "reason": "A fixed image does not expose exact fractional coordinates or the lattice matrix."},
+        "TUI-ART": {"status": "abstention_test", "reason": "Terminal art does not expose typed coordinates or the lattice matrix."},
+        "TUI-INT": {"status": "abstention_test", "reason": "The current interactive screen has no exact coordinate inspection action."},
+        "TUI-STRUCT": {"status": "abstention_test", "reason": "The current output rounds fractional and Cartesian coordinates too coarsely for the Q03 tolerance."},
+        "CIF": {"status": "eligible", "reason": "The source contains the cell and fractional coordinates."},
+        "ASE": {"status": "eligible", "reason": "ASE exposes cell, scaled positions, and Cartesian positions."},
+        "PMG": {"status": "eligible", "reason": "pymatgen exposes the lattice and both coordinate systems."},
+        "MCK": {"status": "eligible", "reason": "The MCK structure retains the lattice and atomic coordinates."},
+        "MV-API": {"status": "eligible", "reason": "MatterVis scene state exposes source/display coordinates and cell geometry."},
+        "TUI-V1": {"status": "not_applicable", "reason": "The proposed terminal JSON contract is not implemented in PR0."}
+      }
+    },
+    {
+      "task_id": "Q06",
+      "suite": "end_to_end",
+      "arms": {
+        "IMG": {"status": "abstention_test", "reason": "A fixed image cannot provide an exact MIC distance and image shift."},
+        "TUI-ART": {"status": "abstention_test", "reason": "Terminal art cannot provide an exact MIC distance and image shift."},
+        "TUI-INT": {"status": "abstention_test", "reason": "The current interactive TUI has no exact bond inspection action."},
+        "TUI-STRUCT": {"status": "abstention_test", "reason": "The current output aggregates bonds by element pair and omits the requested endpoints and image shift."},
+        "CIF": {"status": "eligible", "reason": "The MIC is computable from the source cell and coordinates."},
+        "ASE": {"status": "eligible", "reason": "ASE provides MIC distance and cell-shift operations."},
+        "PMG": {"status": "eligible", "reason": "pymatgen provides periodic neighbor/image calculations."},
+        "MCK": {"status": "eligible", "reason": "MCK provides PBC-aware molecular geometry."},
+        "MV-API": {"status": "eligible", "reason": "Canonical scene bonds carry PBC-aware endpoints."},
+        "TUI-V1": {"status": "not_applicable", "reason": "The proposed terminal JSON contract is not implemented in PR0."}
+      }
+    },
+    {
+      "task_id": "Q09",
+      "suite": "end_to_end",
+      "arms": {
+        "IMG": {"status": "abstention_test", "reason": "A single unlabeled image does not reliably expose molecular stoichiometry."},
+        "TUI-ART": {"status": "abstention_test", "reason": "Static art does not expose canonical species and per-FU counts."},
+        "TUI-INT": {"status": "abstention_test", "reason": "The interactive molecule level does not expose exact per-FU counts or a formula-unit member list."},
+        "TUI-STRUCT": {"status": "eligible", "reason": "The current structured report includes molecule indices for evaluating the wrapper."},
+        "CIF": {"status": "eligible", "reason": "The synthetic graph is recoverable from coordinates under the published oracle policy."},
+        "ASE": {"status": "eligible", "reason": "ASE can construct the fixed-cutoff graph and component counts."},
+        "PMG": {"status": "eligible", "reason": "pymatgen can construct the fixed-cutoff graph and component counts."},
+        "MCK": {"status": "eligible", "reason": "MCK owns molecule grouping and simplest-unit stoichiometry."},
+        "MV-API": {"status": "eligible", "reason": "MatterVis exposes canonical fragment and formula-unit state."},
+        "TUI-V1": {"status": "not_applicable", "reason": "The proposed terminal JSON contract is not implemented in PR0."}
+      }
+    },
+    {
+      "task_id": "Q10",
+      "suite": "end_to_end",
+      "arms": {
+        "IMG": {"status": "abstention_test", "reason": "A fixed image does not expose source occupancy and disorder groups."},
+        "TUI-ART": {"status": "abstention_test", "reason": "Static art cannot prove source occupancy conservation."},
+        "TUI-INT": {"status": "abstention_test", "reason": "The interactive screen does not expose exact occupancies or assembly conservation."},
+        "TUI-STRUCT": {"status": "abstention_test", "reason": "The current structured output omits numeric occupancy and assembly fields."},
+        "CIF": {"status": "eligible", "reason": "The source contains occupancy, assembly, and group fields."},
+        "ASE": {"status": "abstention_test", "reason": "Plain ASE does not standardize CIF disorder major/minor policy without a supplied adapter."},
+        "PMG": {"status": "eligible", "reason": "pymatgen retains disordered-site occupancies for this synthetic case."},
+        "MCK": {"status": "eligible", "reason": "MCK owns the disorder-selection semantics used by MatterVis."},
+        "MV-API": {"status": "eligible", "reason": "The canonical loader exposes resolved major/minor provenance."},
+        "TUI-V1": {"status": "not_applicable", "reason": "The proposed terminal JSON contract is not implemented in PR0."}
+      }
+    },
+    {
+      "task_id": "Q14",
+      "suite": "representation",
+      "arms": {
+        "IMG": {"status": "eligible", "reason": "The fixed image can visually encode front/back order under the matched camera."},
+        "TUI-ART": {"status": "eligible", "reason": "Depth tiers in terminal art can encode front/back order."},
+        "TUI-INT": {"status": "eligible", "reason": "The interactive TUI can inspect the matched camera and rotate if permitted."},
+        "TUI-STRUCT": {"status": "eligible", "reason": "The structured representation includes coordinates and camera metadata."},
+        "CIF": {"status": "eligible", "reason": "The front/back answer is computable from source coordinates and the supplied camera."},
+        "ASE": {"status": "eligible", "reason": "ASE coordinates can be projected using the supplied camera."},
+        "PMG": {"status": "eligible", "reason": "pymatgen coordinates can be projected using the supplied camera."},
+        "MCK": {"status": "eligible", "reason": "MCK coordinates can be projected using the supplied camera."},
+        "MV-API": {"status": "eligible", "reason": "MatterVis exposes scene coordinates and camera actions."},
+        "TUI-V1": {"status": "not_applicable", "reason": "The proposed terminal JSON contract is not implemented in PR0."}
+      }
+    },
+    {
+      "task_id": "Q17",
+      "suite": "conformance",
+      "arms": {
+        "IMG": {"status": "not_applicable", "reason": "This is a product request-state conformance test, not an image task."},
+        "TUI-ART": {"status": "not_applicable", "reason": "A static frame alone does not expose requested versus resolved state."},
+        "TUI-INT": {"status": "eligible", "reason": "The Textual title and state should reflect the resolved request."},
+        "TUI-STRUCT": {"status": "abstention_test", "reason": "The current serializer reports projection, azimuth, and elevation but omits resolved roll and zoom."},
+        "CIF": {"status": "not_applicable", "reason": "Raw CIF has no TUI request-state contract."},
+        "ASE": {"status": "not_applicable", "reason": "ASE has no TUI request-state contract."},
+        "PMG": {"status": "not_applicable", "reason": "pymatgen has no TUI request-state contract."},
+        "MCK": {"status": "not_applicable", "reason": "MCK has no TUI request-state contract."},
+        "MV-API": {"status": "eligible", "reason": "MatterVis API has a documented camera and projection contract."},
+        "TUI-V1": {"status": "not_applicable", "reason": "The proposed terminal JSON contract is not implemented in PR0."}
+      }
+    },
+    {
+      "task_id": "Q18",
+      "suite": "representation",
+      "arms": {
+        "IMG": {"status": "eligible", "reason": "A matched-size image supplies a visual motif baseline."},
+        "TUI-ART": {"status": "eligible", "reason": "This task directly measures small terminal art legibility."},
+        "TUI-INT": {"status": "eligible", "reason": "The interactive TUI uses the same constrained terminal viewport."},
+        "TUI-STRUCT": {"status": "not_applicable", "reason": "The task measures visual motif recognition rather than structured extraction."},
+        "CIF": {"status": "not_applicable", "reason": "Raw CIF is not a constrained visual representation."},
+        "ASE": {"status": "not_applicable", "reason": "ASE is not a constrained visual representation."},
+        "PMG": {"status": "not_applicable", "reason": "pymatgen is not a constrained visual representation."},
+        "MCK": {"status": "not_applicable", "reason": "MCK is not a constrained visual representation."},
+        "MV-API": {"status": "eligible", "reason": "The API screenshot path provides a matched visual baseline."},
+        "TUI-V1": {"status": "not_applicable", "reason": "The proposed terminal JSON/art contract is not implemented in PR0."}
+      }
+    }
+  ]
+}

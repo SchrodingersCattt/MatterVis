@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mattervis.local/schemas/tui-benchmark/task-eligibility-v1.json",
+  "title": "MatterVis TUI benchmark task eligibility",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "arms", "tasks"],
+  "properties": {
+    "schema": {"const": "mattervis.tui-benchmark.eligibility/v1"},
+    "arms": {
+      "const": ["IMG", "TUI-ART", "TUI-INT", "TUI-STRUCT", "CIF", "ASE", "PMG", "MCK", "MV-API", "TUI-V1"]
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["task_id", "suite", "arms"],
+        "properties": {
+          "task_id": {"type": "string", "pattern": "^Q[0-9]{2}$"},
+          "suite": {"enum": ["representation", "end_to_end", "conformance"]},
+          "arms": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["IMG", "TUI-ART", "TUI-INT", "TUI-STRUCT", "CIF", "ASE", "PMG", "MCK", "MV-API", "TUI-V1"],
+            "properties": {
+              "IMG": {"$ref": "#/$defs/status"},
+              "TUI-ART": {"$ref": "#/$defs/status"},
+              "TUI-INT": {"$ref": "#/$defs/status"},
+              "TUI-STRUCT": {"$ref": "#/$defs/status"},
+              "CIF": {"$ref": "#/$defs/status"},
+              "ASE": {"$ref": "#/$defs/status"},
+              "PMG": {"$ref": "#/$defs/status"},
+              "MCK": {"$ref": "#/$defs/status"},
+              "MV-API": {"$ref": "#/$defs/status"},
+              "TUI-V1": {"$ref": "#/$defs/status"}
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason"],
+      "properties": {
+        "status": {"enum": ["eligible", "abstention_test", "not_applicable"]},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

@@ -1,0 +1,261 @@
+{
+  "schema": "mattervis.tui-benchmark.oracle/v1",
+  "license": "CC0-1.0",
+  "cases": [
+    {
+      "case_id": "triclinic_lattice",
+      "fixture_path": "fixtures/triclinic_lattice.cif",
+      "fixture_sha256": "470d238abb0d569713d9c8781ff112fa3f1a00c6f4602cffea57eb24e8ff9b12",
+      "generator": {"kind": "analytic", "version": "mattervis-synthetic-v1"},
+      "oracle": {
+        "kind": "analytic",
+        "version": "1",
+        "uses_tui_implementation": false,
+        "derivation": "Closed-form triclinic row-vector lattice; cart = frac @ M_rows."
+      },
+      "identities": {
+        "source_sites": [
+          {"source_site_id": "site:0000:C1", "cif_row_index": 0, "original_label": "C1"}
+        ],
+        "expanded_instances": [
+          {"expanded_instance_id": "site:0000:C1/sym:0", "source_site_id": "site:0000:C1", "symmetry_operation_index": 0, "symmetry_operation": "x,y,z", "source_index": 0}
+        ],
+        "display_copies": [
+          {"display_copy_id": "site:0000:C1/sym:0/img:0,0,0", "expanded_instance_id": "site:0000:C1/sym:0", "image_shift": [0, 0, 0]}
+        ],
+        "molecules": [],
+        "fragments": []
+      },
+      "tasks": [
+        {
+          "task_id": "Q03",
+          "request": {"expanded_instance_id": "site:0000:C1/sym:0"},
+          "answer": {
+            "frac": [0.2, 0.3, 0.4],
+            "row_matrix": [[10.0, 0.0, 0.0], [5.0, 8.660254037844386, 0.0], [5.0, 2.886751345948129, 8.16496580927726]],
+            "cart": [5.5, 3.7527767497325675, 3.265986323710904]
+          },
+          "tolerances": {"cartesian_angstrom": 1e-8},
+          "observable_by": ["CIF", "ASE", "PMG", "MCK", "MV-API"]
+        }
+      ]
+    },
+    {
+      "case_id": "pbc_pair",
+      "fixture_path": "fixtures/pbc_pair.cif",
+      "fixture_sha256": "ac333d69397f4dad815ed940932a96dcff06d3253b482a727bdde1bd6f88e8e0",
+      "generator": {"kind": "analytic", "version": "mattervis-synthetic-v1"},
+      "oracle": {
+        "kind": "analytic",
+        "version": "1",
+        "uses_tui_implementation": false,
+        "derivation": "A 10 angstrom cubic cell with sites separated by 0.90 fractional a; the nearest H1 image is shifted by -a."
+      },
+      "identities": {
+        "source_sites": [
+          {"source_site_id": "site:0000:O1", "cif_row_index": 0, "original_label": "O1"},
+          {"source_site_id": "site:0001:H1", "cif_row_index": 1, "original_label": "H1"}
+        ],
+        "expanded_instances": [
+          {"expanded_instance_id": "site:0000:O1/sym:0", "source_site_id": "site:0000:O1", "symmetry_operation_index": 0, "symmetry_operation": "x,y,z", "source_index": 0},
+          {"expanded_instance_id": "site:0001:H1/sym:0", "source_site_id": "site:0001:H1", "symmetry_operation_index": 0, "symmetry_operation": "x,y,z", "source_index": 1}
+        ],
+        "display_copies": [
+          {"display_copy_id": "site:0000:O1/sym:0/img:0,0,0", "expanded_instance_id": "site:0000:O1/sym:0", "image_shift": [0, 0, 0]},
+          {"display_copy_id": "site:0001:H1/sym:0/img:-1,0,0", "expanded_instance_id": "site:0001:H1/sym:0", "image_shift": [-1, 0, 0]}
+        ],
+        "molecules": [
+          {"molecule_id": "mol:0000", "species_id": "HO", "expanded_instance_ids": ["site:0000:O1/sym:0", "site:0001:H1/sym:0"]}
+        ],
+        "fragments": [
+          {"fragment_id": "frag:0000", "molecule_id": "mol:0000", "expanded_instance_ids": ["site:0000:O1/sym:0", "site:0001:H1/sym:0"]}
+        ]
+      },
+      "tasks": [
+        {
+          "task_id": "Q06",
+          "request": {"from": "site:0000:O1/sym:0", "to": "site:0001:H1/sym:0"},
+          "answer": {"wrapped_distance_angstrom": 9.0, "mic_distance_angstrom": 1.0, "accepted_to_image_shifts": [[-1, 0, 0]]},
+          "tolerances": {"distance_angstrom": 1e-8},
+          "observable_by": ["CIF", "ASE", "PMG", "MCK", "MV-API"]
+        }
+      ]
+    },
+    {
+      "case_id": "projection_stack_6",
+      "fixture_path": "fixtures/projection_stack_6.cif",
+      "fixture_sha256": "d66f820456809005761b73a7fadb92b01cdb23beb611786788d40900bc37c949",
+      "generator": {"kind": "analytic", "version": "mattervis-synthetic-v1"},
+      "oracle": {
+        "kind": "analytic",
+        "version": "1",
+        "uses_tui_implementation": false,
+        "derivation": "Q001 and Q002 differ only along the camera forward x axis; the remaining sites form a square in the yz projection."
+      },
+      "identities": {
+        "source_sites": [
+          {"source_site_id": "site:0000:Q001", "cif_row_index": 0, "original_label": "Q001"},
+          {"source_site_id": "site:0001:Q002", "cif_row_index": 1, "original_label": "Q002"},
+          {"source_site_id": "site:0002:Q003", "cif_row_index": 2, "original_label": "Q003"},
+          {"source_site_id": "site:0003:Q004", "cif_row_index": 3, "original_label": "Q004"},
+          {"source_site_id": "site:0004:Q005", "cif_row_index": 4, "original_label": "Q005"},
+          {"source_site_id": "site:0005:Q006", "cif_row_index": 5, "original_label": "Q006"}
+        ],
+        "expanded_instances": [
+          {"expanded_instance_id": "site:0000:Q001/sym:0", "source_site_id": "site:0000:Q001", "symmetry_operation_index": 0, "symmetry_operation": "x,y,z", "source_index": 0},
+          {"expanded_instance_id": "site:0001:Q002/sym:0", "source_site_id": "site:0001:Q002", "symmetry_operation_index": 0, "symmetry_operation": "x,y,z", "source_index": 1},
+          {"expanded_instance_id": "site:0002:Q003/sym:0", "source_site_id": "site:0002:Q003", "symmetry_operation_index": 0, "symmetry_operation": "x,y,z", "source_index": 2},
+          {"expanded_instance_id": "site:0003:Q004/sym:0", "source_site_id": "site:0003:Q004", "symmetry_operation_index": 0, "symmetry_operation": "x,y,z", "source_index": 3},
+          {"expanded_instance_id": "site:0004:Q005/sym:0", "source_site_id": "site:0004:Q005", "symmetry_operation_index": 0, "symmetry_operation": "x,y,z", "source_index": 4},
+          {"expanded_instance_id": "site:0005:Q006/sym:0", "source_site_id": "site:0005:Q006", "symmetry_operation_index": 0, "symmetry_operation": "x,y,z", "source_index": 5}
+        ],
+        "display_copies": [
+          {"display_copy_id": "site:0000:Q001/sym:0/img:0,0,0", "expanded_instance_id": "site:0000:Q001/sym:0", "image_shift": [0, 0, 0]},
+          {"display_copy_id": "site:0001:Q002/sym:0/img:0,0,0", "expanded_instance_id": "site:0001:Q002/sym:0", "image_shift": [0, 0, 0]},
+          {"display_copy_id": "site:0002:Q003/sym:0/img:0,0,0", "expanded_instance_id": "site:0002:Q003/sym:0", "image_shift": [0, 0, 0]},
+          {"display_copy_id": "site:0003:Q004/sym:0/img:0,0,0", "expanded_instance_id": "site:0003:Q004/sym:0", "image_shift": [0, 0, 0]},
+          {"display_copy_id": "site:0004:Q005/sym:0/img:0,0,0", "expanded_instance_id": "site:0004:Q005/sym:0", "image_shift": [0, 0, 0]},
+          {"display_copy_id": "site:0005:Q006/sym:0/img:0,0,0", "expanded_instance_id": "site:0005:Q006/sym:0", "image_shift": [0, 0, 0]}
+        ],
+        "molecules": [],
+        "fragments": []
+      },
+      "tasks": [
+        {
+          "task_id": "Q14",
+          "request": {"camera": {"projection": "orthographic", "azimuth": 0.0, "elevation": 0.0, "roll": 0.0, "target": [10.0, 10.0, 10.0]}, "pair": ["site:0000:Q001/sym:0", "site:0001:Q002/sym:0"]},
+          "answer": {"front": "site:0001:Q002/sym:0"},
+          "tolerances": {},
+          "observable_by": ["IMG", "TUI-ART", "TUI-INT", "TUI-STRUCT", "CIF", "ASE", "PMG", "MCK", "MV-API"]
+        },
+        {
+          "task_id": "Q17",
+          "request": {"projection": "perspective", "azimuth": 30.0, "elevation": 20.0, "roll": 10.0, "zoom": 1.3},
+          "answer": {"resolved_projection": "perspective", "resolved_azimuth": 30.0, "resolved_elevation": 20.0, "resolved_roll": 10.0, "resolved_zoom": 1.3},
+          "tolerances": {"angle_degrees": 1e-8, "zoom": 1e-8},
+          "observable_by": ["TUI-INT", "MV-API"]
+        },
+        {
+          "task_id": "Q18",
+          "request": {"terminal_sizes": [[40, 12], [80, 24]], "motif": "one projected overlap pair plus four square corners"},
+          "answer": {"overlap_pair": ["site:0000:Q001/sym:0", "site:0001:Q002/sym:0"], "corner_count": 4},
+          "tolerances": {},
+          "observable_by": ["IMG", "TUI-ART", "TUI-INT", "MV-API"]
+        }
+      ]
+    },
+    {
+      "case_id": "disorder_70_30",
+      "fixture_path": "fixtures/disorder_70_30.cif",
+      "fixture_sha256": "f8f63c05c16623bde414fbac2da215d2fb78469c181dd9da979d89901251f479",
+      "generator": {"kind": "analytic", "version": "mattervis-synthetic-v1"},
+      "oracle": {
+        "kind": "analytic",
+        "version": "1",
+        "uses_tui_implementation": false,
+        "derivation": "Two alternatives share assembly A and have explicit 0.70/0.30 occupancy; the larger occupancy is the unique major alternative."
+      },
+      "identities": {
+        "source_sites": [
+          {"source_site_id": "site:0000:C1A", "cif_row_index": 0, "original_label": "C1A"},
+          {"source_site_id": "site:0001:C1B", "cif_row_index": 1, "original_label": "C1B"},
+          {"source_site_id": "site:0002:N1", "cif_row_index": 2, "original_label": "N1"}
+        ],
+        "expanded_instances": [
+          {"expanded_instance_id": "site:0000:C1A/sym:0", "source_site_id": "site:0000:C1A", "symmetry_operation_index": 0, "symmetry_operation": "x,y,z", "source_index": 0},
+          {"expanded_instance_id": "site:0001:C1B/sym:0", "source_site_id": "site:0001:C1B", "symmetry_operation_index": 0, "symmetry_operation": "x,y,z", "source_index": 1},
+          {"expanded_instance_id": "site:0002:N1/sym:0", "source_site_id": "site:0002:N1", "symmetry_operation_index": 0, "symmetry_operation": "x,y,z", "source_index": 2}
+        ],
+        "display_copies": [
+          {"display_copy_id": "site:0000:C1A/sym:0/img:0,0,0", "expanded_instance_id": "site:0000:C1A/sym:0", "image_shift": [0, 0, 0]},
+          {"display_copy_id": "site:0001:C1B/sym:0/img:0,0,0", "expanded_instance_id": "site:0001:C1B/sym:0", "image_shift": [0, 0, 0]},
+          {"display_copy_id": "site:0002:N1/sym:0/img:0,0,0", "expanded_instance_id": "site:0002:N1/sym:0", "image_shift": [0, 0, 0]}
+        ],
+        "molecules": [],
+        "fragments": []
+      },
+      "tasks": [
+        {
+          "task_id": "Q10",
+          "request": {"assembly": "A"},
+          "answer": {"major": ["site:0000:C1A/sym:0"], "minor": ["site:0001:C1B/sym:0"], "ordered": ["site:0002:N1/sym:0"], "assembly_occupancy_sum": 1.0},
+          "tolerances": {"occupancy": 1e-8},
+          "observable_by": ["CIF", "PMG", "MCK", "MV-API"]
+        }
+      ]
+    },
+    {
+      "case_id": "fu_1_1_3",
+      "fixture_path": "fixtures/fu_1_1_3.cif",
+      "fixture_sha256": "7bdee4ce704e7b7c717be590d0ac2286f6b1b3b8ea4236053f520838f0e2c748",
+      "generator": {"kind": "analytic", "version": "mattervis-synthetic-v1"},
+      "oracle": {
+        "kind": "analytic",
+        "version": "1",
+        "uses_tui_implementation": false,
+        "derivation": "One isolated H2O graph, one isolated H3N graph, and three separated monatomic Ne components give per-FU counts 1:1:3."
+      },
+      "identities": {
+        "source_sites": [
+          {"source_site_id": "site:0000:O1", "cif_row_index": 0, "original_label": "O1"},
+          {"source_site_id": "site:0001:H1", "cif_row_index": 1, "original_label": "H1"},
+          {"source_site_id": "site:0002:H2", "cif_row_index": 2, "original_label": "H2"},
+          {"source_site_id": "site:0003:N1", "cif_row_index": 3, "original_label": "N1"},
+          {"source_site_id": "site:0004:H3", "cif_row_index": 4, "original_label": "H3"},
+          {"source_site_id": "site:0005:H4", "cif_row_index": 5, "original_label": "H4"},
+          {"source_site_id": "site:0006:H5", "cif_row_index": 6, "original_label": "H5"},
+          {"source_site_id": "site:0007:Ne1", "cif_row_index": 7, "original_label": "Ne1"},
+          {"source_site_id": "site:0008:Ne2", "cif_row_index": 8, "original_label": "Ne2"},
+          {"source_site_id": "site:0009:Ne3", "cif_row_index": 9, "original_label": "Ne3"}
+        ],
+        "expanded_instances": [
+          {"expanded_instance_id": "site:0000:O1/sym:0", "source_site_id": "site:0000:O1", "symmetry_operation_index": 0, "symmetry_operation": "x,y,z", "source_index": 0},
+          {"expanded_instance_id": "site:0001:H1/sym:0", "source_site_id": "site:0001:H1", "symmetry_operation_index": 0, "symmetry_operation": "x,y,z", "source_index": 1},
+          {"expanded_instance_id": "site:0002:H2/sym:0", "source_site_id": "site:0002:H2", "symmetry_operation_index": 0, "symmetry_operation": "x,y,z", "source_index": 2},
+          {"expanded_instance_id": "site:0003:N1/sym:0", "source_site_id": "site:0003:N1", "symmetry_operation_index": 0, "symmetry_operation": "x,y,z", "source_index": 3},
+          {"expanded_instance_id": "site:0004:H3/sym:0", "source_site_id": "site:0004:H3", "symmetry_operation_index": 0, "symmetry_operation": "x,y,z", "source_index": 4},
+          {"expanded_instance_id": "site:0005:H4/sym:0", "source_site_id": "site:0005:H4", "symmetry_operation_index": 0, "symmetry_operation": "x,y,z", "source_index": 5},
+          {"expanded_instance_id": "site:0006:H5/sym:0", "source_site_id": "site:0006:H5", "symmetry_operation_index": 0, "symmetry_operation": "x,y,z", "source_index": 6},
+          {"expanded_instance_id": "site:0007:Ne1/sym:0", "source_site_id": "site:0007:Ne1", "symmetry_operation_index": 0, "symmetry_operation": "x,y,z", "source_index": 7},
+          {"expanded_instance_id": "site:0008:Ne2/sym:0", "source_site_id": "site:0008:Ne2", "symmetry_operation_index": 0, "symmetry_operation": "x,y,z", "source_index": 8},
+          {"expanded_instance_id": "site:0009:Ne3/sym:0", "source_site_id": "site:0009:Ne3", "symmetry_operation_index": 0, "symmetry_operation": "x,y,z", "source_index": 9}
+        ],
+        "display_copies": [
+          {"display_copy_id": "site:0000:O1/sym:0/img:0,0,0", "expanded_instance_id": "site:0000:O1/sym:0", "image_shift": [0, 0, 0]},
+          {"display_copy_id": "site:0001:H1/sym:0/img:0,0,0", "expanded_instance_id": "site:0001:H1/sym:0", "image_shift": [0, 0, 0]},
+          {"display_copy_id": "site:0002:H2/sym:0/img:0,0,0", "expanded_instance_id": "site:0002:H2/sym:0", "image_shift": [0, 0, 0]},
+          {"display_copy_id": "site:0003:N1/sym:0/img:0,0,0", "expanded_instance_id": "site:0003:N1/sym:0", "image_shift": [0, 0, 0]},
+          {"display_copy_id": "site:0004:H3/sym:0/img:0,0,0", "expanded_instance_id": "site:0004:H3/sym:0", "image_shift": [0, 0, 0]},
+          {"display_copy_id": "site:0005:H4/sym:0/img:0,0,0", "expanded_instance_id": "site:0005:H4/sym:0", "image_shift": [0, 0, 0]},
+          {"display_copy_id": "site:0006:H5/sym:0/img:0,0,0", "expanded_instance_id": "site:0006:H5/sym:0", "image_shift": [0, 0, 0]},
+          {"display_copy_id": "site:0007:Ne1/sym:0/img:0,0,0", "expanded_instance_id": "site:0007:Ne1/sym:0", "image_shift": [0, 0, 0]},
+          {"display_copy_id": "site:0008:Ne2/sym:0/img:0,0,0", "expanded_instance_id": "site:0008:Ne2/sym:0", "image_shift": [0, 0, 0]},
+          {"display_copy_id": "site:0009:Ne3/sym:0/img:0,0,0", "expanded_instance_id": "site:0009:Ne3/sym:0", "image_shift": [0, 0, 0]}
+        ],
+        "molecules": [
+          {"molecule_id": "mol:0000", "species_id": "H2O", "expanded_instance_ids": ["site:0000:O1/sym:0", "site:0001:H1/sym:0", "site:0002:H2/sym:0"]},
+          {"molecule_id": "mol:0001", "species_id": "H3N", "expanded_instance_ids": ["site:0003:N1/sym:0", "site:0004:H3/sym:0", "site:0005:H4/sym:0", "site:0006:H5/sym:0"]},
+          {"molecule_id": "mol:0002", "species_id": "Ne", "expanded_instance_ids": ["site:0007:Ne1/sym:0"]},
+          {"molecule_id": "mol:0003", "species_id": "Ne", "expanded_instance_ids": ["site:0008:Ne2/sym:0"]},
+          {"molecule_id": "mol:0004", "species_id": "Ne", "expanded_instance_ids": ["site:0009:Ne3/sym:0"]}
+        ],
+        "fragments": [
+          {"fragment_id": "frag:0000", "molecule_id": "mol:0000", "expanded_instance_ids": ["site:0000:O1/sym:0", "site:0001:H1/sym:0", "site:0002:H2/sym:0"]},
+          {"fragment_id": "frag:0001", "molecule_id": "mol:0001", "expanded_instance_ids": ["site:0003:N1/sym:0", "site:0004:H3/sym:0", "site:0005:H4/sym:0", "site:0006:H5/sym:0"]},
+          {"fragment_id": "frag:0002", "molecule_id": "mol:0002", "expanded_instance_ids": ["site:0007:Ne1/sym:0"]},
+          {"fragment_id": "frag:0003", "molecule_id": "mol:0003", "expanded_instance_ids": ["site:0008:Ne2/sym:0"]},
+          {"fragment_id": "frag:0004", "molecule_id": "mol:0004", "expanded_instance_ids": ["site:0009:Ne3/sym:0"]}
+        ]
+      },
+      "tasks": [
+        {
+          "task_id": "Q09",
+          "request": {"return_one_formula_unit": true},
+          "answer": {"per_fu": {"H2O": 1, "H3N": 1, "Ne": 3}, "atom_count": 10, "composition": {"H": 5, "N": 1, "Ne": 3, "O": 1}, "molecule_ids": ["mol:0000", "mol:0001", "mol:0002", "mol:0003", "mol:0004"]},
+          "tolerances": {},
+          "observable_by": ["TUI-STRUCT", "CIF", "ASE", "PMG", "MCK", "MV-API"]
+        }
+      ]
+    }
+  ]
+}
