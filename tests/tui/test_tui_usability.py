@@ -84,6 +84,9 @@ def test_canonical_cif_display_modes_and_bonds() -> None:
     assert automatic.expanded_atom_count == 336
     assert automatic.canonical_formula == "C48H144Cl24N24O96"
     assert automatic.metadata["display_atom_count"] == 581
+    assert automatic.source_molecules
+    assert automatic.source_molecule_species
+    assert set(automatic.source_molecules) == set(automatic.source_molecule_species)
     assert len({atom.display_copy_id for atom in automatic.atoms}) == 581
     display_ids = {atom.display_copy_id for atom in automatic.atoms}
     assert all(bond.start_display_copy_id in display_ids for bond in automatic.bonds)
@@ -262,6 +265,31 @@ def test_textual_app_preserves_prepared_camera_and_reset() -> None:
             assert app.camera.azimuth == pytest.approx(initial.azimuth)
             assert app.camera.viewport_zoom == pytest.approx(initial.viewport_zoom)
             assert app.camera.roll == pytest.approx(initial.roll)
+
+    asyncio.run(exercise())
+
+
+def test_textual_u_o_zoom_aliases_and_orbit_keep_stable_fit() -> None:
+    crystal = _small_crystal()
+
+    async def exercise() -> None:
+        app = CrystalTUI(crystal, mono=True)
+        async with app.run_test(size=(40, 12)) as pilot:
+            await pilot.pause()
+            initial_zoom = app.camera.viewport_zoom
+            initial_viewport = app.controller.state.viewport
+            await pilot.press("o")
+            await pilot.pause()
+            assert app.camera.viewport_zoom > initial_zoom
+            await pilot.press("u")
+            await pilot.pause()
+            assert app.camera.viewport_zoom == pytest.approx(initial_zoom)
+            await pilot.press("e", "w")
+            await pilot.pause()
+            current = app.controller.state.viewport
+            assert (current.x_min, current.x_max, current.y_min, current.y_max) == pytest.approx(
+                (initial_viewport.x_min, initial_viewport.x_max, initial_viewport.y_min, initial_viewport.y_max)
+            )
 
     asyncio.run(exercise())
 

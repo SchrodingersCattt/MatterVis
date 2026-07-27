@@ -78,6 +78,10 @@ def _load_cif(path: str, name: str, *, display_mode: str) -> CrystalIR:
         species_map={key: list(value) for key, value in bundle.molcrys_analysis.species_map.items()},
         per_formula_unit=dict(bundle.molcrys_analysis.per_fu),
         n_molecules=len(bundle.molcrys_analysis.mol_indices),
+        source_molecules={
+            index: tuple(int(member) for member in members)
+            for index, members in enumerate(bundle.molcrys_analysis.mol_indices)
+        },
         source_site_atom_count=_cif_source_site_count(path),
         expanded_atom_count=len(bundle.raw_atoms),
         canonical_composition=canonical_composition,
@@ -93,6 +97,7 @@ def _crystal_ir_from_scene(
     species_map: dict[str, list[int]],
     per_formula_unit: dict[str, int],
     n_molecules: int,
+    source_molecules: dict[int, tuple[int, ...]],
     source_site_atom_count: int,
     expanded_atom_count: int,
     canonical_composition: dict[str, int],
@@ -206,6 +211,8 @@ def _crystal_ir_from_scene(
         bonds=bonds,
         n_molecules=n_molecules,
         species_map=display_species_map or species_map,
+        source_molecules=source_molecules,
+        source_molecule_species=source_species,
         per_formula_unit=per_formula_unit,
         metadata={
             "display_mode": scene.get("display_mode", "unit_cell"),

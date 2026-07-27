@@ -1,0 +1,504 @@
+"""Semantic state owner shared by the Textual terminal UI and agent adapters."""
+
+from __future__ import annotations
+
+from dataclasses import replace
+from typing import Any
+
+import numpy as np
+
+from ..math.camera import Camera, ProjectionMode, project_points
+from .compositor import DISPLAY_LEVELS, LABEL_MODES, Viewport, _compute_viewport, compose_frame
+from .inspection import inspect_atoms, inspect_molecules, resolve_atom_references, resolve_molecule_reference
+from .observation import build_observation_scope, build_terminal_title
+from .state import (
+    TerminalCameraState,
+    TerminalDisplayState,
+    TerminalFocusState,
+    TerminalObservation,
+    TerminalViewportState,
+    TerminalViewSnapshot,
+    TerminalViewState,
+)
+
+
+class TerminalViewController:
+    """Control one manifested :class:`CrystalIR` without changing its chemistry.
+
+    The controller owns only terminal view state. It never rebuilds bonds,
+    molecular partitions, disorder assignments, or periodic copies; those are
+    already represented in the supplied ``CrystalIR``.
+    """
+
+    CAPABILITIES = (
+        "observe",
+        "set_camera",
+        "orbit",
+        "align",
+        "fit",
+        "pan",
+        "zoom",
+        "set_display",
+        "focus",
+        "save_view",
+        "restore_view",
+        "list_views",
+        "reset_view",
+    )
+
+    def __init__(
+        self,
+        crystal,
+        *,
+        camera: Camera | None = None,
+        width: int = 80,
+        height: int = 24,
+        mono: bool = False,
+        show_bonds: bool = True,
+        show_cell: bool = True,
+        label_mode: str = "auto",
+        show_minor: bool = False,
+        display_level: str = "atom",
+    ) -> None:
+        self.crystal = crystal
+        self._width, self._height = self._validate_dimensions(width, height)
+        self.camera = self._copy_camera(camera or Camera.from_view_name("auto", crystal))
+        self._initial_camera = self._copy_camera(self.camera)
+        self._mono = bool(mono)
+        self._show_bonds = bool(show_bonds)
+        self._show_cell = bool(show_cell)
+        self._label_mode = self._validate_label_mode(label_mode)
+        self._show_minor = bool(show_minor)
+        self._display_level = self._validate_display_level(display_level)
+        self._focus = TerminalFocusState()
+        self._snapshots: dict[str, tuple[Camera, TerminalDisplayState, TerminalFocusState, Viewport]] = {}
+        self._revision = 0
+        self._fit_viewport = self._fit_all_viewport()
+
+    @classmethod
+    def from_file(cls, path: str, *, display_mode: str = "auto", **kwargs) -> "TerminalViewController":
+        """Load a structure through the canonical TUI loader."""
+        from .loader_adapter import load_for_tui
+
+        return cls(load_for_tui(path, display_mode=display_mode), **kwargs)
+
+    @property
+    def revision(self) -> int:
+        return self._revision
+
+    @property
+    def width(self) -> int:
+        return self._width
+
+    @property
+    def height(self) -> int:
+        return self._height
+
+    @property
+    def state(self) -> TerminalViewState:
+        """Return a detached immutable snapshot of the semantic view state."""
+        camera = TerminalCameraState(
+            azimuth=float(self.camera.azimuth),
+            elevation=float(self.camera.elevation),
+            roll=float(self.camera.roll),
+            projection=self.camera.projection.value,
+            zoom=float(self.camera.viewport_zoom),
+            pan_x=float(self.camera.pan_x),
+            pan_y=float(self.camera.pan_y),
+        )
+        display = TerminalDisplayState(
+            display_level=self._display_level,
+            label_mode=self._label_mode,
+            show_bonds=self._show_bonds,
+            show_cell=self._show_cell,
+            show_minor=self._show_minor,
+            mono=self._mono,
+        )
+        viewport = TerminalViewportState(
+            width=self._width,
+            height=self._height,
+            scale=float(self._fit_viewport.scale),
+            x_min=float(self._fit_viewport.x_min),
+            x_max=float(self._fit_viewport.x_max),
+            y_min=float(self._fit_viewport.y_min),
+            y_max=float(self._fit_viewport.y_max),
+        )
+        return TerminalViewState(
+            revision=self._revision,
+            camera=camera,
+            display=display,
+            focus=self._focus,
+            viewport=viewport,
+        )
+
+    def observe(self) -> TerminalObservation:
+        """Render and describe the exact current terminal view without mutation."""
+        state = self.state
+        pts_2d, depth = project_points(self.camera, self.crystal.cart_coords)
+        frame = compose_frame(
+            self.crystal,
+            self.camera,
+            pts_2d,
+            depth,
+            width=self._width,
+            height=self._height,
+            mono=self._mono,
+            label_mode=self._label_mode,
+            show_bonds=self._show_bonds,
+            show_cell=self._show_cell,
+            show_minor=self._show_minor,
+            zoom=self.camera.viewport_zoom,
+            pan_x=self.camera.pan_x,
+            pan_y=self.camera.pan_y,
+            display_level=self._display_level,
+            viewport=self._fit_viewport,
+        )
+        title = build_terminal_title(
+            self.crystal,
+            state.camera,
+            state.display,
+            width=self._width,
+            height=self._height,
+        )
+        return TerminalObservation(
+            revision=self._revision,
+            state=state,
+            title=title,
+            frame=frame,
+            scope=build_observation_scope(self.crystal, state.display),
+            capabilities=self.CAPABILITIES,
+        )
+
+    def set_camera(
+        self,
+        *,
+        azimuth: float | None = None,
+        elevation: float | None = None,
+        roll: float | None = None,
+        projection: str | ProjectionMode | None = None,
+        zoom: float | None = None,
+        pan_x: float | None = None,
+        pan_y: float | None = None,
+    ) -> TerminalObservation:
+        """Apply absolute partial camera state and return the new observation."""
+        candidate = self.camera
+        if any(value is not None for value in (azimuth, elevation, roll)):
+            candidate = candidate.set_orientation(
+                azimuth=azimuth,
+                elevation=elevation,
+                roll=roll,
+            )
+        if projection is not None:
+            candidate = replace(candidate, projection=self._validate_projection(projection))
+        if zoom is not None:
+            candidate = self._with_zoom(candidate, zoom)
+        if pan_x is not None or pan_y is not None:
+            values = (pan_x if pan_x is not None else candidate.pan_x, pan_y if pan_y is not None else candidate.pan_y)
+            self._validate_finite("pan", *values)
+            candidate = replace(candidate, pan_x=float(values[0]), pan_y=float(values[1]))
+        self.camera = candidate
+        return self._changed()
+
+    def orbit(self, *, yaw_deg: float = 0.0, pitch_deg: float = 0.0, roll_deg: float = 0.0) -> TerminalObservation:
+        """Orbit around a fixed world +Z up-axis and return the rendered view."""
+        self.camera = self.camera.orbit_turntable(
+            yaw_deg=float(yaw_deg),
+            pitch_deg=float(pitch_deg),
+            roll_deg=float(roll_deg),
+        )
+        return self._changed()
+
+    def align(self, axis: str) -> TerminalObservation:
+        """Align to real or reciprocal lattice axis ``a/b/c/a*/b*/c*``."""
+        if self.crystal.lattice is None:
+            raise ValueError("align requires a crystal lattice")
+        self.camera = self.camera.align_lattice_axis(self.crystal.lattice.matrix, axis)
+        return self._changed()
+
+    def pan(self, *, dx: float = 0.0, dy: float = 0.0) -> TerminalObservation:
+        """Pan the stable terminal viewport in screen-space data units."""
+        self._validate_finite("pan", dx, dy)
+        self.camera = self.camera.pan(dx=float(dx), dy=float(dy))
+        return self._changed()
+
+    def zoom(self, *, factor: float) -> TerminalObservation:
+        """Multiply viewport zoom within the existing interactive bounds."""
+        self._validate_finite("zoom factor", factor)
+        if factor <= 0:
+            raise ValueError("zoom factor must be greater than zero")
+        self.camera = self.camera.zoom(float(factor))
+        return self._changed()
+
+    def set_display(
+        self,
+        *,
+        display_level: str | None = None,
+        label_mode: str | None = None,
+        show_bonds: bool | None = None,
+        show_cell: bool | None = None,
+        show_minor: bool | None = None,
+        mono: bool | None = None,
+    ) -> TerminalObservation:
+        """Apply absolute render choices without changing source structure data."""
+        if display_level is not None:
+            self._display_level = self._validate_display_level(display_level)
+        if label_mode is not None:
+            self._label_mode = self._validate_label_mode(label_mode)
+        if show_bonds is not None:
+            self._show_bonds = bool(show_bonds)
+        if show_cell is not None:
+            self._show_cell = bool(show_cell)
+        if show_minor is not None:
+            self._show_minor = bool(show_minor)
+        if mono is not None:
+            self._mono = bool(mono)
+        return self._changed()
+
+    def fit(self, *, target: str = "all") -> TerminalObservation:
+        """Explicitly fit either all visible structure or the current focus."""
+        if target == "all":
+            self._fit_viewport = self._fit_all_viewport()
+        elif target == "focus":
+            frame_indices = self._focused_frame_indices()
+            if not frame_indices:
+                raise ValueError("focus has no visible displayed atoms to fit")
+            self._fit_viewport = self._fit_indices_viewport(frame_indices)
+        else:
+            raise ValueError("fit target must be 'all' or 'focus'")
+        self.camera = replace(self.camera, pan_x=0.0, pan_y=0.0)
+        return self._changed()
+
+    def focus_atom(self, references: str | int | dict[str, Any] | list[str | int | dict[str, Any]]) -> TerminalObservation:
+        """Fit exact displayed atom references while preserving all visual context."""
+        values = references if isinstance(references, list) else [references]
+        indices = resolve_atom_references(self.crystal, values)
+        return self._set_focus("atom", indices)
+
+    def focus_molecule(self, reference: str | int | dict[str, Any]) -> TerminalObservation:
+        """Fit a source or displayed molecule while preserving all visual context."""
+        return self._set_focus("molecule", resolve_molecule_reference(self.crystal, reference))
+
+    def focus_selection(self, references: list[str | int | dict[str, Any]]) -> TerminalObservation:
+        """Focus the supplied external selection without mutating browser selection state."""
+        if not references:
+            raise ValueError("focus_selection requires at least one atom reference")
+        return self._set_focus("selection", resolve_atom_references(self.crystal, references))
+
+    def clear_focus(self) -> TerminalObservation:
+        """Clear active focus and refit all current visible structure."""
+        self._focus = TerminalFocusState()
+        self._fit_viewport = self._fit_all_viewport()
+        self.camera = replace(self.camera, pan_x=0.0, pan_y=0.0)
+        return self._changed()
+
+    def save_view(self, name: str, *, overwrite: bool = False) -> TerminalViewSnapshot:
+        """Save detached camera, display, focus, and fit state under ``name``."""
+        name = self._validate_snapshot_name(name)
+        if name in self._snapshots and not overwrite:
+            raise ValueError(f"snapshot already exists: {name}")
+        display = self.state.display
+        viewport = self._copy_viewport(self._fit_viewport)
+        self._snapshots[name] = (
+            self._copy_camera(self.camera),
+            display,
+            self._focus,
+            viewport,
+        )
+        return TerminalViewSnapshot(name=name, state=self.state)
+
+    def restore_view(self, name: str) -> TerminalObservation:
+        """Restore a previously saved view atomically."""
+        try:
+            camera, display, focus, viewport = self._snapshots[name]
+        except KeyError as exc:
+            raise ValueError(f"unknown snapshot: {name}") from exc
+        self.camera = self._copy_camera(camera)
+        self._mono = display.mono
+        self._show_bonds = display.show_bonds
+        self._show_cell = display.show_cell
+        self._label_mode = display.label_mode
+        self._show_minor = display.show_minor
+        self._display_level = display.display_level
+        self._focus = focus
+        self._fit_viewport = self._copy_viewport(viewport)
+        return self._changed()
+
+    def list_views(self) -> tuple[TerminalViewSnapshot, ...]:
+        """List detached metadata for saved named views in name order."""
+        snapshots: list[TerminalViewSnapshot] = []
+        for name in sorted(self._snapshots):
+            camera, display, focus, viewport = self._snapshots[name]
+            state = TerminalViewState(
+                revision=self._revision,
+                camera=TerminalCameraState(
+                    azimuth=float(camera.azimuth), elevation=float(camera.elevation),
+                    roll=float(camera.roll), projection=camera.projection.value,
+                    zoom=float(camera.viewport_zoom), pan_x=float(camera.pan_x), pan_y=float(camera.pan_y),
+                ),
+                display=display,
+                focus=focus,
+                viewport=TerminalViewportState(
+                    width=viewport.width, height=viewport.height, scale=float(viewport.scale),
+                    x_min=float(viewport.x_min), x_max=float(viewport.x_max),
+                    y_min=float(viewport.y_min), y_max=float(viewport.y_max),
+                ),
+            )
+            snapshots.append(TerminalViewSnapshot(name=name, state=state))
+        return tuple(snapshots)
+
+    def inspect_atom(self, references: list[str | int | dict[str, Any]] | None = None) -> dict[str, Any]:
+        """Read existing atom provenance; this does not change view state."""
+        return inspect_atoms(self.crystal, references, show_minor=self._show_minor)
+
+    def inspect_molecule(self, reference: str | int | dict[str, Any] | None = None) -> dict[str, Any]:
+        """Read existing MolCrysKit molecule provenance without re-grouping."""
+        return inspect_molecules(self.crystal, reference, show_minor=self._show_minor)
+
+    def resize(self, width: int, height: int) -> TerminalObservation:
+        """Set terminal dimensions and explicitly refit for the new aspect ratio."""
+        self._width, self._height = self._validate_dimensions(width, height)
+        self._fit_viewport = self._fit_all_viewport()
+        return self._changed()
+
+    def resize_viewport(self, width: int, height: int) -> TerminalObservation:
+        """Resize the existing stable frame without changing its fitted bounds."""
+        self._width, self._height = self._validate_dimensions(width, height)
+        self._fit_viewport = Viewport(
+            x_min=self._fit_viewport.x_min,
+            x_max=self._fit_viewport.x_max,
+            y_min=self._fit_viewport.y_min,
+            y_max=self._fit_viewport.y_max,
+            scale=self._fit_viewport.scale,
+            width=self._width,
+            height=self._height,
+        )
+        return self._changed()
+
+    def reset_view(self) -> TerminalObservation:
+        """Restore the supplied startup camera and all-view framing only."""
+        self.camera = self._copy_camera(self._initial_camera)
+        self._focus = TerminalFocusState()
+        self._fit_viewport = self._fit_all_viewport()
+        return self._changed()
+
+    def _fit_all_viewport(self) -> Viewport:
+        points, _ = project_points(self.camera, self.crystal.cart_coords)
+        extra: list[np.ndarray] = []
+        if self._show_cell and self.crystal.lattice is not None:
+            vertices, _ = project_points(self.camera, self.crystal.lattice.cell_vertices())
+            extra.append(vertices)
+        return _compute_viewport(points, extra, self._width, self._height)
+
+    def _fit_indices_viewport(self, indices: tuple[int, ...]) -> Viewport:
+        coords = np.asarray([self.crystal.atoms[index].cart for index in indices], dtype=float)
+        points, _ = project_points(self.camera, coords)
+        return _compute_viewport(points, [], self._width, self._height)
+
+    def _set_focus(self, kind: str, indices: tuple[int, ...]) -> TerminalObservation:
+        matched_ids = tuple(self.crystal.atoms[index].display_copy_id for index in indices)
+        visible = tuple(index for index in indices if self._show_minor or not self.crystal.atoms[index].is_minor)
+        hidden_ids = tuple(
+            self.crystal.atoms[index].display_copy_id
+            for index in indices
+            if index not in visible
+        )
+        frame_indices = self._expand_frame_indices(visible)
+        focus = TerminalFocusState(
+            kind=kind,
+            matched_copy_ids=matched_ids,
+            framed_copy_ids=tuple(self.crystal.atoms[index].display_copy_id for index in frame_indices),
+            hidden_copy_ids=hidden_ids,
+        )
+        if not frame_indices:
+            raise ValueError("focus has no visible displayed atoms to fit")
+        viewport = self._fit_indices_viewport(frame_indices)
+        self._focus = focus
+        self._fit_viewport = viewport
+        self.camera = replace(self.camera, pan_x=0.0, pan_y=0.0)
+        return self._changed()
+
+    def _focused_frame_indices(self) -> tuple[int, ...]:
+        ids = set(self._focus.framed_copy_ids)
+        return tuple(index for index, atom in enumerate(self.crystal.atoms) if atom.display_copy_id in ids)
+
+    def _expand_frame_indices(self, indices: tuple[int, ...]) -> tuple[int, ...]:
+        if self._display_level != "molecule":
+            return indices
+        molecule_indices = {
+            self.crystal.atoms[index].molecule_index
+            for index in indices
+            if self.crystal.atoms[index].molecule_index >= 0
+        }
+        if not molecule_indices:
+            return indices
+        return tuple(
+            index for index, atom in enumerate(self.crystal.atoms)
+            if atom.molecule_index in molecule_indices and (self._show_minor or not atom.is_minor)
+        )
+
+    def _changed(self) -> TerminalObservation:
+        self._revision += 1
+        return self.observe()
+
+    @staticmethod
+    def _copy_camera(camera: Camera) -> Camera:
+        basis = None if camera.basis is None else camera.basis.copy()
+        return replace(camera, target=camera.target.copy(), basis=basis)
+
+    @staticmethod
+    def _copy_viewport(viewport: Viewport) -> Viewport:
+        return Viewport(
+            x_min=float(viewport.x_min), x_max=float(viewport.x_max),
+            y_min=float(viewport.y_min), y_max=float(viewport.y_max),
+            scale=float(viewport.scale), width=int(viewport.width), height=int(viewport.height),
+        )
+
+    @staticmethod
+    def _validate_snapshot_name(name: str) -> str:
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("snapshot name must be a non-empty string")
+        return name.strip()
+
+    @staticmethod
+    def _validate_dimensions(width: int, height: int) -> tuple[int, int]:
+        if isinstance(width, bool) or isinstance(height, bool):
+            raise TypeError("viewport dimensions must be integers")
+        width, height = int(width), int(height)
+        if width <= 0 or height <= 0:
+            raise ValueError("viewport dimensions must be greater than zero")
+        return width, height
+
+    @staticmethod
+    def _validate_finite(name: str, *values: float) -> None:
+        if not all(np.isfinite(value) for value in values):
+            raise ValueError(f"{name} values must be finite")
+
+    @staticmethod
+    def _validate_label_mode(label_mode: str) -> str:
+        if label_mode not in LABEL_MODES:
+            raise ValueError(f"label_mode must be one of {LABEL_MODES}")
+        return label_mode
+
+    @staticmethod
+    def _validate_display_level(display_level: str) -> str:
+        if display_level not in DISPLAY_LEVELS:
+            raise ValueError(f"display_level must be one of {DISPLAY_LEVELS}")
+        return display_level
+
+    @staticmethod
+    def _validate_projection(projection: str | ProjectionMode) -> ProjectionMode:
+        if isinstance(projection, ProjectionMode):
+            return projection
+        try:
+            return ProjectionMode(str(projection))
+        except ValueError as exc:
+            raise ValueError("projection must be 'orthographic' or 'perspective'") from exc
+
+    @staticmethod
+    def _with_zoom(camera: Camera, zoom: float) -> Camera:
+        if not np.isfinite(zoom) or zoom <= 0:
+            raise ValueError("zoom must be greater than zero")
+        return replace(camera, viewport_zoom=float(np.clip(zoom, 0.5, 20.0)))
+
+
+__all__ = ["TerminalViewController"]

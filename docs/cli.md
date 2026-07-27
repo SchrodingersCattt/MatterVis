@@ -171,8 +171,11 @@ Important options:
   removes partial-occupancy sites.
 - `--width` and `--height` bound static output exactly.
 
-Interactive controls: `q/e` orbit horizontally, `w/s` vertically, `a/d`
-roll, arrows or `i/j/k/l` pan, and `+/-` or `[/]` zoom. `b`, `c`, `t`, `m`,
+Interactive controls: `q/e` orbit horizontally around the world up axis,
+`w/s` pitch about the current screen-right axis, `a/d` roll, arrows or
+`i/j/k/l` pan, and `u/o` zoom out/in. `+/-` and `[/]` remain zoom aliases.
+The terminal keeps its fitted framing while orbiting; use `r` to restore the
+startup all-view fit. `b`, `c`, `t`, `m`,
 and `n` toggle bonds, cell, labels, monochrome, and minor disorder. `Shift+L`
 switches between atom and molecule views; `r` restores the startup camera.
 

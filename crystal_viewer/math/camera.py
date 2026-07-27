@@ -15,7 +15,13 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .rotation import view_rotation
+from .rotation import (
+    axis_camera_basis,
+    orthonormal_camera_basis,
+    rotate_vector,
+    view_rotation,
+    view_vec_to_elev_azim,
+)
 
 if TYPE_CHECKING:
     from ..tui.crystal_ir import CrystalIR
@@ -33,7 +39,7 @@ class Camera:
     Attributes
     ----------
     azimuth : float
-        Horizontal rotation angle in degrees (around world Y).
+        Horizontal rotation angle in degrees around world +Z.
     elevation : float
         Vertical rotation angle in degrees (above XY plane).
     distance : float
@@ -56,15 +62,25 @@ class Camera:
     viewport_zoom: float = 1.0  # >1 crops viewport (zoom into center)
     pan_x: float = 0.0  # 2D viewport pan offset (in projected data units)
     pan_y: float = 0.0
+    basis: np.ndarray | None = None  # [right; up; forward], if view-relative state is retained
 
     def __post_init__(self):
         if self.target is None:
             self.target = np.zeros(3)
         self.target = np.asarray(self.target, dtype=float)
+        if self.target.shape != (3,) or not np.all(np.isfinite(self.target)):
+            raise ValueError("target must be a finite three-dimensional vector")
+        if self.basis is not None:
+            basis = np.asarray(self.basis, dtype=float)
+            if basis.shape != (3, 3) or not np.all(np.isfinite(basis)):
+                raise ValueError("basis must be a finite 3x3 matrix")
+            self.basis = orthonormal_camera_basis(basis[2], basis[1])
 
     @property
     def view_direction(self) -> np.ndarray:
-        """Unit vector FROM camera TOWARD target (into the scene)."""
+        """Unit vector from the target toward the camera (larger depth is closer)."""
+        if self.basis is not None:
+            return self.basis[2].copy()
         elev = np.radians(self.elevation)
         azim = np.radians(self.azimuth)
         # Spherical to Cartesian: camera position relative to target
@@ -77,6 +93,8 @@ class Camera:
     @property
     def rotation_matrix(self) -> np.ndarray:
         """3×3 rotation matrix [right; up; forward] with roll applied."""
+        if self.basis is not None:
+            return self.basis.copy()
         R = view_rotation(self.view_direction)
         if abs(self.roll) > 0.01:
             # Apply roll: rotate the right and up vectors around forward
@@ -136,11 +154,125 @@ class Camera:
     # ── Transforms ──────────────────────────────────────────────────────
 
     def rotate(self, d_azim: float = 0.0, d_elev: float = 0.0, d_roll: float = 0.0) -> "Camera":
-        """Return a new camera rotated by the given increments (degrees)."""
+        """Return a legacy absolute-Euler camera rotation.
+
+        New interactive TUI code uses :meth:`orbit_turntable`, which composes
+        rotations in camera/world space. This method remains stable for
+        existing callers that expect scalar Euler increments.
+        """
         new_elev = np.clip(self.elevation + d_elev, -89.0, 89.0)
         new_azim = (self.azimuth + d_azim) % 360.0
         new_roll = (self.roll + d_roll) % 360.0
-        return replace(self, azimuth=new_azim, elevation=new_elev, roll=new_roll)
+        return replace(self, azimuth=new_azim, elevation=new_elev, roll=new_roll, basis=None)
+
+    def set_orientation(
+        self,
+        *,
+        azimuth: float | None = None,
+        elevation: float | None = None,
+        roll: float | None = None,
+    ) -> "Camera":
+        """Set absolute Euler orientation values and rebuild the camera basis."""
+        new_azimuth = self.azimuth if azimuth is None else float(azimuth) % 360.0
+        new_elevation = self.elevation if elevation is None else float(np.clip(float(elevation), -89.0, 89.0))
+        new_roll = self.roll if roll is None else float(roll) % 360.0
+        if not all(np.isfinite(value) for value in (new_azimuth, new_elevation, new_roll)):
+            raise ValueError("camera orientation values must be finite")
+        return replace(
+            self,
+            azimuth=new_azimuth,
+            elevation=new_elevation,
+            roll=new_roll,
+            basis=None,
+        )
+
+    def orbit_turntable(
+        self,
+        *,
+        yaw_deg: float = 0.0,
+        pitch_deg: float = 0.0,
+        roll_deg: float = 0.0,
+        max_pitch_deg: float = 89.0,
+    ) -> "Camera":
+        """Compose a world-up turntable orbit without moving scene geometry.
+
+        Yaw rotates around Cartesian world ``+Z``. Pitch then rotates around
+        the updated screen-right axis. Roll rotates around the view axis. The
+        final basis is retained so future pitch/roll updates stay continuous.
+        """
+        values = (yaw_deg, pitch_deg, roll_deg, max_pitch_deg)
+        if not all(np.isfinite(value) for value in values):
+            raise ValueError("orbit angles must be finite")
+        if not 0.0 < max_pitch_deg < 90.0:
+            raise ValueError("max_pitch_deg must be between 0 and 90")
+
+        world_up = np.array([0.0, 0.0, 1.0])
+        if self.basis is None:
+            forward = self.view_direction
+            right, up, forward = orthonormal_camera_basis(forward, world_up)
+            if abs(self.roll) > 1e-12:
+                right = rotate_vector(right, forward, self.roll)
+                up = rotate_vector(up, forward, self.roll)
+            right, up, forward = orthonormal_camera_basis(forward, up)
+        else:
+            right, up, forward = self.rotation_matrix
+        if abs(yaw_deg) > 1e-12:
+            forward = rotate_vector(forward, world_up, yaw_deg)
+            up = rotate_vector(up, world_up, yaw_deg)
+            right = rotate_vector(right, world_up, yaw_deg)
+        basis = orthonormal_camera_basis(forward, up)
+        right, up, forward = basis
+
+        if abs(pitch_deg) > 1e-12:
+            # ``forward`` points from scene target to camera. A positive
+            # pitch should therefore raise the camera toward world +Z, which
+            # is a right-hand rotation about *negative* screen-right.
+            pitch_axis = -right
+            applied_pitch = _clamp_turntable_pitch(
+                forward,
+                pitch_axis,
+                pitch_deg,
+                max_pitch_deg,
+            )
+            forward = rotate_vector(forward, pitch_axis, applied_pitch)
+            up = rotate_vector(up, pitch_axis, applied_pitch)
+            basis = orthonormal_camera_basis(forward, up)
+            right, up, forward = basis
+
+        if abs(roll_deg) > 1e-12:
+            right = rotate_vector(right, forward, roll_deg)
+            up = rotate_vector(up, forward, roll_deg)
+        basis = orthonormal_camera_basis(forward, up)
+        elevation, azimuth = view_vec_to_elev_azim(basis[2])
+        base_basis = view_rotation(basis[2])
+        roll = np.degrees(np.arctan2(
+            float(np.dot(basis[0], base_basis[1])),
+            float(np.dot(basis[0], base_basis[0])),
+        )) % 360.0
+        return replace(
+            self,
+            azimuth=float(azimuth % 360.0),
+            elevation=float(elevation),
+            roll=float(roll),
+            basis=basis,
+        )
+
+    def align_lattice_axis(self, matrix: np.ndarray, axis: str) -> "Camera":
+        """Orient this camera along a real or reciprocal lattice axis."""
+        basis = axis_camera_basis(matrix, axis)
+        elevation, azimuth = view_vec_to_elev_azim(basis[2])
+        base_basis = view_rotation(basis[2])
+        roll = np.degrees(np.arctan2(
+            float(np.dot(basis[0], base_basis[1])),
+            float(np.dot(basis[0], base_basis[0])),
+        )) % 360.0
+        return replace(
+            self,
+            azimuth=float(azimuth % 360.0),
+            elevation=float(elevation),
+            roll=float(roll),
+            basis=basis,
+        )
 
     def pan(self, dx: float = 0.0, dy: float = 0.0) -> "Camera":
         """Pan the viewport in 2D screen space.
@@ -218,6 +350,42 @@ def project_points(
         raise ValueError(f"Unknown projection: {camera.projection}")
 
     return xy_2d, depth
+
+
+def _clamp_turntable_pitch(
+    forward: np.ndarray,
+    axis: np.ndarray,
+    requested_deg: float,
+    max_pitch_deg: float,
+) -> float:
+    """Stop pitch at the first world-up pole boundary along its arc."""
+    if abs(requested_deg) < 1e-12:
+        return 0.0
+    direction = float(np.copysign(1.0, requested_deg))
+    total = abs(float(requested_deg))
+    previous = 0.0
+    # A 0.5° walk is deterministic and only runs for explicit interaction;
+    # it prevents a large request (for example 180°) from tunnelling through
+    # the pole and returning to an apparently valid elevation.
+    for magnitude in np.arange(0.5, total + 0.5, 0.5):
+        current = min(float(magnitude), total)
+        candidate = rotate_vector(forward, axis, direction * current)
+        elevation = abs(float(np.degrees(np.arcsin(np.clip(candidate[2], -1.0, 1.0)))))
+        if elevation > max_pitch_deg:
+            low, high = previous, current
+            for _ in range(40):
+                middle = (low + high) / 2.0
+                middle_vec = rotate_vector(forward, axis, direction * middle)
+                middle_elev = abs(float(np.degrees(np.arcsin(np.clip(middle_vec[2], -1.0, 1.0)))))
+                if middle_elev <= max_pitch_deg:
+                    low = middle
+                else:
+                    high = middle
+            return direction * low
+        previous = current
+        if current == total:
+            break
+    return requested_deg
 
 
 def project_segments(

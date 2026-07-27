@@ -165,6 +165,39 @@ def _compute_viewport(
     x_range = x_max - x_min
     y_range = y_max - y_min
 
+    return viewport_from_bounds(
+        x_min,
+        x_max,
+        y_min,
+        y_max,
+        width,
+        height,
+        zoom=zoom,
+        pan_x=pan_x,
+        pan_y=pan_y,
+    )
+
+
+def viewport_from_bounds(
+    x_min: float,
+    x_max: float,
+    y_min: float,
+    y_max: float,
+    width: int,
+    height: int,
+    *,
+    zoom: float = 1.0,
+    pan_x: float = 0.0,
+    pan_y: float = 0.0,
+) -> Viewport:
+    """Create an aspect-correct viewport from already fitted data bounds."""
+    if zoom <= 0:
+        raise ValueError("zoom must be greater than zero")
+    width = max(int(width), 1)
+    height = max(int(height), 1)
+    x_range = max(float(x_max) - float(x_min), 0.01)
+    y_range = max(float(y_max) - float(y_min), 0.01)
+
     # Apply zoom around the fitted center. Values below one zoom out.
     cx = (x_min + x_max) / 2
     cy = (y_min + y_max) / 2
@@ -311,6 +344,7 @@ def compose_frame(
     pan_x: float = 0.0,
     pan_y: float = 0.0,
     display_level: str = "atom",
+    viewport: Viewport | None = None,
 ) -> str:
     """Render crystal in ORTEP style with label relaxation.
 
@@ -351,7 +385,20 @@ def compose_frame(
         cell_verts_2d, _ = _proj(camera, verts)
         extra_pts.append(cell_verts_2d)
 
-    viewport = _compute_viewport(pts_2d, extra_pts, width, height, zoom, pan_x, pan_y)
+    if viewport is None:
+        viewport = _compute_viewport(pts_2d, extra_pts, width, height, zoom, pan_x, pan_y)
+    else:
+        viewport = viewport_from_bounds(
+            viewport.x_min,
+            viewport.x_max,
+            viewport.y_min,
+            viewport.y_max,
+            width,
+            height,
+            zoom=zoom,
+            pan_x=pan_x,
+            pan_y=pan_y,
+        )
     canvas = BrailleCanvas(width, height)
 
     # ── Layer 1: Cell edges (dashed braille) ────────────────────────────
