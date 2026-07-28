@@ -135,17 +135,26 @@ def _unwrap_periodic_component(voxels: np.ndarray, shape: np.ndarray) -> np.ndar
     queue = [start]
     offsets = [
         np.asarray(offset, dtype=int)
-        for offset in ((-1, 0, 0), (1, 0, 0), (0, -1, 0), (0, 1, 0), (0, 0, -1), (0, 0, 1))
+        for offset in product((-1, 0, 1), repeat=3)
+        if offset != (0, 0, 0)
     ]
     while queue:
         current = queue.pop()
         current_unwrapped = unwrapped[current]
         for offset in offsets:
             neighbour = tuple((np.asarray(current) + offset) % shape)
-            if neighbour not in voxel_set or neighbour in unwrapped:
+            if neighbour not in voxel_set:
                 continue
-            unwrapped[neighbour] = current_unwrapped + offset
-            queue.append(neighbour)
+            proposal = current_unwrapped + offset
+            if neighbour not in unwrapped:
+                unwrapped[neighbour] = proposal
+                queue.append(neighbour)
+                continue
+            existing = unwrapped[neighbour]
+            image_delta = np.rint((proposal - existing) / shape).astype(int)
+            proposal = proposal - image_delta * shape
+            if np.linalg.norm(proposal - current_unwrapped) < np.linalg.norm(existing - current_unwrapped):
+                unwrapped[neighbour] = proposal
     if len(unwrapped) != len(voxel_set):
         raise RuntimeError("Periodic component unwrapping did not visit every voxel")
     result = np.asarray([unwrapped[tuple(int(value) for value in voxel)] for voxel in voxels])
