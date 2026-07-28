@@ -14,10 +14,12 @@ the matching public surface.
 flowchart LR
     Q["What do you want to do?"]
     Q --> LIVE["Drive the running viewer"]
+    Q --> TUI["Control a terminal view"]
     Q --> STATIC["Render a static figure"]
     Q --> OVERLAY["Tweak overlays or selectors"]
 
     LIVE --> DASH["dash_service.md<br/>(REST + WebSocket)"]
+    TUI --> TUIAPI["tui_api.md<br/>(local semantic controller)"]
 
     STATIC --> SCENE["scene_api.md<br/>(crystal/cluster)"]
     STATIC --> CUBE["cube_api.md<br/>(orbitals / volumetric)"]
@@ -37,6 +39,7 @@ The same routing as a quick table:
 | If you want to… | Read |
 |---|---|
 | Drive the running Dash viewer over HTTP/WebSocket | [`dash_service.md`](dash_service.md) |
+| Control a local terminal view from Python or an agent adapter | [`tui_api.md`](tui_api.md) |
 | Build a static crystal/cluster figure from a CIF | [`scene_api.md`](scene_api.md) |
 | Build a static cube/orbital figure (HOMO, LUMO, density) | [`cube_api.md`](cube_api.md) |
 | Render ORTEP / thermal ellipsoid figures | [`ortep_api.md`](ortep_api.md) |

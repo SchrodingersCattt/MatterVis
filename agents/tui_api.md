@@ -1,0 +1,103 @@
+# Terminal-view controller API
+
+Use this API when a Python caller or local agent adapter needs to control a
+MatterVis terminal view semantically. It shares the terminal renderer and
+canonical `CrystalIR`/MolCrysKit loader path with `matvis tui`; it is **not** an
+HTTP service and it does not create a second chemistry or render pipeline.
+
+```python
+from crystal_viewer.tui import TerminalViewController
+
+view = TerminalViewController.from_file("structure.cif", width=80, height=22)
+view.set_camera(azimuth=45, elevation=30, projection="orthographic")
+view.set_display(label_mode="element", show_cell=False, show_bonds=True)
+observation = view.observe()
+payload = observation.as_dict()
+```
+
+## Construction and state
+
+- `TerminalViewController(crystal, ...)` accepts an already loaded terminal
+  `CrystalIR`.
+- `TerminalViewController.from_file(path, display_mode="auto", ...)` loads via
+  the canonical terminal loader.
+- `state` returns a detached `TerminalViewState`; each successful active
+  view-state mutation increments its monotonic `revision` exactly once.
+  Snapshot-registry operations (`save_view`, `list_views`) do not alter active
+  view state and therefore do not increment it.
+- `observe()` returns `TerminalObservation` with schema
+  `mattervis.tui.observation/v1`. `as_dict()` is JSON-safe.
+
+The structured observation returns terminal frame text, state, title, scoped
+canonical/display/visible counts, capabilities, and warnings. It intentionally
+does **not** include atom coordinates, projected depth, pair distances,
+front/back answers, collision scores, or a recommended camera.
+
+## Perceptual controls
+
+| Method | Meaning |
+| --- | --- |
+| `set_camera(azimuth=..., elevation=..., roll=..., target=..., projection=..., zoom=..., pan_x=..., pan_y=...)` | Apply absolute partial camera state. `target` is a Cartesian three-vector retained in observation state for reproducible projection. |
+| `orbit(yaw_deg=..., pitch_deg=..., roll_deg=...)` | World-up turntable motion: yaw is about Cartesian `+Z`; pitch is about current screen-right; roll is about view axis. |
+| `align(axis)` | Look along crystallographic `a`, `b`, `c`, `a*`, `b*`, or `c*`; uses real/reciprocal lattice directions. |
+| `pan(dx=..., dy=...)`, `zoom(factor=...)` | Move/crop the stable terminal viewport. |
+| `fit(target="all"\|"focus")` | Explicitly refit; orbit and display toggles do not refit. |
+| `set_display(...)` | Partial absolute update for `display_level`, `label_mode`, `show_cell`, `show_bonds`, `show_minor`, and `mono`. |
+| `reset_view()` | Restore startup camera and all-view framing while preserving display settings. |
+
+The controller fits at construction, explicit `fit`, resize, and reset. It
+keeps fit bounds fixed while rotating, panning, changing label mode, or toggling
+cell/bond/minor visibility. This prevents the previous auto-fit “breathing”.
+
+## Focus and saved views
+
+- `focus_atom(reference)` and `focus_selection(references)` accept an exact
+  label, `source_index`, `display_copy_id`, or an explicit mapping containing
+  one of those keys.
+- `focus_molecule(reference)` accepts `source_molecule_index`,
+  `display_molecule_index`, or `display_fragment_id`.
+- Focus performs a local fit but leaves unselected atoms/molecules rendered as
+  context. It never filters `CrystalIR`, regenerates copies, or changes display
+  visibility. A target hidden by `show_minor=False` raises `ValueError` and
+  leaves state unchanged.
+- A label means every currently manifested matching source/display copy; callers
+  needing one copy must pass `display_copy_id`.
+- `save_view(name, overwrite=False)`, `restore_view(name)`, and `list_views()`
+  preserve camera, display, focus, and stable fit bounds. Snapshots never store
+  structure data or chemistry results.
+
+## Analytical inspection
+
+`inspect_atom(references=None)` and `inspect_molecule(reference=None)` are pure
+reads. They return JSON-safe canonical loader provenance: source/display IDs,
+occupancy, disorder render classification, periodic copy shift, display
+fragment/source molecule IDs, raw MolCrysKit species ID, and per-formula-unit
+counts.
+
+These are analytical product capabilities. Active-view evaluations must omit
+them and must not offer direct answers such as distances, neighbor queries,
+front/back classification, collision counts, or `best_camera`.
+
+`render_classification="not_minor"` only means the current loader did not mark
+the atom as a minor disorder image. It does not prove that a partial-occupancy
+site is ordered or major.
+
+## Keyboard compatibility
+
+`matvis tui` retains keyboard control through the same controller:
+
+- `q/e`, `w/s`, `a/d`: yaw/pitch/roll.
+- arrows or `i/j/k/l`: pan.
+- `u` zooms out; `o` zooms in. Existing `+/-` and `[/]` aliases remain.
+- `p`, `c`, `b`, `t`, `m`, `n`, `Shift+L`, `r`: projection, cell, bonds,
+  labels, monochrome, minor disorder, display level, and reset.
+
+Legacy static `ascii` and `structured` CLI output stays unchanged. The
+controller observation is the machine-readable local API.
+
+## Visual verification artifacts
+
+The checked-in `verification_screens/tui_controller/` text frames are generated
+by `scripts/10_tui_controller_visuals.py`. They cover initial/orbited mono
+views, focused mono context, disorder-visible molecule mode, and ANSI-colour
+molecule mode for DAP-4 at 80×22.

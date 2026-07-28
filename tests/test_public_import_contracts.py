@@ -27,6 +27,18 @@ PUBLIC_IMPORTS = {
     "crystal_viewer.structure.snapshot": ("molecular_crystal_from_scene",),
     "crystal_viewer.topology": ("analyze_topology", "extract_coordination_shell"),
     "crystal_viewer.transforms": ("apply_transforms", "transforms_cache_key"),
+    "crystal_viewer.tui": (
+        "TerminalViewController",
+        "TerminalCameraState",
+        "TerminalDisplayState",
+        "TerminalFocusState",
+        "TerminalObservation",
+        "TerminalViewportState",
+        "TerminalViewSnapshot",
+        "TerminalViewState",
+        "OBSERVATION_SCHEMA",
+        "run_tui",
+    ),
 }
 
 

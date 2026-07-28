@@ -610,6 +610,8 @@ def _filter_crystal(crystal, keep_indices: set[int]):
             symmetry_operation_index=atom.symmetry_operation_index,
             image_shift=atom.image_shift,
             display_copy_id=atom.display_copy_id,
+            source_molecule_index=atom.source_molecule_index,
+            display_fragment_id=atom.display_fragment_id,
             molecule_index=atom.molecule_index,
             disorder_group=atom.disorder_group,
             is_minor=atom.is_minor,
@@ -654,6 +656,8 @@ def _filter_crystal(crystal, keep_indices: set[int]):
         bonds=new_bonds,
         n_molecules=len(surviving_molecules),
         species_map=species_map,
+        source_molecules=dict(crystal.source_molecules),
+        source_molecule_species=dict(crystal.source_molecule_species),
         per_formula_unit=crystal.per_formula_unit,
         metadata=metadata,
     )

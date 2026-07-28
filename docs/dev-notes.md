@@ -79,3 +79,26 @@ upstream API has grown the exact hook.
 - **CIF symmetry expansion**: minimal expansion at the loader boundary
   for non-P1 CIFs missing explicit symmetry ops. This is a rendering
   precondition, not chemistry.
+
+## Terminal semantic controller boundary
+
+- `crystal_viewer.tui.controller.TerminalViewController` owns terminal camera,
+  display, focus, stable viewport bounds, and named view snapshots. Textual
+  keyboard input and local agent adapters are both thin clients of this single
+  controller.
+- `CrystalIR` remains immutable in spirit across view controls. Orbit, fit,
+  focus, label/cell/bond/minor toggles, and snapshots must not regenerate
+  bonds, periodic copies, molecule partitions, or disorder assignments.
+- Loader adapters retain MolCrysKit source-molecule membership and species IDs
+  in `CrystalIR.source_molecules` / `source_molecule_species` for inspection.
+  Do not reconstruct molecules from displayed bonds or hulls.
+- The terminal camera uses a scene-to-viewer depth vector: larger projected
+  depth is closer. Turntable yaw is around Cartesian world `+Z`; pitch is
+  around the current screen-right axis. The world scene stays fixed.
+- The compositor may receive explicit stable viewport bounds. Do not quietly
+  re-fit during orbit or display toggles, or the terminal view will breathe.
+  Refit only at construction, explicit fit/reset, and explicit semantic resize.
+- `inspect_atom` / `inspect_molecule` are analytical reads. Perceptual
+  observations intentionally omit coordinates, depths, distances, front-order,
+  collision scores, and recommended cameras. Active-view evaluation must not
+  register analytical inspection tools.

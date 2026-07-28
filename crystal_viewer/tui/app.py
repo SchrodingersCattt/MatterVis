@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from dataclasses import replace
-
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import Footer, Header, Static
@@ -19,15 +17,13 @@ from rich.text import Text
 if TYPE_CHECKING:
     from .crystal_ir import CrystalIR
 
-from ..math.camera import Camera, project_points
+from ..math.camera import Camera
 from .compositor import (
-    compose_frame,
     LABEL_MODES,
     DISPLAY_LEVELS,
-    resolve_label_mode,
-    resolve_molecule_detail,
 )
-from .summary import build_scope_summary
+from .controller import TerminalViewController
+from .state import TerminalObservation
 
 
 # ── Constants ───────────────────────────────────────────────────────────────
@@ -93,6 +89,8 @@ class CrystalTUI(App):
         Binding("n", "toggle_minor", "Minor", show=True),
         Binding("L", "cycle_level", "Level", show=True),
         Binding("r", "reset_view", "Reset", show=True),
+        Binding("u", "zoom_out", "Zoom out", show=True),
+        Binding("o", "zoom_in", "Zoom in", show=True),
         Binding("Q", "quit", "Quit", show=True),
     ]
 
@@ -112,16 +110,49 @@ class CrystalTUI(App):
     ):
         super().__init__()
         self.crystal = crystal
-        self.camera = camera or Camera.from_view_name(initial_view, crystal)
-        self._initial_camera = replace(self.camera)
-        self._mono = mono
-        self._show_bonds = show_bonds
-        self._show_cell = show_cell
-        self._label_mode = label_mode if not compact else "dot"
-        self._show_minor = show_minor
-        self._display_level = (
-            initial_level if initial_level in DISPLAY_LEVELS else "atom"
+        self.controller = TerminalViewController(
+            crystal,
+            camera=camera or Camera.from_view_name(initial_view, crystal),
+            mono=mono,
+            show_bonds=show_bonds,
+            show_cell=show_cell,
+            label_mode=label_mode if not compact else "dot",
+            show_minor=show_minor,
+            display_level=initial_level if initial_level in DISPLAY_LEVELS else "atom",
         )
+
+    @property
+    def camera(self) -> Camera:
+        """Compatibility access to the semantic controller's camera."""
+        return self.controller.camera
+
+    @camera.setter
+    def camera(self, value: Camera) -> None:
+        self.controller.camera = value
+
+    @property
+    def _mono(self) -> bool:
+        return self.controller.state.display.mono
+
+    @property
+    def _show_bonds(self) -> bool:
+        return self.controller.state.display.show_bonds
+
+    @property
+    def _show_cell(self) -> bool:
+        return self.controller.state.display.show_cell
+
+    @property
+    def _label_mode(self) -> str:
+        return self.controller.state.display.label_mode
+
+    @property
+    def _show_minor(self) -> bool:
+        return self.controller.state.display.show_minor
+
+    @property
+    def _display_level(self) -> str:
+        return self.controller.state.display.display_level
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -129,169 +160,115 @@ class CrystalTUI(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        self._update_title()
-        self._redraw()
+        self._apply_observation(self._resize_and_observe())
 
     def on_resize(self) -> None:
-        self._update_title()
-        self._redraw()
+        self._apply_observation(self._resize_and_observe())
 
     def on_key(self, event) -> None:
         """Direct key handler — bypasses binding resolution for movement keys."""
         char = event.character
         key = event.key
         handled = True
+        observation: TerminalObservation | None = None
         if char == "j" or key in ("j", "left"):
-            self.camera = self.camera.pan(dx=PAN_STEP)
+            observation = self.controller.pan(dx=PAN_STEP)
         elif char == "l" or key in ("l", "right"):
-            self.camera = self.camera.pan(dx=-PAN_STEP)
+            observation = self.controller.pan(dx=-PAN_STEP)
         elif char == "i" or key in ("i", "up"):
-            self.camera = self.camera.pan(dy=-PAN_STEP)
+            observation = self.controller.pan(dy=-PAN_STEP)
         elif char == "k" or key in ("k", "down"):
-            self.camera = self.camera.pan(dy=PAN_STEP)
+            observation = self.controller.pan(dy=PAN_STEP)
         elif char == "w" or key == "w":
-            self.camera = self.camera.rotate(d_elev=ROTATE_STEP)
-            self._update_title()
+            observation = self.controller.orbit(pitch_deg=ROTATE_STEP)
         elif char == "s" or key == "s":
-            self.camera = self.camera.rotate(d_elev=-ROTATE_STEP)
-            self._update_title()
+            observation = self.controller.orbit(pitch_deg=-ROTATE_STEP)
         elif char == "q" or key == "q":
-            self.camera = self.camera.rotate(d_azim=-ROTATE_STEP)
-            self._update_title()
+            observation = self.controller.orbit(yaw_deg=-ROTATE_STEP)
         elif char == "e" or key == "e":
-            self.camera = self.camera.rotate(d_azim=ROTATE_STEP)
-            self._update_title()
+            observation = self.controller.orbit(yaw_deg=ROTATE_STEP)
         elif char == "a" or key == "a":
-            self.camera = self.camera.rotate(d_roll=-ROTATE_STEP)
-            self._update_title()
+            observation = self.controller.orbit(roll_deg=-ROTATE_STEP)
         elif char == "d" or key == "d":
-            self.camera = self.camera.rotate(d_roll=ROTATE_STEP)
-            self._update_title()
-        elif char in ("[", "-") or key in ("left_square_bracket", "minus"):
-            self.camera = self.camera.zoom(1.0 / ZOOM_FACTOR)
-            self._update_title()
-        elif char in ("]", "+", "=") or key in (
+            observation = self.controller.orbit(roll_deg=ROTATE_STEP)
+        elif char in ("[", "-", "u") or key in ("left_square_bracket", "minus", "u"):
+            observation = self.controller.zoom(factor=1.0 / ZOOM_FACTOR)
+        elif char in ("]", "+", "=", "o") or key in (
             "right_square_bracket", "plus", "equals_sign"
-        ):
-            self.camera = self.camera.zoom(ZOOM_FACTOR)
-            self._update_title()
+        ) or key == "o":
+            observation = self.controller.zoom(factor=ZOOM_FACTOR)
         else:
             handled = False
 
         if handled:
             event.prevent_default()
             event.stop()
-            self._redraw()
+            assert observation is not None
+            self._apply_observation(observation)
 
     # ── Rendering ───────────────────────────────────────────────────────
 
-    def _redraw(self) -> None:
-        """Re-project and re-render the crystal."""
+    def _resize_and_observe(self) -> TerminalObservation:
+        """Synchronize dimensions and render exactly one current observation."""
         canvas = self.query_one("#canvas", CrystalCanvas)
         size = canvas.size
-        w = max(size.width, 1)
-        h = max(size.height, 1)
+        w = size.width if size.width > 1 else max(self.size.width, 1)
+        h = size.height if size.height > 1 else max(self.size.height - 2, 1)
+        if (w, h) != (self.controller.width, self.controller.height):
+            return self.controller.resize_viewport(w, h)
+        return self.controller.observe()
 
-        pts_2d, depth = project_points(self.camera, self.crystal.cart_coords)
+    def _apply_observation(self, observation: TerminalObservation) -> None:
+        """Apply one already-rendered semantic observation to the UI."""
+        canvas = self.query_one("#canvas", CrystalCanvas)
+        canvas.frame_text = observation.frame
+        self.sub_title = observation.title
 
-        frame = compose_frame(
-            self.crystal, self.camera, pts_2d, depth,
-            width=w, height=h,
-            mono=self._mono, label_mode=self._label_mode,
-            show_bonds=self._show_bonds,
-            show_cell=self._show_cell,
-            show_minor=self._show_minor,
-            zoom=self.camera.viewport_zoom,
-            pan_x=self.camera.pan_x,
-            pan_y=self.camera.pan_y,
-            display_level=self._display_level,
-        )
-        canvas.frame_text = frame
+    def _redraw(self) -> None:
+        """Compatibility wrapper for callers that request a visual refresh."""
+        self._apply_observation(self._resize_and_observe())
 
     def _update_title(self) -> None:
-        proj = self.camera.projection.value[:5]
-        try:
-            size = self.query_one("#canvas", CrystalCanvas).size
-            width = size.width or self.size.width
-            height = size.height or max(self.size.height - 2, 1)
-            resolved_label = resolve_label_mode(
-                self._label_mode,
-                atom_count=sum(
-                    self._show_minor or not atom.is_minor
-                    for atom in self.crystal.atoms
-                ),
-                width=max(width, 1),
-                height=max(height, 1),
-                zoom=self.camera.viewport_zoom,
-            )
-        except Exception:
-            resolved_label = self._label_mode
-        zoom_str = f" ×{self.camera.viewport_zoom:.1f}" if self.camera.viewport_zoom != 1.0 else ""
-        roll_str = f" r={self.camera.roll:.0f}°" if abs(self.camera.roll) > 0.5 else ""
-        level_str = f" [{self._display_level}]" if self._display_level != "atom" else ""
-        if self._display_level == "molecule":
-            level_str = (
-                " [molecule:"
-                f"{resolve_molecule_detail(molecule_count=sum(len(v) for v in self.crystal.species_map.values()), width=max(width, 1), height=max(height, 1))}]"
-            )
-        summary = build_scope_summary(
-            self.crystal,
-            show_minor=self._show_minor,
-            display_level=self._display_level,
-        )
-        count_parts = []
-        if summary["expanded_atom_count"] is not None:
-            count_parts.append(f"{summary['expanded_atom_count']} expanded")
-        count_parts.append(f"{summary['display_atom_count']} displayed")
-        if summary["visible_atom_count"] != summary["display_atom_count"]:
-            count_parts.append(f"{summary['visible_atom_count']} visible")
-        self.sub_title = (
-            f"{summary['canonical_formula']} {'/'.join(count_parts)} "
-            f"[{summary['display_mode']}] | "
-            f"az={self.camera.azimuth:.0f}° el={self.camera.elevation:.0f}°{roll_str} | "
-            f"{proj} | {resolved_label}{zoom_str}{level_str}"
-        )
+        self.sub_title = self.controller.observe().title
 
     # ── Actions (toggle bindings only; movement is in on_key) ─────────
 
     def action_toggle_proj(self) -> None:
-        self.camera = self.camera.toggle_projection()
-        self._update_title()
-        self._redraw()
+        projection = "perspective" if self.camera.projection.value == "orthographic" else "orthographic"
+        self._apply_observation(self.controller.set_camera(projection=projection))
 
     def action_toggle_cell(self) -> None:
-        self._show_cell = not self._show_cell
-        self._redraw()
+        self._apply_observation(self.controller.set_display(show_cell=not self._show_cell))
 
     def action_toggle_bonds(self) -> None:
-        self._show_bonds = not self._show_bonds
-        self._redraw()
+        self._apply_observation(self.controller.set_display(show_bonds=not self._show_bonds))
 
     def action_toggle_mono(self) -> None:
-        self._mono = not self._mono
-        self._redraw()
+        self._apply_observation(self.controller.set_display(mono=not self._mono))
 
     def action_toggle_label(self) -> None:
         """Cycle through label modes: element → label → molecule → dot."""
         idx = LABEL_MODES.index(self._label_mode) if self._label_mode in LABEL_MODES else 0
-        self._label_mode = LABEL_MODES[(idx + 1) % len(LABEL_MODES)]
-        self._update_title()
-        self._redraw()
+        self._apply_observation(
+            self.controller.set_display(label_mode=LABEL_MODES[(idx + 1) % len(LABEL_MODES)])
+        )
 
     def action_toggle_minor(self) -> None:
-        self._show_minor = not self._show_minor
-        self._update_title()
-        self._redraw()
+        self._apply_observation(self.controller.set_display(show_minor=not self._show_minor))
 
     def action_cycle_level(self) -> None:
         """Cycle display level: atom → molecule."""
         idx = DISPLAY_LEVELS.index(self._display_level) if self._display_level in DISPLAY_LEVELS else 0
-        self._display_level = DISPLAY_LEVELS[(idx + 1) % len(DISPLAY_LEVELS)]
-        self._update_title()
-        self._redraw()
+        self._apply_observation(
+            self.controller.set_display(display_level=DISPLAY_LEVELS[(idx + 1) % len(DISPLAY_LEVELS)])
+        )
 
     def action_reset_view(self) -> None:
         """Restore the camera supplied at startup."""
-        self.camera = replace(self._initial_camera)
-        self._update_title()
-        self._redraw()
+        self._apply_observation(self.controller.reset_view())
+
+    def action_zoom_out(self) -> None:
+        self._apply_observation(self.controller.zoom(factor=1.0 / ZOOM_FACTOR))
+
+    def action_zoom_in(self) -> None:
+        self._apply_observation(self.controller.zoom(factor=ZOOM_FACTOR))

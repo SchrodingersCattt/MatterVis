@@ -125,6 +125,8 @@ class CrystalIR:
     # MCK molecule grouping
     n_molecules: int = 0
     species_map: dict[str, list[int]] = field(default_factory=dict)
+    source_molecules: dict[int, tuple[int, ...]] = field(default_factory=dict)
+    source_molecule_species: dict[int, str] = field(default_factory=dict)
 
     # Metadata (extensible)
     metadata: dict[str, Any] = field(default_factory=dict)

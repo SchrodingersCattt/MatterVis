@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from .summary import build_scope_summary
+from .text import terminal_text
 
 if TYPE_CHECKING:
     from .crystal_ir import CrystalIR
@@ -70,11 +71,11 @@ def serialize_crystal(
 
     # ── Header ──────────────────────────────────────────────────────────
     lines.append("crystal:")
-    lines.append(f"  formula: {summary['visible_formula']}")
+    lines.append(f"  formula: {terminal_text(summary['visible_formula'])}")
     if crystal.spacegroup:
-        lines.append(f"  spacegroup: {crystal.spacegroup}")
+        lines.append(f"  spacegroup: {terminal_text(crystal.spacegroup)}")
     lines.append(f"  n_atoms: {len(visible_atoms)}")
-    lines.append(f"  source: {crystal.source_path}")
+    lines.append(f"  source: {terminal_text(crystal.source_path)}")
     lines.append("")
 
     lines.append("observation:")
@@ -144,8 +145,8 @@ def serialize_crystal(
         )
 
     for atom in visible_atoms:
-        lines.append(f"  - label: {atom.label}")
-        lines.append(f"    element: {atom.element}")
+        lines.append(f"  - label: {terminal_text(atom.label)}")
+        lines.append(f"    element: {terminal_text(atom.element)}")
         lines.append(
             f"    frac: [{atom.frac[0]:.4f}, {atom.frac[1]:.4f}, {atom.frac[2]:.4f}]"
         )
