@@ -13,15 +13,15 @@ OBSERVATION_SCHEMA = "mattervis.tui.observation/v1"
 class TerminalCameraState:
     """JSON-safe public camera state.
 
-    ``target`` remains Cartesian because it is a camera-control value rather
-    than a chemistry query. The perceptual observation intentionally omits it
-    from the default serialized payload; analytical inspection exposes atom
-    coordinates separately.
+    ``target`` is camera-control state, not an atom query. It is included so a
+    serialized observation can reproduce the exact projection without exposing
+    structure coordinates.
     """
 
     azimuth: float
     elevation: float
     roll: float
+    target: tuple[float, float, float]
     projection: str
     zoom: float
     pan_x: float
@@ -32,6 +32,7 @@ class TerminalCameraState:
             "azimuth": self.azimuth,
             "elevation": self.elevation,
             "roll": self.roll,
+            "target": list(self.target),
             "projection": self.projection,
             "zoom": self.zoom,
             "pan_x": self.pan_x,

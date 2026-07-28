@@ -16,6 +16,18 @@ def test_turntable_yaw_uses_world_positive_z() -> None:
     assert np.allclose(rotated.rotation_matrix @ rotated.rotation_matrix.T, np.eye(3))
 
 
+def test_first_turntable_orbit_preserves_existing_render_basis() -> None:
+    camera = Camera(azimuth=30.0, elevation=20.0, roll=35.0)
+    before = camera.rotation_matrix
+    expected_forward = rotate_vector(before[2], np.array([0.0, 0.0, 1.0]), 10.0)
+    expected_up = rotate_vector(before[1], np.array([0.0, 0.0, 1.0]), 10.0)
+
+    rotated = camera.orbit_turntable(yaw_deg=10.0)
+
+    assert rotated.view_direction == pytest.approx(expected_forward)
+    assert rotated.rotation_matrix[1] == pytest.approx(expected_up)
+
+
 def test_turntable_pitch_uses_current_screen_right_axis() -> None:
     camera = Camera(azimuth=30.0, elevation=20.0, roll=35.0).orbit_turntable()
     before = camera.rotation_matrix
@@ -43,6 +55,12 @@ def test_turntable_pitch_is_clamped_at_poles() -> None:
     assert rotated.elevation == pytest.approx(89.0)
     assert np.isfinite(rotated.rotation_matrix).all()
     assert np.allclose(rotated.rotation_matrix @ rotated.rotation_matrix.T, np.eye(3))
+
+
+def test_turntable_huge_pitch_has_bounded_work_and_first_pole_result() -> None:
+    rotated = Camera(azimuth=0.0, elevation=0.0).orbit_turntable(pitch_deg=1e12)
+
+    assert rotated.elevation == pytest.approx(89.0)
 
 
 def test_legacy_rotate_remains_euler_based() -> None:
@@ -78,3 +96,17 @@ def test_projected_depth_convention_is_preserved_after_turntable_orbit() -> None
     _, depth = project_points(camera, points)
 
     assert depth[1] > depth[0]
+
+
+def test_perspective_projection_makes_nearer_points_larger() -> None:
+    camera = Camera(azimuth=0.0, elevation=0.0, distance=10.0, perspective_near_is_larger=True)
+    camera.projection = camera.projection.PERSPECTIVE
+    points = np.array([
+        [0.0, 1.0, 1.0],
+        [5.0, 1.0, 1.0],
+    ])
+
+    xy, depth = project_points(camera, points)
+
+    assert depth[1] > depth[0]
+    assert abs(xy[1, 0]) > abs(xy[0, 0])

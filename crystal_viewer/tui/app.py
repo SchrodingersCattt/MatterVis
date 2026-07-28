@@ -23,6 +23,7 @@ from .compositor import (
     DISPLAY_LEVELS,
 )
 from .controller import TerminalViewController
+from .state import TerminalObservation
 
 
 # ── Constants ───────────────────────────────────────────────────────────────
@@ -159,64 +160,73 @@ class CrystalTUI(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        self._redraw()
-        self._update_title()
+        self._apply_observation(self._resize_and_observe())
 
     def on_resize(self) -> None:
-        self._redraw()
-        self._update_title()
+        self._apply_observation(self._resize_and_observe())
 
     def on_key(self, event) -> None:
         """Direct key handler — bypasses binding resolution for movement keys."""
         char = event.character
         key = event.key
         handled = True
+        observation: TerminalObservation | None = None
         if char == "j" or key in ("j", "left"):
-            self.controller.pan(dx=PAN_STEP)
+            observation = self.controller.pan(dx=PAN_STEP)
         elif char == "l" or key in ("l", "right"):
-            self.controller.pan(dx=-PAN_STEP)
+            observation = self.controller.pan(dx=-PAN_STEP)
         elif char == "i" or key in ("i", "up"):
-            self.controller.pan(dy=-PAN_STEP)
+            observation = self.controller.pan(dy=-PAN_STEP)
         elif char == "k" or key in ("k", "down"):
-            self.controller.pan(dy=PAN_STEP)
+            observation = self.controller.pan(dy=PAN_STEP)
         elif char == "w" or key == "w":
-            self.controller.orbit(pitch_deg=ROTATE_STEP)
+            observation = self.controller.orbit(pitch_deg=ROTATE_STEP)
         elif char == "s" or key == "s":
-            self.controller.orbit(pitch_deg=-ROTATE_STEP)
+            observation = self.controller.orbit(pitch_deg=-ROTATE_STEP)
         elif char == "q" or key == "q":
-            self.controller.orbit(yaw_deg=-ROTATE_STEP)
+            observation = self.controller.orbit(yaw_deg=-ROTATE_STEP)
         elif char == "e" or key == "e":
-            self.controller.orbit(yaw_deg=ROTATE_STEP)
+            observation = self.controller.orbit(yaw_deg=ROTATE_STEP)
         elif char == "a" or key == "a":
-            self.controller.orbit(roll_deg=-ROTATE_STEP)
+            observation = self.controller.orbit(roll_deg=-ROTATE_STEP)
         elif char == "d" or key == "d":
-            self.controller.orbit(roll_deg=ROTATE_STEP)
+            observation = self.controller.orbit(roll_deg=ROTATE_STEP)
         elif char in ("[", "-", "u") or key in ("left_square_bracket", "minus", "u"):
-            self.controller.zoom(factor=1.0 / ZOOM_FACTOR)
+            observation = self.controller.zoom(factor=1.0 / ZOOM_FACTOR)
         elif char in ("]", "+", "=", "o") or key in (
             "right_square_bracket", "plus", "equals_sign"
         ) or key == "o":
-            self.controller.zoom(factor=ZOOM_FACTOR)
+            observation = self.controller.zoom(factor=ZOOM_FACTOR)
         else:
             handled = False
 
         if handled:
             event.prevent_default()
             event.stop()
-            self._update_title()
-            self._redraw()
+            assert observation is not None
+            self._apply_observation(observation)
 
     # ── Rendering ───────────────────────────────────────────────────────
 
-    def _redraw(self) -> None:
-        """Re-project and re-render the crystal."""
+    def _resize_and_observe(self) -> TerminalObservation:
+        """Synchronize dimensions and render exactly one current observation."""
         canvas = self.query_one("#canvas", CrystalCanvas)
         size = canvas.size
         w = size.width if size.width > 1 else max(self.size.width, 1)
         h = size.height if size.height > 1 else max(self.size.height - 2, 1)
         if (w, h) != (self.controller.width, self.controller.height):
-            self.controller.resize_viewport(w, h)
-        canvas.frame_text = self.controller.observe().frame
+            return self.controller.resize_viewport(w, h)
+        return self.controller.observe()
+
+    def _apply_observation(self, observation: TerminalObservation) -> None:
+        """Apply one already-rendered semantic observation to the UI."""
+        canvas = self.query_one("#canvas", CrystalCanvas)
+        canvas.frame_text = observation.frame
+        self.sub_title = observation.title
+
+    def _redraw(self) -> None:
+        """Compatibility wrapper for callers that request a visual refresh."""
+        self._apply_observation(self._resize_and_observe())
 
     def _update_title(self) -> None:
         self.sub_title = self.controller.observe().title
@@ -225,56 +235,40 @@ class CrystalTUI(App):
 
     def action_toggle_proj(self) -> None:
         projection = "perspective" if self.camera.projection.value == "orthographic" else "orthographic"
-        self.controller.set_camera(projection=projection)
-        self._update_title()
-        self._redraw()
+        self._apply_observation(self.controller.set_camera(projection=projection))
 
     def action_toggle_cell(self) -> None:
-        self.controller.set_display(show_cell=not self._show_cell)
-        self._update_title()
-        self._redraw()
+        self._apply_observation(self.controller.set_display(show_cell=not self._show_cell))
 
     def action_toggle_bonds(self) -> None:
-        self.controller.set_display(show_bonds=not self._show_bonds)
-        self._update_title()
-        self._redraw()
+        self._apply_observation(self.controller.set_display(show_bonds=not self._show_bonds))
 
     def action_toggle_mono(self) -> None:
-        self.controller.set_display(mono=not self._mono)
-        self._update_title()
-        self._redraw()
+        self._apply_observation(self.controller.set_display(mono=not self._mono))
 
     def action_toggle_label(self) -> None:
         """Cycle through label modes: element → label → molecule → dot."""
         idx = LABEL_MODES.index(self._label_mode) if self._label_mode in LABEL_MODES else 0
-        self.controller.set_display(label_mode=LABEL_MODES[(idx + 1) % len(LABEL_MODES)])
-        self._update_title()
-        self._redraw()
+        self._apply_observation(
+            self.controller.set_display(label_mode=LABEL_MODES[(idx + 1) % len(LABEL_MODES)])
+        )
 
     def action_toggle_minor(self) -> None:
-        self.controller.set_display(show_minor=not self._show_minor)
-        self._update_title()
-        self._redraw()
+        self._apply_observation(self.controller.set_display(show_minor=not self._show_minor))
 
     def action_cycle_level(self) -> None:
         """Cycle display level: atom → molecule."""
         idx = DISPLAY_LEVELS.index(self._display_level) if self._display_level in DISPLAY_LEVELS else 0
-        self.controller.set_display(display_level=DISPLAY_LEVELS[(idx + 1) % len(DISPLAY_LEVELS)])
-        self._update_title()
-        self._redraw()
+        self._apply_observation(
+            self.controller.set_display(display_level=DISPLAY_LEVELS[(idx + 1) % len(DISPLAY_LEVELS)])
+        )
 
     def action_reset_view(self) -> None:
         """Restore the camera supplied at startup."""
-        self.controller.reset_view()
-        self._update_title()
-        self._redraw()
+        self._apply_observation(self.controller.reset_view())
 
     def action_zoom_out(self) -> None:
-        self.controller.zoom(factor=1.0 / ZOOM_FACTOR)
-        self._update_title()
-        self._redraw()
+        self._apply_observation(self.controller.zoom(factor=1.0 / ZOOM_FACTOR))
 
     def action_zoom_in(self) -> None:
-        self.controller.zoom(factor=ZOOM_FACTOR)
-        self._update_title()
-        self._redraw()
+        self._apply_observation(self.controller.zoom(factor=ZOOM_FACTOR))

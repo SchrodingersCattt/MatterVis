@@ -11,7 +11,7 @@ import pytest
 
 from crystal_viewer.cli import main
 from crystal_viewer.math.camera import Camera, ProjectionMode, project_points
-from crystal_viewer.tui.app import CrystalTUI
+from crystal_viewer.tui.app import CrystalCanvas, CrystalTUI
 from crystal_viewer.tui.compositor import (
     DISPLAY_LEVELS,
     _compute_viewport,
@@ -22,6 +22,7 @@ from crystal_viewer.tui.compositor import (
 from crystal_viewer.tui.crystal_ir import AtomIR, CrystalIR
 from crystal_viewer.tui.loader_adapter import load_for_tui
 from crystal_viewer.tui import run_tui
+from crystal_viewer.tui.serializer import serialize_crystal
 from crystal_viewer.tui.summary import build_scope_summary
 
 
@@ -379,6 +380,44 @@ def test_narrow_frames_truncate_long_labels() -> None:
         width=1, height=4, mono=True, label_mode="label", show_cell=False,
     )
     assert max((len(line) for line in frame.splitlines()), default=0) <= 1
+
+
+def test_terminal_labels_strip_escape_and_bidi_controls() -> None:
+    crystal = _small_crystal()
+    crystal.atoms[0].label = "C\x1b]8;;https://invalid\x07\u202e1"
+    camera = Camera.from_view_name("diagonal", crystal)
+    points, depth = project_points(camera, crystal.cart_coords)
+
+    mono_frame = compose_frame(
+        crystal, camera, points, depth,
+        width=40, height=12, mono=True, label_mode="label", show_cell=False,
+    )
+    color_frame = compose_frame(
+        crystal, camera, points, depth,
+        width=40, height=12, mono=False, label_mode="label", show_cell=False,
+    )
+    structured = serialize_crystal(crystal, camera, points, include_art=False)
+
+    for value in (mono_frame, color_frame, structured):
+        assert "\x1b]" not in value
+        assert "\x07" not in value
+        assert "\u202e" not in value
+
+
+def test_textual_canvas_does_not_receive_label_escape_sequences() -> None:
+    crystal = _small_crystal()
+    crystal.atoms[0].label = "C\x1b]8;;https://invalid\x07\u202e1"
+
+    async def exercise() -> None:
+        app = CrystalTUI(crystal, mono=False, label_mode="label")
+        async with app.run_test(size=(40, 12)) as pilot:
+            await pilot.pause()
+            frame = app.query_one("#canvas", CrystalCanvas).frame_text
+            assert "\x1b]" not in frame
+            assert "\x07" not in frame
+            assert "\u202e" not in frame
+
+    asyncio.run(exercise())
 
 
 def test_structured_and_public_helper_share_minor_visibility(tmp_path) -> None:

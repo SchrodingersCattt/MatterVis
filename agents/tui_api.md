@@ -21,8 +21,10 @@ payload = observation.as_dict()
   `CrystalIR`.
 - `TerminalViewController.from_file(path, display_mode="auto", ...)` loads via
   the canonical terminal loader.
-- `state` returns a detached `TerminalViewState`; all successful mutations
-  increment its monotonic `revision` exactly once.
+- `state` returns a detached `TerminalViewState`; each successful active
+  view-state mutation increments its monotonic `revision` exactly once.
+  Snapshot-registry operations (`save_view`, `list_views`) do not alter active
+  view state and therefore do not increment it.
 - `observe()` returns `TerminalObservation` with schema
   `mattervis.tui.observation/v1`. `as_dict()` is JSON-safe.
 
@@ -35,7 +37,7 @@ front/back answers, collision scores, or a recommended camera.
 
 | Method | Meaning |
 | --- | --- |
-| `set_camera(azimuth=..., elevation=..., roll=..., projection=..., zoom=..., pan_x=..., pan_y=...)` | Apply absolute partial camera state. |
+| `set_camera(azimuth=..., elevation=..., roll=..., target=..., projection=..., zoom=..., pan_x=..., pan_y=...)` | Apply absolute partial camera state. `target` is a Cartesian three-vector retained in observation state for reproducible projection. |
 | `orbit(yaw_deg=..., pitch_deg=..., roll_deg=...)` | World-up turntable motion: yaw is about Cartesian `+Z`; pitch is about current screen-right; roll is about view axis. |
 | `align(axis)` | Look along crystallographic `a`, `b`, `c`, `a*`, `b*`, or `c*`; uses real/reciprocal lattice directions. |
 | `pan(dx=..., dy=...)`, `zoom(factor=...)` | Move/crop the stable terminal viewport. |
@@ -92,3 +94,10 @@ site is ordered or major.
 
 Legacy static `ascii` and `structured` CLI output stays unchanged. The
 controller observation is the machine-readable local API.
+
+## Visual verification artifacts
+
+The checked-in `verification_screens/tui_controller/` text frames are generated
+by `scripts/10_tui_controller_visuals.py`. They cover initial/orbited mono
+views, focused mono context, disorder-visible molecule mode, and ANSI-colour
+molecule mode for DAP-4 at 80×22.

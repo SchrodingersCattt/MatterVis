@@ -8,7 +8,14 @@ from typing import Any
 import numpy as np
 
 from ..math.camera import Camera, ProjectionMode, project_points
-from .compositor import DISPLAY_LEVELS, LABEL_MODES, Viewport, _compute_viewport, compose_frame
+from .compositor import (
+    DISPLAY_LEVELS,
+    LABEL_MODES,
+    Viewport,
+    _compute_viewport,
+    compose_frame,
+    viewport_from_bounds,
+)
 from .inspection import inspect_atoms, inspect_molecules, resolve_atom_references, resolve_molecule_reference
 from .observation import build_observation_scope, build_terminal_title
 from .state import (
@@ -39,7 +46,10 @@ class TerminalViewController:
         "pan",
         "zoom",
         "set_display",
-        "focus",
+        "focus_atom",
+        "focus_molecule",
+        "focus_selection",
+        "clear_focus",
         "save_view",
         "restore_view",
         "list_views",
@@ -62,14 +72,20 @@ class TerminalViewController:
     ) -> None:
         self.crystal = crystal
         self._width, self._height = self._validate_dimensions(width, height)
-        self.camera = self._copy_camera(camera or Camera.from_view_name("auto", crystal))
-        self._initial_camera = self._copy_camera(self.camera)
         self._mono = bool(mono)
         self._show_bonds = bool(show_bonds)
         self._show_cell = bool(show_cell)
         self._label_mode = self._validate_label_mode(label_mode)
         self._show_minor = bool(show_minor)
         self._display_level = self._validate_display_level(display_level)
+        default_camera = camera is None
+        self.camera = replace(
+            self._copy_camera(camera or Camera.from_view_name("auto", crystal)),
+            perspective_near_is_larger=True,
+        )
+        if default_camera:
+            self.camera = replace(self.camera, target=self._all_view_center())
+        self._initial_camera = self._copy_camera(self.camera)
         self._focus = TerminalFocusState()
         self._snapshots: dict[str, tuple[Camera, TerminalDisplayState, TerminalFocusState, Viewport]] = {}
         self._revision = 0
@@ -97,10 +113,12 @@ class TerminalViewController:
     @property
     def state(self) -> TerminalViewState:
         """Return a detached immutable snapshot of the semantic view state."""
+        viewport = self._effective_viewport()
         camera = TerminalCameraState(
             azimuth=float(self.camera.azimuth),
             elevation=float(self.camera.elevation),
             roll=float(self.camera.roll),
+            target=tuple(float(value) for value in self.camera.target),
             projection=self.camera.projection.value,
             zoom=float(self.camera.viewport_zoom),
             pan_x=float(self.camera.pan_x),
@@ -114,21 +132,21 @@ class TerminalViewController:
             show_minor=self._show_minor,
             mono=self._mono,
         )
-        viewport = TerminalViewportState(
+        viewport_state = TerminalViewportState(
             width=self._width,
             height=self._height,
-            scale=float(self._fit_viewport.scale),
-            x_min=float(self._fit_viewport.x_min),
-            x_max=float(self._fit_viewport.x_max),
-            y_min=float(self._fit_viewport.y_min),
-            y_max=float(self._fit_viewport.y_max),
+            scale=float(viewport.scale),
+            x_min=float(viewport.x_min),
+            x_max=float(viewport.x_max),
+            y_min=float(viewport.y_min),
+            y_max=float(viewport.y_max),
         )
         return TerminalViewState(
             revision=self._revision,
             camera=camera,
             display=display,
             focus=self._focus,
-            viewport=viewport,
+            viewport=viewport_state,
         )
 
     def observe(self) -> TerminalObservation:
@@ -179,6 +197,7 @@ class TerminalViewController:
         zoom: float | None = None,
         pan_x: float | None = None,
         pan_y: float | None = None,
+        target: tuple[float, float, float] | list[float] | np.ndarray | None = None,
     ) -> TerminalObservation:
         """Apply absolute partial camera state and return the new observation."""
         candidate = self.camera
@@ -196,7 +215,15 @@ class TerminalViewController:
             values = (pan_x if pan_x is not None else candidate.pan_x, pan_y if pan_y is not None else candidate.pan_y)
             self._validate_finite("pan", *values)
             candidate = replace(candidate, pan_x=float(values[0]), pan_y=float(values[1]))
+        target_changed = target is not None
+        if target_changed:
+            target_array = np.asarray(target, dtype=float)
+            if target_array.shape != (3,) or not np.all(np.isfinite(target_array)):
+                raise ValueError("target must be a finite three-dimensional vector")
+            candidate = replace(candidate, target=target_array)
         self.camera = candidate
+        if target_changed:
+            self._fit_viewport = self._fit_all_viewport()
         return self._changed()
 
     def orbit(self, *, yaw_deg: float = 0.0, pitch_deg: float = 0.0, roll_deg: float = 0.0) -> TerminalObservation:
@@ -240,23 +267,34 @@ class TerminalViewController:
         mono: bool | None = None,
     ) -> TerminalObservation:
         """Apply absolute render choices without changing source structure data."""
-        if display_level is not None:
-            self._display_level = self._validate_display_level(display_level)
-        if label_mode is not None:
-            self._label_mode = self._validate_label_mode(label_mode)
-        if show_bonds is not None:
-            self._show_bonds = bool(show_bonds)
-        if show_cell is not None:
-            self._show_cell = bool(show_cell)
-        if show_minor is not None:
-            self._show_minor = bool(show_minor)
-        if mono is not None:
-            self._mono = bool(mono)
+        # Validate every field before changing any controller state.
+        candidate_display_level = (
+            self._display_level
+            if display_level is None
+            else self._validate_display_level(display_level)
+        )
+        candidate_label_mode = (
+            self._label_mode
+            if label_mode is None
+            else self._validate_label_mode(label_mode)
+        )
+        candidate_show_bonds = self._show_bonds if show_bonds is None else bool(show_bonds)
+        candidate_show_cell = self._show_cell if show_cell is None else bool(show_cell)
+        candidate_show_minor = self._show_minor if show_minor is None else bool(show_minor)
+        candidate_mono = self._mono if mono is None else bool(mono)
+
+        self._display_level = candidate_display_level
+        self._label_mode = candidate_label_mode
+        self._show_bonds = candidate_show_bonds
+        self._show_cell = candidate_show_cell
+        self._show_minor = candidate_show_minor
+        self._mono = candidate_mono
         return self._changed()
 
     def fit(self, *, target: str = "all") -> TerminalObservation:
         """Explicitly fit either all visible structure or the current focus."""
         if target == "all":
+            self.camera = replace(self.camera, target=self._all_view_center())
             self._fit_viewport = self._fit_all_viewport()
         elif target == "focus":
             frame_indices = self._focused_frame_indices()
@@ -332,16 +370,13 @@ class TerminalViewController:
                 revision=self._revision,
                 camera=TerminalCameraState(
                     azimuth=float(camera.azimuth), elevation=float(camera.elevation),
-                    roll=float(camera.roll), projection=camera.projection.value,
+                    roll=float(camera.roll), target=tuple(float(value) for value in camera.target),
+                    projection=camera.projection.value,
                     zoom=float(camera.viewport_zoom), pan_x=float(camera.pan_x), pan_y=float(camera.pan_y),
                 ),
                 display=display,
                 focus=focus,
-                viewport=TerminalViewportState(
-                    width=viewport.width, height=viewport.height, scale=float(viewport.scale),
-                    x_min=float(viewport.x_min), x_max=float(viewport.x_max),
-                    y_min=float(viewport.y_min), y_max=float(viewport.y_max),
-                ),
+                viewport=self._viewport_state_for(camera, viewport),
             )
             snapshots.append(TerminalViewSnapshot(name=name, state=state))
         return tuple(snapshots)
@@ -363,14 +398,13 @@ class TerminalViewController:
     def resize_viewport(self, width: int, height: int) -> TerminalObservation:
         """Resize the existing stable frame without changing its fitted bounds."""
         self._width, self._height = self._validate_dimensions(width, height)
-        self._fit_viewport = Viewport(
-            x_min=self._fit_viewport.x_min,
-            x_max=self._fit_viewport.x_max,
-            y_min=self._fit_viewport.y_min,
-            y_max=self._fit_viewport.y_max,
-            scale=self._fit_viewport.scale,
-            width=self._width,
-            height=self._height,
+        self._fit_viewport = viewport_from_bounds(
+            self._fit_viewport.x_min,
+            self._fit_viewport.x_max,
+            self._fit_viewport.y_min,
+            self._fit_viewport.y_max,
+            self._width,
+            self._height,
         )
         return self._changed()
 
@@ -382,12 +416,76 @@ class TerminalViewController:
         return self._changed()
 
     def _fit_all_viewport(self) -> Viewport:
-        points, _ = project_points(self.camera, self.crystal.cart_coords)
-        extra: list[np.ndarray] = []
+        coords = self._all_view_coords()
+        if len(coords) == 0:
+            return _compute_viewport(np.empty((0, 2)), [], self._width, self._height)
+
+        # A 3D sphere centered on the camera target projects to a bounded
+        # square for every orbit orientation. Unlike a frozen current 2D
+        # projection, it cannot crop a long structure after rotating side-on.
+        radius = float(np.linalg.norm(coords - self.camera.target, axis=1).max())
+        extent = self._projected_sphere_extent(radius)
+        points = np.array([[-extent, -extent], [extent, extent]], dtype=float)
+        return _compute_viewport(points, [], self._width, self._height)
+
+    def _effective_viewport(self) -> Viewport:
+        """Return the same zoomed/panned viewport passed to the compositor."""
+        return viewport_from_bounds(
+            self._fit_viewport.x_min,
+            self._fit_viewport.x_max,
+            self._fit_viewport.y_min,
+            self._fit_viewport.y_max,
+            self._width,
+            self._height,
+            zoom=self.camera.viewport_zoom,
+            pan_x=self.camera.pan_x,
+            pan_y=self.camera.pan_y,
+        )
+
+    @staticmethod
+    def _viewport_state_for(camera: Camera, viewport: Viewport) -> TerminalViewportState:
+        effective = viewport_from_bounds(
+            viewport.x_min,
+            viewport.x_max,
+            viewport.y_min,
+            viewport.y_max,
+            viewport.width,
+            viewport.height,
+            zoom=camera.viewport_zoom,
+            pan_x=camera.pan_x,
+            pan_y=camera.pan_y,
+        )
+        return TerminalViewportState(
+            width=effective.width,
+            height=effective.height,
+            scale=float(effective.scale),
+            x_min=float(effective.x_min),
+            x_max=float(effective.x_max),
+            y_min=float(effective.y_min),
+            y_max=float(effective.y_max),
+        )
+
+    def _all_view_coords(self) -> np.ndarray:
+        coords = [
+            atom.cart
+            for atom in self.crystal.atoms
+            if self._show_minor or not atom.is_minor
+        ]
         if self._show_cell and self.crystal.lattice is not None:
-            vertices, _ = project_points(self.camera, self.crystal.lattice.cell_vertices())
-            extra.append(vertices)
-        return _compute_viewport(points, extra, self._width, self._height)
+            coords.extend(self.crystal.lattice.cell_vertices())
+        return np.asarray(coords, dtype=float) if coords else np.empty((0, 3))
+
+    def _all_view_center(self) -> np.ndarray:
+        coords = self._all_view_coords()
+        return coords.mean(axis=0) if len(coords) else np.zeros(3)
+
+    def _projected_sphere_extent(self, radius: float) -> float:
+        radius = max(float(radius), 0.005)
+        if self.camera.projection == ProjectionMode.ORTHOGRAPHIC:
+            return radius / max(float(self.camera.distance), 1e-9)
+        near_distance = max(float(self.camera.distance) - radius, 0.01)
+        fov_scale = np.tan(np.radians(self.camera.fov_deg / 2.0))
+        return radius / max(near_distance * fov_scale, 1e-9)
 
     def _fit_indices_viewport(self, indices: tuple[int, ...]) -> Viewport:
         coords = np.asarray([self.crystal.atoms[index].cart for index in indices], dtype=float)

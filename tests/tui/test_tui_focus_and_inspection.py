@@ -137,3 +137,14 @@ def test_inspect_molecule_uses_retained_molcryskit_provenance() -> None:
     assert molecule["source_member_indices"] == [1, 2]
     assert molecule["complete"] is True
     assert {item["display_fragment_id"] for item in molecule["display_instances"]} == {"A0", "A1"}
+
+
+def test_atom_reference_mapping_respects_declared_namespace() -> None:
+    controller = TerminalViewController(_crystal())
+
+    with pytest.raises(TypeError, match="label reference"):
+        controller.focus_atom({"label": 1})
+    with pytest.raises(TypeError, match="source_index reference"):
+        controller.focus_atom({"source_index": "1"})
+    with pytest.raises(TypeError, match="display_copy_id reference"):
+        controller.focus_atom({"display_copy_id": 1})

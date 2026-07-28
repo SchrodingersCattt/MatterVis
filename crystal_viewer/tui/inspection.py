@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any, Iterable
 
+from .text import terminal_text
+
 
 def resolve_atom_references(crystal, references: Iterable[str | int | dict[str, Any]]) -> tuple[int, ...]:
     """Resolve explicit atom references to display indices without guessing.
@@ -26,7 +28,19 @@ def resolve_atom_references(crystal, references: Iterable[str | int | dict[str, 
             keys = set(reference)
             if len(keys) != 1 or not keys <= {"label", "source_index", "display_copy_id"}:
                 raise ValueError("atom reference must contain exactly one of label, source_index, display_copy_id")
-            matches = list(resolve_atom_references(crystal, [next(iter(reference.values()))]))
+            key, value = next(iter(reference.items()))
+            if key == "label":
+                if not isinstance(value, str):
+                    raise TypeError("atom label reference must be a string")
+                matches = [index for index, atom in enumerate(crystal.atoms) if atom.label == value]
+            elif key == "display_copy_id":
+                if not isinstance(value, str):
+                    raise TypeError("display_copy_id reference must be a string")
+                matches = [index for index, atom in enumerate(crystal.atoms) if atom.display_copy_id == value]
+            else:
+                if not isinstance(value, int) or isinstance(value, bool):
+                    raise TypeError("source_index reference must be an integer")
+                matches = [index for index, atom in enumerate(crystal.atoms) if atom.source_index == value]
         else:
             raise TypeError("atom references must be strings, source indices, or reference mappings")
         if not matches:
@@ -126,11 +140,11 @@ def _atom_record(crystal, index: int, *, show_minor: bool) -> dict[str, Any]:
     atom = crystal.atoms[index]
     return {
         "display_index": index,
-        "display_copy_id": atom.display_copy_id,
-        "label": atom.label,
-        "element": atom.element,
+        "display_copy_id": terminal_text(atom.display_copy_id),
+        "label": terminal_text(atom.label),
+        "element": terminal_text(atom.element),
         "source_index": atom.source_index,
-        "source_instance_id": atom.source_instance_id,
+        "source_instance_id": terminal_text(atom.source_instance_id),
         "symmetry_operation_index": atom.symmetry_operation_index,
         "image_shift": list(atom.image_shift),
         "occupancy": atom.occupancy,
@@ -140,7 +154,7 @@ def _atom_record(crystal, index: int, *, show_minor: bool) -> dict[str, Any]:
         "classification_provenance_available": False,
         "source_molecule_index": atom.source_molecule_index,
         "display_molecule_index": atom.molecule_index,
-        "display_fragment_id": atom.display_fragment_id,
+        "display_fragment_id": terminal_text(atom.display_fragment_id),
         "visible": bool(show_minor or not atom.is_minor),
         "hidden_reason": None if show_minor or not atom.is_minor else "minor_filtered",
         "cartesian": [float(value) for value in atom.cart],

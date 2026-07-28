@@ -63,6 +63,7 @@ class Camera:
     pan_x: float = 0.0  # 2D viewport pan offset (in projected data units)
     pan_y: float = 0.0
     basis: np.ndarray | None = None  # [right; up; forward], if view-relative state is retained
+    perspective_near_is_larger: bool = False
 
     def __post_init__(self):
         if self.target is None:
@@ -95,7 +96,13 @@ class Camera:
         """3×3 rotation matrix [right; up; forward] with roll applied."""
         if self.basis is not None:
             return self.basis.copy()
-        R = view_rotation(self.view_direction)
+        # The turntable's world-up convention is +Z. Use it for first-frame
+        # Euler cameras too, so the first orbit continues the rendered basis
+        # instead of changing screen roll or making pitch orbit around +Z.
+        R = orthonormal_camera_basis(
+            self.view_direction,
+            np.array([0.0, 0.0, 1.0]),
+        )
         if abs(self.roll) > 0.01:
             # Apply roll: rotate the right and up vectors around forward
             angle = np.radians(self.roll)
@@ -207,15 +214,11 @@ class Camera:
             raise ValueError("max_pitch_deg must be between 0 and 90")
 
         world_up = np.array([0.0, 0.0, 1.0])
-        if self.basis is None:
-            forward = self.view_direction
-            right, up, forward = orthonormal_camera_basis(forward, world_up)
-            if abs(self.roll) > 1e-12:
-                right = rotate_vector(right, forward, self.roll)
-                up = rotate_vector(up, forward, self.roll)
-            right, up, forward = orthonormal_camera_basis(forward, up)
-        else:
-            right, up, forward = self.rotation_matrix
+        # Preserve the exact basis that rendered the preceding frame. In
+        # particular, an Euler camera initially uses ``view_rotation()``'s
+        # established up-vector policy; rebuilding it with world +Z here
+        # would introduce a visible roll before the requested orbit begins.
+        right, up, forward = self.rotation_matrix
         if abs(yaw_deg) > 1e-12:
             forward = rotate_vector(forward, world_up, yaw_deg)
             up = rotate_vector(up, world_up, yaw_deg)
@@ -338,11 +341,15 @@ def project_points(
         xy_2d = cam_space[:, :2] / camera.distance
         depth = cam_space[:, 2]
     elif camera.projection == ProjectionMode.PERSPECTIVE:
-        # Perspective divide: x/z, y/z
-        # z_depth here = distance along view direction from target
-        # We offset by camera distance to avoid divide-by-zero
-        z = cam_space[:, 2] + camera.distance
-        z = np.where(np.abs(z) < 0.01, 0.01, z)  # clamp
+        # Legacy static callers retain their historical convention. The
+        # semantic controller opts into physical camera-distance projection,
+        # where depth grows toward the camera and therefore reduces distance.
+        z = (
+            camera.distance - cam_space[:, 2]
+            if camera.perspective_near_is_larger
+            else camera.distance + cam_space[:, 2]
+        )
+        z = np.maximum(z, 0.01)
         fov_scale = np.tan(np.radians(camera.fov_deg / 2))
         xy_2d = cam_space[:, :2] / (z[:, np.newaxis] * fov_scale)
         depth = cam_space[:, 2]
@@ -362,30 +369,37 @@ def _clamp_turntable_pitch(
     if abs(requested_deg) < 1e-12:
         return 0.0
     direction = float(np.copysign(1.0, requested_deg))
-    total = abs(float(requested_deg))
-    previous = 0.0
-    # A 0.5° walk is deterministic and only runs for explicit interaction;
-    # it prevents a large request (for example 180°) from tunnelling through
-    # the pole and returning to an apparently valid elevation.
-    for magnitude in np.arange(0.5, total + 0.5, 0.5):
-        current = min(float(magnitude), total)
-        candidate = rotate_vector(forward, axis, direction * current)
-        elevation = abs(float(np.degrees(np.arcsin(np.clip(candidate[2], -1.0, 1.0)))))
-        if elevation > max_pitch_deg:
-            low, high = previous, current
-            for _ in range(40):
-                middle = (low + high) / 2.0
-                middle_vec = rotate_vector(forward, axis, direction * middle)
-                middle_elev = abs(float(np.degrees(np.arcsin(np.clip(middle_vec[2], -1.0, 1.0)))))
-                if middle_elev <= max_pitch_deg:
-                    low = middle
-                else:
-                    high = middle
-            return direction * low
-        previous = current
-        if current == total:
+    # A turntable never needs more than a half turn to reach its first pole.
+    # Canonicalising bounds work for arbitrary finite agent input while
+    # retaining the first-pole semantics for ordinary interactions.
+    total = min(abs(float(requested_deg)), 180.0)
+
+    def elevation_at(magnitude: float) -> float:
+        candidate = rotate_vector(forward, axis, direction * magnitude)
+        return abs(float(np.degrees(np.arcsin(np.clip(candidate[2], -1.0, 1.0)))))
+
+    low = 0.0
+    high: float | None = None
+    # Search a fixed number of intervals so a 180° request cannot tunnel
+    # through the first pole and return to low elevation on the far side.
+    for step in range(1, 65):
+        candidate = total * step / 64.0
+        if elevation_at(candidate) > max_pitch_deg:
+            high = candidate
             break
-    return requested_deg
+        low = candidate
+    if high is None:
+        return direction * total
+
+    # A fixed number of bisection iterations avoids work proportional to the
+    # original user input while resolving the first pole precisely.
+    for _ in range(48):
+        middle = (low + high) / 2.0
+        if elevation_at(middle) <= max_pitch_deg:
+            low = middle
+        else:
+            high = middle
+    return direction * low
 
 
 def project_segments(

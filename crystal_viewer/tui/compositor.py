@@ -20,6 +20,7 @@ import numpy as np
 
 from .braille import BrailleCanvas
 from .renderer import ELEMENT_COLORS, DEFAULT_COLOR, BOND_COLOR, CELL_COLOR
+from .text import terminal_text
 
 if TYPE_CHECKING:
     from .crystal_ir import CrystalIR
@@ -41,10 +42,11 @@ def _superscript(n: int) -> str:
 
 def _display_species_name(species_id: str) -> str:
     """Hide MCK's trailing graph-discriminator suffix in terminal labels."""
-    base, separator, suffix = species_id.rpartition("_")
+    safe_species_id = terminal_text(species_id)
+    base, separator, suffix = safe_species_id.rpartition("_")
     if separator and base and suffix.isdigit():
         return base
-    return species_id
+    return safe_species_id
 
 
 def _atom_label_text(atom, label_mode: str) -> str:
@@ -53,13 +55,13 @@ def _atom_label_text(atom, label_mode: str) -> str:
     elif label_mode == "element":
         return atom.element
     elif label_mode == "label":
-        return atom.display_label
+        return terminal_text(atom.display_label)
     elif label_mode == "molecule":
-        base = atom.display_label
+        base = terminal_text(atom.display_label)
         if atom.molecule_index >= 0:
             return base + _superscript(atom.molecule_index)
         return base
-    return atom.element
+    return terminal_text(atom.element)
 
 
 def resolve_label_mode(

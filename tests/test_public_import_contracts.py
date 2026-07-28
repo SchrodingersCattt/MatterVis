@@ -33,8 +33,10 @@ PUBLIC_IMPORTS = {
         "TerminalDisplayState",
         "TerminalFocusState",
         "TerminalObservation",
+        "TerminalViewportState",
         "TerminalViewSnapshot",
         "TerminalViewState",
+        "OBSERVATION_SCHEMA",
         "run_tui",
     ),
 }
