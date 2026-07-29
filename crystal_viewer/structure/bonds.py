@@ -21,7 +21,34 @@ def bonds_conflict(ai, aj):
         return dg_i != dg_j
     return da_i == da_j and dg_i != dg_j
 
-def _bond_cutoff(ai, aj):
+def _mck_pair_cutoff(ai, aj, *, bond_scale, bond_thresholds=None):
+    """Return MolCrysKit's effective pair cutoff for manifested scene atoms."""
+    from molcrys_kit.analysis.interactions import get_bonding_threshold
+    from molcrys_kit.constants import get_atomic_radius, has_atomic_radius, is_metal_element
+
+    ei, ej = ai['elem'], aj['elem']
+    overrides = bond_thresholds or {}
+    threshold = overrides.get((ei, ej), overrides.get((ej, ei)))
+    if threshold is None:
+        radius_i = get_atomic_radius(ei) if has_atomic_radius(ei) else 0.5
+        radius_j = get_atomic_radius(ej) if has_atomic_radius(ej) else 0.5
+        threshold = get_bonding_threshold(
+            radius_i,
+            radius_j,
+            is_metal_element(ei),
+            is_metal_element(ej),
+        )
+    return float(threshold) * float(bond_scale)
+
+
+def _bond_cutoff(ai, aj, *, bond_scale=None, bond_thresholds=None):
+    if bond_scale is not None:
+        return _mck_pair_cutoff(
+            ai,
+            aj,
+            bond_scale=bond_scale,
+            bond_thresholds=bond_thresholds,
+        )
     ei, ej = ai['elem'], aj['elem']
     if ei == 'H' and ej == 'H':
         return None
@@ -152,7 +179,7 @@ _BOND_MAX_CUTOFF = 5.0  # Å — wide enough for any covalent pair the table can
 _PBC_SELECTIVE_THRESHOLD = 500  # Above this, use face-selective ghost expansion.
 
 
-def _effective_cutoff(atoms):
+def _effective_cutoff(atoms, *, bond_scale=None, bond_thresholds=None):
     """Compute the tightest cutoff that still covers all possible covalent
     pairs among the element set present in *atoms*.
 
@@ -162,6 +189,20 @@ def _effective_cutoff(atoms):
     elems = {a['elem'] for a in atoms}
     if not elems:
         return _BOND_MAX_CUTOFF
+    if bond_scale is not None:
+        if not np.isfinite(float(bond_scale)) or float(bond_scale) <= 0:
+            raise ValueError("bond_scale must be finite and positive")
+        probes = [{'elem': elem} for elem in sorted(elems)]
+        cutoffs = [
+            _mck_pair_cutoff(
+                probes[i], probes[j],
+                bond_scale=bond_scale,
+                bond_thresholds=bond_thresholds,
+            )
+            for i in range(len(probes))
+            for j in range(i, len(probes))
+        ]
+        return max(cutoffs, default=_BOND_MAX_CUTOFF)
     radii = []
     for e in elems:
         try:
@@ -296,7 +337,7 @@ def _pbc_pairs_selective(coords, atoms, n, M_arr, cutoff):
         yield (int(i), int(j))
 
 
-def _bond_candidate_pairs(atoms, M, cell):
+def _bond_candidate_pairs(atoms, M, cell, *, bond_scale=None, bond_thresholds=None):
     """Yield ``(i, j)`` index pairs with ``i < j`` whose Cartesian
     distance (or, when ``cell is not None``, **PBC** Cartesian distance)
     is plausibly within bond range.
@@ -329,7 +370,11 @@ def _bond_candidate_pairs(atoms, M, cell):
                 yield (i, j)
         return
     coords = np.asarray([a['cart'] for a in atoms], dtype=float)
-    cutoff = _effective_cutoff(atoms)
+    cutoff = _effective_cutoff(
+        atoms,
+        bond_scale=bond_scale,
+        bond_thresholds=bond_thresholds,
+    )
 
     # No PBC requested -> plain non-periodic KDTree on raw cart coords.
     if cell is None or M is None:
@@ -349,7 +394,7 @@ def _bond_candidate_pairs(atoms, M, cell):
         yield from _pbc_pairs_selective(coords, atoms, n, M_arr, cutoff)
 
 
-def find_bonds(atoms, M=None, cell=None):
+def find_bonds(atoms, M=None, cell=None, *, bond_scale=None, bond_thresholds=None):
     """Find bonds, excluding cross-disorder-group and cross-alternative bonds.
 
     For large atom counts (~64+ atoms, see ``_BOND_KDTREE_THRESHOLD``)
@@ -359,15 +404,30 @@ def find_bonds(atoms, M=None, cell=None):
     O(N * k) where k ~ 10-20 covalent neighbours per atom -- the
     difference between 1 second and 1 minute on a 1500-atom supercell.
     """
+    if bond_scale is not None and (
+        not np.isfinite(float(bond_scale)) or float(bond_scale) <= 0
+    ):
+        raise ValueError("bond_scale must be finite and positive")
     candidates = []
-    for i, j in _bond_candidate_pairs(atoms, M=M, cell=cell):
+    for i, j in _bond_candidate_pairs(
+        atoms,
+        M=M,
+        cell=cell,
+        bond_scale=bond_scale,
+        bond_thresholds=bond_thresholds,
+    ):
         ai = atoms[i]
         aj = atoms[j]
         if not _bond_allowed_by_table(ai, aj):
             continue
         if bonds_conflict(ai, aj):
             continue
-        cutoff = _bond_cutoff(ai, aj)
+        cutoff = _bond_cutoff(
+            ai,
+            aj,
+            bond_scale=bond_scale,
+            bond_thresholds=bond_thresholds,
+        )
         if cutoff is None:
             continue
         if cell is not None:

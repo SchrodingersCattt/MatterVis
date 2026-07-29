@@ -250,6 +250,7 @@ def _label_payload(ops: Any, draw_atoms, view_x, view_y, view_z):
             "atom_cart": at["cart"].copy(),
             "label_cart": lpos_3d.copy(),
             "text": at["label"],
+            "elem": at["elem"],
             "is_minor": atom_is_minor(at),
         })
     return label_items

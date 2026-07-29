@@ -29,6 +29,10 @@ points and pitfalls.
   path — it breaks on disorder + special-position structures.
 - Atoms must carry `_source_index` pointing back to `raw_atoms` so
   molecule lookup works for translated copies (formula-unit, repeat).
+- Cube rendering exposes `bond_scale` as one MolCrysKit-owned coefficient. It
+  must be forwarded to both `molcrys_bridge.analyze` and manifested-scene
+  `find_bonds`; otherwise molecule unwrapping and visible bonds disagree.
+  Scene-cache keys must include the coefficient and normalized pair overrides.
 
 ### SHELX-style occupancy disorder
 

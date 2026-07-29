@@ -65,7 +65,10 @@ flowchart LR
   - `build_cube_figure(path, *, camera=..., periodic=..., periodic_image_policy=..., ...)` — unified cube renderer;
     pass the final camera here so the cell and paper-coordinate compass
     are projected from the same view. Set `periodic=True` for periodic
-    densities and other cell-periodic scalar fields.
+    densities and other cell-periodic scalar fields. Pass `bond_scale=` to use
+    one MolCrysKit coefficient for molecule grouping and visible bonds. Use
+    `style={"show_element_legend": True}` for a compact element key and
+    `show_labels=True, style={"label_selector": ...}` for selective labels.
   - `build_orbital_panel_figure(cubes, *, ...)` — N-up panel figure
     with shared camera and ranges.
   - `sign_legend_annotations(...)` — paper-coord +/− swatches.
@@ -122,6 +125,18 @@ These are stable across versions; rely on them.
 - **Style precedence.** `style={"isosurface_periodic": ...}` overrides the
   convenience `periodic=` keyword, following the same caller-override rule as
   the other cube style fields.
+- **Unified bond thresholds are MolCrysKit-owned.**
+  `build_cube_figure(..., bond_scale=s)` forwards one positive finite
+  coefficient into MolCrysKit molecule identification and manifested-scene
+  bond drawing. The effective cutoff is MolCrysKit's
+  `(radius_i + radius_j) * element_class_factor * s`; explicit
+  `bond_thresholds={("A", "B"): value}` are also multiplied by `s`.
+  `style["mck_bond_scale"]` overrides the convenience kwarg, then config
+  `mck_overrides.bond_scale` is consulted. The cube wrapper default is `1.0`.
+- **Atom identity controls.** `show_element_legend=True` emits a paper-coordinate
+  key for elements present in the scene. `label_selector` accepts
+  `{"elements": ["Sn", "N"]}` and/or `{"labels": ["Cl3"]}` and filters text
+  when `show_labels=True` without hiding atoms.
 - **Atom + bond geometry are bright + opaque by default.**
   `atom_sphere_traces` and `bond_traces` emit `Mesh3d` primitives at
   `opacity=1.0` with `ambient ≥ 0.75` so phenyl-heavy or

@@ -103,6 +103,8 @@ def build_scene_from_atoms(
     ops=None,
     formula_unit_atoms=None,
     unwrapped_atoms=None,
+    bond_scale: float | None = None,
+    bond_thresholds: dict[tuple[str, str], float] | None = None,
 ) -> Dict[str, Any]:
     ops = scene_ops() if ops is None else ops
     preset = default_preset() if preset is None else preset
@@ -145,7 +147,20 @@ def build_scene_from_atoms(
     # neighbours on the other side of the cell boundary).  Without M
     # the KDTree uses non-PBC Cartesian distances and misses these pairs.
     effective_M = None if display_mode == "cluster" else M
-    bond_pairs = ops.find_bonds(draw_atoms, M=effective_M, cell=effective_cell)
+    if bond_scale is None and bond_thresholds is None:
+        bond_pairs = ops.find_bonds(
+            draw_atoms,
+            M=effective_M,
+            cell=effective_cell,
+        )
+    else:
+        bond_pairs = ops.find_bonds(
+            draw_atoms,
+            M=effective_M,
+            cell=effective_cell,
+            bond_scale=bond_scale,
+            bond_thresholds=bond_thresholds,
+        )
     bonds = []
     for i, j in bond_pairs:
         ai = draw_atoms[i]
@@ -213,6 +228,8 @@ def build_scene_from_atoms(
         "has_minor": any(bool(atom["is_minor"]) for atom in draw_atoms),
         "preset_entry": entry,
         "display_mode": display_mode,
+        "bond_scale": bond_scale,
+        "bond_thresholds": copy.deepcopy(bond_thresholds),
         "projected_axes": projected_axes,
         "axis_labels": axis_labels,
     }

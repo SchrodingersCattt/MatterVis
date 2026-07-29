@@ -24,6 +24,36 @@ from .viewport import (
 )
 
 
+def _element_legend_annotations(scene: dict, style: dict) -> list[dict]:
+    if not bool(style.get("show_element_legend", False)):
+        return []
+    present: dict[str, str] = {}
+    for atom in scene.get("draw_atoms", []):
+        element = str(atom.get("elem", ""))
+        if element:
+            present.setdefault(element, str(atom.get("color", "#808080")))
+    order = [str(item) for item in style.get("element_legend_order", [])]
+    elements = [item for item in order if item in present]
+    elements.extend(sorted(set(present) - set(elements)))
+    if not elements:
+        return []
+    swatches = " &nbsp;&nbsp; ".join(
+        f"<span style='color:{present[element]}'><b>● {element}</b></span>"
+        for element in elements
+    )
+    return [{
+        "x": float(style.get("element_legend_x", 0.5)),
+        "y": float(style.get("element_legend_y", 0.02)),
+        "xref": "paper",
+        "yref": "paper",
+        "text": swatches,
+        "showarrow": False,
+        "font": {"size": float(style.get("element_legend_font_size", 13))},
+        "xanchor": "center",
+        "yanchor": "bottom",
+    }]
+
+
 def build_row_figure(
     scene_style_pairs: list[tuple[dict, dict]],
     bgcolor: str = "#FFFFFF",
@@ -235,6 +265,7 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None, *,
         meta=layout_meta,
     )
     key_annotations, key_shapes = compose_axis_key_layout(scene, style)
+    key_annotations = list(key_annotations or []) + _element_legend_annotations(scene, style)
     if key_annotations:
         layout_kwargs["annotations"] = key_annotations
     if key_shapes:

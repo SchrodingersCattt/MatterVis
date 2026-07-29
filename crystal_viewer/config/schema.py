@@ -76,6 +76,8 @@ BUILTIN_STYLE: dict[str, Any] = {
     "minor_wireframe": False,
     "minor_bond_scale": 0.82,
     "show_labels": False,
+    "label_selector": None,
+    "show_element_legend": False,
     "show_axes": True,
     "show_title": True,
     "show_hydrogen": True,
@@ -175,6 +177,7 @@ BUILTIN_CUBE: dict[str, Any] = {
 }
 
 BUILTIN_MCK_OVERRIDES: dict[str, Any] = {
+    "bond_scale": 1.0,
     "gap_threshold": None,
     "enclosure_expand_max": None,
     "default_search_cutoff": None,

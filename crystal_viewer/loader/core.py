@@ -43,6 +43,8 @@ class LoadedCrystal:
     atom_fragment_labels: list[str] = field(default_factory=list)
     source: str = "catalog"
     cube_data: Any | None = None
+    bond_scale: float | None = None
+    bond_thresholds: dict[tuple[str, str], float] | None = None
     # Per-bundle cache for scenes after a transforms pipeline has been
     # applied. Key is ``(display_mode, show_hydrogen, transforms_cache_key)``;
     # value is the post-transform scene dict (already including a refreshed
@@ -877,7 +879,16 @@ def build_bundle_scene(
     atom list. The base scene cache is unchanged so toggling transforms
     on/off stays cheap.
     """
-    base_cache_key = (display_mode, bool(show_hydrogen))
+    threshold_key = tuple(sorted(
+        (str(left), str(right), float(value))
+        for (left, right), value in (bundle.bond_thresholds or {}).items()
+    ))
+    base_cache_key = (
+        display_mode,
+        bool(show_hydrogen),
+        bundle.bond_scale,
+        threshold_key,
+    )
     base_scene = bundle.scene_cache.get(base_cache_key)
     if base_scene is None:
         perf_log.record(
@@ -902,6 +913,8 @@ def build_bundle_scene(
             ops=ops,
             formula_unit_atoms=bundle.formula_unit_atoms if display_mode == "formula_unit" else None,
             unwrapped_atoms=bundle.unwrapped_atoms,
+            bond_scale=bundle.bond_scale,
+            bond_thresholds=bundle.bond_thresholds,
         )
         base_scene["cif_path"] = bundle.cif_path
         base_scene["view_direction"] = view_dir

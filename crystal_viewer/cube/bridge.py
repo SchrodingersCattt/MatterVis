@@ -92,6 +92,8 @@ def build_cube_figure(
     show_hydrogen: bool = False,
     periodic: bool | None = None,
     periodic_image_policy: str | None = None,
+    bond_scale: float | None = None,
+    bond_thresholds: dict[tuple[str, str], float] | None = None,
 ):
     """Render a cube file through the unified crystal pipeline with isosurface overlay.
 
@@ -130,6 +132,14 @@ def build_cube_figure(
         keeps a canonical representative near the base cell;
         ``nearest_atom`` places it nearest a displayed atom image, which is
         useful when unit-cell mode materializes complete boundary fragments.
+    bond_scale : float, optional
+        Global coefficient applied to MolCrysKit bonding thresholds for both
+        molecule grouping and visible bonds. ``style["mck_bond_scale"]`` takes
+        precedence; otherwise config ``mck_overrides.bond_scale`` is used, with
+        MolCrysKit's default 1.0 as the final fallback.
+    bond_thresholds : dict, optional
+        Explicit element-pair thresholds in Å. The global ``bond_scale`` also
+        multiplies these overrides, matching MolCrysKit semantics.
 
     Returns
     -------
@@ -137,20 +147,11 @@ def build_cube_figure(
     """
     from pathlib import Path as _Path
 
+    from ..config import current_config
     from ..config.schema import BUILTIN_STYLE
     from ..loader.core import build_bundle_scene
     from ..loader.cube_adapter import load_cube_file
     from ..render.figures import build_figure
-
-    cube_path = _Path(path)
-    bundle = load_cube_file(cube_path)
-
-    scene = build_bundle_scene(
-        bundle, display_mode=display_mode, show_hydrogen=show_hydrogen,
-    )
-    # Ensure cube_data is on the scene for the isosurface renderer
-    if scene.get("cube_data") is None:
-        scene["cube_data"] = bundle.cube_data
 
     merged_style = dict(BUILTIN_STYLE)
     # Apply convenience kwargs before user style dict (user dict wins)
@@ -166,5 +167,30 @@ def build_cube_figure(
         merged_style["isosurface_image_policy"] = str(periodic_image_policy)
     if style:
         merged_style.update(style)
+
+    configured_scale = current_config().mck_overrides.get("bond_scale", None)
+    effective_bond_scale = merged_style.get("mck_bond_scale", bond_scale)
+    if effective_bond_scale is None:
+        effective_bond_scale = configured_scale
+    if effective_bond_scale is None:
+        effective_bond_scale = 1.0
+    effective_bond_scale = float(effective_bond_scale)
+    if not np.isfinite(effective_bond_scale) or effective_bond_scale <= 0:
+        raise ValueError("bond_scale must be finite and positive")
+    merged_style["mck_bond_scale"] = effective_bond_scale
+
+    cube_path = _Path(path)
+    bundle = load_cube_file(
+        cube_path,
+        bond_scale=effective_bond_scale,
+        bond_thresholds=bond_thresholds,
+    )
+
+    scene = build_bundle_scene(
+        bundle, display_mode=display_mode, show_hydrogen=show_hydrogen,
+    )
+    # Ensure cube_data is on the scene for the isosurface renderer
+    if scene.get("cube_data") is None:
+        scene["cube_data"] = bundle.cube_data
 
     return build_figure(scene, merged_style)
