@@ -12,6 +12,7 @@ dependencies = [
     "plotly",
     "numpy",
     "scipy",
+    "scikit-image",
     "gemmi",
     "pymatgen",
     "kaleido",

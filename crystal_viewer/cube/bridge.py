@@ -59,8 +59,10 @@ def cube_to_raw_atoms(cube: CubeData) -> list[dict[str, Any]]:
         elem_count[elem] = elem_count.get(elem, 0) + 1
         label = f"{elem}{elem_count[elem]}"
 
-        cart = np.asarray(atom.coord, dtype=float)
-        frac = M_inv @ cart
+        cart = np.asarray(atom.coord, dtype=float) - cube.origin
+        # Cell vectors are rows, and cube atom positions are absolute
+        # Cartesian coordinates relative to ``cube.origin``.
+        frac = cart @ M_inv
 
         atoms.append({
             "elem": elem,
@@ -88,6 +90,8 @@ def build_cube_figure(
     style: dict[str, Any] | None = None,
     display_mode: str = "formula_unit",
     show_hydrogen: bool = False,
+    periodic: bool | None = None,
+    periodic_image_policy: str | None = None,
 ):
     """Render a cube file through the unified crystal pipeline with isosurface overlay.
 
@@ -116,6 +120,16 @@ def build_cube_figure(
         Display mode for the structure ("formula_unit", "unit_cell", etc.).
     show_hydrogen : bool
         Whether to show hydrogen atoms.
+    periodic : bool, optional
+        Close the scalar grid across opposite unit-cell faces before mesh
+        extraction. Use ``True`` for periodic densities and ``False`` for
+        isolated molecular or vacuum cubes. If omitted, the style default is
+        used. A value in ``style["isosurface_periodic"]`` takes precedence.
+    periodic_image_policy : {"cell", "nearest_atom"}, optional
+        Select the lattice image of each compact periodic component. ``cell``
+        keeps a canonical representative near the base cell;
+        ``nearest_atom`` places it nearest a displayed atom image, which is
+        useful when unit-cell mode materializes complete boundary fragments.
 
     Returns
     -------
@@ -146,6 +160,10 @@ def build_cube_figure(
         merged_style["isosurface_opacity"] = opacity
     if camera is not None:
         merged_style["camera"] = camera
+    if periodic is not None:
+        merged_style["isosurface_periodic"] = bool(periodic)
+    if periodic_image_policy is not None:
+        merged_style["isosurface_image_policy"] = str(periodic_image_policy)
     if style:
         merged_style.update(style)
 

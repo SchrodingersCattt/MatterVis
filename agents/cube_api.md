@@ -62,9 +62,10 @@ flowchart LR
     Mesh3d cylinders, MIC-aware.
   - `cell_box_trace(lattice, *, origin)` — wireframe parallelepiped.
 - Wrappers (one-shot panel figures)
-  - `build_cube_figure(path, *, camera=..., ...)` — unified cube renderer;
+  - `build_cube_figure(path, *, camera=..., periodic=..., periodic_image_policy=..., ...)` — unified cube renderer;
     pass the final camera here so the cell and paper-coordinate compass
-    are projected from the same view.
+    are projected from the same view. Set `periodic=True` for periodic
+    densities and other cell-periodic scalar fields.
   - `build_orbital_panel_figure(cubes, *, ...)` — N-up panel figure
     with shared camera and ranges.
   - `sign_legend_annotations(...)` — paper-coord +/− swatches.
@@ -102,6 +103,25 @@ These are stable across versions; rely on them.
   replace `fig.layout.scene.camera` after construction: static compass
   annotations are projected and baked at build time, so post-hoc camera
   mutation would leave the compass stale relative to the unit-cell box.
+- **Periodic scalar grids are closed, not tiled.** A periodic cube stores
+  samples at indices `0..N-1`; marching cubes also needs the closing interval
+  back to index zero. `build_cube_figure(..., periodic=True)` appends one
+  wrapped endpoint plane per axis (`N -> N+1`) before extracting the mesh.
+  The physical lattice, atoms, and unit-cell box remain a single base cell;
+  this does not create a `2x2x2` or `3x3x3` volumetric supercell. Generic scene
+  rendering remains nonperiodic by default for backward compatibility.
+- **Choose periodicity from the scalar field, not the display mode.** Charge
+  densities and response densities in a periodic crystal normally use
+  `periodic=True`. Isolated molecular cubes, slab/vacuum data, and signed Bloch
+  orbitals whose phase is not cell-periodic should use `periodic=False`.
+- **Periodic component image policy is explicit.** `periodic_image_policy="cell"`
+  keeps one canonical complete component near the base cell.
+  `periodic_image_policy="nearest_atom"` selects the lattice image nearest a
+  displayed atom, matching unit-cell scenes that show complete molecular
+  fragments across a boundary. Neither policy duplicates the full scalar cell.
+- **Style precedence.** `style={"isosurface_periodic": ...}` overrides the
+  convenience `periodic=` keyword, following the same caller-override rule as
+  the other cube style fields.
 - **Atom + bond geometry are bright + opaque by default.**
   `atom_sphere_traces` and `bond_traces` emit `Mesh3d` primitives at
   `opacity=1.0` with `ambient ≥ 0.75` so phenyl-heavy or

@@ -115,6 +115,8 @@ BUILTIN_STYLE: dict[str, Any] = {
     "isosurface_positive_color": "#D55E00",
     "isosurface_negative_color": "#0072B2",
     "isosurface_stride": 2,
+    "isosurface_periodic": False,
+    "isosurface_image_policy": "cell",
     "isosurface_atom_mask_radius": None,
     "isosurface_min_volume_voxels": 0,
     "monochrome": False,
