@@ -419,7 +419,7 @@ def isosurface_overlay_traces(scene: dict, style: dict) -> list[dict]:
             "color": color,
             "opacity": opacity,
             "flatshading": False,
-            "lighting": {"ambient": 0.85, "diffuse": 0.55, "specular": 0.2, "roughness": 0.55},
+            "lighting": {"ambient": 1.0, "diffuse": 0.0, "specular": 0.0, "roughness": 1.0, "fresnel": 0.0},
             "lightposition": {"x": 200, "y": 200, "z": 200},
             "name": name,
             "hoverinfo": "name",
