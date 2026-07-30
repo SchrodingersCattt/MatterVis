@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 import numpy as np
 from molcrys_kit.utils.geometry import frac_to_cart
 
+from .. import perf_log
 from ..structure.bonds import bonds_conflict, find_bonds
 from ..structure.cif_parse import parse_asu
 from ..style.disorder import atom_is_minor, bond_is_minor, disorder_alpha, is_minor
@@ -151,6 +152,7 @@ def build_scene_from_atoms(
     canonical_pairs = None
     if display_mode in ("formula_unit", "unit_cell"):
         canonical_pairs = canonical_bond_pairs
+    bond_source = "canonical_mck" if canonical_pairs is not None else "redetect"
     if canonical_pairs is not None:
         source_to_draw = {
             int(atom.get("_source_index", index)): index
@@ -204,6 +206,18 @@ def build_scene_from_atoms(
                 "occ": min(float(ai.get("occ", 1.0)), float(aj.get("occ", 1.0))),
                 "depth_t": float((ai["_depth_t"] + aj["_depth_t"]) / 2.0),
             }
+        )
+    if os.environ.get("MATTERVIS_SCENE_PERF_EVENTS") == "1":
+        perf_log.record(
+            "scene:bonds",
+            kind="event",
+            info={
+                "source": bond_source,
+                "display_mode": display_mode,
+                "draw_atoms": len(draw_atoms),
+                "input_pairs": len(bond_pairs),
+                "rendered_bonds": len(bonds),
+            },
         )
 
     label_items = legacy_scene._label_payload(ops, draw_atoms, view_x, view_y, view_z)
