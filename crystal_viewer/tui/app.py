@@ -103,7 +103,7 @@ class CrystalTUI(App):
         Binding("u", "zoom_out", "Zoom out", show=True),
         Binding("o", "zoom_in", "Zoom in", show=True),
         Binding("shift+semicolon", "command", "Command", show=True),
-        Binding("Q", "quit", "Quit", show=True),
+            Binding("x", "quit", "Quit", show=True),
     ]
 
     def __init__(

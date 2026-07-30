@@ -109,7 +109,10 @@ site is ordered or major.
 - `q/e`, `w/s`, `a/d`: yaw/pitch/roll.
 - arrows or `i/j/k/l`: pan.
 - `u` zooms out; `o` zooms in. Existing `+/-` and `[/]` aliases remain.
+- `p`, `c`, `b`, `t`, `m`, `n`, `Shift+L`, `r`: projection, cell, bonds,
   labels, monochrome, minor disorder, display level, and reset.
+- `x`: quit. `Ctrl+Q` is intentionally not used because it conflicts with
+  common terminal/editor shortcuts.
 
 Legacy static `ascii` and `structured` CLI output stays unchanged. The
 controller observation is the machine-readable local API.

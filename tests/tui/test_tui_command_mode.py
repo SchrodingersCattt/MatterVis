@@ -175,3 +175,9 @@ def test_repeated_colon_keeps_one_command_input_and_escape_allows_reopen() -> No
             assert len(app.query("#command").nodes) == 1
 
     asyncio.run(exercise())
+
+
+def test_quit_binding_uses_x_instead_of_ctrl_q() -> None:
+    keys = {binding.key for binding in CrystalTUI.BINDINGS if binding.action == "quit"}
+
+    assert keys == {"x"}

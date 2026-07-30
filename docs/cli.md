@@ -177,7 +177,8 @@ Interactive controls: `q/e` orbit horizontally around the world up axis,
 The terminal keeps its fitted framing while orbiting; use `r` to restore the
 startup all-view fit. `b`, `c`, `t`, `m`,
 and `n` toggle bonds, cell, labels, monochrome, and minor disorder. `Shift+L`
-switches between atom and molecule views; `r` restores the startup camera.
+switches between atom and molecule views; `r` restores the startup camera. Use
+`x` to quit; avoid relying on terminal/VS Code-reserved `Ctrl+Q`.
 
 Press `:` for command mode. It supports explicit atom selection, local
 bond-neighborhood focus, and direct/MIC distance, angle, or chain-unwrapped
