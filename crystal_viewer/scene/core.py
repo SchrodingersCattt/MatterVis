@@ -105,6 +105,7 @@ def build_scene_from_atoms(
     unwrapped_atoms=None,
     bond_scale: float | None = None,
     bond_thresholds: dict[tuple[str, str], float] | None = None,
+    canonical_bond_pairs: list[tuple[int, int]] | None = None,
 ) -> Dict[str, Any]:
     ops = scene_ops() if ops is None else ops
     preset = default_preset() if preset is None else preset
@@ -147,7 +148,21 @@ def build_scene_from_atoms(
     # neighbours on the other side of the cell boundary).  Without M
     # the KDTree uses non-PBC Cartesian distances and misses these pairs.
     effective_M = None if display_mode == "cluster" else M
-    if bond_scale is None and bond_thresholds is None:
+    canonical_pairs = None
+    if display_mode in ("formula_unit", "unit_cell"):
+        canonical_pairs = canonical_bond_pairs
+    if canonical_pairs is not None:
+        source_to_draw = {
+            int(atom.get("_source_index", index)): index
+            for index, atom in enumerate(draw_atoms)
+            if atom.get("_source_index") is not None
+        }
+        bond_pairs = [
+            (source_to_draw[left], source_to_draw[right])
+            for left, right in canonical_pairs
+            if left in source_to_draw and right in source_to_draw
+        ]
+    elif bond_scale is None and bond_thresholds is None:
         bond_pairs = ops.find_bonds(
             draw_atoms,
             M=effective_M,

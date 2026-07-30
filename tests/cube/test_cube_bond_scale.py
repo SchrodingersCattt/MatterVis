@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from crystal_viewer.cube import CubeData
 from crystal_viewer.render.figures import _element_legend_annotations
@@ -10,12 +11,13 @@ from crystal_viewer.render.traces_overlays import _label_traces
 from crystal_viewer.structure.bonds import find_bonds
 
 
-def _atom(label: str, element: str, x: float) -> dict:
+def _atom(label: str, element: str, x) -> dict:
+    cart = np.asarray(x if np.ndim(x) else [x, 0.0, 0.0], dtype=float)
     return {
         "label": label,
         "elem": element,
-        "cart": np.array([x, 0.0, 0.0]),
-        "frac": np.array([x / 10.0, 0.0, 0.0]),
+        "cart": cart,
+        "frac": cart / 10.0,
         "occ": 1.0,
         "dg": ".",
         "da": ".",
@@ -39,15 +41,44 @@ def test_explicit_pair_threshold_is_scaled():
     assert find_bonds(atoms, bond_scale=1.1, bond_thresholds=thresholds) == [(0, 1)]
 
 
+@pytest.mark.parametrize("value", [0.0, -1.0, float("nan"), float("inf")])
+def test_invalid_pair_thresholds_are_rejected(value):
+    atoms = [_atom("C1", "C", 0.0), _atom("C2", "C", 1.0)]
+    with pytest.raises(ValueError, match="finite and positive"):
+        find_bonds(atoms, bond_scale=1.0, bond_thresholds={("C", "C"): value})
+
+
+def test_pair_threshold_keys_are_symmetric():
+    atoms = [_atom("C1", "C", 0.0), _atom("N1", "N", 1.5)]
+    assert find_bonds(atoms, bond_scale=1.0, bond_thresholds={("N", "C"): 1.6}) == [(0, 1)]
+
+
+def test_threshold_above_legacy_five_angstrom_limit_is_supported():
+    atoms = [_atom("C1", "C", 0.0), _atom("C2", "C", 5.5)]
+    assert find_bonds(atoms, bond_scale=1.0, bond_thresholds={("C", "C"): 6.0}) == [(0, 1)]
+    with pytest.raises(ValueError, match="candidate-search guard"):
+        find_bonds(atoms, bond_scale=1.0, bond_thresholds={("C", "C"): 13.0})
+
+
+def test_large_triclinic_row_vector_pbc_finds_boundary_bond():
+    lattice = np.array([[10.0, 0.0, 0.0], [2.0, 10.0, 0.0], [0.0, 1.0, 10.0]])
+    atoms = []
+    for index in range(64):
+        frac = np.array([0.3 + index * 0.001, 0.7, 0.7])
+        atoms.append(_atom(f"C{index}", "C", frac @ lattice))
+    atoms[0]["cart"] = np.array([0.01, 7.70, 7.70])
+    atoms[1]["cart"] = np.array([9.99, 7.70, 7.70])
+    import gemmi
+    cell = gemmi.UnitCell(10.198, 10.198, 10.05, 84.3, 90.0, 78.7)
+    bonds = find_bonds(atoms, M=lattice, cell=cell, bond_scale=1.0)
+    assert (0, 1) in bonds
+
+
 def test_bond_scale_must_be_positive():
     atoms = [_atom("C1", "C", 0.0), _atom("C2", "C", 1.4)]
     for invalid in (0.0, -1.0, float("nan")):
-        try:
+        with pytest.raises(ValueError, match="finite and positive"):
             find_bonds(atoms, bond_scale=invalid)
-        except ValueError:
-            pass
-        else:
-            raise AssertionError(f"Expected ValueError for bond_scale={invalid!r}")
 
 
 def test_cube_wrapper_style_bond_scale_precedence(tmp_path, monkeypatch):
@@ -92,6 +123,28 @@ def test_cube_wrapper_style_bond_scale_precedence(tmp_path, monkeypatch):
     assert style["mck_bond_scale"] == 1.1
 
 
+def test_scene_cache_key_separates_bond_scale_and_thresholds(tmp_path):
+    from crystal_viewer.loader.cube_adapter import load_cube_file
+    from crystal_viewer.loader.core import build_bundle_scene
+
+    cube_path = tmp_path / "cache.cube"
+    cube_path.write_text(
+        "cache\nsynthetic\n"
+        "    2 0.0 0.0 0.0\n"
+        "    2 0.5 0.0 0.0\n"
+        "    2 0.0 0.5 0.0\n"
+        "    2 0.0 0.0 0.5\n"
+        " 6 0.0 0.0 0.0 0 0 0 0\n"
+        " 6 1.95 0.0 0.0 0 0 0 0\n"
+        " 0 0 0 0 0 0 0 0\n"
+    )
+    bundle_a = load_cube_file(cube_path, bond_scale=1.0)
+    bundle_b = load_cube_file(cube_path, bond_scale=1.1)
+    build_bundle_scene(bundle_a)
+    build_bundle_scene(bundle_b)
+    assert bundle_a.scene_cache.keys() != bundle_b.scene_cache.keys()
+
+
 def test_selective_labels_and_element_legend():
     scene = {
         "label_items": [
@@ -111,3 +164,22 @@ def test_selective_labels_and_element_legend():
     assert len(annotations) == 1
     assert "Sn" in annotations[0]["text"]
     assert "C" in annotations[0]["text"]
+
+
+def test_label_selector_label_only_empty_and_warm_cache():
+    scene = {
+        "label_items": [
+            {"text": "Sn1", "elem": "Sn", "label_cart": [0, 0, 0], "is_minor": False},
+            {"text": "C1", "elem": "C", "label_cart": [1, 0, 0], "is_minor": False},
+        ],
+    }
+    style = {"label_selector": {"labels": ["C1"]}}
+    first = _label_traces(scene, style)
+    second = _label_traces(scene, style)
+    assert [text for trace in first for text in trace["text"]] == ["C1"]
+    assert [text for trace in second for text in trace["text"]] == ["C1"]
+    assert len(_label_traces(scene, {"label_selector": {}})) == 1
+    assert _label_traces(scene, {"label_selector": {"elements": ["Cl"]}}) == []
+    with pytest.raises((TypeError, ValueError)):
+        from crystal_viewer.render.style.core import validate_style_schema
+        validate_style_schema({"label_selector": "Sn"})

@@ -26,6 +26,16 @@ def validate_style_schema(style: dict) -> dict:
     if projection not in ("perspective", "orthographic"):
         raise ValueError(f"unknown projection: {projection}")
     normalized = dict(style)
+    selector = normalized.get("label_selector")
+    if selector is not None:
+        if not isinstance(selector, dict):
+            raise ValueError("label_selector must be a mapping")
+        allowed = {"elements", "labels"}
+        unknown = set(selector) - allowed
+        if unknown:
+            raise ValueError(f"unknown label_selector keys: {sorted(unknown)}")
+        if any(not isinstance(selector.get(key, []), (list, tuple)) for key in allowed):
+            raise ValueError("label_selector elements and labels must be lists")
     normalized["material"] = material
     normalized["style"] = render_style
     normalized["disorder"] = disorder

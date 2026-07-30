@@ -131,6 +131,13 @@ These are stable across versions; rely on them.
   bond drawing. The effective cutoff is MolCrysKit's
   `(radius_i + radius_j) * element_class_factor * s`; explicit
   `bond_thresholds={("A", "B"): value}` are also multiplied by `s`.
+  Threshold values must be finite and strictly positive; pair keys are
+  symmetric, so `("A", "B")` and `("B", "A")` are equivalent. Effective
+  cutoffs are limited to 12 Å to protect the broad-phase candidate search;
+  larger values fail explicitly rather than silently missing candidates.
+  Formula-unit and unit-cell cube scenes reuse MolCrysKit's canonical
+  source-index bond graph; transformed/cluster scenes must re-detect bonds
+  because their manifested atoms no longer have a one-to-one source graph.
   `style["mck_bond_scale"]` overrides the convenience kwarg, then config
   `mck_overrides.bond_scale` is consulted. The cube wrapper default is `1.0`.
 - **Atom identity controls.** `show_element_legend=True` emits a paper-coordinate

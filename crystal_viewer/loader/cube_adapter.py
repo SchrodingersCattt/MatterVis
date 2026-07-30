@@ -103,6 +103,7 @@ def build_loaded_crystal_from_cube(
             unwrapped_atoms=unwrapped_atoms,
             bond_scale=bond_scale,
             bond_thresholds=bond_thresholds,
+            canonical_bond_pairs=molcrys_analysis.bond_pairs,
         )
     initial_scene["cif_path"] = str(cube.path)
     initial_scene["view_direction"] = np.array(view_dir, dtype=float)

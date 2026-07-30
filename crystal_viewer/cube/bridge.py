@@ -153,6 +153,16 @@ def build_cube_figure(
     from ..loader.cube_adapter import load_cube_file
     from ..render.figures import build_figure
 
+    if bond_thresholds is not None:
+        for pair, value in bond_thresholds.items():
+            if not isinstance(pair, tuple) or len(pair) != 2:
+                raise ValueError("bond_thresholds keys must be 2-tuples of element symbols")
+            numeric = float(value)
+            if not np.isfinite(numeric) or numeric <= 0:
+                raise ValueError("bond_thresholds values must be finite and positive")
+            if numeric * float(bond_scale if bond_scale is not None else 1.0) > 12.0:
+                raise ValueError("effective bond cutoff exceeds the 12.0 Å candidate-search guard")
+
     merged_style = dict(BUILTIN_STYLE)
     # Apply convenience kwargs before user style dict (user dict wins)
     if isovalue is not None:

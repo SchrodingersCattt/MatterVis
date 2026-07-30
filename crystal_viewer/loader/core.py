@@ -30,7 +30,7 @@ class LoadedCrystal:
     M: Any | None = None
     view_direction: list[float] = field(default_factory=list)
     up: list[float] = field(default_factory=list)
-    scene_cache: dict[tuple[str, bool], Dict[str, Any]] = field(default_factory=dict)
+    scene_cache: dict[tuple[Any, ...], Dict[str, Any]] = field(default_factory=dict)
     pymatgen_structure: Any | None = None
     crystal: Any | None = None
     molcrys_analysis: Any | None = None
@@ -915,6 +915,7 @@ def build_bundle_scene(
             unwrapped_atoms=bundle.unwrapped_atoms,
             bond_scale=bundle.bond_scale,
             bond_thresholds=bundle.bond_thresholds,
+            canonical_bond_pairs=getattr(bundle.molcrys_analysis, "bond_pairs", None),
         )
         base_scene["cif_path"] = bundle.cif_path
         base_scene["view_direction"] = view_dir

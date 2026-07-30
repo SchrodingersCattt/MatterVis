@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+from functools import lru_cache
 
 from ..style.disorder import _disorder_group_id
 from .geometry import _nearest_pbc_cart, bond_vector_mic
@@ -21,24 +22,58 @@ def bonds_conflict(ai, aj):
         return dg_i != dg_j
     return da_i == da_j and dg_i != dg_j
 
-def _mck_pair_cutoff(ai, aj, *, bond_scale, bond_thresholds=None):
-    """Return MolCrysKit's effective pair cutoff for manifested scene atoms."""
+_MAX_CANDIDATE_CUTOFF = 12.0
+
+
+def _normalize_thresholds(bond_thresholds):
+    if bond_thresholds is None:
+        return ()
+    if isinstance(bond_thresholds, tuple):
+        return bond_thresholds
+    normalized = []
+    for pair, value in bond_thresholds.items():
+        if not isinstance(pair, tuple) or len(pair) != 2:
+            raise ValueError("bond_thresholds keys must be 2-tuples of element symbols")
+        numeric = float(value)
+        if not np.isfinite(numeric) or numeric <= 0:
+            raise ValueError("bond_thresholds values must be finite and positive")
+        left, right = str(pair[0]), str(pair[1])
+        normalized.append((left, right, numeric))
+    return tuple(sorted(normalized))
+
+
+@lru_cache(maxsize=512)
+def _cached_mck_cutoff(element_i, element_j, bond_scale, normalized_thresholds):
     from molcrys_kit.analysis.interactions import get_bonding_threshold
     from molcrys_kit.constants import get_atomic_radius, has_atomic_radius, is_metal_element
 
-    ei, ej = ai['elem'], aj['elem']
-    overrides = bond_thresholds or {}
-    threshold = overrides.get((ei, ej), overrides.get((ej, ei)))
+    overrides = {
+        (left, right): value
+        for left, right, value in normalized_thresholds
+    }
+    threshold = overrides.get((element_i, element_j), overrides.get((element_j, element_i)))
     if threshold is None:
-        radius_i = get_atomic_radius(ei) if has_atomic_radius(ei) else 0.5
-        radius_j = get_atomic_radius(ej) if has_atomic_radius(ej) else 0.5
+        radius_i = get_atomic_radius(element_i) if has_atomic_radius(element_i) else 0.5
+        radius_j = get_atomic_radius(element_j) if has_atomic_radius(element_j) else 0.5
         threshold = get_bonding_threshold(
-            radius_i,
-            radius_j,
-            is_metal_element(ei),
-            is_metal_element(ej),
+            radius_i, radius_j,
+            is_metal_element(element_i), is_metal_element(element_j),
         )
-    return float(threshold) * float(bond_scale)
+    cutoff = float(threshold) * float(bond_scale)
+    if cutoff > _MAX_CANDIDATE_CUTOFF:
+        raise ValueError(
+            f"effective bond cutoff {cutoff:.3f} Å exceeds the {_MAX_CANDIDATE_CUTOFF:.1f} Å "
+            "candidate-search guard"
+        )
+    return cutoff
+
+
+def _mck_pair_cutoff(ai, aj, *, bond_scale, bond_thresholds=None):
+    """Return MolCrysKit's effective pair cutoff for manifested scene atoms."""
+    ei, ej = ai['elem'], aj['elem']
+    return _cached_mck_cutoff(
+        ei, ej, float(bond_scale), _normalize_thresholds(bond_thresholds)
+    )
 
 
 def _bond_cutoff(ai, aj, *, bond_scale=None, bond_thresholds=None):
@@ -175,7 +210,6 @@ def _prune_duplicate_label_bond_candidates(atoms, candidates, tol=0.005):
 
 # ── Bond finding ────────────────────────────────────────────────────────────
 _BOND_KDTREE_THRESHOLD = 64
-_BOND_MAX_CUTOFF = 5.0  # Å — wide enough for any covalent pair the table can return.
 _PBC_SELECTIVE_THRESHOLD = 500  # Above this, use face-selective ghost expansion.
 
 
@@ -183,46 +217,43 @@ def _effective_cutoff(atoms, *, bond_scale=None, bond_thresholds=None):
     """Compute the tightest cutoff that still covers all possible covalent
     pairs among the element set present in *atoms*.
 
-    Returns at most ``_BOND_MAX_CUTOFF``.  For typical organic crystals
-    this is ~3.2 Å (C–I + tolerance), reducing KDTree pair counts 3–5×.
+    Legacy non-MCK mode uses a 12 Å candidate guard. MolCrysKit mode uses
+    the same guard but rejects larger effective cutoffs explicitly.
     """
     elems = {a['elem'] for a in atoms}
     if not elems:
-        return _BOND_MAX_CUTOFF
+        return 0.0
     if bond_scale is not None:
         if not np.isfinite(float(bond_scale)) or float(bond_scale) <= 0:
             raise ValueError("bond_scale must be finite and positive")
+        normalized = _normalize_thresholds(bond_thresholds)
         probes = [{'elem': elem} for elem in sorted(elems)]
         cutoffs = [
-            _mck_pair_cutoff(
-                probes[i], probes[j],
-                bond_scale=bond_scale,
-                bond_thresholds=bond_thresholds,
-            )
+            _cached_mck_cutoff(probes[i]['elem'], probes[j]['elem'], float(bond_scale), normalized)
             for i in range(len(probes))
             for j in range(i, len(probes))
         ]
-        return max(cutoffs, default=_BOND_MAX_CUTOFF)
+        return max(cutoffs, default=0.0)
     radii = []
     for e in elems:
         try:
             radii.append(cov_r(e))
         except Exception:
-            return _BOND_MAX_CUTOFF
+            return 12.0
     max_sum = radii[-1] + radii[-1]  # placeholder
     radii.sort(reverse=True)
     max_sum = radii[0] + (radii[1] if len(radii) > 1 else radii[0])
     cutoff = max_sum + 0.42  # same tolerance as _bond_cutoff
-    return min(cutoff, _BOND_MAX_CUTOFF)
+    return min(cutoff, _MAX_CANDIDATE_CUTOFF)
 
 
 def _pbc_pairs_full(coords, n, M_arr, cutoff):
     """Full 27× ghost expansion — fast for N < _PBC_SELECTIVE_THRESHOLD."""
     from scipy.spatial import cKDTree
 
-    a_vec = M_arr[:, 0]
-    b_vec = M_arr[:, 1]
-    c_vec = M_arr[:, 2]
+    a_vec = M_arr[0]
+    b_vec = M_arr[1]
+    c_vec = M_arr[2]
     coord_chunks = [coords]
     orig_idx_chunks = [np.arange(n, dtype=int)]
     for da in (-1, 0, 1):
@@ -267,13 +298,13 @@ def _pbc_pairs_selective(coords, atoms, n, M_arr, cutoff):
     """
     from scipy.spatial import cKDTree
 
-    a_vec = M_arr[:, 0]
-    b_vec = M_arr[:, 1]
-    c_vec = M_arr[:, 2]
+    a_vec = M_arr[0]
+    b_vec = M_arr[1]
+    c_vec = M_arr[2]
     # Compute fractional coords for face-proximity test.
     # frac = cart @ inv(M).T  (M columns are lattice vectors)
-    M_inv_T = np.linalg.inv(M_arr).T
-    fracs = coords @ M_inv_T  # shape (n, 3)
+    M_inv = np.linalg.inv(M_arr)
+    fracs = coords @ M_inv  # row-vector convention: cart = frac @ M
 
     # For each lattice direction, compute the Cartesian "skin depth"
     # as cutoff / |lattice_vector_component perpendicular to the face|.
@@ -408,13 +439,14 @@ def find_bonds(atoms, M=None, cell=None, *, bond_scale=None, bond_thresholds=Non
         not np.isfinite(float(bond_scale)) or float(bond_scale) <= 0
     ):
         raise ValueError("bond_scale must be finite and positive")
+    normalized_thresholds = _normalize_thresholds(bond_thresholds)
     candidates = []
     for i, j in _bond_candidate_pairs(
         atoms,
         M=M,
         cell=cell,
         bond_scale=bond_scale,
-        bond_thresholds=bond_thresholds,
+        bond_thresholds=normalized_thresholds,
     ):
         ai = atoms[i]
         aj = atoms[j]
@@ -426,7 +458,7 @@ def find_bonds(atoms, M=None, cell=None, *, bond_scale=None, bond_thresholds=Non
             ai,
             aj,
             bond_scale=bond_scale,
-            bond_thresholds=bond_thresholds,
+            bond_thresholds=normalized_thresholds,
         )
         if cutoff is None:
             continue

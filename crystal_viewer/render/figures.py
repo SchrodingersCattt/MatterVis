@@ -1,6 +1,8 @@
 # ruff: noqa: F401,F405
 from __future__ import annotations
 
+import re
+
 from .scene_traces import *  # noqa: F403
 from .style import style_from_controls
 from .topology import topology_histogram_figure, topology_results_markdown
@@ -37,10 +39,18 @@ def _element_legend_annotations(scene: dict, style: dict) -> list[dict]:
     elements.extend(sorted(set(present) - set(elements)))
     if not elements:
         return []
-    swatches = " &nbsp;&nbsp; ".join(
-        f"<span style='color:{present[element]}'><b>● {element}</b></span>"
-        for element in elements
-    )
+    safe_colors = {
+        element: color if re.fullmatch(r"#[0-9A-Fa-f]{6}", color) else "#808080"
+        for element, color in present.items()
+    }
+    maximum = max(1, int(style.get("element_legend_max_entries_per_row", 8)))
+    rows = []
+    for start in range(0, len(elements), maximum):
+        rows.append(" &nbsp;&nbsp; ".join(
+            f"<span style='color:{safe_colors[element]}'><b>● {element}</b></span>"
+            for element in elements[start:start + maximum]
+        ))
+    swatches = "<br>".join(rows)
     return [{
         "x": float(style.get("element_legend_x", 0.5)),
         "y": float(style.get("element_legend_y", 0.02)),
