@@ -232,7 +232,14 @@ class CrystalAnalysis:
         self.bond_pairs: list[tuple[int, int]] = list(bond_pairs or [])
 
 
-def analyze(raw_atoms, M, *, max_atoms=None):
+def analyze(
+    raw_atoms,
+    M,
+    *,
+    max_atoms=None,
+    bond_scale: float = 1.0,
+    bond_thresholds=None,
+):
     """Run MolCrysKit on ``raw_atoms`` (full unit cell) and return a
     :class:`CrystalAnalysis` summarising species + per-FU counts.
 
@@ -251,7 +258,12 @@ def analyze(raw_atoms, M, *, max_atoms=None):
         return CrystalAnalysis(crystal, [], [], {}, {}, bond_pairs=[])
 
     ase_atoms = _ase_atoms_from_raw(raw_atoms, M, mk)
-    identified = mk["identify_molecules"](ase_atoms, max_atoms=max_atoms)
+    identified = mk["identify_molecules"](
+        ase_atoms,
+        max_atoms=max_atoms,
+        bond_scale=bond_scale,
+        bond_thresholds=bond_thresholds,
+    )
 
     molecules = []
     mol_indices = []

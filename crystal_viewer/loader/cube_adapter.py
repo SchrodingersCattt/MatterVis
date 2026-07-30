@@ -35,6 +35,8 @@ def build_loaded_crystal_from_cube(
     title: Optional[str] = None,
     preset: Optional[Dict[str, Any]] = None,
     source: str = "cube",
+    bond_scale: float = 1.0,
+    bond_thresholds: Optional[Dict[tuple[str, str], float]] = None,
 ) -> LoadedCrystal:
     """Build a full LoadedCrystal bundle from a CubeData object.
 
@@ -60,7 +62,12 @@ def build_loaded_crystal_from_cube(
     # Phase 2: MCK analysis (bonds, molecules, species)
     n_atoms = len(raw_atoms)
     with perf_log.time_block("cube_loader:molcrys_analyze", kind="event", structure=name, n_atoms=n_atoms):
-        molcrys_analysis = molcrys_bridge.analyze(raw_atoms, M)
+        molcrys_analysis = molcrys_bridge.analyze(
+            raw_atoms,
+            M,
+            bond_scale=bond_scale,
+            bond_thresholds=bond_thresholds,
+        )
 
     # Phase 3: formula unit selection
     with perf_log.time_block("cube_loader:select_formula_unit", kind="event", structure=name):
@@ -94,6 +101,9 @@ def build_loaded_crystal_from_cube(
             ops=ops,
             formula_unit_atoms=formula_unit_atoms,
             unwrapped_atoms=unwrapped_atoms,
+            bond_scale=bond_scale,
+            bond_thresholds=bond_thresholds,
+            canonical_bond_pairs=molcrys_analysis.bond_pairs,
         )
     initial_scene["cif_path"] = str(cube.path)
     initial_scene["view_direction"] = np.array(view_dir, dtype=float)
@@ -159,6 +169,8 @@ def build_loaded_crystal_from_cube(
         fragment_table_cache=fragment_table_cache,
         atom_fragment_labels=atom_fragment_labels,
         source=source,
+        bond_scale=bond_scale,
+        bond_thresholds=copy.deepcopy(bond_thresholds),
     )
     # Store cube data on the bundle for isosurface generation
     bundle.cube_data = cube  # type: ignore[attr-defined]
@@ -171,7 +183,16 @@ def load_cube_file(
     name: Optional[str] = None,
     preset: Optional[Dict[str, Any]] = None,
     source: str = "cube",
+    bond_scale: float = 1.0,
+    bond_thresholds: Optional[Dict[tuple[str, str], float]] = None,
 ) -> LoadedCrystal:
     """Convenience: read a .cube file and return a full LoadedCrystal bundle."""
     cube = read_cube(path)
-    return build_loaded_crystal_from_cube(cube, name=name, preset=preset, source=source)
+    return build_loaded_crystal_from_cube(
+        cube,
+        name=name,
+        preset=preset,
+        source=source,
+        bond_scale=bond_scale,
+        bond_thresholds=bond_thresholds,
+    )

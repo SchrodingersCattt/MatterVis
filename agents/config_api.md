@@ -53,5 +53,16 @@ Top-level sections:
 - `mck_overrides`: optional MolCrysKit kwargs. `None` / absent means
   "use MolCrysKit default".
 
+`mck_overrides.bond_scale` is the global MolCrysKit bonding coefficient used by
+cube loading when a caller does not pass `bond_scale=` or
+`style["mck_bond_scale"]`. The default is `1.0`; it scales calibrated
+radius-based cutoffs and explicit pair thresholds.
+
+`bond_thresholds` is intentionally cube-call-only: tuple-key mappings are not
+stored in TOML config. Precedence is `style["mck_bond_scale"]`, then the
+`bond_scale=` keyword, then `mck_overrides.bond_scale`, then `1.0`; explicit
+pair thresholds are supplied through `bond_thresholds=` and are scaled by the
+selected coefficient.
+
 Unknown keys are ignored so older MatterVis builds can safely read
 newer config files.

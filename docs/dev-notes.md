@@ -29,6 +29,21 @@ points and pitfalls.
   path — it breaks on disorder + special-position structures.
 - Atoms must carry `_source_index` pointing back to `raw_atoms` so
   molecule lookup works for translated copies (formula-unit, repeat).
+- Cube rendering exposes `bond_scale` as one MolCrysKit-owned coefficient. It
+  must be forwarded to both `molcrys_bridge.analyze` and manifested-scene
+  `find_bonds`; otherwise molecule unwrapping and visible bonds disagree.
+  Scene-cache keys must include the coefficient and normalized pair overrides.
+  Formula-unit and unit-cell scenes reuse `CrystalAnalysis.bond_pairs` through
+  `_source_index`; only transformed/cluster scenes use MatterVis re-detection.
+- The re-detection path uses KDTree broad-phase pruning, caches MCK cutoffs by
+  element pair/scale/threshold map, uses row-vector triclinic PBC expansion,
+  and rejects effective cutoffs above 12 Å. Run
+  `python scripts/11_bond_scale_benchmark.py --atoms 1000 5000 10000` before
+  changing this guard or candidate strategy.
+  On the current environment the synthetic benchmark reports 1k=4.192 s
+  (cold import), 5k=0.046 s and 10k=0.214 s on the warm path; the first timing
+  includes Python/MolCrysKit import overhead and is not a per-scene steady-state
+  target.
 
 ### SHELX-style occupancy disorder
 

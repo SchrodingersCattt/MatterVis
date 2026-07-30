@@ -1,6 +1,8 @@
 # ruff: noqa: F401,F405
 from __future__ import annotations
 
+import re
+
 from .scene_traces import *  # noqa: F403
 from .style import style_from_controls
 from .topology import topology_histogram_figure, topology_results_markdown
@@ -22,6 +24,44 @@ from .viewport import (
     figure_axis_layout,
     uniform_viewport,
 )
+
+
+def _element_legend_annotations(scene: dict, style: dict) -> list[dict]:
+    if not bool(style.get("show_element_legend", False)):
+        return []
+    present: dict[str, str] = {}
+    for atom in scene.get("draw_atoms", []):
+        element = str(atom.get("elem", ""))
+        if element:
+            present.setdefault(element, str(atom.get("color", "#808080")))
+    order = [str(item) for item in style.get("element_legend_order", [])]
+    elements = [item for item in order if item in present]
+    elements.extend(sorted(set(present) - set(elements)))
+    if not elements:
+        return []
+    safe_colors = {
+        element: color if re.fullmatch(r"#[0-9A-Fa-f]{6}", color) else "#808080"
+        for element, color in present.items()
+    }
+    maximum = max(1, int(style.get("element_legend_max_entries_per_row", 8)))
+    rows = []
+    for start in range(0, len(elements), maximum):
+        rows.append(" &nbsp;&nbsp; ".join(
+            f"<span style='color:{safe_colors[element]}'><b>● {element}</b></span>"
+            for element in elements[start:start + maximum]
+        ))
+    swatches = "<br>".join(rows)
+    return [{
+        "x": float(style.get("element_legend_x", 0.5)),
+        "y": float(style.get("element_legend_y", 0.02)),
+        "xref": "paper",
+        "yref": "paper",
+        "text": swatches,
+        "showarrow": False,
+        "font": {"size": float(style.get("element_legend_font_size", 13))},
+        "xanchor": "center",
+        "yanchor": "bottom",
+    }]
 
 
 def build_row_figure(
@@ -235,6 +275,7 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None, *,
         meta=layout_meta,
     )
     key_annotations, key_shapes = compose_axis_key_layout(scene, style)
+    key_annotations = list(key_annotations or []) + _element_legend_annotations(scene, style)
     if key_annotations:
         layout_kwargs["annotations"] = key_annotations
     if key_shapes:

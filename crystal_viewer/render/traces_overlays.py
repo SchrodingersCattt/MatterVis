@@ -214,6 +214,7 @@ def _label_traces(scene: dict, style: dict, hidden_labels: set | None = None):
         # group rule actually re-emits the label trace; otherwise a
         # warm cache from before the rule still draws the H labels.
         tuple(sorted(hidden_labels)),
+        repr(style.get("label_selector")),
     )
     if key in cache:
         perf_log.record("cache:mesh", kind="cache", info={"hit": True, "entries": len(cache)})
@@ -229,8 +230,16 @@ def _label_traces(scene: dict, style: dict, hidden_labels: set | None = None):
         False: {"x": [], "y": [], "z": [], "text": [], "color": major_label_color},
         True: {"x": [], "y": [], "z": [], "text": [], "color": minor_label_color},
     }
+    selector = style.get("label_selector")
+    selected_elements = set((selector or {}).get("elements", [])) if isinstance(selector, dict) else set()
+    selected_labels = set((selector or {}).get("labels", [])) if isinstance(selector, dict) else set()
     for item in scene["label_items"]:
         if str(item.get("text")) in hidden_labels:
+            continue
+        if selector and (
+            item.get("elem") not in selected_elements
+            and item.get("text") not in selected_labels
+        ):
             continue
         bucket = buckets[item["is_minor"]]
         bucket["x"].append(float(item["label_cart"][0]))
