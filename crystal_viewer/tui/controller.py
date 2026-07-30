@@ -16,7 +16,17 @@ from .compositor import (
     compose_frame,
     viewport_from_bounds,
 )
-from .inspection import inspect_atoms, inspect_molecules, resolve_atom_references, resolve_molecule_reference
+from .inspection import (
+    inspect_atoms,
+    inspect_local_geometries,
+    inspect_local_geometry,
+    inspect_molecules,
+    measure_angle,
+    measure_dihedral,
+    measure_distance,
+    resolve_atom_references,
+    resolve_molecule_reference,
+)
 from .observation import build_observation_scope, build_terminal_title
 from .state import (
     TerminalCameraState,
@@ -49,6 +59,7 @@ class TerminalViewController:
         "focus_atom",
         "focus_molecule",
         "focus_selection",
+        "focus_local",
         "clear_focus",
         "save_view",
         "restore_view",
@@ -322,6 +333,33 @@ class TerminalViewController:
             raise ValueError("focus_selection requires at least one atom reference")
         return self._set_focus("selection", resolve_atom_references(self.crystal, references))
 
+    def focus_local(
+        self,
+        reference: str | int | dict[str, Any],
+        *,
+        bond_depth: int = 1,
+    ) -> TerminalObservation:
+        """Fit one atom and its manifested bond neighborhood."""
+        if isinstance(bond_depth, bool) or not isinstance(bond_depth, int) or bond_depth < 0:
+            raise ValueError("bond_depth must be a non-negative integer")
+        centers = resolve_atom_references(self.crystal, [reference])
+        if len(centers) != 1:
+            raise ValueError("local focus requires exactly one displayed atom; use display_copy_id to disambiguate")
+        if not self._show_minor and self.crystal.atoms[centers[0]].is_minor:
+            raise ValueError("focus has no visible displayed atoms to fit")
+        selected = set(centers)
+        frontier = set(centers)
+        for _ in range(bond_depth):
+            neighbors: set[int] = set()
+            for bond in self.crystal.bonds:
+                if bond.i in frontier:
+                    neighbors.add(bond.j)
+                if bond.j in frontier:
+                    neighbors.add(bond.i)
+            frontier = neighbors - selected
+            selected.update(neighbors)
+        return self._set_focus("local", tuple(index for index in range(self.crystal.n_atoms) if index in selected))
+
     def clear_focus(self) -> TerminalObservation:
         """Clear active focus and refit all current visible structure."""
         self._focus = TerminalFocusState()
@@ -388,6 +426,59 @@ class TerminalViewController:
     def inspect_molecule(self, reference: str | int | dict[str, Any] | None = None) -> dict[str, Any]:
         """Read existing MolCrysKit molecule provenance without re-grouping."""
         return inspect_molecules(self.crystal, reference, show_minor=self._show_minor)
+
+    def inspect_local_geometry(
+        self,
+        reference: str | int | dict[str, Any],
+        *,
+        include_angles: bool = True,
+    ) -> dict[str, Any]:
+        """Read one displayed atom's current bond neighborhood and geometry."""
+        return inspect_local_geometry(
+            self.crystal,
+            reference,
+            include_angles=include_angles,
+        )
+
+    def inspect_local_geometries(
+        self,
+        references: list[str | int | dict[str, Any]] | None = None,
+        *,
+        include_angles: bool = True,
+    ) -> dict[str, Any]:
+        """Batch-read local geometry for selected or all displayed atoms."""
+        return inspect_local_geometries(
+            self.crystal,
+            references,
+            include_angles=include_angles,
+        )
+
+    def measure_distance(
+        self,
+        references: list[str | int | dict[str, Any]],
+        *,
+        mode: str = "mic",
+    ) -> dict[str, Any]:
+        """Measure a displayed atom pair without mutating view state."""
+        return measure_distance(self.crystal, references, mode=mode)
+
+    def measure_angle(
+        self,
+        references: list[str | int | dict[str, Any]],
+        *,
+        mode: str = "mic",
+    ) -> dict[str, Any]:
+        """Measure A-B-C without mutating view state."""
+        return measure_angle(self.crystal, references, mode=mode)
+
+    def measure_dihedral(
+        self,
+        references: list[str | int | dict[str, Any]],
+        *,
+        mode: str = "mic_chain",
+    ) -> dict[str, Any]:
+        """Measure signed A-B-C-D torsion without mutating view state."""
+        return measure_dihedral(self.crystal, references, mode=mode)
 
     def resize(self, width: int, height: int) -> TerminalObservation:
         """Set terminal dimensions and explicitly refit for the new aspect ratio."""

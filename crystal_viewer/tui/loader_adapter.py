@@ -216,6 +216,8 @@ def _crystal_ir_from_scene(
         per_formula_unit=per_formula_unit,
         metadata={
             "display_mode": scene.get("display_mode", "unit_cell"),
+            "bond_source": "canonical_scene",
+            "explicit_bond_table": any(bool(atom.get("_has_bond_table")) for atom in source_atoms),
             "source_site_atom_count": source_site_atom_count,
             "expanded_atom_count": expanded_atom_count,
             "display_atom_count": len(atoms),
@@ -404,6 +406,8 @@ def _load_cube(path: str, name: str) -> CrystalIR:
         bonds=bonds,
         metadata={
             "display_mode": "structure",
+            "bond_source": "distance_heuristic",
+            "explicit_bond_table": False,
             "source_site_atom_count": len(atoms),
             "expanded_atom_count": len(atoms),
             "display_atom_count": len(atoms),
@@ -548,6 +552,8 @@ def _from_pymatgen_structure(struct, name: str, path: str) -> CrystalIR:
         bonds=bonds,
         metadata={
             "display_mode": "structure",
+            "bond_source": "distance_heuristic",
+            "explicit_bond_table": False,
             "source_site_atom_count": len(atoms),
             "expanded_atom_count": len(atoms),
             "display_atom_count": len(atoms),
@@ -606,6 +612,8 @@ def _from_ase_atoms(atoms_ase, name: str, path: str) -> CrystalIR:
         bonds=[],  # Skip bonds for extxyz (no topology data)
         metadata={
             "display_mode": "structure",
+            "bond_source": "none",
+            "explicit_bond_table": False,
             "source_site_atom_count": len(atoms),
             "expanded_atom_count": len(atoms),
             "display_atom_count": len(atoms),

@@ -179,6 +179,12 @@ startup all-view fit. `b`, `c`, `t`, `m`,
 and `n` toggle bonds, cell, labels, monochrome, and minor disorder. `Shift+L`
 switches between atom and molecule views; `r` restores the startup camera.
 
+Press `:` for command mode. It supports explicit atom selection, local
+bond-neighborhood focus, and direct/MIC distance, angle, or chain-unwrapped
+dihedral measurements. Use `:help` for the compact command list, for example
+`:focus N9 1`, `:angle C12 N9 C13`, or
+`:distance Cd2 Cl3 mic`.
+
 The earlier automatic terminal polyhedron level was removed because it used a
 local metal table and convex hull rather than MatterVis/MolCrysKit's canonical
 coordination analysis. Use the documented polyhedron API for analytical
