@@ -44,7 +44,12 @@ Parses a CIF and returns a scene dict consumable by
   imaging. When MolCrysKit canonical bond records are available, every
   manifested boundary-fragment image receives the corresponding canonical
   edge instances. This preserves the chemistry of a whole boundary replica
-  without re-perceiving bonds on display atoms.
+  without re-perceiving bonds on display atoms. The view also includes one
+  adjacent periodic image for sites within `0.03` fractional units of a cell
+  face (`0.99 -> -0.01`, `0.01 -> 1.01`). If any member of a known molecule
+  triggers an image, the complete molecule is translated. Image shifts are
+  unioned per member; face signals from different members are never combined
+  into an unsupported diagonal image.
 - `asymmetric_unit` — only the asymmetric unit is drawn.
 - `cluster` — **free molecular cluster mode**. Every parsed atom is
   drawn unchanged; no formula-unit selection or periodic image

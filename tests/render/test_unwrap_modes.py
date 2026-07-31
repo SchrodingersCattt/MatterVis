@@ -59,5 +59,7 @@ def test_unit_cell_prefers_unwrapped_atoms_for_boundary_fragment():
     )
 
     assert scene["draw_atoms"][1]["_unwrapped"] is True
-    assert len(scene["bonds"]) == 1
-    np.testing.assert_allclose(scene["bonds"][0]["end"], [10.2, 5.0, 5.0])
+    assert len(scene["draw_atoms"]) == 4
+    assert len(scene["bonds"]) == 2
+    assert any(np.allclose(bond["end"], [10.2, 5.0, 5.0]) for bond in scene["bonds"])
+    assert all(np.linalg.norm(bond["end"] - bond["start"]) < 0.5 for bond in scene["bonds"])
