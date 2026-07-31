@@ -33,6 +33,12 @@ canonical/display/visible counts, capabilities, and warnings. It intentionally
 does **not** include atom coordinates, projected depth, pair distances,
 front/back answers, collision scores, or a recommended camera.
 
+When edit mode is active, state additionally includes `edit` with `mode`,
+`level`, ordered stable `selected_ids`, and `active_id`. Observation
+`pick_tokens` contains only tokens that were actually placed in the current
+frame. Tokens are frame-local (`a1`, `m1`, ...); selection persists by stable
+`display_copy_id` or `display_fragment_id` when camera motion renumbers them.
+
 ## Perceptual controls
 
 | Method | Meaning |
@@ -121,8 +127,10 @@ controller observation is the machine-readable local API.
 
 Press `:` in `matvis tui` to open a one-line command prompt:
 
+- `:edit atom|molecule`, `:exit`
+- `:pick a1 a2`, `:unpick a1`, `:toggle a2`, `:active a2`
 - `:select A B ...`, `:clear`
-- `:focus N9 [bond_depth]`
+- `:focus N9 [bond_depth]`, `:focus selection`
 - `:distance A B [direct|mic]`
 - `:angle A B C [direct|mic]`
 - `:dihedral A B C D [direct|mic_chain]`
@@ -131,6 +139,12 @@ Press `:` in `matvis tui` to open a one-line command prompt:
 Measurements use the same controller methods as programmatic callers; the UI
 does not implement a second geometry path. Command results are transient view
 text and do not mutate the source structure or manifested topology.
+
+Edit mode changes selection only. Switching atom/molecule level clears the
+cross-level selection. Atom selection uses exact displayed copies; molecule
+selection uses canonical displayed fragment identities retained from the
+loader. Structures without molecule identities reject `:edit molecule` rather
+than re-grouping locally.
 
 ## Visual verification artifacts
 

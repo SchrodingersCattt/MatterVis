@@ -186,6 +186,13 @@ dihedral measurements. Use `:help` for the compact command list, for example
 `:focus N9 1`, `:angle C12 N9 C13`, or
 `:distance Cd2 Cl3 mic`.
 
+Use `:edit atom` or `:edit molecule` to label currently visible objects with
+frame-local tokens (`a1`, `m1`, ...). Select with `:pick`, remove with
+`:unpick`, toggle with `:toggle`, set the active selected object with
+`:active`, and return to browsing with `:exit`. Tokens may be renumbered after
+camera motion, while the selection remains attached to stable displayed
+object identities.
+
 The earlier automatic terminal polyhedron level was removed because it used a
 local metal table and convex hull rather than MatterVis/MolCrysKit's canonical
 coordination analysis. Use the documented polyhedron API for analytical

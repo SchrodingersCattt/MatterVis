@@ -25,6 +25,7 @@ from .text import terminal_text
 if TYPE_CHECKING:
     from .crystal_ir import CrystalIR
     from ..math.camera import Camera
+    from .state import TerminalEditState, TerminalPickToken
 
 
 # ── Label modes ─────────────────────────────────────────────────────────────
@@ -303,6 +304,14 @@ _OFFSETS = [
     (1, 2), (1, -2),
 ]
 
+_EDIT_OFFSETS = [
+    *_OFFSETS,
+    (-2, 1), (-2, -1), (2, 1), (2, -1),
+    (-2, 2), (-2, -2), (2, 2), (2, -2),
+    (-3, 0), (3, 0), (0, 3), (0, -3),
+    (-3, 2), (-3, -2), (3, 2), (3, -2),
+]
+
 
 @dataclass
 class _AtomDraw:
@@ -326,6 +335,14 @@ class _AtomDraw:
     needs_leader: bool = False
 
 
+@dataclass(frozen=True)
+class ComposedFrame:
+    """Rendered terminal text plus tokens that were actually placed."""
+
+    text: str
+    pick_tokens: tuple["TerminalPickToken", ...] = ()
+
+
 # ── Main compositor ─────────────────────────────────────────────────────────
 
 
@@ -347,7 +364,38 @@ def compose_frame(
     pan_y: float = 0.0,
     display_level: str = "atom",
     viewport: Viewport | None = None,
+    edit_state: "TerminalEditState | None" = None,
 ) -> str:
+    """Compatibility wrapper returning only rendered terminal text."""
+    return compose_frame_result(
+        crystal, camera, pts_2d, depth,
+        width=width, height=height, mono=mono, label_mode=label_mode,
+        show_bonds=show_bonds, show_cell=show_cell, show_minor=show_minor,
+        zoom=zoom, pan_x=pan_x, pan_y=pan_y, display_level=display_level,
+        viewport=viewport, edit_state=edit_state,
+    ).text
+
+
+def compose_frame_result(
+    crystal: "CrystalIR",
+    camera: "Camera",
+    pts_2d: np.ndarray,
+    depth: np.ndarray,
+    *,
+    width: int | None = None,
+    height: int | None = None,
+    mono: bool = False,
+    label_mode: str = "label",
+    show_bonds: bool = True,
+    show_cell: bool = True,
+    show_minor: bool = True,
+    zoom: float = 1.0,
+    pan_x: float = 0.0,
+    pan_y: float = 0.0,
+    display_level: str = "atom",
+    viewport: Viewport | None = None,
+    edit_state: "TerminalEditState | None" = None,
+) -> ComposedFrame:
     """Render crystal in ORTEP style with label relaxation.
 
     Parameters
@@ -414,7 +462,7 @@ def compose_frame(
     if display_level == "molecule":
         return _compose_molecule_frame(
             crystal, camera, pts_2d, depth, viewport, canvas,
-            width, height, mono, show_minor,
+            width, height, mono, show_minor, edit_state,
         )
     # ── Depth tier computation ───────────────────────────────────────
     depth_min = float(depth.min()) if len(depth) > 0 else 0.0
@@ -434,6 +482,9 @@ def compose_frame(
             radius = _atom_radius(atom.element, tier, detail_scale)
 
             text = _atom_label_text(atom, resolved_label_mode)
+            if edit_state is not None and edit_state.mode == "edit" and edit_state.level == "atom":
+                text = terminal_text(atom.display_label)
+                radius = min(radius, 2 if atom.element != "H" else 1)
             is_partial = atom.occupancy < 0.99
             if is_partial and resolved_label_mode != "dot":
                 text += "*"
@@ -512,8 +563,30 @@ def compose_frame(
     # Sort front-to-back for label priority (closest gets first pick)
     label_order = sorted(atoms_draw, key=lambda a: -a.depth)
 
+    edit_tokens: dict[int, str] = {}
+    edit_legend_width = 0
+    if edit_state is not None and edit_state.mode == "edit" and edit_state.level == "atom":
+        candidates = sorted(
+            (
+                atom_draw for atom_draw in atoms_draw
+                if viewport.in_bounds_grid(atom_draw.row, atom_draw.col)
+            ),
+            key=lambda atom_draw: (atom_draw.row, atom_draw.col, -atom_draw.depth, crystal.atoms[atom_draw.idx].display_copy_id),
+        )
+        edit_tokens = {atom_draw.idx: f"a{index}" for index, atom_draw in enumerate(candidates, start=1)}
+        if candidates:
+            edit_legend_width = min(22, max(14, width // 4))
+        for atom_draw in candidates:
+            atom = crystal.atoms[atom_draw.idx]
+            marker = ">" if atom.display_copy_id == edit_state.active_id else "*" if atom.display_copy_id in edit_state.selected_ids else ""
+            atom_draw.text = f"{marker}[{edit_tokens[atom_draw.idx]}]{terminal_text(atom.display_label)}"
+
     # Grid tracks occupied cells
-    occupied: set[tuple[int, int]] = set()
+    occupied: set[tuple[int, int]] = {
+        (row, col)
+        for row in range(height)
+        for col in range(max(width - edit_legend_width, 0), width)
+    } if edit_legend_width else set()
 
     for a in label_order:
         if len(a.text) > width:
@@ -521,7 +594,8 @@ def compose_frame(
         lw = len(a.text)
         placed = False
 
-        for dr, dc in _OFFSETS:
+        offsets = _EDIT_OFFSETS if edit_tokens else _OFFSETS
+        for dr, dc in offsets:
             r = a.row + dr
             c = a.col - lw // 2 + dc
             # Clamp to bounds
@@ -636,7 +710,54 @@ def compose_frame(
 
     while output_lines and not output_lines[-1]:
         output_lines.pop()
-    return "\n".join(output_lines)
+    from .state import TerminalPickToken
+
+    if edit_legend_width:
+        legend_items = [
+            (
+                f">[{edit_tokens[atom_draw.idx]}]{terminal_text(crystal.atoms[atom_draw.idx].display_label)}"
+                if crystal.atoms[atom_draw.idx].display_copy_id == edit_state.active_id
+                else f"*[{edit_tokens[atom_draw.idx]}]{terminal_text(crystal.atoms[atom_draw.idx].display_label)}"
+                if crystal.atoms[atom_draw.idx].display_copy_id in edit_state.selected_ids
+                else f"[{edit_tokens[atom_draw.idx]}]{terminal_text(crystal.atoms[atom_draw.idx].display_label)}"
+            )
+            for atom_draw in sorted(
+                (item for item in label_order if item.idx in edit_tokens),
+                key=lambda item: int(edit_tokens[item.idx][1:]),
+            )
+        ]
+        columns = 2 if len(legend_items) > height else 1
+        rows_per_column = (len(legend_items) + columns - 1) // columns
+        column_width = max(edit_legend_width // columns, 1)
+        while len(output_lines) < min(height, rows_per_column):
+            output_lines.append("")
+        for index, item in enumerate(legend_items):
+            row = index % rows_per_column
+            if row >= height:
+                break
+            column = index // rows_per_column
+            start = width - edit_legend_width + column * column_width
+            item = item[:column_width]
+            base = output_lines[row] if row < len(output_lines) else ""
+            base = base[:start].ljust(start) + item
+            if row < len(output_lines):
+                output_lines[row] = base
+            else:
+                output_lines.append(base)
+
+    tokens = tuple(
+        TerminalPickToken(
+            token=edit_tokens[atom_draw.idx],
+            level="atom",
+            target_id=crystal.atoms[atom_draw.idx].display_copy_id,
+            label=terminal_text(crystal.atoms[atom_draw.idx].display_label),
+            selected=crystal.atoms[atom_draw.idx].display_copy_id in edit_state.selected_ids,
+            active=crystal.atoms[atom_draw.idx].display_copy_id == edit_state.active_id,
+        )
+        for atom_draw in label_order
+        if atom_draw.idx in edit_tokens
+    ) if edit_state is not None else ()
+    return ComposedFrame("\n".join(output_lines), tokens)
 
 # ── Color-run helpers ───────────────────────────────────────────────────────
 
@@ -815,7 +936,8 @@ def _compose_molecule_frame(
     height: int,
     mono: bool,
     show_minor: bool,
-) -> str:
+    edit_state: "TerminalEditState | None" = None,
+) -> ComposedFrame:
     """Render molecule-level view: convex hull outlines + formula labels."""
     from ._hull2d import convex_hull_2d
 
@@ -856,9 +978,11 @@ def _compose_molecule_frame(
 
     # Draw each molecule outline
     label_candidates: dict[str, list[tuple[float, int, int, int]]] = {}
+    molecule_candidates: list[tuple[int, float, int, int, int]] = []
+    edit_molecule = edit_state is not None and edit_state.mode == "edit" and edit_state.level == "molecule"
     for mol_idx, molecule_depth in mol_depths:
         atom_indices = mol_groups[mol_idx]
-        if len(atom_indices) < 2:
+        if len(atom_indices) < 2 and not edit_molecule:
             continue
 
         color = mol_color_map.get(mol_idx, MOLECULE_COLORS[mol_idx % len(MOLECULE_COLORS)])
@@ -869,7 +993,7 @@ def _compose_molecule_frame(
         # Centroid for label placement
         cx = sum(x for x, y in mol_pts) / len(mol_pts)
         cy = sum(y for x, y in mol_pts) / len(mol_pts)
-        if molecule_detail == "centroid":
+        if molecule_detail == "centroid" or len(mol_pts) == 1:
             px_x, px_y = viewport.to_px(cx, cy)
             _draw_circle(canvas, px_x, px_y, 2, color=color)
         else:
@@ -893,28 +1017,41 @@ def _compose_molecule_frame(
 
         row, col = viewport.to_grid(cx, cy)
         formula = mol_formula.get(mol_idx, f"M{mol_idx}")
+        molecule_candidates.append((mol_idx, molecule_depth, row, col, color))
         label_candidates.setdefault(formula, []).append(
             (molecule_depth, row, col, color)
         )
 
     # One label per species is enough to identify the full unit-cell packing;
     # choose the front-most instance so text does not cover every replica.
-    labels_to_place: list[tuple[int, int, str, int]] = []
-    for formula, candidates in label_candidates.items():
-        _, row, col, color = max(candidates, key=lambda item: item[0])
-        labels_to_place.append((row, col, _display_species_name(formula), color))
+    labels_to_place: list[tuple[int, int, str, int, int | None]] = []
+    if edit_molecule:
+        visible_candidates = sorted(
+            (candidate for candidate in molecule_candidates if 0 <= candidate[2] < height and 0 <= candidate[3] < width),
+            key=lambda candidate: (candidate[2], candidate[3], -candidate[1], candidate[0]),
+        )
+        for token_index, (mol_idx, _, row, col, color) in enumerate(visible_candidates, start=1):
+            member_index = mol_groups[mol_idx][0]
+            target_id = crystal.atoms[member_index].display_fragment_id
+            marker = ">" if target_id == edit_state.active_id else "*" if target_id in edit_state.selected_ids else ""
+            labels_to_place.append((row, col, f"{marker}[m{token_index}]{_display_species_name(mol_formula.get(mol_idx, f'M{mol_idx}'))}", color, mol_idx))
+    else:
+        for formula, candidates in label_candidates.items():
+            _, row, col, color = max(candidates, key=lambda item: item[0])
+            labels_to_place.append((row, col, _display_species_name(formula), color, None))
 
     # Build output with labels
     colored_rows = canvas.render_colored()
     output_lines: list[str] = []
 
     # Index labels by row
-    lbl_map: dict[int, list[tuple[int, str, int]]] = {}
-    for row, col, text, color in labels_to_place:
+    lbl_map: dict[int, list[tuple[int, str, int, int | None]]] = {}
+    placed_molecules: list[tuple[int, str]] = []
+    for row, col, text, color, mol_idx in labels_to_place:
         if 0 <= row < height:
             text = text[:width]
             start = max(0, min(width - len(text), col - len(text) // 2))
-            lbl_map.setdefault(row, []).append((start, text, color))
+            lbl_map.setdefault(row, []).append((start, text, color, mol_idx))
 
     for row_idx in range(height):
         row_data = colored_rows[row_idx] if row_idx < len(colored_rows) else []
@@ -944,12 +1081,14 @@ def _compose_molecule_frame(
             while col < width:
                 if li < len(row_labels) and row_labels[li][0] == col:
                     _flush()
-                    lcol, ltext, lcolor = row_labels[li]
+                    lcol, ltext, lcolor, mol_idx = row_labels[li]
                     if mono:
                         parts.append(ltext)
                     else:
                         parts.append(f"\033[1;38;5;{lcolor}m{ltext}\033[0m")
                     col += len(ltext)
+                    if mol_idx is not None:
+                        placed_molecules.append((mol_idx, ltext))
                     li += 1
                 else:
                     if col < len(row_data):
@@ -962,4 +1101,17 @@ def _compose_molecule_frame(
 
     while output_lines and not output_lines[-1]:
         output_lines.pop()
-    return "\n".join(output_lines)
+    from .state import TerminalPickToken
+
+    tokens = tuple(
+        TerminalPickToken(
+            token=text[text.find("[") + 1:text.find("]")],
+            level="molecule",
+            target_id=crystal.atoms[mol_groups[mol_idx][0]].display_fragment_id,
+            label=_display_species_name(mol_formula.get(mol_idx, f"M{mol_idx}")),
+            selected=crystal.atoms[mol_groups[mol_idx][0]].display_fragment_id in edit_state.selected_ids,
+            active=crystal.atoms[mol_groups[mol_idx][0]].display_fragment_id == edit_state.active_id,
+        )
+        for mol_idx, text in placed_molecules
+    ) if edit_molecule else ()
+    return ComposedFrame("\n".join(output_lines), tokens)

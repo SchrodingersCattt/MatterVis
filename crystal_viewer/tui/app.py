@@ -123,7 +123,6 @@ class CrystalTUI(App):
         super().__init__()
         self.crystal = crystal
         self._command_mode = False
-        self._command_selection: list[dict[str, str]] = []
         self.controller = TerminalViewController(
             crystal,
             camera=camera or Camera.from_view_name(initial_view, crystal),
@@ -301,28 +300,48 @@ class CrystalTUI(App):
         name, args = parts[0].lower(), parts[1:]
         if name == "help":
             return (
-                "select A... | focus A [depth] | distance A B [direct|mic] | "
+                "edit atom|molecule | pick/unpick/toggle TOKEN... | active TOKEN | exit | "
+                "select A... | focus A [depth]|selection | distance A B [direct|mic] | "
                 "angle A B C [direct|mic] | dihedral A B C D [direct|mic_chain] | clear",
                 None,
             )
+        if name == "edit":
+            if len(args) != 1:
+                raise ValueError("edit requires atom or molecule")
+            observation = self.controller.enter_edit(args[0])
+            return f"edit mode: {args[0]}", observation
+        if name in {"pick", "unpick", "toggle"}:
+            if not args:
+                raise ValueError(f"{name} requires at least one current-frame token")
+            method = {
+                "pick": self.controller.pick,
+                "unpick": self.controller.unpick,
+                "toggle": self.controller.toggle_pick,
+            }[name]
+            observation = method(args)
+            return f"selected: {' '.join(observation.state.edit.selected_ids)}", observation
+        if name == "active":
+            if len(args) != 1:
+                raise ValueError("active requires one current-frame token")
+            observation = self.controller.set_active(args[0])
+            return f"active: {observation.state.edit.active_id}", observation
+        if name == "exit":
+            return "browse mode", self.controller.exit_edit()
         if name == "select":
             if not args:
                 raise ValueError("select requires at least one atom label")
-            atoms = self.controller.inspect_atom(args)["atoms"]
-            self._command_selection = [
-                {"display_copy_id": atom["display_copy_id"]}
-                for atom in atoms
-            ]
-            return f"selected: {' '.join(atom['label'] for atom in atoms)}", None
+            observation = self.controller.select_atom_references(args)
+            return f"selected: {' '.join(args)}", observation
         if name == "clear":
-            self._command_selection = []
-            return "selection cleared", self.controller.clear_focus()
+            return "selection cleared", self.controller.clear_selection()
         if name == "focus":
-            if not args and self._command_selection:
-                return "focused selection", self.controller.focus_selection(self._command_selection)
+            if not args or args == ["selection"]:
+                return "focused selection", self.controller.focus_edit_selection()
             if not args:
                 raise ValueError("focus requires an atom label or a prior selection")
             depth = int(args[1]) if len(args) > 1 else 1
+            if self.controller.state.edit.mode == "edit" and args[0].startswith("a") and args[0][1:].isdigit():
+                return f"focused {args[0]} with bond depth {depth}", self.controller.focus_pick_token(args[0], bond_depth=depth)
             return f"focused {args[0]} with bond depth {depth}", self.controller.focus_local(args[0], bond_depth=depth)
         if name == "distance":
             references, mode = self._measurement_arguments(args, 2, "mic")
@@ -344,7 +363,7 @@ class CrystalTUI(App):
         modes = {"direct", "mic", "mic_chain"}
         mode = args[-1] if args and args[-1] in modes else default_mode
         labels = args[:-1] if args and args[-1] in modes else args
-        references: list[str | int | dict[str, str]] = list(labels) if labels else list(self._command_selection)
+        references: list[str | int | dict[str, str]] = list(labels) if labels else self.controller.atom_selection_references()
         if len(references) != count:
             raise ValueError(f"measurement requires {count} atoms or a {count}-atom selection")
         return references, mode

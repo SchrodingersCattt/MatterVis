@@ -13,7 +13,7 @@ from .compositor import (
     LABEL_MODES,
     Viewport,
     _compute_viewport,
-    compose_frame,
+    compose_frame_result,
     viewport_from_bounds,
 )
 from .inspection import (
@@ -31,6 +31,7 @@ from .observation import build_observation_scope, build_terminal_title
 from .state import (
     TerminalCameraState,
     TerminalDisplayState,
+    TerminalEditState,
     TerminalFocusState,
     TerminalObservation,
     TerminalViewportState,
@@ -60,6 +61,13 @@ class TerminalViewController:
         "focus_molecule",
         "focus_selection",
         "focus_local",
+        "enter_edit",
+        "exit_edit",
+        "pick",
+        "unpick",
+        "toggle_pick",
+        "clear_selection",
+        "set_active",
         "clear_focus",
         "save_view",
         "restore_view",
@@ -98,7 +106,10 @@ class TerminalViewController:
             self.camera = replace(self.camera, target=self._all_view_center())
         self._initial_camera = self._copy_camera(self.camera)
         self._focus = TerminalFocusState()
-        self._snapshots: dict[str, tuple[Camera, TerminalDisplayState, TerminalFocusState, Viewport]] = {}
+        self._edit = TerminalEditState()
+        self._pick_token_map: dict[str, str] = {}
+        self._pick_token_revision = -1
+        self._snapshots: dict[str, tuple[Camera, TerminalDisplayState, TerminalFocusState, TerminalEditState, Viewport]] = {}
         self._revision = 0
         self._fit_viewport = self._fit_all_viewport()
 
@@ -157,6 +168,7 @@ class TerminalViewController:
             camera=camera,
             display=display,
             focus=self._focus,
+            edit=self._edit,
             viewport=viewport_state,
         )
 
@@ -164,7 +176,7 @@ class TerminalViewController:
         """Render and describe the exact current terminal view without mutation."""
         state = self.state
         pts_2d, depth = project_points(self.camera, self.crystal.cart_coords)
-        frame = compose_frame(
+        composed = compose_frame_result(
             self.crystal,
             self.camera,
             pts_2d,
@@ -181,22 +193,143 @@ class TerminalViewController:
             pan_y=self.camera.pan_y,
             display_level=self._display_level,
             viewport=self._fit_viewport,
+            edit_state=self._edit,
         )
+        self._pick_token_map = {token.token: token.target_id for token in composed.pick_tokens}
+        self._pick_token_revision = self._revision
         title = build_terminal_title(
             self.crystal,
             state.camera,
             state.display,
             width=self._width,
             height=self._height,
+            edit=self._edit,
         )
         return TerminalObservation(
             revision=self._revision,
             state=state,
             title=title,
-            frame=frame,
+            frame=composed.text,
             scope=build_observation_scope(self.crystal, state.display),
             capabilities=self.CAPABILITIES,
+            pick_tokens=composed.pick_tokens,
         )
+
+    def enter_edit(self, level: str = "atom") -> TerminalObservation:
+        """Enter edit mode at atom or molecule level."""
+        if level not in {"atom", "molecule"}:
+            raise ValueError("edit level must be 'atom' or 'molecule'")
+        if level == "molecule" and not any(atom.display_fragment_id for atom in self.crystal.atoms):
+            raise ValueError("molecule edit requires displayed molecule identities")
+        if self._edit.mode == "edit" and self._edit.level == level:
+            return self.observe()
+        self._display_level = level
+        self._edit = TerminalEditState(mode="edit", level=level)
+        return self._changed()
+
+    def exit_edit(self) -> TerminalObservation:
+        """Leave edit mode while retaining stable selected object identities."""
+        if self._edit.mode == "browse":
+            return self.observe()
+        self._edit = replace(self._edit, mode="browse")
+        return self._changed()
+
+    def pick(self, tokens: list[str]) -> TerminalObservation:
+        """Add current-frame tokens to the ordered selection atomically."""
+        target_ids = self._resolve_pick_tokens(tokens)
+        selected = list(self._edit.selected_ids)
+        for target_id in target_ids:
+            if target_id not in selected:
+                selected.append(target_id)
+        self._edit = replace(self._edit, selected_ids=tuple(selected), active_id=target_ids[-1])
+        return self._changed()
+
+    def unpick(self, tokens: list[str]) -> TerminalObservation:
+        """Remove current-frame tokens from selection atomically."""
+        target_ids = set(self._resolve_pick_tokens(tokens))
+        selected = tuple(value for value in self._edit.selected_ids if value not in target_ids)
+        active = self._edit.active_id if self._edit.active_id in selected else (selected[-1] if selected else None)
+        self._edit = replace(self._edit, selected_ids=selected, active_id=active)
+        return self._changed()
+
+    def toggle_pick(self, tokens: list[str]) -> TerminalObservation:
+        """Toggle current-frame tokens in selection atomically."""
+        target_ids = self._resolve_pick_tokens(tokens)
+        selected = list(self._edit.selected_ids)
+        for target_id in target_ids:
+            if target_id in selected:
+                selected.remove(target_id)
+            else:
+                selected.append(target_id)
+        active = target_ids[-1] if target_ids[-1] in selected else (selected[-1] if selected else None)
+        self._edit = replace(self._edit, selected_ids=tuple(selected), active_id=active)
+        return self._changed()
+
+    def clear_selection(self) -> TerminalObservation:
+        """Clear edit selection without changing camera focus."""
+        if not self._edit.selected_ids and self._edit.active_id is None:
+            return self.observe()
+        self._edit = replace(self._edit, selected_ids=(), active_id=None)
+        return self._changed()
+
+    def select_atom_references(
+        self,
+        references: list[str | int | dict[str, Any]],
+    ) -> TerminalObservation:
+        """Replace atom edit selection from explicit stable atom references."""
+        indices = resolve_atom_references(self.crystal, references)
+        target_ids = tuple(self.crystal.atoms[index].display_copy_id for index in indices)
+        self._display_level = "atom"
+        self._edit = TerminalEditState(
+            mode="edit",
+            level="atom",
+            selected_ids=target_ids,
+            active_id=target_ids[-1] if target_ids else None,
+        )
+        return self._changed()
+
+    def atom_selection_references(self) -> list[dict[str, str]]:
+        """Return current atom edit selection as exact measurement references."""
+        if self._edit.level != "atom":
+            raise ValueError("measurements require atom edit selection")
+        return [{"display_copy_id": target_id} for target_id in self._edit.selected_ids]
+
+    def set_active(self, token: str) -> TerminalObservation:
+        """Set active object to one already selected current-frame token."""
+        target_id = self._resolve_pick_tokens([token])[0]
+        if target_id not in self._edit.selected_ids:
+            raise ValueError("active object must already be selected")
+        self._edit = replace(self._edit, active_id=target_id)
+        return self._changed()
+
+    def focus_edit_selection(self) -> TerminalObservation:
+        """Fit the current atom-level edit selection."""
+        if self._edit.level != "atom" or not self._edit.selected_ids:
+            raise ValueError("atom edit selection is empty")
+        indices = tuple(
+            index for index, atom in enumerate(self.crystal.atoms)
+            if atom.display_copy_id in self._edit.selected_ids
+        )
+        return self._set_focus("selection", indices)
+
+    def focus_pick_token(self, token: str, *, bond_depth: int = 1) -> TerminalObservation:
+        """Focus a current-frame atom token and its bond neighborhood."""
+        if self._edit.level != "atom":
+            raise ValueError("token-local focus requires atom edit level")
+        target_id = self._resolve_pick_tokens([token])[0]
+        return self.focus_local({"display_copy_id": target_id}, bond_depth=bond_depth)
+
+    def _resolve_pick_tokens(self, tokens: list[str]) -> tuple[str, ...]:
+        if self._edit.mode != "edit":
+            raise ValueError("pick commands require edit mode")
+        if not tokens:
+            raise ValueError("at least one pick token is required")
+        if self._pick_token_revision != self._revision:
+            self.observe()
+        missing = [token for token in tokens if token not in self._pick_token_map]
+        if missing:
+            raise ValueError(f"unknown pick token(s): {', '.join(missing)}; read the current frame again")
+        return tuple(dict.fromkeys(self._pick_token_map[token] for token in tokens))
 
     def set_camera(
         self,
@@ -293,6 +426,11 @@ class TerminalViewController:
         candidate_show_cell = self._show_cell if show_cell is None else bool(show_cell)
         candidate_show_minor = self._show_minor if show_minor is None else bool(show_minor)
         candidate_mono = self._mono if mono is None else bool(mono)
+        candidate_edit = self._edit
+        if self._edit.mode == "edit" and self._edit.level != candidate_display_level:
+            if candidate_display_level == "molecule" and not any(atom.display_fragment_id for atom in self.crystal.atoms):
+                raise ValueError("molecule edit requires displayed molecule identities")
+            candidate_edit = TerminalEditState(mode="edit", level=candidate_display_level)
 
         self._display_level = candidate_display_level
         self._label_mode = candidate_label_mode
@@ -300,6 +438,7 @@ class TerminalViewController:
         self._show_cell = candidate_show_cell
         self._show_minor = candidate_show_minor
         self._mono = candidate_mono
+        self._edit = candidate_edit
         return self._changed()
 
     def fit(self, *, target: str = "all") -> TerminalObservation:
@@ -378,6 +517,7 @@ class TerminalViewController:
             self._copy_camera(self.camera),
             display,
             self._focus,
+            self._edit,
             viewport,
         )
         return TerminalViewSnapshot(name=name, state=self.state)
@@ -385,7 +525,7 @@ class TerminalViewController:
     def restore_view(self, name: str) -> TerminalObservation:
         """Restore a previously saved view atomically."""
         try:
-            camera, display, focus, viewport = self._snapshots[name]
+            camera, display, focus, edit, viewport = self._snapshots[name]
         except KeyError as exc:
             raise ValueError(f"unknown snapshot: {name}") from exc
         self.camera = self._copy_camera(camera)
@@ -396,6 +536,7 @@ class TerminalViewController:
         self._show_minor = display.show_minor
         self._display_level = display.display_level
         self._focus = focus
+        self._edit = edit
         self._fit_viewport = self._copy_viewport(viewport)
         return self._changed()
 
@@ -403,7 +544,7 @@ class TerminalViewController:
         """List detached metadata for saved named views in name order."""
         snapshots: list[TerminalViewSnapshot] = []
         for name in sorted(self._snapshots):
-            camera, display, focus, viewport = self._snapshots[name]
+            camera, display, focus, edit, viewport = self._snapshots[name]
             state = TerminalViewState(
                 revision=self._revision,
                 camera=TerminalCameraState(
@@ -414,6 +555,7 @@ class TerminalViewController:
                 ),
                 display=display,
                 focus=focus,
+                edit=edit,
                 viewport=self._viewport_state_for(camera, viewport),
             )
             snapshots.append(TerminalViewSnapshot(name=name, state=state))

@@ -112,3 +112,8 @@ upstream API has grown the exact hook.
     methods. Angle MIC is center-anchored; dihedral `mic_chain` unwraps A-B-C-D
     consecutively. Keep the applied image shifts in the returned payload and do
     not move this geometry math into Textual event handlers.
+- TUI edit selection belongs to `TerminalViewController`, not Textual. Pick
+  tokens are regenerated from labels actually placed in each frame, while
+  selected atoms/molecules persist by displayed-copy/fragment identity. Do not
+  reuse the browser's label-collapsing selection state for exact periodic
+  copies.
