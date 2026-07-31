@@ -44,8 +44,8 @@ def test_face_fragment_replica_lifts_its_canonical_internal_bond():
     cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
     M = np.eye(3) * 10.0
     atoms = [
-        _atom("C1", "C", [0.0, 0.5, 0.5], M, 0),
-        _atom("C2", "C", [0.1, 0.5, 0.5], M, 1),
+        _atom("C1", "C", [0.99, 0.5, 0.5], M, 0),
+        _atom("C2", "C", [0.94, 0.5, 0.5], M, 1),
     ]
 
     scene = build_scene_from_atoms(
@@ -60,7 +60,7 @@ def test_face_fragment_replica_lifts_its_canonical_internal_bond():
         unwrapped_atoms=atoms,
         canonical_bond_pairs=[(0, 1)],
         canonical_bond_records=[
-            {"left": 0, "right": 1, "right_image_shift": [0, 0, 0], "vector": [1.0, 0.0, 0.0]}
+            {"left": 0, "right": 1, "right_image_shift": [0, 0, 0], "vector": [-0.5, 0.0, 0.0]}
         ],
         preset={"style": {"show_labels": False, "show_axes": False}},
     )
@@ -68,7 +68,7 @@ def test_face_fragment_replica_lifts_its_canonical_internal_bond():
     assert len(scene["draw_atoms"]) == 4
     assert len(scene["bonds"]) == 2
     assert _source_pair_set(scene) == {(0, 1)}
-    assert sorted(round(float(np.linalg.norm(bond["end"] - bond["start"])), 6) for bond in scene["bonds"]) == [1.0, 1.0]
+    assert sorted(round(float(np.linalg.norm(bond["end"] - bond["start"])), 6) for bond in scene["bonds"]) == [0.5, 0.5]
     replica_indices = {
         index
         for index, atom in enumerate(scene["draw_atoms"])
@@ -109,9 +109,10 @@ def test_canonical_record_preserves_cross_cell_image_relation():
         preset={"style": {"show_labels": False, "show_axes": False}},
     )
 
-    assert len(scene["draw_atoms"]) == 2
-    assert len(scene["bonds"]) == 1
-    np.testing.assert_allclose(scene["bonds"][0]["end"] - scene["bonds"][0]["start"], [0.4, 0.0, 0.0])
+    assert len(scene["draw_atoms"]) == 4
+    assert len(scene["bonds"]) == 2
+    for bond in scene["bonds"]:
+        np.testing.assert_allclose(bond["end"] - bond["start"], [0.4, 0.0, 0.0])
 
 
 def test_canonical_lift_does_not_cross_connect_duplicate_display_images():

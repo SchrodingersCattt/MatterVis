@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import gemmi
 import numpy as np
+import pytest
 
 from crystal_viewer.scene import build_scene_from_atoms, scene_ops
 
@@ -124,14 +125,13 @@ def test_fragment_on_face_replicates_as_whole_fragment():
     ]
 
 
-def test_fragment_near_face_replicates_by_centroid_tolerance():
-    """Fragments visually sitting on a face get a whole-fragment image.
+def test_fragment_near_face_replicates_by_member_tolerance():
+    """A near-face member gives the whole fragment an adjacent image.
 
     DAP-4 perchlorate has several ClO4 groups whose central Cl is at
     fractional coordinates like 0.012/0.988 rather than exactly 0/1. Treating
-    only exact special positions makes the unit cell look asymmetric, so a
-    molecule-level centroid tolerance fills these near-face images without
-    broadening the atom-level special-position rule.
+    only exact special positions makes the unit cell look asymmetric. Member
+    extent, rather than a wrapped centroid, owns periodic-context triggering.
     """
     cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
     M = np.eye(3) * 10.0
@@ -164,6 +164,213 @@ def test_fragment_near_face_replicates_by_centroid_tolerance():
     ]
     assert sorted(atom["label"] for atom in replicas) == ["Cl1", "O1", "O2"]
     assert {tuple(atom["_image_shift"]) for atom in replicas} == {(-1, 0, 0)}
+
+
+def test_high_face_member_replicates_whole_fragment_to_negative_image():
+    cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
+    M = np.eye(3) * 10.0
+    atoms = [
+        _atom("C1", [0.99, 0.50, 0.50], M),
+        _atom("C2", [0.94, 0.50, 0.50], M),
+    ]
+    for atom in atoms:
+        atom["_source_molecule_index"] = 40
+        atom["_wrapped_frac"] = np.array(atom["frac"], dtype=float)
+
+    scene = build_scene_from_atoms(
+        name="high_face_context",
+        title="High face context",
+        atoms=atoms,
+        cell=cell,
+        M=M,
+        R=np.eye(3),
+        display_mode="unit_cell",
+        ops=scene_ops(),
+        unwrapped_atoms=atoms,
+        preset={"style": {"show_labels": False, "show_axes": False}},
+    )
+
+    replicas = [atom for atom in scene["draw_atoms"] if atom.get("_is_fragment_boundary_replica")]
+    assert len(replicas) == 2
+    assert {tuple(atom["_image_shift"]) for atom in replicas} == {(-1, 0, 0)}
+    assert sorted(round(float(atom["frac"][0]), 2) for atom in replicas) == [-0.06, -0.01]
+
+
+def test_low_face_member_replicates_whole_fragment_to_positive_image():
+    cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
+    M = np.eye(3) * 10.0
+    atoms = [
+        _atom("C1", [0.01, 0.50, 0.50], M),
+        _atom("C2", [0.06, 0.50, 0.50], M),
+    ]
+    for atom in atoms:
+        atom["_source_molecule_index"] = 41
+        atom["_wrapped_frac"] = np.array(atom["frac"], dtype=float)
+
+    scene = build_scene_from_atoms(
+        name="low_face_context",
+        title="Low face context",
+        atoms=atoms,
+        cell=cell,
+        M=M,
+        R=np.eye(3),
+        display_mode="unit_cell",
+        ops=scene_ops(),
+        unwrapped_atoms=atoms,
+        preset={"style": {"show_labels": False, "show_axes": False}},
+    )
+
+    replicas = [atom for atom in scene["draw_atoms"] if atom.get("_is_fragment_boundary_replica")]
+    assert len(replicas) == 2
+    assert {tuple(atom["_image_shift"]) for atom in replicas} == {(1, 0, 0)}
+    assert sorted(round(float(atom["frac"][0]), 2) for atom in replicas) == [1.01, 1.06]
+
+
+def test_member_extent_triggers_both_neighbour_images_even_when_centroid_is_middle():
+    cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
+    M = np.eye(3) * 10.0
+    atoms = [
+        _atom("C1", [0.99, 0.50, 0.50], M),
+        _atom("C2", [0.01, 0.50, 0.50], M),
+    ]
+    for atom in atoms:
+        atom["_source_molecule_index"] = 42
+        atom["_wrapped_frac"] = np.array(atom["frac"], dtype=float)
+
+    scene = build_scene_from_atoms(
+        name="extent_not_centroid",
+        title="Extent not centroid",
+        atoms=atoms,
+        cell=cell,
+        M=M,
+        R=np.eye(3),
+        display_mode="unit_cell",
+        ops=scene_ops(),
+        unwrapped_atoms=atoms,
+        preset={"style": {"show_labels": False, "show_axes": False}},
+    )
+
+    shifts = {
+        tuple(atom["_image_shift"])
+        for atom in scene["draw_atoms"]
+        if atom.get("_is_fragment_boundary_replica")
+    }
+    assert shifts == {(-1, 0, 0), (1, 0, 0)}
+    assert len(scene["draw_atoms"]) == 6
+
+
+def test_near_face_signals_from_different_members_do_not_form_diagonal_image():
+    cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
+    M = np.eye(3) * 10.0
+    atoms = [
+        _atom("C1", [0.01, 0.50, 0.50], M),
+        _atom("C2", [0.50, 0.01, 0.50], M),
+    ]
+    for atom in atoms:
+        atom["_source_molecule_index"] = 43
+        atom["_wrapped_frac"] = np.array(atom["frac"], dtype=float)
+
+    scene = build_scene_from_atoms(
+        name="near_face_union",
+        title="Near face union",
+        atoms=atoms,
+        cell=cell,
+        M=M,
+        R=np.eye(3),
+        display_mode="unit_cell",
+        ops=scene_ops(),
+        unwrapped_atoms=atoms,
+        preset={"style": {"show_labels": False, "show_axes": False}},
+    )
+
+    shifts = {
+        tuple(atom["_image_shift"])
+        for atom in scene["draw_atoms"]
+        if atom.get("_is_fragment_boundary_replica")
+    }
+    assert shifts == {(0, 1, 0), (1, 0, 0)}
+
+
+def test_ungrouped_near_face_atoms_get_periodic_context_images():
+    cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
+    M = np.eye(3) * 10.0
+    atoms = [
+        _atom("C1", [0.99, 0.50, 0.50], M),
+        _atom("C2", [0.01, 0.25, 0.25], M),
+    ]
+
+    scene = build_scene_from_atoms(
+        name="ungrouped_context",
+        title="Ungrouped context",
+        atoms=atoms,
+        cell=cell,
+        M=M,
+        R=np.eye(3),
+        display_mode="unit_cell",
+        ops=scene_ops(),
+        preset={"style": {"show_labels": False, "show_axes": False}},
+    )
+
+    replica_fracs = sorted(
+        round(float(atom["frac"][0]), 2)
+        for atom in scene["draw_atoms"]
+        if atom.get("_is_boundary_replica")
+    )
+    assert replica_fracs == [-0.01, 1.01]
+
+
+def test_near_face_replica_uses_triclinic_lattice_vector():
+    cell = gemmi.UnitCell(8.0, 9.0, 10.0, 78.0, 96.0, 112.0)
+    from crystal_viewer.structure.geometry import ortho_matrix
+
+    legacy_M, _ = ortho_matrix(cell)
+    M = legacy_M.T
+    atom = _atom("C1", [0.99, 0.40, 0.30], M)
+
+    scene = build_scene_from_atoms(
+        name="triclinic_context",
+        title="Triclinic context",
+        atoms=[atom],
+        cell=cell,
+        M=M,
+        R=np.eye(3),
+        display_mode="unit_cell",
+        ops=scene_ops(),
+        preset={"style": {"show_labels": False, "show_axes": False}},
+    )
+
+    original = next(item for item in scene["draw_atoms"] if not item.get("_is_boundary_replica"))
+    replica = next(item for item in scene["draw_atoms"] if item.get("_is_boundary_replica"))
+    np.testing.assert_allclose(replica["cart"] - original["cart"], -M[0])
+    np.testing.assert_allclose(replica["frac"], [-0.01, 0.40, 0.30])
+
+
+@pytest.mark.parametrize(
+    "frac, expected_replicas",
+    [
+        (0.03, 1),
+        (0.97, 1),
+        (0.0301, 0),
+        (0.9699, 0),
+    ],
+)
+def test_periodic_context_tolerance_boundary(frac, expected_replicas):
+    cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
+    M = np.eye(3) * 10.0
+
+    scene = build_scene_from_atoms(
+        name="tolerance_boundary",
+        title="Tolerance boundary",
+        atoms=[_atom("C1", [frac, 0.50, 0.50], M)],
+        cell=cell,
+        M=M,
+        R=np.eye(3),
+        display_mode="unit_cell",
+        ops=scene_ops(),
+        preset={"style": {"show_labels": False, "show_axes": False}},
+    )
+
+    assert sum(bool(atom.get("_is_boundary_replica")) for atom in scene["draw_atoms"]) == expected_replicas
 
 
 def test_minor_disorder_fragment_replicates_as_whole_fragment():
@@ -408,13 +615,8 @@ def test_interior_atom_is_not_replicated():
     assert len(scene["draw_atoms"]) == 1
 
 
-def test_unwrapped_continuation_atom_is_not_replicated():
-    """Atoms at frac>1 (unwrapped for molecule continuity) must NOT
-    trigger a boundary replica. Otherwise a C2 unwrapped to frac=1.02
-    spawns a duplicate at frac=0.02, doubling bonds in the picture.
-    Regression test for the boundary-replica bug found by
-    ``tests/render/test_unwrap_modes.py``.
-    """
+def test_unwrapped_near_face_fragment_does_not_create_second_neighbour_images():
+    """Near-face context may add the adjacent image, never a second neighbour."""
     cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
     M = np.eye(3) * 10.0
     # Simulate the post-unwrap output: one atom inside the cell, one
@@ -423,8 +625,9 @@ def test_unwrapped_continuation_atom_is_not_replicated():
         _atom("C1", [0.98, 0.5, 0.5], M),
         _atom("C2", [1.02, 0.5, 0.5], M),
     ]
-    # These are NOT on a face (their frac is 0.98 / 1.02, not exactly
-    # 0 or 1), so neither should be replicated.
+    for atom, wrapped in zip(atoms, ([0.98, 0.5, 0.5], [0.02, 0.5, 0.5])):
+        atom["_source_molecule_index"] = 44
+        atom["_wrapped_frac"] = np.array(wrapped, dtype=float)
     scene = build_scene_from_atoms(
         name="unwrap_continuation",
         title="UC",
@@ -437,7 +640,11 @@ def test_unwrapped_continuation_atom_is_not_replicated():
         unwrapped_atoms=atoms,
         preset={"style": {"show_labels": False, "show_axes": False}},
     )
-    assert len(scene["draw_atoms"]) == 2
+    fracs = [float(atom["frac"][0]) for atom in scene["draw_atoms"]]
+    assert len(scene["draw_atoms"]) == 4
+    assert min(fracs) >= -0.02 - 1e-9
+    assert max(fracs) <= 1.02 + 1e-9
+    assert not any(abs(value - 2.02) < 1e-9 or abs(value + 1.02) < 1e-9 for value in fracs)
 
 
 def test_formula_unit_mode_does_not_replicate():
@@ -461,3 +668,26 @@ def test_formula_unit_mode_does_not_replicate():
         preset={"style": {"show_labels": False, "show_axes": False}},
     )
     assert len(scene["draw_atoms"]) == 1
+
+
+@pytest.mark.parametrize("display_mode", ["formula_unit", "asymmetric_unit", "cluster"])
+def test_near_face_context_is_unit_cell_only(display_mode):
+    cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
+    M = np.eye(3) * 10.0
+    atom = _atom("C1", [0.99, 0.50, 0.50], M)
+
+    scene = build_scene_from_atoms(
+        name="mode_isolation",
+        title="Mode isolation",
+        atoms=[atom],
+        cell=cell,
+        M=M,
+        R=np.eye(3),
+        display_mode=display_mode,
+        ops=scene_ops(),
+        formula_unit_atoms=[atom],
+        preset={"style": {"show_labels": False, "show_axes": False}},
+    )
+
+    assert len(scene["draw_atoms"]) == 1
+    assert not scene["draw_atoms"][0].get("_is_boundary_replica")

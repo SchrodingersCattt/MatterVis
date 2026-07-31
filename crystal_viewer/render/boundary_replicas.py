@@ -15,8 +15,8 @@ from typing import Any
 import numpy as np
 from molcrys_kit.utils.geometry import frac_to_cart
 
-_BOUNDARY_TOL: float = 1e-3  # fractional-coordinate tolerance for exact special positions
-_FRAGMENT_FACE_TOL: float = 3e-2  # visual tolerance for whole fragments near a cell face
+_PERIODIC_FACE_TOL: float = 3e-2
+_SOURCE_IMAGE_TOL: float = 1e-5
 
 
 def expand_boundary_replicas(
@@ -25,15 +25,16 @@ def expand_boundary_replicas(
 ) -> list[dict[str, Any]]:
     """Add image-replica copies for cell-boundary atoms/fragments.
 
-    The boundary "mirror set" of each atom is determined in *canonical
-    wrapped* fractional space (the original ``parse_asu`` coordinates,
-    pinned to ``_wrapped_frac`` before MCK overwrites ``frac`` with its
-    continuous unwrapped value).
+    The periodic-context set of each atom is determined in *canonical wrapped*
+    fractional space.  Sites within 0.03 fractional units of a face receive
+    the adjacent image (for example 0.99 -> -0.01 and 0.01 -> 1.01).
 
-    For atoms that carry ``_source_molecule_index``, the *fragment* is
-    replicated rather than each atom independently.  Cart-space
-    placement accounts for the integer *MCK drift* between the
-    canonical wrapped centroid and the MCK home centroid.
+    For atoms that carry ``_source_molecule_index``, each member contributes
+    its own complete face/edge/corner shift set and those sets are unioned;
+    every resulting shift translates the *whole fragment*. This preserves
+    complete chemistry without combining unrelated face signals from
+    different members. Existing MCK continuous-image placement is handled by
+    deriving translations from the current displayed fractional coordinate.
 
     Returns a new list; atoms inside ``(tol, 1-tol)`` along every axis
     are passed through unchanged.
@@ -44,9 +45,8 @@ def expand_boundary_replicas(
 
     # ── helpers ──────────────────────────────────────────────────────
 
-    def _canonical_shifts_for_frac(
+    def _target_images_for_frac(
         frac: Any,
-        tol: float,
     ) -> list[tuple[int, int, int]]:
         if frac is None:
             return [(0, 0, 0)]
@@ -56,8 +56,8 @@ def expand_boundary_replicas(
         per_axis: list[list[int]] = [[0], [0], [0]]
         for axis in range(3):
             f = float(frac_arr[axis])
-            on_zero = -tol <= f <= tol
-            on_one = 1.0 - tol <= f <= 1.0 + tol
+            on_zero = -_SOURCE_IMAGE_TOL <= f <= _PERIODIC_FACE_TOL + _SOURCE_IMAGE_TOL
+            on_one = 1.0 - _PERIODIC_FACE_TOL - _SOURCE_IMAGE_TOL <= f <= 1.0 + _SOURCE_IMAGE_TOL
             if on_zero:
                 per_axis[axis] = [0, 1]
             elif on_one:
@@ -69,86 +69,32 @@ def expand_boundary_replicas(
                     out_shifts.append((sa, sb, sc))
         return out_shifts
 
-    def _canonical_shifts_for_atom(
+    def _periodic_translations_for_atom(
         atom: dict[str, Any],
-    ) -> list[tuple[int, int, int]]:
-        return _canonical_shifts_for_frac(
-            atom.get("_wrapped_frac", atom.get("frac")),
-            _BOUNDARY_TOL,
-        )
+    ) -> set[tuple[int, int, int]]:
+        displayed = np.asarray(atom.get("frac"), dtype=float)
+        if displayed.shape != (3,) or not np.all(np.isfinite(displayed)):
+            return set()
+        # Decompose the current continuous/MCK coordinate into a wrapped
+        # visual position plus its integer display image. This keeps an atom
+        # already shown at 1.02 in the +1 image from spawning a +2 image: its
+        # only additional near-face translation is -1, back to 0.02.
+        current_image_arr = np.floor(displayed + _SOURCE_IMAGE_TOL).astype(int)
+        displayed_wrapped = displayed - current_image_arr
+        current_image = tuple(int(value) for value in current_image_arr)
+        return {
+            tuple(target[axis] - current_image[axis] for axis in range(3))
+            for target in _target_images_for_frac(displayed_wrapped)
+        }
 
-    def _molecule_canonical_shifts(
+    def _molecule_periodic_translations(
         molecule_atoms: list[dict[str, Any]],
     ) -> set[tuple[int, int, int]]:
-        shifts: set[tuple[int, int, int]] = set()
-        wrapped_fracs: list[np.ndarray] = []
+        translations: set[tuple[int, int, int]] = set()
         for atom in molecule_atoms:
-            for shift in _canonical_shifts_for_atom(atom):
-                shifts.add(shift)
-            frac = atom.get("_wrapped_frac", atom.get("frac"))
-            if frac is None:
-                continue
-            frac_arr = np.asarray(frac, dtype=float)
-            if frac_arr.shape == (3,):
-                wrapped_fracs.append(frac_arr)
-        if wrapped_fracs:
-            centroid = np.mean(wrapped_fracs, axis=0)
-            for shift in _canonical_shifts_for_frac(centroid, _FRAGMENT_FACE_TOL):
-                shifts.add(shift)
-        return shifts
-
-    def _molecule_has_disorder(
-        molecule_atoms: list[dict[str, Any]],
-    ) -> bool:
-        for atom in molecule_atoms:
-            if "_is_minor" in atom or atom.get("_is_major"):
-                return True
-            dg = str(atom.get("dg") or "").strip()
-            if dg not in ("", ".", "?", "0"):
-                return True
-            da = str(atom.get("da") or "").strip()
-            if da not in ("", ".", "?"):
-                return True
-        return False
-
-    def _molecule_display_face_shifts(
-        molecule_atoms: list[dict[str, Any]],
-    ) -> set[tuple[int, int, int]]:
-        if not _molecule_has_disorder(molecule_atoms):
-            return set()
-        fracs: list[np.ndarray] = []
-        for atom in molecule_atoms:
-            frac = atom.get("frac")
-            if frac is None:
-                continue
-            frac_arr = np.asarray(frac, dtype=float)
-            if frac_arr.shape == (3,):
-                fracs.append(frac_arr)
-        if not fracs:
-            return set()
-        centroid = np.mean(fracs, axis=0)
-        return set(_canonical_shifts_for_frac(centroid, _FRAGMENT_FACE_TOL))
-
-    def _molecule_drift(
-        molecule_atoms: list[dict[str, Any]],
-    ) -> tuple[int, int, int]:
-        wrapped: list[np.ndarray] = []
-        mck: list[np.ndarray] = []
-        for atom in molecule_atoms:
-            w = atom.get("_wrapped_frac", atom.get("frac"))
-            f = atom.get("frac")
-            if w is None or f is None:
-                continue
-            w_arr = np.asarray(w, dtype=float)
-            f_arr = np.asarray(f, dtype=float)
-            if w_arr.shape != (3,) or f_arr.shape != (3,):
-                continue
-            wrapped.append(w_arr)
-            mck.append(f_arr)
-        if not wrapped:
-            return (0, 0, 0)
-        delta = np.mean(mck, axis=0) - np.mean(wrapped, axis=0)
-        return tuple(int(np.floor(d + 0.5)) for d in delta)
+            translations.update(_periodic_translations_for_atom(atom))
+        translations.discard((0, 0, 0))
+        return translations
 
     # ── main loop ────────────────────────────────────────────────────
 
@@ -167,22 +113,7 @@ def expand_boundary_replicas(
 
     for molecule_atoms in grouped.values():
         out.extend(molecule_atoms)
-        canonical_shifts = _molecule_canonical_shifts(molecule_atoms)
-        drift = _molecule_drift(molecule_atoms)
-        effective_shifts: set[tuple[int, int, int]] = set()
-        if drift in canonical_shifts:
-            for cs in sorted(canonical_shifts):
-                if cs == drift:
-                    continue
-                effective_shifts.add(
-                    (cs[0] - drift[0], cs[1] - drift[1], cs[2] - drift[2])
-                )
-        effective_shifts.update(
-            shift
-            for shift in _molecule_display_face_shifts(molecule_atoms)
-            if shift != (0, 0, 0)
-        )
-        for effective in sorted(effective_shifts):
+        for effective in sorted(_molecule_periodic_translations(molecule_atoms)):
             shift_arr = np.array(effective, dtype=float)
             shift_cart = frac_to_cart(shift_arr, M_arr)
             for atom in molecule_atoms:
@@ -204,7 +135,7 @@ def expand_boundary_replicas(
 
     for atom in ungrouped:
         out.append(atom)
-        for shift in _canonical_shifts_for_atom(atom):
+        for shift in sorted(_periodic_translations_for_atom(atom)):
             if shift == (0, 0, 0):
                 continue
             shift_arr = np.array(shift, dtype=float)
