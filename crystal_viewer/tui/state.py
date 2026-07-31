@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 
@@ -81,6 +81,46 @@ class TerminalFocusState:
 
 
 @dataclass(frozen=True)
+class TerminalEditState:
+    """Selection state independent from source structure and camera state."""
+
+    mode: str = "browse"
+    level: str = "atom"
+    selected_ids: tuple[str, ...] = ()
+    active_id: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode,
+            "level": self.level,
+            "selected_ids": list(self.selected_ids),
+            "active_id": self.active_id,
+        }
+
+
+@dataclass(frozen=True)
+class TerminalPickToken:
+    """One frame-local token mapped to a stable displayed object identity."""
+
+    token: str
+    level: str
+    target_id: str
+    label: str
+    selected: bool = False
+    active: bool = False
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "token": self.token,
+            "level": self.level,
+            "target_id": self.target_id,
+            "label": self.label,
+            "selected": self.selected,
+            "active": self.active,
+        }
+
+
+@dataclass(frozen=True)
 class TerminalViewportState:
     """Terminal viewport dimensions and stable fit scale."""
 
@@ -113,6 +153,7 @@ class TerminalViewState:
     display: TerminalDisplayState
     focus: TerminalFocusState
     viewport: TerminalViewportState
+    edit: TerminalEditState = field(default_factory=TerminalEditState)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -120,6 +161,7 @@ class TerminalViewState:
             "camera": self.camera.as_dict(),
             "display": self.display.as_dict(),
             "focus": self.focus.as_dict(),
+            "edit": self.edit.as_dict(),
             "viewport": self.viewport.as_dict(),
         }
 
@@ -147,6 +189,7 @@ class TerminalObservation:
     capabilities: tuple[str, ...]
     warnings: tuple[str, ...] = ()
     schema: str = OBSERVATION_SCHEMA
+    pick_tokens: tuple[TerminalPickToken, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -161,9 +204,11 @@ class TerminalObservation:
             "camera": self.state.camera.as_dict(),
             "display": self.state.display.as_dict(),
             "focus": self.state.focus.as_dict(),
+            "edit": self.state.edit.as_dict(),
             "viewport": self.state.viewport.as_dict(),
             "scope": dict(self.scope),
             "capabilities": list(self.capabilities),
+            "pick_tokens": [token.as_dict() for token in self.pick_tokens],
             "warnings": list(self.warnings),
         }
 
@@ -172,8 +217,10 @@ __all__ = [
     "OBSERVATION_SCHEMA",
     "TerminalCameraState",
     "TerminalDisplayState",
+    "TerminalEditState",
     "TerminalFocusState",
     "TerminalObservation",
+    "TerminalPickToken",
     "TerminalViewportState",
     "TerminalViewSnapshot",
     "TerminalViewState",

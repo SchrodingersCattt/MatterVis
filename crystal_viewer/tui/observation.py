@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .compositor import resolve_label_mode, resolve_molecule_detail
-from .state import TerminalCameraState, TerminalDisplayState
+from .state import TerminalCameraState, TerminalDisplayState, TerminalEditState
 from .summary import build_scope_summary
 from .text import terminal_text
 
@@ -17,6 +17,7 @@ def build_terminal_title(
     *,
     width: int,
     height: int,
+    edit: TerminalEditState | None = None,
 ) -> str:
     """Build the compact human-readable title from canonical state."""
     resolved_label = (
@@ -47,11 +48,16 @@ def build_terminal_title(
     if display.display_level == "molecule":
         molecule_count = sum(len(indices) for indices in crystal.species_map.values())
         level = f" [molecule:{resolve_molecule_detail(molecule_count=molecule_count, width=width, height=height)}]"
+    edit_text = (
+        f" | edit:{edit.level} selected={len(edit.selected_ids)}"
+        if edit is not None and edit.mode == "edit"
+        else ""
+    )
     return (
         f"{terminal_text(summary['canonical_formula'])} {'/'.join(count_parts)} "
         f"[{terminal_text(summary['display_mode'])}] | "
         f"az={camera.azimuth:.0f}° el={camera.elevation:.0f}°{roll} | "
-        f"{camera.projection[:5]} | {resolved_label}{zoom}{level}"
+        f"{camera.projection[:5]} | {resolved_label}{zoom}{level}{edit_text}"
     )
 
 
