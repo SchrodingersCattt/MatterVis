@@ -189,3 +189,50 @@ def test_ws_figure_broadcast_allows_camera_revision_drift(tmp_path):
         assert backend.latest_figure_broadcast()["figure"] == valid
     finally:
         backend._render_worker.shutdown()
+
+
+def test_ws_figure_broadcast_rejects_old_generation_after_state_round_trip(tmp_path):
+    backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    scene_id = backend.active_scene_id()
+    try:
+        state_a1 = backend.get_state(scene_id)
+        backend.patch_state({"display_mode": "unit_cell"}, scene_id=scene_id, broadcast=False)
+        backend.patch_state(
+            {"display_mode": state_a1["display_mode"]},
+            scene_id=scene_id,
+            broadcast=False,
+        )
+        state_a2 = backend.get_state(scene_id)
+        valid = {
+            "data": [{"type": "scatter3d", "x": [0], "y": [0], "z": [0]}],
+            "layout": {"scene": {"camera": {}}},
+        }
+
+        ignored = backend.broadcast_figure(scene_id=scene_id, figure=valid, state=state_a1)
+        accepted = backend.broadcast_figure(scene_id=scene_id, figure=valid, state=state_a2)
+
+        assert state_a2["render_revision"] == state_a1["render_revision"] + 2
+        assert ignored["type"] == "figure_ignored"
+        assert ignored["reason"] == "stale-render-revision"
+        assert accepted["render_revision"] == state_a2["render_revision"]
+    finally:
+        backend._render_worker.shutdown()
+
+
+def test_figure_history_filters_payload_that_became_stale(tmp_path):
+    backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    scene_id = backend.active_scene_id()
+    try:
+        state = backend.get_state(scene_id)
+        valid = {
+            "data": [{"type": "scatter3d", "x": [0], "y": [0], "z": [0]}],
+            "layout": {"scene": {"camera": {}}},
+        }
+        payload = backend.broadcast_figure(scene_id=scene_id, figure=valid, state=state)
+        backend.patch_state({"display_mode": "unit_cell"}, scene_id=scene_id, broadcast=False)
+
+        assert backend.figure_broadcasts_since(0) == []
+        assert backend.latest_figure_broadcast() is None
+        assert payload["figure_seq"] == backend.latest_figure_seq()
+    finally:
+        backend._render_worker.shutdown()

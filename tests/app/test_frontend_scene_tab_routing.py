@@ -46,6 +46,17 @@ def test_scene_tab_intent_is_bound_by_global_rebind_observer():
     assert "bindSceneTabIntent();" in rebind_body
 
 
+def test_deferred_ws_figure_keeps_and_revalidates_render_metadata():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+
+    assert "function currentRenderRevision" in source
+    assert "function figurePushIsCurrent" in source
+    assert "pendingFigurePush=p" in source
+    flush_idx = source.index("function flushPendingFigurePush")
+    flush_body = source[flush_idx:source.index("function markActive", flush_idx)]
+    assert "figurePushIsCurrent(p)" in flush_body
+
+
 def test_main_graph_disables_plotly_double_click_reset(tmp_path):
     """Double-clicking empty graph space must not reset the camera.
 

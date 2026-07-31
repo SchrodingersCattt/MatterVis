@@ -293,6 +293,9 @@ class _IOBackendMixin:
             store.active_id = str(active_id) if active_id in store.scenes else (store.order[0] if store.order else None)
             if store.scenes:
                 self.scene_store = store
+                self._render_revisions = {
+                    str(scene_id): 0 for scene_id in self.scene_store.scenes
+                }
                 self.scene_store.save()
         for bundle in self.bundles.values():
             bundle.scene_cache.clear()
@@ -358,6 +361,7 @@ class _IOBackendMixin:
                 snapshot["figure_version"] = latest.get("figure_version", self.version)
                 snapshot["figure_seq"] = latest.get("figure_seq")
                 snapshot["scene_id"] = latest.get("scene_id")
+                snapshot["render_revision"] = latest.get("render_revision")
         return snapshot
 
 

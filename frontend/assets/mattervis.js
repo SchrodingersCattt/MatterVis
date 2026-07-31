@@ -30,6 +30,9 @@
   let interactionActive = false, settleTimer = null;
   let lastFigureSeq = 0, pendingFigurePush = null;
   let sceneTabIntentId = null, sceneTabIntentAt = 0;
+  function figurePushIsCurrent(p) {
+    return !!(p && typeof p.isCurrent === "function" && p.isCurrent());
+  }
   function sceneIdFromTabNode(node) {
     if (!node || !node.id || node.id.indexOf("scene-tab-") !== 0) return null;
     if (node.id.indexOf("scene-tab-close-") === 0) return null;
@@ -54,7 +57,7 @@
     if (!pendingFigurePush) return;
     var p = pendingFigurePush;
     pendingFigurePush = null;
-    applyFigurePush(p.data, p.layout);
+    if (figurePushIsCurrent(p)) applyFigurePush(p.figure.data||[], p.figure.layout||{});
   }
   function markActive() {
     if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
@@ -223,6 +226,24 @@
       if (!text) return null;
       try { const m = JSON.parse(text); return m && m.scene_id ? String(m.scene_id) : null; } catch(_) { return null; }
     }
+    function currentRenderRevision() {
+      const node = document.getElementById("fast-view-metadata");
+      const text = node ? (node.textContent||"").trim() : "";
+      if (!text) return null;
+      try {
+        const m = JSON.parse(text);
+        const revision = Number(m && m.render_revision);
+        return Number.isFinite(revision) ? revision : null;
+      } catch(_) { return null; }
+    }
+    function isCurrentFigurePush(p) {
+      if (!p || !p.figure) return false;
+      var cur=currentSceneId();
+      if (cur&&p.scene_id&&String(p.scene_id)!==cur) return false;
+      var currentRevision=currentRenderRevision();
+      var pushedRevision=Number(p.render_revision);
+      return currentRevision===null || (Number.isFinite(pushedRevision)&&pushedRevision===currentRevision);
+    }
     function has3DScene(fig) {
       const lay = fig && fig.layout;
       const data = (fig && Array.isArray(fig.data)) ? fig.data : [];
@@ -241,10 +262,10 @@
     ws.addEventListener("message",function(e){
       var p; try { p=JSON.parse(e.data||"{}"); } catch(_){return;}
       if (!p.figure||isPendingFigure(p.figure)||!has3DScene(p.figure)) return;
-      var cur=currentSceneId(); if (cur&&p.scene_id&&String(p.scene_id)!==cur) return;
+      if (!isCurrentFigurePush(p)) return;
       var seq=Number(p.figure_seq||p.figure_version||0); if (seq&&seq<=lastFigureSeq) return;
       if (seq) lastFigureSeq=seq;
-      if (interactionActive) { pendingFigurePush={data:p.figure.data||[],layout:p.figure.layout||{},seq:seq}; return; }
+      if (interactionActive) { p.isCurrent=function(){return isCurrentFigurePush(p);}; pendingFigurePush=p; return; }
       if (sceneTabIntentId && p.scene_id && String(p.scene_id) === sceneTabIntentId) sceneTabIntentAt = 0;
       applyFigurePush(p.figure.data||[], p.figure.layout||{});
     });

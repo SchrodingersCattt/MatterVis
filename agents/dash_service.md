@@ -109,7 +109,10 @@ Notes for callers:
   WebSocket `set_state`), and consumed once per WS tick — clients see
   one push per version, not one push per call.
 - `subscribe_figure` pushes completed figure deltas as separate
-  `{"type":"figure","figure_seq":...,"figure":...}` frames. Figure
+  `{"type":"figure","figure_seq":...,"scene_id":...,"render_revision":...,"figure":...}`
+  frames. `render_revision` is monotonic per scene and changes only when
+  render-affecting state changes; clients must reject a figure whose scene or
+  revision no longer matches their current state. Figure
   delivery is asynchronous: a REST or Dash state mutation may return
   before cold topology/polyhedra overlays have been recomputed.
 - Scene persistence is debounced. A successful mutation updates memory
