@@ -18,8 +18,9 @@ ase
 networkx
 textual
 # Molecule identification, disorder handling, per-formula-unit stoichiometry,
-# and molecule-level packing polyhedra. Pinned to MCK 0.4.0 (cluster carver,
+# and molecule-level packing polyhedra. Pinned to the immutable MCK 00fa232
+# revision (cluster carver,
 # disorder-aware identify_molecules, decoupled disorder symmetry copies,
 # and the gap+enclosure vs hard_cutoff radial knob split that MV's polyhedron
 # editor exposes per spec).
-molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@62fc7e78095634819fad54a29c459a7dad285833
+molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@00fa232f23e52ea928cd6cdb41cdba7331db5ade

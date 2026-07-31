@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import os
+import time
 import numpy as np
 from functools import lru_cache
 
+from .. import perf_log
 from ..style.disorder import _disorder_group_id
 from .geometry import _nearest_pbc_cart, bond_vector_mic
 from ..style.palette import cov_r
@@ -440,6 +443,10 @@ def find_bonds(atoms, M=None, cell=None, *, bond_scale=None, bond_thresholds=Non
     ):
         raise ValueError("bond_scale must be finite and positive")
     normalized_thresholds = _normalize_thresholds(bond_thresholds)
+    telemetry_enabled = os.environ.get("MATTERVIS_BOND_PERF_EVENTS") == "1"
+    started = time.perf_counter() if telemetry_enabled else None
+    candidate_count = 0
+    accepted_count = 0
     candidates = []
     for i, j in _bond_candidate_pairs(
         atoms,
@@ -448,6 +455,8 @@ def find_bonds(atoms, M=None, cell=None, *, bond_scale=None, bond_thresholds=Non
         bond_scale=bond_scale,
         bond_thresholds=normalized_thresholds,
     ):
+        if telemetry_enabled:
+            candidate_count += 1
         ai = atoms[i]
         aj = atoms[j]
         if not _bond_allowed_by_table(ai, aj):
@@ -473,8 +482,24 @@ def find_bonds(atoms, M=None, cell=None, *, bond_scale=None, bond_thresholds=Non
             continue
         if d < cutoff:
             candidates.append((i, j, float(d)))
+            if telemetry_enabled:
+                accepted_count += 1
 
-    return [(i, j) for i, j, _ in _prune_duplicate_label_bond_candidates(atoms, candidates)]
+    result = [(i, j) for i, j, _ in _prune_duplicate_label_bond_candidates(atoms, candidates)]
+    if telemetry_enabled:
+        perf_log.record(
+            "bonds:find",
+            duration_ms=(time.perf_counter() - started) * 1000.0,
+            kind="event",
+            info={
+                "atoms": len(atoms),
+                "candidates": candidate_count,
+                "accepted": accepted_count,
+                "final": len(result),
+                "pbc": bool(cell is not None or M is not None),
+            },
+        )
+    return result
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

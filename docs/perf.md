@@ -8,6 +8,38 @@ python -m crystal_viewer.perf.bench --repeat 3
 python -m crystal_viewer.perf.profile_app
 ```
 
+## Pipeline oracle benchmark
+
+Use the pipeline benchmark to record loader, scene, figure, JSON-encoding, and
+scientific-signature baselines without mixing cold and warm cache paths:
+
+```bash
+python -m crystal_viewer.perf.bench_pipeline scripts/data/DAP-4.cif --repeat 3 --output /tmp/dap4-pipeline.json
+```
+
+Each scene and figure report keeps one explicit cold sample separate from the
+warm repeated samples. Do not compare cProfile wall time with these values: the
+profiler changes the absolute runtime substantially.
+
+The JSON report includes the fixture SHA-256, MatterVis revision, dependency
+provenance, peak RSS, existing perf events, and a versioned oracle with separate
+section digests. A section digest changing is a chemistry/rendering regression
+signal, not a performance result by itself.
+
+`tests/perf/oracles/pipeline_v1.json` stores compact expected signatures. The
+external CSD DAP-O4 fixture is intentionally not committed. Run its slow,
+formula-unit-only oracle explicitly when the fixture and matching MolCrysKit
+revision are available:
+
+```bash
+MATTERVIS_DAP_O4_CIF=/absolute/path/DAP-O4.cif \
+   pytest tests/perf/test_dap_o4_oracle.py
+```
+
+The test verifies the fixture hash and skips when the installed MolCrysKit
+revision differs from the baseline entry. It must not be enabled in the normal
+fast test suite.
+
 ## Baseline
 
 Captured on 2026-05-01 with:

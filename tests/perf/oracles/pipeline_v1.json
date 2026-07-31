@@ -1,0 +1,81 @@
+{
+  "schema": "mattervis.perf.pipeline-oracle/v1",
+  "entries": {
+    "dap4-origin-main-90f9816-mck-00fa232": {
+      "producer": {
+        "mattervis_revision": "90f9816d22d9a733c1e13ed174f73e19431e9d7c",
+        "molcrys_kit_revision": "00fa232f23e52ea928cd6cdb41cdba7331db5ade"
+      },
+      "fixture": {
+        "path": "scripts/data/DAP-4.cif",
+        "sha256": "b126b65d267ae4a6930e203c2124af09c137d466d27613792f83cf519bbc454b"
+      },
+      "oracle": {
+        "schema": "mattervis.perf.oracle/v1",
+        "overall_digest": "ba9a031e28b2f035d9c78f0a56e71626063d0cc370c1ca61ff5d6f44e3562234",
+        "section_digests": {
+          "analysis": "4aca310f8f4cb8158e346811e206695aa48d42d28dfbcd84874e58398716fcb0",
+          "disorder": "dc3bb1b40abccff46be7cb6d7bed804b42cda8bd781033931ce0a6abaa915f9f",
+          "figure": "8466672d9f1b6d520c74c9368a943b38bef96eb52fd410d97f5c3d2a63a78331",
+          "formula_unit": "d66a103a65259bb86e093bf51f1cdc00ac2f05c8fe46d7f38dc96601c32d898c",
+          "raw_atoms": "a44d1055815cfd557cf22671af4bfe52e910ec367c3e0ea2ededab31b6e4d6dc",
+          "scene": "b17638efd737bf1daa066c6acc7d02a8e2694a4dc2e8ce4c8c694dd989cd4a32"
+        },
+        "counts": {
+          "canonical_bonds": 312,
+          "formula_unit_atoms": 42,
+          "fragment_formulas": {
+            "C6N2": 8,
+            "ClO4": 54,
+            "N": 27
+          },
+          "major_atoms": 336,
+          "minor_atoms": 0,
+          "molecules": 40,
+          "raw_atoms": 336,
+          "scene_atoms": 581,
+          "scene_bonds": 312
+        }
+      }
+    },
+    "dap-o4-external-mck-00fa232": {
+      "producer": {
+        "mattervis_revision": "90f9816d22d9a733c1e13ed174f73e19431e9d7c",
+        "molcrys_kit_revision": "00fa232f23e52ea928cd6cdb41cdba7331db5ade"
+      },
+      "fixture": {
+        "external": true,
+        "sha256": "05a0b340700b85f1f2ac1a16468c6f3e23b8951406aaf2781eb363c596be77a9"
+      },
+      "oracle": {
+        "schema": "mattervis.perf.oracle/v1",
+        "overall_digest": "5cd884ee1118dc9009ad1436a491094873977358ab74bcd4466b5fb26f189e54",
+        "section_digests": {
+          "analysis": "0da82221636c5d1901387c959fa613c7dde7b10b6f5c85aa83c24baef3d38406",
+          "disorder": "385771704e4afbfa7f6a49cde9361a2a763bc9a98e33f2ea93b4eaa3014e28fc",
+          "figure": "8466672d9f1b6d520c74c9368a943b38bef96eb52fd410d97f5c3d2a63a78331",
+          "formula_unit": "b761fe16df7d413ec95504df99abdc55230fd8fa077ae41566d6b303dc1999bc",
+          "raw_atoms": "420dff4b131b4752cc08ff40429cc4c4f0dbe92f0622dc5a25eebdda748c023d",
+          "scene": "d668697931847ebf1fd0ac68c5466d0950aa5ea6b338fe88dbdefe0c1774d6f9"
+        },
+        "counts": {
+          "canonical_bonds": 4864,
+          "formula_unit_atoms": 5088,
+          "fragment_formulas": {
+            "C6N": 128,
+            "C6N2O": 64,
+            "ClO4": 24,
+            "N": 8,
+            "O": 128
+          },
+          "major_atoms": 344,
+          "minor_atoms": 4744,
+          "molecules": 352,
+          "raw_atoms": 5088,
+          "scene_atoms": 5088,
+          "scene_bonds": 4864
+        }
+      }
+    }
+  }
+}
