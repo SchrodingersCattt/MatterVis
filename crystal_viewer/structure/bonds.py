@@ -443,7 +443,8 @@ def find_bonds(atoms, M=None, cell=None, *, bond_scale=None, bond_thresholds=Non
     ):
         raise ValueError("bond_scale must be finite and positive")
     normalized_thresholds = _normalize_thresholds(bond_thresholds)
-    started = time.perf_counter()
+    telemetry_enabled = os.environ.get("MATTERVIS_BOND_PERF_EVENTS") == "1"
+    started = time.perf_counter() if telemetry_enabled else None
     candidate_count = 0
     accepted_count = 0
     candidates = []
@@ -454,7 +455,8 @@ def find_bonds(atoms, M=None, cell=None, *, bond_scale=None, bond_thresholds=Non
         bond_scale=bond_scale,
         bond_thresholds=normalized_thresholds,
     ):
-        candidate_count += 1
+        if telemetry_enabled:
+            candidate_count += 1
         ai = atoms[i]
         aj = atoms[j]
         if not _bond_allowed_by_table(ai, aj):
@@ -480,10 +482,11 @@ def find_bonds(atoms, M=None, cell=None, *, bond_scale=None, bond_thresholds=Non
             continue
         if d < cutoff:
             candidates.append((i, j, float(d)))
-            accepted_count += 1
+            if telemetry_enabled:
+                accepted_count += 1
 
     result = [(i, j) for i, j, _ in _prune_duplicate_label_bond_candidates(atoms, candidates)]
-    if os.environ.get("MATTERVIS_BOND_PERF_EVENTS") == "1":
+    if telemetry_enabled:
         perf_log.record(
             "bonds:find",
             duration_ms=(time.perf_counter() - started) * 1000.0,

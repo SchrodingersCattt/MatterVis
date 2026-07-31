@@ -105,6 +105,8 @@ def test_pipeline_report_exposes_cold_warm_and_manifest(monkeypatch, tmp_path):
     cif = tmp_path / "small.cif"
     cif.write_text("data_small\n")
     bundle = _bundle()
+    bundle.scene_cache = {("formula_unit", False): bundle.scene}
+    bundle.fragment_table_cache = {("scene", "formula_unit", False): ([{"formula": "stale"}], ["?"])}
     calls = []
 
     def fake_loader(**_kwargs):
@@ -124,4 +126,5 @@ def test_pipeline_report_exposes_cold_warm_and_manifest(monkeypatch, tmp_path):
     assert report["fixture"]["sha256"]
     assert report["scenes"]["formula_unit"]["timing"].keys() == {"cold", "warm"}
     assert calls == ["formula_unit", "formula_unit"]
+    assert bundle.fragment_table_cache == {}
     json.dumps(report)

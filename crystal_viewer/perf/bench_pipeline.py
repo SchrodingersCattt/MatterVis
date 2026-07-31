@@ -96,6 +96,9 @@ def _scene_timings(bundle, display_mode: str, *, repeat: int) -> tuple[dict[str,
         for key in list(scene_cache):
             if isinstance(key, tuple) and key[:2] == (display_mode, False):
                 scene_cache.pop(key, None)
+    fragment_cache = getattr(bundle, "fragment_table_cache", None)
+    if isinstance(fragment_cache, dict):
+        fragment_cache.pop(("scene", display_mode, False), None)
     cold, scene = _timed(
         lambda: build_bundle_scene(bundle, display_mode=display_mode, show_hydrogen=False, preset={}),
     )

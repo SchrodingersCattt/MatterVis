@@ -6,6 +6,7 @@ import gemmi
 import numpy as np
 import pytest
 
+import crystal_viewer.structure.bonds as bonds_module
 from crystal_viewer.structure.bonds import find_bonds
 from crystal_viewer.structure.geometry import ortho_matrix
 
@@ -43,8 +44,13 @@ def _brute_force_pairs(atoms: list[dict], M: np.ndarray, cutoff: float = 1.94) -
 
 
 def _large_atoms(count: int, M: np.ndarray) -> list[dict]:
-    atoms = [_atom("C1", (0.999, 0.5, 0.5), M), _atom("C2", (0.001, 0.5, 0.5), M)]
-    for index in range(count - 2):
+    atoms = [
+        _atom("C1", (0.9992, 0.5, 0.5), M),
+        _atom("C2", (0.0008, 0.5, 0.5), M),
+        _atom("C3", (0.2, 0.2, 0.2), M),
+        _atom("C4", (0.201, 0.2, 0.2), M),
+    ]
+    for index in range(count - 4):
         x = 0.10 + (index % 20) * 0.04
         y = 0.10 + ((index // 20) % 20) * 0.04
         z = 0.10 + (index // 400) * 0.04
@@ -79,5 +85,22 @@ def test_find_bonds_kdtree_paths_match_brute_force_periodic_pairs(count):
     legacy_M, _ = ortho_matrix(cell)
     M = legacy_M.T
     atoms = _large_atoms(count, M)
+    expected = _brute_force_pairs(atoms, M)
 
-    assert set(find_bonds(atoms, M=M, cell=cell)) == _brute_force_pairs(atoms, M)
+    assert {(0, 1), (2, 3)} <= expected
+    assert set(find_bonds(atoms, M=M, cell=cell)) == expected
+
+
+def test_disabled_bond_telemetry_does_not_start_a_timer(monkeypatch):
+    monkeypatch.delenv("MATTERVIS_BOND_PERF_EVENTS", raising=False)
+    monkeypatch.setattr(
+        bonds_module.time,
+        "perf_counter",
+        lambda: pytest.fail("disabled bond telemetry must not read perf_counter"),
+    )
+    atoms = [
+        {"label": "C1", "elem": "C", "cart": np.array([0.0, 0.0, 0.0]), "occ": 1.0, "dg": ".", "da": "."},
+        {"label": "C2", "elem": "C", "cart": np.array([1.4, 0.0, 0.0]), "occ": 1.0, "dg": ".", "da": "."},
+    ]
+
+    assert find_bonds(atoms) == [(0, 1)]

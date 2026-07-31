@@ -2,6 +2,10 @@
   "schema": "mattervis.perf.pipeline-oracle/v1",
   "entries": {
     "dap4-origin-main-90f9816-mck-00fa232": {
+      "producer": {
+        "mattervis_revision": "90f9816d22d9a733c1e13ed174f73e19431e9d7c",
+        "molcrys_kit_revision": "00fa232f23e52ea928cd6cdb41cdba7331db5ade"
+      },
       "fixture": {
         "path": "scripts/data/DAP-4.cif",
         "sha256": "b126b65d267ae4a6930e203c2124af09c137d466d27613792f83cf519bbc454b"
