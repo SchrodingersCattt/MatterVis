@@ -41,7 +41,10 @@ Parses a CIF and returns a scene dict consumable by
   `StoichiometryAnalyzer.get_simplest_unit()` (unit-cell species counts
   divided by their GCD), not MatterVis-local hard-coded heuristics.
 - `unit_cell` — every atom of the conventional cell, with PBC bond
-  imaging.
+  imaging. When MolCrysKit canonical bond records are available, every
+  manifested boundary-fragment image receives the corresponding canonical
+  edge instances. This preserves the chemistry of a whole boundary replica
+  without re-perceiving bonds on display atoms.
 - `asymmetric_unit` — only the asymmetric unit is drawn.
 - `cluster` — **free molecular cluster mode**. Every parsed atom is
   drawn unchanged; no formula-unit selection or periodic image

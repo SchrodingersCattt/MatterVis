@@ -916,6 +916,7 @@ def build_bundle_scene(
             bond_scale=bundle.bond_scale,
             bond_thresholds=bundle.bond_thresholds,
             canonical_bond_pairs=getattr(bundle.molcrys_analysis, "bond_pairs", None),
+            canonical_bond_records=getattr(bundle.molcrys_analysis, "bond_records", None),
         )
         base_scene["cif_path"] = bundle.cif_path
         base_scene["view_direction"] = view_dir

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import os
+import time
 from types import SimpleNamespace
 from typing import Any, Dict, Optional
 
@@ -90,6 +91,143 @@ def _bond_endpoints(ai, aj, cell, display_mode: str):
     return start, end
 
 
+_SOURCE_IMAGE_TOL = 1e-5
+
+
+def _source_image_identity(
+    atom: dict[str, Any],
+    source_atoms: list[dict[str, Any]],
+    fallback_index: int,
+) -> tuple[int, tuple[int, int, int]] | None:
+    """Return a manifested atom's absolute raw-source image identity.
+
+    ``_image_shift`` is intentionally not used here: boundary replication
+    stores a shift relative to MCK's unwrapped display home image.  The stable
+    identity is the integer offset between the displayed fractional coordinate
+    and the source atom's crystallographically wrapped coordinate.
+    """
+    try:
+        source_index = int(atom.get("_source_index", fallback_index))
+    except (TypeError, ValueError):
+        return None
+    if not 0 <= source_index < len(source_atoms):
+        return None
+    display_frac = np.asarray(atom.get("frac"), dtype=float)
+    wrapped_frac = np.asarray(
+        atom.get("_wrapped_frac", source_atoms[source_index].get("frac")),
+        dtype=float,
+    )
+    if display_frac.shape != (3,) or wrapped_frac.shape != (3,):
+        return None
+    delta = display_frac - wrapped_frac
+    image = np.rint(delta).astype(int)
+    if not np.allclose(delta, image, rtol=0.0, atol=_SOURCE_IMAGE_TOL):
+        return None
+    return source_index, tuple(int(value) for value in image)
+
+
+def _canonical_display_bond_pairs(
+    draw_atoms: list[dict[str, Any]],
+    source_atoms: list[dict[str, Any]],
+    canonical_bond_records: list[dict[str, Any]],
+) -> tuple[list[tuple[int, int]], dict[str, int]]:
+    """Lift PBC-aware canonical records to matching display atom instances.
+
+    For a canonical record ``(left, right, S)`` and a visible instance
+    ``left@q``, the sole valid target is ``right@(q + S)``.  The lookup is
+    linear in manifested atoms plus valid edge copies; it never re-perceives
+    bonds or forms a Cartesian product of replica sets.
+    """
+    instances: dict[tuple[int, tuple[int, int, int]], int] = {}
+    fragment_instances: dict[
+        tuple[int, tuple[int, int, int]],
+        dict[int, int],
+    ] = {}
+    fragment_keys_by_source: dict[
+        int,
+        list[tuple[int, tuple[int, int, int]]],
+    ] = {}
+    shifts_by_source: dict[int, list[tuple[tuple[int, int, int], int]]] = {}
+    collision_keys: set[tuple[int, tuple[int, int, int]]] = set()
+    unresolved_instances = 0
+    for draw_index, atom in enumerate(draw_atoms):
+        identity = _source_image_identity(atom, source_atoms, draw_index)
+        if identity is None:
+            unresolved_instances += 1
+            continue
+        existing = instances.get(identity)
+        if existing is not None:
+            collision_keys.add(identity)
+            continue
+        instances[identity] = draw_index
+        shifts_by_source.setdefault(identity[0], []).append((identity[1], draw_index))
+        molecule_index = atom.get("_source_molecule_index")
+        if molecule_index is not None:
+            try:
+                relative_shift = tuple(int(value) for value in atom.get("_image_shift", (0, 0, 0)))
+                fragment_key = (int(molecule_index), relative_shift)
+                members = fragment_instances.setdefault(fragment_key, {})
+                if identity[0] not in members:
+                    fragment_keys_by_source.setdefault(identity[0], []).append(fragment_key)
+                members[identity[0]] = draw_index
+            except (TypeError, ValueError):
+                pass
+
+    pairs: set[tuple[int, int]] = set()
+    missing_targets = 0
+    instance_lookups = 0
+    max_copies_per_record = 0
+    for record in canonical_bond_records:
+        try:
+            left = int(record["left"])
+            right = int(record["right"])
+            relation = tuple(int(value) for value in record["right_image_shift"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if len(relation) != 3:
+            continue
+        emitted_for_record: set[tuple[int, int]] = set()
+        for fragment_key in sorted(fragment_keys_by_source.get(left, ())):
+            members = fragment_instances[fragment_key]
+            if left in members and right in members:
+                pair = (members[left], members[right])
+            else:
+                continue
+            instance_lookups += 1
+            pair_key = tuple(sorted(pair))
+            pairs.add(pair_key)
+            emitted_for_record.add(pair_key)
+        directions = (
+            (left, right, relation),
+            (right, left, tuple(-value for value in relation)),
+        )
+        for source, target, shift in directions:
+            for image, source_draw_index in shifts_by_source.get(source, ()):
+                source_key = (source, image)
+                if source_key in collision_keys:
+                    continue
+                target_image = tuple(image[axis] + shift[axis] for axis in range(3))
+                target_key = (target, target_image)
+                instance_lookups += 1
+                target_draw_index = instances.get(target_key)
+                if target_draw_index is None or target_key in collision_keys:
+                    missing_targets += 1
+                    continue
+                pair_key = tuple(sorted((source_draw_index, target_draw_index)))
+                pairs.add(pair_key)
+                emitted_for_record.add(pair_key)
+            max_copies_per_record = max(max_copies_per_record, len(emitted_for_record))
+
+    return sorted(pairs), {
+        "display_instances": len(instances),
+        "instance_collisions": len(collision_keys),
+        "unresolved_instances": unresolved_instances,
+        "instance_lookups": instance_lookups,
+        "missing_target_instances": missing_targets,
+        "max_copies_per_record": max_copies_per_record,
+    }
+
+
 def build_scene_from_atoms(
     *,
     name: str,
@@ -107,6 +245,7 @@ def build_scene_from_atoms(
     bond_scale: float | None = None,
     bond_thresholds: dict[tuple[str, str], float] | None = None,
     canonical_bond_pairs: list[tuple[int, int]] | None = None,
+    canonical_bond_records: list[dict[str, Any]] | None = None,
 ) -> Dict[str, Any]:
     ops = scene_ops() if ops is None else ops
     preset = default_preset() if preset is None else preset
@@ -150,10 +289,21 @@ def build_scene_from_atoms(
     # the KDTree uses non-PBC Cartesian distances and misses these pairs.
     effective_M = None if display_mode == "cluster" else M
     canonical_pairs = None
+    canonical_records = None
     if display_mode in ("formula_unit", "unit_cell"):
         canonical_pairs = canonical_bond_pairs
+        canonical_records = canonical_bond_records
     bond_source = "canonical_mck" if canonical_pairs is not None else "redetect"
-    if canonical_pairs is not None:
+    telemetry_enabled = os.environ.get("MATTERVIS_SCENE_PERF_EVENTS") == "1"
+    bond_started = time.perf_counter() if telemetry_enabled else None
+    canonical_stats: dict[str, int] = {}
+    if canonical_records:
+        bond_pairs, canonical_stats = _canonical_display_bond_pairs(
+            draw_atoms,
+            atoms,
+            canonical_records,
+        )
+    elif canonical_pairs is not None:
         source_to_draw = {
             int(atom.get("_source_index", index)): index
             for index, atom in enumerate(draw_atoms)
@@ -179,10 +329,14 @@ def build_scene_from_atoms(
             bond_thresholds=bond_thresholds,
         )
     bonds = []
+    conflict_drops = 0
+    render_length_drops = 0
     for i, j in bond_pairs:
         ai = draw_atoms[i]
         aj = draw_atoms[j]
         if bonds_conflict(ai, aj):
+            if telemetry_enabled:
+                conflict_drops += 1
             continue
         start, end = _bond_endpoints(ai, aj, cell, display_mode=display_mode)
         # Skip bonds whose rendered length far exceeds a covalent bond —
@@ -191,6 +345,8 @@ def build_scene_from_atoms(
         # visual representation would span the entire cell as a long line.
         rendered_len = float(np.linalg.norm(end - start))
         if rendered_len > 3.5:
+            if telemetry_enabled:
+                render_length_drops += 1
             continue
         bonds.append(
             {
@@ -213,10 +369,16 @@ def build_scene_from_atoms(
             kind="event",
             info={
                 "source": bond_source,
+                "mapping": "source_image_lift" if canonical_records else "legacy_source_map",
                 "display_mode": display_mode,
+                "canonical_records": len(canonical_records or []),
                 "draw_atoms": len(draw_atoms),
                 "input_pairs": len(bond_pairs),
                 "rendered_bonds": len(bonds),
+                "conflict_drops": conflict_drops,
+                "render_length_drops": render_length_drops,
+                "duration_ms": (time.perf_counter() - bond_started) * 1000.0,
+                **canonical_stats,
             },
         )
 
