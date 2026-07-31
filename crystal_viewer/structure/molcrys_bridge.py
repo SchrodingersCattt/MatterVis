@@ -216,6 +216,7 @@ class CrystalAnalysis:
         species_map,
         per_fu,
         bond_pairs=None,
+        bond_records=None,
     ):
         self.crystal = crystal
         self.mol_indices = mol_indices
@@ -230,6 +231,12 @@ class CrystalAnalysis:
         # reintroduces the disorder/PBC mishandling that produced the
         # "?-orphan-H" / variable-cluster_size NH4 bugs (DAP-4, SY).
         self.bond_pairs: list[tuple[int, int]] = list(bond_pairs or [])
+        # ``bond_records`` extend ``bond_pairs`` with MolCrysKit's signed
+        # PBC image relation.  For ``left, right, S`` the physical edge is
+        # ``x_right + S @ M - x_left``.  Display assembly uses this relation
+        # to materialise the edge on the matching boundary image rather than
+        # re-perceiving chemistry on replica atoms.
+        self.bond_records: list[dict] = list(bond_records or [])
 
 
 def analyze(
@@ -255,7 +262,7 @@ def analyze(
     mk = _require_molcryskit()
     if not raw_atoms:
         crystal = mk["MolecularCrystal"](np.eye(3), [], pbc=(True, True, True))
-        return CrystalAnalysis(crystal, [], [], {}, {}, bond_pairs=[])
+        return CrystalAnalysis(crystal, [], [], {}, {}, bond_pairs=[], bond_records=[])
 
     ase_atoms = _ase_atoms_from_raw(raw_atoms, M, mk)
     identified = mk["identify_molecules"](
@@ -269,6 +276,7 @@ def analyze(
     mol_indices = []
     mol_cart_positions = []
     bond_pairs: set[tuple[int, int]] = set()
+    bond_records: dict[tuple[int, int, tuple[int, int, int]], dict] = {}
     for molecule in identified:
         indices = [int(i) for i in (molecule.info.get("atom_indices") or [])]
         if not indices:
@@ -284,6 +292,21 @@ def analyze(
             if a > b:
                 a, b = b, a
             bond_pairs.add((a, b))
+        for record in molecule.info.get("bond_records") or []:
+            left, right = int(record["left"]), int(record["right"])
+            shift = tuple(int(value) for value in record.get("right_image_shift", (0, 0, 0)))
+            vector = [float(value) for value in record.get("vector", (0.0, 0.0, 0.0))]
+            key = (left, right, shift)
+            normalised = {
+                "left": left,
+                "right": right,
+                "right_image_shift": list(shift),
+                "vector": vector,
+            }
+            existing = bond_records.get(key)
+            if existing is not None and existing != normalised:
+                raise ValueError(f"conflicting canonical PBC bond records for raw edge {key[:2]}")
+            bond_records[key] = normalised
 
     crystal = mk["MolecularCrystal"](
         ase_atoms.get_cell(), molecules, pbc=tuple(ase_atoms.get_pbc())
@@ -296,6 +319,7 @@ def analyze(
         species_map=copy.deepcopy(analyzer.species_map),
         per_fu=copy.deepcopy(analyzer.get_simplest_unit()),
         bond_pairs=sorted(bond_pairs),
+        bond_records=[bond_records[key] for key in sorted(bond_records)],
     )
 
 
