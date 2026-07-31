@@ -113,7 +113,17 @@ upstream API has grown the exact hook.
 - The compositor may receive explicit stable viewport bounds. Do not quietly
   re-fit during orbit or display toggles, or the terminal view will breathe.
   Refit only at construction, explicit fit/reset, and explicit semantic resize.
-- `inspect_atom` / `inspect_molecule` are analytical reads. Perceptual
+- `inspect_atom` / `inspect_molecule` / `inspect_local_geometry` /
+  `inspect_local_geometries` are analytical
+  reads. Local geometry consumes the manifested `CrystalIR.bonds` topology and
+  may derive direct/MIC distances and neighbor-pair angles, but must not infer
+  replacement bonds or emit an abnormality verdict. Include topology
+  provenance so callers can distinguish canonical scene bonds from a
+  distance-heuristic non-CIF topology.
   observations intentionally omit coordinates, depths, distances, front-order,
   collision scores, and recommended cameras. Active-view evaluation must not
   register analytical inspection tools.
+  - Interactive `:` measurements are thin wrappers over controller measurement
+    methods. Angle MIC is center-anchored; dihedral `mic_chain` unwraps A-B-C-D
+    consecutively. Keep the applied image shifts in the returned payload and do
+    not move this geometry math into Textual event handlers.

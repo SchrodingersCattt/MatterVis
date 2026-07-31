@@ -43,6 +43,7 @@ front/back answers, collision scores, or a recommended camera.
 | `pan(dx=..., dy=...)`, `zoom(factor=...)` | Move/crop the stable terminal viewport. |
 | `fit(target="all"\|"focus")` | Explicitly refit; orbit and display toggles do not refit. |
 | `set_display(...)` | Partial absolute update for `display_level`, `label_mode`, `show_cell`, `show_bonds`, `show_minor`, and `mono`. |
+| `focus_local(reference, bond_depth=1)` | Fit one exact displayed atom and its manifested bond neighborhood. |
 | `reset_view()` | Restore startup camera and all-view framing while preserving display settings. |
 
 The controller fits at construction, explicit `fit`, resize, and reset. It
@@ -74,6 +75,25 @@ occupancy, disorder render classification, periodic copy shift, display
 fragment/source molecule IDs, raw MolCrysKit species ID, and per-formula-unit
 counts.
 
+`inspect_local_geometry(reference, include_angles=True)` is also a pure read.
+It resolves exactly one displayed atom and reports the current manifested bond
+neighbors, coordination number, rendered/direct and minimum-image distances,
+periodic image shifts, neighbor-pair angles, and topology provenance. It
+describes the topology already present in `CrystalIR`; it does not perceive new
+bonds or label any coordination, distance, angle, or ring as chemically normal
+or abnormal. Ambiguous labels must be replaced by an exact `display_copy_id`.
+`inspect_local_geometries(references=None, include_angles=True)` batches the
+same records; omitted references mean every manifested atom. This is intended
+for bounded agent audits where one-tool-call-per-atom would waste the action
+budget. It adds no anomaly classification or replacement topology.
+
+`measure_distance`, `measure_angle`, and `measure_dihedral` are explicit,
+read-only measurements over caller-selected atoms. Distance and angle support
+`direct`/`mic`; dihedral supports `direct`/`mic_chain`. Every result reports
+the image shifts actually used. Labels are accepted only when they resolve to
+exactly the requested number of displayed atoms; ambiguous labels require
+`display_copy_id`.
+
 These are analytical product capabilities. Active-view evaluations must omit
 them and must not offer direct answers such as distances, neighbor queries,
 front/back classification, collision counts, or `best_camera`.
@@ -91,9 +111,26 @@ site is ordered or major.
 - `u` zooms out; `o` zooms in. Existing `+/-` and `[/]` aliases remain.
 - `p`, `c`, `b`, `t`, `m`, `n`, `Shift+L`, `r`: projection, cell, bonds,
   labels, monochrome, minor disorder, display level, and reset.
+- `x`: quit. `Ctrl+Q` is intentionally not used because it conflicts with
+  common terminal/editor shortcuts.
 
 Legacy static `ascii` and `structured` CLI output stays unchanged. The
 controller observation is the machine-readable local API.
+
+## Interactive command mode
+
+Press `:` in `matvis tui` to open a one-line command prompt:
+
+- `:select A B ...`, `:clear`
+- `:focus N9 [bond_depth]`
+- `:distance A B [direct|mic]`
+- `:angle A B C [direct|mic]`
+- `:dihedral A B C D [direct|mic_chain]`
+- `:help`
+
+Measurements use the same controller methods as programmatic callers; the UI
+does not implement a second geometry path. Command results are transient view
+text and do not mutate the source structure or manifested topology.
 
 ## Visual verification artifacts
 

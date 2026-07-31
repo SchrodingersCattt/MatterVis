@@ -6,11 +6,13 @@ panning, zooming, and toggling display options.
 
 from __future__ import annotations
 
+import json
+import shlex
 from typing import TYPE_CHECKING
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import Footer, Header, Static
+from textual.widgets import Footer, Header, Input, Static
 from textual.reactive import reactive
 from rich.text import Text
 
@@ -68,6 +70,15 @@ class CrystalTUI(App):
         height: 1fr;
         overflow: hidden hidden;
     }
+    #command-result {
+        dock: bottom;
+        height: 2;
+        overflow: hidden hidden;
+    }
+    #command {
+        dock: bottom;
+        height: 1;
+    }
     Header {
         dock: top;
         height: 1;
@@ -91,7 +102,8 @@ class CrystalTUI(App):
         Binding("r", "reset_view", "Reset", show=True),
         Binding("u", "zoom_out", "Zoom out", show=True),
         Binding("o", "zoom_in", "Zoom in", show=True),
-        Binding("Q", "quit", "Quit", show=True),
+        Binding("shift+semicolon", "command", "Command", show=True),
+            Binding("x", "quit", "Quit", show=True),
     ]
 
     def __init__(
@@ -110,6 +122,8 @@ class CrystalTUI(App):
     ):
         super().__init__()
         self.crystal = crystal
+        self._command_mode = False
+        self._command_selection: list[dict[str, str]] = []
         self.controller = TerminalViewController(
             crystal,
             camera=camera or Camera.from_view_name(initial_view, crystal),
@@ -157,9 +171,11 @@ class CrystalTUI(App):
     def compose(self) -> ComposeResult:
         yield Header()
         yield CrystalCanvas(id="canvas")
+        yield Static("", id="command-result")
         yield Footer()
 
     def on_mount(self) -> None:
+        self.query_one("#command-result", Static).display = False
         self._apply_observation(self._resize_and_observe())
 
     def on_resize(self) -> None:
@@ -167,8 +183,21 @@ class CrystalTUI(App):
 
     def on_key(self, event) -> None:
         """Direct key handler — bypasses binding resolution for movement keys."""
+        if self._command_mode:
+            if event.key == "escape":
+                self._close_command()
+                event.prevent_default()
+                event.stop()
+            return
         char = event.character
         key = event.key
+        if char == ":" or key in ("colon", "shift+semicolon"):
+            if not self._command_mode:
+                self._command_mode = True
+                self.run_worker(self._mount_command())
+            event.prevent_default()
+            event.stop()
+            return
         handled = True
         observation: TerminalObservation | None = None
         if char == "j" or key in ("j", "left"):
@@ -230,6 +259,106 @@ class CrystalTUI(App):
 
     def _update_title(self) -> None:
         self.sub_title = self.controller.observe().title
+
+    # ── Command mode ──────────────────────────────────────────────────
+
+    async def action_command(self) -> None:
+        """Open the one-line measurement command prompt."""
+        if self._command_mode:
+            commands = self.query("#command").nodes
+            if commands:
+                commands[0].focus()
+            return
+        self._command_mode = True
+        await self._mount_command()
+
+    async def _mount_command(self) -> None:
+        """Mount and focus the command input after mode is reserved."""
+        command = Input(placeholder=":distance A B [direct|mic]", id="command")
+        await self.mount(command, before=self.query_one(Footer))
+        command.focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id != "command":
+            return
+        try:
+            result, observation = self.execute_command(event.value)
+        except (TypeError, ValueError) as exc:
+            result, observation = f"error: {exc}", None
+        event.input.remove()
+        self._command_mode = False
+        output = self.query_one("#command-result", Static)
+        output.update(result)
+        output.display = True
+        if observation is not None:
+            self._apply_observation(observation)
+
+    def execute_command(self, text: str) -> tuple[str, TerminalObservation | None]:
+        """Execute one command-mode line; kept public for deterministic tests."""
+        parts = shlex.split(text.strip().lstrip(":"))
+        if not parts:
+            raise ValueError("empty command; use :help")
+        name, args = parts[0].lower(), parts[1:]
+        if name == "help":
+            return (
+                "select A... | focus A [depth] | distance A B [direct|mic] | "
+                "angle A B C [direct|mic] | dihedral A B C D [direct|mic_chain] | clear",
+                None,
+            )
+        if name == "select":
+            if not args:
+                raise ValueError("select requires at least one atom label")
+            atoms = self.controller.inspect_atom(args)["atoms"]
+            self._command_selection = [
+                {"display_copy_id": atom["display_copy_id"]}
+                for atom in atoms
+            ]
+            return f"selected: {' '.join(atom['label'] for atom in atoms)}", None
+        if name == "clear":
+            self._command_selection = []
+            return "selection cleared", self.controller.clear_focus()
+        if name == "focus":
+            if not args and self._command_selection:
+                return "focused selection", self.controller.focus_selection(self._command_selection)
+            if not args:
+                raise ValueError("focus requires an atom label or a prior selection")
+            depth = int(args[1]) if len(args) > 1 else 1
+            return f"focused {args[0]} with bond depth {depth}", self.controller.focus_local(args[0], bond_depth=depth)
+        if name == "distance":
+            references, mode = self._measurement_arguments(args, 2, "mic")
+            return self._format_measurement(self.controller.measure_distance(references, mode=mode)), None
+        if name == "angle":
+            references, mode = self._measurement_arguments(args, 3, "mic")
+            return self._format_measurement(self.controller.measure_angle(references, mode=mode)), None
+        if name == "dihedral":
+            references, mode = self._measurement_arguments(args, 4, "mic_chain")
+            return self._format_measurement(self.controller.measure_dihedral(references, mode=mode)), None
+        raise ValueError(f"unknown command: {name}; use :help")
+
+    def _measurement_arguments(
+        self,
+        args: list[str],
+        count: int,
+        default_mode: str,
+    ) -> tuple[list[str | int | dict[str, str]], str]:
+        modes = {"direct", "mic", "mic_chain"}
+        mode = args[-1] if args and args[-1] in modes else default_mode
+        labels = args[:-1] if args and args[-1] in modes else args
+        references: list[str | int | dict[str, str]] = list(labels) if labels else list(self._command_selection)
+        if len(references) != count:
+            raise ValueError(f"measurement requires {count} atoms or a {count}-atom selection")
+        return references, mode
+
+    @staticmethod
+    def _format_measurement(result: dict) -> str:
+        atoms = "-".join(result["atoms"])
+        shifts = json.dumps(result["image_shifts"], separators=(",", ":"))
+        return f"{result['kind']} {atoms}: {result['value']:.4f} {result['unit']} ({result['mode']}; shifts={shifts})"
+
+    def _close_command(self) -> None:
+        command = self.query_one("#command", Input)
+        command.remove()
+        self._command_mode = False
 
     # ── Actions (toggle bindings only; movement is in on_key) ─────────
 

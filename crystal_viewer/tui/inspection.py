@@ -5,6 +5,9 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any, Iterable
 
+import numpy as np
+
+from ..math.pbc import nearest_image_vector_cart
 from .text import terminal_text
 
 
@@ -136,6 +139,252 @@ def inspect_molecules(crystal, reference: str | int | dict[str, Any] | None = No
     return {"molecules": molecules, "count": len(molecules)}
 
 
+def inspect_local_geometry(
+    crystal,
+    reference: str | int | dict[str, Any],
+    *,
+    include_angles: bool = True,
+) -> dict[str, Any]:
+    """Read one atom's manifested bond neighborhood without judging it.
+
+    The neighbor set is exactly the current ``CrystalIR.bonds`` topology. For
+    periodic structures each bond reports both its manifested/direct length
+    and the minimum-image length derived from the retained lattice. This is an
+    observation primitive: it deliberately does not classify coordination,
+    bond lengths, angles, or rings as chemically normal or abnormal.
+    """
+    indices = resolve_atom_references(crystal, [reference])
+    if len(indices) != 1:
+        raise ValueError("local geometry requires exactly one displayed atom; use display_copy_id to disambiguate")
+    center_index = indices[0]
+    center = crystal.atoms[center_index]
+    neighbors: list[tuple[int, Any]] = []
+    for bond in crystal.bonds:
+        if bond.i == center_index:
+            neighbors.append((bond.j, bond))
+        elif bond.j == center_index:
+            neighbors.append((bond.i, bond))
+    neighbors.sort(key=lambda item: (crystal.atoms[item[0]].label, item[0]))
+
+    bond_records: list[dict[str, Any]] = []
+    vectors: dict[int, np.ndarray] = {}
+    for neighbor_index, bond in neighbors:
+        direct_vector = np.asarray(crystal.atoms[neighbor_index].cart - center.cart, dtype=float)
+        mic_vector, image_shift = _minimum_image_vector(crystal, direct_vector)
+        vectors[neighbor_index] = mic_vector
+        bond_records.append({
+            "neighbor_display_index": neighbor_index,
+            "neighbor_display_copy_id": terminal_text(crystal.atoms[neighbor_index].display_copy_id),
+            "neighbor_label": terminal_text(crystal.atoms[neighbor_index].label),
+            "neighbor_element": terminal_text(crystal.atoms[neighbor_index].element),
+            "rendered_distance": float(bond.distance),
+            "direct_distance": float(np.linalg.norm(direct_vector)),
+            "mic_distance": float(np.linalg.norm(mic_vector)),
+            "nearest_image_shift": list(image_shift),
+            "rendered_image_relation": list(bond.image_relation),
+        })
+
+    angles: list[dict[str, Any]] = []
+    if include_angles:
+        for left_position, (left_index, _) in enumerate(neighbors):
+            for right_index, _ in neighbors[left_position + 1:]:
+                left = vectors[left_index]
+                right = vectors[right_index]
+                denominator = float(np.linalg.norm(left) * np.linalg.norm(right))
+                if denominator <= 1e-12:
+                    continue
+                value = float(np.degrees(np.arccos(np.clip(np.dot(left, right) / denominator, -1.0, 1.0))))
+                angles.append({
+                    "atoms": [
+                        terminal_text(crystal.atoms[left_index].label),
+                        terminal_text(center.label),
+                        terminal_text(crystal.atoms[right_index].label),
+                    ],
+                    "angle_deg": value,
+                })
+
+    return {
+        "center": {
+            "display_index": center_index,
+            "display_copy_id": terminal_text(center.display_copy_id),
+            "label": terminal_text(center.label),
+            "element": terminal_text(center.element),
+        },
+        "coordination_number": len(neighbors),
+        "bonds": bond_records,
+        "angles": angles,
+        "topology_provenance": {
+            "source": str(crystal.metadata.get("bond_source", "manifested_crystal_ir")),
+            "explicit_bond_table": bool(crystal.metadata.get("explicit_bond_table", False)),
+            "neighbor_scope": "manifested_display_bonds",
+            "angle_vectors": "minimum_image" if crystal.lattice is not None else "direct_cartesian",
+        },
+    }
+
+
+def inspect_local_geometries(
+    crystal,
+    references: Iterable[str | int | dict[str, Any]] | None = None,
+    *,
+    include_angles: bool = True,
+) -> dict[str, Any]:
+    """Batch local-geometry reads while preserving one record per display atom.
+
+    Omitting ``references`` inspects every manifested atom. Repeated source
+    labels are expanded to their displayed copies and then de-duplicated in
+    ``CrystalIR`` order. The result contains facts only, never anomaly labels.
+    """
+    indices = (
+        tuple(range(crystal.n_atoms))
+        if references is None
+        else resolve_atom_references(crystal, references)
+    )
+    geometries = [
+        inspect_local_geometry(
+            crystal,
+            {"display_copy_id": crystal.atoms[index].display_copy_id},
+            include_angles=include_angles,
+        )
+        for index in indices
+    ]
+    return {"geometries": geometries, "count": len(geometries)}
+
+
+def measure_distance(
+    crystal,
+    references: Iterable[str | int | dict[str, Any]],
+    *,
+    mode: str = "mic",
+) -> dict[str, Any]:
+    """Measure one displayed atom pair using direct or minimum-image geometry."""
+    indices = _resolve_exact_count(crystal, references, 2, "distance")
+    direct = np.asarray(crystal.atoms[indices[1]].cart - crystal.atoms[indices[0]].cart, dtype=float)
+    mic, shift = _minimum_image_vector(crystal, direct)
+    if mode not in {"direct", "mic"}:
+        raise ValueError("distance mode must be 'direct' or 'mic'")
+    vector = direct if mode == "direct" else mic
+    return {
+        "kind": "distance",
+        "atoms": _labels(crystal, indices),
+        "mode": mode,
+        "value": float(np.linalg.norm(vector)),
+        "unit": "angstrom",
+        "vector": [float(value) for value in vector],
+        "image_shifts": [[0, 0, 0], list(shift) if mode == "mic" else [0, 0, 0]],
+    }
+
+
+def measure_angle(
+    crystal,
+    references: Iterable[str | int | dict[str, Any]],
+    *,
+    mode: str = "mic",
+) -> dict[str, Any]:
+    """Measure A-B-C, anchoring minimum-image vectors at center B."""
+    indices = _resolve_exact_count(crystal, references, 3, "angle")
+    if mode not in {"direct", "mic"}:
+        raise ValueError("angle mode must be 'direct' or 'mic'")
+    left_direct = np.asarray(crystal.atoms[indices[0]].cart - crystal.atoms[indices[1]].cart, dtype=float)
+    right_direct = np.asarray(crystal.atoms[indices[2]].cart - crystal.atoms[indices[1]].cart, dtype=float)
+    left_mic, left_shift = _minimum_image_vector(crystal, left_direct)
+    right_mic, right_shift = _minimum_image_vector(crystal, right_direct)
+    left = left_direct if mode == "direct" else left_mic
+    right = right_direct if mode == "direct" else right_mic
+    value = _angle_degrees(left, right)
+    return {
+        "kind": "angle",
+        "atoms": _labels(crystal, indices),
+        "mode": mode,
+        "value": value,
+        "unit": "degree",
+        "image_shifts": (
+            [[0, 0, 0]] * 3
+            if mode == "direct"
+            else [list(left_shift), [0, 0, 0], list(right_shift)]
+        ),
+    }
+
+
+def measure_dihedral(
+    crystal,
+    references: Iterable[str | int | dict[str, Any]],
+    *,
+    mode: str = "mic_chain",
+) -> dict[str, Any]:
+    """Measure signed A-B-C-D torsion using direct or chain-unwrapped geometry."""
+    indices = _resolve_exact_count(crystal, references, 4, "dihedral")
+    if mode not in {"direct", "mic_chain"}:
+        raise ValueError("dihedral mode must be 'direct' or 'mic_chain'")
+    coords = [np.asarray(crystal.atoms[index].cart, dtype=float) for index in indices]
+    if mode == "direct":
+        points = coords
+        shifts = [(0, 0, 0)] * 4
+    else:
+        ba, shift_a = _minimum_image_vector(crystal, coords[0] - coords[1])
+        bc, shift_c = _minimum_image_vector(crystal, coords[2] - coords[1])
+        cd, shift_d_from_c = _minimum_image_vector(crystal, coords[3] - coords[2])
+        points = [ba, np.zeros(3), bc, bc + cd]
+        shifts = [shift_a, (0, 0, 0), shift_c, tuple(shift_c[i] + shift_d_from_c[i] for i in range(3))]
+    return {
+        "kind": "dihedral",
+        "atoms": _labels(crystal, indices),
+        "mode": mode,
+        "value": _dihedral_degrees(*points),
+        "unit": "degree",
+        "image_shifts": [list(shift) for shift in shifts],
+    }
+
+
+def _resolve_exact_count(crystal, references, count: int, name: str) -> tuple[int, ...]:
+    indices = resolve_atom_references(crystal, references)
+    if len(indices) != count:
+        raise ValueError(
+            f"{name} requires exactly {count} displayed atoms; use display_copy_id to disambiguate"
+        )
+    if len(set(indices)) != count:
+        raise ValueError(f"{name} references must be distinct")
+    return indices
+
+
+def _labels(crystal, indices: Iterable[int]) -> list[str]:
+    return [terminal_text(crystal.atoms[index].label) for index in indices]
+
+
+def _angle_degrees(left: np.ndarray, right: np.ndarray) -> float:
+    denominator = float(np.linalg.norm(left) * np.linalg.norm(right))
+    if denominator <= 1e-12:
+        raise ValueError("angle is undefined for coincident atoms")
+    return float(np.degrees(np.arccos(np.clip(np.dot(left, right) / denominator, -1.0, 1.0))))
+
+
+def _dihedral_degrees(a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.ndarray) -> float:
+    first = a - b
+    middle = c - b
+    last = d - c
+    middle_norm = float(np.linalg.norm(middle))
+    if middle_norm <= 1e-12:
+        raise ValueError("dihedral is undefined for coincident middle atoms")
+    middle_unit = middle / middle_norm
+    first_plane = first - np.dot(first, middle_unit) * middle_unit
+    last_plane = last - np.dot(last, middle_unit) * middle_unit
+    if np.linalg.norm(first_plane) <= 1e-12 or np.linalg.norm(last_plane) <= 1e-12:
+        raise ValueError("dihedral is undefined for collinear atoms")
+    x = float(np.dot(first_plane, last_plane))
+    y = float(np.dot(np.cross(middle_unit, first_plane), last_plane))
+    return float(np.degrees(np.arctan2(y, x)))
+
+
+def _minimum_image_vector(crystal, direct_vector: np.ndarray) -> tuple[np.ndarray, tuple[int, int, int]]:
+    if crystal.lattice is None:
+        return direct_vector.copy(), (0, 0, 0)
+    matrix = np.asarray(crystal.lattice.matrix, dtype=float)
+    try:
+        vector, shift_array = nearest_image_vector_cart(direct_vector, matrix)
+    except (np.linalg.LinAlgError, ValueError):
+        return direct_vector.copy(), (0, 0, 0)
+    return vector, tuple(int(value) for value in shift_array)
+
+
 def _atom_record(crystal, index: int, *, show_minor: bool) -> dict[str, Any]:
     atom = crystal.atoms[index]
     return {
@@ -164,7 +413,12 @@ def _atom_record(crystal, index: int, *, show_minor: bool) -> dict[str, Any]:
 
 __all__ = [
     "inspect_atoms",
+    "inspect_local_geometries",
+    "inspect_local_geometry",
     "inspect_molecules",
+    "measure_angle",
+    "measure_dihedral",
+    "measure_distance",
     "resolve_atom_references",
     "resolve_molecule_reference",
 ]
