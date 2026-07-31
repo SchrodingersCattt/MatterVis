@@ -576,6 +576,7 @@ def compose_frame_result(
         edit_tokens = {atom_draw.idx: f"a{index}" for index, atom_draw in enumerate(candidates, start=1)}
         if candidates:
             edit_legend_width = min(22, max(14, width // 4))
+            edit_legend_width = min(edit_legend_width, width)
         for atom_draw in candidates:
             atom = crystal.atoms[atom_draw.idx]
             marker = ">" if atom.display_copy_id == edit_state.active_id else "*" if atom.display_copy_id in edit_state.selected_ids else ""
@@ -654,9 +655,45 @@ def compose_frame_result(
             )
 
     output_lines: list[str] = []
+    placed_token_ids: set[int] = set()
+    legend_token_ids: set[int] = set()
+    legend_by_row: dict[int, list[tuple[int, str]]] = {}
+    if edit_legend_width:
+        legend_draws = sorted(
+            (item for item in label_order if item.idx in edit_tokens),
+            key=lambda item: int(edit_tokens[item.idx][1:]),
+        )
+        columns = 2 if len(legend_draws) > height else 1
+        rows_per_column = max((len(legend_draws) + columns - 1) // columns, 1)
+        column_width = max(edit_legend_width // columns, 1)
+        for index, atom_draw in enumerate(legend_draws):
+            row = index % rows_per_column
+            column = index // rows_per_column
+            if row >= height or column >= columns:
+                continue
+            atom = crystal.atoms[atom_draw.idx]
+            marker = ">" if atom.display_copy_id == edit_state.active_id else "*" if atom.display_copy_id in edit_state.selected_ids else ""
+            item = f"{marker}[{edit_tokens[atom_draw.idx]}]{terminal_text(atom.display_label)}"[:column_width]
+            if f"[{edit_tokens[atom_draw.idx]}]" not in item:
+                continue
+            start = width - edit_legend_width + column * column_width
+            legend_by_row.setdefault(row, []).append((start, item))
+            legend_token_ids.add(atom_draw.idx)
+
     for row_idx in range(height):
-        row_data = colored_rows[row_idx] if row_idx < len(colored_rows) else []
-        row_labels = label_map.get(row_idx)
+        row_data = (
+            [(" ", 0)] * width
+            if edit_legend_width >= width
+            else list(colored_rows[row_idx]) if row_idx < len(colored_rows) else []
+        )
+        if legend_by_row.get(row_idx):
+            if len(row_data) < width:
+                row_data.extend([(" ", 0)] * (width - len(row_data)))
+            for start, item in legend_by_row[row_idx]:
+                for offset, character in enumerate(item):
+                    if start + offset < width:
+                        row_data[start + offset] = (character, CELL_COLOR)
+        row_labels = None if edit_legend_width >= width else label_map.get(row_idx)
 
         if not row_labels:
             # No labels — emit braille with per-cell color runs
@@ -712,39 +749,7 @@ def compose_frame_result(
         output_lines.pop()
     from .state import TerminalPickToken
 
-    if edit_legend_width:
-        legend_items = [
-            (
-                f">[{edit_tokens[atom_draw.idx]}]{terminal_text(crystal.atoms[atom_draw.idx].display_label)}"
-                if crystal.atoms[atom_draw.idx].display_copy_id == edit_state.active_id
-                else f"*[{edit_tokens[atom_draw.idx]}]{terminal_text(crystal.atoms[atom_draw.idx].display_label)}"
-                if crystal.atoms[atom_draw.idx].display_copy_id in edit_state.selected_ids
-                else f"[{edit_tokens[atom_draw.idx]}]{terminal_text(crystal.atoms[atom_draw.idx].display_label)}"
-            )
-            for atom_draw in sorted(
-                (item for item in label_order if item.idx in edit_tokens),
-                key=lambda item: int(edit_tokens[item.idx][1:]),
-            )
-        ]
-        columns = 2 if len(legend_items) > height else 1
-        rows_per_column = (len(legend_items) + columns - 1) // columns
-        column_width = max(edit_legend_width // columns, 1)
-        while len(output_lines) < min(height, rows_per_column):
-            output_lines.append("")
-        for index, item in enumerate(legend_items):
-            row = index % rows_per_column
-            if row >= height:
-                break
-            column = index // rows_per_column
-            start = width - edit_legend_width + column * column_width
-            item = item[:column_width]
-            base = output_lines[row] if row < len(output_lines) else ""
-            base = base[:start].ljust(start) + item
-            if row < len(output_lines):
-                output_lines[row] = base
-            else:
-                output_lines.append(base)
-
+    visible_token_ids = placed_token_ids | legend_token_ids
     tokens = tuple(
         TerminalPickToken(
             token=edit_tokens[atom_draw.idx],
@@ -755,7 +760,7 @@ def compose_frame_result(
             active=crystal.atoms[atom_draw.idx].display_copy_id == edit_state.active_id,
         )
         for atom_draw in label_order
-        if atom_draw.idx in edit_tokens
+        if atom_draw.idx in visible_token_ids
     ) if edit_state is not None else ()
     return ComposedFrame("\n".join(output_lines), tokens)
 

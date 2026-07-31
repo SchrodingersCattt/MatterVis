@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 
@@ -152,8 +152,8 @@ class TerminalViewState:
     camera: TerminalCameraState
     display: TerminalDisplayState
     focus: TerminalFocusState
-    edit: TerminalEditState
     viewport: TerminalViewportState
+    edit: TerminalEditState = field(default_factory=TerminalEditState)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -187,9 +187,9 @@ class TerminalObservation:
     frame: str
     scope: Mapping[str, Any]
     capabilities: tuple[str, ...]
-    pick_tokens: tuple[TerminalPickToken, ...] = ()
     warnings: tuple[str, ...] = ()
     schema: str = OBSERVATION_SCHEMA
+    pick_tokens: tuple[TerminalPickToken, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         return {

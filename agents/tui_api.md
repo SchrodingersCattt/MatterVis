@@ -33,10 +33,11 @@ canonical/display/visible counts, capabilities, and warnings. It intentionally
 does **not** include atom coordinates, projected depth, pair distances,
 front/back answers, collision scores, or a recommended camera.
 
-When edit mode is active, state additionally includes `edit` with `mode`,
-`level`, ordered stable `selected_ids`, and `active_id`. Observation
-`pick_tokens` contains only tokens that were actually placed in the current
-frame. Tokens are frame-local (`a1`, `m1`, ...); selection persists by stable
+State always includes `edit` with `mode`, `level`, ordered stable
+`selected_ids`, and `active_id`; browse mode uses the default empty selection.
+Observation always includes `pick_tokens`; it is empty outside edit mode and
+otherwise contains only tokens actually written into the current frame.
+Tokens are frame-local (`a1`, `m1`, ...); selection persists by stable
 `display_copy_id` or `display_fragment_id` when camera motion renumbers them.
 
 ## Perceptual controls

@@ -6,6 +6,14 @@ import pytest
 from crystal_viewer.tui.app import CrystalTUI
 from crystal_viewer.tui.controller import TerminalViewController
 from crystal_viewer.tui.crystal_ir import AtomIR, BondIR, CrystalIR
+from crystal_viewer.tui.state import (
+    TerminalCameraState,
+    TerminalDisplayState,
+    TerminalFocusState,
+    TerminalObservation,
+    TerminalViewportState,
+    TerminalViewState,
+)
 
 
 def _crystal(*, molecules: bool = False) -> CrystalIR:
@@ -130,3 +138,47 @@ def test_crowded_atom_edit_keeps_every_pick_token_visible_without_wrapping() -> 
     }
     assert all(f"[{token.token}]" in observation.frame for token in observation.pick_tokens)
     assert max(map(len, observation.frame.splitlines())) <= 80
+
+
+@pytest.mark.parametrize(("width", "height", "mono"), [(12, 6, True), (40, 4, True), (40, 4, False)])
+def test_edit_tokens_only_report_visible_entries_for_narrow_or_color_frames(
+    width: int,
+    height: int,
+    mono: bool,
+) -> None:
+    controller = TerminalViewController.from_file(
+        "tests/tui/fixtures/dirty_geometry.vasp",
+        width=width,
+        height=height,
+        mono=mono,
+        label_mode="label",
+    )
+
+    observation = controller.enter_edit("atom")
+    plain_frame = _strip_ansi(observation.frame)
+
+    assert len(observation.pick_tokens) <= controller.crystal.n_atoms
+    assert all(f"[{token.token}]" in plain_frame for token in observation.pick_tokens)
+    assert max(map(len, plain_frame.splitlines()), default=0) <= width
+    assert observation.frame.count("\x1b[") % 2 == 0
+
+
+def test_public_state_dataclasses_keep_old_positional_constructor_order() -> None:
+    camera = TerminalCameraState(0.0, 0.0, 0.0, (0.0, 0.0, 0.0), "orthographic", 1.0, 0.0, 0.0)
+    display = TerminalDisplayState("atom", "label", True, True, False, True)
+    focus = TerminalFocusState()
+    viewport = TerminalViewportState(80, 22, 1.0, -1.0, 1.0, -1.0, 1.0)
+
+    state = TerminalViewState(0, camera, display, focus, viewport)
+    observation = TerminalObservation(0, state, "title", "frame", {}, (), ("legacy-warning",), "legacy-schema")
+
+    assert state.edit.mode == "browse"
+    assert observation.warnings == ("legacy-warning",)
+    assert observation.schema == "legacy-schema"
+    assert observation.pick_tokens == ()
+
+
+def _strip_ansi(value: str) -> str:
+    import re
+
+    return re.sub(r"\x1b\[[0-9;]*m", "", value)

@@ -337,8 +337,6 @@ class CrystalTUI(App):
         if name == "focus":
             if not args or args == ["selection"]:
                 return "focused selection", self.controller.focus_edit_selection()
-            if not args:
-                raise ValueError("focus requires an atom label or a prior selection")
             depth = int(args[1]) if len(args) > 1 else 1
             if self.controller.state.edit.mode == "edit" and args[0].startswith("a") and args[0][1:].isdigit():
                 return f"focused {args[0]} with bond depth {depth}", self.controller.focus_pick_token(args[0], bond_depth=depth)
