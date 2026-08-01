@@ -151,7 +151,7 @@ class _CameraBackendMixin:
             # the same dict across callers keeps the caches warm
             # across cache hits and saves ~25 ms of redundant
             # deepcopy on the hot slider path.
-            return fig, cached_topology
+            return self._stamp_figure_render_metadata(fig, state), cached_topology
 
         # --- CACHE MISS ---
         # If async_figure is requested, offload the full build to a
@@ -168,7 +168,7 @@ class _CameraBackendMixin:
                 # Return a minimal skeleton figure (unit cell box only)
                 # so the Dash callback returns immediately.
                 skeleton = self._skeleton_figure(state)
-                return skeleton, None
+                return self._stamp_figure_render_metadata(skeleton, state), None
 
         with perf_log.time_block("scene_for_state", kind="event", scene_id=scene_id):
             scene = self.scene_for_state(state)
@@ -249,7 +249,7 @@ class _CameraBackendMixin:
         # version, so we need to mirror the cache-hit branch's
         # behaviour for the current response.
         _apply_polyhedron_visibility_patch(fig, state)
-        return fig, topology_data
+        return self._stamp_figure_render_metadata(fig, state), topology_data
 
     def _skeleton_figure(self, state: dict[str, Any]) -> "go.Figure":
         """Build a lightweight placeholder figure for async rendering.

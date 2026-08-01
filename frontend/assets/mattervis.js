@@ -30,6 +30,8 @@
   let interactionActive = false, settleTimer = null;
   let lastFigureSeq = 0, pendingFigurePush = null;
   let sceneTabIntentId = null, sceneTabIntentAt = 0;
+  let renderServerEpoch = null;
+  const expectedRenderRevisionByScene = Object.create(null);
   function figurePushIsCurrent(p) {
     return !!(p && typeof p.isCurrent === "function" && p.isCurrent());
   }
@@ -46,6 +48,101 @@
     sceneTabIntentId = sceneId;
     sceneTabIntentAt = Date.now();
   }
+  function selectedSceneId() {
+    if (sceneTabIntentId && Date.now() - sceneTabIntentAt < 10000) return sceneTabIntentId;
+    const root = document.getElementById("scene-tabs");
+    if (!root) return null;
+    const selected = root.querySelector("[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active");
+    if (!selected) return null;
+    const node = sceneIdFromTabNode(selected)
+      ? selected
+      : (selected.closest ? selected.closest("[id^='scene-tab-']") : null);
+    return sceneIdFromTabNode(node);
+  }
+  function fastViewMetadata() {
+    const node = document.getElementById("fast-view-metadata");
+    const text = node ? (node.textContent||"").trim() : "";
+    if (!text) return null;
+    try {
+      const value=JSON.parse(text);
+      if (value&&typeof value==="object") rememberExpectedRender(value, false);
+      return value&&typeof value==="object"?value:null;
+    }
+    catch(_) { return null; }
+  }
+  function rememberExpectedRender(value, allowEpochChange) {
+    if (!value||typeof value!=="object") return;
+    const epoch=value.server_started_at?String(value.server_started_at):null;
+    if (epoch&&renderServerEpoch&&epoch!==renderServerEpoch) {
+      if (!allowEpochChange) return;
+      Object.keys(expectedRenderRevisionByScene).forEach(function(key){delete expectedRenderRevisionByScene[key];});
+      lastFigureSeq=0;
+    }
+    if (epoch) renderServerEpoch=epoch;
+    if (!value.scene_id) return;
+    const revision=Number(value.render_revision);
+    if (!Number.isFinite(revision)) return;
+    const key=String(value.scene_id);
+    const previous=expectedRenderRevisionByScene[key];
+    if (!Number.isFinite(previous)||revision>previous) expectedRenderRevisionByScene[key]=revision;
+  }
+  function currentSceneId() {
+    const tabScene = selectedSceneId();
+    if (tabScene) return tabScene;
+    const metadata = fastViewMetadata();
+    return metadata&&metadata.scene_id ? String(metadata.scene_id) : null;
+  }
+  function currentRenderRevision() {
+    const m = fastViewMetadata();
+    const sceneId = currentSceneId();
+    if (sceneId&&Number.isFinite(expectedRenderRevisionByScene[sceneId])) return expectedRenderRevisionByScene[sceneId];
+    if (!m || !m.scene_id || (sceneId && String(m.scene_id)!==sceneId)) return null;
+    const revision=Number(m.render_revision);
+    return Number.isFinite(revision)?revision:null;
+  }
+  function renderMetadataFromLayout(layout) {
+    if (!layout || typeof layout!=="object") return null;
+    let meta=layout.meta;
+    if (typeof meta==="string") { try { meta=JSON.parse(meta); } catch(_) { return null; } }
+    const render=meta&&typeof meta==="object"?meta.mattervis_render:null;
+    return render&&typeof render==="object"?render:null;
+  }
+  function figureMetadataIsCurrent(render) {
+    if (!render) return true;
+    const sceneId=currentSceneId();
+    if (sceneId&&render.scene_id&&String(render.scene_id)!==sceneId) return false;
+    const expected=currentRenderRevision();
+    const revision=Number(render.render_revision);
+    if (expected!==null&&(!Number.isFinite(revision)||revision!==expected)) return false;
+    if (renderServerEpoch&&render.server_started_at&&renderServerEpoch!==String(render.server_started_at)) return false;
+    return true;
+  }
+  function installPlotlyRenderGate() {
+    if (!window.Plotly) { setTimeout(installPlotlyRenderGate,25); return; }
+    function wrap(name) {
+      const original=window.Plotly[name];
+      if (typeof original!=="function"||original.__mattervisRenderGate) return;
+      const wrapped=function() {
+        const args=Array.prototype.slice.call(arguments);
+        let layout=null;
+        if (name==="newPlot"||name==="react") layout=args[2];
+        else if (name==="update") layout=args[2];
+        else if (name==="relayout") layout=args[1];
+        const render=renderMetadataFromLayout(layout);
+        if (render&&!figureMetadataIsCurrent(render)) return Promise.resolve(args[0]);
+        return original.apply(this,args);
+      };
+      wrapped.__mattervisRenderGate=true;
+      wrapped.__mattervisOriginal=original;
+      window.Plotly[name]=wrapped;
+    }
+    wrap("newPlot");
+    wrap("react");
+    wrap("update");
+    wrap("relayout");
+    wrap("restyle");
+  }
+  installPlotlyRenderGate();
   function setInteraction(active) { setDashStore("graph-interaction-store", {active:!!active, ts:Date.now()}); }
   function applyFigurePush(data, layout) {
     var gd = graphDiv(); if (!gd||!window.Plotly) return;
@@ -207,35 +304,6 @@
   // ── WS figure fast lane (ws_figure.js) ──────────────────────────
   (function connectWS() {
     if (window.MATTERVIS_WS_FIGURE === false || !window.WebSocket || !window.Plotly) return;
-    function selectedSceneId() {
-      if (sceneTabIntentId && Date.now() - sceneTabIntentAt < 10000) return sceneTabIntentId;
-      const root = document.getElementById("scene-tabs");
-      if (!root) return null;
-      const selected = root.querySelector("[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active");
-      if (!selected) return null;
-      const node = sceneIdFromTabNode(selected)
-        ? selected
-        : (selected.closest ? selected.closest("[id^='scene-tab-']") : null);
-      return sceneIdFromTabNode(node);
-    }
-    function currentSceneId() {
-      const tabScene = selectedSceneId();
-      if (tabScene) return tabScene;
-      const node = document.getElementById("fast-view-metadata");
-      const text = node ? (node.textContent||"").trim() : "";
-      if (!text) return null;
-      try { const m = JSON.parse(text); return m && m.scene_id ? String(m.scene_id) : null; } catch(_) { return null; }
-    }
-    function currentRenderRevision() {
-      const node = document.getElementById("fast-view-metadata");
-      const text = node ? (node.textContent||"").trim() : "";
-      if (!text) return null;
-      try {
-        const m = JSON.parse(text);
-        const revision = Number(m && m.render_revision);
-        return Number.isFinite(revision) ? revision : null;
-      } catch(_) { return null; }
-    }
     function isCurrentFigurePush(p) {
       if (!p || !p.figure) return false;
       var cur=currentSceneId();
@@ -261,6 +329,8 @@
     ws.addEventListener("open",function(){ws.send(JSON.stringify({type:"subscribe_figure",enabled:true}));});
     ws.addEventListener("message",function(e){
       var p; try { p=JSON.parse(e.data||"{}"); } catch(_){return;}
+      if (p.state&&typeof p.state==="object") rememberExpectedRender(p.state, true);
+      if (p.scene_id&&p.render_revision!==undefined) rememberExpectedRender(p, true);
       if (!p.figure||isPendingFigure(p.figure)||!has3DScene(p.figure)) return;
       if (!isCurrentFigurePush(p)) return;
       var seq=Number(p.figure_seq||p.figure_version||0); if (seq&&seq<=lastFigureSeq) return;

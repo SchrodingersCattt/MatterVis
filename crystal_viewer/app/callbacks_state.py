@@ -352,10 +352,6 @@ def register_state_callbacks(app, backend):
                     kind="event",
                     info={"scene_id": scene_id, "cache_hit": True},
                 )
-                # Mark on the backend so update_view can skip redundant rebuild.
-                backend._tab_switch_ws_pushed = (scene_id, time.monotonic())
-            else:
-                backend._tab_switch_ws_pushed = None
             # Always emit a unique seq to guarantee update_view fires
             # as a fallback (in case WS is not connected).
             seq = getattr(sync_agent_state, "_switch_seq", 0) + 1

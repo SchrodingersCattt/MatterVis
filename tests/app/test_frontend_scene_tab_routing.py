@@ -30,7 +30,7 @@ def test_ws_figure_routing_prefers_clicked_scene_tab_over_fast_metadata():
 
     selected_idx = source.index("function selectedSceneId")
     current_idx = source.index("function currentSceneId")
-    metadata_idx = source.index('document.getElementById("fast-view-metadata")', current_idx)
+    metadata_idx = source.index("fastViewMetadata()", current_idx)
 
     assert selected_idx < current_idx < metadata_idx
     current_body = source[current_idx:metadata_idx]
@@ -55,6 +55,28 @@ def test_deferred_ws_figure_keeps_and_revalidates_render_metadata():
     flush_idx = source.index("function flushPendingFigurePush")
     flush_body = source[flush_idx:source.index("function markActive", flush_idx)]
     assert "figurePushIsCurrent(p)" in flush_body
+
+
+def test_plotly_apply_gate_rejects_stale_dash_figures_and_patches():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+
+    assert "function installPlotlyRenderGate" in source
+    assert "function figureMetadataIsCurrent" in source
+    assert 'wrap("newPlot")' in source
+    assert 'wrap("react")' in source
+    assert 'wrap("update")' in source
+    assert 'wrap("relayout")' in source
+    assert 'wrap("restyle")' in source
+    assert "mattervis_render" in source
+
+
+def test_revision_lookup_never_combines_clicked_scene_with_other_scene_metadata():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    revision_idx = source.index("function currentRenderRevision")
+    revision_body = source[revision_idx:source.index("function isCurrentFigurePush", revision_idx)]
+
+    assert "m.scene_id" in revision_body
+    assert "currentSceneId()" in revision_body
 
 
 def test_main_graph_disables_plotly_double_click_reset(tmp_path):

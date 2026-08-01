@@ -309,7 +309,7 @@ class _IOBackendMixin:
         structure = self.get_state()["structure"]
         if self.scene_store.active_id:
             self.current_state = self.scene_state(self.scene_store.active_id)
-            self.pending_state = copy.deepcopy(self.current_state)
+            self.pending_state = self._state_snapshot(self.current_state, self.scene_store.active_id)
             self._bump_version()
         else:
             self.patch_state(self.default_state(structure))

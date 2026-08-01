@@ -236,3 +236,37 @@ def test_figure_history_filters_payload_that_became_stale(tmp_path):
         assert payload["figure_seq"] == backend.latest_figure_seq()
     finally:
         backend._render_worker.shutdown()
+
+
+def test_pending_state_snapshot_includes_render_revision(tmp_path):
+    backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    scene_id = backend.active_scene_id()
+    try:
+        state = backend.patch_state(
+            {"display_mode": "unit_cell"},
+            scene_id=scene_id,
+            broadcast=True,
+        )
+
+        pending = backend.pop_pending_state()
+
+        assert pending["scene_id"] == scene_id
+        assert pending["render_revision"] == state["render_revision"]
+    finally:
+        backend._render_worker.shutdown()
+
+
+def test_figure_metadata_identifies_scene_and_render_revision(tmp_path):
+    backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    scene_id = backend.active_scene_id()
+    try:
+        state = backend.get_state(scene_id)
+
+        fig, _ = backend.figure_for_state(state)
+        meta = fig.to_plotly_json()["layout"]["meta"]["mattervis_render"]
+
+        assert meta["scene_id"] == scene_id
+        assert meta["render_revision"] == state["render_revision"]
+        assert meta["server_started_at"] == state["server_started_at"]
+    finally:
+        backend._render_worker.shutdown()

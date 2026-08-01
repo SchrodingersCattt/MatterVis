@@ -617,18 +617,6 @@ def register_view_callbacks(app, backend):
         cb_start = time.monotonic()
         state = backend.normalize_state(agent_state or backend.get_state())
         scene_id = state.get("scene_id")
-        # If sync_agent_state already pushed this scene's figure via WS
-        # (cache-hit tab switch), skip the redundant rebuild here.
-        _ws_pushed_info = getattr(backend, "_tab_switch_ws_pushed", None)
-        if _ws_pushed_info and _ws_pushed_info[0] == scene_id and (time.monotonic() - _ws_pushed_info[1]) < 1.0:
-            backend._tab_switch_ws_pushed = None
-            perf_log.record(
-                "callback:update_view",
-                duration_ms=(time.monotonic() - cb_start) * 1000.0,
-                kind="cb",
-                info={"scene_id": scene_id, "skipped": "ws-already-pushed"},
-            )
-            return no_update, no_update, no_update, no_update
         topo_key_preview = (
             state.get("scene_id"),
             state.get("structure"),
