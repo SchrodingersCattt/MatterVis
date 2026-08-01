@@ -210,9 +210,10 @@ def register_state_callbacks(app, backend):
         Input("scene-event-store", "data"),
         Input("native-upload-sync", "data"),
         Input("agent-state-poll", "n_intervals"),
+        State("scene-tabs", "value"),
         prevent_initial_call=True,
     )
-    def manage_scene_tabs_dom(_scene_event, _native_upload_sync, _n_intervals):
+    def manage_scene_tabs_dom(_scene_event, _native_upload_sync, _n_intervals, browser_scene_id):
         """Single writer for the scene-tab DOM.
 
         Two paths converge here:
@@ -246,6 +247,8 @@ def register_state_callbacks(app, backend):
         active_id = backend.active_scene_id() or options[0]["id"]
 
         if triggered == "agent-state-poll":
+            valid_ids = {str(scene.get("id")) for scene in options}
+            browser_scene_is_valid = str(browser_scene_id) in valid_ids
             # Use a stable fingerprint of the visible scene list so a
             # plain poll tick is a no-op when nothing changed since the
             # previous render. We deliberately exclude ``active_id``
@@ -257,9 +260,15 @@ def register_state_callbacks(app, backend):
             )
             cache = getattr(manage_scene_tabs_dom, "_poll_fingerprint", None)
             if cache == fingerprint:
-                return no_update, no_update, no_update
+                if browser_scene_is_valid:
+                    return no_update, no_update, no_update
+                return no_update, no_update, active_id
             manage_scene_tabs_dom._poll_fingerprint = fingerprint
-            return backend.scene_tabs(), backend.scene_close_buttons(), no_update
+            return (
+                backend.scene_tabs(),
+                backend.scene_close_buttons(),
+                no_update if browser_scene_is_valid else active_id,
+            )
 
         # Explicit event paths (CRUD / upload) DO own the active id.
         # Refresh the cached fingerprint so the next poll tick keeps its

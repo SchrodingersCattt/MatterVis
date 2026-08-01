@@ -177,6 +177,21 @@ def test_scene_tabs_dom_caches_fingerprint_so_poll_does_not_tear_down_react_tree
     )
 
 
+def test_scene_tabs_poll_repairs_deleted_browser_scene_id(tmp_path: Path):
+    """A REST/other-browser delete must not leave a ghost selected tab.
+
+    The poll normally preserves the browser-owned selected id, but if that id
+    no longer exists in the backend scene list it must select the backend's
+    valid active scene while rebuilding the tab children.
+    """
+    app = create_app(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    source = _manage_scene_tabs_source(app)
+
+    assert 'State("scene-tabs", "value")' in source
+    assert "browser_scene_is_valid" in source
+    assert "no_update if browser_scene_is_valid else active_id" in source
+
+
 def test_update_view_not_wired_to_graph_interaction_store(tmp_path: Path):
     """``graph-interaction-store`` must NOT appear as an Input on any
     callback that outputs ``crystal-graph.figure``.
