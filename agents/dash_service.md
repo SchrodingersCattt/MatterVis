@@ -109,7 +109,13 @@ Notes for callers:
   WebSocket `set_state`), and consumed once per WS tick — clients see
   one push per version, not one push per call.
 - `subscribe_figure` pushes completed figure deltas as separate
-  `{"type":"figure","figure_seq":...,"figure":...}` frames. Figure
+  `{"type":"figure","figure_seq":...,"scene_id":...,"render_revision":...,"figure":...}`
+  frames. `render_revision` is monotonic per scene and changes only when
+  render-affecting state changes; clients must reject a figure whose scene or
+  revision no longer matches their current state. Dash-delivered figures carry
+  the same identity under `layout.meta.mattervis_render`; the browser validates
+  that metadata immediately before Plotly applies a replacement so a late Dash
+  response cannot overwrite a newer WebSocket figure. Figure
   delivery is asynchronous: a REST or Dash state mutation may return
   before cold topology/polyhedra overlays have been recomputed.
 - Scene persistence is debounced. A successful mutation updates memory

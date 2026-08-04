@@ -75,6 +75,9 @@ class _CoreBackendMixin:
                 print(f"[crystal_viewer] could not persist scene store: {exc}", file=sys.stderr)
         if self.scene_store.active_id:
             self.current_state = self.scene_state(self.scene_store.active_id)
+        self._render_revisions: dict[str, int] = {
+            str(scene_id): 0 for scene_id in self.scene_store.scenes
+        }
         self.pending_state: Optional[dict[str, Any]] = None
         self._first_figure_ready = threading.Event()
         self.version = 0
@@ -236,6 +239,12 @@ class _CoreBackendMixin:
                 "scene_id": scene_id,
                 "reason": "stale-state",
             }
+        if not self._figure_revision_matches_current(scene_id, state):
+            return {
+                "type": "figure_ignored",
+                "scene_id": scene_id,
+                "reason": "stale-render-revision",
+            }
         with self._figure_broadcast_lock:
             self._figure_broadcast_seq += 1
             payload = {
@@ -244,6 +253,7 @@ class _CoreBackendMixin:
                 "figure_version": self.version,
                 "version": self.version,
                 "scene_id": scene_id,
+                "render_revision": self.render_revision(scene_id),
                 "reason": reason,
                 "figure": figure,
                 "state": copy.deepcopy(state) if isinstance(state, dict) else None,
@@ -258,7 +268,7 @@ class _CoreBackendMixin:
         key_state = {
             k: v
             for k, v in state.items()
-            if k not in ("version", "server_started_at", "camera", "camera_revision", "disorder_resolve", "disorder_replicas")
+            if k not in ("version", "server_started_at", "render_revision", "camera", "camera_revision", "disorder_resolve", "disorder_replicas")
         }
         # Phase 6: ``polyhedron_specs[i].enabled`` is honoured via a
         # post-cache trace-visibility patch (see ``figure_for_state``
@@ -296,6 +306,79 @@ class _CoreBackendMixin:
         except Exception:
             return False
 
+    def render_revision(self, scene_id: Optional[str] = None) -> int:
+        target = scene_id or self.scene_store.active_id
+        return int(self._render_revisions.get(str(target), 0)) if target else 0
+
+    def _state_snapshot(
+        self,
+        state: dict[str, Any],
+        scene_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        snapshot = copy.deepcopy(state)
+        target = scene_id or snapshot.get("scene_id") or self.scene_store.active_id
+        snapshot["server_started_at"] = self.server_started_iso()
+        snapshot["version"] = self.version
+        snapshot["render_revision"] = self.render_revision(target)
+        return snapshot
+
+    def _stamp_figure_render_metadata(
+        self,
+        figure: Any,
+        state: dict[str, Any],
+    ) -> Any:
+        render_meta = {
+            "scene_id": state.get("scene_id"),
+            "render_revision": int(
+                state.get("render_revision", self.render_revision(state.get("scene_id"))) or 0
+            ),
+            "server_started_at": state.get("server_started_at") or self.server_started_iso(),
+        }
+        if isinstance(figure, dict):
+            layout = figure.setdefault("layout", {})
+            meta = layout.get("meta")
+            meta = dict(meta) if isinstance(meta, dict) else {}
+            meta["mattervis_render"] = render_meta
+            layout["meta"] = meta
+            return figure
+        try:
+            meta = figure.layout.meta
+            meta = dict(meta) if isinstance(meta, dict) else {}
+            meta["mattervis_render"] = render_meta
+            figure.update_layout(meta=meta)
+        except Exception:
+            pass
+        return figure
+
+    def _figure_revision_matches_current(
+        self,
+        scene_id: Optional[str],
+        state: Optional[dict[str, Any]],
+    ) -> bool:
+        if not isinstance(state, dict) or not scene_id:
+            return True
+        try:
+            return int(state.get("render_revision", -1)) == self.render_revision(scene_id)
+        except (TypeError, ValueError):
+            return False
+
+    def _bump_render_revision_if_changed(
+        self,
+        scene_id: Optional[str],
+        before: dict[str, Any],
+        after: dict[str, Any],
+    ) -> None:
+        if not scene_id:
+            return
+        before_state = dict(before)
+        after_state = dict(after)
+        scene = self.scene_store.get(scene_id)
+        before_state.update({"scene_id": str(scene_id), "scene_label": scene.label})
+        after_state.update({"scene_id": str(scene_id), "scene_label": scene.label})
+        if self._figure_state_cache_key(before_state) != self._figure_state_cache_key(after_state):
+            key = str(scene_id)
+            self._render_revisions[key] = self._render_revisions.get(key, 0) + 1
+
     @staticmethod
     def _figure_payload_has_scene3d(figure: Any) -> bool:
         if not isinstance(figure, dict):
@@ -332,13 +415,24 @@ class _CoreBackendMixin:
                 copy.deepcopy(payload)
                 for payload in self._figure_broadcasts
                 if int(payload.get("figure_seq", 0) or 0) > int(seq)
+                and self._figure_revision_matches_current(payload.get("scene_id"), payload.get("state"))
+                and self._figure_state_matches_current(payload.get("scene_id"), payload.get("state"))
             ]
 
     def latest_figure_broadcast(self) -> Optional[dict[str, Any]]:
         with self._figure_broadcast_lock:
-            if not self._figure_broadcasts:
-                return None
-            return copy.deepcopy(self._figure_broadcasts[-1])
+            for payload in reversed(self._figure_broadcasts):
+                if (
+                    payload.get("type") == "figure"
+                    and self._figure_revision_matches_current(payload.get("scene_id"), payload.get("state"))
+                    and self._figure_state_matches_current(payload.get("scene_id"), payload.get("state"))
+                ):
+                    return copy.deepcopy(payload)
+            return None
+
+    def latest_figure_seq(self) -> int:
+        with self._figure_broadcast_lock:
+            return self._figure_broadcast_seq
 
     def _request_scene_store_save(self) -> None:
         try:
@@ -594,11 +688,12 @@ class _CoreBackendMixin:
             camera=base_state.get("camera"),
             save=False,
         )
+        self._render_revisions[str(scene.id)] = 0
         self.current_state = self.scene_state(scene.id)
         # ``pending_state`` is a derived broadcast snapshot. Keep it detached
         # from the canonical scene state so poll-driven UI sync cannot alias
         # later in-process mutations.
-        self.pending_state = copy.deepcopy(self.current_state)
+        self.pending_state = self._state_snapshot(self.current_state, scene.id)
         self._bump_version()
         payload = scene.to_dict()
         payload["requested_label"] = str(requested_label)
@@ -608,6 +703,7 @@ class _CoreBackendMixin:
 
     def update_scene(self, scene_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         scene = self.scene_store.get(scene_id)
+        state_before = self.scene_state(scene_id)
         if "label" in payload and len(payload) == 1:
             scene = self.scene_store.rename(scene_id, payload["label"], save=False)
         else:
@@ -617,20 +713,22 @@ class _CoreBackendMixin:
                 state_patch = self.normalize_state(state_patch, scene_id=scene_id)
                 patch.update(state_patch)
             scene = self.scene_store.patch_scene(scene_id, patch, save=False)
+        self._bump_render_revision_if_changed(scene_id, state_before, self.scene_state(scene_id))
         if self.scene_store.active_id == scene_id:
             self.current_state = self.scene_state(scene_id)
             # Poll clients consume ``pending_state`` asynchronously; take a
             # full snapshot instead of sharing the canonical active-scene dict.
-            self.pending_state = copy.deepcopy(self.current_state)
+            self.pending_state = self._state_snapshot(self.current_state, scene_id)
         self._bump_version()
         self._request_scene_store_save()
         return scene.to_dict()
 
     def delete_scene(self, scene_id: str) -> dict[str, Any]:
         removed = self.scene_store.remove(scene_id, save=False)
+        self._render_revisions.pop(str(scene_id), None)
         if self.scene_store.active_id:
             self.current_state = self.scene_state(self.scene_store.active_id)
-        self.pending_state = copy.deepcopy(self.current_state)
+        self.pending_state = self._state_snapshot(self.current_state, self.scene_store.active_id)
         self._bump_version()
         self._request_scene_store_save()
         return removed.to_dict()
@@ -650,9 +748,10 @@ class _CoreBackendMixin:
         removed: list[dict[str, Any]] = []
         for scene_id in [sid for sid in list(self.scene_store.scenes.keys()) if sid != keep_id]:
             removed.append(self.scene_store.remove(scene_id, save=False).to_dict())
+            self._render_revisions.pop(str(scene_id), None)
         self.scene_store.active_id = keep_id
         self.current_state = self.scene_state(keep_id)
-        self.pending_state = copy.deepcopy(self.current_state)
+        self.pending_state = self._state_snapshot(self.current_state, keep_id)
         if removed:
             self._bump_version()
             self._request_scene_store_save()
@@ -660,8 +759,9 @@ class _CoreBackendMixin:
 
     def duplicate_scene(self, scene_id: str, label: Optional[str] = None) -> dict[str, Any]:
         scene = self.scene_store.duplicate(scene_id, label=label, save=False)
+        self._render_revisions[str(scene.id)] = 0
         self.current_state = self.scene_state(scene.id)
-        self.pending_state = copy.deepcopy(self.current_state)
+        self.pending_state = self._state_snapshot(self.current_state, scene.id)
         self._bump_version()
         self._request_scene_store_save()
         return scene.to_dict()
@@ -687,7 +787,7 @@ class _CoreBackendMixin:
         scene = self.scene_store.set_active(scene_id, save=False)
         self.current_state = self.scene_state(scene.id)
         if broadcast:
-            self.pending_state = copy.deepcopy(self.current_state)
+            self.pending_state = self._state_snapshot(self.current_state, scene.id)
         self._bump_version()
         self._request_scene_store_save()
         return scene.to_dict()
@@ -837,6 +937,12 @@ class _CoreBackendMixin:
         else:
             state = copy.deepcopy(self.current_state)
         patch = patch or {}
+
+        if "render_revision" in patch and patch["render_revision"] is not None:
+            try:
+                state["render_revision"] = int(patch["render_revision"])
+            except (TypeError, ValueError):
+                pass
 
         def _display_signature(value: dict[str, Any]) -> tuple[str, bool, bool]:
             return (
@@ -1034,12 +1140,10 @@ class _CoreBackendMixin:
     def get_state(self, scene_id: Optional[str] = None) -> dict[str, Any]:
         with self._lock:
             if scene_id is not None:
-                state = copy.deepcopy(self.scene_state(scene_id))
+                state = self.scene_state(scene_id)
             else:
-                state = copy.deepcopy(self.current_state)
-            state["server_started_at"] = self.server_started_iso()
-            state["version"] = self.version
-            return state
+                state = self.current_state
+            return self._state_snapshot(state, scene_id)
 
     def patch_state(
         self,
@@ -1061,18 +1165,22 @@ class _CoreBackendMixin:
         # authoritative for the field being changed.
         with self._lock:
             target_scene_id = scene_id or (patch or {}).get("scene_id") or self.scene_store.active_id
+            state_before = self.scene_state(target_scene_id) if target_scene_id else copy.deepcopy(self.current_state)
             self.current_state = self.normalize_state(patch, scene_id=target_scene_id)
             if target_scene_id:
                 scene_payload = copy.deepcopy(self.current_state)
                 scene_payload.pop("scene_id", None)
                 scene_payload.pop("scene_label", None)
                 self.scene_store.patch_scene(target_scene_id, scene_payload, save=False)
+                self._bump_render_revision_if_changed(target_scene_id, state_before, self.current_state)
+            self.current_state["render_revision"] = self.render_revision(target_scene_id)
             if broadcast:
                 self.pending_state = copy.deepcopy(self.current_state)
             self._bump_version()
             state = copy.deepcopy(self.current_state)
             state["version"] = self.version
             state["server_started_at"] = self.server_started_iso()
+            state["render_revision"] = self.render_revision(target_scene_id)
             self._request_scene_store_save()
             return state
 

@@ -31,6 +31,8 @@ def _fast_view_metadata(backend: "ViewerBackend", state: dict[str, Any], camera_
 
     payload = {
         "scene_id": scene_id,
+        "render_revision": backend.render_revision(scene_id),
+        "server_started_at": state.get("server_started_at") or backend.server_started_iso(),
         "M": _json_safe(scene.get("M")),
         "camera": _json_safe(_plotly_camera(camera) or backend.default_camera(state)),
         "default_camera": _json_safe(backend.default_camera(state)),
