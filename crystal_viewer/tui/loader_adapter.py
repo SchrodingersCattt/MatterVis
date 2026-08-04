@@ -580,6 +580,7 @@ def _from_ase_atoms(atoms_ase, name: str, path: str) -> CrystalIR:
     symbols = atoms_ase.get_chemical_symbols()
 
     atoms = []
+    atoms_raw = []  # dict format for find_bonds compatibility
     for i, (sym, pos) in enumerate(zip(symbols, positions)):
         frac = np.zeros(3)
         if has_cell:
@@ -594,9 +595,43 @@ def _from_ase_atoms(atoms_ase, name: str, path: str) -> CrystalIR:
             source_instance_id=f"{sym}{i+1}@source:{i}",
             display_copy_id=f"source:{i}/image:0,0,0",
         ))
+        atoms_raw.append({
+            "elem": sym, "cart": pos, "frac": frac,
+            "label": f"{sym}{i+1}", "occ": 1.0,
+            "dg": ".", "da": ".",
+            "_bond_partners": (), "_bond_lengths": {},
+            "_has_bond_table": False,
+        })
 
     formula = _compose_formula(atoms)
     counts = _counts_from_atoms(atoms)
+
+    # Distance-heuristic bond detection (same approach as POSCAR/VASP)
+    bonds: list[BondIR] = []
+    bond_source = "none"
+    if len(atoms_raw) > 0:
+        try:
+            from ..structure.bonds import find_bonds
+
+            import gemmi
+
+            if has_cell and lattice is not None:
+                M = np.array(lattice.matrix)
+                cell = gemmi.UnitCell(
+                    lattice.a, lattice.b, lattice.c,
+                    lattice.alpha, lattice.beta, lattice.gamma,
+                )
+                bond_pairs = find_bonds(atoms_raw, M=M, cell=cell)
+            else:
+                bond_pairs = find_bonds(atoms_raw)
+
+            for i, j in bond_pairs:
+                d = float(np.linalg.norm(atoms[i].cart - atoms[j].cart))
+                bonds.append(BondIR(i=i, j=j, distance=d))
+            if bonds:
+                bond_source = "distance_heuristic"
+        except Exception:
+            pass  # Bonds are optional
 
     return CrystalIR(
         title=name,
@@ -609,10 +644,10 @@ def _from_ase_atoms(atoms_ase, name: str, path: str) -> CrystalIR:
         expanded_atom_count=len(atoms),
         lattice=lattice,
         atoms=atoms,
-        bonds=[],  # Skip bonds for extxyz (no topology data)
+        bonds=bonds,
         metadata={
             "display_mode": "structure",
-            "bond_source": "none",
+            "bond_source": bond_source,
             "explicit_bond_table": False,
             "source_site_atom_count": len(atoms),
             "expanded_atom_count": len(atoms),
