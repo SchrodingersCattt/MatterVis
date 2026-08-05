@@ -647,6 +647,91 @@ def test_unwrapped_near_face_fragment_does_not_create_second_neighbour_images():
     assert not any(abs(value - 2.02) < 1e-9 or abs(value + 1.02) < 1e-9 for value in fracs)
 
 
+def test_unit_cell_can_omit_outside_boundary_replicas():
+    cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
+    M = np.eye(3) * 10.0
+    raw = [_atom("C1", [0.02, 0.5, 0.5], M)]
+    unwrapped = [_atom("C1", [1.02, 0.5, 0.5], M)]
+
+    scene = build_scene_from_atoms(
+        name="strict_cell",
+        title="Strict unit cell",
+        atoms=raw,
+        cell=cell,
+        M=M,
+        R=np.eye(3),
+        display_mode="unit_cell",
+        include_boundary_replicas=False,
+        ops=scene_ops(),
+        unwrapped_atoms=unwrapped,
+        preset={"style": {"show_labels": False, "show_axes": False}},
+    )
+
+    assert len(scene["draw_atoms"]) == 1
+    assert np.allclose(scene["draw_atoms"][0]["frac"], [0.02, 0.5, 0.5])
+    assert scene["unit_cell_boundary_replicas"] is False
+    assert not scene["draw_atoms"][0].get("_is_boundary_replica")
+
+
+def test_strict_unit_cell_drops_cross_boundary_bond_segments():
+    cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
+    M = np.eye(3) * 10.0
+    atoms = [
+        _atom("C1", [0.98, 0.5, 0.5], M),
+        _atom("C2", [0.02, 0.5, 0.5], M),
+    ]
+
+    scene = build_scene_from_atoms(
+        name="strict_cross_boundary_bond",
+        title="Strict cross-boundary bond",
+        atoms=atoms,
+        cell=cell,
+        M=M,
+        R=np.eye(3),
+        display_mode="unit_cell",
+        include_boundary_replicas=False,
+        ops=scene_ops(),
+        canonical_bond_pairs=[(0, 1)],
+        preset={"style": {"show_labels": False, "show_axes": False}},
+    )
+
+    assert len(scene["draw_atoms"]) == 2
+    assert scene["bonds"] == []
+    assert all(
+        np.all(np.asarray(atom["frac"]) >= 0.0)
+        and np.all(np.asarray(atom["frac"]) < 1.0)
+        for atom in scene["draw_atoms"]
+    )
+
+
+def test_strict_unit_cell_preserves_in_cell_canonical_bonds():
+    cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
+    M = np.eye(3) * 10.0
+    atoms = [
+        _atom("C1", [0.40, 0.5, 0.5], M),
+        _atom("C2", [0.52, 0.5, 0.5], M),
+    ]
+
+    scene = build_scene_from_atoms(
+        name="strict_in_cell_bond",
+        title="Strict in-cell bond",
+        atoms=atoms,
+        cell=cell,
+        M=M,
+        R=np.eye(3),
+        display_mode="unit_cell",
+        include_boundary_replicas=False,
+        ops=scene_ops(),
+        canonical_bond_pairs=[(0, 1)],
+        preset={"style": {"show_labels": False, "show_axes": False}},
+    )
+
+    assert [atom["_source_index"] for atom in scene["draw_atoms"]] == [0, 1]
+    assert len(scene["bonds"]) == 1
+    assert np.allclose(scene["bonds"][0]["start"], [4.0, 5.0, 5.0])
+    assert np.allclose(scene["bonds"][0]["end"], [5.2, 5.0, 5.0])
+
+
 def test_formula_unit_mode_does_not_replicate():
     """Boundary replication is a unit_cell-only convention. Other
     display modes must not emit duplicate atoms (their semantics are

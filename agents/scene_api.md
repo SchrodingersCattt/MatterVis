@@ -50,6 +50,12 @@ Parses a CIF and returns a scene dict consumable by
   triggers an image, the complete molecule is translated. Image shifts are
   unioned per member; face signals from different members are never combined
   into an unsupported diagonal image.
+  Library callers that need a strict publication cell can pass
+  `include_boundary_replicas=False` to `build_scene_from_atoms` or
+  `build_bundle_scene`. Atom centres are wrapped into `[0, 1)` and no adjacent
+  image is emitted. Cross-boundary bonds whose in-cell endpoints would create
+  a long line are omitted rather than drawn outside the cell. The default is
+  `True` to preserve the interactive whole-fragment convention.
 - `asymmetric_unit` — only the asymmetric unit is drawn.
 - `cluster` — **free molecular cluster mode**. Every parsed atom is
   drawn unchanged; no formula-unit selection or periodic image
@@ -101,12 +107,22 @@ honours:
 - `material` — `mesh` for real Mesh3d atoms/bonds, or `flat` for
   billboard-style traces.
 - `style` — `ball`, `ball_stick`, `stick`, `ortep`, or `wireframe`.
+- `scatter_atom_scale` — multiplier for fixed-pixel atom markers in the fast
+  Scatter3d fallback (default `0.45`).
+- `scatter_bond_scale` — multiplier for fast Scatter3d bond-line width
+  (default `1.0`).
+- `scatter_bond_contrast_color` — optional replacement for a fast bond half
+  whose colour has insufficient luminance contrast with the background.
 - `disorder` — `opacity`, `dashed_bonds`, `outline_rings`,
   `color_shift`, or `none`. This is independent from `material` and
   `style`; disorder no longer implies transparent atoms.
 - Legacy aliases: `fast_rendering=True` maps to `material="flat"`;
   `minor_wireframe=True` maps to `disorder="outline_rings"`; and
   `minor_opacity` only changes visibility when `disorder="opacity"`.
+- The fast Scatter3d fallback preserves every manifested scene bond and draws
+  its endpoint-coloured bond halves after the fixed-pixel atom markers. This
+  ordering keeps short N-H/O-H bonds visible in fitted unit-cell overviews;
+  Mesh3d retains depth-correct bond-before-atom ordering.
 - `show_title` — set to `False` to suppress the Plotly panel title
   when the caller composes panels externally (e.g. with Matplotlib
   subplot titles or `make_subplots`).

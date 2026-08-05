@@ -171,6 +171,120 @@ def test_dashed_disorder_fast_path_sets_dash_style(scene_template):
     assert any(getattr(trace.line, "dash", None) == "dash" for trace in bond_lines)
 
 
+def test_fast_ball_stick_draws_bonds_after_atoms(scene_template):
+    """Fast marker atoms must not occlude short bonds in overview renders.
+
+    Scatter3d marker diameters are fixed in screen pixels. At a fitted
+    unit-cell overview they can cover an entire short N-H/O-H bond when the
+    bond trace is inserted first. The fast path therefore overlays the
+    endpoint-coloured bond halves after the atom markers; the mesh path keeps
+    its depth-correct bond-before-atom ordering.
+    """
+    fig = build_figure(
+        _scene(scene_template),
+        {
+            "material": "mesh",
+            "style": "ball_stick",
+            "disorder": "outline_rings",
+            "fast_rendering": True,
+            "atom_scale": 1.0,
+            "bond_radius": 0.1,
+            "axis_scale": 0.1,
+            "show_axes": False,
+            "show_labels": False,
+            "topology_enabled": False,
+        },
+    )
+
+    roles = [
+        (trace.meta or {}).get("mv_role")
+        if isinstance(trace.meta, dict)
+        else None
+        for trace in fig.data
+    ]
+    atom_indices = [index for index, role in enumerate(roles) if role == "atom"]
+    bond_indices = [index for index, role in enumerate(roles) if role == "bond"]
+
+    assert atom_indices
+    assert bond_indices
+    assert max(atom_indices) < min(bond_indices)
+
+
+def test_fast_atom_scale_default_is_compact_and_cache_sensitive(scene_template):
+    scene = _scene(scene_template)
+    style = {
+        "material": "mesh",
+        "style": "ball_stick",
+        "disorder": "outline_rings",
+        "fast_rendering": True,
+        "atom_scale": 1.0,
+        "bond_radius": 0.1,
+        "axis_scale": 0.1,
+        "show_axes": False,
+        "show_labels": False,
+        "topology_enabled": False,
+    }
+
+    default_fig = build_figure(scene, style)
+    larger_fig = build_figure(scene, {**style, "scatter_atom_scale": 0.8})
+
+    def marker_sizes(fig):
+        values = []
+        for trace in fig.data:
+            meta = trace.meta if isinstance(trace.meta, dict) else {}
+            if meta.get("mv_role") != "atom" or getattr(trace, "mode", None) != "markers":
+                continue
+            size = trace.marker.size
+            if isinstance(size, (list, tuple)):
+                values.extend(float(value) for value in size)
+            else:
+                values.append(float(size))
+        return values
+
+    default_sizes = marker_sizes(default_fig)
+    larger_sizes = marker_sizes(larger_fig)
+    assert default_sizes
+    assert max(default_sizes) == pytest.approx(11.2)
+    assert max(larger_sizes) > max(default_sizes)
+
+
+def test_fast_white_bond_half_gets_background_contrast(scene_template):
+    scene = _scene(scene_template)
+    scene["draw_atoms"][1]["color"] = "#FFFFFF"
+    scene["draw_atoms"][1]["color_light"] = "#FFFFFF"
+    scene["bonds"][0]["color_j"] = "#FFFFFF"
+
+    fig = build_figure(
+        scene,
+        {
+            "material": "mesh",
+            "style": "ball_stick",
+            "disorder": "outline_rings",
+            "fast_rendering": True,
+            "atom_scale": 1.0,
+            "bond_radius": 0.1,
+            "axis_scale": 0.1,
+            "show_axes": False,
+            "show_labels": False,
+            "topology_enabled": False,
+            "background": "#FFFFFF",
+        },
+    )
+
+    bond_colors = [
+        str(trace.line.color).upper()
+        for trace in fig.data
+        if (
+            isinstance(trace.meta, dict)
+            and trace.meta.get("mv_role") == "bond"
+            and getattr(trace, "mode", None) == "lines"
+        )
+    ]
+    assert bond_colors
+    assert "#FFFFFF" not in bond_colors
+    assert "#6B7280" in bond_colors
+
+
 def test_monochrome_style_renders_black_atoms_and_bonds(scene_template):
     fig = build_figure(
         _scene(scene_template),

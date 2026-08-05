@@ -64,6 +64,29 @@ def _element_legend_annotations(scene: dict, style: dict) -> list[dict]:
     }]
 
 
+def _ordered_atom_bond_trace_dicts(mesh_payload: dict, *, use_fast: bool) -> list[dict]:
+    """Return atom/bond layers in a pipeline-appropriate draw order.
+
+    Fast atoms are fixed-size Scatter3d markers. At a fitted overview their
+    screen radii can cover a complete short N-H/O-H bond when bonds are
+    inserted first. Endpoint-coloured fast bonds therefore overlay markers;
+    Mesh3d keeps the conventional depth-correct bond-before-atom order.
+    """
+    if use_fast:
+        return [
+            *mesh_payload["atom_dicts"],
+            *mesh_payload["bond_dicts"],
+            *mesh_payload["minor_bond_dicts"],
+            *mesh_payload["minor_outline_dicts"],
+        ]
+    return [
+        *mesh_payload["bond_dicts"],
+        *mesh_payload["minor_bond_dicts"],
+        *mesh_payload["atom_dicts"],
+        *mesh_payload["minor_outline_dicts"],
+    ]
+
+
 def build_row_figure(
     scene_style_pairs: list[tuple[dict, dict]],
     bgcolor: str = "#FFFFFF",
@@ -126,10 +149,7 @@ def build_row_figure(
             hidden_labels_row = hidden_atom_label_set(tagged_row)
 
         trace_dicts: list[dict] = []
-        trace_dicts.extend(mesh_payload["bond_dicts"])
-        trace_dicts.extend(mesh_payload["minor_bond_dicts"])
-        trace_dicts.extend(mesh_payload["atom_dicts"])
-        trace_dicts.extend(mesh_payload["minor_outline_dicts"])
+        trace_dicts.extend(_ordered_atom_bond_trace_dicts(mesh_payload, use_fast=use_fast))
         trace_dicts.extend(_traces_to_dicts(_contact_traces(scene, style_norm)))
         trace_dicts.extend(_traces_to_dicts(_label_traces(scene, style_norm, hidden_labels=hidden_labels_row)))
         trace_dicts.extend(_traces_to_dicts(_axis_traces(scene, style_norm)))
@@ -211,10 +231,7 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None, *,
     # skeleton renders on top of the translucent orbital lobes.
     from .traces_isosurface import isosurface_overlay_traces
     trace_dicts.extend(isosurface_overlay_traces(scene, style))
-    trace_dicts.extend(mesh_payload["bond_dicts"])
-    trace_dicts.extend(mesh_payload["minor_bond_dicts"])
-    trace_dicts.extend(mesh_payload["atom_dicts"])
-    trace_dicts.extend(mesh_payload["minor_outline_dicts"])
+    trace_dicts.extend(_ordered_atom_bond_trace_dicts(mesh_payload, use_fast=use_fast))
     selection_trace = selection_outline_trace(
         scene,
         style,

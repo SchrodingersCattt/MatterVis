@@ -84,6 +84,8 @@ def scene_ops():
 
 def _bond_endpoints(ai, aj, cell, display_mode: str):
     start = np.array(ai["cart"], dtype=float)
+    if ai.get("_strict_unit_cell") or aj.get("_strict_unit_cell"):
+        return start, np.array(aj["cart"], dtype=float)
     if display_mode in ("formula_unit", "cluster") or (ai.get("_unwrapped") and aj.get("_unwrapped")):
         end = np.array(aj["cart"], dtype=float)
     else:
@@ -228,6 +230,51 @@ def _canonical_display_bond_pairs(
     }
 
 
+def _canonical_display_pair_instances(
+    draw_atoms: list[dict[str, Any]],
+    canonical_bond_pairs: list[tuple[int, int]],
+) -> list[tuple[int, int]]:
+    """Lift legacy source-index pairs to every matching fragment image.
+
+    Older MolCrysKit releases expose ``bond_pairs`` without signed PBC
+    ``bond_records``. A one-value ``source_index -> draw_index`` mapping drops
+    all but one boundary-fragment instance. Group by source molecule and
+    display image instead, then emit an edge in every group containing both
+    endpoints. Ungrouped atoms retain the historical one-instance fallback.
+    """
+    fragment_members: dict[tuple[int, tuple[int, int, int]], dict[int, int]] = {}
+    fragment_keys_by_source: dict[int, set[tuple[int, tuple[int, int, int]]]] = {}
+    ungrouped: dict[int, int] = {}
+    for draw_index, atom in enumerate(draw_atoms):
+        try:
+            source_index = int(atom.get("_source_index", draw_index))
+        except (TypeError, ValueError):
+            continue
+        molecule_index = atom.get("_source_molecule_index")
+        if molecule_index is None:
+            ungrouped.setdefault(source_index, draw_index)
+            continue
+        try:
+            image_shift = tuple(int(value) for value in atom.get("_image_shift", (0, 0, 0)))
+            fragment_key = (int(molecule_index), image_shift)
+        except (TypeError, ValueError):
+            ungrouped.setdefault(source_index, draw_index)
+            continue
+        fragment_members.setdefault(fragment_key, {}).setdefault(source_index, draw_index)
+        fragment_keys_by_source.setdefault(source_index, set()).add(fragment_key)
+
+    pairs: set[tuple[int, int]] = set()
+    for raw_left, raw_right in canonical_bond_pairs:
+        left, right = int(raw_left), int(raw_right)
+        common_keys = fragment_keys_by_source.get(left, set()) & fragment_keys_by_source.get(right, set())
+        for key in common_keys:
+            members = fragment_members[key]
+            pairs.add(tuple(sorted((members[left], members[right]))))
+        if not common_keys and left in ungrouped and right in ungrouped:
+            pairs.add(tuple(sorted((ungrouped[left], ungrouped[right]))))
+    return sorted(pairs)
+
+
 def build_scene_from_atoms(
     *,
     name: str,
@@ -242,6 +289,7 @@ def build_scene_from_atoms(
     ops=None,
     formula_unit_atoms=None,
     unwrapped_atoms=None,
+    include_boundary_replicas: bool = True,
     bond_scale: float | None = None,
     bond_thresholds: dict[tuple[str, str], float] | None = None,
     canonical_bond_pairs: list[tuple[int, int]] | None = None,
@@ -262,6 +310,7 @@ def build_scene_from_atoms(
         display_mode=display_mode,
         formula_unit_atoms=formula_unit_atoms,
         unwrapped_atoms=unwrapped_atoms,
+        include_boundary_replicas=include_boundary_replicas,
     )
     draw_atoms = [dict(atom) for atom in sel_atoms if show_h or atom["elem"] != "H"]
 
@@ -304,16 +353,7 @@ def build_scene_from_atoms(
             canonical_records,
         )
     elif canonical_pairs is not None:
-        source_to_draw = {
-            int(atom.get("_source_index", index)): index
-            for index, atom in enumerate(draw_atoms)
-            if atom.get("_source_index") is not None
-        }
-        bond_pairs = [
-            (source_to_draw[left], source_to_draw[right])
-            for left, right in canonical_pairs
-            if left in source_to_draw and right in source_to_draw
-        ]
+        bond_pairs = _canonical_display_pair_instances(draw_atoms, canonical_pairs)
     elif bond_scale is None and bond_thresholds is None:
         bond_pairs = ops.find_bonds(
             draw_atoms,
@@ -419,6 +459,7 @@ def build_scene_from_atoms(
         "has_minor": any(bool(atom["is_minor"]) for atom in draw_atoms),
         "preset_entry": entry,
         "display_mode": display_mode,
+        "unit_cell_boundary_replicas": bool(include_boundary_replicas),
         "bond_scale": bond_scale,
         "bond_thresholds": copy.deepcopy(bond_thresholds),
         "projected_axes": projected_axes,
