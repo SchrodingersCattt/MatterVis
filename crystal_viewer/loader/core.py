@@ -869,6 +869,7 @@ def build_bundle_scene(
     show_hydrogen: bool = False,
     preset: Optional[Dict[str, Any]] = None,
     transforms: Optional[list[Dict[str, Any]]] = None,
+    include_boundary_replicas: bool = True,
 ) -> Dict[str, Any]:
     """Build the scene dict for ``bundle``.
 
@@ -886,6 +887,7 @@ def build_bundle_scene(
     base_cache_key = (
         display_mode,
         bool(show_hydrogen),
+        bool(include_boundary_replicas),
         bundle.bond_scale,
         threshold_key,
     )
@@ -913,6 +915,7 @@ def build_bundle_scene(
             ops=ops,
             formula_unit_atoms=bundle.formula_unit_atoms if display_mode == "formula_unit" else None,
             unwrapped_atoms=bundle.unwrapped_atoms,
+            include_boundary_replicas=include_boundary_replicas,
             bond_scale=bundle.bond_scale,
             bond_thresholds=bundle.bond_thresholds,
             canonical_bond_pairs=getattr(bundle.molcrys_analysis, "bond_pairs", None),
@@ -922,7 +925,12 @@ def build_bundle_scene(
         base_scene["view_direction"] = view_dir
         base_scene["up"] = up
         base_scene["unwrap_overflow"] = copy.deepcopy(bundle.unwrap_overflow)
-        fragment_cache_key = ("scene", display_mode, bool(show_hydrogen))
+        fragment_cache_key = (
+            "scene",
+            display_mode,
+            bool(show_hydrogen),
+            bool(include_boundary_replicas),
+        )
         cached_fragments = bundle.fragment_table_cache.get(fragment_cache_key)
         if cached_fragments is None:
             fragment_table, atom_fragment_labels = _fragment_table_from_atoms(
@@ -963,7 +971,12 @@ def build_bundle_scene(
             bundle._transformed_scene_cache = transformed_cache
         except Exception:
             pass
-    cache_key = (display_mode, bool(show_hydrogen), transforms_cache_key(transforms))
+    cache_key = (
+        display_mode,
+        bool(show_hydrogen),
+        bool(include_boundary_replicas),
+        transforms_cache_key(transforms),
+    )
     cached = transformed_cache.get(cache_key) if isinstance(transformed_cache, dict) else None
     if cached is not None:
         return cached
