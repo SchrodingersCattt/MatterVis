@@ -270,9 +270,9 @@ def _style_trace_dicts(trace_dicts: list[dict], style: dict) -> list[dict]:
             copied["visible"] = show_axes
         elif role == "unit_cell":
             copied["visible"] = show_unit_cell
-        elif show_minor_only and role in {"atom", "bond", "atom_selection", "bond_selection"} and not is_minor:
+        elif show_minor_only and role in {"atom", "atom_highlight", "bond", "atom_selection", "bond_selection"} and not is_minor:
             copied["visible"] = False
-        elif role in {"atom", "bond", "atom_selection", "bond_selection"}:
+        elif role in {"atom", "atom_highlight", "bond", "atom_selection", "bond_selection"}:
             copied["visible"] = True
         group_id = meta.get("mv_opacity_group")
         if role == "atom":

@@ -6,7 +6,49 @@ from .meshes import *
 from .style import *
 from .traces_overlays import _dashed_segments, _ring_segments, _segment_cylinder_trace
 
-def _bond_segments(scene: dict, style: dict, *, with_scales: bool = False):
+_FLAT_ATOM_MIN_PIXEL_SIZE = 3.0
+
+
+def _flat_atom_marker_size(atom_radius: float, style: dict) -> float:
+    """Map the scene radius to a fast-path pixel marker size."""
+    return max(
+        _FLAT_ATOM_MIN_PIXEL_SIZE,
+        95.0
+        * float(atom_radius)
+        * float(style["atom_scale"])
+        * float(style.get("scatter_atom_scale", 0.45)),
+    )
+
+
+def _flat_highlight_center(atom: dict, scene: dict, style: dict) -> np.ndarray:
+    """Place an opaque specular dot at the screen upper-right of an atom."""
+    right = screen_up = toward_camera = None
+    camera = style.get("camera")
+    if isinstance(camera, dict) and all(key in camera for key in ("eye", "center", "up")):
+        try:
+            from ..compass import camera_screen_basis
+
+            right, screen_up = camera_screen_basis(camera)
+            eye = np.array([float(camera["eye"][axis]) for axis in ("x", "y", "z")], dtype=float)
+            center = np.array([float(camera["center"][axis]) for axis in ("x", "y", "z")], dtype=float)
+            toward_camera = eye - center
+            toward_camera /= max(float(np.linalg.norm(toward_camera)), 1e-12)
+        except (KeyError, TypeError, ValueError, IndexError):
+            right = screen_up = toward_camera = None
+
+    if right is None or screen_up is None or toward_camera is None:
+        # Unit tests and interactive callers may not provide a Plotly camera.
+        # The loader rotation stores the same basis as view_x/view_y/view_z.
+        right = np.asarray(scene["view_x"], dtype=float)
+        screen_up = np.asarray(scene["view_y"], dtype=float)
+        toward_camera = np.asarray(scene["view_z"], dtype=float)
+
+    light_dir = 0.62 * right + 0.62 * screen_up + 0.45 * toward_camera
+    norm = float(np.linalg.norm(light_dir))
+    if norm < 1e-8:
+        return np.asarray(atom["cart"], dtype=float)
+    radius = float(atom["atom_radius"]) * float(style["atom_scale"])
+    return np.asarray(atom["cart"], dtype=float) + light_dir / norm * (0.28 * radius)`n`n`ndef _bond_segments(scene: dict, style: dict, *, with_scales: bool = False):
     """Yield ``(color, is_minor, start, end)`` tuples for every bond half.
 
     When ``with_scales=True`` each yield is extended with
@@ -328,25 +370,39 @@ def _atom_scatter_traces(scene: dict, style: dict):
         opacity_group = _atom_opacity_group_id(atom)
         opacity_bin = f"{eff_opacity:.2f}"
         # Per-trace key = (element, is_minor, effective_color, effective_opacity_bin).
-        # Adding colour to the key means a per-element atom_groups
-        # rule still groups its atoms in one Scatter3d (so legend
-        # entries still read element-by-element) but doesn't merge
-        # red-O with default-O when the user splits them.
+        # Adding colour to the key means a per-element atom_groups rule still
+        # groups its atoms in one Scatter3d without merging differently styled O.
         key = (atom["elem"], is_minor, color, opacity_group, opacity_bin)
         groups.setdefault(
             key,
-            {"x": [], "y": [], "z": [], "size": [], "text": [], "color": color, "customdata": [], "opacity": eff_opacity},
+            {
+                "x": [],
+                "y": [],
+                "z": [],
+                "size": [],
+                "text": [],
+                "color": color,
+                "customdata": [],
+                "opacity": eff_opacity,
+                "highlight_x": [],
+                "highlight_y": [],
+                "highlight_z": [],
+                "highlight_size": [],
+            },
         )
-        base_size = max(10.0, 95.0 * atom["atom_radius"] * float(style["atom_scale"]) * float(style.get("scatter_atom_scale", 0.45)))
-        groups[key]["x"].append(float(atom["cart"][0]))
-        groups[key]["y"].append(float(atom["cart"][1]))
-        groups[key]["z"].append(float(atom["cart"][2]))
-        groups[key]["size"].append(base_size * (1.12 if is_minor else 1.0))
-        groups[key]["text"].append(atom["label"])
+        payload = groups[key]
+        base_size = _flat_atom_marker_size(atom["atom_radius"], style)
+        payload["x"].append(float(atom["cart"][0]))
+        payload["y"].append(float(atom["cart"][1]))
+        payload["z"].append(float(atom["cart"][2]))
+        payload["size"].append(base_size * (1.12 if is_minor else 1.0))
+        payload["text"].append(atom["label"])
         frag_label = (
-            str(fragment_labels[idx]) if idx < len(fragment_labels) and fragment_labels[idx] is not None else ""
+            str(fragment_labels[idx])
+            if idx < len(fragment_labels) and fragment_labels[idx] is not None
+            else ""
         )
-        groups[key]["customdata"].append([
+        payload["customdata"].append([
             "atom",
             int(idx),
             str(atom["label"]),
@@ -354,30 +410,66 @@ def _atom_scatter_traces(scene: dict, style: dict):
             int(is_minor),
             frag_label,
         ])
+        if style.get("material") == "flat" and atom["elem"] != "H":
+            center = _flat_highlight_center(atom, scene, style)
+            payload["highlight_x"].append(float(center[0]))
+            payload["highlight_y"].append(float(center[1]))
+            payload["highlight_z"].append(float(center[2]))
+            payload["highlight_size"].append(base_size)
 
     traces = []
     for (elem, is_minor, _color, opacity_group, _opacity_bin), payload in groups.items():
         # Raw dict avoids go.Scatter3d() validator overhead.
-        trace_dict = {
-            "type": "scatter3d",
-            "x": payload["x"],
-            "y": payload["y"],
-            "z": payload["z"],
-            "mode": "markers",
-            "text": payload["text"],
-            "customdata": payload["customdata"],
-            "hovertemplate": "%{text}<extra></extra>",
-            "marker": {
-                "size": payload["size"],
-                "color": payload["color"],
-                "opacity": payload["opacity"],
-                "line": {"color": "#444444" if is_minor else payload["color"], "width": 3.5 if is_minor else 0},
-            },
-            "showlegend": False,
-            "name": f"{elem}{' minor' if is_minor else ''}",
-            "meta": _latency_meta("atom", is_minor=is_minor, opacity_group=opacity_group),
-        }
-        traces.append(trace_dict)
+        traces.append(
+            {
+                "type": "scatter3d",
+                "x": payload["x"],
+                "y": payload["y"],
+                "z": payload["z"],
+                "mode": "markers",
+                "text": payload["text"],
+                "customdata": payload["customdata"],
+                "hovertemplate": "%{text}<extra></extra>",
+                "marker": {
+                    "size": payload["size"],
+                    "color": payload["color"],
+                    "opacity": payload["opacity"],
+                    "line": {
+                        "color": "#444444" if is_minor else payload["color"],
+                        "width": 3.5 if is_minor else 0,
+                    },
+                },
+                "showlegend": False,
+                "name": f"{elem}{' minor' if is_minor else ''}",
+                "meta": _latency_meta("atom", is_minor=is_minor, opacity_group=opacity_group),
+            }
+        )
+        if not payload["highlight_x"]:
+            continue
+        highlight_meta = _latency_meta(
+            "atom_highlight",
+            is_minor=is_minor,
+            opacity_group=opacity_group,
+        )
+        for kind, scale, opacity in (("core", 0.20, 1.0),):
+            traces.append(
+                {
+                    "type": "scatter3d",
+                    "x": payload["highlight_x"],
+                    "y": payload["highlight_y"],
+                    "z": payload["highlight_z"],
+                    "mode": "markers",
+                    "marker": {
+                        "size": [size * scale for size in payload["highlight_size"]],
+                        "color": "#FFFFFF",
+                        "opacity": opacity,
+                    },
+                    "hoverinfo": "skip",
+                    "showlegend": False,
+                    "name": f"flat highlight {kind}",
+                    "meta": {**highlight_meta, "mv_highlight_kind": kind},
+                }
+            )
     return traces
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from crystal_viewer.render.style import _atom_effective_opacity, _style_trace_dicts
@@ -7,6 +8,7 @@ from crystal_viewer.render.traces_atoms import (
     _atom_mesh_traces,
     _atom_scatter_traces,
     _bond_segments,
+    _flat_highlight_center,
 )
 from crystal_viewer.render.traces_overlays import _minor_outline_traces
 from crystal_viewer.style.disorder import atom_is_disordered, bond_effective_opacity
@@ -80,7 +82,36 @@ def test_flat_atoms_with_different_occupancies_keep_distinct_opacities():
     assert sorted(trace["marker"]["opacity"] for trace in traces) == [0.4, 0.7]
 
 
-def test_flat_cache_replay_preserves_occupancy_opacity():
+def test_flat_sizes_follow_radius_and_use_opaque_upper_right_highlights():
+    major = _atom("major", is_minor=False)
+    minor = _atom("minor", is_minor=True)
+    minor["atom_radius"] = 0.24
+    scene = {
+        "draw_atoms": [major, minor],
+        "view_x": [1.0, 0.0, 0.0],
+        "view_y": [0.0, 1.0, 0.0],
+        "view_z": [0.0, 0.0, 1.0],
+    }
+
+    camera = {
+        "eye": {"x": 0.0, "y": 0.0, "z": 1.0},
+        "center": {"x": 0.0, "y": 0.0, "z": 0.0},
+        "up": {"x": 0.0, "y": 1.0, "z": 0.0},
+    }
+    style = _style(material="flat", camera=camera)
+    traces = _atom_scatter_traces(scene, style)
+    delta = _flat_highlight_center(major, scene, style) - np.asarray(major["cart"], dtype=float)
+    assert delta[0] > 0.0 and delta[1] > 0.0
+    atom_traces = [trace for trace in traces if trace["meta"]["mv_role"] == "atom"]
+    highlight_traces = [
+        trace for trace in traces if trace["meta"]["mv_role"] == "atom_highlight"
+    ]
+    sizes = [float(size) for trace in atom_traces for size in trace["marker"]["size"]]
+    assert len(set(sizes)) == 2
+    assert len(highlight_traces) == len(atom_traces)
+    assert {trace["meta"]["mv_highlight_kind"] for trace in highlight_traces} == {"core"}
+    assert all(trace["marker"]["color"] == "#FFFFFF" for trace in highlight_traces)
+    assert all(trace["marker"]["opacity"] == 1.0 for trace in highlight_traces)`n`n`ndef test_flat_cache_replay_preserves_occupancy_opacity():
     traces = [
         {
             "type": "scatter3d",

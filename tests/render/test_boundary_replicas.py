@@ -738,8 +738,10 @@ def test_strict_unit_cell_supplements_missing_legacy_cross_boundary_pair():
         preset={"style": {"show_labels": False, "show_axes": False}},
     )
 
-    assert scene["bonded_image_replica_count"] == 2
-    assert len(scene["bonds"]) == 3
+    # The missing legacy relation exposes a connected three-atom fragment;
+    # strict completion mirrors the whole fragment, not only its endpoints.
+    assert scene["bonded_image_replica_count"] == 3
+    assert len(scene["bonds"]) == 4
     degrees = [0] * len(scene["draw_atoms"])
     for bond in scene["bonds"]:
         degrees[bond["i"]] += 1

@@ -180,12 +180,12 @@ def _manifest_strict_bonded_images(
     M: Any,
     canonical_bond_records: list[dict[str, Any]],
 ) -> int:
-    """Add only the periodic atom images required by strict-cell bonds.
+    """Add complete periodic images required by strict-cell bonds.
 
-    Strict unit-cell mode keeps the crystallographic home-cell atom centres,
-    but a bond crossing a cell face needs its nearest periodic endpoint to be
-    visible. Materialising that endpoint avoids both cell-spanning bonds and
-    apparently isolated boundary atoms without expanding a full replica shell.
+    A strict-cell image is introduced because one bond crosses a cell face.
+    The image must represent the whole connected chemical fragment: adding
+    only the endpoint that crosses the face leaves, for example, a translated
+    ClO4 centre with just one of its four O atoms.
     """
     if not draw_atoms or not any(atom.get("_strict_unit_cell") for atom in draw_atoms):
         return 0
@@ -201,7 +201,42 @@ def _manifest_strict_bonded_images(
             home_by_source.setdefault(identity[0], atom)
 
     M_arr = np.asarray(M, dtype=float)
+    adjacency: dict[int, list[tuple[int, tuple[int, int, int]]]] = {}
+    for record in canonical_bond_records:
+        try:
+            left = int(record["left"])
+            right = int(record["right"])
+            relation = tuple(int(value) for value in record["right_image_shift"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if len(relation) != 3:
+            continue
+        adjacency.setdefault(left, []).append((right, relation))
+        adjacency.setdefault(right, []).append((left, tuple(-value for value in relation)))
+
     additions: list[dict[str, Any]] = []
+
+    def _add_image(source: int, shift: tuple[int, int, int]) -> None:
+        target_key = (source, shift)
+        source_atom = home_by_source.get(source)
+        if source_atom is None or target_key in instances:
+            return
+        copied = dict(source_atom)
+        wrapped_frac = np.asarray(source_atom.get("frac"), dtype=float)
+        target_frac = wrapped_frac + np.asarray(shift, dtype=float)
+        copied["frac"] = target_frac
+        copied["cart"] = frac_to_cart(target_frac, M_arr)
+        copied["_wrapped_frac"] = wrapped_frac.copy()
+        copied["_image_shift"] = shift
+        copied["_strict_unit_cell"] = True
+        copied["_is_bonded_image_replica"] = True
+        copied.pop("_is_boundary_replica", None)
+        copied.pop("_is_fragment_boundary_replica", None)
+        instances[target_key] = len(draw_atoms) + len(additions)
+        additions.append(copied)
+
+    # Seed image instances from canonical records whose endpoint crosses a
+    # face. The checks retain the existing safety guard for each seed.
     for record in canonical_bond_records:
         try:
             left = int(record["left"])
@@ -220,23 +255,45 @@ def _manifest_strict_bonded_images(
             target_key = (target, shift)
             if source_atom is None or target_atom is None or target_key in instances:
                 continue
-            copied = dict(target_atom)
-            wrapped_frac = np.asarray(target_atom.get("frac"), dtype=float)
-            target_frac = wrapped_frac + np.asarray(shift, dtype=float)
-            copied["frac"] = target_frac
-            copied["cart"] = frac_to_cart(target_frac, M_arr)
-            copied["_wrapped_frac"] = wrapped_frac.copy()
-            copied["_image_shift"] = shift
-            copied["_strict_unit_cell"] = True
-            copied["_is_bonded_image_replica"] = True
-            copied.pop("_is_boundary_replica", None)
-            copied.pop("_is_fragment_boundary_replica", None)
-            if bonds_conflict(source_atom, copied):
+            candidate = dict(target_atom)
+            candidate_frac = np.asarray(target_atom.get("frac"), dtype=float) + np.asarray(shift, dtype=float)
+            candidate["frac"] = candidate_frac
+            candidate["cart"] = frac_to_cart(candidate_frac, M_arr)
+            if bonds_conflict(source_atom, candidate):
                 continue
-            if float(np.linalg.norm(np.asarray(copied["cart"]) - np.asarray(source_atom["cart"]))) > 3.5:
+            if float(np.linalg.norm(np.asarray(candidate["cart"]) - np.asarray(source_atom["cart"]))) > 3.5:
                 continue
-            instances[target_key] = len(draw_atoms) + len(additions)
-            additions.append(copied)
+            _add_image(target, shift)
+
+    # Complete every seeded image over its canonical connected component.
+    # The signed record relation maps current@q to neighbour@(q + edge).
+    for (seed_source, seed_shift), _draw_index in list(instances.items()):
+        if seed_shift == (0, 0, 0):
+            continue
+        potentials: dict[int, tuple[int, int, int]] = {seed_source: (0, 0, 0)}
+        queue = [seed_source]
+        while queue:
+            current = queue.pop(0)
+            current_potential = potentials[current]
+            for neighbour, edge_shift in adjacency.get(current, ()):
+                proposed = tuple(
+                    current_potential[axis] + edge_shift[axis]
+                    for axis in range(3)
+                )
+                known = potentials.get(neighbour)
+                if known is None:
+                    potentials[neighbour] = proposed
+                    queue.append(neighbour)
+                elif known != proposed:
+                    # Keep the first shortest-path potential for malformed
+                    # record sets containing an inconsistent cycle.
+                    continue
+        for source, relative_shift in potentials.items():
+            absolute_shift = tuple(
+                seed_shift[axis] + relative_shift[axis]
+                for axis in range(3)
+            )
+            _add_image(source, absolute_shift)
 
     draw_atoms.extend(additions)
     return len(additions)

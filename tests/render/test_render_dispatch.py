@@ -244,7 +244,8 @@ def test_fast_atom_scale_default_is_compact_and_cache_sensitive(scene_template):
     default_sizes = marker_sizes(default_fig)
     larger_sizes = marker_sizes(larger_fig)
     assert default_sizes
-    assert max(default_sizes) == pytest.approx(11.2)
+    assert max(default_sizes) == pytest.approx(95.0 * 0.17 * 0.45 * 1.12)
+    assert min(default_sizes) < max(default_sizes)
     assert max(larger_sizes) > max(default_sizes)
 
 

@@ -241,12 +241,10 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None, *,
         trace_dicts.extend(_traces_to_dicts([selection_trace]))
     trace_dicts.extend(_traces_to_dicts([disorder_preview_outline_trace(scene, style, highlight_labels=set())]))
     trace_dicts.extend(_traces_to_dicts(_contact_traces(scene, style)))
-    # _highlight_traces (fake specular dots) are deliberately *not* added.
-    # They were Scatter3d markers with pixel-fixed sizes -- in the static
-    # publication path they read as ugly translucent halos that engulf the
-    # atoms when the scene is zoomed out, and the proper Mesh3d shading on
-    # `_atom_mesh_traces` already gives a believable highlight.
-    trace_dicts.extend(_traces_to_dicts(_label_traces(scene, style, hidden_labels=hidden_labels)))
+    # Flat rendering emits one grouped, fully opaque white dot from
+    # `_atom_scatter_traces`, placed at the screen upper-right of each atom.
+    # Mesh rendering keeps its native Mesh3d lighting; no raster post-process
+    # or per-atom highlight traces are used.    trace_dicts.extend(_traces_to_dicts(_label_traces(scene, style, hidden_labels=hidden_labels)))
     trace_dicts.extend(_traces_to_dicts(_axis_traces(scene, style)))
     trace_dicts.extend(_traces_to_dicts(_unit_cell_traces(scene, style)))
     trace_dicts.extend(_traces_to_dicts(_morphology_traces(scene, style)))
