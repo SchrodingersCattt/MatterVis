@@ -102,6 +102,7 @@ def test_flat_sizes_follow_radius_and_use_opaque_upper_right_highlights():
     traces = _atom_scatter_traces(scene, style)
     delta = _flat_highlight_center(major, scene, style) - np.asarray(major["cart"], dtype=float)
     assert delta[0] > 0.0 and delta[1] > 0.0
+    assert delta[0] == pytest.approx(delta[1])
     atom_traces = [trace for trace in traces if trace["meta"]["mv_role"] == "atom"]
     highlight_traces = [
         trace for trace in traces if trace["meta"]["mv_role"] == "atom_highlight"
@@ -111,7 +112,10 @@ def test_flat_sizes_follow_radius_and_use_opaque_upper_right_highlights():
     assert len(highlight_traces) == len(atom_traces)
     assert {trace["meta"]["mv_highlight_kind"] for trace in highlight_traces} == {"core"}
     assert all(trace["marker"]["color"] == "#FFFFFF" for trace in highlight_traces)
-    assert all(trace["marker"]["opacity"] == 1.0 for trace in highlight_traces)`n`n`ndef test_flat_cache_replay_preserves_occupancy_opacity():
+    assert all(trace["marker"]["opacity"] == 1.0 for trace in highlight_traces)
+
+
+def test_flat_cache_replay_preserves_occupancy_opacity():
     traces = [
         {
             "type": "scatter3d",

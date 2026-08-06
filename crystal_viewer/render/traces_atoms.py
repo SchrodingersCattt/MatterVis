@@ -22,33 +22,35 @@ def _flat_atom_marker_size(atom_radius: float, style: dict) -> float:
 
 def _flat_highlight_center(atom: dict, scene: dict, style: dict) -> np.ndarray:
     """Place an opaque specular dot at the screen upper-right of an atom."""
-    right = screen_up = toward_camera = None
+    right = screen_up = None
     camera = style.get("camera")
     if isinstance(camera, dict) and all(key in camera for key in ("eye", "center", "up")):
         try:
             from ..compass import camera_screen_basis
 
             right, screen_up = camera_screen_basis(camera)
-            eye = np.array([float(camera["eye"][axis]) for axis in ("x", "y", "z")], dtype=float)
-            center = np.array([float(camera["center"][axis]) for axis in ("x", "y", "z")], dtype=float)
-            toward_camera = eye - center
-            toward_camera /= max(float(np.linalg.norm(toward_camera)), 1e-12)
         except (KeyError, TypeError, ValueError, IndexError):
-            right = screen_up = toward_camera = None
+            right = screen_up = None
 
-    if right is None or screen_up is None or toward_camera is None:
+    if right is None or screen_up is None:
         # Unit tests and interactive callers may not provide a Plotly camera.
         # The loader rotation stores the same basis as view_x/view_y/view_z.
         right = np.asarray(scene["view_x"], dtype=float)
         screen_up = np.asarray(scene["view_y"], dtype=float)
-        toward_camera = np.asarray(scene["view_z"], dtype=float)
 
-    light_dir = 0.62 * right + 0.62 * screen_up + 0.45 * toward_camera
+    # Keep the displacement on the camera image plane. A depth component can
+    # collapse the apparent horizontal offset after perspective projection.
+    # Equal positive screen-right and screen-up components make the intended
+    # upper-right placement explicit for both orthographic and perspective.
+    light_dir = right + screen_up
     norm = float(np.linalg.norm(light_dir))
     if norm < 1e-8:
         return np.asarray(atom["cart"], dtype=float)
     radius = float(atom["atom_radius"]) * float(style["atom_scale"])
-    return np.asarray(atom["cart"], dtype=float) + light_dir / norm * (0.28 * radius)`n`n`ndef _bond_segments(scene: dict, style: dict, *, with_scales: bool = False):
+    return np.asarray(atom["cart"], dtype=float) + light_dir / norm * (0.42 * radius)
+
+
+def _bond_segments(scene: dict, style: dict, *, with_scales: bool = False):
     """Yield ``(color, is_minor, start, end)`` tuples for every bond half.
 
     When ``with_scales=True`` each yield is extended with
