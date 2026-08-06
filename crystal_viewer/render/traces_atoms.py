@@ -26,7 +26,8 @@ def _bond_segments(scene: dict, style: dict, *, with_scales: bool = False):
     atoms = scene.get("draw_atoms") or []
     n_atoms = len(atoms)
     for bond in scene["bonds"]:
-        if style.get("show_minor_only", False) and float(bond.get("occ", 1.0)) >= 0.999:
+        is_minor = bool(bond.get("is_minor", False))
+        if style.get("show_minor_only", False) and not is_minor:
             continue
         # Phase 4: bond_groups can mark a bond invisible directly. We
         # honour both the bond-level ``_render_visible`` (set by
@@ -61,11 +62,15 @@ def _bond_segments(scene: dict, style: dict, *, with_scales: bool = False):
         opacity_group = _bond_opacity_group_id(bond)
         bond_occ = float(bond.get("occ", 1.0))
         halves = [
-            (c_i, bond["is_minor"], start, mid),
-            (c_j, bond["is_minor"], mid, end),
+            (c_i, is_minor, start, mid),
+            (c_j, is_minor, mid, end),
         ]
         for color, is_minor, seg_start, seg_end in halves:
-            if bond_occ < 0.999 and style.get("disorder") == "dashed_bonds":
+            if (
+                is_minor
+                and bond_occ < 0.999
+                and style.get("disorder") == "dashed_bonds"
+            ):
                 length = float(np.linalg.norm(seg_end - seg_start))
                 # Gap scales with disorder intensity: lower occ → bigger gaps
                 intensity = 1.0 - bond_occ
@@ -177,19 +182,18 @@ def _atom_mesh_traces(scene: dict, style: dict):
     # list and tank the figure-JSON cache hit rate.
     groups: Dict[Tuple[str, bool, str | None, str], dict] = {}
     for atom in scene["draw_atoms"]:
-        if style.get("show_minor_only", False) and float(atom.get("occ", 1.0)) >= 0.999:
+        is_minor = bool(atom.get("is_minor", False))
+        if style.get("show_minor_only", False) and not is_minor:
             continue
         if not _atom_render_visible(atom):
             continue
-        occ = float(atom.get("occ", 1.0))
-        is_partial = occ < 0.999
-        color = _atom_render_color(atom, style, light=is_partial)
+        color = _atom_render_color(atom, style, light=is_minor)
         eff_opacity = _atom_effective_opacity(atom, style)
         opacity_group = _atom_opacity_group_id(atom)
         # Quantise opacity to 2 decimals so near-identical slider values
         # don't fragment traces and tank cache hit rate.
         opacity_bin = f"{eff_opacity:.2f}"
-        key = (color, atom["is_minor"], opacity_group, opacity_bin)
+        key = (color, is_minor, opacity_group, opacity_bin)
         groups.setdefault(key, {"centers": [], "radii": [], "opacity": eff_opacity, "opacity_group": opacity_group})
         radius = float(atom["atom_radius"]) * float(style["atom_scale"])
         groups[key]["centers"].append(atom["cart"])
@@ -292,7 +296,13 @@ def _bond_scatter_traces(scene: dict, style: dict):
             "line": {
                 "color": color,
                 "width": base_width,
-                "dash": "dash" if bond_occ < 0.999 and style.get("disorder") == "dashed_bonds" else "solid",
+                "dash": (
+                    "dash"
+                    if is_minor
+                    and bond_occ < 0.999
+                    and style.get("disorder") == "dashed_bonds"
+                    else "solid"
+                ),
             },
             "opacity": payload["opacity"],
             "hoverinfo": "skip",
@@ -307,13 +317,12 @@ def _atom_scatter_traces(scene: dict, style: dict):
     groups: Dict[Tuple[str, bool, str, str | None], dict] = {}
     fragment_labels = scene.get("atom_fragment_labels") or []
     for idx, atom in enumerate(scene["draw_atoms"]):
-        if style.get("show_minor_only", False) and float(atom.get("occ", 1.0)) >= 0.999:
+        is_minor = bool(atom.get("is_minor", False))
+        if style.get("show_minor_only", False) and not is_minor:
             continue
         if not _atom_render_visible(atom):
             continue
-        occ = float(atom.get("occ", 1.0))
-        is_partial = occ < 0.999
-        color = _atom_render_color(atom, style, light=is_partial)
+        color = _atom_render_color(atom, style, light=is_minor)
         eff_opacity = _atom_effective_opacity(atom, style)
         opacity_group = _atom_opacity_group_id(atom)
         # Per-trace key = (element, is_minor, effective_color, effective_opacity_bin).
@@ -321,7 +330,7 @@ def _atom_scatter_traces(scene: dict, style: dict):
         # rule still groups its atoms in one Scatter3d (so legend
         # entries still read element-by-element) but doesn't merge
         # red-O with default-O when the user splits them.
-        key = (atom["elem"], atom["is_minor"], color, opacity_group)
+        key = (atom["elem"], is_minor, color, opacity_group)
         groups.setdefault(
             key,
             {"x": [], "y": [], "z": [], "size": [], "text": [], "color": color, "customdata": [], "opacity": eff_opacity},
@@ -330,7 +339,7 @@ def _atom_scatter_traces(scene: dict, style: dict):
         groups[key]["x"].append(float(atom["cart"][0]))
         groups[key]["y"].append(float(atom["cart"][1]))
         groups[key]["z"].append(float(atom["cart"][2]))
-        groups[key]["size"].append(base_size * (1.12 if atom["is_minor"] else 1.0))
+        groups[key]["size"].append(base_size * (1.12 if is_minor else 1.0))
         groups[key]["text"].append(atom["label"])
         frag_label = (
             str(fragment_labels[idx]) if idx < len(fragment_labels) and fragment_labels[idx] is not None else ""
@@ -340,7 +349,7 @@ def _atom_scatter_traces(scene: dict, style: dict):
             int(idx),
             str(atom["label"]),
             str(atom["elem"]),
-            int(atom["is_minor"]),
+            int(is_minor),
             frag_label,
         ])
 
@@ -442,8 +451,8 @@ def _wireframe_atom_traces(scene: dict, style: dict):
         if not _atom_render_visible(atom):
             continue
         radius = max(0.05, float(atom["atom_radius"]) * float(style["atom_scale"]))
-        occ = float(atom.get("occ", 1.0))
-        key = (_atom_render_color(atom, style, light=(occ < 0.999)), atom["is_minor"])
+        is_minor = bool(atom.get("is_minor", False))
+        key = (_atom_render_color(atom, style, light=is_minor), is_minor)
         bucket = groups.setdefault(key, [])
         center = np.asarray(atom["cart"], dtype=float)
         for axis in axes:

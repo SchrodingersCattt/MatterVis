@@ -38,8 +38,12 @@ def bond_effective_opacity(bond: Mapping[str, Any], style: Mapping[str, Any]) ->
         scale_f = 1.0
     if scale_f < 0.999:
         return scale_f
-    # In disorder="opacity" mode, use crystallographic occupancy.
-    if style.get("disorder") == "opacity" or style.get("force_minor_fade"):
+
+    is_minor = bool(bond.get("is_minor", False))
+    # Use crystallographic occupancy only for a loader-confirmed minor bond.
+    if is_minor and (
+        style.get("disorder") == "opacity" or style.get("force_minor_fade")
+    ):
         occ = bond.get("occ", 1.0)
         try:
             occ_f = float(occ)
@@ -47,7 +51,7 @@ def bond_effective_opacity(bond: Mapping[str, Any], style: Mapping[str, Any]) ->
             occ_f = 1.0
         if occ_f < 0.999:
             return max(0.05, occ_f)
-    return minor_opacity_for(style, bool(bond.get("is_minor", False)))
+    return minor_opacity_for(style, is_minor)
 
 
 # ── Disorder helpers ────────────────────────────────────────────────────────
