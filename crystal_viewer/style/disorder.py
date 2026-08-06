@@ -14,9 +14,26 @@ def atom_is_minor(atom: Mapping[str, Any]) -> bool:
     return bool(atom.get("_is_minor", False))
 
 
+def atom_is_disordered(atom: Mapping[str, Any]) -> bool:
+    """Return whether the loader identified an atom as part of disorder.
+
+    The loader writes ``_is_minor=False`` on the chosen major alternative and
+    ``_is_minor=True`` on the remaining alternatives. Key presence therefore
+    distinguishes explicit disorder from an ordered partial-occupancy site.
+    """
+    if "is_disordered" in atom:
+        return bool(atom.get("is_disordered"))
+    return "_is_minor" in atom or bool(atom.get("is_minor", False))
+
+
 def bond_is_minor(atom_i: Mapping[str, Any], atom_j: Mapping[str, Any]) -> bool:
     """A bond is minor when either rendered endpoint is a loader minor."""
     return atom_is_minor(atom_i) or atom_is_minor(atom_j)
+
+
+def bond_is_disordered(atom_i: Mapping[str, Any], atom_j: Mapping[str, Any]) -> bool:
+    """A bond is disordered when either rendered endpoint is disordered."""
+    return atom_is_disordered(atom_i) or atom_is_disordered(atom_j)
 
 
 def minor_opacity_for(style: Mapping[str, Any], is_minor: bool) -> float:
@@ -40,8 +57,9 @@ def bond_effective_opacity(bond: Mapping[str, Any], style: Mapping[str, Any]) ->
         return scale_f
 
     is_minor = bool(bond.get("is_minor", False))
-    # Use crystallographic occupancy only for a loader-confirmed minor bond.
-    if is_minor and (
+    is_disordered = bool(bond.get("is_disordered", is_minor))
+    # Occupancy controls opacity only for a loader-confirmed disordered bond.
+    if is_disordered and (
         style.get("disorder") == "opacity" or style.get("force_minor_fade")
     ):
         occ = bond.get("occ", 1.0)
@@ -49,8 +67,7 @@ def bond_effective_opacity(bond: Mapping[str, Any], style: Mapping[str, Any]) ->
             occ_f = float(occ)
         except (TypeError, ValueError):
             occ_f = 1.0
-        if occ_f < 0.999:
-            return max(0.05, occ_f)
+        return max(0.0, min(1.0, occ_f))
     return minor_opacity_for(style, is_minor)
 
 

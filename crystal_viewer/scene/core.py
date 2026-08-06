@@ -12,7 +12,14 @@ from molcrys_kit.utils.geometry import frac_to_cart  # noqa: F401
 from .. import perf_log
 from ..structure.bonds import bonds_conflict, find_bonds
 from ..structure.cif_parse import parse_asu
-from ..style.disorder import atom_is_minor, bond_is_minor, disorder_alpha, is_minor
+from ..style.disorder import (
+    atom_is_disordered,
+    atom_is_minor,
+    bond_is_disordered,
+    bond_is_minor,
+    disorder_alpha,
+    is_minor,
+)
 from ..structure.formula_unit import cluster_atoms, select_formula_unit  # noqa: F401
 from ..structure.geometry import _nearest_pbc_cart, view_rotation
 from ..style.palette import atom_r, elem_color, elem_color_light
@@ -325,6 +332,7 @@ def build_scene_from_atoms(
         for atom, depth in zip(draw_atoms, depths):
             atom["_depth_t"] = float((depth - z_min) / z_span)
             atom["is_minor"] = atom_is_minor(atom)
+            atom["is_disordered"] = atom_is_disordered(atom)
             atom["disorder_alpha"] = float(ops.disorder_alpha(atom))
             atom["color"] = ops.elem_color(atom["elem"])
             atom["color_light"] = ops.elem_color_light(atom["elem"])
@@ -399,6 +407,7 @@ def build_scene_from_atoms(
                 "alpha_i": ai["disorder_alpha"],
                 "alpha_j": aj["disorder_alpha"],
                 "is_minor": bond_is_minor(ai, aj),
+                "is_disordered": bond_is_disordered(ai, aj),
                 "occ": min(float(ai.get("occ", 1.0)), float(aj.get("occ", 1.0))),
                 "depth_t": float((ai["_depth_t"] + aj["_depth_t"]) / 2.0),
             }

@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from crystal_viewer.render.style import _atom_effective_opacity
+from crystal_viewer.render.style import _atom_effective_opacity, _style_trace_dicts
 from crystal_viewer.render.traces_atoms import (
     _atom_mesh_traces,
     _atom_scatter_traces,
     _bond_segments,
 )
 from crystal_viewer.render.traces_overlays import _minor_outline_traces
-from crystal_viewer.style.disorder import bond_effective_opacity
+from crystal_viewer.style.disorder import atom_is_disordered, bond_effective_opacity
 
 
 def _atom(label: str, *, is_minor: bool) -> dict:
@@ -40,7 +40,7 @@ def _style(**overrides) -> dict:
 
 
 @pytest.mark.parametrize("trace_builder", (_atom_mesh_traces, _atom_scatter_traces))
-def test_partial_occupancy_does_not_make_major_atom_look_minor(trace_builder):
+def test_partial_occupancy_does_not_make_ordered_atom_translucent(trace_builder):
     scene = {"draw_atoms": [_atom("major", is_minor=False)]}
 
     trace = trace_builder(scene, _style())[0]
@@ -79,6 +79,19 @@ def test_flat_atoms_with_different_occupancies_keep_distinct_opacities():
 
     assert sorted(trace["marker"]["opacity"] for trace in traces) == [0.4, 0.7]
 
+
+def test_flat_cache_replay_preserves_occupancy_opacity():
+    traces = [
+        {
+            "type": "scatter3d",
+            "marker": {"opacity": 0.4},
+            "meta": {"mv_role": "atom", "mv_minor": True},
+        }
+    ]
+
+    styled = _style_trace_dicts(traces, _style())
+
+    assert styled[0]["marker"]["opacity"] == 0.4
 
 def test_minor_only_filter_uses_loader_identity_not_occupancy():
     scene = {
@@ -124,10 +137,28 @@ def test_partial_occupancy_does_not_make_major_bond_minor():
     assert bond_effective_opacity(bond, _style()) == 1.0
 
 
-def test_occupancy_scales_only_loader_confirmed_minor_components():
-    major = _atom("major", is_minor=False)
+def test_occupancy_scales_only_loader_confirmed_disordered_components():
+    ordered = _atom("ordered", is_minor=False)
+    disordered_major = _atom("disordered-major", is_minor=False)
+    disordered_major["is_disordered"] = True
+    disordered_major["occ"] = 0.7
+    disordered_low = _atom("disordered-low", is_minor=False)
+    disordered_low["is_disordered"] = True
+    disordered_low["occ"] = 0.02
     minor = _atom("minor", is_minor=True)
 
-    assert _atom_effective_opacity(major, _style()) == 1.0
+    assert _atom_effective_opacity(ordered, _style()) == 1.0
+    assert _atom_effective_opacity(disordered_major, _style()) == 0.7
+    assert _atom_effective_opacity(disordered_low, _style()) == 0.02
     assert _atom_effective_opacity(minor, _style()) == 0.4
+    assert bond_effective_opacity(
+        {"is_minor": False, "is_disordered": True, "occ": 0.7},
+        _style(),
+    ) == 0.7
     assert bond_effective_opacity({"is_minor": True, "occ": 0.4}, _style()) == 0.4
+
+
+def test_loader_provenance_distinguishes_disorder_from_partial_occupancy():
+    assert atom_is_disordered({"occ": 0.5}) is False
+    assert atom_is_disordered({"occ": 0.5, "_is_minor": False}) is True
+    assert atom_is_disordered({"occ": 0.5, "_is_minor": True}) is True

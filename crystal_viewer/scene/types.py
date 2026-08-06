@@ -31,6 +31,7 @@ class AtomDict(TypedDict, total=False):
     cart: list[float]
     atom_radius: float
     is_minor: bool
+    is_disordered: bool
     disorder_alpha: float
     dg: str  # disorder group (SHELX convention)
     da: str  # disorder assembly (SHELX convention)
@@ -72,6 +73,7 @@ class BondDict(TypedDict, total=False):
     alpha_i: float
     alpha_j: float
     is_minor: bool
+    is_disordered: bool
     depth_t: float
 
     # --- style (applied by style/bond_groups.py) ---

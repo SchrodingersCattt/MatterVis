@@ -10,7 +10,7 @@ def _bond_segments(scene: dict, style: dict, *, with_scales: bool = False):
     """Yield ``(color, is_minor, start, end)`` tuples for every bond half.
 
     When ``with_scales=True`` each yield is extended with
-    ``(radius_scale, opacity_scale)`` (floats, default 1.0) so callers
+    ``(is_disordered, radius_scale, opacity_scale)`` so callers
     that build mesh traces can bucket on the bond_groups radius/opacity
     overrides. Default ``False`` keeps the legacy 4-tuple API for the
     other callers (cylinder schematic / line traces) that don't need
@@ -27,6 +27,7 @@ def _bond_segments(scene: dict, style: dict, *, with_scales: bool = False):
     n_atoms = len(atoms)
     for bond in scene["bonds"]:
         is_minor = bool(bond.get("is_minor", False))
+        is_disordered = bool(bond.get("is_disordered", is_minor))
         if style.get("show_minor_only", False) and not is_minor:
             continue
         # Phase 4: bond_groups can mark a bond invisible directly. We
@@ -78,12 +79,12 @@ def _bond_segments(scene: dict, style: dict, *, with_scales: bool = False):
                 gap_len = max(0.05, 0.14 * length * (1.0 + intensity))
                 for dash_start, dash_end in _dashed_segments([(seg_start, seg_end)], dash_len=dash_len, gap_len=gap_len):
                     if with_scales:
-                        yield color, is_minor, dash_start, dash_end, radius_scale, opacity_scale, opacity_group, bond_occ
+                        yield color, is_minor, is_disordered, dash_start, dash_end, radius_scale, opacity_scale, opacity_group, bond_occ
                     else:
                         yield color, is_minor, dash_start, dash_end
             else:
                 if with_scales:
-                    yield color, is_minor, seg_start, seg_end, radius_scale, opacity_scale, opacity_group, bond_occ
+                    yield color, is_minor, is_disordered, seg_start, seg_end, radius_scale, opacity_scale, opacity_group, bond_occ
                 else:
                     yield color, is_minor, seg_start, seg_end
 
@@ -96,14 +97,14 @@ def _bond_mesh_traces(scene: dict, style: dict):
     groups: Dict[Tuple[str, bool, int, str | None, str], dict] = {}
     base_radius = max(0.04, float(style["bond_radius"]))
     mesh_lighting = style.get("mesh_lighting")
-    for color, is_minor, start, end, radius_scale, opacity_scale, opacity_group, bond_occ in _bond_segments(
+    for color, is_minor, is_disordered, start, end, radius_scale, opacity_scale, opacity_group, bond_occ in _bond_segments(
         scene, style, with_scales=True
     ):
         # Bin to two decimals so e.g. a 1.50 vs 1.51 slider tick doesn't
         # fragment the trace list. Same trick is used in _atom_mesh_traces.
         radius_bin = int(round(float(radius_scale) * 100))
         eff_opacity = bond_effective_opacity(
-            {"is_minor": is_minor, "_render_opacity_scale": opacity_scale, "occ": bond_occ},
+            {"is_minor": is_minor, "is_disordered": is_disordered, "_render_opacity_scale": opacity_scale, "occ": bond_occ},
             style,
         )
         opacity_bin = f"{eff_opacity:.2f}"
@@ -261,12 +262,12 @@ def _contrast_safe_scatter_bond_color(color: str, style: dict) -> str:
 
 def _bond_scatter_traces(scene: dict, style: dict):
     groups: Dict[Tuple[str, bool, str | None, str, str], dict] = {}
-    for color, is_minor, start, end, _radius_scale, opacity_scale, opacity_group, bond_occ in _bond_segments(
+    for color, is_minor, is_disordered, start, end, _radius_scale, opacity_scale, opacity_group, bond_occ in _bond_segments(
         scene, style, with_scales=True
     ):
         color = _contrast_safe_scatter_bond_color(color, style)
         eff_opacity = bond_effective_opacity(
-            {"is_minor": is_minor, "_render_opacity_scale": opacity_scale, "occ": bond_occ},
+            {"is_minor": is_minor, "is_disordered": is_disordered, "_render_opacity_scale": opacity_scale, "occ": bond_occ},
             style,
         )
         opacity_bin = f"{eff_opacity:.2f}"
@@ -476,7 +477,7 @@ def _wireframe_atom_traces(scene: dict, style: dict):
 
 def _wireframe_bond_traces(scene: dict, style: dict):
     groups: Dict[Tuple[str, bool, str | None], dict] = {}
-    for color, is_minor, start, end, _radius_scale, opacity_scale, opacity_group, bond_occ in _bond_segments(
+    for color, is_minor, is_disordered, start, end, _radius_scale, opacity_scale, opacity_group, bond_occ in _bond_segments(
         scene, style, with_scales=True
     ):
         groups.setdefault(
@@ -492,7 +493,7 @@ def _wireframe_bond_traces(scene: dict, style: dict):
             radius=max(0.01, 0.40 * float(style["bond_radius"])),
             color=color,
             opacity=bond_effective_opacity(
-                {"is_minor": is_minor, "_render_opacity_scale": opacity_scale},
+                {"is_minor": is_minor, "is_disordered": is_disordered, "_render_opacity_scale": opacity_scale, "occ": bond_occ},
                 style,
             ),
             sides=4,

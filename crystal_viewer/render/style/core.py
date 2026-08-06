@@ -153,7 +153,7 @@ def _atom_effective_opacity(atom: dict, style: dict) -> float:
     "halved" -- and a user setting opacity=0 expects an invisible atom,
     not "0 × something".
 
-    Only loader-authored minor atoms participate in disorder fading.
+    Only loader-confirmed disordered atoms participate in occupancy fading.
     A partial occupancy can also describe an ordered special-position atom
     and must not by itself make the atom translucent.
     """
@@ -167,8 +167,9 @@ def _atom_effective_opacity(atom: dict, style: dict) -> float:
         return scale_f
 
     is_minor = bool(atom.get("is_minor", False))
-    # Use crystallographic occupancy only for a loader-confirmed minor alternative.
-    if is_minor and (
+    is_disordered = bool(atom.get("is_disordered", is_minor))
+    # Occupancy controls opacity only for a loader-confirmed disordered atom.
+    if is_disordered and (
         style.get("disorder") == "opacity" or style.get("force_minor_fade")
     ):
         occ = atom.get("occ", 1.0)
@@ -176,8 +177,7 @@ def _atom_effective_opacity(atom: dict, style: dict) -> float:
             occ_f = float(occ)
         except (TypeError, ValueError):
             occ_f = 1.0
-        if occ_f < 0.999:
-            return max(0.05, occ_f)
+        return max(0.0, min(1.0, occ_f))
 
     # Major atoms or non-opacity disorder modes.
     return _minor_opacity_for(style, is_minor)
@@ -276,15 +276,24 @@ def _style_trace_dicts(trace_dicts: list[dict], style: dict) -> list[dict]:
             copied["visible"] = True
         group_id = meta.get("mv_opacity_group")
         if role == "atom":
+            marker = None
+            if copied.get("type") == "scatter3d":
+                marker = dict(copied.get("marker") or {})
+                existing_opacity = marker.get("opacity")
+            else:
+                existing_opacity = copied.get("opacity")
             if str(group_id) in atom_group_opacity:
                 opacity = atom_group_opacity[str(group_id)]
             else:
-                # Preserve the trace's own opacity (set by _atom_mesh_traces
-                # using _atom_effective_opacity which respects occ in
-                # disorder='opacity' mode).  Only override when absent.
-                opacity = copied.get("opacity") if copied.get("opacity") is not None else _minor_opacity_for(style, is_minor)
-            if copied.get("type") == "scatter3d":
-                marker = dict(copied.get("marker") or {})
+                # Preserve opacity computed from loader disorder provenance and
+                # occupancy. Flat atoms store it on marker; meshes store it on
+                # the trace itself.
+                opacity = (
+                    existing_opacity
+                    if existing_opacity is not None
+                    else _minor_opacity_for(style, is_minor)
+                )
+            if marker is not None:
                 marker["opacity"] = opacity
                 copied["marker"] = marker
             else:
