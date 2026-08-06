@@ -673,11 +673,11 @@ def test_unit_cell_can_omit_outside_boundary_replicas():
     assert not scene["draw_atoms"][0].get("_is_boundary_replica")
 
 
-def test_strict_unit_cell_drops_cross_boundary_bond_segments():
+def test_strict_unit_cell_manifests_cross_boundary_bonded_images():
     cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
     M = np.eye(3) * 10.0
     atoms = [
-        _atom("C1", [0.98, 0.5, 0.5], M),
+        _atom("C1", [-0.02, 0.5, 0.5], M),
         _atom("C2", [0.02, 0.5, 0.5], M),
     ]
 
@@ -695,13 +695,57 @@ def test_strict_unit_cell_drops_cross_boundary_bond_segments():
         preset={"style": {"show_labels": False, "show_axes": False}},
     )
 
-    assert len(scene["draw_atoms"]) == 2
-    assert scene["bonds"] == []
+    assert len(scene["draw_atoms"]) == 4
+    assert len(scene["bonds"]) == 2
+    assert scene["bonded_image_replica_count"] == 2
+    home_atoms = [atom for atom in scene["draw_atoms"] if not atom.get("_is_bonded_image_replica")]
+    image_atoms = [atom for atom in scene["draw_atoms"] if atom.get("_is_bonded_image_replica")]
+    assert len(home_atoms) == 2
+    assert len(image_atoms) == 2
     assert all(
         np.all(np.asarray(atom["frac"]) >= 0.0)
         and np.all(np.asarray(atom["frac"]) < 1.0)
-        for atom in scene["draw_atoms"]
+        for atom in home_atoms
     )
+    np.testing.assert_allclose(
+        sorted(tuple(np.asarray(atom["frac"])) for atom in image_atoms),
+        [(-0.02, 0.5, 0.5), (1.02, 0.5, 0.5)],
+    )
+    assert all(np.isclose(np.linalg.norm(bond["end"] - bond["start"]), 0.4) for bond in scene["bonds"])
+
+
+def test_strict_unit_cell_supplements_missing_legacy_cross_boundary_pair():
+    cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
+    M = np.eye(3) * 10.0
+    atoms = [
+        _atom("C1", [0.05, 0.5, 0.5], M),
+        _atom("C2", [0.15, 0.5, 0.5], M),
+        _atom("C3", [0.95, 0.5, 0.5], M),
+    ]
+
+    scene = build_scene_from_atoms(
+        name="strict_missing_cross_boundary_bond",
+        title="Strict missing cross-boundary bond",
+        atoms=atoms,
+        cell=cell,
+        M=M,
+        R=np.eye(3),
+        display_mode="unit_cell",
+        include_boundary_replicas=False,
+        ops=scene_ops(),
+        canonical_bond_pairs=[(0, 1)],
+        canonical_bond_records=[],
+        preset={"style": {"show_labels": False, "show_axes": False}},
+    )
+
+    assert scene["bonded_image_replica_count"] == 2
+    assert len(scene["bonds"]) == 3
+    degrees = [0] * len(scene["draw_atoms"])
+    for bond in scene["bonds"]:
+        degrees[bond["i"]] += 1
+        degrees[bond["j"]] += 1
+    assert all(degrees[index] > 0 for index in range(3))
+    assert all(degree > 0 for degree in degrees[3:])
 
 
 def test_strict_unit_cell_preserves_in_cell_canonical_bonds():

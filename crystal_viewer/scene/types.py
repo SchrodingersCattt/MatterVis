@@ -44,6 +44,7 @@ class AtomDict(TypedDict, total=False):
     _wrapped_frac: list[float]
     _depth_t: float
     _is_boundary_replica: bool
+    _is_bonded_image_replica: bool
 
     # --- style (applied by style/atom_groups.py & scene core) ---
     color: str
@@ -159,6 +160,7 @@ class SceneDict(TypedDict, total=False):
     camera: dict[str, Any]
     style: StyleDict
     has_minor: bool
+    bonded_image_replica_count: int
 
     # --- internal caches (DO NOT modify externally) ---
     _mesh_trace_cache: dict[str, Any]

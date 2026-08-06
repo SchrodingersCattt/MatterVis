@@ -131,6 +131,7 @@ def _wrapped_unit_cell_atoms(
         copied = dict(atom)
         copied["frac"] = wrapped
         copied["cart"] = frac_to_cart(wrapped, M_arr)
+        copied["_wrapped_frac"] = wrapped.copy()
         copied["_image_shift"] = (0, 0, 0)
         copied["_strict_unit_cell"] = True
         copied.setdefault("_source_index", source_index)
