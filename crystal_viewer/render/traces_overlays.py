@@ -51,9 +51,9 @@ def _minor_outline_traces(scene: dict, style: dict):
     # atoms with the same occupancy share a trace.
     groups: Dict[Tuple[str, int], list[tuple[np.ndarray, np.ndarray]]] = {}
     for atom in scene["draw_atoms"]:
-        occ = float(atom.get("occ", 1.0))
-        if occ >= 0.999:
+        if not bool(atom.get("is_minor", False)):
             continue
+        occ = float(atom.get("occ", 1.0))
         if not _atom_render_visible(atom):
             continue
         if style.get("show_minor_only", False) and not atom["is_minor"]:

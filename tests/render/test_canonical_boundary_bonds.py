@@ -176,3 +176,49 @@ def test_dap4_boundary_fragment_instances_keep_all_internal_canonical_bonds(monk
         expected = sum(1 for left, right in canonical if {left, right} <= source_indices)
         actual = sum(1 for bond in scene["bonds"] if bond["i"] in indices and bond["j"] in indices)
         assert actual == expected
+
+
+def test_strict_cell_completes_a_cross_boundary_tetrahedral_fragment():
+    cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
+    M = np.eye(3) * 10.0
+    atoms = [
+        _atom("Cl1", "Cl", [0.02, 0.50, 0.50], M, 0),
+        _atom("O1", "O", [0.08, 0.50, 0.50], M, 1),
+        _atom("O2", "O", [0.02, 0.56, 0.50], M, 2),
+        _atom("O3", "O", [0.02, 0.50, 0.56], M, 3),
+        _atom("O4", "O", [0.98, 0.50, 0.50], M, 4),
+    ]
+    records = [
+        {"left": 0, "right": 1, "right_image_shift": [0, 0, 0]},
+        {"left": 0, "right": 2, "right_image_shift": [0, 0, 0]},
+        {"left": 0, "right": 3, "right_image_shift": [0, 0, 0]},
+        {"left": 0, "right": 4, "right_image_shift": [-1, 0, 0]},
+    ]
+    scene = build_scene_from_atoms(
+        name="strict-complete-tetrahedron",
+        title="strict-complete-tetrahedron",
+        atoms=atoms,
+        cell=cell,
+        M=M,
+        R=np.eye(3),
+        display_mode="unit_cell",
+        include_boundary_replicas=False,
+        ops=_ops_without_redetection(),
+        unwrapped_atoms=atoms,
+        canonical_bond_pairs=[(0, 1), (0, 2), (0, 3), (0, 4)],
+        canonical_bond_records=records,
+        preset={"style": {"show_labels": False, "show_axes": False}},
+    )
+
+    degrees = [0] * len(scene["draw_atoms"])
+    for bond in scene["bonds"]:
+        degrees[bond["i"]] += 1
+        degrees[bond["j"]] += 1
+    home_cl = next(index for index, atom in enumerate(scene["draw_atoms"]) if atom["_source_index"] == 0 and not atom.get("_is_bonded_image_replica"))
+    image_cl = [index for index, atom in enumerate(scene["draw_atoms"]) if atom["_source_index"] == 0 and atom.get("_is_bonded_image_replica")]
+    image_atoms = [index for index, atom in enumerate(scene["draw_atoms"]) if atom.get("_is_bonded_image_replica")]
+
+    assert len(image_cl) == 1
+    assert degrees[home_cl] == degrees[image_cl[0]] == 4
+    assert len(image_atoms) == 5
+    assert all(degrees[index] > 0 for index in image_atoms)

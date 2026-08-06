@@ -22,6 +22,7 @@ from .viewport import (
     _visible_atoms,
     cell_aspect_ratio,
     figure_axis_layout,
+    flat_projected_pixel_scale,
     uniform_viewport,
 )
 
@@ -132,6 +133,10 @@ def build_row_figure(
     for col_idx, (scene, style) in enumerate(scene_style_pairs):
         style_norm = validate_style_schema(style)
         xr, yr, zr = _scene_ranges(scene, style_norm)
+        if style_norm.get("material") == "flat":
+            style_norm["_flat_projected_pixel_scale"] = flat_projected_pixel_scale(
+                scene, style_norm, ranges=(xr, yr, zr)
+            )
         use_fast = (
             bool(style_norm.get("fast_rendering", False))
             or style_norm.get("material") == "flat"
@@ -184,6 +189,10 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None, *,
 
     style = validate_style_schema(style)
     xr, yr, zr = _scene_ranges(scene, style, topology_data=topology_data if style.get("topology_enabled", False) else None)
+    if style.get("material") == "flat":
+        style["_flat_projected_pixel_scale"] = flat_projected_pixel_scale(
+            scene, style, ranges=(xr, yr, zr)
+        )
     style["_topology_viewport_ranges"] = [list(xr), list(yr), list(zr)]
     # Mesh3d atoms are 3D world-coordinate spheres -- they grow when the
     # camera dollies in, which is what users expect from "zoom". Scatter3d
@@ -241,12 +250,10 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None, *,
         trace_dicts.extend(_traces_to_dicts([selection_trace]))
     trace_dicts.extend(_traces_to_dicts([disorder_preview_outline_trace(scene, style, highlight_labels=set())]))
     trace_dicts.extend(_traces_to_dicts(_contact_traces(scene, style)))
-    # _highlight_traces (fake specular dots) are deliberately *not* added.
-    # They were Scatter3d markers with pixel-fixed sizes -- in the static
-    # publication path they read as ugly translucent halos that engulf the
-    # atoms when the scene is zoomed out, and the proper Mesh3d shading on
-    # `_atom_mesh_traces` already gives a believable highlight.
-    trace_dicts.extend(_traces_to_dicts(_label_traces(scene, style, hidden_labels=hidden_labels)))
+    # Flat rendering emits one grouped, fully opaque white dot from
+    # `_atom_scatter_traces`, placed at the screen upper-right of each atom.
+    # Mesh rendering keeps its native Mesh3d lighting; no raster post-process
+    # or per-atom highlight traces are used.    trace_dicts.extend(_traces_to_dicts(_label_traces(scene, style, hidden_labels=hidden_labels)))
     trace_dicts.extend(_traces_to_dicts(_axis_traces(scene, style)))
     trace_dicts.extend(_traces_to_dicts(_unit_cell_traces(scene, style)))
     trace_dicts.extend(_traces_to_dicts(_morphology_traces(scene, style)))
@@ -278,6 +285,8 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None, *,
     ui_revision = style.get("uirevision", str(scene.get("name", "scene")))
     compass_ctx = compass_clientside_context(scene, style)
     layout_meta = {"compass": compass_ctx} if compass_ctx else {}
+    if style.get("material") == "flat":
+        layout_meta["flat_projected_pixel_scale"] = style.get("_flat_projected_pixel_scale")
     layout_kwargs = dict(
         title=title_arg,
         showlegend=False,

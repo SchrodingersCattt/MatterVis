@@ -12,9 +12,17 @@ from molcrys_kit.utils.geometry import frac_to_cart  # noqa: F401
 from .. import perf_log
 from ..structure.bonds import bonds_conflict, find_bonds
 from ..structure.cif_parse import parse_asu
-from ..style.disorder import atom_is_minor, bond_is_minor, disorder_alpha, is_minor
+from ..style.disorder import (
+    atom_is_disordered,
+    atom_is_minor,
+    bond_is_disordered,
+    bond_is_minor,
+    disorder_alpha,
+    is_minor,
+)
 from ..structure.formula_unit import cluster_atoms, select_formula_unit  # noqa: F401
 from ..structure.geometry import _nearest_pbc_cart, view_rotation
+from ..math.pbc import nearest_image_vector_cart
 from ..style.palette import atom_r, elem_color, elem_color_light
 from ..presets import DEFAULT_STYLE, deep_merge, default_preset, json_safe  # noqa: F401
 from ..viewpoint import auto_view_dir
@@ -94,6 +102,201 @@ def _bond_endpoints(ai, aj, cell, display_mode: str):
 
 
 _SOURCE_IMAGE_TOL = 1e-5
+
+
+def _bond_record_for_display_pair(
+    left: int,
+    right: int,
+    left_atom: dict[str, Any],
+    right_atom: dict[str, Any],
+    M: Any,
+) -> dict[str, Any]:
+    vector, shift = nearest_image_vector_cart(
+        np.asarray(right_atom["cart"], dtype=float) - np.asarray(left_atom["cart"], dtype=float),
+        np.asarray(M, dtype=float),
+    )
+    return {
+        "left": left,
+        "right": right,
+        "right_image_shift": [int(value) for value in shift],
+        "vector": [float(value) for value in vector],
+    }
+
+
+def _records_from_legacy_pairs(
+    draw_atoms: list[dict[str, Any]],
+    canonical_bond_pairs: list[tuple[int, int]],
+    M: Any,
+) -> list[dict[str, Any]]:
+    """Infer nearest-image relations for legacy canonical bond pairs."""
+    home_by_source: dict[int, dict[str, Any]] = {}
+    for draw_index, atom in enumerate(draw_atoms):
+        try:
+            source_index = int(atom.get("_source_index", draw_index))
+        except (TypeError, ValueError):
+            continue
+        home_by_source.setdefault(source_index, atom)
+
+    records: list[dict[str, Any]] = []
+    for raw_left, raw_right in canonical_bond_pairs:
+        left, right = int(raw_left), int(raw_right)
+        if left not in home_by_source or right not in home_by_source:
+            continue
+        records.append(
+            _bond_record_for_display_pair(
+                left,
+                right,
+                home_by_source[left],
+                home_by_source[right],
+                M,
+            )
+        )
+    return records
+
+
+def _records_from_detected_pairs(
+    draw_atoms: list[dict[str, Any]],
+    detected_pairs: list[tuple[int, int]],
+    M: Any,
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for left_index, right_index in detected_pairs:
+        left_atom = draw_atoms[left_index]
+        right_atom = draw_atoms[right_index]
+        try:
+            left = int(left_atom.get("_source_index", left_index))
+            right = int(right_atom.get("_source_index", right_index))
+        except (TypeError, ValueError):
+            continue
+        records.append(
+            _bond_record_for_display_pair(left, right, left_atom, right_atom, M)
+        )
+    return records
+
+
+def _manifest_strict_bonded_images(
+    draw_atoms: list[dict[str, Any]],
+    source_atoms: list[dict[str, Any]],
+    M: Any,
+    canonical_bond_records: list[dict[str, Any]],
+) -> int:
+    """Add complete periodic images required by strict-cell bonds.
+
+    A strict-cell image is introduced because one bond crosses a cell face.
+    The image must represent the whole connected chemical fragment: adding
+    only the endpoint that crosses the face leaves, for example, a translated
+    ClO4 centre with just one of its four O atoms.
+    """
+    if not draw_atoms or not any(atom.get("_strict_unit_cell") for atom in draw_atoms):
+        return 0
+
+    instances: dict[tuple[int, tuple[int, int, int]], int] = {}
+    home_by_source: dict[int, dict[str, Any]] = {}
+    for draw_index, atom in enumerate(draw_atoms):
+        identity = _source_image_identity(atom, source_atoms, draw_index)
+        if identity is None:
+            continue
+        instances.setdefault(identity, draw_index)
+        if identity[1] == (0, 0, 0):
+            home_by_source.setdefault(identity[0], atom)
+
+    M_arr = np.asarray(M, dtype=float)
+    adjacency: dict[int, list[tuple[int, tuple[int, int, int]]]] = {}
+    for record in canonical_bond_records:
+        try:
+            left = int(record["left"])
+            right = int(record["right"])
+            relation = tuple(int(value) for value in record["right_image_shift"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if len(relation) != 3:
+            continue
+        adjacency.setdefault(left, []).append((right, relation))
+        adjacency.setdefault(right, []).append((left, tuple(-value for value in relation)))
+
+    additions: list[dict[str, Any]] = []
+
+    def _add_image(source: int, shift: tuple[int, int, int]) -> None:
+        target_key = (source, shift)
+        source_atom = home_by_source.get(source)
+        if source_atom is None or target_key in instances:
+            return
+        copied = dict(source_atom)
+        wrapped_frac = np.asarray(source_atom.get("frac"), dtype=float)
+        target_frac = wrapped_frac + np.asarray(shift, dtype=float)
+        copied["frac"] = target_frac
+        copied["cart"] = frac_to_cart(target_frac, M_arr)
+        copied["_wrapped_frac"] = wrapped_frac.copy()
+        copied["_image_shift"] = shift
+        copied["_strict_unit_cell"] = True
+        copied["_is_bonded_image_replica"] = True
+        copied.pop("_is_boundary_replica", None)
+        copied.pop("_is_fragment_boundary_replica", None)
+        instances[target_key] = len(draw_atoms) + len(additions)
+        additions.append(copied)
+
+    # Seed image instances from canonical records whose endpoint crosses a
+    # face. The checks retain the existing safety guard for each seed.
+    for record in canonical_bond_records:
+        try:
+            left = int(record["left"])
+            right = int(record["right"])
+            relation = tuple(int(value) for value in record["right_image_shift"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if len(relation) != 3 or relation == (0, 0, 0):
+            continue
+        for source, target, shift in (
+            (left, right, relation),
+            (right, left, tuple(-value for value in relation)),
+        ):
+            source_atom = home_by_source.get(source)
+            target_atom = home_by_source.get(target)
+            target_key = (target, shift)
+            if source_atom is None or target_atom is None or target_key in instances:
+                continue
+            candidate = dict(target_atom)
+            candidate_frac = np.asarray(target_atom.get("frac"), dtype=float) + np.asarray(shift, dtype=float)
+            candidate["frac"] = candidate_frac
+            candidate["cart"] = frac_to_cart(candidate_frac, M_arr)
+            if bonds_conflict(source_atom, candidate):
+                continue
+            if float(np.linalg.norm(np.asarray(candidate["cart"]) - np.asarray(source_atom["cart"]))) > 3.5:
+                continue
+            _add_image(target, shift)
+
+    # Complete every seeded image over its canonical connected component.
+    # The signed record relation maps current@q to neighbour@(q + edge).
+    for (seed_source, seed_shift), _draw_index in list(instances.items()):
+        if seed_shift == (0, 0, 0):
+            continue
+        potentials: dict[int, tuple[int, int, int]] = {seed_source: (0, 0, 0)}
+        queue = [seed_source]
+        while queue:
+            current = queue.pop(0)
+            current_potential = potentials[current]
+            for neighbour, edge_shift in adjacency.get(current, ()):
+                proposed = tuple(
+                    current_potential[axis] + edge_shift[axis]
+                    for axis in range(3)
+                )
+                known = potentials.get(neighbour)
+                if known is None:
+                    potentials[neighbour] = proposed
+                    queue.append(neighbour)
+                elif known != proposed:
+                    # Keep the first shortest-path potential for malformed
+                    # record sets containing an inconsistent cycle.
+                    continue
+        for source, relative_shift in potentials.items():
+            absolute_shift = tuple(
+                seed_shift[axis] + relative_shift[axis]
+                for axis in range(3)
+            )
+            _add_image(source, absolute_shift)
+
+    draw_atoms.extend(additions)
+    return len(additions)
 
 
 def _source_image_identity(
@@ -314,6 +517,55 @@ def build_scene_from_atoms(
     )
     draw_atoms = [dict(atom) for atom in sel_atoms if show_h or atom["elem"] != "H"]
 
+    canonical_pairs = None
+    canonical_records = None
+    if display_mode in ("formula_unit", "unit_cell"):
+        canonical_pairs = canonical_bond_pairs
+        canonical_records = canonical_bond_records
+    image_records = list(canonical_records or [])
+    strict_cell = display_mode == "unit_cell" and not include_boundary_replicas
+    if strict_cell and not canonical_records:
+        if canonical_pairs is not None:
+            image_records = _records_from_legacy_pairs(draw_atoms, canonical_pairs, M)
+        detected_pairs = ops.find_bonds(
+            draw_atoms,
+            M=M,
+            cell=cell,
+            bond_scale=bond_scale,
+            bond_thresholds=bond_thresholds,
+        )
+        detected_records = _records_from_detected_pairs(draw_atoms, detected_pairs, M)
+        if canonical_pairs is None:
+            canonical_pairs = [
+                (int(record["left"]), int(record["right"]))
+                for record in detected_records
+            ]
+            image_records = detected_records
+        else:
+            record_keys = {
+                (
+                    int(record["left"]),
+                    int(record["right"]),
+                    tuple(int(value) for value in record["right_image_shift"]),
+                )
+                for record in image_records
+            }
+            for record in detected_records:
+                relation = tuple(int(value) for value in record["right_image_shift"])
+                key = (int(record["left"]), int(record["right"]), relation)
+                if relation != (0, 0, 0) and key not in record_keys:
+                    image_records.append(record)
+                    record_keys.add(key)
+        canonical_records = image_records
+    bonded_image_replica_count = 0
+    if strict_cell and image_records:
+        bonded_image_replica_count = _manifest_strict_bonded_images(
+            draw_atoms,
+            atoms,
+            M,
+            image_records,
+        )
+
     view_x = np.array(R[0], dtype=float)
     view_y = np.array(R[1], dtype=float)
     view_z = np.array(R[2], dtype=float)
@@ -325,6 +577,7 @@ def build_scene_from_atoms(
         for atom, depth in zip(draw_atoms, depths):
             atom["_depth_t"] = float((depth - z_min) / z_span)
             atom["is_minor"] = atom_is_minor(atom)
+            atom["is_disordered"] = atom_is_disordered(atom)
             atom["disorder_alpha"] = float(ops.disorder_alpha(atom))
             atom["color"] = ops.elem_color(atom["elem"])
             atom["color_light"] = ops.elem_color_light(atom["elem"])
@@ -337,12 +590,8 @@ def build_scene_from_atoms(
     # neighbours on the other side of the cell boundary).  Without M
     # the KDTree uses non-PBC Cartesian distances and misses these pairs.
     effective_M = None if display_mode == "cluster" else M
-    canonical_pairs = None
-    canonical_records = None
-    if display_mode in ("formula_unit", "unit_cell"):
-        canonical_pairs = canonical_bond_pairs
-        canonical_records = canonical_bond_records
     bond_source = "canonical_mck" if canonical_pairs is not None else "redetect"
+
     telemetry_enabled = os.environ.get("MATTERVIS_SCENE_PERF_EVENTS") == "1"
     bond_started = time.perf_counter() if telemetry_enabled else None
     canonical_stats: dict[str, int] = {}
@@ -399,6 +648,7 @@ def build_scene_from_atoms(
                 "alpha_i": ai["disorder_alpha"],
                 "alpha_j": aj["disorder_alpha"],
                 "is_minor": bond_is_minor(ai, aj),
+                "is_disordered": bond_is_disordered(ai, aj),
                 "occ": min(float(ai.get("occ", 1.0)), float(aj.get("occ", 1.0))),
                 "depth_t": float((ai["_depth_t"] + aj["_depth_t"]) / 2.0),
             }
@@ -460,6 +710,7 @@ def build_scene_from_atoms(
         "preset_entry": entry,
         "display_mode": display_mode,
         "unit_cell_boundary_replicas": bool(include_boundary_replicas),
+        "bonded_image_replica_count": bonded_image_replica_count,
         "bond_scale": bond_scale,
         "bond_thresholds": copy.deepcopy(bond_thresholds),
         "projected_axes": projected_axes,

@@ -7,6 +7,7 @@ import pytest
 
 from crystal_viewer.loader import build_empty_bundle
 from crystal_viewer.renderer import DISORDER_DISPATCH, MATERIAL_DISPATCH, STYLE_DISPATCH, build_figure
+from crystal_viewer.render.viewport import flat_projected_pixel_scale
 
 
 def _scene_template():
@@ -244,7 +245,9 @@ def test_fast_atom_scale_default_is_compact_and_cache_sensitive(scene_template):
     default_sizes = marker_sizes(default_fig)
     larger_sizes = marker_sizes(larger_fig)
     assert default_sizes
-    assert max(default_sizes) == pytest.approx(11.2)
+    projected_scale = flat_projected_pixel_scale(scene, style)
+    assert max(default_sizes) == pytest.approx(2.0 * 0.17 * projected_scale * 0.45 * 1.12)
+    assert min(default_sizes) < max(default_sizes)
     assert max(larger_sizes) > max(default_sizes)
 
 
