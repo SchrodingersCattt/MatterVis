@@ -130,6 +130,64 @@ def _range_aspect_ratio(xr, yr, zr) -> dict | None:
     return {"x": float(scaled[0]), "y": float(scaled[1]), "z": float(scaled[2])}
 
 
+def flat_projected_pixel_scale(scene: dict, style: dict, *, ranges=None) -> float:
+    """Return rendered pixels per Cartesian data unit for flat primitives."""
+    if ranges is None:
+        ranges = _scene_ranges(scene, style)
+    xr, yr, zr = ranges
+    spans = np.array([float(xr[1]) - float(xr[0]), float(yr[1]) - float(yr[0]), float(zr[1]) - float(zr[0])], dtype=float)
+    if not np.all(np.isfinite(spans)) or np.any(spans <= 1e-9):
+        return 47.5
+
+    camera = _plotly_camera_from_scene(scene, style)
+    try:
+        from ..compass import camera_screen_basis
+
+        right, screen_up = camera_screen_basis(camera)
+    except (KeyError, TypeError, ValueError, IndexError):
+        right = np.array([1.0, 0.0, 0.0], dtype=float)
+        screen_up = np.array([0.0, 1.0, 0.0], dtype=float)
+
+    aspect = _range_aspect_ratio(xr, yr, zr)
+    half_ranges = spans / 2.0
+    data_to_cube = (
+        np.array([aspect[axis] for axis in ("x", "y", "z")], dtype=float) / half_ranges
+        if aspect is not None
+        else 1.0 / half_ranges
+    )
+    center = np.array(
+        [(float(axis_range[0]) + float(axis_range[1])) / 2.0 for axis_range in ranges],
+        dtype=float,
+    )
+    corners = np.array(
+        [
+            [xr[ix], yr[iy], zr[iz]]
+            for ix in (0, 1)
+            for iy in (0, 1)
+            for iz in (0, 1)
+        ],
+        dtype=float,
+    )
+    cube_points = (corners - center[None, :]) * data_to_cube[None, :]
+    projected = np.stack([cube_points @ right, cube_points @ screen_up], axis=1)
+    projected_spans = projected.max(axis=0) - projected.min(axis=0)
+    if not np.all(np.isfinite(projected_spans)) or np.any(projected_spans <= 1e-9):
+        return 47.5
+
+    width = float(style.get("figure_width", style.get("axis_key_fig_width", 1024.0)))
+    height = float(style.get("figure_height", style.get("axis_key_fig_height", 720.0)))
+    if not np.isfinite(width) or not np.isfinite(height) or width <= 0 or height <= 0:
+        return 47.5
+    px_per_cube_unit = 0.90 * min(width / projected_spans[0], height / projected_spans[1])
+    projected_unit = max(
+        float(np.linalg.norm(data_to_cube * right)),
+        float(np.linalg.norm(data_to_cube * screen_up)),
+    )
+    if not np.isfinite(projected_unit) or projected_unit <= 1e-9:
+        return 47.5
+    return float(px_per_cube_unit * projected_unit)
+
+
 def _should_use_manual_range_aspect(mode: str | None) -> bool:
     """Whether layout should write a manual isometric range aspect.
 
