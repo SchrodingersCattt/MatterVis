@@ -314,7 +314,7 @@ def _bond_scatter_traces(scene: dict, style: dict):
 
 
 def _atom_scatter_traces(scene: dict, style: dict):
-    groups: Dict[Tuple[str, bool, str, str | None], dict] = {}
+    groups: Dict[Tuple[str, bool, str, str | None, str], dict] = {}
     fragment_labels = scene.get("atom_fragment_labels") or []
     for idx, atom in enumerate(scene["draw_atoms"]):
         is_minor = bool(atom.get("is_minor", False))
@@ -325,12 +325,13 @@ def _atom_scatter_traces(scene: dict, style: dict):
         color = _atom_render_color(atom, style, light=is_minor)
         eff_opacity = _atom_effective_opacity(atom, style)
         opacity_group = _atom_opacity_group_id(atom)
+        opacity_bin = f"{eff_opacity:.2f}"
         # Per-trace key = (element, is_minor, effective_color, effective_opacity_bin).
         # Adding colour to the key means a per-element atom_groups
         # rule still groups its atoms in one Scatter3d (so legend
         # entries still read element-by-element) but doesn't merge
         # red-O with default-O when the user splits them.
-        key = (atom["elem"], is_minor, color, opacity_group)
+        key = (atom["elem"], is_minor, color, opacity_group, opacity_bin)
         groups.setdefault(
             key,
             {"x": [], "y": [], "z": [], "size": [], "text": [], "color": color, "customdata": [], "opacity": eff_opacity},
@@ -354,7 +355,7 @@ def _atom_scatter_traces(scene: dict, style: dict):
         ])
 
     traces = []
-    for (elem, is_minor, _color, opacity_group), payload in groups.items():
+    for (elem, is_minor, _color, opacity_group, _opacity_bin), payload in groups.items():
         # Raw dict avoids go.Scatter3d() validator overhead.
         trace_dict = {
             "type": "scatter3d",

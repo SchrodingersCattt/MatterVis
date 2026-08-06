@@ -67,6 +67,19 @@ def test_loader_minor_atom_keeps_minor_styling(trace_builder):
     assert trace["meta"]["mv_minor"] is True
 
 
+def test_flat_atoms_with_different_occupancies_keep_distinct_opacities():
+    minor_low = _atom("minor-low", is_minor=True)
+    minor_high = _atom("minor-high", is_minor=True)
+    minor_high["occ"] = 0.7
+
+    traces = _atom_scatter_traces(
+        {"draw_atoms": [minor_low, minor_high]},
+        _style(),
+    )
+
+    assert sorted(trace["marker"]["opacity"] for trace in traces) == [0.4, 0.7]
+
+
 def test_minor_only_filter_uses_loader_identity_not_occupancy():
     scene = {
         "draw_atoms": [
