@@ -77,6 +77,7 @@ BUILTIN_STYLE: dict[str, Any] = {
     "minor_bond_scale": 0.82,
     "scatter_atom_scale": 0.45,
     "scatter_bond_scale": 1.0,
+    "flat_visual_pixel_scale": 30.0,
     "scatter_bond_contrast_color": None,
     "show_labels": False,
     "label_selector": None,

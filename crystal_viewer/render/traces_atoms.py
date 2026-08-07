@@ -5,27 +5,35 @@ from .common import *
 from .meshes import *
 from .style import *
 from .traces_overlays import _dashed_segments, _ring_segments, _segment_cylinder_trace
-from .viewport import flat_projected_pixel_scale
+from .viewport import flat_projected_pixel_scale, flat_visual_pixel_scale
 
 _FLAT_ATOM_MIN_PIXEL_SIZE = 3.0
 
 
-def _flat_atom_marker_size(atom_radius: float, style: dict, projected_scale: float | None = None) -> float:
-    """Map a Cartesian radius to a projected marker diameter in pixels."""
-    if projected_scale is None:
-        projected_scale = float(style.get("_flat_projected_pixel_scale", 47.5))
+def _flat_atom_marker_size(atom_radius: float, style: dict, visual_scale: float | None = None) -> float:
+    """Map a Cartesian radius to a fixed flat-marker diameter in pixels."""
+    if visual_scale is None:
+        visual_scale = float(style.get("_flat_visual_pixel_scale", flat_visual_pixel_scale(style)))
     return max(
         _FLAT_ATOM_MIN_PIXEL_SIZE,
         2.0
         * float(atom_radius)
         * float(style["atom_scale"])
-        * float(projected_scale)
+        * float(visual_scale)
         * float(style.get("scatter_atom_scale", 0.45)),
     )
 
 
-def _flat_projected_scale(scene: dict, style: dict) -> float:
-    value = style.get("_flat_projected_pixel_scale")
+def _flat_visual_scale(scene: dict, style: dict) -> float:
+    """Return one fixed screen-space scale for flat primitives.
+
+    Non-flat fast rendering remains viewport-aware, preserving its existing
+    zoom behaviour. Only flat publication renders lock the ball/stick ratio
+    across separately framed panels.
+    """
+    if style.get("material") != "flat":
+        return flat_projected_pixel_scale(scene, style)
+    value = style.get("_flat_visual_pixel_scale")
     if value is not None:
         try:
             value = float(value)
@@ -33,7 +41,7 @@ def _flat_projected_scale(scene: dict, style: dict) -> float:
                 return value
         except (TypeError, ValueError):
             pass
-    return flat_projected_pixel_scale(scene, style)
+    return flat_visual_pixel_scale(style)
 
 
 def _flat_highlight_center(atom: dict, scene: dict, style: dict) -> np.ndarray:
@@ -338,12 +346,12 @@ def _bond_scatter_traces(scene: dict, style: dict):
         )["segments"].append([start, end])
 
     traces = []
-    projected_scale = _flat_projected_scale(scene, style)
+    visual_scale = _flat_visual_scale(scene, style)
     base_width = max(
         1.5,
         2.0
         * float(style["bond_radius"])
-        * projected_scale
+        * visual_scale
         * float(style.get("scatter_bond_scale", 1.0)),
     )
     for (color, is_minor, opacity_group, _opc_bin, _occ_bin), payload in groups.items():
@@ -384,7 +392,7 @@ def _bond_scatter_traces(scene: dict, style: dict):
 def _atom_scatter_traces(scene: dict, style: dict):
     groups: Dict[Tuple[str, bool, str, str | None, str], dict] = {}
     fragment_labels = scene.get("atom_fragment_labels") or []
-    projected_scale = _flat_projected_scale(scene, style)
+    visual_scale = _flat_visual_scale(scene, style)
     for idx, atom in enumerate(scene["draw_atoms"]):
         is_minor = bool(atom.get("is_minor", False))
         if style.get("show_minor_only", False) and not is_minor:
@@ -417,7 +425,7 @@ def _atom_scatter_traces(scene: dict, style: dict):
             },
         )
         payload = groups[key]
-        base_size = _flat_atom_marker_size(atom["atom_radius"], style, projected_scale)
+        base_size = _flat_atom_marker_size(atom["atom_radius"], style, visual_scale)
         payload["x"].append(float(atom["cart"][0]))
         payload["y"].append(float(atom["cart"][1]))
         payload["z"].append(float(atom["cart"][2]))
