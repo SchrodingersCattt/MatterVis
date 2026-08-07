@@ -188,6 +188,20 @@ def flat_projected_pixel_scale(scene: dict, style: dict, *, ranges=None) -> floa
     return float(px_per_cube_unit * projected_unit)
 
 
+def flat_visual_pixel_scale(style: dict) -> float:
+    """Return the fixed pixel scale for flat atom and bond primitives.
+
+    Scatter3d markers and lines are screen-space primitives. Flat figures
+    therefore keep one calibrated scale across camera orientations and crops;
+    only viewport framing is allowed to vary between panels.
+    """
+    try:
+        value = float(style.get("flat_visual_pixel_scale", 30.0))
+    except (TypeError, ValueError):
+        return 30.0
+    return value if np.isfinite(value) and value > 0 else 30.0
+
+
 def _should_use_manual_range_aspect(mode: str | None) -> bool:
     """Whether layout should write a manual isometric range aspect.
 

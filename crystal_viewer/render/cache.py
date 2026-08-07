@@ -131,7 +131,7 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
         round(float(style.get("scatter_atom_scale", 0.45)), 3),
         round(float(style.get("bond_radius", 0.1)), 3),
         round(float(style.get("scatter_bond_scale", 1.0)), 3),
-        round(float(style.get("_flat_projected_pixel_scale", -1.0)), 4),
+        round(float(style.get("_flat_visual_pixel_scale", -1.0)), 4),
         str(style.get("background", "#FFFFFF")),
         str(style.get("scatter_bond_contrast_color") or ""),
         round(float(style.get("minor_bond_scale", 0.6)), 3),

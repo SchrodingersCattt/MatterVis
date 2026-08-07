@@ -3,7 +3,8 @@ from __future__ import annotations
 import pytest
 
 from crystal_viewer.render.traces_atoms import _atom_scatter_traces, _bond_scatter_traces
-from crystal_viewer.render.viewport import flat_projected_pixel_scale
+from crystal_viewer.renderer import build_figure
+from crystal_viewer.render.viewport import flat_visual_pixel_scale
 
 
 def _style() -> dict:
@@ -16,6 +17,7 @@ def _style() -> dict:
         "bond_radius": 0.1,
         "scatter_atom_scale": 0.45,
         "scatter_bond_scale": 1.0,
+        "flat_visual_pixel_scale": 30.0,
         "disorder": "opacity",
         "major_opacity": 1.0,
         "minor_opacity": 0.35,
@@ -75,19 +77,24 @@ def _trace_by_role(traces: list[dict], role: str) -> dict:
     return next(trace for trace in traces if trace["meta"]["mv_role"] == role)
 
 
-def test_flat_atom_and_bond_sizes_share_projected_viewport_scale():
+def test_flat_atom_and_bond_sizes_use_fixed_visual_scale_across_viewports():
     style = _style()
     wide = _scene(10.0)
     close = _scene(5.0)
 
-    wide_scale = flat_projected_pixel_scale(wide, style)
-    close_scale = flat_projected_pixel_scale(close, style)
-    assert close_scale == pytest.approx(2.0 * wide_scale)
+    assert flat_visual_pixel_scale(style) == pytest.approx(30.0)
+    wide_figure = build_figure(wide, style)
+    close_figure = build_figure(close, style)
+    assert wide_figure.layout.meta["flat_visual_pixel_scale"] == pytest.approx(30.0)
+    assert close_figure.layout.meta["flat_visual_pixel_scale"] == pytest.approx(30.0)
 
     wide_atom = _trace_by_role(_atom_scatter_traces(wide, style), "atom")
     close_atom = _trace_by_role(_atom_scatter_traces(close, style), "atom")
     wide_bond = _trace_by_role(_bond_scatter_traces(wide, style), "bond")
     close_bond = _trace_by_role(_bond_scatter_traces(close, style), "bond")
 
-    assert close_atom["marker"]["size"][0] == pytest.approx(2.0 * wide_atom["marker"]["size"][0])
-    assert close_bond["line"]["width"] == pytest.approx(2.0 * wide_bond["line"]["width"])
+    assert close_atom["marker"]["size"][0] == pytest.approx(wide_atom["marker"]["size"][0])
+    assert close_bond["line"]["width"] == pytest.approx(wide_bond["line"]["width"])
+    assert wide_atom["marker"]["size"][0] / wide_bond["line"]["width"] == pytest.approx(
+        close_atom["marker"]["size"][0] / close_bond["line"]["width"]
+    )
