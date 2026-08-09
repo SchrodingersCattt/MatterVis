@@ -45,6 +45,30 @@ directory so the task does not mutate unrelated Python installations:
 	.venv/bin/python -m pip install \
 	  "matter-vis @ git+https://github.com/SchrodingersCattt/MatterVis.git@<full-commit>"
 
+The direct command is preferred, but Git dependencies may fail on a weak
+international connection after ordinary wheels have already downloaded. Retry
+at most twice using the platform's `sandbox-proxy` skill. If the failure is the
+pinned MolCrysKit Git dependency, use this integrity-preserving staged fallback:
+
+1. Clone MatterVis from `SchrodingersCattt/MatterVis`, checkout the requested
+   full commit, and verify `git rev-parse HEAD` equals it.
+2. Read the exact MolCrysKit URL and commit from that checkout's
+   `pyproject.toml`; do not substitute the installed version or a version range.
+3. Clone that exact MolCrysKit commit separately, with the same bounded proxy
+   retry policy.
+4. Install ordinary MatterVis dependencies from the domestic PyPI mirror,
+   excluding only the direct-URL MolCrysKit line; then install the clean local
+   MolCrysKit checkout and clean local MatterVis checkout with `--no-deps`.
+5. Require `git -C <mattervis-checkout> diff --exit-code` and the same check for
+   MolCrysKit before and after installation.
+
+Downloading GitHub codeload archives for those exact commits is an acceptable
+fallback when Git transport alone fails. Record archive URLs and SHA256 hashes,
+and verify the extracted source identifies the requested commits. Never edit
+`pyproject.toml`, dependency pins, lock files, or source code to make installation
+succeed. Never replace a pinned dependency such as
+`molcrys-kit @ git+...@<commit>` with `molcrys-kit>=...`.
+
 Use the same interpreter for every command:
 
 	.venv/bin/python -m crystal_viewer render --help
@@ -53,9 +77,10 @@ Use the same interpreter for every command:
 Do not install an unpinned branch, silently substitute a local checkout, or
 claim a commit was used without verification. Record the requested commit,
 `importlib.metadata.version("matter-vis")`, module path, Python executable, and
-the successful `render --help` probe. If network or dependency installation
-fails, preserve the error and stop rather than using an unknown preinstalled
-version.
+the successful `render --help` probe. Also record the resolved MatterVis and
+MolCrysKit commit IDs and clean-worktree checks. If all bounded Git/codeload
+routes fail, preserve the errors and stop rather than using an unknown or
+modified version.
 
 ## Procedure
 
