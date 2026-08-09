@@ -34,11 +34,34 @@ Read the matching path document before running commands:
 
 `flat` is not a general backend name: only `material=flat` plus `style=ortep` selects Matplotlib. Prefer Plotly/Kaleido for the requested style. If it falls back to Matplotlib ORTEP, report that the visual language changed.
 
+## Install MatterVis
+
+When the caller supplies a MatterVis Git commit, install that exact immutable
+revision before rendering. Prefer an isolated virtual environment in the work
+directory so the task does not mutate unrelated Python installations:
+
+	python3 -m venv .venv
+	.venv/bin/python -m pip install --upgrade pip
+	.venv/bin/python -m pip install \
+	  "matter-vis @ git+https://github.com/SchrodingersCattt/MatterVis.git@<full-commit>"
+
+Use the same interpreter for every command:
+
+	.venv/bin/python -m crystal_viewer render --help
+	.venv/bin/python -m crystal_viewer render INPUT.cif -o OUTPUT.png ...
+
+Do not install an unpinned branch, silently substitute a local checkout, or
+claim a commit was used without verification. Record the requested commit,
+`importlib.metadata.version("matter-vis")`, module path, Python executable, and
+the successful `render --help` probe. If network or dependency installation
+fails, preserve the error and stop rather than using an unknown preinstalled
+version.
+
 ## Procedure
 
 1. Verify the input path exists and note its extension.
 2. Identify the output role: single structure, comparable panel, publication composition, trajectory animation, or terminal description.
-3. Inspect available commands with `python -m crystal_viewer render --help`; do not assume `matvis` is installed on `PATH`.
+3. Install or verify the caller-requested immutable MatterVis revision, then inspect available commands with that interpreter's `python -m crystal_viewer render --help`; do not assume `matvis` is installed on `PATH`.
 4. Diagnose expanded/raw, selected, major, minor, fragment, and bond counts plus chemistry/parser warnings before choosing the display mode. If the CLI cannot expose those facts, use the documented API or stop with that limitation.
 5. Read the selected path document and set camera, projection, display mode, disorder treatment, style, and visual scale explicitly.
 6. Export with explicit width, height, scale, frame range, or stride as applicable.
