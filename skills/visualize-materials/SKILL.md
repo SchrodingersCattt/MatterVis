@@ -26,9 +26,9 @@ Do not use `auto`, `diagonal`, perspective, or an unrecorded interactive camera 
 
 Read the matching path document before running commands:
 
-- [Plotly 3D render](./plotly-render.md) — mesh, ball-and-stick, non-ORTEP `flat`, interactive HTML, and normal static image requests.
-- [Matplotlib flat ORTEP](./matplotlib-flat-ortep.md) — browser-independent 2D ORTEP publication figures.
-- [Terminal TUI](./tui.md) — deterministic textual or structured descriptions; not image export.
+- [Plotly 3D render](./reference/plotly-render.md) — mesh, ball-and-stick, non-ORTEP `flat`, interactive HTML, and normal static image requests.
+- [Matplotlib flat ORTEP](./reference/matplotlib-flat-ortep.md) — browser-independent 2D ORTEP publication figures.
+- [Terminal TUI](./reference/tui.md) — deterministic textual or structured descriptions; not image export.
 
 `flat` is not a general backend name: only `material=flat` plus `style=ortep` selects Matplotlib. Prefer Plotly/Kaleido for the requested style. If it falls back to Matplotlib ORTEP, report that the visual language changed.
 
