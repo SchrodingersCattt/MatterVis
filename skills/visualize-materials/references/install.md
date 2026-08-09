@@ -22,7 +22,7 @@ or silently use an unrelated preinstalled copy.
 Run:
 
 ```bash
-.venv/bin/python -m crystal_viewer render --help
+.venv/bin/mat-vis render --help
 .venv/bin/python - <<'PY'
 import importlib.metadata
 import sys

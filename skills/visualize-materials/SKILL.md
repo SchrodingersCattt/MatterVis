@@ -39,6 +39,9 @@ Read only when relevant:
 
 ## Non-negotiable rules
 
+- Use the installed `mat-vis` command for examples and automation. The Python
+  package remains `crystal_viewer`; do not infer a second package name from the
+  CLI rename.
 - Diagnose before selecting `formula_unit`, `unit_cell`, `asymmetric_unit`, or
 	`cluster`; a successful export does not prove a trustworthy scene.
 - Default to an orthographic lattice `+c` view for crystals. Do not use an

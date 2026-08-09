@@ -19,7 +19,7 @@ diagnosis rejects it.
 ## Commands
 
 ```bash
-python -m crystal_viewer render INPUT.cif -o OUTPUT.png \
+    mat-vis render INPUT.cif -o OUTPUT.png \
   --view formula_unit --style ball_stick --material mesh \
   --camera-axis c --orthogonal \
   --width 1200 --height 900 --scale 2
@@ -28,7 +28,7 @@ python -m crystal_viewer render INPUT.cif -o OUTPUT.png \
 For interactive output:
 
 ```bash
-python -m crystal_viewer render INPUT.cif -o OUTPUT.html \
+    mat-vis render INPUT.cif -o OUTPUT.html \
   --camera-axis c --orthogonal
 ```
 

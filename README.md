@@ -34,7 +34,7 @@ own CIF with a single flag.
   viewer from notebooks, agents or subprocesses (`GET /api/v1/state`,
   `POST /api/v1/topology`, `GET /api/v1/screenshot`, ...).
 - **Zero catalog required** — the package ships with a single public CIF so
-  `python -m crystal_viewer --cif scripts/data/DAP-4.cif` just works.
+  `mat-vis serve --cif scripts/data/DAP-4.cif` just works.
 
 ## Install
 
@@ -42,6 +42,7 @@ own CIF with a single flag.
 git clone https://github.com/SchrodingersCattt/MatterVis.git
 cd MatterVis
 python -m pip install -r requirements.txt
+python -m pip install -e .
 ```
 
 `molcrys_kit` is optional. When available the per-fragment **A / B / X**
@@ -58,14 +59,14 @@ browser:
 
 ```bash
 # PNG with default ball-and-stick style
-python -m crystal_viewer render structure.cif -o figure.png
+mat-vis render structure.cif -o figure.png
 
 # PDF, full unit cell, ORTEP hatch shading in greyscale
-python -m crystal_viewer render structure.cif -o figure.pdf \
+mat-vis render structure.cif -o figure.pdf \
   --view unit_cell --style ortep --ortep-mode ortep_hatch --monochrome
 
 # Interactive HTML for supplementary information
-python -m crystal_viewer render structure.cif -o si_figure.html \
+mat-vis render structure.cif -o si_figure.html \
   --show-hydrogen --show-labels
 ```
 
@@ -75,17 +76,17 @@ recipes, and advanced `--config` JSON usage.
 ## Launch the browser viewer
 
 ```bash
-python -m crystal_viewer serve --cif scripts/data/DAP-4.cif
+mat-vis serve --cif scripts/data/DAP-4.cif
 # Serving crystal viewer at http://0.0.0.0:50001
 ```
 
 Additional flags:
 
 ```bash
-python -m crystal_viewer serve --port 8051            # pick a port
-python -m crystal_viewer serve --host 127.0.0.1       # bind to localhost only
-python -m crystal_viewer serve --structure DAP-4      # limit catalog to one name
-python -m crystal_viewer serve --cif a.cif --cif b.cif --cif c.cif
+mat-vis serve --port 8051            # pick a port
+mat-vis serve --host 127.0.0.1       # bind to localhost only
+mat-vis serve --structure DAP-4      # limit catalog to one name
+mat-vis serve --cif a.cif --cif b.cif --cif c.cif
 ```
 
 `--cif` is `action="append"` -- repeat the flag once per CIF file you want to
@@ -109,7 +110,7 @@ common gotchas:
 Putting it together for a Bohrium dev box:
 
 ```bash
-python -m crystal_viewer serve --host 0.0.0.0 --port 50001 \
+mat-vis serve --host 0.0.0.0 --port 50001 \
   --cif scripts/data/DAP-4.cif --cif scripts/data/SY.cif
 # Reachable at http://<your-id>.bohrium.tech:50001/
 ```
@@ -140,7 +141,7 @@ response" report is a DOM problem (no clicks), an event-delegation
 problem (clicks but no POST), or a server problem (POST but no OK).
 
 For server-side debugging the same information is available via
-`MATTERVIS_AUDIT=1 python -m crystal_viewer.app ...`, which prints a
+`MATTERVIS_AUDIT=1 mat-vis serve ...`, which prints a
 one-line summary of every non-poll callback (changedPropIds,
 duration, payload size, originating IP / User-Agent).
 
@@ -319,7 +320,7 @@ hand-curated fragment rather than a crystallographic asymmetric unit.
 ```
 crystal_viewer/
 ├── __init__.py          # re-exports create_app
-├── __main__.py          # `python -m crystal_viewer` entry point
+├── __main__.py          # compatibility entry point; use `mat-vis`
 ├── app/                 # Dash layout, callbacks, ViewerBackend internals
 ├── api/                 # REST + WebSocket blueprints
 ├── render/              # Plotly viewport / traces / cache internals

@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=68.0"]
+requires = ["setuptools>=68.0", "setuptools_scm[toml]>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "matter-vis"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Publication-quality crystal structure visualization + terminal viewer"
 requires-python = ">=3.10"
 dependencies = [
@@ -27,7 +27,16 @@ dependencies = [
 ]
 
 [project.scripts]
-matvis = "crystal_viewer.cli:main"
+mat-vis = "crystal_viewer.cli:main"
+
+[project.optional-dependencies]
+test = ["pytest>=8.0", "pytest-cov"]
+dev = ["matter-vis[test]", "build", "ruff"]
 
 [tool.setuptools.packages.find]
 include = ["crystal_viewer*"]
+
+[tool.setuptools_scm]
+write_to = "crystal_viewer/_version.py"
+local_scheme = "no-local-version"
+fallback_version = "0.0.0+unknown"
