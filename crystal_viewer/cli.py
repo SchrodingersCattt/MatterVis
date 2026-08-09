@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -30,6 +31,7 @@ _MATERIALS = ("mesh", "flat")
 _ORTEP_MODES = ("ortep_solid", "ortep_axes", "ortep_octant", "ortep_hatch")
 _IMAGE_EXTENSIONS = (".png", ".pdf", ".svg")
 _SUPPORTED_EXTENSIONS = _IMAGE_EXTENSIONS + (".html",)
+_CAMERA_AXES = ("a", "b", "c", "a*", "b*", "c*")
 
 
 def _build_render_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -83,9 +85,28 @@ def _build_render_parser(subparsers: argparse._SubParsersAction) -> argparse.Arg
     )
     proj.add_argument(
         "--perspective", dest="projection", action="store_const", const="perspective",
-        help="Use perspective projection (default).",
+        help="Use perspective projection.",
     )
-    p.set_defaults(projection="perspective")
+    p.set_defaults(projection="orthographic")
+
+    # Camera. Explicit Cartesian controls override the default +c alignment.
+    camera_direction = p.add_mutually_exclusive_group()
+    camera_direction.add_argument(
+        "--camera-axis", choices=_CAMERA_AXES, default=None,
+        help="Align the camera with a real or reciprocal lattice axis (default: c).",
+    )
+    camera_direction.add_argument(
+        "--view-direction", nargs=3, type=float, metavar=("X", "Y", "Z"),
+        help="Cartesian direction from the scene toward the camera.",
+    )
+    camera_direction.add_argument(
+        "--camera-position", nargs=3, type=float, metavar=("X", "Y", "Z"),
+        help="Explicit Plotly camera eye position relative to the scene centre.",
+    )
+    p.add_argument(
+        "--camera-up", nargs=3, type=float, metavar=("X", "Y", "Z"),
+        help="Preferred Cartesian screen-up direction.",
+    )
 
     # Boolean display options
     p.add_argument("--show-hydrogen", dest="show_hydrogen", action="store_true", default=False, help="Show hydrogen atoms.")
@@ -183,6 +204,70 @@ def _build_style_overrides(args: argparse.Namespace) -> Dict[str, Any]:
     return overrides
 
 
+def _apply_camera_overrides(
+    scene: Dict[str, Any],
+    overrides: Dict[str, Any],
+    args: argparse.Namespace,
+) -> None:
+    """Apply deterministic CLI camera controls to Plotly and flat renderers."""
+    import numpy as np
+
+    from .math.rotation import axis_camera_basis, normalize_vector, orthogonalise_up
+
+    up_hint = np.asarray(args.camera_up or [0.0, 1.0, 0.0], dtype=float)
+    if args.camera_position is not None:
+        eye = np.asarray(args.camera_position, dtype=float)
+        view_direction = normalize_vector(eye, name="camera position")
+        up = orthogonalise_up(view_direction, up_hint)
+    elif args.view_direction is not None:
+        view_direction = normalize_vector(args.view_direction, name="view direction")
+        up = orthogonalise_up(view_direction, up_hint)
+        eye = view_direction * float(args.camera_distance)
+    else:
+        axis = args.camera_axis or "c"
+        matrix = np.asarray(scene.get("M"), dtype=float)
+        if matrix.shape == (3, 3) and np.all(np.isfinite(matrix)):
+            basis = axis_camera_basis(matrix, axis)
+            view_direction = basis[2]
+            up = basis[1] if args.camera_up is None else orthogonalise_up(view_direction, up_hint)
+        elif axis == "c":
+            view_direction = np.array([0.0, 0.0, 1.0], dtype=float)
+            up = orthogonalise_up(view_direction, up_hint)
+        else:
+            raise ValueError(f"camera axis {axis!r} requires a valid lattice matrix")
+        eye = view_direction * float(args.camera_distance)
+
+    scene["view_direction"] = np.asarray(view_direction, dtype=float)
+    scene["up"] = np.asarray(up, dtype=float)
+    overrides["camera"] = {
+        "eye": {axis: float(eye[index]) for index, axis in enumerate("xyz")},
+        "center": {"x": 0.0, "y": 0.0, "z": 0.0},
+        "up": {axis: float(up[index]) for index, axis in enumerate("xyz")},
+        "projection": {"type": args.projection},
+    }
+
+
+def _plotly_static_export_available() -> tuple[bool, str | None]:
+    """Check whether the installed Kaleido generation can find a browser."""
+    try:
+        from importlib.metadata import version
+
+        major = int(version("kaleido").split(".", 1)[0])
+    except Exception:
+        return False, "Kaleido is not installed"
+    if major < 1:
+        return True, None
+    try:
+        from choreographer.browsers.chromium import Chromium
+
+        browser = Chromium.find_browser(skip_local=False)
+    except Exception as exc:
+        return False, f"browser detection failed: {exc}"
+    if browser:
+        return True, None
+    return False, "Kaleido 1+ could not find Chrome or Chromium"
+
+
 def _render_main(args: argparse.Namespace) -> None:
     """Execute the render subcommand."""
     cif_path = Path(args.cif).resolve()
@@ -196,11 +281,13 @@ def _render_main(args: argparse.Namespace) -> None:
             f"Error: unsupported output format '{ext}'. "
             f"Supported: {', '.join(_SUPPORTED_EXTENSIONS)}"
         )
+    if not math.isfinite(args.camera_distance) or args.camera_distance <= 0:
+        sys.exit("Error: --camera-distance must be finite and greater than zero.")
 
     # Lazy imports to keep CLI startup fast when just showing --help
     from .loader import build_loaded_crystal, build_bundle_scene
     from .scene import scene_style
-    from .renderer import build_figure
+    from .renderer import build_figure, render
 
     name = cif_path.stem
     print(f"Loading {cif_path.name} ...")
@@ -229,32 +316,86 @@ def _render_main(args: argparse.Namespace) -> None:
     )
 
     overrides = _build_style_overrides(args)
+    try:
+        _apply_camera_overrides(scene, overrides, args)
+    except ValueError as exc:
+        sys.exit(f"Error: invalid camera parameters: {exc}")
     style = scene_style(scene, overrides)
 
     print(f"Building figure ({args.style}, {args.view}) ...")
-    fig = build_figure(scene, style)
-
-    # kaleido ≥1.0 crashes when layout.title is None (it tries .get("text")
-    # on it). Ensure a valid title dict is always present for static export.
-    fig_dict = fig.to_dict()
-    layout = fig_dict.setdefault("layout", {})
-    if layout.get("title") is None:
-        layout["title"] = {"text": ""}
-    import plotly.graph_objects as go
-    fig = go.Figure(fig_dict)
 
     # Ensure output directory exists
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     if ext == ".html":
+        # HTML is always the interactive Plotly path, including flat ORTEP.
+        fig = build_figure(scene, style)
         fig.write_html(str(output_path), include_plotlyjs="cdn", full_html=True)
     else:
-        fig.write_image(
-            str(output_path),
-            width=args.width,
-            height=args.height,
-            scale=args.scale,
-        )
+        result = render(scene, style)
+        export_available, unavailable_reason = _plotly_static_export_available()
+        if result.plotly_figure is not None and not export_available:
+            print(
+                "Plotly/Kaleido static export is unavailable "
+                f"({unavailable_reason}).",
+                file=sys.stderr,
+            )
+            print(
+                "Falling back to Matplotlib flat ORTEP output; "
+                "the visual style differs from the requested Plotly rendering.",
+                file=sys.stderr,
+            )
+            fallback_style = scene_style(
+                scene,
+                {
+                    **overrides,
+                    "material": "flat",
+                    "style": "ortep",
+                    "projection": "orthographic",
+                },
+            )
+            render(scene, fallback_style).save(
+                str(output_path),
+                width=args.width,
+                height=args.height,
+                scale=args.scale,
+            )
+        else:
+            try:
+                result.save(
+                    str(output_path),
+                    width=args.width,
+                    height=args.height,
+                    scale=args.scale,
+                )
+            except Exception as exc:
+                if result.plotly_figure is None:
+                    raise
+                print(
+                    "Plotly/Kaleido static export is unavailable "
+                    f"({type(exc).__name__}: {exc}).",
+                    file=sys.stderr,
+                )
+                print(
+                    "Falling back to Matplotlib flat ORTEP output; "
+                    "the visual style differs from the requested Plotly rendering.",
+                    file=sys.stderr,
+                )
+                fallback_style = scene_style(
+                    scene,
+                    {
+                        **overrides,
+                        "material": "flat",
+                        "style": "ortep",
+                        "projection": "orthographic",
+                    },
+                )
+                render(scene, fallback_style).save(
+                    str(output_path),
+                    width=args.width,
+                    height=args.height,
+                    scale=args.scale,
+                )
 
     size = os.path.getsize(output_path)
     print(f"Wrote {ext.lstrip('.')} : {output_path}  ({size:,} bytes)")

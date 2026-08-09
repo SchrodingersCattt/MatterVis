@@ -24,7 +24,13 @@ class FigureResult:
             import matplotlib.pyplot as plt
             plt.close(self._mpl)
         elif self._plotly is not None:
-            self._plotly.write_image(path, width=width, height=height, scale=scale)
+            # Kaleido ≥1.0 expects a title mapping rather than ``None``.
+            fig_dict = self._plotly.to_dict()
+            layout = fig_dict.setdefault("layout", {})
+            if layout.get("title") is None:
+                layout["title"] = {"text": ""}
+            import plotly.graph_objects as go
+            go.Figure(fig_dict).write_image(path, width=width, height=height, scale=scale)
         else:
             raise RuntimeError("FigureResult has no figure")
 
