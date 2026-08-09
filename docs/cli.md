@@ -17,9 +17,9 @@ python -m crystal_viewer render structure.cif -o figure.pdf \
 python -m crystal_viewer render structure.cif -o ortep.png \
   --style ortep --ortep-mode ortep_hatch --monochrome
 
-# Interactive HTML with orthographic projection
+# Interactive HTML with the default orthographic +c view
 python -m crystal_viewer render structure.cif -o interactive.html \
-  --orthogonal --atom-scale 1.2
+  --camera-axis c --orthogonal --atom-scale 1.2
 ```
 
 ## Subcommands
@@ -60,8 +60,28 @@ python -m crystal_viewer render CIF -o OUTPUT [options]
 | `--view MODE` | `formula_unit` | Display mode: `formula_unit`, `unit_cell`, `asymmetric_unit`, `cluster` |
 | `--style STYLE` | `ball_stick` | Rendering style: `ball_stick`, `ball`, `stick`, `ortep`, `wireframe` |
 | `--material MAT` | `mesh` | Surface material: `mesh`, `flat` |
-| `--orthogonal` | — | Use orthographic projection |
-| `--perspective` | ✓ | Use perspective projection (default) |
+| `--orthogonal` | ✓ | Use orthographic projection (default) |
+| `--perspective` | — | Use perspective projection |
+
+### Camera
+
+Static renders default to a reproducible view from the structure toward `+c`
+(`+Z` when no lattice is available), with `+b`/`+Y` pointing up. Camera
+direction options are mutually exclusive.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--camera-axis a|b|c|a*|b*|c*` | `c` | Align to a real or reciprocal lattice axis |
+| `--view-direction X Y Z` | — | Cartesian direction from scene toward camera |
+| `--camera-position X Y Z` | — | Explicit Plotly eye position relative to scene centre |
+| `--camera-up X Y Z` | `+b` / `+Y` | Preferred screen-up direction |
+| `--camera-distance D` | `1.8` | Positive eye distance for axis/direction views |
+
+`--camera-up` is orthogonalized against the view direction. Static Plotly
+PNG/PDF/SVG export is attempted first. If local Chrome/Kaleido export is
+unavailable, the CLI reports the error and falls back to the browser-free
+Matplotlib `material=flat, style=ortep` path; that fallback is ORTEP rather
+than an exact replacement for a requested mesh or ball-and-stick style.
 
 ### Visibility toggles
 
@@ -79,7 +99,7 @@ python -m crystal_viewer render CIF -o OUTPUT [options]
 |------|---------|-------|-------------|
 | `--atom-scale` | 1.0 | 0.3–1.8 | Atom radius scale factor |
 | `--bond-radius` | 0.15 | 0.05–0.40 | Bond cylinder radius (Å) |
-| `--camera-distance` | 1.8 | 0.5–5.0 | Camera eye distance |
+| `--camera-distance` | 1.8 | > 0 | Camera eye distance |
 | `--width` | 900 | — | Image width in pixels |
 | `--height` | 720 | — | Image height in pixels |
 | `--scale` | 2 | 1–4 | Supersampling factor (effective DPI = 72 × scale) |

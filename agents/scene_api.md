@@ -139,6 +139,11 @@ honours:
   (default `1.8`). Larger values reduce perspective depth when
   `projection="perspective"`; orthographic views keep the same visual
   scale but still use the eye direction.
+- `camera` — explicit Plotly camera mapping. The CLI exposes this as
+  `--camera-axis`, `--view-direction`, `--camera-position`, and
+  `--camera-up`. Static CLI renders default to a `+c` lattice-axis view with
+  orthographic projection. Programmatic callers may pass `eye` / `center` /
+  `up`, or the legacy `position` / `focal_point` / `up` form.
 
 ## Worked example
 
