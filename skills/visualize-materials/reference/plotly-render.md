@@ -9,9 +9,10 @@ Use this path for ball-and-stick, mesh ORTEP, wireframe, interactive HTML, or an
 - HTML output is interactive and does not require local Chrome to write.
 - PNG, PDF, and SVG use Kaleido and may require Chrome/Chromium.
 
-## Accessible defaults
+## Initial candidate for simple structures
 
-Unless overridden, set:
+After the parent skill's structure/disorder diagnosis admits a small,
+chemically resolved, low-disorder formula unit, set:
 
 - `--camera-axis c`
 - `--orthogonal`
@@ -22,6 +23,11 @@ Unless overridden, set:
 - explicit `--width`, `--height`, and `--scale`
 
 Do not use an unrecorded interactive camera as the final view.
+
+Do not run this formula-unit recipe blindly. If formula-unit selection is over
+500 atoms, retains over half of the expanded structure, contains over 25%
+minor atoms, or has formula/moiety parsing warnings, use the parent skill's
+diagnostic decision path before rendering.
 
 ## Camera controls
 
@@ -59,4 +65,5 @@ For static output, let the command perform the decisive Kaleido export check. If
 
 - Confirm the output exists and is non-empty.
 - Decode PNG output; check `%PDF`, `<svg`, or Plotly HTML signatures as appropriate.
-- Report camera axis/vector, projection, display mode, style, material, dimensions, backend, and fallback status.
+- Parse stdout/stderr rather than inferring the backend from the output suffix.
+- Report requested and effective camera, display mode, style, material, dimensions, backend, and fallback reason.

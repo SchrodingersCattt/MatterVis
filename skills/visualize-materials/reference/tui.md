@@ -10,13 +10,25 @@ Use this path for a deterministic textual view, an agent-readable structure summ
 
 The TUI is not an image-export backend and must not be described as a fallback PNG/PDF renderer.
 
-## Accessible defaults
+## CLI semantic limits
+
+The static CLI's `--view c` is a Cartesian `+Z` preset, not the image CLI's
+true lattice-`c` direction. Do not call it the "same named axis" for an oblique
+cell. The programmatic `TerminalViewController.align("c")` does use the real
+lattice axis; use that when exact camera parity is required.
+
+Structured output serializes per-atom coordinates and adjacency. Emit it
+automatically only for a visible scene of at most 200 atoms. For larger scenes,
+prefer a bounded count/warning summary; if no summary interface is available,
+omit the companion and state why rather than producing a giant dump.
+
+## Accessible defaults for admitted small scenes
 
 For non-interactive delivery, specify:
 
 - `--view c`
 - `--projection orthographic`
-- `--display formula_unit` for CIF formula-unit parity with the default image path
+- an explicitly diagnosed display mode; do not assume formula-unit parity
 - `--format structured`
 - `--width` and `--height` when fixed terminal framing matters
 
@@ -62,4 +74,5 @@ Fixed-size terminal frame:
 - Confirm stdout is non-empty.
 - For structured output, confirm it includes structure and camera data.
 - Record display mode, view, projection, zoom, dimensions, and visibility toggles.
+- State whether the view is Cartesian CLI `+Z` or a controller-aligned lattice axis.
 - Use this output as an accessible companion to an image when practical.

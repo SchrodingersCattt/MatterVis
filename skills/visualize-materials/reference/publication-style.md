@@ -19,6 +19,60 @@ Keep the chemistry and geometry unchanged while improving display. Do not add
 atoms, bonds, surfaces, disorder branches, or labels that are not supported by
 the source scene.
 
+## Diagnose before styling
+
+Record expanded/raw, selected, major, minor, fragment, and bond counts before
+choosing a formal-figure recipe. Also capture formula/moiety, disorder, bond
+table, and parser warnings. A valid export with an untrustworthy object
+selection is a diagnostic artifact, not a publication figure.
+
+Treat these as soft stop conditions for automatic `formula_unit` rendering:
+over 500 selected atoms, selection above 50% of the expanded structure, minor
+fraction above 25%, or a formula/moiety parsing warning. In those cases,
+inspect `asymmetric_unit` as a diagnostic reduction, choose an explicit
+disorder policy, or stop and request an auditable target selection. Do not
+shrink atom radii or bonds to disguise a failed chemical selection.
+
+Classify warnings:
+
+- **export**: backend/export failure; an explicit visual-language fallback may proceed;
+- **display**: dense scene or likely occlusion; label the output diagnostic;
+- **chemistry**: formula, moiety, disorder, or bond-table degradation; block an automatic formal-figure claim;
+- **semantic-fatal**: the selected object cannot be shown to match the requested target; stop or switch to an explicitly labelled diagnostic.
+
+For periodic scenes, define one geometry contract before styling: wrapped cell,
+bonded periodic images, or an unwrapped cluster. Atom coordinates and bond
+endpoints must use that same contract. A minimum-image distance alone does not
+justify drawing a bond between two wrapped endpoints on opposite box faces.
+Prefer stable labels or atom indices in `atom_groups` and `bond_groups`; do not
+rename O/H or other atoms to non-elements merely to distinguish semantic roles.
+
+## Molecule focus and mixed styles
+
+Use MatterVis's canonical loader whenever one complete molecule must be
+highlighted over structural context. `build_loaded_crystal(...)` runs
+MolCrysKit once and records its native molecule identity as
+`fragment_table[*].source_molecule_index`; the same loader supplies MCK's
+continuous `mol_cart_positions`, canonical bonds, and whole-fragment boundary
+replicas. Do not parse coordinates and reconstruct molecules or bonds by
+distance in a plotting script.
+
+Discover the intended identity before rendering. For terminal-supported inputs,
+`TerminalViewController.inspect_molecule(...)` reports
+`source_molecule_index`, and `focus_molecule({"source_molecule_index": N})`
+provides a deterministic inspection view. In a loaded publication scene,
+resolve the same MCK index through `scene["fragment_table"]` and its
+`site_indices`; do not substitute the display row index or label such as `A0`.
+
+For a wireframe scene with one ball-stick molecule, keep the scene-level style
+as `wireframe` and add an `atom_groups` rule for all resolved site indices with
+`material="mesh"` and `style="ball_stick"`. MatterVis currently has no
+`--highlight-molecule-index` render flag, and atom-group style overrides do not
+partition bonds, so do not claim that a convenience command or fully mixed bond
+style exists. Use canonical scene bonds as rendered, or state the limitation;
+never replace them with inferred cutoff bonds. A future direct selector should
+target `_source_molecule_index`, not a rederived molecule namespace.
+
 ## Comparable structural panels
 
 When panels are meant to be compared, share the following unless the figure
@@ -116,3 +170,11 @@ Decode the PNG and check the PDF/SVG signature. Inspect the final-size image,
 not only the plotting script or an interactive preview. For a panel grid, check
 that comparable panels retain the same scale and that the declared gutters are
 background-dominant.
+
+If the executing model cannot inspect images, separate machine verification
+from visual acceptance. It may report dimensions, signatures, scene counts,
+camera/style metadata, coordinate bounds, bond-length bounds, crop statistics,
+and successful decoding. It must not claim that the structure is clear,
+unclipped, publication-ready, or visually faithful. Attach the export for a
+human or vision-capable reviewer and mark visual acceptance as pending; after
+review, record the reviewer and observed defects or approval in the manifest.
