@@ -23,7 +23,7 @@ dependencies = [
     "ase",
     "networkx",
     "textual",
-    "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@9165749f64eb75b8429cf7c5db170a522b80a896",
+    "molcrys-kit>=0.6.1",
 ]
 
 [project.scripts]
