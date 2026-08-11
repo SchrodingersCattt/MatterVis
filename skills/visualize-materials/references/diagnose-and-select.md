@@ -72,10 +72,10 @@ unit-cell tangle and calling it formal output.
 For an ordered crystal scene above 500 displayed atoms, use one deterministic
 low-noise first candidate rather than trying a gallery: `unit_cell`, hidden
 hydrogen, orthographic lattice `+c`, `ball_stick`, `mesh`, white background,
-`atom-scale=0.65`, `bond-radius=0.08`, `1600x1200`, and `scale=2`. This preserves
-the crystal context while reducing occlusion. If the target is one local event
-or molecule rather than the whole cell, use the auditable focus workflow instead
-of drawing the entire dense box.
+hidden axes and labels, `atom-scale=0.65`, `bond-radius=0.08`, `1600x1200`, and
+`scale=2`. This preserves the crystal context while reducing occlusion. If the
+target is one local event or molecule rather than the whole cell, use the
+auditable focus workflow instead of drawing the entire dense box.
 
 For opacity rendering, use a style config of this shape:
 

@@ -11,6 +11,9 @@ Read this before delivering any image, vector graphic, HTML view, or animation.
 - Decode PNG; check `%PDF`, an `<svg` root, or Plotly HTML content as relevant.
 - Record dimensions, scale, camera, projection, display mode, hydrogen and cell
   visibility, viewport or physical scale, and disorder treatment.
+- For a single structure, reject excessive paper border: after the allowed
+  background-only crop, the non-white scene bounding box should occupy at least
+  70% of both final image dimensions. Record crop box and confirm no rescaling.
 - Preserve stdout/stderr and classify warnings.
 
 ## Requested versus effective
