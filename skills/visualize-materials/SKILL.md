@@ -11,8 +11,7 @@ camera, style, export backend, and verification as explicit data.
 ## Core workflow
 
 1. Verify the input and requested deliverable.
-2. Read [installation](./references/install.md) when MatterVis must be installed
-	 or pinned to a revision.
+2. Read [installation](./references/install.md) and verify the released CLI.
 3. Always read [diagnosis and scene selection](./references/diagnose-and-select.md)
 	 before choosing a display mode or style.
 4. For images, always read the [camera contract](./references/camera.md), then the

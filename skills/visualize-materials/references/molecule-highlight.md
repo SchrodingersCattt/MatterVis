@@ -3,6 +3,9 @@
 Read this only when one complete molecule or fragment must be highlighted over
 structural context.
 
+MatterVis 0.0.0 has no render `--highlight-molecule-index` flag and no TUI
+`--focus-molecule` flag. This is a Python/API workflow.
+
 Use MatterVis's canonical loader. `build_loaded_crystal(...)` runs MolCrysKit and
 records its native molecule identity as
 `fragment_table[*].source_molecule_index`; it also supplies continuous
@@ -30,3 +33,8 @@ atom-group style overrides do not partition bonds. Do not claim that a
 convenience command or fully mixed bond style exists. State the limitation and
 never replace canonical bonds with screen-distance inference. A future direct
 selector should target `_source_molecule_index`.
+
+Image `atom_groups` selectors support `all`, `elements`, `is_minor`, `labels`,
+`atom_indices`, `fragment_labels`, and `fragment_indices`, not
+`source_molecule_index`. Resolve the MCK identity to all manifested target site
+indices before styling.

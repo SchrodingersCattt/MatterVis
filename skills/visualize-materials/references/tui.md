@@ -5,7 +5,7 @@ terminal interaction. The TUI is not an image backend or PNG/PDF fallback.
 
 ## Modes
 
-- Interactive: `python -m crystal_viewer tui INPUT.cif`
+- Interactive: `mat-vis tui INPUT.cif`
 - Deterministic: add `--no-interaction`
 - Agent-readable: add `--format structured`
 
@@ -21,13 +21,13 @@ explain why.
 ## Small-scene commands
 
 ```bash
-python -m crystal_viewer tui INPUT.cif --no-interaction \
+mat-vis tui INPUT.cif --no-interaction \
   --format structured --display <diagnosed-mode> \
   --view c --projection orthographic
 ```
 
 ```bash
-python -m crystal_viewer tui INPUT.cif --no-interaction \
+mat-vis tui INPUT.cif --no-interaction \
   --view c --projection orthographic --width 100 --height 40
 ```
 

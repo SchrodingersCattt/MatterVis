@@ -6,6 +6,8 @@ request that must preserve real 3D geometry. Read `diagnose-and-select.md` and
 
 ## Semantics
 
+- `mat-vis render` accepts one CIF input and writes `.png`, `.pdf`, `.svg`, or
+  `.html` according to the output suffix.
 - `material=mesh` uses Plotly `Mesh3d` atoms and bonds.
 - `material=flat` with a non-ORTEP style remains Plotly 3D and uses fixed-screen
   `Scatter3d` primitives.
@@ -19,21 +21,31 @@ diagnosis rejects it.
 ## Commands
 
 ```bash
-python -m crystal_viewer render INPUT.cif -o OUTPUT.png \
+mat-vis render INPUT.cif -o OUTPUT.png \
   --view formula_unit --style ball_stick --material mesh \
   --camera-axis c --orthogonal \
+  --no-hydrogen --show-cell --show-axes --no-labels \
+  --background '#FFFFFF' --atom-scale 1.0 --bond-radius 0.15 \
   --width 1200 --height 900 --scale 2
 ```
 
 For interactive output:
 
 ```bash
-python -m crystal_viewer render INPUT.cif -o OUTPUT.html \
+mat-vis render INPUT.cif -o OUTPUT.html \
   --camera-axis c --orthogonal
 ```
 
 Use `--show-hydrogen` explicitly when hydrogens matter; the image CLI hides them
 by default. Use `--config` for supported style fields such as disorder treatment.
+Live 0.0.0 render choices are:
+
+- views: `formula_unit`, `unit_cell`, `asymmetric_unit`, `cluster`;
+- styles: `ball_stick`, `ball`, `stick`, `ortep`, `wireframe`;
+- materials: `mesh`, `flat`;
+- visibility: hydrogen, cell, axes, labels, and monochrome;
+- appearance: atom scale, bond radius, background, dimensions, scale;
+- ORTEP probability/mode and JSON view-scoring weights.
 
 ## Large scenes
 
