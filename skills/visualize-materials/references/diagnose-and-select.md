@@ -62,6 +62,13 @@ High-disorder scenes need an explicit choice: major-only, hidden minor sites,
 opacity, or an ASU diagnostic. `minor_opacity` does not reduce
 `disorder="outline_rings"`.
 
+When minor sites exceed 25%, never run the unmodified ball-stick/mesh defaults as
+the primary candidate. For a crystal-context view, start with `unit_cell`, hidden
+hydrogen, `disorder="opacity"`, `minor_opacity` between 0.08 and 0.15,
+`atom-scale` between 0.65 and 0.8, and `bond-radius` between 0.08 and 0.12. If the
+scene remains dense, deliver an ASU diagnostic rather than shrinking a black
+unit-cell tangle and calling it formal output.
+
 For opacity rendering, use a style config of this shape:
 
 ```json

@@ -60,3 +60,11 @@ Let the static command perform the decisive Kaleido check. If unavailable,
 MatterVis may fall back to Matplotlib flat ORTEP. Preserve the original error and
 never describe the fallback as equivalent to requested mesh, flat-stick,
 ball-and-stick, or wireframe output.
+
+If static Plotly output is required and Chrome/Chromium is missing, use the
+installed Plotly/Kaleido helper (`plotly_get_chrome`, `kaleido_get_chrome`, or
+`choreo_get_chrome`, whichever is present), then retry the exact render once.
+Do not attach the black Matplotlib ORTEP fallback as the primary answer to a
+mesh/ball-stick request. If Chrome installation or retry fails, preserve an
+interactive Plotly HTML as the effective 3D deliverable and label any fallback
+PNG diagnostic-only.

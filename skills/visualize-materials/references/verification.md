@@ -28,6 +28,12 @@ valid PNG after Plotly/Kaleido failure may be Matplotlib flat ORTEP and does not
 prove that requested mesh, flat-stick, ball-and-stick, or wireframe output
 succeeded.
 
+Before `AttachFigure`, require the effective style/material/backend to match the
+requested visual language. A fallback ORTEP image must not be attached as the
+primary candidate for a mesh, ball-stick, stick, or wireframe request. Repair the
+static Plotly runtime and retry, or attach a matching previously verified image;
+otherwise deliver Plotly HTML and mark the PNG diagnostic-only.
+
 MatterVis 0.0.0 does not write a native manifest/sidecar and has no
 `--effective-backend` or `--no-fallback` flag. Create a caller-owned JSON sidecar
 from the command, captured stdout/stderr, input/output hashes, and checks above.
