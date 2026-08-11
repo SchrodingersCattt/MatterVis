@@ -48,12 +48,32 @@ non-interactively with the helper shipped by Plotly:
 ```bash
 plotly_get_chrome -y
 python - <<'PY'
-from crystal_viewer.cli import _plotly_static_export_available
-available, reason = _plotly_static_export_available()
-print("plotly_static_export=", available, reason)
-raise SystemExit(0 if available else 1)
+import os
+import tempfile
+import plotly.graph_objects as go
+
+path = os.path.join(tempfile.gettempdir(), "mattervis-plotly-probe.png")
+go.Figure(go.Scatter(x=[0, 1], y=[0, 1])).write_image(path, width=64, height=64)
+print("plotly_static_export=", os.path.getsize(path) > 0, path)
 PY
 ```
+
+This real write probe is required: browser-path detection alone can return true
+when Chrome immediately exits because shared libraries are missing. If the probe
+reports `BrowserFailedError`, run the downloaded Chrome executable with
+`--version` and inspect `ldd ... | grep 'not found'`. On Ubuntu/Debian, the
+common runtime set is:
+
+```bash
+apt-get update -qq
+apt-get install -y -qq \
+	libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+	libdbus-1-3 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
+	libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64
+```
+
+Install only when the current environment permits system packages; otherwise
+report the static-runtime blocker. Rerun the real write probe after repair.
 
 Run this preflight before rendering, not after accepting a fallback PNG. Do not
 try `kaleido[chromium]` (that extra does not exist), Playwright, or HTML as the
