@@ -39,5 +39,27 @@ module path, console-script name, and live help output. The installed CLI is
 authoritative: it currently exposes `render`, `serve`, and `tui`. Do not invent
 commands or options absent from the probe.
 
+## Static PNG runtime
+
+Kaleido 1.x is installed by pip but Chrome/Chromium is an external runtime, not
+a Python dependency. Before the first Plotly-backed PNG render, install Chrome
+non-interactively with the helper shipped by Plotly:
+
+```bash
+plotly_get_chrome -y
+python - <<'PY'
+from crystal_viewer.cli import _plotly_static_export_available
+available, reason = _plotly_static_export_available()
+print("plotly_static_export=", available, reason)
+raise SystemExit(0 if available else 1)
+PY
+```
+
+Run this preflight before rendering, not after accepting a fallback PNG. Do not
+try `kaleido[chromium]` (that extra does not exist), Playwright, or HTML as the
+default workaround. If the helper fails because of transient network access,
+retry that exact helper through the available network proxy. Do not start the
+PNG render until the browser check passes.
+
 If the caller explicitly requests a Git revision instead of the release, install
 that immutable revision in a separate environment and record the resolved commit.

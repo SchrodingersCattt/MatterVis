@@ -31,6 +31,17 @@ mat-vis render INPUT.cif -o OUTPUT.png \
   --width 1200 --height 900 --scale 2
 ```
 
+For an ordered crystal above 500 displayed atoms, use the diagnosed large-scene
+preset directly:
+
+```bash
+mat-vis render INPUT.cif -o OUTPUT.png \
+  --view unit_cell --style ball_stick --material mesh \
+  --camera-axis c --orthogonal --no-hydrogen \
+  --background '#FFFFFF' --atom-scale 0.65 --bond-radius 0.08 \
+  --width 1600 --height 1200 --scale 2
+```
+
 Only for explicitly requested interactive output:
 
 ```bash
@@ -63,9 +74,9 @@ MatterVis may fall back to Matplotlib flat ORTEP. Preserve the original error an
 never describe the fallback as equivalent to requested mesh, flat-stick,
 ball-and-stick, or wireframe output.
 
-If static Plotly output is required and Chrome/Chromium is missing, use the
-installed Plotly/Kaleido helper (`plotly_get_chrome`, `kaleido_get_chrome`, or
-`choreo_get_chrome`, whichever is present), then retry the exact render once.
+The installation reference requires `plotly_get_chrome -y` and a browser
+preflight before this command. If a runtime change still makes Chrome disappear,
+rerun that exact helper and browser check, then retry the exact render once.
 Do not attach the black Matplotlib ORTEP fallback as the primary answer to a
 mesh/ball-stick request. If Chrome installation or retry fails, report the static
 export failure; do not silently replace a requested PNG with HTML. Generate HTML
