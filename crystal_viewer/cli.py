@@ -7,8 +7,8 @@ serve   Launch the interactive Dash browser viewer.
 
 Usage::
 
-    python -m crystal_viewer render structure.cif -o figure.png
-    python -m crystal_viewer serve --cif structure.cif --port 50001
+    mat-vis render structure.cif -o figure.png
+    mat-vis serve --cif structure.cif --port 50001
 """
 from __future__ import annotations
 
@@ -811,7 +811,7 @@ def _filter_crystal(crystal, keep_indices: set[int]):
 def main(argv: Optional[list[str]] = None) -> None:
     """MatterVis CLI entry point."""
     parser = argparse.ArgumentParser(
-        prog="matvis",
+        prog="mat-vis",
         description="MatterVis: publication-quality crystal structure visualization.",
     )
     subparsers = parser.add_subparsers(dest="command")

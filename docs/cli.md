@@ -7,18 +7,18 @@ crystal structure figures without launching the browser viewer.
 
 ```bash
 # Render a CIF to PNG (publication quality, 2× supersampling)
-python -m crystal_viewer render structure.cif -o figure.png
+mat-vis render structure.cif -o figure.png
 
 # PDF output, unit cell view, no hydrogen
-python -m crystal_viewer render structure.cif -o figure.pdf \
+mat-vis render structure.cif -o figure.pdf \
   --view unit_cell --no-hydrogen
 
 # ORTEP with hatch shading in greyscale
-python -m crystal_viewer render structure.cif -o ortep.png \
+mat-vis render structure.cif -o ortep.png \
   --style ortep --ortep-mode ortep_hatch --monochrome
 
 # Interactive HTML with the default orthographic +c view
-python -m crystal_viewer render structure.cif -o interactive.html \
+mat-vis render structure.cif -o interactive.html \
   --camera-axis c --orthogonal --atom-scale 1.2
 ```
 
@@ -34,7 +34,7 @@ python -m crystal_viewer render structure.cif -o interactive.html \
 ## `render` — Static figure export
 
 ```
-python -m crystal_viewer render CIF -o OUTPUT [options]
+mat-vis render CIF -o OUTPUT [options]
 ```
 
 ### Required arguments
@@ -115,7 +115,7 @@ than an exact replacement for a requested mesh or ball-and-stick style.
 ### Advanced: full style override via JSON
 
 ```bash
-python -m crystal_viewer render structure.cif -o fig.png --config style.json
+mat-vis render structure.cif -o fig.png --config style.json
 ```
 
 The `--config` flag loads a JSON file containing any style keys from the
@@ -145,7 +145,7 @@ settings, and ORTEP fine-tuning (silhouette, hatch linewidths, z-lifts).
 ## `serve` — Browser viewer
 
 ```
-python -m crystal_viewer serve [options]
+mat-vis serve [options]
 ```
 
 | Flag | Default | Description |
@@ -162,14 +162,14 @@ python -m crystal_viewer serve [options]
 Open a crystal in the terminal without starting the Dash service:
 
 ```bash
-matvis tui structure.cif
+mat-vis tui structure.cif
 ```
 
 Use `--no-interaction` for deterministic stdout suitable for scripts or
 agents. `--format structured` adds cell, atom, bond-summary, and camera data.
 
 ```bash
-matvis tui structure.cif --no-interaction --format structured \
+mat-vis tui structure.cif --no-interaction --format structured \
   --display formula_unit --projection orthographic
 ```
 
@@ -217,7 +217,7 @@ polyhedra.
 ### Publication-quality ball-and-stick (JACS style)
 
 ```bash
-python -m crystal_viewer render mol.cif -o fig.png \
+mat-vis render mol.cif -o fig.png \
   --view formula_unit \
   --no-hydrogen --no-axes --show-cell \
   --atom-scale 0.9 --bond-radius 0.14 \
@@ -228,7 +228,7 @@ python -m crystal_viewer render mol.cif -o fig.png \
 ### Full unit cell overview
 
 ```bash
-python -m crystal_viewer render crystal.cif -o cell.png \
+mat-vis render crystal.cif -o cell.png \
   --view unit_cell \
   --no-hydrogen --show-cell --show-axes \
   --atom-scale 0.7 --bond-radius 0.12
@@ -237,7 +237,7 @@ python -m crystal_viewer render crystal.cif -o cell.png \
 ### ORTEP for crystallographic papers
 
 ```bash
-python -m crystal_viewer render crystal.cif -o ortep.pdf \
+mat-vis render crystal.cif -o ortep.pdf \
   --style ortep --ortep-mode ortep_hatch \
   --monochrome --no-axes --show-labels \
   --ortep-probability 0.5
@@ -246,14 +246,14 @@ python -m crystal_viewer render crystal.cif -o ortep.pdf \
 ### Orthographic projection (no foreshortening)
 
 ```bash
-python -m crystal_viewer render crystal.cif -o ortho.png \
+mat-vis render crystal.cif -o ortho.png \
   --orthogonal --atom-scale 1.0 --camera-distance 2.5
 ```
 
 ### Interactive HTML for SI / supplementary info
 
 ```bash
-python -m crystal_viewer render crystal.cif -o si_figure.html \
+mat-vis render crystal.cif -o si_figure.html \
   --view unit_cell --show-hydrogen --show-labels
 ```
 
@@ -274,7 +274,7 @@ pip install kaleido
 For cells with >500 atoms, reduce supersampling:
 
 ```bash
-python -m crystal_viewer render big.cif -o fig.png --scale 1
+mat-vis render big.cif -o fig.png --scale 1
 ```
 
 Or use the `cluster` display mode to show only a molecular fragment.

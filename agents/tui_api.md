@@ -2,7 +2,7 @@
 
 Use this API when a Python caller or local agent adapter needs to control a
 MatterVis terminal view semantically. It shares the terminal renderer and
-canonical `CrystalIR`/MolCrysKit loader path with `matvis tui`; it is **not** an
+canonical `CrystalIR`/MolCrysKit loader path with `mat-vis tui`; it is **not** an
 HTTP service and it does not create a second chemistry or render pipeline.
 
 ```python
@@ -104,7 +104,7 @@ site is ordered or major.
 
 ## Keyboard compatibility
 
-`matvis tui` retains keyboard control through the same controller:
+`mat-vis tui` retains keyboard control through the same controller:
 
 - `q/e`, `w/s`, `a/d`: yaw/pitch/roll.
 - arrows or `i/j/k/l`: pan.
@@ -119,7 +119,7 @@ controller observation is the machine-readable local API.
 
 ## Interactive command mode
 
-Press `:` in `matvis tui` to open a one-line command prompt:
+Press `:` in `mat-vis tui` to open a one-line command prompt:
 
 - `:select A B ...`, `:clear`
 - `:focus N9 [bond_depth]`
