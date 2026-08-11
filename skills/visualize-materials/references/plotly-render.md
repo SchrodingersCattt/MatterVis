@@ -11,7 +11,9 @@ request that must preserve real 3D geometry. Read `diagnose-and-select.md` and
 - `material=mesh` uses Plotly `Mesh3d` atoms and bonds.
 - `material=flat` with a non-ORTEP style remains Plotly 3D and uses fixed-screen
   `Scatter3d` primitives.
-- HTML is interactive and does not require local Chrome to write.
+- The default deliverable is one static PNG. HTML is interactive and does not
+  require local Chrome, but generate it only when the caller explicitly requests
+  interactive output.
 - PNG, PDF, and SVG use Kaleido and may require Chrome/Chromium.
 
 For an admitted small, chemically resolved, low-disorder formula unit, start
@@ -29,7 +31,7 @@ mat-vis render INPUT.cif -o OUTPUT.png \
   --width 1200 --height 900 --scale 2
 ```
 
-For interactive output:
+Only for explicitly requested interactive output:
 
 ```bash
 mat-vis render INPUT.cif -o OUTPUT.html \
@@ -65,6 +67,6 @@ If static Plotly output is required and Chrome/Chromium is missing, use the
 installed Plotly/Kaleido helper (`plotly_get_chrome`, `kaleido_get_chrome`, or
 `choreo_get_chrome`, whichever is present), then retry the exact render once.
 Do not attach the black Matplotlib ORTEP fallback as the primary answer to a
-mesh/ball-stick request. If Chrome installation or retry fails, preserve an
-interactive Plotly HTML as the effective 3D deliverable and label any fallback
-PNG diagnostic-only.
+mesh/ball-stick request. If Chrome installation or retry fails, report the static
+export failure; do not silently replace a requested PNG with HTML. Generate HTML
+only after explicit caller approval.

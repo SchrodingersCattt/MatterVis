@@ -6,6 +6,8 @@ Read this before delivering any image, vector graphic, HTML view, or animation.
 
 - Resolve the intended input and record its hash when provenance matters.
 - Confirm the output exists, is non-empty, and has the requested extension.
+- For a normal image request, require exactly one selected final PNG. Do not
+  deliver HTML, PDF, SVG, or multiple variants unless explicitly requested.
 - Decode PNG; check `%PDF`, an `<svg` root, or Plotly HTML content as relevant.
 - Record dimensions, scale, camera, projection, display mode, hydrogen and cell
   visibility, viewport or physical scale, and disorder treatment.
@@ -32,7 +34,8 @@ Before `AttachFigure`, require the effective style/material/backend to match the
 requested visual language. A fallback ORTEP image must not be attached as the
 primary candidate for a mesh, ball-stick, stick, or wireframe request. Repair the
 static Plotly runtime and retry, or attach a matching previously verified image;
-otherwise deliver Plotly HTML and mark the PNG diagnostic-only.
+otherwise report that a matching static PNG could not be produced. HTML requires
+an explicit interactive-output request.
 
 MatterVis 0.0.0 does not write a native manifest/sidecar and has no
 `--effective-backend` or `--no-fallback` flag. Create a caller-owned JSON sidecar

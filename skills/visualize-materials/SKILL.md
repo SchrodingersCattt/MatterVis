@@ -16,7 +16,9 @@ camera, style, export backend, and verification as explicit data.
 	 before choosing a display mode or style.
 4. For images, always read the [camera contract](./references/camera.md), then the
 	 matching render path.
-5. Export with explicit dimensions and settings.
+5. By default export exactly one final PNG with explicit dimensions and settings.
+   Generate HTML, PDF, SVG, animations, or extra candidate files only when the
+   caller explicitly requests them.
 6. Always read [verification and delivery](./references/verification.md) before
 	 reporting or attaching the result.
 
@@ -48,5 +50,7 @@ Read only when relevant:
 	contracts.
 - Distinguish requested from effective display, style, material, backend, and
 	fallback. A decoded PNG does not prove that the requested visual language ran.
+- Do not emit HTML or a gallery of diagnostic variants for a normal static-image
+  request. Keep failed attempts as diagnostics only; attach one selected PNG.
 - A model without image-inspection capability reports objective checks and leaves
 	visual acceptance pending; it never self-certifies publication quality.
