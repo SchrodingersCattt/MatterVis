@@ -159,7 +159,99 @@ def _build_render_parser(subparsers: argparse._SubParsersAction) -> argparse.Arg
         ),
     )
 
+    p.add_argument(
+        "--polyhedron", action="append", default=[], metavar="JSON",
+        help=(
+            "Add a polyhedron overlay from a JSON object. Repeat for multiple overlays. "
+            "Required keys: center, ligand. Optional: level=atom|molecule, "
+            "center_kind, cutoff, hard_cutoff, fallback_max, color, name."
+        ),
+    )
+    p.add_argument(
+        "--polyhedron-site", type=int, default=None, metavar="INDEX",
+        help="Displayed fragment index used as the primary polyhedron analysis anchor.",
+    )
+    p.add_argument(
+        "--polyhedron-cutoff", type=float, default=10.0, metavar="ANGSTROM",
+        help="Default polyhedron search cutoff in Å (default: 10.0).",
+    )
+
     return p
+
+
+def _parse_polyhedron_specs(raw_specs: list[str]) -> list[dict[str, Any]]:
+    from .app.normalizers import _normalize_polyhedron_spec
+
+    specs: list[dict[str, Any]] = []
+    existing_ids: set[str] = set()
+    for index, raw in enumerate(raw_specs):
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"polyhedron {index + 1}: invalid JSON: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise ValueError(f"polyhedron {index + 1}: expected a JSON object")
+        normalized_payload = dict(payload)
+        if "center_species" not in normalized_payload and "center" in normalized_payload:
+            normalized_payload["center_species"] = normalized_payload.pop("center")
+        if "ligand_species" not in normalized_payload and "ligand" in normalized_payload:
+            normalized_payload["ligand_species"] = normalized_payload.pop("ligand")
+        spec = _normalize_polyhedron_spec(
+            normalized_payload,
+            fallback_color="#7c5cbf",
+            existing_ids=existing_ids,
+        )
+        if spec is None:
+            raise ValueError(f"polyhedron {index + 1}: center and ligand are required")
+        if not spec.get("ligand_species"):
+            raise ValueError(f"polyhedron {index + 1}: ligand is required")
+        specs.append(spec)
+    return specs
+
+
+def _build_cli_topology_data(bundle, scene: dict, args: argparse.Namespace) -> dict[str, Any] | None:
+    if not args.polyhedron:
+        return None
+    from .app.backend_topology import compute_topology_geometry
+
+    specs = _parse_polyhedron_specs(args.polyhedron)
+    fragments = scene.get("fragment_table") or []
+    if not fragments:
+        raise ValueError("polyhedra require a scene with at least one fragment")
+    site_index = args.polyhedron_site
+    if site_index is None:
+        site_index = next(
+            (
+                int(fragment["index"])
+                for spec in specs
+                for fragment in fragments
+                if (
+                    str(spec.get("center_species"))
+                    in {str(elem) for elem in (fragment.get("elem_set") or [])}
+                    if spec.get("level") == "atom"
+                    else (fragment.get("formula") or fragment.get("species"))
+                    == spec.get("center_species")
+                )
+            ),
+            int(fragments[0]["index"]),
+        )
+    topology_data = compute_topology_geometry(
+        bundle=bundle,
+        scene=scene,
+        effective_specs=specs,
+        site_index=int(site_index),
+        cutoff=float(args.polyhedron_cutoff),
+    )
+    if topology_data is None:
+        raise ValueError(f"no topology fragment found for site {site_index}")
+    if not any(
+        overlay.get("hull", {}).get("simplices")
+        for result in topology_data.get("spec_results") or []
+        for overlay in result.get("overlays") or []
+    ):
+        details = "; ".join(topology_data.get("warnings") or [])
+        raise ValueError(f"no drawable polyhedron found{': ' + details if details else ''}")
+    return topology_data
 
 
 def _build_style_overrides(args: argparse.Namespace) -> Dict[str, Any]:
@@ -322,6 +414,13 @@ def _render_main(args: argparse.Namespace) -> None:
         sys.exit(f"Error: invalid camera parameters: {exc}")
     style = scene_style(scene, overrides)
 
+    try:
+        topology_data = _build_cli_topology_data(bundle, scene, args)
+    except ValueError as exc:
+        sys.exit(f"Error: invalid polyhedron parameters: {exc}")
+    if topology_data is not None:
+        style["topology_enabled"] = True
+
     print(f"Building figure ({args.style}, {args.view}) ...")
 
     # Ensure output directory exists
@@ -329,10 +428,13 @@ def _render_main(args: argparse.Namespace) -> None:
 
     if ext == ".html":
         # HTML is always the interactive Plotly path, including flat ORTEP.
-        fig = build_figure(scene, style)
+        fig = build_figure(scene, style, topology_data=topology_data)
         fig.write_html(str(output_path), include_plotlyjs="cdn", full_html=True)
     else:
-        result = render(scene, style)
+        result = render(scene, style) if topology_data is None else None
+        if topology_data is not None:
+            from .render.api import FigureResult
+            result = FigureResult(plotly_fig=build_figure(scene, style, topology_data=topology_data))
         export_available, unavailable_reason = _plotly_static_export_available()
         if result.plotly_figure is not None and not export_available:
             print(

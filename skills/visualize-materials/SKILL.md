@@ -34,6 +34,7 @@ camera, style, export backend, and verification as explicit data.
 Read only when relevant:
 
 - [Molecule focus and mixed styles](./references/molecule-highlight.md)
+- [Atom- and molecule-centred polyhedra](./references/polyhedra.md)
 - [Publication layout](./references/publication-layout.md)
 - [Trajectory animation](./references/trajectory-animation.md)
 - [Terminal TUI](./references/tui.md)

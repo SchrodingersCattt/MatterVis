@@ -145,6 +145,13 @@ def _overlay_drawable_hull_size(overlay: dict[str, Any]) -> int:
     return len(shell) if len(shell) >= 4 and len(simplices) > 0 else 0
 
 
+def _fragment_matches_polyhedron_spec(fragment: dict[str, Any], spec: dict[str, Any]) -> bool:
+    center_species = str(spec.get("center_species") or "")
+    if str(spec.get("level") or "molecule") == "atom":
+        return center_species in {str(elem) for elem in (fragment.get("elem_set") or [])}
+    return (fragment.get("formula") or fragment.get("species")) == center_species
+
+
 def compute_topology_geometry(
     *,
     bundle,
@@ -166,13 +173,16 @@ def compute_topology_geometry(
         center_to_spec_indices.setdefault(spec["center_species"], []).append(index)
 
     primary_display_index = int(display_fragment["index"]) if display_fragment else None
-    primary_formula = (
-        (display_fragment.get("formula") or display_fragment.get("species"))
-        if display_fragment else None
-    )
     analysis_spec_index = 0
-    if primary_formula and primary_formula in center_to_spec_indices:
-        analysis_spec_index = center_to_spec_indices[primary_formula][0]
+    if display_fragment:
+        analysis_spec_index = next(
+            (
+                index
+                for index, spec in enumerate(effective_specs)
+                if _fragment_matches_polyhedron_spec(display_fragment, spec)
+            ),
+            0,
+        )
     analysis_spec = effective_specs[analysis_spec_index]
     analysis_ligand = analysis_spec.get("ligand_species") or None
     analysis_enforce_enclosure = bool(analysis_spec.get("enforce_enclosure", True))
@@ -192,6 +202,7 @@ def compute_topology_geometry(
         display_label=display_fragment.get("label") if display_fragment else None,
         display_type=display_fragment.get("type") if display_fragment else None,
         ligand_species=[analysis_ligand] if analysis_ligand else None,
+        center_species=analysis_spec.get("center_species"),
         enforce_enclosure=analysis_enforce_enclosure,
         centroid_offset_frac=analysis_centroid_offset_frac,
         level=analysis_level,
@@ -217,7 +228,7 @@ def compute_topology_geometry(
         candidate_fragments = [
             frag
             for frag in (scene.get("fragment_table") or [])
-            if (frag.get("formula") or frag.get("species")) == center_species
+            if _fragment_matches_polyhedron_spec(frag, spec)
         ]
         center_fragments = _dedupe_disorder_center_fragments(bundle, scene, candidate_fragments)
         for frag in center_fragments:
@@ -250,6 +261,7 @@ def compute_topology_geometry(
                     display_label=frag.get("label"),
                     display_type=frag.get("type"),
                     ligand_species=ligand_arg,
+                    center_species=center_species,
                     enforce_enclosure=enforce_enclosure,
                     centroid_offset_frac=centroid_offset_frac,
                     level=spec_level,

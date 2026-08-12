@@ -5,7 +5,13 @@ from argparse import Namespace
 import numpy as np
 import pytest
 
-from crystal_viewer.cli import _apply_camera_overrides, _plotly_static_export_available
+from crystal_viewer.cli import (
+    _apply_camera_overrides,
+    _build_render_parser,
+    _parse_polyhedron_specs,
+    _plotly_static_export_available,
+)
+import argparse
 
 
 def _args(**overrides) -> Namespace:
@@ -61,3 +67,44 @@ def test_static_export_preflight_returns_reason_when_unavailable():
     available, reason = _plotly_static_export_available()
     assert isinstance(available, bool)
     assert reason is None if available else isinstance(reason, str) and bool(reason)
+
+
+def test_polyhedron_json_supports_atom_and_molecule_centres():
+    specs = _parse_polyhedron_specs(
+        [
+            '{"center":"Pb","ligand":"I","level":"atom","fallback_max":6}',
+            '{"center":"C6N2","ligand":"ClO4","level":"molecule",'
+            '"center_kind":"heavy_centroid","hard_cutoff":8.0}',
+        ]
+    )
+
+    assert specs[0]["center_species"] == "Pb"
+    assert specs[0]["ligand_species"] == "I"
+    assert specs[0]["level"] == "atom"
+    assert specs[0]["fallback_max"] == 6
+    assert specs[1]["level"] == "molecule"
+    assert specs[1]["center_kind"] == "heavy_centroid"
+    assert specs[1]["hard_cutoff"] == 8.0
+
+
+def test_polyhedron_json_requires_ligand():
+    with pytest.raises(ValueError, match="ligand is required"):
+        _parse_polyhedron_specs(['{"center":"Pb","level":"atom"}'])
+
+
+def test_render_parser_exposes_repeatable_polyhedra():
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(dest="command")
+    _build_render_parser(subparsers)
+
+    args = parser.parse_args(
+        [
+            "render", "input.cif", "-o", "out.png",
+            "--polyhedron", '{"center":"Pb","ligand":"I","level":"atom"}',
+            "--polyhedron", '{"center":"C6N2","ligand":"ClO4"}',
+            "--polyhedron-cutoff", "6.5",
+        ]
+    )
+
+    assert len(args.polyhedron) == 2
+    assert args.polyhedron_cutoff == 6.5
