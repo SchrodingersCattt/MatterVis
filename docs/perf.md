@@ -3,6 +3,9 @@
 This file records developer benchmark results for the Phase 1 performance
 cleanup. Benchmarks are run with:
 
+The public user-facing command is `mat-vis`; the benchmark modules below are
+developer-only entry points and remain Python module invocations.
+
 ```bash
 python -m crystal_viewer.perf.bench --repeat 3
 python -m crystal_viewer.perf.profile_app

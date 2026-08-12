@@ -2,10 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from crystal_viewer.app import create_app
 from crystal_viewer.app.dash_impl import _camera_figure_patch
 from crystal_viewer.loader import build_loaded_crystal
 from crystal_viewer.presets import DEFAULT_STYLE
+
+
+SY_CIF = Path("scripts/data/SY.cif")
 
 
 from _layout_helpers import (  # noqa: E402  shared helpers
@@ -47,6 +52,8 @@ def test_projection_buttons_patch_graph_camera_directly(tmp_path: Path):
 
 
 def test_camera_patch_carries_viewport_aspect_contract():
+    if not SY_CIF.exists():
+        pytest.skip("local SY CIF fixture is not present")
     bundle = build_loaded_crystal(name="SY", cif_path="scripts/data/SY.cif", title="SY")
     style = {
         **DEFAULT_STYLE,

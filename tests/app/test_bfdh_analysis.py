@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import pytest
+from pathlib import Path
 
 from crystal_viewer.app.backend import ViewerBackend
 from crystal_viewer.app.shared import DEFAULT_PRESET_PATH
 from crystal_viewer.loader import build_empty_bundle
+
+
+SY_CIF = Path("scripts/data/SY.cif")
 
 
 @pytest.fixture
@@ -34,6 +38,7 @@ def backend_empty(tmp_path):
     return backend
 
 
+@pytest.mark.skipif(not SY_CIF.exists(), reason="local SY CIF fixture is not present")
 def test_run_bfdh_analysis_success(backend_with_crystal):
     """Test that BFDH analysis returns expected facets for a valid crystal."""
     backend = backend_with_crystal

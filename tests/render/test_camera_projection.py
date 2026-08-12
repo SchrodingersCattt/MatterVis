@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import numpy as np
+import pytest
 
 from crystal_viewer.loader import build_loaded_crystal
 from crystal_viewer.presets import DEFAULT_STYLE
 from crystal_viewer.renderer import build_figure
+
+
+SY_CIF = Path("scripts/data/SY.cif")
 
 
 def _empty_scene():
@@ -51,6 +56,8 @@ def _annotation_labels(fig):
 
 
 def test_show_axes_uses_paper_compass_for_sy():
+    if not SY_CIF.exists():
+        pytest.skip("local SY CIF fixture is not present")
     """``show_axes`` must drive the paper-coord compass overlay, not a
     3D cylinder triad in world space. The 3D shaft path used to either
     foreshorten to a tiny stub (cameras aligned with a lattice vector)
@@ -124,6 +131,8 @@ def test_axis_key_reprojects_from_current_camera():
 
 
 def test_compass_arrows_share_single_anchor():
+    if not SY_CIF.exists():
+        pytest.skip("local SY CIF fixture is not present")
     """All three compass arrows must originate from a single paper-coord
     anchor (the "single shared origin" invariant that distinguishes a
     compass from a stacked legend). Regression: an earlier row-stacked
@@ -510,6 +519,8 @@ def test_compass_overlay_python_skipped_for_dash_interactive_path():
 
 
 def test_compass_metadata_stashed_for_clientside_reprojection():
+    if not SY_CIF.exists():
+        pytest.skip("local SY CIF fixture is not present")
     """The clientside JS handler in ``compass_overlay.js`` consumes
     ``fig.layout.meta.compass`` (lattice matrix + sizing knobs) to
     reproject the triad on every camera drag. Lock the contract so

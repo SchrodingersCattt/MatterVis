@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import numpy as np
+import pytest
 
 from crystal_viewer.loader import build_bundle_scene, build_loaded_crystal
 from crystal_viewer.presets import DEFAULT_STYLE
 from crystal_viewer.renderer import build_figure
 from crystal_viewer.render.viewport import _scene_ranges
+
+
+SY_CIF = Path("scripts/data/SY.cif")
 
 
 def _aspect_tuple(fig):
@@ -48,6 +53,8 @@ def _sy_base_style(bundle):
 
 
 def test_unit_cell_mode_preserves_cartesian_data_unit_scale():
+    if not SY_CIF.exists():
+        pytest.skip("local SY CIF fixture is not present")
     """In ``display_mode='unit_cell'`` the scene IS the cell, so the user
     expects one Angstrom to have the same screen scale along Cartesian x/y/z.
     The on/off Unit Cell Box toggle must not switch aspect modes or introduce
@@ -73,6 +80,8 @@ def test_unit_cell_mode_preserves_cartesian_data_unit_scale():
 
 
 def test_all_display_modes_preserve_cartesian_data_unit_scale():
+    if not SY_CIF.exists():
+        pytest.skip("local SY CIF fixture is not present")
     bundle = build_loaded_crystal(name="SY", cif_path="scripts/data/SY.cif", title="SY")
 
     for display_mode in ("formula_unit", "asymmetric_unit", "unit_cell", "cluster"):
@@ -152,6 +161,8 @@ def test_unit_cell_viewport_includes_unwrapped_boundary_fragments():
 
 
 def test_formula_unit_does_not_inherit_lattice_aspect():
+    if not SY_CIF.exists():
+        pytest.skip("local SY CIF fixture is not present")
     """``display_mode='formula_unit'`` shows a molecular cluster carved out
     of the unit cell; the cluster's bounding box is roughly equiaxed even
     when the host cell is wildly anisotropic (SY: |c|=24.7 Å vs |a|=8.1
@@ -180,6 +191,8 @@ def test_formula_unit_does_not_inherit_lattice_aspect():
 
 
 def test_formula_unit_box_does_not_dwarf_molecule_along_long_axis():
+    if not SY_CIF.exists():
+        pytest.skip("local SY CIF fixture is not present")
     """``formula_unit`` mode still draws the *full* unit-cell wireframe when
     the Unit Cell Box toggle is enabled. The viewport must therefore include
     the eight cell corners; otherwise Plotly clips the box and ASU/formula
@@ -241,6 +254,8 @@ def test_formula_unit_box_does_not_dwarf_molecule_along_long_axis():
 
 
 def test_formula_unit_polyhedra_extras_do_not_extend_scene_cube():
+    if not SY_CIF.exists():
+        pytest.skip("local SY CIF fixture is not present")
     """When the user enables a per-instance polyhedra overlay
     (``extra_overlays``) in ``formula_unit`` mode, the overlays sit at
     the OTHER formula-unit replicas — scattered across the entire cell.
@@ -306,6 +321,8 @@ def test_formula_unit_polyhedra_extras_do_not_extend_scene_cube():
 
 
 def test_unit_cell_mode_polyhedra_extras_do_not_extend_scene_cube():
+    if not SY_CIF.exists():
+        pytest.skip("local SY CIF fixture is not present")
     """Polyhedron replicas may be drawn outside the focused cell, but they
     must not own the main viewport. Otherwise enabling the overlay makes the
     unit cell collapse into a tiny strip inside an oversized range.

@@ -4,7 +4,7 @@ This package provides:
 - A non-interactive ASCII/structured output for LLM consumption.
 - An interactive Textual TUI for human debugging.
 
-Entry point: ``matvis tui <file>``
+Entry point: ``mat-vis tui <file>``
 """
 
 from __future__ import annotations

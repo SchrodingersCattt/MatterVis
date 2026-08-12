@@ -3,9 +3,15 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
+import pytest
+
 from crystal_viewer.app.dash_impl import ViewerBackend
 from crystal_viewer.loader import build_loaded_crystal
 from crystal_viewer.render.viewport import _plotly_camera_from_scene
+
+
+SY_CIF = Path("scripts/data/SY.cif")
+pytestmark = pytest.mark.skipif(not SY_CIF.exists(), reason="local SY CIF fixture is not present")
 
 
 def _backend() -> ViewerBackend:
