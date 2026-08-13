@@ -5,7 +5,7 @@ Read this when MatterVis must be installed or its active release must be verifie
 ## Released installation
 
 ```bash
-pip install "matter-vis==0.0.0"
+pip install "matter-vis==0.0.1"
 ```
 
 The release installs `molcrys-kit==0.6.1` or a compatible `>=0.6.1` build from
@@ -32,8 +32,8 @@ print("module=", crystal_viewer.__file__)
 PY
 ```
 
-Require the installed distribution version to equal `0.0.0`. Record, but do not
-equate, the package's internal `crystal_viewer.__version__`; release 0.0.0 may
+Require the installed distribution version to equal `0.0.1`. Record, but do not
+equate, the package's internal `crystal_viewer.__version__`; release 0.0.1 may
 report a different internal module version. Also record the Python executable,
 module path, console-script name, and live help output. The installed CLI is
 authoritative: it currently exposes `render`, `serve`, and `tui`. Do not invent
