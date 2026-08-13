@@ -251,6 +251,15 @@ def _build_cli_topology_data(bundle, scene: dict, args: argparse.Namespace) -> d
     ):
         details = "; ".join(topology_data.get("warnings") or [])
         raise ValueError(f"no drawable polyhedron found{': ' + details if details else ''}")
+    color_by_id = {str(spec["id"]): str(spec.get("color") or "#7c5cbf") for spec in specs}
+    topology_data = dict(topology_data)
+    topology_data["spec_results"] = [
+        {
+            **result,
+            "color": color_by_id.get(str(result.get("spec_id")), "#7c5cbf"),
+        }
+        for result in topology_data.get("spec_results") or []
+    ]
     return topology_data
 
 
