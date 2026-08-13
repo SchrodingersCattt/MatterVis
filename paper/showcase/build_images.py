@@ -11,6 +11,8 @@ Markdown renders without requiring a build step.
 
 All figures use the Matplotlib flat ORTEP renderer via ``render()``, which
 is the only reliable export path on headless/CI/Windows environments.
+The showcase intentionally uses the renderer's monochrome ORTEP palette;
+MatterVis's normal Plotly viewer defaults remain element-coloured.
 """
 from __future__ import annotations
 
@@ -51,6 +53,7 @@ def _ortep_style(scene, **overrides) -> dict:
         "show_labels": False,
         "show_axes": False,
         "show_unit_cell": False,
+        "monochrome": True,
         "ortep_probability": 0.5,
         "ortep_mode": "ortep_axes",
         "bond_radius": 0.12,
@@ -163,27 +166,19 @@ def render_publication(out: Path) -> Path:
     return _save_render(result, out, width=900, height=720, dpi=240)
 
 
-def render_tui(out: Path) -> Path:
-    """Terminal TUI view — text frame rendered as PNG."""
-    from crystal_viewer.tui import TerminalViewController
-
-    tui = TerminalViewController.from_file(
-        str(CIF), width=80, height=22, mono=True, display_mode="unit_cell",
+def render_asymmetric_unit(out: Path) -> Path:
+    """Asymmetric-unit diagnostic view with the crystallographic cell."""
+    bundle = _bundle()
+    scene = build_bundle_scene(bundle, display_mode="asymmetric_unit")
+    style = _ortep_style(
+        scene,
+        show_unit_cell=True,
+        show_labels=False,
+        atom_scale=0.9,
+        bond_radius=0.12,
     )
-    tui.orbit(yaw_deg=35.0, pitch_deg=15.0)
-    obs = tui.observe()
-
-    fig, ax = plt.subplots(figsize=(10, 4.5), facecolor="#1a1a2e")
-    ax.set_facecolor("#1a1a2e")
-    ax.axis("off")
-    lines = obs.frame.split("\n")
-    for i, line in enumerate(lines):
-        ax.text(0.02, 0.95 - i * 0.035, line, fontfamily="monospace", fontsize=7,
-                color="#c0c0c0", transform=ax.transAxes, verticalalignment="top")
-    fig.savefig(out, dpi=180, bbox_inches="tight", facecolor="#1a1a2e")
-    plt.close(fig)
-    print(f"  -> {out.relative_to(REPO_ROOT)}  ({out.stat().st_size // 1024} KB)")
-    return out
+    result = render(scene, style)
+    return _save_render(result, out, width=900, height=720, dpi=240)
 
 
 def render_banner(images: Iterable[Path], out: Path) -> Path:
@@ -213,7 +208,7 @@ def main() -> None:
     render_coordination(IMG_DIR / "feature_coordination.png", IMG_DIR / "feature_histogram.png")
     panel = render_three_modes(IMG_DIR / "feature_three_modes.png")
     pub = render_publication(IMG_DIR / "feature_publication.png")
-    tui = render_tui(IMG_DIR / "feature_tui.png")
+    asu = render_asymmetric_unit(IMG_DIR / "feature_asymmetric_unit.png")
     render_banner([cell, IMG_DIR / "feature_coordination.png", pub], IMG_DIR / "banner.png")
     print("Done.")
 
