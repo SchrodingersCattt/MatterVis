@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..render.api import render, FigureResult
-from ..render.figures import build_figure, build_row_figure
+from ..render.figures import build_figure, build_publication_figure, build_row_figure
 from ..render.viewport import uniform_viewport
 from ..render.compass import (
     _COMPASS_ITEM_NAME,

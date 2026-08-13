@@ -33,7 +33,9 @@ from crystal_viewer.app import (
     _polyhedra_table_rows,
 )
 from crystal_viewer.app.backend_topology import (
+    _atom_overlay,
     _dedupe_disorder_center_fragments,
+    _display_atom_centers_for_spec,
     _fragment_matches_polyhedron_spec,
 )
 from crystal_viewer import topology as topology_module
@@ -318,6 +320,41 @@ def test_mck_polyhedron_record_passes_packing_shell_knobs(monkeypatch):
     assert captured["kwargs"]["centroid_offset_frac"] == 0.7
 
 
+def test_extract_atom_shells_targets_raw_source_indices(monkeypatch):
+    captured = {}
+
+    def fake_find_polyhedra(*args, **kwargs):
+        captured["kwargs"] = kwargs
+        return [
+            {
+                "center_index": 7,
+                "center_position": [1.0, 2.0, 3.0],
+                "shell_coords": [
+                    [2.0, 2.0, 3.0],
+                    [1.0, 3.0, 3.0],
+                    [1.0, 2.0, 4.0],
+                    [0.0, 1.0, 2.0],
+                ],
+                "shell_distances": [1.0] * 4,
+            }
+        ]
+
+    monkeypatch.setattr(_molcrys_bridge_module, "molecular_crystal_from_bundle", lambda bundle: object())
+    monkeypatch.setattr(topology_module.analysis, "find_polyhedra", fake_find_polyhedra)
+
+    shells = topology_module.extract_atom_coordination_shells(
+        object(),
+        4.0,
+        center_species="Zr",
+        ligand_species="O",
+        source_indices={9, 7},
+    )
+
+    assert captured["kwargs"]["central_indices"] == [7, 9]
+    assert list(shells) == [7]
+    assert shells[7]["center_source_index"] == 7
+
+
 def test_disorder_center_dedupe_prefers_major_orientation():
     bundle = type("Bundle", (), {"M": [[10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 10.0]]})()
     scene = {
@@ -405,6 +442,62 @@ def test_atom_polyhedron_spec_matches_element_inside_polyatomic_fragment():
         fragment,
         {"center_species": "ClO4", "level": "molecule"},
     )
+
+
+def test_atom_polyhedron_centers_enumerate_unique_display_images():
+    bundle = type(
+        "Bundle",
+        (),
+        {
+            "raw_atoms": [
+                {"frac": [0.0, 0.0, 0.0]},
+                {"frac": [0.5, 0.5, 0.5]},
+            ]
+        },
+    )()
+    scene = {
+        "draw_atoms": [
+            {"elem": "Zr", "label": "Zr0", "frac": [0.0, 0.0, 0.0], "cart": [0.0, 0.0, 0.0], "_source_index": 0},
+            {"elem": "Zr", "label": "Zr0'", "frac": [1.0, 0.0, 0.0], "cart": [10.0, 0.0, 0.0], "_source_index": 0},
+            {"elem": "Zr", "label": "duplicate", "frac": [1.0, 0.0, 0.0], "cart": [10.0, 0.0, 0.0], "_source_index": 0},
+            {"elem": "O", "label": "O1", "frac": [0.5, 0.5, 0.5], "cart": [5.0, 5.0, 5.0], "_source_index": 1},
+        ]
+    }
+
+    centers = _display_atom_centers_for_spec(
+        bundle,
+        scene,
+        {"center_species": "Zr", "level": "atom"},
+    )
+
+    assert [(center["source_index"], center["image"]) for center in centers] == [
+        (0, (0, 0, 0)),
+        (0, (1, 0, 0)),
+    ]
+
+
+def test_atom_overlay_translates_shell_and_hull_to_display_image():
+    shell = {
+        "source_center_coords": [0.0, 0.0, 0.0],
+        "source_shell_coords": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        "source_hull": {"vertices": [[1.0, 0.0, 0.0]], "simplices": [[0, 0, 0]]},
+        "distances": [1.0, 1.0],
+    }
+    center = {
+        "center": [10.0, 0.0, 0.0],
+        "label": "Zr0'",
+        "source_index": 0,
+        "image": (1, 0, 0),
+        "draw_index": 1,
+    }
+
+    overlay = _atom_overlay(shell, center)
+
+    assert overlay["center_coords"] == [10.0, 0.0, 0.0]
+    assert overlay["shell_coords"] == [[11.0, 0.0, 0.0], [10.0, 1.0, 0.0]]
+    assert overlay["hull"]["vertices"] == [[11.0, 0.0, 0.0]]
+    assert overlay["center_source_index"] == 0
+    assert overlay["center_image"] == [1, 0, 0]
 
 
 def test_topology_results_markdown_surfaces_warnings():

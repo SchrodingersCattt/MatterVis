@@ -164,7 +164,8 @@ def _build_render_parser(subparsers: argparse._SubParsersAction) -> argparse.Arg
         help=(
             "Add a polyhedron overlay from a JSON object. Repeat for multiple overlays. "
             "Required keys: center, ligand. Optional: level=atom|molecule, "
-            "center_kind, cutoff, hard_cutoff, fallback_max, color, name."
+            "center_kind, cutoff, hard_cutoff, fallback_max, color, opacity, "
+            "edge_opacity, edge_width, flatshading, name."
         ),
     )
     p.add_argument(
@@ -174,6 +175,18 @@ def _build_render_parser(subparsers: argparse._SubParsersAction) -> argparse.Arg
     p.add_argument(
         "--polyhedron-cutoff", type=float, default=10.0, metavar="ANGSTROM",
         help="Default polyhedron search cutoff in Å (default: 10.0).",
+    )
+    p.add_argument(
+        "--publication-layout", action="store_true", default=False,
+        help="Compose a main structure view with isolated representative polyhedron panels.",
+    )
+    p.add_argument(
+        "--title", default=None, metavar="TEXT",
+        help="Title for --publication-layout (default: structure title).",
+    )
+    p.add_argument(
+        "--subtitle", default=None, metavar="TEXT",
+        help="Optional subtitle for --publication-layout.",
     )
 
     return p
@@ -251,12 +264,27 @@ def _build_cli_topology_data(bundle, scene: dict, args: argparse.Namespace) -> d
     ):
         details = "; ".join(topology_data.get("warnings") or [])
         raise ValueError(f"no drawable polyhedron found{': ' + details if details else ''}")
-    color_by_id = {str(spec["id"]): str(spec.get("color") or "#7c5cbf") for spec in specs}
+    paint_by_id = {
+        str(spec["id"]): {
+            "color": str(spec.get("color") or "#7c5cbf"),
+            "opacity": float(spec.get("opacity", 0.55)),
+            "edge_opacity": float(spec.get("edge_opacity", 0.90)),
+            "edge_width": float(spec.get("edge_width", 3.0)),
+            "flatshading": bool(spec.get("flatshading", True)),
+        }
+        for spec in specs
+    }
     topology_data = dict(topology_data)
     topology_data["spec_results"] = [
         {
             **result,
-            "color": color_by_id.get(str(result.get("spec_id")), "#7c5cbf"),
+            **paint_by_id.get(str(result.get("spec_id")), {
+                "color": "#7c5cbf",
+                "opacity": 0.55,
+                "edge_opacity": 0.90,
+                "edge_width": 3.0,
+                "flatshading": True,
+            }),
         }
         for result in topology_data.get("spec_results") or []
     ]
@@ -388,7 +416,7 @@ def _render_main(args: argparse.Namespace) -> None:
     # Lazy imports to keep CLI startup fast when just showing --help
     from .loader import build_loaded_crystal, build_bundle_scene
     from .scene import scene_style
-    from .renderer import build_figure, render
+    from .renderer import build_figure, build_publication_figure, render
 
     name = cif_path.stem
     print(f"Loading {cif_path.name} ...")
@@ -429,6 +457,8 @@ def _render_main(args: argparse.Namespace) -> None:
         sys.exit(f"Error: invalid polyhedron parameters: {exc}")
     if topology_data is not None:
         style["topology_enabled"] = True
+    if args.publication_layout and topology_data is None:
+        sys.exit("Error: --publication-layout requires at least one --polyhedron specification.")
 
     print(f"Building figure ({args.style}, {args.view}) ...")
 
@@ -437,15 +467,42 @@ def _render_main(args: argparse.Namespace) -> None:
 
     if ext == ".html":
         # HTML is always the interactive Plotly path, including flat ORTEP.
-        fig = build_figure(scene, style, topology_data=topology_data)
+        if args.publication_layout:
+            fig = build_publication_figure(
+                scene,
+                style,
+                topology_data,
+                title=args.title,
+                subtitle=args.subtitle,
+                width=args.width,
+                height=args.height,
+            )
+        else:
+            fig = build_figure(scene, style, topology_data=topology_data)
         fig.write_html(str(output_path), include_plotlyjs="cdn", full_html=True)
     else:
         result = render(scene, style) if topology_data is None else None
-        if topology_data is not None:
+        if args.publication_layout:
+            from .render.api import FigureResult
+            result = FigureResult(plotly_fig=build_publication_figure(
+                scene,
+                style,
+                topology_data,
+                title=args.title,
+                subtitle=args.subtitle,
+                width=args.width,
+                height=args.height,
+            ))
+        elif topology_data is not None:
             from .render.api import FigureResult
             result = FigureResult(plotly_fig=build_figure(scene, style, topology_data=topology_data))
         export_available, unavailable_reason = _plotly_static_export_available()
         if result.plotly_figure is not None and not export_available:
+            if args.publication_layout:
+                sys.exit(
+                    "Error: publication layout requires Plotly/Kaleido static export "
+                    f"({unavailable_reason})."
+                )
             print(
                 "Plotly/Kaleido static export is unavailable "
                 f"({unavailable_reason}).",
@@ -482,6 +539,11 @@ def _render_main(args: argparse.Namespace) -> None:
             except Exception as exc:
                 if result.plotly_figure is None:
                     raise
+                if args.publication_layout:
+                    sys.exit(
+                        "Error: publication layout static export failed "
+                        f"({type(exc).__name__}: {exc})."
+                    )
                 print(
                     "Plotly/Kaleido static export is unavailable "
                     f"({type(exc).__name__}: {exc}).",

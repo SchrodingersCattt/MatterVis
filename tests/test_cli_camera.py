@@ -87,6 +87,18 @@ def test_polyhedron_json_supports_atom_and_molecule_centres():
     assert specs[1]["hard_cutoff"] == 8.0
 
 
+def test_polyhedron_json_preserves_independent_paint_properties():
+    spec = _parse_polyhedron_specs([
+        '{"center":"Pb","ligand":"I","level":"atom",'
+        '"opacity":0.72,"edge_opacity":0.65,"edge_width":2.5,"flatshading":false}'
+    ])[0]
+
+    assert spec["opacity"] == 0.72
+    assert spec["edge_opacity"] == 0.65
+    assert spec["edge_width"] == 2.5
+    assert spec["flatshading"] is False
+
+
 def test_polyhedron_json_requires_ligand():
     with pytest.raises(ValueError, match="ligand is required"):
         _parse_polyhedron_specs(['{"center":"Pb","level":"atom"}'])
@@ -108,6 +120,22 @@ def test_render_parser_exposes_repeatable_polyhedra():
 
     assert len(args.polyhedron) == 2
     assert args.polyhedron_cutoff == 6.5
+
+
+def test_render_parser_exposes_publication_layout_metadata():
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(dest="command")
+    _build_render_parser(subparsers)
+
+    args = parser.parse_args([
+        "render", "input.cif", "-o", "out.png",
+        "--publication-layout", "--title", "Crystal structure",
+        "--subtitle", "Cubic phase",
+    ])
+
+    assert args.publication_layout is True
+    assert args.title == "Crystal structure"
+    assert args.subtitle == "Cubic phase"
 
 
 def test_cli_topology_stamps_distinct_spec_colors(monkeypatch):
