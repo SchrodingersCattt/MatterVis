@@ -108,3 +108,32 @@ def test_render_parser_exposes_repeatable_polyhedra():
 
     assert len(args.polyhedron) == 2
     assert args.polyhedron_cutoff == 6.5
+
+
+def test_cli_topology_stamps_distinct_spec_colors(monkeypatch):
+    import crystal_viewer.app.backend_topology as backend_topology
+    from crystal_viewer.cli import _build_cli_topology_data
+
+    monkeypatch.setattr(
+        backend_topology,
+        "compute_topology_geometry",
+        lambda **kwargs: {
+            "spec_results": [
+                {"spec_id": "a", "overlays": [{"hull": {"simplices": [[0, 1, 2]]}}]},
+                {"spec_id": "b", "overlays": [{"hull": {"simplices": [[0, 1, 2]]}}]},
+            ]
+        },
+    )
+    args = Namespace(
+        polyhedron=[
+            '{"id":"a","center":"C6N2","ligand":"ClO4","color":"#0072B2"}',
+            '{"id":"b","center":"N","ligand":"ClO4","color":"#D55E00"}',
+        ],
+        polyhedron_site=0,
+        polyhedron_cutoff=10.0,
+    )
+    scene = {"fragment_table": [{"index": 0, "formula": "C6N2", "elem_set": ["C", "N"]}]}
+
+    topology = _build_cli_topology_data(object(), scene, args)
+
+    assert [entry["color"] for entry in topology["spec_results"]] == ["#0072b2", "#d55e00"]

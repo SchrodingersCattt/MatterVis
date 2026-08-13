@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from crystal_viewer.app import (
@@ -332,18 +333,21 @@ def test_disorder_center_dedupe_prefers_major_orientation():
         {
             "index": 10,
             "formula": "C4NO",
+            "center": [1.0, 2.0, 3.0],
             "frac_center": [0.10, 0.20, 0.30],
             "site_indices": [0, 1],
         },
         {
             "index": 11,
             "formula": "C4NO",
+            "center": [1.05, 2.05, 3.05],
             "frac_center": [0.105, 0.205, 0.305],
             "site_indices": [2, 3],
         },
         {
             "index": 12,
             "formula": "C4NO",
+            "center": [5.0, 5.0, 5.0],
             "frac_center": [0.50, 0.50, 0.50],
             "site_indices": [4],
         },
@@ -352,6 +356,38 @@ def test_disorder_center_dedupe_prefers_major_orientation():
     deduped = _dedupe_disorder_center_fragments(bundle, scene, fragments)
 
     assert [fragment["index"] for fragment in deduped] == [11, 12]
+
+
+def test_polyhedron_dedupe_preserves_periodic_display_replicas():
+    bundle = type("Bundle", (), {"M": np.eye(3) * 10.0})()
+    scene = {"draw_atoms": [{"is_minor": False}] * 3}
+    fragments = [
+        {
+            "index": 0,
+            "formula": "C6N2",
+            "center": [0.0, 0.0, 0.0],
+            "frac_center": [0.0, 0.0, 0.0],
+            "site_indices": [0],
+        },
+        {
+            "index": 1,
+            "formula": "C6N2",
+            "center": [10.0, 0.0, 0.0],
+            "frac_center": [1.0, 0.0, 0.0],
+            "site_indices": [1],
+        },
+        {
+            "index": 2,
+            "formula": "C6N2",
+            "center": [10.0, 10.0, 10.0],
+            "frac_center": [1.0, 1.0, 1.0],
+            "site_indices": [2],
+        },
+    ]
+
+    deduped = _dedupe_disorder_center_fragments(bundle, scene, fragments)
+
+    assert [fragment["index"] for fragment in deduped] == [0, 1, 2]
 
 
 def test_atom_polyhedron_spec_matches_element_inside_polyatomic_fragment():
