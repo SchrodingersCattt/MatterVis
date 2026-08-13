@@ -6,7 +6,7 @@ Flask test client so it doubles as a contract test for agents driving
 atom-group overrides over HTTP.
 
 DO NOT REMOVE -- the endpoint shape and error semantics here are
-documented in ``agents/atom_groups_api.md``.
+documented in ``docs/agents/atom_groups_api.md``.
 """
 from __future__ import annotations
 

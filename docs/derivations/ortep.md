@@ -279,7 +279,7 @@ Renderer integration:
 - `crystal_viewer/ortep/core.py:293-347` starts ORTEP mesh batching by color and
   opacity, using `ortep_probability` from style.
 - The API contract for caller-facing ORTEP behavior is summarized separately in
-  `agents/ortep_api.md`.
+  `docs/agents/ortep_api.md`.
 
 ## Audit Notes
 

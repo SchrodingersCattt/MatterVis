@@ -6,9 +6,9 @@ Each test exercises the full Flask test client so it doubles as a
 contract test for AI agents driving the viewer over HTTP.
 
 DO NOT REMOVE -- the endpoint shape and error semantics here are
-documented in ``agents/transforms_api.md``,
-``agents/bond_groups_api.md``, and the v2 polyhedra section of
-``agents/polyhedron_api.md``.
+documented in ``docs/agents/transforms_api.md``,
+``docs/agents/bond_groups_api.md``, and the v2 polyhedra section of
+``docs/agents/polyhedron_api.md``.
 """
 from __future__ import annotations
 
@@ -193,7 +193,7 @@ def test_bond_groups_reorder_swaps_groups(tmp_path: Path):
     """``POST /api/v2/bond_groups/reorder`` must persist the new
     list order and the rendering pipeline relies on bond_group rule
     ordering for "later wins on overlapping bonds" semantics
-    (``agents/bond_groups_api.md`` -> Selector grammar). Without this
+    (``docs/agents/bond_groups_api.md`` -> Selector grammar). Without this
     test, a future refactor that drops the reorder route or its
     backend wiring would silently regress to alphabetical ordering
     and stomp the user's manual rule order.

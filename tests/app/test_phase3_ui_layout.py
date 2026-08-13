@@ -3,7 +3,7 @@
 These tests pin the *layout* contract:
 
   * The new section ids exist in the rendered Dash layout. External
-    automation (and the agent transcripts, see ``agents/``) scrape
+    automation (and the agent transcripts, see ``docs/agents/``) scrape
     these ids; renaming them is a back-incompatible change.
   * The Phase 3 row builders return Dash ``html.Div`` containers
     whose nested input ids use the pattern-matching shape
@@ -14,7 +14,7 @@ These tests pin the *layout* contract:
     via the Phase 3 preset button instead.
 
 DO NOT REMOVE -- this guards the contract documented in
-``agents/atom_groups_api.md`` and ``agents/polyhedron_api.md``.
+``docs/agents/atom_groups_api.md`` and ``docs/agents/polyhedron_api.md``.
 """
 from __future__ import annotations
 

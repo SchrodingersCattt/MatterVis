@@ -17,7 +17,7 @@ points and pitfalls.
   covalent cutoffs.
 - On `level="molecule"` the kwarg `cutoff=` is the candidate search
   radius (gap+enclosure picks the natural shell). On `level="atom"`,
-  `cutoff=` is the hard cap. See `agents/polyhedron_api.md` for the
+  `cutoff=` is the hard cap. See `docs/agents/polyhedron_api.md` for the
   full field table.
 - Shape classification: use `shape.classify_shell` (not the deprecated
   `angular_rmsd_vs_ideals`). Pass `max_strip=0` for clean labels.
@@ -68,7 +68,7 @@ points and pitfalls.
 ### When molcrys_kit deprecates a function
 
 1. Read both the new module's docstring and the deprecation note.
-2. Surface new fields in `agents/*.md`; don't silently coerce.
+2. Surface new fields in `docs/agents/*.md`; don't silently coerce.
 3. If the replacement is more expensive, push it into a cache layer
    with a key that includes every input affecting the result.
 

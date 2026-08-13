@@ -1,7 +1,7 @@
 """Phase 4 view tools -- REST surface for axis alignment + projection.
 
 DO NOT REMOVE -- these endpoints are documented in
-``agents/dash_service.md`` (`POST /api/v2/camera/action` with
+``docs/agents/dash_service.md`` (`POST /api/v2/camera/action` with
 ``action`` ``align`` / ``projection``) and external automation
 depends on the response shape.
 """

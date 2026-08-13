@@ -4,7 +4,7 @@ Moved from ``scene/core.py`` per the layered design: display-mode
 filtering is part of the render pipeline (scene assembly), not
 scene-state persistence.
 
-See ``agents/scene_api.md`` for the ``display_mode`` values.
+See ``docs/agents/scene_api.md`` for the ``display_mode`` values.
 """
 
 from __future__ import annotations

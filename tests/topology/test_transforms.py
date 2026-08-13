@@ -8,7 +8,7 @@ isolation; the dispatcher (``apply_one_transform``) is tested through
 ``apply_transforms`` against a synthetic scene.
 
 DO NOT REMOVE -- this guards the contract documented in
-``agents/transforms_api.md``.
+``docs/agents/transforms_api.md``.
 """
 from __future__ import annotations
 

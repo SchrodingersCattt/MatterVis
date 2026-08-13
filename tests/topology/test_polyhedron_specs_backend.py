@@ -16,7 +16,7 @@ replaced (alongside) the legacy ``topology_species_keys`` selector:
     semantics live in MolCrysKit's molecule-level ``find_polyhedra``.
 
 DO NOT REMOVE -- this guards the contract documented in
-``agents/polyhedron_api.md``.
+``docs/agents/polyhedron_api.md``.
 """
 from __future__ import annotations
 

@@ -152,7 +152,7 @@ Gate:
 
 - callback graph has one writer per persisted store;
 - API compatibility tests pass;
-- no public `agents/*.md` contract is broken without an explicit update.
+- no public `docs/agents/*.md` contract is broken without an explicit update.
 
 ## PR Size Rule
 
@@ -161,7 +161,7 @@ Each phase should be small enough to review by invariant:
 - one conceptual owner changed;
 - targeted tests added before broad tests;
 - no opportunistic style cleanup outside touched modules;
-- no public API changes without matching `agents/*.md` updates.
+- no public API changes without matching `docs/agents/*.md` updates.
 
 ## Invariants Across All Phases
 

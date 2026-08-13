@@ -89,7 +89,7 @@ def register_overlay_routes(v2, backend) -> dict:
     # visible / opacity / material / style overrides. Rules apply in
     # list order; later rows win on overlapping atoms. Empty list
     # falls back to the legacy ``monochrome`` flag + element palette.
-    # See ``agents/atom_groups_api.md``.
+    # See ``docs/agents/atom_groups_api.md``.
 
     @v2.get("/atom_groups")
     def atom_groups_list():
@@ -158,7 +158,7 @@ def register_overlay_routes(v2, backend) -> dict:
 
     # ----- bond_groups (Phase 4) ---------------------------------------
     #
-    # Per-scene bond-style override table. See agents/bond_groups_api.md.
+    # Per-scene bond-style override table. See docs/agents/bond_groups_api.md.
 
     @v2.get("/bond_groups")
     def bond_groups_list():
@@ -227,7 +227,7 @@ def register_overlay_routes(v2, backend) -> dict:
     # Per-scene structure-mutation pipeline. Each entry is a transform
     # spec dict {id, name, kind, params, enabled}. Order matters --
     # later transforms see the results of earlier ones. See
-    # agents/transforms_api.md for the parameter schema per kind.
+    # See docs/agents/transforms_api.md for the parameter schema per kind.
 
     @v2.get("/transforms")
     def transforms_list():
