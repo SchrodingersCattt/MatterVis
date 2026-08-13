@@ -18,7 +18,7 @@ class _OverlaysBackendMixin:
     #
     # Same shape as polyhedron CRUD: scoped to one scene, persisted via
     # patch_state, returns the canonical post-normalisation list. See
-    # agents/atom_groups_api.md.
+    # docs/agents/atom_groups_api.md.
 
     def list_atom_groups(self, scene_id: Optional[str] = None) -> list[dict[str, Any]]:
         return list(self.get_state(scene_id).get("atom_groups") or [])
@@ -120,7 +120,7 @@ class _OverlaysBackendMixin:
 
     # ---- bond_groups CRUD ---------------------------------------------
     #
-    # Mirror of atom_groups CRUD; see ``agents/bond_groups_api.md``.
+    # Mirror of atom_groups CRUD; see ``docs/agents/bond_groups_api.md``.
 
     def list_bond_groups(self, scene_id: Optional[str] = None) -> list[dict[str, Any]]:
         return list(self.get_state(scene_id).get("bond_groups") or [])

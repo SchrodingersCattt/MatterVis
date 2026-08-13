@@ -75,6 +75,6 @@ def register_export_routes(v2, backend) -> dict:
     # = {id, name, center_species, ligand_species, color, enabled,
     # packing-shell knobs}. Empty list (DELETE-all or never-set) falls back to the
     # legacy ``topology_species_keys`` + shared ``topology_hull_color``
-    # behaviour. See ``agents/polyhedron_api.md``.
+    # behaviour. See ``docs/agents/polyhedron_api.md``.
 
     return locals()

@@ -11,7 +11,7 @@ These tests pin down:
     dispatcher can pick up overrides.
 
 DO NOT REMOVE -- this guards the contract documented in
-``agents/atom_groups_api.md``.
+``docs/agents/atom_groups_api.md``.
 """
 from __future__ import annotations
 

@@ -4,7 +4,7 @@ Moved from ``scene/core.py`` per the layered design: boundary
 replication is part of the render pipeline, not scene-state
 persistence.
 
-See ``agents/scene_api.md`` for the ``display_mode="unit_cell"``
+See ``docs/agents/scene_api.md`` for the ``display_mode="unit_cell"``
 contract.
 """
 

@@ -149,7 +149,7 @@ class _CoreBackendMixin:
             # ligand_species, color, enabled}. Empty list = fall back to the
             # legacy ``topology_species_keys`` + shared ``topology_hull_color``
             # behaviour (auto-derived neighbour types). See
-            # ``agents/polyhedron_api.md`` for the API surface.
+            # ``docs/agents/polyhedron_api.md`` for the API surface.
             "polyhedron_specs": [],
             # Phase 2: per-scene atom-group rules. Each entry is
             # {id, name, selector, color, color_light, visible, opacity,
@@ -160,18 +160,18 @@ class _CoreBackendMixin:
             # Multiple groups apply in list order with later-wins
             # semantics on overlapping atoms. Empty list = no overrides;
             # the legacy ``monochrome`` flag is still honoured when no
-            # atom_groups are present. See ``agents/atom_groups_api.md``.
+            # atom_groups are present. See ``docs/agents/atom_groups_api.md``.
             "atom_groups": [],
             # Phase 4: per-scene bond-group rules. Each entry is
             # {id, name, selector, color, visible, opacity,
             # radius_scale}. Selectors support ``all``,
             # ``between_elements`` (unordered), ``labels`` (atom-pair
             # ids), and ``is_minor``. Empty list = render bonds as the
-            # endpoint atoms dictate. See ``agents/bond_groups_api.md``.
+            # endpoint atoms dictate. See ``docs/agents/bond_groups_api.md``.
             "bond_groups": [],
             # Phase 4: list of structure-mutation transforms. See
             # ``crystal_viewer.transforms`` and
-            # ``agents/transforms_api.md`` for the schema. Empty list =
+            # ``docs/agents/transforms_api.md`` for the schema. Empty list =
             # no transform; ``apply_transforms`` short-circuits.
             "transforms": [],
             "disorder_resolve": {"method": "enumerate", "count": 5, "seed": None},

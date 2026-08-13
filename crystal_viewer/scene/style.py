@@ -50,7 +50,7 @@ def apply_element_colors(
     """Apply per-element hex-colour overrides to every atom and bond.
 
     Mutates ``scene`` in place and returns the same object for
-    chaining. See ``agents/scene_api.md`` for the full contract.
+    chaining. See ``docs/agents/scene_api.md`` for the full contract.
     """
     if scene.get("style", {}).get("monochrome"):
         element_colors = {atom.get("elem", ""): "#000000" for atom in scene.get("draw_atoms", [])}

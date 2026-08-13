@@ -227,7 +227,17 @@ def _atom_color(atom: dict, style: dict) -> str:
     override = atom.get("_render_color")
     if override:
         return str(override)
-    return "#000000" if style.get("monochrome", False) else atom.get("color", "#808080")
+    if style.get("monochrome", False):
+        return "#000000"
+    color = atom.get("color")
+    if color:
+        return str(color)
+    try:
+        from ..config.colors import ELEMENT_COLORS
+
+        return str(ELEMENT_COLORS.get(str(atom.get("elem", "")), "#808080"))
+    except Exception:
+        return "#808080"
 
 
 def _atom_is_minor(atom: dict) -> bool:

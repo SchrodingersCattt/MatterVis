@@ -7,7 +7,7 @@ single source of truth for applying these on top of the shared
 geometry payload, and the backend's CRUD helpers wrap the persistence.
 
 DO NOT REMOVE -- this guards the contract documented in
-``agents/polyhedron_api.md``.
+``docs/agents/polyhedron_api.md``.
 """
 from __future__ import annotations
 

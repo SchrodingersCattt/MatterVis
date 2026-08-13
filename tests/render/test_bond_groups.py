@@ -8,7 +8,7 @@ override fields (``color``, ``visible``, ``opacity``, ``radius_scale``).
 renderer's ``_bond_segments`` then consumes.
 
 DO NOT REMOVE -- this guards the contract documented in
-``agents/bond_groups_api.md``.
+``docs/agents/bond_groups_api.md``.
 """
 from __future__ import annotations
 

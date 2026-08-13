@@ -29,3 +29,5 @@ scripts/private/
 verification_screens/
 _tmp/
 server.log
+*.egg-info/
+crystal_viewer/_version.py

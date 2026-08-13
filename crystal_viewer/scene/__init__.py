@@ -6,7 +6,7 @@ from . import store as _store
 
 # Re-export public symbols from each sub-module.
 # Legacy: build_scene_from_atoms is defined in scene/core.py but the
-# canonical owner is render/assembly.py per agents/scene_api.md.
+# canonical owner is render/assembly.py per docs/agents/scene_api.md.
 #
 # core.py is the broad compatibility facade — use dir() because its
 # public surface includes legacy static-publication imports and other

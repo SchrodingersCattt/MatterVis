@@ -6,7 +6,7 @@ Flask test client so it doubles as a contract test for agents driving
 the viewer over HTTP.
 
 DO NOT REMOVE -- the endpoint shape and error semantics here are
-documented in ``agents/polyhedron_api.md``.
+documented in ``docs/agents/polyhedron_api.md``.
 """
 from __future__ import annotations
 

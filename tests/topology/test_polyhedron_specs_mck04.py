@@ -4,7 +4,7 @@ Each spec now carries ``level``, ``center_kind``, ``hard_cutoff`` and
 ``fallback_max`` in addition to the historical ``enforce_enclosure`` /
 ``centroid_offset_frac`` pair. The schema, REST surface and MCK
 passthrough are part of the public API; this file is the contract test
-for all three (cf. ``agents/polyhedron_api.md``).
+for all three (cf. ``docs/agents/polyhedron_api.md``).
 """
 from __future__ import annotations
 

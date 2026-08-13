@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-# Public API — all symbols documented in agents/polyhedron_api.md
+# Public API — all symbols documented in docs/agents/polyhedron_api.md
 from .analysis import (  # noqa: F401
     DEFAULT_CENTROID_OFFSET_FRAC,
     _classify_shell_payload,

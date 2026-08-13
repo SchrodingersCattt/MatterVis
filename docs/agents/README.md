@@ -2,7 +2,7 @@
 
 This folder is for agents and humans **calling** MatterVis — either via
 its HTTP/WebSocket service or by importing `crystal_viewer` from Python.
-If you are **modifying** the codebase itself, read `../AGENTS.md`
+If you are **modifying** the codebase itself, read [`../../AGENTS.md`](../../AGENTS.md)
 instead.
 
 ## Where to drop in

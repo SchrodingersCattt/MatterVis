@@ -1,7 +1,7 @@
 # MatterVis Geometry Derivations
 
 This directory is the geometry contract for MatterVis.  It is intentionally
-separate from the public API notes in `agents/`: those files describe what
+separate from the public API notes in `docs/agents/`: those files describe what
 callers may rely on, while these notes derive the coordinate, display, camera,
 transform, and ORTEP formulae that the implementation must obey.
 

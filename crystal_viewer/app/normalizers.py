@@ -203,7 +203,7 @@ def _normalize_polyhedron_spec(
         # Phase 5 -- expose the MCK 0.4 radial / level knobs per spec so
         # the UI can switch between A--B atom shells (e.g. Pb--I CN=6)
         # and molecule packing shells (e.g. NH4 -> ClO4 CN=6 vs the
-        # historical CN=12 cuboctahedron). See ``agents/polyhedron_api.md``.
+        # historical CN=12 cuboctahedron). See ``docs/agents/polyhedron_api.md``.
         "level": level,
         "center_kind": center_kind,
         "hard_cutoff": hard_cutoff,

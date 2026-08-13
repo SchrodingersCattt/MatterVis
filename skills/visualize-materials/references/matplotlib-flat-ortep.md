@@ -18,6 +18,8 @@ wireframe styles.
 - Uses Matplotlib's non-interactive `Agg` backend.
 - Exports PNG, PDF, and SVG without Chrome.
 - Uses camera-projected thermal ellipsoids and orthographic projection.
+- Uses the active MatterVis element palette by default; set `monochrome=true`
+  or pass `--monochrome` when a black-and-white figure is required.
 - Is not equivalent to Plotly mesh, ball-and-stick, or interactive HTML.
 
 Choose it directly for publication ORTEP or browser-independent static output.

@@ -48,7 +48,7 @@ are cached on the bundle keyed on a stable hash of the transform list
 so a sidebar checkbox toggle is a hash-lookup, not a recompute.
 
 Transform spec shape (also documented in
-``agents/transforms_api.md``)::
+``docs/agents/transforms_api.md``)::
 
     {
         "id": "<stable id, auto-generated>",

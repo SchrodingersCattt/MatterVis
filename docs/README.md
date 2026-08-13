@@ -2,6 +2,7 @@
 
 Use this directory by intent:
 
+- `agents/` documents caller-facing API contracts (REST + WebSocket, scene, cube, ORTEP, compass, polyhedra, atom/bond groups, transforms, config, selection, TUI).
 - `cli.md` documents the command-line interface for headless rendering.
 - `derivations/` documents geometry, camera, lattice, ORTEP, and display-mode invariants.
 - `redesign/` documents target architecture and migration notes for ongoing refactors.
@@ -9,4 +10,4 @@ Use this directory by intent:
 - `scores.md` explains topology score fields returned by the analysis API.
 - `perf.md` records performance budgets and profiling notes.
 
-Caller-facing API contracts live in `agents/`. Developer rules and module ownership live in `AGENTS.md`.
+Developer rules and module ownership live in `AGENTS.md` at the repo root.
