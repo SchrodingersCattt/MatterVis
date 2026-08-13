@@ -12,7 +12,7 @@ MatterVis is a Python toolkit for interactive and publication-quality visualizat
 ## Key Features
 
 - **Headless CLI** — Three subcommands (`render`, `serve`, `tui`) cover the full workflow: CIF → publication-quality figure, interactive 3D viewer, or terminal-based inspection. Ideal for batch processing, CI pipelines, and remote servers
-- **Browser Viewer** — Drag-and-drop CIF upload, interactive 3D display with `Mesh3d` atoms and bonds, and a fast `Scatter3d` fallback for large cells. The viewer uses the built-in element palette by default; the black-and-white figures below are deliberate ORTEP showcase presets, not a global monochrome default
+- **Browser Viewer** — Drag-and-drop CIF upload, interactive 3D display with `Mesh3d` atoms and bonds, and a fast `Scatter3d` fallback for large cells. The viewer uses the built-in element palette by default
 - **Coordination Topology** — Automatic coordination-number detection via the nearest-neighbour gap, continuous shape measure (CShM) classification against 12 ideal polyhedra (CN 4–12), planarity RMS, and prism/antiprism twist analysis
 - **Publication Export** — Vendored ORTEP-style Matplotlib renderer with correct depth ordering, two-colour bonds, smart label placement, and configurable presets
 - **Multi-Panel Figures** — `uniform_viewport(scenes)` stamps a shared world-cube on any list of scenes so every `build_figure` call emits at the same physical length per pixel
@@ -21,7 +21,7 @@ MatterVis is a Python toolkit for interactive and publication-quality visualizat
 
 <p align="center">
   <img src="docs/images/feature_unit_cell.png" width="500"><br>
-  <em>Unit Cell — DAP-4 unit cell (explicit black-and-white ORTEP showcase preset)</em>
+  <em>Unit Cell — DAP-4 unit cell (flat ORTEP with element colours)</em>
 </p>
 
 <p align="center">
@@ -36,7 +36,7 @@ MatterVis is a Python toolkit for interactive and publication-quality visualizat
 
 <p align="center">
   <img src="docs/images/feature_publication.png" width="500"><br>
-  <em>Publication-Quality Export — ORTEP-style Matplotlib renderer with labels</em>
+  <em>Publication-Quality Export — Colour ORTEP-style Matplotlib renderer with labels</em>
 </p>
 
 <p align="center">

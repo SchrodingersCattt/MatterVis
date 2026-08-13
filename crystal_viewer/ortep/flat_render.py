@@ -25,6 +25,7 @@ from matplotlib.collections import LineCollection
 
 from .core import (
     _as_u_matrix,
+    _atom_color,
     _atom_u,
     _probability_scale,
     ellipsoid_principal_axes,
@@ -215,17 +216,18 @@ def render_ortep_flat(scene: dict, style: dict | None = None) -> plt.Figure:
         start_2d = _project_2d(bond["start"], view_x, view_y)
         end_2d = _project_2d(bond["end"], view_x, view_y)
 
+        bond_color = _atom_color(ai, style)
         line = Line2D(
             [start_2d[0], end_2d[0]],
             [start_2d[1], end_2d[1]],
             linewidth=bond_lw,
-            color="black",
+            color=bond_color,
             solid_capstyle="round",
             zorder=1,
         )
         ax.add_line(line)
 
-    # ── Layer 2: Atom fills (white disks to clip bonds) ─────────────────
+    # ── Layer 2: Atom fills (translucent element colors to clip bonds) ──
     for atom in draw_atoms:
         idx = id(atom)
         cx, cy, w, h, angle = atom_ellipses[idx]
@@ -238,15 +240,16 @@ def render_ortep_flat(scene: dict, style: dict | None = None) -> plt.Figure:
             continue
 
         elem = str(atom.get("elem", "C"))
+        atom_color = _atom_color(atom, style)
         if elem in ("H", "D") and h_radius_override:
             patch = Circle(
                 (cx, cy), radius=float(h_radius_override),
-                facecolor="white", edgecolor="none", zorder=2,
+                facecolor=atom_color, edgecolor="none", alpha=0.72, zorder=2,
             )
         else:
             patch = Ellipse(
                 (cx, cy), w, h, angle=angle,
-                facecolor="white", edgecolor="none", zorder=2,
+                facecolor=atom_color, edgecolor="none", alpha=0.72, zorder=2,
             )
         ax.add_patch(patch)
 
@@ -267,7 +270,7 @@ def render_ortep_flat(scene: dict, style: dict | None = None) -> plt.Figure:
             lc = LineCollection(
                 hatch_segs,
                 linewidths=0.7,
-                colors="black",
+                colors=_atom_color(atom, style),
                 zorder=3,
             )
             ax.add_collection(lc)
@@ -284,16 +287,17 @@ def render_ortep_flat(scene: dict, style: dict | None = None) -> plt.Figure:
         linestyle = "--" if is_disordered else "-"
         linewidth = 1.2
 
+        atom_color = _atom_color(atom, style)
         if elem in ("H", "D") and h_radius_override:
             patch = Circle(
                 (cx, cy), radius=float(h_radius_override),
-                facecolor="none", edgecolor="black",
+            facecolor="none", edgecolor=atom_color,
                 linewidth=linewidth, linestyle=linestyle, zorder=4,
             )
         else:
             patch = Ellipse(
                 (cx, cy), w, h, angle=angle,
-                facecolor="none", edgecolor="black",
+                facecolor="none", edgecolor=atom_color,
                 linewidth=linewidth, linestyle=linestyle, zorder=4,
             )
         ax.add_patch(patch)
@@ -315,7 +319,7 @@ def render_ortep_flat(scene: dict, style: dict | None = None) -> plt.Figure:
             ax.text(
                 cx + offset_x, cy + offset_y, label,
                 fontsize=7, ha="left", va="bottom",
-                color="black", zorder=5,
+                color=_atom_color(atom, style), zorder=5,
             )
 
     # Auto-range with generous margin based on largest ellipse

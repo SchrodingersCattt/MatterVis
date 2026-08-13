@@ -11,8 +11,8 @@ Markdown renders without requiring a build step.
 
 All figures use the Matplotlib flat ORTEP renderer via ``render()``, which
 is the only reliable export path on headless/CI/Windows environments.
-The showcase intentionally uses the renderer's monochrome ORTEP palette;
-MatterVis's normal Plotly viewer defaults remain element-coloured.
+The showcase keeps MatterVis's default element-colour palette; flat ORTEP
+is a publication backend, not a monochrome-only style.
 """
 from __future__ import annotations
 
@@ -53,7 +53,6 @@ def _ortep_style(scene, **overrides) -> dict:
         "show_labels": False,
         "show_axes": False,
         "show_unit_cell": False,
-        "monochrome": True,
         "ortep_probability": 0.5,
         "ortep_mode": "ortep_axes",
         "bond_radius": 0.12,
