@@ -6,9 +6,14 @@ Read this before delivering any image, vector graphic, HTML view, or animation.
 
 - Resolve the intended input and record its hash when provenance matters.
 - Confirm the output exists, is non-empty, and has the requested extension.
+- For a normal image request, require exactly one selected final PNG. Do not
+  deliver HTML, PDF, SVG, or multiple variants unless explicitly requested.
 - Decode PNG; check `%PDF`, an `<svg` root, or Plotly HTML content as relevant.
 - Record dimensions, scale, camera, projection, display mode, hydrogen and cell
   visibility, viewport or physical scale, and disorder treatment.
+- For a single structure, reject excessive paper border: after the allowed
+  background-only crop, the non-white scene bounding box should occupy at least
+  70% of both final image dimensions. Record crop box and confirm no rescaling.
 - Preserve stdout/stderr and classify warnings.
 
 ## Requested versus effective
@@ -27,6 +32,32 @@ Parse command output rather than inferring the backend from the filename. A
 valid PNG after Plotly/Kaleido failure may be Matplotlib flat ORTEP and does not
 prove that requested mesh, flat-stick, ball-and-stick, or wireframe output
 succeeded.
+
+Before `AttachFigure`, require the effective style/material/backend to match the
+requested visual language. A fallback ORTEP image must not be attached as the
+primary candidate for a mesh, ball-stick, stick, or wireframe request. Repair the
+static Plotly runtime and retry, or attach a matching previously verified image;
+otherwise report that a matching static PNG could not be produced. HTML requires
+an explicit interactive-output request.
+
+MatterVis 0.0.0 does not write a native manifest/sidecar and has no
+`--effective-backend` or `--no-fallback` flag. Create a caller-owned JSON sidecar
+from the command, captured stdout/stderr, input/output hashes, and checks above.
+For a successful CLI run without fallback text, intentional backend identity is
+not printed explicitly; mark it inferred from the dispatch contract or verify it
+through Python.
+
+Python callers can determine the backend without guessing:
+
+```python
+from crystal_viewer.render.api import render
+result = render(scene, style)
+backend = "plotly" if result.plotly_figure is not None else "matplotlib"
+```
+
+All combinations except `material="flat"` plus `style="ortep"` dispatch to
+Plotly. HTML is always Plotly. Static Plotly export may still fall back in the
+CLI, forcing flat ORTEP and orthographic projection.
 
 ## Visual acceptance
 

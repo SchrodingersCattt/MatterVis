@@ -27,7 +27,7 @@ the visual language changed.
 ## Command
 
 ```bash
-    mat-vis render INPUT.cif -o OUTPUT.pdf \
+mat-vis render INPUT.cif -o OUTPUT.pdf \
   --view formula_unit --style ortep --material flat \
   --camera-axis c --orthogonal \
   --width 1200 --height 900 --scale 2

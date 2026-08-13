@@ -11,13 +11,14 @@ camera, style, export backend, and verification as explicit data.
 ## Core workflow
 
 1. Verify the input and requested deliverable.
-2. Read [installation](./references/install.md) when MatterVis must be installed
-	 or pinned to a revision.
+2. Read [installation](./references/install.md) and verify the released CLI.
 3. Always read [diagnosis and scene selection](./references/diagnose-and-select.md)
 	 before choosing a display mode or style.
 4. For images, always read the [camera contract](./references/camera.md), then the
 	 matching render path.
-5. Export with explicit dimensions and settings.
+5. By default export exactly one final PNG with explicit dimensions and settings.
+   Generate HTML, PDF, SVG, animations, or extra candidate files only when the
+   caller explicitly requests them.
 6. Always read [verification and delivery](./references/verification.md) before
 	 reporting or attaching the result.
 
@@ -33,6 +34,7 @@ camera, style, export backend, and verification as explicit data.
 Read only when relevant:
 
 - [Molecule focus and mixed styles](./references/molecule-highlight.md)
+- [Atom- and molecule-centred polyhedra](./references/polyhedra.md)
 - [Publication layout](./references/publication-layout.md)
 - [Trajectory animation](./references/trajectory-animation.md)
 - [Terminal TUI](./references/tui.md)
@@ -52,5 +54,7 @@ Read only when relevant:
 	contracts.
 - Distinguish requested from effective display, style, material, backend, and
 	fallback. A decoded PNG does not prove that the requested visual language ran.
+- Do not emit HTML or a gallery of diagnostic variants for a normal static-image
+  request. Keep failed attempts as diagnostics only; attach one selected PNG.
 - A model without image-inspection capability reports objective checks and leaves
 	visual acceptance pending; it never self-certifies publication quality.

@@ -15,6 +15,30 @@ Record, where available:
 A decoded export with an untrustworthy object selection is a diagnostic artifact,
 not a publication figure.
 
+MatterVis 0.0.0 has no `diagnose` subcommand. Use capability tiers:
+
+1. For an admitted small scene, `mat-vis tui INPUT --no-interaction --format
+  structured --display <mode>` reports formulas, source/expanded/displayed/
+  visible atom counts, cell, atoms, disorder markers, and bonds. It is an
+  unbounded per-atom serialization, so do not use it automatically above 200
+  visible atoms.
+2. For large or ambiguous CIFs, use the canonical Python API:
+
+```python
+from crystal_viewer.loader.core import build_loaded_crystal, build_bundle_scene
+
+bundle = build_loaded_crystal(name="input", cif_path="INPUT.cif")
+scene = build_bundle_scene(bundle, display_mode="asymmetric_unit")
+print("raw", len(bundle.raw_atoms))
+print("formula_unit", len(bundle.formula_unit_atoms))
+print("fragments", len(bundle.fragment_table))
+print("displayed", len(scene["draw_atoms"]), "bonds", len(scene["bonds"]))
+```
+
+Capture Python warnings around the loader call. The function is keyword-only and
+can be expensive because loading performs symmetry expansion and MolCrysKit
+analysis before display-mode reduction.
+
 ## Display modes
 
 - `formula_unit` is a MolCrysKit chemical selection, not a guarantee of one
@@ -38,6 +62,21 @@ High-disorder scenes need an explicit choice: major-only, hidden minor sites,
 opacity, or an ASU diagnostic. `minor_opacity` does not reduce
 `disorder="outline_rings"`.
 
+When minor sites exceed 25%, never run the unmodified ball-stick/mesh defaults as
+the primary candidate. For a crystal-context view, start with `unit_cell`, hidden
+hydrogen, `disorder="opacity"`, `minor_opacity` between 0.08 and 0.15,
+`atom-scale` between 0.65 and 0.8, and `bond-radius` between 0.08 and 0.12. If the
+scene remains dense, deliver an ASU diagnostic rather than shrinking a black
+unit-cell tangle and calling it formal output.
+
+For an ordered crystal scene above 500 displayed atoms, use one deterministic
+low-noise first candidate rather than trying a gallery: `unit_cell`, hidden
+hydrogen, orthographic lattice `+c`, `ball_stick`, `mesh`, white background,
+hidden axes and labels, `atom-scale=0.65`, `bond-radius=0.08`, `1600x1200`, and
+`scale=2`. This preserves the crystal context while reducing occlusion. If the
+target is one local event or molecule rather than the whole cell, use the
+auditable focus workflow instead of drawing the entire dense box.
+
 For opacity rendering, use a style config of this shape:
 
 ```json
@@ -51,6 +90,26 @@ For opacity rendering, use a style config of this shape:
 
 Do not pass an object as the `disorder` value. If the CLI/API cannot express the
 needed policy, report that limitation rather than forcing a formal figure.
+
+Supported image disorder modes are `opacity`, `dashed_bonds`, `outline_rings`,
+`color_shift`, and `none`. Image render has no `--show-minor`, `--hide-minor`, or
+canonical `--major-only` flag. To hide rendered minor instances, use an
+`atom_groups` selector on `is_minor`; this changes visibility, not chemistry:
+
+```json
+{"style":{"atom_groups":[{"id":"hide-minor","selector":{"is_minor":true},"visible":false}]}}
+```
+
+TUI `--hide-partial` removes all occupancy below approximately 0.99, not only
+minor disorder alternatives.
+
+## Config precedence
+
+`--config` may be flat or contain `{"style": {...}}`. Config-only fields such
+as `disorder`, `minor_opacity`, and `atom_groups` survive. Every field represented
+by a normal render CLI option is overwritten by that option's parser value even
+when the flag was omitted; set style, material, projection, visibility, scale,
+and colours explicitly on the command line.
 
 ## Warning classes
 

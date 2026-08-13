@@ -36,6 +36,9 @@ from crystal_viewer.loader import (
 )
 
 
+SY_CIF = Path("scripts/data/SY.cif")
+
+
 # --------------------------------------------------------------------- #
 # 1) CrystalAnalysis.bond_pairs                                         #
 # --------------------------------------------------------------------- #
@@ -92,6 +95,8 @@ def test_dap4_formula_unit_table_matches_per_fu_stoichiometry():
 # 3) SY structure has zero orphan-H fragments                           #
 # --------------------------------------------------------------------- #
 def test_sy_topology_table_has_no_orphan_hydrogens():
+    if not SY_CIF.exists():
+        pytest.skip("local SY CIF fixture is not present")
     bundle = build_loaded_crystal(
         name="SY", cif_path="scripts/data/SY.cif", title="SY"
     )
@@ -224,6 +229,8 @@ def test_analysis_bond_pairs_match_mol_indices_membership():
 # 7) SY ethylenediamine should be split, not fused                      #
 # --------------------------------------------------------------------- #
 def test_sy_ethylenediamine_not_fused():
+    if not SY_CIF.exists():
+        pytest.skip("local SY CIF fixture is not present")
     """Regression for SY ethylenediamine fusion. SHELX -PART disorder +
     Pa-3 symmetry expansion creates 8 N3 + 8 N2 atoms that overlap at
     0.15 A pairs (alternative orientations of the same nucleus).
@@ -257,6 +264,8 @@ def test_sy_ethylenediamine_not_fused():
 
 
 def test_sy_minor_ethylenediamine_fragments_are_grouped_whole():
+    if not SY_CIF.exists():
+        pytest.skip("local SY CIF fixture is not present")
     """Minor SHELX -PART atoms must remain first-class fragments.
 
     The renderer draws minor alternatives faded, but they still need MCK
@@ -315,6 +324,8 @@ def test_dap4_nh4_count_correct():
 # 9) "Black cage" -- cross-orientation ghost bonds are filtered          #
 # --------------------------------------------------------------------- #
 def test_no_cross_orientation_ghost_bonds_in_unit_cell_scene():
+    if not SY_CIF.exists():
+        pytest.skip("local SY CIF fixture is not present")
     """Regression for cross-orientation ghost bonds: ``find_bonds`` doesn't know
     about ``_is_minor`` and would happily bond a major N3 (kept
     orientation) to a minor C4 (discarded orientation) at 0.83 A

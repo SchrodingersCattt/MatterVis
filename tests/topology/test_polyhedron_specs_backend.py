@@ -31,7 +31,10 @@ from crystal_viewer.app import (
     _normalize_polyhedron_specs,
     _polyhedra_table_rows,
 )
-from crystal_viewer.app.backend_topology import _dedupe_disorder_center_fragments
+from crystal_viewer.app.backend_topology import (
+    _dedupe_disorder_center_fragments,
+    _fragment_matches_polyhedron_spec,
+)
 from crystal_viewer import topology as topology_module
 from crystal_viewer.structure import molcrys_bridge as _molcrys_bridge_module
 from crystal_viewer.presets import default_preset_path
@@ -349,6 +352,23 @@ def test_disorder_center_dedupe_prefers_major_orientation():
     deduped = _dedupe_disorder_center_fragments(bundle, scene, fragments)
 
     assert [fragment["index"] for fragment in deduped] == [11, 12]
+
+
+def test_atom_polyhedron_spec_matches_element_inside_polyatomic_fragment():
+    fragment = {"formula": "ClO4", "elem_set": ["Cl", "O"]}
+
+    assert _fragment_matches_polyhedron_spec(
+        fragment,
+        {"center_species": "Cl", "level": "atom"},
+    )
+    assert not _fragment_matches_polyhedron_spec(
+        fragment,
+        {"center_species": "Pb", "level": "atom"},
+    )
+    assert _fragment_matches_polyhedron_spec(
+        fragment,
+        {"center_species": "ClO4", "level": "molecule"},
+    )
 
 
 def test_topology_results_markdown_surfaces_warnings():
