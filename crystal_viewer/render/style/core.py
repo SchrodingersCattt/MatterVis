@@ -53,8 +53,9 @@ def validate_style_schema(style: dict) -> dict:
     normalized["minor_wireframe"] = bool(normalized.get("minor_wireframe", False)) or disorder == "outline_rings"
 
     # Classic 2D ORTEP publication mode: flat + ortep activates the
-    # open-ellipsoid pipeline (white fill + silhouette + octant hatch +
-    # black bond lines + orthographic projection).
+    # open-ellipsoid pipeline (silhouette + octant hatch + orthographic
+    # projection). The active element palette remains effective unless the
+    # caller explicitly requests monochrome.
     if material == "flat" and render_style == "ortep":
         normalized["ortep_silhouette_outline"] = True
         normalized["ortep_octant_hatching"] = True
@@ -63,7 +64,6 @@ def validate_style_schema(style: dict) -> dict:
         normalized["projection"] = "orthographic"
         if not normalized.get("ortep_hydrogen_radius"):
             normalized["ortep_hydrogen_radius"] = 0.15
-        normalized["monochrome"] = True
 
     return normalized
 
