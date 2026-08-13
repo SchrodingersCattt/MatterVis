@@ -115,16 +115,16 @@ def _dedupe_disorder_center_fragments(
     representatives: list[dict[str, Any]] = []
     for fragment in fragments:
         formula = fragment.get("formula") or fragment.get("species")
-        frac = fragment.get("frac_center", [0.0, 0.0, 0.0])
         duplicate_at: int | None = None
         for index, representative in enumerate(representatives):
             rep_formula = representative.get("formula") or representative.get("species")
             if rep_formula != formula:
                 continue
-            distance = _pbc_distance_for_bundle(
-                bundle,
-                frac,
-                representative.get("frac_center", [0.0, 0.0, 0.0]),
+            distance = float(
+                np.linalg.norm(
+                    np.asarray(fragment.get("center", [0.0, 0.0, 0.0]), dtype=float)
+                    - np.asarray(representative.get("center", [0.0, 0.0, 0.0]), dtype=float)
+                )
             )
             if distance <= _DISORDER_CENTER_DEDUPE_TOL:
                 duplicate_at = index
