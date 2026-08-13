@@ -21,12 +21,12 @@ MatterVis is a Python toolkit for interactive and publication-quality visualizat
 
 <p align="center">
   <img src="docs/images/feature_unit_cell.png" width="500"><br>
-  <em>Unit Cell Visualization — DAP-4 unit cell with 672 atoms</em>
+  <em>Unit Cell — DAP-4 unit cell (ORTEP, 672 atoms)</em>
 </p>
 
 <p align="center">
   <img src="docs/images/feature_coordination.png" width="500"><br>
-  <em>Coordination Shell — A-site coordination with convex hull overlay</em>
+  <em>Coordination Shell — A-site coordination with convex hull overlay (CN=9, tricapped trigonal prism)</em>
 </p>
 
 <p align="center">
@@ -36,7 +36,12 @@ MatterVis is a Python toolkit for interactive and publication-quality visualizat
 
 <p align="center">
   <img src="docs/images/feature_publication.png" width="500"><br>
-  <em>Publication-Quality Export — ORTEP-style Matplotlib renderer</em>
+  <em>Publication-Quality Export — ORTEP-style Matplotlib renderer with labels</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/feature_tui.png" width="640"><br>
+  <em>Terminal TUI — Interactive crystal viewer for headless servers and SSH sessions</em>
 </p>
 
 ## Installation

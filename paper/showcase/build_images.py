@@ -2,11 +2,15 @@
 
 Run from the repository root:
 
-    python docs/build_images.py
+    python docs/build_images.py    (thin wrapper)
+    python paper/showcase/build_images.py   (canonical)
 
 Produces ``docs/images/*.png`` from the bundled DAP-4 example. These are the
 images embedded in ``README.md`` and are committed to the repository so the
 Markdown renders without requiring a build step.
+
+All figures use the Matplotlib flat ORTEP renderer via ``render()``, which
+is the only reliable export path on headless/CI/Windows environments.
 """
 from __future__ import annotations
 
@@ -14,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import Iterable
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 import matplotlib  # noqa: E402
@@ -22,10 +26,9 @@ import matplotlib  # noqa: E402
 matplotlib.use("Agg")
 import matplotlib.image as mpimg  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
-from plotly.subplots import make_subplots  # noqa: E402
 
 from crystal_viewer.loader import build_bundle_scene, build_loaded_crystal  # noqa: E402
-from crystal_viewer.renderer import build_figure, render, topology_histogram_figure  # noqa: E402
+from crystal_viewer.renderer import render  # noqa: E402
 from crystal_viewer.scene import scene_style  # noqa: E402
 from crystal_viewer.topology import analyze_topology  # noqa: E402
 
@@ -35,130 +38,150 @@ IMG_DIR = REPO_ROOT / "docs" / "images"
 IMG_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def _save_plotly(fig, path: Path, *, width: int, height: int, scale: int = 2) -> Path:
-    fig.write_image(str(path), width=width, height=height, scale=scale)
-    print(f"  -> {path.relative_to(REPO_ROOT)}  ({path.stat().st_size // 1024} KB)")
-    return path
-
-
 def _bundle():
     return build_loaded_crystal(name="DAP-4", cif_path=str(CIF), title="DAP-4")
 
 
+def _ortep_style(scene, **overrides) -> dict:
+    """Build a flat ORTEP style dict — always goes through Matplotlib, never hangs."""
+    base = {
+        "material": "flat",
+        "style": "ortep",
+        "show_hydrogen": False,
+        "show_labels": False,
+        "show_axes": False,
+        "show_unit_cell": False,
+        "ortep_probability": 0.5,
+        "ortep_mode": "ortep_axes",
+        "bond_radius": 0.12,
+        "atom_scale": 1.0,
+    }
+    base.update(overrides)
+    return scene_style(scene, base)
+
+
+def _save_render(result, path: Path, *, width: int = 900, height: int = 720, dpi: int = 240) -> Path:
+    """Save a render() result (always Matplotlib, never Kaleido)."""
+    result.save(str(path), width=width, height=height, dpi=dpi)
+    print(f"  -> {path.relative_to(REPO_ROOT)}  ({path.stat().st_size // 1024} KB)")
+    return path
+
+
+# ── renderers ────────────────────────────────────────────────────────────────
+
+
 def render_unit_cell(out: Path) -> Path:
+    """Unit cell — flat ORTEP of the full unit cell."""
     bundle = _bundle()
     cell_scene = build_bundle_scene(bundle, display_mode="unit_cell")
-    style = scene_style(
-        cell_scene,
-        {
-            "show_unit_cell": True,
-            "show_axes": False,
-            "show_labels": False,
-            "atom_scale": 0.85,
-            "bond_radius": 0.13,
-        },
-    )
-    fig = build_figure(cell_scene, style)
-    fig.update_layout(
-        title=dict(text=f"DAP-4 unit cell ({len(cell_scene['draw_atoms'])} atoms)", x=0.5),
-        margin=dict(l=0, r=0, t=42, b=0),
-    )
-    return _save_plotly(fig, out, width=900, height=720)
+    style = _ortep_style(cell_scene, show_unit_cell=True, atom_scale=0.85, bond_radius=0.13)
+    result = render(cell_scene, style)
+    return _save_render(result, out)
 
 
 def render_coordination(out: Path, hist_out: Path):
+    """Coordination shell with convex hull overlay + distance histogram."""
     bundle = _bundle()
     a_target = next(f for f in bundle.topology_fragment_table if f["type"] == "A")
-    topology = analyze_topology(bundle, center_index=a_target["index"], cutoff=8.0)
-    style = scene_style(
-        bundle.scene,
-        {
-            "show_axes": False,
-            "show_labels": False,
-            "atom_scale": 1.0,
-            "bond_radius": 0.16,
-            "topology_enabled": True,
-        },
+    topology = analyze_topology(
+        bundle, center_index=a_target["index"], cutoff=8.0,
+        ligand_species=("ClO4",),
+        center_species="C6N2",
     )
-    fig = build_figure(bundle.scene, style, topology_data=topology)
-    fig.update_layout(
-        title=dict(
-            text=f"A-site coordination shell - CN={topology['coordination_number']}",
-            x=0.5,
-        ),
-        margin=dict(l=0, r=0, t=42, b=0),
-    )
-    _save_plotly(fig, out, width=900, height=720)
+    style = _ortep_style(bundle.scene, atom_scale=1.0, bond_radius=0.16)
+    style["topology_enabled"] = True
+    result = render(bundle.scene, style, topology_data=topology)
+    _save_render(result, out)
 
-    hist = topology_histogram_figure(topology)
-    hist.update_layout(
-        title=dict(text=f"{a_target['label']} -> X distance histogram (DAP-4)", x=0.5),
-        margin=dict(l=40, r=20, t=42, b=42),
-    )
-    _save_plotly(hist, hist_out, width=900, height=380)
+    # Distance histogram — Matplotlib bar chart (no Kaleido dependency)
+    distances = topology.get("all_distances", [])
+    shell_set = set(topology.get("distances", []))
+    fig_h, ax_h = plt.subplots(figsize=(9, 3.8), facecolor="white")
+    ax_h.set_facecolor("white")
+    if distances:
+        colors = ["#7C5CBF" if d in shell_set else "#C9C9E8" for d in distances]
+        ax_h.bar(range(1, len(distances) + 1), distances, color=colors, width=0.7)
+    ax_h.set_xlabel("Neighbor rank")
+    ax_h.set_ylabel("Distance (Å)")
+    ax_h.set_title(f"{a_target['label']} → X distance histogram (DAP-4)")
+    fig_h.tight_layout()
+    fig_h.savefig(hist_out, dpi=200, bbox_inches="tight", facecolor="white")
+    plt.close(fig_h)
+    print(f"  -> {hist_out.relative_to(REPO_ROOT)}  ({hist_out.stat().st_size // 1024} KB)")
 
 
 def render_three_modes(out: Path) -> Path:
+    """Multi-panel: formula unit, unit cell, coordination shell — stitched in matplotlib."""
     bundle = _bundle()
     a_target = next(f for f in bundle.topology_fragment_table if f["type"] == "A")
-    topology = analyze_topology(bundle, center_index=a_target["index"], cutoff=8.0)
+    topology = analyze_topology(
+        bundle, center_index=a_target["index"], cutoff=8.0,
+        ligand_species=("ClO4",),
+        center_species="C6N2",
+    )
 
     formula_scene = build_bundle_scene(bundle, display_mode="formula_unit")
     cell_scene = build_bundle_scene(bundle, display_mode="unit_cell")
 
-    panels = [
-        ("Formula unit", formula_scene, {"show_unit_cell": True}, None),
-        (
-            "Unit cell",
-            cell_scene,
-            {"show_unit_cell": True, "atom_scale": 0.85, "bond_radius": 0.13},
-            None,
-        ),
-        (
-            f"Coordination shell (CN={topology['coordination_number']})",
-            bundle.scene,
-            {"topology_enabled": True, "show_unit_cell": False},
-            topology,
-        ),
-    ]
+    # Render each panel as flat ORTEP
+    tmp = REPO_ROOT / "_tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
 
-    fig = make_subplots(
-        rows=1,
-        cols=3,
-        specs=[[{"type": "scene"}] * 3],
-        subplot_titles=[panel[0] for panel in panels],
-        horizontal_spacing=0.02,
-    )
+    for label, scene, extra_style in [
+        ("formula", formula_scene, {"show_unit_cell": True}),
+        ("cell", cell_scene, {"show_unit_cell": True, "atom_scale": 0.85, "bond_radius": 0.13}),
+        ("coord", bundle.scene, {"topology_enabled": True, "show_unit_cell": False}),
+    ]:
+        style = _ortep_style(scene, **extra_style)
+        kwargs = {"topology_data": topology} if label == "coord" else {}
+        result = render(scene, style, **kwargs)
+        result.save(str(tmp / f"_panel_{label}.png"), width=500, height=500, dpi=150)
 
-    for col, (_, scene, style_overrides, topology_data) in enumerate(panels, start=1):
-        style = scene_style(scene, {"show_axes": False, "show_labels": False, **style_overrides})
-        sub_fig = build_figure(scene, style, topology_data=topology_data)
-        for trace in sub_fig.data:
-            fig.add_trace(trace, row=1, col=col)
-        scene_key = "scene" if col == 1 else f"scene{col}"
-        fig.layout[scene_key].update(sub_fig.layout.scene.to_plotly_json())
-
-    fig.update_layout(
-        title=dict(text="DAP-4: three display modes", x=0.5),
-        paper_bgcolor="white",
-        margin=dict(l=10, r=10, t=70, b=10),
-        showlegend=False,
-    )
-    return _save_plotly(fig, out, width=1500, height=560)
+    # Stitch panels
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5.6), dpi=100)
+    titles = ["Formula unit", "Unit cell", "Coordination shell"]
+    for ax, title, label in zip(axes, titles, ["formula", "cell", "coord"]):
+        ax.imshow(mpimg.imread(tmp / f"_panel_{label}.png"))
+        ax.set_title(title, fontsize=12, pad=4)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+    fig.subplots_adjust(left=0.005, right=0.995, top=0.93, bottom=0.01, wspace=0.02)
+    fig.savefig(out, dpi=180, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    print(f"  -> {out.relative_to(REPO_ROOT)}  ({out.stat().st_size // 1024} KB)")
+    return out
 
 
 def render_publication(out: Path) -> Path:
+    """ORTEP-style publication-quality Matplotlib export."""
     bundle = _bundle()
     scene = build_bundle_scene(bundle, display_mode="formula_unit")
-    result = render(scene, {
-        "material": "flat",
-        "style": "ortep",
-        "show_hydrogen": False,
-        "show_labels": True,
-        "ortep_probability": 0.5,
-        "bond_radius": 0.12,
-    })
-    result.save(str(out), dpi=240)
+    style = _ortep_style(scene, show_labels=True, bond_radius=0.12)
+    result = render(scene, style)
+    return _save_render(result, out, width=900, height=720, dpi=240)
+
+
+def render_tui(out: Path) -> Path:
+    """Terminal TUI view — text frame rendered as PNG."""
+    from crystal_viewer.tui import TerminalViewController
+
+    tui = TerminalViewController.from_file(
+        str(CIF), width=80, height=22, mono=True, display_mode="unit_cell",
+    )
+    tui.orbit(yaw_deg=35.0, pitch_deg=15.0)
+    obs = tui.observe()
+
+    fig, ax = plt.subplots(figsize=(10, 4.5), facecolor="#1a1a2e")
+    ax.set_facecolor("#1a1a2e")
+    ax.axis("off")
+    lines = obs.frame.split("\n")
+    for i, line in enumerate(lines):
+        ax.text(0.02, 0.95 - i * 0.035, line, fontfamily="monospace", fontsize=7,
+                color="#c0c0c0", transform=ax.transAxes, verticalalignment="top")
+    fig.savefig(out, dpi=180, bbox_inches="tight", facecolor="#1a1a2e")
+    plt.close(fig)
     print(f"  -> {out.relative_to(REPO_ROOT)}  ({out.stat().st_size // 1024} KB)")
     return out
 
@@ -181,12 +204,16 @@ def render_banner(images: Iterable[Path], out: Path) -> Path:
     return out
 
 
+# ── main ─────────────────────────────────────────────────────────────────────
+
+
 def main() -> None:
     print("Rendering README showcase images...")
     cell = render_unit_cell(IMG_DIR / "feature_unit_cell.png")
     render_coordination(IMG_DIR / "feature_coordination.png", IMG_DIR / "feature_histogram.png")
     panel = render_three_modes(IMG_DIR / "feature_three_modes.png")
     pub = render_publication(IMG_DIR / "feature_publication.png")
+    tui = render_tui(IMG_DIR / "feature_tui.png")
     render_banner([cell, IMG_DIR / "feature_coordination.png", pub], IMG_DIR / "banner.png")
     print("Done.")
 
