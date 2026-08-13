@@ -2,7 +2,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](#)
-[![CI](https://github.com/SchrodingersCattt/MatterVis/actions/workflows/ci.yml/badge.svg)](https://github.com/SchrodingersCattt/MatterVis/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/matter-vis.svg)](https://pypi.org/project/matter-vis/)
+[![CI](https://github.com/SchrodingersCattt/MatterVis/actions/workflows/release.yml/badge.svg)](https://github.com/SchrodingersCattt/MatterVis/actions/workflows/release.yml)
 
 ## Overview
 
@@ -10,6 +11,7 @@ MatterVis is a Python toolkit for interactive and publication-quality visualizat
 
 ## Key Features
 
+- **Headless CLI** — Three subcommands (`render`, `serve`, `tui`) cover the full workflow: CIF → publication-quality figure, interactive 3D viewer, or terminal-based inspection. Ideal for batch processing, CI pipelines, and remote servers
 - **Browser Viewer** — Drag-and-drop CIF upload, interactive 3D display with `Mesh3d` atoms and bonds, and a fast `Scatter3d` fallback for large cells
 - **Coordination Topology** — Automatic coordination-number detection via the nearest-neighbour gap, continuous shape measure (CShM) classification against 12 ideal polyhedra (CN 4–12), planarity RMS, and prism/antiprism twist analysis
 - **Publication Export** — Vendored ORTEP-style Matplotlib renderer with correct depth ordering, two-colour bonds, smart label placement, and configurable presets
@@ -39,16 +41,21 @@ MatterVis is a Python toolkit for interactive and publication-quality visualizat
 
 ## Installation
 
+### From PyPI (recommended)
+
+```bash
+pip install matter-vis
+```
+
 ### From source (development)
 
 ```bash
 git clone https://github.com/SchrodingersCattt/MatterVis.git
 cd MatterVis
-python -m pip install -r requirements.txt
-python -m pip install -e .
+pip install -e .
 ```
 
-All dependencies are declared in `pyproject.toml` and mirrored in `requirements.txt`.
+All dependencies are declared in `pyproject.toml`.
 `requires-python = ">=3.10"`. The available extras are:
 
 | Extra | Adds |
@@ -62,7 +69,29 @@ element/size heuristics.
 
 ## Quick Start
 
-Generate a publication-quality figure from a CIF file in a few lines:
+### CLI — one-liner from CIF to figure
+
+Install MatterVis, then render a crystal structure with a single command:
+
+```bash
+# PNG with default ball-and-stick style
+mat-vis render structure.cif -o figure.png
+
+# PDF, full unit cell, ORTEP hatch shading in greyscale
+mat-vis render structure.cif -o figure.pdf \
+  --view unit_cell --style ortep --ortep-mode ortep_hatch --monochrome
+
+# Interactive HTML for supplementary information
+mat-vis render structure.cif -o si_figure.html \
+  --show-hydrogen --show-labels
+
+# Launch the interactive browser viewer
+mat-vis serve --cif structure.cif
+```
+
+See [`docs/cli.md`](docs/cli.md) for the full flag reference and common recipes.
+
+### Python API — programmatic control
 
 ```python
 from crystal_viewer.loader import build_bundle_scene, build_loaded_crystal
@@ -92,9 +121,9 @@ mat-vis tui --help
 
 The three subcommands cover:
 
-- `mat-vis render ...` — generate static figures (PNG/PDF/SVG/HTML) from CIF files
-- `mat-vis serve ...` — launch the interactive Dash browser viewer
-- `mat-vis tui ...` — terminal-based crystal structure viewer
+- `mat-vis render ...` — generate static figures (PNG/PDF/SVG/HTML) from CIF files, with full control over camera, style, colour, and display mode
+- `mat-vis serve ...` — launch the interactive Dash browser viewer with drag-and-drop CIF upload, topology analysis, and REST + WebSocket API
+- `mat-vis tui ...` — terminal-based crystal structure viewer for headless servers and SSH sessions
 
 ## Documentation
 
