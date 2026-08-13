@@ -73,7 +73,7 @@ mat-vis render INPUT.cif -o OUTPUT.html \
 
 Use `--show-hydrogen` explicitly when hydrogens matter; the image CLI hides them
 by default. Use `--config` for supported style fields such as disorder treatment.
-Live 0.0.0 render choices are:
+Live 0.0.1 render choices are:
 
 - views: `formula_unit`, `unit_cell`, `asymmetric_unit`, `cluster`;
 - styles: `ball_stick`, `ball`, `stick`, `ortep`, `wireframe`;

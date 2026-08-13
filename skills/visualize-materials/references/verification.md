@@ -40,7 +40,7 @@ static Plotly runtime and retry, or attach a matching previously verified image;
 otherwise report that a matching static PNG could not be produced. HTML requires
 an explicit interactive-output request.
 
-MatterVis 0.0.0 does not write a native manifest/sidecar and has no
+MatterVis 0.0.1 does not write a native manifest/sidecar and has no
 `--effective-backend` or `--no-fallback` flag. Create a caller-owned JSON sidecar
 from the command, captured stdout/stderr, input/output hashes, and checks above.
 For a successful CLI run without fallback text, intentional backend identity is
