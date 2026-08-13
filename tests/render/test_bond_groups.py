@@ -196,8 +196,8 @@ def test_bond_segments_yields_per_bond_scales(atoms_and_bonds):
     segments_with_scales = list(_bond_segments(scene, style, with_scales=True))
     # Default radius_scale=1.0, opacity=1.0 for non-matching bonds; 2.5 / 0.4
     # for the matching O-H bond's two halves.
-    assert any(seg[4] == pytest.approx(2.5) and seg[5] == pytest.approx(0.4) for seg in segments_with_scales)
-    assert any(seg[4] == pytest.approx(1.0) and seg[5] == pytest.approx(1.0) for seg in segments_with_scales)
+    assert any(seg[5] == pytest.approx(2.5) and seg[6] == pytest.approx(0.4) for seg in segments_with_scales)
+    assert any(seg[5] == pytest.approx(1.0) and seg[6] == pytest.approx(1.0) for seg in segments_with_scales)
 
 
 # ---- cache key ---------------------------------------------------------

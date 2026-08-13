@@ -30,4 +30,6 @@ verification_screens/
 _tmp/
 server.log
 *.egg-info/
+build/
+dist/
 crystal_viewer/_version.py

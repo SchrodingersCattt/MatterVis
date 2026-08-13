@@ -44,7 +44,7 @@ dependencies = [
 mat-vis = "crystal_viewer.cli:main"
 
 [project.optional-dependencies]
-test = ["pytest>=8.0", "pytest-cov"]
+test = ["pytest>=8.0", "pytest-cov", "pytest-timeout"]
 dev = ["matter-vis[test]", "build", "ruff"]
 
 [tool.setuptools.packages.find]

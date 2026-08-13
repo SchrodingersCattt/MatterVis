@@ -20,13 +20,14 @@ ENTRIES = json.loads(ORACLES.read_text(encoding="utf-8"))["entries"]
 
 def _installed_mck_revision() -> str | None:
     try:
-        direct_url = json.loads(
-            importlib.metadata.distribution("molcrys-kit").read_text("direct_url.json") or "null"
-        )
+        direct_url = json.loads(importlib.metadata.distribution("molcrys-kit").read_text("direct_url.json") or "null")
         commit_id = (direct_url or {}).get("vcs_info", {}).get("commit_id")
         if commit_id:
             return str(commit_id)
-        source = Path(str((direct_url or {}).get("url") or "").replace("file://", ""))
+        source_url = str((direct_url or {}).get("url") or "")
+        if not source_url.startswith("file://"):
+            return None
+        source = Path(source_url.removeprefix("file://"))
         return subprocess.check_output(
             ["git", "-C", str(source), "rev-parse", "HEAD"],
             text=True,
@@ -39,6 +40,8 @@ def _installed_mck_revision() -> str | None:
 def _require_expected_mck(entry: dict) -> None:
     expected = entry["producer"]["molcrys_kit_revision"]
     actual = _installed_mck_revision()
+    if actual is None:
+        pytest.skip("installed MolCrysKit distribution does not expose a source revision")
     if actual != expected:
         pytest.fail(
             f"oracle requires MolCrysKit {expected}, installed revision is {actual or 'unknown'}"
@@ -68,6 +71,13 @@ def test_revision_mismatch_is_an_explicit_failure(monkeypatch):
     monkeypatch.setattr(sys.modules[__name__], "_installed_mck_revision", lambda: "wrong-revision")
 
     with pytest.raises(pytest.fail.Exception, match="requires MolCrysKit"):
+        _require_expected_mck({"producer": {"molcrys_kit_revision": "expected-revision"}})
+
+
+def test_revision_check_skips_when_distribution_has_no_source_revision(monkeypatch):
+    monkeypatch.setattr(sys.modules[__name__], "_installed_mck_revision", lambda: None)
+
+    with pytest.raises(pytest.skip.Exception, match="does not expose a source revision"):
         _require_expected_mck({"producer": {"molcrys_kit_revision": "expected-revision"}})
 
 

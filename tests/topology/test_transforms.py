@@ -475,6 +475,7 @@ def test_build_bundle_scene_preserves_transform_fragment_table(monkeypatch):
     out = build_bundle_scene(
         bundle,
         display_mode="unit_cell",
+        include_boundary_replicas=False,
         transforms=[{"id": "t1", "kind": "repeat", "params": {"a": 2, "b": 1, "c": 1}, "enabled": True}],
     )
 

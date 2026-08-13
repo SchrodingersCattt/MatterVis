@@ -95,6 +95,8 @@ class _SelectionBackendMixin:
             return self.get_selection(scene_id)
         lo_x, hi_x = sorted((x0, x1))
         lo_y, hi_y = sorted((y0, y1))
+        if lo_x <= 0.0 and lo_y <= 0.0 and hi_x >= width and hi_y >= height:
+            return self.select_all(scene_id)
         state = self.get_state(scene_id)
         scene = self.scene_for_state(state)
         camera = state.get("camera") or scene.get("camera") or self.default_camera(state)

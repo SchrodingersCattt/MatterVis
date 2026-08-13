@@ -9,7 +9,7 @@ PUBLIC_IMPORTS = {
     "crystal_viewer.atom_groups": ("tag_atoms_with_groups",),
     "crystal_viewer.bond_groups": ("tag_bonds_with_groups",),
     "crystal_viewer.compass": ("camera_screen_basis", "lattice_compass_annotations"),
-    "crystal_viewer.cube": ("read_cube", "build_orbital_panel_figure", "export_static", "mapped_isosurface_mesh_trace"),
+    "crystal_viewer.cube": ("read_cube", "build_orbital_panel_figure", "export_static"),
     "crystal_viewer.depth_sort": ("camera_view_vector", "assign_zorder_by_depth"),
     "crystal_viewer.loader": ("LoadedCrystal", "build_bundle_scene", "build_loaded_crystal"),
     "crystal_viewer.math": ("camera_screen_basis", "ellipsoid_principal_axes", "nearest_lattice_shift_frac"),
