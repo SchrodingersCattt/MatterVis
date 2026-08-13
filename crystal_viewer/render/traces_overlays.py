@@ -233,7 +233,7 @@ def _label_traces(scene: dict, style: dict, hidden_labels: set | None = None):
     selector = style.get("label_selector")
     selected_elements = set((selector or {}).get("elements", [])) if isinstance(selector, dict) else set()
     selected_labels = set((selector or {}).get("labels", [])) if isinstance(selector, dict) else set()
-    for item in scene["label_items"]:
+    for item in scene.get("label_items") or []:
         if str(item.get("text")) in hidden_labels:
             continue
         if selector and (

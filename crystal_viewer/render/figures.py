@@ -249,7 +249,8 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None, *,
     # Flat rendering emits one grouped, fully opaque white dot from
     # `_atom_scatter_traces`, placed at the screen upper-right of each atom.
     # Mesh rendering keeps its native Mesh3d lighting; no raster post-process
-    # or per-atom highlight traces are used.    trace_dicts.extend(_traces_to_dicts(_label_traces(scene, style, hidden_labels=hidden_labels)))
+    # or per-atom highlight traces are used.
+    trace_dicts.extend(_traces_to_dicts(_label_traces(scene, style, hidden_labels=hidden_labels)))
     trace_dicts.extend(_traces_to_dicts(_axis_traces(scene, style)))
     trace_dicts.extend(_traces_to_dicts(_unit_cell_traces(scene, style)))
     trace_dicts.extend(_traces_to_dicts(_morphology_traces(scene, style)))

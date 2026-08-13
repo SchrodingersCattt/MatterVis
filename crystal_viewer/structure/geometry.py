@@ -4,15 +4,18 @@ import gemmi
 import numpy as np
 
 # Re-export canonical domain-neutral math primitives from crystal_viewer.math
-from ..math.pbc import bond_vector_mic, nearest_lattice_shift_frac
-from ..math.rotation import view_rotation, view_vec_to_elev_azim
+from ..math.pbc import bond_vector_mic, nearest_lattice_shift_frac  # noqa: F401
+from ..math.rotation import view_rotation, view_vec_to_elev_azim  # noqa: F401
 
 # ── Orthogonalisation matrix ────────────────────────────────────────────────
 def ortho_matrix(cell):
     a, b, c = cell.a, cell.b, cell.c
-    al = np.radians(cell.alpha); be = np.radians(cell.beta); ga = np.radians(cell.gamma)
+    al = np.radians(cell.alpha)
+    be = np.radians(cell.beta)
+    ga = np.radians(cell.gamma)
     cos_al, cos_be, cos_ga = np.cos(al), np.cos(be), np.cos(ga)
-    sin_ga = np.sin(ga); vol = cell.volume
+    sin_ga = np.sin(ga)
+    vol = cell.volume
     M = np.array([
         [a, b*cos_ga, c*cos_be],
         [0, b*sin_ga, c*(cos_al - cos_be*cos_ga)/sin_ga],
@@ -28,6 +31,8 @@ def _wrap_frac01(frac):
 
 
 def _nearest_pbc_cart(ref_cart, pos_cart, cell):
+    if not hasattr(cell, "find_nearest_pbc_position"):
+        cell = gemmi.UnitCell(*cell)
     ref = gemmi.Position(float(ref_cart[0]), float(ref_cart[1]), float(ref_cart[2]))
     pos = gemmi.Position(float(pos_cart[0]), float(pos_cart[1]), float(pos_cart[2]))
     nearest = cell.find_nearest_pbc_position(ref, pos, 0)

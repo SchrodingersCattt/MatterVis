@@ -16,12 +16,14 @@ def validate_style_schema(style: dict) -> dict:
         raise ValueError(f"unknown style: {render_style}")
     if disorder not in DISORDER_DISPATCH:
         raise ValueError(f"unknown disorder mode: {disorder}")
+    legacy_ortep_modes = {"ortep_axes", "principal_axes"}
     if ortep_mode is not None and str(ortep_mode) not in ORTEP_MODES:
-        # Legacy mode names (e.g. "ortep_axes", "principal_axes") may
-        # persist in scene stores from older versions. Fall back to the
-        # default solid mode rather than crashing.
+        if str(ortep_mode) not in legacy_ortep_modes:
+            raise ValueError(f"unknown ORTEP mode: {ortep_mode}")
         ortep_mode = "ortep_solid"
     if ortep_mode_minor is not None and str(ortep_mode_minor) not in ORTEP_MODES:
+        if str(ortep_mode_minor) not in legacy_ortep_modes:
+            raise ValueError(f"unknown minor ORTEP mode: {ortep_mode_minor}")
         ortep_mode_minor = None
     if projection not in ("perspective", "orthographic"):
         raise ValueError(f"unknown projection: {projection}")
@@ -169,7 +171,7 @@ def _atom_effective_opacity(atom: dict, style: dict) -> float:
     is_minor = bool(atom.get("is_minor", False))
     is_disordered = bool(atom.get("is_disordered", is_minor))
     # Occupancy controls opacity only for a loader-confirmed disordered atom.
-    if is_disordered and (
+    if is_disordered and "occ" in atom and (
         style.get("disorder") == "opacity" or style.get("force_minor_fade")
     ):
         occ = atom.get("occ", 1.0)
