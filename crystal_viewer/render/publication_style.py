@@ -46,9 +46,9 @@ DENSE_COORDINATION_PRESET: dict[str, Any] = {
         "8": {
             "main": {
                 "fill": "#4CB17A",
-                "alpha": 0.52,
+                "alpha": 0.26,
                 "edge": "#315F4B",
-                "edge_alpha": 0.52,
+                "edge_alpha": 0.14,
             },
             "panel": {
                 "fill": "#41F288",
@@ -60,9 +60,9 @@ DENSE_COORDINATION_PRESET: dict[str, Any] = {
         "6": {
             "main": {
                 "fill": "#8F50C2",
-                "alpha": 0.65,
+                "alpha": 0.30,
                 "edge": "#59336D",
-                "edge_alpha": 0.52,
+                "edge_alpha": 0.14,
             },
             "panel": {
                 "fill": "#A352D7",
@@ -74,9 +74,9 @@ DENSE_COORDINATION_PRESET: dict[str, Any] = {
         "4": {
             "main": {
                 "fill": "#3D90CE",
-                "alpha": 0.70,
+                "alpha": 0.34,
                 "edge": "#245D7D",
-                "edge_alpha": 0.52,
+                "edge_alpha": 0.14,
             },
             "panel": {
                 "fill": "#4E92D8",
@@ -93,9 +93,9 @@ DENSE_COORDINATION_PRESET: dict[str, Any] = {
         "altitude": 45.0,
     },
     "lines": {
-        "main_edge_width": 0.34,
-        "main_spoke_width": 0.24,
-        "main_spoke_alpha": 0.30,
+        "main_edge_width": 0.12,
+        "main_spoke_width": 0.0,
+        "main_spoke_alpha": 0.0,
         "panel_edge_width": 0.72,
         "panel_spoke_width": 0.52,
         "panel_spoke_alpha": 0.55,

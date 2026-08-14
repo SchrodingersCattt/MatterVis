@@ -250,23 +250,26 @@ def _draw_main_polyhedra(
     )
     setattr(face_collection, "_mattervis_role", "polyhedron_face_stack")
     ax.add_collection3d(face_collection)
-    ax.add_collection3d(
-        Line3DCollection(
+    main_edge_width = float(lines["main_edge_width"])
+    if edges and main_edge_width > 0 and any(color[3] > 0 for color in edgecolors):
+        edge_collection = Line3DCollection(
             edges,
             colors=edgecolors,
-            linewidths=float(lines["main_edge_width"]),
+            linewidths=main_edge_width,
         )
-    )
-    ax.add_collection3d(
-        Line3DCollection(
+        setattr(edge_collection, "_mattervis_role", "main_polyhedron_edges")
+        ax.add_collection3d(edge_collection)
+
+    main_spoke_width = float(lines["main_spoke_width"])
+    main_spoke_alpha = float(lines["main_spoke_alpha"])
+    if spokes and main_spoke_width > 0 and main_spoke_alpha > 0:
+        spoke_collection = Line3DCollection(
             spokes,
-            colors=to_rgba(
-                lines["spoke_color"],
-                float(lines["main_spoke_alpha"]),
-            ),
-            linewidths=float(lines["main_spoke_width"]),
+            colors=to_rgba(lines["spoke_color"], main_spoke_alpha),
+            linewidths=main_spoke_width,
         )
-    )
+        setattr(spoke_collection, "_mattervis_role", "main_polyhedron_spokes")
+        ax.add_collection3d(spoke_collection)
     return counts
 
 

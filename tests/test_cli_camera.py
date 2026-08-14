@@ -145,7 +145,7 @@ def test_render_parser_exposes_publication_layout_metadata():
             "--publication-preset",
             "dense_coordination",
             "--publication-option",
-            "materials.8.main.alpha=0.52",
+            "materials.8.main.alpha=0.26",
             "--publication-site-style",
             "M8a,M8b",
             "#111111,#222222",
@@ -169,7 +169,7 @@ def test_render_parser_exposes_publication_layout_metadata():
 
     assert args.publication_layout is True
     assert args.publication_preset == "dense_coordination"
-    assert args.publication_option == ["materials.8.main.alpha=0.52"]
+    assert args.publication_option == ["materials.8.main.alpha=0.26"]
     assert args.publication_site_style[0][-2:] == ["site A", "0.28"]
     assert args.publication_legend_entry == [["#111111,#222222", "site A"]]
     assert args.publication_panel_label == [["cn8", "[M8]X8"]]

@@ -31,9 +31,9 @@ Main-view polyhedra:
 
 | CN | Fill | Alpha | Edge | Edge alpha |
 |---:|---|---:|---|---:|
-| 8 | `#4CB17A` | 0.52 | `#315F4B` | 0.52 |
-| 6 | `#8F50C2` | 0.65 | `#59336D` | 0.52 |
-| 4 | `#3D90CE` | 0.70 | `#245D7D` | 0.52 |
+| 8 | `#4CB17A` | 0.26 | `#315F4B` | 0.14 |
+| 6 | `#8F50C2` | 0.30 | `#59336D` | 0.14 |
+| 4 | `#3D90CE` | 0.34 | `#245D7D` | 0.14 |
 
 Representative-panel polyhedra:
 
@@ -49,10 +49,11 @@ ambient 0.72, diffuse 0.28, and a `#FFF7F7` glossy highlight. Use radius
 panel ligands. Panel centre spheres use radius 0.38 and alpha 0.28.
 
 Keep native polyhedron face shading disabled. Its dark floor makes overlapping
-transparent faces muddy. Use flat translucent faces, thin edges, and explicit
-sphere lighting instead. Recommended line values are 0.34/0.24 for main
-edge/spoke width and 0.72/0.52 for panel edge/spoke width; spoke colour is
-`#465852`.
+transparent faces muddy. In a packed main cell, keep hull edges faint
+(width 0.12, alpha 0.14) and omit centre-to-ligand spokes; those spokes encode
+no additional topology and accumulate into a dark web. Representative panels
+retain edge/spoke widths 0.72/0.52 because they show one isolated polyhedron;
+spoke colour is `#465852`.
 
 ## Layout defaults
 
