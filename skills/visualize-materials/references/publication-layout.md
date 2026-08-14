@@ -11,6 +11,29 @@ palettes, fake shadows, unnecessary titles, and opaque overlays. Keep chemistry
 and geometry unchanged. Prefer editable PDF/SVG with a PNG preview when the
 downstream composition supports it.
 
+## Dense coordination polyhedra
+
+For a packed unit cell plus isolated coordination panels, use
+`--publication-layout`, `view=unit_cell`, explicit polyhedron specifications,
+and `style.publication.preset=dense_coordination`.
+
+Treat this as a material/layout preset, not a camera preset. It intentionally
+contains no camera; select the view separately for the structure.
+
+The verified material signature is flat translucent green/purple/blue
+polyhedra (CN 8/6/4), thin dark edges, and glossy coral ligand spheres. Keep
+native face shading off. Sphere lighting uses ambient 0.72 and diffuse 0.28;
+ligands use `#FF6363`. Main face alphas are 0.52/0.65/0.70 and panel face
+alphas are 0.52/0.53/0.50.
+
+Select main polyhedra by centre in the half-open fractional cell
+`0 <= f < 1`. Render mixed occupancies as weighted sphere sectors. In isolated
+panels, draw rear ligands before the translucent polyhedron and front ligands
+after it. Verify canonical counts, complete front/back partitioning, and exact
+saved dimensions. The complete parameter table is in
+`docs/agents/static_publication.md` in the MatterVis repository.
+
+
 ## Comparable panels
 
 Share camera direction and screen-up, orthographic projection, display mode,

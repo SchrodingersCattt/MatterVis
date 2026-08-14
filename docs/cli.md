@@ -48,9 +48,9 @@ mat-vis render CIF -o OUTPUT [options]
 
 | Extension | Format | Backend |
 |-----------|--------|---------|
-| `.png` | Raster image | Plotly + kaleido |
-| `.pdf` | Vector PDF | Plotly + kaleido |
-| `.svg` | Vector SVG | Plotly + kaleido |
+| `.png` | Raster image | Plotly + kaleido; Matplotlib for publication layout |
+| `.pdf` | Vector PDF | Plotly + kaleido; Matplotlib for publication layout |
+| `.svg` | Vector SVG | Plotly + kaleido; Matplotlib for publication layout |
 | `.html` | Interactive 3D | Plotly.js (CDN) |
 
 ### Display options
@@ -139,6 +139,20 @@ Example `style.json`:
 This covers advanced parameters not exposed as CLI flags: disorder modes,
 element colour overrides, force bond colour, depth cue, axis key overlay
 settings, and ORTEP fine-tuning (silhouette, hatch linewidths, z-lifts).
+
+### Dense coordination publication layout
+
+`--publication-layout` requires at least one `--polyhedron` specification. For
+PNG/PDF/SVG it uses the deterministic Matplotlib compositor, so it does not
+require Kaleido and preserves the requested canvas dimensions. HTML continues
+to use the interactive Plotly compositor.
+
+The `dense_coordination` preset owns material, transparency, sphere lighting,
+front/back ligand layers, and normalized layout. It does not prescribe a
+camera. Keep any structure-specific camera choice outside the reusable
+material preset. See [the static publication contract](agents/static_publication.md)
+for the parameter table and acceptance checks.
+
 
 ---
 
