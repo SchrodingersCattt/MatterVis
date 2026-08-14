@@ -75,6 +75,9 @@ requested canvas; they do not require Kaleido. HTML remains interactive Plotly.
 
 ## Minimal call
 
+CI parses this example with the live `mat-vis` argument parser and resolves its
+publication options. Keep it executable when CLI or preset fields change.
+
 ```bash
 mat-vis render structure.cif -o figure.png --view unit_cell \
   --publication-layout \

@@ -9,7 +9,7 @@ from ..render.compass import (
 )
 from ..render.figures import build_figure, build_publication_figure, build_row_figure
 from ..render.publication import build_static_publication_figure
-from ..render.publication_style import DENSE_COORDINATION_PRESET
+from ..render.publication import DENSE_COORDINATION_PRESET
 
 # Re-export everything that render/scene_traces exported, so
 # ``from crystal_viewer.renderer import *`` still works.

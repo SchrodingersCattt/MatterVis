@@ -17,11 +17,11 @@ from crystal_viewer.render.publication import (
     filter_polyhedra_to_half_open_cell,
     in_half_open_cell,
 )
-from crystal_viewer.render.publication_materials import (
+from crystal_viewer.render.publication.materials import (
     _polyhedron_facecolors,
     _sphere_facecolors,
 )
-from crystal_viewer.render.publication_style import publication_config
+from crystal_viewer.render.publication import publication_config
 
 
 def _overlay(center: list[float]) -> dict:

@@ -7,7 +7,8 @@ reproducible delivery path.
 ## Dense-coordination publication figure
 
 All reusable style selection and overrides travel through `mat-vis` arguments.
-No project-specific configuration file is required or committed.
+No project-specific configuration file is required or committed. CI parses the
+command below with the live CLI and publication-option resolver.
 
 ```bash
 mat-vis render structure.cif \
