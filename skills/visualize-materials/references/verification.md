@@ -1,77 +1,47 @@
-# Export Verification and Delivery
+# Verification and Delivery
 
-Read this before delivering any image, vector graphic, HTML view, or animation.
+The standard PNG workflow is in `quickstart.md`. Use this page for other formats
+or wrapper troubleshooting.
 
-## Machine checks
+## Verified-render wrapper
 
-- Resolve the intended input and record its hash when provenance matters.
-- Confirm the output exists, is non-empty, and has the requested extension.
-- For a normal image request, require exactly one selected final PNG. Do not
-  deliver HTML, PDF, SVG, or multiple variants unless explicitly requested.
-- Decode PNG; check `%PDF`, an `<svg` root, or Plotly HTML content as relevant.
-- Record dimensions, scale, camera, projection, display mode, hydrogen and cell
-  visibility, viewport or physical scale, and disorder treatment.
-- For a single structure, reject excessive paper border: after the allowed
-  background-only crop, the non-white scene bounding box should occupy at least
-  70% of both final image dimensions. Record crop box and confirm no rescaling.
-- Preserve stdout/stderr and classify warnings.
+Run delivery commands through:
 
-## Requested versus effective
-
-Record both sides separately:
-
-```text
-requested_display/style/material/backend:
-effective_display/style/material/backend:
-fallback_reason:
-requested_camera:
-effective_camera_and_up:
+```bash
+python scripts/render_verified.py \
+  --manifest OUTPUT.manifest.json \
+  --crop-padding 24 \
+  -- mat-vis render INPUT.cif -o OUTPUT.png ...
 ```
 
-Parse command output rather than inferring the backend from the filename. A
-valid PNG after Plotly/Kaleido failure may be Matplotlib flat ORTEP and does not
-prove that requested mesh, flat-stick, ball-and-stick, or wireframe output
-succeeded.
+The wrapper saves adjacent stdout/stderr logs, preserves the CLI exit code,
+checks the output signature, rejects blank PNGs, records hashes and geometry,
+classifies fallback evidence, and writes a deterministic JSON manifest. Optional
+cropping uses the command's actual background color and records the crop without
+rescaling. Do not hand-author a sidecar.
 
-Before `AttachFigure`, require the effective style/material/backend to match the
-requested visual language. A fallback ORTEP image must not be attached as the
-primary candidate for a mesh, ball-stick, stick, or wireframe request. Repair the
-static Plotly runtime and retry, or attach a matching previously verified image;
-otherwise report that a matching static PNG could not be produced. HTML requires
-an explicit interactive-output request.
+For an ordinary single-structure PNG, add `--min-bbox-coverage 0.70`. Lower it
+only for a deliberate multi-panel or whitespace-bearing composition.
 
-MatterVis 0.0.1 does not write a native manifest/sidecar and has no
-`--effective-backend` or `--no-fallback` flag. Create a caller-owned JSON sidecar
-from the command, captured stdout/stderr, input/output hashes, and checks above.
-For a successful CLI run without fallback text, intentional backend identity is
-not printed explicitly; mark it inferred from the dispatch contract or verify it
-through Python.
+## Required evidence
 
-Python callers can determine the backend without guessing:
+Require the manifest to record:
 
-```python
-from crystal_viewer.render.api import render
-result = render(scene, style)
-backend = "plotly" if result.plotly_figure is not None else "matplotlib"
-```
+- exact command and CLI exit code;
+- input/output/log SHA256;
+- output format, byte size, dimensions, and scale;
+- foreground count/fraction and bounding box for PNG;
+- requested and effective display/style/material/backend;
+- camera/projection and visibility arguments;
+- fallback reason and warning classification;
+- `visual_acceptance=pending` until final-size inspection.
 
-All combinations except `material="flat"` plus `style="ortep"` dispatch to
-Plotly. HTML is always Plotly. Static Plotly export may still fall back in the
-CLI, forcing flat ORTEP and orthographic projection.
+A decoded PNG is insufficient. `blank=true`, mismatched fallback, chemistry
+warning, or semantic-fatal warning blocks delivery.
 
-## Visual acceptance
+For PDF require `%PDF`; for SVG require an `<svg` root; for HTML require Plotly
+content. These signatures do not replace visual inspection.
 
-Command success, byte size, and successful decoding do not prove visual quality.
-Inspect the final-size artifact, including comparable scale, clipping, overlap,
-labels, cell edges, gutters, and readability. For an animation, inspect motion,
-not only one frame.
-
-If the executing model cannot inspect images, report only objective checks. It
-must not call an artifact clear, attractive, unclipped, publication-ready, or
-visually faithful. Attach it for a human or vision-capable reviewer and mark
-visual acceptance pending. Record the reviewer and observed defects or approval
-when available.
-
-Chemistry and semantic-fatal warnings block an automatic publication-ready
-claim. Export warnings may permit an explicitly disclosed fallback; display
-warnings require a diagnostic label.
+Models without image inspection report objective checks only. A vision-capable
+reviewer must inspect clipping, overlap, labels, cell edges, gutters, and
+readability at delivery size.

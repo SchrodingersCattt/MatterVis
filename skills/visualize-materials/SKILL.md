@@ -5,56 +5,41 @@ description: 'Visualize crystal and molecular material structures with MatterVis
 
 # Visualize Materials
 
-Create deterministic material visualizations. Treat object selection, disorder,
-camera, style, export backend, and verification as explicit data.
+Create deterministic material visualizations with the installed `mat-vis` CLI.
+Treat scene selection, camera, backend, and artifact verification as evidence.
 
-## Core workflow
+## Route
 
-1. Verify the input and requested deliverable.
-2. Read [installation](./references/install.md) and verify the released CLI.
-3. Always read [diagnosis and scene selection](./references/diagnose-and-select.md)
-	 before choosing a display mode or style.
-4. For images, always read the [camera contract](./references/camera.md), then the
-	 matching render path.
-5. By default export exactly one final PNG with explicit dimensions and settings.
-   Generate HTML, PDF, SVG, animations, or extra candidate files only when the
-   caller explicitly requests them.
-6. Always read [verification and delivery](./references/verification.md) before
-	 reporting or attaching the result.
+1. Read [quickstart](./references/quickstart.md) for every task.
+2. Read [installation](./references/install.md) only when installing or repairing
+   Chrome/Kaleido.
+3. Read [diagnosis](./references/diagnose-and-select.md) for disorder, ambiguous
+   chemistry, or scenes above 200 visible atoms.
+4. Read [camera](./references/camera.md) only for non-default views or comparable
+   panels.
+5. Read one specialized path when needed:
+   - [Matplotlib flat ORTEP](./references/matplotlib-flat-ortep.md)
+   - [Molecule focus](./references/molecule-highlight.md)
+   - [Polyhedra](./references/polyhedra.md)
+   - [Publication layout](./references/publication-layout.md)
+   - [Trajectory animation](./references/trajectory-animation.md)
+   - [Terminal TUI](./references/tui.md)
+6. Read [verification](./references/verification.md) only for non-PNG outputs or
+   troubleshooting the verified-render wrapper.
 
-## Render paths
+## Hard boundaries
 
-- [Plotly 3D](./references/plotly-render.md): mesh, ball-and-stick, wireframe,
-	non-ORTEP flat, interactive HTML, and normal static images.
-- [Matplotlib flat ORTEP](./references/matplotlib-flat-ortep.md): intentional
-	browser-independent 2D ORTEP output.
-
-## Optional workflows
-
-Read only when relevant:
-
-- [Molecule focus and mixed styles](./references/molecule-highlight.md)
-- [Atom- and molecule-centred polyhedra](./references/polyhedra.md)
-- [Publication layout](./references/publication-layout.md)
-- [Trajectory animation](./references/trajectory-animation.md)
-- [Terminal TUI](./references/tui.md)
-
-## Non-negotiable rules
-
-- Use the installed `mat-vis` command for examples and automation. The Python
-  package remains `crystal_viewer`; do not infer a second package name from the
-  CLI rename.
-- Diagnose before selecting `formula_unit`, `unit_cell`, `asymmetric_unit`, or
-	`cluster`; a successful export does not prove a trustworthy scene.
-- Default to an orthographic lattice `+c` view for crystals. Do not use an
-	unrecorded interactive camera as the only delivered view.
-- Use MatterVis/MolCrysKit canonical molecule identity, PBC unwrapping, and bonds.
-	Never rebuild them from screen proximity or invent pseudo-elements for styling.
-- Keep comparable panels and animation frames on explicit shared camera/scale
-	contracts.
-- Distinguish requested from effective display, style, material, backend, and
-	fallback. A decoded PNG does not prove that the requested visual language ran.
-- Do not emit HTML or a gallery of diagnostic variants for a normal static-image
-  request. Keep failed attempts as diagnostics only; attach one selected PNG.
-- A model without image-inspection capability reports objective checks and leaves
-	visual acceptance pending; it never self-certifies publication quality.
+- Use `mat-vis`, never `python -m crystal_viewer`, for delivered renders.
+- Install into an isolated environment; never let installation silently replace
+  packages in a shared scientific environment.
+- Diagnose before choosing the displayed object. Export success is not chemistry
+  or semantic validation.
+- Use orthographic lattice `+c` by default. Record any other camera explicitly.
+- Use MatterVis/MolCrysKit molecule identity, PBC unwrapping, and bonds; do not
+  reconstruct them from screen proximity.
+- Produce one requested final artifact by default, not a gallery.
+- Run delivery renders through `scripts/render_verified.py`. A file that is
+  undecodable, blank, a mismatched fallback, or unverified is not deliverable.
+- Keep requested and effective display/style/material/backend distinct.
+- Models without image inspection report objective checks and leave visual
+  acceptance pending.
