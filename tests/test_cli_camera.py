@@ -144,6 +144,8 @@ def test_render_parser_exposes_publication_layout_metadata():
             "--publication-layout",
             "--publication-preset",
             "dense_coordination",
+            "--publication-style",
+            "blender",
             "--publication-option",
             "materials.8.main.alpha=0.34",
             "--publication-site-style",
@@ -169,6 +171,7 @@ def test_render_parser_exposes_publication_layout_metadata():
 
     assert args.publication_layout is True
     assert args.publication_preset == "dense_coordination"
+    assert args.publication_style == "blender"
     assert args.publication_option == ["materials.8.main.alpha=0.34"]
     assert args.publication_site_style[0][-2:] == ["site A", "0.28"]
     assert args.publication_legend_entry == [["#111111,#222222", "site A"]]

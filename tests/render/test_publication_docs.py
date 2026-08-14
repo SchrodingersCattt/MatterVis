@@ -42,9 +42,11 @@ def test_publication_documentation_uses_live_cli_contract(path: Path) -> None:
 
     assert args.command == "render"
     assert args.publication_layout is True
+    assert args.publication_style == "blender"
     style = _parse_publication_options(
         args.publication_preset,
         args.publication_option,
+        publication_style=args.publication_style,
         site_styles=args.publication_site_style,
         legend_entries=args.publication_legend_entry,
         panel_labels=args.publication_panel_label,

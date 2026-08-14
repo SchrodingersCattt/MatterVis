@@ -192,6 +192,21 @@ def test_publication_cli_options_cover_nested_material_values() -> None:
     assert "camera" not in config["main"]
 
 
+def test_blender_style_loads_before_explicit_publication_options() -> None:
+    style = _parse_publication_options(
+        "dense_coordination",
+        ["materials.8.main.alpha=0.61"],
+        publication_style="blender",
+    )
+    config = publication_config(style)
+
+    assert style["publication"]["style"] == "blender"
+    assert config["main"]["rect"] == [0.005, 0.280, 0.585, 0.675]
+    assert config["materials"]["8"]["main"]["fill"] == "#4CB17A"
+    assert config["materials"]["8"]["main"]["alpha"] == 0.61
+    assert config["lighting"]["polyhedron_ambient"] == 0.45
+
+
 def test_polyhedron_material_uses_face_normals_and_preserves_alpha() -> None:
     faces = [
         np.asarray([[0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]),

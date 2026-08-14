@@ -15,16 +15,19 @@ downstream composition supports it.
 
 For a packed unit cell plus isolated coordination panels, use
 `--publication-layout`, `--view unit_cell`, explicit polyhedron specifications,
-and `--publication-preset dense_coordination`. Pass deviations from the preset
-with repeated `--publication-option PATH=VALUE` arguments; do not require a
-project-specific style file.
+`--publication-preset dense_coordination`, and `--publication-style blender`.
+The preset controls composition; `blender` supplies the verified material,
+lighting, line, and sphere defaults. Pass deviations with repeated
+`--publication-option PATH=VALUE` arguments, which are applied last; do not
+require a project-specific style file.
 
 Generate the final static file through `mat-vis render`. Direct Python entry
 points and builder calls are for tests and debugging; do not deliver their
 output as the CLI artifact.
 
-Treat this as a material/layout preset, not a camera preset. It intentionally
-contains no camera; select the view separately for the structure.
+Neither the layout preset nor the visual style contains a camera; select the
+view separately for the structure. The `blender` name identifies this
+MatterVis profile and does not imply a Blender rendering backend.
 
 The verified material signature is flat translucent green/purple/blue
 polyhedra (CN 8/6/4), faint hull edges, and glossy coral ligand spheres. Keep

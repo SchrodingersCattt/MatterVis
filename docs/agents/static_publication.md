@@ -25,7 +25,13 @@ the call site; never copy reference-figure angles into the material preset.
 Coordination counts are structure-specific regression data. Do not encode
 them as universal chemistry assumptions or reusable preset values.
 
-## Recommended material preset
+## Blender publication style
+
+`--publication-style blender` supplies the measured material, lighting, sphere,
+and line defaults below. The layout remains in `dense_coordination`. Repeated
+`--publication-option PATH=VALUE` arguments are merged last and override either
+built-in profile. `blender` names this visual profile; it does not change the
+Matplotlib export backend.
 
 Main-view polyhedra:
 
@@ -85,14 +91,13 @@ mat-vis render structure.cif -o figure.png --view unit_cell \
   --polyhedron '{"id":"cn6","center":"M6","ligand":"X","fallback_max":6}' \
   --polyhedron '{"id":"cn4","center":"M4","ligand":"X","fallback_max":4}' \
   --publication-preset dense_coordination \
-  --publication-option materials.8.main.fill=#4CB17A \
-  --publication-option materials.6.main.fill=#8F50C2 \
-  --publication-option materials.4.main.fill=#3D90CE \
+  --publication-style blender \
   --width 2325 --height 1888 --scale 1
 ```
 
-Reusable style selection and overrides must travel through `mat-vis`
-arguments. Structure-specific species, site labels, legend text, title, and
+Reusable preset/style selection and overrides must travel through `mat-vis`
+arguments. Explicit `--publication-option` values take precedence over
+`blender` defaults. Structure-specific species, site labels, legend text, title, and
 camera belong at the call site and must not be committed as a generic preset.
 Final files must be produced by `mat-vis render`, not delivered from a direct
 Python builder call. Direct API calls remain appropriate for unit tests and

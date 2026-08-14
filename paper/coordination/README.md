@@ -6,7 +6,9 @@ reproducible delivery path.
 
 ## Dense-coordination publication figure
 
-All reusable style selection and overrides travel through `mat-vis` arguments.
+Select the layout with `--publication-preset dense_coordination` and the
+measured material/lighting profile with `--publication-style blender`. Explicit
+`--publication-option PATH=VALUE` arguments are applied last.
 No project-specific configuration file is required or committed. CI parses the
 command below with the live CLI and publication-option resolver.
 
@@ -14,33 +16,10 @@ command below with the live CLI and publication-option resolver.
 mat-vis render structure.cif \
   -o figure.png --view unit_cell --publication-layout \
   --publication-preset dense_coordination \
+  --publication-style blender \
   --polyhedron '{"id":"cn8","center":"M8","ligand":"X","level":"atom","fallback_max":8}' \
   --polyhedron '{"id":"cn6","center":"M6","ligand":"X","level":"atom","fallback_max":6}' \
   --polyhedron '{"id":"cn4","center":"M4","ligand":"X","level":"atom","fallback_max":4}' \
-  --publication-option materials.8.main.fill=#4CB17A \
-  --publication-option materials.8.main.alpha=0.34 \
-  --publication-option materials.6.main.fill=#8F50C2 \
-  --publication-option materials.6.main.alpha=0.72 \
-  --publication-option materials.4.main.fill=#3D90CE \
-  --publication-option materials.4.main.alpha=0.78 \
-  --publication-option materials.8.main.edge_alpha=0.22 \
-  --publication-option materials.6.main.edge_alpha=0.28 \
-  --publication-option materials.4.main.edge_alpha=0.28 \
-  --publication-option materials.8.main.light_strength=0.18 \
-  --publication-option materials.6.main.light_strength=0.55 \
-  --publication-option materials.4.main.light_strength=0.65 \
-  --publication-option lines.main_edge_width=0.20 \
-  --publication-option lines.main_spoke_width=0 \
-  --publication-option lines.main_spoke_alpha=0 \
-  --publication-option lighting.polyhedron_ambient=0.45 \
-  --publication-option lighting.polyhedron_diffuse=0.55 \
-  --publication-option materials.8.panel.fill=#41F288 \
-  --publication-option materials.6.panel.fill=#A352D7 \
-  --publication-option materials.4.panel.fill=#4E92D8 \
-  --publication-option atoms.ligand_color=#FF6363 \
-  --publication-option atoms.gloss_color=#FFF7F7 \
-  --publication-option atoms.sphere_ambient=0.72 \
-  --publication-option atoms.sphere_diffuse=0.28 \
   --publication-site-style M8a,M8b '#86D533,#2F80D9' 1,1 'site A' 0.28 \
   --publication-site-style M6 '#A9B4BE' 1 'site B' 0.28 \
   --publication-legend-entry '#86D533,#2F80D9' 'site A' \
@@ -54,5 +33,5 @@ mat-vis render structure.cif \
 
 Replace the placeholder centre and ligand symbols at the call site. Titles,
 site labels, legend text, and cameras are also call-site data and must not be
-committed as part of this generic rendering style. Any additional preset field
+committed as part of this generic rendering style. Any preset or style field
 can be overridden by repeating `--publication-option PATH=VALUE`.

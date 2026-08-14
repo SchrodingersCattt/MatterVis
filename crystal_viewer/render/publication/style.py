@@ -6,7 +6,6 @@ from copy import deepcopy
 from typing import Any
 
 DENSE_COORDINATION_PRESET: dict[str, Any] = {
-    "background": "#FFFFFF",
     "main": {
         "rect": [0.005, 0.280, 0.585, 0.675],
         "zoom": 1.23,
@@ -22,10 +21,6 @@ DENSE_COORDINATION_PRESET: dict[str, Any] = {
             "gap": 0.0575,
             "label_y": 0.264,
         },
-        "center_alpha": 0.28,
-        "center_radius": {"4": 0.38, "6": 0.38, "8": 0.38},
-        "ligand_radius_front": 0.30,
-        "ligand_radius_back": 0.20,
         "by_coordination": {
             "8": {
                 "orientation": "raw",
@@ -41,6 +36,44 @@ DENSE_COORDINATION_PRESET: dict[str, Any] = {
                 "zoom": 1.42,
             },
         },
+    },
+    "title": {"x": 0.290, "y": 0.982, "size": 9.2, "weight": "bold"},
+    "panel_labels": {"size": 8.5, "weight": "bold"},
+    "legend": {
+        "rect": [0.620, 0.552, 0.300, 0.378],
+        "title": "Legend",
+        "title_x": 0.770,
+        "title_y": 0.902,
+        "title_size": 9.0,
+        "icon_x": 0.666,
+        "text_x": 0.701,
+        "row_start": 0.859,
+        "row_end": 0.597,
+        "text_size": 8.4,
+        "icon_height": 0.034,
+        "footer_x": 0.770,
+        "footer_y": 0.579,
+        "footer_size": 6.0,
+        "entries": [],
+        "footer": "",
+    },
+    "compass": {
+        "rect": [0.775, 0.365, 0.140, 0.140],
+        "line_width": 2.0,
+        "font_size": 9.5,
+        "colors": ["#C7372F", "#22A660", "#2E86C1"],
+    },
+    "site_styles": [],
+    "specs": {},
+}
+
+BLENDER_PUBLICATION_STYLE: dict[str, Any] = {
+    "background": "#FFFFFF",
+    "panels": {
+        "center_alpha": 0.28,
+        "center_radius": {"4": 0.38, "6": 0.38, "8": 0.38},
+        "ligand_radius_front": 0.30,
+        "ligand_radius_back": 0.20,
     },
     "materials": {
         "8": {
@@ -116,35 +149,10 @@ DENSE_COORDINATION_PRESET: dict[str, Any] = {
         "sphere_diffuse": 0.28,
         "sphere_clip_on": False,
     },
-    "title": {"x": 0.290, "y": 0.982, "size": 9.2, "weight": "bold"},
-    "panel_labels": {"size": 8.5, "weight": "bold"},
-    "legend": {
-        "rect": [0.620, 0.552, 0.300, 0.378],
-        "title": "Legend",
-        "title_x": 0.770,
-        "title_y": 0.902,
-        "title_size": 9.0,
-        "icon_x": 0.666,
-        "text_x": 0.701,
-        "row_start": 0.859,
-        "row_end": 0.597,
-        "text_size": 8.4,
-        "icon_height": 0.034,
-        "footer_x": 0.770,
-        "footer_y": 0.579,
-        "footer_size": 6.0,
-        "entries": [],
-        "footer": "",
-    },
-    "compass": {
-        "rect": [0.775, 0.365, 0.140, 0.140],
-        "line_width": 2.0,
-        "font_size": 9.5,
-        "colors": ["#C7372F", "#22A660", "#2E86C1"],
-    },
-    "site_styles": [],
-    "specs": {},
 }
+
+PUBLICATION_PRESETS = {"dense_coordination": DENSE_COORDINATION_PRESET}
+PUBLICATION_STYLES = {"blender": BLENDER_PUBLICATION_STYLE}
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -158,9 +166,15 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
 
 
 def publication_config(style: dict[str, Any] | None) -> dict[str, Any]:
-    """Resolve the static publication preset and caller overrides."""
+    """Merge layout preset, visual style, then caller overrides."""
     requested = dict((style or {}).get("publication") or {})
-    preset = str(requested.pop("preset", "dense_coordination"))
-    if preset != "dense_coordination":
-        raise ValueError(f"unknown publication preset: {preset}")
-    return _deep_merge(DENSE_COORDINATION_PRESET, requested)
+    preset_name = str(requested.pop("preset", "dense_coordination"))
+    style_name = str(requested.pop("style", "blender"))
+    if preset_name not in PUBLICATION_PRESETS:
+        raise ValueError(f"unknown publication preset: {preset_name}")
+    if style_name not in PUBLICATION_STYLES:
+        raise ValueError(f"unknown publication style: {style_name}")
+    config = _deep_merge(
+        PUBLICATION_PRESETS[preset_name], PUBLICATION_STYLES[style_name]
+    )
+    return _deep_merge(config, requested)

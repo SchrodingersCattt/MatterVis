@@ -284,7 +284,13 @@ def _build_render_parser(
         "--publication-preset",
         choices=("dense_coordination",),
         default="dense_coordination",
-        help="Built-in publication style selected entirely from the CLI.",
+        help="Built-in publication layout selected entirely from the CLI.",
+    )
+    p.add_argument(
+        "--publication-style",
+        choices=("blender",),
+        default="blender",
+        help="Built-in publication material and lighting style (default: blender).",
     )
     p.add_argument(
         "--publication-option",
@@ -292,8 +298,8 @@ def _build_render_parser(
         default=[],
         metavar="PATH=VALUE",
         help=(
-            "Override any publication-style field without a config file. Repeat as "
-            "needed, for example materials.8.main.alpha=0.34. Values accept JSON "
+            "Override the selected publication preset or style without a config file. "
+            "Repeat as needed, for example materials.8.main.alpha=0.40. Values accept JSON "
             "scalars or arrays; other text is kept as a string."
         ),
     )
@@ -386,12 +392,16 @@ def _parse_publication_options(
     preset: str,
     raw_options: list[str],
     *,
+    publication_style: str = "blender",
     site_styles: list[list[str]] | None = None,
     legend_entries: list[list[str]] | None = None,
     panel_labels: list[list[str]] | None = None,
     legend_footer: str | None = None,
 ) -> dict[str, Any]:
-    publication: dict[str, Any] = {"preset": preset}
+    publication: dict[str, Any] = {
+        "preset": preset,
+        "style": publication_style,
+    }
     for raw in raw_options:
         if "=" not in raw:
             raise ValueError(f"publication option {raw!r} must use PATH=VALUE syntax")
@@ -563,6 +573,7 @@ def _build_style_overrides(args: argparse.Namespace) -> Dict[str, Any]:
         publication_override = _parse_publication_options(
             args.publication_preset,
             args.publication_option,
+            publication_style=args.publication_style,
             site_styles=args.publication_site_style,
             legend_entries=args.publication_legend_entry,
             panel_labels=args.publication_panel_label,
