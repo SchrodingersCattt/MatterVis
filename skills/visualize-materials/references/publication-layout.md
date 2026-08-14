@@ -34,8 +34,9 @@ Sphere lighting uses ambient 0.72 and diffuse 0.28; ligands use `#FF6363`.
 For a packed main cell, use family-specific roles rather than uniform
 transparency: CN8 alpha/light-strength 0.34/0.18, CN6 0.72/0.55, and CN4
 0.78/0.65. Draw edges only on front-facing hull triangles in the same
-depth-sorted face collection, and omit centre-to-ligand spokes. Isolated panels
-retain face alphas 0.52/0.53/0.50 and their structural spokes.
+depth-sorted face collection, and omit centre-to-ligand spokes. Isolated panels retain face alphas 0.52/0.53/0.50. Draw rear-only hull edges
+and every interior spoke below the translucent face stack, then front-facing
+hull edges above it; never place a complete wireframe above the polyhedron.
 
 Select main polyhedra by centre in the half-open fractional cell
 `0 <= f < 1`. Render mixed occupancies as weighted sphere sectors. In isolated

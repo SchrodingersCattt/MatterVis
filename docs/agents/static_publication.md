@@ -56,9 +56,11 @@ all families: CN8 is the translucent background network (light strength 0.18),
 while CN6/CN4 are opaque foreground units (0.55/0.65). Put main-view edges on
 their own front-facing hull triangles inside the depth-sorted face collection;
 back-facing edges have zero alpha and are covered by nearer faces. Use width
-0.20 and omit centre-to-ligand spokes, which accumulate into a dark web. Representative panels
-retain edge/spoke widths 0.72/0.52 because they show one isolated polyhedron;
-spoke colour is `#465852`.
+0.20 and omit centre-to-ligand spokes, which accumulate into a dark web. Representative panels retain edge/spoke widths 0.72/0.52 because they show
+one isolated polyhedron. Apply convex hidden-line layering there as well:
+rear-only hull edges and all interior spokes are drawn before the translucent
+face stack; front-facing hull edges are drawn after it. The face therefore
+attenuates hidden lines naturally. Spoke colour is `#465852`.
 
 ## Layout defaults
 

@@ -206,6 +206,44 @@ def _front_face_mask(
     return visible
 
 
+def _split_hull_edges_by_facing(
+    overlay: dict[str, Any],
+    view_direction: np.ndarray,
+) -> tuple[list[np.ndarray], list[np.ndarray]]:
+    """Split convex-hull edges into camera-facing and rear collections."""
+    shell = np.asarray(overlay.get("shell_coords") or [], dtype=float)
+    center = np.asarray(overlay.get("center_coords"), dtype=float)
+    if shell.ndim != 2 or shell.shape[1:] != (3,) or center.shape != (3,):
+        return [], []
+
+    hull = overlay.get("hull") or {}
+    edge_keys = set(_hull_edges(shell, hull))
+    front_by_edge = {edge: False for edge in edge_keys}
+    simplices = _hull_simplices(shell, hull)
+    face_mask = _front_face_mask([overlay], view_direction)
+    for simplex, is_front in zip(simplices, face_mask):
+        for first, second in (
+            (simplex[0], simplex[1]),
+            (simplex[1], simplex[2]),
+            (simplex[0], simplex[2]),
+        ):
+            edge = tuple(sorted((int(first), int(second))))
+            if edge in front_by_edge and is_front:
+                front_by_edge[edge] = True
+
+    eye = np.asarray(view_direction, dtype=float)
+    eye /= max(float(np.linalg.norm(eye)), 1e-12)
+    front: list[np.ndarray] = []
+    rear: list[np.ndarray] = []
+    for edge in sorted(edge_keys):
+        segment = np.vstack((shell[edge[0]], shell[edge[1]]))
+        is_front = front_by_edge[edge]
+        if len(simplices) == 0:
+            is_front = float(np.dot(segment.mean(axis=0) - center, eye)) >= 0.0
+        (front if is_front else rear).append(segment)
+    return front, rear
+
+
 def _coordination_number(result: dict[str, Any]) -> int:
     overlay = representative_polyhedron_overlay(result)
     return len(overlay.get("shell_coords") or []) if overlay is not None else 0
@@ -607,7 +645,33 @@ def _draw_panel(
         )
 
     material = _material_for(config, result, coordination, "panel")
-    faces, edges, spokes = _polyhedron_geometry([shifted])
+    faces, _, spokes = _polyhedron_geometry([shifted])
+    front_edges, rear_edges = _split_hull_edges_by_facing(shifted, basis[2])
+    lines = config["lines"]
+    edge_color = to_rgba(material["edge"], float(material["edge_alpha"]))
+
+    if rear_edges:
+        ax.add_collection3d(
+            Line3DCollection(
+                rear_edges,
+                colors=edge_color,
+                linewidths=float(lines["panel_edge_width"]),
+                zorder=0.35,
+            )
+        )
+    if spokes:
+        ax.add_collection3d(
+            Line3DCollection(
+                spokes,
+                colors=to_rgba(
+                    lines["spoke_color"],
+                    float(lines["panel_spoke_alpha"]),
+                ),
+                linewidths=float(lines["panel_spoke_width"]),
+                zorder=0.45,
+            )
+        )
+
     panel_facecolors = [
         to_rgba(material["fill"], float(material["alpha"])) for _ in faces
     ]
@@ -629,29 +693,15 @@ def _draw_panel(
             zorder=1.0,
         )
     )
-    lines = config["lines"]
-    ax.add_collection3d(
-        Line3DCollection(
-            edges,
-            colors=to_rgba(
-                material["edge"],
-                float(material["edge_alpha"]),
-            ),
-            linewidths=float(lines["panel_edge_width"]),
-            zorder=1.1,
+    if front_edges:
+        ax.add_collection3d(
+            Line3DCollection(
+                front_edges,
+                colors=edge_color,
+                linewidths=float(lines["panel_edge_width"]),
+                zorder=1.1,
+            )
         )
-    )
-    ax.add_collection3d(
-        Line3DCollection(
-            spokes,
-            colors=to_rgba(
-                lines["spoke_color"],
-                float(lines["panel_spoke_alpha"]),
-            ),
-            linewidths=float(lines["panel_spoke_width"]),
-            zorder=1.2,
-        )
-    )
     for index in sorted(front):
         _draw_sphere(
             ax,
@@ -666,7 +716,13 @@ def _draw_panel(
             diffuse=sphere_diffuse,
             clip_on=sphere_clip_on,
         )
-    return {"front_ligands": len(front), "back_ligands": len(back)}
+    return {
+        "front_ligands": len(front),
+        "back_ligands": len(back),
+        "front_edges": len(front_edges),
+        "back_edges": len(rear_edges),
+        "interior_spokes": len(spokes),
+    }
 
 
 def _panel_rects(count: int, layout: dict[str, Any]) -> list[list[float]]:

@@ -12,6 +12,7 @@ from crystal_viewer.render.cli import _parse_publication_options
 from crystal_viewer.render.publication import (
     _normalise_sectors,
     _orient_panel,
+    _split_hull_edges_by_facing,
     build_static_publication_figure,
     filter_polyhedra_to_half_open_cell,
     in_half_open_cell,
@@ -232,6 +233,29 @@ def test_sphere_material_has_bright_floor_and_directional_gradient() -> None:
     assert np.allclose(shaded[..., 3], 1.0)
 
 
+def test_octahedron_edges_partition_into_front_and_occluded_sets() -> None:
+    overlay = {
+        "center_coords": [0.0, 0.0, 0.0],
+        "shell_coords": [
+            [1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, -1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, -1.0],
+        ],
+        "hull": {},
+    }
+
+    front, rear = _split_hull_edges_by_facing(
+        overlay,
+        np.asarray([0.0, 0.0, 1.0]),
+    )
+
+    assert len(front) == 8
+    assert len(rear) == 4
+
+
 def test_raw_panel_orientation_returns_centered_shell() -> None:
     overlay = {
         "center_coords": [1.0, 2.0, 3.0],
@@ -267,8 +291,12 @@ def test_static_publication_uses_face_stack_and_depth_layers(tmp_path) -> None:
 
     assert metadata["cell_polyhedron_counts"] == {"tetra": 1}
     assert metadata["ligand_vertex_count"] == 4
-    assert sum(metadata["panel_layers"]["tetra"].values()) == 4
-    assert metadata["panel_layers"]["tetra"]["back_ligands"] >= 1
+    panel_layers = metadata["panel_layers"]["tetra"]
+    assert panel_layers["front_ligands"] + panel_layers["back_ligands"] == 4
+    assert panel_layers["back_ligands"] >= 1
+    assert panel_layers["front_edges"] > 0
+    assert panel_layers["front_edges"] + panel_layers["back_edges"] == 6
+    assert panel_layers["interior_spokes"] == 4
     face_stacks = [
         collection
         for axis in figure.axes
