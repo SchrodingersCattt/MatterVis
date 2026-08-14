@@ -11,7 +11,7 @@ resolver may replace the environment's existing `molcrys-kit`.
 bash scripts/install_runtime.sh --venv /absolute/path/to/mattervis-venv
 ```
 
-The script installs `matter-vis==0.0.1`, installs Chrome with
+The script installs `matter-vis==0.0.2`, installs Chrome with
 `plotly_get_chrome -y`, verifies the `mat-vis` console entry point, and runs a
 nonblank 3D export at a production-like canvas. Use its venv's `mat-vis`.
 

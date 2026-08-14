@@ -41,7 +41,7 @@ fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 "$python_cmd" -m venv "$venv"
-"$venv/bin/python" -m pip install "matter-vis==0.0.1"
+"$venv/bin/python" -m pip install "matter-vis==0.0.2"
 
 if ((with_system_libs)); then
   if ! command -v apt-get >/dev/null 2>&1; then
@@ -74,8 +74,8 @@ import sys
 from pathlib import Path
 
 version = importlib.metadata.version("matter-vis")
-if version != "0.0.1":
-    raise SystemExit(f"expected matter-vis 0.0.1, got {version}")
+if version != "0.0.2":
+    raise SystemExit(f"expected matter-vis 0.0.2, got {version}")
 module_path = Path(crystal_viewer.__file__).resolve()
 venv_path = Path(sys.prefix).resolve()
 if venv_path not in module_path.parents:

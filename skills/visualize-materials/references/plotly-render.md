@@ -29,7 +29,7 @@ Use config only for fields with no CLI representation.
 
 ## Failure behavior
 
-MatterVis 0.0.1 can fall back from Plotly/Kaleido to Matplotlib flat ORTEP.
+MatterVis 0.0.2 can fall back from Plotly/Kaleido to Matplotlib flat ORTEP.
 That changes the visual language. `scripts/render_verified.py` captures the
 fallback text and records the effective backend; do not deliver a fallback as
 the requested mesh, ball-stick, stick, or wireframe image.

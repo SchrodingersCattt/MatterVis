@@ -15,7 +15,7 @@ Record, where available:
 A decoded export with an untrustworthy object selection is a diagnostic artifact,
 not a publication figure.
 
-MatterVis 0.0.1 has no `diagnose` subcommand. Use capability tiers:
+MatterVis 0.0.2 has no `diagnose` subcommand. Use capability tiers:
 
 1. For an admitted small scene, `mat-vis tui INPUT --no-interaction --format
   structured --display <mode>` reports formulas, source/expanded/displayed/
