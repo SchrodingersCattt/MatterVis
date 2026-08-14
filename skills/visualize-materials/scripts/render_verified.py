@@ -12,9 +12,39 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from PIL import Image
 
-from check_static_export import analyze_png
+
+def analyze_png(
+    path: Path,
+    *,
+    background: tuple[int, int, int] = (255, 255, 255),
+    tolerance: int = 8,
+) -> dict[str, Any]:
+    with Image.open(path) as source:
+        image = source.convert("RGBA")
+        canvas = Image.new("RGBA", image.size, (*background, 255))
+        rgb = np.asarray(Image.alpha_composite(canvas, image).convert("RGB"))
+    delta = np.max(np.abs(rgb.astype(np.int16) - np.asarray(background)), axis=2)
+    foreground = delta > tolerance
+    count = int(foreground.sum())
+    total = int(foreground.size)
+    minimum = max(64, int(total * 1e-6))
+    if count:
+        ys, xs = np.where(foreground)
+        bbox = [int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1]
+    else:
+        bbox = None
+    return {
+        "format": "PNG",
+        "width": int(rgb.shape[1]),
+        "height": int(rgb.shape[0]),
+        "foreground_pixels": count,
+        "foreground_fraction": count / total,
+        "foreground_bbox": bbox,
+        "blank": count < minimum,
+    }
 
 
 def sha256(path: Path) -> str:

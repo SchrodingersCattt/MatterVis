@@ -16,9 +16,9 @@ For standard commands, dimensions, camera, and verified delivery, follow
 Diagnose the scene before reducing render quality. Lowering scale or switching
 material does not repair an invalid chemical selection.
 
-Use `scale=1` for the first large-canvas candidate. Probe the exact final pixel
-dimensions with `scripts/check_static_export.py`; do not trust a tiny probe.
-A zero exit code and a nonzero file size do not rule out an all-white export.
+Use `scale=1` for the first large-canvas render and run that actual delivery
+through `scripts/render_verified.py`. A zero exit code and nonzero file size do
+not rule out an all-white export.
 
 ## Config precedence
 
@@ -34,5 +34,5 @@ That changes the visual language. `scripts/render_verified.py` captures the
 fallback text and records the effective backend; do not deliver a fallback as
 the requested mesh, ball-stick, stick, or wireframe image.
 
-If Chrome disappears, rerun the production-sized probe and follow `install.md`.
+If Chrome disappears, preserve the real render error and follow `install.md`.
 Generate HTML only after an explicit interactive-output request.

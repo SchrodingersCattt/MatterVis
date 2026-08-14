@@ -2,18 +2,22 @@
 
 Use this page for the normal path from an input structure to one verified PNG.
 
-## 1. Install once, in isolation
+## 1. Install once
 
 From the skill directory:
 
 ```bash
+bash scripts/install_runtime.sh
+```
+
+This installs into the current Python environment. To isolate it explicitly:
+
+```bash
 bash scripts/install_runtime.sh --venv /absolute/path/to/mattervis-venv
-export PATH=/absolute/path/to/mattervis-venv/bin:$PATH
 ```
 
 Add `--with-system-libs` only when system package installation is authorized.
-The installer verifies the distribution, Chrome startup, and a nonblank 3D
-export at `2400x1800, scale=1`. See `install.md` for repair details.
+The installer verifies the distribution and CLI. See `install.md` for repairs.
 
 ## 2. Admit the scene
 
@@ -70,20 +74,7 @@ Do not use `--config` for fields that have CLI flags. Current parser defaults
 overwrite those config values even when their flags are omitted. Reserve config
 for config-only policies such as disorder handling or atom groups.
 
-## 4. Probe at production dimensions
-
-Before a Plotly-backed static export, run:
-
-```bash
-python scripts/check_static_export.py \
-  --width 2400 --height 1800 --scale 1
-```
-
-Use the final render's width, height, and scale, not a tiny smoke-test canvas.
-The probe must decode and contain foreground pixels. Browser detection or a
-64x64 scatter write is insufficient.
-
-## 5. Render with automatic evidence
+## 4. Render with automatic evidence
 
 Run the same `mat-vis render` command through the wrapper:
 
@@ -110,7 +101,7 @@ Python rendering API.
 For figures with intentional paper whitespace, omit or lower
 `--min-bbox-coverage`; blank-image rejection remains mandatory.
 
-## 6. Deliver
+## 5. Deliver
 
 Require:
 

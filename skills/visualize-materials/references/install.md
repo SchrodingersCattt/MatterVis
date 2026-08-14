@@ -2,18 +2,24 @@
 
 Use this only for installation, version verification, or Chrome/Kaleido repair.
 
-## Isolated installation
+## Installation
 
-Never install MatterVis into a shared scientific environment. Its dependency
-resolver may replace the environment's existing `molcrys-kit`.
+```bash
+bash scripts/install_runtime.sh
+```
+
+By default this installs into the current Python environment. A venv is
+optional, not a prerequisite:
 
 ```bash
 bash scripts/install_runtime.sh --venv /absolute/path/to/mattervis-venv
 ```
 
+Installing may update an existing `molcrys-kit`. Use a venv only when that
+dependency change is undesirable or isolation was requested.
+
 The script installs `matter-vis==0.0.2`, installs Chrome with
-`plotly_get_chrome -y`, verifies the `mat-vis` console entry point, and runs a
-nonblank 3D export at a production-like canvas. Use its venv's `mat-vis`.
+`plotly_get_chrome -y`, and verifies the `mat-vis` console entry point.
 
 The distribution version is authoritative. Record the Python executable,
 distribution version, module path, and `mat-vis render --help`; do not treat an
@@ -22,7 +28,7 @@ internal module-version string as the release identity.
 ## Chrome shared libraries
 
 `Chrome installed successfully` means the executable was downloaded, not that it
-can start. If the probe reports `BrowserFailedError`, inspect the exact browser:
+can start. If a real static render reports `BrowserFailedError`, inspect it:
 
 ```bash
 ldd /path/to/chrome | grep 'not found'
@@ -46,18 +52,6 @@ NSS packages above.
 Pass `--with-system-libs` to the installer only when apt changes are authorized.
 Otherwise preserve the missing-library output and report the blocker.
 
-## Decisive probe
-
-Always probe at the intended final width, height, and scale:
-
-```bash
-python scripts/check_static_export.py \
-  --width WIDTH --height HEIGHT --scale SCALE
-```
-
-A browser-path check or tiny scatter image cannot admit a production render.
-The probe must start Chrome, export a 3D mesh, decode the PNG, and find
-foreground pixels. Rerun it after installing libraries.
 
 Do not install nonexistent `kaleido[chromium]` extras or silently switch to
 Playwright/HTML. HTML is a deliverable only when explicitly requested.

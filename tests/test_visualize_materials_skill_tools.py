@@ -25,7 +25,6 @@ def _load(name: str):
     return module
 
 
-probe = _load("check_static_export")
 verified = _load("render_verified")
 
 
@@ -33,7 +32,7 @@ def test_png_analysis_rejects_nonempty_all_white_file(tmp_path: Path) -> None:
     blank = tmp_path / "blank.png"
     Image.new("RGB", (400, 300), "white").save(blank)
 
-    stats = probe.analyze_png(blank)
+    stats = verified.analyze_png(blank)
 
     assert stats["blank"] is True
     assert stats["foreground_pixels"] == 0
@@ -46,7 +45,7 @@ def test_png_analysis_records_foreground_geometry(tmp_path: Path) -> None:
     ImageDraw.Draw(image).rectangle((40, 30, 359, 269), fill="#3366CC")
     image.save(output)
 
-    stats = probe.analyze_png(output)
+    stats = verified.analyze_png(output)
 
     assert stats["blank"] is False
     assert stats["foreground_bbox"] == [40, 30, 360, 270]
@@ -59,7 +58,7 @@ def test_png_analysis_uses_declared_nonwhite_background(tmp_path: Path) -> None:
     ImageDraw.Draw(image).rectangle((20, 10, 179, 89), fill="#CC3333")
     image.save(output)
 
-    stats = probe.analyze_png(output, background=(32, 48, 64))
+    stats = verified.analyze_png(output, background=(32, 48, 64))
 
     assert stats["blank"] is False
     assert stats["foreground_bbox"] == [20, 10, 180, 90]
@@ -187,3 +186,16 @@ def test_verified_wrapper_writes_evidence_and_rejects_blank(
         assert evidence["output"]["height"] == 90
     assert Path(evidence["logs"]["stdout"]).is_file()
     assert Path(evidence["logs"]["stderr"]).is_file()
+
+
+def test_installer_keeps_venv_optional() -> None:
+    run = subprocess.run(
+        ["bash", str(SCRIPTS / "install_runtime.sh"), "--help"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "Usage: install_runtime.sh [options]" in run.stdout
+    assert "--venv ABSOLUTE_PATH" in run.stdout
+    assert "--venv ABSOLUTE_PATH [options]" not in run.stdout
