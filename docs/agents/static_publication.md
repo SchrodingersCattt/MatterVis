@@ -48,8 +48,10 @@ ambient 0.72, diffuse 0.28, and a `#FFF7F7` glossy highlight. Use radius
 0.20 in the full cell, radius 0.30 for front panel ligands, and 0.20 for back
 panel ligands. Panel centre spheres use radius 0.38 and alpha 0.28.
 
-Keep native polyhedron face shading disabled. Its dark floor makes overlapping
-transparent faces muddy. In a packed main cell, keep hull edges faint
+Keep native Matplotlib face shading disabled because its dark floor makes
+overlapping transparent faces muddy. Apply MatterVis camera-aware face lighting
+instead: ambient 0.45 plus diffuse 0.55, computed from each face normal while
+preserving its alpha. In a packed main cell, keep hull edges faint
 (width 0.12, alpha 0.14) and omit centre-to-ligand spokes; those spokes encode
 no additional topology and accumulate into a dark web. Representative panels
 retain edge/spoke widths 0.72/0.52 because they show one isolated polyhedron;

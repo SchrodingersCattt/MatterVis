@@ -87,10 +87,8 @@ DENSE_COORDINATION_PRESET: dict[str, Any] = {
         },
     },
     "lighting": {
-        "polyhedron_shade_main": False,
-        "polyhedron_shade_panel": False,
-        "azimuth": 320.0,
-        "altitude": 45.0,
+        "polyhedron_ambient": 0.45,
+        "polyhedron_diffuse": 0.55,
     },
     "lines": {
         "main_edge_width": 0.12,

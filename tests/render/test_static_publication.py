@@ -16,7 +16,10 @@ from crystal_viewer.render.publication import (
     filter_polyhedra_to_half_open_cell,
     in_half_open_cell,
 )
-from crystal_viewer.render.publication_materials import _sphere_facecolors
+from crystal_viewer.render.publication_materials import (
+    _polyhedron_facecolors,
+    _sphere_facecolors,
+)
 from crystal_viewer.render.publication_style import publication_config
 
 
@@ -152,8 +155,8 @@ def test_dense_coordination_material_does_not_pin_camera() -> None:
         "camera" not in profile
         for profile in config["panels"]["by_coordination"].values()
     )
-    assert config["lighting"]["polyhedron_shade_main"] is False
-    assert config["lighting"]["polyhedron_shade_panel"] is False
+    assert config["lighting"]["polyhedron_ambient"] == 0.45
+    assert config["lighting"]["polyhedron_diffuse"] == 0.55
     assert config["lines"]["main_edge_width"] == 0.12
     assert config["lines"]["main_spoke_width"] == 0.0
     assert config["lines"]["main_spoke_alpha"] == 0.0
@@ -182,6 +185,24 @@ def test_publication_cli_options_cover_nested_material_values() -> None:
     assert config["legend"]["footer"] == "coordination colors"
     assert config["specs"]["cn8"]["panel_label"] == "[M8]X8"
     assert "camera" not in config["main"]
+
+
+def test_polyhedron_material_uses_face_normals_and_preserves_alpha() -> None:
+    faces = [
+        np.asarray([[0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]),
+        np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]),
+    ]
+    shaded = _polyhedron_facecolors(
+        faces,
+        ["#4CB17A80", "#4CB17A80"],
+        basis=(np.eye(3)[0], np.eye(3)[1], np.eye(3)[2]),
+        ambient=0.45,
+        diffuse=0.55,
+    )
+
+    assert shaded.shape == (2, 4)
+    assert not np.allclose(shaded[0, :3], shaded[1, :3])
+    assert np.allclose(shaded[:, 3], 128 / 255)
 
 
 def test_sphere_material_has_bright_floor_and_directional_gradient() -> None:

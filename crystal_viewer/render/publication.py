@@ -12,7 +12,7 @@ from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.colors import LightSource, to_rgba
+from matplotlib.colors import to_rgba
 from matplotlib.patches import Circle, FancyBboxPatch, Wedge
 from mpl_toolkits.mplot3d import proj3d
 from mpl_toolkits.mplot3d.art3d import Line3DCollection, Poly3DCollection
@@ -22,7 +22,11 @@ from .publication_geometry import (
     filter_polyhedra_to_half_open_cell,
     in_half_open_cell,
 )
-from .publication_materials import _axis_camera_basis, _sphere_facecolors
+from .publication_materials import (
+    _axis_camera_basis,
+    _polyhedron_facecolors,
+    _sphere_facecolors,
+)
 from .publication_style import _deep_merge, publication_config
 from .topology import _hull_edges, _hull_simplices, representative_polyhedron_overlay
 
@@ -239,13 +243,15 @@ def _draw_main_polyhedra(
     lighting = config["lighting"]
     face_collection = Poly3DCollection(
         faces,
-        facecolors=facecolors,
-        linewidths=0.0,
-        shade=bool(lighting["polyhedron_shade_main"]),
-        lightsource=LightSource(
-            azdeg=float(lighting["azimuth"]),
-            altdeg=float(lighting["altitude"]),
+        facecolors=_polyhedron_facecolors(
+            faces,
+            facecolors,
+            basis=_axis_camera_basis(ax),
+            ambient=float(lighting["polyhedron_ambient"]),
+            diffuse=float(lighting["polyhedron_diffuse"]),
         ),
+        linewidths=0.0,
+        shade=False,
         zsort="average",
     )
     setattr(face_collection, "_mattervis_role", "polyhedron_face_stack")
@@ -566,18 +572,22 @@ def _draw_panel(
 
     material = _material_for(config, result, coordination, "panel")
     faces, edges, spokes = _polyhedron_geometry([shifted])
+    panel_facecolors = [
+        to_rgba(material["fill"], float(material["alpha"])) for _ in faces
+    ]
     ax.add_collection3d(
         Poly3DCollection(
             faces,
-            facecolors=material["fill"],
-            edgecolors=material["fill"],
-            linewidths=0.0,
-            alpha=float(material["alpha"]),
-            shade=bool(config["lighting"]["polyhedron_shade_panel"]),
-            lightsource=LightSource(
-                azdeg=float(config["lighting"]["azimuth"]),
-                altdeg=float(config["lighting"]["altitude"]),
+            facecolors=_polyhedron_facecolors(
+                faces,
+                panel_facecolors,
+                basis=basis,
+                ambient=float(config["lighting"]["polyhedron_ambient"]),
+                diffuse=float(config["lighting"]["polyhedron_diffuse"]),
             ),
+            edgecolors="none",
+            linewidths=0.0,
+            shade=False,
             zsort="average",
             zorder=1.0,
         )

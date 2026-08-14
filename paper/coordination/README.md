@@ -28,6 +28,8 @@ mat-vis render structure.cif \
   --publication-option lines.main_edge_width=0.12 \
   --publication-option lines.main_spoke_width=0 \
   --publication-option lines.main_spoke_alpha=0 \
+  --publication-option lighting.polyhedron_ambient=0.45 \
+  --publication-option lighting.polyhedron_diffuse=0.55 \
   --publication-option materials.8.panel.fill=#41F288 \
   --publication-option materials.6.panel.fill=#A352D7 \
   --publication-option materials.4.panel.fill=#4E92D8 \

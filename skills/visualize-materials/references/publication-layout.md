@@ -28,8 +28,10 @@ contains no camera; select the view separately for the structure.
 
 The verified material signature is flat translucent green/purple/blue
 polyhedra (CN 8/6/4), faint hull edges, and glossy coral ligand spheres. Keep
-native face shading off. Sphere lighting uses ambient 0.72 and diffuse 0.28;
-ligands use `#FF6363`. For a packed main cell, use face alphas
+native Matplotlib face shading off and use the controlled camera-aware
+polyhedron material instead (ambient 0.45, diffuse 0.55, alpha preserved).
+Sphere lighting uses ambient 0.72 and diffuse 0.28; ligands use `#FF6363`.
+For a packed main cell, use face alphas
 0.26/0.30/0.34, edge alpha 0.14, and no centre-to-ligand spokes. Isolated
 panels retain face alphas 0.52/0.53/0.50 and their structural spokes.
 
