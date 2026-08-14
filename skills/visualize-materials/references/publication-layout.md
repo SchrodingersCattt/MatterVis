@@ -14,12 +14,14 @@ downstream composition supports it.
 ## Dense coordination polyhedra
 
 For a packed unit cell plus isolated coordination panels, use
-`--publication-layout`, `view=unit_cell`, explicit polyhedron specifications,
-and `style.publication.preset=dense_coordination`.
+`--publication-layout`, `--view unit_cell`, explicit polyhedron specifications,
+and `--publication-preset dense_coordination`. Pass deviations from the preset
+with repeated `--publication-option PATH=VALUE` arguments; do not require a
+project-specific style file.
 
-Generate the final static file through `mat-vis render` or the repository-backed
-`python -m crystal_viewer render` equivalent. Direct Python builder calls are
-for tests and debugging; do not deliver their output as the CLI artifact.
+Generate the final static file through `mat-vis render`. Direct Python entry
+points and builder calls are for tests and debugging; do not deliver their
+output as the CLI artifact.
 
 Treat this as a material/layout preset, not a camera preset. It intentionally
 contains no camera; select the view separately for the structure.

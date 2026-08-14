@@ -22,9 +22,8 @@ the call site; never copy reference-figure angles into the material preset.
 - Do not mutate topology data while selecting the canonical cell or a
   representative polyhedron.
 
-For the garnet verification structure, the half-open rule produces 24 O8,
-16 O6, and 24 O4 polyhedra. These counts are a regression fixture, not a
-universal chemistry assumption.
+Coordination counts are structure-specific regression data. Do not encode
+them as universal chemistry assumptions or reusable preset values.
 
 ## Recommended material preset
 
@@ -69,21 +68,26 @@ requested canvas; they do not require Kaleido. HTML remains interactive Plotly.
 ## Minimal call
 
 ```bash
-mat-vis render garnet.cif -o garnet.png --view unit_cell \
+mat-vis render structure.cif -o figure.png --view unit_cell \
   --publication-layout \
-  --polyhedron '{"id":"o8","center":"Gd","ligand":"O","fallback_max":8}' \
-  --polyhedron '{"id":"o6","center":"Zr","ligand":"O","fallback_max":6}' \
-  --polyhedron '{"id":"o4","center":"Al","ligand":"O","fallback_max":4}' \
-  --config paper/coordination/garnet-publication-style.json \
+  --polyhedron '{"id":"cn8","center":"M8","ligand":"X","fallback_max":8}' \
+  --polyhedron '{"id":"cn6","center":"M6","ligand":"X","fallback_max":6}' \
+  --polyhedron '{"id":"cn4","center":"M4","ligand":"X","fallback_max":4}' \
+  --publication-preset dense_coordination \
+  --publication-option materials.8.main.fill=#4CB17A \
+  --publication-option materials.6.main.fill=#8F50C2 \
+  --publication-option materials.4.main.fill=#3D90CE \
   --width 2325 --height 1888 --scale 1
 ```
 
-The committed JSON contains the complete garnet site styles, legend, and panel
-labels. Final files must be produced by this CLI path (or installed
-`mat-vis render`), not delivered from a direct Python builder call. Direct API
-calls remain appropriate for unit tests and renderer development.
+Reusable style selection and overrides must travel through `mat-vis`
+arguments. Structure-specific species, site labels, legend text, title, and
+camera belong at the call site and must not be committed as a generic preset.
+Final files must be produced by `mat-vis render`, not delivered from a direct
+Python builder call. Direct API calls remain appropriate for unit tests and
+renderer development.
 
-Do not add a camera to this reusable style file. Record any selected camera
+Do not add a camera to the reusable preset. Record any selected camera
 with the figure provenance for that structure.
 
 ## Acceptance checks

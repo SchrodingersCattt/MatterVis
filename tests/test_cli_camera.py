@@ -88,10 +88,12 @@ def test_polyhedron_json_supports_atom_and_molecule_centres():
 
 
 def test_polyhedron_json_preserves_independent_paint_properties():
-    spec = _parse_polyhedron_specs([
-        '{"center":"Pb","ligand":"I","level":"atom",'
-        '"opacity":0.72,"edge_opacity":0.65,"edge_width":2.5,"flatshading":false}'
-    ])[0]
+    spec = _parse_polyhedron_specs(
+        [
+            '{"center":"Pb","ligand":"I","level":"atom",'
+            '"opacity":0.72,"edge_opacity":0.65,"edge_width":2.5,"flatshading":false}'
+        ]
+    )[0]
 
     assert spec["opacity"] == 0.72
     assert spec["edge_opacity"] == 0.65
@@ -111,10 +113,16 @@ def test_render_parser_exposes_repeatable_polyhedra():
 
     args = parser.parse_args(
         [
-            "render", "input.cif", "-o", "out.png",
-            "--polyhedron", '{"center":"Pb","ligand":"I","level":"atom"}',
-            "--polyhedron", '{"center":"C6N2","ligand":"ClO4"}',
-            "--polyhedron-cutoff", "6.5",
+            "render",
+            "input.cif",
+            "-o",
+            "out.png",
+            "--polyhedron",
+            '{"center":"Pb","ligand":"I","level":"atom"}',
+            "--polyhedron",
+            '{"center":"C6N2","ligand":"ClO4"}',
+            "--polyhedron-cutoff",
+            "6.5",
         ]
     )
 
@@ -127,13 +135,45 @@ def test_render_parser_exposes_publication_layout_metadata():
     subparsers = parser.add_subparsers(dest="command")
     _build_render_parser(subparsers)
 
-    args = parser.parse_args([
-        "render", "input.cif", "-o", "out.png",
-        "--publication-layout", "--title", "Crystal structure",
-        "--subtitle", "Cubic phase",
-    ])
+    args = parser.parse_args(
+        [
+            "render",
+            "input.cif",
+            "-o",
+            "out.png",
+            "--publication-layout",
+            "--publication-preset",
+            "dense_coordination",
+            "--publication-option",
+            "materials.8.main.alpha=0.52",
+            "--publication-site-style",
+            "M8a,M8b",
+            "#111111,#222222",
+            "1,1",
+            "site A",
+            "0.28",
+            "--publication-legend-entry",
+            "#111111,#222222",
+            "site A",
+            "--publication-panel-label",
+            "cn8",
+            "[M8]X8",
+            "--publication-legend-footer",
+            "coordination colors",
+            "--title",
+            "Crystal structure",
+            "--subtitle",
+            "Cubic phase",
+        ]
+    )
 
     assert args.publication_layout is True
+    assert args.publication_preset == "dense_coordination"
+    assert args.publication_option == ["materials.8.main.alpha=0.52"]
+    assert args.publication_site_style[0][-2:] == ["site A", "0.28"]
+    assert args.publication_legend_entry == [["#111111,#222222", "site A"]]
+    assert args.publication_panel_label == [["cn8", "[M8]X8"]]
+    assert args.publication_legend_footer == "coordination colors"
     assert args.title == "Crystal structure"
     assert args.subtitle == "Cubic phase"
 
@@ -160,8 +200,13 @@ def test_cli_topology_stamps_distinct_spec_colors(monkeypatch):
         polyhedron_site=0,
         polyhedron_cutoff=10.0,
     )
-    scene = {"fragment_table": [{"index": 0, "formula": "C6N2", "elem_set": ["C", "N"]}]}
+    scene = {
+        "fragment_table": [{"index": 0, "formula": "C6N2", "elem_set": ["C", "N"]}]
+    }
 
     topology = _build_cli_topology_data(object(), scene, args)
 
-    assert [entry["color"] for entry in topology["spec_results"]] == ["#0072b2", "#d55e00"]
+    assert [entry["color"] for entry in topology["spec_results"]] == [
+        "#0072b2",
+        "#d55e00",
+    ]

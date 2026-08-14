@@ -281,6 +281,56 @@ def _build_render_parser(
         help="Compose a main structure view with isolated representative polyhedron panels.",
     )
     p.add_argument(
+        "--publication-preset",
+        choices=("dense_coordination",),
+        default="dense_coordination",
+        help="Built-in publication style selected entirely from the CLI.",
+    )
+    p.add_argument(
+        "--publication-option",
+        action="append",
+        default=[],
+        metavar="PATH=VALUE",
+        help=(
+            "Override any publication-style field without a config file. Repeat as "
+            "needed, for example materials.8.main.alpha=0.52. Values accept JSON "
+            "scalars or arrays; other text is kept as a string."
+        ),
+    )
+    p.add_argument(
+        "--publication-site-style",
+        action="append",
+        nargs=5,
+        default=[],
+        metavar=("ELEMENTS", "COLORS", "WEIGHTS", "LABEL", "RADIUS"),
+        help=(
+            "Add a mixed or single site style. ELEMENTS, COLORS, and WEIGHTS are "
+            "comma-separated; repeat for multiple crystallographic sites."
+        ),
+    )
+    p.add_argument(
+        "--publication-legend-entry",
+        action="append",
+        nargs=2,
+        default=[],
+        metavar=("COLORS", "LABEL"),
+        help="Add a legend row from comma-separated COLORS and a LABEL.",
+    )
+    p.add_argument(
+        "--publication-panel-label",
+        action="append",
+        nargs=2,
+        default=[],
+        metavar=("SPEC_ID", "LABEL"),
+        help="Set the representative-panel label for one polyhedron SPEC_ID.",
+    )
+    p.add_argument(
+        "--publication-legend-footer",
+        default=None,
+        metavar="TEXT",
+        help="Set the publication legend footer.",
+    )
+    p.add_argument(
         "--title",
         default=None,
         metavar="TEXT",
@@ -330,6 +380,86 @@ def _parse_polyhedron_specs(raw_specs: list[str]) -> list[dict[str, Any]]:
             raise ValueError(f"polyhedron {index + 1}: ligand is required")
         specs.append(spec)
     return specs
+
+
+def _parse_publication_options(
+    preset: str,
+    raw_options: list[str],
+    *,
+    site_styles: list[list[str]] | None = None,
+    legend_entries: list[list[str]] | None = None,
+    panel_labels: list[list[str]] | None = None,
+    legend_footer: str | None = None,
+) -> dict[str, Any]:
+    publication: dict[str, Any] = {"preset": preset}
+    for raw in raw_options:
+        if "=" not in raw:
+            raise ValueError(f"publication option {raw!r} must use PATH=VALUE syntax")
+        raw_path, raw_value = raw.split("=", 1)
+        keys = raw_path.split(".")
+        if not raw_path or any(not key for key in keys):
+            raise ValueError(f"invalid publication option path: {raw_path!r}")
+        try:
+            value = json.loads(raw_value)
+        except json.JSONDecodeError:
+            value = raw_value
+
+        target = publication
+        for key in keys[:-1]:
+            current = target.get(key)
+            if current is None:
+                current = {}
+                target[key] = current
+            if not isinstance(current, dict):
+                raise ValueError(
+                    f"publication option path collides at {key!r}: {raw_path!r}"
+                )
+            target = current
+        target[keys[-1]] = value
+
+    parsed_site_styles: list[dict[str, Any]] = []
+    for elements, colors, weights, label, radius in site_styles or []:
+        element_values = [value for value in elements.split(",") if value]
+        color_values = [value for value in colors.split(",") if value]
+        try:
+            weight_values = [float(value) for value in weights.split(",") if value]
+            radius_value = float(radius)
+        except ValueError as exc:
+            raise ValueError("site-style weights and radius must be numeric") from exc
+        if not element_values or len(element_values) != len(color_values):
+            raise ValueError("site-style ELEMENTS and COLORS must have equal lengths")
+        if len(weight_values) != len(element_values):
+            raise ValueError("site-style WEIGHTS must match ELEMENTS")
+        parsed_site_styles.append(
+            {
+                "elements": element_values,
+                "colors": color_values,
+                "weights": weight_values,
+                "label": label,
+                "radius": radius_value,
+            }
+        )
+    if parsed_site_styles:
+        publication["site_styles"] = parsed_site_styles
+
+    parsed_legend_entries: list[dict[str, Any]] = []
+    for colors, label in legend_entries or []:
+        color_values = [value for value in colors.split(",") if value]
+        if not color_values:
+            raise ValueError("legend-entry COLORS must not be empty")
+        parsed_legend_entries.append({"colors": color_values, "label": label})
+    if parsed_legend_entries or legend_footer is not None:
+        publication["legend"] = {}
+        if parsed_legend_entries:
+            publication["legend"]["entries"] = parsed_legend_entries
+        if legend_footer is not None:
+            publication["legend"]["footer"] = legend_footer
+
+    if panel_labels:
+        publication["specs"] = {
+            spec_id: {"panel_label": label} for spec_id, label in panel_labels
+        }
+    return {"publication": publication}
 
 
 def _build_cli_topology_data(
@@ -427,6 +557,24 @@ def _build_style_overrides(args: argparse.Namespace) -> Dict[str, Any]:
             overrides.update(config_data["style"])
         else:
             overrides.update(config_data)
+
+    # CLI publication arguments override config values without requiring a file.
+    try:
+        publication_override = _parse_publication_options(
+            args.publication_preset,
+            args.publication_option,
+            site_styles=args.publication_site_style,
+            legend_entries=args.publication_legend_entry,
+            panel_labels=args.publication_panel_label,
+            legend_footer=args.publication_legend_footer,
+        )
+    except ValueError as exc:
+        sys.exit(f"Error: invalid publication parameters: {exc}")
+    existing_publication = overrides.get("publication")
+    if isinstance(existing_publication, dict):
+        existing_publication.update(publication_override["publication"])
+    else:
+        overrides.update(publication_override)
 
     # CLI flags override config values
     overrides["display_mode"] = args.view

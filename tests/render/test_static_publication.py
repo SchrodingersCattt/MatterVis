@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import copy
-import json
-from pathlib import Path
-
 import matplotlib
 import numpy as np
 from PIL import Image
@@ -11,6 +8,7 @@ from PIL import Image
 matplotlib.use("Agg")
 
 from crystal_viewer.render.api import FigureResult
+from crystal_viewer.render.cli import _parse_publication_options
 from crystal_viewer.render.publication import (
     _normalise_sectors,
     _orient_panel,
@@ -158,18 +156,28 @@ def test_dense_coordination_material_does_not_pin_camera() -> None:
     assert config["lighting"]["polyhedron_shade_panel"] is False
 
 
-def test_committed_garnet_cli_style_is_valid_and_camera_free() -> None:
-    style_path = (
-        Path(__file__).resolve().parents[2]
-        / "paper"
-        / "coordination"
-        / "garnet-publication-style.json"
+def test_publication_cli_options_cover_nested_material_values() -> None:
+    style = _parse_publication_options(
+        "dense_coordination",
+        [
+            "materials.8.main.fill=#4CB17A",
+            "materials.8.main.alpha=0.52",
+            "atoms.sphere_ambient=0.72",
+        ],
+        site_styles=[["M8a,M8b", "#86D533,#2F80D9", "1,1", "site A", "0.28"]],
+        legend_entries=[["#86D533,#2F80D9", "site A"]],
+        panel_labels=[["cn8", "[M8]X8"]],
+        legend_footer="coordination colors",
     )
-    style = json.loads(style_path.read_text(encoding="utf-8"))
     config = publication_config(style)
 
-    assert config["legend"]["entries"]
-    assert set(config["specs"]) == {"o4", "o6", "o8"}
+    assert config["materials"]["8"]["main"]["fill"] == "#4CB17A"
+    assert config["materials"]["8"]["main"]["alpha"] == 0.52
+    assert config["atoms"]["sphere_ambient"] == 0.72
+    assert config["site_styles"][0]["elements"] == ["M8a", "M8b"]
+    assert config["legend"]["entries"][0]["label"] == "site A"
+    assert config["legend"]["footer"] == "coordination colors"
+    assert config["specs"]["cn8"]["panel_label"] == "[M8]X8"
     assert "camera" not in config["main"]
 
 
