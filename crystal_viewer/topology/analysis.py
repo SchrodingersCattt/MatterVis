@@ -31,6 +31,7 @@ __all__ = [
     "convex_hull_payload",
     "detect_coordination_number",
     "detect_prism_vs_antiprism",
+    "extract_atom_coordination_shells",
     "extract_coordination_shell",
     "ideal_polyhedra_for_cn",
     "planarity_analysis",
@@ -166,6 +167,54 @@ def _mck_polyhedron_record(
         **_mck_override_kwargs(find_polyhedra_impl),
     )
     return records[0] if records else None
+
+
+def extract_atom_coordination_shells(
+    bundle,
+    cutoff: float,
+    *,
+    center_species: str,
+    ligand_species: str,
+    source_indices: Iterable[int] | None = None,
+    enforce_enclosure: bool = True,
+    centroid_offset_frac: float = DEFAULT_CENTROID_OFFSET_FRAC,
+    fallback_max: int | None = None,
+) -> dict[int, dict[str, Any]]:
+    """Return atom-level shells keyed by raw crystallographic atom index."""
+    crystal = molcrys_bridge.molecular_crystal_from_bundle(bundle)
+    public_module = sys.modules.get("crystal_viewer.topology")
+    find_polyhedra_impl = getattr(public_module, "find_polyhedra", find_polyhedra)
+    atom_kwargs: dict[str, Any] = {}
+    if source_indices is not None:
+        atom_kwargs["central_indices"] = sorted({int(index) for index in source_indices})
+    if fallback_max is not None:
+        atom_kwargs["fallback_max"] = int(fallback_max)
+    records = find_polyhedra_impl(
+        crystal,
+        str(center_species),
+        str(ligand_species),
+        level="atom",
+        cutoff=float(cutoff),
+        enforce_enclosure=bool(enforce_enclosure),
+        centroid_offset_frac=float(centroid_offset_frac),
+        **atom_kwargs,
+        **_mck_override_kwargs(find_polyhedra_impl),
+    )
+    shells: dict[int, dict[str, Any]] = {}
+    for record in records:
+        source_index = int(record["center_index"])
+        center = np.asarray(record["center_position"], dtype=float)
+        shell_coords = np.asarray(record.get("shell_coords") or [], dtype=float)
+        if shell_coords.size == 0:
+            shell_coords = np.zeros((0, 3), dtype=float)
+        shells[source_index] = {
+            "center_source_index": source_index,
+            "source_center_coords": center.tolist(),
+            "source_shell_coords": shell_coords.tolist(),
+            "distances": [float(value) for value in record.get("shell_distances") or []],
+            "source_hull": convex_hull_payload(shell_coords),
+        }
+    return shells
 
 
 def _extract_coordination_shell_static(

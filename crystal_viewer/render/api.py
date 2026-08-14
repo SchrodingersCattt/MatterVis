@@ -3,6 +3,7 @@
 Single entry point for all rendering backends (Plotly 3D, Matplotlib 2D ORTEP).
 Callers use ``render(scene, style).save(path)`` without knowing which backend runs.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -11,17 +12,34 @@ from typing import Any
 class FigureResult:
     """Unified wrapper around a Plotly or Matplotlib figure."""
 
-    def __init__(self, *, plotly_fig: Any = None, mpl_fig: Any = None):
+    def __init__(
+        self,
+        *,
+        plotly_fig: Any = None,
+        mpl_fig: Any = None,
+        mpl_save_kwargs: dict[str, Any] | None = None,
+    ):
         self._plotly = plotly_fig
         self._mpl = mpl_fig
+        self._mpl_save_kwargs = dict(mpl_save_kwargs or {})
 
-    def save(self, path: str, *, width: int = 800, height: int = 700, dpi: int = 300, scale: int = 2):
+    def save(
+        self,
+        path: str,
+        *,
+        width: int = 800,
+        height: int = 700,
+        dpi: int = 300,
+        scale: int = 2,
+    ):
         """Save the figure to a file (PNG, PDF, SVG, etc.)."""
         if self._mpl is not None:
             # Resize matplotlib figure to match requested pixel dimensions
             self._mpl.set_size_inches(width / dpi, height / dpi)
-            self._mpl.savefig(path, dpi=dpi, bbox_inches="tight")
+            save_kwargs = {"bbox_inches": "tight", **self._mpl_save_kwargs}
+            self._mpl.savefig(path, dpi=dpi, **save_kwargs)
             import matplotlib.pyplot as plt
+
             plt.close(self._mpl)
         elif self._plotly is not None:
             # Kaleido ≥1.0 expects a title mapping rather than ``None``.
@@ -30,14 +48,19 @@ class FigureResult:
             if layout.get("title") is None:
                 layout["title"] = {"text": ""}
             import plotly.graph_objects as go
-            go.Figure(fig_dict).write_image(path, width=width, height=height, scale=scale)
+
+            go.Figure(fig_dict).write_image(
+                path, width=width, height=height, scale=scale
+            )
         else:
             raise RuntimeError("FigureResult has no figure")
 
     def to_plotly(self):
         """Return the Plotly figure (for Dash web frontend)."""
         if self._plotly is None:
-            raise TypeError("This render result is matplotlib-only (flat+ortep). Use .save() for export.")
+            raise TypeError(
+                "This render result is matplotlib-only (flat+ortep). Use .save() for export."
+            )
         return self._plotly
 
     @property
@@ -49,7 +72,9 @@ class FigureResult:
         return self._mpl
 
 
-def render(scene: dict, style: dict, *, force_quality: bool = True, **kwargs) -> FigureResult:
+def render(
+    scene: dict, style: dict, *, force_quality: bool = True, **kwargs
+) -> FigureResult:
     """Render a scene. Dispatches to the correct backend based on style.
 
     Parameters
@@ -76,9 +101,11 @@ def render(scene: dict, style: dict, *, force_quality: bool = True, **kwargs) ->
 
     if full_style.get("material") == "flat" and full_style.get("style") == "ortep":
         from ..ortep.flat_render import render_ortep_flat
+
         fig = render_ortep_flat(scene, full_style)
         return FigureResult(mpl_fig=fig)
 
     from .figures import build_figure
+
     fig = build_figure(scene, full_style, force_quality=force_quality, **kwargs)
     return FigureResult(plotly_fig=fig)

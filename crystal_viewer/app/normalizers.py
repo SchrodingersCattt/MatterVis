@@ -1,6 +1,8 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
+import math
+
 from .shared import *
 
 _HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -144,6 +146,16 @@ def _coerce_polyhedron_fallback_max(raw: Any) -> Optional[int]:
     return max(1, min(64, value))
 
 
+def _coerce_polyhedron_float(raw: Any, default: float, *, minimum: float, maximum: float) -> float:
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(value):
+        return default
+    return max(minimum, min(maximum, value))
+
+
 def _normalize_polyhedron_spec(
     raw: Any,
     *,
@@ -184,6 +196,10 @@ def _normalize_polyhedron_spec(
     if level == "atom":
         hard_cutoff = None
     fallback_max = _coerce_polyhedron_fallback_max(raw.get("fallback_max"))
+    opacity = _coerce_polyhedron_float(raw.get("opacity"), 0.55, minimum=0.0, maximum=1.0)
+    edge_opacity = _coerce_polyhedron_float(raw.get("edge_opacity"), 0.90, minimum=0.0, maximum=1.0)
+    edge_width = _coerce_polyhedron_float(raw.get("edge_width"), 3.0, minimum=0.0, maximum=20.0)
+    flatshading = bool(raw.get("flatshading", True))
     return {
         "id": spec_id,
         "name": name,
@@ -208,6 +224,13 @@ def _normalize_polyhedron_spec(
         "center_kind": center_kind,
         "hard_cutoff": hard_cutoff,
         "fallback_max": fallback_max,
+        # Paint properties are deliberately independent from topology and
+        # analysis-anchor selection. Every periodic equivalent inherits the
+        # same material so dense packing does not mix arbitrary alpha levels.
+        "opacity": opacity,
+        "edge_opacity": edge_opacity,
+        "edge_width": edge_width,
+        "flatshading": flatshading,
     }
 
 

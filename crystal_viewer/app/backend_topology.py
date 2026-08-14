@@ -6,6 +6,8 @@ from collections import OrderedDict
 from .shared import *
 from .normalizers import *
 from .rightclick import _normalize_polyhedron_specs
+from ..scene.core import source_image_identity
+from ..topology import extract_atom_coordination_shells
 
 
 _TOPOLOGY_CACHE_LIMIT = 8
@@ -152,6 +154,57 @@ def _fragment_matches_polyhedron_spec(fragment: dict[str, Any], spec: dict[str, 
     return (fragment.get("formula") or fragment.get("species")) == center_species
 
 
+def _display_atom_centers_for_spec(
+    bundle,
+    scene: dict[str, Any],
+    spec: dict[str, Any],
+) -> list[dict[str, Any]]:
+    wanted = str(spec.get("center_species") or "")
+    source_atoms = list(bundle.raw_atoms)
+    seen: set[tuple[int, tuple[int, int, int]]] = set()
+    centers: list[dict[str, Any]] = []
+    for draw_index, atom in enumerate(scene.get("draw_atoms") or []):
+        if str(atom.get("elem") or "") != wanted:
+            continue
+        identity = source_image_identity(atom, source_atoms, draw_index)
+        if identity is None or identity in seen:
+            continue
+        seen.add(identity)
+        centers.append(
+            {
+                "draw_index": draw_index,
+                "source_index": identity[0],
+                "image": identity[1],
+                "label": atom.get("label") or f"{wanted}{identity[0]}",
+                "center": np.asarray(atom.get("cart"), dtype=float).tolist(),
+            }
+        )
+    return centers
+
+
+def _atom_overlay(shell: dict[str, Any], center: dict[str, Any]) -> dict[str, Any]:
+    source_center = np.asarray(shell["source_center_coords"], dtype=float)
+    display_center = np.asarray(center["center"], dtype=float)
+    delta = display_center - source_center
+    source_shell = np.asarray(shell.get("source_shell_coords") or [], dtype=float)
+    shell_coords = source_shell + delta if len(source_shell) else np.zeros((0, 3), dtype=float)
+    source_hull = shell.get("source_hull") or {}
+    hull = dict(source_hull)
+    source_vertices = np.asarray(source_hull.get("vertices") or [], dtype=float)
+    hull["vertices"] = (source_vertices + delta).tolist() if len(source_vertices) else []
+    return {
+        "center_coords": display_center.tolist(),
+        "center_label": center["label"],
+        "center_source_index": center["source_index"],
+        "center_image": list(center["image"]),
+        "center_draw_index": center["draw_index"],
+        "shell_coords": shell_coords.tolist(),
+        "distances": shell.get("distances") or [],
+        "hull": hull,
+        "is_analysis_anchor": False,
+    }
+
+
 def compute_topology_geometry(
     *,
     bundle,
@@ -225,6 +278,46 @@ def compute_topology_geometry(
         spec_hard_cutoff = spec.get("hard_cutoff")
         spec_fallback_max = spec.get("fallback_max")
         overlays: list[dict[str, Any]] = []
+        if spec_level == "atom" and ligand:
+            atom_centers = _display_atom_centers_for_spec(bundle, scene, spec)
+            shells = extract_atom_coordination_shells(
+                bundle,
+                cutoff,
+                center_species=center_species,
+                ligand_species=ligand,
+                source_indices={center["source_index"] for center in atom_centers},
+                enforce_enclosure=enforce_enclosure,
+                centroid_offset_frac=centroid_offset_frac,
+                fallback_max=spec_fallback_max,
+            )
+            overlays = [
+                _atom_overlay(shells[center["source_index"]], center)
+                for center in atom_centers
+                if center["source_index"] in shells
+            ]
+            if overlays and index == analysis_spec_index:
+                overlays[0]["is_analysis_anchor"] = True
+            spec_results.append(
+                {
+                    "spec_id": spec["id"],
+                    "name": spec["name"],
+                    "center_species": center_species,
+                    "ligand_species": ligand,
+                    "enforce_enclosure": enforce_enclosure,
+                    "centroid_offset_frac": centroid_offset_frac,
+                    "level": spec_level,
+                    "center_kind": spec_center_kind,
+                    "hard_cutoff": spec_hard_cutoff,
+                    "fallback_max": spec_fallback_max,
+                    "overlays": overlays,
+                }
+            )
+            if atom_centers and not any(_overlay_drawable_hull_size(item) for item in overlays):
+                warnings.append(
+                    f"{spec.get('name') or center_species}: no drawable polyhedron for "
+                    f"{center_species} -> {ligand}; need at least 4 non-coplanar ligand points."
+                )
+            continue
         candidate_fragments = [
             frag
             for frag in (scene.get("fragment_table") or [])
@@ -683,6 +776,10 @@ class _TopologyBackendMixin:
         for spec in effective_specs or []:
             spec_id = str(spec.get("id") or "")
             color = str(spec.get("color") or "#7C5CBF")
+            opacity = float(spec.get("opacity", 0.55))
+            edge_opacity = float(spec.get("edge_opacity", 0.90))
+            edge_width = float(spec.get("edge_width", 3.0))
+            flatshading = bool(spec.get("flatshading", True))
             overrides_raw = spec.get("instance_overrides") or {}
             overrides_tuple = tuple(
                 (
@@ -692,7 +789,10 @@ class _TopologyBackendMixin:
                 )
                 for label in sorted(overrides_raw.keys())
             )
-            items.append((spec_id, color, overrides_tuple))
+            items.append((
+                spec_id, color, opacity, edge_opacity, edge_width,
+                flatshading, overrides_tuple,
+            ))
         return tuple(items)
 
     def _attach_spec_colors(
@@ -726,7 +826,16 @@ class _TopologyBackendMixin:
         if cached_wrapper is not None:
             return cached_wrapper
 
-        color_by_id = {spec["id"]: spec.get("color", "#7C5CBF") for spec in effective_specs}
+        paint_by_id = {
+            spec["id"]: {
+                "color": spec.get("color", "#7C5CBF"),
+                "opacity": float(spec.get("opacity", 0.55)),
+                "edge_opacity": float(spec.get("edge_opacity", 0.90)),
+                "edge_width": float(spec.get("edge_width", 3.0)),
+                "flatshading": bool(spec.get("flatshading", True)),
+            }
+            for spec in effective_specs
+        }
         overrides_by_id: dict[str, dict[str, dict[str, Any]]] = {
             spec["id"]: dict(spec.get("instance_overrides") or {}) for spec in effective_specs
         }
@@ -734,7 +843,13 @@ class _TopologyBackendMixin:
         for entry in cached_geometry.get("spec_results", []) or []:
             spec_id = entry.get("spec_id")
             recoloured = dict(entry)
-            recoloured["color"] = color_by_id.get(spec_id, "#7C5CBF")
+            recoloured.update(paint_by_id.get(spec_id, {
+                "color": "#7C5CBF",
+                "opacity": 0.55,
+                "edge_opacity": 0.90,
+                "edge_width": 3.0,
+                "flatshading": True,
+            }))
             spec_overrides = overrides_by_id.get(spec_id) or {}
             if spec_overrides:
                 # Patch each overlay with its per-fragment override (if

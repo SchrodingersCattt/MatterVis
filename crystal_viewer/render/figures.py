@@ -5,7 +5,12 @@ import re
 
 from .scene_traces import *  # noqa: F403
 from .style import style_from_controls
-from .topology import topology_histogram_figure, topology_results_markdown
+from .topology import (
+    representative_polyhedron_overlay,
+    representative_polyhedron_traces,
+    topology_histogram_figure,
+    topology_results_markdown,
+)
 from .morphology import _morphology_traces
 from .compass import (
     _COMPASS_ITEM_NAME,
@@ -63,6 +68,155 @@ def _element_legend_annotations(scene: dict, style: dict) -> list[dict]:
         "xanchor": "center",
         "yanchor": "bottom",
     }]
+
+
+def _publication_polyhedron_legend(spec_results: list[dict]) -> list[dict]:
+    entries = []
+    for result in spec_results:
+        color = str(result.get("color") or "#7C5CBF")
+        name = str(result.get("name") or result.get("center_species") or "Polyhedron")
+        entries.append(f"<span style='color:{color}'><b>■ {name}</b></span>")
+    if not entries:
+        return []
+    return [{
+        "x": 0.99,
+        "y": 0.905,
+        "xref": "paper",
+        "yref": "paper",
+        "text": " &nbsp;&nbsp; ".join(entries),
+        "showarrow": False,
+        "font": {"size": 13},
+        "xanchor": "right",
+        "yanchor": "bottom",
+    }]
+
+
+def build_publication_figure(
+    scene: dict,
+    style: dict,
+    topology_data: dict,
+    *,
+    title: str | None = None,
+    subtitle: str | None = None,
+    width: int = 1600,
+    height: int = 1100,
+) -> "go.Figure":
+    """Compose a crystal overview and isolated representative polyhedra."""
+    from plotly.graph_objects import Figure as go_Figure
+
+    style = validate_style_schema(style)
+    bgcolor = str(style.get("background", "#FFFFFF"))
+    main_style = {
+        **style,
+        "show_title": False,
+        "show_element_legend": False,
+        "axis_key_fig_width": float(width),
+        "axis_key_fig_height": float(height),
+        "axis_key_anchor": [0.075, 0.455],
+    }
+    main_figure = build_figure(scene, main_style, topology_data=topology_data, force_quality=True)
+    main_dict = main_figure.to_dict()
+    traces = list(main_dict.get("data") or [])
+    for trace in traces:
+        trace["scene"] = "scene"
+
+    spec_results = [
+        result
+        for result in (topology_data.get("spec_results") or [])
+        if representative_polyhedron_overlay(result) is not None
+    ]
+    panel_count = len(spec_results)
+    panel_layouts: dict[str, dict] = {}
+    panel_annotations: list[dict] = []
+    for index, result in enumerate(spec_results):
+        overlay = representative_polyhedron_overlay(result)
+        color = str(result.get("color") or "#7C5CBF")
+        panel_traces, radius = representative_polyhedron_traces(
+            overlay,
+            color=color,
+            center_color=str(result.get("center_color") or "#808080"),
+            ligand_color=str(result.get("ligand_color") or "#E00000"),
+            opacity=float(result.get("opacity", 0.55)),
+            edge_opacity=float(result.get("edge_opacity", 0.90)),
+            edge_width=float(result.get("edge_width", 3.0)),
+            flatshading=bool(result.get("flatshading", True)),
+            spec_id=str(result.get("spec_id") or ""),
+        )
+        scene_name = f"scene{index + 2}"
+        for trace in panel_traces:
+            trace["scene"] = scene_name
+        traces.extend(panel_traces)
+        x0 = index / panel_count
+        x1 = (index + 1) / panel_count
+        panel_layouts[scene_name] = {
+            "domain": {"x": [x0 + 0.015, x1 - 0.015], "y": [0.015, 0.245]},
+            "xaxis": {"visible": False, "range": [-radius, radius]},
+            "yaxis": {"visible": False, "range": [-radius, radius]},
+            "zaxis": {"visible": False, "range": [-radius, radius]},
+            "aspectmode": "cube",
+            "camera": main_dict.get("layout", {}).get("scene", {}).get("camera", {}),
+            "bgcolor": bgcolor,
+        }
+        panel_annotations.append({
+            "x": (x0 + x1) / 2,
+            "y": 0.255,
+            "xref": "paper",
+            "yref": "paper",
+            "text": f"<b>{result.get('name') or result.get('center_species') or 'Polyhedron'}</b>",
+            "showarrow": False,
+            "font": {"size": 17, "color": color},
+            "xanchor": "center",
+            "yanchor": "bottom",
+        })
+
+    main_scene_layout = dict(main_dict.get("layout", {}).get("scene") or {})
+    main_scene_layout["domain"] = {"x": [0.0, 1.0], "y": [0.29, 0.94]}
+    camera = dict(main_scene_layout.get("camera") or {})
+    eye = dict(camera.get("eye") or {})
+    if eye:
+        camera["eye"] = {
+            axis: float(value) * 0.38
+            for axis, value in eye.items()
+        }
+        main_scene_layout["camera"] = camera
+    annotations = [
+        {
+            "x": 0.5, "y": 0.985, "xref": "paper", "yref": "paper",
+            "text": f"<b>{title or scene.get('display_title') or scene.get('title') or scene.get('name') or ''}</b>",
+            "showarrow": False, "font": {"size": 30, "color": "#111111"}, "xanchor": "center", "yanchor": "top",
+        },
+    ]
+    if subtitle:
+        annotations.append({
+            "x": 0.5, "y": 0.945, "xref": "paper", "yref": "paper",
+            "text": str(subtitle), "showarrow": False, "font": {"size": 15, "color": "#555555"},
+            "xanchor": "center", "yanchor": "top",
+        })
+    key_annotations, key_shapes = compose_axis_key_layout(scene, main_style)
+    annotations.extend(key_annotations or [])
+    annotations.extend(_publication_polyhedron_legend(spec_results))
+    element_style = {
+        **main_style,
+        "show_element_legend": True,
+        "element_legend_x": 0.5,
+        "element_legend_y": 0.275,
+    }
+    annotations.extend(_element_legend_annotations(scene, element_style))
+    annotations.extend(panel_annotations)
+
+    layout = {
+        "scene": main_scene_layout,
+        **panel_layouts,
+        "annotations": annotations,
+        "shapes": list(key_shapes or []),
+        "showlegend": False,
+        "paper_bgcolor": bgcolor,
+        "plot_bgcolor": bgcolor,
+        "margin": {"l": 20, "r": 20, "t": 10, "b": 10},
+        "width": int(width),
+        "height": int(height),
+    }
+    return go_Figure(data=traces, layout=layout, _validate=False)
 
 
 def _ordered_atom_bond_trace_dicts(mesh_payload: dict, *, use_fast: bool) -> list[dict]:

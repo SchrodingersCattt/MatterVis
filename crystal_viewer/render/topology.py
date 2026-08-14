@@ -136,7 +136,13 @@ def shell_atom_traces(shell_coords, distances, color="#7C5CBF", *, spec_id: str 
     ]
 
 
-def _merged_hull_mesh(overlays: list[tuple[list, float]], color: str, *, spec_id: str | None = None):
+def _merged_hull_mesh(
+    overlays: list[tuple[list, float]],
+    color: str,
+    *,
+    flatshading: bool = True,
+    spec_id: str | None = None,
+):
     """Pack any number of (shell_coords, opacity) overlays into the
     minimum number of Mesh3d traces -- one per distinct opacity value.
     With 40+ tiled polyhedra each contributing its own ConvexHull this
@@ -179,7 +185,7 @@ def _merged_hull_mesh(overlays: list[tuple[list, float]], color: str, *, spec_id
                 k=payload["k"],
                 color=color,
                 opacity=float(opacity),
-                flatshading=True,
+                flatshading=flatshading,
                 hoverinfo="skip",
                 showlegend=False,
                 name="coordination-hull",
@@ -189,7 +195,14 @@ def _merged_hull_mesh(overlays: list[tuple[list, float]], color: str, *, spec_id
     return traces
 
 
-def _merged_hull_edges(overlays: list, color: str, *, spec_id: str | None = None):
+def _merged_hull_edges(
+    overlays: list,
+    color: str,
+    *,
+    opacity: float = 0.90,
+    width: float = 3.0,
+    spec_id: str | None = None,
+):
     """All polyhedron edges in the scene packed into a single
     ``Scatter3d`` line trace using NaN-separated segments.
 
@@ -223,14 +236,83 @@ def _merged_hull_edges(overlays: list, color: str, *, spec_id: str | None = None
         y=ys,
         z=zs,
         mode="lines",
-        line=dict(color=color, width=4),
-        opacity=0.95,
+        line=dict(color=color, width=width),
+        opacity=opacity,
         hoverinfo="skip",
         showlegend=False,
         name="coordination-edges",
         meta=meta,
     )
     return [trace]
+
+
+def representative_polyhedron_overlay(spec_result: dict) -> dict | None:
+    """Return one deterministic drawable overlay for a polyhedron spec."""
+    overlays = list(spec_result.get("overlays") or [])
+    ordered = sorted(overlays, key=lambda item: not bool(item.get("is_analysis_anchor")))
+    return next(
+        (
+            overlay
+            for overlay in ordered
+            if len(overlay.get("shell_coords") or []) >= 4
+            and len((overlay.get("hull") or {}).get("simplices") or []) > 0
+        ),
+        None,
+    )
+
+
+def representative_polyhedron_traces(
+    overlay: dict,
+    *,
+    color: str,
+    center_color: str = "#808080",
+    ligand_color: str = "#E00000",
+    opacity: float = 0.55,
+    edge_opacity: float = 0.90,
+    edge_width: float = 3.0,
+    flatshading: bool = True,
+    spec_id: str | None = None,
+) -> tuple[list[dict], float]:
+    """Build recentered traces for an isolated coordination polyhedron.
+
+    The returned radius is the half-range callers should use for a cubic
+    subplot viewport. Input coordinates are never mutated.
+    """
+    center = np.asarray(overlay.get("center_coords"), dtype=float)
+    shell = np.asarray(overlay.get("shell_coords") or [], dtype=float)
+    if center.shape != (3,) or shell.ndim != 2 or shell.shape[1:] != (3,):
+        return [], 1.0
+    shifted_shell = shell - center
+    shifted_overlay = {
+        **overlay,
+        "center_coords": [0.0, 0.0, 0.0],
+        "shell_coords": shifted_shell.tolist(),
+    }
+    distances = np.linalg.norm(shifted_shell, axis=1)
+    radius = max(1.0, float(np.max(np.abs(shifted_shell))) * 1.18)
+    traces = [
+        *_merged_hull_mesh(
+            [(shifted_overlay, opacity)], color=color,
+            flatshading=flatshading, spec_id=spec_id,
+        ),
+        *_merged_hull_edges(
+            [shifted_overlay], color=color, opacity=edge_opacity,
+            width=edge_width, spec_id=spec_id,
+        ),
+        *shell_center_lines([0.0, 0.0, 0.0], shifted_shell, spec_id=spec_id),
+    ]
+    center_trace = _world_sphere_marker_trace(
+        [[0.0, 0.0, 0.0]], radius=0.34, color=center_color, opacity=1.0, spec_id=spec_id,
+    )
+    if center_trace is not None:
+        traces.append(center_trace)
+    traces.extend(shell_atom_traces(
+        shifted_shell,
+        distances,
+        color=ligand_color,
+        spec_id=spec_id,
+    ))
+    return [_trace_to_json_safe_dict(trace) for trace in traces], radius
 
 
 def _viewport_ranges_from_style(style: dict | None) -> np.ndarray | None:
@@ -327,6 +409,10 @@ def _multi_spec_cache_key(topology_data: dict, fallback_color: str) -> tuple:
             (
                 entry.get("spec_id") or "",
                 entry.get("color") or fallback_color,
+                float(entry.get("opacity", 0.55)),
+                float(entry.get("edge_opacity", 0.90)),
+                float(entry.get("edge_width", 3.0)),
+                bool(entry.get("flatshading", True)),
                 tuple(overlay_overrides),
             )
         )
@@ -355,8 +441,7 @@ def topology_background_traces(topology_data: dict | None, style: dict | None = 
     cache_key = (_multi_spec_cache_key(topology_data, fallback_color), _viewport_cache_key(style))
     if cache_key in cache:
         return cache[cache_key]
-    primary_opacity = 0.22
-    extra_opacity = 0.12
+    default_opacity = 0.55
 
     traces: list = []
     spec_results = topology_data.get("spec_results") or []
@@ -364,6 +449,10 @@ def topology_background_traces(topology_data: dict | None, style: dict | None = 
         for entry in spec_results:
             spec_id = str(entry.get("spec_id") or "")
             spec_color = str(entry.get("color") or fallback_color)
+            spec_opacity = float(entry.get("opacity", default_opacity))
+            edge_opacity = float(entry.get("edge_opacity", 0.90))
+            edge_width = float(entry.get("edge_width", 3.0))
+            flatshading = bool(entry.get("flatshading", True))
             # Bucket overlays by the colour they will paint with: any
             # ``instance_overrides`` entry can swap a single fragment to
             # a different hue, and we want every solid colour to take
@@ -385,22 +474,26 @@ def topology_background_traces(topology_data: dict | None, style: dict | None = 
                     continue
                 if not overlay.get("is_analysis_anchor") and not _overlay_within_viewport(overlay, viewport_ranges):
                     continue
-                opacity = primary_opacity if overlay.get("is_analysis_anchor") else extra_opacity
                 color = str(overlay.get("color") or spec_color)
-                overlays_by_color.setdefault(color, []).append((overlay, opacity))
+                overlays_by_color.setdefault(color, []).append((overlay, spec_opacity))
             for color, group in overlays_by_color.items():
-                traces.extend(_merged_hull_mesh(group, color=color, spec_id=spec_id))
-                traces.extend(_merged_hull_edges([overlay for overlay, _ in group], color=color, spec_id=spec_id))
+                traces.extend(_merged_hull_mesh(
+                    group, color=color, flatshading=flatshading, spec_id=spec_id,
+                ))
+                traces.extend(_merged_hull_edges(
+                    [overlay for overlay, _ in group], color=color,
+                    opacity=edge_opacity, width=edge_width, spec_id=spec_id,
+                ))
     else:
         # Legacy single-colour path: callers (or test fixtures) that
         # construct a topology_data dict by hand still see the original
         # behaviour, no colour table required.
         overlays_with_opacity = []
         if topology_data.get("shell_coords"):
-            overlays_with_opacity.append((topology_data, primary_opacity))
+            overlays_with_opacity.append((topology_data, default_opacity))
         for extra in topology_data.get("extra_overlays") or []:
             if extra.get("shell_coords") and _overlay_within_viewport(extra, viewport_ranges):
-                overlays_with_opacity.append((extra, extra_opacity))
+                overlays_with_opacity.append((extra, default_opacity))
         traces.extend(_merged_hull_mesh(overlays_with_opacity, color=fallback_color))
         traces.extend(_merged_hull_edges([overlay for overlay, _ in overlays_with_opacity], color=fallback_color))
 

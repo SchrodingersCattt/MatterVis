@@ -99,6 +99,31 @@ scale. The cube is the radius-aware bounding cube of the largest input
 scene. Use this for N-up grid figures where each panel must depict the
 same length per pixel.
 
+### `crystal_viewer.renderer.build_publication_figure(...)`
+
+Composes one large crystal/topology scene above one isolated representative
+polyhedron panel per drawable topology spec. The builder consumes the same
+`topology_data` payload as `build_figure`; it does not recompute coordination
+chemistry. It also adds title/subtitle annotations, element and polyhedron
+keys, and the main-scene lattice compass.
+
+The static CLI exposes this as `mat-vis render --publication-layout` together
+with repeated `--polyhedron` specifications. `--title` and `--subtitle` set
+the publication heading. This layout requires Plotly/Kaleido for image export
+and never falls back to a topology-free flat ORTEP image.
+
+For `level="atom"`, each specification is tiled over every unique visible
+`(raw source atom, periodic image)` matching `center_species`. The main panel
+therefore shows the complete coordination-polyhedron packing represented by the
+selected display mode, while the lower row keeps one representative shell per
+specification. Molecule-level specifications retain fragment-centred tiling.
+
+Polyhedron paint is independent from the atom `material` and from which tile is
+the analysis anchor. Each repeated `--polyhedron` JSON object may set `opacity`,
+`edge_opacity`, `edge_width`, and `flatshading`; every periodic equivalent and
+its representative panel inherit the same values. Defaults are `0.55`, `0.90`,
+`3.0`, and `true`, respectively.
+
 ## `build_figure` style keys
 
 Beyond the Dash-driven defaults, `crystal_viewer.renderer.build_figure`
