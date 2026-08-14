@@ -193,7 +193,7 @@ def _manifest_strict_bonded_images(
     instances: dict[tuple[int, tuple[int, int, int]], int] = {}
     home_by_source: dict[int, dict[str, Any]] = {}
     for draw_index, atom in enumerate(draw_atoms):
-        identity = _source_image_identity(atom, source_atoms, draw_index)
+        identity = source_image_identity(atom, source_atoms, draw_index)
         if identity is None:
             continue
         instances.setdefault(identity, draw_index)
@@ -299,7 +299,7 @@ def _manifest_strict_bonded_images(
     return len(additions)
 
 
-def _source_image_identity(
+def source_image_identity(
     atom: dict[str, Any],
     source_atoms: list[dict[str, Any]],
     fallback_index: int,
@@ -356,7 +356,7 @@ def _canonical_display_bond_pairs(
     collision_keys: set[tuple[int, tuple[int, int, int]]] = set()
     unresolved_instances = 0
     for draw_index, atom in enumerate(draw_atoms):
-        identity = _source_image_identity(atom, source_atoms, draw_index)
+        identity = source_image_identity(atom, source_atoms, draw_index)
         if identity is None:
             unresolved_instances += 1
             continue

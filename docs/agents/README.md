@@ -41,6 +41,7 @@ The same routing as a quick table:
 | Drive the running Dash viewer over HTTP/WebSocket | [`dash_service.md`](dash_service.md) |
 | Control a local terminal view from Python or an agent adapter | [`tui_api.md`](tui_api.md) |
 | Build a static crystal/cluster figure from a CIF | [`scene_api.md`](scene_api.md) |
+| Match a dense coordination-polyhedron publication layout | [`static_publication.md`](static_publication.md) |
 | Build a static cube/orbital figure (HOMO, LUMO, density) | [`cube_api.md`](cube_api.md) |
 | Render ORTEP / thermal ellipsoid figures | [`ortep_api.md`](ortep_api.md) |
 | Add a/b/c (or x/y/z, k-path, dipole) direction indicators to any 3D plot | [`compass_api.md`](compass_api.md) |
