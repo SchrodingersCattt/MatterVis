@@ -183,6 +183,29 @@ def _polyhedron_geometry(
     return faces, edges, spokes
 
 
+def _front_face_mask(
+    overlays: list[dict[str, Any]],
+    view_direction: np.ndarray,
+) -> list[bool]:
+    """Mark hull triangles whose outward normal faces the camera."""
+    eye = np.asarray(view_direction, dtype=float)
+    eye /= max(float(np.linalg.norm(eye)), 1e-12)
+    visible: list[bool] = []
+    for overlay in overlays:
+        shell = np.asarray(overlay.get("shell_coords") or [], dtype=float)
+        center = np.asarray(overlay.get("center_coords"), dtype=float)
+        if shell.ndim != 2 or shell.shape[1:] != (3,) or center.shape != (3,):
+            continue
+        for simplex in _hull_simplices(shell, overlay.get("hull") or {}):
+            face = shell[simplex]
+            normal = np.cross(face[1] - face[0], face[2] - face[0])
+            normal /= max(float(np.linalg.norm(normal)), 1e-12)
+            if float(np.dot(normal, face.mean(axis=0) - center)) < 0:
+                normal = -normal
+            visible.append(float(np.dot(normal, eye)) >= 0.0)
+    return visible
+
+
 def _coordination_number(result: dict[str, Any]) -> int:
     overlay = representative_polyhedron_overlay(result)
     return len(overlay.get("shell_coords") or []) if overlay is not None else 0
@@ -221,50 +244,63 @@ def _draw_main_polyhedra(
 ) -> dict[str, int]:
     faces: list[np.ndarray] = []
     facecolors: list[Any] = []
-    edges: list[np.ndarray] = []
-    edgecolors: list[Any] = []
+    face_edgecolors: list[Any] = []
+    face_light_strengths: list[float] = []
     spokes: list[np.ndarray] = []
+    front_edge_faces = 0
+    back_edge_faces = 0
     counts: dict[str, int] = {}
     lines = config["lines"]
+    basis = _axis_camera_basis(ax)
     for result in results:
         coordination = _coordination_number(result)
         material = _material_for(config, result, coordination, "main")
-        item_faces, item_edges, item_spokes = _polyhedron_geometry(result["overlays"])
+        item_faces, _, item_spokes = _polyhedron_geometry(result["overlays"])
+        front_mask = _front_face_mask(result["overlays"], basis[2])
+        if len(front_mask) != len(item_faces):
+            raise ValueError("front-face mask does not match polyhedron faces")
         faces.extend(item_faces)
         facecolors.extend(
             [to_rgba(material["fill"], float(material["alpha"]))] * len(item_faces)
         )
-        edges.extend(item_edges)
-        edgecolors.extend(
-            [to_rgba(material["edge"], float(material["edge_alpha"]))] * len(item_edges)
+        face_light_strengths.extend(
+            [float(material.get("light_strength", 1.0))] * len(item_faces)
         )
+        face_edgecolors.extend(
+            [
+                to_rgba(
+                    material["edge"],
+                    float(material["edge_alpha"]) if is_front else 0.0,
+                )
+                for is_front in front_mask
+            ]
+        )
+        front_edge_faces += sum(front_mask)
+        back_edge_faces += len(front_mask) - sum(front_mask)
         spokes.extend(item_spokes)
         counts[str(result.get("spec_id") or coordination)] = len(result["overlays"])
+
     lighting = config["lighting"]
+    main_edge_width = float(lines["main_edge_width"])
     face_collection = Poly3DCollection(
         faces,
         facecolors=_polyhedron_facecolors(
             faces,
             facecolors,
-            basis=_axis_camera_basis(ax),
+            basis=basis,
             ambient=float(lighting["polyhedron_ambient"]),
             diffuse=float(lighting["polyhedron_diffuse"]),
+            strengths=face_light_strengths,
         ),
-        linewidths=0.0,
+        edgecolors=face_edgecolors if main_edge_width > 0 else "none",
+        linewidths=main_edge_width,
         shade=False,
         zsort="average",
     )
     setattr(face_collection, "_mattervis_role", "polyhedron_face_stack")
+    setattr(face_collection, "_mattervis_front_edge_faces", front_edge_faces)
+    setattr(face_collection, "_mattervis_back_edge_faces", back_edge_faces)
     ax.add_collection3d(face_collection)
-    main_edge_width = float(lines["main_edge_width"])
-    if edges and main_edge_width > 0 and any(color[3] > 0 for color in edgecolors):
-        edge_collection = Line3DCollection(
-            edges,
-            colors=edgecolors,
-            linewidths=main_edge_width,
-        )
-        setattr(edge_collection, "_mattervis_role", "main_polyhedron_edges")
-        ax.add_collection3d(edge_collection)
 
     main_spoke_width = float(lines["main_spoke_width"])
     main_spoke_alpha = float(lines["main_spoke_alpha"])
@@ -584,6 +620,7 @@ def _draw_panel(
                 basis=basis,
                 ambient=float(config["lighting"]["polyhedron_ambient"]),
                 diffuse=float(config["lighting"]["polyhedron_diffuse"]),
+                strengths=[float(material.get("light_strength", 1.0))] * len(faces),
             ),
             edgecolors="none",
             linewidths=0.0,

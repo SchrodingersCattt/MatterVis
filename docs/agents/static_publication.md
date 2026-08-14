@@ -31,9 +31,9 @@ Main-view polyhedra:
 
 | CN | Fill | Alpha | Edge | Edge alpha |
 |---:|---|---:|---|---:|
-| 8 | `#4CB17A` | 0.26 | `#315F4B` | 0.14 |
-| 6 | `#8F50C2` | 0.30 | `#59336D` | 0.14 |
-| 4 | `#3D90CE` | 0.34 | `#245D7D` | 0.14 |
+| 8 | `#4CB17A` | 0.34 | `#315F4B` | 0.22 |
+| 6 | `#8F50C2` | 0.72 | `#59336D` | 0.28 |
+| 4 | `#3D90CE` | 0.78 | `#245D7D` | 0.28 |
 
 Representative-panel polyhedra:
 
@@ -51,9 +51,12 @@ panel ligands. Panel centre spheres use radius 0.38 and alpha 0.28.
 Keep native Matplotlib face shading disabled because its dark floor makes
 overlapping transparent faces muddy. Apply MatterVis camera-aware face lighting
 instead: ambient 0.45 plus diffuse 0.55, computed from each face normal while
-preserving its alpha. In a packed main cell, keep hull edges faint
-(width 0.12, alpha 0.14) and omit centre-to-ligand spokes; those spokes encode
-no additional topology and accumulate into a dark web. Representative panels
+preserving its alpha. Do not apply equal transparency or lighting contrast to
+all families: CN8 is the translucent background network (light strength 0.18),
+while CN6/CN4 are opaque foreground units (0.55/0.65). Put main-view edges on
+their own front-facing hull triangles inside the depth-sorted face collection;
+back-facing edges have zero alpha and are covered by nearer faces. Use width
+0.20 and omit centre-to-ligand spokes, which accumulate into a dark web. Representative panels
 retain edge/spoke widths 0.72/0.52 because they show one isolated polyhedron;
 spoke colour is `#465852`.
 

@@ -17,15 +17,18 @@ mat-vis render structure.cif \
   --polyhedron '{"id":"cn6","center":"M6","ligand":"X","level":"atom","fallback_max":6}' \
   --polyhedron '{"id":"cn4","center":"M4","ligand":"X","level":"atom","fallback_max":4}' \
   --publication-option materials.8.main.fill=#4CB17A \
-  --publication-option materials.8.main.alpha=0.26 \
+  --publication-option materials.8.main.alpha=0.34 \
   --publication-option materials.6.main.fill=#8F50C2 \
-  --publication-option materials.6.main.alpha=0.30 \
+  --publication-option materials.6.main.alpha=0.72 \
   --publication-option materials.4.main.fill=#3D90CE \
-  --publication-option materials.4.main.alpha=0.34 \
-  --publication-option materials.8.main.edge_alpha=0.14 \
-  --publication-option materials.6.main.edge_alpha=0.14 \
-  --publication-option materials.4.main.edge_alpha=0.14 \
-  --publication-option lines.main_edge_width=0.12 \
+  --publication-option materials.4.main.alpha=0.78 \
+  --publication-option materials.8.main.edge_alpha=0.22 \
+  --publication-option materials.6.main.edge_alpha=0.28 \
+  --publication-option materials.4.main.edge_alpha=0.28 \
+  --publication-option materials.8.main.light_strength=0.18 \
+  --publication-option materials.6.main.light_strength=0.55 \
+  --publication-option materials.4.main.light_strength=0.65 \
+  --publication-option lines.main_edge_width=0.20 \
   --publication-option lines.main_spoke_width=0 \
   --publication-option lines.main_spoke_alpha=0 \
   --publication-option lighting.polyhedron_ambient=0.45 \

@@ -32,22 +32,29 @@ def _polyhedron_facecolors(
     basis: tuple[np.ndarray, np.ndarray, np.ndarray],
     ambient: float,
     diffuse: float,
+    strengths: list[float] | None = None,
 ) -> np.ndarray:
     """Shade flat faces by orientation while preserving their input alpha."""
     if len(faces) != len(colors):
         raise ValueError("polyhedron faces and colors must have equal lengths")
+    if strengths is None:
+        strengths = [1.0] * len(faces)
+    if len(strengths) != len(faces):
+        raise ValueError("polyhedron faces and light strengths must have equal lengths")
     light = _camera_light(basis)
     shaded: list[np.ndarray] = []
-    for face, color in zip(faces, colors):
+    for face, color, strength in zip(faces, colors, strengths):
         vertices = np.asarray(face, dtype=float)
         normal = np.cross(vertices[1] - vertices[0], vertices[2] - vertices[0])
         normal /= max(float(np.linalg.norm(normal)), 1e-12)
         lambert = abs(float(np.dot(normal, light)))
-        illumination = np.clip(
+        lit = np.clip(
             float(ambient) + float(diffuse) * lambert,
             0.0,
             1.0,
         )
+        light_strength = float(np.clip(strength, 0.0, 1.0))
+        illumination = (1.0 - light_strength) + light_strength * lit
         rgba = np.asarray(to_rgba(color), dtype=float)
         rgba[:3] *= illumination
         shaded.append(rgba)

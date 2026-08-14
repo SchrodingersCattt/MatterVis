@@ -157,9 +157,13 @@ def test_dense_coordination_material_does_not_pin_camera() -> None:
     )
     assert config["lighting"]["polyhedron_ambient"] == 0.45
     assert config["lighting"]["polyhedron_diffuse"] == 0.55
-    assert config["lines"]["main_edge_width"] == 0.12
+    assert config["lines"]["main_edge_width"] == 0.20
     assert config["lines"]["main_spoke_width"] == 0.0
     assert config["lines"]["main_spoke_alpha"] == 0.0
+    assert config["materials"]["8"]["main"]["alpha"] < 0.5
+    assert config["materials"]["6"]["main"]["alpha"] > 0.7
+    assert config["materials"]["4"]["main"]["alpha"] > 0.7
+    assert config["materials"]["8"]["main"]["light_strength"] < 0.25
 
 
 def test_publication_cli_options_cover_nested_material_values() -> None:
@@ -167,7 +171,7 @@ def test_publication_cli_options_cover_nested_material_values() -> None:
         "dense_coordination",
         [
             "materials.8.main.fill=#4CB17A",
-            "materials.8.main.alpha=0.26",
+            "materials.8.main.alpha=0.34",
             "atoms.sphere_ambient=0.72",
         ],
         site_styles=[["M8a,M8b", "#86D533,#2F80D9", "1,1", "site A", "0.28"]],
@@ -178,7 +182,7 @@ def test_publication_cli_options_cover_nested_material_values() -> None:
     config = publication_config(style)
 
     assert config["materials"]["8"]["main"]["fill"] == "#4CB17A"
-    assert config["materials"]["8"]["main"]["alpha"] == 0.26
+    assert config["materials"]["8"]["main"]["alpha"] == 0.34
     assert config["atoms"]["sphere_ambient"] == 0.72
     assert config["site_styles"][0]["elements"] == ["M8a", "M8b"]
     assert config["legend"]["entries"][0]["label"] == "site A"
@@ -284,8 +288,10 @@ def test_static_publication_uses_face_stack_and_depth_layers(tmp_path) -> None:
         for collection in axis.collections
         if getattr(collection, "_mattervis_role", None) == "main_polyhedron_spokes"
     ]
-    assert len(main_edges) == 1
+    assert main_edges == []
     assert main_spokes == []
+    assert face_stacks[0]._mattervis_front_edge_faces > 0
+    assert face_stacks[0]._mattervis_back_edge_faces > 0
 
     output = tmp_path / "publication.png"
     FigureResult(

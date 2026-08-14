@@ -293,7 +293,7 @@ def _build_render_parser(
         metavar="PATH=VALUE",
         help=(
             "Override any publication-style field without a config file. Repeat as "
-            "needed, for example materials.8.main.alpha=0.26. Values accept JSON "
+            "needed, for example materials.8.main.alpha=0.34. Values accept JSON "
             "scalars or arrays; other text is kept as a string."
         ),
     )
