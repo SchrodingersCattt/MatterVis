@@ -1,0 +1,66 @@
+{
+  "publication": {
+    "preset": "dense_coordination",
+    "site_styles": [
+      {
+        "elements": ["Ca", "Gd"],
+        "colors": ["#86D533", "#2F80D9"],
+        "weights": [1, 1],
+        "label": "Ca / Gd (24c)",
+        "radius": 0.28
+      },
+      {
+        "elements": ["Zr"],
+        "colors": ["#A9B4BE", "#F28E2B"],
+        "weights": [1, 1],
+        "label": "Hf / Sc (16a)",
+        "radius": 0.28
+      },
+      {
+        "elements": ["Al"],
+        "colors": ["#79CBE7"],
+        "weights": [1],
+        "label": "Al (24d)",
+        "radius": 0.28
+      }
+    ],
+    "legend": {
+      "entries": [
+        {
+          "colors": ["#86D533", "#2F80D9"],
+          "weights": [1, 1],
+          "label": "Ca / Gd (24c)"
+        },
+        {
+          "colors": ["#A9B4BE", "#F28E2B"],
+          "weights": [1, 1],
+          "label": "Hf / Sc (16a)"
+        },
+        {
+          "colors": ["#2D8CDB"],
+          "label": "Cr (16a, 3%@Sc)"
+        },
+        {
+          "colors": ["#79CBE7"],
+          "label": "Al (24d)"
+        },
+        {
+          "colors": ["#FF6363"],
+          "label": "O"
+        }
+      ],
+      "footer": "full cell packing: green=O8, purple=MO6, blue=AlO4"
+    },
+    "specs": {
+      "o8": {
+        "panel_label": "[Ca/Gd]O8"
+      },
+      "o6": {
+        "panel_label": "[Hf/Sc/Cr]O6"
+      },
+      "o4": {
+        "panel_label": "[Al]O4"
+      }
+    }
+  }
+}

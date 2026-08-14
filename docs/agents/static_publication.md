@@ -74,29 +74,14 @@ mat-vis render garnet.cif -o garnet.png --view unit_cell \
   --polyhedron '{"id":"o8","center":"Gd","ligand":"O","fallback_max":8}' \
   --polyhedron '{"id":"o6","center":"Zr","ligand":"O","fallback_max":6}' \
   --polyhedron '{"id":"o4","center":"Al","ligand":"O","fallback_max":4}' \
-  --config style.json --width 2325 --height 1888 --scale 1
+  --config paper/coordination/garnet-publication-style.json \
+  --width 2325 --height 1888 --scale 1
 ```
 
-`style.json` should contain only project semantics and deliberate overrides:
-
-```json
-{
-  "publication": {
-    "preset": "dense_coordination",
-    "site_styles": [
-      {
-        "elements": ["Ca", "Gd"],
-        "colors": ["#86D533", "#2F80D9"],
-        "weights": [1, 1],
-        "label": "Ca / Gd (24c)"
-      }
-    ],
-    "specs": {
-      "o8": {"panel_label": "[Ca/Gd]O8"}
-    }
-  }
-}
-```
+The committed JSON contains the complete garnet site styles, legend, and panel
+labels. Final files must be produced by this CLI path (or installed
+`mat-vis render`), not delivered from a direct Python builder call. Direct API
+calls remain appropriate for unit tests and renderer development.
 
 Do not add a camera to this reusable style file. Record any selected camera
 with the figure provenance for that structure.

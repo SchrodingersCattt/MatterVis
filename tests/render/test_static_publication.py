@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import json
+from pathlib import Path
 
 import matplotlib
 import numpy as np
@@ -154,6 +156,21 @@ def test_dense_coordination_material_does_not_pin_camera() -> None:
     )
     assert config["lighting"]["polyhedron_shade_main"] is False
     assert config["lighting"]["polyhedron_shade_panel"] is False
+
+
+def test_committed_garnet_cli_style_is_valid_and_camera_free() -> None:
+    style_path = (
+        Path(__file__).resolve().parents[2]
+        / "paper"
+        / "coordination"
+        / "garnet-publication-style.json"
+    )
+    style = json.loads(style_path.read_text(encoding="utf-8"))
+    config = publication_config(style)
+
+    assert config["legend"]["entries"]
+    assert set(config["specs"]) == {"o4", "o6", "o8"}
+    assert "camera" not in config["main"]
 
 
 def test_sphere_material_has_bright_floor_and_directional_gradient() -> None:
