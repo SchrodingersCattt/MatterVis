@@ -1,6 +1,6 @@
 ---
 name: visualize-materials
-description: 'Visualize crystal and molecular material structures with MatterVis. Use when rendering CIF files, diagnosing display modes or disorder, making publication figures, choosing crystallographic cameras, exporting PNG/PDF/SVG/HTML, highlighting complete molecules, or producing trajectory animations and terminal views.'
+description: 'Visualize atomistic structures and trajectories with MatterVis. Use for CIF, Cube, POSCAR/CONTCAR, VASP, XYZ/extxyz, ASE .traj, LAMMPS dump/data/configuration, molecular crystals, publication figures, static export, animation, and terminal views.'
 ---
 
 # Visualize Materials
@@ -11,15 +11,16 @@ camera, style, export backend, and verification as explicit data.
 ## Core workflow
 
 1. Verify the input and requested deliverable.
-2. Read [installation](./references/install.md) and verify the released CLI.
-3. Always read [diagnosis and scene selection](./references/diagnose-and-select.md)
+2. For non-CIF or multi-frame data, read [input formats](./references/input-formats.md).
+3. Read [installation](./references/install.md) only when installation or repair is needed.
+4. Always read [diagnosis and scene selection](./references/diagnose-and-select.md)
 	 before choosing a display mode or style.
-4. For images, always read the [camera contract](./references/camera.md), then the
+5. For images, always read the [camera contract](./references/camera.md), then the
 	 matching render path.
-5. By default export exactly one final PNG with explicit dimensions and settings.
+6. By default export exactly one final PNG with explicit dimensions and settings.
    Generate HTML, PDF, SVG, animations, or extra candidate files only when the
    caller explicitly requests them.
-6. Always read [verification and delivery](./references/verification.md) before
+7. Always read [verification and delivery](./references/verification.md) before
 	 reporting or attaching the result.
 
 ## Render paths

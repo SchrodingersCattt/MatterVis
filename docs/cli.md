@@ -1,67 +1,104 @@
 # CLI Reference
 
-MatterVis provides a command-line interface for generating publication-quality
-crystal structure figures without launching the browser viewer.
+MatterVis renders atomistic structures and trajectories without launching the
+browser viewer. Every input format is parsed into the same canonical structure
+frame before scene construction.
 
 ## Quick start
 
-```bash
-# Render a CIF to PNG (publication quality, 2× supersampling)
+~~~bash
+# Static CIF
 mat-vis render structure.cif -o figure.png
 
-# PDF output, unit cell view, no hydrogen
-mat-vis render structure.cif -o figure.pdf \
-  --view unit_cell --no-hydrogen
+# VASP structure
+mat-vis render POSCAR -o figure.png --view unit_cell
 
-# ORTEP with hatch shading in greyscale
-mat-vis render structure.cif -o ortep.png \
-  --style ortep --ortep-mode ortep_hatch --monochrome
+# One frame from an ASE trajectory
+mat-vis render trajectory.traj --frame 20 -o frame.png
 
-# Interactive HTML with the default orthographic +c view
-mat-vis render structure.cif -o interactive.html \
-  --camera-axis c --orthogonal --atom-scale 1.2
-```
+# LAMMPS trajectory with explicit atom-type order
+mat-vis render run.dump --type-map O H -o trajectory.gif \
+  --frame-range 0:100:2 --fps 12
+
+# Interactive HTML
+mat-vis render structure.extxyz -o interactive.html --orthogonal
+~~~
 
 ## Subcommands
 
 | Command | Description |
 |---------|-------------|
-| `render` | Generate a static figure from a CIF file |
-| `serve`  | Launch the interactive Dash browser viewer |
+| render | Render a structure, one trajectory frame, or a GIF/MP4 animation |
+| serve | Launch the interactive Dash browser viewer |
+| tui | Open a supported structure or trajectory frame in the terminal |
 
 ---
 
-## `render` — Static figure export
+## render — Structure and trajectory export
 
-```
-mat-vis render CIF -o OUTPUT [options]
-```
+~~~
+mat-vis render INPUT -o OUTPUT [options]
+~~~
 
-### Required arguments
+### Input and output arguments
 
 | Argument | Description |
 |----------|-------------|
-| `CIF` | Path to the input CIF file |
-| `-o`, `--output` | Output file path. Format inferred from extension |
+| INPUT | Atomistic structure or trajectory path |
+| -o, --output | Output path; format is inferred from its extension |
+| --input-format FORMAT | ASE format name for an ambiguous filename |
+| --type-map ELEMENT ... | Complete LAMMPS atom-type order |
+| --frame INDEX | Static frame index; negative indices are accepted |
+
+Supported inputs:
+
+| Input | Reader |
+|-------|--------|
+| CIF | High-fidelity Gemmi and MolCrysKit path |
+| Cube | Cube parser with volumetric data preserved |
+| POSCAR, CONTCAR, .vasp | ASE VASP reader |
+| XYZ, extxyz | ASE, including multi-frame files |
+| .traj | ASE trajectory reader |
+| LAMMPS dump, lammpstrj | ASE LAMMPS text-dump reader |
+| LAMMPS data/configuration | ASE LAMMPS data reader |
+| Other ASE-readable files | ASE auto-detection or --input-format |
+
+LAMMPS numeric types are not elements. Pass --type-map whenever the source does
+not encode element identity unambiguously; the order is type 1, type 2, and so
+on. MatterVis never guesses it from a model filename.
 
 ### Supported output formats
 
 | Extension | Format | Backend |
 |-----------|--------|---------|
-| `.png` | Raster image | Plotly + kaleido; Matplotlib for publication layout |
-| `.pdf` | Vector PDF | Plotly + kaleido; Matplotlib for publication layout |
-| `.svg` | Vector SVG | Plotly + kaleido; Matplotlib for publication layout |
-| `.html` | Interactive 3D | Plotly.js (CDN) |
+| .png | Raster image | Plotly + Kaleido; Matplotlib fallback |
+| .pdf | Vector PDF | Plotly + Kaleido; Matplotlib fallback |
+| .svg | Vector SVG | Plotly + Kaleido; Matplotlib fallback |
+| .html | Interactive 3D | Plotly.js |
+| .gif | Multi-frame animation | Shared renderer + Pillow |
+| .mp4 | H.264 animation | Shared renderer + imageio-ffmpeg |
+
+### Frames and animations
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| --frame INDEX | 0 | Select one frame for PNG/PDF/SVG/HTML |
+| --frame-range START:STOP[:STEP] | all | Python half-open frame slice for GIF/MP4 |
+| --stride N | 1 | Keep every Nth selected animation frame |
+| --fps FPS | 12 | Positive animation frame rate |
+
+GIF/MP4 require at least two selected frames. All selected frames use one camera,
+canvas, and shared world-space viewport scale.
 
 ### Display options
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--view MODE` | `formula_unit` | Display mode: `formula_unit`, `unit_cell`, `asymmetric_unit`, `cluster` |
-| `--style STYLE` | `ball_stick` | Rendering style: `ball_stick`, `ball`, `stick`, `ortep`, `wireframe` |
-| `--material MAT` | `mesh` | Surface material: `mesh`, `flat` |
-| `--orthogonal` | ✓ | Use orthographic projection (default) |
-| `--perspective` | — | Use perspective projection |
+| --view MODE | auto | CIF defaults to formula_unit; other inputs to unit_cell |
+| --style STYLE | ball_stick | ball_stick, ball, stick, ortep, or wireframe |
+| --material MAT | mesh | mesh or flat |
+| --orthogonal | yes | Orthographic projection |
+| --perspective | no | Perspective projection |
 
 ### Camera
 
@@ -171,60 +208,32 @@ mat-vis serve [options]
 | `--preset` | — | Preset JSON to load |
 | `--api-only` | — | Reserved for automation mode |
 
-## `tui`
+## tui — Terminal view
 
-Open a crystal in the terminal without starting the Dash service:
+Open any supported structure or one trajectory frame without starting Dash:
 
-```bash
-mat-vis tui structure.cif
-```
+~~~bash
+mat-vis tui POSCAR
+mat-vis tui trajectory.traj --frame 20
+mat-vis tui run.dump --type-map O H --frame 20
+~~~
 
-Use `--no-interaction` for deterministic stdout suitable for scripts or
-agents. `--format structured` adds cell, atom, bond-summary, and camera data.
-
-```bash
-mat-vis tui structure.cif --no-interaction --format structured \
-  --display formula_unit --projection orthographic
-```
+Use --no-interaction for deterministic stdout. --format structured adds cell,
+atom, bond-summary, and camera data. --input-format, --type-map, and --frame use
+the same shared IO contract as render.
 
 Important options:
 
-- `--display unit_cell|formula_unit|asymmetric_unit` uses MatterVis's
-  canonical loader/display selection for CIF files.
-- The default `--display auto` preserves the canonical unit cell. Dense
-  molecular cells start at molecule level so every molecule remains present
-  without hundreds of atom labels; press `Shift+L` for atom level.
-- The default `--label auto` keeps labels on sparse views, shortens them to
-  element symbols at medium density, and uses coloured dots when crowded.
-  Explicit `--label label|element|molecule|dot` always wins.
-- `--view a|b|c|diagonal|ab|ac|bc` or explicit
-  `--azimuth/--elevation/--roll` selects the initial camera.
-- `--projection orthographic|perspective`, `--zoom`, and `--center` are
-  honored by both static and interactive modes.
-- `--show-minor` displays minor disorder alternatives; `--hide-partial`
-  removes partial-occupancy sites.
-- `--width` and `--height` bound static output exactly.
+- --display auto|unit_cell|formula_unit|asymmetric_unit selects a canonical scene;
+- --view a|b|c|diagonal|ab|ac|bc or explicit angles selects the camera;
+- --projection, --zoom, and --center work in static and interactive modes;
+- --show-minor and --hide-partial control crystallographic disorder;
+- --width and --height bound static output exactly.
 
-Interactive controls: `q/e` orbit horizontally around the world up axis,
-`w/s` pitch about the current screen-right axis, `a/d` roll, arrows or
-`i/j/k/l` pan, and `u/o` zoom out/in. `+/-` and `[/]` remain zoom aliases.
-The terminal keeps its fitted framing while orbiting; use `r` to restore the
-startup all-view fit. `b`, `c`, `t`, `m`,
-and `n` toggle bonds, cell, labels, monochrome, and minor disorder. `Shift+L`
-switches between atom and molecule views; `r` restores the startup camera. Use
-`x` to quit; avoid relying on terminal/VS Code-reserved `Ctrl+Q`.
-
-Press `:` for command mode. It supports explicit atom selection, local
-bond-neighborhood focus, and direct/MIC distance, angle, or chain-unwrapped
-dihedral measurements. Use `:help` for the compact command list, for example
-`:focus N9 1`, `:angle C12 N9 C13`, or
-`:distance Cd2 Cl3 mic`.
-
-The earlier automatic terminal polyhedron level was removed because it used a
-local metal table and convex hull rather than MatterVis/MolCrysKit's canonical
-coordination analysis. Use the documented polyhedron API for analytical
-polyhedra.
-
+Interactive controls: q/e and w/s orbit, a/d roll, arrows or i/j/k/l pan, u/o
+zoom, b/c/t/m/n toggle bonds/cell/labels/monochrome/minor disorder, Shift+L
+switches atom and molecule levels, r resets the view, and x quits. Press : for
+selection, neighborhood focus, and geometric measurements.
 
 ## Common recipes
 
