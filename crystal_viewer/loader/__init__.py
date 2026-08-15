@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .bundle_builder import build_loaded_crystal_from_atoms  # noqa: F401
 from .core import (  # noqa: F401
     LoadedCrystal,
     _fragment_table_from_atoms,
@@ -30,10 +31,24 @@ __all__ = [
     "build_bundle_scene",
     "build_empty_bundle",
     "build_loaded_crystal",
+    "build_loaded_crystal_from_atoms",
+    "build_loaded_crystal_from_ase",
+    "count_structure_frames",
     "bundle_json",
+    "StructureFrame",
+    "StructureInput",
+    "load_structure_input",
     "infer_uploaded_name",
     "load_default_catalog",
     "load_uploaded_cif",
     "perf_log",
     "write_uploaded_cif",
 ]
+
+from .structure_input import (  # noqa: F401
+    StructureFrame,
+    StructureInput,
+    build_loaded_crystal_from_ase,
+    count_structure_frames,
+    load_structure_input,
+)

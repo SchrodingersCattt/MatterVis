@@ -10,12 +10,15 @@ import sys
 from pathlib import Path
 from typing import Any, Dict
 
-_DISPLAY_MODES = ("formula_unit", "unit_cell", "asymmetric_unit", "cluster")
+from .frame_selection import parse_frame_indices as _parse_frame_indices
+
+_DISPLAY_MODES = ("auto", "formula_unit", "unit_cell", "asymmetric_unit", "cluster")
 _STYLES = ("ball_stick", "ball", "stick", "ortep", "wireframe")
 _MATERIALS = ("mesh", "flat")
 _ORTEP_MODES = ("ortep_solid", "ortep_axes", "ortep_octant", "ortep_hatch")
 _IMAGE_EXTENSIONS = (".png", ".pdf", ".svg")
-_SUPPORTED_EXTENSIONS = _IMAGE_EXTENSIONS + (".html",)
+_ANIMATION_EXTENSIONS = (".gif", ".mp4")
+_SUPPORTED_EXTENSIONS = _IMAGE_EXTENSIONS + (".html",) + _ANIMATION_EXTENSIONS
 _CAMERA_AXES = ("a", "b", "c", "a*", "b*", "c*")
 
 
@@ -24,10 +27,10 @@ def _build_render_parser(
 ) -> argparse.ArgumentParser:
     p = subparsers.add_parser(
         "render",
-        help="Render a CIF file to a publication-quality figure.",
+        help="Render an atomistic structure or trajectory.",
         description=(
-            "Load a CIF file and export a static figure. Output format is "
-            "inferred from the file extension (.png, .pdf, .svg, .html)."
+            "Load an atomistic structure or trajectory and export a static figure "
+            "or animation. Output format is inferred from the extension."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
@@ -36,26 +39,72 @@ def _build_render_parser(
             "  %(prog)s structure.cif -o fig.pdf --view unit_cell --no-hydrogen\n"
             "  %(prog)s structure.cif -o fig.png --style ortep --ortep-mode ortep_hatch --monochrome\n"
             "  %(prog)s structure.cif -o fig.html --orthogonal --atom-scale 1.2\n"
+            "  %(prog)s POSCAR -o fig.png --view unit_cell\n"
+            "  %(prog)s run.dump --type-map Si O -o run.gif --stride 10\n"
         ),
     )
 
     # Positional
-    p.add_argument("cif", metavar="CIF", help="Path to the input CIF file.")
+    p.add_argument(
+        "input",
+        metavar="INPUT",
+        help=(
+            "Atomistic input: CIF, Cube, POSCAR/CONTCAR, VASP, XYZ/extxyz, "
+            "ASE .traj, or LAMMPS dump/data."
+        ),
+    )
+    p.add_argument(
+        "--input-format",
+        default=None,
+        metavar="FORMAT",
+        help="ASE format name for ambiguous inputs (for example lammps-data).",
+    )
+    p.add_argument(
+        "--type-map",
+        nargs="+",
+        default=None,
+        metavar="ELEMENT",
+        help="LAMMPS type order, for example --type-map Si O.",
+    )
+    p.add_argument(
+        "--frame",
+        type=int,
+        default=0,
+        help="Frame index for a static output (default: 0; negative indices allowed).",
+    )
+    p.add_argument(
+        "--frame-range",
+        default=None,
+        metavar="START:STOP[:STEP]",
+        help="Frame slice for GIF/MP4 output; defaults to all frames.",
+    )
+    p.add_argument(
+        "--stride",
+        type=int,
+        default=1,
+        help="Keep every Nth selected animation frame (default: 1).",
+    )
+    p.add_argument(
+        "--fps",
+        type=float,
+        default=12.0,
+        help="Animation frames per second (default: 12).",
+    )
 
     # Output
     p.add_argument(
         "-o",
         "--output",
         required=True,
-        help="Output file path. Format inferred from extension: .png, .pdf, .svg, .html.",
+        help="Output path: .png, .pdf, .svg, .html, .gif, or .mp4.",
     )
 
     # Display mode
     p.add_argument(
         "--view",
         choices=_DISPLAY_MODES,
-        default="formula_unit",
-        help="Display mode (default: formula_unit).",
+        default="auto",
+        help="Display mode (default: CIF formula_unit; other inputs unit_cell).",
     )
 
     # Rendering style
@@ -656,87 +705,45 @@ def _apply_camera_overrides(
     }
 
 
-def _render_main(args: argparse.Namespace) -> None:
-    """Execute the render subcommand."""
-    cif_path = Path(args.cif).resolve()
-    if not cif_path.exists():
-        sys.exit(f"Error: CIF file not found: {args.cif}")
+def _prepare_frame(bundle, args: argparse.Namespace, overrides: dict[str, Any]):
+    from ..loader import build_bundle_scene
+    from ..scene import scene_style
 
-    output_path = Path(args.output).resolve()
-    ext = output_path.suffix.lower()
-    if ext not in _SUPPORTED_EXTENSIONS:
-        sys.exit(
-            f"Error: unsupported output format '{ext}'. "
-            f"Supported: {', '.join(_SUPPORTED_EXTENSIONS)}"
-        )
-    if not math.isfinite(args.camera_distance) or args.camera_distance <= 0:
-        sys.exit("Error: --camera-distance must be finite and greater than zero.")
+    source_metadata = dict(getattr(bundle, "scene", {}) or {})
+    include_boundary_replicas = any(source_metadata.get("pbc", [True, True, True]))
+    scene = build_bundle_scene(
+        bundle,
+        display_mode=args.view,
+        show_hydrogen=args.show_hydrogen,
+        include_boundary_replicas=include_boundary_replicas,
+    )
+    _apply_camera_overrides(scene, overrides, args)
+    style = scene_style(scene, overrides)
+    topology_data = _build_cli_topology_data(bundle, scene, args)
+    if topology_data is not None:
+        style["topology_enabled"] = True
+    return scene, style, topology_data
 
-    # Lazy imports to keep CLI startup fast when just showing --help
-    from ..loader import build_bundle_scene, build_loaded_crystal
+
+def _save_static_output(
+    bundle,
+    scene: dict[str, Any],
+    style: dict[str, Any],
+    topology_data: dict[str, Any] | None,
+    args: argparse.Namespace,
+    output_path: Path,
+) -> None:
     from ..renderer import (
         build_figure,
         build_publication_figure,
         build_static_publication_figure,
         render,
     )
-    from ..scene import scene_style
-    from .export import (
-        plotly_static_export_available,
-        save_flat_ortep_fallback,
-    )
+    from .export import plotly_static_export_available, save_flat_ortep_fallback
 
-    name = cif_path.stem
-    print(f"Loading {cif_path.name} ...")
-
-    # Parse view-weights JSON if provided
-    view_weights = None
-    if args.view_weights:
-        try:
-            view_weights = json.loads(args.view_weights)
-            if not isinstance(view_weights, dict):
-                sys.exit("Error: --view-weights must be a JSON object.")
-        except json.JSONDecodeError as exc:
-            sys.exit(f"Error: invalid JSON in --view-weights: {exc}")
-
-    bundle = build_loaded_crystal(
-        name=name,
-        cif_path=str(cif_path),
-        title=name,
-        view_weights=view_weights,
-    )
-
-    scene = build_bundle_scene(
-        bundle,
-        display_mode=args.view,
-        show_hydrogen=args.show_hydrogen,
-    )
-
-    overrides = _build_style_overrides(args)
-    try:
-        _apply_camera_overrides(scene, overrides, args)
-    except ValueError as exc:
-        sys.exit(f"Error: invalid camera parameters: {exc}")
-    style = scene_style(scene, overrides)
-
-    try:
-        topology_data = _build_cli_topology_data(bundle, scene, args)
-    except ValueError as exc:
-        sys.exit(f"Error: invalid polyhedron parameters: {exc}")
-    if topology_data is not None:
-        style["topology_enabled"] = True
-    if args.publication_layout and topology_data is None:
-        sys.exit(
-            "Error: --publication-layout requires at least one --polyhedron specification."
-        )
-
-    print(f"Building figure ({args.style}, {args.view}) ...")
-
-    # Ensure output directory exists
+    ext = output_path.suffix.lower()
     output_path.parent.mkdir(parents=True, exist_ok=True)
-
     if ext == ".html":
-        # HTML is always the interactive Plotly path, including flat ORTEP.
         if args.publication_layout:
             fig = build_publication_figure(
                 scene,
@@ -750,88 +757,238 @@ def _render_main(args: argparse.Namespace) -> None:
         else:
             fig = build_figure(scene, style, topology_data=topology_data)
         fig.write_html(str(output_path), include_plotlyjs="cdn", full_html=True)
-    else:
-        result = render(scene, style) if topology_data is None else None
-        if args.publication_layout:
-            from .api import FigureResult
+        return
 
-            result = FigureResult(
-                mpl_fig=build_static_publication_figure(
-                    scene,
-                    style,
-                    topology_data,
-                    title=args.title,
-                    subtitle=args.subtitle,
-                    width=args.width,
-                    height=args.height,
-                ),
-                mpl_save_kwargs={"bbox_inches": None},
-            )
-        elif topology_data is not None:
-            from .api import FigureResult
+    result = render(scene, style) if topology_data is None else None
+    if args.publication_layout:
+        from .api import FigureResult
 
-            result = FigureResult(
-                plotly_fig=build_figure(scene, style, topology_data=topology_data)
-            )
-        export_available, unavailable_reason = plotly_static_export_available()
-        if result.plotly_figure is not None and not export_available:
-            if args.publication_layout:
-                sys.exit(
-                    "Error: publication layout requires Plotly/Kaleido static export "
-                    f"({unavailable_reason})."
-                )
-            print(
-                "Plotly/Kaleido static export is unavailable "
-                f"({unavailable_reason}).",
-                file=sys.stderr,
-            )
-            print(
-                "Falling back to Matplotlib flat ORTEP output; "
-                "the visual style differs from the requested Plotly rendering.",
-                file=sys.stderr,
-            )
-            save_flat_ortep_fallback(
+        result = FigureResult(
+            mpl_fig=build_static_publication_figure(
                 scene,
-                overrides,
-                output_path,
+                style,
+                topology_data,
+                title=args.title,
+                subtitle=args.subtitle,
                 width=args.width,
                 height=args.height,
-                scale=args.scale,
+            ),
+            mpl_save_kwargs={"bbox_inches": None},
+        )
+    elif topology_data is not None:
+        from .api import FigureResult
+
+        result = FigureResult(
+            plotly_fig=build_figure(scene, style, topology_data=topology_data)
+        )
+
+    export_available, unavailable_reason = plotly_static_export_available()
+    if result.plotly_figure is not None and not export_available:
+        if args.publication_layout:
+            raise RuntimeError(
+                "publication layout requires Plotly/Kaleido static export "
+                f"({unavailable_reason})"
             )
-        else:
-            try:
-                result.save(
-                    str(output_path),
-                    width=args.width,
-                    height=args.height,
-                    scale=args.scale,
-                )
-            except Exception as exc:
-                if result.plotly_figure is None:
-                    raise
-                if args.publication_layout:
-                    sys.exit(
-                        "Error: publication layout static export failed "
-                        f"({type(exc).__name__}: {exc})."
-                    )
-                print(
-                    "Plotly/Kaleido static export is unavailable "
-                    f"({type(exc).__name__}: {exc}).",
-                    file=sys.stderr,
-                )
-                print(
-                    "Falling back to Matplotlib flat ORTEP output; "
-                    "the visual style differs from the requested Plotly rendering.",
-                    file=sys.stderr,
-                )
-                save_flat_ortep_fallback(
-                    scene,
-                    overrides,
+        print(
+            "Plotly/Kaleido static export is unavailable "
+            f"({unavailable_reason}). Falling back to Matplotlib flat ORTEP.",
+            file=sys.stderr,
+        )
+        save_flat_ortep_fallback(
+            scene,
+            style,
+            output_path,
+            width=args.width,
+            height=args.height,
+            scale=args.scale,
+        )
+        return
+
+    try:
+        result.save(
+            str(output_path),
+            width=args.width,
+            height=args.height,
+            scale=args.scale,
+        )
+    except Exception as exc:
+        if result.plotly_figure is None or args.publication_layout:
+            raise
+        print(
+            "Plotly/Kaleido static export failed "
+            f"({type(exc).__name__}: {exc}). Falling back to Matplotlib flat ORTEP.",
+            file=sys.stderr,
+        )
+        save_flat_ortep_fallback(
+            scene,
+            style,
+            output_path,
+            width=args.width,
+            height=args.height,
+            scale=args.scale,
+        )
+
+
+def _save_animation(
+    prepared_frames: list[tuple[Any, dict[str, Any], dict[str, Any], Any]],
+    args: argparse.Namespace,
+    output_path: Path,
+) -> None:
+    import tempfile
+
+    from PIL import Image
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="mattervis-frames-") as temp_dir:
+        frame_paths: list[Path] = []
+        for order, (bundle, scene, style, topology_data) in enumerate(prepared_frames):
+            frame_path = Path(temp_dir) / f"frame-{order:06d}.png"
+            _save_static_output(
+                bundle,
+                scene,
+                style,
+                topology_data,
+                args,
+                frame_path,
+            )
+            frame_paths.append(frame_path)
+
+        images = [Image.open(path).convert("RGB") for path in frame_paths]
+        try:
+            if output_path.suffix.lower() == ".gif":
+                duration_ms = max(1, round(1000.0 / args.fps))
+                images[0].save(
                     output_path,
-                    width=args.width,
-                    height=args.height,
-                    scale=args.scale,
+                    save_all=True,
+                    append_images=images[1:],
+                    duration=duration_ms,
+                    loop=0,
                 )
+            else:
+                import imageio.v3 as iio
+                import numpy as np
+
+                frames = np.stack([np.asarray(image) for image in images])
+                iio.imwrite(
+                    output_path,
+                    frames,
+                    fps=args.fps,
+                    codec="libx264",
+                    macro_block_size=1,
+                )
+        finally:
+            for image in images:
+                image.close()
+
+
+def _render_main(args: argparse.Namespace) -> None:
+    """Execute the render subcommand through the shared structure IO."""
+    input_path = Path(args.input).resolve()
+    if not input_path.exists():
+        sys.exit(f"Error: structure file not found: {args.input}")
+
+    output_path = Path(args.output).resolve()
+    ext = output_path.suffix.lower()
+    if ext not in _SUPPORTED_EXTENSIONS:
+        sys.exit(
+            f"Error: unsupported output format {ext!r}. "
+            f"Supported: {', '.join(_SUPPORTED_EXTENSIONS)}"
+        )
+    if not math.isfinite(args.camera_distance) or args.camera_distance <= 0:
+        sys.exit("Error: --camera-distance must be finite and greater than zero.")
+    if not math.isfinite(args.fps) or args.fps <= 0:
+        sys.exit("Error: --fps must be finite and greater than zero.")
+
+    from ..loader import count_structure_frames, load_structure_input
+    from ..renderer import uniform_viewport
+
+    print(f"Loading {input_path.name} ...")
+    if ext in _ANIMATION_EXTENSIONS:
+        if args.publication_layout:
+            sys.exit("Error: publication layouts cannot be exported as animations.")
+        try:
+            frame_count = count_structure_frames(
+                input_path,
+                input_format=args.input_format,
+                type_map=args.type_map,
+            )
+            indices = _parse_frame_indices(
+                frame_count,
+                args.frame_range,
+                args.stride,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            sys.exit(f"Error: {exc}")
+        if len(indices) < 2:
+            sys.exit("Error: animation output requires at least two selected frames.")
+    else:
+        if args.frame_range is not None:
+            sys.exit("Error: --frame-range is only valid for GIF/MP4 output.")
+        indices = [args.frame]
+
+    try:
+        structure = load_structure_input(
+            input_path,
+            input_format=args.input_format,
+            type_map=args.type_map,
+            frame_indices=indices,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        sys.exit(f"Error: {exc}")
+
+    args.view = (
+        "formula_unit"
+        if args.view == "auto" and structure.input_format == "cif"
+        else "unit_cell" if args.view == "auto" else args.view
+    )
+    overrides = _build_style_overrides(args)
+
+    prepared = []
+    for selected in structure.frames:
+        frame_overrides = dict(overrides)
+        try:
+            scene, style, topology_data = _prepare_frame(
+                selected.bundle,
+                args,
+                frame_overrides,
+            )
+        except ValueError as exc:
+            sys.exit(f"Error: invalid render parameters: {exc}")
+        prepared.append((selected.bundle, scene, style, topology_data))
+
+    if args.publication_layout and prepared[0][3] is None:
+        sys.exit(
+            "Error: --publication-layout requires at least one --polyhedron specification."
+        )
+
+    if len(prepared) > 1:
+        uniform_viewport(
+            [scene for _, scene, _, _ in prepared],
+            style=prepared[0][2],
+            shared_center=True,
+        )
+        print(
+            f"Building animation ({len(prepared)} frames, "
+            f"{args.style}, {args.view}) ..."
+        )
+        try:
+            _save_animation(prepared, args, output_path)
+        except Exception as exc:
+            sys.exit(f"Error: animation export failed ({type(exc).__name__}: {exc}).")
+    else:
+        bundle, scene, style, topology_data = prepared[0]
+        print(f"Building figure ({args.style}, {args.view}) ...")
+        try:
+            _save_static_output(
+                bundle,
+                scene,
+                style,
+                topology_data,
+                args,
+                output_path,
+            )
+        except Exception as exc:
+            sys.exit(f"Error: static export failed ({type(exc).__name__}: {exc}).")
 
     size = os.path.getsize(output_path)
     print(f"Wrote {ext.lstrip('.')} : {output_path}  ({size:,} bytes)")

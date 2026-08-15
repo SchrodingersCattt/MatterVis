@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "matter-vis"
 dynamic = ["version"]
-description = "Publication-quality crystal structure visualization — headless CLI, browser viewer, ORTEP export, and terminal TUI"
+description = "Publication-quality atomistic structure and trajectory visualization — CLI, browser viewer, animation, ORTEP, and terminal TUI"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -34,6 +34,8 @@ dependencies = [
     "flask-compress",
     "matplotlib",
     "pillow",
+    "imageio",
+    "imageio-ffmpeg",
     "ase",
     "networkx",
     "textual",

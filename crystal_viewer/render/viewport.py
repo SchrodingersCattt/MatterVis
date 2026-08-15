@@ -19,6 +19,7 @@ def _normalize(vec: Iterable[float], fallback: Iterable[float]) -> np.ndarray:
 def _plotly_camera_from_scene(scene: dict, style: dict) -> dict:
     explicit = style.get("camera")
     if isinstance(explicit, dict):
+
         def _xyz_value(raw, fallback: tuple[float, float, float]) -> dict[str, float]:
             if isinstance(raw, dict):
                 return {
@@ -54,15 +55,9 @@ def _plotly_camera_from_scene(scene: dict, style: dict) -> dict:
                 up_raw if up_raw is not None else (0.0, 1.0, 0.0),
                 (0.0, 1.0, 0.0),
             )
-            eye = {
-                axis: float(eye_vector[i])
-                for i, axis in enumerate(("x", "y", "z"))
-            }
+            eye = {axis: float(eye_vector[i]) for i, axis in enumerate(("x", "y", "z"))}
             center = {"x": 0.0, "y": 0.0, "z": 0.0}
-            up = {
-                axis: float(up_vector[i])
-                for i, axis in enumerate(("x", "y", "z"))
-            }
+            up = {axis: float(up_vector[i]) for i, axis in enumerate(("x", "y", "z"))}
         else:
             eye = _xyz("eye", (0.0, 0.0, 1.8))
             center = _xyz("center", (0.0, 0.0, 0.0))
@@ -70,9 +65,7 @@ def _plotly_camera_from_scene(scene: dict, style: dict) -> dict:
 
         projection = explicit.get("projection") or {}
         projection_type = (
-            projection.get("type")
-            if isinstance(projection, dict)
-            else projection
+            projection.get("type") if isinstance(projection, dict) else projection
         )
         return {
             "eye": eye,
@@ -84,7 +77,10 @@ def _plotly_camera_from_scene(scene: dict, style: dict) -> dict:
         }
 
     eye_distance = float(style.get("camera_eye_distance", 1.8))
-    eye = _normalize(scene.get("view_direction", [0.0, 0.0, 1.0]), [0.0, 0.0, 1.0]) * eye_distance
+    eye = (
+        _normalize(scene.get("view_direction", [0.0, 0.0, 1.0]), [0.0, 0.0, 1.0])
+        * eye_distance
+    )
     up = _normalize(scene.get("up", [0.0, 1.0, 0.0]), [0.0, 1.0, 0.0])
     return {
         "eye": {"x": float(eye[0]), "y": float(eye[1]), "z": float(eye[2])},
@@ -135,7 +131,14 @@ def flat_projected_pixel_scale(scene: dict, style: dict, *, ranges=None) -> floa
     if ranges is None:
         ranges = _scene_ranges(scene, style)
     xr, yr, zr = ranges
-    spans = np.array([float(xr[1]) - float(xr[0]), float(yr[1]) - float(yr[0]), float(zr[1]) - float(zr[0])], dtype=float)
+    spans = np.array(
+        [
+            float(xr[1]) - float(xr[0]),
+            float(yr[1]) - float(yr[0]),
+            float(zr[1]) - float(zr[0]),
+        ],
+        dtype=float,
+    )
     if not np.all(np.isfinite(spans)) or np.any(spans <= 1e-9):
         return 47.5
 
@@ -160,12 +163,7 @@ def flat_projected_pixel_scale(scene: dict, style: dict, *, ranges=None) -> floa
         dtype=float,
     )
     corners = np.array(
-        [
-            [xr[ix], yr[iy], zr[iz]]
-            for ix in (0, 1)
-            for iy in (0, 1)
-            for iz in (0, 1)
-        ],
+        [[xr[ix], yr[iy], zr[iz]] for ix in (0, 1) for iy in (0, 1) for iz in (0, 1)],
         dtype=float,
     )
     cube_points = (corners - center[None, :]) * data_to_cube[None, :]
@@ -178,7 +176,9 @@ def flat_projected_pixel_scale(scene: dict, style: dict, *, ranges=None) -> floa
     height = float(style.get("figure_height", style.get("axis_key_fig_height", 720.0)))
     if not np.isfinite(width) or not np.isfinite(height) or width <= 0 or height <= 0:
         return 47.5
-    px_per_cube_unit = 0.90 * min(width / projected_spans[0], height / projected_spans[1])
+    px_per_cube_unit = 0.90 * min(
+        width / projected_spans[0], height / projected_spans[1]
+    )
     projected_unit = max(
         float(np.linalg.norm(data_to_cube * right)),
         float(np.linalg.norm(data_to_cube * screen_up)),
@@ -218,7 +218,9 @@ def _should_use_manual_range_aspect(mode: str | None) -> bool:
     return mode == "unit_cell"
 
 
-def _manual_aspect_scale(scene: dict, style: dict, topology_data: dict | None = None) -> np.ndarray | None:
+def _manual_aspect_scale(
+    scene: dict, style: dict, topology_data: dict | None = None
+) -> np.ndarray | None:
     """Return data-units per rendered cube unit for manual aspectratio.
 
     Plotly maps each data axis range into a rendered axis whose length is
@@ -257,7 +259,10 @@ def _camera_axis_projections(scene: dict, style: dict) -> list[list[float]] | No
         try:
             if isinstance(raw, dict):
                 return np.array(
-                    [float(raw.get(k, fallback[i])) for i, k in enumerate(("x", "y", "z"))],
+                    [
+                        float(raw.get(k, fallback[i]))
+                        for i, k in enumerate(("x", "y", "z"))
+                    ],
                     dtype=float,
                 )
             return np.array([float(v) for v in raw], dtype=float)
@@ -418,10 +423,13 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
         atom_maxs = cell_max.copy()
         if atoms:
             carts = np.array([atom["cart"] for atom in atoms], dtype=float)
-            radii = np.array(
-                [max(float(atom.get("atom_radius", 0.18)), 0.05) for atom in atoms],
-                dtype=float,
-            ) * atom_scale
+            radii = (
+                np.array(
+                    [max(float(atom.get("atom_radius", 0.18)), 0.05) for atom in atoms],
+                    dtype=float,
+                )
+                * atom_scale
+            )
             cell_span = np.maximum(cell_max - cell_min, 1e-6)
             slack = 0.15 * cell_span
             keep = np.all(carts >= cell_min - slack, axis=1) & np.all(
@@ -438,10 +446,13 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
                 )
     elif atoms:
         carts = np.array([atom["cart"] for atom in atoms], dtype=float)
-        radii = np.array(
-            [max(float(atom.get("atom_radius", 0.18)), 0.05) for atom in atoms],
-            dtype=float,
-        ) * atom_scale
+        radii = (
+            np.array(
+                [max(float(atom.get("atom_radius", 0.18)), 0.05) for atom in atoms],
+                dtype=float,
+            )
+            * atom_scale
+        )
         atom_mins = (carts - radii[:, None]).min(axis=0)
         atom_maxs = (carts + radii[:, None]).max(axis=0)
 
@@ -526,6 +537,7 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
     cube_data = scene.get("cube_data")
     if cube_data is not None and style.get("isosurface_enabled", True):
         from .traces_isosurface import isosurface_mesh_extents
+
         iso_min, iso_max = isosurface_mesh_extents(scene, style)
         if iso_min is not None:
             if atom_mins is None:
@@ -582,7 +594,7 @@ def figure_axis_layout(scene: dict, style: dict, xr, yr, zr) -> dict:
     """Build the Plotly ``scene`` layout with stable Cartesian data scale."""
     mode = style.get("display_mode", scene.get("display_mode"))
     aspect = _range_aspect_ratio(xr, yr, zr)
-    
+
     if aspect is not None and _should_use_manual_range_aspect(mode):
         aspect_kwargs = {"aspectmode": "manual", "aspectratio": aspect}
     else:
@@ -599,8 +611,14 @@ def figure_axis_layout(scene: dict, style: dict, xr, yr, zr) -> dict:
     }
 
 
-def uniform_viewport(scenes, *, style=None, padding=0.0):
-    """Stamp a shared world-cube viewport on scenes for equal panel scale."""
+def uniform_viewport(
+    scenes,
+    *,
+    style=None,
+    padding=0.0,
+    shared_center=False,
+):
+    """Stamp equal-scale viewports, optionally with one shared world centre."""
     scenes = list(scenes)
     if not scenes:
         return []
@@ -616,16 +634,29 @@ def uniform_viewport(scenes, *, style=None, padding=0.0):
             centroids.append(np.zeros(3, dtype=float))
             continue
         carts = np.array([atom["cart"] for atom in atoms], dtype=float)
-        radii = np.array(
-            [max(float(atom.get("atom_radius", 0.18)), 0.05) for atom in atoms],
-            dtype=float,
-        ) * atom_scale
+        radii = (
+            np.array(
+                [max(float(atom.get("atom_radius", 0.18)), 0.05) for atom in atoms],
+                dtype=float,
+            )
+            * atom_scale
+        )
         mins = (carts - radii[:, None]).min(axis=0)
         maxs = (carts + radii[:, None]).max(axis=0)
         radius_spans.append(float((maxs - mins).max()))
         centroids.append(0.5 * (mins + maxs))
 
-    half = 0.5 * max(radius_spans) + float(padding)
+    if shared_center:
+        centers_array = np.asarray(centroids, dtype=float)
+        spans_array = np.asarray(radius_spans, dtype=float)[:, None]
+        global_min = np.min(centers_array - 0.5 * spans_array, axis=0)
+        global_max = np.max(centers_array + 0.5 * spans_array, axis=0)
+        common_center = 0.5 * (global_min + global_max)
+        half = 0.5 * float(np.max(global_max - global_min)) + float(padding)
+        centroids = [common_center for _ in scenes]
+    else:
+        half = 0.5 * max(radius_spans) + float(padding)
+
     viewports = []
     for scene, center in zip(scenes, centroids):
         viewport = {
