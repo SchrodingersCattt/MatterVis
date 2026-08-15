@@ -102,20 +102,29 @@ def record(
     return entry
 
 
-def recent(limit: int = 200, since_seq: Optional[int] = None) -> list[dict[str, Any]]:
-    """Return the most-recent events in chronological order.
+def snapshot(
+    limit: int = 200, since_seq: Optional[int] = None
+) -> tuple[list[dict[str, Any]], int]:
+    """Return filtered events and their latest sequence in one atomic snapshot.
 
     If ``since_seq`` is given, only events with a strictly greater
     sequence number are returned -- this lets the UI poll incrementally
     without re-shipping the whole buffer every tick.
     """
     with _LOCK:
-        snapshot = list(_BUFFER)
+        events = list(_BUFFER)
+        latest = _SEQ
     if since_seq is not None:
-        snapshot = [e for e in snapshot if e["seq"] > since_seq]
-    if limit and len(snapshot) > limit:
-        snapshot = snapshot[-limit:]
-    return snapshot
+        events = [e for e in events if e["seq"] > since_seq]
+    if limit and len(events) > limit:
+        events = events[-limit:]
+    return events, latest
+
+
+def recent(limit: int = 200, since_seq: Optional[int] = None) -> list[dict[str, Any]]:
+    """Return the most-recent events in chronological order."""
+    events, _ = snapshot(limit=limit, since_seq=since_seq)
+    return events
 
 
 def clear() -> None:
