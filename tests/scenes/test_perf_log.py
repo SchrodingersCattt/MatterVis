@@ -55,6 +55,18 @@ def test_recent_returns_chronological_order_and_filters_by_since():
     assert [e["label"] for e in tail] == ["last"]
 
 
+def test_snapshot_returns_events_and_matching_latest_sequence():
+    perf_log.record("first")
+    middle = perf_log.record("middle")
+    last = perf_log.record("last")
+
+    events, latest = perf_log.snapshot(since_seq=middle["seq"])
+
+    assert [e["label"] for e in events] == ["last"]
+    assert latest == last["seq"]
+    assert latest >= max(e["seq"] for e in events)
+
+
 def test_time_block_records_positive_elapsed_ms():
     with perf_log.time_block("sleep_block"):
         time.sleep(0.02)
@@ -97,7 +109,8 @@ def test_perf_endpoint_returns_events_and_supports_since(monkeypatch, tmp_path):
     # event_two has seq > captured seq and must be returned.
     test_labels = [e["label"] for e in body["events"] if e["label"].startswith("event_")]
     assert test_labels == ["event_two"]
-    assert body["latest_seq"] >= perf_log.latest_seq() or body["latest_seq"] == perf_log.latest_seq()
+    returned_seqs = [e["seq"] for e in body["events"]]
+    assert body["latest_seq"] >= max(returned_seqs, default=seq)
 
     clear_response = client.post("/api/v1/perf/clear")
     assert clear_response.status_code == 200

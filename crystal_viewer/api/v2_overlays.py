@@ -407,11 +407,11 @@ def register_overlay_routes(v2, backend) -> dict:
             limit = int(request.args.get("limit", "200") or 200)
         except ValueError:
             limit = 200
-        events = perf_log.recent(limit=limit, since_seq=since)
+        events, latest_seq = perf_log.snapshot(limit=limit, since_seq=since)
         return jsonify(
             {
                 "events": events,
-                "latest_seq": perf_log.latest_seq(),
+                "latest_seq": latest_seq,
                 "log_path": perf_log.log_path(),
             }
         )
