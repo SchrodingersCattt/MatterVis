@@ -3,7 +3,7 @@
 Read this only when one complete molecule or fragment must be highlighted over
 structural context.
 
-MatterVis 0.0.2 has no render `--highlight-molecule-index` flag and no TUI
+MatterVis 0.0.3 has no render `--highlight-molecule-index` flag and no TUI
 `--focus-molecule` flag. This is a Python/API workflow.
 
 Use MatterVis's canonical loader. `build_loaded_crystal(...)` runs MolCrysKit and

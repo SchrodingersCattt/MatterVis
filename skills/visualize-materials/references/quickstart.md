@@ -1,6 +1,6 @@
 # MatterVis Quickstart
 
-Use this page for the normal path from an input structure to one verified PNG.
+Use this page for the normal path from an input structure to one PNG.
 
 ## 1. Install once
 
@@ -25,7 +25,7 @@ Confirm the input exists. For a small structure, inspect bounded structured
 output:
 
 ```bash
-mat-vis tui INPUT.cif --no-interaction --format structured \
+mat-vis tui INPUT --no-interaction --format structured \
   --display formula_unit --view c --projection orthographic
 ```
 
@@ -46,7 +46,7 @@ Choose the scene from scientific intent:
 Small molecular/formula-unit view:
 
 ```bash
-mat-vis render INPUT.cif -o OUTPUT.png \
+mat-vis render INPUT -o OUTPUT.png \
   --view formula_unit --style ball_stick --material mesh \
   --camera-axis c --orthogonal \
   --no-hydrogen --no-cell --no-axes --no-labels \
@@ -57,7 +57,7 @@ mat-vis render INPUT.cif -o OUTPUT.png \
 Periodic unit-cell view:
 
 ```bash
-mat-vis render INPUT.cif -o OUTPUT.png \
+mat-vis render INPUT -o OUTPUT.png \
   --view unit_cell --style ball_stick --material mesh \
   --camera-axis c --orthogonal \
   --no-hydrogen --show-cell --no-axes --no-labels \
@@ -74,44 +74,16 @@ Do not use `--config` for fields that have CLI flags. Current parser defaults
 overwrite those config values even when their flags are omitted. Reserve config
 for config-only policies such as disorder handling or atom groups.
 
-## 4. Render with automatic evidence
+## 4. Verify and deliver
 
-Run the same `mat-vis render` command through the wrapper:
-
-```bash
-python scripts/render_verified.py \
-  --manifest OUTPUT.manifest.json \
-  --crop-padding 24 \
-  --min-bbox-coverage 0.70 \
-  -- mat-vis render INPUT.cif -o OUTPUT.png \
-  --view formula_unit --style ball_stick --material mesh \
-  --camera-axis c --orthogonal \
-  --no-hydrogen --no-cell --no-axes --no-labels \
-  --background '#FFFFFF' --atom-scale 1.0 --bond-radius 0.15 \
-  --width 1200 --height 900 --scale 1
-```
-
-The wrapper executes the literal installed `mat-vis` command, preserves its exit
-code and logs, identifies the effective backend from dispatch and fallback
-evidence, rejects blank/undecodable output, and writes the manifest. With
-`--crop-padding`, it detects the CLI's actual background color, crops only
-contiguous paper border, and records `rescaled=false`. It does not use the
-Python rendering API.
-
-For figures with intentional paper whitespace, omit or lower
-`--min-bbox-coverage`; blank-image rejection remains mandatory.
-
-## 5. Deliver
-
-Require:
+Run the literal `mat-vis` command directly. Require:
 
 - command exit 0;
-- requested output exists and decodes;
-- `blank=false` in the manifest;
+- requested output exists, is non-empty, and decodes;
 - effective backend/style matches the requested visual language;
 - no chemistry or semantic-fatal warning;
 - final-size visual inspection by a vision-capable reviewer.
 
-Report input/output paths and hashes, dimensions, display, style, material,
-camera, backend, fallback reason, and visual-review status. Deliver one selected
-PNG unless the caller asked for other formats.
+Record the command, input/output paths and hashes, dimensions, display, style,
+material, camera, backend, fallback reason, and visual-review status. Deliver
+one selected PNG unless the caller asked for another format.

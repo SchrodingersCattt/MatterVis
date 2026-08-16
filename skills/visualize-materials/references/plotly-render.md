@@ -16,9 +16,9 @@ For standard commands, dimensions, camera, and verified delivery, follow
 Diagnose the scene before reducing render quality. Lowering scale or switching
 material does not repair an invalid chemical selection.
 
-Use `scale=1` for the first large-canvas render and run that actual delivery
-through `scripts/render_verified.py`. A zero exit code and nonzero file size do
-not rule out an all-white export.
+Use `scale=1` for the first large-canvas render and inspect that actual
+delivery at final resolution. A zero exit code and nonzero file size do not
+rule out an all-white export.
 
 ## Config precedence
 
@@ -29,10 +29,9 @@ Use config only for fields with no CLI representation.
 
 ## Failure behavior
 
-MatterVis 0.0.2 can fall back from Plotly/Kaleido to Matplotlib flat ORTEP.
-That changes the visual language. `scripts/render_verified.py` captures the
-fallback text and records the effective backend; do not deliver a fallback as
-the requested mesh, ball-stick, stick, or wireframe image.
+MatterVis 0.0.3 can fall back from Plotly/Kaleido to Matplotlib flat ORTEP.
+That changes the visual language. Preserve the CLI fallback text and do not
+deliver a fallback as the requested mesh, ball-stick, stick, or wireframe image.
 
 If Chrome disappears, preserve the real render error and follow `install.md`.
 Generate HTML only after an explicit interactive-output request.

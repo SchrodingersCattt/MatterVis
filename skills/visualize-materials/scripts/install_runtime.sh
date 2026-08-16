@@ -40,7 +40,7 @@ else
     exit 2
   fi
 fi
-"$runtime_python" -m pip install "matter-vis==0.0.2"
+"$runtime_python" -m pip install "matter-vis==0.0.3"
 scripts_dir="$("$runtime_python" -c 'import sysconfig; print(sysconfig.get_path("scripts"))')"
 mat_vis="$scripts_dir/mat-vis"
 chrome_installer="$scripts_dir/plotly_get_chrome"
@@ -76,8 +76,8 @@ import sys
 from pathlib import Path
 
 version = importlib.metadata.version("matter-vis")
-if version != "0.0.2":
-    raise SystemExit(f"expected matter-vis 0.0.2, got {version}")
+if version != "0.0.3":
+    raise SystemExit(f"expected matter-vis 0.0.3, got {version}")
 module_path = Path(crystal_viewer.__file__).resolve()
 print("python=", sys.executable)
 print("distribution=", version)

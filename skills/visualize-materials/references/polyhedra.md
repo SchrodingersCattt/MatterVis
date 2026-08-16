@@ -59,5 +59,5 @@ For custom automation, call `analyze_topology(...)` and pass the result to
 `build_figure(scene, style, topology_data=result)`. Do not rebuild shells or PBC
 images from screen proximity.
 
-Run static exports through `scripts/render_verified.py` and follow
-`verification.md` for requested-versus-effective backend checks.
+Follow `verification.md` for static exports and requested-versus-effective
+backend checks.
