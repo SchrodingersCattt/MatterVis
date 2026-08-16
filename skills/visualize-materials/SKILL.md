@@ -1,6 +1,6 @@
 ---
 name: visualize-materials
-description: 'Visualize crystal and molecular material structures with MatterVis. Use when rendering CIF files, diagnosing display modes or disorder, making publication figures, choosing crystallographic cameras, exporting PNG/PDF/SVG/HTML, highlighting complete molecules, or producing trajectory animations and terminal views.'
+description: 'Visualize atomistic structures and trajectories with MatterVis. Use for CIF, Cube, POSCAR/CONTCAR, VASP, XYZ/extxyz, ASE .traj, LAMMPS dump/data/configuration, molecular crystals, publication figures, static export, animation, and terminal views.'
 ---
 
 # Visualize Materials
@@ -11,21 +11,22 @@ Treat scene selection, camera, backend, and artifact verification as evidence.
 ## Route
 
 1. Read [quickstart](./references/quickstart.md) for every task.
-2. Read [installation](./references/install.md) only when installing or repairing
+2. For non-CIF or multi-frame data, read [input formats](./references/input-formats.md).
+3. Read [installation](./references/install.md) only when installing or repairing
    Chrome/Kaleido.
-3. Read [diagnosis](./references/diagnose-and-select.md) for disorder, ambiguous
-   chemistry, or scenes above 200 visible atoms.
-4. Read [camera](./references/camera.md) only for non-default views or comparable
-   panels.
-5. Read one specialized path when needed:
+4. Always read [diagnosis](./references/diagnose-and-select.md) before choosing a
+   display mode or style.
+5. For images, always read the [camera contract](./references/camera.md), then
+   one specialized path when needed:
+   - [Plotly 3D](./references/plotly-render.md)
    - [Matplotlib flat ORTEP](./references/matplotlib-flat-ortep.md)
    - [Molecule focus](./references/molecule-highlight.md)
    - [Polyhedra](./references/polyhedra.md)
    - [Publication layout](./references/publication-layout.md)
    - [Trajectory animation](./references/trajectory-animation.md)
    - [Terminal TUI](./references/tui.md)
-6. Read [verification](./references/verification.md) only for non-PNG outputs or
-   troubleshooting the verified-render wrapper.
+6. Always read [verification](./references/verification.md) before reporting or
+   attaching the result.
 
 ## Hard boundaries
 
@@ -36,7 +37,9 @@ Treat scene selection, camera, backend, and artifact verification as evidence.
   or semantic validation.
 - Use orthographic lattice `+c` by default. Record any other camera explicitly.
 - Use MatterVis/MolCrysKit molecule identity, PBC unwrapping, and bonds; do not
-  reconstruct them from screen proximity.
+  reconstruct them from screen proximity or invent pseudo-elements for styling.
+- Keep comparable panels and animation frames on explicit shared camera/scale
+  contracts.
 - Produce one requested final artifact by default, not a gallery.
 - Run delivery renders through `scripts/render_verified.py`. A file that is
   undecodable, blank, a mismatched fallback, or unverified is not deliverable.

@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import base64
 import copy
 from collections import defaultdict
-import os
 import re
-import tempfile
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any, Dict, Iterable, Optional
@@ -14,9 +11,7 @@ import numpy as np
 from molcrys_kit.utils.geometry import cart_to_frac
 
 from .. import perf_log
-from ..presets import get_default_catalog, workspace_root
-from ..structure import molcrys_bridge
-from ..scene import build_scene_from_atoms, legacy_scene, scene_json, scene_metadata, scene_ops
+from ..scene import build_scene_from_atoms, legacy_scene, scene_metadata, scene_ops
 
 
 @dataclass
@@ -39,7 +34,9 @@ class LoadedCrystal:
     unwrap_overflow: list[list[int]] = field(default_factory=list)
     fragment_table: list[dict[str, Any]] = field(default_factory=list)
     topology_fragment_table: list[dict[str, Any]] = field(default_factory=list)
-    fragment_table_cache: dict[tuple[Any, ...], tuple[list[dict[str, Any]], list[str]]] = field(default_factory=dict)
+    fragment_table_cache: dict[
+        tuple[Any, ...], tuple[list[dict[str, Any]], list[str]]
+    ] = field(default_factory=dict)
     atom_fragment_labels: list[str] = field(default_factory=list)
     source: str = "catalog"
     cube_data: Any | None = None
@@ -50,18 +47,26 @@ class LoadedCrystal:
     # value is the post-transform scene dict (already including a refreshed
     # fragment_table). Lives here -- not on the global app -- so two
     # bundles served by the same Dash worker don't poison each other.
-    _transformed_scene_cache: dict[tuple[Any, ...], Dict[str, Any]] = field(default_factory=dict)
+    _transformed_scene_cache: dict[tuple[Any, ...], Dict[str, Any]] = field(
+        default_factory=dict
+    )
 
     def metadata(self) -> Dict[str, Any]:
         meta = scene_metadata(self.scene)
-        meta.update({
-            "source": self.source,
-            "fragment_count": len(self.topology_fragment_table or self.fragment_table),
-            "has_topology": bool(self.topology_fragment_table or self.fragment_table),
-            "parsed_atom_count": len(self.raw_atoms or []),
-            "displayed_atom_count": len(self.scene.get("draw_atoms", []) or []),
-            "asu_atom_count": len(self.raw_atoms or []),
-        })
+        meta.update(
+            {
+                "source": self.source,
+                "fragment_count": len(
+                    self.topology_fragment_table or self.fragment_table
+                ),
+                "has_topology": bool(
+                    self.topology_fragment_table or self.fragment_table
+                ),
+                "parsed_atom_count": len(self.raw_atoms or []),
+                "displayed_atom_count": len(self.scene.get("draw_atoms", []) or []),
+                "asu_atom_count": len(self.raw_atoms or []),
+            }
+        )
         return meta
 
 
@@ -233,7 +238,9 @@ def _explicit_assembly_disorder_indices(raw_atoms) -> set[int]:
     the same assembly so an ordered special-position site doesn't get
     mistaken for one half of a vanished partner.
     """
-    by_assembly: dict[str, dict[str, list[int]]] = defaultdict(lambda: defaultdict(list))
+    by_assembly: dict[str, dict[str, list[int]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
     for idx, atom in enumerate(raw_atoms):
         if _partial_occupancy_value(atom) >= 0.999:
             continue
@@ -327,9 +334,13 @@ def _simple_explicit_assembly_major_groups(raw_atoms) -> dict[str, set[str]] | N
     the existing full MolCrysKit fallback still owns chemically
     ambiguous cases.
     """
-    if _has_shelx_part_disorder(raw_atoms) or _occupancy_only_disorder_indices(raw_atoms):
+    if _has_shelx_part_disorder(raw_atoms) or _occupancy_only_disorder_indices(
+        raw_atoms
+    ):
         return None
-    by_assembly: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    by_assembly: dict[str, dict[str, list[float]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
     for atom in raw_atoms:
         occ = _partial_occupancy_value(atom)
         dg = _normal_disorder_tag(atom.get("dg"))
@@ -352,9 +363,7 @@ def _simple_explicit_assembly_major_groups(raw_atoms) -> dict[str, set[str]] | N
         if len(groups) < 2:
             continue
         averages = {
-            dg: sum(values) / len(values)
-            for dg, values in groups.items()
-            if values
+            dg: sum(values) / len(values) for dg, values in groups.items() if values
         }
         if len(averages) < 2:
             continue
@@ -444,6 +453,7 @@ generate_ordered_replicas_from_disordered_sites` for the optimal
 
         if not kept_raw and kept_indices:
             import logging
+
             logging.getLogger(__name__).error(
                 "map_mck_indices_to_raw returned empty for %s "
                 "(%d kept_indices could not be matched to raw_atoms). "
@@ -512,7 +522,8 @@ generate_ordered_replicas_from_disordered_sites` for the optimal
                     # Flip: for explicit-assembly atoms use occupancy
                     # to determine major/minor directly.
                     kept_raw = {
-                        i for i in disordered_idx
+                        i
+                        for i in disordered_idx
                         if i not in kept_raw and i in explicit_assembly_idx
                     } | (kept_raw - explicit_assembly_idx)
 
@@ -577,7 +588,9 @@ def _unwrapped_atoms_from_atoms(
             "pass the result, or use build_loaded_crystal which wires "
             "this up automatically."
         )
-    return _unwrapped_atoms_from_molcrys(atoms, M, molcrys_analysis, include_minor=include_minor)
+    return _unwrapped_atoms_from_molcrys(
+        atoms, M, molcrys_analysis, include_minor=include_minor
+    )
 
 
 def _unwrapped_atoms_from_molcrys(
@@ -609,7 +622,9 @@ def _unwrapped_atoms_from_molcrys(
     # Per-axis cell lengths for framework detection
     _cell_lengths = np.array([np.linalg.norm(M_arr[i]) for i in range(3)])
 
-    for mol_idx, (indices, cart_positions) in enumerate(zip(mol_indices, mol_cart_positions)):
+    for mol_idx, (indices, cart_positions) in enumerate(
+        zip(mol_indices, mol_cart_positions)
+    ):
         coords = np.asarray(cart_positions, dtype=float)
         if coords.ndim != 2 or coords.shape[0] != len(indices):
             continue
@@ -632,7 +647,9 @@ def _unwrapped_atoms_from_molcrys(
             # molecule coordinate, which may be outside [0, 1] for fragments
             # crossing a face; boundary replication must still be based on
             # the original special-position / face membership.
-            out[raw_idx]["_wrapped_frac"] = np.asarray(out[raw_idx].get("frac"), dtype=float).copy()
+            out[raw_idx]["_wrapped_frac"] = np.asarray(
+                out[raw_idx].get("frac"), dtype=float
+            ).copy()
             out[raw_idx]["_source_molecule_index"] = int(mol_idx)
             out[raw_idx]["cart"] = cart.copy()
             out[raw_idx]["frac"] = cart_to_frac(cart, M_arr)
@@ -772,18 +789,23 @@ def _fragment_table_from_atoms(
             if elem in elem_counts:
                 ordered.append((elem, elem_counts.pop(elem)))
         ordered.extend(sorted(elem_counts.items()))
-        formula = "".join(f"{elem}{count}" if count > 1 else elem for elem, count in ordered) or "?"
-        fragments.append({
-            "site_indices": site_indices,
-            "source_molecule_index": mol_index,
-            "center": [float(x) for x in center_cart],
-            "frac_center": [float(x) for x in center_frac],
-            "elem_set": sorted(elem_set),
-            "heavy_atom_count": len(heavy_atoms),
-            "cluster_size": len(component_atoms),
-            "species": "".join(sorted(elem_set)) or "?",
-            "formula": formula,
-        })
+        formula = (
+            "".join(f"{elem}{count}" if count > 1 else elem for elem, count in ordered)
+            or "?"
+        )
+        fragments.append(
+            {
+                "site_indices": site_indices,
+                "source_molecule_index": mol_index,
+                "center": [float(x) for x in center_cart],
+                "frac_center": [float(x) for x in center_frac],
+                "elem_set": sorted(elem_set),
+                "heavy_atom_count": len(heavy_atoms),
+                "cluster_size": len(component_atoms),
+                "species": "".join(sorted(elem_set)) or "?",
+                "formula": formula,
+            }
+        )
 
     x_fragments = [frag for frag in fragments if "Cl" in frag["elem_set"]]
     non_x = [frag for frag in fragments if frag not in x_fragments]
@@ -799,15 +821,30 @@ def _fragment_table_from_atoms(
     # Non-organic, non-X clusters (e.g. lone halide counterions) fall through
     # to "?" so they don't pollute either A or B.
     NON_METAL_HEAVY = {
-        "H", "B", "C", "N", "O", "F",
-        "Si", "P", "S", "Cl",
-        "Ge", "As", "Se", "Br",
-        "Sb", "Te", "I",
+        "H",
+        "B",
+        "C",
+        "N",
+        "O",
+        "F",
+        "Si",
+        "P",
+        "S",
+        "Cl",
+        "Ge",
+        "As",
+        "Se",
+        "Br",
+        "Sb",
+        "Te",
+        "I",
     }
     organic_or_metal = []
     for frag in non_x:
         elems = set(frag["elem_set"])
-        is_single_metal = frag["heavy_atom_count"] == 1 and not (elems & NON_METAL_HEAVY)
+        is_single_metal = frag["heavy_atom_count"] == 1 and not (
+            elems & NON_METAL_HEAVY
+        )
         is_organic = bool(elems & {"C", "N"})
         if is_single_metal or is_organic:
             organic_or_metal.append(frag)
@@ -844,21 +881,23 @@ def _fragment_table_from_atoms(
         counters[frag_type] += 1
         for site_idx in frag["site_indices"]:
             atom_fragment_labels[site_idx] = frag_type
-        final_table.append({
-            "index": frag_idx,
-            "type": frag_type,
-            "label": f"{frag_type}{label_index}",
-            "species": frag["species"],
-            "formula": frag.get("formula"),
-            "elem_set": frag.get("elem_set", []),
-            "center": frag["center"],
-            "frac_center": frag["frac_center"],
-            "site_indices": frag["site_indices"],
-            "source_molecule_index": frag.get("source_molecule_index"),
-            "source": bundle_name,
-            "heavy_atom_count": frag["heavy_atom_count"],
-            "cluster_size": frag["cluster_size"],
-        })
+        final_table.append(
+            {
+                "index": frag_idx,
+                "type": frag_type,
+                "label": f"{frag_type}{label_index}",
+                "species": frag["species"],
+                "formula": frag.get("formula"),
+                "elem_set": frag.get("elem_set", []),
+                "center": frag["center"],
+                "frac_center": frag["frac_center"],
+                "site_indices": frag["site_indices"],
+                "source_molecule_index": frag.get("source_molecule_index"),
+                "source": bundle_name,
+                "heavy_atom_count": frag["heavy_atom_count"],
+                "cluster_size": frag["cluster_size"],
+            }
+        )
     return final_table, atom_fragment_labels
 
 
@@ -880,10 +919,12 @@ def build_bundle_scene(
     atom list. The base scene cache is unchanged so toggling transforms
     on/off stays cheap.
     """
-    threshold_key = tuple(sorted(
-        (str(left), str(right), float(value))
-        for (left, right), value in (bundle.bond_thresholds or {}).items()
-    ))
+    threshold_key = tuple(
+        sorted(
+            (str(left), str(right), float(value))
+            for (left, right), value in (bundle.bond_thresholds or {}).items()
+        )
+    )
     base_cache_key = (
         display_mode,
         bool(show_hydrogen),
@@ -896,7 +937,11 @@ def build_bundle_scene(
         perf_log.record(
             "cache:scene",
             kind="cache",
-            info={"hit": False, "display_mode": display_mode, "hydrogens": bool(show_hydrogen)},
+            info={
+                "hit": False,
+                "display_mode": display_mode,
+                "hydrogens": bool(show_hydrogen),
+            },
         )
         ops = scene_ops()
         view_dir = np.array(bundle.view_direction, dtype=float)
@@ -913,13 +958,17 @@ def build_bundle_scene(
             preset=preset,
             display_mode=display_mode,
             ops=ops,
-            formula_unit_atoms=bundle.formula_unit_atoms if display_mode == "formula_unit" else None,
+            formula_unit_atoms=(
+                bundle.formula_unit_atoms if display_mode == "formula_unit" else None
+            ),
             unwrapped_atoms=bundle.unwrapped_atoms,
             include_boundary_replicas=include_boundary_replicas,
             bond_scale=bundle.bond_scale,
             bond_thresholds=bundle.bond_thresholds,
             canonical_bond_pairs=getattr(bundle.molcrys_analysis, "bond_pairs", None),
-            canonical_bond_records=getattr(bundle.molcrys_analysis, "bond_records", None),
+            canonical_bond_records=getattr(
+                bundle.molcrys_analysis, "bond_records", None
+            ),
         )
         base_scene["cif_path"] = bundle.cif_path
         base_scene["view_direction"] = view_dir
@@ -956,7 +1005,11 @@ def build_bundle_scene(
         perf_log.record(
             "cache:scene",
             kind="cache",
-            info={"hit": True, "display_mode": display_mode, "hydrogens": bool(show_hydrogen)},
+            info={
+                "hit": True,
+                "display_mode": display_mode,
+                "hydrogens": bool(show_hydrogen),
+            },
         )
 
     if not transforms:
@@ -977,7 +1030,11 @@ def build_bundle_scene(
         bool(include_boundary_replicas),
         transforms_cache_key(transforms),
     )
-    cached = transformed_cache.get(cache_key) if isinstance(transformed_cache, dict) else None
+    cached = (
+        transformed_cache.get(cache_key)
+        if isinstance(transformed_cache, dict)
+        else None
+    )
     if cached is not None:
         return cached
 
@@ -990,15 +1047,18 @@ def build_bundle_scene(
     if transformed is base_scene:
         return base_scene
     transformed = dict(transformed)
-    if (
-        not transformed.get("fragment_table")
-        or len(transformed.get("atom_fragment_labels") or []) != len(transformed.get("draw_atoms") or [])
-    ):
+    if not transformed.get("fragment_table") or len(
+        transformed.get("atom_fragment_labels") or []
+    ) != len(transformed.get("draw_atoms") or []):
         fragment_table, atom_fragment_labels = _fragment_table_from_atoms(
             bundle.name,
             transformed["draw_atoms"],
             transformed.get("cell") or base_scene["cell"],
-            transformed.get("M") if transformed.get("M") is not None else base_scene["M"],
+            (
+                transformed.get("M")
+                if transformed.get("M") is not None
+                else base_scene["M"]
+            ),
             molcrys_analysis=bundle.molcrys_analysis,
             use_source_indices=False,
             include_minor=True,
@@ -1023,14 +1083,18 @@ _UPLOAD_DEFAULT_VIEW_DIR = np.array([1.0, 1.0, 1.0], dtype=float) / np.sqrt(3.0)
 _UPLOAD_DEFAULT_UP = np.array([0.0, 0.0, 1.0], dtype=float)
 
 
-def _upload_default_view(name: str, preset: Optional[Dict[str, Any]]) -> tuple[np.ndarray, np.ndarray]:
+def _upload_default_view(
+    name: str, preset: Optional[Dict[str, Any]]
+) -> tuple[np.ndarray, np.ndarray]:
     """Pick an initial ``(view_direction, up)`` for an uploaded CIF.
 
     Tries an exact preset entry first, then a stem match (so ``SY_3``
     honours the ``SY`` preset), then falls back to a 3D-friendly
     diagonal so elongated cells don't render as flat 2D projections.
     """
-    structures = (preset or {}).get("structures", {}) if isinstance(preset, dict) else {}
+    structures = (
+        (preset or {}).get("structures", {}) if isinstance(preset, dict) else {}
+    )
     candidates = [name]
     # ``infer_uploaded_name`` appends ``_2``, ``_3``, ... when a name
     # collides; strip the suffix so the original preset still applies.
@@ -1044,7 +1108,12 @@ def _upload_default_view(name: str, preset: Optional[Dict[str, Any]]) -> tuple[n
         if not isinstance(entry, dict):
             continue
         camera = entry.get("camera") if isinstance(entry.get("camera"), dict) else None
-        if camera and camera.get("position") and camera.get("focal_point") and camera.get("up"):
+        if (
+            camera
+            and camera.get("position")
+            and camera.get("focal_point")
+            and camera.get("up")
+        ):
             view_dir, up = legacy_scene.scene_from_camera(
                 camera["position"], camera["focal_point"], camera["up"]
             )
@@ -1065,15 +1134,14 @@ def build_loaded_crystal(
     source: str = "catalog",
     view_weights: Optional[Dict[str, float]] = None,
 ) -> LoadedCrystal:
-    # Each sub-block is wrapped in a ``perf_log.time_block`` so the
-    # /api/v1/perf endpoint shows exactly which leg of an upload is
-    # slow (CIF parse vs. molcryskit analysis vs. bond perception
-    # vs. fragment-table build). See ``crystal_viewer.perf_log``.
-    from . import perf_log
-
+    """Parse a CIF and enter the shared canonical structure pipeline."""
     ops = scene_ops()
-    preset = preset or {}
-    with perf_log.time_block("loader:parse_asu", kind="event", structure=name, cif_path=cif_path):
+    with perf_log.time_block(
+        "loader:parse_asu",
+        kind="event",
+        structure=name,
+        cif_path=cif_path,
+    ):
         raw_atoms, cell, legacy_M = ops.parse_asu(cif_path)
         M = np.asarray(legacy_M, dtype=float).T
     with perf_log.time_block(
@@ -1083,142 +1151,16 @@ def build_loaded_crystal(
         cif_path=cif_path,
     ):
         raw_atoms = _tag_shelx_occupancy_disorder(raw_atoms, cif_path, M)
-    n_atoms = len(raw_atoms) if raw_atoms is not None else 0
-    with perf_log.time_block(
-        "loader:molcrys_analyze",
-        kind="event",
-        structure=name,
-        n_atoms=n_atoms,
-    ):
-        molcrys_analysis = molcrys_bridge.analyze(raw_atoms, M)
-    with perf_log.time_block("loader:select_formula_unit", kind="event", structure=name):
-        formula_unit_atoms = molcrys_bridge.select_formula_unit(raw_atoms, M, analysis=molcrys_analysis)
-    with perf_log.time_block("loader:unwrap_atoms", kind="event", structure=name):
-        unwrapped_atoms, unwrap_overflow = _unwrapped_atoms_from_atoms(
-            raw_atoms,
-            cell,
-            M,
-            include_minor=True,
-            molcrys_analysis=molcrys_analysis,
-        )
-    # ``_resolve_view`` is happy to short-circuit on a preset entry
-    # (camera or view_direction explicitly provided) but otherwise
-    # falls through to ``ops.auto_view_dir`` which scores >1000 view
-    # candidates by ray-projecting every heavy atom -- ~12 s for a
-    # 1024-atom unit cell. Uploaded CIFs almost never have a preset
-    # by their unique name (``SY_3``, ``upload_2``, ...), so the user
-    # paid that cost on every upload. We use a 3D-friendly diagonal
-    # default (eye along (1,1,1), up=+c) instead of straight +z --
-    # the latter projects elongated cells (e.g. SY's 8 x 25 x 10) to
-    # a tall, depthless rectangle that users perceive as "flat".
-    # Preset entries (catalog or user-supplied) still win, including
-    # a stem-match fallback so ``SY_3`` honours the ``SY`` preset.
-    is_upload = source == "upload"
-    if is_upload:
-        with perf_log.time_block("loader:default_view", kind="event", structure=name, reason="skip_auto_view_for_upload"):
-            view_dir, up = _upload_default_view(name, preset)
-    else:
-        with perf_log.time_block("loader:resolve_view", kind="event", structure=name):
-            view_dir, up = legacy_scene._resolve_view(ops, name, raw_atoms, legacy_M, cell, preset, view_weights=view_weights)
-    R = ops.view_rotation(view_dir, up)
-    final_title = title or name
-    with perf_log.time_block(
-        "loader:build_scene_from_atoms",
-        kind="event",
-        structure=name,
-        n_atoms=n_atoms,
-    ):
-        initial_scene = build_scene_from_atoms(
-            name=name,
-            title=final_title,
-            atoms=raw_atoms,
-            cell=cell,
-            M=M,
-            R=R,
-            preset=preset,
-            show_hydrogen=False,
-            display_mode="formula_unit",
-            ops=ops,
-            formula_unit_atoms=formula_unit_atoms,
-            unwrapped_atoms=unwrapped_atoms,
-        )
-    initial_scene["cif_path"] = cif_path
-    initial_scene["view_direction"] = np.array(view_dir, dtype=float)
-    initial_scene["up"] = np.array(up, dtype=float)
-    initial_scene["unwrap_overflow"] = copy.deepcopy(unwrap_overflow)
-    with perf_log.time_block(
-        "loader:fragment_table_scene",
-        kind="event",
-        structure=name,
-    ):
-        fragment_table, atom_fragment_labels = _fragment_table_from_atoms(
-            name,
-            initial_scene["draw_atoms"],
-            initial_scene["cell"],
-            initial_scene["M"],
-            molcrys_analysis=molcrys_analysis,
-            use_source_indices=False,
-            include_minor=True,
-        )
-    initial_scene["fragment_table"] = fragment_table
-    initial_scene["atom_fragment_labels"] = atom_fragment_labels
-    with perf_log.time_block(
-        "loader:fragment_table_topology",
-        kind="event",
-        structure=name,
-    ):
-        # ``include_minor=False`` here is deliberate: the topology
-        # fragment table summarises the *chemical* contents of the
-        # cell, not the atoms drawn on screen. Minor disorder images
-        # (the discarded alternative orientation that
-        # ``_tag_shelx_occupancy_disorder`` flagged) are not part of
-        # any real molecule once MolCrysKit's bond perception has run
-        # without them; including them would pollute the table with
-        # singleton "?" fragments for every orphan H / C / N of the
-        # rejected orientation. The renderer still draws those atoms
-        # faded; only the analysis table hides them.
-        topology_fragment_table, _ = _fragment_table_from_atoms(
-            name,
-            raw_atoms,
-            cell,
-            M,
-            molcrys_analysis=molcrys_analysis,
-            use_source_indices=True,
-            include_minor=False,
-        )
-    fragment_table_cache = {
-        ("scene", "formula_unit", False): (
-            copy.deepcopy(fragment_table),
-            list(atom_fragment_labels),
-        ),
-        ("topology",): (
-            copy.deepcopy(topology_fragment_table),
-            [],
-        ),
-    }
+    from .bundle_builder import build_loaded_crystal_from_atoms
 
-    bundle = LoadedCrystal(
+    return build_loaded_crystal_from_atoms(
         name=name,
-        title=final_title,
-        cif_path=cif_path,
-        scene=initial_scene,
-        raw_atoms=[dict(atom) for atom in raw_atoms],
+        source_path=cif_path,
+        raw_atoms=raw_atoms,
         cell=cell,
         M=M,
-        view_direction=np.array(view_dir, dtype=float).tolist(),
-        up=np.array(up, dtype=float).tolist(),
-        crystal=molcrys_analysis.crystal,
-        molcrys_analysis=molcrys_analysis,
-        formula_unit_atoms=[dict(atom) for atom in formula_unit_atoms],
-        unwrapped_atoms=[dict(atom) for atom in unwrapped_atoms],
-        unwrap_overflow=[list(component) for component in unwrap_overflow],
-        scene_cache={("formula_unit", False): initial_scene},
-        fragment_table=fragment_table,
-        topology_fragment_table=topology_fragment_table,
-        fragment_table_cache=fragment_table_cache,
-        atom_fragment_labels=atom_fragment_labels,
+        title=title,
+        preset=preset,
         source=source,
+        view_weights=view_weights,
     )
-    return bundle
-
-

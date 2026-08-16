@@ -1,11 +1,4 @@
-"""Load crystal structures into CrystalIR from various file formats.
-
-Supported formats:
-- CIF (.cif) — via existing MatterVis parser (gemmi-based)
-- POSCAR/VASP (.vasp, .poscar, POSCAR, CONTCAR) — via pymatgen
-- Extended XYZ (.extxyz, .xyz) — via ASE
-- Gaussian/CP2K cube (.cube) — structure + volumetric density metadata
-"""
+"""Adapt canonical MatterVis structure frames to the terminal CrystalIR."""
 
 from __future__ import annotations
 
@@ -13,80 +6,109 @@ from pathlib import Path
 
 import numpy as np
 
-from .crystal_ir import AtomIR, BondIR, CrystalIR, Lattice
+from .crystal_ir import AtomIR, BondIR, CrystalIR, Lattice, filter_crystal
 
 
-def load_for_tui(path: str, *, display_mode: str = "auto") -> CrystalIR:
-    """Load a crystal structure file and return a CrystalIR.
+def load_for_tui(
+    path: str,
+    *,
+    display_mode: str = "auto",
+    input_format: str | None = None,
+    type_map: list[str] | None = None,
+    frame: int = 0,
+) -> CrystalIR:
+    """Load any supported atomistic input through the canonical structure IO."""
+    from ..loader import load_structure_input
 
-    Dispatches to the appropriate parser based on file extension.
-    CIF files reuse MatterVis's canonical loader and scene assembly so the
-    terminal view observes the same disorder, formula-unit, and PBC bond
-    semantics as the browser and static renderers.
-    """
-    p = Path(path)
-    if not p.exists():
-        raise FileNotFoundError(f"Structure file not found: {path}")
-
-    ext = p.suffix.lower()
-    name = p.stem
-
-    if ext == ".cif":
-        ir = _load_cif(str(p), name, display_mode=display_mode)
-    elif ext == ".cube":
-        ir = _load_cube(str(p), name)
-    elif ext in (".vasp", ".poscar") or p.name.upper() in ("POSCAR", "CONTCAR"):
-        ir = _load_poscar(str(p), name)
-    elif ext in (".extxyz", ".xyz"):
-        ir = _load_extxyz(str(p), name)
-    else:
-        raise ValueError(
-            f"Unsupported file format: {ext!r}. "
-            f"Supported: .cif, .cube, .vasp, .poscar, .extxyz, .xyz"
-        )
-
-    return ir
-
-
-# ── CIF loader (reuses existing MatterVis parser + MCK) ─────────────────────
-
-
-def _load_cif(path: str, name: str, *, display_mode: str) -> CrystalIR:
-    """Load a CIF through the canonical MatterVis loader."""
-    from ..loader import build_bundle_scene, build_loaded_crystal
-
-    bundle = build_loaded_crystal(
-        name=name,
-        cif_path=path,
-        title=name,
-        source="upload",
+    structure = load_structure_input(
+        path,
+        input_format=input_format,
+        type_map=type_map,
+        frame_indices=[frame],
     )
-    resolved_display_mode = display_mode
-    if display_mode == "auto":
-        resolved_display_mode = "unit_cell"
+    selected = structure.frames[0]
+    return _load_bundle(
+        selected.bundle,
+        path=str(structure.path),
+        input_format=structure.input_format,
+        display_mode=display_mode,
+        frame_index=selected.index,
+    )
+
+
+def _load_bundle(
+    bundle,
+    *,
+    path: str,
+    input_format: str,
+    display_mode: str,
+    frame_index: int,
+) -> CrystalIR:
+    """Adapt one canonical LoadedCrystal frame to the compact terminal IR."""
+    from ..loader import build_bundle_scene
+
+    resolved_display_mode = "unit_cell" if display_mode == "auto" else display_mode
+    source_metadata = dict(getattr(bundle, "scene", {}) or {})
+    include_boundary_replicas = input_format == "cif" and any(
+        source_metadata.get("pbc", [True, True, True])
+    )
     scene = build_bundle_scene(
         bundle,
         display_mode=resolved_display_mode,
         show_hydrogen=True,
         preset={},
+        include_boundary_replicas=include_boundary_replicas,
     )
     canonical_composition = _element_counts_from_raw(bundle.raw_atoms)
-    return _crystal_ir_from_scene(
+    is_cif = input_format == "cif"
+    ir = _crystal_ir_from_scene(
         scene,
         source_path=path,
-        spacegroup=_extract_spacegroup_from_cif(path),
-        species_map={key: list(value) for key, value in bundle.molcrys_analysis.species_map.items()},
+        spacegroup=_extract_spacegroup_from_cif(path) if is_cif else "",
+        species_map={
+            key: list(value)
+            for key, value in bundle.molcrys_analysis.species_map.items()
+        },
         per_formula_unit=dict(bundle.molcrys_analysis.per_fu),
         n_molecules=len(bundle.molcrys_analysis.mol_indices),
         source_molecules={
             index: tuple(int(member) for member in members)
             for index, members in enumerate(bundle.molcrys_analysis.mol_indices)
         },
-        source_site_atom_count=_cif_source_site_count(path),
+        source_site_atom_count=(
+            _cif_source_site_count(path) if is_cif else len(bundle.raw_atoms)
+        ),
         expanded_atom_count=len(bundle.raw_atoms),
         canonical_composition=canonical_composition,
         source_atoms=bundle.raw_atoms,
     )
+    ir.metadata.update(
+        {
+            "input_format": input_format,
+            "frame_index": frame_index,
+            "pbc": source_metadata.get("pbc"),
+            "synthetic_cell": source_metadata.get("synthetic_cell", False),
+            "bond_source": ("canonical_scene" if is_cif else "distance_heuristic"),
+        }
+    )
+    if not is_cif:
+        source_indices = {
+            index
+            for index, atom in enumerate(ir.atoms)
+            if atom.image_shift == (0, 0, 0)
+        }
+        ir = filter_crystal(ir, source_indices, collapse_source_images=True)
+
+    cube = getattr(bundle, "cube_data", None)
+    if cube is not None:
+        ir.metadata["cube_data"] = cube
+        try:
+            blobs = _extract_density_blobs(cube)
+            if blobs:
+                ir.metadata["density_blobs"] = blobs
+        except Exception:
+            pass
+    return ir
 
 
 def _crystal_ir_from_scene(
@@ -131,7 +153,11 @@ def _crystal_ir_from_scene(
         source_molecule_index = int(source_molecule_index)
         molecule_species[display_molecule_index] = source_species.get(
             source_molecule_index,
-            str(fragment.get("formula") or fragment.get("species") or display_molecule_index),
+            str(
+                fragment.get("formula")
+                or fragment.get("species")
+                or display_molecule_index
+            ),
         )
         for atom_index in fragment.get("site_indices", []):
             atom_to_molecule[int(atom_index)] = display_molecule_index
@@ -151,26 +177,29 @@ def _crystal_ir_from_scene(
                 pass
         source_index = int(atom.get("_source_index", index))
         image_shift = _source_to_display_shift(atom, source_index, source_atoms)
-        atoms.append(AtomIR(
-            element=str(atom["elem"]),
-            cart=np.asarray(atom["cart"], dtype=float),
-            frac=np.asarray(atom["frac"], dtype=float),
-            label=str(atom.get("label", "")),
-            occupancy=float(atom.get("occ", 1.0)),
-            index=index,
-            source_index=source_index,
-            source_instance_id=str(
-                atom.get("_raw_instance_id") or f"{atom.get('label', '')}@sym{atom.get('_symop_index', 0)}"
-            ),
-            symmetry_operation_index=int(atom.get("_symop_index", 0)),
-            image_shift=image_shift,
-            display_copy_id=_display_copy_id(atom, source_index, image_shift),
-            source_molecule_index=atom_to_source_molecule.get(index, -1),
-            display_fragment_id=atom_to_fragment.get(index, ""),
-            molecule_index=atom_to_molecule.get(index, -1),
-            disorder_group=dg,
-            is_minor=bool(atom.get("is_minor", False)),
-        ))
+        atoms.append(
+            AtomIR(
+                element=str(atom["elem"]),
+                cart=np.asarray(atom["cart"], dtype=float),
+                frac=np.asarray(atom["frac"], dtype=float),
+                label=str(atom.get("label", "")),
+                occupancy=float(atom.get("occ", 1.0)),
+                index=index,
+                source_index=source_index,
+                source_instance_id=str(
+                    atom.get("_raw_instance_id")
+                    or f"{atom.get('label', '')}@sym{atom.get('_symop_index', 0)}"
+                ),
+                symmetry_operation_index=int(atom.get("_symop_index", 0)),
+                image_shift=image_shift,
+                display_copy_id=_display_copy_id(atom, source_index, image_shift),
+                source_molecule_index=atom_to_source_molecule.get(index, -1),
+                display_fragment_id=atom_to_fragment.get(index, ""),
+                molecule_index=atom_to_molecule.get(index, -1),
+                disorder_group=dg,
+                is_minor=bool(atom.get("is_minor", False)),
+            )
+        )
 
     bonds: list[BondIR] = []
     for bond in scene.get("bonds", []):
@@ -178,19 +207,21 @@ def _crystal_ir_from_scene(
         end = np.asarray(bond["end"], dtype=float)
         atom_i = atoms[int(bond["i"])]
         atom_j = atoms[int(bond["j"])]
-        bonds.append(BondIR(
-            i=int(bond["i"]),
-            j=int(bond["j"]),
-            distance=float(np.linalg.norm(end - start)),
-            start=start,
-            end=end,
-            start_display_copy_id=atom_i.display_copy_id,
-            end_display_copy_id=atom_j.display_copy_id,
-            image_relation=tuple(
-                atom_j.image_shift[axis] - atom_i.image_shift[axis]
-                for axis in range(3)
-            ),
-        ))
+        bonds.append(
+            BondIR(
+                i=int(bond["i"]),
+                j=int(bond["j"]),
+                distance=float(np.linalg.norm(end - start)),
+                start=start,
+                end=end,
+                start_display_copy_id=atom_i.display_copy_id,
+                end_display_copy_id=atom_j.display_copy_id,
+                image_relation=tuple(
+                    atom_j.image_shift[axis] - atom_i.image_shift[axis]
+                    for axis in range(3)
+                ),
+            )
+        )
 
     display_species_map: dict[str, list[int]] = {}
     for display_molecule_index, species_id in molecule_species.items():
@@ -217,7 +248,9 @@ def _crystal_ir_from_scene(
         metadata={
             "display_mode": scene.get("display_mode", "unit_cell"),
             "bond_source": "canonical_scene",
-            "explicit_bond_table": any(bool(atom.get("_has_bond_table")) for atom in source_atoms),
+            "explicit_bond_table": any(
+                bool(atom.get("_has_bond_table")) for atom in source_atoms
+            ),
             "source_site_atom_count": source_site_atom_count,
             "expanded_atom_count": expanded_atom_count,
             "display_atom_count": len(atoms),
@@ -276,6 +309,7 @@ def _extract_spacegroup_from_cif(path: str) -> str:
     """Try to extract spacegroup symbol from CIF file."""
     try:
         import gemmi
+
         doc = gemmi.cif.read(path)
         block = doc.sole_block()
         for tag in [
@@ -289,9 +323,8 @@ def _extract_spacegroup_from_cif(path: str) -> str:
                 if cleaned and cleaned not in (".", "?"):
                     return cleaned
         # Try IT number
-        it_val = (
-            block.find_value("_space_group_IT_number")
-            or block.find_value("_symmetry_Int_Tables_number")
+        it_val = block.find_value("_space_group_IT_number") or block.find_value(
+            "_symmetry_Int_Tables_number"
         )
         if it_val:
             num = int(gemmi.cif.as_number(it_val))
@@ -301,131 +334,6 @@ def _extract_spacegroup_from_cif(path: str) -> str:
     except Exception:
         pass
     return ""
-
-
-# ── POSCAR/VASP loader (pymatgen) ──────────────────────────────────────────
-
-
-def _load_poscar(path: str, name: str) -> CrystalIR:
-    """Load POSCAR/VASP file via pymatgen."""
-    from pymatgen.core import Structure
-
-    struct = Structure.from_file(path)
-    return _from_pymatgen_structure(struct, name, path)
-
-
-# ── Extended XYZ loader (ASE) ───────────────────────────────────────────────
-
-
-def _load_extxyz(path: str, name: str) -> CrystalIR:
-    """Load extended XYZ via ASE."""
-    from ase.io import read as ase_read
-
-    atoms_ase = ase_read(path)
-    return _from_ase_atoms(atoms_ase, name, path)
-
-
-# ── Cube file loader ────────────────────────────────────────────────────────
-
-
-def _load_cube(path: str, name: str) -> CrystalIR:
-    """Load Gaussian/CP2K .cube file.
-
-    Structure goes through MCK bond detection (same as CIF).
-    Volumetric data is stored in metadata for TUI density blob rendering.
-    """
-    from ..cube import read_cube
-    from ..cube.bridge import cube_lattice_matrix, cube_to_raw_atoms
-    from ..structure.bonds import find_bonds
-
-    cube = read_cube(path)
-    M = cube_lattice_matrix(cube)
-    raw_atoms = cube_to_raw_atoms(cube)
-
-    # Build lattice from matrix
-    a_vec, b_vec, c_vec = M[0], M[1], M[2]
-    a = float(np.linalg.norm(a_vec))
-    b = float(np.linalg.norm(b_vec))
-    c = float(np.linalg.norm(c_vec))
-    alpha = float(np.degrees(np.arccos(np.clip(np.dot(b_vec, c_vec) / (b * c), -1, 1))))
-    beta = float(np.degrees(np.arccos(np.clip(np.dot(a_vec, c_vec) / (a * c), -1, 1))))
-    gamma = float(np.degrees(np.arccos(np.clip(np.dot(a_vec, b_vec) / (a * b), -1, 1))))
-    lattice = Lattice(a=a, b=b, c=c, alpha=alpha, beta=beta, gamma=gamma, matrix=M)
-
-    # MCK bond detection
-    import gemmi
-    cell = gemmi.UnitCell(a, b, c, alpha, beta, gamma)
-    bond_pairs: list[tuple[int, int]] = []
-    try:
-        from ..structure.molcrys_bridge import analyze as mck_analyze
-        mck_analysis = mck_analyze(raw_atoms, M)
-        bond_pairs = mck_analysis.bond_pairs
-    except Exception:
-        try:
-            bond_pairs = find_bonds(raw_atoms, M=M, cell=cell)
-        except Exception:
-            pass
-
-    # Convert to AtomIR
-    atoms = []
-    for i, at in enumerate(raw_atoms):
-        label = at.get("label", f"{at['elem']}{i+1}")
-        atoms.append(AtomIR(
-            element=at["elem"],
-            cart=np.array(at["cart"], dtype=float),
-            frac=np.array(at["frac"], dtype=float),
-            label=label,
-            occupancy=1.0,
-            index=i,
-            source_index=i,
-            source_instance_id=f"{label}@source:{i}",
-            display_copy_id=f"source:{i}/image:0,0,0",
-        ))
-
-    bonds = []
-    for pair in bond_pairs:
-        i, j = pair[0], pair[1]
-        if i < len(atoms) and j < len(atoms):
-            d = float(np.linalg.norm(atoms[i].cart - atoms[j].cart))
-            bonds.append(BondIR(i=i, j=j, distance=d))
-
-    formula = _compose_formula(atoms)
-    counts = _counts_from_atoms(atoms)
-
-    ir = CrystalIR(
-        title=name,
-        formula=formula,
-        spacegroup="",
-        source_path=path,
-        canonical_formula=formula,
-        canonical_composition=counts,
-        source_site_atom_count=len(atoms),
-        expanded_atom_count=len(atoms),
-        lattice=lattice,
-        atoms=atoms,
-        bonds=bonds,
-        metadata={
-            "display_mode": "structure",
-            "bond_source": "distance_heuristic",
-            "explicit_bond_table": False,
-            "source_site_atom_count": len(atoms),
-            "expanded_atom_count": len(atoms),
-            "display_atom_count": len(atoms),
-        },
-    )
-
-    # Store cube data for density blob rendering
-    ir.metadata["cube_data"] = cube
-
-    # Pre-compute density blobs (bounding spheres of isosurface lobes)
-    try:
-        blobs = _extract_density_blobs(cube)
-        if blobs:
-            ir.metadata["density_blobs"] = blobs
-    except Exception:
-        pass
-
-    return ir
 
 
 def _extract_density_blobs(cube) -> list[dict]:
@@ -469,191 +377,16 @@ def _extract_density_blobs(cube) -> list[dict]:
             )
             center = cart_points.mean(axis=0)
             radius = float(np.max(np.linalg.norm(cart_points - center, axis=1)))
-            blobs.append({
-                "center": center,
-                "radius": radius,
-                "sign": sign,
-                "n_voxels": len(indices),
-            })
+            blobs.append(
+                {
+                    "center": center,
+                    "radius": radius,
+                    "sign": sign,
+                    "n_voxels": len(indices),
+                }
+            )
 
     return blobs
-
-
-# ── Conversion helpers ──────────────────────────────────────────────────────
-
-
-def _from_pymatgen_structure(struct, name: str, path: str) -> CrystalIR:
-    """Convert a pymatgen Structure to CrystalIR."""
-    from ..structure.bonds import find_bonds
-
-    lat = struct.lattice
-    M = np.array(lat.matrix)  # rows = a, b, c
-
-    lattice = Lattice(
-        a=lat.a, b=lat.b, c=lat.c,
-        alpha=lat.alpha, beta=lat.beta, gamma=lat.gamma,
-        matrix=M,
-    )
-
-    atoms = []
-    atoms_raw = []  # dict format for find_bonds compatibility
-    for i, site in enumerate(struct):
-        elem = str(site.specie)
-        cart = np.array(site.coords)
-        frac = np.array(site.frac_coords)
-        atoms.append(AtomIR(
-            element=elem, cart=cart, frac=frac,
-            label=f"{elem}{i+1}", occupancy=1.0, index=i,
-            source_index=i,
-            source_instance_id=f"{elem}{i+1}@source:{i}",
-            display_copy_id=f"source:{i}/image:0,0,0",
-        ))
-        atoms_raw.append({
-            "elem": elem, "cart": cart, "frac": frac,
-            "label": f"{elem}{i+1}", "occ": 1.0,
-            "dg": ".", "da": ".",
-            "_bond_partners": (), "_bond_lengths": {},
-            "_has_bond_table": False,
-        })
-
-    # Find bonds
-    import gemmi
-    cell = gemmi.UnitCell(lat.a, lat.b, lat.c, lat.alpha, lat.beta, lat.gamma)
-    bonds = []
-    try:
-        bond_pairs = find_bonds(atoms_raw, M=M, cell=cell)
-        for i, j in bond_pairs:
-            d = float(np.linalg.norm(atoms[i].cart - atoms[j].cart))
-            bonds.append(BondIR(i=i, j=j, distance=d))
-    except Exception:
-        pass  # Bonds are optional for TUI
-
-    formula = _compose_formula(atoms)
-    counts = _counts_from_atoms(atoms)
-    spacegroup = ""
-    try:
-        from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
-        sga = SpacegroupAnalyzer(struct, symprec=0.1)
-        spacegroup = sga.get_space_group_symbol()
-    except Exception:
-        pass
-
-    return CrystalIR(
-        title=name,
-        formula=formula,
-        spacegroup=spacegroup,
-        source_path=path,
-        canonical_formula=formula,
-        canonical_composition=counts,
-        source_site_atom_count=len(atoms),
-        expanded_atom_count=len(atoms),
-        lattice=lattice,
-        atoms=atoms,
-        bonds=bonds,
-        metadata={
-            "display_mode": "structure",
-            "bond_source": "distance_heuristic",
-            "explicit_bond_table": False,
-            "source_site_atom_count": len(atoms),
-            "expanded_atom_count": len(atoms),
-            "display_atom_count": len(atoms),
-        },
-    )
-
-
-def _from_ase_atoms(atoms_ase, name: str, path: str) -> CrystalIR:
-    """Convert an ASE Atoms object to CrystalIR."""
-    cell_matrix = np.array(atoms_ase.get_cell())
-    has_cell = np.linalg.norm(cell_matrix) > 0.01
-
-    lattice = None
-    if has_cell:
-        lengths = atoms_ase.cell.lengths()
-        angles = atoms_ase.cell.angles()
-        lattice = Lattice(
-            a=lengths[0], b=lengths[1], c=lengths[2],
-            alpha=angles[0], beta=angles[1], gamma=angles[2],
-            matrix=cell_matrix,
-        )
-
-    positions = atoms_ase.get_positions()
-    symbols = atoms_ase.get_chemical_symbols()
-
-    atoms = []
-    atoms_raw = []  # dict format for find_bonds compatibility
-    for i, (sym, pos) in enumerate(zip(symbols, positions)):
-        frac = np.zeros(3)
-        if has_cell:
-            try:
-                frac = atoms_ase.get_scaled_positions()[i]
-            except Exception:
-                pass
-        atoms.append(AtomIR(
-            element=sym, cart=pos, frac=frac,
-            label=f"{sym}{i+1}", occupancy=1.0, index=i,
-            source_index=i,
-            source_instance_id=f"{sym}{i+1}@source:{i}",
-            display_copy_id=f"source:{i}/image:0,0,0",
-        ))
-        atoms_raw.append({
-            "elem": sym, "cart": pos, "frac": frac,
-            "label": f"{sym}{i+1}", "occ": 1.0,
-            "dg": ".", "da": ".",
-            "_bond_partners": (), "_bond_lengths": {},
-            "_has_bond_table": False,
-        })
-
-    formula = _compose_formula(atoms)
-    counts = _counts_from_atoms(atoms)
-
-    # Distance-heuristic bond detection (same approach as POSCAR/VASP)
-    bonds: list[BondIR] = []
-    bond_source = "none"
-    if len(atoms_raw) > 0:
-        try:
-            from ..structure.bonds import find_bonds
-
-            import gemmi
-
-            if has_cell and lattice is not None:
-                M = np.array(lattice.matrix)
-                cell = gemmi.UnitCell(
-                    lattice.a, lattice.b, lattice.c,
-                    lattice.alpha, lattice.beta, lattice.gamma,
-                )
-                bond_pairs = find_bonds(atoms_raw, M=M, cell=cell)
-            else:
-                bond_pairs = find_bonds(atoms_raw)
-
-            for i, j in bond_pairs:
-                d = float(np.linalg.norm(atoms[i].cart - atoms[j].cart))
-                bonds.append(BondIR(i=i, j=j, distance=d))
-            if bonds:
-                bond_source = "distance_heuristic"
-        except Exception:
-            pass  # Bonds are optional
-
-    return CrystalIR(
-        title=name,
-        formula=formula,
-        spacegroup="",
-        source_path=path,
-        canonical_formula=formula,
-        canonical_composition=counts,
-        source_site_atom_count=len(atoms),
-        expanded_atom_count=len(atoms),
-        lattice=lattice,
-        atoms=atoms,
-        bonds=bonds,
-        metadata={
-            "display_mode": "structure",
-            "bond_source": bond_source,
-            "explicit_bond_table": False,
-            "source_site_atom_count": len(atoms),
-            "expanded_atom_count": len(atoms),
-            "display_atom_count": len(atoms),
-        },
-    )
 
 
 def _compose_formula(atoms: list[AtomIR]) -> str:

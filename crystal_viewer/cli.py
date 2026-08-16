@@ -18,6 +18,8 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from .tui.crystal_ir import filter_crystal as _filter_crystal
+
 from .render.cli import (
     _apply_camera_overrides,  # noqa: F401 - compatibility re-export
     _build_cli_topology_data,  # noqa: F401 - compatibility re-export
@@ -115,7 +117,30 @@ def _build_tui_parser(
         ),
     )
     p.add_argument(
-        "FILE", help="Crystal structure file (.cif, .vasp, .poscar, .extxyz)."
+        "FILE",
+        help=(
+            "Atomistic input: CIF, Cube, POSCAR/CONTCAR, VASP, XYZ/extxyz, "
+            "ASE .traj, or LAMMPS dump/data."
+        ),
+    )
+    p.add_argument(
+        "--input-format",
+        default=None,
+        metavar="FORMAT",
+        help="ASE format name for ambiguous inputs.",
+    )
+    p.add_argument(
+        "--type-map",
+        nargs="+",
+        default=None,
+        metavar="ELEMENT",
+        help="LAMMPS type order, for example --type-map Si O.",
+    )
+    p.add_argument(
+        "--frame",
+        type=int,
+        default=0,
+        help="Trajectory frame index (default: 0; negative indices allowed).",
     )
     p.add_argument(
         "--interaction",
@@ -264,10 +289,13 @@ def _tui_main(args: argparse.Namespace) -> None:
         sys.exit(2)
 
     display_mode = args.display
-    loader_display_mode = (
-        display_mode if Path(filepath).suffix.lower() == ".cif" else "unit_cell"
+    crystal = load_for_tui(
+        filepath,
+        display_mode=display_mode,
+        input_format=args.input_format,
+        type_map=args.type_map,
+        frame=args.frame,
     )
-    crystal = load_for_tui(filepath, display_mode=loader_display_mode)
 
     keep_atom_set = {
         index
@@ -276,13 +304,6 @@ def _tui_main(args: argparse.Namespace) -> None:
     }
     if len(keep_atom_set) != crystal.n_atoms:
         crystal = _filter_crystal(crystal, keep_atom_set)
-
-    # Non-CIF formats do not have canonical display slices.
-    if Path(filepath).suffix.lower() != ".cif" and display_mode in (
-        "formula_unit",
-        "asymmetric_unit",
-    ):
-        crystal = _apply_display_filter(crystal, display_mode)
 
     # Map --compact to label_mode="dot" for backward compat
     label_mode = args.label
@@ -426,88 +447,6 @@ def _apply_display_filter(crystal, mode: str):
         return _filter_crystal(crystal, keep_atom_set)
 
     return crystal
-
-
-def _filter_crystal(crystal, keep_indices: set[int]):
-    """Create a new CrystalIR with only the specified atom indices."""
-    from .tui.crystal_ir import AtomIR, BondIR, CrystalIR
-    from .tui.loader_adapter import _compose_formula
-
-    # Build index remapping
-    old_to_new: dict[int, int] = {}
-    new_atoms = []
-    for new_idx, old_idx in enumerate(sorted(keep_indices)):
-        old_to_new[old_idx] = new_idx
-        atom = crystal.atoms[old_idx]
-        new_atoms.append(
-            AtomIR(
-                element=atom.element,
-                cart=atom.cart,
-                frac=atom.frac,
-                label=atom.label,
-                occupancy=atom.occupancy,
-                index=new_idx,
-                source_index=atom.source_index,
-                source_instance_id=atom.source_instance_id,
-                symmetry_operation_index=atom.symmetry_operation_index,
-                image_shift=atom.image_shift,
-                display_copy_id=atom.display_copy_id,
-                source_molecule_index=atom.source_molecule_index,
-                display_fragment_id=atom.display_fragment_id,
-                molecule_index=atom.molecule_index,
-                disorder_group=atom.disorder_group,
-                is_minor=atom.is_minor,
-            )
-        )
-
-    # Filter bonds (both endpoints must be in the kept set)
-    new_bonds = []
-    for bond in crystal.bonds:
-        if bond.i in old_to_new and bond.j in old_to_new:
-            new_bonds.append(
-                BondIR(
-                    i=old_to_new[bond.i],
-                    j=old_to_new[bond.j],
-                    distance=bond.distance,
-                    start=bond.start,
-                    end=bond.end,
-                    start_display_copy_id=bond.start_display_copy_id,
-                    end_display_copy_id=bond.end_display_copy_id,
-                    image_relation=bond.image_relation,
-                )
-            )
-
-    metadata = dict(crystal.metadata)
-    metadata["display_atom_count"] = len(new_atoms)
-    surviving_molecules = {
-        atom.molecule_index for atom in new_atoms if atom.molecule_index >= 0
-    }
-    species_map = {
-        species: [index for index in indices if index in surviving_molecules]
-        for species, indices in crystal.species_map.items()
-    }
-    species_map = {
-        species: indices for species, indices in species_map.items() if indices
-    }
-    return CrystalIR(
-        title=crystal.title,
-        formula=_compose_formula(new_atoms),
-        spacegroup=crystal.spacegroup,
-        source_path=crystal.source_path,
-        canonical_formula=crystal.canonical_formula,
-        canonical_composition=dict(crystal.canonical_composition),
-        source_site_atom_count=crystal.source_site_atom_count,
-        expanded_atom_count=crystal.expanded_atom_count,
-        lattice=crystal.lattice,
-        atoms=new_atoms,
-        bonds=new_bonds,
-        n_molecules=len(surviving_molecules),
-        species_map=species_map,
-        source_molecules=dict(crystal.source_molecules),
-        source_molecule_species=dict(crystal.source_molecule_species),
-        per_formula_unit=crystal.per_formula_unit,
-        metadata=metadata,
-    )
 
 
 # ---------------------------------------------------------------------------

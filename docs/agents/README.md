@@ -15,13 +15,14 @@ flowchart LR
     Q["What do you want to do?"]
     Q --> LIVE["Drive the running viewer"]
     Q --> TUI["Control a terminal view"]
-    Q --> STATIC["Render a static figure"]
+    Q --> STATIC["Render a structure or trajectory"]
     Q --> OVERLAY["Tweak overlays or selectors"]
 
     LIVE --> DASH["dash_service.md<br/>(REST + WebSocket)"]
     TUI --> TUIAPI["tui_api.md<br/>(local semantic controller)"]
 
-    STATIC --> SCENE["scene_api.md<br/>(crystal/cluster)"]
+    STATIC --> CLI["../cli.md<br/>(files, frames, animation)"]
+    STATIC --> SCENE["scene_api.md<br/>(canonical scene API)"]
     STATIC --> CUBE["cube_api.md<br/>(orbitals / volumetric)"]
     STATIC --> ORTEP["ortep_api.md<br/>(thermal ellipsoids)"]
     STATIC --> COMPASS["compass_api.md<br/>(axis triads, k-paths)"]
@@ -40,7 +41,8 @@ The same routing as a quick table:
 |---|---|
 | Drive the running Dash viewer over HTTP/WebSocket | [`dash_service.md`](dash_service.md) |
 | Control a local terminal view from Python or an agent adapter | [`tui_api.md`](tui_api.md) |
-| Build a static crystal/cluster figure from a CIF | [`scene_api.md`](scene_api.md) |
+| Render CIF, Cube, VASP, XYZ, ASE trajectory, or LAMMPS files from the CLI | [`../cli.md`](../cli.md) |
+| Build or compose a canonical structure scene from Python | [`scene_api.md`](scene_api.md) |
 | Match a dense coordination-polyhedron publication layout | [`static_publication.md`](static_publication.md) |
 | Build a static cube/orbital figure (HOMO, LUMO, density) | [`cube_api.md`](cube_api.md) |
 | Render ORTEP / thermal ellipsoid figures | [`ortep_api.md`](ortep_api.md) |

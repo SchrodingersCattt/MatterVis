@@ -126,7 +126,7 @@ mat-vis tui --help
 
 The three subcommands cover:
 
-- `mat-vis render ...` — generate static figures (PNG/PDF/SVG/HTML) from CIF files, with full control over camera, style, colour, and display mode
+- `mat-vis render ...` — render atomistic structures and trajectories from CIF, Cube, VASP, XYZ, ASE, and LAMMPS inputs to PNG/PDF/SVG/HTML/GIF/MP4
 - `mat-vis serve ...` — launch the interactive Dash browser viewer with drag-and-drop CIF upload, topology analysis, and REST + WebSocket API
 - `mat-vis tui ...` — terminal-based crystal structure viewer for headless servers and SSH sessions
 
