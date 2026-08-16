@@ -41,8 +41,8 @@ Treat scene selection, camera, backend, and artifact verification as evidence.
 - Keep comparable panels and animation frames on explicit shared camera/scale
   contracts.
 - Produce one requested final artifact by default, not a gallery.
-- Run delivery renders through `scripts/render_verified.py`. A file that is
-  undecodable, blank, a mismatched fallback, or unverified is not deliverable.
+- Run the literal `mat-vis` command. Retain its exit code and logs, decode
+  the output, and inspect the final artifact before delivery.
 - Keep requested and effective display/style/material/backend distinct.
 - Models without image inspection report objective checks and leave visual
   acceptance pending.

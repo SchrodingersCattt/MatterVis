@@ -18,7 +18,7 @@ bash scripts/install_runtime.sh --venv /absolute/path/to/mattervis-venv
 Installing may update an existing `molcrys-kit`. Use a venv only when that
 dependency change is undesirable or isolation was requested.
 
-The script installs `matter-vis==0.0.2`, installs Chrome with
+The script installs `matter-vis==0.0.3`, installs Chrome with
 `plotly_get_chrome -y`, and verifies the `mat-vis` console entry point.
 
 The distribution version is authoritative. Record the Python executable,

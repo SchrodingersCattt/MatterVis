@@ -1,47 +1,33 @@
 # Verification and Delivery
 
-The standard PNG workflow is in `quickstart.md`. Use this page for other formats
-or wrapper troubleshooting.
+Read this before delivering an image, vector graphic, HTML view, or animation.
 
-## Verified-render wrapper
+## Required checks
 
-Run delivery commands through:
+- Run the literal installed `mat-vis` command and retain its exit code, stdout,
+  and stderr.
+- Confirm the output exists, is non-empty, has the requested format, and decodes.
+- For PNG, reject an all-background image and inspect the final-size artifact.
+- Record input/output hashes when provenance matters.
+- Record dimensions, display, style, material, camera, projection, backend,
+  fallback reason, and warning classification.
+- Deliver one selected artifact unless another set was requested.
 
-```bash
-python scripts/render_verified.py \
-  --manifest OUTPUT.manifest.json \
-  --crop-padding 24 \
-  -- mat-vis render INPUT.cif -o OUTPUT.png ...
-```
+For PDF require `%PDF`; for SVG require an `<svg` root; for HTML require
+Plotly content. These signatures do not replace visual inspection.
 
-The wrapper saves adjacent stdout/stderr logs, preserves the CLI exit code,
-checks the output signature, rejects blank PNGs, records hashes and geometry,
-classifies fallback evidence, and writes a deterministic JSON manifest. Optional
-cropping uses the command's actual background color and records the crop without
-rescaling. Do not hand-author a sidecar.
+## Requested versus effective
 
-For an ordinary single-structure PNG, add `--min-bbox-coverage 0.70`. Lower it
-only for a deliberate multi-panel or whitespace-bearing composition.
+A successful fallback is not automatically the requested result. Preserve CLI
+output and distinguish requested from effective display, style, material, and
+backend. Do not deliver a flat ORTEP fallback as a requested mesh, ball-stick,
+stick, or wireframe image.
 
-## Required evidence
+## Visual acceptance
 
-Require the manifest to record:
+Command success, byte size, and decoding do not prove visual quality. Inspect
+clipping, overlap, labels, cell edges, whitespace, and readability at delivery
+size. For animation, inspect motion rather than one frame.
 
-- exact command and CLI exit code;
-- input/output/log SHA256;
-- output format, byte size, dimensions, and scale;
-- foreground count/fraction and bounding box for PNG;
-- requested and effective display/style/material/backend;
-- camera/projection and visibility arguments;
-- fallback reason and warning classification;
-- `visual_acceptance=pending` until final-size inspection.
-
-A decoded PNG is insufficient. `blank=true`, mismatched fallback, chemistry
-warning, or semantic-fatal warning blocks delivery.
-
-For PDF require `%PDF`; for SVG require an `<svg` root; for HTML require Plotly
-content. These signatures do not replace visual inspection.
-
-Models without image inspection report objective checks only. A vision-capable
-reviewer must inspect clipping, overlap, labels, cell edges, gutters, and
-readability at delivery size.
+Models without image inspection report objective checks only and leave visual
+acceptance pending. Chemistry and semantic-fatal warnings block delivery.
