@@ -245,6 +245,8 @@ def _ordered_atom_bond_trace_dicts(mesh_payload: dict, *, use_fast: bool) -> lis
 def build_row_figure(
     scene_style_pairs: list[tuple[dict, dict]],
     bgcolor: str = "#FFFFFF",
+    *,
+    include_interaction_traces: bool = True,
 ) -> "go.Figure":
     """Pack N scenes side-by-side in a 1×N Plotly subplot figure.
 
@@ -312,9 +314,10 @@ def build_row_figure(
         trace_dicts.extend(_traces_to_dicts(_axis_traces(scene, style_norm)))
         trace_dicts.extend(_traces_to_dicts(_unit_cell_traces(scene, style_norm)))
         trace_dicts.extend(_traces_to_dicts(_morphology_traces(scene, style_norm)))
-        trace_dicts.append(
-            _round_coord_arrays(_atom_selection_trace(scene, style_norm, hidden_labels=hidden_labels_row).to_plotly_json())
-        )
+        if include_interaction_traces:
+            trace_dicts.append(
+                _round_coord_arrays(_atom_selection_trace(scene, style_norm, hidden_labels=hidden_labels_row).to_plotly_json())
+            )
 
         trace_dicts = _style_trace_dicts(trace_dicts, style_norm)
         scene_name = scene_names[col_idx]
@@ -336,7 +339,14 @@ def build_row_figure(
     return fig
 
 
-def build_figure(scene: dict, style: dict, topology_data: dict | None = None, *, force_quality: bool = False) -> "go.Figure":
+def build_figure(
+    scene: dict,
+    style: dict,
+    topology_data: dict | None = None,
+    *,
+    force_quality: bool = False,
+    include_interaction_traces: bool = True,
+) -> "go.Figure":
     from plotly.graph_objects import Figure as go_Figure
 
     style = validate_style_schema(style)
@@ -398,7 +408,8 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None, *,
     )
     if selection_trace is not None:
         trace_dicts.extend(_traces_to_dicts([selection_trace]))
-    trace_dicts.extend(_traces_to_dicts([disorder_preview_outline_trace(scene, style, highlight_labels=set())]))
+    if include_interaction_traces:
+        trace_dicts.extend(_traces_to_dicts([disorder_preview_outline_trace(scene, style, highlight_labels=set())]))
     trace_dicts.extend(_traces_to_dicts(_contact_traces(scene, style)))
     # Flat rendering emits one grouped, fully opaque white dot from
     # `_atom_scatter_traces`, placed at the screen upper-right of each atom.
@@ -410,16 +421,17 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None, *,
     trace_dicts.extend(_traces_to_dicts(_morphology_traces(scene, style)))
     if topology_on:
         trace_dicts.extend(_traces_to_dicts(topology_foreground_traces(topology_data, style)))
-    trace_dicts.append(_round_coord_arrays(_atom_selection_trace(scene, style, hidden_labels=hidden_labels).to_plotly_json()))
-    # Phase 4: extra invisible markers so the right-click menu has
-    # click targets for polyhedron centres and bond midpoints.
-    if topology_on:
-        poly_pick = _polyhedron_selection_trace(topology_data)
-        if poly_pick is not None:
-            trace_dicts.append(_round_coord_arrays(poly_pick.to_plotly_json()))
-    bond_pick = _bond_selection_trace(scene, style)
-    if bond_pick is not None:
-        trace_dicts.append(_round_coord_arrays(bond_pick.to_plotly_json()))
+    if include_interaction_traces:
+        trace_dicts.append(_round_coord_arrays(_atom_selection_trace(scene, style, hidden_labels=hidden_labels).to_plotly_json()))
+        # Phase 4: extra invisible markers so the right-click menu has
+        # click targets for polyhedron centres and bond midpoints.
+        if topology_on:
+            poly_pick = _polyhedron_selection_trace(topology_data)
+            if poly_pick is not None:
+                trace_dicts.append(_round_coord_arrays(poly_pick.to_plotly_json()))
+        bond_pick = _bond_selection_trace(scene, style)
+        if bond_pick is not None:
+            trace_dicts.append(_round_coord_arrays(bond_pick.to_plotly_json()))
 
     # ``_validate=False`` skips Plotly's per-property validator chain when
     # constructing the figure. We've already validated the dicts via

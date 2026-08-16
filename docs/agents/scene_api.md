@@ -164,6 +164,19 @@ honours:
   (default `1.8`). Larger values reduce perspective depth when
   `projection="perspective"`; orthographic views keep the same visual
   scale but still use the eye direction.
+
+## Static exports and interaction traces
+
+`build_figure(..., include_interaction_traces=False)` and
+`build_row_figure(..., include_interaction_traces=False)` omit transparent
+atom/bond/polyhedron picking markers and the empty disorder-preview overlay.
+Use this for Kaleido/publication exports. The default remains `True` for the
+interactive Dash viewer, where these traces provide hover and right-click hit
+targets.
+
+Picking markers explicitly disable their Plotly marker outlines. Relying on a
+transparent marker fill alone is unsafe because Plotly may resolve a white
+bubble-marker outline, which becomes a visible WebGL artifact in static export.
 - `camera` — explicit Plotly camera mapping. The CLI exposes this as
   `--camera-axis`, `--view-direction`, `--camera-position`, and
   `--camera-up`. Static CLI renders default to a `+c` lattice-axis view with
