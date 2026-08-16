@@ -15,7 +15,7 @@ Record, where available:
 A decoded export with an untrustworthy object selection is a diagnostic artifact,
 not a publication figure.
 
-MatterVis 0.0.1 has no `diagnose` subcommand. Use capability tiers:
+MatterVis 0.0.2 has no `diagnose` subcommand. Use capability tiers:
 
 1. For an admitted small scene, `mat-vis tui INPUT --no-interaction --format
   structured --display <mode>` reports formulas, source/expanded/displayed/
@@ -72,8 +72,8 @@ unit-cell tangle and calling it formal output.
 For an ordered crystal scene above 500 displayed atoms, use one deterministic
 low-noise first candidate rather than trying a gallery: `unit_cell`, hidden
 hydrogen, orthographic lattice `+c`, `ball_stick`, `mesh`, white background,
-hidden axes and labels, `atom-scale=0.65`, `bond-radius=0.08`, `1600x1200`, and
-`scale=2`. This preserves the crystal context while reducing occlusion. If the
+hidden axes and labels, `atom-scale=0.65`, `bond-radius=0.08`, `2400x1800`, and
+`scale=1`. This preserves the crystal context while reducing occlusion. If the
 target is one local event or molecule rather than the whole cell, use the
 auditable focus workflow instead of drawing the entire dense box.
 
