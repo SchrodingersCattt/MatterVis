@@ -6,6 +6,12 @@ annotations** rather than in-scene 3D arrows. Use this whenever the
 3D content does not have guaranteed empty space — i.e. almost always
 in a publication figure.
 
+This contract is for direction keys with no physical world origin. For an
+arrow anchored at a molecule, atom, cell centre, or crystal site that must be
+occluded by 3D geometry, use [native vector overlays](vector_overlays_api.md).
+Vector-overlay text still uses paper annotations for static orthographic
+figures.
+
 ## Why not just put 3D arrows in the scene?
 
 In a typical orthographic 3D scene with extended molecular content

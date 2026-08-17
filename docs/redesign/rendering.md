@@ -10,6 +10,11 @@ Rendering is a pure read of resolved state:
 
 It must not mutate persisted state and must not derive new state transitions.
 
+Native `vector_overlays` resolve to opaque world-space Mesh3d arrows. Groups
+with `viewport_policy="include"` own their generated shaft/head bounds; paper
+labels do not grow world ranges. Interaction-only picking traces remain
+independent and may be omitted from static exports.
+
 ## Single Writer For Viewport Layout
 
 `figure_axis_layout` is the only target owner of:
