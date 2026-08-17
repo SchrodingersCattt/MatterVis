@@ -31,3 +31,9 @@ size. For animation, inspect motion rather than one frame.
 
 Models without image inspection report objective checks only and leave visual
 acceptance pending. Chemistry and semantic-fatal warnings block delivery.
+
+For multi-panel PNGs, run `skills/visualize-materials/scripts/check_panel_layout.py`
+with explicit panel boundaries (or `--panels` only for truly equal-width final
+cells). Report each panel's ink bounding box, occupancy, and four safety pads.
+The defaults are 70–95% bounding-box occupancy and 24 px minimum pad; override
+them with CLI arguments when the figure class requires it and record the reason.
