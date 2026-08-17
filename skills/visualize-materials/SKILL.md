@@ -23,6 +23,7 @@ Treat scene selection, camera, backend, and artifact verification as evidence.
    - [Molecule focus](./references/molecule-highlight.md)
    - [Polyhedra](./references/polyhedra.md)
    - [Publication layout](./references/publication-layout.md)
+  - [Multi-structure panels](./references/multi-structure-panels.md)
    - [Trajectory animation](./references/trajectory-animation.md)
    - [Terminal TUI](./references/tui.md)
 6. Always read [verification](./references/verification.md) before reporting or
@@ -40,6 +41,10 @@ Treat scene selection, camera, backend, and artifact verification as evidence.
   reconstruct them from screen proximity or invent pseudo-elements for styling.
 - Keep comparable panels and animation frames on explicit shared camera/scale
   contracts.
+- For every multi-structure figure, declare whether panel scale is shared
+  (physical size is comparable) or independently fitted (shape/direction only).
+  Never use camera distance, viewport padding, or nonuniform scaling as an
+  undocumented cure for whitespace.
 - Produce one requested final artifact by default, not a gallery.
 - Run the literal `mat-vis` command. Retain its exit code and logs, decode
   the output, and inspect the final artifact before delivery.

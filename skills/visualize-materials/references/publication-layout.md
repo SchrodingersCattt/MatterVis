@@ -3,6 +3,11 @@
 Read this for journal figures, N-up panels, compact subfigures, whitespace,
 cropping, compass placement, or comparable structural scale.
 
+For any image containing more than one molecular/crystal structure, also read
+[multi-structure panels](./multi-structure-panels.md). It defines the required
+scale declaration, the five distinct bounding layers, and objective occupancy
+checks; this file does not replace that workflow.
+
 ## Visual baseline
 
 Prefer white backgrounds, thin charcoal marks, restrained semantic colours, and
@@ -81,6 +86,11 @@ pad, preserve centre and aspect ratio, and never resize x and y independently.
 Cropping must not resample the structure, alter its scale, hide a camera/geometry
 problem, or change the relative compass position. Record original/cropped
 dimensions, crop box, padding, and whether rescaling occurred.
+
+When independent panel crops have different widths, preserve them at native
+pixel size and use variable column widths. Do not stretch them into equal-width
+cells. When shared Å/pixel is required, padding a narrow crop is allowed;
+rescaling it is not.
 
 ## Compass and safety bands
 
