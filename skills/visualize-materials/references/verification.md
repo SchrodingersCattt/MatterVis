@@ -29,6 +29,22 @@ Command success, byte size, and decoding do not prove visual quality. Inspect
 clipping, overlap, labels, cell edges, whitespace, and readability at delivery
 size. For animation, inspect motion rather than one frame.
 
+For an auditable animation, record a machine-readable manifest with:
+
+- source paths/hashes, resolved source-frame IDs, and frame-to-time/stage map;
+- stable-ID field, selected IDs, and topology/selection hash when applicable;
+- per-atom array names, shapes, units, and overlay scale;
+- requested/effective display, style, material, backend, and fallback reason;
+- camera, screen-up, projection, shared viewport, canvas, dimensions, and FPS;
+- output-specific decoded frame count and duration (GIF and MP4 may differ);
+- first/middle/last and extrema QA hashes;
+- objective validation separately from `visual_acceptance`, which starts as
+    `pending` until a final-size motion review.
+
+Do not infer a backend from the filename. Preserve structured export facts when
+available; otherwise derive the manifest from the literal command, retained
+logs, hashes, and decoded outputs.
+
 Models without image inspection report objective checks only and leave visual
 acceptance pending. Chemistry and semantic-fatal warnings block delivery.
 

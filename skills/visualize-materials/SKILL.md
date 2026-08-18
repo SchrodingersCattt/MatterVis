@@ -23,7 +23,7 @@ Treat scene selection, camera, backend, and artifact verification as evidence.
    - [Molecule focus](./references/molecule-highlight.md)
    - [Polyhedra](./references/polyhedra.md)
    - [Publication layout](./references/publication-layout.md)
-  - [Multi-structure panels](./references/multi-structure-panels.md)
+    - [Multi-structure panels](./references/multi-structure-panels.md)
    - [Trajectory animation](./references/trajectory-animation.md)
    - [Terminal TUI](./references/tui.md)
 6. Always read [verification](./references/verification.md) before reporting or
@@ -45,6 +45,14 @@ Treat scene selection, camera, backend, and artifact verification as evidence.
   (physical size is comparable) or independently fitted (shape/direction only).
   Never use camera distance, viewport padding, or nonuniform scaling as an
   undocumented cure for whitespace.
+- For trajectories, keep memory bounded to one canonical/rendered frame at a
+  time, use one effective backend for the whole animation, and select semantic
+  focus by stable source identity plus topology closure rather than frame-local
+  row positions or coordinate boxes.
+- Use `mat-vis render` for ordinary animations. For vector fields, order
+  parameters, synchronized panels, or other semantic overlays, preserve clean
+  MatterVis base frames and add only declared overlays in a thin Python
+  composition layer.
 - Produce one requested final artifact by default, not a gallery.
 - Run the literal `mat-vis` command. Retain its exit code and logs, decode
   the output, and inspect the final artifact before delivery.

@@ -10,7 +10,12 @@ from ase.io import write
 from ase.io.trajectory import Trajectory
 
 from crystal_viewer.cli import _build_tui_parser
-from crystal_viewer.loader import LoadedCrystal, load_structure_input
+from crystal_viewer.loader import (
+    LoadedCrystal,
+    iter_atomistic_frames,
+    load_atomistic_input,
+    load_structure_input,
+)
 from crystal_viewer.render.cli import (
     _build_render_parser,
     _parse_frame_indices,
@@ -114,6 +119,55 @@ def test_supported_inputs_converge_on_loaded_crystal(
     assert all(isinstance(frame.bundle, LoadedCrystal) for frame in loaded.frames)
     assert all(len(frame.bundle.raw_atoms) == 3 for frame in loaded.frames)
     assert {atom["elem"] for atom in loaded.frames[0].bundle.raw_atoms} == {"Si", "O"}
+
+
+def test_ase_frame_metadata_preserves_custom_atom_arrays(tmp_path: Path) -> None:
+    atoms = Atoms(
+        "SiO",
+        positions=[[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]],
+        cell=[8.0, 8.0, 8.0],
+        pbc=True,
+    )
+    atoms.info["time_ps"] = 2.5
+    atoms.arrays["local_vector"] = np.array(
+        [[0.1, 0.0, 0.0], [0.0, 0.2, 0.0]]
+    )
+    path = tmp_path / "metadata.extxyz"
+    write(path, atoms, format="extxyz")
+
+    atomistic = load_atomistic_input(path, frame_indices=[0])
+    loaded = load_structure_input(path, frame_indices=[0])
+
+    assert atomistic.frames[0].info["time_ps"] == pytest.approx(2.5)
+    assert atomistic.frames[0].atom_arrays["local_vector"] == pytest.approx(
+        atoms.arrays["local_vector"]
+    )
+    assert loaded.frames[0].atom_arrays["local_vector"] == pytest.approx(
+        atoms.arrays["local_vector"]
+    )
+    assert loaded.frames[0].bundle.frame_info["time_ps"] == pytest.approx(2.5)
+    assert loaded.frames[0].bundle.atom_arrays["local_vector"] == pytest.approx(
+        atoms.arrays["local_vector"]
+    )
+    scene = loaded.frames[0].bundle.scene
+    source_index = scene["draw_atoms"][0]["_source_index"]
+    assert loaded.frames[0].bundle.atom_arrays["local_vector"][source_index] == pytest.approx(
+        atoms.arrays["local_vector"][source_index]
+    )
+
+
+def test_iter_atomistic_frames_streams_selected_source_order(
+    structure_files: dict[str, Path],
+) -> None:
+    streamed = list(
+        iter_atomistic_frames(structure_files["traj"], frame_indices=[1])
+    )
+
+    assert len(streamed) == 1
+    frame, input_format = streamed[0]
+    assert frame.index == 1
+    assert frame.info["step"] == 1
+    assert input_format == "traj"
 
 
 def test_trajectory_frame_selection_reaches_tui(
@@ -244,6 +298,40 @@ def test_render_cli_exports_real_animation(
     assert all(frame.shape[:2] == (160, 200) for frame in frames)
 
 
+def test_animation_cli_does_not_load_all_canonical_frames(
+    structure_files: dict[str, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from crystal_viewer.render import cli
+
+    def fail(*args, **kwargs):
+        raise AssertionError("animation CLI must use the streaming frame path")
+
+    monkeypatch.setattr(cli, "load_structure_input", fail, raising=False)
+    parser = argparse.ArgumentParser()
+    _build_render_parser(parser.add_subparsers(dest="command"))
+    output = tmp_path / "streaming.gif"
+    args = parser.parse_args(
+        [
+            "render",
+            str(structure_files["traj"]),
+            "--width",
+            "100",
+            "--height",
+            "80",
+            "--scale",
+            "1",
+            "-o",
+            str(output),
+        ]
+    )
+
+    _render_main(args)
+
+    assert output.is_file()
+
+
 def test_animation_viewport_has_one_world_center_and_scale() -> None:
     from crystal_viewer.renderer import uniform_viewport
 
@@ -257,6 +345,21 @@ def test_animation_viewport_has_one_world_center_and_scale() -> None:
     assert scenes[0]["viewport"] == scenes[1]["viewport"]
     assert scenes[0]["viewport"]["center"] == pytest.approx([5.0, 0.0, 0.0])
     assert scenes[0]["viewport"]["half_span"] > 5.0
+
+
+def test_viewport_accumulator_matches_uniform_viewport() -> None:
+    from crystal_viewer.renderer import ViewportAccumulator, uniform_viewport
+
+    scenes = [
+        {"draw_atoms": [{"cart": np.array([0.0, 0.0, 0.0]), "atom_radius": 0.2}]},
+        {"draw_atoms": [{"cart": np.array([10.0, 0.0, 0.0]), "atom_radius": 0.2}]},
+    ]
+    accumulator = ViewportAccumulator()
+    for scene in scenes:
+        accumulator.update(scene)
+    uniform_viewport(scenes, shared_center=True)
+
+    assert accumulator.viewport() == scenes[0]["viewport"]
 
 
 def test_tui_parser_exposes_same_generic_input_contract() -> None:

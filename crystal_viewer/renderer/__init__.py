@@ -16,6 +16,6 @@ from ..render.publication import DENSE_COORDINATION_PRESET
 from ..render.scene_traces import *
 from ..render.style import style_from_controls, validate_style_schema
 from ..render.topology import topology_histogram_figure, topology_results_markdown
-from ..render.viewport import uniform_viewport
+from ..render.viewport import ViewportAccumulator, uniform_viewport
 
 __all__ = [name for name in globals() if not name.startswith("__")]

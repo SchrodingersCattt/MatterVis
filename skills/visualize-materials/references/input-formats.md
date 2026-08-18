@@ -3,6 +3,13 @@
 All format adapters converge on one canonical MatterVis structure frame before
 scene construction. Do not create a format-specific rendering path.
 
+For ASE-backed inputs, canonical `StructureFrame` objects preserve frame
+metadata and per-atom arrays. The same data is available on
+`frame.bundle.frame_info` and `frame.bundle.atom_arrays`; rendered atoms map to
+array rows through their stable `_source_index`. Keep scientific arrays separate
+from render atom fields rather than inventing pseudo-elements or screen-space
+selection rules.
+
 ## Static structures
 
 ~~~bash
