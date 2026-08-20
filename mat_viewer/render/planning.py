@@ -8,6 +8,7 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
+from ..config import atom_radius as configured_atom_radius
 from .contracts import (
     CameraSpec,
     LinePrimitive,
@@ -563,12 +564,20 @@ def _normalise_source(
             scene["molcrys_provenance"] = provenance
         return scene
     if hasattr(source, "get_site_records"):
-        sites = list(source.get_site_records())
-        bonds = (
-            list(source.get_bond_records())
-            if hasattr(source, "get_bond_records")
-            else []
-        )
+        site_getter = getattr(source, "get_site_records")
+        bond_getter = getattr(source, "get_bond_records", None)
+        if not callable(site_getter):
+            raise TypeError(
+                "MolCrysKit source get_site_records must be a public callable"
+            )
+        if not callable(bond_getter):
+            raise TypeError(
+                "MolCrysKit source exposes get_site_records but is missing the "
+                "required public get_bond_records callable; MatterVis will not "
+                "infer connectivity"
+            )
+        sites = list(site_getter())
+        bonds = list(bond_getter())
         matrix = _source_matrix(source)
         return _normalise_molecular_crystal(
             source,
@@ -660,13 +669,15 @@ def _site_mapping(
     position: Any,
     display_image_shift: Any | None = None,
 ) -> dict[str, Any]:
+    symbol = str(_value(site, "symbol"))
     source_image_shift = _integer_triplet(
         _value(site, "image_shift", default=(0, 0, 0))
     )
     return {
-        "symbol": str(_value(site, "symbol")),
+        "symbol": symbol,
         "label": str(_value(site, "label", default="")),
         "cartesian_position_A": np.asarray(position, dtype=float),
+        "atom_radius": configured_atom_radius(symbol),
         "occupancy": float(_value(site, "occupancy", default=1.0)),
         "disorder_group": _value(site, "disorder_group", default=None),
         "disorder_assembly": _value(site, "disorder_assembly", default=None),

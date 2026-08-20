@@ -1245,6 +1245,68 @@ def test_real_molecular_crystal_lattice_emits_unit_cell_primitive():
     assert np.max(cell.segments[:, :, 2]) == pytest.approx(6.0)
 
 
+def test_direct_record_source_requires_bond_contract_but_accepts_empty_records():
+    class MissingBonds:
+        def get_site_records(self):
+            return []
+
+    with pytest.raises(TypeError, match="required public get_bond_records"):
+        prepare_render(MissingBonds(), view={"display": "unit_cell"})
+
+    class EmptyStructure(MissingBonds):
+        lattice = np.eye(3)
+
+        def get_bond_records(self):
+            return []
+
+    plan = prepare_render(
+        EmptyStructure(),
+        view={"display": "unit_cell"},
+        render={"show_cell": False},
+    )
+    assert plan.primitives == ()
+
+
+def test_direct_molecular_crystal_uses_configured_element_visual_radii():
+    from ase import Atoms
+    from molcrys_kit.structures import MolecularCrystal
+
+    from mat_viewer.config import atom_radius
+
+    if not hasattr(MolecularCrystal, "get_site_records"):
+        pytest.skip("requires the pinned MolCrysKit structure-contract commit")
+    crystal = MolecularCrystal(
+        np.eye(3) * 8.0,
+        [
+            Atoms("H", positions=[[1.0, 1.0, 1.0]]),
+            Atoms("I", positions=[[5.0, 5.0, 5.0]]),
+        ],
+    )
+    plan = prepare_render(
+        crystal,
+        view={"display": "unit_cell"},
+        render={
+            "representation": "space_filling",
+            "show_cell": False,
+            "show_hydrogen": True,
+            "sphere_detail": (6, 8),
+        },
+    )
+    atoms = {
+        primitive.metadata["element"]: primitive
+        for primitive in plan.primitives
+        if primitive.metadata.get("kind") == "atom"
+    }
+
+    assert set(atoms) == {"H", "I"}
+    for element, primitive in atoms.items():
+        center = np.mean(primitive.vertices, axis=0)
+        rendered_radius = float(
+            np.max(np.linalg.norm(primitive.vertices - center, axis=1))
+        )
+        assert rendered_radius == pytest.approx(max(atom_radius(element), 0.2))
+
+
 def test_structure_input_view_rebuilds_loaded_bundle_with_canonical_display_mode(
     monkeypatch,
 ):
