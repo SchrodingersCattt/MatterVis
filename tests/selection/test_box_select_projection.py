@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from crystal_viewer.app import create_app
+from mat_viewer.app import create_app
 
 
 def test_select_box_full_view_selects_visible_atoms():

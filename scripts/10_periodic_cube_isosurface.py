@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from crystal_viewer.cube import build_cube_figure, export_static
+from mat_viewer.cube import build_cube_figure, export_static
 
 OUTPUT = ROOT / "scripts" / "_outputs"
 

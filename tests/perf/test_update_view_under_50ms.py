@@ -3,8 +3,8 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from crystal_viewer.app import ViewerBackend
-from crystal_viewer.presets import default_preset_path
+from mat_viewer.app import ViewerBackend
+from mat_viewer.presets import default_preset_path
 
 
 def _async_topology_state(backend: ViewerBackend) -> dict:

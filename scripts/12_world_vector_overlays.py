@@ -10,8 +10,8 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from crystal_viewer.renderer import build_figure
-from crystal_viewer.scene import build_scene_from_atoms, scene_ops, scene_style
+from mat_viewer.renderer import build_figure
+from mat_viewer.scene import build_scene_from_atoms, scene_ops, scene_style
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "_outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)

@@ -23,13 +23,13 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from crystal_viewer.loader import build_loaded_crystal  # noqa: E402
-from crystal_viewer.renderer import (  # noqa: E402
+from mat_viewer.loader import build_loaded_crystal  # noqa: E402
+from mat_viewer.renderer import (  # noqa: E402
     build_figure,
     topology_histogram_figure,
 )
-from crystal_viewer.scene import scene_style  # noqa: E402
-from crystal_viewer.topology import analyze_topology  # noqa: E402
+from mat_viewer.scene import scene_style  # noqa: E402
+from mat_viewer.topology import analyze_topology  # noqa: E402
 
 
 HERE = Path(__file__).resolve().parent

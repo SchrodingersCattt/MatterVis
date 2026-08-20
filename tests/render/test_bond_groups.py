@@ -15,7 +15,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from crystal_viewer.bond_groups import (
+from mat_viewer.bond_groups import (
     bond_groups_cache_key,
     bond_matches_selector,
     tag_bonds_with_groups,
@@ -151,7 +151,7 @@ def test_tag_bonds_visible_false_drops_render(atoms_and_bonds):
 
 
 def test_bond_segments_skips_invisible_bonds(atoms_and_bonds):
-    from crystal_viewer.renderer import _bond_segments
+    from mat_viewer.renderer import _bond_segments
 
     atoms, bonds = atoms_and_bonds
     bonds = [dict(b) for b in bonds]
@@ -165,7 +165,7 @@ def test_bond_segments_skips_invisible_bonds(atoms_and_bonds):
 
 
 def test_bond_segments_render_color_overrides_atom_colors(atoms_and_bonds):
-    from crystal_viewer.renderer import _bond_segments
+    from mat_viewer.renderer import _bond_segments
 
     atoms, bonds = atoms_and_bonds
     tagged = tag_bonds_with_groups(
@@ -183,7 +183,7 @@ def test_bond_segments_render_color_overrides_atom_colors(atoms_and_bonds):
 
 
 def test_bond_segments_yields_per_bond_scales(atoms_and_bonds):
-    from crystal_viewer.renderer import _bond_segments
+    from mat_viewer.renderer import _bond_segments
 
     atoms, bonds = atoms_and_bonds
     tagged = tag_bonds_with_groups(

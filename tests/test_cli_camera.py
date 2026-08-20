@@ -5,7 +5,7 @@ from argparse import Namespace
 import numpy as np
 import pytest
 
-from crystal_viewer.cli import (
+from mat_viewer.cli import (
     _apply_camera_overrides,
     _build_render_parser,
     _parse_polyhedron_specs,
@@ -182,8 +182,8 @@ def test_render_parser_exposes_publication_layout_metadata():
 
 
 def test_cli_topology_stamps_distinct_spec_colors(monkeypatch):
-    import crystal_viewer.app.backend_topology as backend_topology
-    from crystal_viewer.cli import _build_cli_topology_data
+    import mat_viewer.app.backend_topology as backend_topology
+    from mat_viewer.cli import _build_cli_topology_data
 
     monkeypatch.setattr(
         backend_topology,

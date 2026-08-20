@@ -7,8 +7,8 @@ The public user-facing command is `mat-vis`; the benchmark modules below are
 developer-only entry points and remain Python module invocations.
 
 ```bash
-python -m crystal_viewer.perf.bench --repeat 3
-python -m crystal_viewer.perf.profile_app
+python -m mat_viewer.perf.bench --repeat 3
+python -m mat_viewer.perf.profile_app
 ```
 
 ## Pipeline oracle benchmark
@@ -17,7 +17,7 @@ Use the pipeline benchmark to record loader, scene, figure, JSON-encoding, and
 scientific-signature baselines without mixing cold and warm cache paths:
 
 ```bash
-python -m crystal_viewer.perf.bench_pipeline scripts/data/DAP-4.cif --repeat 3 --output /tmp/dap4-pipeline.json
+python -m mat_viewer.perf.bench_pipeline scripts/data/DAP-4.cif --repeat 3 --output /tmp/dap4-pipeline.json
 ```
 
 Each scene and figure report keeps one explicit cold sample separate from the
@@ -48,8 +48,8 @@ fast test suite.
 Captured on 2026-05-01 with:
 
 ```bash
-python -m crystal_viewer.perf.bench --repeat 3 --json
-python -m crystal_viewer.perf.profile_app --output /tmp/mattervis-profile-baseline.txt
+python -m mat_viewer.perf.bench --repeat 3 --json
+python -m mat_viewer.perf.profile_app --output /tmp/mattervis-profile-baseline.txt
 ```
 
 Test structure: `scripts/data/DAP-4.cif` (`atom_count_unit_cell=192`,

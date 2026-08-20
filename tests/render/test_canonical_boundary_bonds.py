@@ -3,8 +3,8 @@ from __future__ import annotations
 import gemmi
 import numpy as np
 
-from crystal_viewer.loader import build_bundle_scene, build_loaded_crystal
-from crystal_viewer.scene import build_scene_from_atoms, scene_ops
+from mat_viewer.loader import build_bundle_scene, build_loaded_crystal
+from mat_viewer.scene import build_scene_from_atoms, scene_ops
 
 
 def _atom(label: str, element: str, frac, M, source_index: int) -> dict:
@@ -151,7 +151,7 @@ def test_dap4_boundary_fragment_instances_keep_all_internal_canonical_bonds(monk
         title="DAP-4",
     )
     monkeypatch.setattr(
-        "crystal_viewer.scene.core.find_bonds",
+        "mat_viewer.scene.core.find_bonds",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("unit-cell canonical records must not re-detect bonds"),
         ),

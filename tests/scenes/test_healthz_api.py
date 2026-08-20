@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from crystal_viewer.app import create_app
+from mat_viewer.app import create_app
 
 
 def test_healthz_v2_returns_lightweight_liveness_payload():
@@ -33,7 +33,7 @@ def test_state_echoes_server_started_at_for_restart_detection():
 
 
 def test_screenshot_accepts_size_fast_and_version_query(monkeypatch):
-    from crystal_viewer import app as app_module
+    from mat_viewer import app as app_module
 
     calls = []
 

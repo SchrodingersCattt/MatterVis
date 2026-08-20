@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from crystal_viewer.app import _minor_opacity_control_style, _minor_opacity_disabled
+from mat_viewer.app import _minor_opacity_control_style, _minor_opacity_disabled
 
 
 @pytest.mark.parametrize(

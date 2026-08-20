@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from crystal_viewer.app import _camera_from_relayout_data
+from mat_viewer.app import _camera_from_relayout_data
 
 
 def test_camera_from_relayout_data_accepts_dotted_partial_updates():

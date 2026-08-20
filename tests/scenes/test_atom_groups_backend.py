@@ -19,12 +19,12 @@ from pathlib import Path
 
 import pytest
 
-from crystal_viewer.app import (
+from mat_viewer.app import (
     ViewerBackend,
     _normalize_atom_group,
     _normalize_atom_groups,
 )
-from crystal_viewer.presets import default_preset_path
+from mat_viewer.presets import default_preset_path
 
 
 @pytest.fixture

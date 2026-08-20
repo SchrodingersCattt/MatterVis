@@ -8,7 +8,7 @@ def test_plotly_static_export_real_write_probe_reports_failure(
 ) -> None:
     import plotly.graph_objects as go
 
-    from crystal_viewer.render.export import plotly_static_export_available
+    from mat_viewer.render.export import plotly_static_export_available
 
     def fail(*args, **kwargs):
         raise RuntimeError("browser starts but cannot render")
@@ -26,7 +26,7 @@ def test_animation_disables_style_fallback(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    from crystal_viewer.render import cli
+    from mat_viewer.render import cli
 
     calls = []
 
@@ -52,7 +52,7 @@ def test_animation_disables_style_fallback(
     ]
 
     import pytest
-    from crystal_viewer.render.animation import save_prepared_from_cli
+    from mat_viewer.render.animation import save_prepared_from_cli
 
     with pytest.raises(RuntimeError, match="Chrome unavailable"):
         save_prepared_from_cli(prepared, args, output)

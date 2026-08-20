@@ -6,9 +6,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from crystal_viewer.loader import build_loaded_crystal
-from crystal_viewer.presets import DEFAULT_STYLE
-from crystal_viewer.renderer import build_figure
+from mat_viewer.loader import build_loaded_crystal
+from mat_viewer.presets import DEFAULT_STYLE
+from mat_viewer.renderer import build_figure
 
 
 SY_CIF = Path("scripts/data/SY.cif")
@@ -219,7 +219,7 @@ def test_compass_arrow_lengths_use_equal_basis_vectors():
 
 def test_compass_arrow_lengths_follow_unit_basis_projection():
     """Equal 3D basis vectors still foreshorten under camera projection."""
-    from crystal_viewer.renderer import _camera_axis_projections
+    from mat_viewer.renderer import _camera_axis_projections
 
     scene = {
         "name": "test",
@@ -262,7 +262,7 @@ def test_compass_projection_rescales_to_cube_for_aspectmode_data():
     before normalising them to unit basis directions, so it tracks visible
     direction without encoding cell-axis lengths.
     """
-    from crystal_viewer.renderer import _camera_axis_projections
+    from mat_viewer.renderer import _camera_axis_projections
 
     scene = {
         "M": np.diag([8.09, 24.72, 10.20]),
@@ -299,7 +299,7 @@ def test_compass_projection_skips_cube_rescaling_for_cube_aspectmode():
     the compass still normalises the lattice rows to unit basis directions
     so it does not encode cell lengths.
     """
-    from crystal_viewer.renderer import _camera_axis_projections
+    from mat_viewer.renderer import _camera_axis_projections
 
     scene = {
         "M": np.diag([8.09, 24.72, 10.20]),
@@ -488,7 +488,7 @@ def test_compass_overlay_python_skipped_for_dash_interactive_path():
     export pipelines (cube.export_static, scripts/) leave the flag
     unset and keep the baked compass for kaleido.
     """
-    from crystal_viewer.render.compass import axis_key_overlay
+    from mat_viewer.render.compass import axis_key_overlay
 
     scene = {
         "M": np.eye(3) * 5,
@@ -553,7 +553,7 @@ def test_compass_projects_orthogonal_axes_to_orthogonal_screen_vectors():
     orthogonal on screen, but their lengths are equal because the compass
     is a basis-direction triad rather than a cell-length scale bar.
     """
-    from crystal_viewer.renderer import _camera_axis_projections
+    from mat_viewer.renderer import _camera_axis_projections
 
     scene = {"M": np.diag([8.09, 24.72, 10.20])}
     style = {
@@ -594,7 +594,7 @@ def test_cube_camera_argument_projects_compass_with_final_camera(tmp_path):
     paper-coordinate compass kept the wrapper's original diagonal camera, so
     its arrows were no longer parallel to the visible cell edges.
     """
-    from crystal_viewer.cube import build_cube_figure
+    from mat_viewer.cube import build_cube_figure
 
     path = tmp_path / "monoclinic.cube"
     values = np.zeros((8, 8, 8), dtype=float)
@@ -646,7 +646,7 @@ def test_legacy_app_camera_projects_viewport_and_compass_consistently():
     the renderer.  The viewport and static compass must canonicalize that
     representation once and use the same Plotly camera basis.
     """
-    from crystal_viewer.renderer import _camera_axis_projections
+    from mat_viewer.renderer import _camera_axis_projections
 
     bundle = build_loaded_crystal(
         name="DAP-4", cif_path="scripts/data/DAP-4.cif", title="DAP-4"
@@ -691,7 +691,7 @@ def test_compass_uses_view_minus_eye_not_eye():
     still computing ``view = eye`` (wrong sign), both cameras would
     produce the SAME projection.
     """
-    from crystal_viewer.renderer import _camera_axis_projections
+    from mat_viewer.renderer import _camera_axis_projections
 
     scene = {"M": np.diag([8.09, 24.72, 10.20])}
     above = {

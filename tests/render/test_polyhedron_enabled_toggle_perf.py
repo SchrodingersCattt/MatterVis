@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import copy
 
-from crystal_viewer.app import ViewerBackend
+from mat_viewer.app import ViewerBackend
 
 
 def _backend(tmp_path):
@@ -96,7 +96,7 @@ def test_polyhedron_traces_carry_meta_spec_id(tmp_path):
     ``_apply_polyhedron_visibility_patch`` can route the live
     enabled flag onto the right traces.
     """
-    from crystal_viewer.renderer import topology_background_traces, topology_foreground_traces
+    from mat_viewer.renderer import topology_background_traces, topology_foreground_traces
 
     topology_data = {
         "spec_results": [
@@ -139,7 +139,7 @@ def test_apply_visibility_patch_flips_disabled_spec_traces(tmp_path):
     """
     import plotly.graph_objects as go
 
-    from crystal_viewer.app.backend_camera import _apply_polyhedron_visibility_patch
+    from mat_viewer.app.backend_camera import _apply_polyhedron_visibility_patch
 
     fig = go.Figure(
         data=[
@@ -167,7 +167,7 @@ def test_dash_polyhedron_visibility_patch_flips_existing_figure_traces(tmp_path)
     checked/unchecked row from looking inert while the user is rotating the
     3D scene.
     """
-    from crystal_viewer.app.style_helpers import _polyhedron_visibility_patch_for_figure
+    from mat_viewer.app.style_helpers import _polyhedron_visibility_patch_for_figure
 
     fig = {
         "data": [
@@ -193,7 +193,7 @@ def test_dash_polyhedron_visibility_patch_flips_existing_figure_traces(tmp_path)
 
 
 def test_dash_polyhedron_visibility_patch_hides_all_when_overlay_disabled(tmp_path):
-    from crystal_viewer.app.style_helpers import _polyhedron_visibility_patch_for_figure
+    from mat_viewer.app.style_helpers import _polyhedron_visibility_patch_for_figure
 
     fig = {
         "data": [
@@ -229,7 +229,7 @@ def _backend_with_dap4(tmp_path):
     directly so the backend doesn't have to call ``get_default_catalog``
     or read any preset.
     """
-    from crystal_viewer.loader import build_loaded_crystal
+    from mat_viewer.loader import build_loaded_crystal
 
     backend = ViewerBackend(
         preset_path=str(tmp_path / "preset.json"),
@@ -382,7 +382,7 @@ def test_figure_for_state_cache_hits_and_patches_visibility_on_enabled_toggle(
     The MCK ``find_polyhedra`` call is bypassed via a stubbed
     ``topology_for_state`` so the test stays under 1 s -- the
     contract we're pinning lives in
-    ``crystal_viewer.app.backend_camera`` (cache key + patch),
+    ``mat_viewer.app.backend_camera`` (cache key + patch),
     not in MolCrysKit.
     """
     backend = _backend(tmp_path)  # cheap synthetic backend, no DAP-4 parse

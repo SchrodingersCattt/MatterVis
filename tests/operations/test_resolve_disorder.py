@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from crystal_viewer.operations.disorder import resolve_disorder
+from mat_viewer.operations.disorder import resolve_disorder
 
 
 def test_resolve_disorder_returns_ordered_replica_summaries():

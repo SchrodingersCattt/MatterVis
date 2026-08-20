@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from crystal_viewer.render.selection import disorder_preview_outline_trace
+from mat_viewer.render.selection import disorder_preview_outline_trace
 
 
 def _scene():

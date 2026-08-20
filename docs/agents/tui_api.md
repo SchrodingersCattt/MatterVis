@@ -6,7 +6,7 @@ canonical `CrystalIR`/MolCrysKit loader path with `mat-vis tui`; it is **not** a
 HTTP service and it does not create a second chemistry or render pipeline.
 
 ```python
-from crystal_viewer.tui import TerminalViewController
+from mat_viewer.tui import TerminalViewController
 
 view = TerminalViewController.from_file("structure.cif", width=80, height=22)
 view.set_camera(azimuth=45, elevation=30, projection="orthographic")

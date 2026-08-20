@@ -3,7 +3,7 @@ structure that is no longer in the catalog must not crash boot.
 
 Scenario:
 - Last session uploaded a CIF; the upload landed in
-  ``tempfile.gettempdir()/crystal_viewer_uploads/`` and was GC'd by the
+  ``tempfile.gettempdir()/mat_viewer_uploads/`` and was GC'd by the
   OS, but its ``Scene`` entry stayed on disk.
 - This session starts with only the default catalog (e.g. DAP-4).
 
@@ -21,8 +21,8 @@ from pathlib import Path
 
 import pytest
 
-from crystal_viewer.app import create_app
-from crystal_viewer.scenes import SceneStore
+from mat_viewer.app import create_app
+from mat_viewer.scenes import SceneStore
 
 
 @pytest.fixture
@@ -67,7 +67,7 @@ def test_create_app_recovers_when_scene_store_references_missing_structures(
     stale_scenes_file: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     app = create_app()
-    backend = app.server.extensions["crystal_viewer_backend"] if "crystal_viewer_backend" in getattr(app.server, "extensions", {}) else None
+    backend = app.server.extensions["mat_viewer_backend"] if "mat_viewer_backend" in getattr(app.server, "extensions", {}) else None
     # ``create_app`` doesn't expose the backend via app.server.extensions;
     # the only reliable check is that ``create_app`` returns without raising
     # and that the resulting app has at least one registered callback.
@@ -92,10 +92,10 @@ def test_pruned_store_persists_to_disk(stale_scenes_file: Path) -> None:
 def test_prune_handles_active_id_gone() -> None:
     store = SceneStore("/tmp/unused.json")
     store.scenes = {
-        "a": __import__("crystal_viewer.scenes", fromlist=["Scene"]).Scene(
+        "a": __import__("mat_viewer.scenes", fromlist=["Scene"]).Scene(
             id="a", label="A", structure_name="GHOST"
         ),
-        "b": __import__("crystal_viewer.scenes", fromlist=["Scene"]).Scene(
+        "b": __import__("mat_viewer.scenes", fromlist=["Scene"]).Scene(
             id="b", label="B", structure_name="GHOST"
         ),
     }
@@ -111,7 +111,7 @@ def test_prune_handles_active_id_gone() -> None:
 
 
 def test_prune_keeps_valid_and_demotes_active_to_first_survivor() -> None:
-    Scene = __import__("crystal_viewer.scenes", fromlist=["Scene"]).Scene
+    Scene = __import__("mat_viewer.scenes", fromlist=["Scene"]).Scene
     store = SceneStore("/tmp/unused.json")
     store.scenes = {
         "ghost": Scene(id="ghost", label="X", structure_name="GHOST"),
@@ -128,7 +128,7 @@ def test_prune_keeps_valid_and_demotes_active_to_first_survivor() -> None:
 
 
 def test_prune_repairs_state_patch_structure_mismatch() -> None:
-    Scene = __import__("crystal_viewer.scenes", fromlist=["Scene"]).Scene
+    Scene = __import__("mat_viewer.scenes", fromlist=["Scene"]).Scene
     store = SceneStore("/tmp/unused.json")
     store.scenes = {
         "mixed": Scene(

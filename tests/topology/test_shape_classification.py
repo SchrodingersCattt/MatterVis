@@ -24,10 +24,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from crystal_viewer import topology as topology_module
-from crystal_viewer.loader import build_loaded_crystal
-from crystal_viewer.renderer import topology_results_markdown
-from crystal_viewer.topology import (
+from mat_viewer import topology as topology_module
+from mat_viewer.loader import build_loaded_crystal
+from mat_viewer.renderer import topology_results_markdown
+from mat_viewer.topology import (
     _classify_shell_payload,
     _empty_shape_payload,
     analyze_topology,

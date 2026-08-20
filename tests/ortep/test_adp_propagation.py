@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from crystal_viewer.scene import build_scene_from_atoms, scene_ops
+from mat_viewer.scene import build_scene_from_atoms, scene_ops
 
 
 def test_adp_fields_survive_scene_build():

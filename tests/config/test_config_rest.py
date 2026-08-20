@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from crystal_viewer.app import create_app
-from crystal_viewer.config import reload_config
+from mat_viewer.app import create_app
+from mat_viewer.config import reload_config
 
 
 def test_config_rest_get_patch_delete(monkeypatch, tmp_path):
-    import crystal_viewer.api.v2_config as v2_config
-    from crystal_viewer.config.loader import delete_user_config as _delete_user_config
-    from crystal_viewer.config.loader import write_user_config as _write_user_config
+    import mat_viewer.api.v2_config as v2_config
+    from mat_viewer.config.loader import delete_user_config as _delete_user_config
+    from mat_viewer.config.loader import write_user_config as _write_user_config
 
     target = tmp_path / "config.toml"
 

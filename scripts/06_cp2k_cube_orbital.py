@@ -18,7 +18,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from crystal_viewer.cube import build_orbital_panel_figure, default_isovalue, read_cube  # noqa: E402
+from mat_viewer.cube import build_orbital_panel_figure, default_isovalue, read_cube  # noqa: E402
 
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "_outputs"

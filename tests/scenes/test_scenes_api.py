@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from crystal_viewer.app import create_app
+from mat_viewer.app import create_app
 
 
 def test_v2_scene_crud_and_state_targeting(tmp_path):

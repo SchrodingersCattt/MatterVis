@@ -18,7 +18,7 @@ display-option into a single ``{"selector": {"all": True}, "color":
 "#000000"}`` atom_group rule the first time it sees that patch.
 After that the renderer ignores ``style["monochrome"]`` whenever
 ``atom_groups`` is non-empty (see ``_style_color`` in
-``crystal_viewer.renderer``).
+``mat_viewer.renderer``).
 
 These tests pin both halves of that contract.
 """
@@ -29,7 +29,7 @@ from pathlib import Path
 
 import pytest
 
-from crystal_viewer.app import WORKSPACE_DIR, ViewerBackend
+from mat_viewer.app import WORKSPACE_DIR, ViewerBackend
 
 
 @pytest.fixture
@@ -84,7 +84,7 @@ def test_renderer_ignores_monochrome_when_atom_groups_present():
     no-op even if ``style['monochrome']=True`` (the migration above
     has already turned monochrome into an atom_groups rule, so this
     just guards against double-apply)."""
-    from crystal_viewer.renderer import _style_color
+    from mat_viewer.renderer import _style_color
 
     style = {"monochrome": True, "atom_groups": [{"selector": {"all": True}, "color": "#000000"}]}
     assert _style_color("#FFAA00", style) == "#FFAA00", (

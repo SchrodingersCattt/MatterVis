@@ -16,8 +16,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from crystal_viewer.loader import build_loaded_crystal, build_bundle_scene  # noqa: E402
-from crystal_viewer.renderer import render  # noqa: E402
+from mat_viewer.loader import build_loaded_crystal, build_bundle_scene  # noqa: E402
+from mat_viewer.renderer import render  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 CIF = HERE / "data" / "DAP-4.cif"

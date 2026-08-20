@@ -12,7 +12,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from crystal_viewer.structure.bonds import find_bonds
+from mat_viewer.structure.bonds import find_bonds
 
 
 def main() -> None:

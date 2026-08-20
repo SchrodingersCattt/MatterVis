@@ -17,8 +17,8 @@ from pathlib import Path
 
 import pytest
 
-from crystal_viewer.app import ViewerBackend
-from crystal_viewer.presets import default_preset_path
+from mat_viewer.app import ViewerBackend
+from mat_viewer.presets import default_preset_path
 
 
 _VALID_CIF = b"""data_minimal
@@ -50,7 +50,7 @@ def backend(tmp_path: Path) -> ViewerBackend:
 
 @pytest.fixture
 def upload_dir() -> Path:
-    return Path(os.path.realpath(os.path.join(tempfile.gettempdir(), "crystal_viewer_uploads")))
+    return Path(os.path.realpath(os.path.join(tempfile.gettempdir(), "mat_viewer_uploads")))
 
 
 def test_relative_traversal_is_neutralised(backend: ViewerBackend, upload_dir: Path) -> None:

@@ -28,9 +28,9 @@ from pathlib import Path
 
 import pytest
 
-from crystal_viewer.structure.bonds import bonds_conflict
-from crystal_viewer.style.disorder import is_minor
-from crystal_viewer.loader import (
+from mat_viewer.structure.bonds import bonds_conflict
+from mat_viewer.style.disorder import is_minor
+from mat_viewer.loader import (
     _has_shelx_occupancy_disorder,
     build_loaded_crystal,
 )
@@ -335,7 +335,7 @@ def test_no_cross_orientation_ghost_bonds_in_unit_cell_scene():
     endpoints have incompatible disorder groups, while preserving valid
     major/minor bonds to ordered hubs.
     """
-    from crystal_viewer.loader import build_bundle_scene
+    from mat_viewer.loader import build_bundle_scene
 
     bundle = build_loaded_crystal(
         name="SY", cif_path="scripts/data/SY.cif", title="SY"
@@ -425,8 +425,8 @@ def test_hpep_minor_atoms_get_faded_opacity_in_render_traces():
     if not Path("scripts/data/HPEP.cif").exists():
         pytest.skip("local HPEP CIF fixture is not present")
 
-    from crystal_viewer.render.style import style_from_controls
-    from crystal_viewer.renderer import build_figure
+    from mat_viewer.render.style import style_from_controls
+    from mat_viewer.renderer import build_figure
 
     bundle = build_loaded_crystal(
         name="HPEP", cif_path="scripts/data/HPEP.cif", title="HPEP"

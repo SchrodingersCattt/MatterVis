@@ -140,7 +140,7 @@ land in the focused module directly, not in the facade.
 ## Reverse Hooks
 
 - A test should assert only `figure_axis_layout` writes `aspectmode` for the
-  main crystal viewer path.
+  main material viewer path.
 - A test should assert compass axis projection changes when viewport scale
   changes, even if camera direction is unchanged.
 - A test should assert `show_unit_cell=True` includes all cell corners while

@@ -7,11 +7,11 @@ import shlex
 
 import pytest
 
-from crystal_viewer.render.cli import (
+from mat_viewer.render.cli import (
     _build_render_parser,
     _parse_publication_options,
 )
-from crystal_viewer.render.publication import publication_config
+from mat_viewer.render.publication import publication_config
 
 ROOT = Path(__file__).resolve().parents[2]
 CLI_DOCS = (

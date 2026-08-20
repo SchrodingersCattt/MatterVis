@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import dash
 
-from crystal_viewer.app import create_app
+from mat_viewer.app import create_app
 
 
 def _all_callbacks(app: dash.Dash):

@@ -3,15 +3,15 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from crystal_viewer.render.style import _atom_effective_opacity, _style_trace_dicts
-from crystal_viewer.render.traces_atoms import (
+from mat_viewer.render.style import _atom_effective_opacity, _style_trace_dicts
+from mat_viewer.render.traces_atoms import (
     _atom_mesh_traces,
     _atom_scatter_traces,
     _bond_segments,
     _flat_highlight_center,
 )
-from crystal_viewer.render.traces_overlays import _minor_outline_traces
-from crystal_viewer.style.disorder import atom_is_disordered, bond_effective_opacity
+from mat_viewer.render.traces_overlays import _minor_outline_traces
+from mat_viewer.style.disorder import atom_is_disordered, bond_effective_opacity
 
 
 def _atom(label: str, *, is_minor: bool) -> dict:

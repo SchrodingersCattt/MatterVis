@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from crystal_viewer.loader import build_empty_bundle
-from crystal_viewer.ortep import (
+from mat_viewer.loader import build_empty_bundle
+from mat_viewer.ortep import (
     DEFAULT_HYDROGEN_ORTEP_UISO,
     DEFAULT_MAX_ORTEP_UISO,
     DEFAULT_ORTEP_UISO,

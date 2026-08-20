@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from crystal_viewer.ortep import ortep_mesh3d
+from mat_viewer.ortep import ortep_mesh3d
 
 
 def test_ortep_mesh_counts_and_closed_edges():

@@ -1,11 +1,11 @@
-"""Unit tests for crystal_viewer.depth_sort utilities."""
+"""Unit tests for mat_viewer.depth_sort utilities."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from crystal_viewer.depth_sort import (
+from mat_viewer.depth_sort import (
     assign_zorder_by_depth,
     camera_view_vector,
     depth_along_view,

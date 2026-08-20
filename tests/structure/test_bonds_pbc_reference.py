@@ -6,9 +6,9 @@ import gemmi
 import numpy as np
 import pytest
 
-import crystal_viewer.structure.bonds as bonds_module
-from crystal_viewer.structure.bonds import find_bonds
-from crystal_viewer.structure.geometry import ortho_matrix
+import mat_viewer.structure.bonds as bonds_module
+from mat_viewer.structure.bonds import find_bonds
+from mat_viewer.structure.geometry import ortho_matrix
 
 
 def _atom(label: str, frac: tuple[float, float, float], M: np.ndarray) -> dict:

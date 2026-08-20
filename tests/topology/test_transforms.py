@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from crystal_viewer.transforms import (
+from mat_viewer.transforms import (
     KNOWN_TRANSFORM_KINDS,
     apply_transforms,
     atoms_completing_polyhedron,
@@ -269,7 +269,7 @@ def test_complete_fragment_with_all_seeds_short_circuits():
     to "complete" -- the function must return the input atoms verbatim
     without spinning up the radius pipeline.
     """
-    from crystal_viewer.transforms import atoms_completing_fragment
+    from mat_viewer.transforms import atoms_completing_fragment
 
     atoms = _atoms_2()
     M = np.eye(3) * 5.0
@@ -302,7 +302,7 @@ def test_complete_fragment_caps_halo_radius():
     """
     import time as _time
     from types import SimpleNamespace
-    from crystal_viewer.transforms import atoms_completing_fragment
+    from mat_viewer.transforms import atoms_completing_fragment
 
     atoms = _atoms_2()
     M = np.eye(3) * 5.0
@@ -332,8 +332,8 @@ def test_complete_fragment_caps_halo_radius():
 
 
 def test_supercell_shorthand_emits_repeat_transform():
-    from crystal_viewer.app import ViewerBackend
-    from crystal_viewer.presets import default_preset_path
+    from mat_viewer.app import ViewerBackend
+    from mat_viewer.presets import default_preset_path
 
     import tempfile
 
@@ -361,7 +361,7 @@ def test_rebuild_scene_redetects_bonds_in_replica():
     accepts cross-replica bonds. Without the swap the replica side of
     a 2x1x1 supercell renders as bondless atom dust.
     """
-    from crystal_viewer.transforms import rebuild_scene_with_atoms, replicate_atoms
+    from mat_viewer.transforms import rebuild_scene_with_atoms, replicate_atoms
 
     M = np.diag([10.0, 10.0, 10.0])
     pb = {
@@ -419,7 +419,7 @@ def test_rebuild_scene_redetects_bonds_in_replica():
 
 def test_build_bundle_scene_preserves_transform_fragment_table(monkeypatch):
     """Transform scenes must not be regrouped by the raw crystal molecule graph."""
-    from crystal_viewer.loader import LoadedCrystal, build_bundle_scene
+    from mat_viewer.loader import LoadedCrystal, build_bundle_scene
 
     M = np.diag([10.0, 10.0, 10.0])
     pb = {
@@ -471,7 +471,7 @@ def test_build_bundle_scene_preserves_transform_fragment_table(monkeypatch):
     def fail_if_called(*_args, **_kwargs):
         raise AssertionError("transformed scenes must keep their current-bond fragment table")
 
-    monkeypatch.setattr("crystal_viewer.loader._fragment_table_from_atoms", fail_if_called)
+    monkeypatch.setattr("mat_viewer.loader._fragment_table_from_atoms", fail_if_called)
     out = build_bundle_scene(
         bundle,
         display_mode="unit_cell",
@@ -489,8 +489,8 @@ def test_supercell_shorthand_one_one_one_clears_repeat():
     The shorthand must drop any existing ``repeat`` transform; otherwise
     the AI script that previously enlarged the cell is stuck with it.
     """
-    from crystal_viewer.app import ViewerBackend
-    from crystal_viewer.presets import default_preset_path
+    from mat_viewer.app import ViewerBackend
+    from mat_viewer.presets import default_preset_path
 
     import tempfile
 

@@ -3,8 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from crystal_viewer.math.camera import Camera, project_points
-from crystal_viewer.math.rotation import axis_camera_basis, rotate_vector
+from mat_viewer.math.camera import Camera, project_points
+from mat_viewer.math.rotation import axis_camera_basis, rotate_vector
 
 
 def test_turntable_yaw_uses_world_positive_z() -> None:

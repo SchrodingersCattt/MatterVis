@@ -69,7 +69,7 @@ All dependencies are declared in `pyproject.toml`.
 | `[dev]` | `[test]` + `build`, `ruff` |
 
 `molcrys_kit` is an optional runtime dependency. When available, the per-fragment
-A/B/X heuristic uses its classifier; otherwise `crystal_viewer` uses built-in
+A/B/X heuristic uses its classifier; otherwise `mat_viewer` uses built-in
 element/size heuristics.
 
 ## Quick Start
@@ -99,9 +99,9 @@ See [`docs/cli.md`](docs/cli.md) for the full flag reference and common recipes.
 ### Python API — programmatic control
 
 ```python
-from crystal_viewer.loader import build_bundle_scene, build_loaded_crystal
-from crystal_viewer.renderer import build_figure
-from crystal_viewer.scene import scene_style
+from mat_viewer.loader import build_bundle_scene, build_loaded_crystal
+from mat_viewer.renderer import build_figure
+from mat_viewer.scene import scene_style
 
 bundle = build_loaded_crystal(name="DAP-4", cif_path="scripts/data/DAP-4.cif")
 scene  = build_bundle_scene(bundle, display_mode="unit_cell")
@@ -139,7 +139,7 @@ The three subcommands cover:
 | **AI agent (modifying code)** | [AGENTS.md](AGENTS.md) · [Developer Notes](docs/dev-notes.md) |
 | **Topology scores** | [Scores Reference](docs/scores.md) |
 
-[`crystal_viewer/`](crystal_viewer/) — source code · [`scripts/`](scripts/) — runnable demo scripts · [`docs/`](docs/) — full documentation
+[`mat_viewer/`](mat_viewer/) — source code · [`scripts/`](scripts/) — runnable demo scripts · [`docs/`](docs/) — full documentation
 
 ## License
 

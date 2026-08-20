@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from crystal_viewer.structure import molcrys_bridge
-from crystal_viewer.topology import detect_coordination_number
+from mat_viewer.structure import molcrys_bridge
+from mat_viewer.topology import detect_coordination_number
 
 
 def test_coordination_number_expands_until_centered_inside_hull():

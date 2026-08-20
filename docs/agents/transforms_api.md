@@ -10,9 +10,9 @@ the output of the previous one.
 Internally the implementation now keeps an explicit source/display
 split:
 
-- `crystal_viewer.ops.source` is for real `MolecularCrystal` in/out
+- `mat_viewer.ops.source` is for real `MolecularCrystal` in/out
   operations such as a future saveable slab or true supercell.
-- `crystal_viewer.ops.display` is for fast scene-dict in/out
+- `mat_viewer.ops.display` is for fast scene-dict in/out
   operations used by the current transform pipeline.
 
 The REST transform list remains display-side today for compatibility;
@@ -121,7 +121,7 @@ Geometry-only neighbour pull (alias of `grow_radius`). Use this to
 "close" a coordination polyhedron when the home-cell fragment table
 only kept some of the ligands (e.g. a Pb atom near a face whose Cl
 neighbours sit in the next image). Chemistry-aware neighbour-typing
-lives in `crystal_viewer.topology` and is outside this transform.
+lives in `mat_viewer.topology` and is outside this transform.
 
 #### `by_symmetry`
 
@@ -183,7 +183,7 @@ flowchart LR
 
 ### `seeds` selector grammar
 
-Mirrors `crystal_viewer.atom_groups`:
+Mirrors `mat_viewer.atom_groups`:
 
 - `{"all": true}` — every atom in the scene.
 - `{"labels": ["Pb1", "Cl3"]}` — exact label list (stable across
@@ -315,11 +315,11 @@ curl -s -o /tmp/after.png http://localhost:50001/api/v2/screenshot
 
 ## Library / renderer contract
 
-For library callers driving `crystal_viewer.scene.build_bundle_scene`
+For library callers driving `mat_viewer.scene.build_bundle_scene`
 directly (no Dash app), pass `transforms=[...]` as a kwarg:
 
 ```python
-from crystal_viewer.loader import build_bundle_scene
+from mat_viewer.loader import build_bundle_scene
 
 scene = build_bundle_scene(
     bundle,

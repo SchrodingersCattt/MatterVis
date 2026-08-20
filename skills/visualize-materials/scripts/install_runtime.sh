@@ -71,14 +71,14 @@ fi
   "$mat_vis" render --help >/dev/null
   "$runtime_python" - <<'PY'
 import importlib.metadata
-import crystal_viewer
+import mat_viewer
 import sys
 from pathlib import Path
 
 version = importlib.metadata.version("matter-vis")
 if version != "0.0.3":
     raise SystemExit(f"expected matter-vis 0.0.3, got {version}")
-module_path = Path(crystal_viewer.__file__).resolve()
+module_path = Path(mat_viewer.__file__).resolve()
 print("python=", sys.executable)
 print("distribution=", version)
 print("module=", module_path)

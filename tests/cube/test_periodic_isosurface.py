@@ -4,10 +4,10 @@ from pathlib import Path
 
 import numpy as np
 
-from crystal_viewer.config.schema import BUILTIN_STYLE
-from crystal_viewer.cube import CubeAtom, CubeData
-from crystal_viewer.cube.bridge import cube_to_raw_atoms
-from crystal_viewer.render.traces_isosurface import (
+from mat_viewer.config.schema import BUILTIN_STYLE
+from mat_viewer.cube import CubeAtom, CubeData
+from mat_viewer.cube.bridge import cube_to_raw_atoms
+from mat_viewer.render.traces_isosurface import (
     _cube_atom_shift,
     _periodic_component_filter,
     _periodic_component_meshes,
@@ -181,9 +181,9 @@ def test_nearest_atom_policy_selects_an_integer_lattice_image():
 
 
 def test_build_cube_figure_periodic_argument_and_style_precedence(tmp_path, monkeypatch):
-    from crystal_viewer.cube import build_cube_figure
-    from crystal_viewer.loader import cube_adapter
-    from crystal_viewer.render import figures
+    from mat_viewer.cube import build_cube_figure
+    from mat_viewer.loader import cube_adapter
+    from mat_viewer.render import figures
 
     cube_path = tmp_path / "minimal.cube"
     cube_path.write_text(
@@ -206,7 +206,7 @@ def test_build_cube_figure_periodic_argument_and_style_precedence(tmp_path, monk
     bundle = type("Bundle", (), {"cube_data": cube})()
     monkeypatch.setattr(cube_adapter, "load_cube_file", lambda *_args, **_kwargs: bundle)
     monkeypatch.setattr(
-        "crystal_viewer.loader.core.build_bundle_scene",
+        "mat_viewer.loader.core.build_bundle_scene",
         lambda *_args, **_kwargs: {"cube_data": cube},
     )
     captured = {}

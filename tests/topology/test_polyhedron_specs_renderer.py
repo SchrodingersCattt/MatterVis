@@ -8,7 +8,7 @@ Two invariants worth pinning down:
    of ``overlays`` (the analysis anchor flagged with
    ``is_analysis_anchor=True``).
 
-2. ``crystal_viewer.renderer.topology_background_traces`` and
+2. ``mat_viewer.renderer.topology_background_traces`` and
    ``topology_foreground_traces`` paint each spec with its own colour,
    not a single shared ``style["topology_hull_color"]``. The legacy
    single-colour path keeps working when ``spec_results`` is absent
@@ -23,9 +23,9 @@ from pathlib import Path
 
 import pytest
 
-from crystal_viewer.app import WORKSPACE_DIR, ViewerBackend
-from crystal_viewer.presets import default_preset_path
-from crystal_viewer.renderer import topology_background_traces, topology_foreground_traces
+from mat_viewer.app import WORKSPACE_DIR, ViewerBackend
+from mat_viewer.presets import default_preset_path
+from mat_viewer.renderer import topology_background_traces, topology_foreground_traces
 
 
 @pytest.fixture

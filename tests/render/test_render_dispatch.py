@@ -5,9 +5,9 @@ import itertools
 
 import pytest
 
-from crystal_viewer.loader import build_empty_bundle
-from crystal_viewer.renderer import DISORDER_DISPATCH, MATERIAL_DISPATCH, STYLE_DISPATCH, build_figure
-from crystal_viewer.render.viewport import flat_projected_pixel_scale
+from mat_viewer.loader import build_empty_bundle
+from mat_viewer.renderer import DISORDER_DISPATCH, MATERIAL_DISPATCH, STYLE_DISPATCH, build_figure
+from mat_viewer.render.viewport import flat_projected_pixel_scale
 
 
 def _scene_template():

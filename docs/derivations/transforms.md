@@ -154,7 +154,7 @@ Polyhedron completion is radius growth around center seeds:
 \]
 
 It is geometry-only.  Chemistry-aware shell typing lives in
-`crystal_viewer.topology` and MolCrysKit, not in this transform.
+`mat_viewer.topology` and MolCrysKit, not in this transform.
 
 ### Symmetry Images
 
@@ -233,66 +233,66 @@ disabled spec is skipped inside `apply_transforms` itself.
 
 The transform API and kind list are declared in:
 
-- `crystal_viewer/transforms/core.py:1-80`, including the transform spec schema.
-- `crystal_viewer/transforms/core.py:104-115`, the recognized kind tuple.
+- `mat_viewer/transforms/core.py:1-80`, including the transform spec schema.
+- `mat_viewer/transforms/core.py:104-115`, the recognized kind tuple.
 
 Common image translation:
 
-- `crystal_viewer/transforms/core.py:202-205` converts an image shift to Cartesian
+- `mat_viewer/transforms/core.py:202-205` converts an image shift to Cartesian
   translation with `frac_to_cart`.
-- `crystal_viewer/transforms/core.py:178-199` copies atom dictionaries and records
+- `mat_viewer/transforms/core.py:178-199` copies atom dictionaries and records
   `_image_shift` / `_origin_label`.
 
 Repeat:
 
-- `crystal_viewer/transforms/core.py:208-239` loops over all non-negative image
+- `mat_viewer/transforms/core.py:208-239` loops over all non-negative image
   shifts, translates `cart`, increments `frac`, and suffixes non-home labels.
-- `crystal_viewer/transforms/core.py:719-724` clamps repeat counts to at least 1.
+- `mat_viewer/transforms/core.py:719-724` clamps repeat counts to at least 1.
 
 Radius growth:
 
-- `crystal_viewer/transforms/core.py:242-267` computes the finite image grid.
-- `crystal_viewer/transforms/core.py:270-318` evaluates pairwise distances from
+- `mat_viewer/transforms/core.py:242-267` computes the finite image grid.
+- `mat_viewer/transforms/core.py:270-318` evaluates pairwise distances from
   shifted candidates to seed atoms and deduplicates by label and shift.
 
 Bond growth:
 
-- `crystal_viewer/transforms/core.py:321-387` builds the radius halo, detects bonds,
+- `mat_viewer/transforms/core.py:321-387` builds the radius halo, detects bonds,
   and runs BFS for `hops` layers.
 
 Fragment completion:
 
-- `crystal_viewer/transforms/core.py:390-462` uses the capped halo, detects bonds,
+- `mat_viewer/transforms/core.py:390-462` uses the capped halo, detects bonds,
   and BFS-walks until convergence or `max_hops`.
-- `crystal_viewer/transforms/core.py:416-417` short-circuits the all-atoms seed case.
+- `mat_viewer/transforms/core.py:416-417` short-circuits the all-atoms seed case.
 
 Polyhedron completion:
 
-- `crystal_viewer/transforms/core.py:465-487` delegates to `atoms_within_radius`
+- `mat_viewer/transforms/core.py:465-487` delegates to `atoms_within_radius`
   with `include_seeds=True`.
 
 Symmetry:
 
-- `crystal_viewer/transforms/core.py:490-531` converts each selected atom to
+- `mat_viewer/transforms/core.py:490-531` converts each selected atom to
   fractional coordinates, applies `new_frac = R_arr @ frac + t_arr`, and
   converts back with `frac_to_cart`.
 
 Slab:
 
-- `crystal_viewer/transforms/core.py:539-597` calls
+- `mat_viewer/transforms/core.py:539-597` calls
   `molcrys_kit.operations.surface.generate_topological_slab`, returns
   MatterVis-shaped atoms, and extracts `slab_M`.
-- `crystal_viewer/transforms/core.py:824-854` rebuilds the scene with both
+- `mat_viewer/transforms/core.py:824-854` rebuilds the scene with both
   `cell_override` and `M_override`.
 
 Scene rebuild and composition:
 
-- `crystal_viewer/transforms/core.py:605-716` rebuilds bonds, labels, bounds, and
+- `mat_viewer/transforms/core.py:605-716` rebuilds bonds, labels, bounds, and
   projected axes after atom coordinates change.
-- `crystal_viewer/transforms/core.py:727-856` dispatches a single transform kind.
-- `crystal_viewer/transforms/core.py:887-925` composes enabled transforms in list
+- `mat_viewer/transforms/core.py:727-856` dispatches a single transform kind.
+- `mat_viewer/transforms/core.py:887-925` composes enabled transforms in list
   order and records `_transform_lineage`.
-- `crystal_viewer/loader/core.py:672-715` caches transformed scenes by
+- `mat_viewer/loader/core.py:672-715` caches transformed scenes by
   `(display_mode, show_hydrogen, transforms_cache_key(transforms))` and
   rebuilds fragment tables from the transformed atom list.
 

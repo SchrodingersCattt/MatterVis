@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from crystal_viewer.compass import camera_screen_basis
+from mat_viewer.compass import camera_screen_basis
 
 
 def test_camera_screen_basis_right_points_screen_right():

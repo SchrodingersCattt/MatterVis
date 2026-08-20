@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from crystal_viewer.app import WORKSPACE_DIR, create_app
+from mat_viewer.app import WORKSPACE_DIR, create_app
 
 
 def _client(tmp_path: Path):

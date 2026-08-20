@@ -4,9 +4,9 @@ from __future__ import annotations
 import pytest
 from pathlib import Path
 
-from crystal_viewer.app.backend import ViewerBackend
-from crystal_viewer.app.shared import DEFAULT_PRESET_PATH
-from crystal_viewer.loader import build_empty_bundle
+from mat_viewer.app.backend import ViewerBackend
+from mat_viewer.app.shared import DEFAULT_PRESET_PATH
+from mat_viewer.loader import build_empty_bundle
 
 
 SY_CIF = Path("scripts/data/SY.cif")
@@ -14,9 +14,9 @@ SY_CIF = Path("scripts/data/SY.cif")
 
 @pytest.fixture
 def backend_with_crystal(tmp_path):
-    from crystal_viewer.app.shared import WORKSPACE_DIR
+    from mat_viewer.app.shared import WORKSPACE_DIR
     import os
-    from crystal_viewer.loader import build_loaded_crystal
+    from mat_viewer.loader import build_loaded_crystal
     backend = ViewerBackend(preset_path=DEFAULT_PRESET_PATH, root_dir=os.path.join(WORKSPACE_DIR, "scripts", "data"))
     cif_path = os.path.join(WORKSPACE_DIR, "scripts", "data", "SY.cif")
     bundle = build_loaded_crystal(name="SY", cif_path=cif_path)

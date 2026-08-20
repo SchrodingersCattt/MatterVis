@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from crystal_viewer.perf.bench_pipeline import build_pipeline_report
+from mat_viewer.perf.bench_pipeline import build_pipeline_report
 
 
 ORACLES = Path(__file__).with_name("oracles") / "pipeline_v1.json"

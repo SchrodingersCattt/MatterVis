@@ -43,16 +43,16 @@ dependencies = [
 ]
 
 [project.scripts]
-mat-vis = "crystal_viewer.cli:main"
+mat-vis = "mat_viewer.cli:main"
 
 [project.optional-dependencies]
 test = ["pytest>=8.0", "pytest-cov", "pytest-timeout"]
 dev = ["matter-vis[test]", "build", "ruff"]
 
 [tool.setuptools.packages.find]
-include = ["crystal_viewer*"]
+include = ["mat_viewer*"]
 
 [tool.setuptools_scm]
-write_to = "crystal_viewer/_version.py"
+write_to = "mat_viewer/_version.py"
 local_scheme = "no-local-version"
 fallback_version = "0.0.0+unknown"

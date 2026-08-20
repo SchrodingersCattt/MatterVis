@@ -9,19 +9,19 @@ from ase import Atoms
 from ase.io import write
 from ase.io.trajectory import Trajectory
 
-from crystal_viewer.cli import _build_tui_parser
-from crystal_viewer.loader import (
+from mat_viewer.cli import _build_tui_parser
+from mat_viewer.loader import (
     LoadedCrystal,
     iter_atomistic_frames,
     load_atomistic_input,
     load_structure_input,
 )
-from crystal_viewer.render.cli import (
+from mat_viewer.render.cli import (
     _build_render_parser,
     _parse_frame_indices,
     _render_main,
 )
-from crystal_viewer.tui.loader_adapter import load_for_tui
+from mat_viewer.tui.loader_adapter import load_for_tui
 
 
 @pytest.fixture
@@ -303,7 +303,7 @@ def test_animation_cli_does_not_load_all_canonical_frames(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from crystal_viewer.render import cli
+    from mat_viewer.render import cli
 
     def fail(*args, **kwargs):
         raise AssertionError("animation CLI must use the streaming frame path")
@@ -333,7 +333,7 @@ def test_animation_cli_does_not_load_all_canonical_frames(
 
 
 def test_animation_viewport_has_one_world_center_and_scale() -> None:
-    from crystal_viewer.renderer import uniform_viewport
+    from mat_viewer.renderer import uniform_viewport
 
     scenes = [
         {"draw_atoms": [{"cart": np.array([0.0, 0.0, 0.0]), "atom_radius": 0.2}]},
@@ -348,7 +348,7 @@ def test_animation_viewport_has_one_world_center_and_scale() -> None:
 
 
 def test_viewport_accumulator_matches_uniform_viewport() -> None:
-    from crystal_viewer.renderer import ViewportAccumulator, uniform_viewport
+    from mat_viewer.renderer import ViewportAccumulator, uniform_viewport
 
     scenes = [
         {"draw_atoms": [{"cart": np.array([0.0, 0.0, 0.0]), "atom_radius": 0.2}]},
@@ -426,7 +426,7 @@ def test_only_selected_trajectory_frame_is_canonicalised(
     structure_files: dict[str, Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from crystal_viewer.loader import structure_input
+    from mat_viewer.loader import structure_input
 
     original = structure_input.build_loaded_crystal_from_ase
     calls: list[int] = []
@@ -450,7 +450,7 @@ def test_count_frames_does_not_build_render_bundles(
     structure_files: dict[str, Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from crystal_viewer.loader import count_structure_frames, structure_input
+    from mat_viewer.loader import count_structure_frames, structure_input
 
     def fail(*args, **kwargs):
         raise AssertionError("frame counting must not build a render bundle")

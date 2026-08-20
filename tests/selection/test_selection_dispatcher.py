@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from crystal_viewer.app.rightclick import _dispatch_rightclick_action
+from mat_viewer.app.rightclick import _dispatch_rightclick_action
 
 
 class FakeBackend:

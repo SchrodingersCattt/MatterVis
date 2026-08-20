@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from crystal_viewer.config import atom_radius, covalent_radius, element_color
-from crystal_viewer.config.colors import (
+from mat_viewer.config import atom_radius, covalent_radius, element_color
+from mat_viewer.config.colors import (
     ATOM_RADIUS,
     COVALENT_RADIUS,
     CUBE_ATOM_DISPLAY_RADII_ANG,

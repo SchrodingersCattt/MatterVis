@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from crystal_viewer.app import ViewerBackend, _camera_from_store, _camera_store_payload
+from mat_viewer.app import ViewerBackend, _camera_from_store, _camera_store_payload
 
 
 CAMERA_A = {

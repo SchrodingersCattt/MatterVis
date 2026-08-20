@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from crystal_viewer.renderer import style_from_controls
+from mat_viewer.renderer import style_from_controls
 
 
 def test_style_from_controls_translates_legacy_aliases():

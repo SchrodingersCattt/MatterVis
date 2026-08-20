@@ -18,7 +18,7 @@ pytestmark = pytest.mark.skipif(not CIF.exists(), reason="GAGCIF01.cif not avail
 
 
 def _load_scene(display_mode: str) -> dict:
-    from crystal_viewer.loader import build_loaded_crystal, build_bundle_scene
+    from mat_viewer.loader import build_loaded_crystal, build_bundle_scene
 
     bundle = build_loaded_crystal(
         name="GAGCIF01", cif_path=str(CIF), title="test"

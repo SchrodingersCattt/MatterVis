@@ -15,12 +15,12 @@ from pathlib import Path
 
 import pytest
 
-from crystal_viewer.app import (
+from mat_viewer.app import (
     ViewerBackend,
     _coerce_instance_overrides,
     _normalize_polyhedron_spec,
 )
-from crystal_viewer.presets import default_preset_path
+from mat_viewer.presets import default_preset_path
 
 
 @pytest.fixture
@@ -165,7 +165,7 @@ def test_renderer_renders_overrides_as_separate_colour_buckets():
     """``topology_background_traces`` buckets overlays by colour. Two
     different per-fragment colours must produce two trace groups
     (one per colour); a hidden fragment must produce zero."""
-    from crystal_viewer.renderer import topology_background_traces
+    from mat_viewer.renderer import topology_background_traces
 
     topology_data = {
         "spec_results": [

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from crystal_viewer.loader import build_empty_bundle
-from crystal_viewer.presets import DEFAULT_STYLE
-from crystal_viewer.renderer import build_figure
+from mat_viewer.loader import build_empty_bundle
+from mat_viewer.presets import DEFAULT_STYLE
+from mat_viewer.renderer import build_figure
 
 
 def _scene_with_predecorated_bond():

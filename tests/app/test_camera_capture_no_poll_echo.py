@@ -29,8 +29,8 @@ from pathlib import Path
 
 import pytest
 
-from crystal_viewer.app import ViewerBackend
-from crystal_viewer.presets import default_preset_path
+from mat_viewer.app import ViewerBackend
+from mat_viewer.presets import default_preset_path
 
 
 CAMERA_A = {
@@ -121,7 +121,7 @@ def test_sync_agent_state_poll_path_returns_no_update_for_camera_store() -> None
     """
     import inspect
 
-    from crystal_viewer.app import create_app
+    from mat_viewer.app import create_app
 
     app = create_app()
     sync_cb = None

@@ -36,7 +36,7 @@ goal is "don't repeat known failures", not blame.
      surface, and the tests — none of which the chemistry needed.
 - **Right fix (this PR):** replace the deprecated
   `angular_rmsd_vs_ideals` call site in
-  `crystal_viewer/topology/analysis.py` with `shape.classify_shell`
+  `mat_viewer/topology/analysis.py` with `shape.classify_shell`
   (`max_strip=0` to keep labels clean), surface
   `primary_label` / `label_modifier` / `cshm_value` in the
   analysis-text panel, and leave the `polyhedron_specs` shape and

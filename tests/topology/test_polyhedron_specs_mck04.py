@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from crystal_viewer.app import WORKSPACE_DIR, create_app
-from crystal_viewer.app.normalizers import _normalize_polyhedron_spec
+from mat_viewer.app import WORKSPACE_DIR, create_app
+from mat_viewer.app.normalizers import _normalize_polyhedron_spec
 
 
 def _client(tmp_path: Path):
@@ -164,8 +164,8 @@ def test_polyhedra_patch_can_flip_level_to_atom(tmp_path: Path):
 
 def test_find_polyhedra_receives_hard_cutoff_and_center_kind(monkeypatch):
     """Smoke-check the topology pipeline forwards new knobs to MCK."""
-    import crystal_viewer.topology as topology_public
-    from crystal_viewer.topology import analysis as topology_analysis
+    import mat_viewer.topology as topology_public
+    from mat_viewer.topology import analysis as topology_analysis
 
     captured: dict[str, object] = {}
 
@@ -175,7 +175,7 @@ def test_find_polyhedra_receives_hard_cutoff_and_center_kind(monkeypatch):
         return []
 
     # The analysis module resolves ``find_polyhedra`` via
-    # ``getattr(crystal_viewer.topology, "find_polyhedra", ...)`` with fallback
+    # ``getattr(mat_viewer.topology, "find_polyhedra", ...)`` with fallback
     # to the molcrys_kit import. Test injects on the analysis module directly.
     monkeypatch.setattr(topology_analysis, "find_polyhedra", fake_find_polyhedra)
 
@@ -228,8 +228,8 @@ def test_find_polyhedra_receives_hard_cutoff_and_center_kind(monkeypatch):
 
 
 def test_find_polyhedra_atom_level_skips_hard_cutoff(monkeypatch):
-    import crystal_viewer.topology as topology_public
-    from crystal_viewer.topology import analysis as topology_analysis
+    import mat_viewer.topology as topology_public
+    from mat_viewer.topology import analysis as topology_analysis
 
     captured: dict[str, object] = {}
 

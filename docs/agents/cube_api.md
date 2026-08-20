@@ -1,7 +1,7 @@
 # Cube / orbital rendering API
 
 Static cube isosurface figures (HOMO/LUMO, spin density, charge
-density…) are produced by helpers in `crystal_viewer.cube`. The library
+density…) are produced by helpers in `mat_viewer.cube`. The library
 is **journal-agnostic** — project-specific styling (typography, dpi,
 column widths) lives in caller code, not here.
 

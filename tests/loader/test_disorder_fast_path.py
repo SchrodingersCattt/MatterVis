@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from crystal_viewer.loader import core as loader_core
+from mat_viewer.loader import core as loader_core
 
 
 def _atom(label: str, elem: str, occ: float, da: str, dg: str) -> dict:

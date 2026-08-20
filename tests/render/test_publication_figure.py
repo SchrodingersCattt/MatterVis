@@ -4,13 +4,13 @@ import copy
 
 import numpy as np
 
-from crystal_viewer.render.figures import build_publication_figure
-from crystal_viewer.render.topology import (
+from mat_viewer.render.figures import build_publication_figure
+from mat_viewer.render.topology import (
     representative_polyhedron_overlay,
     representative_polyhedron_traces,
     topology_background_traces,
 )
-from crystal_viewer.scene import scene_style
+from mat_viewer.scene import scene_style
 
 
 def _overlay(*, anchor: bool = False):

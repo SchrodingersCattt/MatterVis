@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from crystal_viewer.app import ViewerBackend
-from crystal_viewer.presets import default_preset_path
+from mat_viewer.app import ViewerBackend
+from mat_viewer.presets import default_preset_path
 
 
 @pytest.fixture
@@ -37,7 +37,7 @@ def _safe_local_root(tmp_path: Path) -> Path:
     path rather than ``tmp_path / ".local"``. Read the live value from
     production code to stay in sync if the fixture path scheme changes.
     """
-    from crystal_viewer.app import backend_io as _backend_io  # local import for monkeypatched value
+    from mat_viewer.app import backend_io as _backend_io  # local import for monkeypatched value
 
     return Path(_backend_io.LOCAL_STATE_DIRNAME).resolve()
 

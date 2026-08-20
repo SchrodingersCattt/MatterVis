@@ -11,14 +11,14 @@ when the arrow has no physical world origin.
 ## Public layers
 
 ```python
-from crystal_viewer.renderer import (
+from mat_viewer.renderer import (
     normalize_vector_overlays,
     resolve_vector_overlays,
     vector_mesh_traces,
     vector_overlay_bounds,
     paper_vector_label_annotations,
 )
-from crystal_viewer.render.meshes import arrow_mesh_geometry
+from mat_viewer.render.meshes import arrow_mesh_geometry
 ```
 
 - `arrow_mesh_geometry`: pure NumPy watertight shaft/head mesh.

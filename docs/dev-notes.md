@@ -62,7 +62,7 @@ points and pitfalls.
 ### Slab generation
 
 - Delegate to `molcrys_kit.operations.surface.generate_topological_slab`.
-  `crystal_viewer/transforms/core.py` is a thin adapter — add missing
+  `mat_viewer/transforms/core.py` is a thin adapter — add missing
   params as passthrough kwargs, don't duplicate the math.
 
 ### When molcrys_kit deprecates a function
@@ -97,7 +97,7 @@ upstream API has grown the exact hook.
 
 ## Terminal semantic controller boundary
 
-- `crystal_viewer.tui.controller.TerminalViewController` owns terminal camera,
+- `mat_viewer.tui.controller.TerminalViewController` owns terminal camera,
   display, focus, stable viewport bounds, and named view snapshots. Textual
   keyboard input and local agent adapters are both thin clients of this single
   controller.

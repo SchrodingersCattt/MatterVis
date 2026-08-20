@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from crystal_viewer.app import create_app
+from mat_viewer.app import create_app
 
 
 def test_selection_backend_replace_add_remove_clear():

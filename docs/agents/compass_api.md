@@ -1,6 +1,6 @@
 # Camera-projected paper-coord direction indicators
 
-`crystal_viewer.compass` renders direction indicators (a/b/c lattice
+`mat_viewer.compass` renders direction indicators (a/b/c lattice
 triads, k-paths, dipole/force vectors…) as **paper-coord 2D
 annotations** rather than in-scene 3D arrows. Use this whenever the
 3D content does not have guaranteed empty space — i.e. almost always

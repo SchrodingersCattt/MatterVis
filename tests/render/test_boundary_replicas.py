@@ -16,7 +16,7 @@ import gemmi
 import numpy as np
 import pytest
 
-from crystal_viewer.scene import build_scene_from_atoms, scene_ops
+from mat_viewer.scene import build_scene_from_atoms, scene_ops
 
 
 def _atom(label: str, frac, M):
@@ -321,7 +321,7 @@ def test_ungrouped_near_face_atoms_get_periodic_context_images():
 
 def test_near_face_replica_uses_triclinic_lattice_vector():
     cell = gemmi.UnitCell(8.0, 9.0, 10.0, 78.0, 96.0, 112.0)
-    from crystal_viewer.structure.geometry import ortho_matrix
+    from mat_viewer.structure.geometry import ortho_matrix
 
     legacy_M, _ = ortho_matrix(cell)
     M = legacy_M.T

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from crystal_viewer.renderer import _minor_opacity_for
+from mat_viewer.renderer import _minor_opacity_for
 
 
 def test_disorder_opacity_is_independent_from_minor_identity():

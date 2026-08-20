@@ -55,10 +55,10 @@ def _isolated_local_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     same names inside their own fixture; the inner monkeypatch wins
     and is reverted at teardown.
     """
-    from crystal_viewer import presets as presets_pkg
-    from crystal_viewer.app import backend_core, backend_io, shared
-    from crystal_viewer.presets import core as presets_core
-    from crystal_viewer.scenes import SceneStore
+    from mat_viewer import presets as presets_pkg
+    from mat_viewer.app import backend_core, backend_io, shared
+    from mat_viewer.presets import core as presets_core
+    from mat_viewer.scenes import SceneStore
 
     isolated_local = tmp_path / "isolated-local"
     isolated_local.mkdir(parents=True, exist_ok=True)
@@ -86,7 +86,7 @@ def _isolated_local_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # Force synchronous upload mode in tests so bundle is ready before
     # the upload call returns. The async background path is tested
     # explicitly in dedicated integration tests.
-    from crystal_viewer.app import backend_io as bio_module
+    from mat_viewer.app import backend_io as bio_module
     monkeypatch.setattr(bio_module._IOBackendMixin, "_upload_sync_mode", True, raising=False)
 
     yield isolated_local

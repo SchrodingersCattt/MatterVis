@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from crystal_viewer.ortep import ellipsoid_principal_axes
+from mat_viewer.ortep import ellipsoid_principal_axes
 
 
 def test_ortep_principal_axes_are_orthonormal_and_scaled():

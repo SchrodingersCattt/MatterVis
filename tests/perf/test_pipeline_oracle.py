@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from crystal_viewer.perf import bench_pipeline
-from crystal_viewer.perf.oracle import SCHEMA, build_oracle_signature
+from mat_viewer.perf import bench_pipeline
+from mat_viewer.perf.oracle import SCHEMA, build_oracle_signature
 
 
 def _atom(index: int, *, minor: bool = False) -> dict:

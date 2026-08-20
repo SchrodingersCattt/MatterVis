@@ -31,7 +31,7 @@ Treat scene selection, camera, backend, and artifact verification as evidence.
 
 ## Hard boundaries
 
-- Use `mat-vis`, never `python -m crystal_viewer`, for delivered renders.
+- Use `mat-vis`, never `python -m mat_viewer`, for delivered renders.
 - Install into the caller's current Python environment by default. Use an
   optional venv only when requested or needed for a known dependency conflict.
 - Diagnose before choosing the displayed object. Export success is not chemistry

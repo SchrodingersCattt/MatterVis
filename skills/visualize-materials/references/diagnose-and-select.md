@@ -25,7 +25,7 @@ MatterVis 0.0.3 has no `diagnose` subcommand. Use capability tiers:
 2. For large or ambiguous CIFs, use the canonical Python API:
 
 ```python
-from crystal_viewer.loader.core import build_loaded_crystal, build_bundle_scene
+from mat_viewer.loader.core import build_loaded_crystal, build_bundle_scene
 
 bundle = build_loaded_crystal(name="input", cif_path="INPUT.cif")
 scene = build_bundle_scene(bundle, display_mode="asymmetric_unit")

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from crystal_viewer.cli import main
+from mat_viewer.cli import main
 
 
 def test_help_uses_mat_vis_command_name(capsys):

@@ -9,7 +9,7 @@ content, so the broad invalidation is no longer needed.
 
 from __future__ import annotations
 
-from crystal_viewer.app import ViewerBackend
+from mat_viewer.app import ViewerBackend
 
 
 def _make_backend(tmp_path):
@@ -165,7 +165,7 @@ def test_figure_cache_evicts_oldest_when_full(tmp_path):
 
     # Fill past ``FIGURE_CACHE_MAX`` with one-call-per-entry variation
     # on a cache-key-affecting field to force distinct entries.
-    from crystal_viewer.app.backend_core import FIGURE_CACHE_MAX
+    from mat_viewer.app.backend_core import FIGURE_CACHE_MAX
 
     keys_in_order: list[str] = []
     for i in range(FIGURE_CACHE_MAX + 3):

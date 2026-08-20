@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from crystal_viewer.render.selection import selection_outline_trace
+from mat_viewer.render.selection import selection_outline_trace
 
 
 def _scene():

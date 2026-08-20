@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from crystal_viewer.app.dash_impl import ViewerBackend
-from crystal_viewer.loader import build_loaded_crystal
-from crystal_viewer.render.viewport import _plotly_camera_from_scene
+from mat_viewer.app.dash_impl import ViewerBackend
+from mat_viewer.loader import build_loaded_crystal
+from mat_viewer.render.viewport import _plotly_camera_from_scene
 
 
 SY_CIF = Path("scripts/data/SY.cif")

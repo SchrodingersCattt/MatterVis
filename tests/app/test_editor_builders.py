@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import pytest
 
-from crystal_viewer.app.callbacks_editors import (
+from mat_viewer.app.callbacks_editors import (
     _build_atom_groups,
     _build_bond_groups,
 )
-from crystal_viewer.app.callbacks_analysis import _build_polyhedron_specs
-from crystal_viewer.app.callbacks_operations import _build_transforms
+from mat_viewer.app.callbacks_analysis import _build_polyhedron_specs
+from mat_viewer.app.callbacks_operations import _build_transforms
 
 
 # ── _build_polyhedron_specs ──────────────────────────────────────
