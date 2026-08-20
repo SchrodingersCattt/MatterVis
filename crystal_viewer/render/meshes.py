@@ -140,4 +140,88 @@ def _cylinder_mesh_batch(segments, radius: float, sides: int = 8):
     return vertices.reshape(-1, 3), triangles.reshape(-1, 3)
 
 
+def arrow_mesh_geometry(
+    origin,
+    end,
+    *,
+    shaft_radius: float = 0.10,
+    head_length: float | None = None,
+    head_length_ratio: float = 0.28,
+    head_radius: float | None = None,
+    head_radius_ratio: float = 2.2,
+    sides: int = 12,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return one opaque, watertight shaft-and-cone arrow mesh.
+
+    The shaft/head junction uses a shoulder annulus rather than overlapping
+    cylinder and cone caps, preventing z-fighting at the colour-continuous
+    seam. Coordinates are world-space Cartesian values.
+    """
+    start = np.asarray(origin, dtype=float)
+    tip = np.asarray(end, dtype=float)
+    if start.shape != (3,) or tip.shape != (3,):
+        raise ValueError("origin and end must each contain three values")
+    if not np.all(np.isfinite(start)) or not np.all(np.isfinite(tip)):
+        raise ValueError("origin and end must be finite")
+    axis = tip - start
+    length = float(np.linalg.norm(axis))
+    if length <= 1.0e-10:
+        raise ValueError("arrow length must be positive")
+    shaft_radius = float(shaft_radius)
+    if not np.isfinite(shaft_radius) or shaft_radius <= 0.0:
+        raise ValueError("shaft_radius must be positive")
+    if int(sides) != sides or int(sides) < 3:
+        raise ValueError("sides must be an integer >= 3")
+    sides = int(sides)
+    if head_length is None:
+        if not np.isfinite(head_length_ratio) or not 0.0 < head_length_ratio < 1.0:
+            raise ValueError("head_length_ratio must lie in (0, 1)")
+        head_length = length * float(head_length_ratio)
+    head_length = float(head_length)
+    if not np.isfinite(head_length) or not 0.0 < head_length < length:
+        raise ValueError("head_length must lie between zero and arrow length")
+    if head_radius is None:
+        head_radius = shaft_radius * float(head_radius_ratio)
+    head_radius = float(head_radius)
+    if not np.isfinite(head_radius) or head_radius < shaft_radius:
+        raise ValueError("head_radius must be finite and >= shaft_radius")
+
+    direction = axis / length
+    reference = np.array([0.0, 0.0, 1.0], dtype=float)
+    if abs(float(direction @ reference)) > 0.92:
+        reference = np.array([0.0, 1.0, 0.0], dtype=float)
+    radial_u = np.cross(direction, reference)
+    radial_u /= np.linalg.norm(radial_u)
+    radial_v = np.cross(direction, radial_u)
+    angles = np.linspace(0.0, 2.0 * math.pi, sides, endpoint=False)
+    unit_ring = (
+        np.cos(angles)[:, None] * radial_u[None, :]
+        + np.sin(angles)[:, None] * radial_v[None, :]
+    )
+    shoulder = tip - head_length * direction
+    shaft_start_ring = start[None, :] + shaft_radius * unit_ring
+    shaft_end_ring = shoulder[None, :] + shaft_radius * unit_ring
+    head_base_ring = shoulder[None, :] + head_radius * unit_ring
+    vertices = np.vstack([shaft_start_ring, shaft_end_ring, head_base_ring, start, tip])
+    origin_index = 3 * sides
+    tip_index = origin_index + 1
+    triangles: list[list[int]] = []
+    for index in range(sides):
+        nxt = (index + 1) % sides
+        start_i, start_n = index, nxt
+        shaft_i, shaft_n = sides + index, sides + nxt
+        head_i, head_n = 2 * sides + index, 2 * sides + nxt
+        triangles.extend(
+            [
+                [start_i, shaft_i, start_n],
+                [start_n, shaft_i, shaft_n],
+                [origin_index, start_n, start_i],
+                [shaft_i, head_i, shaft_n],
+                [shaft_n, head_i, head_n],
+                [head_i, tip_index, head_n],
+            ]
+        )
+    return vertices, np.asarray(triangles, dtype=int)
+
+
 __all__ = [name for name in globals() if not name.startswith("__")]

@@ -133,6 +133,37 @@ class StyleDict(TypedDict, total=False):
     display_options: list[str]  # e.g. ["axes", "compass", "scale_bar"]
 
 
+class VectorArrowDict(TypedDict, total=False):
+    id: str
+    origin: list[float]
+    vector: list[float]
+    end: list[float]
+    origin_space: str
+    direction_space: str
+    end_space: str
+    color: str
+    visible: bool
+    label: str
+    tail_offset: float
+    style: dict[str, Any]
+    metadata: dict[str, Any]
+
+
+class VectorOverlayGroupDict(TypedDict, total=False):
+    id: str
+    name: str
+    visible: bool
+    magnitude_mode: str
+    scale: float
+    length: float
+    viewport_policy: str
+    opacity: float
+    color: str
+    zero_policy: str
+    style: dict[str, Any]
+    arrows: list[VectorArrowDict]
+
+
 class SceneDict(TypedDict, total=False):
     """The central drawable scene dict consumed by ``build_figure()``.
 
@@ -161,6 +192,7 @@ class SceneDict(TypedDict, total=False):
     style: StyleDict
     has_minor: bool
     bonded_image_replica_count: int
+    vector_overlays: list[VectorOverlayGroupDict]
 
     # --- internal caches (DO NOT modify externally) ---
     _mesh_trace_cache: dict[str, Any]
