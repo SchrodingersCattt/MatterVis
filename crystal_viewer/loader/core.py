@@ -42,6 +42,10 @@ class LoadedCrystal:
     cube_data: Any | None = None
     bond_scale: float | None = None
     bond_thresholds: dict[tuple[str, str], float] | None = None
+    # ASE-backed inputs retain frame-level metadata and per-atom arrays here.
+    # Display atoms map back to these arrays through ``_source_index``.
+    frame_info: dict[str, Any] = field(default_factory=dict)
+    atom_arrays: dict[str, np.ndarray] = field(default_factory=dict)
     # Per-bundle cache for scenes after a transforms pipeline has been
     # applied. Key is ``(display_mode, show_hydrogen, transforms_cache_key)``;
     # value is the post-transform scene dict (already including a refreshed

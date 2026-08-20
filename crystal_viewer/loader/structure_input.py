@@ -43,6 +43,27 @@ class StructureFrame:
     index: int
     bundle: LoadedCrystal
     info: dict[str, Any]
+    atom_arrays: dict[str, np.ndarray]
+
+
+@dataclass(frozen=True)
+class AtomisticFrame:
+    """One parsed ASE frame before expensive MatterVis canonicalisation."""
+
+    index: int
+    atoms: Any
+    info: dict[str, Any]
+    atom_arrays: dict[str, np.ndarray]
+
+
+@dataclass(frozen=True)
+class AtomisticInput:
+    """Selected ASE frames with source order and metadata preserved."""
+
+    path: Path
+    input_format: str
+    frames: tuple[AtomisticFrame, ...]
+    total_frames: int
 
 
 @dataclass(frozen=True)
@@ -282,7 +303,7 @@ def build_loaded_crystal_from_ase(
             "source_info": dict(atoms.info),
         }
     )
-    return build_loaded_crystal_from_atoms(
+    bundle = build_loaded_crystal_from_atoms(
         name=Path(path).stem,
         source_path=source_path,
         raw_atoms=raw_atoms,
@@ -292,6 +313,9 @@ def build_loaded_crystal_from_ase(
         source="ase",
         scene_metadata_extra=metadata,
     )
+    bundle.frame_info = {"frame_index": int(frame_index), **dict(atoms.info)}
+    bundle.atom_arrays = _atom_arrays(atoms)
+    return bundle
 
 
 def _normalise_requested_indices(
@@ -355,6 +379,115 @@ def _selected_ase_atoms(
     return [(index, chosen[index]) for index in resolved], total_frames
 
 
+def _atom_arrays(atoms) -> dict[str, np.ndarray]:
+    return {
+        str(name): np.array(values, copy=True)
+        for name, values in atoms.arrays.items()
+        if name not in {"numbers", "positions"}
+    }
+
+
+def load_atomistic_input(
+    path: str | Path,
+    *,
+    input_format: str | None = None,
+    type_map: Iterable[str] | None = None,
+    frame_indices: Iterable[int] | None = None,
+) -> AtomisticInput:
+    """Load selected ASE frames without building canonical render scenes."""
+    source_path, resolved_format, symbols = _prepare_source(
+        path, input_format, type_map
+    )
+    if resolved_format in {"cif", "cube"}:
+        raise ValueError(
+            "load_atomistic_input supports ASE-backed inputs, not CIF or Cube"
+        )
+    selected_atoms, total_frames = _selected_ase_atoms(
+        source_path,
+        resolved_format,
+        symbols,
+        frame_indices,
+    )
+    format_name = resolved_format or "ase-auto"
+    frames = tuple(
+        AtomisticFrame(
+            index=index,
+            atoms=atoms,
+            info={"frame_index": index, **dict(atoms.info)},
+            atom_arrays=_atom_arrays(atoms),
+        )
+        for index, atoms in selected_atoms
+    )
+    return AtomisticInput(source_path, format_name, frames, total_frames)
+
+
+def iter_atomistic_frames(
+    path: str | Path,
+    *,
+    input_format: str | None = None,
+    type_map: Iterable[str] | None = None,
+    frame_indices: Iterable[int] | None = None,
+):
+    """Yield selected ASE frames in source order with bounded memory.
+
+    ``frame_indices`` must already contain non-negative source indices.  This
+    is the contract used after the CLI resolves Python slices against the
+    counted trajectory length.  Output ordering can be restored separately by
+    callers that requested a reverse slice.
+    """
+    source_path, resolved_format, symbols = _prepare_source(
+        path, input_format, type_map
+    )
+    if resolved_format in {"cif", "cube"}:
+        raise ValueError(
+            "iter_atomistic_frames supports ASE-backed inputs, not CIF or Cube"
+        )
+    requested = None if frame_indices is None else [int(value) for value in frame_indices]
+    if requested is not None and any(value < 0 for value in requested):
+        raise ValueError("streaming frame indices must be non-negative")
+    selected = None if requested is None else set(requested)
+    found: set[int] = set()
+    format_name = resolved_format or "ase-auto"
+    for index, atoms in enumerate(_ase_frames(source_path, resolved_format, symbols)):
+        if selected is not None and index not in selected:
+            continue
+        found.add(index)
+        yield AtomisticFrame(
+            index=index,
+            atoms=atoms,
+            info={"frame_index": index, **dict(atoms.info)},
+            atom_arrays=_atom_arrays(atoms),
+        ), format_name
+    if selected is not None:
+        missing = sorted(selected - found)
+        if missing:
+            raise ValueError(f"frame {missing[0]} is out of range")
+
+
+def canonicalise_atomistic_frame(
+    frame: AtomisticFrame,
+    *,
+    path: str | Path,
+    input_format: str,
+) -> StructureFrame:
+    """Build one canonical MatterVis frame while retaining ASE metadata."""
+    bundle = build_loaded_crystal_from_ase(
+        frame.atoms,
+        path=path,
+        frame_index=frame.index,
+        input_format=input_format,
+    )
+    return StructureFrame(
+        frame.index,
+        bundle,
+        dict(bundle.frame_info),
+        {
+            name: np.array(values, copy=True)
+            for name, values in bundle.atom_arrays.items()
+        },
+    )
+
+
 def load_structure_input(
     path: str | Path,
     *,
@@ -385,27 +518,28 @@ def load_structure_input(
             from .cube_adapter import load_cube_file
 
             bundle = load_cube_file(source_path)
-        frames = tuple(StructureFrame(0, bundle, {"frame_index": 0}) for _ in selected)
+        frames = tuple(
+            StructureFrame(0, bundle, {"frame_index": 0}, {}) for _ in selected
+        )
         return StructureInput(source_path, resolved_format, frames, 1)
 
-    selected_atoms, total_frames = _selected_ase_atoms(
+    atomistic = load_atomistic_input(
         source_path,
-        resolved_format,
-        symbols,
-        requested,
+        input_format=resolved_format,
+        type_map=symbols,
+        frame_indices=requested,
     )
-    format_name = resolved_format or "ase-auto"
     canonical_frames = tuple(
-        StructureFrame(
-            index,
-            build_loaded_crystal_from_ase(
-                atoms,
-                path=source_path,
-                frame_index=index,
-                input_format=format_name,
-            ),
-            {"frame_index": index, **dict(atoms.info)},
+        canonicalise_atomistic_frame(
+            frame,
+            path=source_path,
+            input_format=atomistic.input_format,
         )
-        for index, atoms in selected_atoms
+        for frame in atomistic.frames
     )
-    return StructureInput(source_path, format_name, canonical_frames, total_frames)
+    return StructureInput(
+        source_path,
+        atomistic.input_format,
+        canonical_frames,
+        atomistic.total_frames,
+    )

@@ -16,6 +16,7 @@ from ..render.publication import DENSE_COORDINATION_PRESET
 from ..render.scene_traces import *
 from ..render.style import style_from_controls, validate_style_schema
 from ..render.topology import topology_histogram_figure, topology_results_markdown
+from ..render.viewport import ViewportAccumulator, uniform_viewport
 from ..render.overlay.vectors import (
     normalize_vector_overlays,
     paper_vector_label_annotations,

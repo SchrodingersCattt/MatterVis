@@ -20,8 +20,6 @@ _IMAGE_EXTENSIONS = (".png", ".pdf", ".svg")
 _ANIMATION_EXTENSIONS = (".gif", ".mp4")
 _SUPPORTED_EXTENSIONS = _IMAGE_EXTENSIONS + (".html",) + _ANIMATION_EXTENSIONS
 _CAMERA_AXES = ("a", "b", "c", "a*", "b*", "c*")
-
-
 def _build_render_parser(
     subparsers: argparse._SubParsersAction,
 ) -> argparse.ArgumentParser:
@@ -399,8 +397,6 @@ def _build_render_parser(
     )
 
     return p
-
-
 def _parse_polyhedron_specs(raw_specs: list[str]) -> list[dict[str, Any]]:
     from ..app.normalizers import _normalize_polyhedron_spec
 
@@ -732,7 +728,9 @@ def _save_static_output(
     topology_data: dict[str, Any] | None,
     args: argparse.Namespace,
     output_path: Path,
-) -> None:
+    *,
+    allow_style_fallback: bool = True,
+) -> dict[str, Any]:
     from ..renderer import (
         build_figure,
         build_publication_figure,
@@ -757,7 +755,7 @@ def _save_static_output(
         else:
             fig = build_figure(scene, style, topology_data=topology_data)
         fig.write_html(str(output_path), include_plotlyjs="cdn", full_html=True)
-        return
+        return {"backend": "plotly-html", "fallback_reason": None}
 
     result = render(scene, style) if topology_data is None else None
     if args.publication_layout:
@@ -789,6 +787,11 @@ def _save_static_output(
                 "publication layout requires Plotly/Kaleido static export "
                 f"({unavailable_reason})"
             )
+        if not allow_style_fallback:
+            raise RuntimeError(
+                "Plotly/Kaleido export is required for the requested animation "
+                f"style ({unavailable_reason})"
+            )
         print(
             "Plotly/Kaleido static export is unavailable "
             f"({unavailable_reason}). Falling back to Matplotlib flat ORTEP.",
@@ -802,7 +805,10 @@ def _save_static_output(
             height=args.height,
             scale=args.scale,
         )
-        return
+        return {
+            "backend": "matplotlib-flat-ortep",
+            "fallback_reason": unavailable_reason,
+        }
 
     try:
         result.save(
@@ -811,9 +817,20 @@ def _save_static_output(
             height=args.height,
             scale=args.scale,
         )
+        return {
+            "backend": "plotly-kaleido"
+            if result.plotly_figure is not None
+            else "matplotlib-flat-ortep",
+            "fallback_reason": None,
+        }
     except Exception as exc:
         if result.plotly_figure is None or args.publication_layout:
             raise
+        if not allow_style_fallback:
+            raise RuntimeError(
+                "Plotly/Kaleido export failed for the requested animation style "
+                f"({type(exc).__name__}: {exc})"
+            ) from exc
         print(
             "Plotly/Kaleido static export failed "
             f"({type(exc).__name__}: {exc}). Falling back to Matplotlib flat ORTEP.",
@@ -827,58 +844,10 @@ def _save_static_output(
             height=args.height,
             scale=args.scale,
         )
-
-
-def _save_animation(
-    prepared_frames: list[tuple[Any, dict[str, Any], dict[str, Any], Any]],
-    args: argparse.Namespace,
-    output_path: Path,
-) -> None:
-    import tempfile
-
-    from PIL import Image
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="mattervis-frames-") as temp_dir:
-        frame_paths: list[Path] = []
-        for order, (bundle, scene, style, topology_data) in enumerate(prepared_frames):
-            frame_path = Path(temp_dir) / f"frame-{order:06d}.png"
-            _save_static_output(
-                bundle,
-                scene,
-                style,
-                topology_data,
-                args,
-                frame_path,
-            )
-            frame_paths.append(frame_path)
-
-        images = [Image.open(path).convert("RGB") for path in frame_paths]
-        try:
-            if output_path.suffix.lower() == ".gif":
-                duration_ms = max(1, round(1000.0 / args.fps))
-                images[0].save(
-                    output_path,
-                    save_all=True,
-                    append_images=images[1:],
-                    duration=duration_ms,
-                    loop=0,
-                )
-            else:
-                import imageio.v3 as iio
-                import numpy as np
-
-                frames = np.stack([np.asarray(image) for image in images])
-                iio.imwrite(
-                    output_path,
-                    frames,
-                    fps=args.fps,
-                    codec="libx264",
-                    macro_block_size=1,
-                )
-        finally:
-            for image in images:
-                image.close()
+        return {
+            "backend": "matplotlib-flat-ortep",
+            "fallback_reason": f"{type(exc).__name__}: {exc}",
+        }
 
 
 def _render_main(args: argparse.Namespace) -> None:
@@ -926,22 +895,53 @@ def _render_main(args: argparse.Namespace) -> None:
             sys.exit("Error: --frame-range is only valid for GIF/MP4 output.")
         indices = [args.frame]
 
-    try:
-        structure = load_structure_input(
-            input_path,
-            input_format=args.input_format,
-            type_map=args.type_map,
-            frame_indices=indices,
+    if ext in _ANIMATION_EXTENSIONS:
+        structure = None
+        input_format = args.input_format or (
+            "cif" if input_path.suffix.lower() == ".cif" else "ase-auto"
         )
-    except (FileNotFoundError, ValueError) as exc:
-        sys.exit(f"Error: {exc}")
+    else:
+        try:
+            structure = load_structure_input(
+                input_path,
+                input_format=args.input_format,
+                type_map=args.type_map,
+                frame_indices=indices,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            sys.exit(f"Error: {exc}")
+        input_format = structure.input_format
 
     args.view = (
         "formula_unit"
-        if args.view == "auto" and structure.input_format == "cif"
+        if args.view == "auto" and input_format == "cif"
         else "unit_cell" if args.view == "auto" else args.view
     )
     overrides = _build_style_overrides(args)
+
+    if ext in _ANIMATION_EXTENSIONS:
+        from .animation import save_streaming_from_cli
+
+        print(
+            f"Building streaming animation ({len(indices)} frames, "
+            f"{args.style}, {args.view}) ..."
+        )
+        try:
+            export_info = save_streaming_from_cli(
+                input_path,
+                indices,
+                args,
+                overrides,
+                output_path,
+            )
+        except Exception as exc:
+            sys.exit(f"Error: animation export failed ({type(exc).__name__}: {exc}).")
+        size = os.path.getsize(output_path)
+        print(f"Wrote {ext.lstrip('.')} : {output_path}  ({size:,} bytes)")
+        print(f"Effective backend: {export_info['backend']}")
+        if export_info.get("fallback_reason"):
+            print(f"Fallback reason: {export_info['fallback_reason']}", file=sys.stderr)
+        return
 
     prepared = []
     for selected in structure.frames:
@@ -962,6 +962,8 @@ def _render_main(args: argparse.Namespace) -> None:
         )
 
     if len(prepared) > 1:
+        from .animation import save_prepared_from_cli
+
         uniform_viewport(
             [scene for _, scene, _, _ in prepared],
             style=prepared[0][2],
@@ -972,14 +974,14 @@ def _render_main(args: argparse.Namespace) -> None:
             f"{args.style}, {args.view}) ..."
         )
         try:
-            _save_animation(prepared, args, output_path)
+            export_info = save_prepared_from_cli(prepared, args, output_path)
         except Exception as exc:
             sys.exit(f"Error: animation export failed ({type(exc).__name__}: {exc}).")
     else:
         bundle, scene, style, topology_data = prepared[0]
         print(f"Building figure ({args.style}, {args.view}) ...")
         try:
-            _save_static_output(
+            export_info = _save_static_output(
                 bundle,
                 scene,
                 style,
@@ -992,3 +994,6 @@ def _render_main(args: argparse.Namespace) -> None:
 
     size = os.path.getsize(output_path)
     print(f"Wrote {ext.lstrip('.')} : {output_path}  ({size:,} bytes)")
+    print(f"Effective backend: {export_info['backend']}")
+    if export_info.get("fallback_reason"):
+        print(f"Fallback reason: {export_info['fallback_reason']}", file=sys.stderr)

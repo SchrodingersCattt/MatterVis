@@ -2,8 +2,58 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable
+from dataclasses import dataclass, field
 
 import numpy as np
+
+
+@dataclass
+class ViewportAccumulator:
+    """Accumulate one shared viewport without retaining rendered scenes."""
+
+    padding: float = 0.0
+    minimum: np.ndarray = field(
+        default_factory=lambda: np.full(3, np.inf, dtype=float)
+    )
+    maximum: np.ndarray = field(
+        default_factory=lambda: np.full(3, -np.inf, dtype=float)
+    )
+    count: int = 0
+
+    def update(self, scene: dict, *, style: dict | None = None) -> None:
+        scn_style = style if style is not None else scene.get("style") or {}
+        atom_scale = float(scn_style.get("atom_scale", 1.0))
+        atoms = scene.get("draw_atoms") or []
+        if not atoms:
+            return
+        carts = np.array([atom["cart"] for atom in atoms], dtype=float)
+        radii = (
+            np.array(
+                [max(float(atom.get("atom_radius", 0.18)), 0.05) for atom in atoms],
+                dtype=float,
+            )
+            * atom_scale
+        )
+        self.minimum = np.minimum(self.minimum, (carts - radii[:, None]).min(axis=0))
+        self.maximum = np.maximum(self.maximum, (carts + radii[:, None]).max(axis=0))
+        self.count += 1
+
+    def viewport(self) -> dict:
+        if not self.count:
+            center = np.zeros(3, dtype=float)
+            half = 0.5 + float(self.padding)
+        else:
+            center = 0.5 * (self.minimum + self.maximum)
+            half = 0.5 * float(np.max(self.maximum - self.minimum)) + float(
+                self.padding
+            )
+        return {
+            "x": [float(center[0] - half), float(center[0] + half)],
+            "y": [float(center[1] - half), float(center[1] + half)],
+            "z": [float(center[2] - half), float(center[2] + half)],
+            "center": [float(value) for value in center],
+            "half_span": float(half),
+        }
 
 
 def _normalize(vec: Iterable[float], fallback: Iterable[float]) -> np.ndarray:

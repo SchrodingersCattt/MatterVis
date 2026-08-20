@@ -467,7 +467,6 @@ def build_figure(
 
     show_title = bool(style.get("show_title", True))
     title_text = scene.get("display_title") or scene.get("title") or scene.get("name") or ""
-    title_arg = dict(text=str(title_text), x=0.5) if show_title else None
     top_margin = 50 if show_title else 0
 
     ui_revision = style.get("uirevision", str(scene.get("name", "scene")))
@@ -476,7 +475,6 @@ def build_figure(
     if style.get("material") == "flat":
         layout_meta["flat_visual_pixel_scale"] = style.get("_flat_visual_pixel_scale")
     layout_kwargs = dict(
-        title=title_arg,
         showlegend=False,
         uirevision=ui_revision,
         paper_bgcolor=style.get("background", "#FFFFFF"),
@@ -488,6 +486,8 @@ def build_figure(
         },
         meta=layout_meta,
     )
+    if show_title:
+        layout_kwargs["title"] = dict(text=str(title_text), x=0.5)
     key_annotations, key_shapes = compose_axis_key_layout(scene, style)
     if scene.get("vector_overlays"):
         from .overlay.vectors import paper_vector_label_annotations

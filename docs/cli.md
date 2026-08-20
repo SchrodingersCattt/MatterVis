@@ -90,6 +90,12 @@ on. MatterVis never guesses it from a model filename.
 GIF/MP4 require at least two selected frames. All selected frames use one camera,
 canvas, and shared world-space viewport scale.
 
+Animations preserve one requested visual language across every frame. If a
+Plotly-backed animation style cannot be exported because Chrome/Kaleido is
+unavailable or fails, the command stops instead of silently substituting flat
+ORTEP frames. Browser-free animation remains available when explicitly requested
+with `--material flat --style ortep`.
+
 ### Display options
 
 | Flag | Default | Description |
@@ -118,7 +124,9 @@ direction options are mutually exclusive.
 PNG/PDF/SVG export is attempted first. If local Chrome/Kaleido export is
 unavailable, the CLI reports the error and falls back to the browser-free
 Matplotlib `material=flat, style=ortep` path; that fallback is ORTEP rather
-than an exact replacement for a requested mesh or ball-and-stick style.
+than an exact replacement for a requested mesh or ball-and-stick style. This
+style substitution is static-only and is never applied frame-by-frame to an
+animation.
 
 ### Visibility toggles
 

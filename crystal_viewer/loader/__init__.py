@@ -33,10 +33,15 @@ __all__ = [
     "build_loaded_crystal",
     "build_loaded_crystal_from_atoms",
     "build_loaded_crystal_from_ase",
+    "canonicalise_atomistic_frame",
     "count_structure_frames",
     "bundle_json",
     "StructureFrame",
     "StructureInput",
+    "AtomisticFrame",
+    "AtomisticInput",
+    "load_atomistic_input",
+    "iter_atomistic_frames",
     "load_structure_input",
     "infer_uploaded_name",
     "load_default_catalog",
@@ -46,9 +51,14 @@ __all__ = [
 ]
 
 from .structure_input import (  # noqa: F401
+    AtomisticFrame,
+    AtomisticInput,
     StructureFrame,
     StructureInput,
     build_loaded_crystal_from_ase,
+    canonicalise_atomistic_frame,
     count_structure_frames,
+    iter_atomistic_frames,
+    load_atomistic_input,
     load_structure_input,
 )
