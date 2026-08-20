@@ -13,6 +13,7 @@ DO NOT REMOVE -- this guards the contract documented in
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from mat_viewer.transforms import (
     KNOWN_TRANSFORM_KINDS,
@@ -39,6 +40,9 @@ def _atoms_2():
             "occ": 1.0,
             "da": "",
             "dg": "",
+            "_source_index": 0,
+            "_source_molecule_index": 0,
+            "_wrapped_frac": np.array([0.0, 0.0, 0.0]),
         },
         {
             "elem": "Cl",
@@ -48,12 +52,30 @@ def _atoms_2():
             "occ": 1.0,
             "da": "",
             "dg": "",
+            "_source_index": 1,
+            "_source_molecule_index": 0,
+            "_wrapped_frac": np.array([0.5, 0.0, 0.0]),
         },
     ]
 
 
 def _M():
     return np.diag([2.0, 2.0, 2.0])
+
+
+def _contract_payload(atoms):
+    sites = [
+        {"global_index": index, "molecule_index": 0, "local_index": index}
+        for index in range(len(atoms))
+    ]
+    bonds = [
+        {"left": 0, "right": 1, "right_image_shift": [0, 0, 0]}
+    ]
+    return {
+        "_canonical_source_atoms": [dict(atom) for atom in atoms],
+        "_canonical_site_records": sites,
+        "_canonical_bond_records": bonds,
+    }
 
 
 def test_replicate_atoms_2x1x1_doubles_count():
@@ -168,6 +190,7 @@ def _scene():
         "style": {"atom_scale": 1.0, "bond_radius": 0.1},
         "has_minor": False,
         "display_mode": "cluster",
+        **_contract_payload(atoms),
     }
 
 
@@ -195,14 +218,12 @@ def test_apply_transforms_disabled_skipped():
     assert len(out["draw_atoms"]) == len(_scene()["draw_atoms"])
 
 
-def test_apply_transforms_unknown_kind_skipped():
-    out = apply_transforms(
-        _scene(),
-        [{"id": "t1", "kind": "frobnicate", "params": {}, "enabled": True}],
-    )
-    # Unknown kind = no-op; lineage still recorded so the trace is
-    # debuggable from a state dump.
-    assert len(out["draw_atoms"]) == len(_scene()["draw_atoms"])
+def test_apply_transforms_unknown_kind_is_fatal():
+    with pytest.raises(ValueError, match="unknown transform kind"):
+        apply_transforms(
+            _scene(),
+            [{"id": "t1", "kind": "frobnicate", "params": {}, "enabled": True}],
+        )
 
 
 def test_apply_transforms_chains_repeat_then_radius():
@@ -281,8 +302,9 @@ def test_complete_fragment_with_all_seeds_short_circuits():
         atoms,
         M,
         seed_indices=list(range(len(atoms))),
-        ops=None,
-        cell=None,
+        source_atoms=atoms,
+        site_records=_contract_payload(atoms)["_canonical_site_records"],
+        bond_records=_contract_payload(atoms)["_canonical_bond_records"],
         max_hops=32,
     )
     assert len(out) == len(atoms)
@@ -301,22 +323,18 @@ def test_complete_fragment_caps_halo_radius():
     a small home cell.
     """
     import time as _time
-    from types import SimpleNamespace
     from mat_viewer.transforms import atoms_completing_fragment
 
     atoms = _atoms_2()
     M = np.eye(3) * 5.0
-    # The pure-math layer needs an ``ops`` shim with ``find_bonds`` to
-    # walk the bond graph; for a 2-atom isolated test scene it just
-    # needs to return an iterable.
-    ops_stub = SimpleNamespace(find_bonds=lambda atoms, cell=None: [])
     start = _time.monotonic()
     out = atoms_completing_fragment(
         atoms,
         M,
         seed_indices=[0],
-        ops=ops_stub,
-        cell=None,
+        source_atoms=atoms,
+        site_records=_contract_payload(atoms)["_canonical_site_records"],
+        bond_records=_contract_payload(atoms)["_canonical_bond_records"],
         max_hops=128,
     )
     elapsed = _time.monotonic() - start
@@ -326,6 +344,71 @@ def test_complete_fragment_caps_halo_radius():
     # but the broadcast dominates and used to take >>1 s.
     assert elapsed < 1.0, f"complete_fragment took {elapsed:.3f}s; halo cap likely regressed"
     assert isinstance(out, list)
+
+
+def test_grow_bonds_uses_signed_mck_pbc_relation(monkeypatch):
+    from mat_viewer.transforms import atoms_within_bonds
+
+    M = np.eye(3) * 10.0
+    atoms = [
+        {
+            "elem": "C",
+            "label": "C1",
+            "frac": np.array([0.98, 0.5, 0.5]),
+            "cart": np.array([9.8, 5.0, 5.0]),
+            "_wrapped_frac": np.array([0.98, 0.5, 0.5]),
+            "_source_index": 0,
+        },
+        {
+            "elem": "C",
+            "label": "C2",
+            "frac": np.array([0.02, 0.5, 0.5]),
+            "cart": np.array([0.2, 5.0, 5.0]),
+            "_wrapped_frac": np.array([0.02, 0.5, 0.5]),
+            "_source_index": 1,
+        },
+    ]
+    sites = [
+        {"global_index": 0, "molecule_index": 0, "local_index": 0},
+        {"global_index": 1, "molecule_index": 0, "local_index": 1},
+    ]
+    records = [
+        {"left": 0, "right": 1, "right_image_shift": [1, 0, 0]}
+    ]
+    monkeypatch.setattr(
+        "mat_viewer.structure.bonds.find_bonds",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("transform called local find_bonds")
+        ),
+    )
+    grown = atoms_within_bonds(
+        atoms,
+        M,
+        seed_indices=[0],
+        hops=1,
+        source_atoms=atoms,
+        site_records=sites,
+        bond_records=records,
+    )
+    assert len(grown) == 2
+    np.testing.assert_allclose(grown[1]["cart"] - grown[0]["cart"], [0.4, 0, 0])
+
+
+def test_transform_missing_records_is_fatal() -> None:
+    from mat_viewer.structure.molcrys_bridge import StructureContractError
+
+    with pytest.raises(StructureContractError, match="missing records"):
+        apply_transforms(
+            {key: value for key, value in _scene().items() if not key.startswith("_canonical")},
+            [
+                {
+                    "id": "t1",
+                    "kind": "repeat",
+                    "params": {"a": 2, "b": 1, "c": 1},
+                    "enabled": True,
+                }
+            ],
+        )
 
 
 # ---- backend supercell shorthand --------------------------------------
@@ -352,15 +435,8 @@ def test_supercell_shorthand_emits_repeat_transform():
         assert repeats[0]["params"] == {"a": 3, "b": 1, "c": 1}
 
 
-def test_rebuild_scene_redetects_bonds_in_replica():
-    """Regression: after a ``repeat`` transform, replica atoms get
-    suffixed labels (``Cl1`` -> ``Cl1[1,0,0]``) but their
-    ``_bond_partners`` list still references the canonical labels.
-    ``rebuild_scene_with_atoms`` must temporarily restore the canonical
-    label so the legacy bond-table check (``_bond_allowed_by_table``)
-    accepts cross-replica bonds. Without the swap the replica side of
-    a 2x1x1 supercell renders as bondless atom dust.
-    """
+def test_rebuild_scene_lifts_mck_bonds_into_each_replica():
+    """Repeat copies preserve the canonical BondRecord graph."""
     from mat_viewer.transforms import rebuild_scene_with_atoms, replicate_atoms
 
     M = np.diag([10.0, 10.0, 10.0])
@@ -372,9 +448,12 @@ def test_rebuild_scene_redetects_bonds_in_replica():
         "occ": 1.0,
         "da": "",
         "dg": "",
+        "_source_index": 0,
+        "_wrapped_frac": np.array([0.0, 0.0, 0.0]),
         "_has_bond_table": True,
         "_bond_partners": ("Cl1",),
         "_bond_lengths": {"Cl1": (1.0,)},
+        "_source_molecule_index": 0,
     }
     cl = {
         "elem": "Cl",
@@ -384,9 +463,12 @@ def test_rebuild_scene_redetects_bonds_in_replica():
         "occ": 1.0,
         "da": "",
         "dg": "",
+        "_source_index": 1,
+        "_wrapped_frac": np.array([0.1, 0.0, 0.0]),
         "_has_bond_table": True,
         "_bond_partners": ("Pb1",),
         "_bond_lengths": {"Pb1": (1.0,)},
+        "_source_molecule_index": 0,
     }
     base_scene = {
         "draw_atoms": [pb, cl],
@@ -397,6 +479,7 @@ def test_rebuild_scene_redetects_bonds_in_replica():
         "view_y": np.array([0.0, 1.0, 0.0]),
         "view_z": np.array([0.0, 0.0, 1.0]),
         "style": {},
+        **_contract_payload([pb, cl]),
     }
     replicated = replicate_atoms([pb, cl], M, na=2, nb=1, nc=1)
     out = rebuild_scene_with_atoms(base_scene, replicated)
@@ -409,7 +492,7 @@ def test_rebuild_scene_redetects_bonds_in_replica():
     replica_bond = any(i in replica_idx and j in replica_idx for i, j in bond_pairs)
     assert home_bond, "home Pb-Cl bond missing after replicate"
     assert replica_bond, "replica Pb-Cl bond missing after replicate -- bond table label mismatch"
-    # And the original ``label`` field must be restored after detection.
+    # Replica labels are visual metadata only; connectivity uses source ids.
     replica_labels = {a["label"] for a in out["draw_atoms"] if a.get("_image_shift") == (1, 0, 0)}
     assert replica_labels == {"Pb1[1,0,0]", "Cl1[1,0,0]"}
     assert len(out["fragment_table"]) == 2
@@ -430,6 +513,8 @@ def test_build_bundle_scene_preserves_transform_fragment_table(monkeypatch):
         "occ": 1.0,
         "da": "",
         "dg": "",
+        "_source_index": 0,
+        "_wrapped_frac": np.array([0.0, 0.0, 0.0]),
     }
     cl = {
         "elem": "Cl",
@@ -439,6 +524,8 @@ def test_build_bundle_scene_preserves_transform_fragment_table(monkeypatch):
         "occ": 1.0,
         "da": "",
         "dg": "",
+        "_source_index": 1,
+        "_wrapped_frac": np.array([0.1, 0.0, 0.0]),
     }
     base_scene = {
         "name": "synthetic",
@@ -453,6 +540,7 @@ def test_build_bundle_scene_preserves_transform_fragment_table(monkeypatch):
         "style": {},
         "fragment_table": [],
         "atom_fragment_labels": [],
+        **_contract_payload([pb, cl]),
     }
     bundle = LoadedCrystal(
         name="synthetic",
@@ -464,7 +552,7 @@ def test_build_bundle_scene_preserves_transform_fragment_table(monkeypatch):
         M=M,
         view_direction=[0.0, 0.0, 1.0],
         up=[0.0, 1.0, 0.0],
-        scene_cache={("unit_cell", False): base_scene},
+        scene_cache={("unit_cell", False, False, None, ()): base_scene},
         molcrys_analysis=object(),
     )
 

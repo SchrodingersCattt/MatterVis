@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gemmi
 import numpy as np
+from types import SimpleNamespace
 
 from mat_viewer.loader import build_bundle_scene, build_loaded_crystal
 from mat_viewer.scene import build_scene_from_atoms, scene_ops
@@ -32,6 +33,30 @@ def _ops_without_redetection():
     return ops
 
 
+def _analysis(atoms, records):
+    sites = tuple(
+        SimpleNamespace(
+            global_index=index,
+            molecule_index=int(atom.get("_source_molecule_index", 0)),
+            local_index=index,
+            fractional_position=np.asarray(atom["frac"], dtype=float),
+            image_shift=(0, 0, 0),
+            asym_index=index,
+            sym_op_index=0,
+        )
+        for index, atom in enumerate(atoms)
+    )
+    return SimpleNamespace(
+        site_records=sites,
+        bond_records=list(records),
+        bond_pairs=[
+            tuple(sorted((int(record["left"]), int(record["right"]))))
+            for record in records
+        ],
+        formula_unit_selection=None,
+    )
+
+
 def _source_pair_set(scene: dict) -> set[tuple[int, int]]:
     atoms = scene["draw_atoms"]
     return {
@@ -47,6 +72,9 @@ def test_face_fragment_replica_lifts_its_canonical_internal_bond():
         _atom("C1", "C", [0.99, 0.5, 0.5], M, 0),
         _atom("C2", "C", [0.94, 0.5, 0.5], M, 1),
     ]
+    records = [
+        {"left": 0, "right": 1, "right_image_shift": [0, 0, 0], "vector": [-0.5, 0.0, 0.0]}
+    ]
 
     scene = build_scene_from_atoms(
         name="face-bond",
@@ -59,9 +87,8 @@ def test_face_fragment_replica_lifts_its_canonical_internal_bond():
         ops=_ops_without_redetection(),
         unwrapped_atoms=atoms,
         canonical_bond_pairs=[(0, 1)],
-        canonical_bond_records=[
-            {"left": 0, "right": 1, "right_image_shift": [0, 0, 0], "vector": [-0.5, 0.0, 0.0]}
-        ],
+        canonical_bond_records=records,
+        molcrys_analysis=_analysis(atoms, records),
         preset={"style": {"show_labels": False, "show_axes": False}},
     )
 
@@ -91,6 +118,9 @@ def test_canonical_record_preserves_cross_cell_image_relation():
     display_atoms = [dict(raw_atoms[0]), dict(raw_atoms[1])]
     display_atoms[1]["frac"] = np.array([1.02, 0.5, 0.5])
     display_atoms[1]["cart"] = display_atoms[1]["frac"] @ M
+    records = [
+        {"left": 0, "right": 1, "right_image_shift": [1, 0, 0], "vector": [0.4, 0.0, 0.0]}
+    ]
 
     scene = build_scene_from_atoms(
         name="cross-cell",
@@ -103,9 +133,8 @@ def test_canonical_record_preserves_cross_cell_image_relation():
         ops=_ops_without_redetection(),
         unwrapped_atoms=display_atoms,
         canonical_bond_pairs=[(0, 1)],
-        canonical_bond_records=[
-            {"left": 0, "right": 1, "right_image_shift": [1, 0, 0], "vector": [0.4, 0.0, 0.0]}
-        ],
+        canonical_bond_records=records,
+        molcrys_analysis=_analysis(raw_atoms, records),
         preset={"style": {"show_labels": False, "show_axes": False}},
     )
 
@@ -122,6 +151,9 @@ def test_canonical_lift_does_not_cross_connect_duplicate_display_images():
         _atom("C1", "C", [0.0, 0.5, 0.5], M, 0),
         _atom("C2", "C", [0.1, 0.5, 0.5], M, 1),
     ]
+    records = [
+        {"left": 0, "right": 1, "right_image_shift": [0, 0, 0], "vector": [1.0, 0.0, 0.0]}
+    ]
 
     scene = build_scene_from_atoms(
         name="no-cartesian-product",
@@ -134,9 +166,8 @@ def test_canonical_lift_does_not_cross_connect_duplicate_display_images():
         ops=_ops_without_redetection(),
         unwrapped_atoms=atoms,
         canonical_bond_pairs=[(0, 1)],
-        canonical_bond_records=[
-            {"left": 0, "right": 1, "right_image_shift": [0, 0, 0], "vector": [1.0, 0.0, 0.0]}
-        ],
+        canonical_bond_records=records,
+        molcrys_analysis=_analysis(atoms, records),
         preset={"style": {"show_labels": False, "show_axes": False}},
     )
 
@@ -145,18 +176,15 @@ def test_canonical_lift_does_not_cross_connect_duplicate_display_images():
 
 
 def test_dap4_boundary_fragment_instances_keep_all_internal_canonical_bonds(monkeypatch):
+    del monkeypatch
+    import mat_viewer.scene.core as scene_core
+
+    assert not hasattr(scene_core, "find_bonds")
     bundle = build_loaded_crystal(
         name="DAP-4",
         cif_path="scripts/data/DAP-4.cif",
         title="DAP-4",
     )
-    monkeypatch.setattr(
-        "mat_viewer.scene.core.find_bonds",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("unit-cell canonical records must not re-detect bonds"),
-        ),
-    )
-
     scene = build_bundle_scene(bundle, display_mode="unit_cell", show_hydrogen=True, preset={})
     atoms = scene["draw_atoms"]
     canonical = {tuple(sorted(pair)) for pair in bundle.molcrys_analysis.bond_pairs}
@@ -207,6 +235,7 @@ def test_strict_cell_completes_a_cross_boundary_tetrahedral_fragment():
         unwrapped_atoms=atoms,
         canonical_bond_pairs=[(0, 1), (0, 2), (0, 3), (0, 4)],
         canonical_bond_records=records,
+        molcrys_analysis=_analysis(atoms, records),
         preset={"style": {"show_labels": False, "show_axes": False}},
     )
 

@@ -6,12 +6,11 @@ clean, non-legacy import path and configurable weight system.
 from __future__ import annotations
 
 from collections import OrderedDict
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 
-from ..structure.bonds import find_bonds
-from ..structure.formula_unit import cluster_atoms, select_formula_unit
+from ..structure import molcrys_bridge
 from ..structure.geometry import view_rotation
 from ..style.disorder import is_major
 from ..style.palette import cov_r
@@ -131,7 +130,17 @@ def _pick_up_vector(view_vec, candidates):
 
 
 def _classify_clusters(atoms):
-    clusters = cluster_atoms(atoms)
+    clusters: dict[int, list[int]] = {}
+    for index, atom in enumerate(atoms):
+        molecule_index = atom.get(
+            "_source_molecule_index",
+            atom.get("_molecule_index"),
+        )
+        if molecule_index is None:
+            raise molcrys_bridge.StructureContractError(
+                "auto_view requires SiteRecord molecule indices on every atom."
+            )
+        clusters.setdefault(int(molecule_index), []).append(index)
     organic = []
     anion = []
     for idxs in clusters.values():
@@ -440,6 +449,7 @@ def auto_view_dir(
     cell,
     compound_name: Optional[str] = None,
     weights: Optional[Dict[str, float]] = None,
+    molcrys_analysis=None,
 ):
     """Pick the best viewing direction for a crystal structure.
 
@@ -448,7 +458,7 @@ def auto_view_dir(
     atoms
         Sequence of atom dicts with at least ``cart``, ``elem``, and ``label``.
     M
-        Fractional-to-Cartesian matrix (3×3, any orientation convention).
+        Fractional-to-Cartesian row-lattice matrix (3×3).
     cell
         Unit cell object (attributes a, b, c, alpha, beta, gamma) or 3×3
         array.
@@ -465,24 +475,30 @@ def auto_view_dir(
     tuple[ndarray, ndarray]
         ``(view_direction, up_vector)`` — unit vectors.
     """
+    source_atoms = [dict(atom) for atom in atoms]
+    if molcrys_analysis is None:
+        molcrys_analysis = molcrys_bridge.analyze(source_atoms, M)
+    molcrys_bridge.require_structure_contract(
+        molcrys_analysis,
+        atom_count=len(source_atoms),
+        require_formula_unit=True,
+    )
+    source_atoms = molcrys_bridge.atoms_with_site_provenance(
+        source_atoms,
+        molcrys_analysis,
+    )
+    sel_atoms = molcrys_bridge.select_formula_unit(
+        source_atoms,
+        M,
+        analysis=molcrys_analysis,
+    )
+
     resolved_weights = _resolve_view_score_weights(compound_name, overrides=weights)
     cache_key = _auto_view_cache_key(atoms, M, cell, compound_name, weights)
     cached = _AUTO_VIEW_CACHE.get(cache_key)
     if cached is not None:
         _AUTO_VIEW_CACHE.move_to_end(cache_key)
         view_dir, up = cached
-        return view_dir.copy(), up.copy()
-
-    atoms_copy = [dict(a) for a in atoms]
-    try:
-        atoms_sel, sel_idxs = select_formula_unit(atoms_copy, M, cell)
-        sel_atoms = [atoms_sel[i] for i in sel_idxs]
-    except Exception:
-        view_dir = np.array([0.174, 0.985, 0.000])
-        up = np.array([0.0, 0.0, 1.0])
-        _AUTO_VIEW_CACHE[cache_key] = (view_dir, up)
-        if len(_AUTO_VIEW_CACHE) > _AUTO_VIEW_CACHE_MAX:
-            _AUTO_VIEW_CACHE.popitem(last=False)
         return view_dir.copy(), up.copy()
 
     valid_atoms = [at for at in sel_atoms if at["elem"] != "H" and is_major(at)]
@@ -504,7 +520,21 @@ def auto_view_dir(
     radii = np.array([cov_r(at["elem"]) for at in valid_atoms], dtype=float)
     org_coords = coords[np.array(org_pos)]
     centered = org_coords - org_coords.mean(axis=0)
-    excluded_pairs = _build_pair_exclusions(len(valid_atoms), find_bonds(valid_atoms))
+    valid_by_source: dict[int, int] = {}
+    for local_index, atom in enumerate(valid_atoms):
+        source_index = atom.get("_source_index")
+        if source_index is None:
+            raise molcrys_bridge.StructureContractError(
+                "auto_view requires SiteRecord global indices on selected atoms."
+            )
+        valid_by_source[int(source_index)] = local_index
+    visible_bonds: list[tuple[int, int]] = []
+    for record in molcrys_analysis.bond_records:
+        left = valid_by_source.get(int(record["left"]))
+        right = valid_by_source.get(int(record["right"]))
+        if left is not None and right is not None:
+            visible_bonds.append((left, right))
+    excluded_pairs = _build_pair_exclusions(len(valid_atoms), visible_bonds)
 
     try:
         _, _, vt = np.linalg.svd(centered, full_matrices=False)

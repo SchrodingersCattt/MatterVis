@@ -29,10 +29,9 @@ Layered API (per ``AGENTS.md``):
 2. **Composable building blocks**:
 
    * :func:`rebuild_scene_with_atoms` -- given a base scene dict and a
-     fresh ``draw_atoms`` list, re-detect bonds (no PBC, all atoms are
-     manifested), recompute bounds, label items, fragment table, then
-     return a new scene dict with the same metadata as the base
-     scene.
+     fresh ``draw_atoms`` list, lift its MolCrysKit ``BondRecord`` graph
+     onto manifested source/image identities, recompute visual metadata,
+     then return a new scene dict.
    * :func:`apply_one_transform` -- dispatch one transform-spec dict
      onto a scene; returns a new scene dict.
 
@@ -96,12 +95,14 @@ from __future__ import annotations
 import copy
 import math
 from collections import defaultdict
+from collections.abc import Mapping
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from molcrys_kit.utils.geometry import cart_to_frac, frac_to_cart
 
 from ..style.disorder import atom_is_minor, bond_is_minor
+from ..structure import molcrys_bridge
 
 
 # Transform kinds the dispatcher recognises. Anything else is rejected
@@ -130,6 +131,22 @@ MAX_ATOMS_AFTER_TRANSFORM = 50000
 # realistic coordination shell. Callers can tune via the explicit
 # ``cutoff`` parameter; this is the hard ceiling.
 MAX_IMAGE_RANGE = 4
+
+
+__all__ = [
+    "KNOWN_TRANSFORM_KINDS",
+    "MAX_ATOMS_AFTER_TRANSFORM",
+    "MAX_IMAGE_RANGE",
+    "atoms_completing_fragment",
+    "atoms_completing_polyhedron",
+    "atoms_under_symmetry",
+    "atoms_within_bonds",
+    "atoms_within_radius",
+    "rebuild_scene_with_atoms",
+    "replicate_atoms",
+    "resolve_seed_indices",
+    "slab_atoms_from_bundle",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -321,73 +338,182 @@ def atoms_within_radius(
     return list(seen.values())
 
 
+def _record_field(record: Any, name: str) -> Any:
+    if isinstance(record, Mapping):
+        return record[name]
+    return getattr(record, name)
+
+
+def _require_record_payload(source_atoms, site_records, bond_records):
+    if source_atoms is None or site_records is None or bond_records is None:
+        raise molcrys_bridge.StructureContractError(
+            "transform chemistry requires MolCrysKit SiteRecord and BondRecord "
+            "payloads; missing records are not re-derived."
+        )
+    sources = list(source_atoms)
+    sites = list(site_records)
+    bonds = list(bond_records)
+    try:
+        global_indices = sorted(
+            int(_record_field(record, "global_index")) for record in sites
+        )
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        raise molcrys_bridge.StructureContractError(
+            "transform SiteRecord payload is missing global_index."
+        ) from exc
+    if global_indices != list(range(len(sources))):
+        raise molcrys_bridge.StructureContractError(
+            "transform SiteRecord identities do not match canonical source atoms."
+        )
+    for record in bonds:
+        try:
+            left = int(_record_field(record, "left"))
+            right = int(_record_field(record, "right"))
+            shift = tuple(
+                int(value) for value in _record_field(record, "right_image_shift")
+            )
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise molcrys_bridge.StructureContractError(
+                "transform BondRecord payload is missing endpoints/PBC shift."
+            ) from exc
+        if (
+            len(shift) != 3
+            or not 0 <= left < len(sources)
+            or not 0 <= right < len(sources)
+        ):
+            raise molcrys_bridge.StructureContractError(
+                "transform BondRecord payload has an invalid endpoint or PBC shift."
+            )
+    return sources, sites, bonds
+
+
+def _record_adjacency(bond_records):
+    adjacency: dict[int, list[tuple[int, tuple[int, int, int]]]] = {}
+    for record in bond_records:
+        left = int(_record_field(record, "left"))
+        right = int(_record_field(record, "right"))
+        shift = tuple(
+            int(value) for value in _record_field(record, "right_image_shift")
+        )
+        adjacency.setdefault(left, []).append((right, shift))
+        adjacency.setdefault(right, []).append(
+            (left, tuple(-value for value in shift))
+        )
+    return adjacency
+
+
+def _contract_identity(atom, source_atoms, fallback_index):
+    from ..scene.core import source_image_identity
+
+    return source_image_identity(atom, source_atoms, fallback_index)
+
+
+def _materialize_contract_node(source_atoms, M, source_index, image_shift):
+    template = source_atoms[int(source_index)]
+    copied = _atom_copy(template, image_shift=image_shift)
+    wrapped_frac = np.asarray(
+        template.get("_wrapped_frac", template.get("frac")),
+        dtype=float,
+    )
+    if wrapped_frac.shape != (3,):
+        raise molcrys_bridge.StructureContractError(
+            "SiteRecord-projected source atom is missing fractional coordinates."
+        )
+    target_frac = wrapped_frac + np.asarray(image_shift, dtype=float)
+    copied["frac"] = target_frac
+    copied["cart"] = frac_to_cart(target_frac, np.asarray(M, dtype=float))
+    copied["_wrapped_frac"] = wrapped_frac.copy()
+    copied["_source_index"] = int(source_index)
+    return copied
+
+
+def _walk_record_graph(
+    atoms,
+    M,
+    *,
+    seed_indices,
+    max_hops,
+    source_atoms,
+    site_records,
+    bond_records,
+):
+    sources, _sites, bonds = _require_record_payload(
+        source_atoms,
+        site_records,
+        bond_records,
+    )
+    if max_hops <= 0 or not seed_indices:
+        return []
+    existing: dict[tuple[int, tuple[int, int, int]], dict[str, Any]] = {}
+    for index, atom in enumerate(atoms):
+        identity = _contract_identity(atom, sources, index)
+        if identity is not None:
+            existing.setdefault(identity, dict(atom))
+
+    seeds: set[tuple[int, tuple[int, int, int]]] = set()
+    for index in seed_indices:
+        identity = _contract_identity(atoms[int(index)], sources, int(index))
+        if identity is None:
+            raise molcrys_bridge.StructureContractError(
+                "transform seed lacks a SiteRecord source/image identity."
+            )
+        seeds.add(identity)
+
+    adjacency = _record_adjacency(bonds)
+    visited = set(seeds)
+    frontier = set(seeds)
+    for _ in range(int(max_hops)):
+        next_frontier: set[tuple[int, tuple[int, int, int]]] = set()
+        for source, image in frontier:
+            for neighbour, relation in adjacency.get(source, ()):
+                target_image = tuple(
+                    image[axis] + relation[axis] for axis in range(3)
+                )
+                target = (neighbour, target_image)
+                if target not in visited:
+                    next_frontier.add(target)
+        if not next_frontier:
+            break
+        visited.update(next_frontier)
+        frontier = next_frontier
+
+    out = []
+    for identity in sorted(visited, key=lambda item: (item[1], item[0])):
+        if identity in existing:
+            atom = dict(existing[identity])
+            atom.setdefault("_source_index", identity[0])
+            atom.setdefault("_image_shift", identity[1])
+        else:
+            atom = _materialize_contract_node(
+                sources,
+                M,
+                identity[0],
+                identity[1],
+            )
+        out.append(atom)
+    return out
+
+
 def atoms_within_bonds(
     atoms: Sequence[Dict[str, Any]],
     M: np.ndarray,
     *,
     seed_indices: Sequence[int],
     hops: int,
-    ops,
-    cell,
+    source_atoms,
+    site_records,
+    bond_records,
 ) -> List[Dict[str, Any]]:
-    """Bond-walk ``hops`` steps outward from each seed.
-
-    We do this geometrically rather than relying on a precomputed bond
-    table because seeds may pull in periodic-image atoms that the
-    home-cell bond detector never connected. The bond detector is
-    re-run on each (atoms-in-frontier, image candidates) batch.
-    """
-    if hops <= 0 or not seed_indices:
-        return []
-    seed_set = set(int(i) for i in seed_indices)
-    # Use the existing bond detector to find first-neighbour pairs in
-    # the home cell + a 1-cell halo each step. We grow incrementally:
-    # current frontier -> add bonded neighbours -> repeat ``hops``
-    # times. Periodic images in the halo come along automatically.
-    typical_bond_len = 3.5  # generous default for inorganic / molecular
-    halo_radius = float(typical_bond_len) * float(max(1, hops))
-    candidate = atoms_within_radius(
+    """Walk MolCrysKit's signed periodic BondRecord graph for ``hops``."""
+    return _walk_record_graph(
         atoms,
         M,
-        seed_indices=list(seed_set),
-        radius=halo_radius,
-        include_seeds=True,
+        seed_indices=seed_indices,
+        max_hops=hops,
+        source_atoms=source_atoms,
+        site_records=site_records,
+        bond_records=bond_records,
     )
-    # The bond detector wants atoms keyed by integer index, so we walk
-    # over the candidate list with explicit indexing.
-    bond_pairs = ops.find_bonds(candidate, cell=None)
-    label_to_idx = {
-        (atom.get("_origin_label") or atom.get("label"), atom.get("_image_shift", (0, 0, 0))): idx
-        for idx, atom in enumerate(candidate)
-    }
-    seed_keys = {
-        (atoms[i].get("label"), (0, 0, 0))
-        for i in seed_indices
-    }
-    seed_in_candidate = {
-        label_to_idx[key] for key in seed_keys if key in label_to_idx
-    }
-    if not seed_in_candidate:
-        return []
-    adj: dict[int, set[int]] = {}
-    for i, j in bond_pairs:
-        i = int(i)
-        j = int(j)
-        adj.setdefault(i, set()).add(j)
-        adj.setdefault(j, set()).add(i)
-    visited = set(seed_in_candidate)
-    frontier = set(seed_in_candidate)
-    for _ in range(int(hops)):
-        next_frontier: set[int] = set()
-        for node in frontier:
-            for neighbour in adj.get(node, ()):
-                if neighbour not in visited:
-                    next_frontier.add(neighbour)
-        if not next_frontier:
-            break
-        visited.update(next_frontier)
-        frontier = next_frontier
-    return [candidate[i] for i in sorted(visited)]
 
 
 def atoms_completing_fragment(
@@ -395,8 +521,9 @@ def atoms_completing_fragment(
     M: np.ndarray,
     *,
     seed_indices: Sequence[int],
-    ops,
-    cell,
+    source_atoms,
+    site_records,
+    bond_records,
     max_hops: int = 64,
 ) -> List[Dict[str, Any]]:
     """Pull in every atom bonded (transitively) to any seed across cells.
@@ -408,61 +535,15 @@ def atoms_completing_fragment(
     a covalent crystal (graphite / diamond) and exploding the atom
     count.
     """
-    if not seed_indices:
-        return []
-    # Short-circuit: when the seed set already covers every atom in
-    # the scene there is no fragment to "complete" -- the user's home
-    # cell already holds the full graph. Without this guard the halo
-    # below blows up to (3.5 * max_hops) angstrom and the
-    # ``atoms_within_radius`` broadcast becomes O(N_atoms^2 * N_cells)
-    # which can easily hang the figure render on a supercell.
-    if len(set(int(i) for i in seed_indices)) >= len(atoms):
-        return [_atom_copy(atom, image_shift=(0, 0, 0)) for atom in atoms]
-    typical_bond_len = 3.5
-    # Cap the halo so a runaway max_hops doesn't pull in tens of
-    # thousands of replicas. 24 angstrom is enough for any sane
-    # organic ligand (~6-7 bond hops) and keeps the periodic image
-    # grid bounded; the BFS over ``adj`` will still respect the full
-    # ``max_hops`` budget for chains that wrap across cells.
-    halo_radius = min(typical_bond_len * float(max_hops), 24.0)
-    candidate = atoms_within_radius(
+    return _walk_record_graph(
         atoms,
         M,
-        seed_indices=list(seed_indices),
-        radius=halo_radius,
-        include_seeds=True,
+        seed_indices=seed_indices,
+        max_hops=max_hops,
+        source_atoms=source_atoms,
+        site_records=site_records,
+        bond_records=bond_records,
     )
-    if not candidate:
-        return []
-    bond_pairs = ops.find_bonds(candidate, cell=None)
-    seed_keys = {(atoms[i].get("label"), (0, 0, 0)) for i in seed_indices}
-    label_to_idx = {
-        (atom.get("_origin_label") or atom.get("label"), atom.get("_image_shift", (0, 0, 0))): idx
-        for idx, atom in enumerate(candidate)
-    }
-    seed_in_candidate = {
-        label_to_idx[key] for key in seed_keys if key in label_to_idx
-    }
-    if not seed_in_candidate:
-        return []
-    adj: dict[int, set[int]] = {}
-    for i, j in bond_pairs:
-        i = int(i)
-        j = int(j)
-        adj.setdefault(i, set()).add(j)
-        adj.setdefault(j, set()).add(i)
-    visited = set(seed_in_candidate)
-    frontier = set(seed_in_candidate)
-    for _ in range(int(max_hops)):
-        next_frontier: set[int] = set()
-        for node in frontier:
-            next_frontier.update(adj.get(node, ()))
-        next_frontier -= visited
-        if not next_frontier:
-            break
-        visited.update(next_frontier)
-        frontier = next_frontier
-    return [candidate[i] for i in sorted(visited)]
 
 
 def atoms_completing_polyhedron(
@@ -546,15 +627,16 @@ def slab_atoms_from_bundle(
     layers: Optional[int] = None,
     min_thickness: Optional[float] = None,
     vacuum: float = 10.0,
-) -> Tuple[List[Dict[str, Any]], np.ndarray]:
+) -> Tuple[List[Dict[str, Any]], np.ndarray, Any]:
     """Generate slab atoms via :func:`molcrys_kit.operations.surface.generate_topological_slab`.
 
-    Returns ``(atoms_list, slab_M)`` where ``atoms_list`` is a list of
+    Returns ``(atoms_list, slab_M, analysis)`` where ``atoms_list`` is a list of
     MatterVis-shaped atom dicts (``elem``, ``cart``, ``frac``,
     ``label``, ``occ``, ...) and ``slab_M`` is the slab cell as a 3x3
     row-lattice matrix matching MatterVis's lattice convention.
     """
     from molcrys_kit.operations.surface import generate_topological_slab
+    from ..structure.cif_parse import _raw_atoms_from_crystal
 
     crystal = getattr(bundle, "crystal", None)
     if crystal is None:
@@ -574,30 +656,12 @@ def slab_atoms_from_bundle(
     )
     # MolecularCrystal stores lattice as row vectors, matching MatterVis.
     slab_M = np.asarray(slab.lattice, dtype=float)
-    out: List[Dict[str, Any]] = []
-    counter = 0
-    for mol in slab.molecules:
-        ase_atoms = mol.atoms if hasattr(mol, "atoms") else mol
-        symbols = ase_atoms.get_chemical_symbols()
-        positions = ase_atoms.get_positions()
-        for elem, cart in zip(symbols, positions):
-            cart = np.asarray(cart, dtype=float)
-            frac = cart_to_frac(cart, slab_M)
-            out.append(
-                {
-                    "elem": str(elem),
-                    "cart": cart,
-                    "frac": frac,
-                    "label": f"{elem}{counter}",
-                    "occ": 1.0,
-                    "da": "",
-                    "dg": "",
-                    "_image_shift": (0, 0, 0),
-                    "_origin_label": f"{elem}{counter}",
-                }
-            )
-            counter += 1
-    return out, slab_M
+    analysis = molcrys_bridge.analyze_crystal(slab)
+    out = molcrys_bridge.atoms_with_site_provenance(
+        _raw_atoms_from_crystal(slab),
+        analysis,
+    )
+    return out, slab_M, analysis
 
 
 # ---------------------------------------------------------------------------
@@ -612,12 +676,15 @@ def rebuild_scene_with_atoms(
     style: Optional[Dict[str, Any]] = None,
     cell_override: Any = None,
     M_override: Optional[np.ndarray] = None,
+    canonical_source_atoms=None,
+    canonical_site_records=None,
+    canonical_bond_records=None,
 ) -> Dict[str, Any]:
     """Build a new scene dict from ``base_scene`` keeping the metadata
     (camera defaults, view rotation, axes, preset entry) intact but
-    swapping in a fresh ``draw_atoms`` list. Bonds are re-detected
-    without PBC because every transform manifests its atoms in a
-    single global Cartesian frame.
+    swapping in a fresh ``draw_atoms`` list. Bonds are lifted from the
+    signed MolCrysKit graph; missing records fail instead of triggering
+    geometric bond perception.
 
     ``style`` overrides ``base_scene["style"]`` for derived knobs
     (atom_scale on bounds computation, element_colors). Callers that
@@ -625,6 +692,7 @@ def rebuild_scene_with_atoms(
     """
     from ..legacy import crystal_scene as legacy_scene
     from ..scene import scene_ops
+    from ..scene.core import _canonical_display_bond_pairs
 
     ops = scene_ops()
     style = style or dict(base_scene.get("style", {}))
@@ -639,6 +707,27 @@ def rebuild_scene_with_atoms(
     view_y = np.asarray(base_scene["view_y"], dtype=float)
     view_z = np.asarray(base_scene["view_z"], dtype=float)
 
+    contract_sources = (
+        canonical_source_atoms
+        if canonical_source_atoms is not None
+        else base_scene.get("_canonical_source_atoms")
+    )
+    contract_sites = (
+        canonical_site_records
+        if canonical_site_records is not None
+        else base_scene.get("_canonical_site_records")
+    )
+    contract_bonds = (
+        canonical_bond_records
+        if canonical_bond_records is not None
+        else base_scene.get("_canonical_bond_records")
+    )
+    contract_sources, contract_sites, contract_bonds = _require_record_payload(
+        contract_sources,
+        contract_sites,
+        contract_bonds,
+    )
+
     draw_atoms = [dict(atom) for atom in new_atoms]
     if draw_atoms:
         depths = np.array([np.asarray(atom["cart"]) @ view_z for atom in draw_atoms], dtype=float)
@@ -652,25 +741,11 @@ def rebuild_scene_with_atoms(
             atom.setdefault("color_light", ops.elem_color_light(atom["elem"]))
             atom.setdefault("atom_radius", float(ops.atom_r(atom["elem"])))
 
-    # The legacy bond detector keys its bond-table check
-    # (``_bond_allowed_by_table``) on per-atom ``label`` strings; replica
-    # atoms produced by ``replicate_atoms`` carry suffixed labels (``Cl1``
-    # -> ``Cl1[1,0,0]``) but their ``_bond_partners`` list still
-    # references the canonical (unsuffixed) labels. Without help, the
-    # table check would reject every cross-replica bond. Swap each atom's
-    # ``label`` back to its ``_origin_label`` for the duration of the
-    # detection call, then restore.
-    saved_labels: List[Tuple[Dict[str, Any], str]] = []
-    for atom in draw_atoms:
-        origin = atom.get("_origin_label")
-        if origin and origin != atom.get("label"):
-            saved_labels.append((atom, atom["label"]))
-            atom["label"] = origin
-    try:
-        bond_pairs = ops.find_bonds(draw_atoms, cell=None)
-    finally:
-        for atom, original_label in saved_labels:
-            atom["label"] = original_label
+    bond_pairs, _contract_stats = _canonical_display_bond_pairs(
+        draw_atoms,
+        contract_sources,
+        contract_bonds,
+    )
     bonds = []
     for i, j in bond_pairs:
         ai = draw_atoms[int(i)]
@@ -721,6 +796,9 @@ def rebuild_scene_with_atoms(
     out["bounds"] = bounds
     out["projected_axes"] = projected_axes
     out["has_minor"] = any(bool(atom.get("is_minor")) for atom in draw_atoms)
+    out["_canonical_source_atoms"] = copy.deepcopy(contract_sources)
+    out["_canonical_site_records"] = copy.deepcopy(contract_sites)
+    out["_canonical_bond_records"] = copy.deepcopy(contract_bonds)
     return out
 
 

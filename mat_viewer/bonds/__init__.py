@@ -3,8 +3,8 @@ from __future__ import annotations
 from ..structure import bonds as _impl
 globals().update({
     name: getattr(_impl, name)
-    for name in dir(_impl)
-    if not name.startswith("__")
+    for name in getattr(_impl, "__all__", ())
+    if hasattr(_impl, name)
 })
 
-__all__ = [name for name in globals() if not name.startswith("__")]
+__all__ = list(getattr(_impl, "__all__", ()))

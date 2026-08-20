@@ -10,7 +10,6 @@ from .core import (
     MAX_ATOMS_AFTER_TRANSFORM,
     atoms_completing_fragment,
     atoms_completing_polyhedron,
-    atoms_under_symmetry,
     atoms_within_bonds,
     atoms_within_radius,
     rebuild_scene_with_atoms,
@@ -18,6 +17,9 @@ from .core import (
     resolve_seed_indices,
     slab_atoms_from_bundle,
 )
+
+
+__all__ = ["apply_one_transform", "apply_transforms", "transforms_cache_key"]
 
 def _normalise_repeat_params(params: Dict[str, Any]) -> Tuple[int, int, int]:
     return (
@@ -35,9 +37,6 @@ def apply_one_transform(
     style: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Dispatch one transform-spec dict onto ``scene`` and return a new scene."""
-    from ..scene import scene_ops
-
-    ops = scene_ops()
     if not transform.get("enabled", True):
         return scene
     kind = str(transform.get("kind") or "")
@@ -45,7 +44,9 @@ def apply_one_transform(
     seeds = params.get("seeds")
     atoms = scene.get("draw_atoms") or []
     M = np.asarray(scene.get("M"), dtype=float)
-    cell = scene.get("cell")
+    contract_sources = scene.get("_canonical_source_atoms")
+    contract_sites = scene.get("_canonical_site_records")
+    contract_bonds = scene.get("_canonical_bond_records")
 
     if kind == "repeat":
         na, nb, nc = _normalise_repeat_params(params)
@@ -64,7 +65,7 @@ def apply_one_transform(
             radius=radius,
             include_seeds=False,
         )
-        merged = _merge_atoms(atoms, extra)
+        merged = _merge_atoms(atoms, extra, source_atoms=contract_sources)
         return rebuild_scene_with_atoms(scene, merged, style=style)
 
     if kind == "grow_bonds":
@@ -75,10 +76,11 @@ def apply_one_transform(
             M,
             seed_indices=seed_indices,
             hops=hops,
-            ops=ops,
-            cell=cell,
+            source_atoms=contract_sources,
+            site_records=contract_sites,
+            bond_records=contract_bonds,
         )
-        merged = _merge_atoms(atoms, extra)
+        merged = _merge_atoms(atoms, extra, source_atoms=contract_sources)
         return rebuild_scene_with_atoms(scene, merged, style=style)
 
     if kind == "complete_fragment":
@@ -88,11 +90,12 @@ def apply_one_transform(
             atoms,
             M,
             seed_indices=seed_indices,
-            ops=ops,
-            cell=cell,
+            source_atoms=contract_sources,
+            site_records=contract_sites,
+            bond_records=contract_bonds,
             max_hops=max_hops,
         )
-        merged = _merge_atoms(atoms, extra)
+        merged = _merge_atoms(atoms, extra, source_atoms=contract_sources)
         return rebuild_scene_with_atoms(scene, merged, style=style)
 
     if kind == "complete_polyhedron":
@@ -104,30 +107,19 @@ def apply_one_transform(
             seed_indices=seed_indices,
             cutoff=cutoff,
         )
-        merged = _merge_atoms(atoms, extra)
+        merged = _merge_atoms(atoms, extra, source_atoms=contract_sources)
         return rebuild_scene_with_atoms(scene, merged, style=style)
 
     if kind == "by_symmetry":
-        seed_indices = resolve_seed_indices(atoms, seeds)
-        sym_ops_raw = params.get("ops") or []
-        sym_ops: List[Tuple[Sequence[Sequence[float]], Sequence[float]]] = []
-        for entry in sym_ops_raw:
-            if not isinstance(entry, (list, tuple)) or len(entry) != 2:
-                continue
-            sym_ops.append((entry[0], entry[1]))
-        extra = atoms_under_symmetry(
-            atoms,
-            M,
-            seed_indices=seed_indices,
-            sym_ops=sym_ops,
+        raise NotImplementedError(
+            "by_symmetry requires a MolCrysKit-transformed SiteRecord/BondRecord "
+            "contract and is not available through the strict transform API."
         )
-        merged = _merge_atoms(atoms, extra)
-        return rebuild_scene_with_atoms(scene, merged, style=style)
 
     if kind == "slab":
         if bundle is None:
             return scene
-        slab_atoms, slab_M = slab_atoms_from_bundle(
+        slab_atoms, slab_M, slab_analysis = slab_atoms_from_bundle(
             bundle,
             miller=tuple(params.get("miller", (1, 0, 0))),
             layers=params.get("layers"),
@@ -152,32 +144,49 @@ def apply_one_transform(
             style=style,
             cell_override=slab_cell,
             M_override=slab_M,
+            canonical_source_atoms=slab_atoms,
+            canonical_site_records=[
+                {
+                    "global_index": int(record.global_index),
+                    "molecule_index": int(record.molecule_index),
+                    "local_index": int(record.local_index),
+                    "asym_index": record.asym_index,
+                    "sym_op_index": record.sym_op_index,
+                    "image_shift": [int(value) for value in record.image_shift],
+                }
+                for record in slab_analysis.site_records
+            ],
+            canonical_bond_records=slab_analysis.bond_records,
         )
 
-    return scene
+    raise ValueError(f"unknown transform kind: {kind!r}")
 
 
 def _merge_atoms(
     base_atoms: Sequence[Dict[str, Any]],
     extra_atoms: Sequence[Dict[str, Any]],
+    *,
+    source_atoms,
 ) -> List[Dict[str, Any]]:
     """Merge ``extra_atoms`` onto ``base_atoms`` keeping unique
     ``(_origin_label, _image_shift)`` keys. Base atoms always win on
     duplicates so labels stay stable across re-runs.
     """
-    seen: Dict[Tuple[str, Tuple[int, int, int]], int] = {}
+    from .core import _contract_identity
+
+    if source_atoms is None:
+        raise ValueError("transform merge requires canonical SiteRecord sources")
+    seen: Dict[Tuple[int, Tuple[int, int, int]], int] = {}
     merged = [dict(atom) for atom in base_atoms]
     for idx, atom in enumerate(merged):
-        key = (
-            atom.get("_origin_label") or atom.get("label"),
-            atom.get("_image_shift", (0, 0, 0)),
-        )
+        key = _contract_identity(atom, source_atoms, idx)
+        if key is None:
+            raise ValueError("transformed atom lacks a SiteRecord source/image identity")
         seen[key] = idx
-    for atom in extra_atoms:
-        key = (
-            atom.get("_origin_label") or atom.get("label"),
-            atom.get("_image_shift", (0, 0, 0)),
-        )
+    for extra_index, atom in enumerate(extra_atoms):
+        key = _contract_identity(atom, source_atoms, extra_index)
+        if key is None:
+            raise ValueError("transformed atom lacks a SiteRecord source/image identity")
         if key in seen:
             continue
         merged.append(atom)

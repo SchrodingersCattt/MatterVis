@@ -10,8 +10,9 @@ import numpy as np
 from molcrys_kit.utils.geometry import frac_to_cart  # noqa: F401
 
 from .. import perf_log
-from ..structure.bonds import bonds_conflict, find_bonds
-from ..structure.cif_parse import parse_asu
+from ..structure.bonds import bonds_conflict
+from ..structure.cif_parse import load_cif, parse_asu
+from ..structure import molcrys_bridge
 from ..style.disorder import (
     atom_is_disordered,
     atom_is_minor,
@@ -20,9 +21,8 @@ from ..style.disorder import (
     disorder_alpha,
     is_minor,
 )
-from ..structure.formula_unit import cluster_atoms, select_formula_unit  # noqa: F401
+from ..structure.formula_unit import select_formula_unit
 from ..structure.geometry import _nearest_pbc_cart, view_rotation
-from ..math.pbc import nearest_image_vector_cart
 from ..style.palette import atom_r, elem_color, elem_color_light
 from ..presets import DEFAULT_STYLE, deep_merge, default_preset, json_safe  # noqa: F401
 from ..viewpoint import auto_view_dir
@@ -61,7 +61,6 @@ __all__ = [
     "apply_element_colors",
     "build_scene_from_atoms",
     "build_scene_from_cif",
-    "legacy_scene",
     "merge_structure_style",
     "rebuild_scene_with_style",
     "scene_json",
@@ -78,7 +77,6 @@ def scene_ops():
     return SimpleNamespace(
         parse_asu=parse_asu,
         select_formula_unit=select_formula_unit,
-        find_bonds=find_bonds,
         auto_view_dir=auto_view_dir,
         view_rotation=view_rotation,
         disorder_alpha=disorder_alpha,
@@ -102,76 +100,6 @@ def _bond_endpoints(ai, aj, cell, display_mode: str):
 
 
 _SOURCE_IMAGE_TOL = 1e-5
-
-
-def _bond_record_for_display_pair(
-    left: int,
-    right: int,
-    left_atom: dict[str, Any],
-    right_atom: dict[str, Any],
-    M: Any,
-) -> dict[str, Any]:
-    vector, shift = nearest_image_vector_cart(
-        np.asarray(right_atom["cart"], dtype=float) - np.asarray(left_atom["cart"], dtype=float),
-        np.asarray(M, dtype=float),
-    )
-    return {
-        "left": left,
-        "right": right,
-        "right_image_shift": [int(value) for value in shift],
-        "vector": [float(value) for value in vector],
-    }
-
-
-def _records_from_legacy_pairs(
-    draw_atoms: list[dict[str, Any]],
-    canonical_bond_pairs: list[tuple[int, int]],
-    M: Any,
-) -> list[dict[str, Any]]:
-    """Infer nearest-image relations for legacy canonical bond pairs."""
-    home_by_source: dict[int, dict[str, Any]] = {}
-    for draw_index, atom in enumerate(draw_atoms):
-        try:
-            source_index = int(atom.get("_source_index", draw_index))
-        except (TypeError, ValueError):
-            continue
-        home_by_source.setdefault(source_index, atom)
-
-    records: list[dict[str, Any]] = []
-    for raw_left, raw_right in canonical_bond_pairs:
-        left, right = int(raw_left), int(raw_right)
-        if left not in home_by_source or right not in home_by_source:
-            continue
-        records.append(
-            _bond_record_for_display_pair(
-                left,
-                right,
-                home_by_source[left],
-                home_by_source[right],
-                M,
-            )
-        )
-    return records
-
-
-def _records_from_detected_pairs(
-    draw_atoms: list[dict[str, Any]],
-    detected_pairs: list[tuple[int, int]],
-    M: Any,
-) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    for left_index, right_index in detected_pairs:
-        left_atom = draw_atoms[left_index]
-        right_atom = draw_atoms[right_index]
-        try:
-            left = int(left_atom.get("_source_index", left_index))
-            right = int(right_atom.get("_source_index", right_index))
-        except (TypeError, ValueError):
-            continue
-        records.append(
-            _bond_record_for_display_pair(left, right, left_atom, right_atom, M)
-        )
-    return records
 
 
 def _manifest_strict_bonded_images(
@@ -433,51 +361,6 @@ def _canonical_display_bond_pairs(
     }
 
 
-def _canonical_display_pair_instances(
-    draw_atoms: list[dict[str, Any]],
-    canonical_bond_pairs: list[tuple[int, int]],
-) -> list[tuple[int, int]]:
-    """Lift legacy source-index pairs to every matching fragment image.
-
-    Older MolCrysKit releases expose ``bond_pairs`` without signed PBC
-    ``bond_records``. A one-value ``source_index -> draw_index`` mapping drops
-    all but one boundary-fragment instance. Group by source molecule and
-    display image instead, then emit an edge in every group containing both
-    endpoints. Ungrouped atoms retain the historical one-instance fallback.
-    """
-    fragment_members: dict[tuple[int, tuple[int, int, int]], dict[int, int]] = {}
-    fragment_keys_by_source: dict[int, set[tuple[int, tuple[int, int, int]]]] = {}
-    ungrouped: dict[int, int] = {}
-    for draw_index, atom in enumerate(draw_atoms):
-        try:
-            source_index = int(atom.get("_source_index", draw_index))
-        except (TypeError, ValueError):
-            continue
-        molecule_index = atom.get("_source_molecule_index")
-        if molecule_index is None:
-            ungrouped.setdefault(source_index, draw_index)
-            continue
-        try:
-            image_shift = tuple(int(value) for value in atom.get("_image_shift", (0, 0, 0)))
-            fragment_key = (int(molecule_index), image_shift)
-        except (TypeError, ValueError):
-            ungrouped.setdefault(source_index, draw_index)
-            continue
-        fragment_members.setdefault(fragment_key, {}).setdefault(source_index, draw_index)
-        fragment_keys_by_source.setdefault(source_index, set()).add(fragment_key)
-
-    pairs: set[tuple[int, int]] = set()
-    for raw_left, raw_right in canonical_bond_pairs:
-        left, right = int(raw_left), int(raw_right)
-        common_keys = fragment_keys_by_source.get(left, set()) & fragment_keys_by_source.get(right, set())
-        for key in common_keys:
-            members = fragment_members[key]
-            pairs.add(tuple(sorted((members[left], members[right]))))
-        if not common_keys and left in ungrouped and right in ungrouped:
-            pairs.add(tuple(sorted((ungrouped[left], ungrouped[right]))))
-    return sorted(pairs)
-
-
 def build_scene_from_atoms(
     *,
     name: str,
@@ -497,6 +380,7 @@ def build_scene_from_atoms(
     bond_thresholds: dict[tuple[str, str], float] | None = None,
     canonical_bond_pairs: list[tuple[int, int]] | None = None,
     canonical_bond_records: list[dict[str, Any]] | None = None,
+    molcrys_analysis=None,
 ) -> Dict[str, Any]:
     ops = scene_ops() if ops is None else ops
     preset = default_preset() if preset is None else preset
@@ -505,9 +389,94 @@ def build_scene_from_atoms(
     style = deep_merge(style, entry.get("style"))
     show_h = bool(show_hydrogen) or bool(entry.get("show_hydrogen", style.get("show_hydrogen", False)))
 
+    input_atoms = [dict(atom) for atom in atoms]
+    if molcrys_analysis is None:
+        if canonical_bond_pairs is not None or canonical_bond_records is not None:
+            raise TypeError(
+                "canonical bond projections require the MolCrysKit analysis that "
+                "provided their SiteRecord identities; pass molcrys_analysis."
+            )
+        analyze_kwargs: dict[str, Any] = {}
+        if bond_scale is not None:
+            analyze_kwargs["bond_scale"] = bond_scale
+        if bond_thresholds is not None:
+            analyze_kwargs["bond_thresholds"] = bond_thresholds
+        molcrys_analysis = molcrys_bridge.analyze(input_atoms, M, **analyze_kwargs)
+    molcrys_bridge.require_structure_contract(
+        molcrys_analysis,
+        atom_count=len(input_atoms),
+        require_formula_unit=display_mode == "formula_unit",
+    )
+    source_atoms = molcrys_bridge.atoms_with_site_provenance(
+        input_atoms,
+        molcrys_analysis,
+    )
+    canonical_records = [dict(record) for record in molcrys_analysis.bond_records]
+    canonical_pairs = sorted(
+        {
+            tuple(sorted((int(record["left"]), int(record["right"]))))
+            for record in canonical_records
+        }
+    )
+    if canonical_bond_records is not None:
+        supplied = {
+            (
+                int(record["left"]),
+                int(record["right"]),
+                tuple(int(value) for value in record["right_image_shift"]),
+            )
+            for record in canonical_bond_records
+        }
+        canonical = {
+            (
+                int(record["left"]),
+                int(record["right"]),
+                tuple(int(value) for value in record["right_image_shift"]),
+            )
+            for record in canonical_records
+        }
+        if supplied != canonical:
+            raise ValueError(
+                "canonical_bond_records disagrees with molcrys_analysis; "
+                "MatterVis will not replace MolCrysKit connectivity."
+            )
+    if canonical_bond_pairs is not None and {
+        tuple(sorted((int(left), int(right))))
+        for left, right in canonical_bond_pairs
+    } != set(canonical_pairs):
+        raise ValueError(
+            "canonical_bond_pairs disagrees with molcrys_analysis; MatterVis "
+            "will not replace MolCrysKit connectivity."
+        )
+
+    if display_mode == "formula_unit":
+        canonical_formula_atoms = molcrys_bridge.select_formula_unit(
+            source_atoms,
+            M,
+            analysis=molcrys_analysis,
+        )
+        if formula_unit_atoms is not None:
+            def _formula_signature(items):
+                return [
+                    (
+                        int(atom.get("_source_index", index)),
+                        tuple(np.round(np.asarray(atom["cart"], dtype=float), 7)),
+                    )
+                    for index, atom in enumerate(items)
+                ]
+
+            if _formula_signature(formula_unit_atoms) != _formula_signature(
+                canonical_formula_atoms
+            ):
+                raise ValueError(
+                    "formula_unit_atoms disagrees with MolCrysKit's "
+                    "FormulaUnitSelection."
+                )
+        formula_unit_atoms = canonical_formula_atoms
+
     sel_atoms = selected_atoms_for_mode(
         ops,
-        atoms,
+        source_atoms,
         M,
         cell,
         display_mode=display_mode,
@@ -517,51 +486,13 @@ def build_scene_from_atoms(
     )
     draw_atoms = [dict(atom) for atom in sel_atoms if show_h or atom["elem"] != "H"]
 
-    canonical_pairs = None
-    canonical_records = None
-    if display_mode in ("formula_unit", "unit_cell"):
-        canonical_pairs = canonical_bond_pairs
-        canonical_records = canonical_bond_records
-    image_records = list(canonical_records or [])
+    image_records = list(canonical_records)
     strict_cell = display_mode == "unit_cell" and not include_boundary_replicas
-    if strict_cell and not canonical_records:
-        if canonical_pairs is not None:
-            image_records = _records_from_legacy_pairs(draw_atoms, canonical_pairs, M)
-        detected_pairs = ops.find_bonds(
-            draw_atoms,
-            M=M,
-            cell=cell,
-            bond_scale=bond_scale,
-            bond_thresholds=bond_thresholds,
-        )
-        detected_records = _records_from_detected_pairs(draw_atoms, detected_pairs, M)
-        if canonical_pairs is None:
-            canonical_pairs = [
-                (int(record["left"]), int(record["right"]))
-                for record in detected_records
-            ]
-            image_records = detected_records
-        else:
-            record_keys = {
-                (
-                    int(record["left"]),
-                    int(record["right"]),
-                    tuple(int(value) for value in record["right_image_shift"]),
-                )
-                for record in image_records
-            }
-            for record in detected_records:
-                relation = tuple(int(value) for value in record["right_image_shift"])
-                key = (int(record["left"]), int(record["right"]), relation)
-                if relation != (0, 0, 0) and key not in record_keys:
-                    image_records.append(record)
-                    record_keys.add(key)
-        canonical_records = image_records
     bonded_image_replica_count = 0
     if strict_cell and image_records:
         bonded_image_replica_count = _manifest_strict_bonded_images(
             draw_atoms,
-            atoms,
+            source_atoms,
             M,
             image_records,
         )
@@ -583,40 +514,16 @@ def build_scene_from_atoms(
             atom["color_light"] = ops.elem_color_light(atom["elem"])
             atom["atom_radius"] = float(ops.atom_r(atom["elem"]))
 
-    effective_cell = None if display_mode == "cluster" else cell
-    # Pass M so that the KDTree pre-filter generates ghost images for
-    # cross-cell bonds in framework structures (atoms that were NOT
-    # unwrapped retain their wrapped cart positions and may have bonded
-    # neighbours on the other side of the cell boundary).  Without M
-    # the KDTree uses non-PBC Cartesian distances and misses these pairs.
-    effective_M = None if display_mode == "cluster" else M
-    bond_source = "canonical_mck" if canonical_pairs is not None else "redetect"
+    bond_source = "canonical_mck"
 
     telemetry_enabled = os.environ.get("MATTERVIS_SCENE_PERF_EVENTS") == "1"
     bond_started = time.perf_counter() if telemetry_enabled else None
     canonical_stats: dict[str, int] = {}
-    if canonical_records:
-        bond_pairs, canonical_stats = _canonical_display_bond_pairs(
-            draw_atoms,
-            atoms,
-            canonical_records,
-        )
-    elif canonical_pairs is not None:
-        bond_pairs = _canonical_display_pair_instances(draw_atoms, canonical_pairs)
-    elif bond_scale is None and bond_thresholds is None:
-        bond_pairs = ops.find_bonds(
-            draw_atoms,
-            M=effective_M,
-            cell=effective_cell,
-        )
-    else:
-        bond_pairs = ops.find_bonds(
-            draw_atoms,
-            M=effective_M,
-            cell=effective_cell,
-            bond_scale=bond_scale,
-            bond_thresholds=bond_thresholds,
-        )
+    bond_pairs, canonical_stats = _canonical_display_bond_pairs(
+        draw_atoms,
+        source_atoms,
+        canonical_records,
+    )
     bonds = []
     conflict_drops = 0
     render_length_drops = 0
@@ -659,7 +566,7 @@ def build_scene_from_atoms(
             kind="event",
             info={
                 "source": bond_source,
-                "mapping": "source_image_lift" if canonical_records else "legacy_source_map",
+                "mapping": "source_image_lift",
                 "display_mode": display_mode,
                 "canonical_records": len(canonical_records or []),
                 "draw_atoms": len(draw_atoms),
@@ -715,6 +622,19 @@ def build_scene_from_atoms(
         "bond_thresholds": copy.deepcopy(bond_thresholds),
         "projected_axes": projected_axes,
         "axis_labels": axis_labels,
+        "_canonical_source_atoms": [dict(atom) for atom in source_atoms],
+        "_canonical_site_records": [
+            {
+                "global_index": int(record.global_index),
+                "molecule_index": int(record.molecule_index),
+                "local_index": int(record.local_index),
+                "asym_index": record.asym_index,
+                "sym_op_index": record.sym_op_index,
+                "image_shift": [int(value) for value in record.image_shift],
+            }
+            for record in molcrys_analysis.site_records
+        ],
+        "_canonical_bond_records": copy.deepcopy(canonical_records),
     }
     apply_element_colors(
         scene,
@@ -736,14 +656,21 @@ def build_scene_from_cif(
 ) -> Dict[str, Any]:
     ops = scene_ops() if ops is None else ops
     preset = default_preset() if preset is None else preset
-    atoms, cell, legacy_M = ops.parse_asu(cif_path)
-    M = np.asarray(legacy_M, dtype=float).T
-    view_dir, up = legacy_scene._resolve_view(ops, name, atoms, legacy_M, cell, preset)
+    parsed = load_cif(cif_path)
+    atoms = [dict(atom) for atom in parsed.atoms]
+    cell = parsed.cell
+    M = np.asarray(parsed.matrix, dtype=float)
+    analysis = molcrys_bridge.analyze_crystal(parsed.crystal)
+    view_dir, up = legacy_scene._resolve_view(
+        ops,
+        name,
+        atoms,
+        M,
+        cell,
+        preset,
+        molcrys_analysis=analysis,
+    )
     R = ops.view_rotation(view_dir, up)
-    formula_unit_atoms = None
-    if display_mode == "formula_unit":
-        from ..structure import molcrys_bridge
-        formula_unit_atoms = molcrys_bridge.select_formula_unit(atoms, M)
     scene = build_scene_from_atoms(
         name=name,
         title=title,
@@ -755,8 +682,8 @@ def build_scene_from_cif(
         show_hydrogen=show_hydrogen,
         display_mode=display_mode,
         ops=ops,
-        formula_unit_atoms=formula_unit_atoms,
         unwrapped_atoms=None,
+        molcrys_analysis=analysis,
     )
     scene["cif_path"] = cif_path
     scene["view_direction"] = np.array(view_dir, dtype=float)

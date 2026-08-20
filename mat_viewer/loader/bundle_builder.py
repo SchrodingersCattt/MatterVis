@@ -8,7 +8,8 @@ from typing import Any, Dict, Optional
 import numpy as np
 
 from .. import perf_log
-from ..scene import build_scene_from_atoms, legacy_scene, scene_ops
+from ..legacy import crystal_scene as legacy_scene
+from ..scene import build_scene_from_atoms, scene_ops
 from ..structure import molcrys_bridge
 from .core import (
     LoadedCrystal,
@@ -82,15 +83,15 @@ def build_loaded_crystal_from_atoms(
 
     if source == "catalog":
         with perf_log.time_block("loader:resolve_view", kind="event", structure=name):
-            legacy_M = M.T
             view_dir, up = legacy_scene._resolve_view(
                 ops,
                 name,
                 raw_atoms,
-                legacy_M,
+                M,
                 cell,
                 preset,
                 view_weights=view_weights,
+                molcrys_analysis=molcrys_analysis,
             )
     else:
         with perf_log.time_block(
@@ -124,8 +125,7 @@ def build_loaded_crystal_from_atoms(
             unwrapped_atoms=unwrapped_atoms,
             bond_scale=bond_scale,
             bond_thresholds=bond_thresholds,
-            canonical_bond_pairs=getattr(molcrys_analysis, "bond_pairs", None),
-            canonical_bond_records=getattr(molcrys_analysis, "bond_records", None),
+            molcrys_analysis=molcrys_analysis,
         )
     initial_scene["cif_path"] = source_path
     initial_scene["source_path"] = source_path

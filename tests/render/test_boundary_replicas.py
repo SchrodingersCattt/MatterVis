@@ -15,6 +15,7 @@ from __future__ import annotations
 import gemmi
 import numpy as np
 import pytest
+from types import SimpleNamespace
 
 from mat_viewer.scene import build_scene_from_atoms, scene_ops
 
@@ -30,6 +31,29 @@ def _atom(label: str, frac, M):
         "dg": ".",
         "da": ".",
     }
+
+
+def _analysis(atoms, records):
+    return SimpleNamespace(
+        site_records=tuple(
+            SimpleNamespace(
+                global_index=index,
+                molecule_index=0,
+                local_index=index,
+                fractional_position=np.asarray(atom["frac"], dtype=float),
+                image_shift=(0, 0, 0),
+                asym_index=index,
+                sym_op_index=0,
+            )
+            for index, atom in enumerate(atoms)
+        ),
+        bond_records=list(records),
+        bond_pairs=[
+            tuple(sorted((int(record["left"]), int(record["right"]))))
+            for record in records
+        ],
+        formula_unit_selection=None,
+    )
 
 
 def test_atom_on_corner_replicates_to_eight_corners():
@@ -680,6 +704,9 @@ def test_strict_unit_cell_manifests_cross_boundary_bonded_images():
         _atom("C1", [-0.02, 0.5, 0.5], M),
         _atom("C2", [0.02, 0.5, 0.5], M),
     ]
+    records = [
+        {"left": 0, "right": 1, "right_image_shift": [1, 0, 0]}
+    ]
 
     scene = build_scene_from_atoms(
         name="strict_cross_boundary_bond",
@@ -691,7 +718,7 @@ def test_strict_unit_cell_manifests_cross_boundary_bonded_images():
         display_mode="unit_cell",
         include_boundary_replicas=False,
         ops=scene_ops(),
-        canonical_bond_pairs=[(0, 1)],
+        molcrys_analysis=_analysis(atoms, records),
         preset={"style": {"show_labels": False, "show_axes": False}},
     )
 
@@ -714,7 +741,7 @@ def test_strict_unit_cell_manifests_cross_boundary_bonded_images():
     assert all(np.isclose(np.linalg.norm(bond["end"] - bond["start"]), 0.4) for bond in scene["bonds"])
 
 
-def test_strict_unit_cell_supplements_missing_legacy_cross_boundary_pair():
+def test_strict_unit_cell_keeps_empty_mck_bond_contract_empty():
     cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
     M = np.eye(3) * 10.0
     atoms = [
@@ -733,21 +760,13 @@ def test_strict_unit_cell_supplements_missing_legacy_cross_boundary_pair():
         display_mode="unit_cell",
         include_boundary_replicas=False,
         ops=scene_ops(),
-        canonical_bond_pairs=[(0, 1)],
-        canonical_bond_records=[],
+        molcrys_analysis=_analysis(atoms, []),
         preset={"style": {"show_labels": False, "show_axes": False}},
     )
 
-    # The missing legacy relation exposes a connected three-atom fragment;
-    # strict completion mirrors the whole fragment, not only its endpoints.
-    assert scene["bonded_image_replica_count"] == 3
-    assert len(scene["bonds"]) == 4
-    degrees = [0] * len(scene["draw_atoms"])
-    for bond in scene["bonds"]:
-        degrees[bond["i"]] += 1
-        degrees[bond["j"]] += 1
-    assert all(degrees[index] > 0 for index in range(3))
-    assert all(degree > 0 for degree in degrees[3:])
+    assert scene["bonded_image_replica_count"] == 0
+    assert len(scene["draw_atoms"]) == 3
+    assert scene["bonds"] == []
 
 
 def test_strict_unit_cell_preserves_in_cell_canonical_bonds():
@@ -756,6 +775,9 @@ def test_strict_unit_cell_preserves_in_cell_canonical_bonds():
     atoms = [
         _atom("C1", [0.40, 0.5, 0.5], M),
         _atom("C2", [0.52, 0.5, 0.5], M),
+    ]
+    records = [
+        {"left": 0, "right": 1, "right_image_shift": [0, 0, 0]}
     ]
 
     scene = build_scene_from_atoms(
@@ -768,7 +790,7 @@ def test_strict_unit_cell_preserves_in_cell_canonical_bonds():
         display_mode="unit_cell",
         include_boundary_replicas=False,
         ops=scene_ops(),
-        canonical_bond_pairs=[(0, 1)],
+        molcrys_analysis=_analysis(atoms, records),
         preset={"style": {"show_labels": False, "show_axes": False}},
     )
 

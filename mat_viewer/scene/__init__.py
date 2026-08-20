@@ -4,19 +4,13 @@ from . import core as _core
 from . import state as _state
 from . import store as _store
 
-# Re-export public symbols from each sub-module.
-# Legacy: build_scene_from_atoms is defined in scene/core.py but the
-# canonical owner is render/assembly.py per docs/agents/scene_api.md.
-#
-# core.py is the broad compatibility facade — use dir() because its
-# public surface includes legacy static-publication imports and other
-# transient symbols.
-
-# core.py
+# Re-export only explicit public contracts.  ``dir(core)`` previously leaked
+# imported local chemistry helpers (including ``find_bonds``) through this
+# facade, making a private fallback look like a supported scene API.
 globals().update({
     name: getattr(_core, name)
-    for name in dir(_core)
-    if not name.startswith("__")
+    for name in getattr(_core, "__all__", ())
+    if hasattr(_core, name)
 })
 
 # state.py — narrow, uses explicit __all__
@@ -33,4 +27,8 @@ globals().update({
     if hasattr(_store, name)
 })
 
-__all__ = [name for name in globals() if not name.startswith("__")]
+__all__ = [
+    *getattr(_core, "__all__", ()),
+    *getattr(_state, "__all__", ()),
+    *getattr(_store, "__all__", ()),
+]

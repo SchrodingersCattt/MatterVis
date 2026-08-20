@@ -31,7 +31,7 @@ PUBLIC_IMPORTS = {
     "mat_viewer.scene.store": ("Scene", "SceneStore"),
     "mat_viewer.scenes": ("Scene", "SceneStore"),
     "mat_viewer.structure.cif_parse": ("parse_asu",),
-    "mat_viewer.structure.bonds": ("find_bonds", "bonds_conflict"),
+    "mat_viewer.structure.bonds": ("bonds_conflict",),
     "mat_viewer.structure.snapshot": ("molecular_crystal_from_scene",),
     "mat_viewer.topology": ("analyze_topology", "extract_coordination_shell"),
     "mat_viewer.transforms": ("apply_transforms", "transforms_cache_key"),

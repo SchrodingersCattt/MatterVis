@@ -23,6 +23,10 @@ from molcrys_kit.utils.geometry import cart_to_frac, frac_to_cart
 from ..style.disorder import atom_is_minor
 
 
+class StructureContractError(RuntimeError):
+    """Raised when MolCrysKit's renderer-facing structure contract is absent."""
+
+
 def _require_molcryskit():
     """Import MolCrysKit lazily and surface a clean error if missing."""
     try:
@@ -313,6 +317,8 @@ class CrystalAnalysis:
         # ``x_right + S @ M - x_left``.  Display assembly uses this relation
         # to materialise the edge on the matching boundary image rather than
         # re-perceiving chemistry on replica atoms.
+        self._bond_records_present = bond_records is not None
+        self._site_records_present = site_records is not None
         self.bond_records: list[dict] = list(bond_records or [])
         self.site_records = tuple(site_records or ())
         self.formula_unit_selection = formula_unit_selection
@@ -320,6 +326,103 @@ class CrystalAnalysis:
         # stable sorted identity and the edge-connected traversal are mapped
         # to raw/global source indices before any display copies are created.
         self.ring_records: list[dict] = list(ring_records or [])
+
+
+def require_structure_contract(
+    analysis,
+    *,
+    atom_count: int | None = None,
+    require_formula_unit: bool = False,
+):
+    """Validate the complete MolCrysKit contract used by public render paths.
+
+    Empty ``bond_records`` is a valid statement that a structure has no bonds;
+    an absent/``None`` attribute is not. The same distinction matters for
+    ``site_records`` because their global indices are the stable identity used
+    to lift PBC bonds onto displayed images.
+    """
+    if analysis is None:
+        raise StructureContractError(
+            "MatterVis requires a MolCrysKit CrystalAnalysis built from "
+            "get_site_records() and get_bond_records(); no analysis was supplied."
+        )
+
+    site_records = getattr(analysis, "site_records", None)
+    bond_records = getattr(analysis, "bond_records", None)
+    if site_records is None or getattr(analysis, "_site_records_present", True) is False:
+        raise StructureContractError(
+            "MolCrysKit analysis is missing public SiteRecord data."
+        )
+    if bond_records is None or getattr(analysis, "_bond_records_present", True) is False:
+        raise StructureContractError(
+            "MolCrysKit analysis is missing public BondRecord data."
+        )
+
+    sites = tuple(site_records)
+    if atom_count is not None:
+        globals_seen: list[int] = []
+        for record in sites:
+            try:
+                globals_seen.append(int(record.global_index))
+            except (AttributeError, TypeError, ValueError) as exc:
+                raise StructureContractError(
+                    "MolCrysKit SiteRecord is missing a valid global_index."
+                ) from exc
+        if sorted(globals_seen) != list(range(int(atom_count))):
+            raise StructureContractError(
+                "MolCrysKit SiteRecord global indices must match the source atom "
+                "sequence exactly."
+            )
+
+    for record in bond_records:
+        try:
+            left = int(record["left"])
+            right = int(record["right"])
+            shift = tuple(int(value) for value in record["right_image_shift"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise StructureContractError(
+                "MolCrysKit BondRecord projection is missing left/right/PBC shift."
+            ) from exc
+        if len(shift) != 3:
+            raise StructureContractError(
+                "MolCrysKit BondRecord right_image_shift must have three integers."
+            )
+        if atom_count is not None and not (
+            0 <= left < int(atom_count) and 0 <= right < int(atom_count)
+        ):
+            raise StructureContractError(
+                "MolCrysKit BondRecord endpoint is outside the SiteRecord sequence."
+            )
+
+    if require_formula_unit:
+        selection = getattr(analysis, "formula_unit_selection", None)
+        if selection is None or not hasattr(selection, "members"):
+            raise StructureContractError(
+                "MolCrysKit analysis is missing FormulaUnitSelection.members."
+            )
+        if atom_count and not tuple(selection.members):
+            raise StructureContractError(
+                "MolCrysKit returned an empty FormulaUnitSelection for a non-empty "
+                "structure."
+            )
+    return analysis
+
+
+def atoms_with_site_provenance(raw_atoms, analysis):
+    """Copy atom dicts and attach stable identities from public SiteRecords."""
+    atoms = [copy.deepcopy(atom) for atom in raw_atoms]
+    require_structure_contract(analysis, atom_count=len(atoms))
+    records = sorted(analysis.site_records, key=lambda record: int(record.global_index))
+    for atom, record in zip(atoms, records):
+        source_index = int(record.global_index)
+        frac = np.asarray(atom.get("frac", record.fractional_position), dtype=float)
+        atom["_source_index"] = source_index
+        atom["_source_molecule_index"] = int(record.molecule_index)
+        atom.setdefault("_molecule_index", int(record.molecule_index))
+        atom.setdefault("_molecule_local_index", int(record.local_index))
+        atom.setdefault("_wrapped_frac", frac - np.floor(frac))
+        atom.setdefault("_mck_image_shift", list(record.image_shift))
+    return atoms
 
 
 def analyze_crystal(crystal) -> CrystalAnalysis:
@@ -485,9 +588,14 @@ def select_formula_unit(raw_atoms, M, *, analysis=None):
     """Materialise MolCrysKit's deterministic compact formula-unit selection."""
     if analysis is None:
         analysis = analyze(raw_atoms, M)
+    require_structure_contract(
+        analysis,
+        atom_count=len(raw_atoms),
+        require_formula_unit=True,
+    )
     selection = analysis.formula_unit_selection
-    if selection is None or not selection.members:
-        return [copy.deepcopy(atom) for atom in raw_atoms]
+    if not selection.members:
+        return []
 
     M = np.asarray(M, dtype=float)
     chosen_atoms = []
@@ -507,3 +615,16 @@ def select_formula_unit(raw_atoms, M, *, analysis=None):
         chosen_atoms.extend(translated)
 
     return chosen_atoms
+
+
+__all__ = [
+    "CrystalAnalysis",
+    "StructureContractError",
+    "analyze",
+    "analyze_crystal",
+    "atoms_with_site_provenance",
+    "formula_to_moiety",
+    "molecular_crystal_from_bundle",
+    "require_structure_contract",
+    "select_formula_unit",
+]

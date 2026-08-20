@@ -11,7 +11,8 @@ import numpy as np
 from molcrys_kit.utils.geometry import cart_to_frac
 
 from .. import perf_log
-from ..scene import build_scene_from_atoms, legacy_scene, scene_metadata, scene_ops
+from ..legacy import crystal_scene as legacy_scene
+from ..scene import build_scene_from_atoms, scene_metadata, scene_ops
 
 
 @dataclass
@@ -969,10 +970,7 @@ def build_bundle_scene(
             include_boundary_replicas=include_boundary_replicas,
             bond_scale=bundle.bond_scale,
             bond_thresholds=bundle.bond_thresholds,
-            canonical_bond_pairs=getattr(bundle.molcrys_analysis, "bond_pairs", None),
-            canonical_bond_records=getattr(
-                bundle.molcrys_analysis, "bond_records", None
-            ),
+            molcrys_analysis=bundle.molcrys_analysis,
         )
         base_scene["cif_path"] = bundle.cif_path
         base_scene["view_direction"] = view_dir

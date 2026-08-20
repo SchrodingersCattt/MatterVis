@@ -502,4 +502,6 @@ def find_bonds(atoms, M=None, cell=None, *, bond_scale=None, bond_thresholds=Non
     return result
 
 
-__all__ = [name for name in globals() if not name.startswith("__")]
+# ``find_bonds`` remains as an internal benchmark/legacy helper. Public scene,
+# transform and agent paths consume MolCrysKit BondRecord instead.
+__all__ = ["bonds_conflict"]
