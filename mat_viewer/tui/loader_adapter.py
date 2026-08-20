@@ -291,10 +291,14 @@ def _source_to_display_shift(
 
 
 def _cif_source_site_count(path: str) -> int:
-    import gemmi
+    from ..structure.cif_parse import load_cif
 
-    block = gemmi.cif.read(path).sole_block()
-    return len(list(block.find_loop("_atom_site_label")))
+    asym_indices = {
+        record.asym_index
+        for record in load_cif(path).crystal.get_site_records()
+        if record.asym_index is not None
+    }
+    return len(asym_indices)
 
 
 def _element_counts_from_raw(atoms: list[dict]) -> dict[str, int]:
@@ -306,33 +310,25 @@ def _element_counts_from_raw(atoms: list[dict]) -> dict[str, int]:
 
 
 def _extract_spacegroup_from_cif(path: str) -> str:
-    """Try to extract spacegroup symbol from CIF file."""
+    """Read declared space-group metadata without a second structure parser."""
     try:
-        import gemmi
-
-        doc = gemmi.cif.read(path)
-        block = doc.sole_block()
-        for tag in [
-            "_space_group_name_H-M_alt",
-            "_symmetry_space_group_name_H-M",
-            "_space_group_name_H-M",
-        ]:
-            val = block.find_value(tag)
-            if val:
-                cleaned = str(val).strip().strip("'").strip('"')
-                if cleaned and cleaned not in (".", "?"):
-                    return cleaned
-        # Try IT number
-        it_val = block.find_value("_space_group_IT_number") or block.find_value(
-            "_symmetry_Int_Tables_number"
-        )
-        if it_val:
-            num = int(gemmi.cif.as_number(it_val))
-            sg = gemmi.find_spacegroup_by_number(num)
-            if sg:
-                return sg.hm
-    except Exception:
-        pass
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    tags = (
+        "_space_group_name_H-M_alt",
+        "_symmetry_space_group_name_H-M",
+        "_space_group_name_H-M",
+    )
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        lower = line.lower()
+        for tag in tags:
+            if not lower.startswith(tag.lower()):
+                continue
+            value = line[len(tag) :].strip().strip("'").strip('"')
+            if value and value not in {".", "?"}:
+                return value
     return ""
 
 

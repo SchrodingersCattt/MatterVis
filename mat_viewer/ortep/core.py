@@ -4,9 +4,20 @@ import math
 from typing import Iterable
 
 import numpy as np
-import plotly.graph_objects as go
 
 from ..presets import ORTEP_MODES
+
+
+def _plotly_go():
+    """Import the optional Plotly adapter only when a Plotly trace is built."""
+    try:
+        import plotly.graph_objects as go
+    except ImportError as exc:
+        raise ImportError(
+            "Plotly ORTEP traces require `pip install matter-vis[plotly]`. "
+            "CPU PNG/PDF/SVG ORTEP rendering is available in the base install."
+        ) from exc
+    return go
 
 
 CHI2_3D_50 = 2.3659738843753377
@@ -55,26 +66,66 @@ def _probability_scale(probability: float, *, dimensions: int) -> float:
 def _normal_ppf(p: float) -> float:
     # Peter J. Acklam's rational approximation, trimmed to the central use
     # needed by ORTEP probability controls.
-    a = [-3.969683028665376e01, 2.209460984245205e02, -2.759285104469687e02, 1.383577518672690e02, -3.066479806614716e01, 2.506628277459239e00]
-    b = [-5.447609879822406e01, 1.615858368580409e02, -1.556989798598866e02, 6.680131188771972e01, -1.328068155288572e01]
-    c = [-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e00, -2.549732539343734e00, 4.374664141464968e00, 2.938163982698783e00]
-    d = [7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e00, 3.754408661907416e00]
+    a = [
+        -3.969683028665376e01,
+        2.209460984245205e02,
+        -2.759285104469687e02,
+        1.383577518672690e02,
+        -3.066479806614716e01,
+        2.506628277459239e00,
+    ]
+    b = [
+        -5.447609879822406e01,
+        1.615858368580409e02,
+        -1.556989798598866e02,
+        6.680131188771972e01,
+        -1.328068155288572e01,
+    ]
+    c = [
+        -7.784894002430293e-03,
+        -3.223964580411365e-01,
+        -2.400758277161838e00,
+        -2.549732539343734e00,
+        4.374664141464968e00,
+        2.938163982698783e00,
+    ]
+    d = [
+        7.784695709041462e-03,
+        3.224671290700398e-01,
+        2.445134137142996e00,
+        3.754408661907416e00,
+    ]
     plow = 0.02425
     phigh = 1.0 - plow
     if p < plow:
         q = math.sqrt(-2.0 * math.log(p))
-        return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1.0)
+        return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / (
+            (((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1.0
+        )
     if p > phigh:
         q = math.sqrt(-2.0 * math.log(1.0 - p))
-        return -(((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1.0)
+        return -(
+            ((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]
+        ) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1.0)
     q = p - 0.5
     r = q * q
-    return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1.0)
+    return (
+        (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5])
+        * q
+        / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1.0)
+    )
 
 
-def _as_u_matrix(U: Iterable[Iterable[float]] | None, *, uiso: float | None = None) -> np.ndarray:
+def _as_u_matrix(
+    U: Iterable[Iterable[float]] | None, *, uiso: float | None = None
+) -> np.ndarray:
     if U is None:
-        u = DEFAULT_ORTEP_UISO if uiso is None else max(float(uiso), 1e-6)
+        if uiso is None or not np.isfinite(float(uiso)) or float(uiso) <= 0.0:
+            raise ValueError(
+                "ORTEP requires Ucart or Uiso data. Choose an explicit "
+                "missing_adp_policy in RenderSpec to skip or substitute missing sites."
+            )
+        u = float(uiso)
         return np.eye(3, dtype=float) * u
     mat = np.asarray(U, dtype=float)
     if mat.shape != (3, 3):
@@ -97,7 +148,15 @@ def ellipsoid_principal_axes(U, *, probability: float = 0.5, uiso: float | None 
     return lengths, eigvecs
 
 
-def ortep_mesh3d(center, U, *, probability: float = 0.5, lat_steps: int = 10, lon_steps: int = 18, uiso: float | None = None):
+def ortep_mesh3d(
+    center,
+    U,
+    *,
+    probability: float = 0.5,
+    lat_steps: int = 10,
+    lon_steps: int = 18,
+    uiso: float | None = None,
+):
     center = np.asarray(center, dtype=float)
     lengths, axes = ellipsoid_principal_axes(U, probability=probability, uiso=uiso)
     vertices = [center + axes @ (lengths * np.array([0.0, 0.0, 1.0]))]
@@ -105,7 +164,13 @@ def ortep_mesh3d(center, U, *, probability: float = 0.5, lat_steps: int = 10, lo
         theta = math.pi * lat / lat_steps
         for lon in range(lon_steps):
             phi = 2.0 * math.pi * lon / lon_steps
-            unit = np.array([math.sin(theta) * math.cos(phi), math.sin(theta) * math.sin(phi), math.cos(theta)])
+            unit = np.array(
+                [
+                    math.sin(theta) * math.cos(phi),
+                    math.sin(theta) * math.sin(phi),
+                    math.cos(theta),
+                ]
+            )
             vertices.append(center + axes @ (lengths * unit))
     south = len(vertices)
     vertices.append(center + axes @ (lengths * np.array([0.0, 0.0, -1.0])))
@@ -133,7 +198,16 @@ def ortep_mesh3d(center, U, *, probability: float = 0.5, lat_steps: int = 10, lo
     return np.asarray(vertices, dtype=float), np.asarray(triangles, dtype=int)
 
 
-def ortep_billboard_polygon(center, U, view_x, view_y, *, probability: float = 0.5, n_pts: int = 48, uiso: float | None = None):
+def ortep_billboard_polygon(
+    center,
+    U,
+    view_x,
+    view_y,
+    *,
+    probability: float = 0.5,
+    n_pts: int = 48,
+    uiso: float | None = None,
+):
     center = np.asarray(center, dtype=float)
     view_x = np.asarray(view_x, dtype=float)
     view_y = np.asarray(view_y, dtype=float)
@@ -151,17 +225,28 @@ def ortep_billboard_polygon(center, U, view_x, view_y, *, probability: float = 0
     ax3d = e0[0] * view_x + e0[1] * view_y
     ay3d = e1[0] * view_x + e1[1] * view_y
     t = np.linspace(0.0, 2.0 * math.pi, int(n_pts), endpoint=False)
-    verts = center[None, :] + (a_ax * np.cos(t))[:, None] * ax3d[None, :] + (b_ax * np.sin(t))[:, None] * ay3d[None, :]
+    verts = (
+        center[None, :]
+        + (a_ax * np.cos(t))[:, None] * ax3d[None, :]
+        + (b_ax * np.sin(t))[:, None] * ay3d[None, :]
+    )
     return verts, float(a_ax), float(b_ax)
 
 
-def ortep_principal_axis_segments(center, U, *, probability: float = 0.5, uiso: float | None = None):
+def ortep_principal_axis_segments(
+    center, U, *, probability: float = 0.5, uiso: float | None = None
+):
     center = np.asarray(center, dtype=float)
     lengths, axes = ellipsoid_principal_axes(U, probability=probability, uiso=uiso)
-    return [(center - axes[:, idx] * lengths[idx], center + axes[:, idx] * lengths[idx]) for idx in range(3)]
+    return [
+        (center - axes[:, idx] * lengths[idx], center + axes[:, idx] * lengths[idx])
+        for idx in range(3)
+    ]
 
 
-def ortep_octant_shading(center, U, view_dir, *, probability: float = 0.5, uiso: float | None = None):
+def ortep_octant_shading(
+    center, U, view_dir, *, probability: float = 0.5, uiso: float | None = None
+):
     center = np.asarray(center, dtype=float)
     view_dir = np.asarray(view_dir, dtype=float)
     view_dir = view_dir / max(np.linalg.norm(view_dir), 1e-12)
@@ -171,7 +256,12 @@ def ortep_octant_shading(center, U, view_dir, *, probability: float = 0.5, uiso:
         for sy in (-1.0, 1.0):
             for sz in (-1.0, 1.0):
                 direction = axes @ (lengths * np.array([sx, sy, sz]))
-                octants.append({"center": center + 0.5 * direction, "lit": bool(np.dot(direction, view_dir) >= 0.0)})
+                octants.append(
+                    {
+                        "center": center + 0.5 * direction,
+                        "lit": bool(np.dot(direction, view_dir) >= 0.0),
+                    }
+                )
     return octants
 
 
@@ -215,9 +305,18 @@ def _clamp_u_for_visualisation(U, uiso: float, atom: dict) -> tuple:
 
 def _atom_u(atom: dict):
     uiso = atom.get("uiso")
-    if uiso is None or float(uiso) <= 0.0:
-        uiso = _default_uiso_for_atom(atom)
-    return _clamp_u_for_visualisation(atom.get("U"), float(uiso), atom)
+    U = atom.get("U")
+    if U is None and (
+        uiso is None or not np.isfinite(float(uiso)) or float(uiso) <= 0.0
+    ):
+        raise ValueError(
+            f"ORTEP site {atom.get('label') or atom.get('elem') or '?'} has no ADP data; "
+            "set an explicit missing_adp_policy instead of relying on a fabricated Uiso."
+        )
+    scalar = None if uiso is None else float(uiso)
+    if scalar is None:
+        scalar = float(np.trace(np.asarray(U, dtype=float)) / 3.0)
+    return _clamp_u_for_visualisation(U, scalar, atom)
 
 
 def _atom_color(atom: dict, style: dict) -> str:
@@ -290,7 +389,7 @@ def _ortep_outline_trace(segments, *, color: str, width: float, name: str):
         xs.extend([float(first[0]), None])
         ys.extend([float(first[1]), None])
         zs.extend([float(first[2]), None])
-    return go.Scatter3d(
+    return _plotly_go().Scatter3d(
         x=xs,
         y=ys,
         z=zs,
@@ -321,14 +420,12 @@ def ortep_atom_mesh_traces(scene: dict, style: dict):
 
     probability = float(style.get("ortep_probability", 0.5))
     show_minor_only = bool(style.get("show_minor_only", False))
-    minor_opacity = float(style.get("minor_opacity", 0.35))
     major_opacity = float(style.get("major_opacity", 1.0))
     # ``force_minor_fade`` lets callers combine dashed-bond disorder with
     # translucent minor ellipsoids (the default ``disorder == "opacity"``
     # behaviour is otherwise mutually exclusive with dashed bonds).
-    fade_minor = (
-        style.get("disorder") == "opacity"
-        or bool(style.get("force_minor_fade", False))
+    fade_minor = style.get("disorder") == "opacity" or bool(
+        style.get("force_minor_fade", False)
     )
 
     # Subdivision budget mirrors ``_atom_mesh_traces``. ORTEP scenes
@@ -340,7 +437,11 @@ def ortep_atom_mesh_traces(scene: dict, style: dict):
     if user_lat is not None and user_lon is not None:
         lat_steps, lon_steps = int(user_lat), int(user_lon)
     else:
-        n_atoms = sum(1 for a in scene.get("draw_atoms", []) if not show_minor_only or a.get("is_minor"))
+        n_atoms = sum(
+            1
+            for a in scene.get("draw_atoms", [])
+            if not show_minor_only or a.get("is_minor")
+        )
         if n_atoms > 400:
             lat_steps, lon_steps = 4, 8
         elif n_atoms > 150:
@@ -372,7 +473,9 @@ def ortep_atom_mesh_traces(scene: dict, style: dict):
         is_minor = _atom_is_minor(atom)
         U, uiso = _atom_u(atom)
         if _minor_axes_outline_only(atom, style):
-            ring, _, _ = ortep_billboard_polygon(atom["cart"], U, view_x, view_y, probability=probability, uiso=uiso)
+            ring, _, _ = ortep_billboard_polygon(
+                atom["cart"], U, view_x, view_y, probability=probability, uiso=uiso
+            )
             outline_segments.append(ring)
             continue
         occ = float(atom.get("occ", 1.0))
@@ -385,10 +488,14 @@ def ortep_atom_mesh_traces(scene: dict, style: dict):
         elem = _atom_element(atom)
         if h_radius is not None and elem in ("H", "D"):
             from ..render.meshes import _sphere_mesh
-            verts, tris = _sphere_mesh(atom["cart"], float(h_radius), lat_steps=lat_steps, lon_steps=lon_steps)
+
+            verts, tris = _sphere_mesh(
+                atom["cart"], float(h_radius), lat_steps=lat_steps, lon_steps=lon_steps
+            )
         else:
             verts, tris = ortep_mesh3d(
-                atom["cart"], U,
+                atom["cart"],
+                U,
                 probability=probability,
                 lat_steps=lat_steps,
                 lon_steps=lon_steps,
@@ -420,7 +527,7 @@ def ortep_atom_mesh_traces(scene: dict, style: dict):
         )
         if mesh_lighting:
             mesh_kwargs["lighting"] = mesh_lighting
-        traces.append(go.Mesh3d(**mesh_kwargs))
+        traces.append(_plotly_go().Mesh3d(**mesh_kwargs))
     outline_trace = _ortep_outline_trace(
         outline_segments,
         color=style.get("ortep_axis_color", "#222222"),
@@ -444,16 +551,20 @@ def ortep_atom_billboard_traces(scene: dict, style: dict):
         if not _atom_render_visible(atom):
             continue
         U, uiso = _atom_u(atom)
-        ring, _, _ = ortep_billboard_polygon(atom["cart"], U, view_x, view_y, probability=probability, uiso=uiso)
+        ring, _, _ = ortep_billboard_polygon(
+            atom["cart"], U, view_x, view_y, probability=probability, uiso=uiso
+        )
         if _minor_axes_outline_only(atom, style):
             outline_segments.append(ring)
             continue
         center = np.asarray(atom["cart"], dtype=float)
         verts = np.vstack([center[None, :], ring])
         n = len(ring)
-        tris = np.asarray([[0, idx, 1 + (idx % n)] for idx in range(1, n + 1)], dtype=int)
+        tris = np.asarray(
+            [[0, idx, 1 + (idx % n)] for idx in range(1, n + 1)], dtype=int
+        )
         traces.append(
-            go.Mesh3d(
+            _plotly_go().Mesh3d(
                 x=verts[:, 0],
                 y=verts[:, 1],
                 z=verts[:, 2],
@@ -486,22 +597,32 @@ def ortep_axis_dash_traces(scene: dict, style: dict):
             continue
         if not _atom_render_visible(atom):
             continue
-        if not _mode_flag(atom, style, "ortep_show_principal_axes", bool(style.get("ortep_show_principal_axes", True))):
+        if not _mode_flag(
+            atom,
+            style,
+            "ortep_show_principal_axes",
+            bool(style.get("ortep_show_principal_axes", True)),
+        ):
             continue
         U, uiso = _atom_u(atom)
-        for start, end in ortep_principal_axis_segments(atom["cart"], U, probability=probability, uiso=uiso):
+        for start, end in ortep_principal_axis_segments(
+            atom["cart"], U, probability=probability, uiso=uiso
+        ):
             xs.extend([float(start[0]), float(end[0]), None])
             ys.extend([float(start[1]), float(end[1]), None])
             zs.extend([float(start[2]), float(end[2]), None])
     if not xs:
         return []
     return [
-        go.Scatter3d(
+        _plotly_go().Scatter3d(
             x=xs,
             y=ys,
             z=zs,
             mode="lines",
-            line=dict(color=style.get("ortep_axis_color", "#222222"), width=float(style.get("ortep_axis_linewidth", 1.6))),
+            line=dict(
+                color=style.get("ortep_axis_color", "#222222"),
+                width=float(style.get("ortep_axis_linewidth", 1.6)),
+            ),
             opacity=0.8,
             hoverinfo="skip",
             showlegend=False,
@@ -530,7 +651,12 @@ def ortep_octant_shade_traces(scene: dict, style: dict):
             continue
         if not _atom_render_visible(atom):
             continue
-        if not _mode_flag(atom, style, "ortep_octant_shading", bool(style.get("ortep_octant_shading", False))):
+        if not _mode_flag(
+            atom,
+            style,
+            "ortep_octant_shading",
+            bool(style.get("ortep_octant_shading", False)),
+        ):
             continue
         center = np.asarray(atom["cart"], dtype=float)
         U, uiso = _atom_u(atom)
@@ -564,7 +690,7 @@ def ortep_octant_shade_traces(scene: dict, style: dict):
     verts = np.asarray(vertices, dtype=float)
     tris = np.asarray(triangles, dtype=int)
     return [
-        go.Mesh3d(
+        _plotly_go().Mesh3d(
             x=verts[:, 0],
             y=verts[:, 1],
             z=verts[:, 2],
@@ -619,9 +745,8 @@ def ortep_octant_hatch_traces(scene: dict, style: dict):
     edge_color = style.get("ortep_octant_edge_color", color)
     edge_width = float(style.get("ortep_octant_edge_linewidth", width * 1.4))
     show_minor_only = bool(style.get("show_minor_only", False))
-    fade_minor = (
-        style.get("disorder") == "opacity"
-        or bool(style.get("force_minor_fade", False))
+    fade_minor = style.get("disorder") == "opacity" or bool(
+        style.get("force_minor_fade", False)
     )
     minor_opacity = max(0.05, float(style.get("minor_opacity", 0.35)))
 
@@ -649,7 +774,9 @@ def ortep_octant_hatch_traces(scene: dict, style: dict):
         if not _atom_render_visible(atom):
             continue
         if not _mode_flag(
-            atom, style, "ortep_octant_hatching",
+            atom,
+            style,
+            "ortep_octant_hatching",
             bool(style.get("ortep_octant_hatching", False)),
         ):
             continue
@@ -685,9 +812,9 @@ def ortep_octant_hatch_traces(scene: dict, style: dict):
         sx, sy, sz = best_signs
 
         # Per-atom hatch density (Br/heavy atoms can pass >1 to densify).
-        n_lines = max(1, int(round(base_lines * float(
-            atom.get("hatch_density_multiplier", 1.0)
-        ))))
+        n_lines = max(
+            1, int(round(base_lines * float(atom.get("hatch_density_multiplier", 1.0))))
+        )
 
         # ── Hatch latitudes: constant θ, sweep φ ∈ [0, π/2] ──────────────
         for k in range(1, n_lines + 1):
@@ -747,26 +874,34 @@ def ortep_octant_hatch_traces(scene: dict, style: dict):
     ):
         hxs, hys, hzs = hatch_buckets[key]
         if hxs:
-            traces.append(go.Scatter3d(
-                x=hxs, y=hys, z=hzs,
-                mode="lines",
-                line=dict(color=color, width=width),
-                opacity=opacity,
-                hoverinfo="skip",
-                showlegend=False,
-                name=f"ortep-octant-hatch{suffix}",
-            ))
+            traces.append(
+                _plotly_go().Scatter3d(
+                    x=hxs,
+                    y=hys,
+                    z=hzs,
+                    mode="lines",
+                    line=dict(color=color, width=width),
+                    opacity=opacity,
+                    hoverinfo="skip",
+                    showlegend=False,
+                    name=f"ortep-octant-hatch{suffix}",
+                )
+            )
         exs, eys, ezs = edge_buckets[key]
         if exs:
-            traces.append(go.Scatter3d(
-                x=exs, y=eys, z=ezs,
-                mode="lines",
-                line=dict(color=edge_color, width=edge_width),
-                opacity=opacity if key == "minor" else 0.98,
-                hoverinfo="skip",
-                showlegend=False,
-                name=f"ortep-octant-edges{suffix}",
-            ))
+            traces.append(
+                _plotly_go().Scatter3d(
+                    x=exs,
+                    y=eys,
+                    z=ezs,
+                    mode="lines",
+                    line=dict(color=edge_color, width=edge_width),
+                    opacity=opacity if key == "minor" else 0.98,
+                    hoverinfo="skip",
+                    showlegend=False,
+                    name=f"ortep-octant-edges{suffix}",
+                )
+            )
     return traces
 
 
@@ -788,9 +923,8 @@ def ortep_atom_fill_traces(scene: dict, style: dict):
     probability = float(style.get("ortep_probability", 0.5))
     fill_color = style.get("ortep_atom_fill_color", "#FFFFFF")
     show_minor_only = bool(style.get("show_minor_only", False))
-    fade_minor = (
-        style.get("disorder") == "opacity"
-        or bool(style.get("force_minor_fade", False))
+    fade_minor = style.get("disorder") == "opacity" or bool(
+        style.get("force_minor_fade", False)
     )
     minor_opacity = max(0.05, float(style.get("minor_opacity", 0.35)))
     z_lift = float(style.get("ortep_z_lift_fill", 0.04))
@@ -805,12 +939,13 @@ def ortep_atom_fill_traces(scene: dict, style: dict):
     view_dir = view_dir / nrm if nrm > 1e-9 else np.array([0.0, 0.0, 1.0])
     cam = view_dir * z_lift  # ``view_dir`` points toward camera (see view_rotation)
 
-    buckets = {"major": ([], [], [], [], 0), "minor": ([], [], [], [], 0)}
     # Each tuple: (xs, ys, zs, tris, vert_offset).  Lists are mutable; we
     # track the offset separately so triangle indices stay correct as we
     # concatenate per-atom triangle fans into one mesh.
-    buckets_dict = {"major": {"x": [], "y": [], "z": [], "tris": [], "off": 0},
-                    "minor": {"x": [], "y": [], "z": [], "tris": [], "off": 0}}
+    buckets_dict = {
+        "major": {"x": [], "y": [], "z": [], "tris": [], "off": 0},
+        "minor": {"x": [], "y": [], "z": [], "tris": [], "off": 0},
+    }
 
     for atom in scene.get("draw_atoms", []):
         if show_minor_only and not atom.get("is_minor"):
@@ -826,8 +961,13 @@ def ortep_atom_fill_traces(scene: dict, style: dict):
 
         U, uiso = _atom_u(atom)
         ring, _, _ = ortep_billboard_polygon(
-            atom["cart"], U, view_x, view_y,
-            probability=probability, uiso=uiso, n_pts=32,
+            atom["cart"],
+            U,
+            view_x,
+            view_y,
+            probability=probability,
+            uiso=uiso,
+            n_pts=32,
         )
         ring = np.asarray(ring, dtype=float) + cam[None, :]
         center = np.asarray(atom["cart"], dtype=float) + cam
@@ -852,20 +992,25 @@ def ortep_atom_fill_traces(scene: dict, style: dict):
         if not b["tris"]:
             continue
         tris = np.asarray(b["tris"], dtype=int)
-        traces.append(go.Mesh3d(
-            x=b["x"], y=b["y"], z=b["z"],
-            i=tris[:, 0].tolist(),
-            j=tris[:, 1].tolist(),
-            k=tris[:, 2].tolist(),
-            color=fill_color,
-            opacity=opacity,
-            flatshading=True,
-            lighting=dict(ambient=1.0, diffuse=0.0, specular=0.0,
-                          fresnel=0.0, roughness=1.0),
-            hoverinfo="skip",
-            showlegend=False,
-            name=f"ortep-atom-fill-{key}",
-        ))
+        traces.append(
+            _plotly_go().Mesh3d(
+                x=b["x"],
+                y=b["y"],
+                z=b["z"],
+                i=tris[:, 0].tolist(),
+                j=tris[:, 1].tolist(),
+                k=tris[:, 2].tolist(),
+                color=fill_color,
+                opacity=opacity,
+                flatshading=True,
+                lighting=dict(
+                    ambient=1.0, diffuse=0.0, specular=0.0, fresnel=0.0, roughness=1.0
+                ),
+                hoverinfo="skip",
+                showlegend=False,
+                name=f"ortep-atom-fill-{key}",
+            )
+        )
     return traces
 
 
@@ -887,9 +1032,8 @@ def ortep_silhouette_outline_traces(scene: dict, style: dict):
     color = style.get("ortep_silhouette_color", "#1A1A1A")
     width = float(style.get("ortep_silhouette_linewidth", 1.4))
     show_minor_only = bool(style.get("show_minor_only", False))
-    fade_minor = (
-        style.get("disorder") == "opacity"
-        or bool(style.get("force_minor_fade", False))
+    fade_minor = style.get("disorder") == "opacity" or bool(
+        style.get("force_minor_fade", False)
     )
     minor_opacity = float(style.get("minor_opacity", 0.35))
     view_x = np.asarray(scene.get("view_x", [1.0, 0.0, 0.0]), dtype=float)
@@ -923,7 +1067,12 @@ def ortep_silhouette_outline_traces(scene: dict, style: dict):
             continue
         U, uiso = _atom_u(atom)
         ring, _, _ = ortep_billboard_polygon(
-            atom["cart"], U, view_x, view_y, probability=probability, uiso=uiso,
+            atom["cart"],
+            U,
+            view_x,
+            view_y,
+            probability=probability,
+            uiso=uiso,
         )
         ring = np.asarray(ring, dtype=float) + camera_offset[None, :]
         if _atom_is_minor(atom) and fade_minor:
@@ -933,12 +1082,18 @@ def ortep_silhouette_outline_traces(scene: dict, style: dict):
 
     traces = []
     major_trace = _ortep_outline_trace(
-        rings_major, color=color, width=width, name="ortep-silhouette",
+        rings_major,
+        color=color,
+        width=width,
+        name="ortep-silhouette",
     )
     if major_trace is not None:
         traces.append(major_trace)
     minor_trace = _ortep_outline_trace(
-        rings_minor, color=color, width=width, name="ortep-silhouette-minor",
+        rings_minor,
+        color=color,
+        width=width,
+        name="ortep-silhouette-minor",
     )
     if minor_trace is not None:
         # Reduce opacity in-place since _ortep_outline_trace fixes it at 0.95
@@ -947,7 +1102,14 @@ def ortep_silhouette_outline_traces(scene: dict, style: dict):
     return traces
 
 
-def build_ortep_panel_figure(scene: dict, *, probability: float = 0.5, show_axes: bool = True, shade_octants: bool = False, **kwargs):
+def build_ortep_panel_figure(
+    scene: dict,
+    *,
+    probability: float = 0.5,
+    show_axes: bool = True,
+    shade_octants: bool = False,
+    **kwargs,
+):
     from ..renderer import build_figure
 
     style = {

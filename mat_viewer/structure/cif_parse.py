@@ -1,252 +1,173 @@
+"""CIF adapter backed exclusively by MolCrysKit's public structure contracts."""
+
 from __future__ import annotations
 
-import re
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
-import gemmi
 import numpy as np
 
-from .geometry import _wrap_frac01, bond_vector_mic, ortho_matrix
 
-# ── Parse CIF ───────────────────────────────────────────────────────────────
+@dataclass(frozen=True)
+class CellParameters:
+    """Small renderer-facing unit-cell record with no parser dependency."""
+
+    a: float
+    b: float
+    c: float
+    alpha: float
+    beta: float
+    gamma: float
+    volume: float
+
+
+@dataclass(frozen=True)
+class ParsedCif:
+    """MolCrysKit crystal plus the legacy atom-dict projection."""
+
+    path: Path
+    crystal: Any
+    atoms: tuple[dict[str, Any], ...]
+    cell: CellParameters
+    matrix: np.ndarray
+
+
+def _angle(left: np.ndarray, right: np.ndarray) -> float:
+    denom = float(np.linalg.norm(left) * np.linalg.norm(right))
+    if denom <= 0.0:
+        raise ValueError("cell vectors must have positive length")
+    cosine = float(np.dot(left, right) / denom)
+    return float(np.degrees(np.arccos(np.clip(cosine, -1.0, 1.0))))
+
+
+def cell_from_matrix(matrix: np.ndarray) -> CellParameters:
+    lattice = np.asarray(matrix, dtype=float)
+    if lattice.shape != (3, 3) or not np.all(np.isfinite(lattice)):
+        raise ValueError("MolCrysKit returned an invalid 3x3 lattice")
+    lengths = np.linalg.norm(lattice, axis=1)
+    if np.any(lengths <= 0.0):
+        raise ValueError("cell vectors must have positive length")
+    return CellParameters(
+        a=float(lengths[0]),
+        b=float(lengths[1]),
+        c=float(lengths[2]),
+        alpha=_angle(lattice[1], lattice[2]),
+        beta=_angle(lattice[0], lattice[2]),
+        gamma=_angle(lattice[0], lattice[1]),
+        volume=float(abs(np.linalg.det(lattice))),
+    )
+
+
+def _require_contracts():
+    try:
+        from molcrys_kit.structures import MolecularCrystal
+    except ImportError as exc:
+        raise ImportError(
+            "CIF input requires MolCrysKit. Install MatterVis's base dependencies."
+        ) from exc
+
+    missing = [
+        name
+        for name in ("get_site_records", "get_bond_records")
+        if not callable(getattr(MolecularCrystal, name, None))
+    ]
+    if missing:
+        raise RuntimeError(
+            "The installed MolCrysKit is too old for MatterVis: missing public "
+            + ", ".join(missing)
+            + ". Install the exact development revision pinned by MatterVis CI."
+        )
+    return MolecularCrystal
+
+
+def _raw_atoms_from_crystal(crystal) -> tuple[dict[str, Any], ...]:
+    records = tuple(crystal.get_site_records())
+    by_global = {record.global_index: record for record in records}
+    atoms: list[dict[str, Any]] = []
+    for record in records:
+        frac = np.asarray(record.fractional_position, dtype=float)
+        sym_op = record.sym_op_index
+        asym_index = record.asym_index
+        atom = {
+            "label": record.label,
+            "elem": record.symbol,
+            "frac": frac.copy(),
+            "cart": np.asarray(record.cartesian_position_A, dtype=float),
+            "occ": float(record.occupancy),
+            "uiso": record.uiso_A2,
+            "dg": str(record.disorder_group),
+            "da": record.disorder_assembly or ".",
+            "U": (
+                None
+                if record.u_cart_A2 is None
+                else np.asarray(record.u_cart_A2, dtype=float)
+            ),
+            "_source_index": int(record.global_index),
+            "_molecule_index": int(record.molecule_index),
+            "_molecule_local_index": int(record.local_index),
+            "_asym_index": asym_index,
+            "_asym_label": record.label,
+            "_symop_index": sym_op,
+            "_site_symmetry_order": int(record.site_symmetry_order),
+            # MCK's shift makes this molecule contiguous. ``_image_shift`` is
+            # reserved by the scene layer for explicit rendered replicas.
+            "_mck_image_shift": list(record.image_shift),
+            "_image_shift": [0, 0, 0],
+            "_wrapped_frac": frac - np.floor(frac),
+            "_raw_instance_id": (
+                f"asu{asym_index if asym_index is not None else 'unknown'}"
+                f"@sym{sym_op if sym_op is not None else 'unknown'}"
+                f"@site{record.global_index}"
+            ),
+            # Connectivity is supplied separately by get_bond_records().
+            "_bond_partners": (),
+            "_bond_lengths": {},
+            "_has_bond_table": False,
+        }
+        atoms.append(atom)
+
+    if set(by_global) != set(range(len(records))):
+        raise RuntimeError(
+            "MolCrysKit site records must use a contiguous global_index sequence"
+        )
+    atoms.sort(key=lambda atom: atom["_source_index"])
+    return tuple(atoms)
+
+
+def load_cif(path: str | Path) -> ParsedCif:
+    """Load a CIF once and retain MolCrysKit as the chemical source of truth."""
+    source = Path(path).expanduser().resolve()
+    if not source.is_file():
+        raise FileNotFoundError(f"CIF file not found: {source}")
+    MolecularCrystal = _require_contracts()
+    crystal = MolecularCrystal.from_cif(str(source), use_asu_first=False)
+    matrix = np.asarray(crystal.lattice, dtype=float)
+    return ParsedCif(
+        path=source,
+        crystal=crystal,
+        atoms=_raw_atoms_from_crystal(crystal),
+        cell=cell_from_matrix(matrix),
+        matrix=matrix,
+    )
+
+
 def parse_asu(path):
-    doc = gemmi.cif.read(path)
-    block = doc.sole_block()
+    """Return the historical triple, now projected from MolCrysKit records.
 
-    def fv(tag):
-        v = block.find_value(tag)
-        return float(gemmi.cif.as_number(v)) if v else None
-
-    a=fv('_cell_length_a'); b=fv('_cell_length_b'); c=fv('_cell_length_c')
-    al=fv('_cell_angle_alpha') or 90.; be=fv('_cell_angle_beta') or 90.; ga=fv('_cell_angle_gamma') or 90.
-    cell = gemmi.UnitCell(a, b, c, al, be, ga)
-    M, N = ortho_matrix(cell)
-
-    symops = []
-    for tag in ['_space_group_symop_operation_xyz', '_symmetry_equiv_pos_as_xyz']:
-        tbl = block.find([tag])
-        if tbl:
-            for row in tbl:
-                try: symops.append(gemmi.Op(row[0].strip().strip("'")))
-                except: pass
-            break
-    if not symops:
-        symops = [gemmi.Op('x,y,z')]
-    if len(symops) == 1:
-        sg = None
-        it_value = block.find_value('_space_group_IT_number') or block.find_value('_symmetry_Int_Tables_number')
-        if it_value:
-            try:
-                sg = gemmi.find_spacegroup_by_number(int(gemmi.cif.as_number(it_value)))
-            except Exception:
-                sg = None
-        if sg is None:
-            for tag in ['_space_group_name_H-M_alt', '_symmetry_space_group_name_H-M', '_space_group_name_H-M']:
-                name = block.find_value(tag)
-                if not name:
-                    continue
-                try:
-                    cleaned = str(name).strip().strip("'").strip('"')
-                    if cleaned and cleaned.upper().replace(" ", "") not in {'P1', 'P-1'}:
-                        sg = gemmi.SpaceGroup(cleaned)
-                        break
-                except Exception:
-                    continue
-        if sg is not None and sg.number > 1:
-            try:
-                expanded_ops = list(sg.operations())
-                if len(expanded_ops) > 1:
-                    symops = expanded_ops
-            except Exception:
-                pass
-
-    bond_partners = {}
-    bond_lengths = {}
-    bond_tbl = block.find([
-        '_geom_bond_atom_site_label_1',
-        '_geom_bond_atom_site_label_2',
-        '_geom_bond_distance',
-    ])
-    for row in bond_tbl:
-        a = row[0].strip()
-        b = row[1].strip()
-        if a in ('', '.', '?') or b in ('', '.', '?'):
-            continue
-        try:
-            dist = float(gemmi.cif.as_number(row[2]))
-        except Exception:
-            dist = None
-        bond_partners.setdefault(a, set()).add(b)
-        bond_partners.setdefault(b, set()).add(a)
-        if dist is not None:
-            bond_lengths.setdefault(a, {}).setdefault(b, []).append(dist)
-            bond_lengths.setdefault(b, {}).setdefault(a, []).append(dist)
-
-    # Read each `_atom_site_*` column independently so we don't fail when the
-    # CIF omits optional tags (e.g. Materials-Studio exports that drop
-    # `_atom_site_disorder_group` / `_atom_site_disorder_assembly`).
-    def _column(tag, *, required=False, default='.'):
-        values = list(block.find_loop(tag))
-        if values:
-            return values
-        if required:
-            raise ValueError(f"CIF is missing required tag: {tag}")
-        return None
-
-    labels = _column('_atom_site_label', required=True)
-    types  = _column('_atom_site_type_symbol')
-    xs     = _column('_atom_site_fract_x', required=True)
-    ys     = _column('_atom_site_fract_y', required=True)
-    zs     = _column('_atom_site_fract_z', required=True)
-    occs   = _column('_atom_site_occupancy')
-    uisos  = _column('_atom_site_U_iso_or_equiv')
-    dgs    = _column('_atom_site_disorder_group')
-    das    = _column('_atom_site_disorder_assembly')
-
-    n_rows = len(labels)
-    if types is None:
-        types = [re.sub(r'\d', '', label) or 'C' for label in labels]
-    asu_atoms = []
-    for i in range(n_rows):
-        label = labels[i]
-        elem = (types[i] if i < len(types) else 'C').strip().capitalize()
-        try:
-            x = float(gemmi.cif.as_number(xs[i]))
-            y = float(gemmi.cif.as_number(ys[i]))
-            z = float(gemmi.cif.as_number(zs[i]))
-        except Exception:
-            continue
-        try:
-            occ = float(gemmi.cif.as_number(occs[i])) if occs else 1.0
-        except Exception:
-            occ = 1.0
-        try:
-            uiso = float(gemmi.cif.as_number(uisos[i])) if uisos else 0.04
-        except Exception:
-            uiso = 0.04
-        dg = (dgs[i] if dgs else '.').strip()
-        da = (das[i] if das else '.').strip()
-        asu_atoms.append({'label': label, 'elem': elem,
-                          'frac': np.array([x,y,z]),
-                          'occ': occ, 'uiso': uiso,
-                          'dg': dg, 'da': da,
-                          '_bond_partners': tuple(sorted(bond_partners.get(label, ()))),
-                          '_bond_lengths': {
-                              partner: tuple(lengths)
-                              for partner, lengths in bond_lengths.get(label, {}).items()
-                          },
-                          '_has_bond_table': bool(bond_partners)})
-
-    aniso_tbl = block.find(['_atom_site_aniso_label',
-                            '_atom_site_aniso_U_11',
-                            '_atom_site_aniso_U_22',
-                            '_atom_site_aniso_U_33',
-                            '_atom_site_aniso_U_12',
-                            '_atom_site_aniso_U_13',
-                            '_atom_site_aniso_U_23'])
-    aniso = {}
-    for row in aniso_tbl:
-        try:
-            u = np.array([[float(gemmi.cif.as_number(row[1])),
-                           float(gemmi.cif.as_number(row[4])),
-                           float(gemmi.cif.as_number(row[5]))],
-                          [float(gemmi.cif.as_number(row[4])),
-                           float(gemmi.cif.as_number(row[2])),
-                           float(gemmi.cif.as_number(row[6]))],
-                          [float(gemmi.cif.as_number(row[5])),
-                           float(gemmi.cif.as_number(row[6])),
-                           float(gemmi.cif.as_number(row[3]))]])
-            aniso[row[0]] = u
-        except: pass
-
-    atoms = []
-    # Per-label spatial lookup for O(N·k) dedup instead of O(N²) linear scan.
-    # Each label gets its own list of Cartesian positions; duplicates are only
-    # checked within the same label (different labels can legitimately sit
-    # close on special positions or disorder-related sites).
-    _seen_by_label: dict[str, list[np.ndarray]] = {}
-    DEDUP_TOL = 0.15
-
-    for asu_at in asu_atoms:
-        frac0 = asu_at['frac']
-        # Always expand by every symmetry operation, regardless of
-        # occupancy. The previous "only the first symop for disordered
-        # atoms" rule meant a partial-occupancy carbon (e.g. PEP's
-        # C8/C8A at 0.5 each) ended up at a single asymmetric-unit
-        # position while its full-occupancy nitrogen neighbour expanded
-        # to all 8 unit-cell sites. The 7 nitrogen images then had no
-        # carbon neighbour anywhere in the structure and surfaced as
-        # bogus lone-N "fragments" in the topology UI. Special-position
-        # overlaps are still handled by the dedup below.
-        ops = symops
-        for symop_index, op in enumerate(ops):
-            frac_new = np.array(op.apply_to_xyz(list(frac0)), dtype=float)
-            frac_basic = _wrap_frac01(frac_new)
-            cart_new = M @ frac_basic
-
-            # Uses per-label list — O(k) per atom where k = images of the
-            # same label (typically ≤ symops), giving O(N·k) total.
-            label = asu_at['label']
-            label_carts = _seen_by_label.get(label)
-            if label_carts is not None:
-                dup = any(
-                    np.linalg.norm(cart_new - sc) < DEDUP_TOL
-                    for sc in label_carts
-                )
-            else:
-                dup = False
-            if dup:
-                continue
-            _seen_by_label.setdefault(label, []).append(cart_new.copy())
-
-            U_cart = None
-            if asu_at['label'] in aniso:
-                U_cif = aniso[asu_at['label']]
-                U_cart_asu = N @ U_cif @ N.T
-                r_int = op.rot
-                r_mat = np.array(r_int, dtype=float).reshape(3, 3) / 24.0
-                try:
-                    M_inv = np.linalg.inv(M)
-                    R_cart = M @ r_mat @ M_inv
-                    U_cart = R_cart @ U_cart_asu @ R_cart.T
-                except:
-                    U_cart = U_cart_asu
-
-            atoms.append({'label': asu_at['label'], 'elem': asu_at['elem'],
-                          'frac': frac_basic, 'cart': cart_new.copy(),
-                          'occ': asu_at['occ'], 'uiso': asu_at['uiso'],
-                          'dg': asu_at['dg'], 'da': asu_at['da'],
-                          'U': U_cart,
-                          '_asym_label': asu_at['label'],
-                          '_symop_index': int(symop_index),
-                          '_raw_instance_id': f"{asu_at['label']}@sym{symop_index}",
-                          '_bond_partners': asu_at.get('_bond_partners', ()),
-                          '_bond_lengths': asu_at.get('_bond_lengths', {}),
-                          '_has_bond_table': asu_at.get('_has_bond_table', False)})
-
-    # Reassemble fragmented ClO₄ groups
-    a_vec = M[:, 0]; b_vec = M[:, 1]; c_vec = M[:, 2]
-    cl_atoms = [at for at in atoms if at['elem'] == 'Cl']
-    for at in atoms:
-        if at['elem'] != 'O':
-            continue
-        bonded = any(np.linalg.norm(at['cart'] - cl['cart']) < 1.70
-                     for cl in cl_atoms)
-        if bonded:
-            continue
-        best_dist = np.inf
-        best_shift_frac = np.zeros(3)
-        for cl in cl_atoms:
-            delta_cart, shift = bond_vector_mic(cl, at, M, search_radius=1)
-            d = np.linalg.norm(delta_cart)
-            if d < best_dist:
-                best_dist = d
-                best_shift_frac = -shift
-        if best_dist < 1.70:
-            shift_cart = M @ best_shift_frac
-            at['frac'] = at['frac'] + best_shift_frac
-            at['cart'] = at['cart'] + shift_cart
-
-    return atoms, cell, M
+    The function name remains for internal callers. The returned sites are the
+    symmetry-expanded molecular crystal, not a second independently parsed ASU.
+    ``legacy_M`` stores lattice vectors as columns for compatibility with the
+    existing scene assembly boundary.
+    """
+    parsed = load_cif(path)
+    return [dict(atom) for atom in parsed.atoms], parsed.cell, parsed.matrix.T.copy()
 
 
-__all__ = [name for name in globals() if not name.startswith("__")]
+__all__ = [
+    "CellParameters",
+    "ParsedCif",
+    "cell_from_matrix",
+    "load_cif",
+    "parse_asu",
+]

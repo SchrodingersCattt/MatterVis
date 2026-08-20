@@ -37,6 +37,11 @@ def _require_molcryskit():
             KEY_ASSEMBLY,
             KEY_LABEL,
             KEY_SYM_OP_INDEX,
+            KEY_ASYM_ID,
+            KEY_SITE_SYMMETRY_ORDER,
+            KEY_IMAGE_SHIFT,
+            KEY_UISO,
+            KEY_U_CART,
         )
     except ImportError as exc:
         raise ImportError(
@@ -44,6 +49,29 @@ def _require_molcryskit():
             "Install it with `pip install molcrys-kit` (it is listed in "
             "MatterVis's requirements.txt)."
         ) from exc
+
+    required_contracts = {
+        "MolecularCrystal.get_site_records": getattr(
+            MolecularCrystal, "get_site_records", None
+        ),
+        "MolecularCrystal.get_bond_records": getattr(
+            MolecularCrystal, "get_bond_records", None
+        ),
+        "StoichiometryAnalyzer.select_formula_unit": getattr(
+            StoichiometryAnalyzer, "select_formula_unit", None
+        ),
+    }
+    missing = [
+        name for name, value in required_contracts.items() if not callable(value)
+    ]
+    if missing:
+        raise RuntimeError(
+            "The installed molcrys-kit does not provide MatterVis's required "
+            "public structure contracts: "
+            + ", ".join(missing)
+            + ". Install the MolCrysKit structure-contract release or the exact "
+            "development commit pinned by MatterVis CI."
+        )
 
     return {
         "Atoms": Atoms,
@@ -55,6 +83,11 @@ def _require_molcryskit():
         "KEY_ASSEMBLY": KEY_ASSEMBLY,
         "KEY_LABEL": KEY_LABEL,
         "KEY_SYM_OP_INDEX": KEY_SYM_OP_INDEX,
+        "KEY_ASYM_ID": KEY_ASYM_ID,
+        "KEY_SITE_SYMMETRY_ORDER": KEY_SITE_SYMMETRY_ORDER,
+        "KEY_IMAGE_SHIFT": KEY_IMAGE_SHIFT,
+        "KEY_UISO": KEY_UISO,
+        "KEY_U_CART": KEY_U_CART,
     }
 
 
@@ -105,23 +138,52 @@ def _ase_atoms_from_raw(raw_atoms, M, mk):
         elif atom.get("_is_major") is True or atom.get("_is_minor") is False:
             dg[i] = 1
 
-    da = np.array([
-        (str(atom.get("da", "") or "").strip()) for atom in raw_atoms
-    ])
+    da = np.array([(str(atom.get("da", "") or "").strip()) for atom in raw_atoms])
     da = np.array([("" if v in (".", "?") else v) for v in da])
 
-    label = np.array([
-        atom.get("label") or atom["elem"] for atom in raw_atoms
-    ])
-    sym_op_index = np.array([
-        int(atom.get("_symop_index", 0) or 0) for atom in raw_atoms
-    ], dtype=int)
+    label = np.array([atom.get("label") or atom["elem"] for atom in raw_atoms])
+    sym_op_index = np.array(
+        [int(atom.get("_symop_index", 0) or 0) for atom in raw_atoms], dtype=int
+    )
+    asym_index = np.array(
+        [int(atom.get("_asym_index", i)) for i, atom in enumerate(raw_atoms)], dtype=int
+    )
+    site_symmetry_order = np.array(
+        [int(atom.get("_site_symmetry_order", 1) or 1) for atom in raw_atoms], dtype=int
+    )
+    image_shift = np.asarray(
+        [
+            atom.get("_mck_image_shift", atom.get("_image_shift", (0, 0, 0)))
+            for atom in raw_atoms
+        ],
+        dtype=int,
+    ).reshape(n, 3)
+    uiso = np.asarray(
+        [
+            np.nan if atom.get("uiso") is None else float(atom["uiso"])
+            for atom in raw_atoms
+        ],
+        dtype=float,
+    )
+    u_cart = np.full((n, 9), np.nan, dtype=float)
+    for i, atom in enumerate(raw_atoms):
+        value = atom.get("U")
+        if value is None:
+            continue
+        matrix = np.asarray(value, dtype=float)
+        if matrix.shape == (3, 3) and np.all(np.isfinite(matrix)):
+            u_cart[i] = matrix.reshape(9)
 
     atoms.set_array(mk["KEY_OCCUPANCY"], occ)
     atoms.set_array(mk["KEY_DISORDER_GROUP"], dg)
     atoms.set_array(mk["KEY_ASSEMBLY"], da)
     atoms.set_array(mk["KEY_LABEL"], label)
     atoms.set_array(mk["KEY_SYM_OP_INDEX"], sym_op_index)
+    atoms.set_array(mk["KEY_ASYM_ID"], asym_index)
+    atoms.set_array(mk["KEY_SITE_SYMMETRY_ORDER"], site_symmetry_order)
+    atoms.set_array(mk["KEY_IMAGE_SHIFT"], image_shift)
+    atoms.set_array(mk["KEY_UISO"], uiso)
+    atoms.set_array(mk["KEY_U_CART"], u_cart)
     return atoms
 
 
@@ -160,12 +222,16 @@ def formula_to_moiety(formula: str) -> str:
     """
     text = str(formula or "").strip()
     if not text or text == "?":
-        raise ValueError(f"Cannot convert empty fragment formula to moiety: {formula!r}")
+        raise ValueError(
+            f"Cannot convert empty fragment formula to moiety: {formula!r}"
+        )
     parts: list[str] = []
     pos = 0
     for match in _FORMULA_TOKEN_RE.finditer(text):
         if match.start() != pos:
-            raise ValueError(f"Invalid compact formula for MolCrysKit moiety: {formula!r}")
+            raise ValueError(
+                f"Invalid compact formula for MolCrysKit moiety: {formula!r}"
+            )
         elem, count = match.groups()
         parts.append(f"{elem}{count}" if count else elem)
         pos = match.end()
@@ -180,8 +246,13 @@ def molecular_crystal_from_bundle(bundle):
     crystal = getattr(analysis, "crystal", None) or getattr(bundle, "crystal", None)
     if crystal is None:
         raise ValueError("Bundle has no MolCrysKit MolecularCrystal analysis.")
-    if getattr(crystal, "molecules", None) is None or getattr(crystal, "lattice", None) is None:
-        raise TypeError("MolCrysKit molecule-level polyhedra require .molecules and .lattice.")
+    if (
+        getattr(crystal, "molecules", None) is None
+        or getattr(crystal, "lattice", None) is None
+    ):
+        raise TypeError(
+            "MolCrysKit molecule-level polyhedra require .molecules and .lattice."
+        )
     return crystal
 
 
@@ -217,6 +288,8 @@ class CrystalAnalysis:
         per_fu,
         bond_pairs=None,
         bond_records=None,
+        site_records=None,
+        formula_unit_selection=None,
     ):
         self.crystal = crystal
         self.mol_indices = mol_indices
@@ -237,6 +310,66 @@ class CrystalAnalysis:
         # to materialise the edge on the matching boundary image rather than
         # re-perceiving chemistry on replica atoms.
         self.bond_records: list[dict] = list(bond_records or [])
+        self.site_records = tuple(site_records or ())
+        self.formula_unit_selection = formula_unit_selection
+
+
+def analyze_crystal(crystal) -> CrystalAnalysis:
+    """Build MatterVis lookup tables from MolCrysKit public contracts only."""
+    mk = _require_molcryskit()
+    site_records = tuple(crystal.get_site_records())
+    contract_bonds = tuple(crystal.get_bond_records())
+
+    sites_by_molecule: dict[int, list] = {}
+    for record in site_records:
+        sites_by_molecule.setdefault(record.molecule_index, []).append(record)
+
+    mol_indices: list[list[int]] = []
+    mol_cart_positions: list[np.ndarray] = []
+    for molecule_index in range(len(crystal.molecules)):
+        records = sorted(
+            sites_by_molecule.get(molecule_index, ()),
+            key=lambda record: record.local_index,
+        )
+        mol_indices.append([int(record.global_index) for record in records])
+        mol_cart_positions.append(
+            np.asarray([record.cartesian_position_A for record in records], dtype=float)
+        )
+
+    bond_pairs = sorted(
+        {
+            tuple(sorted((record.left_global_index, record.right_global_index)))
+            for record in contract_bonds
+        }
+    )
+    bond_records = [
+        {
+            "left": int(record.left_global_index),
+            "right": int(record.right_global_index),
+            "left_local_index": int(record.left_local_index),
+            "right_local_index": int(record.right_local_index),
+            "molecule_index": int(record.molecule_index),
+            "left_asym_index": record.left_asym_index,
+            "right_asym_index": record.right_asym_index,
+            "right_image_shift": list(record.right_image_shift),
+            "vector": list(record.vector_A),
+            "distance": float(record.distance_A),
+        }
+        for record in contract_bonds
+    ]
+
+    analyzer = mk["StoichiometryAnalyzer"](crystal)
+    return CrystalAnalysis(
+        crystal=crystal,
+        mol_indices=mol_indices,
+        mol_cart_positions=mol_cart_positions,
+        species_map=copy.deepcopy(analyzer.species_map),
+        per_fu=copy.deepcopy(analyzer.get_simplest_unit()),
+        bond_pairs=bond_pairs,
+        bond_records=bond_records,
+        site_records=site_records,
+        formula_unit_selection=analyzer.select_formula_unit(),
+    )
 
 
 def analyze(
@@ -262,7 +395,7 @@ def analyze(
     mk = _require_molcryskit()
     if not raw_atoms:
         crystal = mk["MolecularCrystal"](np.eye(3), [], pbc=(True, True, True))
-        return CrystalAnalysis(crystal, [], [], {}, {}, bond_pairs=[], bond_records=[])
+        return analyze_crystal(crystal)
 
     ase_atoms = _ase_atoms_from_raw(raw_atoms, M, mk)
     identified = mk["identify_molecules"](
@@ -272,77 +405,10 @@ def analyze(
         bond_thresholds=bond_thresholds,
     )
 
-    molecules = []
-    mol_indices = []
-    mol_cart_positions = []
-    bond_pairs: set[tuple[int, int]] = set()
-    bond_records: dict[tuple[int, int, tuple[int, int, int]], dict] = {}
-    for molecule in identified:
-        indices = [int(i) for i in (molecule.info.get("atom_indices") or [])]
-        if not indices:
-            continue
-        positions = np.asarray(molecule.get_positions(), dtype=float)
-        if positions.ndim != 2 or positions.shape[0] != len(indices):
-            continue
-        molecules.append(molecule)
-        mol_indices.append(indices)
-        mol_cart_positions.append(positions)
-        for i, j in molecule.info.get("bond_pairs") or []:
-            a, b = int(i), int(j)
-            if a > b:
-                a, b = b, a
-            bond_pairs.add((a, b))
-        for record in molecule.info.get("bond_records") or []:
-            left, right = int(record["left"]), int(record["right"])
-            shift = tuple(int(value) for value in record.get("right_image_shift", (0, 0, 0)))
-            vector = [float(value) for value in record.get("vector", (0.0, 0.0, 0.0))]
-            key = (left, right, shift)
-            normalised = {
-                "left": left,
-                "right": right,
-                "right_image_shift": list(shift),
-                "vector": vector,
-            }
-            existing = bond_records.get(key)
-            if existing is not None and existing != normalised:
-                raise ValueError(f"conflicting canonical PBC bond records for raw edge {key[:2]}")
-            bond_records[key] = normalised
-
     crystal = mk["MolecularCrystal"](
-        ase_atoms.get_cell(), molecules, pbc=tuple(ase_atoms.get_pbc())
+        ase_atoms.get_cell(), identified, pbc=tuple(ase_atoms.get_pbc())
     )
-    analyzer = mk["StoichiometryAnalyzer"](crystal)
-    return CrystalAnalysis(
-        crystal=crystal,
-        mol_indices=mol_indices,
-        mol_cart_positions=mol_cart_positions,
-        species_map=copy.deepcopy(analyzer.species_map),
-        per_fu=copy.deepcopy(analyzer.get_simplest_unit()),
-        bond_pairs=sorted(bond_pairs),
-        bond_records=[bond_records[key] for key in sorted(bond_records)],
-    )
-
-
-def _centroid(raw_atoms, indices, cart_positions=None):
-    if cart_positions is not None:
-        return np.mean(np.asarray(cart_positions, dtype=float), axis=0)
-    return np.mean([np.asarray(raw_atoms[i]["cart"], dtype=float) for i in indices], axis=0)
-
-
-def _best_pbc_translation(raw_atoms, indices, anchor, M, cart_positions=None, search_radius=2):
-    base = _centroid(raw_atoms, indices, cart_positions=cart_positions)
-    best_shift = np.zeros(3)
-    best_d = float("inf")
-    for na in range(-search_radius, search_radius + 1):
-        for nb in range(-search_radius, search_radius + 1):
-            for nc in range(-search_radius, search_radius + 1):
-                shift_frac = np.array([na, nb, nc], dtype=float)
-                shift_cart = frac_to_cart(shift_frac, M)
-                d = float(np.linalg.norm(base + shift_cart - anchor))
-                if d < best_d:
-                    best_d = d
-                    best_shift = shift_frac
-    return best_shift, best_d
+    return analyze_crystal(crystal)
 
 
 def _translate_cluster(raw_atoms, indices, shift_frac, M, cart_positions=None):
@@ -369,97 +435,29 @@ def _translate_cluster(raw_atoms, indices, shift_frac, M, cart_positions=None):
     return out
 
 
-def _species_priority(species_id, mol_indices_list, raw_atoms):
-    """Sort key for picking the anchor species: heaviest molecule first
-    (so we don't anchor on a small counterion / solvent), then the
-    species with fewer cell copies (further breaks ties)."""
-    if not mol_indices_list:
-        return (0, 0)
-    sample = mol_indices_list[0]
-    heavy = sum(1 for i in sample if raw_atoms[i].get("elem") != "H")
-    return (-heavy, len(mol_indices_list))
-
-
 def select_formula_unit(raw_atoms, M, *, analysis=None):
-    """Pick one set of molecules realising the simplest stoichiometric
-    unit and translate them so the rendered FU stays spatially compact.
-
-    Counts come from MolCrysKit's GCD analysis (no hard-coded
-    ``max_count=4``).  Selection is greedy: anchor on one molecule of
-    the heaviest species; for every other species pick its
-    ``per_fu`` molecules in proximity-first order, choosing the PBC
-    translation that minimises distance to the running centroid.
-    """
+    """Materialise MolCrysKit's deterministic compact formula-unit selection."""
     if analysis is None:
         analysis = analyze(raw_atoms, M)
-    if not analysis.per_fu:
+    selection = analysis.formula_unit_selection
+    if selection is None or not selection.members:
         return [copy.deepcopy(atom) for atom in raw_atoms]
 
     M = np.asarray(M, dtype=float)
-    species_order = sorted(
-        analysis.per_fu.keys(),
-        key=lambda sid: _species_priority(
-            sid,
-            [analysis.mol_indices[mi] for mi in analysis.species_map[sid]],
-            raw_atoms,
-        ),
-    )
-
     chosen_atoms = []
-    anchor_centroid = None
-
-    for species_id in species_order:
-        n_keep = analysis.per_fu.get(species_id, 0)
-        if n_keep <= 0:
-            continue
-        mol_idx_list = list(analysis.species_map[species_id])
-        if not mol_idx_list:
-            continue
-
-        if anchor_centroid is None:
-            first_mi = mol_idx_list[0]
-            translated = _translate_cluster(
-                raw_atoms,
-                analysis.mol_indices[first_mi],
-                np.zeros(3),
-                M,
-                cart_positions=analysis.mol_cart_positions[first_mi],
-            )
-            chosen_atoms.extend(translated)
-            anchor_centroid = np.mean(
-                [np.asarray(a["cart"], dtype=float) for a in translated], axis=0
-            )
-            mol_idx_list.remove(first_mi)
-            n_keep -= 1
-            if n_keep <= 0:
-                continue
-
-        scored = []
-        for mi in mol_idx_list:
-            shift, dist = _best_pbc_translation(
-                raw_atoms,
-                analysis.mol_indices[mi],
-                anchor_centroid,
-                M,
-                cart_positions=analysis.mol_cart_positions[mi],
-            )
-            scored.append((dist, mi, shift))
-        scored.sort(key=lambda item: item[0])
-        for _, mi, shift in scored[:n_keep]:
-            translated = _translate_cluster(
-                raw_atoms,
-                analysis.mol_indices[mi],
-                shift,
-                M,
-                cart_positions=analysis.mol_cart_positions[mi],
-            )
-            mol_centroid = np.mean(
-                [np.asarray(a["cart"], dtype=float) for a in translated], axis=0
-            )
-            prev_n = len(chosen_atoms)
-            chosen_atoms.extend(translated)
-            anchor_centroid = (
-                anchor_centroid * prev_n + mol_centroid * len(translated)
-            ) / max(len(chosen_atoms), 1)
+    for member in selection.members:
+        molecule_index = int(member.molecule_index)
+        translated = _translate_cluster(
+            raw_atoms,
+            analysis.mol_indices[molecule_index],
+            member.image_shift,
+            M,
+            cart_positions=analysis.mol_cart_positions[molecule_index],
+        )
+        for atom in translated:
+            atom["_molecule_index"] = molecule_index
+            atom["_formula_species_id"] = member.species_id
+            atom["_formula_image_shift"] = list(member.image_shift)
+        chosen_atoms.extend(translated)
 
     return chosen_atoms

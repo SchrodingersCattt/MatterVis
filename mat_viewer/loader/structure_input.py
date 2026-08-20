@@ -213,24 +213,9 @@ def count_structure_frames(
 
 
 def _cell_from_matrix(matrix: np.ndarray):
-    import gemmi
+    from ..structure.cif_parse import cell_from_matrix
 
-    lengths = np.linalg.norm(matrix, axis=1)
-    if np.any(lengths <= 0):
-        raise ValueError("cell vectors must have positive length")
-
-    def angle(left: np.ndarray, right: np.ndarray) -> float:
-        cosine = np.dot(left, right) / (np.linalg.norm(left) * np.linalg.norm(right))
-        return float(np.degrees(np.arccos(np.clip(cosine, -1.0, 1.0))))
-
-    return gemmi.UnitCell(
-        float(lengths[0]),
-        float(lengths[1]),
-        float(lengths[2]),
-        angle(matrix[1], matrix[2]),
-        angle(matrix[0], matrix[2]),
-        angle(matrix[0], matrix[1]),
-    )
+    return cell_from_matrix(matrix)
 
 
 def _ase_atoms_to_pipeline(
@@ -442,7 +427,9 @@ def iter_atomistic_frames(
         raise ValueError(
             "iter_atomistic_frames supports ASE-backed inputs, not CIF or Cube"
         )
-    requested = None if frame_indices is None else [int(value) for value in frame_indices]
+    requested = (
+        None if frame_indices is None else [int(value) for value in frame_indices]
+    )
     if requested is not None and any(value < 0 for value in requested):
         raise ValueError("streaming frame indices must be non-negative")
     selected = None if requested is None else set(requested)
@@ -452,12 +439,15 @@ def iter_atomistic_frames(
         if selected is not None and index not in selected:
             continue
         found.add(index)
-        yield AtomisticFrame(
-            index=index,
-            atoms=atoms,
-            info={"frame_index": index, **dict(atoms.info)},
-            atom_arrays=_atom_arrays(atoms),
-        ), format_name
+        yield (
+            AtomisticFrame(
+                index=index,
+                atoms=atoms,
+                info={"frame_index": index, **dict(atoms.info)},
+                atom_arrays=_atom_arrays(atoms),
+            ),
+            format_name,
+        )
     if selected is not None:
         missing = sorted(selected - found)
         if missing:

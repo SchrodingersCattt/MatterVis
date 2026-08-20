@@ -23,23 +23,10 @@ def cube_lattice_matrix(cube: CubeData) -> np.ndarray:
 
 
 def cube_to_cell(cube: CubeData):
-    """Derive a ``gemmi.UnitCell`` from the cube lattice vectors.
+    """Derive the lightweight renderer cell record from cube vectors."""
+    from ..structure.cif_parse import cell_from_matrix
 
-    Computes cell lengths and angles from the 3×3 Cartesian matrix.
-    """
-    import gemmi
-
-    M = cube_lattice_matrix(cube)
-    a_vec, b_vec, c_vec = M[0], M[1], M[2]
-    a = float(np.linalg.norm(a_vec))
-    b = float(np.linalg.norm(b_vec))
-    c = float(np.linalg.norm(c_vec))
-
-    alpha = float(np.degrees(np.arccos(np.clip(np.dot(b_vec, c_vec) / (b * c), -1, 1))))
-    beta = float(np.degrees(np.arccos(np.clip(np.dot(a_vec, c_vec) / (a * c), -1, 1))))
-    gamma = float(np.degrees(np.arccos(np.clip(np.dot(a_vec, b_vec) / (a * b), -1, 1))))
-
-    return gemmi.UnitCell(a, b, c, alpha, beta, gamma)
+    return cell_from_matrix(cube_lattice_matrix(cube))
 
 
 def cube_to_raw_atoms(cube: CubeData) -> list[dict[str, Any]]:
@@ -64,20 +51,22 @@ def cube_to_raw_atoms(cube: CubeData) -> list[dict[str, Any]]:
         # Cartesian coordinates relative to ``cube.origin``.
         frac = cart @ M_inv
 
-        atoms.append({
-            "elem": elem,
-            "cart": cart,
-            "frac": frac,
-            "label": label,
-            "_asym_label": label,
-            "occ": 1.0,
-            "dg": ".",
-            "da": ".",
-            "_symop_index": 0,
-            "_bond_partners": (),
-            "_bond_lengths": {},
-            "_has_bond_table": False,
-        })
+        atoms.append(
+            {
+                "elem": elem,
+                "cart": cart,
+                "frac": frac,
+                "label": label,
+                "_asym_label": label,
+                "occ": 1.0,
+                "dg": ".",
+                "da": ".",
+                "_symop_index": 0,
+                "_bond_partners": (),
+                "_bond_lengths": {},
+                "_has_bond_table": False,
+            }
+        )
     return atoms
 
 
@@ -156,12 +145,16 @@ def build_cube_figure(
     if bond_thresholds is not None:
         for pair, value in bond_thresholds.items():
             if not isinstance(pair, tuple) or len(pair) != 2:
-                raise ValueError("bond_thresholds keys must be 2-tuples of element symbols")
+                raise ValueError(
+                    "bond_thresholds keys must be 2-tuples of element symbols"
+                )
             numeric = float(value)
             if not np.isfinite(numeric) or numeric <= 0:
                 raise ValueError("bond_thresholds values must be finite and positive")
             if numeric * float(bond_scale if bond_scale is not None else 1.0) > 12.0:
-                raise ValueError("effective bond cutoff exceeds the 12.0 Å candidate-search guard")
+                raise ValueError(
+                    "effective bond cutoff exceeds the 12.0 Å candidate-search guard"
+                )
 
     merged_style = dict(BUILTIN_STYLE)
     # Apply convenience kwargs before user style dict (user dict wins)
@@ -197,7 +190,9 @@ def build_cube_figure(
     )
 
     scene = build_bundle_scene(
-        bundle, display_mode=display_mode, show_hydrogen=show_hydrogen,
+        bundle,
+        display_mode=display_mode,
+        show_hydrogen=show_hydrogen,
     )
     # Ensure cube_data is on the scene for the isosurface renderer
     if scene.get("cube_data") is None:
