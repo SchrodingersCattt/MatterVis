@@ -100,6 +100,7 @@ def build_publication_figure(
     subtitle: str | None = None,
     width: int = 1600,
     height: int = 1100,
+    vector_overlays: list[dict] | None = None,
 ) -> "go.Figure":
     """Compose a crystal overview and isolated representative polyhedra."""
     from plotly.graph_objects import Figure as go_Figure
@@ -114,7 +115,13 @@ def build_publication_figure(
         "axis_key_fig_height": float(height),
         "axis_key_anchor": [0.075, 0.455],
     }
-    main_figure = build_figure(scene, main_style, topology_data=topology_data, force_quality=True)
+    main_figure = build_figure(
+        scene,
+        main_style,
+        topology_data=topology_data,
+        force_quality=True,
+        vector_overlays=vector_overlays,
+    )
     main_dict = main_figure.to_dict()
     traces = list(main_dict.get("data") or [])
     for trace in traces:
@@ -247,6 +254,7 @@ def build_row_figure(
     bgcolor: str = "#FFFFFF",
     *,
     include_interaction_traces: bool = True,
+    vector_overlays_by_scene: list[list[dict] | None] | None = None,
 ) -> "go.Figure":
     """Pack N scenes side-by-side in a 1×N Plotly subplot figure.
 
@@ -287,6 +295,11 @@ def build_row_figure(
 
     all_trace_dicts: list[dict] = []
     for col_idx, (scene, style) in enumerate(scene_style_pairs):
+        scene = dict(scene)
+        if vector_overlays_by_scene is not None:
+            if len(vector_overlays_by_scene) != n:
+                raise ValueError("vector_overlays_by_scene must match scene count")
+            scene["vector_overlays"] = vector_overlays_by_scene[col_idx] or []
         style_norm = validate_style_schema(style)
         xr, yr, zr = _scene_ranges(scene, style_norm)
         if style_norm.get("material") == "flat":
@@ -308,6 +321,10 @@ def build_row_figure(
             hidden_labels_row = hidden_atom_label_set(tagged_row)
 
         trace_dicts: list[dict] = []
+        if scene.get("vector_overlays"):
+            from .overlay.vectors import vector_mesh_traces
+
+            trace_dicts.extend(vector_mesh_traces(scene["vector_overlays"], lattice=scene.get("M")))
         trace_dicts.extend(_ordered_atom_bond_trace_dicts(mesh_payload, use_fast=use_fast))
         trace_dicts.extend(_traces_to_dicts(_contact_traces(scene, style_norm)))
         trace_dicts.extend(_traces_to_dicts(_label_traces(scene, style_norm, hidden_labels=hidden_labels_row)))
@@ -346,9 +363,13 @@ def build_figure(
     *,
     force_quality: bool = False,
     include_interaction_traces: bool = True,
+    vector_overlays: list[dict] | None = None,
 ) -> "go.Figure":
     from plotly.graph_objects import Figure as go_Figure
 
+    scene = dict(scene)
+    if vector_overlays is not None:
+        scene["vector_overlays"] = vector_overlays
     style = validate_style_schema(style)
     xr, yr, zr = _scene_ranges(scene, style, topology_data=topology_data if style.get("topology_enabled", False) else None)
     if style.get("material") == "flat":
@@ -400,6 +421,10 @@ def build_figure(
     # skeleton renders on top of the translucent orbital lobes.
     from .traces_isosurface import isosurface_overlay_traces
     trace_dicts.extend(isosurface_overlay_traces(scene, style))
+    if scene.get("vector_overlays"):
+        from .overlay.vectors import vector_mesh_traces
+
+        trace_dicts.extend(vector_mesh_traces(scene["vector_overlays"], lattice=scene.get("M")))
     trace_dicts.extend(_ordered_atom_bond_trace_dicts(mesh_payload, use_fast=use_fast))
     selection_trace = selection_outline_trace(
         scene,
@@ -464,6 +489,18 @@ def build_figure(
     if show_title:
         layout_kwargs["title"] = dict(text=str(title_text), x=0.5)
     key_annotations, key_shapes = compose_axis_key_layout(scene, style)
+    if scene.get("vector_overlays"):
+        from .overlay.vectors import paper_vector_label_annotations
+
+        camera = layout_kwargs["scene"]["camera"]
+        projection = camera.get("projection") or {}
+        if (projection.get("type") if isinstance(projection, dict) else projection) == "orthographic":
+            key_annotations = list(key_annotations or []) + paper_vector_label_annotations(
+                scene["vector_overlays"],
+                lattice=scene.get("M"),
+                camera=camera,
+                ranges=(xr, yr, zr),
+            )
     key_annotations = list(key_annotations or []) + _element_legend_annotations(scene, style)
     if key_annotations:
         layout_kwargs["annotations"] = key_annotations

@@ -9,9 +9,11 @@ from .backend_operations import _OperationsBackendMixin
 from .backend_overlays import _OverlaysBackendMixin
 from .backend_selection import _SelectionBackendMixin
 from .backend_topology import _TopologyBackendMixin
+from .backend_vectors import _VectorBackendMixin
 
 
 class ViewerBackend(
+    _VectorBackendMixin,
     _CoreBackendMixin,
     _OperationsBackendMixin,
     _OverlaysBackendMixin,

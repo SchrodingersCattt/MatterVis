@@ -596,6 +596,21 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
                 atom_mins = np.minimum(atom_mins, iso_min)
                 atom_maxs = np.maximum(atom_maxs, iso_max)
 
+    vector_overlays = scene.get("vector_overlays") or []
+    if vector_overlays:
+        from .overlay.vectors import vector_overlay_bounds
+
+        vector_min, vector_max = vector_overlay_bounds(
+            vector_overlays,
+            lattice=scene.get("M"),
+        )
+        if vector_min is not None:
+            if atom_mins is None:
+                atom_mins, atom_maxs = vector_min, vector_max
+            else:
+                atom_mins = np.minimum(atom_mins, vector_min)
+                atom_maxs = np.maximum(atom_maxs, vector_max)
+
     if atom_mins is None:
         return [[-1.0, 1.0], [-1.0, 1.0], [-1.0, 1.0]]
 

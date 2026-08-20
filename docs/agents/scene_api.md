@@ -165,6 +165,11 @@ honours:
   `projection="perspective"`; orthographic views keep the same visual
   scale but still use the eye direction.
 
+Anchored scientific arrows are supplied with `vector_overlays=` or
+`scene["vector_overlays"]`; see [vector overlays](vector_overlays_api.md).
+They are world-space Mesh3d content and therefore differ from corner compass
+annotations.
+
 ## Static exports and interaction traces
 
 `build_figure(..., include_interaction_traces=False)` and
