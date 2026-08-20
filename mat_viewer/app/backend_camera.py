@@ -355,7 +355,7 @@ class _CameraBackendMixin:
         except Exception as exc:  # pragma: no cover - depends on local Chrome/Kaleido state
             if raise_errors:
                 raise
-            return _fallback_png(f"Plotly image export failed: {exc}")
+            raise RuntimeError(f"Plotly/Kaleido PNG export failed: {exc}") from exc
 
     def default_camera(self, state: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         scene = self.scene_for_state(self.get_state() if state is None else state)

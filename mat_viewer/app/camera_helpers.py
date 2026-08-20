@@ -324,19 +324,4 @@ def _rotate_vector(vec: np.ndarray, axis: np.ndarray, angle_deg: float) -> np.nd
     )
 
 
-def _fallback_png(message: str) -> bytes:
-    try:
-        from PIL import Image, ImageDraw
-    except Exception:
-        return bytes.fromhex(
-            "89504E470D0A1A0A0000000D4948445200000001000000010802000000907753DE"
-            "0000000C49444154789C63606060000000040001F61738550000000049454E44AE426082"
-        )
-    image = Image.new("RGB", (960, 240), "white")
-    draw = ImageDraw.Draw(image)
-    draw.text((18, 18), message, fill="black")
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    return buffer.getvalue()
-
 __all__ = [name for name in globals() if not name.startswith("__")]

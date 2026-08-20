@@ -13,6 +13,7 @@ import numpy as np
 from ..camera import CameraTransform, triangulate_polygon
 from ..contracts import (
     LinePrimitive,
+    RENDER_RESULT_SCHEMA,
     RenderPlan,
     RenderResult,
     TextPrimitive,
@@ -159,7 +160,7 @@ def render_vector(
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(data)
     return RenderResult(
-        schema="matter-vis.render-result/v1",
+        schema=RENDER_RESULT_SCHEMA,
         backend="cpu",
         format=output_format,
         width=plan.width,

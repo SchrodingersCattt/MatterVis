@@ -41,7 +41,14 @@ def register_export_routes(v2, backend) -> dict:
         except (TypeError, ValueError) as exc:
             return _error_response(exc, 400, hint="width and height must be integers; scale must be numeric")
         except Exception as exc:
-            return _error_response(exc, 503, hint="Plotly/Kaleido image export failed")
+            return _error_response(
+                exc,
+                503,
+                hint=(
+                    "Install Plotly static export support with: "
+                    'python -m pip install "matter-vis[plotly-export]"'
+                ),
+            )
         return Response(png, mimetype="image/png")
 
     @v2.post("/preset/save")

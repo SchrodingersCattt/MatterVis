@@ -21,6 +21,8 @@ Projection = Literal["orthographic", "perspective"]
 Backend = Literal["cpu", "plotly"]
 DisplayMode = Literal["formula_unit", "unit_cell", "asymmetric_unit", "cluster"]
 RGBA: TypeAlias = tuple[float, float, float, float]
+RENDER_PLAN_SCHEMA = "mattervis.render-plan/v1"
+RENDER_RESULT_SCHEMA = "mattervis.render-result/v1"
 
 
 def _readonly_array(
@@ -213,6 +215,8 @@ class RenderSpec:
             raise ValueError("unknown shading")
         if self.ortep_mode not in {"solid", "axes", "hatch"}:
             raise ValueError("unknown ORTEP mode")
+        if self.missing_adp_policy not in {"error", "sphere"}:
+            raise ValueError("missing_adp_policy must be 'error' or 'sphere'")
         if self.representation != "ortep" and self.ortep_mode != "solid":
             raise ValueError("ortep_mode axes/hatch requires representation='ortep'")
         object.__setattr__(
@@ -365,7 +369,7 @@ class RenderPlan:
     viewports: tuple[ViewportPlan, ...]
     metadata: Mapping[str, Any] = field(default_factory=dict)
     warnings: tuple[str, ...] = ()
-    schema: str = "matter-vis.render-plan/v1"
+    schema: str = RENDER_PLAN_SCHEMA
 
     def __post_init__(self) -> None:
         if int(self.width) <= 0 or int(self.height) <= 0:
@@ -529,6 +533,8 @@ __all__ = [
     "Primitive",
     "Projection",
     "RGBA",
+    "RENDER_PLAN_SCHEMA",
+    "RENDER_RESULT_SCHEMA",
     "RenderPlan",
     "RenderResult",
     "RenderSpec",

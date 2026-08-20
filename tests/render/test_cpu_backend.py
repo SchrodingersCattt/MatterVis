@@ -146,6 +146,8 @@ def test_flat_and_smooth_shading_produce_distinct_geometry_and_pixels():
         RenderSpec(shading="silently-invented")
     with pytest.raises(ValueError, match="unknown ORTEP mode"):
         RenderSpec(representation="ortep", ortep_mode="octant")
+    with pytest.raises(ValueError, match="missing_adp_policy must be 'error' or 'sphere'"):
+        RenderSpec(missing_adp_policy="placeholder")
     with pytest.raises(ValueError, match="requires representation='ortep'"):
         RenderSpec(ortep_mode="hatch")
     with pytest.raises(ValueError, match="unknown RenderSpec fields: glow"):
@@ -308,6 +310,8 @@ def test_png_bytes_and_plan_hash_are_deterministic():
     plan = _plan(_triangle("triangle", 0.0, (0.2, 0.5, 0.8, 1.0)))
     first = render(plan, format="png")
     second = render(plan, format="png")
+    assert plan.schema == "mattervis.render-plan/v1"
+    assert first.schema == "mattervis.render-result/v1"
     assert first.data == second.data
     assert first.output_sha256 == second.output_sha256
     assert first.plan_sha256 == plan.fingerprint()
