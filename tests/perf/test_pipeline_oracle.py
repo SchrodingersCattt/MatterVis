@@ -51,6 +51,12 @@ def _bundle():
     )
 
 
+def test_peak_rss_is_optional_on_platforms_without_resource(monkeypatch):
+    monkeypatch.setattr(bench_pipeline, "_resource", None)
+
+    assert bench_pipeline._peak_rss_mib() is None
+
+
 def test_oracle_signature_is_stable_and_json_safe():
     bundle = _bundle()
 

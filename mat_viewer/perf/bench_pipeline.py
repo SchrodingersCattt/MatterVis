@@ -10,7 +10,6 @@ import importlib.metadata
 import json
 import os
 import platform
-import resource
 import statistics
 import subprocess
 import sys
@@ -21,6 +20,11 @@ from typing import Any, Callable
 import numpy as np
 import plotly
 
+try:
+    import resource as _resource
+except ImportError:  # Windows does not provide the POSIX resource module.
+    _resource = None
+
 from mat_viewer import perf_log
 from mat_viewer.loader import build_bundle_scene, build_loaded_crystal
 from mat_viewer.renderer import build_figure, style_from_controls
@@ -28,6 +32,15 @@ from mat_viewer.renderer import build_figure, style_from_controls
 from .oracle import build_oracle_signature
 
 SCHEMA = "mattervis.perf.pipeline/v1"
+
+
+def _peak_rss_mib() -> float | None:
+    """Return peak resident memory when the platform exposes it."""
+    if _resource is None:
+        return None
+    peak = float(_resource.getrusage(_resource.RUSAGE_SELF).ru_maxrss)
+    divisor = 1024.0**2 if sys.platform == "darwin" else 1024.0
+    return peak / divisor
 
 
 @contextmanager
@@ -192,7 +205,7 @@ def build_pipeline_report(
         },
         "scenes": scenes,
         "figure": figure_report,
-        "peak_rss_mib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0,
+        "peak_rss_mib": _peak_rss_mib(),
         "events": perf_log.recent(limit=1000, since_seq=event_cursor),
         "oracle": build_oracle_signature(bundle, scene=oracle_scene, figure=figure),
     }
