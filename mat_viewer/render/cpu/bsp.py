@@ -68,19 +68,51 @@ def traverse_back_to_front(
     node: BSPNode | None,
     *,
     eye: np.ndarray | None = None,
+    view_direction: np.ndarray | None = None,
 ) -> list[BSPPolygon]:
-    """Return split polygons in painter order for one camera-space eye."""
+    """Return split polygons in painter order for one camera-space view.
+
+    ``eye`` is the finite camera-space eye used by perspective projection.
+    ``view_direction`` is the direction of parallel orthographic rays from
+    the eye into the scene, equivalent to placing the eye at infinity in the
+    opposite direction.  Omitting both retains the perspective-eye default at
+    the camera-space origin.
+    """
     if node is None:
         return []
+    if eye is not None and view_direction is not None:
+        raise ValueError("provide either eye or view_direction, not both")
     eye_point = np.zeros(3) if eye is None else np.asarray(eye, dtype=float)
     if eye_point.shape != (3,) or not np.all(np.isfinite(eye_point)):
         raise ValueError("eye must be a finite three-dimensional point")
+    ray_direction = (
+        None if view_direction is None else np.asarray(view_direction, dtype=float)
+    )
+    if ray_direction is not None:
+        length = float(np.linalg.norm(ray_direction))
+        if (
+            ray_direction.shape != (3,)
+            or not np.all(np.isfinite(ray_direction))
+            or length <= 0.0
+        ):
+            raise ValueError(
+                "view_direction must be a finite non-zero three-dimensional vector"
+            )
+        ray_direction = ray_direction / length
     result: list[BSPPolygon] = []
 
     def visit(current: BSPNode | None) -> None:
         if current is None:
             return
-        eye_side = float(eye_point @ current.normal - current.offset)
+        if ray_direction is None:
+            eye_side = float(eye_point @ current.normal - current.offset)
+        else:
+            # Eye = origin - distance * ray_direction.  At infinite distance,
+            # the directional term selects the side; for a plane parallel to
+            # the rays, the origin-offset term remains constant along the ray.
+            eye_side = -float(ray_direction @ current.normal)
+            if abs(eye_side) <= np.finfo(float).eps * 16.0:
+                eye_side = -float(current.offset)
         far, near = (
             (current.back, current.front)
             if eye_side >= 0.0

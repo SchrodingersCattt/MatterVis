@@ -186,7 +186,13 @@ def vector_scene(
     transform = CameraTransform(viewport.camera, width, height)
     bsp_polygons = _mesh_polygons(viewport, transform)
     tree = build_bsp(bsp_polygons, epsilon=_scene_epsilon(bsp_polygons))
-    ordered = traverse_back_to_front(tree)
+    if viewport.camera.projection == "orthographic":
+        ordered = traverse_back_to_front(
+            tree,
+            view_direction=np.asarray([0.0, 0.0, -1.0]),
+        )
+    else:
+        ordered = traverse_back_to_front(tree, eye=np.zeros(3))
     projected = _project_polygons(ordered, transform)
     lines = _line_pieces(viewport, transform, projected)
     return projected, lines

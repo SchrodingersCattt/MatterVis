@@ -306,6 +306,68 @@ def test_intersecting_transparent_polyhedra_use_abuffer_and_vector_bsp():
     assert svg is not None and b"<image" not in svg.lower()
 
 
+def test_orthographic_oblique_overlap_paints_back_to_front_in_svg_and_pdf():
+    camera = CameraSpec(
+        position=(0.0, 0.0, 0.0),
+        target=(0.0, 0.0, -1.0),
+        up=(0.0, 1.0, 0.0),
+        projection="orthographic",
+        near=0.1,
+        far=30.0,
+        ortho_scale=12.0,
+    )
+    xy = np.asarray([[9.0, -1.0], [11.0, -1.0], [10.0, 1.0]])
+
+    def oblique_triangle(identifier, z, rgba):
+        return TriangleMeshPrimitive(
+            semantic_id=identifier,
+            vertices=np.column_stack((xy, z(xy[:, 0]))),
+            triangles=np.asarray([[0, 1, 2]]),
+            rgba=rgba,
+        )
+
+    front = oblique_triangle(
+        "A-front-red",
+        lambda x: 1.0 - x,
+        (1.0, 0.0, 0.0, 0.5),
+    )
+    back = oblique_triangle(
+        "B-back-blue",
+        lambda x: -x,
+        (0.0, 0.0, 1.0, 0.5),
+    )
+    tree = build_bsp(
+        [
+            BSPPolygon(front.vertices, front.rgba, front.semantic_id, 0),
+            BSPPolygon(back.vertices, back.rgba, back.semantic_id, 1),
+        ]
+    )
+    assert [item.semantic_id for item in traverse_back_to_front(tree, eye=np.zeros(3))] == [
+        "A-front-red",
+        "B-back-blue",
+    ]
+    assert [
+        item.semantic_id
+        for item in traverse_back_to_front(
+            tree,
+            view_direction=np.asarray([0.0, 0.0, -1.0]),
+        )
+    ] == ["B-back-blue", "A-front-red"]
+    plan = _plan(front, back, camera=camera)
+
+    polygons, _lines = vector_scene(plan.viewports[0], plan.width, plan.height)
+    assert [item.polygon.semantic_id for item in polygons] == [
+        "B-back-blue",
+        "A-front-red",
+    ]
+
+    svg = render(plan, format="svg").data
+    pdf = render(plan, format="pdf").data
+    assert svg is not None and b"<image" not in svg.lower()
+    assert pdf is not None and pdf.startswith(b"%PDF")
+    assert b"/Subtype /Image" not in pdf
+
+
 def test_png_bytes_and_plan_hash_are_deterministic():
     plan = _plan(_triangle("triangle", 0.0, (0.2, 0.5, 0.8, 1.0)))
     first = render(plan, format="png")
