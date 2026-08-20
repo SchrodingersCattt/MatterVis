@@ -45,33 +45,34 @@ def _require_molcryskit():
             KEY_U_CART,
         )
     except ImportError as exc:
+        from ..capabilities import (
+            MOLCRYSKIT_DEVELOPMENT_INSTALL,
+            MOLCRYSKIT_MINIMUM,
+        )
+
         raise ImportError(
-            "molcrys-kit is required for the formula_unit display mode. "
-            "Install it with `pip install molcrys-kit` (it is listed in "
-            "MatterVis's requirements.txt)."
+            "MolCrysKit is a base MatterVis dependency and is required for "
+            f"formula_unit display (molcrys-kit>={MOLCRYSKIT_MINIMUM}). "
+            "During the two-PR development window, install the exact contract "
+            f"commit with: {MOLCRYSKIT_DEVELOPMENT_INSTALL}."
         ) from exc
 
-    required_contracts = {
-        "MolecularCrystal.get_site_records": getattr(
-            MolecularCrystal, "get_site_records", None
-        ),
-        "MolecularCrystal.get_bond_records": getattr(
-            MolecularCrystal, "get_bond_records", None
-        ),
-        "StoichiometryAnalyzer.select_formula_unit": getattr(
-            StoichiometryAnalyzer, "select_formula_unit", None
-        ),
-    }
-    missing = [
-        name for name, value in required_contracts.items() if not callable(value)
-    ]
+    from ..capabilities import (
+        MOLCRYSKIT_DEVELOPMENT_INSTALL,
+        MOLCRYSKIT_MINIMUM,
+        molcryskit_contract_missing,
+    )
+
+    missing = molcryskit_contract_missing()
     if missing:
         raise RuntimeError(
             "The installed molcrys-kit does not provide MatterVis's required "
             "public structure contracts: "
             + ", ".join(missing)
-            + ". Install the MolCrysKit structure-contract release or the exact "
-            "development commit pinned by MatterVis CI."
+            + f". MatterVis requires molcrys-kit>={MOLCRYSKIT_MINIMUM}. During "
+            "development, install the exact contract commit with: "
+            + MOLCRYSKIT_DEVELOPMENT_INSTALL
+            + "."
         )
 
     return {
@@ -394,9 +395,7 @@ def analyze_crystal(crystal) -> CrystalAnalysis:
                     "centroid_A": tuple(float(value) for value in ring.centroid_A),
                     "normal": tuple(float(value) for value in ring.normal),
                     "plane_rmsd_A": (
-                        None
-                        if ring.plane_rmsd_A is None
-                        else float(ring.plane_rmsd_A)
+                        None if ring.plane_rmsd_A is None else float(ring.plane_rmsd_A)
                     ),
                     "is_planar": bool(ring.is_planar),
                     "is_aromatic": bool(ring.is_aromatic),

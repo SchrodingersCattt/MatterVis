@@ -14,7 +14,7 @@ from typing import Any
 
 import numpy as np
 
-from .core import CubeData
+from .io import CubeData
 
 
 def cube_lattice_matrix(cube: CubeData) -> np.ndarray:
@@ -86,8 +86,8 @@ def build_cube_figure(
 ):
     """Render a cube file through the unified crystal pipeline with isosurface overlay.
 
-    This is the recommended replacement for :func:`build_orbital_panel_figure`.
-    The structure (atoms, bonds) goes through the full rendering pipeline
+    This is the canonical Plotly cube entry point. The structure (atoms, bonds)
+    goes through the full rendering pipeline
     (MCK bonds, correct colors/materials, display modes) and the volumetric data
     is rendered as an isosurface overlay on top.
 

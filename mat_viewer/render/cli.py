@@ -20,6 +20,8 @@ _IMAGE_EXTENSIONS = (".png", ".pdf", ".svg")
 _ANIMATION_EXTENSIONS = (".gif", ".mp4")
 _SUPPORTED_EXTENSIONS = _IMAGE_EXTENSIONS + (".html",) + _ANIMATION_EXTENSIONS
 _CAMERA_AXES = ("a", "b", "c", "a*", "b*", "c*")
+
+
 def _build_render_parser(
     subparsers: argparse._SubParsersAction,
 ) -> argparse.ArgumentParser:
@@ -397,40 +399,13 @@ def _build_render_parser(
     )
 
     return p
-def _parse_polyhedron_specs(raw_specs: list[str]) -> list[dict[str, Any]]:
-    from ..app.normalizers import _normalize_polyhedron_spec
 
-    specs: list[dict[str, Any]] = []
-    existing_ids: set[str] = set()
-    for index, raw in enumerate(raw_specs):
-        try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"polyhedron {index + 1}: invalid JSON: {exc}") from exc
-        if not isinstance(payload, dict):
-            raise ValueError(f"polyhedron {index + 1}: expected a JSON object")
-        normalized_payload = dict(payload)
-        if (
-            "center_species" not in normalized_payload
-            and "center" in normalized_payload
-        ):
-            normalized_payload["center_species"] = normalized_payload.pop("center")
-        if (
-            "ligand_species" not in normalized_payload
-            and "ligand" in normalized_payload
-        ):
-            normalized_payload["ligand_species"] = normalized_payload.pop("ligand")
-        spec = _normalize_polyhedron_spec(
-            normalized_payload,
-            fallback_color="#7c5cbf",
-            existing_ids=existing_ids,
-        )
-        if spec is None:
-            raise ValueError(f"polyhedron {index + 1}: center and ligand are required")
-        if not spec.get("ligand_species"):
-            raise ValueError(f"polyhedron {index + 1}: ligand is required")
-        specs.append(spec)
-    return specs
+
+def _parse_polyhedron_specs(raw_specs: list[str]) -> list[dict[str, Any]]:
+    """Compatibility delegate to the backend-neutral strict parser."""
+    from ..agent_topology import parse_polyhedron_specs
+
+    return parse_polyhedron_specs(raw_specs)
 
 
 def _parse_publication_options(
@@ -520,77 +495,27 @@ def _parse_publication_options(
 def _build_cli_topology_data(
     bundle, scene: dict, args: argparse.Namespace
 ) -> dict[str, Any] | None:
-    if not args.polyhedron:
-        return None
-    from ..app.backend_topology import compute_topology_geometry
+    from types import SimpleNamespace
 
-    specs = _parse_polyhedron_specs(args.polyhedron)
-    fragments = scene.get("fragment_table") or []
-    if not fragments:
-        raise ValueError("polyhedra require a scene with at least one fragment")
-    site_index = args.polyhedron_site
-    if site_index is None:
-        site_index = next(
-            (
-                int(fragment["index"])
-                for spec in specs
-                for fragment in fragments
-                if (
-                    str(spec.get("center_species"))
-                    in {str(elem) for elem in (fragment.get("elem_set") or [])}
-                    if spec.get("level") == "atom"
-                    else (fragment.get("formula") or fragment.get("species"))
-                    == spec.get("center_species")
-                )
-            ),
-            int(fragments[0]["index"]),
-        )
-    topology_data = compute_topology_geometry(
-        bundle=bundle,
-        scene=scene,
-        effective_specs=specs,
-        site_index=int(site_index),
+    from ..agent_topology import build_topology_data
+
+    class _SceneBundleProxy:
+        def __init__(self, base, active_scene: dict) -> None:
+            self._base = base
+            self.scene = active_scene
+
+        def __getattr__(self, name: str):
+            return getattr(self._base, name)
+
+    structure = SimpleNamespace(
+        frames=(SimpleNamespace(bundle=_SceneBundleProxy(bundle, scene)),)
+    )
+    return build_topology_data(
+        structure,
+        args.polyhedron,
+        site_index=args.polyhedron_site,
         cutoff=float(args.polyhedron_cutoff),
     )
-    if topology_data is None:
-        raise ValueError(f"no topology fragment found for site {site_index}")
-    if not any(
-        overlay.get("hull", {}).get("simplices")
-        for result in topology_data.get("spec_results") or []
-        for overlay in result.get("overlays") or []
-    ):
-        details = "; ".join(topology_data.get("warnings") or [])
-        raise ValueError(
-            f"no drawable polyhedron found{': ' + details if details else ''}"
-        )
-    paint_by_id = {
-        str(spec["id"]): {
-            "color": str(spec.get("color") or "#7c5cbf"),
-            "opacity": float(spec.get("opacity", 0.55)),
-            "edge_opacity": float(spec.get("edge_opacity", 0.90)),
-            "edge_width": float(spec.get("edge_width", 3.0)),
-            "flatshading": bool(spec.get("flatshading", True)),
-        }
-        for spec in specs
-    }
-    topology_data = dict(topology_data)
-    topology_data["spec_results"] = [
-        {
-            **result,
-            **paint_by_id.get(
-                str(result.get("spec_id")),
-                {
-                    "color": "#7c5cbf",
-                    "opacity": 0.55,
-                    "edge_opacity": 0.90,
-                    "edge_width": 3.0,
-                    "flatshading": True,
-                },
-            ),
-        }
-        for result in topology_data.get("spec_results") or []
-    ]
-    return topology_data
 
 
 def _build_style_overrides(args: argparse.Namespace) -> Dict[str, Any]:
@@ -729,7 +654,7 @@ def _save_static_output(
     args: argparse.Namespace,
     output_path: Path,
     *,
-    allow_style_fallback: bool = True,
+    allow_style_fallback: bool = False,
 ) -> dict[str, Any]:
     from ..renderer import (
         build_figure,
@@ -737,7 +662,13 @@ def _save_static_output(
         build_static_publication_figure,
         render,
     )
-    from .export import plotly_static_export_available, save_flat_ortep_fallback
+    from .export import plotly_static_export_available
+
+    if allow_style_fallback:
+        raise ValueError(
+            "visual style fallback has been removed; request an explicit backend "
+            "and representation"
+        )
 
     ext = output_path.suffix.lower()
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -782,33 +713,10 @@ def _save_static_output(
 
     export_available, unavailable_reason = plotly_static_export_available()
     if result.plotly_figure is not None and not export_available:
-        if args.publication_layout:
-            raise RuntimeError(
-                "publication layout requires Plotly/Kaleido static export "
-                f"({unavailable_reason})"
-            )
-        if not allow_style_fallback:
-            raise RuntimeError(
-                "Plotly/Kaleido export is required for the requested animation "
-                f"style ({unavailable_reason})"
-            )
-        print(
-            "Plotly/Kaleido static export is unavailable "
-            f"({unavailable_reason}). Falling back to Matplotlib flat ORTEP.",
-            file=sys.stderr,
+        raise RuntimeError(
+            "Plotly/Kaleido static export is unavailable and no fallback is "
+            f"permitted ({unavailable_reason})"
         )
-        save_flat_ortep_fallback(
-            scene,
-            style,
-            output_path,
-            width=args.width,
-            height=args.height,
-            scale=args.scale,
-        )
-        return {
-            "backend": "matplotlib-flat-ortep",
-            "fallback_reason": unavailable_reason,
-        }
 
     try:
         result.save(
@@ -824,30 +732,12 @@ def _save_static_output(
             "fallback_reason": None,
         }
     except Exception as exc:
-        if result.plotly_figure is None or args.publication_layout:
-            raise
-        if not allow_style_fallback:
+        if result.plotly_figure is not None:
             raise RuntimeError(
-                "Plotly/Kaleido export failed for the requested animation style "
+                "Plotly/Kaleido static export failed and no fallback is permitted "
                 f"({type(exc).__name__}: {exc})"
             ) from exc
-        print(
-            "Plotly/Kaleido static export failed "
-            f"({type(exc).__name__}: {exc}). Falling back to Matplotlib flat ORTEP.",
-            file=sys.stderr,
-        )
-        save_flat_ortep_fallback(
-            scene,
-            style,
-            output_path,
-            width=args.width,
-            height=args.height,
-            scale=args.scale,
-        )
-        return {
-            "backend": "matplotlib-flat-ortep",
-            "fallback_reason": f"{type(exc).__name__}: {exc}",
-        }
+        raise
 
 
 def _render_main(args: argparse.Namespace) -> None:
@@ -915,7 +805,9 @@ def _render_main(args: argparse.Namespace) -> None:
     args.view = (
         "formula_unit"
         if args.view == "auto" and input_format == "cif"
-        else "unit_cell" if args.view == "auto" else args.view
+        else "unit_cell"
+        if args.view == "auto"
+        else args.view
     )
     overrides = _build_style_overrides(args)
 

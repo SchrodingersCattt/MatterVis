@@ -7,13 +7,16 @@ classification to MolCrysKit.
 
 ## Static CLI
 
+Polyhedra are part of the base CPU renderer; no Plotly/Web extra is required.
+Run `mat-vis render INPUT.cif -o OUTPUT.png --backend cpu --check --json` first.
+
 `mat-vis render` accepts repeatable `--polyhedron` JSON objects. Required keys are
 `center` and `ligand`.
 
 Atom-centred coordination polyhedron:
 
 ```bash
-mat-vis render INPUT.cif -o OUTPUT.png \
+mat-vis render INPUT.cif -o OUTPUT.png --backend cpu \
   --view unit_cell --style ball_stick --material mesh \
   --camera-axis c --orthogonal \
   --polyhedron '{"center":"Pb","ligand":"I","level":"atom","fallback_max":6,"color":"#ff6600"}' \
@@ -23,24 +26,26 @@ mat-vis render INPUT.cif -o OUTPUT.png \
 Molecule-centred packing shell:
 
 ```bash
-mat-vis render INPUT.cif -o OUTPUT.png \
+mat-vis render INPUT.cif -o OUTPUT.png --backend cpu \
   --view unit_cell --style ball_stick --material mesh \
   --camera-axis c --orthogonal \
   --polyhedron '{"center":"C6N2","ligand":"ClO4","level":"molecule","center_kind":"heavy_centroid","color":"#3366cc"}' \
   --polyhedron-cutoff 10.0
 ```
 
-Repeat `--polyhedron` for multiple overlays. Optional JSON keys are `name`,
-`color`, `level`, `center_kind`, `enforce_enclosure`,
-`centroid_offset_frac`, `hard_cutoff`, and `fallback_max`.
-`--polyhedron-site INDEX` selects the displayed fragment used as the primary
-analysis anchor; without it, the CLI chooses the first matching fragment.
+Repeat `--polyhedron` for multiple overlays. Optional JSON keys are `id` (or
+its alias `spec_id`), `color`, `opacity`, `edge_opacity`, `level`,
+`center_kind`, `enforce_enclosure`, `centroid_offset_frac`, `cutoff`,
+`hard_cutoff`, and `fallback_max`. Unknown or conflicting alias keys fail
+explicitly. `--polyhedron-site INDEX` restricts analysis to that displayed
+fragment index; without it, the CLI draws every matching displayed fragment.
 
 ## Semantics
 
-- Atom level uses element symbols. `cutoff` is the hard radial cap and
-  `hard_cutoff` is ignored. A centre element inside a polyatomic fragment is
-  supported; when the fragment contains multiple atoms of that element,
+- Atom level uses element symbols. `cutoff` is the hard radial cap and an
+  explicit `hard_cutoff` or `center_kind` is rejected as molecule-only. A
+  centre element inside a polyatomic fragment is supported; when the fragment
+  contains multiple atoms of that element,
   MolCrysKit/MatterVis currently select the matching record nearest the fragment
   centre rather than an exact atom label.
 - Molecule level uses compact molecular formulas and canonical
@@ -53,11 +58,7 @@ analysis anchor; without it, the CLI chooses the first matching fragment.
   CLI exits non-zero rather than silently producing an image without the
   requested polyhedron.
 
-## Python path
-
-For custom automation, call `analyze_topology(...)` and pass the result to
-`build_figure(scene, style, topology_data=result)`. Do not rebuild shells or PBC
-images from screen proximity.
-
-Follow `verification.md` for static exports and requested-versus-effective
-backend checks.
+For custom Python automation, pass MolCrysKit-derived `topology_data` through
+`mat_viewer.agent.render`; do not call a Web normalizer or rebuild shells/PBC
+images from screen proximity. Follow `verification.md` for static exports and
+requested-versus-effective backend checks.

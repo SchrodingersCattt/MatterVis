@@ -101,16 +101,12 @@ same length per pixel.
 
 ### `mat_viewer.renderer.build_publication_figure(...)`
 
-Composes one large crystal/topology scene above one isolated representative
-polyhedron panel per drawable topology spec. The builder consumes the same
-`topology_data` payload as `build_figure`; it does not recompute coordination
-chemistry. It also adds title/subtitle annotations, element and polyhedron
-keys, and the main-scene lattice compass.
-
-The static CLI exposes this as `mat-vis render --publication-layout` together
-with repeated `--polyhedron` specifications. `--title` and `--subtitle` set
-the publication heading. This layout requires Plotly/Kaleido for image export
-and never falls back to a topology-free flat ORTEP image.
+This is a legacy private compositor retained for the browser application's
+internal compatibility surface. The agent-facing CLI does not expose it:
+legacy `--publication-*`, `--title`, and `--subtitle` flags fail explicitly.
+Agents render one verified CPU SVG/PDF/PNG per view and compose panels in a
+separate authorized document or graphics step. Do not call this builder to
+bypass that boundary.
 
 For `level="atom"`, each specification is tiled over every unique visible
 `(raw source atom, periodic image)` matching `center_species`. The main panel

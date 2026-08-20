@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from ..cube import CubeData, read_cube
+from ..cube.io import CubeData, read_cube
 from ..cube.bridge import cube_lattice_matrix, cube_to_cell, cube_to_raw_atoms
 from .bundle_builder import build_loaded_crystal_from_atoms
 from .core import LoadedCrystal

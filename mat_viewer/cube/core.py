@@ -1,164 +1,51 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import TYPE_CHECKING, Mapping, Sequence
 
 import numpy as np
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
 from ..config.colors import (
     CUBE_ATOM_DISPLAY_RADII_ANG,
-    CUBE_COVALENT_RADII_ANG,
     CUBE_ELEMENT_COLORS,
-    CUBE_ELEMENT_SYMBOLS,
+)
+from .io import (
+    CubeAtom,
+    CubeData,
+    cube_grid,
+    default_isovalue,
+    read_cube as read_cube,
+    tile_cube as tile_cube,
+    tile_cube_data as tile_cube_data,
 )
 
+if TYPE_CHECKING:
+    import plotly.graph_objects as go
 
-BOHR_TO_ANGSTROM = 0.529177210903
 
-ELEMENT_SYMBOLS = CUBE_ELEMENT_SYMBOLS
 ELEMENT_COLORS = CUBE_ELEMENT_COLORS
-COVALENT_RADII_ANG = CUBE_COVALENT_RADII_ANG
 ATOM_DISPLAY_RADII_ANG = CUBE_ATOM_DISPLAY_RADII_ANG
 
 
-@dataclass
-class CubeAtom:
-    atomic_number: int
-    charge: float
-    coord: np.ndarray
-
-    @property
-    def element(self) -> str:
-        return ELEMENT_SYMBOLS.get(self.atomic_number, str(self.atomic_number))
-
-
-@dataclass
-class CubeData:
-    title: str
-    comment: str
-    atoms: list[CubeAtom]
-    origin: np.ndarray
-    axes: np.ndarray
-    values: np.ndarray
-    path: Path
-
-    @property
-    def shape(self) -> tuple[int, int, int]:
-        return tuple(int(x) for x in self.values.shape)
-
-    @property
-    def lattice(self) -> np.ndarray:
-        """3x3 lattice matrix (rows = cell vectors in Angstrom)."""
-        return self.axes * np.asarray(self.shape, dtype=float)[:, None]
+def _plotly_go():
+    try:
+        import plotly.graph_objects as go
+    except ImportError as exc:
+        raise ImportError(
+            "Plotly cube traces require `pip install matter-vis[plotly]`. "
+            "CPU cube rendering requires only `matter-vis[cube]`."
+        ) from exc
+    return go
 
 
-def tile_cube(cube: CubeData, neg: tuple[int, int, int],
-              pos: tuple[int, int, int]) -> tuple[np.ndarray, np.ndarray]:
-    """Tile cube data over a range of periodic images.
-
-    ``neg[i]`` cells on the negative side and ``pos[i]`` cells on the positive
-    side along axis ``i``. Returns ``(values, origin)`` where ``values`` has
-    shape ``(N0*reps0, N1*reps1, N2*reps2)`` and ``origin`` is the cartesian
-    origin of the tiled grid. Step vectors (``cube.axes``) are unchanged.
-    """
-    reps = (neg[0] + pos[0], neg[1] + pos[1], neg[2] + pos[2])
-    if any(r <= 0 for r in reps):
-        raise ValueError(f"reps must be positive, got {reps}")
-    big_values = np.tile(cube.values, reps)
-    shift = (neg[0] * cube.axes[0] * cube.shape[0]
-             + neg[1] * cube.axes[1] * cube.shape[1]
-             + neg[2] * cube.axes[2] * cube.shape[2])
-    big_origin = cube.origin - shift
-    return big_values, big_origin
-
-
-def tile_cube_data(cube: CubeData, neg: tuple[int, int, int], pos: tuple[int, int, int]) -> CubeData:
-    """Return a new :class:`CubeData` with values tiled over PBC images."""
-    values, origin = tile_cube(cube, neg, pos)
-    return CubeData(
-        title=cube.title,
-        comment=cube.comment,
-        atoms=list(cube.atoms),
-        origin=origin,
-        axes=np.array(cube.axes, dtype=float),
-        values=values,
-        path=cube.path,
-    )
-
-
-def _as_angstrom(vec: Iterable[float]) -> np.ndarray:
-    return np.asarray(list(vec), dtype=float) * BOHR_TO_ANGSTROM
-
-
-def read_cube(path: str | Path) -> CubeData:
-    """Read a Gaussian/CP2K cube file and return coordinates in Angstrom."""
-    cube_path = Path(path)
-    with cube_path.open("r", encoding="utf-8", errors="replace") as handle:
-        title = handle.readline().rstrip()
-        comment = handle.readline().rstrip()
-
-        natom_line = handle.readline().split()
-        natoms = abs(int(natom_line[0]))
-        origin = _as_angstrom(float(x) for x in natom_line[1:4])
-
-        shape: list[int] = []
-        axes: list[np.ndarray] = []
-        for _ in range(3):
-            parts = handle.readline().split()
-            shape.append(abs(int(parts[0])))
-            axes.append(_as_angstrom(float(x) for x in parts[1:4]))
-
-        atoms: list[CubeAtom] = []
-        for _ in range(natoms):
-            parts = handle.readline().split()
-            atoms.append(
-                CubeAtom(
-                    atomic_number=int(parts[0]),
-                    charge=float(parts[1]),
-                    coord=_as_angstrom(float(x) for x in parts[2:5]),
-                )
-            )
-
-        raw_values = np.fromiter((float(x) for line in handle for x in line.split()), dtype=float)
-
-    expected = int(np.prod(shape))
-    if raw_values.size != expected:
-        raise ValueError(f"{cube_path} contains {raw_values.size} values, expected {expected}")
-
-    return CubeData(
-        title=title,
-        comment=comment,
-        atoms=atoms,
-        origin=origin,
-        axes=np.asarray(axes, dtype=float),
-        values=raw_values.reshape(shape),
-        path=cube_path,
-    )
-
-
-def cube_grid(cube: CubeData, stride: int = 1) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Return flattened x/y/z/value arrays, optionally downsampled."""
-    stride = max(1, int(stride))
-    values = cube.values[::stride, ::stride, ::stride]
-    ii, jj, kk = np.indices(values.shape, dtype=float)
-    coords = (
-        cube.origin[:, None, None, None]
-        + ii[None, ...] * cube.axes[0, :, None, None, None] * stride
-        + jj[None, ...] * cube.axes[1, :, None, None, None] * stride
-        + kk[None, ...] * cube.axes[2, :, None, None, None] * stride
-    )
-    return coords[0].ravel(), coords[1].ravel(), coords[2].ravel(), values.ravel()
-
-
-def default_isovalue(values: np.ndarray, percentile: float = 98.5) -> float:
-    """Pick a robust orbital isovalue from the absolute-value distribution."""
-    nonzero = np.abs(values[np.nonzero(values)])
-    if nonzero.size == 0:
-        raise ValueError("Cube values are all zero")
-    return float(np.percentile(nonzero, percentile))
+def _plotly_make_subplots(*args, **kwargs):
+    try:
+        from plotly.subplots import make_subplots
+    except ImportError as exc:
+        raise ImportError(
+            "Plotly cube panels require `pip install matter-vis[plotly]`."
+        ) from exc
+    return make_subplots(*args, **kwargs)
 
 
 def orbital_isosurface_traces(
@@ -173,14 +60,18 @@ def orbital_isosurface_traces(
 ) -> list[go.Isosurface]:
     """Create positive and negative orbital isosurface traces (Plotly volume)."""
     x, y, z, values = cube_grid(cube, stride=stride)
-    iso = float(isovalue) if isovalue is not None else default_isovalue(values, percentile=percentile)
+    iso = (
+        float(isovalue)
+        if isovalue is not None
+        else default_isovalue(values, percentile=percentile)
+    )
     vmax = float(np.max(values))
     vmin = float(np.min(values))
 
     traces: list[go.Isosurface] = []
     if vmax >= iso:
         traces.append(
-            go.Isosurface(
+            _plotly_go().Isosurface(
                 x=x,
                 y=y,
                 z=z,
@@ -197,7 +88,7 @@ def orbital_isosurface_traces(
         )
     if vmin <= -iso:
         traces.append(
-            go.Isosurface(
+            _plotly_go().Isosurface(
                 x=x,
                 y=y,
                 z=z,
@@ -243,9 +134,11 @@ def mask_to_atoms(
 
     mask = np.zeros((Nx, Ny, Nz), dtype=bool)
     rsq = radius * radius
-    pad = (int(np.ceil(radius / dx)) + 1,
-           int(np.ceil(radius / dy)) + 1,
-           int(np.ceil(radius / dz)) + 1)
+    pad = (
+        int(np.ceil(radius / dx)) + 1,
+        int(np.ceil(radius / dy)) + 1,
+        int(np.ceil(radius / dz)) + 1,
+    )
 
     for p in coords:
         frac = inv_axes @ (p - origin)
@@ -260,11 +153,11 @@ def mask_to_atoms(
         ii = np.arange(i0, i1)
         jj = np.arange(j0, j1)
         kk = np.arange(k0, k1)
-        I, J, K = np.meshgrid(ii, jj, kk, indexing="ij")
+        grid_i, grid_j, grid_k = np.meshgrid(ii, jj, kk, indexing="ij")
         # Cartesian coordinates of the sub-block.
-        X = origin[0] + I * ax[0, 0] + J * ax[1, 0] + K * ax[2, 0]
-        Y = origin[1] + I * ax[0, 1] + J * ax[1, 1] + K * ax[2, 1]
-        Z = origin[2] + I * ax[0, 2] + J * ax[1, 2] + K * ax[2, 2]
+        X = origin[0] + grid_i * ax[0, 0] + grid_j * ax[1, 0] + grid_k * ax[2, 0]
+        Y = origin[1] + grid_i * ax[0, 1] + grid_j * ax[1, 1] + grid_k * ax[2, 1]
+        Z = origin[2] + grid_i * ax[0, 2] + grid_j * ax[1, 2] + grid_k * ax[2, 2]
         dist2 = (X - p[0]) ** 2 + (Y - p[1]) ** 2 + (Z - p[2]) ** 2
         sub = dist2 <= rsq
         mask[i0:i1, j0:j1, k0:k1] |= sub
@@ -302,7 +195,11 @@ def orbital_mesh_traces(
 
     stride = max(1, int(stride))
     values = cube.values[::stride, ::stride, ::stride]
-    iso = float(isovalue) if isovalue is not None else default_isovalue(values, percentile=percentile)
+    iso = (
+        float(isovalue)
+        if isovalue is not None
+        else default_isovalue(values, percentile=percentile)
+    )
     a0 = cube.axes[0] * stride
     a1 = cube.axes[1] * stride
     a2 = cube.axes[2] * stride
@@ -350,7 +247,9 @@ def orbital_mesh_traces(
         pos_field = np.where(pos_mask, pos_field, 0.0)
         neg_field = np.where(neg_mask, neg_field, 0.0)
 
-    def _iso_mesh(field: np.ndarray, level: float, color: str, name: str) -> go.Mesh3d | None:
+    def _iso_mesh(
+        field: np.ndarray, level: float, color: str, name: str
+    ) -> go.Mesh3d | None:
         try:
             verts, faces, _, _ = marching_cubes(field, level=level)
         except (ValueError, RuntimeError):
@@ -363,7 +262,7 @@ def orbital_mesh_traces(
             + verts[:, 1:2] * a1[None, :]
             + verts[:, 2:3] * a2[None, :]
         )
-        return go.Mesh3d(
+        return _plotly_go().Mesh3d(
             x=cart[:, 0],
             y=cart[:, 1],
             z=cart[:, 2],
@@ -399,14 +298,19 @@ def cube_atom_trace(cube: CubeData, *, atom_scale: float = 5.0) -> go.Scatter3d:
     labels = [f"{atom.element}{idx + 1}" for idx, atom in enumerate(cube.atoms)]
     colors = [ELEMENT_COLORS.get(atom.element, "#999999") for atom in cube.atoms]
     coords = np.asarray([atom.coord for atom in cube.atoms], dtype=float)
-    return go.Scatter3d(
+    return _plotly_go().Scatter3d(
         x=coords[:, 0],
         y=coords[:, 1],
         z=coords[:, 2],
         mode="markers",
         text=labels,
         hovertemplate="%{text}<extra></extra>",
-        marker=dict(size=atom_scale, color=colors, opacity=0.9, line=dict(color="#333333", width=0.5)),
+        marker=dict(
+            size=atom_scale,
+            color=colors,
+            opacity=0.9,
+            line=dict(color="#333333", width=0.5),
+        ),
         showlegend=False,
         name="atoms",
     )
@@ -470,13 +374,23 @@ def atom_sphere_traces(
         V = np.concatenate(all_v, axis=0)
         F = np.concatenate(all_f, axis=0)
         traces.append(
-            go.Mesh3d(
-                x=V[:, 0], y=V[:, 1], z=V[:, 2],
-                i=F[:, 0], j=F[:, 1], k=F[:, 2],
+            _plotly_go().Mesh3d(
+                x=V[:, 0],
+                y=V[:, 1],
+                z=V[:, 2],
+                i=F[:, 0],
+                j=F[:, 1],
+                k=F[:, 2],
                 color=color,
                 opacity=1.0,
                 flatshading=flatshading,
-                lighting=dict(ambient=0.75, diffuse=0.7, specular=0.25, roughness=0.45, fresnel=0.1),
+                lighting=dict(
+                    ambient=0.75,
+                    diffuse=0.7,
+                    specular=0.25,
+                    roughness=0.45,
+                    fresnel=0.1,
+                ),
                 lightposition=dict(x=200, y=200, z=200),
                 name=elem,
                 hoverinfo="name",
@@ -486,18 +400,22 @@ def atom_sphere_traces(
     return traces
 
 
-def _cylinder(p0: np.ndarray, p1: np.ndarray, radius: float, n_seg: int = 8
-              ) -> tuple[np.ndarray, np.ndarray]:
+def _cylinder(
+    p0: np.ndarray, p1: np.ndarray, radius: float, n_seg: int = 8
+) -> tuple[np.ndarray, np.ndarray]:
     axis = p1 - p0
     L = float(np.linalg.norm(axis))
     if L < 1e-9:
         return np.zeros((0, 3)), np.zeros((0, 3), dtype=int)
     z = axis / L
     a = np.array([1.0, 0.0, 0.0]) if abs(z[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
-    x = np.cross(z, a); x /= np.linalg.norm(x)
+    x = np.cross(z, a)
+    x /= np.linalg.norm(x)
     y = np.cross(z, x)
     angles = np.linspace(0.0, 2.0 * np.pi, n_seg, endpoint=False)
-    ring = radius * (np.cos(angles)[:, None] * x[None, :] + np.sin(angles)[:, None] * y[None, :])
+    ring = radius * (
+        np.cos(angles)[:, None] * x[None, :] + np.sin(angles)[:, None] * y[None, :]
+    )
     bottom = ring + p0[None, :]
     top = ring + p1[None, :]
     verts = np.concatenate([bottom, top], axis=0)
@@ -512,52 +430,63 @@ def _cylinder(p0: np.ndarray, p1: np.ndarray, radius: float, n_seg: int = 8
     return verts, np.asarray(faces, dtype=int)
 
 
-def bond_traces(
+def _legacy_bond_traces(
     cube: CubeData,
+    bonds: Sequence[Mapping[str, object] | tuple[int, int]],
     *,
-    tolerance: float = 1.15,
     radius: float = 0.10,
     color: str = "#888888",
     n_seg: int = 8,
-    skip_pairs: tuple[tuple[str, str], ...] = (("H", "H"),),
 ) -> list[go.Mesh3d]:
-    """Build cylindrical bonds based on covalent-radii distance criterion.
+    """Build cylinders from explicit canonical bond records.
 
-    Bonds are drawn as half-cylinders colored by their endpoint elements,
-    giving a clean ball-and-stick rendering that is robust under static
-    export. Pairs in ``skip_pairs`` (e.g. H–H) are never bonded.
+    This low-level legacy Plotly helper never infers chemistry. Mapping records
+    may contain ``left``/``right`` (or ``i``/``j``) plus the MolCrysKit
+    ``right_image_shift``. Two-item tuples are interpreted as zero-shift atom
+    indices. Prefer the canonical agent or :func:`build_cube_figure` facade.
     """
     atoms = cube.atoms
-    if len(atoms) < 2:
+    if len(atoms) < 2 or not bonds:
         return []
     coords = np.asarray([a.coord for a in atoms], dtype=float)
     elems = [a.element for a in atoms]
-    skip = {tuple(sorted(p)) for p in skip_pairs}
 
     by_color: dict[str, tuple[list[np.ndarray], list[np.ndarray]]] = {}
     nv_total: dict[str, int] = {}
 
-    for i in range(len(atoms)):
-        ri = COVALENT_RADII_ANG.get(elems[i], 0.75)
-        for j in range(i + 1, len(atoms)):
-            rj = COVALENT_RADII_ANG.get(elems[j], 0.75)
-            if tuple(sorted((elems[i], elems[j]))) in skip:
+    for record in bonds:
+        if isinstance(record, Mapping):
+            left = record.get("left", record.get("i"))
+            right = record.get("right", record.get("j"))
+            if left is None or right is None:
+                raise ValueError("bond records require left/right or i/j endpoints")
+            i, j = int(left), int(right)
+            image_shift = np.asarray(
+                record.get("right_image_shift", (0, 0, 0)), dtype=float
+            )
+        else:
+            if len(record) != 2:
+                raise ValueError("bond tuples must contain exactly two atom indices")
+            i, j = (int(record[0]), int(record[1]))
+            image_shift = np.zeros(3, dtype=float)
+        if i == j or min(i, j) < 0 or max(i, j) >= len(atoms):
+            raise ValueError(f"invalid cube bond endpoints {(i, j)!r}")
+        p_left = coords[i]
+        p_right = coords[j] + image_shift @ cube.lattice
+        mid = 0.5 * (p_left + p_right)
+        for p0, p1, elem in (
+            (p_left, mid, elems[i]),
+            (mid, p_right, elems[j]),
+        ):
+            col = ELEMENT_COLORS.get(elem, color)
+            vertices, faces = _cylinder(p0, p1, radius=radius, n_seg=n_seg)
+            if vertices.shape[0] == 0:
                 continue
-            cutoff = (ri + rj) * tolerance
-            d = float(np.linalg.norm(coords[i] - coords[j]))
-            if d > cutoff or d < 0.4:
-                continue
-            mid = 0.5 * (coords[i] + coords[j])
-            for p0, p1, elem in ((coords[i], mid, elems[i]), (mid, coords[j], elems[j])):
-                col = ELEMENT_COLORS.get(elem, color)
-                v, f = _cylinder(p0, p1, radius=radius, n_seg=n_seg)
-                if v.shape[0] == 0:
-                    continue
-                lst = by_color.setdefault(col, ([], []))
-                offset = nv_total.get(col, 0)
-                lst[0].append(v)
-                lst[1].append(f + offset)
-                nv_total[col] = offset + v.shape[0]
+            vertex_lists, face_lists = by_color.setdefault(col, ([], []))
+            offset = nv_total.get(col, 0)
+            vertex_lists.append(vertices)
+            face_lists.append(faces + offset)
+            nv_total[col] = offset + vertices.shape[0]
 
     traces: list[go.Mesh3d] = []
     for col, (vlist, flist) in by_color.items():
@@ -566,9 +495,13 @@ def bond_traces(
         V = np.concatenate(vlist, axis=0)
         F = np.concatenate(flist, axis=0)
         traces.append(
-            go.Mesh3d(
-                x=V[:, 0], y=V[:, 1], z=V[:, 2],
-                i=F[:, 0], j=F[:, 1], k=F[:, 2],
+            _plotly_go().Mesh3d(
+                x=V[:, 0],
+                y=V[:, 1],
+                z=V[:, 2],
+                i=F[:, 0],
+                j=F[:, 1],
+                k=F[:, 2],
                 color=col,
                 opacity=1.0,
                 flatshading=True,
@@ -581,7 +514,7 @@ def bond_traces(
     return traces
 
 
-def build_orbital_figure(
+def _legacy_build_orbital_figure(
     cube: CubeData,
     *,
     isovalue: float | None = None,
@@ -591,13 +524,19 @@ def build_orbital_figure(
     title: str | None = None,
 ) -> go.Figure:
     """Build a standalone Plotly figure for a cube orbital."""
-    fig = go.Figure()
-    for trace in orbital_isosurface_traces(cube, isovalue=isovalue, percentile=percentile, stride=stride):
+    fig = _plotly_go().Figure()
+    for trace in orbital_isosurface_traces(
+        cube, isovalue=isovalue, percentile=percentile, stride=stride
+    ):
         fig.add_trace(trace)
     if show_atoms and cube.atoms:
         fig.add_trace(cube_atom_trace(cube))
 
-    coords = np.asarray([atom.coord for atom in cube.atoms], dtype=float) if cube.atoms else np.zeros((0, 3))
+    coords = (
+        np.asarray([atom.coord for atom in cube.atoms], dtype=float)
+        if cube.atoms
+        else np.zeros((0, 3))
+    )
     if coords.size:
         mins = coords.min(axis=0)
         maxs = coords.max(axis=0)
@@ -624,8 +563,14 @@ def build_orbital_figure(
     return fig
 
 
-def _scene_ranges(cube: CubeData, padding: float = 0.6, stride: int = 4) -> list[list[float]]:
-    coords = np.asarray([atom.coord for atom in cube.atoms], dtype=float) if cube.atoms else np.zeros((0, 3))
+def _scene_ranges(
+    cube: CubeData, padding: float = 0.6, stride: int = 4
+) -> list[list[float]]:
+    coords = (
+        np.asarray([atom.coord for atom in cube.atoms], dtype=float)
+        if cube.atoms
+        else np.zeros((0, 3))
+    )
     if coords.size:
         mins = coords.min(axis=0)
         maxs = coords.max(axis=0)
@@ -639,7 +584,7 @@ def _scene_ranges(cube: CubeData, padding: float = 0.6, stride: int = 4) -> list
 
 
 DEFAULT_TRACE_ORDER: tuple[str, ...] = ("cell", "orbital", "bonds", "atoms")
-"""Default mesh insertion order in :func:`build_orbital_panel_figure`.
+"""Legacy mesh insertion order for the private panel helper.
 
 Plotly/WebGL composites transparent meshes in **insertion order** within a
 scene: the trace added LAST is drawn on top. Half-transparent orbital
@@ -653,15 +598,17 @@ skeleton stays legible regardless of orbital density. ``cell`` (the unit
 cell wireframe) goes first so it sits behind everything; if absent it is
 silently skipped.
 
-Override ``trace_order`` in :func:`build_orbital_panel_figure` only when
+Override ``trace_order`` in the private legacy panel helper only when
 deliberately wanting the inverse stacking (e.g. emphasising orbital phase
 over the framework).
 """
 
 
-def build_orbital_panel_figure(
+def _legacy_build_orbital_panel_figure(
     cubes: Sequence[CubeData],
     *,
+    bond_records: Sequence[Sequence[Mapping[str, object] | tuple[int, int]]]
+    | None = None,
     titles: Sequence[str] | None = None,
     isovalues: Sequence[float] | None = None,
     percentile: float = 98.5,
@@ -676,7 +623,6 @@ def build_orbital_panel_figure(
     opacity: float = 0.55,
     atom_radius_scale: float = 0.55,
     bond_radius: float = 0.10,
-    bond_tolerance: float = 1.15,
     atom_marker_scale: float | None = None,
     camera: dict | None = None,
     horizontal_spacing: float = 0.02,
@@ -689,16 +635,16 @@ def build_orbital_panel_figure(
     scene_y_top: float = 0.92,
     trace_order: Sequence[str] = DEFAULT_TRACE_ORDER,
 ) -> go.Figure:
-    """Build a single Plotly figure with one 3D scene per cube, side-by-side.
+    """Build a legacy Plotly panel from explicit canonical chemistry.
 
     Useful for publication-quality side-by-side rendering of HOCO/LUCO,
     spin-up/spin-down, or any pair/triplet of orbitals.
 
     .. deprecated::
-        This standalone rendering path uses its own color/material/bond
-        system. Prefer :func:`build_cube_figure` which routes the structure
-        through the standard crystal pipeline (MCK bonds, unified style,
-        display modes) with the isosurface as an overlay.
+        This standalone rendering path uses its own color/material system.
+        Prefer :func:`build_cube_figure`, which routes the complete structure
+        through MolCrysKit and the standard scene pipeline. If bonds are shown
+        here, ``bond_records`` is mandatory; chemistry is never inferred.
     """
     n = len(cubes)
     if n == 0:
@@ -707,9 +653,16 @@ def build_orbital_panel_figure(
     isovalues = list(isovalues) if isovalues is not None else [None] * n
     if len(titles) != n or len(isovalues) != n:
         raise ValueError("titles and isovalues must have the same length as cubes")
+    if show_bonds and bond_records is None:
+        raise ValueError(
+            "legacy cube panels require explicit MolCrysKit bond_records; "
+            "prefer build_cube_figure()"
+        )
+    if bond_records is not None and len(bond_records) != n:
+        raise ValueError("bond_records must have the same length as cubes")
 
     specs = [[{"type": "scene"}] * n]
-    fig = make_subplots(
+    fig = _plotly_make_subplots(
         rows=1,
         cols=n,
         specs=specs,
@@ -735,8 +688,12 @@ def build_orbital_panel_figure(
 
         if show_cell_box and cube.axes is not None:
             kind_traces["cell"].append(
-                cell_box_trace(cube.lattice, origin=cube.origin,
-                               color=cell_box_color, width=cell_box_width)
+                cell_box_trace(
+                    cube.lattice,
+                    origin=cube.origin,
+                    color=cell_box_color,
+                    width=cell_box_width,
+                )
             )
 
         if use_mesh:
@@ -765,7 +722,11 @@ def build_orbital_panel_figure(
 
         if show_bonds and cube.atoms:
             kind_traces["bonds"] = list(
-                bond_traces(cube, tolerance=bond_tolerance, radius=bond_radius)
+                _legacy_bond_traces(
+                    cube,
+                    bond_records[col - 1],
+                    radius=bond_radius,
+                )
             )
         if show_atoms and cube.atoms:
             if use_atom_spheres:
@@ -809,8 +770,10 @@ def build_orbital_panel_figure(
             fig.layout.annotations[col - 1].update(
                 x=0.5 * (x0 + x1),
                 y=1.0,
-                xref="paper", yref="paper",
-                xanchor="center", yanchor="bottom",
+                xref="paper",
+                yref="paper",
+                xanchor="center",
+                yanchor="bottom",
             )
 
     fig.update_layout(
@@ -820,8 +783,9 @@ def build_orbital_panel_figure(
         font=dict(family="Arial, Helvetica, sans-serif", size=title_fontsize),
     )
     for ann in fig.layout.annotations:
-        ann.font = dict(family="Arial, Helvetica, sans-serif",
-                        size=title_fontsize, color="#000000")
+        ann.font = dict(
+            family="Arial, Helvetica, sans-serif", size=title_fontsize, color="#000000"
+        )
     return fig
 
 
@@ -854,12 +818,22 @@ def cell_box_trace(
         origin = np.zeros(3)
     a, b, c = lattice[0], lattice[1], lattice[2]
     o = np.asarray(origin, dtype=float)
-    corners = np.array([o, o + a, o + a + b, o + b,
-                        o + c, o + a + c, o + a + b + c, o + b + c])
+    corners = np.array(
+        [o, o + a, o + a + b, o + b, o + c, o + a + c, o + a + b + c, o + b + c]
+    )
     edges = [
-        (0, 1), (1, 2), (2, 3), (3, 0),
-        (4, 5), (5, 6), (6, 7), (7, 4),
-        (0, 4), (1, 5), (2, 6), (3, 7),
+        (0, 1),
+        (1, 2),
+        (2, 3),
+        (3, 0),
+        (4, 5),
+        (5, 6),
+        (6, 7),
+        (7, 4),
+        (0, 4),
+        (1, 5),
+        (2, 6),
+        (3, 7),
     ]
     xs: list[float] = []
     ys: list[float] = []
@@ -868,10 +842,15 @@ def cell_box_trace(
         xs.extend([corners[i, 0], corners[j, 0], None])
         ys.extend([corners[i, 1], corners[j, 1], None])
         zs.extend([corners[i, 2], corners[j, 2], None])
-    return go.Scatter3d(
-        x=xs, y=ys, z=zs, mode="lines",
+    return _plotly_go().Scatter3d(
+        x=xs,
+        y=ys,
+        z=zs,
+        mode="lines",
         line=dict(color=color, width=width),
-        hoverinfo="skip", showlegend=False, name="cell",
+        hoverinfo="skip",
+        showlegend=False,
+        name="cell",
     )
 
 
@@ -887,17 +866,30 @@ def sign_legend_annotations(
     """Two-line +/- sign legend for orbital phase (paper-coord annotations)."""
     return [
         dict(
-            xref="paper", yref="paper", x=x, y=y, xanchor="right", yanchor="top",
-            text=f"<b><span style='color:{positive_color}'>\u25A0</span> +</b>",
+            xref="paper",
+            yref="paper",
+            x=x,
+            y=y,
+            xanchor="right",
+            yanchor="top",
+            text=f"<b><span style='color:{positive_color}'>\u25a0</span> +</b>",
             showarrow=False,
-            font=dict(family="Arial, Helvetica, sans-serif", size=fontsize, color="#000"),
+            font=dict(
+                family="Arial, Helvetica, sans-serif", size=fontsize, color="#000"
+            ),
         ),
         dict(
-            xref="paper", yref="paper", x=x, y=y - spacing,
-            xanchor="right", yanchor="top",
-            text=f"<b><span style='color:{negative_color}'>\u25A0</span> \u2212</b>",
+            xref="paper",
+            yref="paper",
+            x=x,
+            y=y - spacing,
+            xanchor="right",
+            yanchor="top",
+            text=f"<b><span style='color:{negative_color}'>\u25a0</span> \u2212</b>",
             showarrow=False,
-            font=dict(family="Arial, Helvetica, sans-serif", size=fontsize, color="#000"),
+            font=dict(
+                family="Arial, Helvetica, sans-serif", size=fontsize, color="#000"
+            ),
         ),
     ]
 
@@ -927,22 +919,31 @@ def axis_indicator_traces(
             continue
         end = o + (vec / n) * length
         traces.append(
-            go.Scatter3d(
-                x=[o[0], end[0]], y=[o[1], end[1]], z=[o[2], end[2]],
+            _plotly_go().Scatter3d(
+                x=[o[0], end[0]],
+                y=[o[1], end[1]],
+                z=[o[2], end[2]],
                 mode="lines",
                 line=dict(color=color, width=width),
-                hoverinfo="skip", showlegend=False, name=f"axis-{label}",
+                hoverinfo="skip",
+                showlegend=False,
+                name=f"axis-{label}",
             )
         )
         tip = o + (vec / n) * (length + label_offset)
         traces.append(
-            go.Scatter3d(
-                x=[tip[0]], y=[tip[1]], z=[tip[2]],
+            _plotly_go().Scatter3d(
+                x=[tip[0]],
+                y=[tip[1]],
+                z=[tip[2]],
                 mode="text",
                 text=[f"<b>{label}</b>"],
-                textfont=dict(color=color, size=18,
-                              family="Arial, Helvetica, sans-serif"),
-                hoverinfo="skip", showlegend=False, name=f"label-{label}",
+                textfont=dict(
+                    color=color, size=18, family="Arial, Helvetica, sans-serif"
+                ),
+                hoverinfo="skip",
+                showlegend=False,
+                name=f"label-{label}",
             )
         )
     return traces

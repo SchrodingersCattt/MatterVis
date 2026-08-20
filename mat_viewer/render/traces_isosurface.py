@@ -42,12 +42,16 @@ def _sample_isosurface_field(
     return sampled, (indices[0], indices[1], indices[2])
 
 
-def _interpolate_sample_indices(coordinates: np.ndarray, indices: np.ndarray) -> np.ndarray:
+def _interpolate_sample_indices(
+    coordinates: np.ndarray, indices: np.ndarray
+) -> np.ndarray:
     """Map marching-cubes coordinates onto original-grid index coordinates."""
     return np.interp(coordinates, np.arange(len(indices), dtype=float), indices)
 
 
-def _periodic_component_filter(mask: np.ndarray, minimum: int, periodic: bool) -> np.ndarray:
+def _periodic_component_filter(
+    mask: np.ndarray, minimum: int, periodic: bool
+) -> np.ndarray:
     """Filter small components, merging opposite-face labels in periodic mode."""
     from scipy.ndimage import label as ndi_label
 
@@ -117,7 +121,9 @@ def _periodic_root_labels(mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
             for offsets in product((-1, 0, 1), repeat=2):
                 last = first.copy()
                 last[axis] = shape[axis] - 1
-                last[other_axes] = (first_coord + np.asarray(offsets)) % shape[other_axes]
+                last[other_axes] = (first_coord + np.asarray(offsets)) % shape[
+                    other_axes
+                ]
                 if mask[tuple(last)]:
                     union(int(labels[tuple(first)]), int(labels[tuple(last)]))
 
@@ -153,16 +159,22 @@ def _unwrap_periodic_component(voxels: np.ndarray, shape: np.ndarray) -> np.ndar
             existing = unwrapped[neighbour]
             image_delta = np.rint((proposal - existing) / shape).astype(int)
             proposal = proposal - image_delta * shape
-            if np.linalg.norm(proposal - current_unwrapped) < np.linalg.norm(existing - current_unwrapped):
+            if np.linalg.norm(proposal - current_unwrapped) < np.linalg.norm(
+                existing - current_unwrapped
+            ):
                 unwrapped[neighbour] = proposal
     if len(unwrapped) != len(voxel_set):
         raise RuntimeError("Periodic component unwrapping did not visit every voxel")
-    result = np.asarray([unwrapped[tuple(int(value) for value in voxel)] for voxel in voxels])
+    result = np.asarray(
+        [unwrapped[tuple(int(value) for value in voxel)] for voxel in voxels]
+    )
     result -= np.floor(result.mean(axis=0) / shape).astype(int) * shape
     return result
 
 
-def _sample_coordinate(index: np.ndarray, sampled_indices: np.ndarray, full_size: int) -> np.ndarray:
+def _sample_coordinate(
+    index: np.ndarray, sampled_indices: np.ndarray, full_size: int
+) -> np.ndarray:
     """Map unwrapped sampled-grid indices to original-grid index coordinates."""
     sampled_size = len(sampled_indices)
     cycles = np.floor_divide(index, sampled_size)
@@ -204,39 +216,58 @@ def _periodic_component_meshes(
         lower = unwrapped.min(axis=0) - 1
         upper = unwrapped.max(axis=0) + 1
         local_axes = [np.arange(lower[axis], upper[axis] + 1) for axis in range(3)]
-        modulo_axes = [np.mod(axis_values, sampled_shape[axis]) for axis, axis_values in enumerate(local_axes)]
+        modulo_axes = [
+            np.mod(axis_values, sampled_shape[axis])
+            for axis, axis_values in enumerate(local_axes)
+        ]
         local_values = values[np.ix_(*modulo_axes)]
         local_roots = rooted[np.ix_(*modulo_axes)]
         if positive:
             local_values = np.where(
-                (local_roots == root) | (local_values <= level), local_values, background,
+                (local_roots == root) | (local_values <= level),
+                local_values,
+                background,
             )
         else:
             local_values = np.where(
-                (local_roots == root) | (local_values >= level), local_values, background,
+                (local_roots == root) | (local_values >= level),
+                local_values,
+                background,
             )
         try:
-            vertices, faces, _normals, _levels = marching_cubes(local_values, level=level)
+            vertices, faces, _normals, _levels = marching_cubes(
+                local_values, level=level
+            )
         except (ValueError, RuntimeError):
             continue
         sampled_coordinates = vertices + lower[None, :]
-        original_coordinates = np.column_stack([
-            np.interp(
-                sampled_coordinates[:, axis],
-                local_axes[axis],
-                _sample_coordinate(local_axes[axis], sampled_indices[axis], int(full_shape_array[axis])),
-            )
-            for axis in range(3)
-        ])
+        original_coordinates = np.column_stack(
+            [
+                np.interp(
+                    sampled_coordinates[:, axis],
+                    local_axes[axis],
+                    _sample_coordinate(
+                        local_axes[axis],
+                        sampled_indices[axis],
+                        int(full_shape_array[axis]),
+                    ),
+                )
+                for axis in range(3)
+            ]
+        )
         if target_indices is not None and len(target_indices):
             centroid = original_coordinates.mean(axis=0)
             candidate_shifts = np.rint(
                 (target_indices - centroid[None, :]) / full_shape_array[None, :]
             ).astype(int)
-            shifted_centroids = centroid[None, :] + candidate_shifts * full_shape_array[None, :]
+            shifted_centroids = (
+                centroid[None, :] + candidate_shifts * full_shape_array[None, :]
+            )
             distances = np.linalg.norm(shifted_centroids - target_indices, axis=1)
             shift = candidate_shifts[int(np.argmin(distances))]
-            original_coordinates = original_coordinates + shift[None, :] * full_shape_array[None, :]
+            original_coordinates = (
+                original_coordinates + shift[None, :] * full_shape_array[None, :]
+            )
         meshes.append((original_coordinates, faces))
     return meshes
 
@@ -281,7 +312,12 @@ def isosurface_mesh_extents(
     for i in (0, 1):
         for j in (0, 1):
             for k in (0, 1):
-                pt = origin + i * axes[0] * shape[0] + j * axes[1] * shape[1] + k * axes[2] * shape[2]
+                pt = (
+                    origin
+                    + i * axes[0] * shape[0]
+                    + j * axes[1] * shape[1]
+                    + k * axes[2] * shape[2]
+                )
                 corners.append(pt)
     corners_arr = np.array(corners, dtype=float)
     return corners_arr.min(axis=0), corners_arr.max(axis=0)
@@ -309,8 +345,14 @@ def isosurface_overlay_traces(scene: dict, style: dict) -> list[dict]:
 
     try:
         from skimage.measure import marching_cubes
-    except ImportError:
-        return []
+    except ImportError as exc:
+        from ..capabilities import resolve_requirements
+
+        install = resolve_requirements("cube").install_command
+        raise ImportError(
+            "Cube isosurfaces were explicitly requested but scikit-image is "
+            f"unavailable. Install with: {install}"
+        ) from exc
 
     # Read style parameters
     isovalue = style.get("isosurface_isovalue")
@@ -346,10 +388,14 @@ def isosurface_overlay_traces(scene: dict, style: dict) -> list[dict]:
         iso = default_isovalue(source_values, percentile=percentile)
 
     values, sampled_indices = _sample_isosurface_field(
-        cube.values, stride=stride, periodic=periodic,
+        cube.values,
+        stride=stride,
+        periodic=periodic,
     )
     periodic_source_values, periodic_source_indices = _sample_isosurface_field(
-        cube.values, stride=stride, periodic=False,
+        cube.values,
+        stride=stride,
+        periodic=False,
     )
     target_indices = None
     if periodic and image_policy == "nearest_atom":
@@ -357,7 +403,8 @@ def isosurface_overlay_traces(scene: dict, style: dict) -> list[dict]:
         if draw_atoms:
             lattice = np.asarray(cube.lattice, dtype=float)
             fractional = (
-                np.asarray([atom["cart"] for atom in draw_atoms], dtype=float) - aligned_origin
+                np.asarray([atom["cart"] for atom in draw_atoms], dtype=float)
+                - aligned_origin
             ) @ np.linalg.inv(lattice)
             target_indices = fractional * np.asarray(cube.shape, dtype=float)[None, :]
 
@@ -365,6 +412,7 @@ def isosurface_overlay_traces(scene: dict, style: dict) -> list[dict]:
     if atom_mask_radius is not None and atom_mask_radius > 0:
         from ..cube.core import CubeData as _CD
         from ..cube.core import mask_to_atoms
+
         if periodic:
             raise ValueError(
                 "isosurface_atom_mask_radius is not yet supported with periodic closure; "
@@ -373,9 +421,13 @@ def isosurface_overlay_traces(scene: dict, style: dict) -> list[dict]:
         # Build a temporary CubeData with the strided/aligned values for masking
         # But mask_to_atoms works in the cube's native frame, so use original
         strided_cube = _CD(
-            title=cube.title, comment=cube.comment, atoms=cube.atoms,
-            origin=cube.origin, axes=cube.axes * stride,
-            values=values, path=cube.path,
+            title=cube.title,
+            comment=cube.comment,
+            atoms=cube.atoms,
+            origin=cube.origin,
+            axes=cube.axes * stride,
+            values=values,
+            path=cube.path,
         )
         keep = mask_to_atoms(strided_cube, radius=float(atom_mask_radius))
         values = np.where(keep, values, 0.0)
@@ -383,6 +435,7 @@ def isosurface_overlay_traces(scene: dict, style: dict) -> list[dict]:
     # Optional small-component filtering
     if min_volume_voxels > 0:
         try:
+
             def _filter(mask):
                 return _periodic_component_filter(mask, min_volume_voxels, periodic)
 
@@ -390,16 +443,23 @@ def isosurface_overlay_traces(scene: dict, style: dict) -> list[dict]:
             neg_mask = _filter(values < -iso)
             pos_field = np.where(pos_mask, values, 0.0)
             neg_field = np.where(neg_mask, values, 0.0)
-        except ImportError:
-            pos_field = values
-            neg_field = values
+        except ImportError as exc:
+            from ..capabilities import resolve_requirements
+
+            install = resolve_requirements("cube").install_command
+            raise ImportError(
+                "Cube component filtering was explicitly requested but its "
+                f"scikit-image/SciPy runtime is unavailable. Install with: {install}"
+            ) from exc
     else:
         pos_field = values
         neg_field = values
 
     traces: list[dict] = []
 
-    def _mesh_trace(original_indices: np.ndarray, faces: np.ndarray, color: str, name: str) -> dict:
+    def _mesh_trace(
+        original_indices: np.ndarray, faces: np.ndarray, color: str, name: str
+    ) -> dict:
         # Transform vertices: original-grid index space → aligned Cartesian.
         cart = (
             aligned_origin[None, :]
@@ -413,20 +473,34 @@ def isosurface_overlay_traces(scene: dict, style: dict) -> list[dict]:
             "x": np.ascontiguousarray(cart[:, 0], dtype=np.float32),
             "y": np.ascontiguousarray(cart[:, 1], dtype=np.float32),
             "z": np.ascontiguousarray(cart[:, 2], dtype=np.float32),
-            "i": np.ascontiguousarray(faces[:, 0], dtype=np.int16 if n_verts < 32768 else np.int32),
-            "j": np.ascontiguousarray(faces[:, 1], dtype=np.int16 if n_verts < 32768 else np.int32),
-            "k": np.ascontiguousarray(faces[:, 2], dtype=np.int16 if n_verts < 32768 else np.int32),
+            "i": np.ascontiguousarray(
+                faces[:, 0], dtype=np.int16 if n_verts < 32768 else np.int32
+            ),
+            "j": np.ascontiguousarray(
+                faces[:, 1], dtype=np.int16 if n_verts < 32768 else np.int32
+            ),
+            "k": np.ascontiguousarray(
+                faces[:, 2], dtype=np.int16 if n_verts < 32768 else np.int32
+            ),
             "color": color,
             "opacity": opacity,
             "flatshading": False,
-            "lighting": {"ambient": 1.0, "diffuse": 0.0, "specular": 0.0, "roughness": 1.0, "fresnel": 0.0},
+            "lighting": {
+                "ambient": 1.0,
+                "diffuse": 0.0,
+                "specular": 0.0,
+                "roughness": 1.0,
+                "fresnel": 0.0,
+            },
             "lightposition": {"x": 200, "y": 200, "z": 200},
             "name": name,
             "hoverinfo": "name",
             "showlegend": False,
         }
 
-    def _build_meshes(field: np.ndarray, level: float, color: str, name: str) -> list[dict]:
+    def _build_meshes(
+        field: np.ndarray, level: float, color: str, name: str
+    ) -> list[dict]:
         if periodic:
             periodic_meshes = _periodic_component_meshes(
                 periodic_source_values,
@@ -437,17 +511,22 @@ def isosurface_overlay_traces(scene: dict, style: dict) -> list[dict]:
                 target_indices=target_indices,
             )
             if periodic_meshes:
-                return [_mesh_trace(vertices, faces, color, name) for vertices, faces in periodic_meshes]
+                return [
+                    _mesh_trace(vertices, faces, color, name)
+                    for vertices, faces in periodic_meshes
+                ]
         try:
             verts, faces, _, _ = marching_cubes(field, level=level)
         except (ValueError, RuntimeError):
             return []
         if verts.size == 0:
             return []
-        original_indices = np.column_stack([
-            _interpolate_sample_indices(verts[:, axis], sampled_indices[axis])
-            for axis in range(3)
-        ])
+        original_indices = np.column_stack(
+            [
+                _interpolate_sample_indices(verts[:, axis], sampled_indices[axis])
+                for axis in range(3)
+            ]
+        )
         return [_mesh_trace(original_indices, faces, color, name)]
 
     vmax = float(np.max(pos_field))

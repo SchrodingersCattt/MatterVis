@@ -1,22 +1,4 @@
-dash
-plotly
-numpy
-scipy
-scikit-image
-gemmi
-pymatgen
-kaleido
-flask-sock
-# brotli + gzip for /_dash-update-component responses. The Mesh3d
-# vertex base64 (and our 1 MB-per-frame topology figure) compresses
-# ~5x; without this every Labels/Axes click ships a megabyte over
-# the wire and feels like a 5-10 s lag on consumer connections.
-flask-compress
-matplotlib
-pillow
-ase
-networkx
-textual
-# Molecule identification, disorder handling, per-formula-unit stoichiometry,
-# cluster carving, and molecule-level packing polyhedra.
-molcrys-kit>=0.6.1
+# Full-feature developer convenience shim.
+# pyproject.toml and mat_viewer.capabilities are the only dependency registry.
+# Ordinary CPU PNG/PDF/SVG users should install the base package instead.
+.[all]

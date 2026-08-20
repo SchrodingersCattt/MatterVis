@@ -34,11 +34,11 @@ Let the anisotropic displacement tensor be
 U=U^\top\succeq0.
 \]
 
-If no tensor is available, MatterVis uses an isotropic fallback
-
-\[
-U = U_\mathrm{iso} I.
-\]
+MolCrysKit may supply anisotropic \(U_\mathrm{cart}\) or a measured isotropic
+\(U_\mathrm{iso}\). If neither is available, the agent-facing renderer raises
+by default. The explicit `missing_adp_policy="sphere"` option draws a
+non-quantitative sphere and records that policy; it does not invent an
+isotropic displacement value.
 
 The displacement distribution is a centered Gaussian with covariance \(U\).
 The probability ellipsoid containing probability \(p\) is
@@ -265,14 +265,14 @@ Principal axes and octants:
 - `mat_viewer/ortep/core.py:164-175` evaluates eight sign triples and marks
   an octant lit if its direction dots positively with the view direction.
 
-Visual clamp:
+Missing-data policy:
 
-- `mat_viewer/ortep/core.py:26-37` defines per-element and default visual Uiso
-  caps.
-- `mat_viewer/ortep/core.py:192-213` clamps isotropic Uiso directly and scales
-  anisotropic \(U\) by `cap / max_eig`.
-- `mat_viewer/ortep/core.py:216-220` chooses fallback Uiso values and applies
-  the clamp for each atom.
+- MolCrysKit keeps absent Uiso/Ucart values absent rather than substituting a
+  default tensor.
+- `RenderSpec.missing_adp_policy="error"` is the default and stops an ORTEP
+  render when required ADP data is missing.
+- `RenderSpec.missing_adp_policy="sphere"` is an explicit visual placeholder;
+  it is not a measured or fabricated Uiso and must be reported in provenance.
 
 Renderer integration:
 

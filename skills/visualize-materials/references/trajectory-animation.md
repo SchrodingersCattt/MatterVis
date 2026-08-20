@@ -15,11 +15,18 @@ separate requested intervals explicitly rather than silently concatenating them.
 
 ## CLI
 
+Animation encoding is optional. Preflight it before rendering:
+
 ~~~bash
-mat-vis render trajectory.traj -o trajectory.gif \
+mat-vis capabilities --require animation --json
+mat-vis render trajectory.traj -o trajectory.gif --backend cpu --check --json
+~~~
+
+~~~bash
+mat-vis render trajectory.traj -o trajectory.gif --backend cpu \
   --frame-range 0:100:2 --fps 12
 
-mat-vis render run.dump --type-map O H -o trajectory.mp4 \
+mat-vis render run.dump --type-map O H -o trajectory.mp4 --backend cpu \
   --stride 10 --fps 24
 ~~~
 
@@ -87,11 +94,10 @@ and encoding. Do not accumulate all canonical scenes, decoded PNGs, or a stacked
 `F×H×W` array. Temporary frame spooling is acceptable for reverse-order slices;
 the live memory target remains one rendered frame plus encoder state.
 
-One animation uses one effective visual backend. If a requested Plotly/Kaleido
-animation style cannot export, stop rather than silently replacing individual
-frames with flat ORTEP. Browser-free animation is valid when explicitly
-requested as `--material flat --style ortep`; record that as the requested and
-effective backend, not as an invisible fallback.
+One animation uses one explicit effective backend. CPU rendering plus
+`[animation]` is the default browser-free path. If an explicitly requested
+Plotly export cannot run, stop rather than replacing individual frames. Record
+the backend and representation; neither may change between frames.
 
 ## Comparable frames
 

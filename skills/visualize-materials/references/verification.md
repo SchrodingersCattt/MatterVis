@@ -9,19 +9,19 @@ Read this before delivering an image, vector graphic, HTML view, or animation.
 - Confirm the output exists, is non-empty, has the requested format, and decodes.
 - For PNG, reject an all-background image and inspect the final-size artifact.
 - Record input/output hashes when provenance matters.
-- Record dimensions, display, style, material, camera, projection, backend,
-  fallback reason, and warning classification.
+- Record dimensions, display, representation, shading, camera, projection,
+  backend, output hash, and warning classification.
 - Deliver one selected artifact unless another set was requested.
 
-For PDF require `%PDF`; for SVG require an `<svg` root; for HTML require
-Plotly content. These signatures do not replace visual inspection.
+For PDF require `%PDF`; for SVG require an `<svg` root and reject a full-canvas
+`<image>` raster substitute; for HTML require Plotly content. These signatures
+do not replace visual inspection.
 
 ## Requested versus effective
 
-A successful fallback is not automatically the requested result. Preserve CLI
-output and distinguish requested from effective display, style, material, and
-backend. Do not deliver a flat ORTEP fallback as a requested mesh, ball-stick,
-stick, or wireframe image.
+MatterVis does not silently fall back. Preserve CLI output and confirm that the
+actual backend, representation, shading, camera, and selection equal the
+request. A failed requested backend is a failure, not permission to substitute.
 
 ## Visual acceptance
 
@@ -34,7 +34,7 @@ For an auditable animation, record a machine-readable manifest with:
 - source paths/hashes, resolved source-frame IDs, and frame-to-time/stage map;
 - stable-ID field, selected IDs, and topology/selection hash when applicable;
 - per-atom array names, shapes, units, and overlay scale;
-- requested/effective display, style, material, backend, and fallback reason;
+- requested/effective display, representation, shading, and backend;
 - camera, screen-up, projection, shared viewport, canvas, dimensions, and FPS;
 - output-specific decoded frame count and duration (GIF and MP4 may differ);
 - first/middle/last and extrema QA hashes;

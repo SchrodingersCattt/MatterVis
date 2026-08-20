@@ -3,6 +3,12 @@
 Read this whenever one delivered image contains two or more molecular, crystal,
 polyhedral, orbital, or trajectory panels. The central rule is:
 
+MatterVis currently has no agent-facing multi-panel compositor. Render and
+verify each panel separately with the explicit CPU or Plotly path, then use a
+separate authorized composition tool. Do not invoke legacy private publication
+builders. The installation requirement is determined by each panel render; no
+additional MatterVis extra exists for composition.
+
 > A panel has a world-space structure, a camera projection, a renderer-owned
 > scene domain, a composition cell, and a paper canvas. Diagnose those layers in
 > that order; do not change an upstream layer to hide whitespace created later.
@@ -21,7 +27,7 @@ object sizes are part of the comparison.
 
 - share camera direction and screen-up;
 - use orthographic projection unless perspective is scientifically required;
-- use a shared world viewport or `uniform_viewport`;
+- use one recorded world viewport or physical scale across the separate renders;
 - keep the same Å per rendered pixel;
 - accept true whitespace around smaller structures;
 - crop only common outer paper borders unless variable panel widths are allowed;
@@ -50,7 +56,7 @@ For every panel, distinguish:
    centres alone are insufficient.
 2. **Projected bounds** — the structure bounds after the selected camera and
    projection, before paper annotations.
-3. **Scene domain** — the rectangular Plotly/Matplotlib region reserved for the
+3. **Scene domain** — the rectangular renderer region reserved for the
    3D axes. A square/cube-preserving scene inside a wide column can create large
    horizontal gutters even when the world viewport is tight.
 4. **Composition cell** — the row/column slot assigned by the subplot layout,

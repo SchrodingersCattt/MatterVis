@@ -1,39 +1,35 @@
-# Matplotlib Flat ORTEP Path
+# CPU Static PNG/PDF/SVG
 
-Read this for browser-independent, camera-projected 2D ORTEP publication output.
-Read `camera.md` first and `verification.md` before delivery.
-
-## Exact dispatch
-
-Matplotlib is selected only by both:
-
-- `--material flat`
-- `--style ortep`
-
-`material=flat` alone remains Plotly 3D for ball, ball-stick, stick, and
-wireframe styles.
-
-## Capabilities and limits
-
-- Uses Matplotlib's non-interactive `Agg` backend.
-- Exports PNG, PDF, and SVG without Chrome.
-- Uses camera-projected thermal ellipsoids and orthographic projection.
-- Uses the active MatterVis element palette by default; set `monochrome=true`
-  or pass `--monochrome` when a black-and-white figure is required.
-- Is not equivalent to Plotly mesh, ball-and-stick, or interactive HTML.
-
-Choose it directly for publication ORTEP or browser-independent static output.
-If it is an automatic fallback, preserve the Plotly/Kaleido error and state that
-the visual language changed.
-
-## Command
+Read this for the default browser-independent static path. Base MatterVis draws
+atoms, bonds, thermal ellipsoids, aromatic rings, unit cells, and polyhedra with
+one camera and backend-neutral geometry.
 
 ```bash
-mat-vis render INPUT.cif -o OUTPUT.pdf \
+mat-vis render INPUT.cif -o OUTPUT.svg --backend cpu --json \
   --view formula_unit --style ortep --material flat \
-  --camera-axis c --orthogonal \
+  --ortep-mode ortep_hatch --missing-adp-policy error \
+  --aromatic-rings bonds --camera-axis c --orthogonal \
   --width 1200 --height 900 --scale 2
 ```
 
-Use `--show-hydrogen` explicitly when required. Report the effective backend as
-`Matplotlib flat ORTEP`, not merely as PNG/PDF/SVG output.
+Explicit aromatic circle and explicit missing-ADP placeholder (only when the
+caller requests those semantics):
+
+```bash
+mat-vis render INPUT.cif -o OUTPUT.svg --backend cpu --json \
+  --style ortep --material flat --ortep-mode ortep_axes \
+  --aromatic-rings circle --missing-adp-policy sphere
+```
+
+- PNG uses a per-pixel depth buffer and per-pixel transparent fragments.
+- PDF/SVG keep triangle, line, arc, hatch, and text geometry as vectors; reject
+  an SVG containing a full-canvas `<image>` raster substitute.
+- `ortep` is a representation; `flat` is shading; `cpu` is the backend. Do not
+  treat those as interchangeable selector names.
+- Missing ADPs default to an error. `sphere` is an explicit visual placeholder,
+  not a fabricated displacement measurement; record its use.
+- Aromatic rings default to ordinary bonds. Select circle/disk only when the
+  caller explicitly wants that convention.
+
+The CPU backend never invokes Plotly, Kaleido, Chrome, Dash, or a Web service.
+If it fails, report the error; do not change representation or backend.

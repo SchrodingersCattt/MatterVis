@@ -3,11 +3,11 @@
 Read this only when one complete molecule or fragment must be highlighted over
 structural context.
 
-MatterVis 0.0.3 has no render `--highlight-molecule-index` flag and no TUI
-`--focus-molecule` flag. This is a Python/API workflow.
+MatterVis has no render `--highlight-molecule-index` flag. This is a public
+Python/API workflow.
 
-Use MatterVis's canonical loader. `build_loaded_crystal(...)` runs MolCrysKit and
-records its native molecule identity as
+Use `mat_viewer.load_structure`. MatterVis consumes MolCrysKit and records its
+native molecule identity as
 `fragment_table[*].source_molecule_index`; it also supplies continuous
 `mol_cart_positions`, canonical bonds, and whole-fragment boundary replicas.
 Never reconstruct molecules, PBC geometry, bonds, or covalent cutoffs in an ad

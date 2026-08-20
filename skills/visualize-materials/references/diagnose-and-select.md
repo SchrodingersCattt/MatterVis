@@ -4,6 +4,12 @@ Read this before selecting a MatterVis display mode or formal-figure style.
 
 ## Required diagnosis
 
+Start with the bounded public command:
+
+```bash
+mat-vis inspect INPUT --json
+```
+
 Record, where available:
 
 - raw/asymmetric-site and symmetry-expanded atom counts;
@@ -15,29 +21,10 @@ Record, where available:
 A decoded export with an untrustworthy object selection is a diagnostic artifact,
 not a publication figure.
 
-MatterVis 0.0.3 has no `diagnose` subcommand. Use capability tiers:
-
-1. For an admitted small scene, `mat-vis tui INPUT --no-interaction --format
-  structured --display <mode>` reports formulas, source/expanded/displayed/
-  visible atom counts, cell, atoms, disorder markers, and bonds. It is an
-  unbounded per-atom serialization, so do not use it automatically above 200
-  visible atoms.
-2. For large or ambiguous CIFs, use the canonical Python API:
-
-```python
-from mat_viewer.loader.core import build_loaded_crystal, build_bundle_scene
-
-bundle = build_loaded_crystal(name="input", cif_path="INPUT.cif")
-scene = build_bundle_scene(bundle, display_mode="asymmetric_unit")
-print("raw", len(bundle.raw_atoms))
-print("formula_unit", len(bundle.formula_unit_atoms))
-print("fragments", len(bundle.fragment_table))
-print("displayed", len(scene["draw_atoms"]), "bonds", len(scene["bonds"]))
-```
-
-Capture Python warnings around the loader call. The function is keyword-only and
-can be expensive because loading performs symmetry expansion and MolCrysKit
-analysis before display-mode reduction.
+Do not start Dash, the TUI, or a private loader merely to discover counts. For
+custom Python automation use only `mat_viewer.load_structure`; the returned
+structure consumes MolCrysKit's public site and bond records. A missing public
+MolCrysKit contract is fatal and must not fall back to `.info` fields.
 
 ## Display modes
 
@@ -77,43 +64,17 @@ hidden axes and labels, `atom-scale=0.65`, `bond-radius=0.08`, `2400x1800`, and
 target is one local event or molecule rather than the whole cell, use the
 auditable focus workflow instead of drawing the entire dense box.
 
-For opacity rendering, use a style config of this shape:
-
-```json
-{
-  "style": {
-    "disorder": "opacity",
-    "minor_opacity": 0.15
-  }
-}
-```
-
-Do not pass an object as the `disorder` value. If the CLI/API cannot express the
-needed policy, report that limitation rather than forcing a formal figure.
-
-Supported image disorder modes are `opacity`, `dashed_bonds`, `outline_rings`,
-`color_shift`, and `none`. Image render has no `--show-minor`, `--hide-minor`, or
-canonical `--major-only` flag. To hide rendered minor instances, use an
-`atom_groups` selector on `is_minor`; this changes visibility, not chemistry:
-
-```json
-{"style":{"atom_groups":[{"id":"hide-minor","selector":{"is_minor":true},"visible":false}]}}
-```
+The current agent render CLI has no public disorder-style or major-only switch.
+It rejects the legacy `--config` escape hatch instead of accepting an option it
+cannot translate to `RenderSpec`. If a formal figure needs a different disorder
+policy, report that limitation and stop; do not invoke a private Web normalizer.
 
 TUI `--hide-partial` removes all occupancy below approximately 0.99, not only
 minor disorder alternatives.
 
-## Config precedence
-
-`--config` may be flat or contain `{"style": {...}}`. Config-only fields such
-as `disorder`, `minor_opacity`, and `atom_groups` survive. Every field represented
-by a normal render CLI option is overwritten by that option's parser value even
-when the flag was omitted; set style, material, projection, visibility, scale,
-and colours explicitly on the command line.
-
 ## Warning classes
 
-- **export**: backend/export failure; an explicit visual-language fallback may proceed;
+- **export**: backend/export failure; stop and preserve the requested backend;
 - **display**: dense scene or likely occlusion; label the output diagnostic;
 - **chemistry**: formula, moiety, disorder, or bond-table degradation; block an automatic formal-figure claim;
 - **semantic-fatal**: selected content cannot be shown to match the target; stop or deliver an explicitly labelled diagnostic.

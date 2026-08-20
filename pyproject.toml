@@ -22,32 +22,42 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Visualization",
 ]
 dependencies = [
-    "dash",
-    "plotly",
     "numpy",
-    "scipy",
-    "scikit-image",
-    "gemmi",
-    "pymatgen",
-    "kaleido",
-    "flask-sock",
-    "flask-compress",
     "matplotlib",
     "pillow",
-    "imageio",
-    "imageio-ffmpeg",
     "ase",
-    "networkx",
-    "textual",
-    "molcrys-kit>=0.6.1",
+    "molcrys-kit>=0.6.2.dev2",
 ]
 
 [project.scripts]
 mat-vis = "mat_viewer.cli:main"
 
 [project.optional-dependencies]
-test = ["pytest>=8.0", "pytest-cov", "pytest-timeout"]
-dev = ["matter-vis[test]", "build", "ruff"]
+plotly = ["plotly"]
+plotly-export = ["plotly", "kaleido"]
+web = ["plotly", "dash", "flask-sock", "flask-compress"]
+tui = ["textual"]
+cube = ["scikit-image"]
+animation = ["imageio", "imageio-ffmpeg"]
+all = [
+    "plotly",
+    "kaleido",
+    "dash",
+    "flask-sock",
+    "flask-compress",
+    "textual",
+    "scikit-image",
+    "imageio",
+    "imageio-ffmpeg",
+]
+test = [
+    "pytest>=8.0",
+    "pytest-cov",
+    "pytest-timeout",
+    "gemmi",
+    "tomli; python_version < '3.11'",
+]
+dev = ["matter-vis[all,test]", "build", "ruff"]
 
 [tool.setuptools.packages.find]
 include = ["mat_viewer*"]
