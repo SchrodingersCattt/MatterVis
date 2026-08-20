@@ -662,11 +662,11 @@ def _file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _record_count(crystal, method: str) -> int | None:
+def _records(crystal, method: str) -> list | None:
     function = getattr(crystal, method, None)
     if not callable(function):
         return None
-    return len(function())
+    return list(function())
 
 
 def _inspect_payload(structure) -> dict:
@@ -676,6 +676,26 @@ def _inspect_payload(structure) -> dict:
     crystal = getattr(analysis, "crystal", None)
     metadata = bundle.metadata() if hasattr(bundle, "metadata") else {}
     warnings = list(metadata.get("warnings") or [])
+    site_records = (
+        _records(crystal, "get_site_records") if crystal is not None else None
+    )
+    bond_records = (
+        _records(crystal, "get_bond_records") if crystal is not None else None
+    )
+    disordered_sites = []
+    if site_records is not None:
+        for record in site_records:
+            occupancy = float(getattr(record, "occupancy", 1.0))
+            group = getattr(record, "disorder_group", 0)
+            if occupancy < 1.0 - 1.0e-8 or group not in (None, 0, "0", ".", "?"):
+                disordered_sites.append(record)
+    if disordered_sites and not any(
+        "disorder" in warning.lower() for warning in warnings
+    ):
+        warnings.append(
+            f"MolCrysKit reports disorder in {len(disordered_sites)} of "
+            f"{len(site_records)} sites."
+        )
     return {
         "schema": "mattervis.inspect/v1",
         "ok": True,
@@ -687,18 +707,14 @@ def _inspect_payload(structure) -> dict:
             "total_frames": structure.total_frames,
         },
         "structure": {
-            "site_records": _record_count(crystal, "get_site_records")
-            if crystal is not None
-            else None,
-            "bond_records": _record_count(crystal, "get_bond_records")
-            if crystal is not None
-            else None,
+            "site_records": None if site_records is None else len(site_records),
+            "bond_records": None if bond_records is None else len(bond_records),
             "parsed_atoms": len(getattr(bundle, "raw_atoms", ()) or ()),
             "displayed_atoms": len(
                 (getattr(bundle, "scene", {}) or {}).get("draw_atoms", ()) or ()
             ),
             "fragments": len(getattr(bundle, "fragment_table", ()) or ()),
-            "has_disorder": bool(metadata.get("has_minor")),
+            "has_disorder": bool(disordered_sites),
         },
         "warnings": warnings,
     }
@@ -884,7 +900,7 @@ def _hex_rgba(value: str) -> tuple[float, float, float, float]:
     return tuple(channels)  # type: ignore[return-value]
 
 
-def _scene_fit(bundle, *, display: str, show_hydrogen: bool):
+def _scene_fit(bundle, *, display: str, show_hydrogen: bool, show_cell: bool):
     import numpy as np
 
     scene = getattr(bundle, "scene", {}) or {}
@@ -904,17 +920,47 @@ def _scene_fit(bundle, *, display: str, show_hydrogen: bool):
     radius = 0.0
     mins = np.asarray(bounds.get("mins", ()), dtype=float)
     maxs = np.asarray(bounds.get("maxs", ()), dtype=float)
+    fit_points = np.empty((0, 3), dtype=float)
     if mins.shape == (3,) and maxs.shape == (3,) and np.all(np.isfinite((mins, maxs))):
+        if show_cell:
+            matrix = np.asarray(getattr(bundle, "M", scene.get("M")), dtype=float)
+            if matrix.shape == (3, 3) and np.all(np.isfinite(matrix)):
+                fractions = np.asarray(
+                    [
+                        [0, 0, 0],
+                        [1, 0, 0],
+                        [0, 1, 0],
+                        [0, 0, 1],
+                        [1, 1, 0],
+                        [1, 0, 1],
+                        [0, 1, 1],
+                        [1, 1, 1],
+                    ],
+                    dtype=float,
+                )
+                cell_vertices = fractions @ matrix
+                mins = np.minimum(mins, cell_vertices.min(axis=0))
+                maxs = np.maximum(maxs, cell_vertices.max(axis=0))
+        center = (mins + maxs) * 0.5
+        fit_points = np.asarray(
+            [
+                [x, y, z]
+                for x in (mins[0], maxs[0])
+                for y in (mins[1], maxs[1])
+                for z in (mins[2], maxs[2])
+            ],
+            dtype=float,
+        )
         radius = float(np.linalg.norm((maxs - mins) * 0.5))
-        if bounds.get("center") is None:
-            center = (mins + maxs) * 0.5
     if radius <= 1.0e-9:
         ranges = np.asarray(bounds.get("ranges", ()), dtype=float)
         if ranges.shape == (3,) and np.all(np.isfinite(ranges)):
             radius = float(np.linalg.norm(ranges * 0.5))
     if center.shape != (3,) or not np.all(np.isfinite(center)):
         center = np.zeros(3, dtype=float)
-    return scene, center, max(radius, 1.0)
+    if not len(fit_points):
+        fit_points = np.asarray([center - radius, center + radius], dtype=float)
+    return scene, center, max(radius, 1.0), fit_points
 
 
 def _camera_spec(structure, args: argparse.Namespace, *, display: str):
@@ -924,10 +970,11 @@ def _camera_spec(structure, args: argparse.Namespace, *, display: str):
 
     selected = structure.frames[0]
     matrix = np.asarray(getattr(selected.bundle, "M", np.eye(3)), dtype=float)
-    _, target, radius = _scene_fit(
+    _, target, radius, fit_points = _scene_fit(
         selected.bundle,
         display=display,
         show_hydrogen=args.show_hydrogen,
+        show_cell=bool(getattr(args, "show_cell", True)),
     )
     aspect = max(float(args.width) / float(args.height), 1.0e-6)
     ortho_scale = radius * 1.15 / min(aspect, 1.0)
@@ -957,12 +1004,25 @@ def _camera_spec(structure, args: argparse.Namespace, *, display: str):
             direction = reciprocal[{"a*": 0, "b*": 1, "c*": 2}[axis]]
         else:
             direction = matrix[{"a": 0, "b": 1, "c": 2}[axis]]
-    up = np.asarray(args.camera_up or matrix[1], dtype=float)
+    direction_norm = float(np.linalg.norm(direction))
+    if direction_norm < 1.0e-12:
+        raise ValueError("direction must be non-zero")
+    up = np.array(args.camera_up or matrix[1], dtype=float, copy=True)
     if np.linalg.norm(np.cross(direction, up)) < 1e-10:
         up = np.array([0.0, 1.0, 0.0])
         if np.linalg.norm(np.cross(direction, up)) < 1e-10:
             up = np.array([1.0, 0.0, 0.0])
     up /= np.linalg.norm(up)
+    if args.projection == "orthographic":
+        view_to_camera = direction / direction_norm
+        forward = -view_to_camera
+        right = np.cross(forward, up)
+        right /= np.linalg.norm(right)
+        screen_up = np.cross(right, forward)
+        relative = fit_points - target
+        half_width = float(np.max(np.abs(relative @ right)))
+        half_height = float(np.max(np.abs(relative @ screen_up)))
+        ortho_scale = max(half_height, half_width / aspect, 0.5) * 1.12
     multiplier = float(args.camera_distance)
     if not np.isfinite(multiplier) or multiplier <= 0.0:
         raise ValueError("--camera-distance fit multiplier must be finite and positive")

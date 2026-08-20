@@ -111,6 +111,11 @@ def test_formula_unit_materialises_mck_image_shift():
         formula_unit_selection=selection,
         mol_indices=[[0, 1]],
         mol_cart_positions=[np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])],
+        site_records=(
+            SimpleNamespace(global_index=0),
+            SimpleNamespace(global_index=1),
+        ),
+        bond_records=[],
     )
 
     atoms = molcrys_bridge.select_formula_unit(

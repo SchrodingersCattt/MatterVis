@@ -18,7 +18,9 @@ def _rounded(values: Any, digits: int = 8) -> list[float]:
 
 
 def _digest(value: Any) -> str:
-    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    payload = json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -27,7 +29,9 @@ def _source_index(atom: dict[str, Any], fallback: int) -> int:
 
 
 def _wrapped_frac(atom: dict[str, Any]) -> list[float]:
-    frac = np.asarray(atom.get("frac") if atom.get("frac") is not None else (), dtype=float)
+    frac = np.asarray(
+        atom.get("frac") if atom.get("frac") is not None else (), dtype=float
+    )
     return _rounded(frac - np.floor(frac))
 
 
@@ -37,7 +41,12 @@ def _image_shift(atom: dict[str, Any]) -> list[int]:
 
 def _source_identity(atom: dict[str, Any], fallback: int) -> tuple[Any, ...]:
     return (
-        str(atom.get("_raw_instance_id") or atom.get("_asym_label") or atom.get("label") or ""),
+        str(
+            atom.get("_raw_instance_id")
+            or atom.get("_asym_label")
+            or atom.get("label")
+            or ""
+        ),
         _source_index(atom, fallback),
         int(atom.get("_symop_index", 0) or 0),
         tuple(_image_shift(atom)),
@@ -48,23 +57,25 @@ def _source_identity(atom: dict[str, Any], fallback: int) -> tuple[Any, ...]:
 def _atom_rows(atoms: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     rows = []
     for index, atom in enumerate(atoms):
-        rows.append({
-            "index": index,
-            "source_index": _source_index(atom, index),
-            "label": str(atom.get("label") or ""),
-            "element": str(atom.get("elem") or ""),
-            "wrapped_frac": _wrapped_frac(atom),
-            "occupancy": round(float(atom.get("occ", 1.0) or 0.0), 8),
-            "assembly": str(atom.get("da") or ""),
-            "group": str(atom.get("dg") or ""),
-            "symop": int(atom.get("_symop_index", 0) or 0),
-            "is_minor": bool(atom.get("_is_minor", False)),
-            "minor_flag_explicit": "_is_minor" in atom,
-            "asym_label": str(atom.get("_asym_label") or ""),
-            "raw_instance_id": str(atom.get("_raw_instance_id") or ""),
-            "image_shift": _image_shift(atom),
-        })
-    return sorted(
+        rows.append(
+            {
+                "index": index,
+                "source_index": _source_index(atom, index),
+                "label": str(atom.get("label") or ""),
+                "element": str(atom.get("elem") or ""),
+                "wrapped_frac": _wrapped_frac(atom),
+                "occupancy": round(float(atom.get("occ", 1.0) or 0.0), 8),
+                "assembly": str(atom.get("da") or ""),
+                "group": str(atom.get("dg") or ""),
+                "symop": int(atom.get("_symop_index", 0) or 0),
+                "is_minor": bool(atom.get("_is_minor", False)),
+                "minor_flag_explicit": "_is_minor" in atom,
+                "asym_label": str(atom.get("_asym_label") or ""),
+                "raw_instance_id": str(atom.get("_raw_instance_id") or ""),
+                "image_shift": _image_shift(atom),
+            }
+        )
+    rows = sorted(
         rows,
         key=lambda row: (
             row["raw_instance_id"] or row["asym_label"] or row["label"],
@@ -72,8 +83,15 @@ def _atom_rows(atoms: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             row["symop"],
             row["image_shift"],
             row["wrapped_frac"],
+            row["occupancy"],
+            row["assembly"],
+            row["group"],
+            row["is_minor"],
         ),
     )
+    for index, row in enumerate(rows):
+        row["index"] = index
+    return rows
 
 
 def _analysis_payload(analysis: Any) -> dict[str, Any]:
@@ -81,15 +99,25 @@ def _analysis_payload(analysis: Any) -> dict[str, Any]:
         return {"mol_indices": [], "bond_pairs": [], "species_map": {}, "per_fu": {}}
     return {
         "mol_indices": sorted(
-            (sorted(int(value) for value in members) for members in analysis.mol_indices),
+            (
+                sorted(int(value) for value in members)
+                for members in analysis.mol_indices
+            ),
             key=lambda members: tuple(members),
         ),
-        "bond_pairs": [list(map(int, pair)) for pair in sorted(tuple(sorted(pair)) for pair in analysis.bond_pairs)],
+        "bond_pairs": [
+            list(map(int, pair))
+            for pair in sorted(tuple(sorted(pair)) for pair in analysis.bond_pairs)
+        ],
         "species_map": {
             str(key): sorted(int(value) for value in members)
-            for key, members in sorted(analysis.species_map.items(), key=lambda item: str(item[0]))
+            for key, members in sorted(
+                analysis.species_map.items(), key=lambda item: str(item[0])
+            )
         },
-        "per_fu": {str(key): int(value) for key, value in sorted(analysis.per_fu.items())},
+        "per_fu": {
+            str(key): int(value) for key, value in sorted(analysis.per_fu.items())
+        },
     }
 
 
@@ -106,12 +134,14 @@ def _formula_unit_payload(
             display_frac = np.asarray(atom.get("frac"), dtype=float)
             explicit_shift = np.rint(display_frac - source_frac).astype(int)
         image_shift = explicit_shift if explicit_shift is not None else (0, 0, 0)
-        rows.append({
-            "source_index": source_index,
-            "image_shift": [int(value) for value in image_shift],
-            "element": str(atom.get("elem") or ""),
-            "label": str(atom.get("label") or ""),
-        })
+        rows.append(
+            {
+                "source_index": source_index,
+                "image_shift": [int(value) for value in image_shift],
+                "element": str(atom.get("elem") or ""),
+                "label": str(atom.get("label") or ""),
+            }
+        )
     return sorted(
         rows,
         key=lambda row: (row["source_index"], row["image_shift"], row["label"]),
@@ -146,12 +176,14 @@ def _scene_payload(scene: dict[str, Any] | None) -> dict[str, Any]:
         end = _rounded(bond.get("end"))
         if endpoint_rows[0][0] != left:
             start, end = end, start
-        bonds.append({
-            "endpoints": [row[1] for row in endpoint_rows],
-            "start": start,
-            "end": end,
-            "is_minor": bool(bond.get("is_minor", False)),
-        })
+        bonds.append(
+            {
+                "endpoints": [row[1] for row in endpoint_rows],
+                "start": start,
+                "end": end,
+                "is_minor": bool(bond.get("is_minor", False)),
+            }
+        )
     bonds.sort(key=lambda row: (row["endpoints"], row["start"], row["end"]))
     fragments = [
         {
@@ -163,7 +195,13 @@ def _scene_payload(scene: dict[str, Any] | None) -> dict[str, Any]:
         }
         for fragment in scene.get("fragment_table") or []
     ]
-    fragments.sort(key=lambda row: (row["formula"], row["label"], str(row["source_molecule_index"])))
+    fragments.sort(
+        key=lambda row: (
+            row["formula"],
+            row["label"],
+            str(row["source_molecule_index"]),
+        )
+    )
     return {
         "display_mode": scene.get("display_mode"),
         "atoms": atom_ids,

@@ -10,7 +10,7 @@ import pytest
 
 import mat_viewer.capabilities as capability_module
 from mat_viewer.agent_topology import build_topology_data, parse_polyhedron_specs
-from mat_viewer.cli import _camera_spec, main
+from mat_viewer.cli import _camera_spec, _inspect_payload, main
 from mat_viewer.capabilities import resolve_requirements
 
 
@@ -33,6 +33,7 @@ def _camera_args(**overrides) -> Namespace:
         "width": 900,
         "height": 720,
         "show_hydrogen": False,
+        "show_cell": True,
         "camera_axis": None,
         "view_direction": None,
         "camera_position": None,
@@ -45,13 +46,64 @@ def _camera_args(**overrides) -> Namespace:
 
 
 def test_camera_defaults_to_orthographic_positive_c_axis() -> None:
-    camera = _camera_spec(_structure(), _camera_args(), display="unit_cell")
+    structure = _structure()
+    matrix_before = structure.frames[0].bundle.M.copy()
+    camera = _camera_spec(structure, _camera_args(), display="unit_cell")
 
     direction = np.asarray(camera.position) - np.asarray(camera.target)
     direction /= np.linalg.norm(direction)
     assert direction == pytest.approx([0.0, 0.0, 1.0])
     assert camera.up == pytest.approx([0.0, 1.0, 0.0])
     assert camera.projection == "orthographic"
+    assert structure.frames[0].bundle.M == pytest.approx(matrix_before)
+
+
+def test_camera_fit_includes_the_visible_unit_cell() -> None:
+    structure = _structure()
+    camera = _camera_spec(
+        structure, _camera_args(show_cell=True), display="formula_unit"
+    )
+
+    assert camera.target == pytest.approx([1.0, 1.5, 2.0])
+    assert camera.ortho_scale == pytest.approx(2.8)
+
+    atoms_only = _camera_spec(
+        structure,
+        _camera_args(show_cell=False),
+        display="formula_unit",
+    )
+    assert atoms_only.target == pytest.approx([0.0, 0.0, 0.0])
+
+
+def test_inspect_reports_disorder_from_mck_site_records(tmp_path: Path) -> None:
+    source = tmp_path / "disorder.cif"
+    source.write_text("data_disorder\n", encoding="utf-8")
+    sites = [
+        SimpleNamespace(occupancy=0.5, disorder_group=0),
+        SimpleNamespace(occupancy=1.0, disorder_group=0),
+    ]
+    crystal = SimpleNamespace(
+        get_site_records=lambda: sites,
+        get_bond_records=lambda: [],
+    )
+    bundle = SimpleNamespace(
+        molcrys_analysis=SimpleNamespace(crystal=crystal),
+        raw_atoms=[object(), object()],
+        scene={"draw_atoms": []},
+        fragment_table=[],
+        metadata=lambda: {"has_minor": False, "warnings": []},
+    )
+    structure = SimpleNamespace(
+        path=source,
+        input_format="cif",
+        total_frames=1,
+        frames=(SimpleNamespace(index=0, bundle=bundle),),
+    )
+
+    payload = _inspect_payload(structure)
+
+    assert payload["structure"]["has_disorder"] is True
+    assert payload["warnings"] == ["MolCrysKit reports disorder in 1 of 2 sites."]
 
 
 def test_explicit_camera_position_is_absolute_cartesian() -> None:

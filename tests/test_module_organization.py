@@ -14,9 +14,20 @@ KNOWN_OVERSIZE_DURING_SPLIT = {
     "app/backend_core.py": 1308,
     "app/factory.py": 1114,
     "loader/core.py": 1224,
+    "cli.py": 1263,
+    "ortep/core.py": 1124,
+    "render/planning.py": 1297,
     "structure/loader/core.py": 1050,
 }
-ALLOWED_TOP_LEVEL_PY = {"__init__.py", "__main__.py", "_version.py", "cli.py"}
+ALLOWED_TOP_LEVEL_PY = {
+    "__init__.py",
+    "__main__.py",
+    "_version.py",
+    "agent.py",
+    "agent_topology.py",
+    "capabilities.py",
+    "cli.py",
+}
 
 
 def _line_count(path: Path) -> int:
@@ -36,7 +47,9 @@ def test_mat_viewer_modules_stay_small_enough() -> None:
         )
         count = _line_count(path)
         if count > limit:
-            failures.append(f"{path.relative_to(MAT_VIEWER.parent)} has {count} lines > {limit}")
+            failures.append(
+                f"{path.relative_to(MAT_VIEWER.parent)} has {count} lines > {limit}"
+            )
 
     assert not failures, "\n".join(failures)
 

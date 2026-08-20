@@ -596,6 +596,7 @@ def test_default_camera_fits_a_large_scene() -> None:
         width=900,
         height=720,
         show_hydrogen=False,
+        show_cell=True,
         camera_position=None,
         camera_up=None,
         view_direction=None,
