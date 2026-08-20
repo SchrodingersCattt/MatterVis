@@ -1,10 +1,10 @@
 {
   "schema": "mattervis.perf.pipeline-oracle/v1",
   "entries": {
-    "dap4-origin-main-90f9816-mck-00fa232": {
+    "dap4-mattervis-051df0b-mck-a503bbd": {
       "producer": {
-        "mattervis_revision": "90f9816d22d9a733c1e13ed174f73e19431e9d7c",
-        "molcrys_kit_revision": "00fa232f23e52ea928cd6cdb41cdba7331db5ade"
+        "mattervis_revision": "051df0bc175281fee331b75b741f19d9b489a60d",
+        "molcrys_kit_revision": "a503bbd110dca068b18c06f777f2009f6feb671f"
       },
       "fixture": {
         "path": "scripts/data/DAP-4.cif",
@@ -12,14 +12,14 @@
       },
       "oracle": {
         "schema": "mattervis.perf.oracle/v1",
-        "overall_digest": "ba9a031e28b2f035d9c78f0a56e71626063d0cc370c1ca61ff5d6f44e3562234",
+        "overall_digest": "78e448b2031d15d04ef995e102f52c07bc7aed619ead511bc2ce9c042ca250a6",
         "section_digests": {
           "analysis": "4aca310f8f4cb8158e346811e206695aa48d42d28dfbcd84874e58398716fcb0",
-          "disorder": "dc3bb1b40abccff46be7cb6d7bed804b42cda8bd781033931ce0a6abaa915f9f",
+          "disorder": "747cafa36368b6f87151d3354538a20ed21c6a221ee93c5ec5b4a6b5278957f0",
           "figure": "8466672d9f1b6d520c74c9368a943b38bef96eb52fd410d97f5c3d2a63a78331",
-          "formula_unit": "d66a103a65259bb86e093bf51f1cdc00ac2f05c8fe46d7f38dc96601c32d898c",
-          "raw_atoms": "a44d1055815cfd557cf22671af4bfe52e910ec367c3e0ea2ededab31b6e4d6dc",
-          "scene": "b17638efd737bf1daa066c6acc7d02a8e2694a4dc2e8ce4c8c694dd989cd4a32"
+          "formula_unit": "b822193b5a1556495a2a39f4c997c575a293dfb082335b272d6c6c7ecb283166",
+          "raw_atoms": "ff9f644a4b7e5ba70327fd6a1021d26bf728e4c11993507310be5f39ed27ee14",
+          "scene": "5d307cbd01b950933e611eee2a6988e7522acd590e33b8f7ce842625cd293596"
         },
         "counts": {
           "canonical_bonds": 312,
@@ -34,7 +34,7 @@
           "molecules": 40,
           "raw_atoms": 336,
           "scene_atoms": 581,
-          "scene_bonds": 312
+          "scene_bonds": 508
         }
       }
     },

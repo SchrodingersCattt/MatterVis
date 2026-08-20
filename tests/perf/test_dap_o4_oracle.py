@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 import pytest
 
@@ -25,9 +27,13 @@ def _installed_mck_revision() -> str | None:
         if commit_id:
             return str(commit_id)
         source_url = str((direct_url or {}).get("url") or "")
-        if not source_url.startswith("file://"):
+        parsed = urlparse(source_url)
+        if parsed.scheme != "file":
             return None
-        source = Path(source_url.removeprefix("file://"))
+        local_path = url2pathname(parsed.path)
+        if parsed.netloc:
+            local_path = f"//{parsed.netloc}{local_path}"
+        source = Path(local_path)
         return subprocess.check_output(
             ["git", "-C", str(source), "rev-parse", "HEAD"],
             text=True,
@@ -67,6 +73,26 @@ def test_installed_mck_revision_prefers_pep610_vcs_commit(monkeypatch):
     assert _installed_mck_revision() == "expected-git-commit"
 
 
+def test_installed_mck_revision_resolves_pep610_file_url(monkeypatch, tmp_path):
+    source = tmp_path / "MolCrysKit checkout"
+    direct_url = json.dumps({"url": source.as_uri(), "dir_info": {}})
+    observed = []
+    monkeypatch.setattr(
+        importlib.metadata,
+        "distribution",
+        lambda _name: SimpleNamespace(read_text=lambda _path: direct_url),
+    )
+
+    def fake_check_output(command, **_kwargs):
+        observed.append(command)
+        return "expected-local-commit"
+
+    monkeypatch.setattr(subprocess, "check_output", fake_check_output)
+
+    assert _installed_mck_revision() == "expected-local-commit"
+    assert observed == [["git", "-C", str(source), "rev-parse", "HEAD"]]
+
+
 def test_revision_mismatch_is_an_explicit_failure(monkeypatch):
     monkeypatch.setattr(sys.modules[__name__], "_installed_mck_revision", lambda: "wrong-revision")
 
@@ -82,7 +108,7 @@ def test_revision_check_skips_when_distribution_has_no_source_revision(monkeypat
 
 
 def test_dap4_pipeline_oracle():
-    entry = ENTRIES["dap4-origin-main-90f9816-mck-00fa232"]
+    entry = ENTRIES["dap4-mattervis-051df0b-mck-a503bbd"]
     fixture = Path(__file__).resolve().parents[2] / "scripts" / "data" / "DAP-4.cif"
 
     assert hashlib.sha256(fixture.read_bytes()).hexdigest() == entry["fixture"]["sha256"]
