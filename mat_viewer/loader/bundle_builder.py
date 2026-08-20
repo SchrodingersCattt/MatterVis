@@ -132,6 +132,9 @@ def build_loaded_crystal_from_atoms(
     initial_scene["view_direction"] = np.asarray(view_dir, dtype=float)
     initial_scene["up"] = np.asarray(up, dtype=float)
     initial_scene["unwrap_overflow"] = copy.deepcopy(unwrap_overflow)
+    initial_scene["rings"] = copy.deepcopy(
+        getattr(molcrys_analysis, "ring_records", ())
+    )
     if scene_metadata_extra:
         initial_scene.update(copy.deepcopy(scene_metadata_extra))
 

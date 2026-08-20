@@ -30,6 +30,7 @@ def _require_molcryskit():
 
         from molcrys_kit.structures.crystal import MolecularCrystal
         from molcrys_kit.io.cif import identify_molecules
+        from molcrys_kit.analysis.interactions import LocalGeometryCache
         from molcrys_kit.analysis.stoichiometry import StoichiometryAnalyzer
         from molcrys_kit.constants.config import (
             KEY_OCCUPANCY,
@@ -78,6 +79,7 @@ def _require_molcryskit():
         "MolecularCrystal": MolecularCrystal,
         "identify_molecules": identify_molecules,
         "StoichiometryAnalyzer": StoichiometryAnalyzer,
+        "LocalGeometryCache": LocalGeometryCache,
         "KEY_OCCUPANCY": KEY_OCCUPANCY,
         "KEY_DISORDER_GROUP": KEY_DISORDER_GROUP,
         "KEY_ASSEMBLY": KEY_ASSEMBLY,
@@ -290,6 +292,7 @@ class CrystalAnalysis:
         bond_records=None,
         site_records=None,
         formula_unit_selection=None,
+        ring_records=None,
     ):
         self.crystal = crystal
         self.mol_indices = mol_indices
@@ -312,6 +315,10 @@ class CrystalAnalysis:
         self.bond_records: list[dict] = list(bond_records or [])
         self.site_records = tuple(site_records or ())
         self.formula_unit_selection = formula_unit_selection
+        # Rings come from MolCrysKit's molecule-local topology. Both the
+        # stable sorted identity and the edge-connected traversal are mapped
+        # to raw/global source indices before any display copies are created.
+        self.ring_records: list[dict] = list(ring_records or [])
 
 
 def analyze_crystal(crystal) -> CrystalAnalysis:
@@ -358,6 +365,45 @@ def analyze_crystal(crystal) -> CrystalAnalysis:
         for record in contract_bonds
     ]
 
+    ring_records: list[dict] = []
+    local_geometries = mk["LocalGeometryCache"](crystal)
+    for molecule_index, global_indices in enumerate(mol_indices):
+        for ring_index, ring in enumerate(local_geometries[molecule_index].rings()):
+            cycle_local = tuple(int(index) for index in ring.cycle_atom_indices)
+            sorted_local = tuple(int(index) for index in ring.atom_indices)
+            if not cycle_local:
+                raise RuntimeError(
+                    "MolCrysKit RingGeometry is missing cycle_atom_indices; "
+                    "install the structure-contract release or the exact "
+                    "development commit pinned by MatterVis CI."
+                )
+            try:
+                cycle_global = tuple(global_indices[index] for index in cycle_local)
+                sorted_global = tuple(global_indices[index] for index in sorted_local)
+            except IndexError as exc:
+                raise RuntimeError(
+                    "MolCrysKit returned a ring index outside its parent molecule."
+                ) from exc
+            ring_records.append(
+                {
+                    "molecule_index": molecule_index,
+                    "ring_index": ring_index,
+                    "atom_indices": sorted_global,
+                    "cycle_atom_indices": cycle_global,
+                    "symbols": tuple(str(symbol) for symbol in ring.symbols),
+                    "centroid_A": tuple(float(value) for value in ring.centroid_A),
+                    "normal": tuple(float(value) for value in ring.normal),
+                    "plane_rmsd_A": (
+                        None
+                        if ring.plane_rmsd_A is None
+                        else float(ring.plane_rmsd_A)
+                    ),
+                    "is_planar": bool(ring.is_planar),
+                    "is_aromatic": bool(ring.is_aromatic),
+                    "size": int(ring.size or len(sorted_global)),
+                }
+            )
+
     analyzer = mk["StoichiometryAnalyzer"](crystal)
     return CrystalAnalysis(
         crystal=crystal,
@@ -369,6 +415,7 @@ def analyze_crystal(crystal) -> CrystalAnalysis:
         bond_records=bond_records,
         site_records=site_records,
         formula_unit_selection=analyzer.select_formula_unit(),
+        ring_records=ring_records,
     )
 
 

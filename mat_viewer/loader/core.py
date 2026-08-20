@@ -978,6 +978,9 @@ def build_bundle_scene(
         base_scene["view_direction"] = view_dir
         base_scene["up"] = up
         base_scene["unwrap_overflow"] = copy.deepcopy(bundle.unwrap_overflow)
+        base_scene["rings"] = copy.deepcopy(
+            getattr(bundle.molcrys_analysis, "ring_records", ())
+        )
         fragment_cache_key = (
             "scene",
             display_mode,

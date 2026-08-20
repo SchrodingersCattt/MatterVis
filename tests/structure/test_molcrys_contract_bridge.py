@@ -49,6 +49,25 @@ def test_analysis_consumes_only_public_molcryskit_records(monkeypatch):
         def select_formula_unit(self):
             return selection
 
+    ring = SimpleNamespace(
+        atom_indices=(0, 1),
+        cycle_atom_indices=(1, 0),
+        symbols=("C", "C"),
+        centroid_A=(0.5, 0.0, 0.0),
+        normal=(0.0, 0.0, 1.0),
+        plane_rmsd_A=0.0,
+        is_planar=True,
+        is_aromatic=True,
+        size=2,
+    )
+
+    class GeometryCache:
+        def __init__(self, crystal):
+            pass
+
+        def __getitem__(self, molecule_index):
+            return SimpleNamespace(rings=lambda: [ring])
+
     crystal = SimpleNamespace(
         molecules=[object()],
         get_site_records=lambda: list(sites),
@@ -57,7 +76,10 @@ def test_analysis_consumes_only_public_molcryskit_records(monkeypatch):
     monkeypatch.setattr(
         molcrys_bridge,
         "_require_molcryskit",
-        lambda: {"StoichiometryAnalyzer": Analyzer},
+        lambda: {
+            "StoichiometryAnalyzer": Analyzer,
+            "LocalGeometryCache": GeometryCache,
+        },
     )
 
     analysis = molcrys_bridge.analyze_crystal(crystal)
@@ -66,6 +88,9 @@ def test_analysis_consumes_only_public_molcryskit_records(monkeypatch):
     assert analysis.bond_pairs == [(0, 1)]
     assert analysis.bond_records[0]["right_image_shift"] == [1, 0, 0]
     assert analysis.formula_unit_selection is selection
+    assert analysis.ring_records[0]["atom_indices"] == (0, 1)
+    assert analysis.ring_records[0]["cycle_atom_indices"] == (1, 0)
+    assert analysis.ring_records[0]["is_aromatic"] is True
 
 
 def test_formula_unit_materialises_mck_image_shift():
