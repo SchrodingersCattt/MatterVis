@@ -13,6 +13,7 @@ from mat_viewer.capabilities import (
     MOLCRYSKIT_CONTRACT_SHA,
     MOLCRYSKIT_MINIMUM,
     install_command,
+    resolve_requirements,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,6 +61,10 @@ def test_skill_install_matrix_is_generated_from_the_same_names_and_commands() ->
     assert set(rows) == set(CAPABILITY_REGISTRY)
     for name, spec in CAPABILITY_REGISTRY.items():
         assert rows[name] == install_command((spec.extra,) if spec.extra else ())
+
+    for alias in ("web-screenshot", "static-web-export"):
+        assert alias in document
+        assert resolve_requirements(alias).install_command in document
 
 
 def test_skill_has_no_second_installer_or_obsolete_package_entrypoint() -> None:

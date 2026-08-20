@@ -5,7 +5,7 @@ their endpoints.  They must not change the lattice convention: the scene keeps
 the same row-vector `M` unless a transform explicitly replaces the cell.
 
 The four modes branch from the same loader inputs and converge again at the
-hydrogen filter and bond-detection step:
+hydrogen filter and canonical BondRecord projection step:
 
 ```mermaid
 flowchart TD
@@ -18,16 +18,13 @@ flowchart TD
     FU --> Hfilt
     UC --> Hfilt
     CL --> Hfilt
-    Hfilt --> B{"effective_cell for find_bonds"}
-    B -->|"display_mode == cluster"| Bdir["cell = None<br/>direct Cartesian endpoints<br/>no nearest-image lookup"]
-    B -->|"otherwise"| Bpbc["cell = bundle.cell<br/>PBC bond perception<br/>_bond_endpoints chooses nearest image"]
-    Bdir --> Out["scene draw_atoms + bonds"]
-    Bpbc --> Out
+    Hfilt --> B["MCK BondRecord lift<br/>left@q → right@(q+image_shift)"]
+    B --> Out["scene draw_atoms + bonds"]
 ```
 
-The `cluster` branch is intentionally a short-circuit: it skips formula-unit
-stoichiometry and PBC bond imaging entirely, because the stored Cartesian
-coordinates are already the final geometry.
+The `cluster` branch skips formula-unit selection and periodic atom imaging,
+but connectivity still comes from MolCrysKit BondRecords. Stored Cartesian
+coordinates remain the final displayed geometry.
 
 ## Derivation
 
@@ -57,8 +54,10 @@ generated and no molecule completion is implied.
 The formula-unit view is a molecule-level stoichiometric selection.  Let
 MolCrysKit partition raw atoms into molecules \(m_j\), assign species
 \(s(m_j)\), and compute the simplest unit counts \(q_s\) by dividing species
-counts by their greatest common divisor.  MatterVis then chooses \(q_s\)
-molecules for every species \(s\).
+counts by their greatest common divisor. MolCrysKit's
+`FormulaUnitSelection` chooses \(q_s\) molecules for every species \(s\) and
+supplies each member's integer image shift. MatterVis only materialises that
+result.
 
 The selected molecules are translated by integer fractional vectors so the
 formula unit stays spatially compact.  If a molecule centroid is
@@ -230,15 +229,13 @@ Unit-cell boundary replicas are implemented by `_expand_boundary_replicas`:
 
 Bond endpoint policy is implemented by `_bond_endpoints`:
 
-- `mat_viewer/scene/core.py:455-463` uses direct endpoints for formula-unit,
-  cluster, and already-unwrapped pairs, otherwise delegates to the legacy
-  nearest-PBC-image helper.
-- `mat_viewer/scene/core.py:522-544` stores those endpoints on each bond.
+- `mat_viewer/scene/core.py` maps signed canonical records from source/global
+  identities to exact displayed image identities before storing endpoints.
 
 ## Audit Notes
 
-Display mode is currently more than a pure selector.  It affects atom
-materialization, bond perception, endpoint imaging, bounds, topology index
+Display mode is currently more than a pure selector. It affects atom
+materialization, BondRecord projection, endpoint imaging, bounds, topology index
 validity, and cache keys.  A redesign should separate those concerns:
 
 - **selection**: which raw atoms or molecule images are active;
@@ -265,7 +262,8 @@ wireframe is still drawn.
 - `display_mode` never mutates `M`; it only changes selected/materialized
   atoms and bond endpoint policy.
 - `formula_unit` molecule grouping and per-FU counts come from MolCrysKit.
-- `cluster` bonds are Euclidean bonds in manifested Cartesian coordinates.
+- `cluster` connectivity remains the MCK BondRecord graph; no periodic atom
+  images are added by the mode.
 - `unit_cell` boundary replicas are whole-fragment replicas whenever a
   MolCrysKit molecule index is present.
 - The drift-corrected shift is `canonical_shift - mck_drift`; skipping the

@@ -7,8 +7,9 @@ Each transform takes a base scene and produces a new scene whose
 applied. Transforms compose in **list order**: each entry's input is
 the output of the previous one.
 
-Internally the implementation now keeps an explicit source/display
-split:
+Internally the implementation keeps an explicit source/display split and
+retains MolCrysKit's public `SiteRecord`/`BondRecord` identities on every
+scene:
 
 - `mat_viewer.ops.source` is for real `MolecularCrystal` in/out
   operations such as a future saveable slab or true supercell.
@@ -93,9 +94,9 @@ includes them and a "grow" that didn't would feel broken.
 {"seeds": <selector>, "hops": int}
 ```
 
-Bond-walks `hops` steps outward from each seed. The bond detector
-re-runs on the seed-plus-halo to discover periodic-image neighbours
-that the home-cell bond table never connected. Use this to add a
+Bond-walks `hops` steps outward from each seed over the signed periodic
+`BondRecord` graph. For an edge `(left, right, S)`, a visible `left@q`
+reaches exactly `right@(q+S)`; MatterVis never re-perceives the bond. Use this to add a
 single coordination shell while pulling in only the chemically
 bonded atoms (vs `grow_radius` which is geometry-only).
 
@@ -135,11 +136,11 @@ lives in `mat_viewer.topology` and is outside this transform.
 }
 ```
 
-Applies each `(R_frac, t_frac)` symmetry operation (in fractional
-coordinates) to each seed. Use this to expand a partial occupancy /
-asymmetric unit to its full multiplicity by hand. Identity is **not**
-skipped automatically; if you want only the symmetry-related extras,
-remove the seed atoms from the result yourself.
+The strict public transform pipeline currently rejects `by_symmetry` with a
+clear `NotImplementedError`. Arbitrary symmetry images need a newly transformed
+MolCrysKit SiteRecord/BondRecord contract; treating an operation index as a
+lattice image would silently corrupt PBC bonds. Use a MolCrysKit-expanded input
+until that source-side operation is available.
 
 #### `slab`
 
@@ -177,7 +178,8 @@ flowchart LR
   D --> K5["complete_polyhedron<br/>params: seeds, cutoff"]
   D --> K6["by_symmetry<br/>params: seeds, ops"]
   D --> K7["slab<br/>params: miller, layers,<br/>min_thickness, vacuum"]
-  K1 & K2 & K3 & K4 & K5 & K6 & K7 --> R["rebuild_scene_with_atoms<br/>(re-detect bonds, recompute bounds,<br/>regenerate fragment labels)"]
+  K1 & K2 & K3 & K4 & K5 & K7 --> R["rebuild_scene_with_atoms<br/>(lift MCK BondRecords, recompute bounds,<br/>regenerate fragment labels)"]
+  K6 --> X["explicit unsupported error<br/>until MCK returns transformed records"]
   R --> OUT["output scene<br/>(feeds next transform or renderer)"]
 ```
 
@@ -346,7 +348,7 @@ flowchart LR
   K --> C["_transformed_scene_cache<br/>key=(display_mode, show_hydrogen,<br/>transforms_cache_key)"]
   T --> A["apply_transforms<br/>iterates in list order"]
   A --> O["apply_one_transform<br/>(dispatch on kind)"]
-  O --> R["rebuild_scene_with_atoms<br/>(re-detect bonds, recompute<br/>bounds, regenerate labels)"]
+  O --> R["rebuild_scene_with_atoms<br/>(lift MCK BondRecords, recompute<br/>bounds, regenerate labels)"]
   R --> S["post-transform scene"]
   S --> C
   C --> F["renderer.build_figure<br/>(figure-JSON cache also keys on<br/>transforms_cache_key)"]

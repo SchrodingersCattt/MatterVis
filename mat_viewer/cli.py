@@ -34,6 +34,7 @@ from typing import Optional
 from .capabilities import (
     capabilities,
     requirements_for_render,
+    requirements_for_tui,
     resolve_requirements,
 )
 
@@ -1187,7 +1188,9 @@ def main(argv: Optional[list[str]] = None) -> None:
         _serve_main(args)
     elif args.command == "tui":
         try:
-            resolve_requirements("tui").require()
+            resolve_requirements(
+                requirements_for_tui(args.FILE, args.input_format)
+            ).require()
         except Exception as exc:
             _fail(str(exc), json_output=False)
         _tui_main(args)

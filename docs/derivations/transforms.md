@@ -18,7 +18,7 @@ flowchart LR
     B --> C["base_scene<br/>cached at (display_mode, show_hydrogen)"]
     C --> D{"apply_transforms<br/>ordered list"}
     D -->|"each enabled spec"| E["apply_one_transform<br/>kind dispatch"]
-    E --> F["rebuild_scene_with_atoms<br/>re-detect bonds (cell=None)<br/>recompute bounds + label_items<br/>regenerate fragment_table"]
+    E --> F["rebuild_scene_with_atoms<br/>lift signed MCK BondRecords<br/>recompute bounds + label_items<br/>regenerate fragment_table"]
     F -->|"becomes next input scene"| D
     D --> G["transformed scene<br/>cached at (display_mode, show_hydrogen, transforms_cache_key)"]
     G --> H["renderer (build_figure)"]
@@ -107,39 +107,26 @@ The candidate grid is
 This deliberately overshoots: an atom offset inside the source cell can still
 fall inside the sphere even when the image-cell origin is farther than \(r\).
 
-Duplicates are removed by source label plus image shift.
+Duplicates are removed by SiteRecord global index plus image shift.
 
 ### Bond Growth
 
-Bond growth is graph expansion over a radius-limited candidate set.
+Bond growth is graph expansion over MolCrysKit's signed BondRecords. For a
+record `(left, right, S)`, the periodic graph contains both directed edges
 
-1. Build a candidate halo with radius
-   \[
-   r_\mathrm{halo}=3.5\,\text{Å}\times\max(1,h),
-   \]
-   where \(h\) is the requested hop count.
-2. Detect bonds in the manifested candidate coordinates without PBC.
-3. Start from seed nodes in the home image.
-4. Run breadth-first search for \(h\) layers.
+\[
+(left,\vec q)\rightarrow(right,\vec q+\vec S),\qquad
+(right,\vec q)\rightarrow(left,\vec q-\vec S).
+\]
 
-The result is every candidate node whose graph distance from a seed is at most
-\(h\).
+A breadth-first walk of at most \(h\) edges materialises only those exact
+source/image identities. No distance cutoff or local bond detector participates.
 
 ### Complete Fragment
 
-Fragment completion is the same graph idea with a larger hop budget.  A halo is
-constructed with
-
-\[
-r_\mathrm{halo} = \min(3.5\,\text{Å}\times h_\max,\,24\,\text{Å}),
-\]
-
-then BFS walks until convergence or `max_hops`.  The 24 Å cap prevents runaway
-periodic candidates while still allowing wrapped organic fragments to close.
-
-When the seed set already covers every atom in the scene, completion is the
-identity on the home image; growing a full scene by a huge halo would be a
-performance bug, not a geometry feature.
+Fragment completion uses the same signed-record graph with a larger hop budget
+and stops at convergence or `max_hops`. Periodic frameworks can still grow
+without bound, so the global transformed-atom ceiling remains the safety guard.
 
 ### Complete Polyhedron
 
@@ -158,32 +145,9 @@ It is geometry-only.  Chemistry-aware shell typing lives in
 
 ### Symmetry Images
 
-A symmetry operation is supplied in fractional coordinates as
-
-\[
-(\mathcal R,\vec t).
-\]
-
-For a seed atom with fractional row vector \(\vec f\), the current
-implementation applies
-
-\[
-\vec f' = \mathcal R\vec f + \vec t,
-\qquad
-\vec x'=\vec f'M.
-\]
-
-Because \(\vec f\) is conceptually a row vector elsewhere in MatterVis, this
-formula is a code-level convention worth auditing.  The mathematical row-vector
-form would usually be
-
-\[
-\vec f' = \vec f\mathcal R^\top+\vec t.
-\]
-
-The present API must therefore document whether supplied \(\mathcal R\) is
-already transposed for the implementation.  Until that is clarified, symmetry
-ops are a boundary-sensitive transform.
+The strict public pipeline rejects `by_symmetry`. An arbitrary operation must
+produce a new MolCrysKit SiteRecord/BondRecord contract; an operation number is
+not a lattice image shift and cannot safely reuse the source bond graph.
 
 ### Slab
 
@@ -210,10 +174,10 @@ flowchart TD
     P["transform spec<br/>{id, name, kind, params, enabled}"] --> K{"kind"}
     K -->|"repeat"| R["replicate_atoms<br/>(N_a, N_b, N_c) replicas<br/>home keeps labels<br/>others suffixed [na,nb,nc]"]
     K -->|"grow_radius"| GR["atoms_within_radius<br/>seeds + radius<br/>image grid by lattice norms"]
-    K -->|"grow_bonds"| GB["atoms_within_bonds<br/>seeds + hops<br/>BFS over halo bond graph"]
-    K -->|"complete_fragment"| CF["atoms_completing_fragment<br/>BFS until convergence<br/>halo capped at 24 Å"]
+    K -->|"grow_bonds"| GB["atoms_within_bonds<br/>seeds + hops<br/>signed BondRecord BFS"]
+    K -->|"complete_fragment"| CF["atoms_completing_fragment<br/>BondRecord BFS until convergence"]
     K -->|"complete_polyhedron"| CP["atoms_completing_polyhedron<br/>centers + cutoff<br/>radius growth incl. seeds"]
-    K -->|"by_symmetry"| BS["atoms_under_symmetry<br/>seeds + (R, t)<br/>frac' = R · frac + t"]
+    K -->|"by_symmetry"| BS["explicit unsupported error<br/>needs transformed MCK records"]
     K -->|"slab"| SL["slab_atoms_from_bundle<br/>delegates to MolCrysKit<br/>replaces M with slab_M"]
     R --> MG["_merge_atoms or wholesale<br/>+ rebuild_scene_with_atoms"]
     GR --> MG
@@ -255,16 +219,10 @@ Radius growth:
 - `mat_viewer/transforms/core.py:270-318` evaluates pairwise distances from
   shifted candidates to seed atoms and deduplicates by label and shift.
 
-Bond growth:
+Bond growth and fragment completion:
 
-- `mat_viewer/transforms/core.py:321-387` builds the radius halo, detects bonds,
-  and runs BFS for `hops` layers.
-
-Fragment completion:
-
-- `mat_viewer/transforms/core.py:390-462` uses the capped halo, detects bonds,
-  and BFS-walks until convergence or `max_hops`.
-- `mat_viewer/transforms/core.py:416-417` short-circuits the all-atoms seed case.
+- `_walk_record_graph` validates SiteRecord/BondRecord payloads and walks their
+  signed periodic graph without invoking local chemistry.
 
 Polyhedron completion:
 
@@ -311,10 +269,9 @@ column-vector operation matrices, but then the transform is a convention
 boundary and must say so.  A redesign should normalize symmetry op conventions
 at input time.
 
-`rebuild_scene_with_atoms` re-detects bonds with `cell=None` because transformed
-atoms are already manifested in one Cartesian frame.  That is correct for
-repeat/grow/complete operations, but it means transformed connectivity is not
-the same object as MolCrysKit's unit-cell molecule graph.
+`rebuild_scene_with_atoms` lifts the same MolCrysKit BondRecords onto manifested
+SiteRecord source/image identities. Missing records are fatal; an empty record
+list is a valid zero-bond structure.
 
 Slab generation properly stays upstream in MolCrysKit.  MatterVis should add
 passthrough parameters when needed, not duplicate slab geometry.
@@ -330,6 +287,6 @@ passthrough parameters when needed, not duplicate slab geometry.
 - After any transform that changes atoms, the scene must be rebuilt: bonds,
   bounds, labels, projected axes, and fragment tables cannot be reused.
 - Only `slab` replaces `M` in the current transform set.
-- Symmetry operation matrix convention must be documented at the API boundary;
-  code should not silently mix row-vector and column-vector forms.
+- `by_symmetry` remains unavailable until the source layer returns transformed
+  records; the display layer must not invent them.
 

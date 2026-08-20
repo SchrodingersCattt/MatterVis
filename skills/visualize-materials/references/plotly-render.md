@@ -19,6 +19,18 @@ mat-vis capabilities --require plotly-export --json
 mat-vis render INPUT.cif -o OUTPUT.png --backend plotly --check --json
 ```
 
+When static Plotly export is invoked through the running Web frontend, resolve
+both boundaries instead of checking Kaleido alone:
+
+```bash
+mat-vis capabilities --require web-screenshot --json
+mat-vis capabilities --require static-web-export --json
+```
+
+Both aliases report
+`python -m pip install "matter-vis[plotly-export,web]"`. A failed Web export is
+reported as an error; it does not return a placeholder image.
+
 Do not install Chrome automatically and do not substitute CPU output after a
 Plotly failure. Preserve the original diagnostic and the requested/effective
 backend. Plotly preserves the RenderPlan target, view direction, screen-up, and

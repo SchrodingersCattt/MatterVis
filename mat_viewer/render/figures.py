@@ -377,19 +377,15 @@ def build_figure(
     style["_topology_viewport_ranges"] = [list(xr), list(yr), list(zr)]
     # Mesh3d atoms are 3D world-coordinate spheres -- they grow when the
     # camera dollies in, which is what users expect from "zoom". Scatter3d
-    # markers are pixel-fixed and break that expectation (the user reported
-    # that toggling Hydrogens on PEP unit-cell suddenly produced "flat"
-    # atoms because the threshold tripped). With the per-scene mesh cache
-    # in place even ~700-atom scenes stay responsive on the warm path,
-    # so the threshold is now ~3x looser. The explicit "Fast rendering
-    # fallback" checkbox remains the user-controlled escape hatch.
+    # markers are pixel-fixed and therefore must never be selected merely
+    # because a structure crosses an atom-count threshold. Fast rendering is
+    # an explicit caller/UI choice (or the deliberately selected flat material).
     # flat+ortep is excluded: it uses the open-ORTEP billboard pipeline,
     # not the scatter fast-path.
     is_flat_ortep = style.get("material") == "flat" and style.get("style") == "ortep"
     use_fast = (
         bool(style.get("fast_rendering", False))
         or (style.get("material") == "flat" and not is_flat_ortep)
-        or (len(scene.get("draw_atoms", [])) > 800 and not force_quality)
     )
 
     mesh_payload = _cached_atom_bond_meshes(scene, style, use_fast=use_fast)

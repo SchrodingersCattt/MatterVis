@@ -802,7 +802,19 @@ def register_view_callbacks(app, backend):
                 return message, class_name, dcc.send_bytes(buf.getvalue, filename), False, 0
 
             # Default: PNG export via Plotly
-            png = backend.render_current_png(backend.active_scene_id())
+            from ..capabilities import resolve_requirements
+
+            resolution = resolve_requirements("static-web-export")
+            try:
+                resolution.require()
+                png = backend.render_current_png(backend.active_scene_id())
+            except Exception as exc:
+                message, class_name = _status_message(
+                    f"Export failed: {exc}. Required install: "
+                    f"{resolution.install_command}",
+                    "error",
+                )
+                return message, class_name, no_update, False, 0
             filename = f"{scene_label.replace(os.sep, '_')}.png"
             message, class_name = _status_message(f"Export ready: {filename}", "success")
             return message, class_name, dcc.send_bytes(lambda buffer: buffer.write(png), filename), False, 0

@@ -76,5 +76,6 @@ def test_screenshot_reports_plotly_export_failure_without_placeholder_png(monkey
     body = response.get_json()
     assert "Kaleido is unavailable" in body["error"]
     assert body["hint"] == (
-        'Install Plotly static export support with: python -m pip install "matter-vis[plotly-export]"'
+        "Install Web screenshot support with: "
+        'python -m pip install "matter-vis[plotly-export,web]"'
     )

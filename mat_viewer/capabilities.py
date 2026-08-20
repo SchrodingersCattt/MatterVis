@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from importlib import metadata, util
+from pathlib import Path
 import sys
 from types import ModuleType
 from typing import Iterable, Mapping
@@ -24,6 +25,60 @@ MOLCRYSKIT_DEVELOPMENT_INSTALL = (
     f'{MOLCRYSKIT_CONTRACT_SHA}"'
 )
 
+_MOLCRYSKIT_RECORD_FIELDS: Mapping[str, tuple[str, ...]] = {
+    "SiteRecord": (
+        "global_index",
+        "molecule_index",
+        "local_index",
+        "symbol",
+        "label",
+        "cartesian_position_A",
+        "fractional_position",
+        "occupancy",
+        "disorder_group",
+        "disorder_assembly",
+        "asym_index",
+        "sym_op_index",
+        "site_symmetry_order",
+        "image_shift",
+        "uiso_A2",
+        "u_cart_A2",
+    ),
+    "BondRecord": (
+        "molecule_index",
+        "left_local_index",
+        "right_local_index",
+        "left_global_index",
+        "right_global_index",
+        "left_asym_index",
+        "right_asym_index",
+        "right_image_shift",
+        "vector_A",
+        "distance_A",
+    ),
+    "FormulaUnitMember": (
+        "species_id",
+        "molecule_index",
+        "image_shift",
+    ),
+    "FormulaUnitSelection": (
+        "members",
+        "species_counts",
+    ),
+}
+
+
+def _missing_dataclass_fields(
+    record_name: str,
+    record_type: type,
+) -> list[str]:
+    fields = getattr(record_type, "__dataclass_fields__", {})
+    return [
+        f"{record_name}.{field}"
+        for field in _MOLCRYSKIT_RECORD_FIELDS[record_name]
+        if field not in fields
+    ]
+
 
 def molcryskit_contract_missing() -> tuple[str, ...]:
     """Return missing parts of the public renderer contract.
@@ -37,10 +92,12 @@ def molcryskit_contract_missing() -> tuple[str, ...]:
         return ("molcrys_kit",)
     try:
         from molcrys_kit.analysis import (
+            FormulaUnitMember,
             FormulaUnitSelection,
             RingGeometry,
             StoichiometryAnalyzer,
         )
+        from molcrys_kit.structures import BondRecord, SiteRecord
         from molcrys_kit.structures.crystal import MolecularCrystal
     except (ImportError, AttributeError):
         return ("public structure-contract imports",)
@@ -53,8 +110,13 @@ def molcryskit_contract_missing() -> tuple[str, ...]:
         missing.append("StoichiometryAnalyzer.select_formula_unit")
     if "cycle_atom_indices" not in getattr(RingGeometry, "__dataclass_fields__", {}):
         missing.append("RingGeometry.cycle_atom_indices")
-    if not getattr(FormulaUnitSelection, "__dataclass_fields__", None):
-        missing.append("FormulaUnitSelection")
+    for record_name, record_type in (
+        ("SiteRecord", SiteRecord),
+        ("BondRecord", BondRecord),
+        ("FormulaUnitMember", FormulaUnitMember),
+        ("FormulaUnitSelection", FormulaUnitSelection),
+    ):
+        missing.extend(_missing_dataclass_fields(record_name, record_type))
     return tuple(missing)
 
 
@@ -185,6 +247,8 @@ REQUIREMENT_ALIASES: Mapping[str, tuple[str, ...]] = {
     "dash": ("web",),
     "rest": ("web",),
     "websocket": ("web",),
+    "web-screenshot": ("web", "plotly-export"),
+    "static-web-export": ("web", "plotly-export"),
     "tui": ("tui",),
     "cube": ("cube",),
     "isosurface": ("cube",),
@@ -297,18 +361,26 @@ def resolve_requirements(
         )
     )
     missing = tuple(name for name in names if not CAPABILITY_REGISTRY[name].available())
-    notes = tuple(
+    notes = [
         spec.note
         for name in names
         if (spec := CAPABILITY_REGISTRY[name]).note is not None
-    )
+    ]
+    if "core" in missing:
+        contract_missing = molcryskit_contract_missing()
+        if contract_missing:
+            notes.append(
+                "Missing MolCrysKit public contract: "
+                + ", ".join(contract_missing)
+                + "."
+            )
     return RequirementResolution(
         requested=requested,
         capabilities=tuple(names),
         extras=extras,
         missing_capabilities=missing,
         install_command=install_command(extras),
-        notes=notes,
+        notes=tuple(notes),
     )
 
 
@@ -350,6 +422,26 @@ def requirements_for_render(output: str, backend: str = "cpu") -> tuple[str, ...
     return tuple(required)
 
 
+def requirements_for_tui(
+    source: str | Path,
+    input_format: str | None = None,
+) -> tuple[str, ...]:
+    """Return the TUI requirements for one input without loading it.
+
+    An explicit input format takes precedence over the filename, matching the
+    canonical structure loader. Cube input needs both the terminal frontend and
+    volumetric support, so callers receive one exact combined install command.
+    """
+
+    format_name = str(input_format or "").strip().lower()
+    if format_name in {"", "auto"}:
+        format_name = "cube" if Path(source).suffix.lower() == ".cube" else ""
+    required = ["tui"]
+    if format_name == "cube":
+        required.append("cube")
+    return tuple(required)
+
+
 class _CallableCapabilitiesModule(ModuleType):
     """Preserve ``mat_viewer.capabilities()`` after submodule import."""
 
@@ -370,6 +462,7 @@ __all__ = [
     "install_command",
     "molcryskit_contract_missing",
     "requirements_for_render",
+    "requirements_for_tui",
     "resolve_requirements",
 ]
 

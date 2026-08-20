@@ -29,21 +29,10 @@ points and pitfalls.
   path — it breaks on disorder + special-position structures.
 - Atoms must carry `_source_index` pointing back to `raw_atoms` so
   molecule lookup works for translated copies (formula-unit, repeat).
-- Cube rendering exposes `bond_scale` as one MolCrysKit-owned coefficient. It
-  must be forwarded to both `molcrys_bridge.analyze` and manifested-scene
-  `find_bonds`; otherwise molecule unwrapping and visible bonds disagree.
-  Scene-cache keys must include the coefficient and normalized pair overrides.
-  Formula-unit and unit-cell scenes reuse `CrystalAnalysis.bond_pairs` through
-  `_source_index`; only transformed/cluster scenes use MatterVis re-detection.
-- The re-detection path uses KDTree broad-phase pruning, caches MCK cutoffs by
-  element pair/scale/threshold map, uses row-vector triclinic PBC expansion,
-  and rejects effective cutoffs above 12 Å. Run
-  `python scripts/11_bond_scale_benchmark.py --atoms 1000 5000 10000` before
-  changing this guard or candidate strategy.
-  On the current environment the synthetic benchmark reports 1k=4.192 s
-  (cold import), 5k=0.046 s and 10k=0.214 s on the warm path; the first timing
-  includes Python/MolCrysKit import overhead and is not a per-scene steady-state
-  target.
+- Input bond-scale and pair overrides are forwarded into
+  `molcrys_bridge.analyze`. Every display mode and transform then projects that
+  analysis's signed `BondRecord` graph through SiteRecord source/image
+  identities. Do not add a manifested-scene re-detection pass.
 
 ### SHELX-style occupancy disorder
 
@@ -78,22 +67,18 @@ These paths look like duplicate chemistry but are intentional.
 Do not delete them in favour of a `molcrys_kit` call unless the
 upstream API has grown the exact hook.
 
-- **Scene bond perception** (`scene.py` → `ops.find_bonds`): runs on
-  manifested display atoms (formula-unit slice, boundary replicas,
-  transformed cluster), not the original raw atom list.
-- **Transform bond perception** (`transforms.py`): re-detects bonds
-  after grow/repeat because transformed scenes are no longer a
-  periodic unit cell.
-- **Cube bond helpers** (`cube.py`): operate on Gaussian-cube cluster
-  coordinates, not crystallographic PBC.
+- **Scene/transform bond projection**: lifts MolCrysKit BondRecords onto
+  manifested SiteRecord source/image identities; it is visual mapping, not
+  chemical perception.
+- **Cube mesh helpers**: operate on scalar-field geometry. Cube atom bonds
+  still require explicit MolCrysKit BondRecords.
 - **Minor-disorder outlines** (`renderer.py`): visual annotations
   coloured from per-atom render colours, not hard-coded ink.
 - **Lattice matrix convention**: MatterVis uses row vectors
   (`cart = frac @ M`), matching ASE/pymatgen/molcrys_kit. The static
   CIF parser returns column vectors — convert once at the boundary.
-- **CIF symmetry expansion**: minimal expansion at the loader boundary
-  for non-P1 CIFs missing explicit symmetry ops. This is a rendering
-  precondition, not chemistry.
+- **CIF symmetry expansion**: MolCrysKit owns the expanded public SiteRecords;
+  MatterVis does not run an independent symmetry path.
 
 ## Terminal semantic controller boundary
 

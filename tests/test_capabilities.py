@@ -15,6 +15,7 @@ from mat_viewer.capabilities import (
     CAPABILITY_REGISTRY,
     capabilities,
     requirements_for_render,
+    requirements_for_tui,
     resolve_requirements,
 )
 from mat_viewer.cli import main
@@ -55,6 +56,27 @@ def test_optional_requirements_combine_minimal_extras() -> None:
     )
 
 
+@pytest.mark.parametrize("requirement", ["web-screenshot", "static-web-export"])
+def test_web_static_aliases_combine_web_and_plotly_export(requirement: str) -> None:
+    result = resolve_requirements(requirement)
+
+    assert result.capabilities == ("core", "web", "plotly-export")
+    assert result.extras == ("plotly-export", "web")
+    assert result.install_command == (
+        'python -m pip install "matter-vis[plotly-export,web]"'
+    )
+
+
+def test_cube_tui_requirements_are_combined_without_loading_input() -> None:
+    assert requirements_for_tui("density.cube") == ("tui", "cube")
+    assert requirements_for_tui("ambiguous.dat", "cube") == ("tui", "cube")
+    assert requirements_for_tui("density.cube", "extxyz") == ("tui",)
+    assert resolve_requirements(requirements_for_tui("density.cube")).extras == (
+        "cube",
+        "tui",
+    )
+
+
 def test_unknown_requirement_fails_instead_of_falling_back() -> None:
     with pytest.raises(ValueError, match="unknown MatterVis requirement"):
         resolve_requirements("magic-renderer")
@@ -82,6 +104,63 @@ def test_core_capability_probes_public_molcryskit_contract(monkeypatch) -> None:
         capability_module, "_molcryskit_contract_available", lambda: True
     )
     assert CAPABILITY_REGISTRY["core"].available()
+
+
+@pytest.mark.parametrize(
+    ("module_name", "record_name", "field_name"),
+    [
+        ("molcrys_kit.structures", "SiteRecord", "image_shift"),
+        ("molcrys_kit.structures", "BondRecord", "vector_A"),
+        ("molcrys_kit.analysis", "FormulaUnitMember", "species_id"),
+    ],
+)
+def test_molcryskit_contract_probe_reports_incomplete_record_schema(
+    monkeypatch,
+    module_name: str,
+    record_name: str,
+    field_name: str,
+) -> None:
+    import importlib
+
+    record_type = getattr(importlib.import_module(module_name), record_name)
+    incomplete = dict(record_type.__dataclass_fields__)
+    incomplete.pop(field_name)
+    monkeypatch.setattr(record_type, "__dataclass_fields__", incomplete)
+
+    assert (
+        f"{record_name}.{field_name}"
+        in capability_module.molcryskit_contract_missing()
+    )
+
+
+def test_render_check_reports_incomplete_molcryskit_schema(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    from molcrys_kit.structures import SiteRecord
+
+    incomplete = dict(SiteRecord.__dataclass_fields__)
+    incomplete.pop("global_index")
+    monkeypatch.setattr(SiteRecord, "__dataclass_fields__", incomplete)
+
+    with pytest.raises(SystemExit, match="2"):
+        main(
+            [
+                "render",
+                str(tmp_path / "not-loaded.cif"),
+                "-o",
+                str(tmp_path / "not-created.svg"),
+                "--check",
+                "--json",
+            ]
+        )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["requirements"]["missing_capabilities"] == ["core"]
+    assert any(
+        "SiteRecord.global_index" in note
+        for note in payload["requirements"]["notes"]
+    )
 
 
 def test_capabilities_payload_is_json_safe_and_complete() -> None:
@@ -179,6 +258,48 @@ def test_capabilities_cli_keeps_stdout_machine_readable(
     assert captured.err == ""
     assert payload["schema"] == "mattervis.requirements/v1"
     assert payload["extras"] == []
+
+
+def test_cube_tui_cli_reports_exact_combined_install_when_cube_is_missing(
+    monkeypatch, capsys, available_core_contract
+) -> None:
+    real_find_spec = capability_module.util.find_spec
+
+    def fake_find_spec(name: str):
+        if name == "skimage":
+            return None
+        return real_find_spec(name)
+
+    monkeypatch.setattr(capability_module.util, "find_spec", fake_find_spec)
+
+    with pytest.raises(SystemExit) as exc:
+        main(["tui", "not-loaded.cube", "--no-interaction"])
+
+    assert exc.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert 'python -m pip install "matter-vis[cube,tui]"' in captured.err
+
+
+def test_cube_tui_loader_reports_exact_combined_install_before_loading(
+    monkeypatch, available_core_contract
+) -> None:
+    from mat_viewer.tui.loader_adapter import load_for_tui
+
+    real_find_spec = capability_module.util.find_spec
+
+    def fake_find_spec(name: str):
+        if name == "skimage":
+            return None
+        return real_find_spec(name)
+
+    monkeypatch.setattr(capability_module.util, "find_spec", fake_find_spec)
+
+    with pytest.raises(
+        RuntimeError,
+        match=r'python -m pip install "matter-vis\[cube,tui\]"',
+    ):
+        load_for_tui("not-loaded.cube")
 
 
 def test_agent_entrypoints_do_not_import_optional_frontends() -> None:

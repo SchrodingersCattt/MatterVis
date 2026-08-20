@@ -69,6 +69,9 @@ at the operation that needs them:
 - Plotly HTML: `matter-vis[plotly]`;
 - Plotly static export: `matter-vis[plotly-export]`;
 - Dash, REST, and WebSocket: `matter-vis[web]`;
+- Web/API screenshots and the Web UI's Plotly static export:
+  `matter-vis[plotly-export,web]` (requirements `web-screenshot` and
+  `static-web-export`);
 - terminal UI: `matter-vis[tui]`;
 - Cube isosurfaces: `matter-vis[cube]`;
 - GIF/MP4 encoding: `matter-vis[animation]`.

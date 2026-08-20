@@ -15,7 +15,7 @@ frontends.
 ## Key Features
 
 - **Agent-ready CLI** — Five explicit subcommands (`inspect`, `capabilities`, `render`, `serve`, `tui`) separate bounded diagnosis, dependency preflight, browser-free static output, Web service, and terminal interaction
-- **Browser Viewer** — Drag-and-drop CIF upload, interactive 3D display with `Mesh3d` atoms and bonds, and a fast `Scatter3d` fallback for large cells. The viewer uses the built-in element palette by default
+- **Browser Viewer** — Drag-and-drop CIF upload and interactive 3D display with `Mesh3d` atoms and bonds. `Scatter3d` fast rendering is used only when explicitly selected; atom count never changes the representation
 - **Coordination Topology** — Automatic coordination-number detection via the nearest-neighbour gap, continuous shape measure (CShM) classification against 12 ideal polyhedra (CN 4–12), planarity RMS, and prism/antiprism twist analysis
 - **Publication Export** — The base CPU backend renders PNG with per-pixel depth handling and emits true-vector PDF/SVG from the same backend-neutral geometry
 - **Multi-Panel Figures** — `uniform_viewport(scenes)` stamps a shared world-cube on any list of scenes so every `build_figure` call emits at the same physical length per pixel
@@ -78,6 +78,14 @@ Install only the frontend the requested output needs:
 | `[animation]` | GIF/MP4 encoders |
 | `[all]` | Every optional frontend |
 | `[test]` | Test tools |
+
+Browser screenshots and the Web UI's default static export combine `[web]`
+with `[plotly-export]`. Ask the resolver for the exact combined command:
+
+```bash
+mat-vis capabilities --require web-screenshot --json
+mat-vis capabilities --require static-web-export --json
+```
 
 MolCrysKit is required and is the only chemistry structure source. MatterVis
 does not fall back to private MolCrysKit fields or local chemistry heuristics.

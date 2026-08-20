@@ -99,10 +99,9 @@ The normal fractional-to-Cartesian conversion is delegated to MolCrysKit:
   molecule by `shift_cart = frac_to_cart(shift_frac, M)` and recomputes
   `atom["frac"] = cart_to_frac(atom["cart"], M)`.
 
-The only explicit bridge back into the legacy column-vector convention is:
-
-- `mat_viewer/scene/core.py:156-158`, where `_continuous_components` constructs
-  `legacy_M = M.T` for `formula_unit.assemble_component_p1`.
+The public scene, viewpoint, and transform paths stay in row-lattice form.
+Formula-unit image shifts and molecule-continuous positions come from
+MolCrysKit records, so no local column-vector P1 assembly bridge remains.
 
 The lattice-length summary is implemented in `cell_aspect_ratio`:
 

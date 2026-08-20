@@ -28,6 +28,17 @@ the output. Use the exact `install` command in its JSON result. Never install
 | GIF/MP4 encoding | `animation` | `python -m pip install "matter-vis[animation]"` |
 <!-- capability-matrix:end -->
 
+Combined Web operations intentionally cross two optional boundaries:
+
+| What you need | Resolver requirement | Required installation |
+|---|---|---|
+| REST/API browser screenshot | `web-screenshot` | `python -m pip install "matter-vis[plotly-export,web]"` |
+| Web UI static Plotly export | `static-web-export` | `python -m pip install "matter-vis[plotly-export,web]"` |
+
+These are requirement aliases, not new extras. They combine the Web service
+with the Plotly/Kaleido encoder and never substitute a CPU image or placeholder
+PNG when export fails.
+
 Combine only the extras the request needs, for example:
 
 ```bash

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ..capabilities import requirements_for_tui, resolve_requirements
 from .crystal_ir import AtomIR, BondIR, CrystalIR, Lattice, filter_crystal
 
 
@@ -18,6 +19,8 @@ def load_for_tui(
     frame: int = 0,
 ) -> CrystalIR:
     """Load any supported atomistic input through the canonical structure IO."""
+    resolve_requirements(requirements_for_tui(path, input_format)).require()
+
     from ..loader import load_structure_input
 
     structure = load_structure_input(
@@ -102,12 +105,9 @@ def _load_bundle(
     cube = getattr(bundle, "cube_data", None)
     if cube is not None:
         ir.metadata["cube_data"] = cube
-        try:
-            blobs = _extract_density_blobs(cube)
-            if blobs:
-                ir.metadata["density_blobs"] = blobs
-        except Exception:
-            pass
+        blobs = _extract_density_blobs(cube)
+        if blobs:
+            ir.metadata["density_blobs"] = blobs
     return ir
 
 
@@ -174,7 +174,7 @@ def _crystal_ir_from_scene(
             try:
                 dg = int(float(dg_raw))
             except ValueError:
-                pass
+                dg = 0
         source_index = int(atom.get("_source_index", index))
         image_shift = _source_to_display_shift(atom, source_index, source_atoms)
         atoms.append(
@@ -343,8 +343,12 @@ def _extract_density_blobs(cube) -> list[dict]:
 
     try:
         from scipy.ndimage import label as ndi_label
-    except ImportError:
-        return []
+    except ImportError as exc:
+        install = resolve_requirements(("cube", "tui")).install_command
+        raise RuntimeError(
+            "Cube density extraction is unavailable. "
+            f"Install the exact TUI + Cube requirements with: {install}."
+        ) from exc
 
     iso = default_isovalue(cube.values)
     blobs = []

@@ -128,8 +128,8 @@ honours:
 - `material` — `mesh` for real Mesh3d atoms/bonds, or `flat` for
   billboard-style traces.
 - `style` — `ball`, `ball_stick`, `stick`, `ortep`, or `wireframe`.
-- `scatter_atom_scale` — multiplier for fixed-pixel atom markers in the fast
-  Scatter3d fallback (default `0.45`).
+- `scatter_atom_scale` — multiplier for fixed-pixel atom markers in the
+  explicitly selected fast Scatter3d mode (default `0.45`).
 - `scatter_bond_scale` — multiplier for fast Scatter3d bond-line width
   (default `1.0`).
 - `scatter_bond_contrast_color` — optional replacement for a fast bond half
@@ -140,7 +140,7 @@ honours:
 - Legacy aliases: `fast_rendering=True` maps to `material="flat"`;
   `minor_wireframe=True` maps to `disorder="outline_rings"`; and
   `minor_opacity` only changes visibility when `disorder="opacity"`.
-- The fast Scatter3d fallback preserves every manifested scene bond and draws
+- Explicit `fast_rendering=True` preserves every manifested scene bond and draws
   its endpoint-coloured bond halves after the fixed-pixel atom markers. This
   ordering keeps short N-H/O-H bonds visible in fitted unit-cell overviews;
   Mesh3d retains depth-correct bond-before-atom ordering.

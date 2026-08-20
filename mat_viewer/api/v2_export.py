@@ -2,6 +2,7 @@ from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
 from .shared import *
+from ..capabilities import resolve_requirements
 
 
 def register_export_routes(v2, backend) -> dict:
@@ -41,12 +42,13 @@ def register_export_routes(v2, backend) -> dict:
         except (TypeError, ValueError) as exc:
             return _error_response(exc, 400, hint="width and height must be integers; scale must be numeric")
         except Exception as exc:
+            install = resolve_requirements("web-screenshot").install_command
             return _error_response(
                 exc,
                 503,
                 hint=(
-                    "Install Plotly static export support with: "
-                    'python -m pip install "matter-vis[plotly-export]"'
+                    "Install Web screenshot support with: "
+                    f"{install}"
                 ),
             )
         return Response(png, mimetype="image/png")

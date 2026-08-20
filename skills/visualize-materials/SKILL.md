@@ -36,6 +36,10 @@ explicit data.
   do not diagnose through Web/TUI startup or private Python modules.
 - Select `--backend cpu|plotly` explicitly. MatterVis has no silent backend or
   representation fallback; preserve a failure and its exact install hint.
+- For a Web/API screenshot use requirement `web-screenshot`; for the Web UI's
+  Plotly static export use `static-web-export`. Both resolve the required
+  `[web,plotly-export]` combination rather than assuming one extra implies the
+  other.
 - Use orthographic lattice `+c` by default and record any other camera.
 - Use MolCrysKit site, bond, ring, molecule, PBC, and formula-unit records. Do
   not reconstruct chemical identity from screen proximity.

@@ -204,7 +204,10 @@ mat-vis serve [options]
 
 ## tui — Terminal view
 
-Requires `python -m pip install "matter-vis[tui]"`. Use `mat-vis inspect --json`
+Ordinary structure input requires `python -m pip install "matter-vis[tui]"`.
+Cube input requires the combined
+`python -m pip install "matter-vis[cube,tui]"`; resolve it with
+`mat-vis capabilities --require cube tui --json`. Use `mat-vis inspect --json`
 for normal bounded agent diagnosis without installing Textual.
 
 Open any supported structure or one trajectory frame without starting Dash:
@@ -287,10 +290,14 @@ Ask the resolver instead of guessing packages:
 
 ```bash
 mat-vis capabilities --require plotly-export --json
+mat-vis capabilities --require web-screenshot --json
+mat-vis capabilities --require static-web-export --json
 mat-vis render structure.cif -o figure.png --backend plotly --check --json
 ```
 
 Ordinary CPU PNG/PDF/SVG does not require Kaleido or Chrome.
+Both Web screenshot aliases intentionally resolve to `[web,plotly-export]`;
+the service frontend and its static-image encoder are separate capabilities.
 
 ### Large cell runs out of memory
 
