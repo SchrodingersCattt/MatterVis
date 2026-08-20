@@ -658,6 +658,34 @@ def test_vector_line_is_split_at_opaque_triangle_occlusion_boundaries():
     assert max(piece.end[0] - piece.start[0] for piece in pieces) < 85.0
 
 
+@pytest.mark.parametrize("output_format", ["svg", "pdf"])
+def test_vector_non_depth_tested_line_is_drawn_after_transparent_surfaces(
+    output_format,
+):
+    surface = _triangle("transparent-screen", 0.0, (0.0, 0.1, 1.0, 0.5))
+    overlay = LinePrimitive(
+        semantic_id="overlay-line",
+        segments=np.asarray([[[-0.8, 0.0, -1.0], [0.8, 0.0, -1.0]]]),
+        rgba=(1.0, 0.0, 0.0, 1.0),
+        width_px=3.0,
+        depth_test=False,
+    )
+    plan = _plan(surface, overlay)
+    polygons, pieces = vector_scene(plan.viewports[0], plan.width, plan.height)
+
+    assert len(polygons) == 1
+    assert pieces
+    assert {piece.insertion_index for piece in pieces} == {len(polygons)}
+
+    result = render(plan, format=output_format)
+    assert result.data is not None
+    if output_format == "svg":
+        assert b"<image" not in result.data.lower()
+    else:
+        assert result.data.startswith(b"%PDF")
+        assert b"/Subtype /Image" not in result.data
+
+
 def test_bsp_splits_intersecting_polygons_instead_of_centroid_sorting():
     first = BSPPolygon(
         vertices=np.asarray([[0.0, -1.0, -3.0], [0.0, 1.0, -3.0], [0.0, 0.0, -5.0]]),

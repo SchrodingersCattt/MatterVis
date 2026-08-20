@@ -373,13 +373,20 @@ def _line_pieces(
                 for polygon, polygon_depth in covering
             ):
                 continue
-            closer_transparent = [
-                polygon.painter_index
-                for polygon, polygon_depth in covering
-                if polygon.polygon.rgba[3] < 1.0 - 1e-12
-                and polygon_depth < line_depth - _EPSILON
-            ]
-            insertion = min(closer_transparent) if closer_transparent else len(polygons)
+            if primitive.depth_test:
+                closer_transparent = [
+                    polygon.painter_index
+                    for polygon, polygon_depth in covering
+                    if polygon.polygon.rgba[3] < 1.0 - 1e-12
+                    and polygon_depth < line_depth - _EPSILON
+                ]
+                insertion = (
+                    min(closer_transparent)
+                    if closer_transparent
+                    else len(polygons)
+                )
+            else:
+                insertion = len(polygons)
             start = _interpolate_xy(segment["xy"], start_t)
             end = _interpolate_xy(segment["xy"], end_t)
             result.append(
