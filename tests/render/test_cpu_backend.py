@@ -15,6 +15,7 @@ from mat_viewer.render.contracts import (
     LinePrimitive,
     RenderPlan,
     RenderSpec,
+    TextPrimitive,
     TriangleMeshPrimitive,
     ViewportPlan,
 )
@@ -68,6 +69,74 @@ def _triangle(semantic_id: str, z: float, rgba) -> TriangleMeshPrimitive:
         vertices=np.asarray([[-0.8, -0.8, z], [0.8, -0.8, z], [0.0, 0.8, z]]),
         triangles=np.asarray([[0, 1, 2]]),
         rgba=rgba,
+    )
+
+
+def _text_occlusion_plan(
+    *,
+    depth_test: bool,
+    surface_alpha: float | None = 1.0,
+    rect: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 1.0),
+    camera: CameraSpec | None = None,
+    text_position: tuple[float, float, float] = (0.0, 0.0, -5.0),
+    line_alpha: float | None = None,
+) -> RenderPlan:
+    primitives = []
+    if surface_alpha is not None:
+        primitives.append(
+            TriangleMeshPrimitive(
+                semantic_id="opaque-screen",
+                vertices=np.asarray(
+                    [
+                        [-1.0, -1.0, 0.0],
+                        [1.0, -1.0, 0.0],
+                        [1.0, 1.0, 0.0],
+                        [-1.0, 1.0, 0.0],
+                    ]
+                ),
+                triangles=np.asarray([[0, 1, 2], [0, 2, 3]]),
+                rgba=(0.0, 0.1, 1.0, surface_alpha),
+            )
+        )
+    if line_alpha is not None:
+        primitives.append(
+            LinePrimitive(
+                semantic_id="foreground-line",
+                segments=np.asarray([[[-1.0, 0.0, 0.0], [1.0, 0.0, 0.0]]]),
+                rgba=(0.0, 0.1, 1.0, line_alpha),
+                width_px=12.0,
+            )
+        )
+    primitives.append(
+        TextPrimitive(
+            semantic_id="depth-label",
+            position=text_position,
+            text="DEPTH",
+            rgba=(1.0, 0.0, 0.0, 1.0),
+            size_pt=12.0,
+            offset_px=(3.0, 0.0),
+            depth_test=depth_test,
+        )
+    )
+    return RenderPlan(
+        width=160,
+        height=100,
+        background=(1.0, 1.0, 1.0, 1.0),
+        viewports=(
+            ViewportPlan(
+                semantic_id="text-panel",
+                camera=camera or _camera(),
+                primitives=tuple(primitives),
+                rect=rect,
+            ),
+        ),
+    )
+
+
+def _red_text_pixels(image: np.ndarray) -> np.ndarray:
+    rgb = image[..., :3].astype(int)
+    return (rgb[..., 0] > rgb[..., 1] + 32) & (
+        rgb[..., 0] > rgb[..., 2] + 32
     )
 
 
@@ -411,6 +480,163 @@ def test_vector_outputs_are_true_vector_without_embedded_page_image():
     assert b"<image" not in svg.lower()
     assert pdf is not None and pdf.startswith(b"%PDF")
     assert b"/Subtype /Image" not in pdf
+
+
+@pytest.mark.parametrize("projection", ["orthographic", "perspective"])
+def test_text_anchor_depth_test_is_strict_for_opaque_but_not_transparent_surfaces(
+    projection,
+):
+    camera = _camera(projection=projection)
+    hidden = render_rgba(_text_occlusion_plan(depth_test=True, camera=camera))
+    overlay = render_rgba(_text_occlusion_plan(depth_test=False, camera=camera))
+    assert not np.any(_red_text_pixels(hidden))
+    assert np.count_nonzero(_red_text_pixels(overlay)) > 20
+
+    transparent_depth_test = render_rgba(
+        _text_occlusion_plan(depth_test=True, surface_alpha=0.5, camera=camera)
+    )
+    transparent_overlay = render_rgba(
+        _text_occlusion_plan(depth_test=False, surface_alpha=0.5, camera=camera)
+    )
+    assert np.array_equal(transparent_depth_test, transparent_overlay)
+    assert np.count_nonzero(_red_text_pixels(transparent_depth_test)) > 20
+
+    line_hidden = render_rgba(
+        _text_occlusion_plan(
+            depth_test=True,
+            surface_alpha=None,
+            line_alpha=1.0,
+            camera=camera,
+        )
+    )
+    line_overlay = render_rgba(
+        _text_occlusion_plan(
+            depth_test=False,
+            surface_alpha=None,
+            line_alpha=1.0,
+            camera=camera,
+        )
+    )
+    assert not np.any(_red_text_pixels(line_hidden))
+    assert np.count_nonzero(_red_text_pixels(line_overlay)) > 20
+
+
+@pytest.mark.parametrize("output_format", ["svg", "pdf"])
+def test_vector_text_anchor_depth_test_matches_png(output_format, monkeypatch):
+    from matplotlib.axes import Axes
+
+    observed: list[str] = []
+    original_text = Axes.text
+
+    def record_text(axes, x, y, text, *args, **kwargs):
+        if text == "DEPTH":
+            observed.append(text)
+        return original_text(axes, x, y, text, *args, **kwargs)
+
+    monkeypatch.setattr(Axes, "text", record_text)
+    hidden = render(_text_occlusion_plan(depth_test=True), format=output_format)
+    assert observed == []
+
+    observed.clear()
+    overlay = render(_text_occlusion_plan(depth_test=False), format=output_format)
+    assert observed == ["DEPTH"]
+
+    observed.clear()
+    transparent = render(
+        _text_occlusion_plan(depth_test=True, surface_alpha=0.5),
+        format=output_format,
+    )
+    assert observed == ["DEPTH"]
+
+    observed.clear()
+    line_hidden = render(
+        _text_occlusion_plan(
+            depth_test=True,
+            surface_alpha=None,
+            line_alpha=1.0,
+        ),
+        format=output_format,
+    )
+    assert observed == []
+
+    observed.clear()
+    line_overlay = render(
+        _text_occlusion_plan(
+            depth_test=False,
+            surface_alpha=None,
+            line_alpha=1.0,
+        ),
+        format=output_format,
+    )
+    assert observed == ["DEPTH"]
+
+    observed.clear()
+    near_camera = CameraSpec(
+        position=(0.0, 0.0, 0.0),
+        target=(0.0, 0.0, -1.0),
+        up=(0.0, 1.0, 0.0),
+        projection="orthographic",
+        near=1.0,
+        far=20.0,
+        ortho_scale=1.2,
+    )
+    near_clipped = render(
+        _text_occlusion_plan(
+            depth_test=False,
+            surface_alpha=None,
+            camera=near_camera,
+            text_position=(0.0, 0.0, -0.5),
+        ),
+        format=output_format,
+    )
+    assert observed == []
+    for result in (
+        hidden,
+        overlay,
+        transparent,
+        line_hidden,
+        line_overlay,
+        near_clipped,
+    ):
+        assert result.data is not None
+        if output_format == "svg":
+            assert b"<image" not in result.data.lower()
+        else:
+            assert result.data.startswith(b"%PDF")
+            assert b"/Subtype /Image" not in result.data
+
+
+def test_text_anchor_respects_near_clip_and_raster_viewport_offset():
+    right_overlay = render_rgba(
+        _text_occlusion_plan(
+            depth_test=False,
+            surface_alpha=None,
+            rect=(0.5, 0.0, 0.5, 1.0),
+        )
+    )
+    red = _red_text_pixels(right_overlay)
+    assert not np.any(red[:, :80])
+    assert np.count_nonzero(red[:, 80:]) > 20
+
+    near_camera = CameraSpec(
+        position=(0.0, 0.0, 0.0),
+        target=(0.0, 0.0, -1.0),
+        up=(0.0, 1.0, 0.0),
+        projection="orthographic",
+        near=1.0,
+        far=20.0,
+        ortho_scale=1.2,
+    )
+    clipped = render_rgba(
+        _text_occlusion_plan(
+            depth_test=False,
+            surface_alpha=None,
+            rect=(0.5, 0.0, 0.5, 1.0),
+            camera=near_camera,
+            text_position=(0.0, 0.0, -0.5),
+        )
+    )
+    assert not np.any(_red_text_pixels(clipped))
 
 
 def test_vector_line_is_split_at_opaque_triangle_occlusion_boundaries():

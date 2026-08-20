@@ -21,6 +21,7 @@ from ..contracts import (
     ViewportPlan,
 )
 from .bsp import BSPPolygon, build_bsp, traverse_back_to_front
+from .visibility import anchor_occluded, projected_polygon_depth
 
 
 _EPSILON = 1.0e-8
@@ -142,7 +143,14 @@ def render_vector(
                 )
                 axes.add_patch(patch)
             draw_lines(len(polygons))
-            _draw_vector_text(axes, viewport, local_width, local_height, dpi=dpi)
+            _draw_vector_text(
+                axes,
+                viewport,
+                local_width,
+                local_height,
+                polygons,
+                dpi=dpi,
+            )
         figure.savefig(
             buffer,
             format=output_format,
@@ -466,33 +474,52 @@ def _polygon_depth_at(
     *,
     perspective: bool,
 ) -> float | None:
-    xy, depths = polygon.xy, polygon.depths
-    for index in range(1, len(xy) - 1):
-        triangle = np.asarray([xy[0], xy[index], xy[index + 1]])
-        weights = _barycentric(point, triangle)
-        if weights is None or np.any(weights < -1e-9):
-            continue
-        triangle_depths = np.asarray([depths[0], depths[index], depths[index + 1]])
-        if perspective:
-            reciprocal = float(np.sum(weights / triangle_depths))
-            return 1.0 / max(reciprocal, 1e-15)
-        return float(weights @ triangle_depths)
-    return None
+    return projected_polygon_depth(
+        polygon.xy,
+        polygon.depths,
+        point,
+        perspective=perspective,
+    )
 
 
 def _draw_vector_text(
-    axes, viewport: ViewportPlan, width: int, height: int, *, dpi: int
+    axes,
+    viewport: ViewportPlan,
+    width: int,
+    height: int,
+    polygons: list[ProjectedPolygon],
+    *,
+    dpi: int,
 ) -> None:
-    transform = CameraTransform(viewport.camera, width, height)
     texts = sorted(
         (item for item in viewport.primitives if isinstance(item, TextPrimitive)),
         key=lambda item: item.semantic_id,
     )
+    if not texts:
+        return
+    transform = CameraTransform(viewport.camera, width, height)
+    opaque_surfaces = tuple(
+        (polygon.xy, polygon.depths)
+        for polygon in polygons
+        if polygon.polygon.rgba[3] >= 1.0 - 1e-12
+    )
+    opaque_strokes = _projected_text_strokes(viewport, transform)
     for primitive in texts:
         projection = transform.project_world(np.asarray([primitive.position]))
-        if not np.all(np.isfinite(projection.xy)):
+        if not bool(projection.visible[0]):
             continue
-        position = projection.xy[0] + np.asarray(primitive.offset_px)
+        anchor = projection.xy[0]
+        if not (0.0 <= anchor[0] < width and 0.0 <= anchor[1] < height):
+            continue
+        if primitive.depth_test and anchor_occluded(
+            opaque_surfaces,
+            anchor,
+            float(projection.depth[0]),
+            perspective=viewport.camera.projection == "perspective",
+            strokes=opaque_strokes,
+        ):
+            continue
+        position = anchor + np.asarray(primitive.offset_px)
         axes.text(
             float(position[0]),
             float(position[1]),
@@ -504,6 +531,38 @@ def _draw_vector_text(
             clip_on=True,
             rasterized=False,
         )
+
+
+def _projected_text_strokes(
+    viewport: ViewportPlan,
+    transform: CameraTransform,
+) -> tuple[tuple[np.ndarray, np.ndarray, float, tuple[float, ...]], ...]:
+    strokes = []
+    for primitive in sorted(
+        (item for item in viewport.primitives if isinstance(item, LinePrimitive)),
+        key=lambda item: item.semantic_id,
+    ):
+        if primitive.rgba[3] < 1.0 - 1e-12:
+            continue
+        for segment in primitive.segments:
+            clipped = transform.clip_segment_world(segment[0], segment[1])
+            if clipped is None:
+                continue
+            projection = transform.project_camera(np.asarray(clipped))
+            depths = (
+                projection.depth
+                if primitive.depth_test
+                else np.full(2, -np.inf, dtype=float)
+            )
+            strokes.append(
+                (
+                    projection.xy,
+                    depths,
+                    float(primitive.width_px),
+                    primitive.dash,
+                )
+            )
+    return tuple(strokes)
 
 
 def _segment_intersection_parameters(
@@ -523,17 +582,6 @@ def _segment_intersection_parameters(
     if 1e-10 < first_parameter < 1.0 - 1e-10 and 1e-10 < second_parameter < 1.0 - 1e-10:
         return float(first_parameter), float(second_parameter)
     return None
-
-
-def _barycentric(point: np.ndarray, triangle: np.ndarray) -> np.ndarray | None:
-    first, second, third = triangle
-    denominator = _cross2(second - first, third - first)
-    if abs(denominator) < 1e-14:
-        return None
-    weight1 = _cross2(point - first, third - first) / denominator
-    weight2 = _cross2(second - first, point - first) / denominator
-    weight0 = 1.0 - weight1 - weight2
-    return np.asarray([weight0, weight1, weight2])
 
 
 def _cross2(first: np.ndarray, second: np.ndarray) -> float:

@@ -77,24 +77,22 @@ def render_rgba(plan: RenderPlan, *, scale: int = 1) -> np.ndarray:
     background = np.asarray(plan.background, dtype=float)
     canvas = np.empty((height, width, 4), dtype=float)
     canvas[...] = background
+    depth_buffers: dict[str, np.ndarray] = {}
     for viewport in sorted(plan.viewports, key=lambda item: item.semantic_id):
-        x, y, viewport_width, viewport_height = viewport.rect
-        left = int(round(x * width))
-        top = int(round(y * height))
-        right = int(round((x + viewport_width) * width))
-        bottom = int(round((y + viewport_height) * height))
+        left, top, right, bottom = _viewport_bounds(viewport, width, height)
         local_width = max(1, right - left)
         local_height = max(1, bottom - top)
-        local = _render_viewport(
+        local, z_buffer = _render_viewport(
             viewport,
             local_width,
             local_height,
             background,
             line_scale=scale,
         )
+        depth_buffers[viewport.semantic_id] = z_buffer
         canvas[top:bottom, left:right] = local[: bottom - top, : right - left]
     canvas = np.clip(np.rint(canvas * 255.0), 0.0, 255.0).astype(np.uint8)
-    _draw_text(canvas, plan, scale=scale)
+    _draw_text(canvas, plan, depth_buffers, scale=scale)
     return canvas
 
 
@@ -105,7 +103,7 @@ def _render_viewport(
     background: np.ndarray,
     *,
     line_scale: int,
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray]:
     transform = CameraTransform(viewport.camera, width, height)
     color = np.empty((height, width, 4), dtype=float)
     color[...] = background
@@ -142,7 +140,7 @@ def _render_viewport(
                 width_scale=line_scale,
             )
     _composite_fragments(color, z_buffer, fragments)
-    return color
+    return color, z_buffer
 
 
 def _rasterize_mesh(
@@ -438,7 +436,13 @@ def _composite_fragments(
         color[y_value, x_value] = destination
 
 
-def _draw_text(canvas: np.ndarray, plan: RenderPlan, *, scale: int) -> None:
+def _draw_text(
+    canvas: np.ndarray,
+    plan: RenderPlan,
+    depth_buffers: dict[str, np.ndarray],
+    *,
+    scale: int,
+) -> None:
     texts: list[tuple[ViewportPlan, TextPrimitive]] = []
     for viewport in plan.viewports:
         texts.extend(
@@ -451,28 +455,49 @@ def _draw_text(canvas: np.ndarray, plan: RenderPlan, *, scale: int) -> None:
     from PIL import Image, ImageDraw, ImageFont
 
     image = Image.fromarray(canvas, mode="RGBA")
-    draw = ImageDraw.Draw(image)
     full_width, full_height = image.size
     for viewport, primitive in sorted(texts, key=lambda item: item[1].semantic_id):
-        x, y, viewport_width, viewport_height = viewport.rect
-        local_width = max(1, int(round(viewport_width * full_width)))
-        local_height = max(1, int(round(viewport_height * full_height)))
+        left, top, right, bottom = _viewport_bounds(viewport, full_width, full_height)
+        local_width = max(1, right - left)
+        local_height = max(1, bottom - top)
         transform = CameraTransform(viewport.camera, local_width, local_height)
         projected = transform.project_world(np.asarray([primitive.position]))
-        if not np.isfinite(projected.xy).all():
+        if not bool(projected.visible[0]):
             continue
-        screen = projected.xy[0] + np.asarray(
-            [x * full_width, y * full_height], dtype=float
-        )
-        screen += np.asarray(primitive.offset_px) * scale
+        anchor = projected.xy[0]
+        if not (0.0 <= anchor[0] < local_width and 0.0 <= anchor[1] < local_height):
+            continue
+        if primitive.depth_test:
+            pixel_x, pixel_y = np.floor(anchor).astype(int)
+            opaque_depth = depth_buffers[viewport.semantic_id][pixel_y, pixel_x]
+            if opaque_depth < float(projected.depth[0]) - _DEPTH_EPSILON:
+                continue
+        screen = anchor + np.asarray(primitive.offset_px) * scale
         size_px = max(1, int(round(primitive.size_pt * scale * 96.0 / 72.0)))
         try:
             font = ImageFont.truetype("DejaVuSans.ttf", size_px)
         except OSError:  # pragma: no cover - platform font fallback
             font = ImageFont.load_default()
         rgba = tuple(int(round(channel * 255.0)) for channel in primitive.rgba)
+        label_layer = Image.new("RGBA", (local_width, local_height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(label_layer)
         draw.text(tuple(screen), primitive.text, fill=rgba, font=font, anchor="ls")
+        image.alpha_composite(label_layer, dest=(left, top))
     canvas[:] = np.asarray(image)
+
+
+def _viewport_bounds(
+    viewport: ViewportPlan,
+    width: int,
+    height: int,
+) -> tuple[int, int, int, int]:
+    x, y, viewport_width, viewport_height = viewport.rect
+    return (
+        int(round(x * width)),
+        int(round(y * height)),
+        int(round((x + viewport_width) * width)),
+        int(round((y + viewport_height) * height)),
+    )
 
 
 def _clip_polygon_attributes(

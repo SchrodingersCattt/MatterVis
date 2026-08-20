@@ -304,6 +304,14 @@ class LinePrimitive:
 
 @dataclass(frozen=True, slots=True)
 class TextPrimitive:
+    """World-anchored text with optional opaque-surface anchor occlusion.
+
+    Depth testing hides the whole label when its anchor is behind nearer
+    opaque mesh or line geometry.  Transparent geometry does not hide labels,
+    and the pixel offset does not move the depth-test sample away from the
+    anchor.  Camera clipping applies regardless of ``depth_test``.
+    """
+
     semantic_id: str
     position: tuple[float, float, float]
     text: str
