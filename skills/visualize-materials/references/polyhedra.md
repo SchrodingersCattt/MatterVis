@@ -17,7 +17,7 @@ Atom-centred coordination polyhedron:
 
 ```bash
 mat-vis render INPUT.cif -o OUTPUT.png --backend cpu \
-  --view unit_cell --style ball_stick --material mesh \
+  --view unit_cell --style ball_stick --shading smooth \
   --camera-axis c --orthogonal \
   --polyhedron '{"center":"Pb","ligand":"I","level":"atom","fallback_max":6,"color":"#ff6600"}' \
   --polyhedron-cutoff 3.5
@@ -27,7 +27,7 @@ Molecule-centred packing shell:
 
 ```bash
 mat-vis render INPUT.cif -o OUTPUT.png --backend cpu \
-  --view unit_cell --style ball_stick --material mesh \
+  --view unit_cell --style ball_stick --shading smooth \
   --camera-axis c --orthogonal \
   --polyhedron '{"center":"C6N2","ligand":"ClO4","level":"molecule","center_kind":"heavy_centroid","color":"#3366cc"}' \
   --polyhedron-cutoff 10.0

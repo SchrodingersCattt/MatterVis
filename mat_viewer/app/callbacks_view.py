@@ -703,6 +703,15 @@ def register_view_callbacks(app, backend):
         if pending_figure:
             topo_key = topo_key_preview
             if prev_key == topo_key:
+                # Callback function attributes are process-global, not
+                # browser-local. Another client may have populated this key
+                # while this browser still shows the previous scene summary.
+                # Read the already-built bundle scene (no figure rebuild) so
+                # a tab switch can never leave "Disorder: none" from a
+                # different structure on screen.
+                summary = _structure_summary(
+                    backend.get_bundle(state["structure"]).scene
+                )
                 update_view._last_rendered_scene_id = state.get("scene_id")
                 perf_log.record(
                     "callback:update_view",
@@ -714,7 +723,7 @@ def register_view_callbacks(app, backend):
                         "side_panel": "cached",
                     },
                 )
-                return no_update, no_update, no_update, no_update
+                return no_update, no_update, no_update, summary
             update_view._topo_cache_key = topo_key
             with perf_log.time_block("update_view:side_panel", kind="event"):
                 summary = _structure_summary(backend.scene_for_state(state))
@@ -741,6 +750,7 @@ def register_view_callbacks(app, backend):
         # the markdown table tear-down was visible in the CPU profile.
         topo_key = topo_key_preview
         if prev_key == topo_key:
+            summary = _structure_summary(backend.get_bundle(state["structure"]).scene)
             perf_log.record(
                 "callback:update_view",
                 duration_ms=(time.monotonic() - cb_start) * 1000.0,
@@ -751,7 +761,7 @@ def register_view_callbacks(app, backend):
                 },
             )
             update_view._last_rendered_scene_id = state.get("scene_id")
-            return fig, no_update, no_update, no_update
+            return fig, no_update, no_update, summary
         update_view._topo_cache_key = topo_key
         with perf_log.time_block("update_view:side_panel", kind="event"):
             summary = _structure_summary(backend.scene_for_state(state))

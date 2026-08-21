@@ -88,9 +88,9 @@ def _build_render_parser(
             )
     parser.add_argument(
         "--backend",
-        choices=("cpu", "plotly"),
+        choices=("cpu", "matplotlib", "plotly"),
         default="cpu",
-        help="Rendering backend (default: cpu; never selected by fallback).",
+        help="Backend: cpu 3D, matplotlib projected 2D, or plotly WebGL (default: cpu).",
     )
     parser.add_argument(
         "--check",
@@ -768,7 +768,7 @@ def _is_animation_output(args: argparse.Namespace) -> bool:
 
 
 def _render_shading(args: argparse.Namespace) -> str:
-    return "flat" if args.material == "flat" else "smooth"
+    return str(args.shading)
 
 
 def _render_ortep_mode(args: argparse.Namespace) -> str:
@@ -974,7 +974,7 @@ def _camera_spec(structure, args: argparse.Namespace, *, display: str):
         selected.bundle,
         display=display,
         show_hydrogen=args.show_hydrogen,
-        show_cell=bool(getattr(args, "show_cell", True)),
+        show_cell=bool(getattr(args, "show_unit_cell", getattr(args, "show_cell", True))),
     )
     aspect = max(float(args.width) / float(args.height), 1.0e-6)
     ortho_scale = radius * 1.15 / min(aspect, 1.0)

@@ -18,7 +18,7 @@ import numpy as np
 
 
 Projection = Literal["orthographic", "perspective"]
-Backend = Literal["cpu", "plotly"]
+Backend = Literal["cpu", "matplotlib", "plotly"]
 DisplayMode = Literal["formula_unit", "unit_cell", "asymmetric_unit", "cluster"]
 RGBA: TypeAlias = tuple[float, float, float, float]
 RENDER_PLAN_SCHEMA = "mattervis.render-plan/v1"
@@ -195,8 +195,8 @@ class RenderSpec:
     cylinder_sides: int = 12
 
     def __post_init__(self) -> None:
-        if self.backend not in ("cpu", "plotly"):
-            raise ValueError("backend must be 'cpu' or 'plotly'")
+        if self.backend not in ("cpu", "matplotlib", "plotly"):
+            raise ValueError("backend must be 'cpu', 'matplotlib', or 'plotly'")
         if any(
             int(value) != value or int(value) <= 0
             for value in (self.width, self.height, self.scale)

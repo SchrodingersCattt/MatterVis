@@ -162,7 +162,8 @@ CAPABILITY_REGISTRY: Mapping[str, CapabilitySpec] = {
     "core": CapabilitySpec(
         name="core",
         description=(
-            "CPU PNG/PDF/SVG, structure inspection, ORTEP, rings, and polyhedra"
+            "CPU 3D and Matplotlib 2D PNG/PDF/SVG, structure inspection, "
+            "ORTEP, rings, and polyhedra"
         ),
         extra=None,
         packages=("numpy", "ase", "matplotlib", "pillow", "molcrys-kit"),
@@ -407,10 +408,12 @@ def requirements_for_render(output: str, backend: str = "cpu") -> tuple[str, ...
     if suffix not in {"png", "pdf", "svg", "html", "gif", "mp4"}:
         raise ValueError(f"unsupported MatterVis output format: {suffix or output!r}")
     backend_name = str(backend).strip().lower()
-    if backend_name not in {"cpu", "plotly"}:
-        raise ValueError("backend must be 'cpu' or 'plotly'")
+    if backend_name not in {"cpu", "matplotlib", "plotly"}:
+        raise ValueError("backend must be 'cpu', 'matplotlib', or 'plotly'")
     if suffix == "html" and backend_name != "plotly":
         raise ValueError("HTML output requires --backend plotly")
+    if backend_name == "matplotlib" and suffix not in {"png", "pdf", "svg"}:
+        raise ValueError("Matplotlib output must be PNG, PDF, or SVG")
     if suffix in {"gif", "mp4"} and backend_name != "cpu":
         raise ValueError("GIF/MP4 output requires --backend cpu")
 

@@ -19,6 +19,7 @@ explicit data.
    displayed object, and [camera](./references/camera.md) for images.
 5. Read only the requested output path:
    - [CPU static PNG/PDF/SVG](./references/cpu-static.md) — default;
+   - [Matplotlib projected 2D PNG/PDF/SVG](./references/cpu-static.md);
    - [Plotly HTML or explicit Plotly static export](./references/plotly-render.md);
    - [input formats](./references/input-formats.md);
    - [molecule focus](./references/molecule-highlight.md);
@@ -34,7 +35,8 @@ explicit data.
   the requested capability requires them.
 - Use public `mat-vis inspect`, `capabilities`, and `render --check` commands;
   do not diagnose through Web/TUI startup or private Python modules.
-- Select `--backend cpu|plotly` explicitly. MatterVis has no silent backend or
+- Select `--backend cpu|matplotlib|plotly` explicitly. Use `matplotlib` for a
+  projected 2D drawing and `cpu` for 3D geometry. MatterVis has no silent backend or
   representation fallback; preserve a failure and its exact install hint.
 - For a Web/API screenshot use requirement `web-screenshot`; for the Web UI's
   Plotly static export use `static-web-export`. Both resolve the required

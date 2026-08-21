@@ -85,7 +85,9 @@ BUILTIN_STYLE: dict[str, Any] = {
     "show_axes": True,
     "show_title": True,
     "show_hydrogen": True,
-    "show_unit_cell": True,
+    # A compact formula-unit image is not the contents of one conventional
+    # cell. Callers that select ``unit_cell`` can enable the cell box.
+    "show_unit_cell": False,
     "show_minor_only": False,
     "depth_cue_enabled": False,
     "projection": "perspective",

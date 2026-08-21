@@ -37,6 +37,10 @@ from mat_viewer.loader import (
     _has_shelx_occupancy_disorder,
     build_loaded_crystal,
 )
+from mat_viewer.loader.core import (
+    _fragment_table_from_atoms,
+    _tag_unresolved_partial_solvent_disorder,
+)
 
 
 SY_CIF = Path("scripts/data/SY.cif")
@@ -167,6 +171,47 @@ def test_sy_topology_table_has_no_orphan_hydrogens():
 )
 def test_is_minor_reads_loader_flag_only(atom, expected):
     assert is_minor(atom) is expected
+
+
+def test_partial_water_sites_are_tagged_as_unresolved_disorder():
+    atoms = [
+        {"label": "O2W", "elem": "O", "occ": 0.06},
+        {"label": "H2WA", "elem": "H", "occ": 0.06},
+        {"label": "C1", "elem": "C", "occ": 0.5},
+    ]
+
+    tagged = _tag_unresolved_partial_solvent_disorder(atoms)
+
+    assert tagged[0]["is_disordered"] is True
+    assert tagged[1]["is_disordered"] is True
+    assert tagged[0]["disorder_resolved"] is False
+    assert "is_disordered" not in tagged[2]
+
+
+def test_unresolved_partial_solvent_h_is_not_a_topology_species():
+    atom = {
+        "label": "H3WA",
+        "elem": "H",
+        "occ": 0.04,
+        "frac": np.array([0.1, 0.2, 0.3]),
+        "cart": np.array([1.0, 2.0, 3.0]),
+        "dg": ".",
+        "da": ".",
+        "is_disordered": True,
+        "disorder_resolved": False,
+    }
+    analysis = SimpleNamespace(mol_indices=[[0]])
+
+    table, labels = _fragment_table_from_atoms(
+        "water",
+        [atom],
+        None,
+        np.eye(3),
+        molcrys_analysis=analysis,
+    )
+
+    assert table == []
+    assert labels == ["?"]
 
 
 def test_is_minor_explicit_flag_is_the_single_source_of_truth():

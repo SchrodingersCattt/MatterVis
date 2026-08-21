@@ -171,8 +171,11 @@ def _atom_effective_opacity(atom: dict, style: dict) -> float:
     is_minor = bool(atom.get("is_minor", False))
     is_disordered = bool(atom.get("is_disordered", is_minor))
     # Occupancy controls opacity only for a loader-confirmed disordered atom.
+    unresolved = is_disordered and not bool(atom.get("disorder_resolved", False))
     if is_disordered and "occ" in atom and (
-        style.get("disorder") == "opacity" or style.get("force_minor_fade")
+        style.get("disorder") == "opacity"
+        or style.get("force_minor_fade")
+        or (unresolved and style.get("disorder") != "none")
     ):
         occ = atom.get("occ", 1.0)
         try:
