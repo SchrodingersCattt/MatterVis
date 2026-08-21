@@ -295,7 +295,7 @@ def _canonical_display_bond_pairs(
         instances[identity] = draw_index
         shifts_by_source.setdefault(identity[0], []).append((identity[1], draw_index))
         molecule_index = atom.get("_source_molecule_index")
-        if molecule_index is not None:
+        if molecule_index is not None and not atom.get("_cell_spanning_component"):
             try:
                 relative_shift = tuple(int(value) for value in atom.get("_image_shift", (0, 0, 0)))
                 fragment_key = (int(molecule_index), relative_shift)
@@ -361,6 +361,36 @@ def _canonical_display_bond_pairs(
     }
 
 
+def _prune_unconnected_spanning_replicas(
+    draw_atoms: list[dict[str, Any]],
+    source_atoms: list[dict[str, Any]],
+    canonical_bond_records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not canonical_bond_records:
+        return draw_atoms
+    pairs, _stats = _canonical_display_bond_pairs(
+        draw_atoms,
+        source_atoms,
+        canonical_bond_records,
+    )
+    connected = {index for pair in pairs for index in pair}
+    bonded_sources = {
+        int(record[endpoint])
+        for record in canonical_bond_records
+        for endpoint in ("left", "right")
+    }
+    return [
+        atom
+        for index, atom in enumerate(draw_atoms)
+        if not (
+            atom.get("_cell_spanning_component")
+            and atom.get("_is_boundary_replica")
+            and int(atom.get("_source_index", -1)) in bonded_sources
+            and index not in connected
+        )
+    ]
+
+
 def build_scene_from_atoms(
     *,
     name: str,
@@ -411,6 +441,27 @@ def build_scene_from_atoms(
         input_atoms,
         molcrys_analysis,
     )
+    canonical_unwrapped_atoms = None
+    if unwrapped_atoms is not None:
+        if len(unwrapped_atoms) != len(source_atoms):
+            raise ValueError(
+                "unwrapped_atoms must preserve the MolCrysKit SiteRecord order."
+            )
+        canonical_unwrapped_atoms = []
+        provenance_keys = (
+            "_source_index",
+            "_source_molecule_index",
+            "_molecule_index",
+            "_molecule_local_index",
+            "_wrapped_frac",
+            "_mck_image_shift",
+        )
+        for unwrapped, source in zip(unwrapped_atoms, source_atoms):
+            copied = dict(unwrapped)
+            for key in provenance_keys:
+                if key in source:
+                    copied.setdefault(key, copy.deepcopy(source[key]))
+            canonical_unwrapped_atoms.append(copied)
     canonical_records = [dict(record) for record in molcrys_analysis.bond_records]
     canonical_pairs = sorted(
         {
@@ -481,7 +532,7 @@ def build_scene_from_atoms(
         cell,
         display_mode=display_mode,
         formula_unit_atoms=formula_unit_atoms,
-        unwrapped_atoms=unwrapped_atoms,
+        unwrapped_atoms=canonical_unwrapped_atoms,
         include_boundary_replicas=include_boundary_replicas,
     )
     draw_atoms = [dict(atom) for atom in sel_atoms if show_h or atom["elem"] != "H"]
@@ -496,6 +547,11 @@ def build_scene_from_atoms(
             M,
             image_records,
         )
+    draw_atoms = _prune_unconnected_spanning_replicas(
+        draw_atoms,
+        source_atoms,
+        image_records,
+    )
 
     view_x = np.array(R[0], dtype=float)
     view_y = np.array(R[1], dtype=float)

@@ -112,7 +112,7 @@ substitutes one frame backend for another.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| --view MODE | auto | CIF defaults to formula_unit; other inputs to unit_cell |
+| --view MODE | auto | Defaults to unit_cell; use formula_unit explicitly for one chemical formula unit |
 | --style STYLE | ball_stick | ball_stick, ball, stick, ortep, or wireframe |
 | --material MAT | mesh | mesh or flat |
 | --backend BACKEND | cpu | cpu or plotly; never selected by fallback |

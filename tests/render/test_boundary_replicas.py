@@ -149,6 +149,83 @@ def test_fragment_on_face_replicates_as_whole_fragment():
     ]
 
 
+def test_unwrapped_atoms_inherit_mck_molecule_provenance():
+    cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
+    M = np.eye(3) * 10.0
+    atoms = [
+        _atom("C1", [0.0, 0.5, 0.5], M),
+        _atom("C2", [0.1, 0.5, 0.5], M),
+    ]
+    unwrapped = [dict(atom) for atom in atoms]
+
+    scene = build_scene_from_atoms(
+        name="record_provenance",
+        title="Record provenance",
+        atoms=atoms,
+        cell=cell,
+        M=M,
+        R=np.eye(3),
+        display_mode="unit_cell",
+        ops=scene_ops(),
+        unwrapped_atoms=unwrapped,
+        molcrys_analysis=_analysis(
+            atoms,
+            [{"left": 0, "right": 1, "right_image_shift": [0, 0, 0]}],
+        ),
+        preset={"style": {"show_labels": False, "show_axes": False}},
+    )
+
+    replicas = [
+        atom
+        for atom in scene["draw_atoms"]
+        if atom.get("_is_fragment_boundary_replica")
+    ]
+    assert len(scene["draw_atoms"]) == 4
+    assert sorted(atom["label"] for atom in replicas) == ["C1", "C2"]
+
+
+def test_cell_spanning_component_is_not_replicated_as_a_whole_cell():
+    M = np.eye(3) * 10.0
+    atoms = [
+        {**_atom("C1", [0.02, 0.5, 0.5], M), "_source_molecule_index": 0},
+        {**_atom("C2", [1.02, 0.5, 0.5], M), "_source_molecule_index": 0},
+    ]
+
+    from mat_viewer.render.boundary_replicas import expand_boundary_replicas
+
+    expanded = expand_boundary_replicas(atoms, M)
+
+    assert len(expanded) == 4
+    assert not any(atom.get("_is_fragment_boundary_replica") for atom in expanded)
+
+
+def test_cell_spanning_component_drops_unbonded_site_images():
+    cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
+    M = np.eye(3) * 10.0
+    atoms = [
+        {**_atom("C1", [0.02, 0.5, 0.5], M), "_source_molecule_index": 0},
+        {**_atom("C2", [1.02, 0.5, 0.5], M), "_source_molecule_index": 0},
+    ]
+    records = [{"left": 0, "right": 1, "right_image_shift": [1, 0, 0]}]
+
+    scene = build_scene_from_atoms(
+        name="spanning_bond",
+        title="Spanning bond",
+        atoms=atoms,
+        cell=cell,
+        M=M,
+        R=np.eye(3),
+        display_mode="unit_cell",
+        ops=scene_ops(),
+        unwrapped_atoms=atoms,
+        molcrys_analysis=_analysis(atoms, records),
+        preset={"style": {"show_labels": False, "show_axes": False}},
+    )
+
+    assert len(scene["draw_atoms"]) == 2
+    assert len(scene["bonds"]) == 1
+
+
 def test_fragment_near_face_replicates_by_member_tolerance():
     """A near-face member gives the whole fragment an adjacent image.
 

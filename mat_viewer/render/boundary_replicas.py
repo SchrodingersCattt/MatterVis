@@ -96,6 +96,14 @@ def expand_boundary_replicas(
         translations.discard((0, 0, 0))
         return translations
 
+    def _spans_cell(molecule_atoms: list[dict[str, Any]]) -> bool:
+        fractions = np.asarray(
+            [atom.get("frac") for atom in molecule_atoms], dtype=float
+        )
+        if fractions.ndim != 2 or fractions.shape[1:] != (3,):
+            return False
+        return bool(np.any(np.ptp(fractions, axis=0) >= 1.0 - _SOURCE_IMAGE_TOL))
+
     # ── main loop ────────────────────────────────────────────────────
 
     out: list[dict[str, Any]] = []
@@ -112,6 +120,11 @@ def expand_boundary_replicas(
             ungrouped.append(atom)
 
     for molecule_atoms in grouped.values():
+        if _spans_cell(molecule_atoms):
+            for atom in molecule_atoms:
+                atom["_cell_spanning_component"] = True
+            ungrouped.extend(molecule_atoms)
+            continue
         out.extend(molecule_atoms)
         for effective in sorted(_molecule_periodic_translations(molecule_atoms)):
             shift_arr = np.array(effective, dtype=float)

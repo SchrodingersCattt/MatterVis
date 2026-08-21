@@ -10,7 +10,7 @@ import pytest
 
 import mat_viewer.capabilities as capability_module
 from mat_viewer.agent_topology import build_topology_data, parse_polyhedron_specs
-from mat_viewer.cli import _camera_spec, _inspect_payload, main
+from mat_viewer.cli import _camera_spec, _display_mode, _inspect_payload, main
 from mat_viewer.capabilities import resolve_requirements
 
 
@@ -56,6 +56,19 @@ def test_camera_defaults_to_orthographic_positive_c_axis() -> None:
     assert camera.up == pytest.approx([0.0, 1.0, 0.0])
     assert camera.projection == "orthographic"
     assert structure.frames[0].bundle.M == pytest.approx(matrix_before)
+
+
+def test_auto_display_uses_periodic_unit_cell_context() -> None:
+    args = Namespace(view="auto")
+
+    assert _display_mode(SimpleNamespace(input_format="cif"), args) == "unit_cell"
+    assert _display_mode(SimpleNamespace(input_format="extxyz"), args) == "unit_cell"
+    assert (
+        _display_mode(
+            SimpleNamespace(input_format="cif"), Namespace(view="formula_unit")
+        )
+        == "formula_unit"
+    )
 
 
 def test_camera_fit_includes_the_visible_unit_cell() -> None:

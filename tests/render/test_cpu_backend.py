@@ -942,6 +942,7 @@ def test_disorder_opacity_and_cross_cell_bond_vector_survive_planning():
     )
     assert disordered.rgba[3] == pytest.approx(0.5)
     assert disordered.metadata["disorder_group"] == 1
+    assert any("disorder at 1 source sites" in warning for warning in plan.warnings)
     bond_meshes = [
         item for item in plan.primitives if item.metadata.get("kind") == "bond"
     ]

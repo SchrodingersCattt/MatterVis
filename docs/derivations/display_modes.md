@@ -182,7 +182,8 @@ to atom \(i\):
 Mode dispatch is centralized in `_selected_atoms_for_mode`:
 
 - `mat_viewer/scene/core.py:200-223` handles `unit_cell`,
-  `asymmetric_unit`, `cluster`, and the default `formula_unit`.
+  `asymmetric_unit`, `cluster`, and explicit `formula_unit`; automatic display uses
+  `unit_cell` so periodic boundary fragments remain visually complete.
 - `mat_viewer/loader/core.py:625-637` passes `bundle.formula_unit_atoms` only
   when `display_mode == "formula_unit"` and passes `bundle.unwrapped_atoms`
   for continuous molecule coordinates.

@@ -94,6 +94,7 @@ def prepare_render(
     primitives: list[Primitive] = []
 
     visible_indices: set[int] = set()
+    disordered_source_indices: set[int] = set()
     atom_colors: dict[int, Any] = {}
     atom_positions: dict[int, np.ndarray] = {}
     display_atoms_by_source: dict[int, dict[tuple[Any, ...], int]] = {}
@@ -139,12 +140,21 @@ def prepare_render(
             default=_ELEMENT_COLORS.get(element, "#808080"),
         )
         atom_colors[index] = color
+        source_index = _source_atom_index(atom, index)
         occupancy = float(_value(atom, "occ", "occupancy", default=1.0))
+        disorder_group = _value(atom, "disorder_group", "dg", default=None)
+        if occupancy < 1.0 - 1.0e-8 or disorder_group not in (
+            None,
+            0,
+            "0",
+            ".",
+            "?",
+        ):
+            disordered_source_indices.add(source_index)
         opacity_scale = float(_value(atom, "_render_opacity_scale", default=1.0))
         alpha = float(np.clip(occupancy * opacity_scale, 0.0, 1.0))
         label = str(_value(atom, "label", default=f"{element}{index + 1}"))
         semantic_id = f"atom:{index}:{label}"
-        source_index = _source_atom_index(atom, index)
         copy_key = _display_copy_key(atom)
         source_instances = display_atoms_by_source.setdefault(source_index, {})
         previous_index = source_instances.setdefault(copy_key, index)
@@ -160,7 +170,7 @@ def prepare_render(
             "label": label,
             "source_index": source_index,
             "occupancy": occupancy,
-            "disorder_group": _value(atom, "disorder_group", "dg", default=None),
+            "disorder_group": disorder_group,
             "disorder_assembly": _value(atom, "disorder_assembly", "da", default=None),
             "image_shift": _integer_triplet(
                 _value(atom, "image_shift", "_image_shift", default=(0, 0, 0))
@@ -257,6 +267,13 @@ def prepare_render(
                     metadata={"kind": "atom_label", "atom_index": index},
                 )
             )
+
+    if disordered_source_indices:
+        warnings.append(
+            "scene contains disorder at "
+            f"{len(disordered_source_indices)} source sites; occupancies are "
+            "rendered as opacity without automatic disorder resolution"
+        )
 
     if representation != "ball":
         for bond_index, bond in enumerate(bonds):

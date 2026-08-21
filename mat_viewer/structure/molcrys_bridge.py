@@ -453,6 +453,10 @@ def analyze_crystal(crystal) -> CrystalAnalysis:
             for record in contract_bonds
         }
     )
+    site_image_shifts = {
+        int(record.global_index): np.asarray(record.image_shift, dtype=int)
+        for record in site_records
+    }
     bond_records = [
         {
             "left": int(record.left_global_index),
@@ -462,7 +466,11 @@ def analyze_crystal(crystal) -> CrystalAnalysis:
             "molecule_index": int(record.molecule_index),
             "left_asym_index": record.left_asym_index,
             "right_asym_index": record.right_asym_index,
-            "right_image_shift": list(record.right_image_shift),
+            "right_image_shift": list(
+                np.asarray(record.right_image_shift, dtype=int)
+                + site_image_shifts[int(record.right_global_index)]
+                - site_image_shifts[int(record.left_global_index)]
+            ),
             "vector": list(record.vector_A),
             "distance": float(record.distance_A),
         }

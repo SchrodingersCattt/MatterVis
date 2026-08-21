@@ -1089,7 +1089,7 @@ def _render_result_payload(result, structure, args: argparse.Namespace, camera) 
 def _display_mode(structure, args: argparse.Namespace) -> str:
     if args.view != "auto":
         return args.view
-    return "formula_unit" if structure.input_format == "cif" else "unit_cell"
+    return "unit_cell"
 
 
 def _animation_indices(args: argparse.Namespace) -> list[int]:
