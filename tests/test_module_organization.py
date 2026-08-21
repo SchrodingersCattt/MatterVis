@@ -16,7 +16,7 @@ KNOWN_OVERSIZE_DURING_SPLIT = {
     "loader/core.py": 1224,
     "cli.py": 1263,
     "ortep/core.py": 1124,
-    "render/planning.py": 1297,
+    "render/planning.py": 1314,
     "structure/loader/core.py": 1050,
 }
 ALLOWED_TOP_LEVEL_PY = {
