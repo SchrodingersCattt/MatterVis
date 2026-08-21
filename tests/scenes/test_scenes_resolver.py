@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from crystal_viewer.app import ViewerBackend
+from mat_viewer.app import ViewerBackend
 
 
 def test_backend_scene_state_targets_active_and_explicit_scene(tmp_path):

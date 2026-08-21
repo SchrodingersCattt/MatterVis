@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from crystal_viewer.loader import build_loaded_crystal
-from crystal_viewer.presets import DEFAULT_STYLE
-from crystal_viewer.renderer import build_figure
+from mat_viewer.loader import build_loaded_crystal
+from mat_viewer.presets import DEFAULT_STYLE
+from mat_viewer.renderer import build_figure
 
 
 # DAP-4 and MPEP are fully ordered (no `_atom_site_disorder_assembly`

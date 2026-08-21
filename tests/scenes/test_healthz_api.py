@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from crystal_viewer.app import create_app
+from mat_viewer.app import create_app
 
 
 def test_healthz_v2_returns_lightweight_liveness_payload():
@@ -33,7 +33,7 @@ def test_state_echoes_server_started_at_for_restart_detection():
 
 
 def test_screenshot_accepts_size_fast_and_version_query(monkeypatch):
-    from crystal_viewer import app as app_module
+    from mat_viewer import app as app_module
 
     calls = []
 
@@ -55,3 +55,27 @@ def test_screenshot_accepts_size_fast_and_version_query(monkeypatch):
     assert calls[-1]["width"] == 320
     assert calls[-1]["height"] == 240
     assert calls[-1]["scale"] == 1.0
+
+
+def test_screenshot_reports_plotly_export_failure_without_placeholder_png(monkeypatch):
+    from mat_viewer import app as app_module
+
+    def fail_to_image(_fig, **_kwargs):
+        raise RuntimeError("Kaleido is unavailable")
+
+    monkeypatch.setattr(app_module.pio, "to_image", fail_to_image)
+    app = create_app()
+    server = app.server
+    server.config["TESTING"] = True
+    client = server.test_client()
+
+    response = client.get("/api/v2/screenshot")
+
+    assert response.status_code == 503
+    assert response.is_json
+    body = response.get_json()
+    assert "Kaleido is unavailable" in body["error"]
+    assert body["hint"] == (
+        "Install Web screenshot support with: "
+        'python -m pip install "matter-vis[plotly-export,web]"'
+    )

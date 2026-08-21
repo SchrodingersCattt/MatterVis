@@ -10,7 +10,7 @@ remain MolCrysKit-owned; MatterVis only exposes optional
 ## Python
 
 ```python
-from crystal_viewer.config import CONFIG, reload_config
+from mat_viewer.config import CONFIG, reload_config
 
 style = CONFIG.style.as_dict()
 carbon = CONFIG.colors.get("elements", {})["C"]
@@ -46,7 +46,7 @@ curl -X PATCH http://localhost:50001/api/v2/config \
 Top-level sections:
 
 - `style`: default render style keys, mirroring
-  `crystal_viewer.presets.DEFAULT_STYLE`.
+  `mat_viewer.presets.DEFAULT_STYLE`.
 - `colors`: MatterVis scene palette, radii, polyhedron auto-colours,
   and `selection_highlight`.
 - `cube`: cube/orbital panel palette and radii.

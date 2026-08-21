@@ -288,66 +288,66 @@ scale changes.
 
 Default camera creation:
 
-- `crystal_viewer/render/viewport.py:19-28` creates a Plotly camera from
+- `mat_viewer/render/viewport.py:19-28` creates a Plotly camera from
   `scene["view_direction"]`, `scene["up"]`, and `camera_eye_distance`.
 
 Aspect:
 
-- `crystal_viewer/render/viewport.py:31-45` keeps a lattice-length summary
+- `mat_viewer/render/viewport.py:31-45` keeps a lattice-length summary
   helper for callers that need it.
-- `crystal_viewer/render/viewport.py:48-64` derives manual Plotly aspect from
+- `mat_viewer/render/viewport.py:48-64` derives manual Plotly aspect from
   final Cartesian axis ranges.
-- `crystal_viewer/render/viewport.py:67-82` gates manual range aspect to
+- `mat_viewer/render/viewport.py:67-82` gates manual range aspect to
   `display_mode == "unit_cell"`.
 
 Cube scale:
 
-- `crystal_viewer/render/viewport.py:85-110` computes manual scale
+- `mat_viewer/render/viewport.py:85-110` computes manual scale
   \(\sigma_k=h_k/a_k\).
-- `crystal_viewer/render/viewport.py:137-170` falls back to viewport or
+- `mat_viewer/render/viewport.py:137-170` falls back to viewport or
   bounds-derived scale for non-manual scenes.
-- `crystal_viewer/render/viewport.py:129-133` divides lattice axes by this
+- `mat_viewer/render/viewport.py:129-133` divides lattice axes by this
   cube scale before projecting compass axes.
 
 Ranges and equalization:
 
-- `crystal_viewer/render/viewport.py:180-274` computes atom/topology/cell
+- `mat_viewer/render/viewport.py:180-274` computes atom/topology/cell
   axis ranges.
-- `crystal_viewer/render/viewport.py:219-239` includes unit-cell corners only
+- `mat_viewer/render/viewport.py:219-239` includes unit-cell corners only
   when `cell_owns_cube` is true.
-- `crystal_viewer/render/viewport.py:240-252` includes focused topology in
+- `mat_viewer/render/viewport.py:240-252` includes focused topology in
   the range but excludes `extra_overlays` from viewport ownership.
-- `crystal_viewer/render/viewport.py:277-304` equalizes axis ranges to the
+- `mat_viewer/render/viewport.py:277-304` equalizes axis ranges to the
   longest span.
-- `crystal_viewer/render/viewport.py:307-331` writes the final Plotly
+- `mat_viewer/render/viewport.py:307-331` writes the final Plotly
   `layout.scene`: axis ranges, camera, `uirevision`, background, and either
   manual aspect or cube aspect.
 
 Figure assembly:
 
-- `crystal_viewer/renderer/core.py:116-118` calls `_scene_ranges` before building
+- `mat_viewer/renderer/core.py:116-118` calls `_scene_ranges` before building
   traces.
-- `crystal_viewer/renderer/core.py:201` installs `figure_axis_layout`.
-- `crystal_viewer/render/traces_overlays.py` draws the full unit-cell
+- `mat_viewer/renderer/core.py:201` installs `figure_axis_layout`.
+- `mat_viewer/render/traces_overlays.py` draws the full unit-cell
   box from the eight lattice corners whenever `scene["M"]` exists; visibility
   is controlled later by style.
 
 Camera persistence and overwrite:
 
-- `crystal_viewer/app/backend_camera.py` excludes compatible `camera` from
+- `mat_viewer/app/backend_camera.py` excludes compatible `camera` from
   the figure cache key.
-- `crystal_viewer/app/backend_camera.py` applies the live camera on cached
+- `mat_viewer/app/backend_camera.py` applies the live camera on cached
   and freshly built figures.
 
 Compass:
 
-- `crystal_viewer/compass/core.py:46-87` implements the screen basis.
-- `crystal_viewer/compass/core.py:90-102` projects 3D vectors onto that basis.
-- `crystal_viewer/compass/core.py:171-190` normalizes arrows to pixels and flips the
+- `mat_viewer/compass/core.py:46-87` implements the screen basis.
+- `mat_viewer/compass/core.py:90-102` projects 3D vectors onto that basis.
+- `mat_viewer/compass/core.py:171-190` normalizes arrows to pixels and flips the
   tail sign for Plotly pixel-y semantics.
-- `crystal_viewer/render/compass.py:74-110` caps baked compass arrows so they
+- `mat_viewer/render/compass.py:74-110` caps baked compass arrows so they
   stay inside the figure edge.
-- `crystal_viewer/render/compass.py:155-168` emits the same paper/pixel
+- `mat_viewer/render/compass.py:155-168` emits the same paper/pixel
   arrow structure as the lower-level compass helper.
 - `frontend/assets/mattervis.js` renders the interactive Dash
   compass into a sibling SVG. Normal redraws use the committed
@@ -367,7 +367,7 @@ full lattice parallelepiped from
 \vec a+\vec b+\vec c\}.
 \]
 
-That is implemented in `crystal_viewer/render/traces_overlays.py`.
+That is implemented in `mat_viewer/render/traces_overlays.py`.
 
 but let `_scene_ranges` omit those corners in non-unit-cell modes. If a lattice
 corner \(C\) satisfied

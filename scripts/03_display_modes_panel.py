@@ -20,10 +20,10 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from plotly.subplots import make_subplots  # noqa: E402
 
-from crystal_viewer.loader import build_bundle_scene, build_loaded_crystal  # noqa: E402
-from crystal_viewer.renderer import build_figure  # noqa: E402
-from crystal_viewer.scene import scene_style  # noqa: E402
-from crystal_viewer.topology import analyze_topology  # noqa: E402
+from mat_viewer.loader import build_bundle_scene, build_loaded_crystal  # noqa: E402
+from mat_viewer.renderer import build_figure  # noqa: E402
+from mat_viewer.scene import scene_style  # noqa: E402
+from mat_viewer.topology import analyze_topology  # noqa: E402
 
 
 HERE = Path(__file__).resolve().parent

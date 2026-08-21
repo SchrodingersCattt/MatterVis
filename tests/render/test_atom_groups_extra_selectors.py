@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from crystal_viewer.atom_groups import atom_matches_selector, tag_atoms_with_groups
-from crystal_viewer.app import _coerce_atom_selector
+from mat_viewer.atom_groups import atom_matches_selector, tag_atoms_with_groups
+from mat_viewer.app import _coerce_atom_selector
 
 
 # ---- _coerce_atom_selector --------------------------------------------

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from crystal_viewer.app import WORKSPACE_DIR, create_app
+from mat_viewer.app import WORKSPACE_DIR, create_app
 
 
 def _client(tmp_path: Path):
@@ -357,11 +357,19 @@ def test_state_post_supercell_replaces_previous(tmp_path: Path):
 # ---- screenshot synchronously reflects state changes ------------------
 
 
-def test_screenshot_reflects_state_changes(tmp_path: Path):
+def test_screenshot_reflects_state_changes(tmp_path: Path, monkeypatch):
     """An AI script that POSTs a state change then GETs a screenshot
     must see the updated render in the returned PNG bytes (not a
     stale picture from before the patch). The endpoint is synchronous
     so this is a pure sequencing test rather than a polling one."""
+    from hashlib import sha256
+
+    from mat_viewer import app as app_module
+
+    def fake_to_image(figure, **_kwargs):
+        return b"\x89PNG\r\n\x1a\n" + sha256(figure.to_json().encode()).digest()
+
+    monkeypatch.setattr(app_module.pio, "to_image", fake_to_image)
     client = _client(tmp_path)
     # Baseline screenshot before any change.
     before = client.get("/api/v2/screenshot")
@@ -373,3 +381,4 @@ def test_screenshot_reflects_state_changes(tmp_path: Path):
     after = client.get("/api/v2/screenshot")
     assert after.status_code == 200
     assert after.mimetype == "image/png"
+    assert after.data != before.data

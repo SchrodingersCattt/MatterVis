@@ -4,7 +4,7 @@ Background
 ----------
 On 2026-05-10 the user complained that uploads were slow and asked
 "do you even have logs?". We now record a timestamped event for each
-callback / upload step in :mod:`crystal_viewer.perf_log`. These tests
+callback / upload step in :mod:`mat_viewer.perf_log`. These tests
 lock in the contract:
 
 * :func:`record` is FIFO with monotonic ``seq`` numbers.
@@ -21,7 +21,7 @@ import time
 
 import pytest
 
-from crystal_viewer import perf_log
+from mat_viewer import perf_log
 
 
 @pytest.fixture(autouse=True)
@@ -84,7 +84,7 @@ def test_record_appends_to_disk_log(tmp_path):
 
 
 def test_perf_endpoint_returns_events_and_supports_since(monkeypatch, tmp_path):
-    from crystal_viewer.app import create_app
+    from mat_viewer.app import create_app
 
     monkeypatch.setattr(perf_log, "_LOG_PATH", str(tmp_path / "cv-perf-app.log"))
     perf_log.clear()

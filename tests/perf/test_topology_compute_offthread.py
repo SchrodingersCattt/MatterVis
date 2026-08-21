@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from crystal_viewer.app import ViewerBackend
-from crystal_viewer.presets import default_preset_path
+from mat_viewer.app import ViewerBackend
+from mat_viewer.presets import default_preset_path
 
 
 def test_topology_request_is_deduplicated_before_worker_submit(tmp_path: Path):

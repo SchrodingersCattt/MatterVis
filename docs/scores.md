@@ -1,6 +1,6 @@
 # Topology scores reference
 
-`crystal_viewer.topology.analyze_topology` returns one JSON-serialisable dict
+`mat_viewer.topology.analyze_topology` returns one JSON-serialisable dict
 that bundles **five** distinct scores characterising a coordination shell.
 This page explains what each score means, how it is computed, and how to
 interpret the value.
@@ -11,8 +11,8 @@ fragments of the chosen centre). The shell itself is extracted by
 fragment inside `cutoff` Å and sorts them by distance.
 
 ```python
-from crystal_viewer.loader import build_loaded_crystal
-from crystal_viewer.topology import analyze_topology
+from mat_viewer.loader import build_loaded_crystal
+from mat_viewer.topology import analyze_topology
 
 bundle = build_loaded_crystal(name="DAP-4", cif_path="scripts/data/DAP-4.cif")
 # The first A-site fragment in DAP-4 is at index 8; tune cutoff to your lattice.

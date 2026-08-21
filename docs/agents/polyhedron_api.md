@@ -210,7 +210,7 @@ curl -s -X POST http://localhost:50001/api/v2/polyhedra/reorder \
 
 ## Renderer contract
 
-For library callers driving `crystal_viewer.renderer.build_figure`
+For library callers driving `mat_viewer.renderer.build_figure`
 directly (no Dash app), the renderer pulls per-spec colours from
 `topology_data["spec_results"]`, where each entry has:
 

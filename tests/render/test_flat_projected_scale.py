@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from crystal_viewer.render.traces_atoms import _atom_scatter_traces, _bond_scatter_traces
-from crystal_viewer.renderer import build_figure
-from crystal_viewer.render.viewport import flat_visual_pixel_scale
+from mat_viewer.render.traces_atoms import _atom_scatter_traces, _bond_scatter_traces
+from mat_viewer.renderer import build_figure
+from mat_viewer.render.viewport import flat_visual_pixel_scale
 
 
 def _style() -> dict:

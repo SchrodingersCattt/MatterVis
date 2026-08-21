@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from crystal_viewer.app import ViewerBackend
-from crystal_viewer.presets import default_preset_path
+from mat_viewer.app import ViewerBackend
+from mat_viewer.presets import default_preset_path
 
 
 def test_reducer_rejects_out_of_order_client_sequence(tmp_path: Path):

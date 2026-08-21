@@ -29,10 +29,10 @@ matplotlib.use("Agg")
 import matplotlib.image as mpimg  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 
-from crystal_viewer.loader import build_bundle_scene, build_loaded_crystal  # noqa: E402
-from crystal_viewer.renderer import render  # noqa: E402
-from crystal_viewer.scene import scene_style  # noqa: E402
-from crystal_viewer.topology import analyze_topology  # noqa: E402
+from mat_viewer.loader import build_bundle_scene, build_loaded_crystal  # noqa: E402
+from mat_viewer.renderer import render  # noqa: E402
+from mat_viewer.scene import scene_style  # noqa: E402
+from mat_viewer.topology import analyze_topology  # noqa: E402
 
 
 CIF = REPO_ROOT / "scripts" / "data" / "DAP-4.cif"

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from crystal_viewer.app import ViewerBackend
+from mat_viewer.app import ViewerBackend
 
 
 def test_v1_legacy_aliases_survive_scene_state(tmp_path):

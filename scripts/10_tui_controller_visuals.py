@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from crystal_viewer.tui import TerminalViewController
+from mat_viewer.tui import TerminalViewController
 
 
 ROOT = Path(__file__).resolve().parents[1]

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from crystal_viewer.ortep import (
+from mat_viewer.ortep import (
     ortep_atom_mesh_traces,
     ortep_octant_shade_traces,
 )

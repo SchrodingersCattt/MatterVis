@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from crystal_viewer.app import WORKSPACE_DIR, create_app
+from mat_viewer.app import WORKSPACE_DIR, create_app
 
 
 @pytest.fixture

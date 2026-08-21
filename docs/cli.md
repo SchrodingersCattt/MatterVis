@@ -7,8 +7,12 @@ frame before scene construction.
 ## Quick start
 
 ~~~bash
-# Static CIF
-mat-vis render structure.cif -o figure.png
+# Inspect and preflight without writing a file
+mat-vis inspect structure.cif --json
+mat-vis render structure.cif -o figure.png --backend cpu --check --json
+
+# Static CIF through the base CPU renderer
+mat-vis render structure.cif -o figure.png --backend cpu --json
 
 # VASP structure
 mat-vis render POSCAR -o figure.png --view unit_cell
@@ -21,16 +25,21 @@ mat-vis render run.dump --type-map O H -o trajectory.gif \
   --frame-range 0:100:2 --fps 12
 
 # Interactive HTML
-mat-vis render structure.extxyz -o interactive.html --orthogonal
+mat-vis render structure.extxyz -o interactive.html --backend plotly --orthogonal
 ~~~
 
 ## Subcommands
 
 | Command | Description |
 |---------|-------------|
+| inspect | Report bounded source and structure metadata as JSON |
+| capabilities | Resolve requested features to exact optional extras |
 | render | Render a structure, one trajectory frame, or a GIF/MP4 animation |
 | serve | Launch the interactive Dash browser viewer |
 | tui | Open a supported structure or trajectory frame in the terminal |
+
+`inspect`, `capabilities`, and `render --check` are the agent preflight surface.
+`--check` resolves requirements only and never creates the output.
 
 ---
 
@@ -54,8 +63,8 @@ Supported inputs:
 
 | Input | Reader |
 |-------|--------|
-| CIF | High-fidelity Gemmi and MolCrysKit path |
-| Cube | Cube parser with volumetric data preserved |
+| CIF | MolCrysKit renderer-ready public records |
+| Cube | Cube parser and volumetric isosurfaces (`[cube]`) |
 | POSCAR, CONTCAR, .vasp | ASE VASP reader |
 | XYZ, extxyz | ASE, including multi-frame files |
 | .traj | ASE trajectory reader |
@@ -71,12 +80,17 @@ on. MatterVis never guesses it from a model filename.
 
 | Extension | Format | Backend |
 |-----------|--------|---------|
-| .png | Raster image | Plotly + Kaleido; Matplotlib fallback |
-| .pdf | Vector PDF | Plotly + Kaleido; Matplotlib fallback |
-| .svg | Vector SVG | Plotly + Kaleido; Matplotlib fallback |
-| .html | Interactive 3D | Plotly.js |
-| .gif | Multi-frame animation | Shared renderer + Pillow |
-| .mp4 | H.264 animation | Shared renderer + imageio-ffmpeg |
+| .png | Raster image | CPU (base) or explicit Plotly + Kaleido |
+| .pdf | Vector PDF | CPU (base) or explicit Plotly + Kaleido |
+| .svg | Vector SVG | CPU (base) or explicit Plotly + Kaleido |
+| .html | Interactive 3D | Plotly (`[plotly]`) |
+| .gif | Multi-frame animation | CPU + `[animation]` |
+| .mp4 | H.264 animation | CPU + `[animation]` |
+
+Use `--backend cpu|plotly`; there is no backend or representation fallback.
+Base MatterVis provides complete CPU PNG/PDF/SVG, ORTEP, rings, polyhedra, and
+ordinary structure inputs. Run `mat-vis capabilities --require FEATURE --json`
+for an exact install command before using an optional frontend.
 
 ### Frames and animations
 
@@ -90,19 +104,18 @@ on. MatterVis never guesses it from a model filename.
 GIF/MP4 require at least two selected frames. All selected frames use one camera,
 canvas, and shared world-space viewport scale.
 
-Animations preserve one requested visual language across every frame. If a
-Plotly-backed animation style cannot be exported because Chrome/Kaleido is
-unavailable or fails, the command stops instead of silently substituting flat
-ORTEP frames. Browser-free animation remains available when explicitly requested
-with `--material flat --style ortep`.
+Animations preserve one requested representation, camera, and CPU backend
+across every frame. Plotly GIF/MP4 is rejected explicitly; MatterVis never
+substitutes one frame backend for another.
 
 ### Display options
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| --view MODE | auto | CIF defaults to formula_unit; other inputs to unit_cell |
+| --view MODE | auto | Defaults to unit_cell; use formula_unit explicitly for one chemical formula unit |
 | --style STYLE | ball_stick | ball_stick, ball, stick, ortep, or wireframe |
 | --material MAT | mesh | mesh or flat |
+| --backend BACKEND | cpu | cpu or plotly; never selected by fallback |
 | --orthogonal | yes | Orthographic projection |
 | --perspective | no | Perspective projection |
 
@@ -116,17 +129,13 @@ direction options are mutually exclusive.
 |------|---------|-------------|
 | `--camera-axis a|b|c|a*|b*|c*` | `c` | Align to a real or reciprocal lattice axis |
 | `--view-direction X Y Z` | — | Cartesian direction from scene toward camera |
-| `--camera-position X Y Z` | — | Explicit Plotly eye position relative to scene centre |
+| `--camera-position X Y Z` | — | Explicit absolute Cartesian camera position in Å |
 | `--camera-up X Y Z` | `+b` / `+Y` | Preferred screen-up direction |
-| `--camera-distance D` | `1.8` | Positive eye distance for axis/direction views |
+| `--camera-distance D` | `1.8` | Positive scene-fit multiplier for axis/direction views |
 
-`--camera-up` is orthogonalized against the view direction. Static Plotly
-PNG/PDF/SVG export is attempted first. If local Chrome/Kaleido export is
-unavailable, the CLI reports the error and falls back to the browser-free
-Matplotlib `material=flat, style=ortep` path; that fallback is ORTEP rather
-than an exact replacement for a requested mesh or ball-and-stick style. This
-style substitution is static-only and is never applied frame-by-frame to an
-animation.
+`--camera-up` is orthogonalized against the view direction. CPU is the default
+static backend and needs neither Chrome nor Kaleido. Explicit Plotly static
+export requires `[plotly-export]`; a failure is reported without substitution.
 
 ### Visibility toggles
 
@@ -134,9 +143,12 @@ animation.
 |------|---------|-------------|
 | `--show-hydrogen` / `--no-hydrogen` | off | Show/hide hydrogen atoms |
 | `--show-cell` / `--no-cell` | on | Show/hide unit cell edges |
-| `--show-axes` / `--no-axes` | on | Show/hide lattice axes |
 | `--show-labels` / `--no-labels` | off | Show/hide atom labels |
-| `--monochrome` | off | Render in greyscale |
+
+`--show-axes`, `--no-axes`, and `--monochrome` are legacy flags not implemented
+by the backend-neutral renderer and therefore fail explicitly. They are never
+accepted and ignored; the CPU renderer currently emits no lattice-axis
+primitive.
 
 ### Numeric parameters
 
@@ -144,7 +156,7 @@ animation.
 |------|---------|-------|-------------|
 | `--atom-scale` | 1.0 | 0.3–1.8 | Atom radius scale factor |
 | `--bond-radius` | 0.15 | 0.05–0.40 | Bond cylinder radius (Å) |
-| `--camera-distance` | 1.8 | > 0 | Camera eye distance |
+| `--camera-distance` | 1.8 | > 0 | Scene-fit multiplier (not Å) |
 | `--width` | 900 | — | Image width in pixels |
 | `--height` | 720 | — | Image height in pixels |
 | `--scale` | 2 | 1–4 | Supersampling factor (effective DPI = 72 × scale) |
@@ -155,53 +167,27 @@ animation.
 |------|---------|-------------|
 | `--background` | `#FFFFFF` | Background hex colour |
 | `--ortep-probability` | 0.5 | Ellipsoid probability (0.0–1.0) |
-| `--ortep-mode` | `ortep_axes` | ORTEP variant: `ortep_solid`, `ortep_axes`, `ortep_octant`, `ortep_hatch` |
+| `--ortep-mode` | `ortep_axes` | ORTEP decoration: `ortep_solid`, `ortep_axes`, or `ortep_hatch` |
+| `--aromatic-rings` | `bonds` | `bonds`, `circle`, or `disk` |
+| `--missing-adp-policy` | `error` | ORTEP missing-ADP policy: `error` or explicit `sphere` placeholder |
 
-### Advanced: full style override via JSON
+`--style ortep` selects the representation. `--material mesh|flat` selects
+smooth or flat surface shading independently. `--ortep-mode` independently
+adds no marks, principal axes, or hatch marks.
 
-```bash
-mat-vis render structure.cif -o fig.png --config style.json
-```
-
-The `--config` flag loads a JSON file containing any style keys from the
-full MatterVis style schema. CLI flags take precedence over config values.
-
-Example `style.json`:
-
-```json
-{
-  "disorder": "opacity",
-  "minor_opacity": 0.25,
-  "force_bond_color": "#1A1A1A",
-  "element_colors": {
-    "N": "#3366CC",
-    "Cl": "#33AA33"
-  },
-  "depth_cue_enabled": true
-}
-```
-
-This covers advanced parameters not exposed as CLI flags: disorder modes,
-element colour overrides, force bond colour, depth cue, axis key overlay
-settings, and ORTEP fine-tuning (silhouette, hatch linewidths, z-lifts).
-
-### Dense coordination publication layout
-
-`--publication-layout` requires at least one `--polyhedron` specification. For
-PNG/PDF/SVG it uses the deterministic Matplotlib compositor, so it does not
-require Kaleido and preserves the requested canvas dimensions. HTML continues
-to use the interactive Plotly compositor.
-
-The `dense_coordination` preset owns material, transparency, sphere lighting,
-front/back ligand layers, and normalized layout. It does not prescribe a
-camera. Keep any structure-specific camera choice outside the reusable
-material preset. See [the static publication contract](agents/static_publication.md)
-for the parameter table and acceptance checks.
+Legacy `--config`, `--view-weights`, `--publication-*`, `--title`, and
+`--subtitle` options are rejected by this agent-facing path instead of being
+silently ignored. Polyhedron overlays remain available through repeatable
+`--polyhedron` JSON objects plus `--polyhedron-site` and
+`--polyhedron-cutoff`; they use the base CPU topology path and require no Web
+module.
 
 
 ---
 
 ## `serve` — Browser viewer
+
+Requires `python -m pip install "matter-vis[web]"`; this extra includes Plotly.
 
 ```
 mat-vis serve [options]
@@ -217,6 +203,12 @@ mat-vis serve [options]
 | `--api-only` | — | Reserved for automation mode |
 
 ## tui — Terminal view
+
+Ordinary structure input requires `python -m pip install "matter-vis[tui]"`.
+Cube input requires the combined
+`python -m pip install "matter-vis[cube,tui]"`; resolve it with
+`mat-vis capabilities --require cube tui --json`. Use `mat-vis inspect --json`
+for normal bounded agent diagnosis without installing Textual.
 
 Open any supported structure or one trajectory frame without starting Dash:
 
@@ -250,7 +242,7 @@ selection, neighborhood focus, and geometric measurements.
 ```bash
 mat-vis render mol.cif -o fig.png \
   --view formula_unit \
-  --no-hydrogen --no-axes --show-cell \
+  --no-hydrogen --show-cell \
   --atom-scale 0.9 --bond-radius 0.14 \
   --background "#FFFFFF" \
   --width 1200 --height 900 --scale 3
@@ -260,8 +252,8 @@ mat-vis render mol.cif -o fig.png \
 
 ```bash
 mat-vis render crystal.cif -o cell.png \
-  --view unit_cell \
-  --no-hydrogen --show-cell --show-axes \
+  --backend cpu --view unit_cell \
+  --no-hydrogen --show-cell \
   --atom-scale 0.7 --bond-radius 0.12
 ```
 
@@ -269,9 +261,9 @@ mat-vis render crystal.cif -o cell.png \
 
 ```bash
 mat-vis render crystal.cif -o ortep.pdf \
-  --style ortep --ortep-mode ortep_hatch \
-  --monochrome --no-axes --show-labels \
-  --ortep-probability 0.5
+  --backend cpu --style ortep --material flat \
+  --ortep-mode ortep_hatch --show-labels \
+  --ortep-probability 0.5 --missing-adp-policy error
 ```
 
 ### Orthographic projection (no foreshortening)
@@ -285,20 +277,27 @@ mat-vis render crystal.cif -o ortho.png \
 
 ```bash
 mat-vis render crystal.cif -o si_figure.html \
-  --view unit_cell --show-hydrogen --show-labels
+  --backend plotly --view unit_cell --show-hydrogen --show-labels
 ```
 
 ---
 
 ## Troubleshooting
 
-### `kaleido` not installed
+### Optional capability is not installed
 
-PNG/PDF/SVG export requires the `kaleido` package:
+Ask the resolver instead of guessing packages:
 
 ```bash
-pip install kaleido
+mat-vis capabilities --require plotly-export --json
+mat-vis capabilities --require web-screenshot --json
+mat-vis capabilities --require static-web-export --json
+mat-vis render structure.cif -o figure.png --backend plotly --check --json
 ```
+
+Ordinary CPU PNG/PDF/SVG does not require Kaleido or Chrome.
+Both Web screenshot aliases intentionally resolve to `[web,plotly-export]`;
+the service frontend and its static-image encoder are separate capabilities.
 
 ### Large cell runs out of memory
 
@@ -308,13 +307,10 @@ For cells with >500 atoms, reduce supersampling:
 mat-vis render big.cif -o fig.png --scale 1
 ```
 
-Or use the `cluster` display mode to show only a molecular fragment.
+If the scientific request is a local fragment, select it by a public molecule
+or source identifier before rendering; `cluster` does not crop a periodic cell.
 
 ### Fonts not rendering correctly in PDF
 
-Ensure a Unicode-capable font is available on the system. On headless
-Linux servers:
-
-```bash
-apt-get install fonts-dejavu-core
-```
+Use a Unicode-capable font already available in the execution environment.
+MatterVis does not install operating-system packages automatically.

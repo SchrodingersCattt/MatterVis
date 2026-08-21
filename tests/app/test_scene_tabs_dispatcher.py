@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from crystal_viewer.app import ViewerBackend, create_app
+from mat_viewer.app import ViewerBackend, create_app
 
 
 _VALID_CIF = b"""data_minimal

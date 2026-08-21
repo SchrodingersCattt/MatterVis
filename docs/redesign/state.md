@@ -40,7 +40,7 @@ Derived state must not be persisted as independent truth.
 | `show_axes` | `"axes" in display_options` or axis-key style. |
 | `show_labels` | `"labels" in display_options` plus label mode. |
 | `monochrome` | Atom-group rule, not a display option. |
-| `fast_rendering` | Derived from explicit setting plus `material == "flat"` and atom-count threshold. |
+| `fast_rendering` | Derived from explicit setting plus the explicitly selected `material == "flat"`; never from atom count. |
 | `uirevision` | Function of scene name, `camera_revision`, and viewport signature. |
 | `fragment_options` | Derived from resolved scene fragment table. |
 | `topology_payload` | Derived from scene geometry, selected site, cutoff, and specs. |

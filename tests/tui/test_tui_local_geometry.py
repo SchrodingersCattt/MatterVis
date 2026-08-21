@@ -5,8 +5,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from crystal_viewer.tui.controller import TerminalViewController
-from crystal_viewer.tui.crystal_ir import AtomIR, BondIR, CrystalIR, Lattice
+from mat_viewer.tui.controller import TerminalViewController
+from mat_viewer.tui.crystal_ir import AtomIR, BondIR, CrystalIR, Lattice
 
 
 ROOT = Path(__file__).resolve().parents[2]

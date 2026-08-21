@@ -1,188 +1,101 @@
-# Cube / orbital rendering API
+# Cube and isosurface API
 
-Static cube isosurface figures (HOMO/LUMO, spin density, charge
-density…) are produced by helpers in `crystal_viewer.cube`. The library
-is **journal-agnostic** — project-specific styling (typography, dpi,
-column widths) lives in caller code, not here.
-
-## Panel construction at a glance
+Cube support is a volumetric-data adapter, not an independent chemistry
+renderer. MatterVis parses the grid, sends the embedded atoms and periodic
+cell through the canonical MolCrysKit structure contract, and then adds the
+positive and negative isosurface meshes to the backend-neutral scene.
 
 ```mermaid
 flowchart LR
-    CUBE["cube file (.cube)"] --> READ["read_cube"]
-    READ --> DATA["CubeData<br/>(grid + atoms + axes)"]
-    DATA --> TILE["tile_cube_data<br/>(optional PBC extend)"]
-    TILE --> CLEAN["orbital_mesh_traces<br/>filters:<br/>min_volume_voxels<br/>atom_mask_radius"]
-    DATA --> CLEAN
-    DATA --> ATOMS["atom_sphere_traces"]
-    DATA --> BONDS["bond_traces"]
-    DATA --> CELLT["cell_box_trace"]
-    CLEAN --> ORDER["trace order:<br/>cell, orbital, bonds, atoms"]
-    ATOMS --> ORDER
-    BONDS --> ORDER
-    CELLT --> ORDER
-    ORDER --> PANEL["build_orbital_panel_figure"]
-    PANEL --> EXPORT["export_static<br/>use_mesh=True (publication)"]
-    PANEL -. "interactive only" .-> ISO["go.Isosurface fallback"]
+    CUBE[".cube file"] --> IO["read_cube<br/>CubeData"]
+    IO --> MCK["MolCrysKit<br/>sites, PBC bonds, rings"]
+    IO --> MC["marching cubes<br/>isosurface meshes"]
+    MCK --> SCENE["canonical scene"]
+    MC --> SCENE
+    SCENE --> CPU["CPU PNG / PDF / SVG"]
+    SCENE --> PLOTLY["optional Plotly HTML"]
 ```
 
-Pick the lowest layer that lets you ship the figure: feed `read_cube`
-into your own composition when the wrapper does not fit, but keep the
-default trace order or half-transparent orbitals will render on top of
-opaque atoms.
+## Installation boundary
 
-## Opacity / ambient discipline
+- Parse ordinary structures and render PNG/PDF/SVG: base `matter-vis`.
+- Parse a Cube grid and extract isosurfaces: `matter-vis[cube]`.
+- Render a Cube scene to Plotly HTML: `matter-vis[cube,plotly]`.
+- Use Plotly/Kaleido static export: `matter-vis[cube,plotly-export]`.
 
-Plotly Mesh3d only z-orders correctly when `opacity == 1.0`. Below 1.0
-it falls back to alpha-blending, which compounds as `(1 − α)^N` through
-overlapping HOMO/LUMO lobes and washes out atoms behind them.
+Run `mat-vis capabilities --require cube --json` for the exact command in the
+current environment. Importing `mat_viewer`, `mat_viewer.cube`, or
+`mat_viewer.cube.core` does not import scikit-image or Plotly; those packages
+are loaded only when their adapters are called.
 
-```mermaid
-flowchart LR
-    A["atom_sphere_traces<br/>opacity = 1.0<br/>ambient ≥ 0.75"] --> S["Stable depth-buffer<br/>compositing"]
-    B["bond_traces<br/>opacity = 1.0<br/>ambient ≥ 0.75"] --> S
-    O["orbital_mesh_traces<br/>opacity ≥ 0.95"] --> S
-    S --> P["Print-legible panel"]
-    LOW["opacity < 0.95"] -. avoid for static export .-> GHOST["(1−α)^N ghosting<br/>pale atoms inside lobes"]
+## Agent-first entry points
+
+Use the same public API as other structure formats:
+
+```python
+from mat_viewer.agent import load_structure, prepare_render, render
+
+source = load_structure("density.cube")
+plan = prepare_render(source)
+result = render(plan, output="density.svg", backend="cpu")
 ```
 
-## Public surface
+The equivalent CLI is:
 
-- I/O
-  - `read_cube(path) -> CubeData`
-  - `tile_cube(cube, neg, pos)` — extend volumetric data over PBC.
-  - `tile_cube_data(cube, neg, pos) -> CubeData` — convenience wrapper
-    that preserves atoms/axes and returns a full tiled cube object.
-- Primitives (compose your own figure)
-  - `orbital_mesh_traces(cube, *, isovalue, ...)` — marching-cubes
-    Mesh3d isosurfaces, with built-in noise filtering.
-  - `atom_sphere_traces(cube, *, radius_scale=0.5, ...)` — opaque
-    Mesh3d spheres.
-  - `bond_traces(cube, *, tolerance=1.15, radius=0.09, ...)` — opaque
-    Mesh3d cylinders, MIC-aware.
-  - `cell_box_trace(lattice, *, origin)` — wireframe parallelepiped.
-- Wrappers (one-shot panel figures)
-  - `build_cube_figure(path, *, camera=..., periodic=..., periodic_image_policy=..., ...)` — unified cube renderer;
-    pass the final camera here so the cell and paper-coordinate compass
-    are projected from the same view. Set `periodic=True` for periodic
-    densities and other cell-periodic scalar fields. Pass `bond_scale=` to use
-    one MolCrysKit coefficient for molecule grouping and visible bonds. Use
-    `style={"show_element_legend": True}` for a compact element key and
-    `show_labels=True, style={"label_selector": ...}` for selective labels.
-  - `build_orbital_panel_figure(cubes, *, ...)` — N-up panel figure
-    with shared camera and ranges.
-  - `sign_legend_annotations(...)` — paper-coord +/− swatches.
-  - `default_isovalue(values, percentile)` — pick a sensible isovalue
-    from the cube grid.
-- Static export
-  - `export_static(fig, path, *, use_mesh=True, scale=2.0, ...)`
+```console
+mat-vis render density.cube -o density.svg --backend cpu --check --json
+mat-vis render density.cube -o density.svg --backend cpu --json
+```
 
-## Hard contracts the library guarantees
+`--check` resolves `[cube]` without loading the file or creating output.
 
-These are stable across versions; rely on them.
+For the optional Plotly frontend, `build_cube_figure(path, ...)` is the public
+bridge. It still obtains atoms, bonds, image shifts, and display fragments from
+the canonical loader before adding the isosurface overlay.
 
-- **Trace insertion order.** `build_orbital_panel_figure` defaults to
-  `DEFAULT_TRACE_ORDER = ("cell", "orbital", "bonds", "atoms")` so
-  half-transparent isosurfaces are always composited UNDER opaque
-  atoms and bonds. This keeps the molecular skeleton legible
-  regardless of orbital density and ensures panels with sparse vs
-  dense orbitals look visually consistent. Override only when
-  deliberately wanting the inverse stacking; pass `trace_order=(...)`
-  with any subset of `{"cell", "orbital", "bonds", "atoms"}`.
-- **Tiled-cube cleanliness.** When `tile_cube` has been used to
-  extend the volumetric data over PBC images, callers MUST pass both
-  `min_volume_voxels > 0` (drops tiny disconnected lobes from
-  connected-component analysis) and `atom_mask_radius > 0` together
-  with `extra_atom_positions` (zeroes voxels farther than R from any
-  atom) to `orbital_mesh_traces` / `build_orbital_panel_figure`.
-  Without either, marching-cubes will emit floating phantom lobes
-  from PBC-image background noise.
-- **Static export.** Use `export_static` (Kaleido) with
-  `use_mesh=True` (marching-cubes Mesh3d). `go.Isosurface` is an
-  interactive-only fallback because Kaleido currently rasterises it
-  inconsistently across versions.
-- **Camera/compass alignment.** Supply the final Plotly camera through
-  `build_cube_figure(..., camera=camera)` or the `style` mapping. Do not
-  replace `fig.layout.scene.camera` after construction: static compass
-  annotations are projected and baked at build time, so post-hoc camera
-  mutation would leave the compass stale relative to the unit-cell box.
-- **Periodic scalar grids are closed, not tiled.** A periodic cube stores
-  samples at indices `0..N-1`; marching cubes also needs the closing interval
-  back to index zero. `build_cube_figure(..., periodic=True)` appends one
-  wrapped endpoint plane per axis (`N -> N+1`) before extracting the mesh.
-  The physical lattice, atoms, and unit-cell box remain a single base cell;
-  this does not create a `2x2x2` or `3x3x3` volumetric supercell. Generic scene
-  rendering remains nonperiodic by default for backward compatibility.
-- **Choose periodicity from the scalar field, not the display mode.** Charge
-  densities and response densities in a periodic crystal normally use
-  `periodic=True`. Isolated molecular cubes, slab/vacuum data, and signed Bloch
-  orbitals whose phase is not cell-periodic should use `periodic=False`.
-- **Periodic component image policy is explicit.** `periodic_image_policy="cell"`
-  keeps one canonical complete component near the base cell.
-  `periodic_image_policy="nearest_atom"` selects the lattice image nearest a
-  displayed atom, matching unit-cell scenes that show complete molecular
-  fragments across a boundary. Neither policy duplicates the full scalar cell.
-- **Style precedence.** `style={"isosurface_periodic": ...}` overrides the
-  convenience `periodic=` keyword, following the same caller-override rule as
-  the other cube style fields.
-- **Unified bond thresholds are MolCrysKit-owned.**
-  `build_cube_figure(..., bond_scale=s)` forwards one positive finite
-  coefficient into MolCrysKit molecule identification and manifested-scene
-  bond drawing. The effective cutoff is MolCrysKit's
-  `(radius_i + radius_j) * element_class_factor * s`; explicit
-  `bond_thresholds={("A", "B"): value}` are also multiplied by `s`.
-  Threshold values must be finite and strictly positive; pair keys are
-  symmetric, so `("A", "B")` and `("B", "A")` are equivalent. Effective
-  cutoffs are limited to 12 Å to protect the broad-phase candidate search;
-  larger values fail explicitly rather than silently missing candidates.
-  Formula-unit and unit-cell cube scenes reuse MolCrysKit's canonical
-  source-index bond graph; transformed/cluster scenes must re-detect bonds
-  because their manifested atoms no longer have a one-to-one source graph.
-  `style["mck_bond_scale"]` overrides the convenience kwarg, then config
-  `mck_overrides.bond_scale` is consulted. The cube wrapper default is `1.0`.
-- **Atom identity controls.** `show_element_legend=True` emits a paper-coordinate
-  key for elements present in the scene. `label_selector` accepts
-  `{"elements": ["Sn", "N"]}` and/or `{"labels": ["Cl3"]}` and filters text
-  when `show_labels=True` without hiding atoms.
-- **Atom + bond geometry are bright + opaque by default.**
-  `atom_sphere_traces` and `bond_traces` emit `Mesh3d` primitives at
-  `opacity=1.0` with `ambient ≥ 0.75` so phenyl-heavy or
-  dark-element-heavy structures remain legible in print. Element
-  colors come from `ELEMENT_COLORS`; override per-call via positional
-  or keyword arguments rather than mutating the module dict.
-- **Orbital opacity defaults to opaque for a reason.** Prefer
-  `opacity=1.0` (or ≥ 0.95) for static publication exports. Plotly
-  Mesh3d resolves overlap with the depth buffer when
-  `opacity == 1.0`, but uses alpha-blending below that — and HOMO/
-  LUMO isosurfaces routinely intersect themselves and contain atoms
-  inside, so alpha stacks as `(1-α)^N` and washes out atoms behind/
-  inside the lobes (visible as ghostly pale spheres). Use
-  `opacity < 1.0` only for interactive exploration where seeing
-  through the lobe is required.
-- **Sign legend uses unicode.** `sign_legend_annotations` emits
-  paper-coord swatches using unicode `\u25A0` / `\u2212`. HTML
-  entities (`&#9632;`, `&minus;`) corrupt SVG export and must not be
-  reintroduced.
+## Stable data surface
 
-## Common pitfalls and what to do instead
+- `CubeAtom` and `CubeData` hold embedded atoms, origin, axes, and scalar data.
+- `read_cube(path) -> CubeData` performs pure Cube IO.
+- `tile_cube` and `tile_cube_data` explicitly replicate a scalar grid.
+- `default_isovalue(values, percentile)` chooses a threshold strictly inside
+  the positive/negative value range or fails when no surface can exist.
+- `cube_isosurface_meshes(cube, ...)` in `mat_viewer.cube.cpu` lazily uses
+  scikit-image and returns backend-neutral vertices, triangles, normals,
+  colour, and opacity.
+- `ensure_cube_isosurfaces(structure)` attaches those meshes to the canonical
+  scene consumed by CPU or Plotly renderers.
 
-- *"My LUCO panel has pale, ghostly atoms but my HOCO panel doesn't."*
-  Lower `opacity` on `orbital_mesh_traces` was raised somewhere; reset
-  to 1.0 (or 0.95 with a deliberate trade-off accepted).
-- *"My orbital figure has lobes floating in vacuum."* You forgot
-  `min_volume_voxels` AND/OR `atom_mask_radius` after
-  `tile_cube`. Pass both.
-- *"My PDF export of a 3D scene looks rasterised."* That is a
-  Plotly + Kaleido limitation: 3D scenes are always rasterised on
-  PDF export. Either accept it (export at scale ≥ 2) or switch to a
-  vector-native pipeline (matplotlib 2D projection).
+Standalone `bond_traces`, `build_orbital_figure`, and
+`build_orbital_panel_figure` are intentionally not exported. They inferred
+chemistry from direct Euclidean distances, which loses periodic boundary bonds
+and creates a second structure truth. Compose multiple completed views in an
+external layout tool instead of using an independent panel chemistry path.
 
-## Worked example
+## Contracts and failure behaviour
 
-See `scripts/06_cp2k_cube_orbital.py` for an end-to-end recipe
-covering CP2K cube I/O, MolCrysKit-based PBC unwrapping, tiling +
-mesh filtering, opaque orbital panels, and paper-coord compass. The CLI
-accepts `--no-mesh`, `--show-bonds/--no-bonds`,
-`--show-cell-box/--no-cell`, `--opacity`, phase colours, and the same
-`--atom-mask-radius` / `--min-volume-voxels` cleanup knobs exposed by
-the Python API.
+- MolCrysKit owns bond thresholds, PBC image shifts, molecule grouping, rings,
+  and formula-unit selection. Cube code never re-detects those relationships.
+- `periodic=True` closes the scalar grid by appending wrapped endpoint planes;
+  it does not create a structural supercell.
+- `periodic_image_policy="cell"` keeps a canonical base-cell component;
+  `"nearest_atom"` selects the image nearest a displayed canonical atom.
+- A missing `[cube]` extra raises an installation error. The renderer never
+  drops isosurfaces or disables component filtering silently.
+- CPU vector output remains true vector geometry. Plotly 3D PDF/SVG export is
+  rasterized by Plotly/Kaleido and is therefore a distinct explicit backend.
+- Supply the final Plotly camera to `build_cube_figure`; changing it after the
+  figure is built can desynchronize baked compass annotations.
+
+## Common checks
+
+```console
+mat-vis inspect density.cube --json
+mat-vis capabilities --require cube --json
+mat-vis render density.cube -o density.png --backend cpu --check --json
+```
+
+If marching cubes reports that the level does not cross the data, choose an
+explicit isovalue inside the scalar range. If isolated noise components remain,
+use the component-size and atom-mask controls deliberately; absence of their
+optional implementation is an error rather than a visual fallback.

@@ -6,7 +6,7 @@ Run from the repository root:
 
 The script:
 
-1. Starts ``crystal_viewer.create_app`` with the bundled DAP-4 CIF preloaded.
+1. Starts ``mat_viewer.create_app`` with the bundled DAP-4 CIF preloaded.
 2. Hits ``GET  /api/v2/state``           - the live viewer state.
 3. Hits ``POST /api/v2/topology``        - coordination analysis for fragment 0.
 4. Hits ``POST /api/v2/camera/action``   - rotates the camera.
@@ -31,8 +31,8 @@ from urllib import request as urlrequest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from crystal_viewer.app import create_app  # noqa: E402
-from crystal_viewer.loader import build_loaded_crystal  # noqa: E402
+from mat_viewer.app import create_app  # noqa: E402
+from mat_viewer.loader import build_loaded_crystal  # noqa: E402
 
 
 HERE = Path(__file__).resolve().parent

@@ -17,8 +17,8 @@ from pathlib import Path
 
 import pytest
 
-from crystal_viewer.api import handle_ws_message
-from crystal_viewer.app import WORKSPACE_DIR, ViewerBackend
+from mat_viewer.api import handle_ws_message
+from mat_viewer.app import WORKSPACE_DIR, ViewerBackend
 
 
 @pytest.fixture

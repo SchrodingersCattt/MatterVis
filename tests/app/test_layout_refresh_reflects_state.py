@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from crystal_viewer.app import create_app
+from mat_viewer.app import create_app
 from _layout_helpers import find_component
 
 

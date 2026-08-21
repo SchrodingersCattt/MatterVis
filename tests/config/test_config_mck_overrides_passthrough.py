@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from crystal_viewer.config import reload_config
-from crystal_viewer.topology.analysis import _mck_override_kwargs
+from mat_viewer.config import reload_config
+from mat_viewer.topology.analysis import _mck_override_kwargs
 
 
 def test_mck_overrides_are_omitted_when_unset():

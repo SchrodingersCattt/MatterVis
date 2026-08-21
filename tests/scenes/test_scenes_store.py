@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from crystal_viewer.scenes import SceneStore
+from mat_viewer.scenes import SceneStore
 
 
 def test_scene_store_crud_round_trip(tmp_path):

@@ -1,7 +1,7 @@
 # Calling MatterVis
 
 This folder is for agents and humans **calling** MatterVis — either via
-its HTTP/WebSocket service or by importing `crystal_viewer` from Python.
+its HTTP/WebSocket service or by importing `mat_viewer` from Python.
 If you are **modifying** the codebase itself, read [`../../AGENTS.md`](../../AGENTS.md)
 instead.
 
@@ -63,7 +63,7 @@ top-level ownership boundaries clear:
 
 | Directory | Owns |
 |---|---|
-| `crystal_viewer/` | Python library code (`structure`, `ops`, `analysis`, `render`, `scene`, `math`, `utils`) |
+| `mat_viewer/` | Python library code (`structure`, `ops`, `analysis`, `render`, `scene`, `math`, `utils`) |
 | `api/` | REST/WebSocket route modules for scripts and agents |
 | `app/` | Dash Python BFF: layouts, callbacks, and `ViewerBackend` |
 | `frontend/` | Browser-only JavaScript and CSS loaded by Dash |
@@ -78,14 +78,13 @@ are "is composed from", not "must call".
 ```mermaid
 flowchart TD
     subgraph WRAP["Convenience wrappers (one-shot figures)"]
-        W1["build_orbital_panel_figure"]
+        W1["build_cube_figure"]
         W2["lattice_compass_annotations"]
         W4["build_ortep_panel_figure"]
     end
     subgraph BLOCK["Composable trace / annotation builders"]
         B1["orbital_mesh_traces"]
-        B2["atom_sphere_traces"]
-        B3["bond_traces"]
+        B2["canonical structure scene"]
         B4["paper_arrow_annotations"]
         B5["ortep_atom_mesh_traces"]
     end
@@ -98,10 +97,9 @@ flowchart TD
 
     W1 --> B1
     W1 --> B2
-    W1 --> B3
     W2 --> B4
     W4 --> B5
-    B1 --> M1
+    W1 --> M1
     B4 --> M2
     B4 --> M3
     B5 --> M4
@@ -122,7 +120,7 @@ These hold for every consumer, regardless of which API surface you use.
 - **Journal-agnostic library.** Typography, dpi, column widths, and
   palette choices for a specific journal are the **caller's**
   responsibility. Keep them in your own `*_style.py` next to your
-  scripts. Do not patch `crystal_viewer` to embed journal-specific
+  scripts. Do not patch `mat_viewer` to embed journal-specific
   defaults; this library is shared across projects.
 - **Override styling at the call site.** Every wrapper that hard-codes
   a colour, font, anchor, or pixel offset also accepts those as keyword
@@ -130,8 +128,8 @@ These hold for every consumer, regardless of which API surface you use.
   rather than mutating module dicts (`ELEMENT_COLORS` etc.). Mutating
   module-level state breaks concurrent jobs.
 - **Drop down a layer when the wrapper is too narrow.** The high-level
-  helpers (`build_orbital_panel_figure`,
-  `lattice_compass_annotations`, …) are convenience wrappers around
+  helpers (`build_cube_figure`, `lattice_compass_annotations`, …) are
+  convenience wrappers around
   exposed primitives (`orbital_mesh_traces`, `project_to_screen`, …).
   If the wrapper does not fit your case, compose the primitives
   directly instead of monkey-patching the wrapper.

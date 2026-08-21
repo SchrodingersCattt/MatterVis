@@ -1,7 +1,7 @@
 import numpy as np
 
-from crystal_viewer.structure.bonds import find_bonds
-from crystal_viewer.structure.cif_parse import parse_asu
+from mat_viewer.structure.bonds import find_bonds
+from mat_viewer.structure.cif_parse import parse_asu
 
 
 def _atom(label, elem, cart, partners):

@@ -13,7 +13,7 @@ import json
 
 import pytest
 
-from crystal_viewer.renderer import _round_coord_arrays, _merged_hull_edges
+from mat_viewer.renderer import _round_coord_arrays, _merged_hull_edges
 
 
 def test_round_coord_arrays_quantises_floats():

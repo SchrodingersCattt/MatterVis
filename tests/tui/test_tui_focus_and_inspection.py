@@ -3,8 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from crystal_viewer.tui.controller import TerminalViewController
-from crystal_viewer.tui.crystal_ir import AtomIR, CrystalIR
+from mat_viewer.tui.controller import TerminalViewController
+from mat_viewer.tui.crystal_ir import AtomIR, CrystalIR
 
 
 def _crystal() -> CrystalIR:

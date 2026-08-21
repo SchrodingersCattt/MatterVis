@@ -5,10 +5,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from crystal_viewer.cube import CubeData
-from crystal_viewer.render.figures import _element_legend_annotations
-from crystal_viewer.render.traces_overlays import _label_traces
-from crystal_viewer.structure.bonds import find_bonds
+from mat_viewer.cube import CubeData
+from mat_viewer.render.figures import _element_legend_annotations
+from mat_viewer.render.traces_overlays import _label_traces
+from mat_viewer.structure.bonds import find_bonds
 
 
 def _atom(label: str, element: str, x) -> dict:
@@ -82,9 +82,9 @@ def test_bond_scale_must_be_positive():
 
 
 def test_cube_wrapper_style_bond_scale_precedence(tmp_path, monkeypatch):
-    from crystal_viewer.cube import build_cube_figure
-    from crystal_viewer.loader import cube_adapter
-    from crystal_viewer.render import figures
+    from mat_viewer.cube import build_cube_figure
+    from mat_viewer.loader import cube_adapter
+    from mat_viewer.render import figures
 
     cube_path = tmp_path / "minimal.cube"
     cube_path.write_text(
@@ -113,7 +113,7 @@ def test_cube_wrapper_style_bond_scale_precedence(tmp_path, monkeypatch):
 
     monkeypatch.setattr(cube_adapter, "load_cube_file", fake_load)
     monkeypatch.setattr(
-        "crystal_viewer.loader.core.build_bundle_scene",
+        "mat_viewer.loader.core.build_bundle_scene",
         lambda *_args, **_kwargs: {"cube_data": cube},
     )
     monkeypatch.setattr(figures, "build_figure", lambda _scene, style: style)
@@ -124,8 +124,8 @@ def test_cube_wrapper_style_bond_scale_precedence(tmp_path, monkeypatch):
 
 
 def test_scene_cache_key_separates_bond_scale_and_thresholds(tmp_path):
-    from crystal_viewer.loader.cube_adapter import load_cube_file
-    from crystal_viewer.loader.core import build_bundle_scene
+    from mat_viewer.loader.cube_adapter import load_cube_file
+    from mat_viewer.loader.core import build_bundle_scene
 
     cube_path = tmp_path / "cache.cube"
     cube_path.write_text(
@@ -181,5 +181,5 @@ def test_label_selector_label_only_empty_and_warm_cache():
     assert len(_label_traces(scene, {"label_selector": {}})) == 1
     assert _label_traces(scene, {"label_selector": {"elements": ["Cl"]}}) == []
     with pytest.raises((TypeError, ValueError)):
-        from crystal_viewer.render.style.core import validate_style_schema
+        from mat_viewer.render.style.core import validate_style_schema
         validate_style_schema({"label_selector": "Sn"})

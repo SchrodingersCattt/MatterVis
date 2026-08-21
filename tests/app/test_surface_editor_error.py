@@ -44,8 +44,8 @@ from unittest.mock import patch
 
 import pytest
 
-from crystal_viewer import perf_log
-from crystal_viewer.app import callbacks_editors
+from mat_viewer import perf_log
+from mat_viewer.app import callbacks_editors
 
 
 @pytest.fixture(autouse=True)

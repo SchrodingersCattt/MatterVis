@@ -3,6 +3,13 @@
 Read this for journal figures, N-up panels, compact subfigures, whitespace,
 cropping, compass placement, or comparable structural scale.
 
+This document contains composition guidance, not a supported MatterVis agent
+entry point. The backend-neutral `mat-vis render` command currently produces
+one view per output and explicitly rejects legacy `--publication-*` options.
+Render each source through the CPU PNG/PDF/SVG path, verify every artifact, and
+compose panels in a separate explicitly authorized document/graphics step. Do
+not call private MatterVis compositors from an agent.
+
 For any image containing more than one molecular/crystal structure, also read
 [multi-structure panels](./multi-structure-panels.md). It defines the required
 scale declaration, the five distinct bounding layers, and objective occupancy
@@ -18,26 +25,23 @@ downstream composition supports it.
 
 ## Dense coordination polyhedra
 
-For a packed unit cell plus isolated coordination panels, use
-`--publication-layout`, `--view unit_cell`, explicit polyhedron specifications,
-`--publication-preset dense_coordination`, and `--publication-style blender`.
-The preset controls composition; `blender` supplies the verified material,
-lighting, line, and sphere defaults. Pass deviations with repeated
-`--publication-option PATH=VALUE` arguments, which are applied last; do not
-require a project-specific style file.
+Render a packed unit cell and each isolated coordination environment as
+separate verified CPU SVG/PDF outputs. Use repeatable `--polyhedron` JSON on
+the individual renders; see [polyhedra](./polyhedra.md). Keep the camera,
+projection, physical scale, colours, and opacity explicit and identical where
+the panels are scientifically comparable. Base MatterVis is sufficient for
+this rendering step; panel composition is not a MatterVis optional extra.
 
-Generate the final static file through `mat-vis render`. Direct Python entry
-points and builder calls are for tests and debugging; do not deliver their
-output as the CLI artifact.
-
-Neither the layout preset nor the visual style contains a camera; select the
-view separately for the structure. The `blender` name identifies this
-MatterVis profile and does not imply a Blender rendering backend.
+```bash
+mat-vis render INPUT.cif -o PANEL.svg --backend cpu --view unit_cell \
+  --camera-axis c --orthogonal \
+  --polyhedron '{"id":"shell","center":"Pb","ligand":"I","level":"atom"}' \
+  --json
+```
 
 The verified material signature is flat translucent green/purple/blue
 polyhedra (CN 8/6/4), faint hull edges, and glossy coral ligand spheres. Keep
-native Matplotlib face shading off and use the controlled camera-aware
-polyhedron material instead (ambient 0.45, diffuse 0.55, alpha preserved).
+flat face shading and use the controlled camera-aware polyhedron material.
 Sphere lighting uses ambient 0.72 and diffuse 0.28; ligands use `#FF6363`.
 For a packed main cell, use family-specific roles rather than uniform
 transparency: CN8 alpha/light-strength 0.34/0.18, CN6 0.72/0.55, and CN4
@@ -50,8 +54,8 @@ Select main polyhedra by centre in the half-open fractional cell
 `0 <= f < 1`. Render mixed occupancies as weighted sphere sectors. In isolated
 panels, draw rear ligands before the translucent polyhedron and front ligands
 after it. Verify canonical counts, complete front/back partitioning, and exact
-saved dimensions. The complete parameter table is in
-`docs/agents/static_publication.md` in the MatterVis repository.
+saved dimensions. Record material deviations with the delivered figure rather
+than relying on a private preset or config file.
 
 
 ## Comparable panels
@@ -60,11 +64,12 @@ Share camera direction and screen-up, orthographic projection, display mode,
 world viewport or physical scale, palette, atom/bond ratio, highlight convention,
 background, aspect ratio, and intended physical size.
 
-Use `uniform_viewport(scenes, padding=...)` when N-up scenes need shared
-length-per-pixel. For `material="flat"`, retain the fixed
-`flat_visual_pixel_scale` (default `30.0`) and change framing or canvas size
-rather than atom and bond sizes independently. Do not mix mesh depth shading and
-flat billboards unless that contrast is scientifically intentional and disclosed.
+Reuse the same explicit camera and physical scale when N-up scenes need shared
+length-per-pixel. The current CLI has no multi-scene viewport resolver; record
+the shared contract in the external composition step. Change framing or canvas
+size rather than atom and bond sizes independently. Do not mix smooth and flat
+surface shading unless that contrast is scientifically intentional and
+disclosed.
 
 ## Separate empty-space sources
 

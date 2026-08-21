@@ -34,11 +34,11 @@ Let the anisotropic displacement tensor be
 U=U^\top\succeq0.
 \]
 
-If no tensor is available, MatterVis uses an isotropic fallback
-
-\[
-U = U_\mathrm{iso} I.
-\]
+MolCrysKit may supply anisotropic \(U_\mathrm{cart}\) or a measured isotropic
+\(U_\mathrm{iso}\). If neither is available, the agent-facing renderer raises
+by default. The explicit `missing_adp_policy="sphere"` option draws a
+non-quantitative sphere and records that policy; it does not invent an
+isotropic displacement value.
 
 The displacement distribution is a centered Gaussian with covariance \(U\).
 The probability ellipsoid containing probability \(p\) is
@@ -232,51 +232,51 @@ This preserves eigenvectors and ellipsoid shape while reducing all radii by
 
 Constants and probability scaling:
 
-- `crystal_viewer/ortep/core.py:12-15` defines the 50% chi-square constants and
+- `mat_viewer/ortep/core.py:12-15` defines the 50% chi-square constants and
   default Uiso values.
-- `crystal_viewer/ortep/core.py:40-52` implements `_probability_scale`: exact 2D
+- `mat_viewer/ortep/core.py:40-52` implements `_probability_scale`: exact 2D
   formula, exact 3D default for 50%, and Wilson-Hilferty approximation for
   other 3D probabilities.
-- `crystal_viewer/ortep/core.py:55-72` implements the normal quantile approximation
+- `mat_viewer/ortep/core.py:55-72` implements the normal quantile approximation
   used by Wilson-Hilferty.
 
 Tensor validation and axes:
 
-- `crystal_viewer/ortep/core.py:75-87` validates or builds the \(U\) matrix:
+- `mat_viewer/ortep/core.py:75-87` validates or builds the \(U\) matrix:
   3x3 shape, symmetry, positive semidefinite eigenvalues, and symmetrization.
-- `crystal_viewer/ortep/core.py:90-97` diagonalizes \(U\), sorts eigenvalues
+- `mat_viewer/ortep/core.py:90-97` diagonalizes \(U\), sorts eigenvalues
   descending, clips tiny negative values, and computes semi-axis lengths.
 
 3D mesh:
 
-- `crystal_viewer/ortep/core.py:100-133` generates vertices from spherical
+- `mat_viewer/ortep/core.py:100-133` generates vertices from spherical
   lat/lon samples and returns triangle indices.
 
 2D billboard:
 
-- `crystal_viewer/ortep/core.py:136-155` forms
+- `mat_viewer/ortep/core.py:136-155` forms
   `P = np.array([view_x, view_y])`, computes `U2 = P @ mat @ P.T`,
   diagonalizes it, scales by the 2D probability radius, maps 2D eigenvectors
   back through `view_x` / `view_y`, and emits a polygon.
 
 Principal axes and octants:
 
-- `crystal_viewer/ortep/core.py:158-161` emits the three principal-axis segments.
-- `crystal_viewer/ortep/core.py:164-175` evaluates eight sign triples and marks
+- `mat_viewer/ortep/core.py:158-161` emits the three principal-axis segments.
+- `mat_viewer/ortep/core.py:164-175` evaluates eight sign triples and marks
   an octant lit if its direction dots positively with the view direction.
 
-Visual clamp:
+Missing-data policy:
 
-- `crystal_viewer/ortep/core.py:26-37` defines per-element and default visual Uiso
-  caps.
-- `crystal_viewer/ortep/core.py:192-213` clamps isotropic Uiso directly and scales
-  anisotropic \(U\) by `cap / max_eig`.
-- `crystal_viewer/ortep/core.py:216-220` chooses fallback Uiso values and applies
-  the clamp for each atom.
+- MolCrysKit keeps absent Uiso/Ucart values absent rather than substituting a
+  default tensor.
+- `RenderSpec.missing_adp_policy="error"` is the default and stops an ORTEP
+  render when required ADP data is missing.
+- `RenderSpec.missing_adp_policy="sphere"` is an explicit visual placeholder;
+  it is not a measured or fabricated Uiso and must be reported in provenance.
 
 Renderer integration:
 
-- `crystal_viewer/ortep/core.py:293-347` starts ORTEP mesh batching by color and
+- `mat_viewer/ortep/core.py:293-347` starts ORTEP mesh batching by color and
   opacity, using `ortep_probability` from style.
 - The API contract for caller-facing ORTEP behavior is summarized separately in
   `docs/agents/ortep_api.md`.

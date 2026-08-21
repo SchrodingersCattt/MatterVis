@@ -327,11 +327,12 @@ Notes for callers:
   and `timeout`. Use the state `version` returned by mutating calls as
   `at_version=N` to block until the screenshot sees that state (or
   returns 504 after `timeout` seconds). `fast=true` uses the flat
-  renderer path for low-latency thumbnails. By default,
-  Plotly/Kaleido export failures are returned as a small fallback PNG
-  for backwards compatibility. Callers that prefer structured failures
-  should send `Accept: application/json`; export failures then return
-  HTTP 503 with `{"error": "...", "type": "...", "hint": "..."}`.
+  renderer path for low-latency thumbnails. This endpoint requires both the
+  Web service and Plotly static export; preflight with
+  `mat-vis capabilities --require web-screenshot --json`. Plotly/Kaleido
+  failures return HTTP 503 with
+  `{"error": "...", "type": "...", "hint": "..."}`. No placeholder PNG or
+  alternate renderer is substituted.
 - `POST /preset/save`
   Optional JSON body: `{"path": "custom_preset.json"}`. Presets saved
   through v2 use schema `version: 2` and include a `scenes` array plus
@@ -347,7 +348,7 @@ Notes for callers:
   per-structure style path. The same `.local/` jail and
   `allow_external=true` escape hatch apply.
 - `POST /export`
-  Triggers the vendored `crystal_viewer.static_publication.plot_crystal` exporter
+  Triggers the vendored `mat_viewer.static_publication.plot_crystal` exporter
   with the current preset.
 - `GET /perf?since=N&limit=M`
   Tail of the in-process perf-event ring buffer. Returns

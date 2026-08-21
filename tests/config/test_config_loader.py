@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from crystal_viewer.config import current_config, reload_config
-from crystal_viewer.config.loader import load_config
+from mat_viewer.config import current_config, reload_config
+from mat_viewer.config.loader import load_config
 
 
 def test_builtin_config_is_read_only_and_exposes_defaults():

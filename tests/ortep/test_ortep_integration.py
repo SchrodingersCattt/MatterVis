@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from crystal_viewer.loader import build_empty_bundle
-from crystal_viewer.renderer import build_figure
+from mat_viewer.loader import build_empty_bundle
+from mat_viewer.renderer import build_figure
 
 
 def test_ortep_build_figure_round_trips_to_dict():

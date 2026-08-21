@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from crystal_viewer.app import create_app
-from crystal_viewer.app.dash_impl import _camera_figure_patch
-from crystal_viewer.loader import build_loaded_crystal
-from crystal_viewer.presets import DEFAULT_STYLE
+from mat_viewer.app import create_app
+from mat_viewer.app.dash_impl import _camera_figure_patch
+from mat_viewer.loader import build_loaded_crystal
+from mat_viewer.presets import DEFAULT_STYLE
 
 
 SY_CIF = Path("scripts/data/SY.cif")

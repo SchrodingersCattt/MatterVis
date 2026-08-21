@@ -82,37 +82,36 @@ axis at aspect component 1.
 
 The row-vector convention is established at the CIF boundary:
 
-- `crystal_viewer/scene/core.py` receives `legacy_M` from
-  `crystal_viewer/structure/cif_parse.py` and immediately stores `M = legacy_M.T`.
-- `crystal_viewer/structure/molcrys_bridge.py:62-68` documents that the rows of `M` are
+- `mat_viewer/scene/core.py` receives `legacy_M` from
+  `mat_viewer/structure/cif_parse.py` and immediately stores `M = legacy_M.T`.
+- `mat_viewer/structure/molcrys_bridge.py:62-68` documents that the rows of `M` are
   the `a`, `b`, `c` vectors before creating the ASE `Atoms` object.
-- `crystal_viewer/loader/core.py:625-637` passes `bundle.M` unchanged into
+- `mat_viewer/loader/core.py:625-637` passes `bundle.M` unchanged into
   `build_scene_from_atoms`, so scene construction receives row-vector `M`.
 
 The normal fractional-to-Cartesian conversion is delegated to MolCrysKit:
 
-- `crystal_viewer/transforms/core.py:202-205` computes an image translation by
+- `mat_viewer/transforms/core.py:202-205` computes an image translation by
   converting an integer fractional shift with `frac_to_cart(shift_frac, M)`.
-- `crystal_viewer/transforms/core.py:315-317` adds the same integer image shift in
+- `mat_viewer/transforms/core.py:315-317` adds the same integer image shift in
   fractional space when materializing periodic copies.
-- `crystal_viewer/structure/molcrys_bridge.py:327-340` translates a selected formula-unit
+- `mat_viewer/structure/molcrys_bridge.py:327-340` translates a selected formula-unit
   molecule by `shift_cart = frac_to_cart(shift_frac, M)` and recomputes
   `atom["frac"] = cart_to_frac(atom["cart"], M)`.
 
-The only explicit bridge back into the legacy column-vector convention is:
-
-- `crystal_viewer/scene/core.py:156-158`, where `_continuous_components` constructs
-  `legacy_M = M.T` for `formula_unit.assemble_component_p1`.
+The public scene, viewpoint, and transform paths stay in row-lattice form.
+Formula-unit image shifts and molecule-continuous positions come from
+MolCrysKit records, so no local column-vector P1 assembly bridge remains.
 
 The lattice-length summary is implemented in `cell_aspect_ratio`:
 
-- `crystal_viewer/render/viewport.py:31-40` reads `scene["M"]`, computes
+- `mat_viewer/render/viewport.py:31-40` reads `scene["M"]`, computes
   `lens = np.linalg.norm(M, axis=1)`, divides by `lens.max()`, and returns a
   `{"x", "y", "z"}` dict.
 
 The unit-cell wireframe uses the rows directly:
 
-- `crystal_viewer/render/traces_overlays.py` assigns
+- `mat_viewer/render/traces_overlays.py` assigns
   `a = scene["M"][0]`, `b = scene["M"][1]`, `c = scene["M"][2]`, then enumerates
   the eight corners \(0,\vec a,\vec b,\vec c,\vec a+\vec b,\vec a+\vec c,
   \vec b+\vec c,\vec a+\vec b+\vec c\).

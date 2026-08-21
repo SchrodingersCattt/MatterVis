@@ -7,14 +7,17 @@
 
 ## Overview
 
-MatterVis is a Python toolkit for interactive and publication-quality visualization of crystal structures. Built on Dash and Plotly, it provides a browser-based 3D viewer, coordination-topology analysis, ORTEP-style Matplotlib export, and a REST + WebSocket API for agent-driven automation.
+MatterVis is a Python toolkit for deterministic, publication-quality material
+visualization. Its lightweight core renders PNG/PDF/SVG on the CPU; Plotly,
+Dash/Web APIs, Textual, Cube isosurfaces, and animation encoders are optional
+frontends.
 
 ## Key Features
 
-- **Headless CLI** — Three subcommands (`render`, `serve`, `tui`) cover the full workflow: CIF → publication-quality figure, interactive 3D viewer, or terminal-based inspection. Ideal for batch processing, CI pipelines, and remote servers
-- **Browser Viewer** — Drag-and-drop CIF upload, interactive 3D display with `Mesh3d` atoms and bonds, and a fast `Scatter3d` fallback for large cells. The viewer uses the built-in element palette by default
+- **Agent-ready CLI** — Five explicit subcommands (`inspect`, `capabilities`, `render`, `serve`, `tui`) separate bounded diagnosis, dependency preflight, browser-free static output, Web service, and terminal interaction
+- **Browser Viewer** — Drag-and-drop CIF upload and interactive 3D display with `Mesh3d` atoms and bonds. `Scatter3d` fast rendering is used only when explicitly selected; atom count never changes the representation
 - **Coordination Topology** — Automatic coordination-number detection via the nearest-neighbour gap, continuous shape measure (CShM) classification against 12 ideal polyhedra (CN 4–12), planarity RMS, and prism/antiprism twist analysis
-- **Publication Export** — Vendored ORTEP-style Matplotlib renderer with correct depth ordering, two-colour bonds, smart label placement, and configurable presets
+- **Publication Export** — The base CPU backend renders PNG with per-pixel depth handling and emits true-vector PDF/SVG from the same backend-neutral geometry
 - **Multi-Panel Figures** — `uniform_viewport(scenes)` stamps a shared world-cube on any list of scenes so every `build_figure` call emits at the same physical length per pixel
 - **Automation API** — REST + WebSocket endpoints on the same Flask server; drive the viewer from notebooks, agents, or subprocesses
 - **Zero Catalog Required** — Ships with a bundled DAP-4.cif so `mat-vis serve` works out of the box
@@ -57,20 +60,35 @@ pip install matter-vis
 ```bash
 git clone https://github.com/SchrodingersCattt/MatterVis.git
 cd MatterVis
+python -m pip install "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@448d60dbc27639d92f75c3e744f215776f4b966c"
 pip install -e .
 ```
 
-All dependencies are declared in `pyproject.toml`.
-`requires-python = ">=3.10"`. The available extras are:
+All dependencies are declared in `pyproject.toml`; `requires-python = ">=3.10"`.
+Install only the frontend the requested output needs:
 
 | Extra | Adds |
 |---|---|
-| `[test]` | `pytest>=8.0`, `pytest-cov` |
-| `[dev]` | `[test]` + `build`, `ruff` |
+| base | CPU PNG/PDF/SVG, inspection, ORTEP, rings, and polyhedra |
+| `[plotly]` | Interactive Plotly/WebGL HTML |
+| `[plotly-export]` | Plotly + Kaleido static export |
+| `[web]` | Dash, REST, WebSocket, compression, and Plotly |
+| `[tui]` | Textual terminal UI |
+| `[cube]` | Cube input inspection and isosurfaces |
+| `[animation]` | GIF/MP4 encoders |
+| `[all]` | Every optional frontend |
+| `[test]` | Test tools |
 
-`molcrys_kit` is an optional runtime dependency. When available, the per-fragment
-A/B/X heuristic uses its classifier; otherwise `crystal_viewer` uses built-in
-element/size heuristics.
+Browser screenshots and the Web UI's default static export combine `[web]`
+with `[plotly-export]`. Ask the resolver for the exact combined command:
+
+```bash
+mat-vis capabilities --require web-screenshot --json
+mat-vis capabilities --require static-web-export --json
+```
+
+MolCrysKit is required and is the only chemistry structure source. MatterVis
+does not fall back to private MolCrysKit fields or local chemistry heuristics.
 
 ## Quick Start
 
@@ -80,17 +98,21 @@ Install MatterVis, then render a crystal structure with a single command:
 
 ```bash
 # PNG with default ball-and-stick style
-mat-vis render structure.cif -o figure.png
+mat-vis inspect structure.cif --json
+mat-vis render structure.cif -o figure.png --backend cpu --check --json
+mat-vis render structure.cif -o figure.png --backend cpu --json
 
-# PDF, full unit cell, ORTEP hatch shading in greyscale
+# PDF, full unit cell, ORTEP hatch marks over flat-shaded ellipsoids
 mat-vis render structure.cif -o figure.pdf \
-  --view unit_cell --style ortep --ortep-mode ortep_hatch --monochrome
+  --backend cpu --view unit_cell --style ortep --material flat \
+  --ortep-mode ortep_hatch --missing-adp-policy error
 
 # Interactive HTML for supplementary information
-mat-vis render structure.cif -o si_figure.html \
+mat-vis render structure.cif -o si_figure.html --backend plotly \
   --show-hydrogen --show-labels
 
 # Launch the interactive browser viewer
+python -m pip install "matter-vis[web]"
 mat-vis serve --cif structure.cif
 ```
 
@@ -99,17 +121,16 @@ See [`docs/cli.md`](docs/cli.md) for the full flag reference and common recipes.
 ### Python API — programmatic control
 
 ```python
-from crystal_viewer.loader import build_bundle_scene, build_loaded_crystal
-from crystal_viewer.renderer import build_figure
-from crystal_viewer.scene import scene_style
+from mat_viewer.agent import load_structure, prepare_render, render
+from mat_viewer.render.contracts import RenderSpec, ViewSpec
 
-bundle = build_loaded_crystal(name="DAP-4", cif_path="scripts/data/DAP-4.cif")
-scene  = build_bundle_scene(bundle, display_mode="unit_cell")
-style  = scene_style(scene, {"show_unit_cell": True})
-
-fig = build_figure(scene, style)
-fig.write_image("dap4.png", width=900, height=720, scale=2)
-fig.write_html("dap4.html", include_plotlyjs="cdn")
+structure = load_structure("scripts/data/DAP-4.cif")
+plan = prepare_render(
+    structure,
+    view=ViewSpec(display="unit_cell"),
+    render_spec=RenderSpec(backend="cpu", width=900, height=720),
+)
+result = render(plan, output="dap4.svg", backend="cpu")
 ```
 
 ## Command Line Interface
@@ -119,13 +140,17 @@ use `--help` at any level to see the exact arguments:
 
 ```bash
 mat-vis --help
+mat-vis inspect --help
+mat-vis capabilities --help
 mat-vis render --help
 mat-vis serve --help
 mat-vis tui --help
 ```
 
-The three subcommands cover:
+The main subcommands cover:
 
+- `mat-vis inspect ... --json` — bounded structure/source metadata for agents
+- `mat-vis capabilities ... --json` — availability and exact install commands
 - `mat-vis render ...` — render atomistic structures and trajectories from CIF, Cube, VASP, XYZ, ASE, and LAMMPS inputs to PNG/PDF/SVG/HTML/GIF/MP4
 - `mat-vis serve ...` — launch the interactive Dash browser viewer with drag-and-drop CIF upload, topology analysis, and REST + WebSocket API
 - `mat-vis tui ...` — terminal-based crystal structure viewer for headless servers and SSH sessions
@@ -134,12 +159,13 @@ The three subcommands cover:
 
 | You are… | Start here |
 |---|---|
+| **Understanding the design** | [Architecture](docs/architecture.md) |
 | **Using the library** | [API Reference](docs/agents/) · [CLI Reference](docs/cli.md) |
 | **AI agent (calling MatterVis)** | [Caller API Contracts](docs/agents/) |
 | **AI agent (modifying code)** | [AGENTS.md](AGENTS.md) · [Developer Notes](docs/dev-notes.md) |
 | **Topology scores** | [Scores Reference](docs/scores.md) |
 
-[`crystal_viewer/`](crystal_viewer/) — source code · [`scripts/`](scripts/) — runnable demo scripts · [`docs/`](docs/) — full documentation
+[`mat_viewer/`](mat_viewer/) — source code · [`scripts/`](scripts/) — runnable demo scripts · [`docs/`](docs/) — full documentation
 
 ## License
 

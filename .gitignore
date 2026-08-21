@@ -32,4 +32,4 @@ server.log
 *.egg-info/
 build/
 dist/
-crystal_viewer/_version.py
+mat_viewer/_version.py

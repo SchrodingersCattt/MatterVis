@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from crystal_viewer.ortep import ortep_billboard_polygon
+from mat_viewer.ortep import ortep_billboard_polygon
 
 
 def test_ortep_billboard_matches_legacy_projection_scale_for_default_probability():

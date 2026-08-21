@@ -22,37 +22,47 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Visualization",
 ]
 dependencies = [
-    "dash",
-    "plotly",
     "numpy",
-    "scipy",
-    "scikit-image",
-    "gemmi",
-    "pymatgen",
-    "kaleido",
-    "flask-sock",
-    "flask-compress",
     "matplotlib",
     "pillow",
-    "imageio",
-    "imageio-ffmpeg",
     "ase",
-    "networkx",
-    "textual",
-    "molcrys-kit>=0.6.1",
+    "molcrys-kit>=0.6.2.dev16",
 ]
 
 [project.scripts]
-mat-vis = "crystal_viewer.cli:main"
+mat-vis = "mat_viewer.cli:main"
 
 [project.optional-dependencies]
-test = ["pytest>=8.0", "pytest-cov", "pytest-timeout"]
-dev = ["matter-vis[test]", "build", "ruff"]
+plotly = ["plotly"]
+plotly-export = ["plotly", "kaleido"]
+web = ["plotly", "dash", "flask-sock", "flask-compress"]
+tui = ["textual"]
+cube = ["scikit-image"]
+animation = ["imageio", "imageio-ffmpeg"]
+all = [
+    "plotly",
+    "kaleido",
+    "dash",
+    "flask-sock",
+    "flask-compress",
+    "textual",
+    "scikit-image",
+    "imageio",
+    "imageio-ffmpeg",
+]
+test = [
+    "pytest>=8.0",
+    "pytest-cov",
+    "pytest-timeout",
+    "gemmi",
+    "tomli; python_version < '3.11'",
+]
+dev = ["matter-vis[all,test]", "build", "ruff"]
 
 [tool.setuptools.packages.find]
-include = ["crystal_viewer*"]
+include = ["mat_viewer*"]
 
 [tool.setuptools_scm]
-write_to = "crystal_viewer/_version.py"
+write_to = "mat_viewer/_version.py"
 local_scheme = "no-local-version"
 fallback_version = "0.0.0+unknown"

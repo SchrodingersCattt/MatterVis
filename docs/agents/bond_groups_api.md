@@ -136,7 +136,7 @@ new bond group rule.
 
 ```python
 # Library use (no Dash app required).
-from crystal_viewer.bond_groups import tag_bonds_with_groups
+from mat_viewer.bond_groups import tag_bonds_with_groups
 
 bond_groups = [
     {"id": "g1", "name": "weak", "enabled": True,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dash import dcc
 
-from crystal_viewer.app import _status_class, _status_message, create_app
+from mat_viewer.app import _status_class, _status_message, create_app
 
 
 from _layout_helpers import (  # noqa: E402  shared helper

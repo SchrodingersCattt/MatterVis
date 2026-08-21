@@ -15,9 +15,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from crystal_viewer.loader import build_loaded_crystal  # noqa: E402
-from crystal_viewer.renderer import build_figure  # noqa: E402
-from crystal_viewer.scene import scene_style  # noqa: E402
+from mat_viewer.loader import build_loaded_crystal  # noqa: E402
+from mat_viewer.renderer import build_figure  # noqa: E402
+from mat_viewer.scene import scene_style  # noqa: E402
 
 
 HERE = Path(__file__).resolve().parent
@@ -29,7 +29,7 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 def main() -> None:
     bundle = build_loaded_crystal(name="DAP-4", cif_path=str(CIF), title="DAP-4 · unit cell")
 
-    from crystal_viewer.loader import build_bundle_scene
+    from mat_viewer.loader import build_bundle_scene
     cell_scene = build_bundle_scene(bundle, display_mode="unit_cell")
 
     style = scene_style(

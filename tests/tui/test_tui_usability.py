@@ -9,21 +9,21 @@ from contextlib import redirect_stdout
 import numpy as np
 import pytest
 
-from crystal_viewer.cli import main
-from crystal_viewer.math.camera import Camera, ProjectionMode, project_points
-from crystal_viewer.tui.app import CrystalCanvas, CrystalTUI
-from crystal_viewer.tui.compositor import (
+from mat_viewer.cli import main
+from mat_viewer.math.camera import Camera, ProjectionMode, project_points
+from mat_viewer.tui.app import CrystalCanvas, CrystalTUI
+from mat_viewer.tui.compositor import (
     DISPLAY_LEVELS,
     _compute_viewport,
     compose_frame,
     resolve_label_mode,
     resolve_molecule_detail,
 )
-from crystal_viewer.tui.crystal_ir import AtomIR, CrystalIR
-from crystal_viewer.tui.loader_adapter import load_for_tui
-from crystal_viewer.tui import run_tui
-from crystal_viewer.tui.serializer import serialize_crystal
-from crystal_viewer.tui.summary import build_scope_summary
+from mat_viewer.tui.crystal_ir import AtomIR, CrystalIR
+from mat_viewer.tui.loader_adapter import load_for_tui
+from mat_viewer.tui import run_tui
+from mat_viewer.tui.serializer import serialize_crystal
+from mat_viewer.tui.summary import build_scope_summary
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -314,7 +314,7 @@ def test_textual_can_start_in_readable_molecule_level(monkeypatch) -> None:
         def run(self):
             captured["ran"] = True
 
-    monkeypatch.setattr("crystal_viewer.tui.app.CrystalTUI", FakeApp)
+    monkeypatch.setattr("mat_viewer.tui.app.CrystalTUI", FakeApp)
     main(["tui", str(DAP4)])
     assert captured["ran"] is True
     assert captured["crystal"].n_atoms == 581
@@ -475,7 +475,7 @@ def test_non_cif_ir_has_deterministic_identity_and_scopes(tmp_path) -> None:
 
 
 def test_filtered_molecule_summary_drops_removed_groups() -> None:
-    from crystal_viewer.cli import _filter_crystal
+    from mat_viewer.cli import _filter_crystal
 
     crystal = load_for_tui(str(DAP4), display_mode="formula_unit")
     first_molecule = next(atom.molecule_index for atom in crystal.atoms if atom.molecule_index >= 0)

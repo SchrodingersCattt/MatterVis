@@ -26,7 +26,7 @@ from typing import Iterable
 
 import pytest
 
-from crystal_viewer.app import (
+from mat_viewer.app import (
     WORKSPACE_DIR,
     _AUTO_LIGAND_VALUE,
     _atom_groups_table_rows,

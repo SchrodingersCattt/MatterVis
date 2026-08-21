@@ -3,9 +3,9 @@ from __future__ import annotations
 import gemmi
 import numpy as np
 
-from crystal_viewer.structure import molcrys_bridge
-from crystal_viewer.loader import _unwrapped_atoms_from_atoms
-from crystal_viewer.scene import build_scene_from_atoms, scene_ops
+from mat_viewer.structure import molcrys_bridge
+from mat_viewer.loader import _unwrapped_atoms_from_atoms
+from mat_viewer.scene import build_scene_from_atoms, scene_ops
 
 
 def test_unit_cell_prefers_unwrapped_atoms_for_boundary_fragment():

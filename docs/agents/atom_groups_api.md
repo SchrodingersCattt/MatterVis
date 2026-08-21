@@ -230,7 +230,7 @@ curl -s -X POST http://localhost:50001/api/v2/atom_groups \
 
 ## Renderer contract
 
-For library callers driving `crystal_viewer.renderer.build_figure`
+For library callers driving `mat_viewer.renderer.build_figure`
 directly (no Dash app), atom_groups ride along on the style dict:
 
 ```python
@@ -242,7 +242,7 @@ style["atom_groups"] = [
 
 The dispatcher (`_cached_atom_bond_meshes`) detects a non-empty
 `atom_groups` list, calls
-`crystal_viewer.atom_groups.tag_atoms_with_groups(scene["draw_atoms"],
+`mat_viewer.atom_groups.tag_atoms_with_groups(scene["draw_atoms"],
 atom_groups)` to decorate every atom with `_render_color`,
 `_render_color_light`, `_render_visible`, `_render_opacity_scale`,
 `_render_material`, and `_render_style`, and partitions the result

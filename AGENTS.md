@@ -12,7 +12,7 @@ read the relevant module before modifying it.
 ## Repository Layout
 
 ```
-crystal_viewer/
+mat_viewer/
   app/                 Dash layout, callbacks, ViewerBackend internals
   api/                 REST + WebSocket blueprints
   render/              Plotly viewport / traces / cache internals
@@ -45,7 +45,7 @@ paper/                 figure-generation scripts for publications
 ## Testing Rules
 
 - **Full suite must stay green.** Run `pytest tests/` before pushing.
-- Lint with `ruff check crystal_viewer/`.
+- Lint with `ruff check mat_viewer/`.
 - Example regressions: run the relevant `python scripts/<n>_*.py` and
   inspect the generated artifact under `scripts/_outputs/`.
 - `pytest.ini` sets `timeout = 60` with `timeout_method = thread` for
@@ -64,7 +64,7 @@ paper/                 figure-generation scripts for publications
 - **Reuse before reinventing.** Check existing modules and utilities —
   and upstream `molcrys_kit` — before writing new logic.
 - **Do not hardcode version strings.** Version is derived from git tags
-  via `setuptools_scm` → `crystal_viewer/_version.py` (gitignored).
+  via `setuptools_scm` → `mat_viewer/_version.py` (gitignored).
 - **Name modules for the data/operation**, not a journal, project, or
   one-off output.
 - **Add new capability at the lowest layer that fits**, then wrap upward.
@@ -77,7 +77,7 @@ paper/                 figure-generation scripts for publications
 ## Non-negotiable Design Principles
 
 1. **Separate caller style from library capability.** No journal, project,
-   or paper-specific naming under `crystal_viewer/`. Defaults are conveniences;
+   or paper-specific naming under `mat_viewer/`. Defaults are conveniences;
    styling must be caller-overridable.
 2. **Keep APIs layered.** Prefer pure primitives at the bottom, composable
    builders above them, and convenience wrappers at the top. Callers must be
@@ -88,7 +88,7 @@ paper/                 figure-generation scripts for publications
    PBC, shape, disorder, or slab logic, check upstream `molcrys_kit` and
    existing MatterVis modules for the current primitive.
 5. **Respect ownership boundaries.** Browser code stays in `frontend/`,
-   service code in `api/` or `app/`, reusable library code in `crystal_viewer/`,
+   service code in `api/` or `app/`, reusable library code in `mat_viewer/`,
    and chemistry semantics in `molcrys_kit`.
 6. **Keep operation paths distinct.** Source operations work on real crystal
    objects and return through the loader. Display operations work on manifested

@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from crystal_viewer.render.meshes import arrow_mesh_geometry
+from mat_viewer.render.meshes import arrow_mesh_geometry
 
 
 def test_arrow_mesh_has_exact_origin_tip_and_no_degenerate_faces() -> None:

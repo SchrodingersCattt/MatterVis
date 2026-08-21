@@ -1,64 +1,62 @@
 from __future__ import annotations
 
-import argparse
+import json
 from pathlib import Path
-import re
-import shlex
 
 import pytest
 
-from crystal_viewer.render.cli import (
-    _build_render_parser,
-    _parse_publication_options,
-)
-from crystal_viewer.render.publication import publication_config
+from mat_viewer.cli import main
 
 ROOT = Path(__file__).resolve().parents[2]
-CLI_DOCS = (
+PUBLICATION_DOCS = (
     ROOT / "docs/agents/static_publication.md",
     ROOT / "paper/coordination/README.md",
+    ROOT / "skills/visualize-materials/references/publication-layout.md",
 )
 
 
-def _documented_command(path: Path) -> list[str]:
-    blocks = re.findall(
-        r"```bash\n(.*?)```", path.read_text(encoding="utf-8"), re.DOTALL
-    )
-    assert len(blocks) == 1, f"{path} must contain one canonical bash example"
-    command_text = blocks[0].replace(chr(92) + "\n", " ")
-    command = shlex.split(command_text, comments=False, posix=True)
-    assert command[:2] == ["mat-vis", "render"]
-    assert "--config" not in command
-    assert "python" not in command[:2]
-    return command
+@pytest.mark.parametrize("path", PUBLICATION_DOCS, ids=lambda path: path.name)
+def test_publication_docs_use_single_view_cpu_contract(path: Path) -> None:
+    document = path.read_text(encoding="utf-8")
+
+    assert "--backend cpu" in document
+    assert "external" in document.lower() or "separate" in document.lower()
+    assert "--publication-preset dense_coordination" not in document
+    assert "--publication-style blender" not in document
+    assert "--publication-option PATH=VALUE" not in document
 
 
-@pytest.mark.parametrize("path", CLI_DOCS, ids=lambda path: path.name)
-def test_publication_documentation_uses_live_cli_contract(path: Path) -> None:
-    command = _documented_command(path)
-    parser = argparse.ArgumentParser()
-    _build_render_parser(parser.add_subparsers(dest="command"))
-    args = parser.parse_args(command[1:])
+@pytest.mark.parametrize(
+    "legacy_args",
+    [
+        ["--publication-layout"],
+        ["--publication-preset", "dense_coordination"],
+        ["--publication-style", "blender"],
+        ["--publication-option", "materials.alpha=0.5"],
+        ["--title", "legacy heading"],
+        ["--subtitle", "legacy subtitle"],
+    ],
+)
+def test_agent_cli_rejects_legacy_publication_contract(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    legacy_args: list[str],
+) -> None:
+    with pytest.raises(SystemExit) as raised:
+        main(
+            [
+                "render",
+                str(tmp_path / "not-loaded.cif"),
+                "-o",
+                str(tmp_path / "not-created.svg"),
+                *legacy_args,
+                "--check",
+                "--json",
+            ]
+        )
 
-    assert args.command == "render"
-    assert args.publication_layout is True
-    assert args.publication_style == "blender"
-    style = _parse_publication_options(
-        args.publication_preset,
-        args.publication_option,
-        publication_style=args.publication_style,
-        site_styles=args.publication_site_style,
-        legend_entries=args.publication_legend_entry,
-        panel_labels=args.publication_panel_label,
-        legend_footer=args.publication_legend_footer,
-    )
-    assert publication_config(style)["materials"]
-
-
-def test_skill_reference_points_to_parser_checked_documentation() -> None:
-    skill_doc = (
-        ROOT / "skills/visualize-materials/references/publication-layout.md"
-    ).read_text(encoding="utf-8")
-
-    assert "docs/agents/static_publication.md" in skill_doc
-    assert CLI_DOCS[0].is_file()
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert raised.value.code == 2
+    assert "unsupported by the backend-neutral render command" in payload["error"]
+    assert not (tmp_path / "not-created.svg").exists()

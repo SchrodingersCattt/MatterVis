@@ -25,23 +25,23 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from crystal_viewer.app import (
+from mat_viewer.app import (
     DEFAULT_CENTROID_OFFSET_FRAC,
     ViewerBackend,
     _normalize_polyhedron_spec,
     _normalize_polyhedron_specs,
     _polyhedra_table_rows,
 )
-from crystal_viewer.app.backend_topology import (
+from mat_viewer.app.backend_topology import (
     _atom_overlay,
     _dedupe_disorder_center_fragments,
     _display_atom_centers_for_spec,
     _fragment_matches_polyhedron_spec,
 )
-from crystal_viewer import topology as topology_module
-from crystal_viewer.structure import molcrys_bridge as _molcrys_bridge_module
-from crystal_viewer.presets import default_preset_path
-from crystal_viewer.render.topology import topology_results_markdown
+from mat_viewer import topology as topology_module
+from mat_viewer.structure import molcrys_bridge as _molcrys_bridge_module
+from mat_viewer.presets import default_preset_path
+from mat_viewer.render.topology import topology_results_markdown
 
 
 @pytest.fixture

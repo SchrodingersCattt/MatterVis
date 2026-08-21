@@ -23,12 +23,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from crystal_viewer.atom_groups import (
+from mat_viewer.atom_groups import (
     atom_matches_selector,
     partition_atoms_by_render_pipeline,
     tag_atoms_with_groups,
 )
-from crystal_viewer.renderer import (
+from mat_viewer.renderer import (
     _atom_groups_cache_key,
     _atom_render_color,
     _atom_render_opacity_scale,
@@ -263,7 +263,7 @@ def test_label_traces_skip_hidden_atom_labels():
     """Phase 2: when an atom_groups rule hides H atoms, the label
     list must drop H labels too -- otherwise a label hangs in empty
     space where the atom used to be."""
-    from crystal_viewer.renderer import _label_traces
+    from mat_viewer.renderer import _label_traces
 
     scene = {
         "draw_atoms": _atoms(),
@@ -305,7 +305,7 @@ def test_atom_selection_trace_skips_hidden_atoms():
     the right-click handler can demux on the kind tag. Index 2 is
     the label, not index 1 (which is now the integer atom index).
     """
-    from crystal_viewer.renderer import _atom_selection_trace
+    from mat_viewer.renderer import _atom_selection_trace
 
     atoms = _atoms()
     atoms[2]["_render_visible"] = False  # H1 hidden via render flag too
@@ -324,7 +324,7 @@ def test_minor_bond_wireframe_skips_hidden_atoms():
     """Sev 2: the disorder-outline wireframe ring shouldn't draw a
     bond stroke through empty space where a hidden minor atom used
     to live."""
-    from crystal_viewer.renderer import _minor_bond_wireframe_traces
+    from mat_viewer.renderer import _minor_bond_wireframe_traces
 
     atoms = [
         {"label": "A", "elem": "C", "cart": [0, 0, 0], "color": "#000", "color_light": "#000", "is_minor": True, "atom_radius": 0.15, "_render_visible": True},
@@ -354,7 +354,7 @@ def test_effective_opacity_replace_semantics():
     """Sev 2: per-group opacity REPLACES the disorder fade, not
     multiplies. Otherwise minor atoms set to opacity=0.5 stack with
     the minor fade and disappear."""
-    from crystal_viewer.renderer import _atom_effective_opacity
+    from mat_viewer.renderer import _atom_effective_opacity
 
     style = {"disorder": "opacity", "minor_opacity": 0.4, "major_opacity": 1.0}
     minor_with_override = {"is_minor": True, "_render_opacity_scale": 0.5}
@@ -368,7 +368,7 @@ def test_mesh_cache_key_includes_ortep_probability():
     """Sev 2: changing ``ortep_probability`` (e.g. 50% -> 90%) must
     invalidate the trace cache; otherwise the user clicks the slider
     and nothing changes on screen."""
-    from crystal_viewer.renderer import _cached_atom_bond_meshes
+    from mat_viewer.renderer import _cached_atom_bond_meshes
 
     scene_a = {"draw_atoms": [], "bonds": []}
     style_a = {"ortep_probability": 0.5, "atom_scale": 1.0, "bond_radius": 0.1}

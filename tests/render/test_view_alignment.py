@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from crystal_viewer.app import (
+from mat_viewer.app import (
     WORKSPACE_DIR,
     ViewerBackend,
     _AXIS_VIEW_KEYS,

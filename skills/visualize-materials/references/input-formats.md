@@ -13,13 +13,13 @@ selection rules.
 ## Static structures
 
 ~~~bash
-mat-vis render INPUT -o figure.png
+mat-vis render INPUT -o figure.png --backend cpu
 ~~~
 
 Supported directly:
 
-- CIF through the high-fidelity Gemmi/MolCrysKit parser;
-- Cube with volumetric data preserved;
+- CIF through MolCrysKit's public renderer-ready structure records;
+- Cube with volumetric data preserved (`matter-vis[cube]`, no Plotly required);
 - POSCAR, CONTCAR, and .vasp;
 - XYZ and extxyz;
 - ASE .traj;

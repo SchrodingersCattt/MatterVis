@@ -5,10 +5,10 @@ import json
 import numpy as np
 import pytest
 
-from crystal_viewer.math.camera import Camera, ProjectionMode, project_points
-from crystal_viewer.tui.compositor import viewport_from_bounds
-from crystal_viewer.tui.controller import TerminalViewController
-from crystal_viewer.tui.crystal_ir import AtomIR, CrystalIR, Lattice
+from mat_viewer.math.camera import Camera, ProjectionMode, project_points
+from mat_viewer.tui.compositor import viewport_from_bounds
+from mat_viewer.tui.controller import TerminalViewController
+from mat_viewer.tui.crystal_ir import AtomIR, CrystalIR, Lattice
 
 
 def _crystal() -> CrystalIR:

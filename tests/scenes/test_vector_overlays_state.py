@@ -4,7 +4,7 @@ import copy
 
 import pytest
 
-from crystal_viewer.render.overlay.vectors import normalize_vector_overlays
+from mat_viewer.render.overlay.vectors import normalize_vector_overlays
 
 
 def _groups():
@@ -33,7 +33,7 @@ def test_duplicate_ids_are_rejected() -> None:
 
 
 def test_backend_normalizes_vectors_and_invalidates_camera() -> None:
-    from crystal_viewer.app.backend import ViewerBackend
+    from mat_viewer.app.backend import ViewerBackend
 
     backend = ViewerBackend.__new__(ViewerBackend)
     backend.current_state = {
@@ -75,8 +75,8 @@ def test_backend_normalizes_vectors_and_invalidates_camera() -> None:
 
 
 def test_scene_for_state_attaches_tab_local_vector_copy(monkeypatch) -> None:
-    from crystal_viewer.app import backend_core
-    from crystal_viewer.app.backend import ViewerBackend
+    from mat_viewer.app import backend_core
+    from mat_viewer.app.backend import ViewerBackend
 
     shared_scene = {"name": "dummy", "fragment_table": []}
     bundle = type("Bundle", (), {"scene": shared_scene, "fragment_table": []})()

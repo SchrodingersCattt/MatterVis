@@ -5,9 +5,10 @@ import itertools
 
 import pytest
 
-from crystal_viewer.loader import build_empty_bundle
-from crystal_viewer.renderer import DISORDER_DISPATCH, MATERIAL_DISPATCH, STYLE_DISPATCH, build_figure
-from crystal_viewer.render.viewport import flat_projected_pixel_scale
+import mat_viewer.render.figures as figures
+from mat_viewer.loader import build_empty_bundle
+from mat_viewer.renderer import DISORDER_DISPATCH, MATERIAL_DISPATCH, STYLE_DISPATCH, build_figure
+from mat_viewer.render.viewport import flat_projected_pixel_scale
 
 
 def _scene_template():
@@ -209,6 +210,52 @@ def test_fast_ball_stick_draws_bonds_after_atoms(scene_template):
     assert atom_indices
     assert bond_indices
     assert max(atom_indices) < min(bond_indices)
+
+
+def test_801_atoms_keep_mesh_path_until_fast_rendering_is_explicit(
+    scene_template, monkeypatch
+):
+    scene = _scene(scene_template)
+    template = scene["draw_atoms"][0]
+    scene["draw_atoms"] = [
+        {
+            **template,
+            "label": f"C{index}",
+            "cart": [float(index % 20), float((index // 20) % 20), float(index // 400)],
+        }
+        for index in range(801)
+    ]
+    scene["bonds"] = []
+    observed: list[bool] = []
+
+    def fake_meshes(_scene, _style, *, use_fast):
+        observed.append(use_fast)
+        return {
+            "atom_dicts": [],
+            "bond_dicts": [],
+            "minor_outline_dicts": [],
+            "minor_bond_dicts": [],
+        }
+
+    monkeypatch.setattr(figures, "_cached_atom_bond_meshes", fake_meshes)
+    style = {
+        "material": "mesh",
+        "style": "ball_stick",
+        "disorder": "none",
+        "show_axes": False,
+        "show_labels": False,
+        "show_unit_cell": False,
+        "topology_enabled": False,
+    }
+
+    figures.build_figure(scene, style, include_interaction_traces=False)
+    figures.build_figure(
+        scene,
+        {**style, "fast_rendering": True},
+        include_interaction_traces=False,
+    )
+
+    assert observed == [False, True]
 
 
 def test_fast_atom_scale_default_is_compact_and_cache_sensitive(scene_template):

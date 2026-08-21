@@ -1,89 +1,58 @@
 # MatterVis Quickstart
 
-Use this page for the normal path from an input structure to one PNG.
+Use this path for the normal structure-to-static-image request. It uses the CPU
+backend and requires only base MatterVis.
 
-## 1. Install once
-
-From the skill directory:
-
-```bash
-bash scripts/install_runtime.sh
-```
-
-This installs into the current Python environment. To isolate it explicitly:
+## 1. Inspect and preflight
 
 ```bash
-bash scripts/install_runtime.sh --venv /absolute/path/to/mattervis-venv
+mat-vis inspect INPUT.cif --json
+mat-vis render INPUT.cif -o OUTPUT.png --backend cpu --check --json
 ```
 
-Add `--with-system-libs` only when system package installation is authorized.
-The installer verifies the distribution and CLI. See `install.md` for repairs.
+The first command reports bounded source and structure metadata. The second
+resolves dependencies without loading the input or writing a file. If it is not
+available, run only the exact `install` command it reports; see
+`capabilities-and-install.md`.
 
-## 2. Admit the scene
+Choose the displayed object from scientific intent:
 
-Confirm the input exists. For a small structure, inspect bounded structured
-output:
-
-```bash
-mat-vis tui INPUT --no-interaction --format structured \
-  --display formula_unit --view c --projection orthographic
-```
-
-Do not serialize more than 200 visible atoms through the TUI. For larger,
-disordered, or ambiguous scenes, read `diagnose-and-select.md`.
-
-Choose the scene from scientific intent:
-
-- one molecule or formula unit: `formula_unit`;
-- crystal packing or periodic context: `unit_cell`;
-- diagnostic symmetry sites: `asymmetric_unit`;
+- one formula unit: `formula_unit`;
+- periodic packing: `unit_cell`;
+- crystallographic-site diagnosis: `asymmetric_unit`;
 - an already finite nonperiodic input: `cluster`.
 
 `cluster` is not a crop or neighbour-shell selector.
 
-## 3. Choose one explicit render command
+## 2. Render explicitly
 
-Small molecular/formula-unit view:
+Formula-unit PNG:
 
 ```bash
-mat-vis render INPUT -o OUTPUT.png \
+mat-vis render INPUT.cif -o OUTPUT.png --backend cpu --json \
   --view formula_unit --style ball_stick --material mesh \
   --camera-axis c --orthogonal \
-  --no-hydrogen --no-cell --no-axes --no-labels \
+  --no-hydrogen --no-cell --no-labels \
   --background '#FFFFFF' --atom-scale 1.0 --bond-radius 0.15 \
   --width 1200 --height 900 --scale 1
 ```
 
-Periodic unit-cell view:
+Periodic SVG:
 
 ```bash
-mat-vis render INPUT -o OUTPUT.png \
+mat-vis render INPUT.cif -o OUTPUT.svg --backend cpu --json \
   --view unit_cell --style ball_stick --material mesh \
-  --camera-axis c --orthogonal \
-  --no-hydrogen --show-cell --no-axes --no-labels \
+  --camera-axis c --orthogonal --show-cell --no-labels \
   --background '#FFFFFF' --atom-scale 0.85 --bond-radius 0.12 \
   --width 1600 --height 1200 --scale 1
 ```
 
-For an admitted ordered scene above 500 displayed atoms, start with
-`unit_cell`, `atom-scale=0.65`, `bond-radius=0.08`, `2400x1800`, and `scale=1`.
-Do not use the former `1600x1200, scale=2` recipe: a successful command can
-still produce an all-white `3200x2400` export.
+Use PDF/SVG when downstream editing needs true vector geometry. Do not request
+Plotly or Kaleido for ordinary static output.
 
-Do not use `--config` for fields that have CLI flags. Current parser defaults
-overwrite those config values even when their flags are omitted. Reserve config
-for config-only policies such as disorder handling or atom groups.
+## 3. Verify
 
-## 4. Verify and deliver
-
-Run the literal `mat-vis` command directly. Require:
-
-- command exit 0;
-- requested output exists, is non-empty, and decodes;
-- effective backend/style matches the requested visual language;
-- no chemistry or semantic-fatal warning;
-- final-size visual inspection by a vision-capable reviewer.
-
-Record the command, input/output paths and hashes, dimensions, display, style,
-material, camera, backend, fallback reason, and visual-review status. Deliver
-one selected PNG unless the caller asked for another format.
+Require exit 0 and one JSON object on stdout. Confirm that `backend` is `cpu`,
+the output hash matches the file, PNG decodes or PDF/SVG has the correct root,
+and no chemistry warning blocks delivery. Inspect the final-size artifact; a
+valid file and nonzero byte count do not prove visual quality.

@@ -4,15 +4,15 @@ import gemmi
 import numpy as np
 import pytest
 
-from crystal_viewer.render.figures import build_figure, build_publication_figure, build_row_figure
-from crystal_viewer.render.overlay.vectors import (
+from mat_viewer.render.figures import build_figure, build_publication_figure, build_row_figure
+from mat_viewer.render.overlay.vectors import (
     normalize_vector_overlays,
     paper_vector_label_annotations,
     resolve_vector_overlays,
     vector_mesh_traces,
     vector_overlay_bounds,
 )
-from crystal_viewer.scene import build_scene_from_atoms, scene_ops, scene_style
+from mat_viewer.scene import build_scene_from_atoms, scene_ops, scene_style
 
 
 def _groups(mode="normalized"):

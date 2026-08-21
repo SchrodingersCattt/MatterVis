@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from crystal_viewer.perf import bench_pipeline
-from crystal_viewer.perf.oracle import SCHEMA, build_oracle_signature
+from mat_viewer.perf import bench_pipeline
+from mat_viewer.perf.oracle import SCHEMA, build_oracle_signature
 
 
 def _atom(index: int, *, minor: bool = False) -> dict:
@@ -40,8 +40,18 @@ def _bundle():
     scene = {
         "display_mode": "unit_cell",
         "draw_atoms": copy.deepcopy(atoms),
-        "bonds": [{"i": 0, "j": 1, "start": atoms[0]["cart"], "end": atoms[1]["cart"], "is_minor": True}],
-        "fragment_table": [{"label": "A0", "formula": "CO", "cluster_size": 2, "heavy_atom_count": 2}],
+        "bonds": [
+            {
+                "i": 0,
+                "j": 1,
+                "start": atoms[0]["cart"],
+                "end": atoms[1]["cart"],
+                "is_minor": True,
+            }
+        ],
+        "fragment_table": [
+            {"label": "A0", "formula": "CO", "cluster_size": 2, "heavy_atom_count": 2}
+        ],
     }
     return SimpleNamespace(
         raw_atoms=atoms,
@@ -49,6 +59,12 @@ def _bundle():
         molcrys_analysis=analysis,
         scene=scene,
     )
+
+
+def test_peak_rss_is_optional_on_platforms_without_resource(monkeypatch):
+    monkeypatch.setattr(bench_pipeline, "_resource", None)
+
+    assert bench_pipeline._peak_rss_mib() is None
 
 
 def test_oracle_signature_is_stable_and_json_safe():
@@ -73,8 +89,14 @@ def test_oracle_reports_only_changed_section_digest():
     baseline = build_oracle_signature(baseline_bundle)
     changed = build_oracle_signature(changed_bundle)
 
-    assert baseline["section_digests"]["raw_atoms"] != changed["section_digests"]["raw_atoms"]
-    assert baseline["section_digests"]["analysis"] == changed["section_digests"]["analysis"]
+    assert (
+        baseline["section_digests"]["raw_atoms"]
+        != changed["section_digests"]["raw_atoms"]
+    )
+    assert (
+        baseline["section_digests"]["analysis"]
+        == changed["section_digests"]["analysis"]
+    )
     assert baseline["overall_digest"] != changed["overall_digest"]
 
 
@@ -96,7 +118,18 @@ def test_oracle_canonicalizes_atom_and_molecule_order_and_selection_schema():
 
     changed = build_oracle_signature(reordered, figure=figure)
 
-    assert baseline["section_digests"]["analysis"] == changed["section_digests"]["analysis"]
+    assert (
+        baseline["section_digests"]["analysis"]
+        == changed["section_digests"]["analysis"]
+    )
+    assert (
+        baseline["section_digests"]["raw_atoms"]
+        == changed["section_digests"]["raw_atoms"]
+    )
+    assert (
+        baseline["section_digests"]["disorder"]
+        == changed["section_digests"]["disorder"]
+    )
     assert baseline["section_digests"]["figure"] == changed["section_digests"]["figure"]
     assert baseline["counts"]["major_atoms"] == 1
 
@@ -106,7 +139,9 @@ def test_pipeline_report_exposes_cold_warm_and_manifest(monkeypatch, tmp_path):
     cif.write_text("data_small\n")
     bundle = _bundle()
     bundle.scene_cache = {("formula_unit", False): bundle.scene}
-    bundle.fragment_table_cache = {("scene", "formula_unit", False): ([{"formula": "stale"}], ["?"])}
+    bundle.fragment_table_cache = {
+        ("scene", "formula_unit", False): ([{"formula": "stale"}], ["?"])
+    }
     calls = []
 
     def fake_loader(**_kwargs):
@@ -118,9 +153,15 @@ def test_pipeline_report_exposes_cold_warm_and_manifest(monkeypatch, tmp_path):
 
     monkeypatch.setattr(bench_pipeline, "build_loaded_crystal", fake_loader)
     monkeypatch.setattr(bench_pipeline, "build_bundle_scene", fake_scene)
-    monkeypatch.setattr(bench_pipeline, "_package_provenance", lambda _name: {"version": "test", "direct_url": None})
+    monkeypatch.setattr(
+        bench_pipeline,
+        "_package_provenance",
+        lambda _name: {"version": "test", "direct_url": None},
+    )
 
-    report = bench_pipeline.build_pipeline_report(cif, include_unit_cell=False, include_figure=False)
+    report = bench_pipeline.build_pipeline_report(
+        cif, include_unit_cell=False, include_figure=False
+    )
 
     assert report["schema"] == bench_pipeline.SCHEMA
     assert report["fixture"]["sha256"]

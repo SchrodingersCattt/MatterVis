@@ -31,10 +31,10 @@ flowchart LR
 
 ## Builders
 
-### `crystal_viewer.scene.build_scene_from_cif(...)`
+### `mat_viewer.scene.build_scene_from_cif(...)`
 
 Parses a CIF and returns a scene dict consumable by
-`crystal_viewer.renderer.build_figure`. Honours `display_mode`:
+`mat_viewer.renderer.build_figure`. Honours `display_mode`:
 
 - `formula_unit` (default) — single formula unit centred in the cell.
   Per-species counts come from MolCrysKit's
@@ -63,20 +63,20 @@ Parses a CIF and returns a scene dict consumable by
   Cartesian coordinates. The 100 Å dummy cells that CIF exporters
   sometimes write around clusters are ignored.
 
-### `crystal_viewer.render.assembly.build_scene_from_atoms(atoms, *, style=None, ...)`
+### `mat_viewer.render.assembly.build_scene_from_atoms(atoms, *, style=None, ...)`
 
 ASE `Atoms` → scene dict. Accepts the same `display_mode` values. When
 `style["element_colors"]` is provided, the element palette is applied
 automatically.
 
-`crystal_viewer.scene.build_scene_from_atoms` remains available as a
+`mat_viewer.scene.build_scene_from_atoms` remains available as a
 compatibility import, but new code should treat scene assembly as part
 of the render pipeline. The `scene/` namespace is reserved for per-tab
 state and scene-store helpers.
 
 ## Style helpers
 
-### `crystal_viewer.scene.apply_element_colors(scene, element_colors, element_colors_light)`
+### `mat_viewer.scene.apply_element_colors(scene, element_colors, element_colors_light)`
 
 Re-skin element palettes on a finished scene. Mutates `scene` in place
 and returns the same object for chaining; never returns a fresh scene.
@@ -91,7 +91,7 @@ monochrome off before calling.
 Never mutate the module-level `ELEMENT_COLORS` dict — pass kwargs
 instead.
 
-### `crystal_viewer.renderer.uniform_viewport(scenes, *, padding=0.0)`
+### `mat_viewer.renderer.uniform_viewport(scenes, *, padding=0.0)`
 
 Stamp a shared world-cube `viewport` on a list of scenes so every
 subsequent `build_figure` call renders at an identical physical length
@@ -99,18 +99,14 @@ scale. The cube is the radius-aware bounding cube of the largest input
 scene. Use this for N-up grid figures where each panel must depict the
 same length per pixel.
 
-### `crystal_viewer.renderer.build_publication_figure(...)`
+### `mat_viewer.renderer.build_publication_figure(...)`
 
-Composes one large crystal/topology scene above one isolated representative
-polyhedron panel per drawable topology spec. The builder consumes the same
-`topology_data` payload as `build_figure`; it does not recompute coordination
-chemistry. It also adds title/subtitle annotations, element and polyhedron
-keys, and the main-scene lattice compass.
-
-The static CLI exposes this as `mat-vis render --publication-layout` together
-with repeated `--polyhedron` specifications. `--title` and `--subtitle` set
-the publication heading. This layout requires Plotly/Kaleido for image export
-and never falls back to a topology-free flat ORTEP image.
+This is a legacy private compositor retained for the browser application's
+internal compatibility surface. The agent-facing CLI does not expose it:
+legacy `--publication-*`, `--title`, and `--subtitle` flags fail explicitly.
+Agents render one verified CPU SVG/PDF/PNG per view and compose panels in a
+separate authorized document or graphics step. Do not call this builder to
+bypass that boundary.
 
 For `level="atom"`, each specification is tiled over every unique visible
 `(raw source atom, periodic image)` matching `center_species`. The main panel
@@ -126,14 +122,14 @@ its representative panel inherit the same values. Defaults are `0.55`, `0.90`,
 
 ## `build_figure` style keys
 
-Beyond the Dash-driven defaults, `crystal_viewer.renderer.build_figure`
+Beyond the Dash-driven defaults, `mat_viewer.renderer.build_figure`
 honours:
 
 - `material` — `mesh` for real Mesh3d atoms/bonds, or `flat` for
   billboard-style traces.
 - `style` — `ball`, `ball_stick`, `stick`, `ortep`, or `wireframe`.
-- `scatter_atom_scale` — multiplier for fixed-pixel atom markers in the fast
-  Scatter3d fallback (default `0.45`).
+- `scatter_atom_scale` — multiplier for fixed-pixel atom markers in the
+  explicitly selected fast Scatter3d mode (default `0.45`).
 - `scatter_bond_scale` — multiplier for fast Scatter3d bond-line width
   (default `1.0`).
 - `scatter_bond_contrast_color` — optional replacement for a fast bond half
@@ -144,7 +140,7 @@ honours:
 - Legacy aliases: `fast_rendering=True` maps to `material="flat"`;
   `minor_wireframe=True` maps to `disorder="outline_rings"`; and
   `minor_opacity` only changes visibility when `disorder="opacity"`.
-- The fast Scatter3d fallback preserves every manifested scene bond and draws
+- Explicit `fast_rendering=True` preserves every manifested scene bond and draws
   its endpoint-coloured bond halves after the fixed-pixel atom markers. This
   ordering keeps short N-H/O-H bonds visible in fitted unit-cell overviews;
   Mesh3d retains depth-correct bond-before-atom ordering.

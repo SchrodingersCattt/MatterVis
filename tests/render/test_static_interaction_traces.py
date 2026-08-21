@@ -3,9 +3,9 @@ from __future__ import annotations
 import gemmi
 import numpy as np
 
-from crystal_viewer.render.figures import build_figure, build_row_figure
-from crystal_viewer.render.selection import _atom_selection_trace, _bond_selection_trace
-from crystal_viewer.scene import build_scene_from_atoms, scene_ops, scene_style
+from mat_viewer.render.figures import build_figure, build_row_figure
+from mat_viewer.render.selection import _atom_selection_trace, _bond_selection_trace
+from mat_viewer.scene import build_scene_from_atoms, scene_ops, scene_style
 
 
 def _scene():

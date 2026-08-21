@@ -1,37 +1,39 @@
-# Plotly 3D Render Path
+# Plotly HTML and Explicit Plotly Export
 
-Read `quickstart.md` first. Use this reference for Plotly-specific limits and
-repair, not as a second standard workflow.
+Use Plotly only when the caller requests interactive HTML/WebGL or explicitly
+chooses Plotly static export.
 
-- `mesh` uses Plotly `Mesh3d`; non-ORTEP `flat` uses Plotly `Scatter3d`.
-- HTML is always Plotly and needs no local Chrome.
-- PNG/PDF/SVG use Kaleido and Chrome.
-- `material=flat` plus `style=ortep` is the intentional Matplotlib path.
+Interactive HTML:
 
-For standard commands, dimensions, camera, and verified delivery, follow
-`quickstart.md`. Use `--show-hydrogen` only when hydrogen matters.
+```bash
+mat-vis capabilities --require html --json
+mat-vis render INPUT.cif -o OUTPUT.html --backend plotly --check --json
+mat-vis render INPUT.cif -o OUTPUT.html --backend plotly --json
+```
 
-## Large scenes
+HTML requires `[plotly]` and no Chrome. Explicit Plotly PNG/PDF/SVG requires
+`[plotly-export]` and may require a working Chrome runtime:
 
-Diagnose the scene before reducing render quality. Lowering scale or switching
-material does not repair an invalid chemical selection.
+```bash
+mat-vis capabilities --require plotly-export --json
+mat-vis render INPUT.cif -o OUTPUT.png --backend plotly --check --json
+```
 
-Use `scale=1` for the first large-canvas render and inspect that actual
-delivery at final resolution. A zero exit code and nonzero file size do not
-rule out an all-white export.
+When static Plotly export is invoked through the running Web frontend, resolve
+both boundaries instead of checking Kaleido alone:
 
-## Config precedence
+```bash
+mat-vis capabilities --require web-screenshot --json
+mat-vis capabilities --require static-web-export --json
+```
 
-Config fields represented by ordinary CLI options are overwritten by parser
-defaults even when the flag was not written. Put display, style, material,
-projection, visibility, colors, dimensions, and scale on the command line.
-Use config only for fields with no CLI representation.
+Both aliases report
+`python -m pip install "matter-vis[plotly-export,web]"`. A failed Web export is
+reported as an error; it does not return a placeholder image.
 
-## Failure behavior
-
-MatterVis 0.0.3 can fall back from Plotly/Kaleido to Matplotlib flat ORTEP.
-That changes the visual language. Preserve the CLI fallback text and do not
-deliver a fallback as the requested mesh, ball-stick, stick, or wireframe image.
-
-If Chrome disappears, preserve the real render error and follow `install.md`.
-Generate HTML only after an explicit interactive-output request.
+Do not install Chrome automatically and do not substitute CPU output after a
+Plotly failure. Preserve the original diagnostic and the requested/effective
+backend. Plotly preserves the RenderPlan target, view direction, screen-up, and
+deterministic ranges; its API cannot reproduce the CPU near/far planes or field
+of view exactly, and the result warning records that limitation. For ordinary
+static output, use `--backend cpu` instead.

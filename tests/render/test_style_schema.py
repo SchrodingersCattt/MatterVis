@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from crystal_viewer.presets import DEFAULT_STYLE, ORTEP_MODES, deep_merge, json_safe
-from crystal_viewer.renderer import DISORDER_DISPATCH, MATERIAL_DISPATCH, STYLE_DISPATCH, validate_style_schema
+from mat_viewer.presets import DEFAULT_STYLE, ORTEP_MODES, deep_merge, json_safe
+from mat_viewer.renderer import DISORDER_DISPATCH, MATERIAL_DISPATCH, STYLE_DISPATCH, validate_style_schema
 
 
 def test_style_schema_round_trips_and_enums_are_public():

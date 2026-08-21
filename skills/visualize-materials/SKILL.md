@@ -1,61 +1,52 @@
 ---
 name: visualize-materials
-description: 'Visualize atomistic structures and trajectories with MatterVis. Use for CIF, Cube, POSCAR/CONTCAR, VASP, XYZ/extxyz, ASE .traj, LAMMPS dump/data/configuration, molecular crystals, publication figures, static export, animation, and terminal views.'
+description: 'Visualize atomistic structures and trajectories with MatterVis. Use for CIF, Cube, POSCAR/CONTCAR, VASP, XYZ/extxyz, ASE .traj, LAMMPS dump/data, publication figures, static vector/raster export, animation, WebGL, and terminal views.'
 ---
 
 # Visualize Materials
 
-Create deterministic material visualizations with the installed `mat-vis` CLI.
-Treat scene selection, camera, backend, and artifact verification as evidence.
+Create deterministic material visualizations with the public `mat-vis` CLI.
+Treat chemical selection, camera, backend, requirements, and artifact checks as
+explicit data.
 
 ## Route
 
 1. Read [quickstart](./references/quickstart.md) for every task.
-2. For non-CIF or multi-frame data, read [input formats](./references/input-formats.md).
-3. Read [installation](./references/install.md) only when installing or repairing
-   Chrome/Kaleido.
-4. Always read [diagnosis](./references/diagnose-and-select.md) before choosing a
-   display mode or style.
-5. For images, always read the [camera contract](./references/camera.md), then
-   one specialized path when needed:
-   - [Plotly 3D](./references/plotly-render.md)
-   - [Matplotlib flat ORTEP](./references/matplotlib-flat-ortep.md)
-   - [Molecule focus](./references/molecule-highlight.md)
-   - [Polyhedra](./references/polyhedra.md)
-   - [Publication layout](./references/publication-layout.md)
-    - [Multi-structure panels](./references/multi-structure-panels.md)
-   - [Trajectory animation](./references/trajectory-animation.md)
-   - [Terminal TUI](./references/tui.md)
-6. Always read [verification](./references/verification.md) before reporting or
-   attaching the result.
+2. Run `mat-vis inspect INPUT --json`, then `mat-vis render ... --check --json`.
+3. If preflight is unavailable, read [capabilities and installation](./references/capabilities-and-install.md)
+   and use only the exact reported extra.
+4. Read [diagnosis](./references/diagnose-and-select.md) before selecting the
+   displayed object, and [camera](./references/camera.md) for images.
+5. Read only the requested output path:
+   - [CPU static PNG/PDF/SVG](./references/cpu-static.md) — default;
+   - [Plotly HTML or explicit Plotly static export](./references/plotly-render.md);
+   - [input formats](./references/input-formats.md);
+   - [molecule focus](./references/molecule-highlight.md);
+   - [polyhedra](./references/polyhedra.md);
+   - [trajectory animation](./references/trajectory-animation.md);
+   - [terminal TUI](./references/tui.md).
+6. Read [verification](./references/verification.md) before delivery.
 
 ## Hard boundaries
 
-- Use `mat-vis`, never `python -m crystal_viewer`, for delivered renders.
-- Install into the caller's current Python environment by default. Use an
-  optional venv only when requested or needed for a known dependency conflict.
-- Diagnose before choosing the displayed object. Export success is not chemistry
-  or semantic validation.
-- Use orthographic lattice `+c` by default. Record any other camera explicitly.
-- Use MatterVis/MolCrysKit molecule identity, PBC unwrapping, and bonds; do not
-  reconstruct them from screen proximity or invent pseudo-elements for styling.
-- Keep comparable panels and animation frames on explicit shared camera/scale
-  contracts.
-- For every multi-structure figure, declare whether panel scale is shared
-  (physical size is comparable) or independently fitted (shape/direction only).
-  Never use camera distance, viewport padding, or nonuniform scaling as an
-  undocumented cure for whitespace.
-- For trajectories, keep memory bounded to one canonical/rendered frame at a
-  time, use one effective backend for the whole animation, and select semantic
-  focus by stable source identity plus topology closure rather than frame-local
-  row positions or coordinate boxes.
-- Use `mat-vis render` for ordinary animations. For vector fields, order
-  parameters, synchronized panels, or other semantic overlays, preserve clean
-  MatterVis base frames and add only declared overlays in a thin Python
-  composition layer.
-- Produce one requested final artifact by default, not a gallery.
-- Run the literal `mat-vis` command. Retain its exit code and logs, decode
-  the output, and inspect the final artifact before delivery.
-- Keep requested and effective display/style/material/backend distinct.
-- Models without image inspection report objective checks and leave visual
-  acceptance pending.
+- Base MatterVis is the complete CPU static path. Do not install Dash, Plotly,
+  Kaleido, Textual, scikit-image, imageio, Chrome, or system libraries unless
+  the requested capability requires them.
+- Use public `mat-vis inspect`, `capabilities`, and `render --check` commands;
+  do not diagnose through Web/TUI startup or private Python modules.
+- Select `--backend cpu|plotly` explicitly. MatterVis has no silent backend or
+  representation fallback; preserve a failure and its exact install hint.
+- For a Web/API screenshot use requirement `web-screenshot`; for the Web UI's
+  Plotly static export use `static-web-export`. Both resolve the required
+  `[web,plotly-export]` combination rather than assuming one extra implies the
+  other.
+- Use orthographic lattice `+c` by default and record any other camera.
+- Use MolCrysKit site, bond, ring, molecule, PBC, and formula-unit records. Do
+  not reconstruct chemical identity from screen proximity.
+- Keep comparable panels and animation frames on an explicit shared camera and
+  physical-scale contract. Never alter geometry to hide whitespace.
+- The agent CLI rejects legacy config/publication-layout flags it cannot honour.
+  Report that boundary instead of invoking private compositors.
+- Produce one requested artifact by default. Retain the JSON result, verify the
+  file signature/hash/decoding, and keep visual acceptance pending until the
+  final-size artifact has actually been reviewed.

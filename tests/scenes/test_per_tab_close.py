@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from crystal_viewer.app import ViewerBackend
+from mat_viewer.app import ViewerBackend
 
 
 def _has_component_id(component, target_id) -> bool:

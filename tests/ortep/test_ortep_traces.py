@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
-from crystal_viewer.loader import build_empty_bundle
-from crystal_viewer.ortep import (
-    DEFAULT_HYDROGEN_ORTEP_UISO,
+from mat_viewer.loader import build_empty_bundle
+from mat_viewer.ortep import (
     DEFAULT_MAX_ORTEP_UISO,
     DEFAULT_ORTEP_UISO,
     MAX_ORTEP_UISO_BY_ELEMENT,
@@ -42,7 +42,7 @@ def test_ortep_traces_include_mesh_and_optional_axes():
 #
 # This regression has been fixed and re-broken at least twice by
 # unrelated rewrites of ortep._atom_u. If you are deleting either
-# DEFAULT_HYDROGEN_ORTEP_UISO, MAX_ORTEP_UISO_BY_ELEMENT, the
+# MAX_ORTEP_UISO_BY_ELEMENT, the
 # _clamp_u_for_visualisation helper, or these tests, please re-read
 # the H-cap discussion in the PR that introduced them and either
 # replace the clamp with an equivalent guard or document why it is
@@ -52,14 +52,11 @@ def test_ortep_traces_include_mesh_and_optional_axes():
 # ==============================================================================
 
 
-def test_ortep_fallback_uiso_shrinks_hydrogen():
-    _, h_uiso = _atom_u({"elem": "H"})
-    _, c_uiso = _atom_u({"elem": "C"})
-
-    # Default fallback (no Uiso provided) gives a sensibly small
-    # hydrogen and a larger heavy-atom default.
-    assert h_uiso == DEFAULT_HYDROGEN_ORTEP_UISO
-    assert h_uiso < c_uiso
+def test_ortep_missing_adp_fails_instead_of_fabricating_uiso():
+    with pytest.raises(ValueError, match="no ADP data"):
+        _atom_u({"label": "H1", "elem": "H"})
+    with pytest.raises(ValueError, match="no ADP data"):
+        _atom_u({"label": "C1", "elem": "C"})
 
     # Hydrogen sees a per-element ceiling that is tighter than the
     # generic heavy-atom default, so passing the heavy-atom default

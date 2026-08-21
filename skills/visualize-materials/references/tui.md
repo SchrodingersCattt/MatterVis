@@ -3,6 +3,13 @@
 Read this only for deterministic textual views, agent-readable summaries, or
 terminal interaction. The TUI is not an image backend or PNG/PDF fallback.
 
+Install `[tui]` only when this output was requested. Cube input crosses both
+optional boundaries, so preflight with
+`mat-vis capabilities --require cube tui --json` and use its exact
+`python -m pip install "matter-vis[cube,tui]"` command. Missing Cube support is
+an explicit error; the TUI does not omit density lobes. Use `mat-vis inspect
+INPUT --json` for ordinary agent diagnosis; it is bounded and needs no Textual.
+
 ## Modes
 
 - Interactive: `mat-vis tui INPUT.cif`

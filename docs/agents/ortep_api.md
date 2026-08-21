@@ -28,7 +28,7 @@ upstream is shared:
 
 ```mermaid
 flowchart LR
-    U["ADP tensor U<br/>(from CIF aniso, or U_iso fallback)"] --> AXES["ellipsoid_principal_axes<br/>(pure math)"]
+    U["ADP tensor U<br/>(measured Ucart or Uiso;<br/>missing = error or explicit sphere)"] --> AXES["ellipsoid_principal_axes<br/>(pure math)"]
     AXES --> MESH["material=mesh, style=ortep<br/>ortep_mesh3d (real 3D Mesh3d)"]
     AXES --> BILL["material=flat, style=ortep<br/>ortep_billboard_polygon (camera-facing)"]
     MESH --> MT["ortep_atom_mesh_traces"]

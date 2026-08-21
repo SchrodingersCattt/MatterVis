@@ -7,7 +7,7 @@ must be mapped to ``raw_atoms`` by coordinate, never by positional index.
 
 from __future__ import annotations
 
-import crystal_viewer.structure.disorder_index as di
+import mat_viewer.structure.disorder_index as di
 
 
 def _raw(label, elem, frac):

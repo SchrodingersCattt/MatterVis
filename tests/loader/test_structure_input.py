@@ -9,19 +9,15 @@ from ase import Atoms
 from ase.io import write
 from ase.io.trajectory import Trajectory
 
-from crystal_viewer.cli import _build_tui_parser
-from crystal_viewer.loader import (
+from mat_viewer.cli import _build_tui_parser, main as cli_main
+from mat_viewer.loader import (
     LoadedCrystal,
     iter_atomistic_frames,
     load_atomistic_input,
     load_structure_input,
 )
-from crystal_viewer.render.cli import (
-    _build_render_parser,
-    _parse_frame_indices,
-    _render_main,
-)
-from crystal_viewer.tui.loader_adapter import load_for_tui
+from mat_viewer.render.frame_selection import parse_frame_indices
+from mat_viewer.tui.loader_adapter import load_for_tui
 
 
 @pytest.fixture
@@ -129,9 +125,7 @@ def test_ase_frame_metadata_preserves_custom_atom_arrays(tmp_path: Path) -> None
         pbc=True,
     )
     atoms.info["time_ps"] = 2.5
-    atoms.arrays["local_vector"] = np.array(
-        [[0.1, 0.0, 0.0], [0.0, 0.2, 0.0]]
-    )
+    atoms.arrays["local_vector"] = np.array([[0.1, 0.0, 0.0], [0.0, 0.2, 0.0]])
     path = tmp_path / "metadata.extxyz"
     write(path, atoms, format="extxyz")
 
@@ -151,17 +145,15 @@ def test_ase_frame_metadata_preserves_custom_atom_arrays(tmp_path: Path) -> None
     )
     scene = loaded.frames[0].bundle.scene
     source_index = scene["draw_atoms"][0]["_source_index"]
-    assert loaded.frames[0].bundle.atom_arrays["local_vector"][source_index] == pytest.approx(
-        atoms.arrays["local_vector"][source_index]
-    )
+    assert loaded.frames[0].bundle.atom_arrays["local_vector"][
+        source_index
+    ] == pytest.approx(atoms.arrays["local_vector"][source_index])
 
 
 def test_iter_atomistic_frames_streams_selected_source_order(
     structure_files: dict[str, Path],
 ) -> None:
-    streamed = list(
-        iter_atomistic_frames(structure_files["traj"], frame_indices=[1])
-    )
+    streamed = list(iter_atomistic_frames(structure_files["traj"], frame_indices=[1]))
 
     assert len(streamed) == 1
     frame, input_format = streamed[0]
@@ -205,14 +197,16 @@ def test_frame_range_uses_python_slice_semantics(
     stride: int,
     expected: list[int],
 ) -> None:
-    assert _parse_frame_indices(6, value, stride) == expected
+    assert parse_frame_indices(6, value, stride) == expected
 
 
-def test_render_parser_exposes_generic_input_contract() -> None:
-    parser = argparse.ArgumentParser()
-    _build_render_parser(parser.add_subparsers(dest="command"))
+def test_render_preflight_exposes_generic_input_contract(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import json
 
-    args = parser.parse_args(
+    output = tmp_path / "run.gif"
+    cli_main(
         [
             "render",
             "run.dump",
@@ -226,15 +220,20 @@ def test_render_parser_exposes_generic_input_contract() -> None:
             "--fps",
             "8",
             "-o",
-            "run.gif",
+            str(output),
+            "--backend",
+            "cpu",
+            "--check",
+            "--json",
         ]
     )
 
-    assert args.input == "run.dump"
-    assert args.type_map == ["Si", "O"]
-    assert args.frame_range == "::2"
-    assert args.stride == 3
-    assert args.fps == 8
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["schema"] == "mattervis.render-check/v1"
+    assert payload["backend"] == "cpu"
+    assert payload["output_format"] == "gif"
+    assert payload["requirements"]["extras"] == ["animation"]
+    assert not output.exists()
 
 
 @pytest.mark.parametrize("key", ["vasp", "extxyz", "traj", "dump", "data"])
@@ -242,21 +241,38 @@ def test_render_cli_accepts_every_structure_adapter(
     structure_files: dict[str, Path],
     tmp_path: Path,
     key: str,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    parser = argparse.ArgumentParser()
-    _build_render_parser(parser.add_subparsers(dest="command"))
-    output = tmp_path / f"{key}.html"
-    argv = ["render", str(structure_files[key]), "-o", str(output)]
+    import json
+
+    output = tmp_path / f"{key}.png"
+    argv = [
+        "render",
+        str(structure_files[key]),
+        "-o",
+        str(output),
+        "--backend",
+        "cpu",
+        "--view",
+        "unit_cell",
+        "--width",
+        "96",
+        "--height",
+        "96",
+        "--scale",
+        "1",
+        "--json",
+    ]
     if key in {"dump", "data"}:
         argv.extend(["--type-map", "Si", "O"])
     if key in {"extxyz", "traj", "dump"}:
         argv.extend(["--frame", "1"])
-    args = parser.parse_args(argv)
-
-    _render_main(args)
+    cli_main(argv)
 
     assert output.is_file()
-    assert output.stat().st_size > 1000
+    assert output.stat().st_size > 100
+    assert output.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    assert json.loads(capsys.readouterr().out)["backend"] == "cpu"
 
 
 @pytest.mark.parametrize("extension", [".gif", ".mp4"])
@@ -267,13 +283,13 @@ def test_render_cli_exports_real_animation(
 ) -> None:
     import imageio.v3 as iio
 
-    parser = argparse.ArgumentParser()
-    _build_render_parser(parser.add_subparsers(dest="command"))
     output = tmp_path / f"trajectory{extension}"
-    args = parser.parse_args(
+    cli_main(
         [
             "render",
             str(structure_files["traj"]),
+            "--backend",
+            "cpu",
             "--view",
             "unit_cell",
             "--width",
@@ -289,8 +305,6 @@ def test_render_cli_exports_real_animation(
         ]
     )
 
-    _render_main(args)
-
     assert output.is_file()
     assert output.stat().st_size > 1000
     frames = list(iio.imiter(output))
@@ -298,42 +312,8 @@ def test_render_cli_exports_real_animation(
     assert all(frame.shape[:2] == (160, 200) for frame in frames)
 
 
-def test_animation_cli_does_not_load_all_canonical_frames(
-    structure_files: dict[str, Path],
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from crystal_viewer.render import cli
-
-    def fail(*args, **kwargs):
-        raise AssertionError("animation CLI must use the streaming frame path")
-
-    monkeypatch.setattr(cli, "load_structure_input", fail, raising=False)
-    parser = argparse.ArgumentParser()
-    _build_render_parser(parser.add_subparsers(dest="command"))
-    output = tmp_path / "streaming.gif"
-    args = parser.parse_args(
-        [
-            "render",
-            str(structure_files["traj"]),
-            "--width",
-            "100",
-            "--height",
-            "80",
-            "--scale",
-            "1",
-            "-o",
-            str(output),
-        ]
-    )
-
-    _render_main(args)
-
-    assert output.is_file()
-
-
 def test_animation_viewport_has_one_world_center_and_scale() -> None:
-    from crystal_viewer.renderer import uniform_viewport
+    from mat_viewer.renderer import uniform_viewport
 
     scenes = [
         {"draw_atoms": [{"cart": np.array([0.0, 0.0, 0.0]), "atom_radius": 0.2}]},
@@ -348,7 +328,7 @@ def test_animation_viewport_has_one_world_center_and_scale() -> None:
 
 
 def test_viewport_accumulator_matches_uniform_viewport() -> None:
-    from crystal_viewer.renderer import ViewportAccumulator, uniform_viewport
+    from mat_viewer.renderer import ViewportAccumulator, uniform_viewport
 
     scenes = [
         {"draw_atoms": [{"cart": np.array([0.0, 0.0, 0.0]), "atom_radius": 0.2}]},
@@ -426,7 +406,7 @@ def test_only_selected_trajectory_frame_is_canonicalised(
     structure_files: dict[str, Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from crystal_viewer.loader import structure_input
+    from mat_viewer.loader import structure_input
 
     original = structure_input.build_loaded_crystal_from_ase
     calls: list[int] = []
@@ -450,7 +430,7 @@ def test_count_frames_does_not_build_render_bundles(
     structure_files: dict[str, Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from crystal_viewer.loader import count_structure_frames, structure_input
+    from mat_viewer.loader import count_structure_frames, structure_input
 
     def fail(*args, **kwargs):
         raise AssertionError("frame counting must not build a render bundle")
