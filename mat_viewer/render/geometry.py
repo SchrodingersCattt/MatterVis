@@ -149,8 +149,18 @@ def sphere_primitive(
     alpha: float | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> TriangleMeshPrimitive:
+    center_array = _point(center, name="center")
+    radius_value = _positive(radius, name="radius")
     vertices, triangles, normals = sphere_mesh(
-        center, radius, lat_steps=lat_steps, lon_steps=lon_steps
+        center_array, radius_value, lat_steps=lat_steps, lon_steps=lon_steps
+    )
+    raster_metadata = dict(metadata or {})
+    raster_metadata.update(
+        {
+            "_raster_shape": "sphere",
+            "_raster_center": tuple(float(value) for value in center_array),
+            "_raster_radius": radius_value,
+        }
     )
     return TriangleMeshPrimitive(
         semantic_id=semantic_id,
@@ -158,7 +168,7 @@ def sphere_primitive(
         triangles=triangles,
         vertex_normals=normals,
         rgba=color_to_rgba(color, alpha=alpha),
-        metadata=metadata or {},
+        metadata=raster_metadata,
     )
 
 
@@ -231,14 +241,28 @@ def cylinder_primitive(
     alpha: float | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> TriangleMeshPrimitive:
-    vertices, triangles, normals = cylinder_mesh(start, end, radius, sides=sides)
+    first = _point(start, name="start")
+    second = _point(end, name="end")
+    radius_value = _positive(radius, name="radius")
+    vertices, triangles, normals = cylinder_mesh(
+        first, second, radius_value, sides=sides
+    )
+    raster_metadata = dict(metadata or {})
+    raster_metadata.update(
+        {
+            "_raster_shape": "cylinder",
+            "_raster_start": tuple(float(value) for value in first),
+            "_raster_end": tuple(float(value) for value in second),
+            "_raster_radius": radius_value,
+        }
+    )
     return TriangleMeshPrimitive(
         semantic_id=semantic_id,
         vertices=vertices,
         triangles=triangles,
         vertex_normals=normals,
         rgba=color_to_rgba(color, alpha=alpha),
-        metadata=metadata or {},
+        metadata=raster_metadata,
     )
 
 

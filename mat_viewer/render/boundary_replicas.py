@@ -57,7 +57,11 @@ def expand_boundary_replicas(
         for axis in range(3):
             f = float(frac_arr[axis])
             on_zero = -_SOURCE_IMAGE_TOL <= f <= _PERIODIC_FACE_TOL + _SOURCE_IMAGE_TOL
-            on_one = 1.0 - _PERIODIC_FACE_TOL - _SOURCE_IMAGE_TOL <= f <= 1.0 + _SOURCE_IMAGE_TOL
+            on_one = (
+                1.0 - _PERIODIC_FACE_TOL - _SOURCE_IMAGE_TOL
+                <= f
+                <= 1.0 + _SOURCE_IMAGE_TOL
+            )
             if on_zero:
                 per_axis[axis] = [0, 1]
             elif on_one:
@@ -122,8 +126,26 @@ def expand_boundary_replicas(
     for molecule_atoms in grouped.values():
         if _spans_cell(molecule_atoms):
             for atom in molecule_atoms:
-                atom["_cell_spanning_component"] = True
-            ungrouped.extend(molecule_atoms)
+                wrapped = np.mod(
+                    np.asarray(
+                        atom.get("_wrapped_frac", atom.get("frac")), dtype=float
+                    ),
+                    1.0,
+                )
+                wrapped[np.isclose(wrapped, 1.0, rtol=0.0, atol=1e-9)] = 0.0
+                copied = dict(atom)
+                copied["frac"] = wrapped
+                copied["cart"] = frac_to_cart(wrapped, M_arr)
+                copied["_wrapped_frac"] = wrapped.copy()
+                copied["_image_shift"] = (0, 0, 0)
+                copied["_cell_spanning_component"] = True
+                copied.pop("_is_boundary_replica", None)
+                copied.pop("_is_fragment_boundary_replica", None)
+                out.append(copied)
+            # A periodic framework is not a finite molecule. Replicating its
+            # members independently from a face tolerance creates orphan atoms
+            # and asymmetric chunks outside the cell. Scene assembly adds the
+            # exact neighbouring context from signed MCK BondRecords instead.
             continue
         out.extend(molecule_atoms)
         for effective in sorted(_molecule_periodic_translations(molecule_atoms)):
@@ -135,13 +157,9 @@ def expand_boundary_replicas(
                 replica["frac"] = (
                     frac + shift_arr if frac.shape == (3,) else atom.get("frac")
                 )
-                replica["cart"] = (
-                    np.asarray(atom.get("cart"), dtype=float) + shift_cart
-                )
+                replica["cart"] = np.asarray(atom.get("cart"), dtype=float) + shift_cart
                 replica["_image_shift"] = effective
-                replica["_origin_label"] = atom.get(
-                    "_origin_label", atom.get("label")
-                )
+                replica["_origin_label"] = atom.get("_origin_label", atom.get("label"))
                 replica["_is_boundary_replica"] = True
                 replica["_is_fragment_boundary_replica"] = True
                 out.append(replica)
@@ -158,9 +176,7 @@ def expand_boundary_replicas(
             replica["frac"] = (
                 frac + shift_arr if frac.shape == (3,) else atom.get("frac")
             )
-            replica["cart"] = (
-                np.asarray(atom.get("cart"), dtype=float) + shift_cart
-            )
+            replica["cart"] = np.asarray(atom.get("cart"), dtype=float) + shift_cart
             replica["_image_shift"] = shift
             replica["_origin_label"] = atom.get("_origin_label", atom.get("label"))
             replica["_is_boundary_replica"] = True

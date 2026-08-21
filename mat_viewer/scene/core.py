@@ -92,7 +92,9 @@ def _bond_endpoints(ai, aj, cell, display_mode: str):
     start = np.array(ai["cart"], dtype=float)
     if ai.get("_strict_unit_cell") or aj.get("_strict_unit_cell"):
         return start, np.array(aj["cart"], dtype=float)
-    if display_mode in ("formula_unit", "cluster") or (ai.get("_unwrapped") and aj.get("_unwrapped")):
+    if display_mode in ("formula_unit", "cluster") or (
+        ai.get("_unwrapped") and aj.get("_unwrapped")
+    ):
         end = np.array(aj["cart"], dtype=float)
     else:
         end = np.array(_nearest_pbc_cart(ai["cart"], aj["cart"], cell), dtype=float)
@@ -140,7 +142,9 @@ def _manifest_strict_bonded_images(
         if len(relation) != 3:
             continue
         adjacency.setdefault(left, []).append((right, relation))
-        adjacency.setdefault(right, []).append((left, tuple(-value for value in relation)))
+        adjacency.setdefault(right, []).append(
+            (left, tuple(-value for value in relation))
+        )
 
     additions: list[dict[str, Any]] = []
 
@@ -184,12 +188,21 @@ def _manifest_strict_bonded_images(
             if source_atom is None or target_atom is None or target_key in instances:
                 continue
             candidate = dict(target_atom)
-            candidate_frac = np.asarray(target_atom.get("frac"), dtype=float) + np.asarray(shift, dtype=float)
+            candidate_frac = np.asarray(
+                target_atom.get("frac"), dtype=float
+            ) + np.asarray(shift, dtype=float)
             candidate["frac"] = candidate_frac
             candidate["cart"] = frac_to_cart(candidate_frac, M_arr)
             if bonds_conflict(source_atom, candidate):
                 continue
-            if float(np.linalg.norm(np.asarray(candidate["cart"]) - np.asarray(source_atom["cart"]))) > 3.5:
+            if (
+                float(
+                    np.linalg.norm(
+                        np.asarray(candidate["cart"]) - np.asarray(source_atom["cart"])
+                    )
+                )
+                > 3.5
+            ):
                 continue
             _add_image(target, shift)
 
@@ -205,8 +218,7 @@ def _manifest_strict_bonded_images(
             current_potential = potentials[current]
             for neighbour, edge_shift in adjacency.get(current, ()):
                 proposed = tuple(
-                    current_potential[axis] + edge_shift[axis]
-                    for axis in range(3)
+                    current_potential[axis] + edge_shift[axis] for axis in range(3)
                 )
                 known = potentials.get(neighbour)
                 if known is None:
@@ -218,10 +230,132 @@ def _manifest_strict_bonded_images(
                     continue
         for source, relative_shift in potentials.items():
             absolute_shift = tuple(
-                seed_shift[axis] + relative_shift[axis]
-                for axis in range(3)
+                seed_shift[axis] + relative_shift[axis] for axis in range(3)
             )
             _add_image(source, absolute_shift)
+
+    draw_atoms.extend(additions)
+    return len(additions)
+
+
+def _manifest_spanning_bond_context(
+    draw_atoms: list[dict[str, Any]],
+    source_atoms: list[dict[str, Any]],
+    M: Any,
+    canonical_bond_records: list[dict[str, Any]],
+    ring_records: list[dict[str, Any]],
+) -> int:
+    """Materialise exact neighbouring context for periodic frameworks.
+
+    A cell-spanning component is infinite, so whole-component replication is
+    undefined and per-site face replication produces disconnected fragments.
+    Signed MCK bond records identify the exact adjacent-cell endpoints.  When
+    an endpoint belongs to an MCK ring, the complete ring is copied in the
+    same image so a boundary linker is never shown as a broken partial ring.
+    """
+    if not canonical_bond_records or not any(
+        atom.get("_cell_spanning_component") for atom in draw_atoms
+    ):
+        return 0
+
+    instances: set[tuple[int, tuple[int, int, int]]] = set()
+    home_by_source: dict[int, dict[str, Any]] = {}
+    for draw_index, atom in enumerate(draw_atoms):
+        identity = source_image_identity(atom, source_atoms, draw_index)
+        if identity is None:
+            continue
+        instances.add(identity)
+        if identity[1] == (0, 0, 0) and atom.get("_cell_spanning_component"):
+            home_by_source.setdefault(identity[0], atom)
+
+    adjacency: dict[int, list[tuple[int, tuple[int, int, int]]]] = {}
+    for record in canonical_bond_records:
+        try:
+            left = int(record["left"])
+            right = int(record["right"])
+            relation = tuple(int(value) for value in record["right_image_shift"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if len(relation) != 3:
+            continue
+        adjacency.setdefault(left, []).append((right, relation))
+        adjacency.setdefault(right, []).append(
+            (left, tuple(-value for value in relation))
+        )
+    for neighbours in adjacency.values():
+        neighbours.sort(key=lambda item: (item[0], item[1]))
+
+    rings_by_source: dict[int, list[set[int]]] = {}
+    for ring in ring_records:
+        if not bool(ring.get("is_aromatic")) or int(ring.get("size", 0)) > 8:
+            continue
+        members = {
+            int(value)
+            for value in ring.get("cycle_atom_indices", ring.get("atom_indices", ()))
+        }
+        members.intersection_update(home_by_source)
+        if not members:
+            continue
+        for source in members:
+            rings_by_source.setdefault(source, []).append(members)
+
+    M_arr = np.asarray(M, dtype=float)
+    additions: list[dict[str, Any]] = []
+
+    def add_context(seed: int, shift: tuple[int, int, int]) -> None:
+        placements: dict[int, tuple[int, int, int]] = {seed: (0, 0, 0)}
+        for ring in rings_by_source.get(seed, ()):
+            queue = [seed]
+            while queue:
+                current = queue.pop(0)
+                current_shift = placements[current]
+                for neighbour, edge_shift in adjacency.get(current, ()):
+                    if neighbour not in ring:
+                        continue
+                    proposed = tuple(
+                        current_shift[axis] + edge_shift[axis] for axis in range(3)
+                    )
+                    if neighbour not in placements:
+                        placements[neighbour] = proposed
+                        queue.append(neighbour)
+        for source in sorted(placements):
+            relative = placements[source]
+            absolute = tuple(shift[axis] + relative[axis] for axis in range(3))
+            key = (source, absolute)
+            home = home_by_source.get(source)
+            if home is None or key in instances:
+                continue
+            base_frac = np.asarray(
+                home.get("_wrapped_frac", source_atoms[source].get("frac")),
+                dtype=float,
+            )
+            if base_frac.shape != (3,) or not np.all(np.isfinite(base_frac)):
+                continue
+            shift_arr = np.asarray(absolute, dtype=float)
+            copied = dict(home)
+            copied["frac"] = base_frac + shift_arr
+            copied["cart"] = frac_to_cart(copied["frac"], M_arr)
+            copied["_wrapped_frac"] = base_frac.copy()
+            copied["_image_shift"] = absolute
+            copied["_is_boundary_replica"] = True
+            copied["_is_framework_context_replica"] = True
+            copied.pop("_is_fragment_boundary_replica", None)
+            instances.add(key)
+            additions.append(copied)
+
+    for record in canonical_bond_records:
+        try:
+            left = int(record["left"])
+            right = int(record["right"])
+            relation = tuple(int(value) for value in record["right_image_shift"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if len(relation) != 3 or relation == (0, 0, 0):
+            continue
+        if left not in home_by_source or right not in home_by_source:
+            continue
+        add_context(right, relation)
+        add_context(left, tuple(-value for value in relation))
 
     draw_atoms.extend(additions)
     return len(additions)
@@ -297,11 +431,15 @@ def _canonical_display_bond_pairs(
         molecule_index = atom.get("_source_molecule_index")
         if molecule_index is not None and not atom.get("_cell_spanning_component"):
             try:
-                relative_shift = tuple(int(value) for value in atom.get("_image_shift", (0, 0, 0)))
+                relative_shift = tuple(
+                    int(value) for value in atom.get("_image_shift", (0, 0, 0))
+                )
                 fragment_key = (int(molecule_index), relative_shift)
                 members = fragment_instances.setdefault(fragment_key, {})
                 if identity[0] not in members:
-                    fragment_keys_by_source.setdefault(identity[0], []).append(fragment_key)
+                    fragment_keys_by_source.setdefault(identity[0], []).append(
+                        fragment_key
+                    )
                 members[identity[0]] = draw_index
             except (TypeError, ValueError):
                 pass
@@ -417,7 +555,9 @@ def build_scene_from_atoms(
     style = deep_merge(DEFAULT_STYLE, preset.get("style"))
     entry = preset.get("structures", {}).get(name, {})
     style = deep_merge(style, entry.get("style"))
-    show_h = bool(show_hydrogen) or bool(entry.get("show_hydrogen", style.get("show_hydrogen", False)))
+    show_h = bool(show_hydrogen) or bool(
+        entry.get("show_hydrogen", style.get("show_hydrogen", False))
+    )
 
     input_atoms = [dict(atom) for atom in atoms]
     if molcrys_analysis is None:
@@ -492,8 +632,7 @@ def build_scene_from_atoms(
                 "MatterVis will not replace MolCrysKit connectivity."
             )
     if canonical_bond_pairs is not None and {
-        tuple(sorted((int(left), int(right))))
-        for left, right in canonical_bond_pairs
+        tuple(sorted((int(left), int(right)))) for left, right in canonical_bond_pairs
     } != set(canonical_pairs):
         raise ValueError(
             "canonical_bond_pairs disagrees with molcrys_analysis; MatterVis "
@@ -507,6 +646,7 @@ def build_scene_from_atoms(
             analysis=molcrys_analysis,
         )
         if formula_unit_atoms is not None:
+
             def _formula_signature(items):
                 return [
                     (
@@ -540,12 +680,21 @@ def build_scene_from_atoms(
     image_records = list(canonical_records)
     strict_cell = display_mode == "unit_cell" and not include_boundary_replicas
     bonded_image_replica_count = 0
+    framework_context_replica_count = 0
     if strict_cell and image_records:
         bonded_image_replica_count = _manifest_strict_bonded_images(
             draw_atoms,
             source_atoms,
             M,
             image_records,
+        )
+    elif display_mode == "unit_cell" and include_boundary_replicas:
+        framework_context_replica_count = _manifest_spanning_bond_context(
+            draw_atoms,
+            source_atoms,
+            M,
+            image_records,
+            list(getattr(molcrys_analysis, "ring_records", ()) or ()),
         )
     draw_atoms = _prune_unconnected_spanning_replicas(
         draw_atoms,
@@ -643,12 +792,13 @@ def build_scene_from_atoms(
         view_z,
         atom_scale=float(style.get("atom_scale", 1.0)),
     )
-    camera = entry.get("camera") or legacy_scene._camera_from_bounds(bounds, view_y, view_z)
+    camera = entry.get("camera") or legacy_scene._camera_from_bounds(
+        bounds, view_y, view_z
+    )
 
     M_arr = np.asarray(M, dtype=float)
     projected_axes = [
-        (float(M_arr[i] @ view_x), float(M_arr[i] @ view_y))
-        for i in range(3)
+        (float(M_arr[i] @ view_x), float(M_arr[i] @ view_y)) for i in range(3)
     ]
     axis_labels = list(style.get("axes_labels") or ["a", "b", "c"])[:3]
 
@@ -674,6 +824,7 @@ def build_scene_from_atoms(
         "display_mode": display_mode,
         "unit_cell_boundary_replicas": bool(include_boundary_replicas),
         "bonded_image_replica_count": bonded_image_replica_count,
+        "framework_context_replica_count": framework_context_replica_count,
         "bond_scale": bond_scale,
         "bond_thresholds": copy.deepcopy(bond_thresholds),
         "projected_axes": projected_axes,

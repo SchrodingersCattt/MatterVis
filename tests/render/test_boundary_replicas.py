@@ -10,6 +10,7 @@ fix from spuriously replicating *unwrapped* continuation atoms (which
 sit at frac like ``1.02`` for visual continuity but are crystallo-
 graphically a single site in the home cell).
 """
+
 from __future__ import annotations
 
 import gemmi
@@ -138,7 +139,11 @@ def test_fragment_on_face_replicates_as_whole_fragment():
 
     assert len(scene["draw_atoms"]) == 4
     labels_by_x = sorted(
-        (atom["label"], round(float(atom["cart"][0]), 5), bool(atom.get("_is_fragment_boundary_replica")))
+        (
+            atom["label"],
+            round(float(atom["cart"][0]), 5),
+            bool(atom.get("_is_fragment_boundary_replica")),
+        )
         for atom in scene["draw_atoms"]
     )
     assert labels_by_x == [
@@ -195,11 +200,12 @@ def test_cell_spanning_component_is_not_replicated_as_a_whole_cell():
 
     expanded = expand_boundary_replicas(atoms, M)
 
-    assert len(expanded) == 4
-    assert not any(atom.get("_is_fragment_boundary_replica") for atom in expanded)
+    assert len(expanded) == 2
+    assert all(atom.get("_cell_spanning_component") for atom in expanded)
+    assert not any(atom.get("_is_boundary_replica") for atom in expanded)
 
 
-def test_cell_spanning_component_drops_unbonded_site_images():
+def test_cell_spanning_component_uses_signed_record_images():
     cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
     M = np.eye(3) * 10.0
     atoms = [
@@ -222,8 +228,20 @@ def test_cell_spanning_component_drops_unbonded_site_images():
         preset={"style": {"show_labels": False, "show_axes": False}},
     )
 
-    assert len(scene["draw_atoms"]) == 2
-    assert len(scene["bonds"]) == 1
+    replicas = [
+        (index, atom)
+        for index, atom in enumerate(scene["draw_atoms"])
+        if atom.get("_is_framework_context_replica")
+    ]
+    connected = {index for bond in scene["bonds"] for index in (bond["i"], bond["j"])}
+
+    assert len(scene["draw_atoms"]) == 4
+    assert len(scene["bonds"]) == 2
+    assert {tuple(atom["_image_shift"]) for _, atom in replicas} == {
+        (-1, 0, 0),
+        (1, 0, 0),
+    }
+    assert all(index in connected for index, _ in replicas)
 
 
 def test_fragment_near_face_replicates_by_member_tolerance():
@@ -260,7 +278,8 @@ def test_fragment_near_face_replicates_by_member_tolerance():
 
     assert len(scene["draw_atoms"]) == 6
     replicas = [
-        atom for atom in scene["draw_atoms"]
+        atom
+        for atom in scene["draw_atoms"]
         if atom.get("_is_fragment_boundary_replica")
     ]
     assert sorted(atom["label"] for atom in replicas) == ["Cl1", "O1", "O2"]
@@ -291,10 +310,17 @@ def test_high_face_member_replicates_whole_fragment_to_negative_image():
         preset={"style": {"show_labels": False, "show_axes": False}},
     )
 
-    replicas = [atom for atom in scene["draw_atoms"] if atom.get("_is_fragment_boundary_replica")]
+    replicas = [
+        atom
+        for atom in scene["draw_atoms"]
+        if atom.get("_is_fragment_boundary_replica")
+    ]
     assert len(replicas) == 2
     assert {tuple(atom["_image_shift"]) for atom in replicas} == {(-1, 0, 0)}
-    assert sorted(round(float(atom["frac"][0]), 2) for atom in replicas) == [-0.06, -0.01]
+    assert sorted(round(float(atom["frac"][0]), 2) for atom in replicas) == [
+        -0.06,
+        -0.01,
+    ]
 
 
 def test_low_face_member_replicates_whole_fragment_to_positive_image():
@@ -321,7 +347,11 @@ def test_low_face_member_replicates_whole_fragment_to_positive_image():
         preset={"style": {"show_labels": False, "show_axes": False}},
     )
 
-    replicas = [atom for atom in scene["draw_atoms"] if atom.get("_is_fragment_boundary_replica")]
+    replicas = [
+        atom
+        for atom in scene["draw_atoms"]
+        if atom.get("_is_fragment_boundary_replica")
+    ]
     assert len(replicas) == 2
     assert {tuple(atom["_image_shift"]) for atom in replicas} == {(1, 0, 0)}
     assert sorted(round(float(atom["frac"][0]), 2) for atom in replicas) == [1.01, 1.06]
@@ -440,8 +470,12 @@ def test_near_face_replica_uses_triclinic_lattice_vector():
         preset={"style": {"show_labels": False, "show_axes": False}},
     )
 
-    original = next(item for item in scene["draw_atoms"] if not item.get("_is_boundary_replica"))
-    replica = next(item for item in scene["draw_atoms"] if item.get("_is_boundary_replica"))
+    original = next(
+        item for item in scene["draw_atoms"] if not item.get("_is_boundary_replica")
+    )
+    replica = next(
+        item for item in scene["draw_atoms"] if item.get("_is_boundary_replica")
+    )
     np.testing.assert_allclose(replica["cart"] - original["cart"], -M[0])
     np.testing.assert_allclose(replica["frac"], [-0.01, 0.40, 0.30])
 
@@ -471,7 +505,10 @@ def test_periodic_context_tolerance_boundary(frac, expected_replicas):
         preset={"style": {"show_labels": False, "show_axes": False}},
     )
 
-    assert sum(bool(atom.get("_is_boundary_replica")) for atom in scene["draw_atoms"]) == expected_replicas
+    assert (
+        sum(bool(atom.get("_is_boundary_replica")) for atom in scene["draw_atoms"])
+        == expected_replicas
+    )
 
 
 def test_minor_disorder_fragment_replicates_as_whole_fragment():
@@ -509,7 +546,8 @@ def test_minor_disorder_fragment_replicates_as_whole_fragment():
 
     assert len(scene["draw_atoms"]) == 4
     replicas = [
-        atom for atom in scene["draw_atoms"]
+        atom
+        for atom in scene["draw_atoms"]
         if atom.get("_is_fragment_boundary_replica")
     ]
     assert sorted(atom["label"] for atom in replicas) == ["C5", "N3"]
@@ -556,7 +594,8 @@ def test_disorder_fragment_displayed_near_face_replicates_next_to_partners():
 
     assert len(scene["draw_atoms"]) == 4
     replicas = [
-        atom for atom in scene["draw_atoms"]
+        atom
+        for atom in scene["draw_atoms"]
         if atom.get("_is_fragment_boundary_replica")
     ]
     assert sorted(atom["label"] for atom in replicas) == ["C5", "N3"]
@@ -611,7 +650,9 @@ def test_fragment_with_mck_drift_replicates_at_canonical_cell_corners():
     # should land outside ``[-eps, a + eps]`` along any axis.
     n_atoms = [a for a in scene["draw_atoms"] if a["elem"] == "N"]
     assert len(n_atoms) == 8
-    n_carts = sorted(tuple(round(float(c), 3) for c in atom["cart"]) for atom in n_atoms)
+    n_carts = sorted(
+        tuple(round(float(c), 3) for c in atom["cart"]) for atom in n_atoms
+    )
     expected = sorted(
         (10.0 * sx, 10.0 * sy, 10.0 * sz)
         for sx in (0.0, 1.0)
@@ -669,11 +710,13 @@ def test_fragment_face_membership_does_not_cartesian_explode():
     # whole 2-atom fragment = 2 + 2 * 2 = 6. The cartesian-product bug
     # would have produced 2 + 3 * 2 = 8 (extra (+x,+y,0) copy).
     assert len(scene["draw_atoms"]) == 6
-    image_shifts = sorted({
-        tuple(atom.get("_image_shift", (0, 0, 0)))
-        for atom in scene["draw_atoms"]
-        if atom.get("_is_boundary_replica")
-    })
+    image_shifts = sorted(
+        {
+            tuple(atom.get("_image_shift", (0, 0, 0)))
+            for atom in scene["draw_atoms"]
+            if atom.get("_is_boundary_replica")
+        }
+    )
     assert image_shifts == [(0, 1, 0), (1, 0, 0)]
 
 
@@ -745,7 +788,9 @@ def test_unwrapped_near_face_fragment_does_not_create_second_neighbour_images():
     assert len(scene["draw_atoms"]) == 4
     assert min(fracs) >= -0.02 - 1e-9
     assert max(fracs) <= 1.02 + 1e-9
-    assert not any(abs(value - 2.02) < 1e-9 or abs(value + 1.02) < 1e-9 for value in fracs)
+    assert not any(
+        abs(value - 2.02) < 1e-9 or abs(value + 1.02) < 1e-9 for value in fracs
+    )
 
 
 def test_unit_cell_can_omit_outside_boundary_replicas():
@@ -781,9 +826,7 @@ def test_strict_unit_cell_manifests_cross_boundary_bonded_images():
         _atom("C1", [-0.02, 0.5, 0.5], M),
         _atom("C2", [0.02, 0.5, 0.5], M),
     ]
-    records = [
-        {"left": 0, "right": 1, "right_image_shift": [1, 0, 0]}
-    ]
+    records = [{"left": 0, "right": 1, "right_image_shift": [1, 0, 0]}]
 
     scene = build_scene_from_atoms(
         name="strict_cross_boundary_bond",
@@ -802,8 +845,12 @@ def test_strict_unit_cell_manifests_cross_boundary_bonded_images():
     assert len(scene["draw_atoms"]) == 4
     assert len(scene["bonds"]) == 2
     assert scene["bonded_image_replica_count"] == 2
-    home_atoms = [atom for atom in scene["draw_atoms"] if not atom.get("_is_bonded_image_replica")]
-    image_atoms = [atom for atom in scene["draw_atoms"] if atom.get("_is_bonded_image_replica")]
+    home_atoms = [
+        atom for atom in scene["draw_atoms"] if not atom.get("_is_bonded_image_replica")
+    ]
+    image_atoms = [
+        atom for atom in scene["draw_atoms"] if atom.get("_is_bonded_image_replica")
+    ]
     assert len(home_atoms) == 2
     assert len(image_atoms) == 2
     assert all(
@@ -815,7 +862,10 @@ def test_strict_unit_cell_manifests_cross_boundary_bonded_images():
         sorted(tuple(np.asarray(atom["frac"])) for atom in image_atoms),
         [(-0.02, 0.5, 0.5), (1.02, 0.5, 0.5)],
     )
-    assert all(np.isclose(np.linalg.norm(bond["end"] - bond["start"]), 0.4) for bond in scene["bonds"])
+    assert all(
+        np.isclose(np.linalg.norm(bond["end"] - bond["start"]), 0.4)
+        for bond in scene["bonds"]
+    )
 
 
 def test_strict_unit_cell_keeps_empty_mck_bond_contract_empty():
@@ -853,9 +903,7 @@ def test_strict_unit_cell_preserves_in_cell_canonical_bonds():
         _atom("C1", [0.40, 0.5, 0.5], M),
         _atom("C2", [0.52, 0.5, 0.5], M),
     ]
-    records = [
-        {"left": 0, "right": 1, "right_image_shift": [0, 0, 0]}
-    ]
+    records = [{"left": 0, "right": 1, "right_image_shift": [0, 0, 0]}]
 
     scene = build_scene_from_atoms(
         name="strict_in_cell_bond",
