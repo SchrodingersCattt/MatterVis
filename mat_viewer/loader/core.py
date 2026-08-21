@@ -8,7 +8,6 @@ from types import SimpleNamespace
 from typing import Any, Dict, Iterable, Optional
 
 import numpy as np
-from molcrys_kit.utils.geometry import cart_to_frac
 
 from .. import perf_log
 from ..legacy import crystal_scene as legacy_scene
@@ -605,60 +604,10 @@ def _unwrapped_atoms_from_molcrys(
     *,
     include_minor: bool = True,
 ) -> tuple[list[dict[str, Any]], list[list[int]]]:
-    """Build the unwrapped-atom list directly from a
-    :class:`molcrys_bridge.CrystalAnalysis`. ``mol_indices`` /
-    ``mol_cart_positions`` were already produced by MolCrysKit's
-    PBC-aware ASE neighbour-list traversal; copy those Cartesian
-    positions onto the source atom dicts and recompute the matching
-    fractional coords. Atoms not touched by any molecule (e.g.
-    isolated minor-disorder ghosts that the analysis dropped) keep
-    their original cart/frac.
-    """
-    out = [dict(atom) for atom in atoms]
-    for idx, atom in enumerate(out):
-        atom["_unwrapped"] = False
-        atom["_source_index"] = int(idx)
+    """Build deterministic molecule images from public MCK bond records."""
+    from .periodic_unwrap import unwrap_from_bond_records
 
-    M_arr = np.asarray(M, dtype=float)
-
-    mol_indices = getattr(molcrys_analysis, "mol_indices", None) or []
-    mol_cart_positions = getattr(molcrys_analysis, "mol_cart_positions", None) or []
-
-    # Per-axis cell lengths for framework detection
-    _cell_lengths = np.array([np.linalg.norm(M_arr[i]) for i in range(3)])
-
-    for mol_idx, (indices, cart_positions) in enumerate(
-        zip(mol_indices, mol_cart_positions)
-    ):
-        coords = np.asarray(cart_positions, dtype=float)
-        if coords.ndim != 2 or coords.shape[0] != len(indices):
-            continue
-
-        # Skip unwrapping for framework/network molecules: if the molecule
-        # span exceeds 90% of any cell axis length, it is a framework that
-        # wraps across PBC and should NOT be unwrapped.
-        span = coords.max(axis=0) - coords.min(axis=0)
-        # Project span onto each cell axis
-        frac_span = span @ np.linalg.inv(M_arr)
-        if np.any(np.abs(frac_span) > 0.9):
-            continue
-
-        for local_idx, raw_idx in enumerate(indices):
-            if raw_idx < 0 or raw_idx >= len(out):
-                continue
-            cart = coords[local_idx]
-            # Keep the crystallographic wrapped position as the boundary
-            # image key. ``frac`` below is overwritten with MCK's continuous
-            # molecule coordinate, which may be outside [0, 1] for fragments
-            # crossing a face; boundary replication must still be based on
-            # the original special-position / face membership.
-            out[raw_idx]["_wrapped_frac"] = np.asarray(
-                out[raw_idx].get("frac"), dtype=float
-            ).copy()
-            out[raw_idx]["_source_molecule_index"] = int(mol_idx)
-            out[raw_idx]["cart"] = cart.copy()
-            out[raw_idx]["frac"] = cart_to_frac(cart, M_arr)
-            out[raw_idx]["_unwrapped"] = True
+    out = unwrap_from_bond_records(atoms, M, molcrys_analysis)
 
     if not include_minor:
         ops = scene_ops()

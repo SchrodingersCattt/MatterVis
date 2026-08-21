@@ -25,9 +25,12 @@ from __future__ import annotations
 
 from collections import Counter
 from pathlib import Path
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
+from mat_viewer.loader.periodic_unwrap import unwrap_from_bond_records
 from mat_viewer.structure.bonds import bonds_conflict
 from mat_viewer.style.disorder import is_minor
 from mat_viewer.loader import (
@@ -37,6 +40,27 @@ from mat_viewer.loader import (
 
 
 SY_CIF = Path("scripts/data/SY.cif")
+
+
+def test_unwrap_uses_signed_bond_records_not_traversal_images():
+    matrix = np.eye(3) * 10.0
+    atoms = [
+        {"label": "C1", "elem": "C", "frac": np.array([0.98, 0.5, 0.5])},
+        {"label": "C2", "elem": "C", "frac": np.array([0.02, 0.5, 0.5])},
+    ]
+    analysis = SimpleNamespace(
+        mol_indices=[[0, 1]],
+        mol_cart_positions=[np.array([[9.8, 5.0, 5.0], [-9.8, 5.0, 5.0]])],
+        bond_records=[
+            {"left": 0, "right": 1, "right_image_shift": [1, 0, 0]}
+        ],
+    )
+
+    unwrapped = unwrap_from_bond_records(atoms, matrix, analysis)
+
+    assert np.allclose(unwrapped[0]["frac"], [0.98, 0.5, 0.5])
+    assert np.allclose(unwrapped[1]["frac"], [1.02, 0.5, 0.5])
+    assert np.linalg.norm(unwrapped[1]["cart"] - unwrapped[0]["cart"]) == pytest.approx(0.4)
 
 
 # --------------------------------------------------------------------- #
