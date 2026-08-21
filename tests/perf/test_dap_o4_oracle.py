@@ -108,7 +108,7 @@ def test_revision_check_skips_when_distribution_has_no_source_revision(monkeypat
 
 
 def test_dap4_pipeline_oracle():
-    entry = ENTRIES["dap4-mattervis-051df0b-mck-448d60d"]
+    entry = ENTRIES["dap4-mattervis-051df0b-mck-f2188c1"]
     fixture = Path(__file__).resolve().parents[2] / "scripts" / "data" / "DAP-4.cif"
 
     assert hashlib.sha256(fixture.read_bytes()).hexdigest() == entry["fixture"]["sha256"]
