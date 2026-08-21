@@ -90,10 +90,7 @@ def _build_render_parser(
         "--backend",
         choices=("cpu", "matplotlib", "plotly"),
         default="cpu",
-        help=(
-            "Rendering backend: cpu for 3D raster/vector geometry, matplotlib "
-            "for projected 2D figures, or plotly for WebGL (default: cpu)."
-        ),
+        help="Backend: cpu 3D, matplotlib projected 2D, or plotly WebGL (default: cpu).",
     )
     parser.add_argument(
         "--check",
@@ -977,9 +974,7 @@ def _camera_spec(structure, args: argparse.Namespace, *, display: str):
         selected.bundle,
         display=display,
         show_hydrogen=args.show_hydrogen,
-        show_cell=bool(
-            getattr(args, "show_unit_cell", getattr(args, "show_cell", True))
-        ),
+        show_cell=bool(getattr(args, "show_unit_cell", getattr(args, "show_cell", True))),
     )
     aspect = max(float(args.width) / float(args.height), 1.0e-6)
     ortho_scale = radius * 1.15 / min(aspect, 1.0)
