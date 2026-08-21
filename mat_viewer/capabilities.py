@@ -17,8 +17,8 @@ from typing import Iterable, Mapping
 CAPABILITIES_SCHEMA = "mattervis.capabilities/v1"
 RESOLUTION_SCHEMA = "mattervis.requirements/v1"
 DIST_NAME = "matter-vis"
-MOLCRYSKIT_MINIMUM = "0.6.2.dev11"
-MOLCRYSKIT_CONTRACT_SHA = "79198073c0b1ea9b01faeb4aa5c93f79cb00b345"
+MOLCRYSKIT_MINIMUM = "0.6.2.dev16"
+MOLCRYSKIT_CONTRACT_SHA = "448d60dbc27639d92f75c3e744f215776f4b966c"
 MOLCRYSKIT_DEVELOPMENT_INSTALL = (
     'python -m pip install "molcrys-kit @ '
     "git+https://github.com/SchrodingersCattt/MolCrysKit.git@"
