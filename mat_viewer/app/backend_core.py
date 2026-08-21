@@ -1235,12 +1235,6 @@ class _CoreBackendMixin:
             )
         )
         style["display_mode"] = state.get("display_mode", scene.get("display_mode", "formula_unit"))
-        # A formula-unit cluster may cross periodic images to stay chemically
-        # whole. The origin cell is not its bounding box, so cell edges are
-        # meaningful only for the canonical unit-cell slice.
-        style["show_unit_cell"] = bool(style.get("show_unit_cell")) and (
-            style["display_mode"] == "unit_cell"
-        )
         style["material"] = state.get("material", style.get("material", "mesh"))
         style["style"] = state.get("style", style.get("style", "ball_stick"))
         style["disorder"] = state.get("disorder", style.get("disorder", "outline_rings"))
