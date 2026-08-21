@@ -368,7 +368,10 @@ def create_app(
                                 {"label": "Axes", "value": "axes"},
                                 {"label": "Disorder Only", "value": "minor_only"},
                                 {"label": "Hydrogens", "value": "hydrogens"},
-                                {"label": "Unit Cell Box", "value": "unit_cell_box"},
+                                {
+                                    "label": "Unit Cell Box (unit-cell scope)",
+                                    "value": "unit_cell_box",
+                                },
                                 # Phase 3: legacy "Monochrome atoms" toggle
                                 # has been replaced by the Atom-Groups
                                 # editor below (one-click "Monochrome"
@@ -445,7 +448,10 @@ def create_app(
                                     id="material-selector",
                                     options=[
                                         {"label": "3D Mesh", "value": "mesh"},
-                                        {"label": "2D Flat", "value": "flat"},
+                                        {
+                                            "label": "Flat shading (fast 3D)",
+                                            "value": "flat",
+                                        },
                                     ],
                                     value=first_state.get("material", "mesh"),
                                     clearable=False,

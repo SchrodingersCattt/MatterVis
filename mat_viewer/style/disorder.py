@@ -59,8 +59,11 @@ def bond_effective_opacity(bond: Mapping[str, Any], style: Mapping[str, Any]) ->
     is_minor = bool(bond.get("is_minor", False))
     is_disordered = bool(bond.get("is_disordered", is_minor))
     # Occupancy controls opacity only for a loader-confirmed disordered bond.
+    unresolved = is_disordered and not bool(bond.get("disorder_resolved", False))
     if is_disordered and (
-        style.get("disorder") == "opacity" or style.get("force_minor_fade")
+        style.get("disorder") == "opacity"
+        or style.get("force_minor_fade")
+        or (unresolved and style.get("disorder") != "none")
     ):
         occ = bond.get("occ", 1.0)
         try:

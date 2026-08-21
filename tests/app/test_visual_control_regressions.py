@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from mat_viewer.app import ViewerBackend
 from mat_viewer.app.dash_impl import _display_options_can_fast_patch
+from mat_viewer.app.camera_helpers import _structure_summary
 from mat_viewer.loader import build_empty_bundle
 from mat_viewer.presets import DEFAULT_STYLE
 from mat_viewer.renderer import build_figure
@@ -81,11 +82,55 @@ def test_display_scope_persists_after_selection(tmp_path):
     assert backend.get_state(scene_id)["display_mode"] == "unit_cell"
 
 
+def test_cell_box_is_not_drawn_around_formula_unit_cluster(tmp_path):
+    backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    scene_id = backend.active_scene_id()
+    try:
+        backend.patch_state(
+            {
+                "display_mode": "formula_unit",
+                "display_options": ["unit_cell_box"],
+            },
+            scene_id=scene_id,
+        )
+        empty_scene = build_empty_bundle().scene
+        formula_style = backend.style_for_state(
+            backend.get_state(scene_id), scene=empty_scene
+        )
+        assert formula_style["show_unit_cell"] is False
+
+        backend.patch_state({"display_mode": "unit_cell"}, scene_id=scene_id)
+        cell_style = backend.style_for_state(
+            backend.get_state(scene_id), scene=empty_scene
+        )
+        assert cell_style["show_unit_cell"] is True
+    finally:
+        backend._render_worker.shutdown()
+
+
 def test_only_label_and_axis_options_use_fast_display_patch():
     assert _display_options_can_fast_patch(["labels"], ["labels", "axes"])
     assert not _display_options_can_fast_patch([], ["unit_cell_box"])
     assert not _display_options_can_fast_patch(["minor_only"], [])
     assert not _display_options_can_fast_patch([], ["minor_wireframe"])
+
+
+def test_structure_summary_reports_unresolved_disorder():
+    scene = {
+        "draw_atoms": [
+            {
+                "is_minor": False,
+                "is_disordered": True,
+                "disorder_resolved": False,
+            }
+        ],
+        "bonds": [],
+    }
+
+    summary = _structure_summary(scene)
+
+    assert "Disorder detected: 1 site(s)" in summary
+    assert "no resolved major/minor assignment" in summary
 
 
 def test_ws_figure_broadcast_rejects_empty_2d_payload(tmp_path):

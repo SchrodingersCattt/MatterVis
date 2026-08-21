@@ -50,6 +50,15 @@ def _status_message(message: str, level: str = "info") -> tuple[str, str]:
 def _structure_summary(scene: dict) -> str:
     if not scene.get("draw_atoms"):
         return "No structure loaded yet. Upload a CIF to begin."
+    disordered_atoms = sum(
+        1 for atom in scene["draw_atoms"] if atom.get("is_disordered", False)
+    )
+    unresolved_atoms = sum(
+        1
+        for atom in scene["draw_atoms"]
+        if atom.get("is_disordered", False)
+        and not atom.get("disorder_resolved", False)
+    )
     minor_atoms = sum(1 for atom in scene["draw_atoms"] if atom["is_minor"])
     minor_bonds = sum(1 for bond in scene["bonds"] if bond["is_minor"])
     overflow_count = len(scene.get("unwrap_overflow") or [])
@@ -58,8 +67,18 @@ def _structure_summary(scene: dict) -> str:
         if overflow_count
         else ""
     )
-    if minor_atoms:
-        return f"Disorder detected: {minor_atoms} minor atoms, {minor_bonds} minor bonds.{overflow_text}"
+    if disordered_atoms:
+        unresolved_text = (
+            f" {unresolved_atoms} site(s) have no resolved major/minor "
+            "assignment; occupancy is used visually."
+            if unresolved_atoms
+            else ""
+        )
+        return (
+            f"Disorder detected: {disordered_atoms} site(s), "
+            f"{minor_atoms} minor atoms, {minor_bonds} minor bonds."
+            f"{unresolved_text}{overflow_text}"
+        )
     return f"Disorder: none detected.{overflow_text}"
 
 

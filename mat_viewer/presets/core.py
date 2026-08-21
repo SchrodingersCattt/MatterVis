@@ -23,7 +23,9 @@ DEFAULT_STYLE = {
     "show_axes": True,
     "show_title": True,
     "show_hydrogen": True,
-    "show_unit_cell": True,
+    # ``formula_unit`` is a compact molecular selection, not a conventional
+    # cell slice. Keep the box off until ``unit_cell`` is requested.
+    "show_unit_cell": False,
     "show_minor_only": False,
     "depth_cue_enabled": False,
     "projection": "perspective",
