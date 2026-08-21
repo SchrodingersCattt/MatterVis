@@ -65,7 +65,7 @@ During the two-PR development window, MatterVis requires the exact MolCrysKit
 contract commit used by CI. Install it first with:
 
 ```bash
-python -m pip install "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@0a7eb759c11bf3df7272534765b67e5e0f9e5d1d"
+python -m pip install "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@79198073c0b1ea9b01faeb4aa5c93f79cb00b345"
 ```
 
 Then install this checkout.

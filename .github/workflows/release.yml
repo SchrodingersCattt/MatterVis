@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  MOLCRYSKIT_CONTRACT_SHA: 0a7eb759c11bf3df7272534765b67e5e0f9e5d1d
+  MOLCRYSKIT_CONTRACT_SHA: 79198073c0b1ea9b01faeb4aa5c93f79cb00b345
 
 jobs:
   release-checks:
