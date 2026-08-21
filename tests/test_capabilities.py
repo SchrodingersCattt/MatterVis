@@ -84,6 +84,8 @@ def test_unknown_requirement_fails_instead_of_falling_back() -> None:
 
 def test_output_backend_resolution_is_explicit() -> None:
     assert requirements_for_render("figure.svg", "cpu") == ("svg",)
+    assert requirements_for_render("figure.svg", "matplotlib") == ("svg",)
+    assert requirements_for_render("figure.png", "matplotlib") == ("png",)
     assert requirements_for_render("figure.html", "plotly") == ("html", "plotly")
     assert requirements_for_render("figure.png", "plotly") == (
         "png",
@@ -91,6 +93,8 @@ def test_output_backend_resolution_is_explicit() -> None:
     )
     with pytest.raises(ValueError, match="HTML output requires"):
         requirements_for_render("figure.html", "cpu")
+    with pytest.raises(ValueError, match="Matplotlib output must be"):
+        requirements_for_render("movie.gif", "matplotlib")
     with pytest.raises(ValueError, match="GIF/MP4 output requires --backend cpu"):
         requirements_for_render("movie.gif", "plotly")
 
@@ -703,6 +707,8 @@ C 0.6 0 0
             "7",
             "--style",
             "ortep",
+            "--shading",
+            "flat",
             "--ortep-mode",
             "ortep_hatch",
             "--aromatic-rings",
@@ -717,7 +723,7 @@ C 0.6 0 0
     spec = captured_call["render_spec"]
     assert captured_call["frame_indices"] == [1, 3]
     assert captured_call["fps"] == 7.0
-    assert spec.shading == "smooth"
+    assert spec.shading == "flat"
     assert spec.ortep_mode == "hatch"
     assert spec.aromatic_rings == "disk"
     assert spec.missing_adp_policy == "sphere"

@@ -14,7 +14,7 @@ from .frame_selection import parse_frame_indices as _parse_frame_indices
 
 _DISPLAY_MODES = ("auto", "formula_unit", "unit_cell", "asymmetric_unit", "cluster")
 _STYLES = ("ball_stick", "ball", "stick", "ortep", "wireframe")
-_MATERIALS = ("mesh", "flat")
+_SHADINGS = ("smooth", "flat")
 _ORTEP_MODES = ("ortep_solid", "ortep_axes", "ortep_octant", "ortep_hatch")
 _IMAGE_EXTENSIONS = (".png", ".pdf", ".svg")
 _ANIMATION_EXTENSIONS = (".gif", ".mp4")
@@ -115,10 +115,10 @@ def _build_render_parser(
         help="Atom/bond rendering style (default: ball_stick).",
     )
     p.add_argument(
-        "--material",
-        choices=_MATERIALS,
-        default="mesh",
-        help="Surface material (default: mesh).",
+        "--shading",
+        choices=_SHADINGS,
+        default="smooth",
+        help="Surface shading for mesh geometry (default: smooth).",
     )
 
     # Projection

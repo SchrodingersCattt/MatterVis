@@ -19,7 +19,7 @@ the output. Use the exact `install` command in its JSON result. Never install
 <!-- capability-matrix:start -->
 | What you need | Resolver requirement | Required installation |
 |---|---|---|
-| CPU PNG/PDF/SVG; structure inspection; ORTEP; rings; polyhedra | `core` | `python -m pip install "matter-vis"` |
+| CPU 3D or Matplotlib projected 2D PNG/PDF/SVG; structure inspection; ORTEP; rings; polyhedra | `core` | `python -m pip install "matter-vis"` |
 | Interactive Plotly/WebGL HTML | `plotly` | `python -m pip install "matter-vis[plotly]"` |
 | Plotly PNG/PDF/SVG through Kaleido | `plotly-export` | `python -m pip install "matter-vis[plotly-export]"` |
 | Dash viewer, REST, and WebSocket service | `web` | `python -m pip install "matter-vis[web]"` |

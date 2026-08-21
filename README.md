@@ -69,7 +69,7 @@ Install only the frontend the requested output needs:
 
 | Extra | Adds |
 |---|---|
-| base | CPU PNG/PDF/SVG, inspection, ORTEP, rings, and polyhedra |
+| base | CPU 3D and Matplotlib 2D PNG/PDF/SVG, inspection, ORTEP, rings, and polyhedra |
 | `[plotly]` | Interactive Plotly/WebGL HTML |
 | `[plotly-export]` | Plotly + Kaleido static export |
 | `[web]` | Dash, REST, WebSocket, compression, and Plotly |
@@ -102,9 +102,13 @@ mat-vis inspect structure.cif --json
 mat-vis render structure.cif -o figure.png --backend cpu --check --json
 mat-vis render structure.cif -o figure.png --backend cpu --json
 
+# True projected 2D ball-and-stick (Matplotlib; no 3D lighting)
+mat-vis render structure.cif -o figure-2d.png --backend matplotlib --json \
+  --view unit_cell --style ball_stick --camera-axis c --orthogonal
+
 # PDF, full unit cell, ORTEP hatch marks over flat-shaded ellipsoids
 mat-vis render structure.cif -o figure.pdf \
-  --backend cpu --view unit_cell --style ortep --material flat \
+  --backend cpu --view unit_cell --style ortep --shading flat \
   --ortep-mode ortep_hatch --missing-adp-policy error
 
 # Interactive HTML for supplementary information

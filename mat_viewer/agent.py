@@ -291,6 +291,10 @@ def render(
         from .render.cpu import render as _render_cpu
 
         result = _render_cpu(plan, output=output)
+    elif backend_name == "matplotlib":
+        from .render.matplotlib import render as _render_matplotlib
+
+        result = _render_matplotlib(plan, output=output)
     elif backend_name == "plotly":
         try:
             from .render.plotly import render as _render_plotly
@@ -301,7 +305,7 @@ def render(
             ) from exc
         result = _render_plotly(plan, output=output)
     else:
-        raise ValueError("backend must be 'cpu' or 'plotly'")
+        raise ValueError("backend must be 'cpu', 'matplotlib', or 'plotly'")
     return _enrich_result(
         result,
         source=source_or_plan,
