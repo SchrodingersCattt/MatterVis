@@ -244,6 +244,48 @@ def test_cell_spanning_component_uses_signed_record_images():
     assert all(index in connected for index, _ in replicas)
 
 
+def test_cell_spanning_context_completes_boundary_coordination_shells():
+    cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
+    M = np.eye(3) * 10.0
+    atoms = [
+        {**_atom("Zn1", [0.05, 0.5, 0.5], M), "_source_molecule_index": 0},
+        {**_atom("N1", [1.05, 0.5, 0.5], M), "_source_molecule_index": 0},
+        {**_atom("N2", [0.15, 0.5, 0.5], M), "_source_molecule_index": 0},
+        {**_atom("C1", [1.15, 0.5, 0.5], M), "_source_molecule_index": 0},
+    ]
+    records = [
+        {"left": 0, "right": 1, "right_image_shift": [1, 0, 0]},
+        {"left": 0, "right": 2, "right_image_shift": [0, 0, 0]},
+        {"left": 1, "right": 3, "right_image_shift": [0, 0, 0]},
+    ]
+
+    scene = build_scene_from_atoms(
+        name="spanning_coordination_shell",
+        title="Spanning coordination shell",
+        atoms=atoms,
+        cell=cell,
+        M=M,
+        R=np.eye(3),
+        display_mode="unit_cell",
+        ops=scene_ops(),
+        unwrapped_atoms=atoms,
+        molcrys_analysis=_analysis(atoms, records),
+        preset={"style": {"show_labels": False, "show_axes": False}},
+    )
+
+    replicas = {
+        (atom["label"], tuple(atom["_image_shift"]))
+        for atom in scene["draw_atoms"]
+        if atom.get("_is_framework_context_replica")
+    }
+    assert replicas == {
+        ("Zn1", (-1, 0, 0)),
+        ("N2", (-1, 0, 0)),
+        ("N1", (1, 0, 0)),
+        ("C1", (1, 0, 0)),
+    }
+
+
 def test_fragment_near_face_replicates_by_member_tolerance():
     """A near-face member gives the whole fragment an adjacent image.
 

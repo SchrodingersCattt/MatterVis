@@ -26,7 +26,7 @@ dependencies = [
     "matplotlib",
     "pillow",
     "ase",
-    "molcrys-kit>=0.6.2.dev16",
+    "molcrys-kit>=0.6.2.dev17",
 ]
 
 [project.scripts]

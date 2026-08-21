@@ -249,9 +249,11 @@ def _manifest_spanning_bond_context(
 
     A cell-spanning component is infinite, so whole-component replication is
     undefined and per-site face replication produces disconnected fragments.
-    Signed MCK bond records identify the exact adjacent-cell endpoints.  When
-    an endpoint belongs to an MCK ring, the complete ring is copied in the
-    same image so a boundary linker is never shown as a broken partial ring.
+    Signed MCK bond records identify the exact adjacent-cell endpoints.  Each
+    endpoint is expanded through one complete bond shell, then any aromatic
+    rings touched by that shell are completed in the same image.  This keeps
+    boundary coordination centres and linkers visually symmetric without
+    attempting to replicate an infinite framework component.
     """
     if not canonical_bond_records or not any(
         atom.get("_cell_spanning_component") for atom in draw_atoms
@@ -304,19 +306,26 @@ def _manifest_spanning_bond_context(
 
     def add_context(seed: int, shift: tuple[int, int, int]) -> None:
         placements: dict[int, tuple[int, int, int]] = {seed: (0, 0, 0)}
-        for ring in rings_by_source.get(seed, ()):
-            queue = [seed]
-            while queue:
-                current = queue.pop(0)
-                current_shift = placements[current]
-                for neighbour, edge_shift in adjacency.get(current, ()):
-                    if neighbour not in ring:
-                        continue
-                    proposed = tuple(
-                        current_shift[axis] + edge_shift[axis] for axis in range(3)
-                    )
-                    if neighbour not in placements:
-                        placements[neighbour] = proposed
+        for neighbour, edge_shift in adjacency.get(seed, ()):
+            placements.setdefault(neighbour, edge_shift)
+
+        ring_anchors = list(placements)
+        for anchor in ring_anchors:
+            for ring in rings_by_source.get(anchor, ()):
+                queue = [anchor]
+                visited = {anchor}
+                while queue:
+                    current = queue.pop(0)
+                    current_shift = placements[current]
+                    for neighbour, edge_shift in adjacency.get(current, ()):
+                        if neighbour not in ring or neighbour in visited:
+                            continue
+                        visited.add(neighbour)
+                        proposed = tuple(
+                            current_shift[axis] + edge_shift[axis]
+                            for axis in range(3)
+                        )
+                        placements.setdefault(neighbour, proposed)
                         queue.append(neighbour)
         for source in sorted(placements):
             relative = placements[source]
