@@ -75,6 +75,13 @@ interpreted as Å. `tail_offset` can move the rendered origin along the displaye
 direction, but the default is zero: an arrow beginning inside an atom is
 correctly hidden by that atom.
 
+For vibration modes, the conventional caller policy is to centre the displayed
+arrow on the equilibrium atom: set `origin = atom_position - display_vector/2`
+and pass `vector = display_vector` in `absolute` mode. Dipoles, forces, and
+polarization vectors usually keep the physical anchor as the tail. This is an
+origin policy rather than a distinct arrow type, so callers may choose either
+convention without changing mesh geometry.
+
 ## Coordinate spaces
 
 `origin_space`, `direction_space`, and `end_space` independently accept
