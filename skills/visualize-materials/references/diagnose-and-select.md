@@ -43,6 +43,11 @@ MolCrysKit contract is fatal and must not fall back to `.info` fields.
 For a local environment, first extract an auditable target or use an API that
 accepts the intended centre/fragment. Do not use bare `cluster` as a crop tool.
 
+If the target contains a 1D chain, 2D layer, or 3D framework and the default
+`unit_cell` boundary replicas are too dense or visually one-sided, read
+`periodic-finite-views.md`. This is a topology/window-selection problem, not a
+camera, clipping, atom-scale, or bond-radius problem.
+
 ## Disorder strategy
 
 High-disorder scenes need an explicit choice: major-only, hidden minor sites,
