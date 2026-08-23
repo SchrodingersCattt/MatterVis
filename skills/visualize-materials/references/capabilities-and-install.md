@@ -61,11 +61,11 @@ switch backend or representation silently.
 
 ## Development checkout
 
-During the two-PR development window, MatterVis requires the exact MolCrysKit
-contract commit used by CI. Install it first with:
+MatterVis requires MolCrysKit 0.7.0 or later. Install it before this checkout
+with:
 
 ```bash
-python -m pip install "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@f2188c14e245b87d99dc1d13ab72e37993d972b0"
+python -m pip install "molcrys-kit>=0.7.0"
 ```
 
 Then install this checkout.

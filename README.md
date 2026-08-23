@@ -60,7 +60,7 @@ pip install matter-vis
 ```bash
 git clone https://github.com/SchrodingersCattt/MatterVis.git
 cd MatterVis
-python -m pip install "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@f2188c14e245b87d99dc1d13ab72e37993d972b0"
+python -m pip install "molcrys-kit>=0.7.0"
 pip install -e .
 ```
 

@@ -50,19 +50,18 @@ def _require_molcryskit():
         )
     except ImportError as exc:
         from ..capabilities import (
-            MOLCRYSKIT_DEVELOPMENT_INSTALL,
+            MOLCRYSKIT_INSTALL,
             MOLCRYSKIT_MINIMUM,
         )
 
         raise ImportError(
             "MolCrysKit is a base MatterVis dependency and is required for "
             f"formula_unit display (molcrys-kit>={MOLCRYSKIT_MINIMUM}). "
-            "During the two-PR development window, install the exact contract "
-            f"commit with: {MOLCRYSKIT_DEVELOPMENT_INSTALL}."
+            f"Install or upgrade it with: {MOLCRYSKIT_INSTALL}."
         ) from exc
 
     from ..capabilities import (
-        MOLCRYSKIT_DEVELOPMENT_INSTALL,
+        MOLCRYSKIT_INSTALL,
         MOLCRYSKIT_MINIMUM,
         molcryskit_contract_missing,
     )
@@ -73,9 +72,9 @@ def _require_molcryskit():
             "The installed molcrys-kit does not provide MatterVis's required "
             "public structure contracts: "
             + ", ".join(missing)
-            + f". MatterVis requires molcrys-kit>={MOLCRYSKIT_MINIMUM}. During "
-            "development, install the exact contract commit with: "
-            + MOLCRYSKIT_DEVELOPMENT_INSTALL
+            + f". MatterVis requires molcrys-kit>={MOLCRYSKIT_MINIMUM}. "
+            "Install or upgrade it with: "
+            + MOLCRYSKIT_INSTALL
             + "."
         )
 

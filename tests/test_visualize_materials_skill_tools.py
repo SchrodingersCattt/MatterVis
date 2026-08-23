@@ -10,7 +10,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 CI
 
 from mat_viewer.capabilities import (
     CAPABILITY_REGISTRY,
-    MOLCRYSKIT_CONTRACT_SHA,
+    MOLCRYSKIT_INSTALL,
     MOLCRYSKIT_MINIMUM,
     install_command,
     resolve_requirements,
@@ -76,7 +76,7 @@ def test_skill_has_no_second_installer_or_obsolete_package_entrypoint() -> None:
     assert "apt-get install" not in text
 
 
-def test_unreleased_molcryskit_contract_pin_is_consistent() -> None:
+def test_released_molcryskit_minimum_is_consistent() -> None:
     data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     molcryskit = next(
         dependency
@@ -88,10 +88,11 @@ def test_unreleased_molcryskit_contract_pin_is_consistent() -> None:
 
     for workflow in ("ci.yml", "release.yml"):
         text = (ROOT / ".github" / "workflows" / workflow).read_text(encoding="utf-8")
-        assert f"MOLCRYSKIT_CONTRACT_SHA: {MOLCRYSKIT_CONTRACT_SHA}" in text
+        assert f'MOLCRYSKIT_MINIMUM: "{MOLCRYSKIT_MINIMUM}"' in text
+        assert 'molcrys-kit==${MOLCRYSKIT_MINIMUM}' in text
         assert 'python -m pip install -e ".[all,test]"' in text
 
     development = (SKILL / "references" / "capabilities-and-install.md").read_text(
         encoding="utf-8"
     )
-    assert MOLCRYSKIT_CONTRACT_SHA in development
+    assert MOLCRYSKIT_INSTALL in development

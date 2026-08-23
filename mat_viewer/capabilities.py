@@ -17,13 +17,13 @@ from typing import Iterable, Mapping
 CAPABILITIES_SCHEMA = "mattervis.capabilities/v1"
 RESOLUTION_SCHEMA = "mattervis.requirements/v1"
 DIST_NAME = "matter-vis"
-MOLCRYSKIT_MINIMUM = "0.6.2.dev17"
-MOLCRYSKIT_CONTRACT_SHA = "f2188c14e245b87d99dc1d13ab72e37993d972b0"
-MOLCRYSKIT_DEVELOPMENT_INSTALL = (
-    'python -m pip install "molcrys-kit @ '
-    "git+https://github.com/SchrodingersCattt/MolCrysKit.git@"
-    f'{MOLCRYSKIT_CONTRACT_SHA}"'
+MOLCRYSKIT_MINIMUM = "0.7.0"
+MOLCRYSKIT_INSTALL = (
+    f'python -m pip install "molcrys-kit>={MOLCRYSKIT_MINIMUM}"'
 )
+# Backward-compatible names retained for callers of the pre-0.7 helpers.
+MOLCRYSKIT_CONTRACT_SHA = "2a0ca454839f7fc8350ebe4b9ff5689b4b4ce335"
+MOLCRYSKIT_DEVELOPMENT_INSTALL = MOLCRYSKIT_INSTALL
 
 _MOLCRYSKIT_RECORD_FIELDS: Mapping[str, tuple[str, ...]] = {
     "SiteRecord": (
@@ -83,7 +83,7 @@ def _missing_dataclass_fields(
 def molcryskit_contract_missing() -> tuple[str, ...]:
     """Return missing parts of the public renderer contract.
 
-    The development minimum is intentionally backed by the methods MatterVis
+    The supported minimum is intentionally backed by the methods MatterVis
     calls.  This keeps ``--check`` accurate even when an older MolCrysKit is
     importable under the same module name.
     """
@@ -170,9 +170,8 @@ CAPABILITY_REGISTRY: Mapping[str, CapabilitySpec] = {
         imports=("numpy", "ase", "matplotlib", "PIL", "molcrys_kit"),
         note=(
             "Requires the renderer-ready MolCrysKit public contracts from "
-            f"molcrys-kit>={MOLCRYSKIT_MINIMUM}. Until that release exists, "
-            "development and CI installs must use the exact contract commit: "
-            f"{MOLCRYSKIT_DEVELOPMENT_INSTALL}."
+            f"molcrys-kit>={MOLCRYSKIT_MINIMUM}. Upgrade with: "
+            f"{MOLCRYSKIT_INSTALL}."
         ),
     ),
     "plotly": CapabilitySpec(
@@ -456,6 +455,7 @@ __all__ = [
     "CAPABILITIES_SCHEMA",
     "CAPABILITY_REGISTRY",
     "MOLCRYSKIT_MINIMUM",
+    "MOLCRYSKIT_INSTALL",
     "MOLCRYSKIT_CONTRACT_SHA",
     "MOLCRYSKIT_DEVELOPMENT_INSTALL",
     "CapabilitySpec",

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from .capabilities import (
-    MOLCRYSKIT_DEVELOPMENT_INSTALL,
+    MOLCRYSKIT_INSTALL,
     MOLCRYSKIT_MINIMUM,
     MissingCapabilityError,
     capabilities,
@@ -129,9 +129,7 @@ def require_molcryskit_contract() -> None:
             "The installed MolCrysKit lacks the renderer-ready public contract "
             f"({', '.join(missing)}). MatterVis requires "
             f"molcrys-kit>={MOLCRYSKIT_MINIMUM}; "
-            "upgrade MolCrysKit before rendering. During the two-PR development "
-            f"window, install the exact contract commit with: "
-            f"{MOLCRYSKIT_DEVELOPMENT_INSTALL}."
+            f"upgrade MolCrysKit before rendering with: {MOLCRYSKIT_INSTALL}."
         )
 
 
