@@ -197,3 +197,22 @@ def test_loader_provenance_distinguishes_disorder_from_partial_occupancy():
     assert atom_is_disordered({"occ": 0.5}) is False
     assert atom_is_disordered({"occ": 0.5, "_is_minor": False}) is True
     assert atom_is_disordered({"occ": 0.5, "_is_minor": True}) is True
+
+
+def test_unresolved_disorder_uses_occupancy_in_outline_mode():
+    atom = _atom("H3WA", is_minor=False)
+    atom.update(
+        is_disordered=True,
+        disorder_resolved=False,
+        occ=0.04,
+    )
+    bond = {
+        "is_minor": False,
+        "is_disordered": True,
+        "disorder_resolved": False,
+        "occ": 0.04,
+    }
+
+    assert _atom_effective_opacity(atom, _style(disorder="outline_rings")) == 0.04
+    assert bond_effective_opacity(bond, _style(disorder="outline_rings")) == 0.04
+    assert _atom_effective_opacity(atom, _style(disorder="none")) == 1.0

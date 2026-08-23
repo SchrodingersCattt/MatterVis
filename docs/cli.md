@@ -80,15 +80,15 @@ on. MatterVis never guesses it from a model filename.
 
 | Extension | Format | Backend |
 |-----------|--------|---------|
-| .png | Raster image | CPU (base) or explicit Plotly + Kaleido |
-| .pdf | Vector PDF | CPU (base) or explicit Plotly + Kaleido |
-| .svg | Vector SVG | CPU (base) or explicit Plotly + Kaleido |
+| .png | Raster image | CPU 3D, Matplotlib projected 2D, or explicit Plotly + Kaleido |
+| .pdf | Vector PDF | CPU 3D, Matplotlib projected 2D, or explicit Plotly + Kaleido |
+| .svg | Vector SVG | CPU 3D, Matplotlib projected 2D, or explicit Plotly + Kaleido |
 | .html | Interactive 3D | Plotly (`[plotly]`) |
 | .gif | Multi-frame animation | CPU + `[animation]` |
 | .mp4 | H.264 animation | CPU + `[animation]` |
 
-Use `--backend cpu|plotly`; there is no backend or representation fallback.
-Base MatterVis provides complete CPU PNG/PDF/SVG, ORTEP, rings, polyhedra, and
+Use `--backend cpu|matplotlib|plotly`; there is no backend or representation fallback.
+Base MatterVis provides CPU 3D and Matplotlib projected 2D PNG/PDF/SVG, ORTEP, rings, polyhedra, and
 ordinary structure inputs. Run `mat-vis capabilities --require FEATURE --json`
 for an exact install command before using an optional frontend.
 
@@ -114,8 +114,8 @@ substitutes one frame backend for another.
 |------|---------|-------------|
 | --view MODE | auto | Defaults to unit_cell; use formula_unit explicitly for one chemical formula unit |
 | --style STYLE | ball_stick | ball_stick, ball, stick, ortep, or wireframe |
-| --material MAT | mesh | mesh or flat |
-| --backend BACKEND | cpu | cpu or plotly; never selected by fallback |
+| --shading MODE | smooth | smooth or flat mesh shading |
+| --backend BACKEND | cpu | cpu (3D), matplotlib (projected 2D), or plotly; never selected by fallback |
 | --orthogonal | yes | Orthographic projection |
 | --perspective | no | Perspective projection |
 
@@ -171,7 +171,7 @@ primitive.
 | `--aromatic-rings` | `bonds` | `bonds`, `circle`, or `disk` |
 | `--missing-adp-policy` | `error` | ORTEP missing-ADP policy: `error` or explicit `sphere` placeholder |
 
-`--style ortep` selects the representation. `--material mesh|flat` selects
+`--style ortep` selects the representation. `--shading smooth|flat` selects
 smooth or flat surface shading independently. `--ortep-mode` independently
 adds no marks, principal axes, or hatch marks.
 
@@ -261,7 +261,7 @@ mat-vis render crystal.cif -o cell.png \
 
 ```bash
 mat-vis render crystal.cif -o ortep.pdf \
-  --backend cpu --style ortep --material flat \
+  --backend cpu --style ortep --shading flat \
   --ortep-mode ortep_hatch --show-labels \
   --ortep-probability 0.5 --missing-adp-policy error
 ```

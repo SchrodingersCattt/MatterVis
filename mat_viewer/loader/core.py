@@ -309,6 +309,33 @@ def _has_shelx_occupancy_disorder(raw_atoms) -> bool:
     return bool(_occupancy_only_disorder_indices(raw_atoms))
 
 
+_PARTIAL_SOLVENT_LABEL = re.compile(r"^[OH]\d+W", re.IGNORECASE)
+
+
+def _tag_unresolved_partial_solvent_disorder(raw_atoms):
+    """Record provenance for low-occupancy solvent sites.
+
+    Deposited CIFs often model solvent without a complete assembly/group
+    pairing (MAF-4 uses labels such as ``O2W`` and ``H2WA``). These are
+    unambiguously solvent disorder, but there is no defensible major/minor
+    choice for MatterVis to invent. Mark them as unresolved so occupancy can
+    drive their visual weight while MCK remains the connectivity authority.
+    """
+    out = [dict(atom) for atom in raw_atoms]
+    for atom in out:
+        if "_is_minor" in atom:
+            atom["is_disordered"] = True
+            atom["disorder_resolved"] = True
+            continue
+        if (
+            _partial_occupancy_value(atom) < 0.999
+            and _PARTIAL_SOLVENT_LABEL.match(_site_label(atom))
+        ):
+            atom["is_disordered"] = True
+            atom["disorder_resolved"] = False
+    return out
+
+
 def _normal_disorder_tag(value: Any) -> str:
     return str(value or ".").strip()
 
@@ -710,6 +737,15 @@ def _fragment_table_from_atoms(
         site_indices = sorted(pool_source_idx[idx] for idx in component)
         component_atoms = [pool_kept[idx] for idx in component]
         heavy_atoms = [atom for atom in component_atoms if atom["elem"] != "H"]
+        # Do not advertise an unresolved, partial solvent-H singleton as a
+        # chemical species named ``?``. MCK remains the connectivity source;
+        # MatterVis merely omits a non-species from topology selection.
+        if not heavy_atoms and all(
+            atom.get("is_disordered", False)
+            and not atom.get("disorder_resolved", False)
+            for atom in component_atoms
+        ):
+            continue
         center_atoms = heavy_atoms or component_atoms
         elem_set = {atom["elem"] for atom in heavy_atoms}
         if not center_atoms:
@@ -1105,6 +1141,7 @@ def build_loaded_crystal(
         cif_path=cif_path,
     ):
         raw_atoms = _tag_shelx_occupancy_disorder(raw_atoms, cif_path, M)
+        raw_atoms = _tag_unresolved_partial_solvent_disorder(raw_atoms)
     from .bundle_builder import build_loaded_crystal_from_atoms
 
     return build_loaded_crystal_from_atoms(

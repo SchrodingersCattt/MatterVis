@@ -2,11 +2,18 @@
 
 Read this for the default browser-independent static path. Base MatterVis draws
 atoms, bonds, thermal ellipsoids, aromatic rings, unit cells, and polyhedra with
-one camera and backend-neutral geometry.
+one camera and backend-neutral geometry. Use `cpu` for 3D geometry or
+`matplotlib` for a projected 2D drawing.
+
+```bash
+mat-vis render INPUT.cif -o OUTPUT.svg --backend matplotlib --json \
+  --view unit_cell --style ball_stick \
+  --camera-axis c --orthogonal --show-cell
+```
 
 ```bash
 mat-vis render INPUT.cif -o OUTPUT.svg --backend cpu --json \
-  --view formula_unit --style ortep --material flat \
+  --view formula_unit --style ortep --shading flat \
   --ortep-mode ortep_hatch --missing-adp-policy error \
   --aromatic-rings bonds --camera-axis c --orthogonal \
   --width 1200 --height 900 --scale 2
@@ -17,7 +24,7 @@ caller requests those semantics):
 
 ```bash
 mat-vis render INPUT.cif -o OUTPUT.svg --backend cpu --json \
-  --style ortep --material flat --ortep-mode ortep_axes \
+  --style ortep --shading flat --ortep-mode ortep_axes \
   --aromatic-rings circle --missing-adp-policy sphere
 ```
 

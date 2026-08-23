@@ -723,6 +723,9 @@ def build_scene_from_atoms(
             atom["_depth_t"] = float((depth - z_min) / z_span)
             atom["is_minor"] = atom_is_minor(atom)
             atom["is_disordered"] = atom_is_disordered(atom)
+            atom["disorder_resolved"] = bool(
+                atom.get("disorder_resolved", "_is_minor" in atom)
+            )
             atom["disorder_alpha"] = float(ops.disorder_alpha(atom))
             atom["color"] = ops.elem_color(atom["elem"])
             atom["color_light"] = ops.elem_color_light(atom["elem"])
@@ -770,6 +773,10 @@ def build_scene_from_atoms(
                 "alpha_j": aj["disorder_alpha"],
                 "is_minor": bond_is_minor(ai, aj),
                 "is_disordered": bond_is_disordered(ai, aj),
+                "disorder_resolved": bool(
+                    ai.get("disorder_resolved", False)
+                    and aj.get("disorder_resolved", False)
+                ),
                 "occ": min(float(ai.get("occ", 1.0)), float(aj.get("occ", 1.0))),
                 "depth_t": float((ai["_depth_t"] + aj["_depth_t"]) / 2.0),
             }

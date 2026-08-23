@@ -343,7 +343,7 @@ def _dashed_segments(segments, *, dash_len: float, gap_len: float):
 
 
 def _unit_cell_traces(scene: dict, style: dict):
-    if scene.get("M") is None:
+    if scene.get("M") is None or style.get("display_mode") != "unit_cell":
         return []
     origin = np.zeros(3, dtype=float)
     a = np.array(scene["M"][0], dtype=float)
