@@ -25,7 +25,7 @@ explicit data.
    - [molecule focus](./references/molecule-highlight.md);
     - [periodic finite views](./references/periodic-finite-views.md);
    - [polyhedra](./references/polyhedra.md);
-    - [vibration displacement arrows](./references/vibration-mode-vectors.md);
+  - [vibration displacement arrows and optional GIFs](./references/vibration-mode-vectors.md);
    - [trajectory animation](./references/trajectory-animation.md);
    - [terminal TUI](./references/tui.md).
 6. Read [verification](./references/verification.md) before delivery.
