@@ -23,6 +23,7 @@ explicit data.
    - [Plotly HTML or explicit Plotly static export](./references/plotly-render.md);
    - [input formats](./references/input-formats.md);
    - [molecule focus](./references/molecule-highlight.md);
+    - [periodic finite views](./references/periodic-finite-views.md);
    - [polyhedra](./references/polyhedra.md);
    - [trajectory animation](./references/trajectory-animation.md);
    - [terminal TUI](./references/tui.md).
@@ -45,6 +46,10 @@ explicit data.
 - Use orthographic lattice `+c` by default and record any other camera.
 - Use MolCrysKit site, bond, ring, molecule, PBC, and formula-unit records. Do
   not reconstruct chemical identity from screen proximity.
+- A finite image of a periodic chain, layer, or framework must follow
+  [periodic finite views](./references/periodic-finite-views.md). Do not infer
+  periodic dimensionality from the camera or replicate whole cells merely to
+  make a boundary look balanced.
 - Keep comparable panels and animation frames on an explicit shared camera and
   physical-scale contract. Never alter geometry to hide whitespace.
 - The agent CLI rejects legacy config/publication-layout flags it cannot honour.

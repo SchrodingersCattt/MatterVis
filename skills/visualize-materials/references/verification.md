@@ -11,6 +11,10 @@ Read this before delivering an image, vector graphic, HTML view, or animation.
 - Record input/output hashes when provenance matters.
 - Record dimensions, display, representation, shading, camera, projection,
   backend, output hash, and warning classification.
+- For a finite view of periodic topology, also record the crossing bond image
+    shifts, periodic translation rank/directions, finite-window policy, number of
+    added image atoms/fragments, and confirm that visible endpoints are graphical
+    truncations rather than chemical termination.
 - Deliver one selected artifact unless another set was requested.
 
 For PDF require `%PDF`; for SVG require an `<svg` root and reject a full-canvas
@@ -47,6 +51,11 @@ logs, hashes, and decoded outputs.
 
 Models without image inspection report objective checks only and leave visual
 acceptance pending. Chemistry and semantic-fatal warnings block delivery.
+
+For chains, layers, and frameworks, verify independently that every displayed
+bond is canonical, each crossing bond has the intended nearest image, no
+screen-spanning bond was introduced, and no whole-cell replication was added
+without an explicit scientific reason.
 
 For multi-panel PNGs, run `skills/visualize-materials/scripts/check_panel_layout.py`
 with explicit panel boundaries (or `--panels` only for truly equal-width final
