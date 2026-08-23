@@ -43,6 +43,10 @@ explicit data.
   Plotly static export use `static-web-export`. Both resolve the required
   `[web,plotly-export]` combination rather than assuming one extra implies the
   other.
+- For uniformly compressed or expanded structures, prefer one positive global
+  MolCrysKit `bond_scale` before introducing element-pair thresholds. Use the
+  same scale for source molecule perception and displayed bonds, then verify
+  intended bonds and false contacts on the actual structure.
 - Use orthographic lattice `+c` by default and record any other camera.
 - Use MolCrysKit site, bond, ring, molecule, PBC, and formula-unit records. Do
   not reconstruct chemical identity from screen proximity.

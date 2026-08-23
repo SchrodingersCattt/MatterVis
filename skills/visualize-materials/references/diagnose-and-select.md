@@ -18,6 +18,19 @@ Record, where available:
 - fragment count and formulas or species;
 - formula/moiety, disorder, bond-table, parser, and performance warnings.
 
+For a uniformly compressed or expanded structure, diagnose bonding with one
+global MolCrysKit `bond_scale` first. Values below `1.0` tighten all calibrated
+cutoffs; values above `1.0` loosen them. Keep the same scale through molecule
+identification, periodic unwrapping, and visible-bond construction. Do not use
+the unrelated render-width controls (`bond_radius` or `scatter_bond_scale`) to
+change chemical connectivity.
+
+Choose a scale from the actual structure rather than from a generic pressure
+label. Verify that every intended covalent or coordination bond remains and
+that the shortest compressed intermolecular contacts remain excluded. Use
+explicit element-pair thresholds only when no single global scale separates
+those two sets; record that exception as chemistry provenance.
+
 A decoded export with an untrustworthy object selection is a diagnostic artifact,
 not a publication figure.
 
