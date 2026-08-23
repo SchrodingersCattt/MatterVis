@@ -25,6 +25,7 @@ explicit data.
    - [molecule focus](./references/molecule-highlight.md);
     - [periodic finite views](./references/periodic-finite-views.md);
    - [polyhedra](./references/polyhedra.md);
+  - [vibration displacement arrows and optional GIFs](./references/vibration-mode-vectors.md);
    - [trajectory animation](./references/trajectory-animation.md);
    - [terminal TUI](./references/tui.md).
 6. Read [verification](./references/verification.md) before delivery.
@@ -36,6 +37,9 @@ explicit data.
   the requested capability requires them.
 - Use public `mat-vis inspect`, `capabilities`, and `render --check` commands;
   do not diagnose through Web/TUI startup or private Python modules.
+- Vibration displacement arrows are the narrow exception while the CLI has no
+  equivalent input: use the public `build_figure(..., vector_overlays=...)`
+  API, never private renderer internals.
 - Select `--backend cpu|matplotlib|plotly` explicitly. Use `matplotlib` for a
   projected 2D drawing and `cpu` for 3D geometry. MatterVis has no silent backend or
   representation fallback; preserve a failure and its exact install hint.
@@ -43,6 +47,10 @@ explicit data.
   Plotly static export use `static-web-export`. Both resolve the required
   `[web,plotly-export]` combination rather than assuming one extra implies the
   other.
+- For uniformly compressed or expanded structures, prefer one positive global
+  MolCrysKit `bond_scale` before introducing element-pair thresholds. Use the
+  same scale for source molecule perception and displayed bonds, then verify
+  intended bonds and false contacts on the actual structure.
 - Use orthographic lattice `+c` by default and record any other camera.
 - Use MolCrysKit site, bond, ring, molecule, PBC, and formula-unit records. Do
   not reconstruct chemical identity from screen proximity.

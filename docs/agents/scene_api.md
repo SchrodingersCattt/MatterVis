@@ -69,6 +69,19 @@ ASE `Atoms` → scene dict. Accepts the same `display_mode` values. When
 `style["element_colors"]` is provided, the element palette is applied
 automatically.
 
+Programmatic builders also accept `bond_scale=` as one positive global
+MolCrysKit coefficient. It multiplies calibrated element-class bonding cutoffs:
+values below `1.0` tighten connectivity and values above `1.0` loosen it. Pass
+the same value to source loading/molecule analysis and scene construction so
+PBC unwrapping and visible bonds cannot disagree. `bond_radius` and
+`scatter_bond_scale` affect appearance only, not connectivity.
+
+For uniformly compressed or expanded structures, try and validate one global
+`bond_scale` first. Use `bond_thresholds=` only when no global coefficient can
+retain all intended bonds while excluding compressed intermolecular contacts.
+Explicit pair thresholds are also multiplied by `bond_scale`; they are not an
+independent post-processing filter.
+
 `mat_viewer.scene.build_scene_from_atoms` remains available as a
 compatibility import, but new code should treat scene assembly as part
 of the render pipeline. The `scene/` namespace is reserved for per-tab

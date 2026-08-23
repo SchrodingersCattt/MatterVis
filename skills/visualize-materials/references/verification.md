@@ -15,6 +15,9 @@ Read this before delivering an image, vector graphic, HTML view, or animation.
     shifts, periodic translation rank/directions, finite-window policy, number of
     added image atoms/fragments, and confirm that visible endpoints are graphical
     truncations rather than chemical termination.
+- For vibration displacement arrows, also verify atom/order mapping, the
+    declared centre-versus-tail anchor convention, vector units, fixed scale,
+    relative-length preservation, filtering threshold, and global sign caveat.
 - Deliver one selected artifact unless another set was requested.
 
 For PDF require `%PDF`; for SVG require an `<svg` root and reject a full-canvas
