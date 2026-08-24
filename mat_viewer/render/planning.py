@@ -35,7 +35,6 @@ from .geometry import (
     unit_cell_primitive,
 )
 
-
 _ELEMENT_COLORS = {
     "H": "#FFFFFF",
     "D": "#E8F5FF",
@@ -63,6 +62,7 @@ def prepare_render(
     render: RenderSpec | Mapping[str, Any] | None = None,
     *,
     topology_data: Mapping[str, Any] | None = None,
+    vector_overlays: Any = None,
 ) -> RenderPlan:
     """Compile a scene, CrystalIR, or MolCrysKit object into a RenderPlan.
 
@@ -78,6 +78,8 @@ def prepare_render(
         display_mode=view_spec.display,
         show_hydrogen=render_spec.show_hydrogen,
     )
+    if vector_overlays is not None:
+        scene["vector_overlays"] = vector_overlays
     scene_display = scene.get("display_mode")
     if scene_display is not None:
         scene_view = ViewSpec(display=str(scene_display))
@@ -420,9 +422,11 @@ def prepare_render(
     primitives.extend(_vector_primitives(scene))
     if render_spec.shading == "flat":
         primitives = [
-            replace(primitive, vertex_normals=None)
-            if isinstance(primitive, TriangleMeshPrimitive)
-            else primitive
+            (
+                replace(primitive, vertex_normals=None)
+                if isinstance(primitive, TriangleMeshPrimitive)
+                else primitive
+            )
             for primitive in primitives
         ]
     primitives = sorted(primitives, key=lambda primitive: primitive.semantic_id)
@@ -547,9 +551,9 @@ def _normalise_source(
             **source,
             "atoms": list(source.get("draw_atoms") or source.get("atoms") or []),
             "bonds": list(source.get("bonds") or []),
-            "matrix": source.get("M")
-            if source.get("M") is not None
-            else source.get("matrix"),
+            "matrix": (
+                source.get("M") if source.get("M") is not None else source.get("matrix")
+            ),
         }
     if hasattr(source, "scene") and isinstance(source.scene, Mapping):
         if _is_loaded_crystal(source):
@@ -1163,27 +1167,27 @@ def _polyhedron_primitives(
 
 
 def _vector_primitives(scene: Mapping[str, Any]) -> list[TriangleMeshPrimitive]:
+    vector_overlays = scene.get("vector_overlays")
+    if not vector_overlays:
+        return []
+
+    from .overlay.vectors import resolve_vector_overlays
+
     results = []
-    for group_index, group in enumerate(scene.get("vector_overlays") or []):
-        if not bool(_value(group, "visible", default=True)):
-            continue
-        group_color = _value(group, "color", default="#CC3311")
-        scale = float(_value(group, "scale", default=1.0))
-        for arrow_index, arrow in enumerate(_value(group, "arrows", default=[])):
-            if not bool(_value(arrow, "visible", default=True)):
-                continue
-            origin = np.asarray(_value(arrow, "origin"), dtype=float)
-            end = _value(arrow, "end", default=None)
-            if end is None:
-                end = origin + scale * np.asarray(_value(arrow, "vector"), dtype=float)
-            results.append(
-                arrow_primitive(
-                    f"vector:{group_index}:{arrow_index}",
-                    origin,
-                    end,
-                    _value(arrow, "color", default=group_color),
-                )
+    for arrow in resolve_vector_overlays(vector_overlays, lattice=scene.get("matrix")):
+        style = arrow["style"]
+        results.append(
+            arrow_primitive(
+                f"vector:{arrow['group_id']}:{arrow['arrow_id']}",
+                arrow["origin"],
+                arrow["end"],
+                arrow["color"],
+                shaft_radius=float(style.get("shaft_radius", 0.08)),
+                head_radius_ratio=float(style.get("head_radius_ratio", 2.2)),
+                head_length_ratio=float(style.get("head_length_ratio", 0.28)),
+                sides=int(style.get("sides", 12)),
             )
+        )
     return results
 
 

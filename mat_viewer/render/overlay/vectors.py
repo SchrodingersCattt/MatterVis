@@ -7,7 +7,6 @@ from typing import Any
 import numpy as np
 
 from ...compass import camera_screen_basis
-from ..meshes import arrow_mesh_geometry
 
 MAGNITUDE_MODES = {"absolute", "scaled", "normalized"}
 VIEWPORT_POLICIES = {"include", "clip"}
@@ -182,6 +181,8 @@ def resolve_vector_overlays(raw: Any, *, lattice=None) -> list[dict]:
 
 
 def _mesh_for_arrow(arrow: dict) -> tuple[np.ndarray, np.ndarray]:
+    from ..meshes import arrow_mesh_geometry
+
     style = arrow["style"]
     return arrow_mesh_geometry(
         arrow["origin"],

@@ -62,6 +62,7 @@ def _build_render_parser(
     # representation, and ORTEP mode is resolved only for ORTEP.
     parser.set_defaults(
         show_axes=None,
+        show_unit_cell=None,
         ortep_mode=None,
         ortep_probability=None,
         frame=None,
@@ -114,6 +115,13 @@ def _build_render_parser(
         choices=("error", "sphere"),
         default="error",
         help="ORTEP behavior when ADP data is missing (default: error).",
+    )
+    parser.add_argument(
+        "--vector-overlays",
+        type=Path,
+        default=None,
+        metavar="JSON",
+        help="JSON file containing public world-space vector overlay groups.",
     )
     return parser
 
@@ -675,6 +683,10 @@ def _inspect_payload(structure) -> dict:
     analysis = getattr(bundle, "molcrys_analysis", None)
     crystal = getattr(analysis, "crystal", None)
     metadata = bundle.metadata() if hasattr(bundle, "metadata") else {}
+    scene = getattr(bundle, "scene", {}) or {}
+    has_lattice = scene.get("has_lattice")
+    pbc = scene.get("pbc")
+    synthetic_cell = bool(scene.get("synthetic_cell", False))
     warnings = list(metadata.get("warnings") or [])
     site_records = (
         _records(crystal, "get_site_records") if crystal is not None else None
@@ -715,6 +727,10 @@ def _inspect_payload(structure) -> dict:
             ),
             "fragments": len(getattr(bundle, "fragment_table", ()) or ()),
             "has_disorder": bool(disordered_sites),
+            "has_lattice": has_lattice,
+            "pbc": None if pbc is None else [bool(value) for value in pbc],
+            "synthetic_cell": synthetic_cell,
+            "periodic": not _is_nonperiodic_structure(structure),
         },
         "warnings": warnings,
     }
@@ -843,6 +859,10 @@ def _validate_render_options(args: argparse.Namespace) -> None:
             raise ValueError(
                 "animated --polyhedron overlays are not yet supported; no static "
                 "overlay was silently reused across frames"
+            )
+        if args.vector_overlays is not None:
+            raise ValueError(
+                "animated --vector-overlays are not yet supported; use static output"
             )
         if args.stride is not None and args.stride <= 0:
             raise ValueError("--stride must be greater than zero")
@@ -974,7 +994,7 @@ def _camera_spec(structure, args: argparse.Namespace, *, display: str):
         selected.bundle,
         display=display,
         show_hydrogen=args.show_hydrogen,
-        show_cell=bool(getattr(args, "show_unit_cell", getattr(args, "show_cell", True))),
+        show_cell=_effective_show_cell(structure, args),
     )
     aspect = max(float(args.width) / float(args.height), 1.0e-6)
     ortho_scale = radius * 1.15 / min(aspect, 1.0)
@@ -1086,10 +1106,42 @@ def _render_result_payload(result, structure, args: argparse.Namespace, camera) 
     }
 
 
+def _is_nonperiodic_structure(structure) -> bool:
+    frames = tuple(getattr(structure, "frames", ()) or ())
+    if not frames:
+        return False
+    scene = getattr(frames[0].bundle, "scene", {}) or {}
+    if bool(scene.get("synthetic_cell", False)):
+        return True
+    if scene.get("has_lattice") is False:
+        return True
+    pbc = scene.get("pbc")
+    return pbc is not None and not any(bool(value) for value in pbc)
+
+
 def _display_mode(structure, args: argparse.Namespace) -> str:
     if args.view != "auto":
         return args.view
+    if _is_nonperiodic_structure(structure):
+        return "cluster"
     return "unit_cell"
+
+
+def _effective_show_cell(structure, args: argparse.Namespace) -> bool:
+    requested = getattr(args, "show_unit_cell", None)
+    if requested is not None:
+        return bool(requested)
+    return not _is_nonperiodic_structure(structure)
+
+
+def _load_vector_overlays(path: Path | None):
+    if path is None:
+        return None
+    with Path(path).expanduser().open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if not isinstance(payload, list):
+        raise ValueError("--vector-overlays JSON root must be a list")
+    return payload
 
 
 def _animation_indices(args: argparse.Namespace) -> list[int]:
@@ -1172,7 +1224,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                 atom_scale=args.atom_scale,
                 bond_radius=args.bond_radius,
                 show_hydrogen=args.show_hydrogen,
-                show_cell=args.show_unit_cell,
+                show_cell=_effective_show_cell(structure, args),
                 show_labels=args.show_labels,
                 aromatic_rings=args.aromatic_rings,
                 ortep_probability=(
@@ -1202,6 +1254,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                 camera=camera,
                 render_spec=spec,
                 topology_data=topology_data,
+                vector_overlays=_load_vector_overlays(args.vector_overlays),
                 fps=args.fps if args.fps is not None else 12.0,
             )
         payload = _render_result_payload(result, structure, args, camera)

@@ -112,7 +112,7 @@ substitutes one frame backend for another.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| --view MODE | auto | Defaults to unit_cell; use formula_unit explicitly for one chemical formula unit |
+| --view MODE | auto | Periodic input uses unit_cell; nonperiodic or synthetic-cell input uses cluster |
 | --style STYLE | ball_stick | ball_stick, ball, stick, ortep, or wireframe |
 | --shading MODE | smooth | smooth or flat mesh shading |
 | --backend BACKEND | cpu | cpu (3D), matplotlib (projected 2D), or plotly; never selected by fallback |
@@ -121,9 +121,10 @@ substitutes one frame backend for another.
 
 ### Camera
 
-Static renders default to a reproducible view from the structure toward `+c`
-(`+Z` when no lattice is available), with `+b`/`+Y` pointing up. Camera
-direction options are mutually exclusive.
+Periodic static renders default to a reproducible view from the structure toward
+`+c`, with `+b` pointing up. Nonperiodic inputs fit the atomic coordinates and do
+not treat an ASE padding box as crystallographic data. Camera direction options
+are mutually exclusive.
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -142,7 +143,7 @@ export requires `[plotly-export]`; a failure is reported without substitution.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--show-hydrogen` / `--no-hydrogen` | off | Show/hide hydrogen atoms |
-| `--show-cell` / `--no-cell` | on | Show/hide unit cell edges |
+| `--show-cell` / `--no-cell` | auto | On for periodic input and off for nonperiodic or synthetic-cell input; explicit flags override |
 | `--show-labels` / `--no-labels` | off | Show/hide atom labels |
 
 `--show-axes`, `--no-axes`, and `--monochrome` are legacy flags not implemented
