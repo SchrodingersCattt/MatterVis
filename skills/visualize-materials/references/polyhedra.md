@@ -44,9 +44,14 @@ fragment index; without it, the CLI draws every matching displayed fragment.
 
 - For a periodic overview, request both `--show-cell` and `--show-axes`,
   then confirm the cell and a/b/c compass are visible at delivery size.
-- Start dense coordination views with `--style ball`; use `ball_stick` only
-  when the bond network is part of the requested evidence. Full-cell bonds can
-  visually bury the coordination hull even when the geometry is correct.
+- Use `ball_stick` by default for molecules, clusters, and discrete covalently
+  bonded components. For a pure dense extended coordination network, use
+  `--style ball` with polyhedra so redundant network bonds do not bury the hull.
+- For a mixed scene, use MatterVis's public `atom_groups` and `bond_groups` API
+  to keep discrete covalent components as ball-stick while suppressing only
+  redundant extended-network bonds. Preserve MolCrysKit canonical bonds; do not
+  replace the figure with an ad hoc plot. CLI selector support is tracked in
+  MatterVis issue #113.
 
 - Atom level uses element symbols. `cutoff` is the hard radial cap and an
   explicit `hard_cutoff` or `center_kind` is rejected as molecule-only. A
