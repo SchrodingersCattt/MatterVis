@@ -3,28 +3,36 @@
 Use this path for the normal structure-to-static-image request. It uses the CPU
 backend and requires only base MatterVis.
 
-## 1. Inspect and preflight
+## 1. Inspect, then render
 
 ```bash
-mat-vis inspect INPUT.cif --json
-mat-vis render INPUT.cif -o OUTPUT.png --backend cpu --check --json
+mat-vis inspect INPUT --json
 ```
 
-The first command reports bounded source and structure metadata. The second
-resolves dependencies without loading the input or writing a file. If it is not
-available, run only the exact `install` command it reports; see
-`capabilities-and-install.md`.
+Inspect reports structure metadata including periodicity and synthetic-cell state.
 
 Choose the displayed object from scientific intent:
 
+- nonperiodic or synthetic-cell input: auto selects `cluster` and hides the cell;
+- periodic input: auto selects `unit_cell` and shows the cell;
 - one formula unit: `formula_unit`;
 - periodic packing: `unit_cell`;
 - crystallographic-site diagnosis: `asymmetric_unit`;
-- an already finite nonperiodic input: `cluster`.
+- an explicitly finite selection: `cluster`.
 
-`cluster` is not a crop or neighbour-shell selector.
+Explicit `--view` and `--show-cell`/`--no-cell` override auto. `cluster` is not a
+crop or neighbour-shell selector.
 
 ## 2. Render explicitly
+
+Nonperiodic molecule or cluster PNG:
+
+```bash
+mat-vis render INPUT.xyz -o OUTPUT.png --backend cpu --json \
+  --style ball_stick --shading smooth --orthogonal \
+  --background '#FFFFFF' --atom-scale 1.0 --bond-radius 0.15 \
+  --width 1200 --height 900 --scale 1
+```
 
 Formula-unit PNG:
 

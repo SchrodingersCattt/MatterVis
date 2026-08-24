@@ -33,6 +33,32 @@ anchor instead. Centring is a caller policy, not a separate mesh primitive:
 changing `origin` (or an equivalent signed `tail_offset`) keeps the API
 adjustable for either convention.
 
+## Static CPU CLI
+
+After applying the scale and centring above, save the arrows as a JSON list:
+
+```json
+[
+  {
+    "id": "mode",
+    "magnitude_mode": "absolute",
+    "viewport_policy": "include",
+    "arrows": [
+      {"id": "atom-0", "origin": [0.0, 0.0, 0.0], "vector": [0.2, 0.0, 0.0]}
+    ]
+  }
+]
+```
+
+```bash
+mat-vis render equilibrium.xyz -o mode.png --backend cpu --json \
+  --vector-overlays mode-vectors.json --style ball_stick --orthogonal
+```
+
+Use `absolute` because the caller already applied the visual scale. This static
+path needs neither Plotly nor Chrome.
+
+
 ## Scale and selection
 
 - Preserve relative vector lengths within a mode.
@@ -61,22 +87,11 @@ focus styling may subordinate context as wireframe, but the normal MatterVis
 style is valid when no focus hierarchy is needed. Prefer a documented lattice
 axis or explicit camera that exposes the relevant motion.
 
-An animated GIF is optional. A useful starting point is sinusoidal motion,
-`16` frames, `10` fps, and maximum displayed displacement near `0.35 Å`, with
-equilibrium-centred eigenvector arrows fixed for reference. These are adjustable
-presentation defaults, not scientific constants. Arrow visibility/scale, motion
-amplitude, frame count, fps, camera, context style, and GIF inclusion must be
-tuned to the structure and communication goal.
-
-For animation, keep equilibrium topology, camera, viewport, canvas, palette,
-vector scale, and crop fixed across frames. Determine one union content box from
-all title-free frames, apply it to every frame, then add the title; per-frame
-autocrop causes visible zoom jitter, while title-first cropping preserves large
-Plotly whitespace. Label displayed motion as amplified.
+Deliver the static CPU figure first. Animated vector overlays are not supported
+by this CLI path; if animation is explicitly required, report that boundary
+without switching to private code or installing Plotly/Chrome.
 
 Verify atom/order mapping, centred arrow endpoints, relative lengths, maximum
 display length, complete periodic fragments, bond topology, camera, clipping,
-and final-size readability. For GIF, also verify decoded frame count, duration,
-loop, extrema, fixed crop, and motion at final size. Save a manifest containing
-the input provenance, mode metadata, selected IDs, vector units/scale/filter,
-camera, animation parameters, and output hash.
+and final-size readability. Save a manifest containing input provenance, mode
+metadata, selected IDs, vector units/scale/filter, camera, and output hash.

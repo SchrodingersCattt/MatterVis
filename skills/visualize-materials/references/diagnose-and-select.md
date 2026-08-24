@@ -12,6 +12,7 @@ mat-vis inspect INPUT --json
 
 Record, where available:
 
+- `periodic`, `pbc`, `has_lattice`, and `synthetic_cell`;
 - raw/asymmetric-site and symmetry-expanded atom counts;
 - selected-scene atom and bond counts;
 - major and minor occupancy counts and fraction;
@@ -38,6 +39,11 @@ Do not start Dash, the TUI, or a private loader merely to discover counts. For
 custom Python automation use only `mat_viewer.load_structure`; the returned
 structure consumes MolCrysKit's public site and bond records. A missing public
 MolCrysKit contract is fatal and must not fall back to `.info` fields.
+
+Auto mode uses `unit_cell` with visible cell edges for periodic inputs and
+`cluster` without cell edges for nonperiodic inputs. A synthetic padding cell
+created only to carry finite coordinates is nonperiodic metadata, not a box to
+draw. Override auto only for a stated scientific reason.
 
 ## Display modes
 
