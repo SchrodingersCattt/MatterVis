@@ -8,6 +8,7 @@ from typing import Any
 
 import numpy as np
 
+from .compass_overlay import lattice_compass_layout
 from .contracts import (
     LinePrimitive,
     RENDER_RESULT_SCHEMA,
@@ -151,6 +152,63 @@ def _scene_layout(viewport, *, aspect: float) -> dict[str, Any]:
     }
 
 
+def _add_lattice_compass(figure, plan: RenderPlan, viewport) -> None:
+    x, y, width_fraction, height_fraction = viewport.rect
+    local_width = max(1, int(round(plan.width * width_fraction)))
+    local_height = max(1, int(round(plan.height * height_fraction)))
+    items = lattice_compass_layout(
+        plan.metadata,
+        viewport,
+        local_width,
+        local_height,
+    )
+    for item in items:
+        end_x = x + item.end[0] / local_width * width_fraction
+        end_y = 1.0 - y - item.end[1] / local_height * height_fraction
+        label_x = x + item.label_at[0] / local_width * width_fraction
+        label_y = 1.0 - y - item.label_at[1] / local_height * height_fraction
+        if item.dot:
+            radius = 3.5
+            figure.add_shape(
+                type="circle",
+                xref="paper",
+                yref="paper",
+                x0=end_x - radius / plan.width,
+                x1=end_x + radius / plan.width,
+                y0=end_y - radius / plan.height,
+                y1=end_y + radius / plan.height,
+                line={"color": item.color, "width": 1},
+                fillcolor=item.color,
+                layer="above",
+            )
+        else:
+            figure.add_annotation(
+                x=end_x,
+                y=end_y,
+                xref="paper",
+                yref="paper",
+                ax=item.start[0] - item.end[0],
+                ay=item.start[1] - item.end[1],
+                axref="pixel",
+                ayref="pixel",
+                text="",
+                showarrow=True,
+                arrowhead=2,
+                arrowsize=1.0,
+                arrowwidth=2.2,
+                arrowcolor=item.color,
+            )
+        figure.add_annotation(
+            x=label_x,
+            y=label_y,
+            xref="paper",
+            yref="paper",
+            text=f"<b>{item.label}</b>",
+            showarrow=False,
+            font={"color": item.color, "size": 12},
+        )
+
+
 def build_figure(plan: RenderPlan):
     """Convert a RenderPlan to a Plotly figure without changing its geometry."""
     go, _ = _plotly()
@@ -164,6 +222,7 @@ def build_figure(plan: RenderPlan):
         scene_layouts[scene] = _scene_layout(viewport, aspect=viewport_aspect)
         for primitive in viewport.primitives:
             figure.add_trace(_primitive_trace(primitive, scene=scene))
+        _add_lattice_compass(figure, plan, viewport)
     figure.update_layout(
         **scene_layouts,
         width=plan.width,

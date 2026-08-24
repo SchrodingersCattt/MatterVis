@@ -27,6 +27,7 @@ from contextlib import redirect_stdout
 from dataclasses import asdict, is_dataclass
 from hashlib import sha256
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Optional
@@ -812,8 +813,6 @@ def _validate_render_options(args: argparse.Namespace) -> None:
     """Reject legacy flags that the backend-neutral path cannot honour."""
 
     unsupported: list[str] = []
-    if args.show_axes is not None:
-        unsupported.append("--show-axes" if args.show_axes else "--no-axes")
     if args.monochrome:
         unsupported.append("--monochrome")
     if args.config is not None:
@@ -886,6 +885,8 @@ def _validate_render_options(args: argparse.Namespace) -> None:
         from .agent_topology import parse_polyhedron_specs
 
         parse_polyhedron_specs(args.polyhedron)
+    if not math.isfinite(args.cell_width) or args.cell_width <= 0.0:
+        raise ValueError("--cell-width must be finite and greater than zero")
     _render_ortep_mode(args)
 
 
@@ -1225,7 +1226,10 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                 bond_radius=args.bond_radius,
                 show_hydrogen=args.show_hydrogen,
                 show_cell=_effective_show_cell(structure, args),
+                show_axes=bool(args.show_axes),
                 show_labels=args.show_labels,
+                cell_color=args.cell_color,
+                cell_width_px=args.cell_width,
                 aromatic_rings=args.aromatic_rings,
                 ortep_probability=(
                     args.ortep_probability

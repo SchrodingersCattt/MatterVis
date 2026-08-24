@@ -145,11 +145,13 @@ export requires `[plotly-export]`; a failure is reported without substitution.
 | `--show-hydrogen` / `--no-hydrogen` | off | Show/hide hydrogen atoms |
 | `--show-cell` / `--no-cell` | auto | On for periodic input and off for nonperiodic or synthetic-cell input; explicit flags override |
 | `--show-labels` / `--no-labels` | off | Show/hide atom labels |
+| `--show-axes` / `--no-axes` | off | Show/hide the camera-projected crystallographic a/b/c compass |
+| `--cell-color COLOR` | `#333333` | Unit-cell edge colour |
+| `--cell-width PX` | 2.0 | Unit-cell edge width |
 
-`--show-axes`, `--no-axes`, and `--monochrome` are legacy flags not implemented
-by the backend-neutral renderer and therefore fail explicitly. They are never
-accepted and ignored; the CPU renderer currently emits no lattice-axis
-primitive.
+The cell and lattice compass are foreground overlays, so dense atoms, bonds,
+or polyhedra do not depth-occlude them. `--monochrome` remains a rejected
+legacy flag.
 
 ### Numeric parameters
 

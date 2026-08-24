@@ -413,7 +413,15 @@ def prepare_render(
 
     lattice = scene.get("matrix")
     if render_spec.show_cell and lattice is not None:
-        primitives.append(unit_cell_primitive("unit-cell", lattice))
+        primitives.append(
+            unit_cell_primitive(
+                "unit-cell",
+                lattice,
+                color=render_spec.cell_color,
+                width_px=render_spec.cell_width_px,
+                depth_test=False,
+            )
+        )
 
     primitives.extend(_polyhedron_primitives(scene, topology_data))
     isosurface_primitives, isosurface_warnings = _isosurface_primitives(scene)
@@ -457,6 +465,19 @@ def prepare_render(
         "frame_info": scene.get("frame_info"),
         "molcrys_provenance": scene.get("molcrys_provenance"),
     }
+    if render_spec.show_axes:
+        lattice_array = np.asarray(lattice if lattice is not None else [], dtype=float)
+        if lattice_array.shape == (3, 3) and np.all(np.isfinite(lattice_array)):
+            metadata["lattice_compass"] = {
+                "visible": True,
+                "matrix": lattice_array.tolist(),
+                "labels": ["a", "b", "c"],
+                "colors": ["#C7372F", "#22A660", "#2E86C1"],
+            }
+        else:
+            warnings.append(
+                "lattice axes were requested but the source has no finite lattice"
+            )
     return RenderPlan(
         width=render_spec.width,
         height=render_spec.height,

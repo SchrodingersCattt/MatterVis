@@ -270,3 +270,30 @@ def test_polyhedron_check_uses_base_capability_only(
     payload = json.loads(capsys.readouterr().out)
     assert payload["requirements"]["extras"] == []
     assert not output.exists()
+
+
+def test_cpu_check_accepts_explicit_lattice_axes(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        capability_module.CapabilitySpec, "available", lambda self: True
+    )
+
+    main(
+        [
+            "render",
+            str(tmp_path / "not-loaded.cif"),
+            "-o",
+            str(tmp_path / "not-created.png"),
+            "--backend",
+            "cpu",
+            "--show-axes",
+            "--check",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
