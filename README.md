@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](#)
 [![PyPI](https://img.shields.io/pypi/v/matter-vis.svg)](https://pypi.org/project/matter-vis/)
-[![CI](https://github.com/SchrodingersCattt/MatterVis/actions/workflows/release.yml/badge.svg)](https://github.com/SchrodingersCattt/MatterVis/actions/workflows/release.yml)
+[![CI](https://github.com/SchrodingersCattt/MatterVis/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SchrodingersCattt/MatterVis/actions/workflows/ci.yml)
 
 ## Overview
 
