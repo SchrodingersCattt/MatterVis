@@ -23,10 +23,12 @@ explicit data.
    - [Plotly HTML or explicit Plotly static export](./references/plotly-render.md);
    - [input formats](./references/input-formats.md);
    - [molecule focus](./references/molecule-highlight.md);
-    - [periodic finite views](./references/periodic-finite-views.md);
+   - [periodic finite views](./references/periodic-finite-views.md);
    - [polyhedra](./references/polyhedra.md);
-  - [vibration displacement arrows and optional GIFs](./references/vibration-mode-vectors.md);
+   - [vibration displacement arrows and optional GIFs](./references/vibration-mode-vectors.md);
    - [trajectory animation](./references/trajectory-animation.md);
+   - [publication layout](./references/publication-layout.md);
+   - [multi-structure panels](./references/multi-structure-panels.md);
    - [terminal TUI](./references/tui.md).
 6. Read [verification](./references/verification.md) before delivery.
 

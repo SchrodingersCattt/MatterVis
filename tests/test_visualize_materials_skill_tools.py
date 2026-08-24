@@ -76,6 +76,13 @@ def test_skill_has_no_second_installer_or_obsolete_package_entrypoint() -> None:
     assert "apt-get install" not in text
 
 
+def test_skill_routes_publication_and_multi_structure_guidance() -> None:
+    document = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "./references/publication-layout.md" in document
+    assert "./references/multi-structure-panels.md" in document
+
+
 def test_released_molcryskit_minimum_is_consistent() -> None:
     data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     molcryskit = next(
