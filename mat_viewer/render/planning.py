@@ -9,6 +9,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 
 from ..config import atom_radius as configured_atom_radius
+from .compass_overlay import lattice_compass_metadata
 from .contracts import (
     CameraSpec,
     LinePrimitive,
@@ -22,7 +23,6 @@ from .contracts import (
 )
 from .geometry import (
     aromatic_ring_primitive,
-    arrow_primitive,
     bond_primitives,
     color_to_rgba,
     ellipsoid_axes_primitive,
@@ -34,6 +34,7 @@ from .geometry import (
     sphere_primitive,
     unit_cell_primitive,
 )
+from .overlay.vectors import vector_primitives
 
 _ELEMENT_COLORS = {
     "H": "#FFFFFF",
@@ -427,7 +428,9 @@ def prepare_render(
     isosurface_primitives, isosurface_warnings = _isosurface_primitives(scene)
     primitives.extend(isosurface_primitives)
     warnings.extend(isosurface_warnings)
-    primitives.extend(_vector_primitives(scene))
+    primitives.extend(
+        vector_primitives(scene.get("vector_overlays"), lattice=scene.get("matrix"))
+    )
     if render_spec.shading == "flat":
         primitives = [
             (
@@ -466,18 +469,13 @@ def prepare_render(
         "molcrys_provenance": scene.get("molcrys_provenance"),
     }
     if render_spec.show_axes:
-        lattice_array = np.asarray(lattice if lattice is not None else [], dtype=float)
-        if lattice_array.shape == (3, 3) and np.all(np.isfinite(lattice_array)):
-            metadata["lattice_compass"] = {
-                "visible": True,
-                "matrix": lattice_array.tolist(),
-                "labels": ["a", "b", "c"],
-                "colors": ["#C7372F", "#22A660", "#2E86C1"],
-            }
-        else:
+        compass = lattice_compass_metadata(lattice)
+        if compass is None:
             warnings.append(
                 "lattice axes were requested but the source has no finite lattice"
             )
+        else:
+            metadata["lattice_compass"] = compass
     return RenderPlan(
         width=render_spec.width,
         height=render_spec.height,
@@ -1182,31 +1180,6 @@ def _polyhedron_primitives(
                 faces,
                 color,
                 alpha=float(_value(item, "edge_opacity", default=0.9)),
-            )
-        )
-    return results
-
-
-def _vector_primitives(scene: Mapping[str, Any]) -> list[TriangleMeshPrimitive]:
-    vector_overlays = scene.get("vector_overlays")
-    if not vector_overlays:
-        return []
-
-    from .overlay.vectors import resolve_vector_overlays
-
-    results = []
-    for arrow in resolve_vector_overlays(vector_overlays, lattice=scene.get("matrix")):
-        style = arrow["style"]
-        results.append(
-            arrow_primitive(
-                f"vector:{arrow['group_id']}:{arrow['arrow_id']}",
-                arrow["origin"],
-                arrow["end"],
-                arrow["color"],
-                shaft_radius=float(style.get("shaft_radius", 0.08)),
-                head_radius_ratio=float(style.get("head_radius_ratio", 2.2)),
-                head_length_ratio=float(style.get("head_length_ratio", 0.28)),
-                sides=int(style.get("sides", 12)),
             )
         )
     return results

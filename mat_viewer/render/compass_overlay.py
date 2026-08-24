@@ -21,6 +21,19 @@ class CompassAxis:
     dot: bool = False
 
 
+def lattice_compass_metadata(lattice: Any) -> dict | None:
+    """Return validated metadata for a lattice compass, if available."""
+    matrix = np.asarray(lattice if lattice is not None else [], dtype=float)
+    if matrix.shape != (3, 3) or not np.all(np.isfinite(matrix)):
+        return None
+    return {
+        "visible": True,
+        "matrix": matrix.tolist(),
+        "labels": ["a", "b", "c"],
+        "colors": ["#C7372F", "#22A660", "#2E86C1"],
+    }
+
+
 def lattice_compass_layout(
     metadata: Mapping[str, Any],
     viewport: ViewportPlan,

@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 from ...compass import camera_screen_basis
+from ..geometry import arrow_primitive
 
 MAGNITUDE_MODES = {"absolute", "scaled", "normalized"}
 VIEWPORT_POLICIES = {"include", "clip"}
@@ -178,6 +179,26 @@ def resolve_vector_overlays(raw: Any, *, lattice=None) -> list[dict]:
                 }
             )
     return resolved
+
+
+def vector_primitives(vector_overlays: Any, *, lattice=None) -> list:
+    """Compile resolved vector overlays into backend-neutral primitives."""
+    results = []
+    for arrow in resolve_vector_overlays(vector_overlays, lattice=lattice):
+        style = arrow["style"]
+        results.append(
+            arrow_primitive(
+                f"vector:{arrow['group_id']}:{arrow['arrow_id']}",
+                arrow["origin"],
+                arrow["end"],
+                arrow["color"],
+                shaft_radius=float(style.get("shaft_radius", 0.08)),
+                head_radius_ratio=float(style.get("head_radius_ratio", 2.2)),
+                head_length_ratio=float(style.get("head_length_ratio", 0.28)),
+                sides=int(style.get("sides", 12)),
+            )
+        )
+    return results
 
 
 def _mesh_for_arrow(arrow: dict) -> tuple[np.ndarray, np.ndarray]:
@@ -353,6 +374,7 @@ __all__ = [
     "VIEWPORT_POLICIES",
     "normalize_vector_overlays",
     "resolve_vector_overlays",
+    "vector_primitives",
     "vector_mesh_traces",
     "vector_overlay_bounds",
     "paper_vector_label_annotations",
