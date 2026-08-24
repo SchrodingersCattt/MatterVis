@@ -80,6 +80,8 @@ def test_skill_routes_publication_and_multi_structure_guidance() -> None:
     document = (SKILL / "SKILL.md").read_text(encoding="utf-8")
 
     assert 'description: "Use for any atomistic image or visualization:' in document
+    assert "--check" not in document
+    assert "--vector-overlays" in document
     assert "./references/publication-layout.md" in document
     assert "./references/multi-structure-panels.md" in document
 
