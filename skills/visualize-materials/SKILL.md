@@ -1,6 +1,6 @@
 ---
 name: visualize-materials
-description: 'Visualize atomistic structures and trajectories with MatterVis. Use for CIF, Cube, POSCAR/CONTCAR, VASP, XYZ/extxyz, ASE .traj, LAMMPS dump/data, publication figures, static vector/raster export, animation, WebGL, and terminal views.'
+description: "Use for any atomistic image or visualization: structures, molecules, crystals, slabs, trajectories, polyhedra, vibrations, fields, animations, comparisons, and publication figures."
 ---
 
 # Visualize Materials
