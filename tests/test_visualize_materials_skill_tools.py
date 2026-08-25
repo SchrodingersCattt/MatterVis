@@ -82,8 +82,14 @@ def test_skill_routes_publication_and_multi_structure_guidance() -> None:
     assert 'description: "Use for any atomistic image or visualization:' in document
     assert "--check" not in document
     assert "--vector-overlays" in document
+    assert "not permission to redraw" in document
     assert "./references/publication-layout.md" in document
     assert "./references/multi-structure-panels.md" in document
+    vectors = (SKILL / "references" / "vibration-mode-vectors.md").read_text(
+        encoding="utf-8"
+    )
+    assert "source Cartesian frame" in vectors
+    assert "synthetic-cell translation internally" in vectors
 
 
 def test_released_molcryskit_minimum_is_consistent() -> None:

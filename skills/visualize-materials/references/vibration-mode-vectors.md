@@ -19,7 +19,9 @@ adapter outside the renderer.
 ## Arrow contract
 
 Use public native world-space `vector_overlays`; these arrows rotate with the
-structure and participate in 3D occlusion. A vibration vector represents motion
+structure and participate in 3D occlusion. Keep origins and endpoints in the
+input structure's source Cartesian frame; MatterVis applies any nonperiodic
+synthetic-cell translation internally. A vibration vector represents motion
 about an equilibrium atom, so centre it on that atom by default:
 
 ```python

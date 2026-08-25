@@ -41,6 +41,9 @@ explicit data.
   do not diagnose through Web/TUI startup or private Python modules.
 - Pass vibration and other anchored vectors through public `mat-vis render
   --vector-overlays`; never invoke private renderer internals.
+- A failed or poor-looking MatterVis artifact is not permission to redraw
+  atomistic geometry with ASE or raw plotting code. Adjust supported `mat-vis`
+  controls, or retain the evidence and report the unresolved limitation.
 - Select `--backend cpu|matplotlib|plotly` explicitly. Use `matplotlib` for a
   projected 2D drawing and `cpu` for 3D geometry. MatterVis has no silent backend or
   representation fallback; preserve a failure and its exact install hint.

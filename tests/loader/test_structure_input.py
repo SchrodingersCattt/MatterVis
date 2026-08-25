@@ -17,6 +17,7 @@ from mat_viewer.loader import (
     load_structure_input,
 )
 from mat_viewer.render.contracts import TriangleMeshPrimitive
+from mat_viewer.render.cpu import render
 from mat_viewer.render.planning import prepare_render
 from mat_viewer.render.frame_selection import parse_frame_indices
 from mat_viewer.tui.loader_adapter import load_for_tui
@@ -196,6 +197,16 @@ def test_nonperiodic_cartesian_vectors_follow_source_coordinates(
     assert arrow.vertices[:, 0].min() == pytest.approx(rendered_origin[0], abs=0.1)
     assert arrow.vertices[:, 0].max() == pytest.approx(rendered_origin[0] + 1.0)
     assert np.median(arrow.vertices[:, 1]) == pytest.approx(rendered_origin[1], abs=0.1)
+
+    without_vectors = prepare_render(
+        loaded,
+        view={"display": "cluster"},
+        render={"show_cell": False, "show_hydrogen": True},
+    )
+    assert (
+        render(plan, format="png").output_sha256
+        != render(without_vectors, format="png").output_sha256
+    )
 
 
 def test_iter_atomistic_frames_streams_selected_source_order(
