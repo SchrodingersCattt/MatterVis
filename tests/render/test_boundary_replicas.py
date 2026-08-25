@@ -244,7 +244,71 @@ def test_cell_spanning_component_uses_signed_record_images():
     assert all(index in connected for index, _ in replicas)
 
 
-def test_cell_spanning_context_completes_boundary_coordination_shells():
+def test_periodic_rank_uses_only_the_network_direction_for_context():
+    cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
+    M = np.eye(3) * 10.0
+    atoms = [{**_atom("C1", [0.5, 0.5, 0.5], M), "_source_molecule_index": 0}]
+    records = [{"left": 0, "right": 0, "right_image_shift": [1, 0, 0]}]
+
+    scene = build_scene_from_atoms(
+        name="one_dimensional_network",
+        title="One-dimensional network",
+        atoms=atoms,
+        cell=cell,
+        M=M,
+        R=np.eye(3),
+        display_mode="unit_cell",
+        ops=scene_ops(),
+        unwrapped_atoms=atoms,
+        molcrys_analysis=_analysis(atoms, records),
+        preset={"style": {"show_labels": False, "show_axes": False}},
+    )
+
+    assert {
+        tuple(int(value) for value in atom["_image_shift"])
+        for atom in scene["draw_atoms"]
+    } == {(-1, 0, 0), (0, 0, 0), (1, 0, 0)}
+    assert len(scene["bonds"]) == 2
+    assert all(atom.get("_cell_spanning_component") for atom in scene["draw_atoms"])
+
+
+def test_cross_boundary_finite_fragment_has_zero_periodic_rank():
+    cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
+    M = np.eye(3) * 10.0
+    source = [
+        {**_atom("C1", [0.98, 0.5, 0.5], M), "_source_molecule_index": 0},
+        {**_atom("C2", [0.02, 0.5, 0.5], M), "_source_molecule_index": 0},
+    ]
+    unwrapped = [dict(source[0]), dict(source[1])]
+    unwrapped[1]["frac"] = np.array([1.02, 0.5, 0.5])
+    unwrapped[1]["cart"] = unwrapped[1]["frac"] @ M
+    records = [{"left": 0, "right": 1, "right_image_shift": [1, 0, 0]}]
+
+    scene = build_scene_from_atoms(
+        name="finite_cross_boundary_fragment",
+        title="Finite cross-boundary fragment",
+        atoms=source,
+        cell=cell,
+        M=M,
+        R=np.eye(3),
+        display_mode="unit_cell",
+        ops=scene_ops(),
+        unwrapped_atoms=unwrapped,
+        molcrys_analysis=_analysis(source, records),
+        preset={"style": {"show_labels": False, "show_axes": False}},
+    )
+
+    home = [
+        atom
+        for atom in scene["draw_atoms"]
+        if tuple(atom.get("_image_shift", (0, 0, 0))) == (0, 0, 0)
+    ]
+    assert len(home) == 2
+    assert all(int(atom.get("_periodic_component_rank", -1)) == 0 for atom in home)
+    assert not any(atom.get("_cell_spanning_component") for atom in scene["draw_atoms"])
+
+
+def test_cell_spanning_context_stops_at_direct_boundary_neighbours():
     cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
     M = np.eye(3) * 10.0
     atoms = [
@@ -280,9 +344,7 @@ def test_cell_spanning_context_completes_boundary_coordination_shells():
     }
     assert replicas == {
         ("Zn1", (-1, 0, 0)),
-        ("N2", (-1, 0, 0)),
         ("N1", (1, 0, 0)),
-        ("C1", (1, 0, 0)),
     }
 
 

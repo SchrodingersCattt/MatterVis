@@ -104,6 +104,75 @@ def _bond_endpoints(ai, aj, cell, display_mode: str):
 _SOURCE_IMAGE_TOL = 1e-5
 
 
+def _periodic_component_ranks(
+    atom_count: int,
+    canonical_bond_records: list[dict[str, Any]],
+) -> list[int]:
+    """Return the translational rank (0..3) of every quotient-graph component.
+
+    A finite molecule may cross a unit-cell face but still has a consistent
+    integer image assignment and therefore rank zero. An infinite chain,
+    layer, or framework contains one or more non-zero translation cycles.
+    Detecting those cycles avoids treating a periodic network as a finite
+    fragment and copying the whole cell into the positive octant.
+    """
+    adjacency: dict[int, list[tuple[int, tuple[int, int, int]]]] = {}
+    for record in canonical_bond_records:
+        try:
+            left = int(record["left"])
+            right = int(record["right"])
+            relation = tuple(int(value) for value in record["right_image_shift"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if (
+            len(relation) != 3
+            or not 0 <= left < atom_count
+            or not 0 <= right < atom_count
+        ):
+            continue
+        adjacency.setdefault(left, []).append((right, relation))
+        adjacency.setdefault(right, []).append(
+            (left, tuple(-value for value in relation))
+        )
+
+    ranks = [0] * atom_count
+    visited: set[int] = set()
+    for root in range(atom_count):
+        if root in visited:
+            continue
+        potentials: dict[int, tuple[int, int, int]] = {root: (0, 0, 0)}
+        component: list[int] = []
+        cycle_vectors: list[tuple[int, int, int]] = []
+        queue = [root]
+        while queue:
+            current = queue.pop(0)
+            if current in visited:
+                continue
+            visited.add(current)
+            component.append(current)
+            current_potential = potentials[current]
+            for neighbour, edge_shift in adjacency.get(current, ()):
+                proposed = tuple(
+                    current_potential[axis] + edge_shift[axis] for axis in range(3)
+                )
+                known = potentials.get(neighbour)
+                if known is None:
+                    potentials[neighbour] = proposed
+                    queue.append(neighbour)
+                    continue
+                cycle = tuple(proposed[axis] - known[axis] for axis in range(3))
+                if cycle != (0, 0, 0):
+                    cycle_vectors.append(cycle)
+        rank = (
+            int(np.linalg.matrix_rank(np.asarray(cycle_vectors, dtype=float)))
+            if cycle_vectors
+            else 0
+        )
+        for source_index in component:
+            ranks[source_index] = rank
+    return ranks
+
+
 def _manifest_strict_bonded_images(
     draw_atoms: list[dict[str, Any]],
     source_atoms: list[dict[str, Any]],
@@ -249,9 +318,9 @@ def _manifest_spanning_bond_context(
 
     A cell-spanning component is infinite, so whole-component replication is
     undefined and per-site face replication produces disconnected fragments.
-    Signed MCK bond records identify the exact adjacent-cell endpoints.  Each
-    endpoint is expanded through one complete bond shell, then any aromatic
-    rings touched by that shell are completed in the same image.  This keeps
+    Signed MCK bond records identify the exact adjacent-cell endpoints. Those
+    direct neighbours are the finite context; only an aromatic ring containing
+    an endpoint is completed in the same image. This keeps
     boundary coordination centres and linkers visually symmetric without
     attempting to replicate an infinite framework component.
     """
@@ -306,9 +375,6 @@ def _manifest_spanning_bond_context(
 
     def add_context(seed: int, shift: tuple[int, int, int]) -> None:
         placements: dict[int, tuple[int, int, int]] = {seed: (0, 0, 0)}
-        for neighbour, edge_shift in adjacency.get(seed, ()):
-            placements.setdefault(neighbour, edge_shift)
-
         ring_anchors = list(placements)
         for anchor in ring_anchors:
             for ring in rings_by_source.get(anchor, ()):
@@ -322,8 +388,7 @@ def _manifest_spanning_bond_context(
                             continue
                         visited.add(neighbour)
                         proposed = tuple(
-                            current_shift[axis] + edge_shift[axis]
-                            for axis in range(3)
+                            current_shift[axis] + edge_shift[axis] for axis in range(3)
                         )
                         placements.setdefault(neighbour, proposed)
                         queue.append(neighbour)
@@ -612,6 +677,14 @@ def build_scene_from_atoms(
                     copied.setdefault(key, copy.deepcopy(source[key]))
             canonical_unwrapped_atoms.append(copied)
     canonical_records = [dict(record) for record in molcrys_analysis.bond_records]
+    periodic_ranks = _periodic_component_ranks(
+        len(source_atoms),
+        canonical_records,
+    )
+    for source_index, rank in enumerate(periodic_ranks):
+        source_atoms[source_index]["_periodic_component_rank"] = rank
+        if canonical_unwrapped_atoms is not None:
+            canonical_unwrapped_atoms[source_index]["_periodic_component_rank"] = rank
     canonical_pairs = sorted(
         {
             tuple(sorted((int(record["left"]), int(record["right"]))))

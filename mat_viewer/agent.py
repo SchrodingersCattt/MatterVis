@@ -165,6 +165,7 @@ def prepare_render(
     render_spec: Any = None,
     *,
     topology_data: Mapping[str, Any] | None = None,
+    vector_overlays: Any = None,
 ) -> Any:
     """Compile a structure and explicit specs into a backend-neutral plan."""
 
@@ -187,6 +188,7 @@ def prepare_render(
         camera=camera,
         render=render_spec,
         topology_data=topology_data,
+        vector_overlays=vector_overlays,
     )
     topology_warnings = tuple(
         str(warning) for warning in (topology_data or {}).get("warnings", ())
@@ -206,6 +208,7 @@ def render(
     camera: Any = None,
     render_spec: Any = None,
     topology_data: Mapping[str, Any] | None = None,
+    vector_overlays: Any = None,
     fps: float = 12.0,
 ) -> Any:
     """Render with an explicit backend; no backend or representation fallback."""
@@ -216,11 +219,12 @@ def render(
     if isinstance(source_or_plan, RenderPlan):
         _require_plan_backend(source_or_plan, backend_name)
         if any(
-            value is not None for value in (view, camera, render_spec, topology_data)
+            value is not None
+            for value in (view, camera, render_spec, topology_data, vector_overlays)
         ):
             raise ValueError(
-                "view, camera, render_spec, and topology_data cannot be supplied "
-                "when rendering an existing RenderPlan"
+                "view, camera, render_spec, topology_data, and vector_overlays "
+                "cannot be supplied when rendering an existing RenderPlan"
             )
         bound_render_spec = None
     else:
@@ -237,6 +241,10 @@ def render(
 
     output_suffix = Path(output).suffix.lower() if output is not None else ""
     if output_suffix in {".gif", ".mp4"}:
+        if vector_overlays is not None:
+            raise ValueError(
+                "animated vector overlays are not yet supported; use static output"
+            )
         if backend_name != "cpu":
             raise ValueError(
                 "GIF/MP4 use the shared CPU frame renderer; select backend='cpu'"
@@ -282,6 +290,7 @@ def render(
             camera=camera,
             render_spec=bound_render_spec,
             topology_data=topology_data,
+            vector_overlays=vector_overlays,
         )
         _require_plan_backend(plan, backend_name)
 

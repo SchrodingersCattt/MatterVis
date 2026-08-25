@@ -135,9 +135,7 @@ def _text_occlusion_plan(
 
 def _red_text_pixels(image: np.ndarray) -> np.ndarray:
     rgb = image[..., :3].astype(int)
-    return (rgb[..., 0] > rgb[..., 1] + 32) & (
-        rgb[..., 0] > rgb[..., 2] + 32
-    )
+    return (rgb[..., 0] > rgb[..., 1] + 32) & (rgb[..., 0] > rgb[..., 2] + 32)
 
 
 def test_camera_uses_one_depth_convention_and_clips_before_projection():
@@ -215,7 +213,9 @@ def test_flat_and_smooth_shading_produce_distinct_geometry_and_pixels():
         RenderSpec(shading="silently-invented")
     with pytest.raises(ValueError, match="unknown ORTEP mode"):
         RenderSpec(representation="ortep", ortep_mode="octant")
-    with pytest.raises(ValueError, match="missing_adp_policy must be 'error' or 'sphere'"):
+    with pytest.raises(
+        ValueError, match="missing_adp_policy must be 'error' or 'sphere'"
+    ):
         RenderSpec(missing_adp_policy="placeholder")
     with pytest.raises(ValueError, match="requires representation='ortep'"):
         RenderSpec(ortep_mode="hatch")
@@ -411,7 +411,9 @@ def test_orthographic_oblique_overlap_paints_back_to_front_in_svg_and_pdf():
             BSPPolygon(back.vertices, back.rgba, back.semantic_id, 1),
         ]
     )
-    assert [item.semantic_id for item in traverse_back_to_front(tree, eye=np.zeros(3))] == [
+    assert [
+        item.semantic_id for item in traverse_back_to_front(tree, eye=np.zeros(3))
+    ] == [
         "A-front-red",
         "B-back-blue",
     ]
@@ -754,6 +756,60 @@ def test_prepare_render_builds_atoms_bonds_ring_cell_and_polyhedron():
     assert "ring:0" in ids
     assert "unit-cell" in ids
     assert any(identifier.startswith("polyhedron:") for identifier in ids)
+
+
+def test_public_vector_overlays_use_declared_magnitude_policy() -> None:
+    scene = {
+        "atoms": [
+            {
+                "elem": "C",
+                "label": "C1",
+                "cart": [0.0, 0.0, 0.0],
+                "atom_radius": 0.25,
+            }
+        ],
+        "bonds": [],
+        "matrix": np.eye(3),
+    }
+    overlays = [
+        {
+            "id": "mode",
+            "magnitude_mode": "scaled",
+            "scale": 2.0,
+            "color": "#D55E00",
+            "style": {"shaft_radius": 0.05, "sides": 8},
+            "arrows": [
+                {
+                    "id": "atom-0",
+                    "origin": [0.0, 0.0, 0.0],
+                    "vector": [1.0, 0.0, 0.0],
+                }
+            ],
+        }
+    ]
+
+    plan = prepare_render(
+        scene,
+        render={"show_cell": False},
+        vector_overlays=overlays,
+    )
+
+    arrow = next(
+        primitive
+        for primitive in plan.primitives
+        if primitive.semantic_id == "vector:mode:atom-0"
+    )
+    assert isinstance(arrow, TriangleMeshPrimitive)
+    assert np.max(arrow.vertices[:, 0]) == pytest.approx(2.0)
+
+
+def test_public_vector_overlays_require_explicit_magnitude_policy() -> None:
+    with pytest.raises(ValueError, match="magnitude_mode must be explicitly set"):
+        prepare_render(
+            {"atoms": [], "bonds": []},
+            render={"show_cell": False},
+            vector_overlays=[{"id": "mode", "arrows": []}],
+        )
 
 
 def test_shuffled_source_ring_cycle_is_lifted_to_each_formula_unit_copy():
@@ -1239,11 +1295,82 @@ def test_real_molecular_crystal_lattice_emits_unit_cell_primitive():
     )
     plan = prepare_render(
         crystal,
-        render={"representation": "ball", "show_cell": True},
+        render={"representation": "ball", "show_cell": True, "show_axes": True},
     )
     cell = next(item for item in plan.primitives if item.semantic_id == "unit-cell")
     assert np.max(cell.segments[:, :, 0]) == pytest.approx(5.1)
     assert np.max(cell.segments[:, :, 2]) == pytest.approx(6.0)
+    assert cell.width_px >= 2.0
+    assert cell.depth_test is False
+    assert plan.metadata["lattice_compass"]["visible"] is True
+
+
+def test_lattice_compass_is_absent_unless_requested():
+    scene = {
+        "atoms": [],
+        "bonds": [],
+        "matrix": np.eye(3),
+    }
+
+    hidden = prepare_render(scene, render={"show_cell": True})
+    shown = prepare_render(
+        scene,
+        render={"show_cell": True, "show_axes": True},
+    )
+
+    assert "lattice_compass" not in hidden.metadata
+    assert shown.metadata["lattice_compass"]["visible"] is True
+    assert shown.metadata["lattice_compass"]["matrix"] == pytest.approx(np.eye(3))
+
+
+def test_cpu_raster_paints_requested_lattice_compass_in_foreground():
+    plan = RenderPlan(
+        width=180,
+        height=140,
+        background=(1.0, 1.0, 1.0, 1.0),
+        viewports=(
+            ViewportPlan(
+                semantic_id="main",
+                camera=_camera(),
+                primitives=(),
+            ),
+        ),
+        metadata={
+            "lattice_compass": {
+                "visible": True,
+                "matrix": np.eye(3).tolist(),
+                "labels": ["a", "b", "c"],
+                "colors": ["#C7372F", "#22A660", "#2E86C1"],
+            }
+        },
+    )
+
+    rgba = render_rgba(plan)
+    non_gray = np.ptp(rgba[:, :, :3], axis=2) > 20
+    assert int(non_gray.sum()) > 40
+
+
+def test_overlapping_foreground_lines_do_not_subtract_infinite_depths():
+    segment = np.asarray([[[-0.8, 0.0, 0.0], [0.8, 0.0, 0.0]]])
+    first = LinePrimitive(
+        "foreground-a",
+        segments=segment,
+        rgba=(0.1, 0.1, 0.1, 1.0),
+        width_px=2.0,
+        depth_test=False,
+    )
+    second = LinePrimitive(
+        "foreground-b",
+        segments=segment,
+        rgba=(0.2, 0.2, 0.2, 1.0),
+        width_px=2.0,
+        depth_test=False,
+    )
+
+    with np.errstate(invalid="raise"):
+        rgba = render_rgba(_plan(first, second))
+
+    assert rgba.shape == (96, 96, 4)
 
 
 def test_direct_record_source_requires_bond_contract_but_accepts_empty_records():

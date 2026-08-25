@@ -20,9 +20,9 @@ from ..contracts import (
     TriangleMeshPrimitive,
     ViewportPlan,
 )
+from ..compass_overlay import draw_matplotlib_compass
 from .bsp import BSPPolygon, build_bsp, traverse_back_to_front
 from .visibility import anchor_occluded, projected_polygon_depth
-
 
 _EPSILON = 1.0e-8
 
@@ -150,6 +150,13 @@ def render_vector(
                 local_height,
                 polygons,
                 dpi=dpi,
+            )
+            draw_matplotlib_compass(
+                axes,
+                plan.metadata,
+                viewport,
+                local_width,
+                local_height,
             )
         figure.savefig(
             buffer,
@@ -381,9 +388,7 @@ def _line_pieces(
                     and polygon_depth < line_depth - _EPSILON
                 ]
                 insertion = (
-                    min(closer_transparent)
-                    if closer_transparent
-                    else len(polygons)
+                    min(closer_transparent) if closer_transparent else len(polygons)
                 )
             else:
                 insertion = len(polygons)

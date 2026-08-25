@@ -9,6 +9,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 
 from ..config import atom_radius as configured_atom_radius
+from .compass_overlay import attach_lattice_compass_metadata
 from .contracts import (
     CameraSpec,
     LinePrimitive,
@@ -22,7 +23,6 @@ from .contracts import (
 )
 from .geometry import (
     aromatic_ring_primitive,
-    arrow_primitive,
     bond_primitives,
     color_to_rgba,
     ellipsoid_axes_primitive,
@@ -34,7 +34,7 @@ from .geometry import (
     sphere_primitive,
     unit_cell_primitive,
 )
-
+from .overlay.vectors import attach_vector_overlays, vector_primitives
 
 _ELEMENT_COLORS = {
     "H": "#FFFFFF",
@@ -63,6 +63,7 @@ def prepare_render(
     render: RenderSpec | Mapping[str, Any] | None = None,
     *,
     topology_data: Mapping[str, Any] | None = None,
+    vector_overlays: Any = None,
 ) -> RenderPlan:
     """Compile a scene, CrystalIR, or MolCrysKit object into a RenderPlan.
 
@@ -78,6 +79,7 @@ def prepare_render(
         display_mode=view_spec.display,
         show_hydrogen=render_spec.show_hydrogen,
     )
+    attach_vector_overlays(scene, vector_overlays)
     scene_display = scene.get("display_mode")
     if scene_display is not None:
         scene_view = ViewSpec(display=str(scene_display))
@@ -411,18 +413,30 @@ def prepare_render(
 
     lattice = scene.get("matrix")
     if render_spec.show_cell and lattice is not None:
-        primitives.append(unit_cell_primitive("unit-cell", lattice))
+        primitives.append(
+            unit_cell_primitive(
+                "unit-cell",
+                lattice,
+                color=render_spec.cell_color,
+                width_px=render_spec.cell_width_px,
+                depth_test=False,
+            )
+        )
 
     primitives.extend(_polyhedron_primitives(scene, topology_data))
     isosurface_primitives, isosurface_warnings = _isosurface_primitives(scene)
     primitives.extend(isosurface_primitives)
     warnings.extend(isosurface_warnings)
-    primitives.extend(_vector_primitives(scene))
+    primitives.extend(
+        vector_primitives(scene.get("vector_overlays"), lattice=scene.get("matrix"))
+    )
     if render_spec.shading == "flat":
         primitives = [
-            replace(primitive, vertex_normals=None)
-            if isinstance(primitive, TriangleMeshPrimitive)
-            else primitive
+            (
+                replace(primitive, vertex_normals=None)
+                if isinstance(primitive, TriangleMeshPrimitive)
+                else primitive
+            )
             for primitive in primitives
         ]
     primitives = sorted(primitives, key=lambda primitive: primitive.semantic_id)
@@ -453,6 +467,8 @@ def prepare_render(
         "frame_info": scene.get("frame_info"),
         "molcrys_provenance": scene.get("molcrys_provenance"),
     }
+    if render_spec.show_axes:
+        attach_lattice_compass_metadata(metadata, warnings, lattice)
     return RenderPlan(
         width=render_spec.width,
         height=render_spec.height,
@@ -547,9 +563,9 @@ def _normalise_source(
             **source,
             "atoms": list(source.get("draw_atoms") or source.get("atoms") or []),
             "bonds": list(source.get("bonds") or []),
-            "matrix": source.get("M")
-            if source.get("M") is not None
-            else source.get("matrix"),
+            "matrix": (
+                source.get("M") if source.get("M") is not None else source.get("matrix")
+            ),
         }
     if hasattr(source, "scene") and isinstance(source.scene, Mapping):
         if _is_loaded_crystal(source):
@@ -579,6 +595,15 @@ def _normalise_source(
         provenance = getattr(source, "molcrys_analysis", None)
         if provenance is not None:
             scene["molcrys_provenance"] = provenance
+        for key in (
+            "has_lattice",
+            "pbc",
+            "synthetic_cell",
+            "origin_shift",
+            "input_format",
+        ):
+            if key in source.scene:
+                scene.setdefault(key, source.scene[key])
         return scene
     if hasattr(source, "get_site_records"):
         site_getter = getattr(source, "get_site_records")
@@ -1159,31 +1184,6 @@ def _polyhedron_primitives(
                 alpha=float(_value(item, "edge_opacity", default=0.9)),
             )
         )
-    return results
-
-
-def _vector_primitives(scene: Mapping[str, Any]) -> list[TriangleMeshPrimitive]:
-    results = []
-    for group_index, group in enumerate(scene.get("vector_overlays") or []):
-        if not bool(_value(group, "visible", default=True)):
-            continue
-        group_color = _value(group, "color", default="#CC3311")
-        scale = float(_value(group, "scale", default=1.0))
-        for arrow_index, arrow in enumerate(_value(group, "arrows", default=[])):
-            if not bool(_value(arrow, "visible", default=True)):
-                continue
-            origin = np.asarray(_value(arrow, "origin"), dtype=float)
-            end = _value(arrow, "end", default=None)
-            if end is None:
-                end = origin + scale * np.asarray(_value(arrow, "vector"), dtype=float)
-            results.append(
-                arrow_primitive(
-                    f"vector:{group_index}:{arrow_index}",
-                    origin,
-                    end,
-                    _value(arrow, "color", default=group_color),
-                )
-            )
     return results
 
 

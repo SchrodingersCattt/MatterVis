@@ -16,7 +16,6 @@ from typing import Any, Literal, Mapping, TypeAlias
 
 import numpy as np
 
-
 Projection = Literal["orthographic", "perspective"]
 Backend = Literal["cpu", "matplotlib", "plotly"]
 DisplayMode = Literal["formula_unit", "unit_cell", "asymmetric_unit", "cluster"]
@@ -186,7 +185,10 @@ class RenderSpec:
     bond_radius: float = 0.15
     show_hydrogen: bool = False
     show_cell: bool = True
+    show_axes: bool = False
     show_labels: bool = False
+    cell_color: str = "#333333"
+    cell_width_px: float = 2.0
     aromatic_rings: Literal["bonds", "circle", "disk"] = "bonds"
     ortep_probability: float = 0.5
     ortep_mode: Literal["solid", "axes", "hatch"] = "solid"
@@ -226,6 +228,8 @@ class RenderSpec:
             raise ValueError("atom_scale must be positive")
         if not np.isfinite(self.bond_radius) or float(self.bond_radius) <= 0.0:
             raise ValueError("bond_radius must be positive")
+        if not np.isfinite(self.cell_width_px) or float(self.cell_width_px) <= 0.0:
+            raise ValueError("cell_width_px must be positive")
         if self.aromatic_rings not in ("bonds", "circle", "disk"):
             raise ValueError("aromatic_rings must be bonds, circle, or disk")
         if not 0.0 < float(self.ortep_probability) < 1.0:

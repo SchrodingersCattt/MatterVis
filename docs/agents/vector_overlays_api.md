@@ -93,6 +93,17 @@ cart = frac @ M
 
 No minimum-image wrapping or automatic PBC replication is applied.
 
+## CLI integration
+
+Save one or more group objects as a JSON list, then pass that file directly:
+
+```bash
+mat-vis render structure.xyz -o mode.png --vector-overlays vectors.json
+```
+
+Static CPU output renders these arrows without Plotly, Kaleido, or Chrome.
+Animated vector overlays are rejected explicitly rather than silently dropped.
+
 ## Figure integration
 
 ```python
@@ -134,6 +145,6 @@ bumps `camera_revision` because include-policy bounds may change.
 
 ## Deferred
 
-The initial API does not include a Dash table editor, dedicated CRUD route, CLI
-file flag, TUI rendering, Matplotlib flat-ORTEP arrows, automatic chemistry
-anchors, or automatic vector replication after structure transforms.
+The initial API does not include a Dash table editor, dedicated CRUD route, TUI
+rendering, Matplotlib flat-ORTEP arrows, automatic chemistry anchors, animated
+vector overlays, or automatic vector replication after structure transforms.

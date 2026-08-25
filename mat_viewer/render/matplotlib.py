@@ -183,6 +183,15 @@ def build_figure(plan: RenderPlan, *, dpi: float = 100.0):
             else:
                 artist.set_zorder(zorder)
                 axes.add_artist(artist)
+        from .compass_overlay import draw_matplotlib_compass
+
+        draw_matplotlib_compass(
+            axes,
+            plan.metadata,
+            viewport,
+            local_width,
+            local_height,
+        )
     return figure
 
 

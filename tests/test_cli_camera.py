@@ -10,11 +10,17 @@ import pytest
 
 import mat_viewer.capabilities as capability_module
 from mat_viewer.agent_topology import build_topology_data, parse_polyhedron_specs
-from mat_viewer.cli import _camera_spec, _display_mode, _inspect_payload, main
+from mat_viewer.cli import (
+    _camera_spec,
+    _display_mode,
+    _effective_show_cell,
+    _inspect_payload,
+    main,
+)
 from mat_viewer.capabilities import resolve_requirements
 
 
-def _structure() -> SimpleNamespace:
+def _structure(scene_overrides=None) -> SimpleNamespace:
     bundle = SimpleNamespace(
         M=np.diag([3.0, 4.0, 5.0]),
         scene={
@@ -25,6 +31,8 @@ def _structure() -> SimpleNamespace:
             }
         },
     )
+    if scene_overrides:
+        bundle.scene.update(scene_overrides)
     return SimpleNamespace(frames=(SimpleNamespace(bundle=bundle),))
 
 
@@ -33,7 +41,7 @@ def _camera_args(**overrides) -> Namespace:
         "width": 900,
         "height": 720,
         "show_hydrogen": False,
-        "show_cell": True,
+        "show_unit_cell": None,
         "camera_axis": None,
         "view_direction": None,
         "camera_position": None,
@@ -58,23 +66,46 @@ def test_camera_defaults_to_orthographic_positive_c_axis() -> None:
     assert structure.frames[0].bundle.M == pytest.approx(matrix_before)
 
 
+def test_unit_cell_camera_targets_cell_center_with_asymmetric_context() -> None:
+    structure = _structure(
+        {
+            "bounds": {
+                "center": [-0.5, 0.0, 0.0],
+                "mins": [-2.0, -1.0, -1.0],
+                "maxs": [1.0, 1.0, 1.0],
+            },
+            "has_lattice": True,
+            "pbc": [True, True, True],
+            "synthetic_cell": False,
+        }
+    )
+
+    camera = _camera_spec(structure, _camera_args(), display="unit_cell")
+
+    assert camera.target == pytest.approx([1.5, 2.0, 2.5])
+
+
 def test_auto_display_uses_periodic_unit_cell_context() -> None:
     args = Namespace(view="auto")
-
-    assert _display_mode(SimpleNamespace(input_format="cif"), args) == "unit_cell"
-    assert _display_mode(SimpleNamespace(input_format="extxyz"), args) == "unit_cell"
-    assert (
-        _display_mode(
-            SimpleNamespace(input_format="cif"), Namespace(view="formula_unit")
-        )
-        == "formula_unit"
+    periodic = _structure(
+        {"has_lattice": True, "pbc": [True, True, True], "synthetic_cell": False}
     )
+    nonperiodic = _structure(
+        {"has_lattice": False, "pbc": [False, False, False], "synthetic_cell": True}
+    )
+
+    assert _display_mode(periodic, args) == "unit_cell"
+    assert _display_mode(nonperiodic, args) == "cluster"
+    assert _effective_show_cell(periodic, Namespace(show_unit_cell=None)) is True
+    assert _effective_show_cell(nonperiodic, Namespace(show_unit_cell=None)) is False
+    assert _effective_show_cell(nonperiodic, Namespace(show_unit_cell=True)) is True
+    assert _display_mode(nonperiodic, Namespace(view="formula_unit")) == "formula_unit"
 
 
 def test_camera_fit_includes_the_visible_unit_cell() -> None:
     structure = _structure()
     camera = _camera_spec(
-        structure, _camera_args(show_cell=True), display="formula_unit"
+        structure, _camera_args(show_unit_cell=True), display="formula_unit"
     )
 
     assert camera.target == pytest.approx([1.0, 1.5, 2.0])
@@ -82,7 +113,7 @@ def test_camera_fit_includes_the_visible_unit_cell() -> None:
 
     atoms_only = _camera_spec(
         structure,
-        _camera_args(show_cell=False),
+        _camera_args(show_unit_cell=False),
         display="formula_unit",
     )
     assert atoms_only.target == pytest.approx([0.0, 0.0, 0.0])
@@ -102,7 +133,12 @@ def test_inspect_reports_disorder_from_mck_site_records(tmp_path: Path) -> None:
     bundle = SimpleNamespace(
         molcrys_analysis=SimpleNamespace(crystal=crystal),
         raw_atoms=[object(), object()],
-        scene={"draw_atoms": []},
+        scene={
+            "draw_atoms": [],
+            "has_lattice": False,
+            "pbc": [False, False, False],
+            "synthetic_cell": True,
+        },
         fragment_table=[],
         metadata=lambda: {"has_minor": False, "warnings": []},
     )
@@ -116,6 +152,10 @@ def test_inspect_reports_disorder_from_mck_site_records(tmp_path: Path) -> None:
     payload = _inspect_payload(structure)
 
     assert payload["structure"]["has_disorder"] is True
+    assert payload["structure"]["periodic"] is False
+    assert payload["structure"]["has_lattice"] is False
+    assert payload["structure"]["synthetic_cell"] is True
+    assert payload["structure"]["pbc"] == [False, False, False]
     assert payload["warnings"] == ["MolCrysKit reports disorder in 1 of 2 sites."]
 
 
@@ -249,3 +289,30 @@ def test_polyhedron_check_uses_base_capability_only(
     payload = json.loads(capsys.readouterr().out)
     assert payload["requirements"]["extras"] == []
     assert not output.exists()
+
+
+def test_cpu_check_accepts_explicit_lattice_axes(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        capability_module.CapabilitySpec, "available", lambda self: True
+    )
+
+    main(
+        [
+            "render",
+            str(tmp_path / "not-loaded.cif"),
+            "-o",
+            str(tmp_path / "not-created.png"),
+            "--backend",
+            "cpu",
+            "--show-axes",
+            "--check",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True

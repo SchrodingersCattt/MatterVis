@@ -28,11 +28,14 @@ For wireframe context with one ball-stick molecule:
 3. override those atoms with `material="mesh"` and `style="ball_stick"`;
 4. preserve real element names and canonical scene bonds.
 
-MatterVis currently has no `--highlight-molecule-index` render flag, and
-atom-group style overrides do not partition bonds. Do not claim that a
-convenience command or fully mixed bond style exists. State the limitation and
-never replace canonical bonds with screen-distance inference. A future direct
-selector should target `_source_molecule_index`.
+MatterVis currently has no `--highlight-molecule-index` render flag. For a
+mixed scene, combine public `atom_groups` with `bond_groups`: resolve the target
+MolCrysKit identity to canonical atom labels or indices, keep discrete covalent
+components as ball-stick, and hide or fade only selected context bonds by
+canonical label pairs or element pairs. The render CLI does not expose these
+selectors yet; do not invent a flag or replace canonical bonds with
+screen-distance inference. A future direct selector should target
+`_source_molecule_index`.
 
 Image `atom_groups` selectors support `all`, `elements`, `is_minor`, `labels`,
 `atom_indices`, `fragment_labels`, and `fragment_indices`, not

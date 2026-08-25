@@ -19,7 +19,6 @@ from ..contracts import (
     ViewportPlan,
 )
 
-
 _DEPTH_EPSILON = 1.0e-9
 
 
@@ -93,6 +92,13 @@ def render_rgba(plan: RenderPlan, *, scale: int = 1) -> np.ndarray:
         canvas[top:bottom, left:right] = local[: bottom - top, : right - left]
     canvas = np.clip(np.rint(canvas * 255.0), 0.0, 255.0).astype(np.uint8)
     _draw_text(canvas, plan, depth_buffers, scale=scale)
+    from PIL import Image
+
+    from ..compass_overlay import draw_raster_compass
+
+    image = Image.fromarray(canvas, mode="RGBA")
+    draw_raster_compass(image, plan)
+    canvas[:] = np.asarray(image)
     return canvas
 
 
@@ -675,7 +681,7 @@ def _rasterize_lines(
                 if primitive.rgba[3] >= 1.0 - 1e-12:
                     existing = z_buffer[y_value, x_value]
                     if depth < existing - _DEPTH_EPSILON or (
-                        abs(depth - existing) <= _DEPTH_EPSILON
+                        (depth == existing or abs(depth - existing) <= _DEPTH_EPSILON)
                         and stable_order < order_buffer[y_value, x_value]
                     ):
                         z_buffer[y_value, x_value] = depth
