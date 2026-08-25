@@ -9,7 +9,6 @@ import numpy as np
 
 from .contracts import LinePrimitive, RGBA, TriangleMeshPrimitive
 
-
 _BASIC_COLORS: dict[str, str] = {
     "black": "#000000",
     "white": "#ffffff",
@@ -568,6 +567,7 @@ def unit_cell_primitive(
     origin: Iterable[float] = (0.0, 0.0, 0.0),
     width_px: float = 1.0,
     alpha: float = 1.0,
+    depth_test: bool = True,
 ) -> LinePrimitive:
     lattice = np.asarray(matrix, dtype=float)
     if lattice.shape != (3, 3) or not np.all(np.isfinite(lattice)):
@@ -608,6 +608,7 @@ def unit_cell_primitive(
         ),
         rgba=color_to_rgba(color, alpha=alpha),
         width_px=width_px,
+        depth_test=depth_test,
         metadata={"kind": "unit_cell"},
     )
 

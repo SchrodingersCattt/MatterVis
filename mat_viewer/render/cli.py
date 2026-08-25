@@ -201,10 +201,23 @@ def _build_render_parser(
         dest="show_axes",
         action="store_true",
         default=True,
-        help="Show lattice axes (default).",
+        help="Show a camera-projected lattice-axis compass.",
     )
     p.add_argument(
         "--no-axes", dest="show_axes", action="store_false", help="Hide lattice axes."
+    )
+    p.add_argument(
+        "--cell-color",
+        default="#333333",
+        metavar="COLOR",
+        help="Unit-cell edge colour (default: #333333).",
+    )
+    p.add_argument(
+        "--cell-width",
+        type=float,
+        default=2.0,
+        metavar="PX",
+        help="Unit-cell edge width in pixels (default: 2.0).",
     )
     p.add_argument(
         "--show-labels",
@@ -726,9 +739,11 @@ def _save_static_output(
             scale=args.scale,
         )
         return {
-            "backend": "plotly-kaleido"
-            if result.plotly_figure is not None
-            else "matplotlib-flat-ortep",
+            "backend": (
+                "plotly-kaleido"
+                if result.plotly_figure is not None
+                else "matplotlib-flat-ortep"
+            ),
             "fallback_reason": None,
         }
     except Exception as exc:
@@ -805,9 +820,7 @@ def _render_main(args: argparse.Namespace) -> None:
     args.view = (
         "formula_unit"
         if args.view == "auto" and input_format == "cif"
-        else "unit_cell"
-        if args.view == "auto"
-        else args.view
+        else "unit_cell" if args.view == "auto" else args.view
     )
     overrides = _build_style_overrides(args)
 

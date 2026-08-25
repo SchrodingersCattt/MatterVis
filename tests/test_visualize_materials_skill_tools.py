@@ -79,8 +79,17 @@ def test_skill_has_no_second_installer_or_obsolete_package_entrypoint() -> None:
 def test_skill_routes_publication_and_multi_structure_guidance() -> None:
     document = (SKILL / "SKILL.md").read_text(encoding="utf-8")
 
+    assert 'description: "Use for any atomistic image or visualization:' in document
+    assert "--check" not in document
+    assert "--vector-overlays" in document
+    assert "not permission to redraw" in document
     assert "./references/publication-layout.md" in document
     assert "./references/multi-structure-panels.md" in document
+    vectors = (SKILL / "references" / "vibration-mode-vectors.md").read_text(
+        encoding="utf-8"
+    )
+    assert "source Cartesian frame" in vectors
+    assert "synthetic-cell translation internally" in vectors
 
 
 def test_released_molcryskit_minimum_is_consistent() -> None:
@@ -96,7 +105,7 @@ def test_released_molcryskit_minimum_is_consistent() -> None:
     for workflow in ("ci.yml", "release.yml"):
         text = (ROOT / ".github" / "workflows" / workflow).read_text(encoding="utf-8")
         assert f'MOLCRYSKIT_MINIMUM: "{MOLCRYSKIT_MINIMUM}"' in text
-        assert 'molcrys-kit==${MOLCRYSKIT_MINIMUM}' in text
+        assert "molcrys-kit==${MOLCRYSKIT_MINIMUM}" in text
         assert 'python -m pip install -e ".[all,test]"' in text
 
     development = (SKILL / "references" / "capabilities-and-install.md").read_text(

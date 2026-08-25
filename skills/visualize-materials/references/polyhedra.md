@@ -8,7 +8,6 @@ classification to MolCrysKit.
 ## Static CLI
 
 Polyhedra are part of the base CPU renderer; no Plotly/Web extra is required.
-Run `mat-vis render INPUT.cif -o OUTPUT.png --backend cpu --check --json` first.
 
 `mat-vis render` accepts repeatable `--polyhedron` JSON objects. Required keys are
 `center` and `ligand`.
@@ -17,8 +16,9 @@ Atom-centred coordination polyhedron:
 
 ```bash
 mat-vis render INPUT.cif -o OUTPUT.png --backend cpu \
-  --view unit_cell --style ball_stick --shading smooth \
-  --camera-axis c --orthogonal \
+  --view unit_cell --style ball --shading smooth \
+  --camera-axis c --orthogonal --show-cell --show-axes \
+  --cell-width 2 \
   --polyhedron '{"center":"Pb","ligand":"I","level":"atom","fallback_max":6,"color":"#ff6600"}' \
   --polyhedron-cutoff 3.5
 ```
@@ -41,6 +41,17 @@ explicitly. `--polyhedron-site INDEX` restricts analysis to that displayed
 fragment index; without it, the CLI draws every matching displayed fragment.
 
 ## Semantics
+
+- For a periodic overview, request both `--show-cell` and `--show-axes`,
+  then confirm the cell and a/b/c compass are visible at delivery size.
+- Use `ball_stick` by default for molecules, clusters, and discrete covalently
+  bonded components. For a pure dense extended coordination network, use
+  `--style ball` with polyhedra so redundant network bonds do not bury the hull.
+- For a mixed scene, use MatterVis's public `atom_groups` and `bond_groups` API
+  to keep discrete covalent components as ball-stick while suppressing only
+  redundant extended-network bonds. Preserve MolCrysKit canonical bonds; do not
+  replace the figure with an ad hoc plot. CLI selector support is tracked in
+  MatterVis issue #113.
 
 - Atom level uses element symbols. `cutoff` is the hard radial cap and an
   explicit `hard_cutoff` or `center_kind` is rejected as molecule-only. A

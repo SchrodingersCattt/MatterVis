@@ -532,27 +532,24 @@ def test_render_check_rejects_ignored_legacy_option(tmp_path: Path, capsys) -> N
     assert "--config" in captured.err
 
 
-def test_render_check_rejects_no_axes_instead_of_ignoring_it(
-    tmp_path: Path, capsys
-) -> None:
-    with pytest.raises(SystemExit) as raised:
-        main(
-            [
-                "render",
-                str(tmp_path / "unused.cif"),
-                "-o",
-                str(tmp_path / "unused.svg"),
-                "--no-axes",
-                "--check",
-                "--json",
-            ]
-        )
+def test_render_check_accepts_explicit_no_axes(tmp_path: Path, capsys) -> None:
+    main(
+        [
+            "render",
+            str(tmp_path / "unused.cif"),
+            "-o",
+            str(tmp_path / "unused.svg"),
+            "--no-axes",
+            "--check",
+            "--json",
+        ]
+    )
 
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
-    assert raised.value.code == 2
-    assert "--no-axes" in payload["error"]
-    assert "--no-axes" in captured.err
+    assert payload["ok"] is True
+    assert payload["check_only"] is True
+    assert captured.err == ""
 
 
 def test_polyhedron_json_rejects_unimplemented_keys() -> None:

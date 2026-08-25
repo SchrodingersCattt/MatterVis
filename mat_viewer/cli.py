@@ -25,8 +25,8 @@ from __future__ import annotations
 import argparse
 from contextlib import redirect_stdout
 from dataclasses import asdict, is_dataclass
-from hashlib import sha256
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Optional
@@ -36,6 +36,11 @@ from .capabilities import (
     requirements_for_render,
     requirements_for_tui,
     resolve_requirements,
+)
+from .structure.inspect import (
+    file_sha256 as _file_sha256,
+    inspect_payload as _inspect_payload,
+    is_nonperiodic_structure as _is_nonperiodic_structure,
 )
 
 
@@ -62,6 +67,7 @@ def _build_render_parser(
     # representation, and ORTEP mode is resolved only for ORTEP.
     parser.set_defaults(
         show_axes=None,
+        show_unit_cell=None,
         ortep_mode=None,
         ortep_probability=None,
         frame=None,
@@ -114,6 +120,13 @@ def _build_render_parser(
         choices=("error", "sphere"),
         default="error",
         help="ORTEP behavior when ADP data is missing (default: error).",
+    )
+    parser.add_argument(
+        "--vector-overlays",
+        type=Path,
+        default=None,
+        metavar="JSON",
+        help="JSON file containing public world-space vector overlay groups.",
     )
     return parser
 
@@ -654,72 +667,6 @@ def _capabilities_main(args: argparse.Namespace) -> None:
     _emit(payload, json_output=args.json_output)
 
 
-def _file_sha256(path: Path) -> str:
-    digest = sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def _records(crystal, method: str) -> list | None:
-    function = getattr(crystal, method, None)
-    if not callable(function):
-        return None
-    return list(function())
-
-
-def _inspect_payload(structure) -> dict:
-    selected = structure.frames[0]
-    bundle = selected.bundle
-    analysis = getattr(bundle, "molcrys_analysis", None)
-    crystal = getattr(analysis, "crystal", None)
-    metadata = bundle.metadata() if hasattr(bundle, "metadata") else {}
-    warnings = list(metadata.get("warnings") or [])
-    site_records = (
-        _records(crystal, "get_site_records") if crystal is not None else None
-    )
-    bond_records = (
-        _records(crystal, "get_bond_records") if crystal is not None else None
-    )
-    disordered_sites = []
-    if site_records is not None:
-        for record in site_records:
-            occupancy = float(getattr(record, "occupancy", 1.0))
-            group = getattr(record, "disorder_group", 0)
-            if occupancy < 1.0 - 1.0e-8 or group not in (None, 0, "0", ".", "?"):
-                disordered_sites.append(record)
-    if disordered_sites and not any(
-        "disorder" in warning.lower() for warning in warnings
-    ):
-        warnings.append(
-            f"MolCrysKit reports disorder in {len(disordered_sites)} of "
-            f"{len(site_records)} sites."
-        )
-    return {
-        "schema": "mattervis.inspect/v1",
-        "ok": True,
-        "source": {
-            "path": str(structure.path),
-            "sha256": _file_sha256(Path(structure.path)),
-            "input_format": structure.input_format,
-            "frame": selected.index,
-            "total_frames": structure.total_frames,
-        },
-        "structure": {
-            "site_records": None if site_records is None else len(site_records),
-            "bond_records": None if bond_records is None else len(bond_records),
-            "parsed_atoms": len(getattr(bundle, "raw_atoms", ()) or ()),
-            "displayed_atoms": len(
-                (getattr(bundle, "scene", {}) or {}).get("draw_atoms", ()) or ()
-            ),
-            "fragments": len(getattr(bundle, "fragment_table", ()) or ()),
-            "has_disorder": bool(disordered_sites),
-        },
-        "warnings": warnings,
-    }
-
-
 def _inspect_main(args: argparse.Namespace) -> None:
     from .agent import load_structure
 
@@ -796,8 +743,6 @@ def _validate_render_options(args: argparse.Namespace) -> None:
     """Reject legacy flags that the backend-neutral path cannot honour."""
 
     unsupported: list[str] = []
-    if args.show_axes is not None:
-        unsupported.append("--show-axes" if args.show_axes else "--no-axes")
     if args.monochrome:
         unsupported.append("--monochrome")
     if args.config is not None:
@@ -844,6 +789,10 @@ def _validate_render_options(args: argparse.Namespace) -> None:
                 "animated --polyhedron overlays are not yet supported; no static "
                 "overlay was silently reused across frames"
             )
+        if args.vector_overlays is not None:
+            raise ValueError(
+                "animated --vector-overlays are not yet supported; use static output"
+            )
         if args.stride is not None and args.stride <= 0:
             raise ValueError("--stride must be greater than zero")
         if args.fps is not None and args.fps <= 0.0:
@@ -866,6 +815,8 @@ def _validate_render_options(args: argparse.Namespace) -> None:
         from .agent_topology import parse_polyhedron_specs
 
         parse_polyhedron_specs(args.polyhedron)
+    if not math.isfinite(args.cell_width) or args.cell_width <= 0.0:
+        raise ValueError("--cell-width must be finite and greater than zero")
     _render_ortep_mode(args)
 
 
@@ -921,8 +872,9 @@ def _scene_fit(bundle, *, display: str, show_hydrogen: bool, show_cell: bool):
     mins = np.asarray(bounds.get("mins", ()), dtype=float)
     maxs = np.asarray(bounds.get("maxs", ()), dtype=float)
     fit_points = np.empty((0, 3), dtype=float)
+    cell_vertices = None
     if mins.shape == (3,) and maxs.shape == (3,) and np.all(np.isfinite((mins, maxs))):
-        if show_cell:
+        if display == "unit_cell" or show_cell:
             matrix = np.asarray(getattr(bundle, "M", scene.get("M")), dtype=float)
             if matrix.shape == (3, 3) and np.all(np.isfinite(matrix)):
                 fractions = np.asarray(
@@ -941,7 +893,6 @@ def _scene_fit(bundle, *, display: str, show_hydrogen: bool, show_cell: bool):
                 cell_vertices = fractions @ matrix
                 mins = np.minimum(mins, cell_vertices.min(axis=0))
                 maxs = np.maximum(maxs, cell_vertices.max(axis=0))
-        center = (mins + maxs) * 0.5
         fit_points = np.asarray(
             [
                 [x, y, z]
@@ -951,7 +902,12 @@ def _scene_fit(bundle, *, display: str, show_hydrogen: bool, show_cell: bool):
             ],
             dtype=float,
         )
-        radius = float(np.linalg.norm((maxs - mins) * 0.5))
+        if display == "unit_cell" and cell_vertices is not None:
+            center = np.asarray(cell_vertices, dtype=float).mean(axis=0)
+            radius = float(np.linalg.norm(fit_points - center, axis=1).max())
+        else:
+            center = (mins + maxs) * 0.5
+            radius = float(np.linalg.norm((maxs - mins) * 0.5))
     if radius <= 1.0e-9:
         ranges = np.asarray(bounds.get("ranges", ()), dtype=float)
         if ranges.shape == (3,) and np.all(np.isfinite(ranges)):
@@ -974,7 +930,7 @@ def _camera_spec(structure, args: argparse.Namespace, *, display: str):
         selected.bundle,
         display=display,
         show_hydrogen=args.show_hydrogen,
-        show_cell=bool(getattr(args, "show_unit_cell", getattr(args, "show_cell", True))),
+        show_cell=_effective_show_cell(structure, args),
     )
     aspect = max(float(args.width) / float(args.height), 1.0e-6)
     ortho_scale = radius * 1.15 / min(aspect, 1.0)
@@ -1089,7 +1045,26 @@ def _render_result_payload(result, structure, args: argparse.Namespace, camera) 
 def _display_mode(structure, args: argparse.Namespace) -> str:
     if args.view != "auto":
         return args.view
+    if _is_nonperiodic_structure(structure):
+        return "cluster"
     return "unit_cell"
+
+
+def _effective_show_cell(structure, args: argparse.Namespace) -> bool:
+    requested = getattr(args, "show_unit_cell", None)
+    if requested is not None:
+        return bool(requested)
+    return not _is_nonperiodic_structure(structure)
+
+
+def _load_vector_overlays(path: Path | None):
+    if path is None:
+        return None
+    with Path(path).expanduser().open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if not isinstance(payload, list):
+        raise ValueError("--vector-overlays JSON root must be a list")
+    return payload
 
 
 def _animation_indices(args: argparse.Namespace) -> list[int]:
@@ -1172,8 +1147,11 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                 atom_scale=args.atom_scale,
                 bond_radius=args.bond_radius,
                 show_hydrogen=args.show_hydrogen,
-                show_cell=args.show_unit_cell,
+                show_cell=_effective_show_cell(structure, args),
+                show_axes=bool(args.show_axes),
                 show_labels=args.show_labels,
+                cell_color=args.cell_color,
+                cell_width_px=args.cell_width,
                 aromatic_rings=args.aromatic_rings,
                 ortep_probability=(
                     args.ortep_probability
@@ -1202,6 +1180,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                 camera=camera,
                 render_spec=spec,
                 topology_data=topology_data,
+                vector_overlays=_load_vector_overlays(args.vector_overlays),
                 fps=args.fps if args.fps is not None else 12.0,
             )
         payload = _render_result_payload(result, structure, args, camera)

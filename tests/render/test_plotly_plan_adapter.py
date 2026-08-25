@@ -111,3 +111,26 @@ def test_plotly_layout_uses_explicit_target_direction_and_ranges() -> None:
     assert scene.zaxis.autorange is False
     assert np.allclose(eye[:2], 0.0)
     assert eye[2] > 0.0
+
+
+def test_plotly_figure_paints_requested_lattice_compass() -> None:
+    pytest.importorskip("plotly")
+    base = _plan()
+    plan = RenderPlan(
+        width=base.width,
+        height=base.height,
+        background=base.background,
+        viewports=base.viewports,
+        metadata={
+            "lattice_compass": {
+                "visible": True,
+                "matrix": np.eye(3).tolist(),
+                "labels": ["a", "b", "c"],
+                "colors": ["#C7372F", "#22A660", "#2E86C1"],
+            }
+        },
+    )
+
+    figure = build_figure(plan)
+    assert len(figure.layout.annotations) == 5
+    assert len(figure.layout.shapes) == 1

@@ -1,6 +1,6 @@
 ---
 name: visualize-materials
-description: "Use before drawing or writing plotting code for structures, trajectories, or fields: model previews, comparisons, frames, animations, publication figures, command-line views, isosurfaces, vectors, and polyhedra."
+description: "Use for any atomistic image or visualization: structures, molecules, crystals, slabs, trajectories, polyhedra, vibrations, fields, animations, comparisons, and publication figures."
 ---
 
 # Visualize Materials
@@ -37,10 +37,13 @@ explicit data.
 - Base MatterVis is the complete CPU static path. Do not install Dash, Plotly,
   Kaleido, Textual, scikit-image, imageio, Chrome, or system libraries unless
   the requested capability requires them.
-- Use public `mat-vis inspect`, `capabilities`, and `render --check` commands;
+- Use public `mat-vis inspect`, `capabilities`, and `render` commands;
   do not diagnose through Web/TUI startup or private Python modules.
 - Pass vibration and other anchored vectors through public `mat-vis render
   --vector-overlays`; never invoke private renderer internals.
+- A failed or poor-looking MatterVis artifact is not permission to redraw
+  atomistic geometry with ASE or raw plotting code. Adjust supported `mat-vis`
+  controls, or retain the evidence and report the unresolved limitation.
 - Select `--backend cpu|matplotlib|plotly` explicitly. Use `matplotlib` for a
   projected 2D drawing and `cpu` for 3D geometry. MatterVis has no silent backend or
   representation fallback; preserve a failure and its exact install hint.
