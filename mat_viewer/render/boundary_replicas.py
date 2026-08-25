@@ -101,6 +101,11 @@ def expand_boundary_replicas(
         return translations
 
     def _spans_cell(molecule_atoms: list[dict[str, Any]]) -> bool:
+        if any(
+            int(atom.get("_periodic_component_rank", 0) or 0) > 0
+            for atom in molecule_atoms
+        ):
+            return True
         fractions = np.asarray(
             [atom.get("frac") for atom in molecule_atoms], dtype=float
         )

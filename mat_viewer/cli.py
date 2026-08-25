@@ -872,8 +872,9 @@ def _scene_fit(bundle, *, display: str, show_hydrogen: bool, show_cell: bool):
     mins = np.asarray(bounds.get("mins", ()), dtype=float)
     maxs = np.asarray(bounds.get("maxs", ()), dtype=float)
     fit_points = np.empty((0, 3), dtype=float)
+    cell_vertices = None
     if mins.shape == (3,) and maxs.shape == (3,) and np.all(np.isfinite((mins, maxs))):
-        if show_cell:
+        if display == "unit_cell" or show_cell:
             matrix = np.asarray(getattr(bundle, "M", scene.get("M")), dtype=float)
             if matrix.shape == (3, 3) and np.all(np.isfinite(matrix)):
                 fractions = np.asarray(
@@ -892,7 +893,6 @@ def _scene_fit(bundle, *, display: str, show_hydrogen: bool, show_cell: bool):
                 cell_vertices = fractions @ matrix
                 mins = np.minimum(mins, cell_vertices.min(axis=0))
                 maxs = np.maximum(maxs, cell_vertices.max(axis=0))
-        center = (mins + maxs) * 0.5
         fit_points = np.asarray(
             [
                 [x, y, z]
@@ -902,7 +902,12 @@ def _scene_fit(bundle, *, display: str, show_hydrogen: bool, show_cell: bool):
             ],
             dtype=float,
         )
-        radius = float(np.linalg.norm((maxs - mins) * 0.5))
+        if display == "unit_cell" and cell_vertices is not None:
+            center = np.asarray(cell_vertices, dtype=float).mean(axis=0)
+            radius = float(np.linalg.norm(fit_points - center, axis=1).max())
+        else:
+            center = (mins + maxs) * 0.5
+            radius = float(np.linalg.norm((maxs - mins) * 0.5))
     if radius <= 1.0e-9:
         ranges = np.asarray(bounds.get("ranges", ()), dtype=float)
         if ranges.shape == (3,) and np.all(np.isfinite(ranges)):

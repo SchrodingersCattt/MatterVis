@@ -66,6 +66,25 @@ def test_camera_defaults_to_orthographic_positive_c_axis() -> None:
     assert structure.frames[0].bundle.M == pytest.approx(matrix_before)
 
 
+def test_unit_cell_camera_targets_cell_center_with_asymmetric_context() -> None:
+    structure = _structure(
+        {
+            "bounds": {
+                "center": [-0.5, 0.0, 0.0],
+                "mins": [-2.0, -1.0, -1.0],
+                "maxs": [1.0, 1.0, 1.0],
+            },
+            "has_lattice": True,
+            "pbc": [True, True, True],
+            "synthetic_cell": False,
+        }
+    )
+
+    camera = _camera_spec(structure, _camera_args(), display="unit_cell")
+
+    assert camera.target == pytest.approx([1.5, 2.0, 2.5])
+
+
 def test_auto_display_uses_periodic_unit_cell_context() -> None:
     args = Namespace(view="auto")
     periodic = _structure(
