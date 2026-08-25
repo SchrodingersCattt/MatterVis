@@ -34,6 +34,21 @@ def lattice_compass_metadata(lattice: Any) -> dict | None:
     }
 
 
+def attach_lattice_compass_metadata(
+    metadata: dict,
+    warnings: list[str],
+    lattice: Any,
+) -> None:
+    """Attach valid lattice-compass metadata or record why it is unavailable."""
+    compass = lattice_compass_metadata(lattice)
+    if compass is None:
+        warnings.append(
+            "lattice axes were requested but the source has no finite lattice"
+        )
+    else:
+        metadata["lattice_compass"] = compass
+
+
 def lattice_compass_layout(
     metadata: Mapping[str, Any],
     viewport: ViewportPlan,

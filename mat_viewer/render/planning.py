@@ -9,7 +9,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 
 from ..config import atom_radius as configured_atom_radius
-from .compass_overlay import lattice_compass_metadata
+from .compass_overlay import attach_lattice_compass_metadata
 from .contracts import (
     CameraSpec,
     LinePrimitive,
@@ -34,7 +34,7 @@ from .geometry import (
     sphere_primitive,
     unit_cell_primitive,
 )
-from .overlay.vectors import normalize_vector_overlays, vector_primitives
+from .overlay.vectors import attach_vector_overlays, vector_primitives
 
 _ELEMENT_COLORS = {
     "H": "#FFFFFF",
@@ -79,10 +79,7 @@ def prepare_render(
         display_mode=view_spec.display,
         show_hydrogen=render_spec.show_hydrogen,
     )
-    if vector_overlays is not None:
-        scene["vector_overlays"] = _vector_overlays_in_scene_frame(
-            vector_overlays, scene
-        )
+    attach_vector_overlays(scene, vector_overlays)
     scene_display = scene.get("display_mode")
     if scene_display is not None:
         scene_view = ViewSpec(display=str(scene_display))
@@ -471,13 +468,7 @@ def prepare_render(
         "molcrys_provenance": scene.get("molcrys_provenance"),
     }
     if render_spec.show_axes:
-        compass = lattice_compass_metadata(lattice)
-        if compass is None:
-            warnings.append(
-                "lattice axes were requested but the source has no finite lattice"
-            )
-        else:
-            metadata["lattice_compass"] = compass
+        attach_lattice_compass_metadata(metadata, warnings, lattice)
     return RenderPlan(
         width=render_spec.width,
         height=render_spec.height,
@@ -650,37 +641,6 @@ def _normalise_source(
     raise TypeError(
         "source must be a scene mapping, CrystalIR, or MolCrysKit structure"
     )
-
-
-def _vector_overlays_in_scene_frame(
-    vector_overlays: Any,
-    scene: Mapping[str, Any],
-) -> Any:
-    """Translate source-Cartesian overlay positions into a synthetic scene cell."""
-    if not bool(scene.get("synthetic_cell", False)):
-        return vector_overlays
-    origin_shift = np.asarray(scene.get("origin_shift", (0.0, 0.0, 0.0)), dtype=float)
-    if origin_shift.shape != (3,) or not np.all(np.isfinite(origin_shift)):
-        raise ValueError(
-            "synthetic-cell origin_shift must contain three finite numbers"
-        )
-    if np.allclose(origin_shift, 0.0):
-        return vector_overlays
-
-    translated = normalize_vector_overlays(vector_overlays)
-    offset = -origin_shift
-    for group in translated:
-        for arrow in group["arrows"]:
-            if str(arrow.get("origin_space") or "cartesian") == "cartesian":
-                arrow["origin"] = (
-                    np.asarray(arrow["origin"], dtype=float) + offset
-                ).tolist()
-            if (
-                "end" in arrow
-                and str(arrow.get("end_space") or "cartesian") == "cartesian"
-            ):
-                arrow["end"] = (np.asarray(arrow["end"], dtype=float) + offset).tolist()
-    return translated
 
 
 def _is_loaded_crystal(source: Any) -> bool:

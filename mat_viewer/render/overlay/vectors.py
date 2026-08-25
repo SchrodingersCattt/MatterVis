@@ -1,4 +1,5 @@
 """Native world-space vector overlays for Plotly 3D scenes."""
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -23,13 +24,17 @@ def _vec3(raw: Any, name: str) -> np.ndarray:
     return vector
 
 
-def _cartesian(vector: np.ndarray, space: str, lattice: np.ndarray | None, name: str) -> np.ndarray:
+def _cartesian(
+    vector: np.ndarray, space: str, lattice: np.ndarray | None, name: str
+) -> np.ndarray:
     if space == "cartesian":
         return vector
     if space != "fractional":
         raise ValueError(f"{name} space must be 'cartesian' or 'fractional'")
     if lattice is None or lattice.shape != (3, 3):
-        raise ValueError(f"{name} uses fractional coordinates but no 3x3 lattice was supplied")
+        raise ValueError(
+            f"{name} uses fractional coordinates but no 3x3 lattice was supplied"
+        )
     return vector @ lattice
 
 
@@ -51,7 +56,9 @@ def normalize_vector_overlays(raw: Any) -> list[dict]:
         group_ids.add(group_id)
         mode = str(group.get("magnitude_mode") or "").strip()
         if mode not in MAGNITUDE_MODES:
-            raise ValueError("magnitude_mode must be explicitly set to absolute, scaled, or normalized")
+            raise ValueError(
+                "magnitude_mode must be explicitly set to absolute, scaled, or normalized"
+            )
         if mode == "scaled" and "scale" not in group:
             raise ValueError(f"scaled vector group {group_id!r} requires scale")
         if mode == "normalized" and "length" not in group:
@@ -67,14 +74,20 @@ def normalize_vector_overlays(raw: Any) -> list[dict]:
         arrow_ids: set[str] = set()
         for arrow_index, raw_arrow in enumerate(arrows_raw):
             if not isinstance(raw_arrow, dict):
-                raise ValueError(f"arrow {arrow_index} in group {group_id!r} must be a dict")
+                raise ValueError(
+                    f"arrow {arrow_index} in group {group_id!r} must be a dict"
+                )
             arrow = dict(raw_arrow)
             arrow_id = str(arrow.get("id") or f"arrow_{arrow_index}").strip()
             if not arrow_id or arrow_id in arrow_ids:
-                raise ValueError(f"duplicate or empty arrow id in group {group_id!r}: {arrow_id!r}")
+                raise ValueError(
+                    f"duplicate or empty arrow id in group {group_id!r}: {arrow_id!r}"
+                )
             arrow_ids.add(arrow_id)
             if ("vector" in arrow) == ("end" in arrow):
-                raise ValueError(f"arrow {arrow_id!r} must define exactly one of vector or end")
+                raise ValueError(
+                    f"arrow {arrow_id!r} must define exactly one of vector or end"
+                )
             arrow["origin"] = _vec3(arrow.get("origin"), "origin").tolist()
             if "vector" in arrow:
                 arrow["vector"] = _vec3(arrow["vector"], "vector").tolist()
@@ -103,6 +116,45 @@ def normalize_vector_overlays(raw: Any) -> list[dict]:
             raise ValueError("vector overlay opacity must lie in (0, 1]")
         groups.append(group)
     return groups
+
+
+def vector_overlays_in_scene_frame(
+    vector_overlays: Any,
+    scene: dict | Any,
+) -> Any:
+    """Translate source-Cartesian overlay positions into a synthetic scene cell."""
+    if not bool(scene.get("synthetic_cell", False)):
+        return vector_overlays
+    origin_shift = np.asarray(scene.get("origin_shift", (0.0, 0.0, 0.0)), dtype=float)
+    if origin_shift.shape != (3,) or not np.all(np.isfinite(origin_shift)):
+        raise ValueError(
+            "synthetic-cell origin_shift must contain three finite numbers"
+        )
+    if np.allclose(origin_shift, 0.0):
+        return vector_overlays
+
+    translated = normalize_vector_overlays(vector_overlays)
+    offset = -origin_shift
+    for group in translated:
+        for arrow in group["arrows"]:
+            if str(arrow.get("origin_space") or "cartesian") == "cartesian":
+                arrow["origin"] = (
+                    np.asarray(arrow["origin"], dtype=float) + offset
+                ).tolist()
+            if (
+                "end" in arrow
+                and str(arrow.get("end_space") or "cartesian") == "cartesian"
+            ):
+                arrow["end"] = (np.asarray(arrow["end"], dtype=float) + offset).tolist()
+    return translated
+
+
+def attach_vector_overlays(scene: dict, vector_overlays: Any) -> None:
+    """Attach optional source-frame vectors to a normalized scene."""
+    if vector_overlays is not None:
+        scene["vector_overlays"] = vector_overlays_in_scene_frame(
+            vector_overlays, scene
+        )
 
 
 def resolve_vector_overlays(raw: Any, *, lattice=None) -> list[dict]:
@@ -155,7 +207,9 @@ def resolve_vector_overlays(raw: Any, *, lattice=None) -> list[dict]:
             else:
                 length = float(arrow.get("length", group.get("length")))
                 if not np.isfinite(length) or length <= 0.0:
-                    raise ValueError("normalized vectors require a positive finite length")
+                    raise ValueError(
+                        "normalized vectors require a positive finite length"
+                    )
                 display_vector = length * raw_vector / magnitude
             direction = display_vector / np.linalg.norm(display_vector)
             origin = origin + float(arrow.get("tail_offset", 0.0)) * direction
@@ -224,7 +278,9 @@ def vector_mesh_traces(vector_overlays: Any, *, lattice=None) -> list[dict]:
     for arrow in resolved:
         style = arrow["style"]
         lighting = style.get("lighting")
-        lighting_key = tuple(sorted(lighting.items())) if isinstance(lighting, dict) else None
+        lighting_key = (
+            tuple(sorted(lighting.items())) if isinstance(lighting, dict) else None
+        )
         key = (
             arrow["group_id"],
             arrow["color"],
@@ -262,9 +318,15 @@ def vector_mesh_traces(vector_overlays: Any, *, lattice=None) -> list[dict]:
             "x": np.asarray(vertices[:, 0], dtype=np.float32),
             "y": np.asarray(vertices[:, 1], dtype=np.float32),
             "z": np.asarray(vertices[:, 2], dtype=np.float32),
-            "i": np.asarray(triangles[:, 0], dtype=np.int16 if n_vertices < 32768 else np.int32),
-            "j": np.asarray(triangles[:, 1], dtype=np.int16 if n_vertices < 32768 else np.int32),
-            "k": np.asarray(triangles[:, 2], dtype=np.int16 if n_vertices < 32768 else np.int32),
+            "i": np.asarray(
+                triangles[:, 0], dtype=np.int16 if n_vertices < 32768 else np.int32
+            ),
+            "j": np.asarray(
+                triangles[:, 1], dtype=np.int16 if n_vertices < 32768 else np.int32
+            ),
+            "k": np.asarray(
+                triangles[:, 2], dtype=np.int16 if n_vertices < 32768 else np.int32
+            ),
             "color": color,
             "opacity": opacity,
             "flatshading": flatshading,
@@ -274,7 +336,11 @@ def vector_mesh_traces(vector_overlays: Any, *, lattice=None) -> list[dict]:
             "name": arrows[0]["group_name"],
             "showlegend": False,
             "uid": f"vector-{group_id}-{color}-{opacity:g}",
-            "meta": {"mv_role": "vector", "mv_group": group_id, "mv_items": item_metadata},
+            "meta": {
+                "mv_role": "vector",
+                "mv_group": group_id,
+                "mv_items": item_metadata,
+            },
         }
         if lighting_key is not None:
             trace["lighting"] = dict(lighting_key)
@@ -282,7 +348,9 @@ def vector_mesh_traces(vector_overlays: Any, *, lattice=None) -> list[dict]:
     return traces
 
 
-def vector_overlay_bounds(vector_overlays: Any, *, lattice=None) -> tuple[np.ndarray | None, np.ndarray | None]:
+def vector_overlay_bounds(
+    vector_overlays: Any, *, lattice=None
+) -> tuple[np.ndarray | None, np.ndarray | None]:
     """Return min/max generated mesh vertices for groups with include policy."""
     points = []
     for arrow in resolve_vector_overlays(vector_overlays, lattice=lattice):
@@ -337,9 +405,13 @@ def paper_vector_label_annotations(
 ) -> list[dict]:
     """Project arrow-tip labels to paper coordinates for static orthographic views."""
     projection = camera.get("projection") or {}
-    projection_type = projection.get("type") if isinstance(projection, dict) else projection
+    projection_type = (
+        projection.get("type") if isinstance(projection, dict) else projection
+    )
     if str(projection_type or "perspective") != "orthographic":
-        raise ValueError("paper vector labels currently require orthographic projection")
+        raise ValueError(
+            "paper vector labels currently require orthographic projection"
+        )
     annotations = []
     for arrow in resolve_vector_overlays(vector_overlays, lattice=lattice):
         label = arrow.get("label")
@@ -362,8 +434,16 @@ def paper_vector_label_annotations(
                 "yshift": int(pixel_offset[1]),
                 "showarrow": False,
                 "text": str(label),
-                "font": {"size": int(font_size), "family": font_family, "color": arrow["color"]},
-                "meta": {"mv_role": "vector_label", "mv_group": arrow["group_id"], "mv_item": arrow["arrow_id"]},
+                "font": {
+                    "size": int(font_size),
+                    "family": font_family,
+                    "color": arrow["color"],
+                },
+                "meta": {
+                    "mv_role": "vector_label",
+                    "mv_group": arrow["group_id"],
+                    "mv_item": arrow["arrow_id"],
+                },
             }
         )
     return annotations
