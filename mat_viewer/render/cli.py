@@ -196,6 +196,20 @@ def _build_render_parser(
         action="store_false",
         help="Hide unit cell edges.",
     )
+    boundary_replicas = p.add_mutually_exclusive_group()
+    boundary_replicas.add_argument(
+        "--include-boundary-replicas",
+        dest="include_boundary_replicas",
+        action="store_true",
+        help="Include complete boundary replicas in unit-cell views.",
+    )
+    boundary_replicas.add_argument(
+        "--no-boundary-replicas",
+        dest="include_boundary_replicas",
+        action="store_false",
+        help="Omit nonessential boundary replicas in unit-cell views.",
+    )
+    p.set_defaults(include_boundary_replicas=None)
     p.add_argument(
         "--show-axes",
         dest="show_axes",
@@ -644,12 +658,17 @@ def _prepare_frame(bundle, args: argparse.Namespace, overrides: dict[str, Any]):
     from ..scene import scene_style
 
     source_metadata = dict(getattr(bundle, "scene", {}) or {})
-    include_boundary_replicas = any(source_metadata.get("pbc", [True, True, True]))
+    include_boundary_replicas = args.include_boundary_replicas
+    if include_boundary_replicas is None:
+        include_boundary_replicas = any(source_metadata.get("pbc", [True, True, True]))
     scene = build_bundle_scene(
         bundle,
         display_mode=args.view,
         show_hydrogen=args.show_hydrogen,
         include_boundary_replicas=include_boundary_replicas,
+        include_cross_boundary_bond_endpoints=(
+            args.style not in {"ball", "space_filling"}
+        ),
     )
     _apply_camera_overrides(scene, overrides, args)
     style = scene_style(scene, overrides)
@@ -820,9 +839,7 @@ def _render_main(args: argparse.Namespace) -> None:
     args.view = (
         "formula_unit"
         if args.view == "auto" and input_format == "cif"
-        else "unit_cell"
-        if args.view == "auto"
-        else args.view
+        else "unit_cell" if args.view == "auto" else args.view
     )
     overrides = _build_style_overrides(args)
 

@@ -750,7 +750,15 @@ def _hex_rgba(value: str) -> tuple[float, float, float, float]:
     return tuple(channels)  # type: ignore[return-value]
 
 
-def _scene_fit(bundle, *, display: str, show_hydrogen: bool, show_cell: bool):
+def _scene_fit(
+    bundle,
+    *,
+    display: str,
+    show_hydrogen: bool,
+    show_cell: bool,
+    include_boundary_replicas: bool = True,
+    include_cross_boundary_bond_endpoints: bool = True,
+):
     import numpy as np
 
     scene = getattr(bundle, "scene", {}) or {}
@@ -764,6 +772,8 @@ def _scene_fit(bundle, *, display: str, show_hydrogen: bool, show_cell: bool):
             bundle,
             display_mode=display,
             show_hydrogen=show_hydrogen,
+            include_boundary_replicas=include_boundary_replicas,
+            include_cross_boundary_bond_endpoints=include_cross_boundary_bond_endpoints,
         )
     bounds = scene.get("bounds") or {}
     center = np.asarray(bounds.get("center", (0.0, 0.0, 0.0)), dtype=float)
@@ -829,11 +839,19 @@ def _camera_spec(structure, args: argparse.Namespace, *, display: str):
     camera_clip = getattr(args, "camera_clip", None)
     requested_ortho_scale = getattr(args, "ortho_scale", None)
     requested_field_of_view = getattr(args, "field_of_view", None)
+    include_boundary_replicas = getattr(args, "include_boundary_replicas", None)
+    if include_boundary_replicas is None:
+        include_boundary_replicas = True
+    include_cross_boundary_bond_endpoints = getattr(
+        args, "style", "ball_stick"
+    ) not in {"ball", "space_filling"}
     _, target, radius, fit_points = _scene_fit(
         selected.bundle,
         display=display,
         show_hydrogen=args.show_hydrogen,
         show_cell=_effective_show_cell(structure, args),
+        include_boundary_replicas=include_boundary_replicas,
+        include_cross_boundary_bond_endpoints=include_cross_boundary_bond_endpoints,
     )
     if camera_target is not None:
         target = np.asarray(camera_target, dtype=float)
@@ -1055,7 +1073,13 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                     frame=args.frame if args.frame is not None else 0,
                 )
             display = _display_mode(structure, args)
-            view = ViewSpec(display=display)
+            include_boundary_replicas = args.include_boundary_replicas
+            if include_boundary_replicas is None:
+                include_boundary_replicas = True
+            view = ViewSpec(
+                display=display,
+                include_boundary_replicas=include_boundary_replicas,
+            )
             camera = _camera_spec(structure, args, display=display)
             spec = RenderSpec(
                 representation=args.style,

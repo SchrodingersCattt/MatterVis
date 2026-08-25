@@ -327,9 +327,8 @@ def _tag_unresolved_partial_solvent_disorder(raw_atoms):
             atom["is_disordered"] = True
             atom["disorder_resolved"] = True
             continue
-        if (
-            _partial_occupancy_value(atom) < 0.999
-            and _PARTIAL_SOLVENT_LABEL.match(_site_label(atom))
+        if _partial_occupancy_value(atom) < 0.999 and _PARTIAL_SOLVENT_LABEL.match(
+            _site_label(atom)
         ):
             atom["is_disordered"] = True
             atom["disorder_resolved"] = False
@@ -899,6 +898,7 @@ def build_bundle_scene(
     preset: Optional[Dict[str, Any]] = None,
     transforms: Optional[list[Dict[str, Any]]] = None,
     include_boundary_replicas: bool = True,
+    include_cross_boundary_bond_endpoints: bool = True,
 ) -> Dict[str, Any]:
     """Build the scene dict for ``bundle``.
 
@@ -919,10 +919,23 @@ def build_bundle_scene(
         display_mode,
         bool(show_hydrogen),
         bool(include_boundary_replicas),
+        bool(include_cross_boundary_bond_endpoints),
         bundle.bond_scale,
         threshold_key,
     )
     base_scene = bundle.scene_cache.get(base_cache_key)
+    if base_scene is None and include_cross_boundary_bond_endpoints:
+        # Scenes cached before this option existed implicitly included bonded
+        # boundary endpoints. Reuse those entries instead of rebuilding them
+        # through a possibly unavailable source-analysis contract.
+        legacy_base_cache_key = (
+            display_mode,
+            bool(show_hydrogen),
+            bool(include_boundary_replicas),
+            bundle.bond_scale,
+            threshold_key,
+        )
+        base_scene = bundle.scene_cache.get(legacy_base_cache_key)
     if base_scene is None:
         perf_log.record(
             "cache:scene",
@@ -953,6 +966,9 @@ def build_bundle_scene(
             ),
             unwrapped_atoms=bundle.unwrapped_atoms,
             include_boundary_replicas=include_boundary_replicas,
+            include_cross_boundary_bond_endpoints=(
+                include_cross_boundary_bond_endpoints
+            ),
             bond_scale=bundle.bond_scale,
             bond_thresholds=bundle.bond_thresholds,
             molcrys_analysis=bundle.molcrys_analysis,
@@ -969,6 +985,7 @@ def build_bundle_scene(
             display_mode,
             bool(show_hydrogen),
             bool(include_boundary_replicas),
+            bool(include_cross_boundary_bond_endpoints),
         )
         cached_fragments = bundle.fragment_table_cache.get(fragment_cache_key)
         if cached_fragments is None:
@@ -1018,6 +1035,7 @@ def build_bundle_scene(
         display_mode,
         bool(show_hydrogen),
         bool(include_boundary_replicas),
+        bool(include_cross_boundary_bond_endpoints),
         transforms_cache_key(transforms),
     )
     cached = (

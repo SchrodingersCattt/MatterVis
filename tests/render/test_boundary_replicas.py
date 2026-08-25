@@ -923,6 +923,35 @@ def test_unit_cell_can_omit_outside_boundary_replicas():
     assert not scene["draw_atoms"][0].get("_is_boundary_replica")
 
 
+def test_strict_unit_cell_can_omit_cross_boundary_bond_endpoints():
+    cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
+    M = np.eye(3) * 10.0
+    atoms = [
+        _atom("C1", [-0.02, 0.5, 0.5], M),
+        _atom("C2", [0.02, 0.5, 0.5], M),
+    ]
+    records = [{"left": 0, "right": 1, "right_image_shift": [1, 0, 0]}]
+
+    scene = build_scene_from_atoms(
+        name="strict_atoms_only",
+        title="Strict atoms only",
+        atoms=atoms,
+        cell=cell,
+        M=M,
+        R=np.eye(3),
+        display_mode="unit_cell",
+        include_boundary_replicas=False,
+        include_cross_boundary_bond_endpoints=False,
+        ops=scene_ops(),
+        molcrys_analysis=_analysis(atoms, records),
+        preset={"style": {"show_labels": False, "show_axes": False}},
+    )
+
+    assert len(scene["draw_atoms"]) == 2
+    assert scene["bonded_image_replica_count"] == 0
+    assert not any(atom.get("_is_bonded_image_replica") for atom in scene["draw_atoms"])
+
+
 def test_strict_unit_cell_manifests_cross_boundary_bonded_images():
     cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
     M = np.eye(3) * 10.0

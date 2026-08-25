@@ -16,7 +16,10 @@ def _render_destinations() -> set[str]:
 def test_backend_neutral_spec_fields_have_cli_destinations() -> None:
     destinations = _render_destinations()
     mappings = {
-        ViewSpec: {"display": "view"},
+        ViewSpec: {
+            "display": "view",
+            "include_boundary_replicas": "include_boundary_replicas",
+        },
         CameraSpec: {
             "position": "camera_position",
             "target": "camera_target",
@@ -64,6 +67,7 @@ def test_composable_user_surfaces_have_cli_destinations() -> None:
         "vector_overlays",
         "atom_group",
         "bond_group",
+        "include_boundary_replicas",
         "polyhedron",
         "frame_range",
         "stride",
@@ -75,3 +79,20 @@ def test_composable_user_surfaces_have_cli_destinations() -> None:
         "first_frame_step",
         "time_position",
     } <= destinations
+
+
+def test_boundary_replica_cli_is_explicit_and_backwards_compatible() -> None:
+    parser = argparse.ArgumentParser()
+    render = _build_render_parser(parser.add_subparsers())
+
+    automatic = render.parse_args(["structure.cif", "-o", "figure.png"])
+    strict = render.parse_args(
+        ["structure.cif", "-o", "figure.png", "--no-boundary-replicas"]
+    )
+    expanded = render.parse_args(
+        ["structure.cif", "-o", "figure.png", "--include-boundary-replicas"]
+    )
+
+    assert automatic.include_boundary_replicas is None
+    assert strict.include_boundary_replicas is False
+    assert expanded.include_boundary_replicas is True

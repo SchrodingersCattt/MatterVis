@@ -48,8 +48,9 @@ MolCrysKit contract is fatal and must not fall back to `.info` fields.
 - `asymmetric_unit` deduplicates by label, element, disorder group, and disorder
   assembly. It is useful for diagnosis but is not raw `_atom_site` or major-only.
 - `unit_cell` gives crystal context and normally adds complete boundary-fragment
-  replicas. Disclose that behavior; the image CLI does not expose strict
-  `include_boundary_replicas=False`.
+  replicas. Use `--no-boundary-replicas --style ball` for a strict home-cell
+  atoms-only view. Bonded styles retain canonical cross-boundary endpoints when
+  needed to show connectivity.
 - `cluster` disables PBC for an already finite input. It does not select a centre,
   radius, molecule, or connected component.
 

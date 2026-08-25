@@ -81,6 +81,10 @@ def prepare_render(
         source,
         display_mode=view_spec.display,
         show_hydrogen=render_spec.show_hydrogen,
+        include_boundary_replicas=view_spec.include_boundary_replicas,
+        include_cross_boundary_bond_endpoints=(
+            render_spec.representation not in {"ball", "space_filling"}
+        ),
     )
     attach_vector_overlays(scene, vector_overlays)
     scene_display = scene.get("display_mode")
@@ -621,6 +625,8 @@ def _normalise_source(
     *,
     display_mode: str,
     show_hydrogen: bool,
+    include_boundary_replicas: bool,
+    include_cross_boundary_bond_endpoints: bool,
 ) -> dict[str, Any]:
     if not isinstance(source, Mapping) and hasattr(source, "frames"):
         frames = tuple(source.frames)
@@ -630,6 +636,8 @@ def _normalise_source(
             frames[0],
             display_mode=display_mode,
             show_hydrogen=show_hydrogen,
+            include_boundary_replicas=include_boundary_replicas,
+            include_cross_boundary_bond_endpoints=include_cross_boundary_bond_endpoints,
         )
         source_path = getattr(source, "path", None)
         if source_path is not None:
@@ -642,6 +650,8 @@ def _normalise_source(
             source.bundle,
             display_mode=display_mode,
             show_hydrogen=show_hydrogen,
+            include_boundary_replicas=include_boundary_replicas,
+            include_cross_boundary_bond_endpoints=include_cross_boundary_bond_endpoints,
         )
         scene["frame_index"] = getattr(source, "index", 0)
         scene["frame_info"] = dict(getattr(source, "info", {}) or {})
@@ -664,6 +674,8 @@ def _normalise_source(
                 source,
                 display_mode=display_mode,
                 show_hydrogen=show_hydrogen,
+                include_boundary_replicas=include_boundary_replicas,
+                include_cross_boundary_bond_endpoints=include_cross_boundary_bond_endpoints,
             )
         else:
             built_scene = source.scene
@@ -671,6 +683,8 @@ def _normalise_source(
             built_scene,
             display_mode=display_mode,
             show_hydrogen=show_hydrogen,
+            include_boundary_replicas=include_boundary_replicas,
+            include_cross_boundary_bond_endpoints=include_cross_boundary_bond_endpoints,
         )
         cube_data = getattr(source, "cube_data", None)
         if cube_data is not None:
