@@ -28,13 +28,14 @@ from .geometry import (
     ellipsoid_axes_primitive,
     ellipsoid_hatch_primitive,
     ellipsoid_primitive,
-    mesh_primitive,
-    polyhedron_edges_primitive,
-    polyhedron_primitive,
     sphere_primitive,
     unit_cell_primitive,
 )
 from .overlay.vectors import attach_vector_overlays, vector_primitives
+from .mesh_overlays import (
+    isosurface_primitives as _isosurface_primitives,
+    polyhedron_primitives as _polyhedron_primitives,
+)
 
 _ELEMENT_COLORS = {
     "H": "#FFFFFF",
@@ -64,6 +65,8 @@ def prepare_render(
     *,
     topology_data: Mapping[str, Any] | None = None,
     vector_overlays: Any = None,
+    atom_groups: Sequence[Mapping[str, Any]] | None = None,
+    bond_groups: Sequence[Mapping[str, Any]] | None = None,
 ) -> RenderPlan:
     """Compile a scene, CrystalIR, or MolCrysKit object into a RenderPlan.
 
@@ -92,6 +95,14 @@ def prepare_render(
             view_spec = scene_view
     atoms = list(scene.get("atoms") or [])
     bonds = list(scene.get("bonds") or [])
+    if atom_groups:
+        from ..style.atom_groups import tag_atoms_with_groups
+
+        atoms = tag_atoms_with_groups(atoms, list(atom_groups))
+    if bond_groups:
+        from ..style.bond_groups import tag_bonds_with_groups
+
+        bonds = tag_bonds_with_groups(bonds, list(bond_groups), atoms=atoms)
     warnings: list[str] = []
     primitives: list[Primitive] = []
 
@@ -100,7 +111,16 @@ def prepare_render(
     atom_colors: dict[int, Any] = {}
     atom_positions: dict[int, np.ndarray] = {}
     display_atoms_by_source: dict[int, dict[tuple[Any, ...], int]] = {}
-    representation = str(render_spec.representation).lower().replace("-", "_")
+    atom_representations: dict[int, str] = {}
+    default_representation = str(render_spec.representation).lower().replace("-", "_")
+    supported_representations = {
+        "ball",
+        "ball_stick",
+        "ortep",
+        "space_filling",
+        "stick",
+        "wireframe",
+    }
     lat_steps, lon_steps = render_spec.sphere_detail
     ortep_view_direction = (
         np.asarray(camera_spec.position) - np.asarray(camera_spec.target)
@@ -118,6 +138,14 @@ def prepare_render(
             continue
         if not bool(_value(atom, "_render_visible", "visible", default=True)):
             continue
+        representation = (
+            str(_value(atom, "_render_style", default=None) or default_representation)
+            .lower()
+            .replace("-", "_")
+        )
+        if representation not in supported_representations:
+            raise ValueError(f"unsupported atom-group style {representation!r}")
+        atom_representations[index] = representation
         position = np.asarray(
             _value(
                 atom,
@@ -135,9 +163,8 @@ def prepare_render(
             continue
         visible_indices.add(index)
         atom_positions[index] = position
-        color = _value(
+        color = _value(atom, "_render_color", default=None) or _value(
             atom,
-            "_render_color",
             "color",
             default=_ELEMENT_COLORS.get(element, "#808080"),
         )
@@ -179,6 +206,7 @@ def prepare_render(
             ),
         }
 
+        atom_primitive_start = len(primitives)
         if representation == "ortep":
             displacement = _displacement_matrix(atom)
             if displacement is None:
@@ -258,6 +286,19 @@ def prepare_render(
                 )
             )
 
+        material = _value(atom, "_render_material", default=None)
+        if material == "flat":
+            primitives[atom_primitive_start:] = [
+                (
+                    replace(primitive, vertex_normals=None)
+                    if isinstance(primitive, TriangleMeshPrimitive)
+                    else primitive
+                )
+                for primitive in primitives[atom_primitive_start:]
+            ]
+        elif material not in {None, "mesh"}:
+            raise ValueError(f"unsupported atom-group material {material!r}")
+
         if render_spec.show_labels:
             primitives.append(
                 TextPrimitive(
@@ -277,7 +318,7 @@ def prepare_render(
             "rendered as opacity without automatic disorder resolution"
         )
 
-    if representation != "ball":
+    if bonds:
         for bond_index, bond in enumerate(bonds):
             first_index = int(
                 _value(
@@ -302,8 +343,32 @@ def prepare_render(
             if (
                 first_index not in visible_indices
                 or second_index not in visible_indices
+                or not bool(_value(bond, "_render_visible", default=True))
             ):
                 continue
+            explicit_bond_style = _value(bond, "_render_style", default=None)
+            if explicit_bond_style is not None:
+                bond_representation = str(explicit_bond_style).replace("-", "_")
+                if bond_representation == "ball_stick":
+                    bond_representation = "stick"
+                if bond_representation not in {"stick", "wireframe"}:
+                    raise ValueError(
+                        f"unsupported bond-group style {bond_representation!r}"
+                    )
+            else:
+                first_representation = atom_representations[first_index]
+                second_representation = atom_representations[second_index]
+                bond_capable = {"ball_stick", "ortep", "stick", "wireframe"}
+                if (
+                    first_representation not in bond_capable
+                    or second_representation not in bond_capable
+                ):
+                    continue
+                bond_representation = (
+                    "wireframe"
+                    if first_representation == second_representation == "wireframe"
+                    else "stick"
+                )
             start = np.asarray(
                 _value(bond, "start", default=atom_positions[first_index]), dtype=float
             )
@@ -323,7 +388,18 @@ def prepare_render(
                     f"bond {bond_index} has invalid endpoints and was skipped"
                 )
                 continue
-            alpha = float(np.clip(_value(bond, "alpha", default=1.0), 0.0, 1.0))
+            alpha = float(
+                np.clip(
+                    _value(bond, "alpha", default=1.0)
+                    * _value(bond, "_render_opacity_scale", default=1.0),
+                    0.0,
+                    1.0,
+                )
+            )
+            radius = render_spec.bond_radius * float(
+                _value(bond, "_render_radius_scale", default=1.0)
+            )
+            override_color = _value(bond, "_render_color", default=None)
             semantic_id = f"bond:{bond_index}:{first_index}-{second_index}"
             bond_metadata = {
                 "kind": "bond",
@@ -332,15 +408,16 @@ def prepare_render(
                     _value(bond, "right_image_shift", default=(0, 0, 0))
                 ),
             }
-            if representation == "wireframe":
+            if bond_representation == "wireframe":
                 primitives.append(
                     LinePrimitive(
                         semantic_id=semantic_id,
                         segments=np.asarray([[start, end]]),
                         rgba=color_to_rgba(
-                            _value(bond, "color", default="#333333"), alpha=alpha
+                            override_color or _value(bond, "color", default="#333333"),
+                            alpha=alpha,
                         ),
-                        width_px=max(1.0, render_spec.bond_radius * 8.0),
+                        width_px=max(1.0, radius * 8.0),
                         metadata=bond_metadata,
                     )
                 )
@@ -350,9 +427,19 @@ def prepare_render(
                         semantic_id,
                         start,
                         end,
-                        render_spec.bond_radius,
-                        _value(bond, "color_i", default=atom_colors[first_index]),
-                        _value(bond, "color_j", default=atom_colors[second_index]),
+                        radius,
+                        override_color
+                        or _value(
+                            bond,
+                            "color_i",
+                            default=atom_colors[first_index],
+                        ),
+                        override_color
+                        or _value(
+                            bond,
+                            "color_j",
+                            default=atom_colors[second_index],
+                        ),
                         sides=render_spec.cylinder_sides,
                         alpha=alpha,
                         metadata=bond_metadata,
@@ -466,6 +553,8 @@ def prepare_render(
         "frame_index": scene.get("frame_index"),
         "frame_info": scene.get("frame_info"),
         "molcrys_provenance": scene.get("molcrys_provenance"),
+        "atom_groups": [dict(group) for group in (atom_groups or ())],
+        "bond_groups": [dict(group) for group in (bond_groups or ())],
     }
     if render_spec.show_axes:
         attach_lattice_compass_metadata(metadata, warnings, lattice)
@@ -1133,136 +1222,6 @@ def _displacement_matrix(atom: Any) -> np.ndarray | None:
     if uiso is not None and np.isfinite(float(uiso)) and float(uiso) > 0.0:
         return np.eye(3) * float(uiso)
     return None
-
-
-def _polyhedron_primitives(
-    scene: Mapping[str, Any], topology_data: Mapping[str, Any] | None
-) -> list[Primitive]:
-    results: list[Primitive] = []
-    explicit = list(scene.get("polyhedra") or [])
-    if topology_data:
-        for specification in topology_data.get("spec_results") or []:
-            for overlay in specification.get("overlays") or []:
-                explicit.append(
-                    {
-                        "vertices": overlay.get("shell_coords"),
-                        "faces": (overlay.get("hull") or {}).get("simplices"),
-                        "color": overlay.get("color")
-                        or specification.get("color")
-                        or "#7C5CBF",
-                        "opacity": specification.get("opacity", 0.55),
-                        "edge_opacity": specification.get("edge_opacity", 0.9),
-                        "spec_id": specification.get("spec_id"),
-                    }
-                )
-    for index, item in enumerate(explicit):
-        vertices = _value(item, "vertices", "shell_coords", default=[])
-        faces = _value(item, "faces", "simplices", default=[])
-        if vertices is None or faces is None or len(vertices) == 0 or len(faces) == 0:
-            continue
-        semantic_id = f"polyhedron:{index}:{_value(item, 'spec_id', default='')}"
-        color = _value(item, "color", default="#7C5CBF")
-        results.append(
-            polyhedron_primitive(
-                semantic_id,
-                vertices,
-                faces,
-                color,
-                alpha=float(_value(item, "opacity", default=0.55)),
-                metadata={
-                    "kind": "polyhedron",
-                    "spec_id": _value(item, "spec_id", default=None),
-                },
-            )
-        )
-        results.append(
-            polyhedron_edges_primitive(
-                f"{semantic_id}:edges",
-                vertices,
-                faces,
-                color,
-                alpha=float(_value(item, "edge_opacity", default=0.9)),
-            )
-        )
-    return results
-
-
-def _isosurface_primitives(
-    scene: Mapping[str, Any],
-) -> tuple[list[TriangleMeshPrimitive], list[str]]:
-    """Consume meshes prepared lazily by the optional cube adapter."""
-    entries = scene.get("isosurfaces")
-    cube_data = scene.get("cube_data")
-    if entries is None and cube_data is not None:
-        for name in ("isosurfaces", "surface_meshes"):
-            candidate = (
-                cube_data.get(name)
-                if isinstance(cube_data, Mapping)
-                else getattr(cube_data, name, None)
-            )
-            if candidate is not None:
-                entries = candidate
-                break
-    if entries is None:
-        if cube_data is not None:
-            raise RuntimeError(
-                "cube_data has no prepared isosurface meshes; the [cube] adapter "
-                "must lazily run marching cubes and populate scene['isosurfaces']"
-            )
-        return [], []
-
-    results: list[TriangleMeshPrimitive] = []
-    warnings: list[str] = []
-    for index, entry in enumerate(entries):
-        if isinstance(entry, Mapping):
-            vertices = entry.get("vertices")
-            if vertices is None:
-                vertices = entry.get("verts")
-            triangles = entry.get("triangles")
-            if triangles is None:
-                triangles = entry.get("faces")
-            normals = entry.get("normals")
-            name = str(entry.get("id") or entry.get("name") or index)
-            color = entry.get("color", "#D55E00" if index == 0 else "#0072B2")
-            opacity = float(entry.get("opacity", 0.55))
-            metadata = {
-                "kind": "isosurface",
-                "name": name,
-                "phase": entry.get("phase"),
-                "level": entry.get("level"),
-            }
-        elif isinstance(entry, (tuple, list)) and len(entry) >= 2:
-            vertices, triangles = entry[0], entry[1]
-            normals = entry[2] if len(entry) >= 3 else None
-            name = str(index)
-            color = "#D55E00" if index == 0 else "#0072B2"
-            opacity = 0.55
-            metadata = {"kind": "isosurface", "name": name}
-        else:
-            warnings.append(
-                f"isosurface {index} has an unsupported mesh record and was skipped"
-            )
-            continue
-        if vertices is None or triangles is None:
-            warnings.append(f"isosurface {name} has no vertices/faces and was skipped")
-            continue
-        vertex_array = np.asarray(vertices, dtype=float)
-        triangle_array = np.asarray(triangles, dtype=np.int64)
-        if len(vertex_array) == 0 or len(triangle_array) == 0:
-            warnings.append(f"isosurface {name} is empty and was skipped")
-            continue
-        results.append(
-            mesh_primitive(
-                f"isosurface:{index}:{name}",
-                vertex_array,
-                triangle_array,
-                color,
-                normals=normals,
-                alpha=opacity,
-                metadata=metadata,
-            )
-        )
-    return results, warnings
 
 
 def _fit_camera(

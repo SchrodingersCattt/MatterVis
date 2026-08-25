@@ -25,7 +25,7 @@ Every group is a flat dict with these fields:
 | `visible` | bool | `false` hides every matched atom AND any bond touching one. |
 | `opacity` | float \| null | Per-group opacity multiplier in `[0, 1]`. Replaces (does not stack-multiply) earlier matching groups. `null` = no override. |
 | `material` | string \| null | `"mesh"` or `"flat"`; per-group atom-rendering material override. `null` = inherit scene-level material. |
-| `style` | string \| null | `"ball"`, `"ball_stick"`, `"stick"`, `"ortep"`, or `"wireframe"`; per-group atom-rendering style override. `null` = inherit scene-level style. |
+| `style` | string \| null | `"ball"`, `"ball_stick"`, `"space_filling"`, `"stick"`, `"ortep"`, or `"wireframe"`; per-group atom-rendering style override. `null` = inherit scene-level style. |
 
 ### Selector grammar
 
@@ -57,6 +57,8 @@ absent is ignored. The supported keys are:
   `fragment_labels` but matches by integer fragment index. Accepts
   both bare integer (`5`) and digit-string (`"5"`) forms when the
   caller threads the label through.
+- `{"molecule_indices": [0, 2]}` — match canonical molecule/component
+  indices carried by the rendered atoms.
 
 Unknown keys are silently ignored. A selector that ends up with no
 recognised keys is **rejected** at the normaliser layer
@@ -73,7 +75,7 @@ to the legacy `monochrome` flag when set).
 
 ```mermaid
 flowchart LR
-  S["selector keys<br/>(all, elements, is_minor,<br/>labels, atom_indices,<br/>fragment_labels, fragment_indices)"] -->|AND per key| M["atom_matches_selector<br/>(per atom)"]
+  S["selector keys<br/>(all, elements, is_minor,<br/>labels, atom_indices,<br/>fragment_labels, fragment_indices, molecule_indices)"] -->|AND per key| M["atom_matches_selector<br/>(per atom)"]
   M --> R["rules run in list order<br/>(later-wins per field)"]
   R --> T["per-atom tags written by<br/>tag_atoms_with_groups:<br/>_render_color, _render_color_light,<br/>_render_visible, _render_opacity_scale,<br/>_render_material, _render_style"]
   N["no rule overrode this atom"] -.-> F["fallback chain:<br/>element palette<br/>+ legacy monochrome flag"]
@@ -87,6 +89,17 @@ Groups apply in **list order** with **later-wins** semantics on
 overlapping atoms. So `[{all -> grey}, {elements: O -> red}]` paints
 everything grey except oxygens, which come out red. Reorder via
 `POST /api/v2/atom_groups/reorder` to change the priority cascade.
+
+The same rules are available without Dash through repeatable CLI arguments:
+
+```bash
+mat-vis render structure.extxyz -o mixed.png \
+  --atom-group all style=ball \
+  --atom-group molecule:0 style=ball_stick
+```
+
+See [`../cli.md`](../cli.md#selector-based-mixed-styles) for the compact
+selector and override grammar.
 
 ### Relationship to the legacy monochrome flag
 
@@ -131,10 +144,11 @@ atoms ball-stick except O atoms as ORTEP ellipsoids" with one rule:
 {"selector": {"elements": ["O"]}, "material": "mesh", "style": "ortep"}
 ```
 
-**Bonds are not partitioned.** Their material/style come from the
-scene-level `material`/`style`. The bond endpoint *colour* still
-respects per-atom `_render_color` so a recoloured atom and the
-adjacent bond half stay visually consistent.
+In the backend-neutral render path, per-atom style also controls bond
+participation. A bond is drawn by default only when both visible endpoints use
+a bond-capable style (`ball_stick`, `stick`, `ortep`, or `wireframe`). An
+explicit bond-group style can override that default. Bond endpoint colours
+still follow per-atom `_render_color`.
 
 ```mermaid
 flowchart TD
@@ -143,7 +157,8 @@ flowchart TD
   P --> B2["bucket (mesh, ortep)<br/>-> ortep_atom_mesh_traces"]
   P --> B3["bucket (flat, *)<br/>-> _atom_scatter_traces"]
   P --> B4["bucket (*, wireframe)<br/>-> _wireframe_atom_traces"]
-  S["bonds: scene-level<br/>(NOT partitioned per-atom)"] --> BD["_bond_segments<br/>prefers _render_color of each<br/>endpoint and skips bonds<br/>touching hidden atoms"]
+  A --> BD["bond participation follows<br/>both endpoint styles"]
+  BG["optional bond-group style"] --> BD
 ```
 
 ## REST surface

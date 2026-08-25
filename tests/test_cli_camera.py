@@ -316,3 +316,48 @@ def test_cpu_check_accepts_explicit_lattice_axes(
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is True
+
+
+def test_check_exposes_camera_and_mesh_quality_cli_parity(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        capability_module.CapabilitySpec, "available", lambda self: True
+    )
+
+    main(
+        [
+            "render",
+            str(tmp_path / "not-loaded.cif"),
+            "-o",
+            str(tmp_path / "not-created.png"),
+            "--backend",
+            "cpu",
+            "--perspective",
+            "--camera-target",
+            "1",
+            "2",
+            "3",
+            "--field-of-view",
+            "37",
+            "--camera-clip",
+            "0.2",
+            "400",
+            "--sphere-detail",
+            "18",
+            "30",
+            "--cylinder-sides",
+            "20",
+            "--check",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["camera"]["target"] == [1.0, 2.0, 3.0]
+    assert payload["camera"]["field_of_view"] == 37.0
+    assert payload["camera"]["clip"] == [0.2, 400.0]
+    assert payload["render"]["sphere_detail"] == [18, 30]
+    assert payload["render"]["cylinder_sides"] == 20

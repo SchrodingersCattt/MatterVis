@@ -13,7 +13,7 @@ from typing import Any, Dict
 from .frame_selection import parse_frame_indices as _parse_frame_indices
 
 _DISPLAY_MODES = ("auto", "formula_unit", "unit_cell", "asymmetric_unit", "cluster")
-_STYLES = ("ball_stick", "ball", "stick", "ortep", "wireframe")
+_STYLES = ("ball_stick", "ball", "space_filling", "stick", "ortep", "wireframe")
 _SHADINGS = ("smooth", "flat")
 _ORTEP_MODES = ("ortep_solid", "ortep_axes", "ortep_octant", "ortep_hatch")
 _IMAGE_EXTENSIONS = (".png", ".pdf", ".svg")
@@ -820,7 +820,9 @@ def _render_main(args: argparse.Namespace) -> None:
     args.view = (
         "formula_unit"
         if args.view == "auto" and input_format == "cif"
-        else "unit_cell" if args.view == "auto" else args.view
+        else "unit_cell"
+        if args.view == "auto"
+        else args.view
     )
     overrides = _build_style_overrides(args)
 

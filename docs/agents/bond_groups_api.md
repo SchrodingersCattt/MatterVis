@@ -17,6 +17,7 @@ order with later-wins semantics for overlapping bonds.
 | `visible` | bool | `false` removes matching bonds entirely. |
 | `opacity` | float | Multiplier in `[0, 1]` applied to bond opacity (the renderer default opacity is 1.0). |
 | `radius_scale` | float | Multiplier on the bond cylinder/line radius. `1.0` is unchanged; `2.0` doubles thickness. |
+| `style` | str / null | `"stick"`, `"ball_stick"`, or `"wireframe"`; `ball_stick` normalizes to stick bonds. |
 | `enabled` | bool | `false` rules persist but do not paint. |
 
 Empty `bond_groups` is the default and means "no overrides".
@@ -31,7 +32,7 @@ keys must match (AND semantics).**
 |---|---|---|
 | `all` | `true` | Matches every bond. Other keys are ignored when set. |
 | `between_elements` | list[str] | The bond's endpoints must (set-wise) equal the two-element list. `["O","H"]` matches O-H **and** H-O bonds. A single-element list matches homo-element bonds (e.g. `["C"]` for C-C). |
-| `labels` | list[list[str]] | Pairs of canonical atom labels. Each pair matches order-independently (`["Pb1","Cl3"]` == `["Cl3","Pb1"]`). |
+| `labels` | list[str] | Canonical bond identifiers such as `"A1-B2"`; endpoint order is accepted both ways. |
 | `is_minor` | bool | When `true`, only matches bonds whose `is_minor` flag is set (partial-occupancy bonds); when `false`, only major-occupancy bonds. |
 
 Matching is exact and case-sensitive on element symbols and labels.
@@ -48,9 +49,22 @@ flowchart LR
   S["selector keys<br/>(all, between_elements,<br/>labels, is_minor)"] -->|AND per key| M["bond_matches_selector<br/>(per bond)"]
   N["between_elements: set-equal<br/>labels: pair order-independent"] -.-> M
   M --> R["rules run in list order<br/>(later-wins per field)"]
-  R --> T["per-bond tags written by<br/>tag_bonds_with_groups:<br/>_render_color,<br/>_render_visible,<br/>_render_opacity_scale,<br/>_render_radius_scale"]
+  R --> T["per-bond tags written by<br/>tag_bonds_with_groups:<br/>_render_color,<br/>_render_visible,<br/>_render_opacity_scale,<br/>_render_radius_scale,<br/>_render_style"]
   T --> C["renderer consumes tags<br/>(_bond_segments -><br/>_bond_mesh_traces)"]
 ```
+
+## CLI surface
+
+The backend-neutral renderer accepts the same ordered rules through repeatable
+arguments:
+
+```bash
+mat-vis render structure.extxyz -o bonds.png \
+  --bond-group between:C,N style=wireframe color=#336699 radius_scale=1.5
+```
+
+See [`../cli.md`](../cli.md#selector-based-mixed-styles) for the compact
+selector grammar. Later occurrences win, matching the REST ordering contract.
 
 ## REST surface
 
@@ -102,7 +116,7 @@ group exactly once.
 
 - Bond rules tag each bond dict with
   `_render_color`, `_render_visible`, `_render_opacity_scale`,
-  `_render_radius_scale` before the renderer runs. The original bond
+  `_render_radius_scale`, and `_render_style` before the renderer runs. The original bond
   attributes are restored after each render pass (the renderer
   wraps the mutation in `try…finally`), so subsequent invocations
   with different group lists do not see stale state.
@@ -165,7 +179,7 @@ curl -s -X POST http://localhost:50001/api/v2/bond_groups \
 - `bond_groups_cache_key` is the canonical hashable summary of the
   list and is used directly by the renderer cache. It includes the full
   selector contract (`all`, `between_elements`, `labels`, `is_minor`),
-  colour, visibility, opacity, radius scale, and enabled flags; it
+  colour, visibility, opacity, radius scale, style, and enabled flags; it
   excludes `id` and `name` so a row rename does not invalidate geometry.
 - Disabled rows persist verbatim through the API. Toggling
   `enabled` is a one-field `PATCH`.

@@ -20,7 +20,10 @@ def render_animation(
     camera: Any = None,
     render_spec: Any = None,
     topology_data: Mapping[str, Any] | None = None,
+    atom_groups: Any = None,
+    bond_groups: Any = None,
     fps: float = 12.0,
+    time_spec: Any = None,
 ) -> RenderResult:
     """Render selected source frames with one CPU camera, then encode lazily."""
     try:
@@ -39,6 +42,18 @@ def render_animation(
     if len(frames) < 2:
         raise ValueError("animation output requires at least two selected frames")
 
+    from .animation_time import (
+        coerce_animation_time_spec,
+        draw_time_label,
+        resolve_animation_times,
+    )
+
+    resolved_time_spec = coerce_animation_time_spec(time_spec)
+    time_series = (
+        resolve_animation_times(frames, resolved_time_spec)
+        if resolved_time_spec is not None
+        else None
+    )
     from PIL import Image
 
     from .cpu import render_png
@@ -65,19 +80,28 @@ def render_animation(
     warnings: list[str] = []
     dimensions: tuple[int, int] | None = None
     with imageio.get_writer(output_path, mode="I", **writer_kwargs) as writer:
-        for frame in frames:
+        for frame_number, frame in enumerate(frames):
             plan = prepare_render(
                 frame,
                 view=view,
                 camera=camera,
                 render=render_spec,
                 topology_data=topology_data,
+                atom_groups=atom_groups,
+                bond_groups=bond_groups,
             )
             frame_result = render_png(plan)
             if frame_result.data is None:  # pragma: no cover - renderer contract guard
                 raise RuntimeError("CPU frame renderer did not return PNG bytes")
             with Image.open(BytesIO(frame_result.data)) as image:
-                rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
+                rendered = image.convert("RGBA")
+                if time_series is not None:
+                    rendered = draw_time_label(
+                        rendered,
+                        time_series.labels[frame_number],
+                        time_series.spec.position,
+                    )
+                rgb = np.asarray(rendered.convert("RGB"), dtype=np.uint8)
             if dimensions is None:
                 dimensions = (int(rgb.shape[1]), int(rgb.shape[0]))
             elif dimensions != (int(rgb.shape[1]), int(rgb.shape[0])):
@@ -107,6 +131,11 @@ def render_animation(
             "frame_duration_ms": 1000.0 / float(fps),
             "duration_seconds": len(frames) / float(fps),
             "frame_plan_sha256": plan_hashes,
+            "simulation_time": (
+                time_series.to_metadata()
+                if time_series is not None
+                else {"displayed": False}
+            ),
         },
     )
 

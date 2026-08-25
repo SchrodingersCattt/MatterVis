@@ -7,6 +7,7 @@ from .shared import *
 
 _HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
+
 def _coerce_hex_color(value: Any, fallback: str) -> str:
     """Reject anything that isn't ``#rrggbb`` so a malformed payload from a
     careless caller can't sneak ``red`` or ``rgba(...)`` into the data
@@ -55,7 +56,9 @@ def _normalize_selection(raw: Any) -> dict[str, Any]:
     return {"atom_labels": atom_labels, "active_label": active, "order": order}
 
 
-def _normalize_disorder_resolve(raw: Any, current: dict[str, Any] | None = None) -> dict[str, Any]:
+def _normalize_disorder_resolve(
+    raw: Any, current: dict[str, Any] | None = None
+) -> dict[str, Any]:
     current = current or {}
     raw = raw if isinstance(raw, dict) else {}
     method = str(raw.get("method") or current.get("method") or "enumerate")
@@ -146,7 +149,9 @@ def _coerce_polyhedron_fallback_max(raw: Any) -> Optional[int]:
     return max(1, min(64, value))
 
 
-def _coerce_polyhedron_float(raw: Any, default: float, *, minimum: float, maximum: float) -> float:
+def _coerce_polyhedron_float(
+    raw: Any, default: float, *, minimum: float, maximum: float
+) -> float:
     try:
         value = float(raw)
     except (TypeError, ValueError):
@@ -184,7 +189,9 @@ def _normalize_polyhedron_spec(
     color = _coerce_hex_color(raw.get("color"), fallback_color)
     enabled = bool(raw.get("enabled", True))
     instance_overrides = _coerce_instance_overrides(raw.get("instance_overrides"))
-    enforce_enclosure = _coerce_polyhedron_enforce_enclosure(raw.get("enforce_enclosure", True))
+    enforce_enclosure = _coerce_polyhedron_enforce_enclosure(
+        raw.get("enforce_enclosure", True)
+    )
     centroid_offset_frac = _coerce_centroid_offset_frac(
         raw.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC)
     )
@@ -196,9 +203,15 @@ def _normalize_polyhedron_spec(
     if level == "atom":
         hard_cutoff = None
     fallback_max = _coerce_polyhedron_fallback_max(raw.get("fallback_max"))
-    opacity = _coerce_polyhedron_float(raw.get("opacity"), 0.55, minimum=0.0, maximum=1.0)
-    edge_opacity = _coerce_polyhedron_float(raw.get("edge_opacity"), 0.90, minimum=0.0, maximum=1.0)
-    edge_width = _coerce_polyhedron_float(raw.get("edge_width"), 3.0, minimum=0.0, maximum=20.0)
+    opacity = _coerce_polyhedron_float(
+        raw.get("opacity"), 0.55, minimum=0.0, maximum=1.0
+    )
+    edge_opacity = _coerce_polyhedron_float(
+        raw.get("edge_opacity"), 0.90, minimum=0.0, maximum=1.0
+    )
+    edge_width = _coerce_polyhedron_float(
+        raw.get("edge_width"), 3.0, minimum=0.0, maximum=20.0
+    )
     flatshading = bool(raw.get("flatshading", True))
     return {
         "id": spec_id,
@@ -292,9 +305,18 @@ _ATOM_SELECTOR_KEYS = (
     "atom_indices",
     "fragment_labels",
     "fragment_indices",
+    "molecule_indices",
 )
 _ATOM_GROUP_VALID_MATERIALS = {"mesh", "flat"}
-_ATOM_GROUP_VALID_STYLES = {"ball", "ball_stick", "stick", "ortep", "wireframe"}
+_ATOM_GROUP_VALID_STYLES = {
+    "ball",
+    "ball_stick",
+    "space_filling",
+    "stick",
+    "ortep",
+    "wireframe",
+}
+_BOND_GROUP_VALID_STYLES = {"ball_stick", "stick", "wireframe"}
 
 _BOND_SELECTOR_KEYS = ("all", "between_elements", "labels", "is_minor")
 
@@ -317,6 +339,7 @@ def _coerce_atom_selector(raw: Any) -> Optional[dict[str, Any]]:
       polyhedron override pipeline when the user wants atoms inside
       a specific polyhedron repainted as a group).
     - ``{"fragment_indices": [2]}`` -- by 0-based fragment index.
+    - ``{"molecule_indices": [0, 2]}`` -- by canonical molecule/component index.
 
     Multiple keys are combined with logical AND -- e.g.
     ``{"elements": ["Pb"], "is_minor": False}`` means "major Pb atoms
@@ -330,14 +353,18 @@ def _coerce_atom_selector(raw: Any) -> Optional[dict[str, Any]]:
         selector["all"] = True
     elements = raw.get("elements")
     if isinstance(elements, (list, tuple)):
-        cleaned = [str(item) for item in elements if item is not None and str(item).strip()]
+        cleaned = [
+            str(item) for item in elements if item is not None and str(item).strip()
+        ]
         if cleaned:
             selector["elements"] = cleaned
     if "is_minor" in raw:
         selector["is_minor"] = bool(raw["is_minor"])
     labels = raw.get("labels")
     if isinstance(labels, (list, tuple)):
-        cleaned = [str(item) for item in labels if item is not None and str(item).strip()]
+        cleaned = [
+            str(item) for item in labels if item is not None and str(item).strip()
+        ]
         if cleaned:
             selector["labels"] = cleaned
     atom_indices = raw.get("atom_indices")
@@ -352,7 +379,11 @@ def _coerce_atom_selector(raw: Any) -> Optional[dict[str, Any]]:
             selector["atom_indices"] = cleaned_idx
     fragment_labels = raw.get("fragment_labels")
     if isinstance(fragment_labels, (list, tuple)):
-        cleaned = [str(item) for item in fragment_labels if item is not None and str(item).strip()]
+        cleaned = [
+            str(item)
+            for item in fragment_labels
+            if item is not None and str(item).strip()
+        ]
         if cleaned:
             selector["fragment_labels"] = cleaned
     fragment_indices = raw.get("fragment_indices")
@@ -365,6 +396,16 @@ def _coerce_atom_selector(raw: Any) -> Optional[dict[str, Any]]:
                 continue
         if cleaned_fi:
             selector["fragment_indices"] = cleaned_fi
+    molecule_indices = raw.get("molecule_indices")
+    if isinstance(molecule_indices, (list, tuple)):
+        cleaned_mi: list[int] = []
+        for item in molecule_indices:
+            try:
+                cleaned_mi.append(int(item))
+            except (TypeError, ValueError):
+                continue
+        if cleaned_mi:
+            selector["molecule_indices"] = cleaned_mi
     return selector or None
 
 
@@ -391,12 +432,18 @@ def _coerce_bond_selector(raw: Any) -> Optional[dict[str, Any]]:
         selector["all"] = True
     between_elements = raw.get("between_elements")
     if isinstance(between_elements, (list, tuple)):
-        cleaned = [str(item) for item in between_elements if item is not None and str(item).strip()]
+        cleaned = [
+            str(item)
+            for item in between_elements
+            if item is not None and str(item).strip()
+        ]
         if cleaned:
             selector["between_elements"] = cleaned
     labels = raw.get("labels")
     if isinstance(labels, (list, tuple)):
-        cleaned = [str(item) for item in labels if item is not None and str(item).strip()]
+        cleaned = [
+            str(item) for item in labels if item is not None and str(item).strip()
+        ]
         if cleaned:
             selector["labels"] = cleaned
     if "is_minor" in raw:
@@ -404,7 +451,9 @@ def _coerce_bond_selector(raw: Any) -> Optional[dict[str, Any]]:
     return selector or None
 
 
-def _coerce_optional_float(value: Any, *, lo: float = 0.0, hi: float = 1.0) -> Optional[float]:
+def _coerce_optional_float(
+    value: Any, *, lo: float = 0.0, hi: float = 1.0
+) -> Optional[float]:
     if value is None:
         return None
     try:
@@ -445,8 +494,16 @@ def _normalize_atom_group(
             group_id = f"grp_{uuid.uuid4().hex[:10]}"
     existing_ids.add(group_id)
     name = str(raw.get("name") or _atom_group_default_name(selector)).strip() or "group"
-    color = _coerce_hex_color(raw.get("color"), fallback_color) if raw.get("color") else None
-    color_light = _coerce_hex_color(raw.get("color_light"), color or "#000000") if raw.get("color_light") else None
+    color = (
+        _coerce_hex_color(raw.get("color"), fallback_color)
+        if raw.get("color")
+        else None
+    )
+    color_light = (
+        _coerce_hex_color(raw.get("color_light"), color or "#000000")
+        if raw.get("color_light")
+        else None
+    )
     visible = bool(raw.get("visible", True))
     opacity = _coerce_optional_float(raw.get("opacity"))
     material = _coerce_optional_choice(raw.get("material"), _ATOM_GROUP_VALID_MATERIALS)
@@ -519,6 +576,7 @@ def _normalize_bond_group(
     - ``visible``: bool.
     - ``opacity``: float in [0, 1] or None.
     - ``radius_scale``: float >0 multiplier on the ``style.bond_radius``.
+    - ``style``: optional stick or wireframe bond rendering override.
     """
     if not isinstance(raw, dict):
         return None
@@ -531,8 +589,15 @@ def _normalize_bond_group(
         while group_id in existing_ids:  # pragma: no cover - astronomically unlikely
             group_id = f"bgrp_{uuid.uuid4().hex[:10]}"
     existing_ids.add(group_id)
-    name = str(raw.get("name") or _bond_group_default_name(selector)).strip() or "bond group"
-    color = _coerce_hex_color(raw.get("color"), fallback_color) if raw.get("color") else None
+    name = (
+        str(raw.get("name") or _bond_group_default_name(selector)).strip()
+        or "bond group"
+    )
+    color = (
+        _coerce_hex_color(raw.get("color"), fallback_color)
+        if raw.get("color")
+        else None
+    )
     visible = bool(raw.get("visible", True))
     opacity = _coerce_optional_float(raw.get("opacity"))
     radius_scale = raw.get("radius_scale")
@@ -542,6 +607,7 @@ def _normalize_bond_group(
         radius_value = None
     if radius_value is not None:
         radius_value = max(0.05, min(8.0, radius_value))
+    style = _coerce_optional_choice(raw.get("style"), _BOND_GROUP_VALID_STYLES)
     return {
         "id": group_id,
         "name": name,
@@ -550,6 +616,7 @@ def _normalize_bond_group(
         "visible": visible,
         "opacity": opacity,
         "radius_scale": radius_value,
+        "style": style,
     }
 
 
@@ -598,7 +665,9 @@ def _normalize_transform(
     transform_id = str(raw.get("id") or "").strip()
     if not transform_id or transform_id in existing_ids:
         transform_id = f"trf_{uuid.uuid4().hex[:10]}"
-        while transform_id in existing_ids:  # pragma: no cover - astronomically unlikely
+        while (
+            transform_id in existing_ids
+        ):  # pragma: no cover - astronomically unlikely
             transform_id = f"trf_{uuid.uuid4().hex[:10]}"
     existing_ids.add(transform_id)
     name = str(raw.get("name") or _TRANSFORM_KIND_NAMES.get(kind, kind)).strip() or kind
@@ -613,7 +682,13 @@ def _normalize_transform(
                 params[axis] = max(1, int(params_raw.get(axis, 1) or 1))
             except (TypeError, ValueError):
                 params[axis] = 1
-    elif kind in ("grow_radius", "grow_bonds", "complete_fragment", "complete_polyhedron", "by_symmetry"):
+    elif kind in (
+        "grow_radius",
+        "grow_bonds",
+        "complete_fragment",
+        "complete_polyhedron",
+        "by_symmetry",
+    ):
         seeds = _coerce_atom_selector(params_raw.get("seeds"))
         params["seeds"] = seeds or {}
         if kind == "grow_radius":
@@ -646,7 +721,11 @@ def _normalize_transform(
                 try:
                     R_arr = [[float(x) for x in row] for row in R]
                     t_arr = [float(x) for x in t]
-                    if len(R_arr) == 3 and all(len(row) == 3 for row in R_arr) and len(t_arr) == 3:
+                    if (
+                        len(R_arr) == 3
+                        and all(len(row) == 3 for row in R_arr)
+                        and len(t_arr) == 3
+                    ):
                         ops_out.append([R_arr, t_arr])
                 except (TypeError, ValueError):
                     continue
