@@ -34,7 +34,7 @@ from .geometry import (
     sphere_primitive,
     unit_cell_primitive,
 )
-from .overlay.vectors import vector_primitives
+from .overlay.vectors import normalize_vector_overlays, vector_primitives
 
 _ELEMENT_COLORS = {
     "H": "#FFFFFF",
@@ -80,7 +80,9 @@ def prepare_render(
         show_hydrogen=render_spec.show_hydrogen,
     )
     if vector_overlays is not None:
-        scene["vector_overlays"] = vector_overlays
+        scene["vector_overlays"] = _vector_overlays_in_scene_frame(
+            vector_overlays, scene
+        )
     scene_display = scene.get("display_mode")
     if scene_display is not None:
         scene_view = ViewSpec(display=str(scene_display))
@@ -602,6 +604,15 @@ def _normalise_source(
         provenance = getattr(source, "molcrys_analysis", None)
         if provenance is not None:
             scene["molcrys_provenance"] = provenance
+        for key in (
+            "has_lattice",
+            "pbc",
+            "synthetic_cell",
+            "origin_shift",
+            "input_format",
+        ):
+            if key in source.scene:
+                scene.setdefault(key, source.scene[key])
         return scene
     if hasattr(source, "get_site_records"):
         site_getter = getattr(source, "get_site_records")
@@ -639,6 +650,37 @@ def _normalise_source(
     raise TypeError(
         "source must be a scene mapping, CrystalIR, or MolCrysKit structure"
     )
+
+
+def _vector_overlays_in_scene_frame(
+    vector_overlays: Any,
+    scene: Mapping[str, Any],
+) -> Any:
+    """Translate source-Cartesian overlay positions into a synthetic scene cell."""
+    if not bool(scene.get("synthetic_cell", False)):
+        return vector_overlays
+    origin_shift = np.asarray(scene.get("origin_shift", (0.0, 0.0, 0.0)), dtype=float)
+    if origin_shift.shape != (3,) or not np.all(np.isfinite(origin_shift)):
+        raise ValueError(
+            "synthetic-cell origin_shift must contain three finite numbers"
+        )
+    if np.allclose(origin_shift, 0.0):
+        return vector_overlays
+
+    translated = normalize_vector_overlays(vector_overlays)
+    offset = -origin_shift
+    for group in translated:
+        for arrow in group["arrows"]:
+            if str(arrow.get("origin_space") or "cartesian") == "cartesian":
+                arrow["origin"] = (
+                    np.asarray(arrow["origin"], dtype=float) + offset
+                ).tolist()
+            if (
+                "end" in arrow
+                and str(arrow.get("end_space") or "cartesian") == "cartesian"
+            ):
+                arrow["end"] = (np.asarray(arrow["end"], dtype=float) + offset).tolist()
+    return translated
 
 
 def _is_loaded_crystal(source: Any) -> bool:

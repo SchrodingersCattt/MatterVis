@@ -16,6 +16,8 @@ from mat_viewer.loader import (
     load_atomistic_input,
     load_structure_input,
 )
+from mat_viewer.render.contracts import TriangleMeshPrimitive
+from mat_viewer.render.planning import prepare_render
 from mat_viewer.render.frame_selection import parse_frame_indices
 from mat_viewer.tui.loader_adapter import load_for_tui
 
@@ -148,6 +150,52 @@ def test_ase_frame_metadata_preserves_custom_atom_arrays(tmp_path: Path) -> None
     assert loaded.frames[0].bundle.atom_arrays["local_vector"][
         source_index
     ] == pytest.approx(atoms.arrays["local_vector"][source_index])
+
+
+def test_nonperiodic_cartesian_vectors_follow_source_coordinates(
+    tmp_path: Path,
+) -> None:
+    atoms = Atoms(
+        "CO",
+        positions=[[-2.0, 0.0, 0.0], [-1.0, 0.0, 0.0]],
+        pbc=False,
+    )
+    path = tmp_path / "molecule.xyz"
+    write(path, atoms, format="xyz")
+    loaded = load_structure_input(path, frame_indices=[0])
+    overlays = [
+        {
+            "id": "mode",
+            "magnitude_mode": "absolute",
+            "viewport_policy": "include",
+            "arrows": [
+                {
+                    "id": "atom-0",
+                    "origin": [-2.0, 0.0, 0.0],
+                    "vector": [1.0, 0.0, 0.0],
+                }
+            ],
+        }
+    ]
+
+    plan = prepare_render(
+        loaded,
+        view={"display": "cluster"},
+        render={"show_cell": False, "show_hydrogen": True},
+        vector_overlays=overlays,
+    )
+
+    arrow = next(
+        primitive
+        for primitive in plan.primitives
+        if primitive.semantic_id == "vector:mode:atom-0"
+    )
+    assert isinstance(arrow, TriangleMeshPrimitive)
+    source_shift = np.asarray(loaded.frames[0].bundle.scene["origin_shift"])
+    rendered_origin = atoms.positions[0] - source_shift
+    assert arrow.vertices[:, 0].min() == pytest.approx(rendered_origin[0], abs=0.1)
+    assert arrow.vertices[:, 0].max() == pytest.approx(rendered_origin[0] + 1.0)
+    assert np.median(arrow.vertices[:, 1]) == pytest.approx(rendered_origin[1], abs=0.1)
 
 
 def test_iter_atomistic_frames_streams_selected_source_order(
