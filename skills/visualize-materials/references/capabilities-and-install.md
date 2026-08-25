@@ -1,20 +1,20 @@
 # Capabilities and Installation
 
-Read this before installing anything or when `render --check` reports a missing
-capability. The capability resolver is authoritative; do not maintain a second
-dependency guess in an agent script.
+Read this only when the direct base render reports a missing command/capability
+or the request explicitly needs an optional frontend. The capability resolver is
+authoritative; do not maintain a second dependency guess in an agent script.
 
-## Preflight
+## Resolve on demand
 
 ```bash
 mat-vis capabilities --json
 mat-vis capabilities --require png ortep --json
-mat-vis render INPUT.cif -o OUTPUT.svg --backend cpu --check --json
 ```
 
-`--check` resolves requirements only. It does not load the structure or create
-the output. Use the exact `install` command in its JSON result. Never install
-`[all]` when a smaller reported extra is sufficient.
+Do not run a separate render preflight before ordinary CPU output. Use the exact
+`install` command in the resolver result only after a real missing-capability
+error. Never install `[all]` when a smaller reported extra is sufficient.
+
 
 <!-- capability-matrix:start -->
 | What you need | Resolver requirement | Required installation |

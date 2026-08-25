@@ -2,9 +2,11 @@
 
 Read this only when the default view is unsuitable or panels must be compared.
 
-Default image camera: orthographic, looking from the structure toward lattice
-`+c`, with lattice `+b` as screen-up. With `--camera-axis c`, omit
-`--camera-up` unless a Cartesian up vector was explicitly requested.
+Periodic default: orthographic, looking from the structure toward lattice `+c`,
+with lattice `+b` as screen-up. With `--camera-axis c`, omit `--camera-up` unless
+a Cartesian up vector was explicitly requested. Nonperiodic inputs use automatic
+atom-content fitting without a crystallographic axis or cell; set an explicit
+Cartesian direction only when it clarifies the requested feature.
 
 Choose exactly one direction control:
 
