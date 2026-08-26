@@ -12,6 +12,8 @@ from mat_viewer.structure.chemistry_records import (
     CrystalStereoRecord,
     EnantiomerCountRecord,
     EntityChemistryRecord,
+    LineNotationRecord,
+    NamingRecord,
 )
 from mat_viewer.tui.chemistry_inspector import format_atom_inspector
 from mat_viewer.tui.app import CrystalTUI
@@ -92,6 +94,22 @@ def _chemistry_crystal() -> CrystalIR:
                 status="inferred",
                 warnings=("bond order is coordinate-derived",),
                 evidence=("inferred:unit-test",),
+                name=NamingRecord(
+                    name="bromochlorofluoromethane",
+                    kind="preferred_iupac_name",
+                    nomenclature="IUPAC substitutive nomenclature",
+                    standard="Blue Book",
+                    version="2013",
+                    status="provisional",
+                    preferred=True,
+                    rule_trace=("Select methane as the parent hydride.",),
+                ),
+                line_notation=LineNotationRecord(
+                    value="F[C@H](Cl)Br",
+                    dialect="OpenSMILES",
+                    version="1.0",
+                    lossless=True,
+                ),
             ),
         ),
         warnings=("multiple chemical interpretations remain",),
@@ -109,6 +127,15 @@ def _chemistry_crystal() -> CrystalIR:
                 EnantiomerCountRecord("molecule:0", 1, None, 0),
             ),
             evidence=("inferred:unit-test",),
+        ),
+        crystal_name=NamingRecord(
+            name="bromochlorofluoromethane",
+            kind="preferred_iupac_name",
+            nomenclature="IUPAC substitutive nomenclature",
+            standard="Blue Book",
+            version="2013",
+            status="provisional",
+            preferred=True,
         ),
         alternative_count=1,
     )
@@ -141,6 +168,8 @@ def test_full_inspector_combines_site_bond_entity_stereo_and_crystal_records() -
     assert "occupancy: 0.75  disorder: 2" in text
     assert "FiniteChemicalEntity  dimension=0D" in text
     assert "formula: [13C]HBrClF" in text
+    assert "IUPAC name: bromochlorofluoromethane [provisional; PIN]" in text
+    assert "line notation [OpenSMILES 1.0; lossless]: F[C@H](Cl)Br" in text
     assert "Br1  covalent order=1" in text
     assert "rings: 3-member non-aromatic planar" in text
     assert "tetrahedral: R [inferred]" in text
@@ -163,7 +192,9 @@ def test_why_and_name_keep_inference_and_source_name_provenance_visible() -> Non
     assert "alternative interpretations retained: 1" in why
     assert "stereo reason: assigned from CIP order" in why
     assert "crystal stereo reason: all stereogenic entities have one handedness" in why
-    assert "IUPAC name: unavailable (source CIF names are not revalidated)" in name
+    assert "IUPAC name: bromochlorofluoromethane [provisional; PIN]" in name
+    assert "system: IUPAC substitutive nomenclature; Blue Book 2013" in name
+    assert "rule: Select methane as the parent hydride." in name
     assert "CIF systematic name: test deposited name" in name
 
 

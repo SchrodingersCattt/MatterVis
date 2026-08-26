@@ -30,6 +30,8 @@ from .chemistry_records import (
     CrystalStereoRecord,
     EnantiomerCountRecord,
     EntityChemistryRecord,
+    LineNotationRecord,
+    NamingRecord,
 )
 
 
@@ -115,6 +117,9 @@ def _require_molcryskit():
             "analyze_crystal_stereochemistry",
             None,
         ),
+        "name_entity": getattr(molcrys_kit, "name_entity", None),
+        "name_crystal": getattr(molcrys_kit, "name_crystal", None),
+        "to_line_notation": getattr(molcrys_kit, "to_line_notation", None),
     }
 
 
@@ -467,6 +472,8 @@ def _chemistry_records(crystal, mk) -> CrystalChemistryRecords | None:
     stereo_reports = {}
     warnings = list(str(value) for value in chemistry.warnings)
     cif_chemistry = dict(getattr(crystal, "metadata", {}).get("cif_chemistry", {}))
+    name_entity = mk.get("name_entity")
+    to_line_notation = mk.get("to_line_notation")
 
     for entity in chemistry.components:
         try:
@@ -487,6 +494,27 @@ def _chemistry_records(crystal, mk) -> CrystalChemistryRecords | None:
             "net_charge",
             getattr(entity, "net_charge_per_repeat", None),
         )
+        entity_name = None
+        if callable(name_entity):
+            try:
+                entity_name = _naming_record(name_entity(entity))
+            except (TypeError, ValueError) as exc:
+                warnings.append(f"{entity.entity_id}: naming unavailable: {exc}")
+        line_notation = None
+        if callable(to_line_notation):
+            try:
+                notation = to_line_notation(entity)
+                line_notation = LineNotationRecord(
+                    value=str(notation.value),
+                    dialect=str(notation.dialect),
+                    version=str(notation.version),
+                    lossless=bool(notation.lossless),
+                    warnings=tuple(str(value) for value in notation.warnings),
+                )
+            except (TypeError, ValueError) as exc:
+                warnings.append(
+                    f"{entity.entity_id}: line notation unavailable: {exc}"
+                )
         entity_records.append(
             EntityChemistryRecord(
                 entity_id=str(entity.entity_id),
@@ -501,6 +529,8 @@ def _chemistry_records(crystal, mk) -> CrystalChemistryRecords | None:
                 ),
                 warnings=tuple(str(value) for value in entity.warnings),
                 evidence=entity_evidence,
+                name=entity_name,
+                line_notation=line_notation,
             )
         )
         for atom in entity.atoms:
@@ -622,6 +652,13 @@ def _chemistry_records(crystal, mk) -> CrystalChemistryRecords | None:
         )
         if cif_chemistry.get(key)
     )
+    crystal_name = None
+    name_crystal = mk.get("name_crystal")
+    if callable(name_crystal):
+        try:
+            crystal_name = _naming_record(name_crystal(crystal))
+        except (TypeError, ValueError) as exc:
+            warnings.append(f"crystal naming unavailable: {exc}")
     return CrystalChemistryRecords(
         status=_enum_text(chemistry.status),
         atoms=tuple(sorted(atom_records, key=lambda record: record.source_index)),
@@ -642,12 +679,28 @@ def _chemistry_records(crystal, mk) -> CrystalChemistryRecords | None:
             else str(absolute_source["details"])
         ),
         crystal_stereo=crystal_stereo,
+        crystal_name=crystal_name,
         alternative_count=len(getattr(chemistry, "alternatives", ())),
     )
 
 
 def _enum_text(value) -> str:
     return str(getattr(value, "value", value))
+
+
+def _naming_record(value) -> NamingRecord:
+    return NamingRecord(
+        name=str(value.name),
+        kind=_enum_text(value.kind),
+        nomenclature=str(value.nomenclature),
+        standard=str(value.standard),
+        version=str(value.version),
+        status=_enum_text(value.status),
+        preferred=value.preferred,
+        rule_trace=tuple(str(item) for item in value.rule_trace),
+        warnings=tuple(str(item) for item in value.warnings),
+        alternatives=tuple(str(item) for item in value.alternatives),
+    )
 
 
 def _evidence_text(values) -> tuple[str, ...]:

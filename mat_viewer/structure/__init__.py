@@ -7,6 +7,8 @@ from .chemistry_records import (
     CrystalStereoRecord,
     EnantiomerCountRecord,
     EntityChemistryRecord,
+    LineNotationRecord,
+    NamingRecord,
 )
 
 __all__ = [
@@ -16,5 +18,7 @@ __all__ = [
     "CrystalStereoRecord",
     "EnantiomerCountRecord",
     "EntityChemistryRecord",
+    "LineNotationRecord",
+    "NamingRecord",
 ]
 

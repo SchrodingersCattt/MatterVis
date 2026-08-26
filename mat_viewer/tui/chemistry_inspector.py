@@ -107,8 +107,16 @@ def _entity_lines(chemistry, entity) -> list[str]:
             "translations: "
             + ", ".join(_shift_text(vector) for vector in entity.translation_generators)
         )
-    lines.extend(_name_lines(chemistry))
-    lines.append("line notation: unavailable (no MCK naming record)")
+    lines.extend(_name_lines(chemistry, entity))
+    if entity.line_notation is None:
+        lines.append("line notation: unavailable (no MCK line-notation record)")
+    else:
+        notation = entity.line_notation
+        fidelity = "lossless" if notation.lossless else "lossy"
+        lines.append(
+            f"line notation [{notation.dialect} {notation.version}; {fidelity}]: "
+            f"{terminal_text(notation.value)}"
+        )
     return lines
 
 
@@ -194,13 +202,36 @@ def _name_text(chemistry, entity) -> str:
         return "\n".join(
             [*lines, "unavailable: MolCrysKit chemistry records are absent"]
         )
-    lines.extend(_name_lines(chemistry))
+    lines.extend(_name_lines(chemistry, entity, expanded=True))
     if entity is not None:
         lines.append(f"entity: {entity.entity_id}")
     return "\n".join(lines)
 
 
-def _name_lines(chemistry) -> list[str]:
+def _name_lines(chemistry, entity=None, *, expanded: bool = False) -> list[str]:
+    if entity is not None and entity.name is not None:
+        record = entity.name
+        if record.preferred is True:
+            pin = "PIN"
+        elif record.preferred is False:
+            pin = "not asserted as PIN"
+        else:
+            pin = "PIN not applicable"
+        lines = [f"IUPAC name: {terminal_text(record.name)} [{record.status}; {pin}]"]
+        if expanded:
+            lines.append(
+                f"system: {record.nomenclature}; {record.standard} {record.version}"
+            )
+            lines.append(f"result kind: {record.kind}")
+            lines.extend(f"rule: {terminal_text(value)}" for value in record.rule_trace)
+            lines.extend(
+                f"naming warning: {terminal_text(value)}" for value in record.warnings
+            )
+        lines.extend(
+            f"CIF {kind} name: {terminal_text(value)}"
+            for kind, value in chemistry.source_names
+        )
+        return lines
     # CIF-deposited names are provenance, not output from the future MCK
     # standards-traced naming engine. Keep that distinction visible.
     if not chemistry.source_names:
@@ -224,6 +255,11 @@ def _crystal_lines(crystal, chemistry) -> list[str]:
         lines.append("enantiomer composition: unavailable")
         lines.append("absolute structure evidence: unavailable")
         return lines
+    if chemistry.crystal_name is not None:
+        lines.append(
+            f"crystal name: {terminal_text(chemistry.crystal_name.name)} "
+            f"[{chemistry.crystal_name.kind}; {chemistry.crystal_name.status}]"
+        )
     stereo = chemistry.crystal_stereo
     if stereo is None:
         lines.append("enantiomer composition: unavailable (no MCK crystal stereo report)")

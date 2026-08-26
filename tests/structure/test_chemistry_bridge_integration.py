@@ -58,3 +58,11 @@ def test_bridge_consumes_real_mck_atom_ids_bonds_entities_and_stereo() -> None:
     carbon = analysis.chemistry.atom("m0:a0")
     assert carbon.stereo_descriptor in {"R", "S"}
     assert carbon.cip_order == ("m0:a1", "m0:a2", "m0:a3", "m0:a4")
+    entity = analysis.chemistry.entities[0]
+    assert entity.name is not None
+    assert entity.name.name == "molecular entity CHBrClF"
+    assert entity.name.kind == "iupac_composition_description"
+    assert entity.line_notation is not None
+    assert entity.line_notation.dialect == "OpenSMILES"
+    assert entity.line_notation.lossless
+    assert analysis.chemistry.crystal_stereo is not None

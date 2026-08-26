@@ -54,6 +54,29 @@ class BondChemistryRecord:
 
 
 @dataclass(frozen=True)
+class LineNotationRecord:
+    value: str
+    dialect: str
+    version: str
+    lossless: bool
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class NamingRecord:
+    name: str
+    kind: str
+    nomenclature: str
+    standard: str
+    version: str
+    status: str
+    preferred: bool | None
+    rule_trace: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+    alternatives: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class EntityChemistryRecord:
     entity_id: str
     kind: str
@@ -64,6 +87,8 @@ class EntityChemistryRecord:
     translation_generators: tuple[tuple[int, int, int], ...] = ()
     warnings: tuple[str, ...] = ()
     evidence: tuple[str, ...] = ()
+    name: NamingRecord | None = None
+    line_notation: LineNotationRecord | None = None
 
 
 @dataclass(frozen=True)
@@ -103,6 +128,7 @@ class CrystalChemistryRecords:
     absolute_structure: tuple[AbsoluteStructureRecord, ...] = ()
     absolute_structure_details: str | None = None
     crystal_stereo: CrystalStereoRecord | None = None
+    crystal_name: NamingRecord | None = None
     alternative_count: int = 0
     source: str = "molcrys_kit"
 
@@ -124,4 +150,6 @@ __all__ = [
     "CrystalStereoRecord",
     "EnantiomerCountRecord",
     "EntityChemistryRecord",
+    "LineNotationRecord",
+    "NamingRecord",
 ]

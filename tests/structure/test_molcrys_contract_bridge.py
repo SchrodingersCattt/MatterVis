@@ -237,6 +237,25 @@ def test_analysis_copies_public_chemistry_and_stereo_records(monkeypatch):
         warnings=("tetrahedral scope only",),
         evidence=(source_evidence,),
     )
+    naming = SimpleNamespace(
+        name="fluoromethane",
+        kind="preferred_iupac_name",
+        nomenclature="IUPAC substitutive nomenclature",
+        standard="Blue Book",
+        version="2013",
+        status="provisional",
+        preferred=True,
+        rule_trace=("Select methane as parent.",),
+        warnings=(),
+        alternatives=(),
+    )
+    notation = SimpleNamespace(
+        value="CF",
+        dialect="OpenSMILES",
+        version="1.0",
+        lossless=True,
+        warnings=(),
+    )
     sites = (
         SimpleNamespace(
             site_id="m0:a0",
@@ -305,6 +324,9 @@ def test_analysis_copies_public_chemistry_and_stereo_records(monkeypatch):
             "infer_chemistry": lambda value: chemistry,
             "assign_stereochemistry": lambda value, embedding: stereo,
             "analyze_crystal_stereochemistry": lambda value, **kwargs: crystal_stereo,
+            "name_entity": lambda value: naming,
+            "name_crystal": lambda value: naming,
+            "to_line_notation": lambda value: notation,
         },
     )
 
@@ -333,6 +355,9 @@ def test_analysis_copies_public_chemistry_and_stereo_records(monkeypatch):
     assert analysis.chemistry.crystal_stereo.classification == "enantiopure"
     assert analysis.chemistry.crystal_stereo.symmetry_category == "Sohncke"
     assert analysis.chemistry.crystal_stereo.enantiomer_counts[0].mirror_count == 0
+    assert analysis.chemistry.entities[0].name.name == "fluoromethane"
+    assert analysis.chemistry.entities[0].line_notation.value == "CF"
+    assert analysis.chemistry.crystal_name.standard == "Blue Book"
     assert "tetrahedral scope only" in analysis.chemistry.warnings
 
 
