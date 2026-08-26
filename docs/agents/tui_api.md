@@ -49,6 +49,11 @@ front/back answers, collision scores, or a recommended camera.
 | `pan(dx=..., dy=...)`, `zoom(factor=...)` | Move/crop the stable terminal viewport. |
 | `fit(target="all"\|"focus")` | Explicitly refit; orbit and display toggles do not refit. |
 | `set_display(...)` | Partial absolute update for `display_level`, `label_mode`, `show_cell`, `show_bonds`, `show_minor`, and `mono`. |
+| `set_selection_mode(active)` | Enter or leave atom selection while retaining the current stable atom identity. |
+| `select_atom(reference)`, `select_next(step=...)` | Select by exact reference or traverse visible atoms in stable atom-id order. |
+| `select_direction(dx=..., dy=...)`, `select_screen(row=..., col=...)` | Select from the retained projection hit map; no chemistry is inferred from screen distance. |
+| `select_neighbor(step=...)` | Traverse only bonds already supplied by MolCrysKit/`CrystalIR`. |
+| `pin_selection()`, `clear_selection()` | Keep a highlight after leaving Select mode or clear it explicitly. |
 | `focus_local(reference, bond_depth=1)` | Fit one exact displayed atom and its manifested bond neighborhood. |
 | `reset_view()` | Restore startup camera and all-view framing while preserving display settings. |
 
@@ -70,8 +75,14 @@ cell/bond/minor visibility. This prevents the previous auto-fit “breathing”.
 - A label means every currently manifested matching source/display copy; callers
   needing one copy must pass `display_copy_id`.
 - `save_view(name, overwrite=False)`, `restore_view(name)`, and `list_views()`
-  preserve camera, display, focus, and stable fit bounds. Snapshots never store
-  structure data or chemistry results.
+preserve camera, display, focus, selection, and stable fit bounds. Snapshots never store
+structure data or chemistry results.
+
+The compositor retains a `ProjectedAtomHit` for every visible atom using the
+same projection and viewport as the ASCII frame. Selection is held by the
+manifested copy and carries the stable MolCrysKit `atom_id`; camera rotation
+therefore moves `[C12]` without changing which atom is selected. Brackets are
+part of the plain text, so selection remains legible when ANSI color is off.
 
 ## Analytical inspection
 
@@ -112,8 +123,12 @@ site is ordered or major.
 
 `mat-vis tui` retains keyboard control through the same controller:
 
-- `q/e`, `w/s`, `a/d`: yaw/pitch/roll.
-- arrows or `i/j/k/l`: pan.
+- `q/e`, `w/z`, `a/d`: yaw/pitch/roll.
+- Outside Select mode, arrows or `i/j/k/l`: pan.
+- `s`: enter/leave Select mode. In Select mode, arrows choose the nearest atom
+  in that projected direction, `Tab`/`Shift+Tab` traverse stable atom IDs,
+  `[`/`]` traverse manifested bond neighbors, `Enter` pins, and `Esc` clears.
+- Clicking the canvas selects the nearest projected atom.
 - `u` zooms out; `o` zooms in. Existing `+/-` and `[/]` aliases remain.
 - `p`, `c`, `b`, `t`, `m`, `n`, `Shift+L`, `r`: projection, cell, bonds,
   labels, monochrome, minor disorder, display level, and reset.
@@ -127,7 +142,7 @@ controller observation is the machine-readable local API.
 
 Press `:` in `mat-vis tui` to open a one-line command prompt:
 
-- `:select A B ...`, `:clear`
+- `:select C12`, `:next atom`, `:clear`
 - `:focus N9 [bond_depth]`
 - `:distance A B [direct|mic]`
 - `:angle A B C [direct|mic]`

@@ -18,10 +18,42 @@ DIRTY_VASP = Path(__file__).parent / "fixtures" / "dirty_geometry.vasp"
 def _measurement_crystal() -> CrystalIR:
     matrix = np.diag([10.0, 10.0, 10.0])
     atoms = [
-        AtomIR("C", np.array([9.0, 0.0, 0.0]), np.array([0.9, 0.0, 0.0]), label="A", index=0, source_index=0, display_copy_id="A/source:0/image:0,0,0"),
-        AtomIR("C", np.array([0.0, 0.0, 0.0]), np.zeros(3), label="B", index=1, source_index=1, display_copy_id="B/source:1/image:0,0,0"),
-        AtomIR("C", np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.1, 0.0]), label="C", index=2, source_index=2, display_copy_id="C/source:2/image:0,0,0"),
-        AtomIR("C", np.array([0.0, 1.0, 1.0]), np.array([0.0, 0.1, 0.1]), label="D", index=3, source_index=3, display_copy_id="D/source:3/image:0,0,0"),
+        AtomIR(
+            "C",
+            np.array([9.0, 0.0, 0.0]),
+            np.array([0.9, 0.0, 0.0]),
+            label="A",
+            index=0,
+            source_index=0,
+            display_copy_id="A/source:0/image:0,0,0",
+        ),
+        AtomIR(
+            "C",
+            np.array([0.0, 0.0, 0.0]),
+            np.zeros(3),
+            label="B",
+            index=1,
+            source_index=1,
+            display_copy_id="B/source:1/image:0,0,0",
+        ),
+        AtomIR(
+            "C",
+            np.array([0.0, 1.0, 0.0]),
+            np.array([0.0, 0.1, 0.0]),
+            label="C",
+            index=2,
+            source_index=2,
+            display_copy_id="C/source:2/image:0,0,0",
+        ),
+        AtomIR(
+            "C",
+            np.array([0.0, 1.0, 1.0]),
+            np.array([0.0, 0.1, 0.1]),
+            label="D",
+            index=3,
+            source_index=3,
+            display_copy_id="D/source:3/image:0,0,0",
+        ),
     ]
     return CrystalIR(
         atoms=atoms,
@@ -52,7 +84,13 @@ def test_measurements_use_true_nearest_image_in_skewed_cell() -> None:
     crystal = CrystalIR(
         atoms=[
             AtomIR("C", np.zeros(3), np.zeros(3), label="A", display_copy_id="A"),
-            AtomIR("C", np.array([9.31, 0.49, 0.0]), np.array([0.49, 0.49, 0.0]), label="B", display_copy_id="B"),
+            AtomIR(
+                "C",
+                np.array([9.31, 0.49, 0.0]),
+                np.array([0.49, 0.49, 0.0]),
+                label="B",
+                display_copy_id="B",
+            ),
         ],
         lattice=Lattice(10.0, np.sqrt(82.0), 10.0, 90.0, 90.0, 6.34, matrix),
     )
@@ -75,9 +113,15 @@ def test_measurements_use_true_nearest_image_in_skewed_cell() -> None:
 )
 def test_signed_dihedral_covers_cis_trans_and_handedness(d, expected) -> None:
     atoms = [
-        AtomIR("C", np.array([0.0, 1.0, 0.0]), np.zeros(3), label="A", display_copy_id="A"),
-        AtomIR("C", np.array([0.0, 0.0, 0.0]), np.zeros(3), label="B", display_copy_id="B"),
-        AtomIR("C", np.array([1.0, 0.0, 0.0]), np.zeros(3), label="C", display_copy_id="C"),
+        AtomIR(
+            "C", np.array([0.0, 1.0, 0.0]), np.zeros(3), label="A", display_copy_id="A"
+        ),
+        AtomIR(
+            "C", np.array([0.0, 0.0, 0.0]), np.zeros(3), label="B", display_copy_id="B"
+        ),
+        AtomIR(
+            "C", np.array([1.0, 0.0, 0.0]), np.zeros(3), label="C", display_copy_id="C"
+        ),
         AtomIR("C", d, np.zeros(3), label="D", display_copy_id="D"),
     ]
     result = TerminalViewController(CrystalIR(atoms=atoms)).measure_dihedral(
@@ -181,3 +225,49 @@ def test_quit_binding_uses_x_instead_of_ctrl_q() -> None:
     keys = {binding.key for binding in CrystalTUI.BINDINGS if binding.action == "quit"}
 
     assert keys == {"x"}
+
+
+def test_select_and_next_commands_update_the_ascii_highlight() -> None:
+    app = CrystalTUI(_measurement_crystal(), mono=True, label_mode="label")
+
+    selected_text, selected = app.execute_command(":select A")
+    next_text, next_atom = app.execute_command(":next atom")
+
+    assert selected_text == "selected: A"
+    assert selected is not None and "[A]" in selected.frame
+    assert next_text == "selected: B"
+    assert next_atom is not None and "[B]" in next_atom.frame
+
+
+def test_s_enters_selection_mode_and_enter_pins_selected_atom() -> None:
+    async def exercise() -> None:
+        app = CrystalTUI(_measurement_crystal(), mono=True, label_mode="label")
+        async with app.run_test(size=(60, 16)) as pilot:
+            await pilot.pause()
+            await pilot.press("s")
+            await pilot.pause()
+            assert app.controller.state.selection.mode is True
+            assert app.controller.state.selection.display_index is not None
+            await pilot.press("tab", "enter")
+            await pilot.pause()
+            assert app.controller.state.selection.mode is False
+            assert app.controller.state.selection.pinned is True
+            assert "[" in app.controller.observe().frame
+
+    asyncio.run(exercise())
+
+
+def test_canvas_click_uses_projected_hit_map() -> None:
+    async def exercise() -> None:
+        app = CrystalTUI(_measurement_crystal(), mono=True, label_mode="label")
+        async with app.run_test(size=(60, 16)) as pilot:
+            await pilot.pause()
+            target = app.controller.atom_hit_map()[0]
+            clicked = await pilot.click("#canvas", offset=(target.col, target.row))
+            await pilot.pause()
+
+            assert clicked is True
+            assert app.controller.state.selection.display_index == target.display_index
+            assert f"[{target.label}]" in app.controller.observe().frame
+
+    asyncio.run(exercise())
