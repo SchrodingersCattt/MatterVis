@@ -22,7 +22,14 @@ mat-vis render trajectory.traj --frame 20 -o frame.png
 
 # LAMMPS trajectory with explicit atom-type order
 mat-vis render run.dump --type-map O H -o trajectory.gif \
-  --frame-range 0:100:2 --fps 12
+  --frame-range 0:100:2 --fps 12 \
+  --display-time ps --time-step 0.5 --time-step-unit fs
+
+# NEB/path animation with progress and an independently derived observable
+mat-vis render neb.extxyz -o neb.gif --fps 6 \
+  --frame-field 'lambda=metadata:lambda,role=progress' \
+  --frame-field 'angle=metadata:rotation_deg,role=observable,unit=deg' \
+  --frame-label 'lambda={lambda:.2f}  rotation={angle:.1f} deg'
 
 # Interactive HTML
 mat-vis render structure.extxyz -o interactive.html --backend plotly --orthogonal
@@ -99,10 +106,40 @@ for an exact install command before using an optional frontend.
 | --frame INDEX | 0 | Select one frame for PNG/PDF/SVG/HTML |
 | --frame-range START:STOP[:STEP] | all | Python half-open frame slice for GIF/MP4 |
 | --stride N | 1 | Keep every Nth selected animation frame |
-| --fps FPS | 12 | Positive animation frame rate |
+| --fps FPS | 12 | Video playback rate; never used as physical simulation time |
+| --display-time UNIT | off | Draw physical time in `fs`, `ps`, or `ns` on every frame |
+| --time-step DT | - | MD integrator timestep |
+| --time-step-unit UNIT | fs | Unit of `--time-step`: `fs`, `ps`, or `ns` |
+| --dump-frequency STEPS | - | MD steps between stored frames when source metadata has no step |
+| --first-frame-step STEP | 0 | Step represented by source frame 0 for the fallback mapping |
+| --time-position CORNER | top-left | `top-left`, `top-right`, `bottom-left`, or `bottom-right` |
+| --frame-field SPEC | - | Repeatable `NAME=SOURCE` field with optional role, unit, scale, and offset |
+| --frame-label TEMPLATE | - | Format template over the declared frame-field names |
+| --frame-label-position CORNER | top-left | Corner for the generic frame annotation |
 
 GIF/MP4 require at least two selected frames. All selected frames use one camera,
 canvas, and shared world-space viewport scale.
+
+Physical time and playback time are independent. `--fps` controls only how fast
+the movie plays. With `--display-time`, MatterVis resolves time in this order:
+
+1. per-frame `time_fs`, `time_ps`, or `time_ns`;
+2. per-frame `timestep`, `step`, or `nstep`, multiplied by `--time-step`;
+3. original source-frame index and `--dump-frequency`, offset by
+   `--first-frame-step`, then multiplied by `--time-step`.
+
+Selection by `--frame-range` and `--stride` never renumbers source frames, so
+stride is not multiplied twice. If neither time nor step metadata exists,
+`--time-step` and `--dump-frequency` are both required.
+
+Generic frame annotations use one or more repeatable `--frame-field` values and
+one `--frame-label` template. Sources are `index`, `metadata:KEY`,
+`linear:START:STEP`, or `table:PATH:COLUMN`. Index, linear, and table lookup
+all use the original source-frame index, so slicing and stride retain scientific
+alignment. A field role is `progress`, `observable`, or `stage`; units are
+recorded but appear only when explicitly written into the label template.
+Table provenance includes the resolved path, column, row mapping, and SHA256.
+Generic annotations and the physical-time shortcut are mutually exclusive.
 
 Animations preserve one requested representation, camera, and CPU backend
 across every frame. Plotly GIF/MP4 is rejected explicitly; MatterVis never
@@ -113,7 +150,7 @@ substitutes one frame backend for another.
 | Flag | Default | Description |
 |------|---------|-------------|
 | --view MODE | auto | Periodic input uses unit_cell; nonperiodic or synthetic-cell input uses cluster |
-| --style STYLE | ball_stick | ball_stick, ball, stick, ortep, or wireframe |
+| --style STYLE | ball_stick | ball_stick, ball, space_filling, stick, ortep, or wireframe |
 | --shading MODE | smooth | smooth or flat mesh shading |
 | --backend BACKEND | cpu | cpu (3D), matplotlib (projected 2D), or plotly; never selected by fallback |
 | --orthogonal | yes | Orthographic projection |
@@ -132,7 +169,11 @@ are mutually exclusive.
 | `--view-direction X Y Z` | — | Cartesian direction from scene toward camera |
 | `--camera-position X Y Z` | — | Explicit absolute Cartesian camera position in Å |
 | `--camera-up X Y Z` | `+b` / `+Y` | Preferred screen-up direction |
+| `--camera-target X Y Z` | scene centre | Explicit Cartesian look-at target in angstrom |
 | `--camera-distance D` | `1.8` | Positive scene-fit multiplier for axis/direction views |
+| `--field-of-view DEG` | `45` | Perspective vertical field of view; requires `--perspective` |
+| `--ortho-scale ANGSTROM` | fitted | Orthographic half-height; requires `--orthogonal` |
+| `--camera-clip NEAR FAR` | fitted | Positive near/far clipping distances |
 
 `--camera-up` is orthogonalized against the view direction. CPU is the default
 static backend and needs neither Chrome nor Kaleido. Explicit Plotly static
@@ -163,6 +204,31 @@ legacy flag.
 | `--width` | 900 | — | Image width in pixels |
 | `--height` | 720 | — | Image height in pixels |
 | `--scale` | 2 | 1–4 | Supersampling factor (effective DPI = 72 × scale) |
+| `--sphere-detail LAT LON` | 12 20 | LAT >= 2, LON >= 3 | Sphere and ellipsoid mesh resolution |
+| `--cylinder-sides N` | 12 | N >= 3 | Bond-cylinder mesh resolution |
+
+### Selector-based mixed styles
+
+Repeat `--atom-group` and `--bond-group` in later-wins order. Each occurrence
+uses one selector token followed by one or more `KEY=VALUE` overrides:
+
+```bash
+mat-vis render structure.extxyz -o mixed.png \
+  --atom-group all style=ball \
+  --atom-group molecule:0 style=ball_stick material=mesh \
+  --bond-group between:C,N style=wireframe color=#336699
+```
+
+Atom selectors are `all`, `minor`, `major`, `element:...`, `label:...`,
+`index:...`, `fragment:...`, `fragment-index:...`, and `molecule:...`.
+`fragment` selects a fragment label; `fragment-index` selects its numeric index.
+Join clauses with `+` for AND, for example `element:O+minor`. Atom overrides are
+`color`, `color_light`,
+`visible`, `opacity`, `style`, and `material`.
+
+Bond selectors are `all`, `minor`, `major`, `between:...`, and `label:...`.
+Bond overrides are `color`, `visible`, `opacity`, `style`, and `radius_scale`.
+Use `--check --json` to inspect the normalized rules without loading the input.
 
 ### Colour and ORTEP
 

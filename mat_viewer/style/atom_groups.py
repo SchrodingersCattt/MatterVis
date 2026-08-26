@@ -32,6 +32,7 @@ The renderer (:mod:`mat_viewer.renderer`) consumes these tags via
 :func:`partition_draw_atoms_by_render_pipeline` to dispatch each
 (material, style) subset to its existing trace builder.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -80,7 +81,8 @@ def atom_matches_selector(
 
     if "elements" in selector:
         used_any_key = True
-        if atom.get("elem") not in selector["elements"]:
+        element = atom.get("elem") or atom.get("symbol") or atom.get("element")
+        if element not in selector["elements"]:
             return False
     if "is_minor" in selector:
         used_any_key = True
@@ -106,6 +108,19 @@ def atom_matches_selector(
         used_any_key = True
         wanted_labels = {str(item) for item in (selector.get("fragment_labels") or [])}
         if str(fragment_label) not in wanted_labels:
+            return False
+    if "molecule_indices" in selector:
+        used_any_key = True
+        molecule_index = atom.get(
+            "_source_molecule_index",
+            atom.get("_molecule_index", atom.get("molecule_index")),
+        )
+        if molecule_index is None:
+            return False
+        wanted_molecules = {
+            int(item) for item in (selector.get("molecule_indices") or [])
+        }
+        if int(molecule_index) not in wanted_molecules:
             return False
     if "fragment_indices" in selector:
         # Fragment indices are passed via the ``fragment_label`` arg
@@ -179,9 +194,13 @@ def tag_atoms_with_groups(
         decorated["_render_material"] = None
         decorated["_render_style"] = None
         fragment_label = (
-            fragment_labels[idx] if fragment_labels and idx < len(fragment_labels) else None
+            fragment_labels[idx]
+            if fragment_labels and idx < len(fragment_labels)
+            else None
         )
         for group in atom_groups:
+            if not bool(group.get("enabled", True)):
+                continue
             selector = group.get("selector") or {}
             if not atom_matches_selector(
                 decorated,

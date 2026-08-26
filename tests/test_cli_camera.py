@@ -38,6 +38,7 @@ def _structure(scene_overrides=None) -> SimpleNamespace:
 
 def _camera_args(**overrides) -> Namespace:
     values = {
+        "output": "figure.png",
         "width": 900,
         "height": 720,
         "show_hydrogen": False,
@@ -51,6 +52,43 @@ def _camera_args(**overrides) -> Namespace:
     }
     values.update(overrides)
     return Namespace(**values)
+
+
+def test_animation_camera_fits_all_selected_frames() -> None:
+    first = _structure(
+        {
+            "bounds": {
+                "center": [0.0, 0.0, 0.0],
+                "mins": [-1.0, -1.0, -0.1],
+                "maxs": [1.0, 1.0, 0.1],
+            }
+        }
+    ).frames[0]
+    widest = _structure(
+        {
+            "bounds": {
+                "center": [0.0, 0.0, 0.0],
+                "mins": [-1.0, -4.0, -0.1],
+                "maxs": [1.0, 4.0, 0.1],
+            }
+        }
+    ).frames[0]
+    structure = SimpleNamespace(frames=(first, widest))
+
+    animation = _camera_spec(
+        structure,
+        _camera_args(output="movie.gif", show_unit_cell=False),
+        display="formula_unit",
+    )
+    static = _camera_spec(
+        structure,
+        _camera_args(output="figure.png", show_unit_cell=False),
+        display="formula_unit",
+    )
+
+    assert animation.target == pytest.approx([0.0, 0.0, 0.0])
+    assert animation.ortho_scale == pytest.approx(4.48)
+    assert static.ortho_scale == pytest.approx(1.12)
 
 
 def test_camera_defaults_to_orthographic_positive_c_axis() -> None:
@@ -316,3 +354,48 @@ def test_cpu_check_accepts_explicit_lattice_axes(
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is True
+
+
+def test_check_exposes_camera_and_mesh_quality_cli_parity(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        capability_module.CapabilitySpec, "available", lambda self: True
+    )
+
+    main(
+        [
+            "render",
+            str(tmp_path / "not-loaded.cif"),
+            "-o",
+            str(tmp_path / "not-created.png"),
+            "--backend",
+            "cpu",
+            "--perspective",
+            "--camera-target",
+            "1",
+            "2",
+            "3",
+            "--field-of-view",
+            "37",
+            "--camera-clip",
+            "0.2",
+            "400",
+            "--sphere-detail",
+            "18",
+            "30",
+            "--cylinder-sides",
+            "20",
+            "--check",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["camera"]["target"] == [1.0, 2.0, 3.0]
+    assert payload["camera"]["field_of_view"] == 37.0
+    assert payload["camera"]["clip"] == [0.2, 400.0]
+    assert payload["render"]["sphere_detail"] == [18, 30]
+    assert payload["render"]["cylinder_sides"] == 20

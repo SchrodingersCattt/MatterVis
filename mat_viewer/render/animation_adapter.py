@@ -20,7 +20,11 @@ def render_animation(
     camera: Any = None,
     render_spec: Any = None,
     topology_data: Mapping[str, Any] | None = None,
+    atom_groups: Any = None,
+    bond_groups: Any = None,
     fps: float = 12.0,
+    time_spec: Any = None,
+    annotation_spec: Any = None,
 ) -> RenderResult:
     """Render selected source frames with one CPU camera, then encode lazily."""
     try:
@@ -39,6 +43,33 @@ def render_animation(
     if len(frames) < 2:
         raise ValueError("animation output requires at least two selected frames")
 
+    from .animation_time import (
+        coerce_animation_time_spec,
+        draw_time_label,
+        resolve_animation_times,
+    )
+
+    from .frame_annotations import (
+        coerce_frame_annotation_spec,
+        resolve_frame_annotations,
+    )
+
+    resolved_time_spec = coerce_animation_time_spec(time_spec)
+    resolved_annotation_spec = coerce_frame_annotation_spec(annotation_spec)
+    if resolved_time_spec is not None and resolved_annotation_spec is not None:
+        raise ValueError(
+            "physical-time and generic frame annotations cannot be combined"
+        )
+    time_series = (
+        resolve_animation_times(frames, resolved_time_spec)
+        if resolved_time_spec is not None
+        else None
+    )
+    annotation_series = (
+        resolve_frame_annotations(frames, resolved_annotation_spec)
+        if resolved_annotation_spec is not None
+        else None
+    )
     from PIL import Image
 
     from .cpu import render_png
@@ -51,7 +82,7 @@ def render_animation(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if output_format == "gif":
         writer_kwargs: dict[str, Any] = {
-            "duration": 1.0 / float(fps),
+            "duration": 1000.0 / float(fps),
             "loop": 0,
         }
     else:
@@ -65,19 +96,29 @@ def render_animation(
     warnings: list[str] = []
     dimensions: tuple[int, int] | None = None
     with imageio.get_writer(output_path, mode="I", **writer_kwargs) as writer:
-        for frame in frames:
+        for frame_number, frame in enumerate(frames):
             plan = prepare_render(
                 frame,
                 view=view,
                 camera=camera,
                 render=render_spec,
                 topology_data=topology_data,
+                atom_groups=atom_groups,
+                bond_groups=bond_groups,
             )
             frame_result = render_png(plan)
             if frame_result.data is None:  # pragma: no cover - renderer contract guard
                 raise RuntimeError("CPU frame renderer did not return PNG bytes")
             with Image.open(BytesIO(frame_result.data)) as image:
-                rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
+                rendered = image.convert("RGBA")
+                label_series = annotation_series or time_series
+                if label_series is not None:
+                    rendered = draw_time_label(
+                        rendered,
+                        label_series.labels[frame_number],
+                        label_series.spec.position,
+                    )
+                rgb = np.asarray(rendered.convert("RGB"), dtype=np.uint8)
             if dimensions is None:
                 dimensions = (int(rgb.shape[1]), int(rgb.shape[0]))
             elif dimensions != (int(rgb.shape[1]), int(rgb.shape[0])):
@@ -107,6 +148,16 @@ def render_animation(
             "frame_duration_ms": 1000.0 / float(fps),
             "duration_seconds": len(frames) / float(fps),
             "frame_plan_sha256": plan_hashes,
+            "simulation_time": (
+                time_series.to_metadata()
+                if time_series is not None
+                else {"displayed": False}
+            ),
+            "frame_annotation": (
+                annotation_series.to_metadata()
+                if annotation_series is not None
+                else {"displayed": False}
+            ),
         },
     )
 

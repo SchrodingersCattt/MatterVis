@@ -16,7 +16,7 @@ from mat_viewer.loader import (
     load_atomistic_input,
     load_structure_input,
 )
-from mat_viewer.render.contracts import TriangleMeshPrimitive
+from mat_viewer.render.contracts import RenderSpec, TriangleMeshPrimitive, ViewSpec
 from mat_viewer.render.cpu import render
 from mat_viewer.render.planning import prepare_render
 from mat_viewer.render.frame_selection import parse_frame_indices
@@ -113,8 +113,16 @@ def test_supported_inputs_converge_on_loaded_crystal(
 ) -> None:
     type_map = ["Si", "O"] if key in {"dump", "data"} else None
     loaded = load_structure_input(structure_files[key], type_map=type_map)
+    expected_formats = {
+        "vasp": "vasp",
+        "extxyz": "extxyz",
+        "traj": "traj",
+        "dump": "lammps-dump-text",
+        "data": "lammps-data",
+    }
 
     assert loaded.n_frames == expected_frames
+    assert loaded.input_format == expected_formats[key]
     assert all(isinstance(frame.bundle, LoadedCrystal) for frame in loaded.frames)
     assert all(len(frame.bundle.raw_atoms) == 3 for frame in loaded.frames)
     assert {atom["elem"] for atom in loaded.frames[0].bundle.raw_atoms} == {"Si", "O"}
@@ -401,6 +409,18 @@ def test_viewport_accumulator_matches_uniform_viewport() -> None:
     assert accumulator.viewport() == scenes[0]["viewport"]
 
 
+def test_viewport_accumulator_exposes_union_fit_points() -> None:
+    from mat_viewer.renderer import ViewportAccumulator
+
+    accumulator = ViewportAccumulator(padding=0.25)
+    accumulator.update_points([[-1.0, -2.0, -3.0], [1.0, 2.0, 3.0]])
+    accumulator.update_points([[-4.0, 0.0, 0.0], [2.0, 5.0, 1.0]])
+
+    points = accumulator.fit_points()
+    assert points.min(axis=0) == pytest.approx([-4.25, -2.25, -3.25])
+    assert points.max(axis=0) == pytest.approx([2.25, 5.25, 3.25])
+
+
 def test_tui_parser_exposes_same_generic_input_contract() -> None:
     parser = argparse.ArgumentParser()
     _build_tui_parser(parser.add_subparsers(dest="command"))
@@ -497,3 +517,43 @@ def test_count_frames_does_not_build_render_bundles(
     monkeypatch.setattr(structure_input, "build_loaded_crystal_from_ase", fail)
 
     assert count_structure_frames(structure_files["traj"]) == 2
+
+
+def test_backend_neutral_view_controls_unit_cell_boundary_replicas(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "boundary.dump"
+    source.write_text(
+        """ITEM: TIMESTEP
+0
+ITEM: NUMBER OF ATOMS
+1
+ITEM: BOX BOUNDS pp pp pp
+0 8
+0 8
+0 8
+ITEM: ATOMS id type element x y z
+1 1 C 0 0 0
+""",
+        encoding="utf-8",
+    )
+    structure = load_structure_input(source)
+
+    expanded = prepare_render(
+        structure,
+        view=ViewSpec(display="unit_cell", include_boundary_replicas=True),
+        render=RenderSpec(representation="ball"),
+    )
+    strict = prepare_render(
+        structure,
+        view=ViewSpec(display="unit_cell", include_boundary_replicas=False),
+        render=RenderSpec(representation="ball"),
+    )
+
+    def atom_count(plan) -> int:
+        return sum(
+            primitive.metadata.get("kind") == "atom" for primitive in plan.primitives
+        )
+
+    assert atom_count(expanded) == 8
+    assert atom_count(strict) == 1

@@ -158,6 +158,7 @@ class CameraSpec:
 @dataclass(frozen=True, slots=True)
 class ViewSpec:
     display: DisplayMode = "formula_unit"
+    include_boundary_replicas: bool = True
 
     def __post_init__(self) -> None:
         supported = {"formula_unit", "unit_cell", "asymmetric_unit", "cluster"}
@@ -168,6 +169,8 @@ class ViewSpec:
                 f"unsupported display mode {self.display!r}; choose one of {choices}"
             )
         object.__setattr__(self, "display", value)
+        if not isinstance(self.include_boundary_replicas, bool):
+            raise TypeError("include_boundary_replicas must be a bool")
 
 
 @dataclass(frozen=True, slots=True)

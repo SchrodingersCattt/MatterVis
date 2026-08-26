@@ -43,16 +43,18 @@ The same routing as a quick table:
 | Drive the running Dash viewer over HTTP/WebSocket | [`dash_service.md`](dash_service.md) |
 | Control a local terminal view from Python or an agent adapter | [`tui_api.md`](tui_api.md) |
 | Render CIF, Cube, VASP, XYZ, ASE trajectory, or LAMMPS files from the CLI | [`../cli.md`](../cli.md) |
+| Label trajectory frames with physical simulation time while keeping playback FPS independent | [`../cli.md`](../cli.md#frames-and-animations) |
 | Build or compose a canonical structure scene from Python | [`scene_api.md`](scene_api.md) |
 | Match a dense coordination-polyhedron publication layout | [`static_publication.md`](static_publication.md) |
 | Build a static cube/orbital figure (HOMO, LUMO, density) | [`cube_api.md`](cube_api.md) |
 | Render ORTEP / thermal ellipsoid figures | [`ortep_api.md`](ortep_api.md) |
 | Add a/b/c (or x/y/z, k-path, dipole) direction indicators to any 3D plot | [`compass_api.md`](compass_api.md) |
 | Manage named coordination polyhedra (per-row colour, ligand restriction, per-instance overrides) | [`polyhedron_api.md`](polyhedron_api.md) |
-| Apply per-element / per-group colour, visibility, or render-style overrides | [`atom_groups_api.md`](atom_groups_api.md) |
+| Apply per-element / per-group colour, visibility, material, or render-style overrides from API or CLI | [`atom_groups_api.md`](atom_groups_api.md) |
 | Draw anchored polarization, dipole, force, displacement, magnetic, or response vectors with real 3D depth | [`vector_overlays_api.md`](vector_overlays_api.md) |
-| Recolour, hide, thin out, or fade chemical bonds by selector | [`bond_groups_api.md`](bond_groups_api.md) |
+| Recolour, hide, restyle, thin out, or fade chemical bonds by selector from API or CLI | [`bond_groups_api.md`](bond_groups_api.md) |
 | Repeat a unit cell, grow by radius / bonds, complete fragments / polyhedra, or generate a slab | [`transforms_api.md`](transforms_api.md) |
+| Audit which backend-neutral render controls are available from the CLI | [`cli-api-parity.md`](cli-api-parity.md) |
 | Read or override global MatterVis defaults | [`config_api.md`](config_api.md) |
 | Select atoms/fragments in the live viewer and promote a selection to a group | [`selection_api.md`](selection_api.md) |
 

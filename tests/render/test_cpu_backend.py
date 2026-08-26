@@ -1442,8 +1442,23 @@ def test_structure_input_view_rebuilds_loaded_bundle_with_canonical_display_mode
 
     calls = []
 
-    def fake_build_bundle_scene(bundle, *, display_mode, show_hydrogen):
-        calls.append((bundle, display_mode, show_hydrogen))
+    def fake_build_bundle_scene(
+        bundle,
+        *,
+        display_mode,
+        show_hydrogen,
+        include_boundary_replicas,
+        include_cross_boundary_bond_endpoints,
+    ):
+        calls.append(
+            (
+                bundle,
+                display_mode,
+                show_hydrogen,
+                include_boundary_replicas,
+                include_cross_boundary_bond_endpoints,
+            )
+        )
         count = 1 if display_mode == "formula_unit" else 3
         return {
             "draw_atoms": [
@@ -1498,8 +1513,8 @@ def test_structure_input_view_rebuilds_loaded_bundle_with_canonical_display_mode
     assert formula.metadata["display_mode"] == "formula_unit"
     assert unit_cell.metadata["display_mode"] == "unit_cell"
     assert [item[1:] for item in calls] == [
-        ("formula_unit", False),
-        ("unit_cell", False),
+        ("formula_unit", False, True, False),
+        ("unit_cell", False, True, False),
     ]
 
 

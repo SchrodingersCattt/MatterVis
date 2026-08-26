@@ -618,6 +618,7 @@ def build_scene_from_atoms(
     formula_unit_atoms=None,
     unwrapped_atoms=None,
     include_boundary_replicas: bool = True,
+    include_cross_boundary_bond_endpoints: bool = True,
     bond_scale: float | None = None,
     bond_thresholds: dict[tuple[str, str], float] | None = None,
     canonical_bond_pairs: list[tuple[int, int]] | None = None,
@@ -763,7 +764,7 @@ def build_scene_from_atoms(
     strict_cell = display_mode == "unit_cell" and not include_boundary_replicas
     bonded_image_replica_count = 0
     framework_context_replica_count = 0
-    if strict_cell and image_records:
+    if strict_cell and image_records and include_cross_boundary_bond_endpoints:
         bonded_image_replica_count = _manifest_strict_bonded_images(
             draw_atoms,
             source_atoms,
