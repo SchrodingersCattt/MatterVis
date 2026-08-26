@@ -23,6 +23,7 @@ from molcrys_kit.utils.geometry import cart_to_frac, frac_to_cart
 
 from ..style.disorder import atom_is_minor
 from .chemistry_records import (
+    AbsoluteStructureRecord,
     AtomChemistryRecord,
     BondChemistryRecord,
     CrystalChemistryRecords,
@@ -457,6 +458,7 @@ def _chemistry_records(crystal, mk) -> CrystalChemistryRecords | None:
     bond_records: list[BondChemistryRecord] = []
     entity_records: list[EntityChemistryRecord] = []
     warnings = list(str(value) for value in chemistry.warnings)
+    cif_chemistry = dict(getattr(crystal, "metadata", {}).get("cif_chemistry", {}))
 
     for entity in chemistry.components:
         try:
@@ -546,6 +548,30 @@ def _chemistry_records(crystal, mk) -> CrystalChemistryRecords | None:
         )
         warnings.extend(str(value) for value in getattr(stereo_report, "warnings", ()))
 
+    absolute_source = dict(cif_chemistry.get("absolute_structure", {}))
+    absolute_records = tuple(
+        AbsoluteStructureRecord(
+            method=method,
+            raw=str(record["raw"]),
+            value=float(record["value"]),
+            standard_uncertainty=(
+                None
+                if record.get("standard_uncertainty") is None
+                else float(record["standard_uncertainty"])
+            ),
+        )
+        for method in ("flack", "hooft", "rogers")
+        if isinstance((record := absolute_source.get(method)), dict)
+        and record.get("value") is not None
+    )
+    source_names = tuple(
+        (kind, str(cif_chemistry[key]))
+        for kind, key in (
+            ("systematic", "chemical_name_systematic"),
+            ("common", "chemical_name_common"),
+        )
+        if cif_chemistry.get(key)
+    )
     return CrystalChemistryRecords(
         status=_enum_text(chemistry.status),
         atoms=tuple(sorted(atom_records, key=lambda record: record.source_index)),
@@ -553,6 +579,18 @@ def _chemistry_records(crystal, mk) -> CrystalChemistryRecords | None:
         entities=tuple(entity_records),
         warnings=tuple(dict.fromkeys(warnings)),
         evidence=_evidence_text(chemistry.evidence),
+        source_names=source_names,
+        absolute_configuration=(
+            None
+            if not cif_chemistry.get("chemical_absolute_configuration")
+            else str(cif_chemistry["chemical_absolute_configuration"])
+        ),
+        absolute_structure=absolute_records,
+        absolute_structure_details=(
+            None
+            if not absolute_source.get("details")
+            else str(absolute_source["details"])
+        ),
     )
 
 

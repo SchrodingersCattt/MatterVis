@@ -261,6 +261,21 @@ def test_analysis_copies_public_chemistry_and_stereo_records(monkeypatch):
     crystal = SimpleNamespace(
         molecules=[object()],
         chemistry=None,
+        metadata={
+            "cif_chemistry": {
+                "chemical_name_systematic": "test systematic name",
+                "chemical_name_common": "test common name",
+                "chemical_absolute_configuration": "ad",
+                "absolute_structure": {
+                    "flack": {
+                        "raw": "0.06(3)",
+                        "value": 0.06,
+                        "standard_uncertainty": 0.03,
+                    },
+                    "details": "Parsons quotients",
+                },
+            }
+        },
         get_site_records=lambda: list(sites),
         get_bond_records=lambda: [],
     )
@@ -286,6 +301,14 @@ def test_analysis_copies_public_chemistry_and_stereo_records(monkeypatch):
     assert carbon.stereo_descriptor == "R"
     assert carbon.cip_order == ("m0:a1", "m0:a0:implicit-H")
     assert carbon.evidence == ("inferred:golden_method (human checked)",)
+    assert analysis.chemistry.source_names == (
+        ("systematic", "test systematic name"),
+        ("common", "test common name"),
+    )
+    assert analysis.chemistry.absolute_configuration == "ad"
+    assert analysis.chemistry.absolute_structure[0].raw == "0.06(3)"
+    assert analysis.chemistry.absolute_structure[0].standard_uncertainty == pytest.approx(0.03)
+    assert analysis.chemistry.absolute_structure_details == "Parsons quotients"
 
 
 def test_formula_unit_materialises_mck_image_shift():

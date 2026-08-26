@@ -263,6 +263,7 @@ def _crystal_ir_from_scene(
             "source_site_atom_count": source_site_atom_count,
             "expanded_atom_count": expanded_atom_count,
             "display_atom_count": len(atoms),
+            "rings": tuple(scene.get("rings", ())),
         },
     )
 

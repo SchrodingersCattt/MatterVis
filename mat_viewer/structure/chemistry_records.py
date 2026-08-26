@@ -12,6 +12,16 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
+class AbsoluteStructureRecord:
+    """One CIF absolute-structure parameter with its reported uncertainty."""
+
+    method: str
+    raw: str
+    value: float
+    standard_uncertainty: float | None
+
+
+@dataclass(frozen=True)
 class AtomChemistryRecord:
     atom_id: str
     source_index: int
@@ -64,6 +74,10 @@ class CrystalChemistryRecords:
     entities: tuple[EntityChemistryRecord, ...]
     warnings: tuple[str, ...] = ()
     evidence: tuple[str, ...] = ()
+    source_names: tuple[tuple[str, str], ...] = ()
+    absolute_configuration: str | None = None
+    absolute_structure: tuple[AbsoluteStructureRecord, ...] = ()
+    absolute_structure_details: str | None = None
     source: str = "molcrys_kit"
 
     def atom(self, atom_id: str) -> AtomChemistryRecord | None:
@@ -77,6 +91,7 @@ class CrystalChemistryRecords:
 
 
 __all__ = [
+    "AbsoluteStructureRecord",
     "AtomChemistryRecord",
     "BondChemistryRecord",
     "CrystalChemistryRecords",
