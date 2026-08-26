@@ -7,7 +7,8 @@ HTTP service and it does not create a second chemistry or render pipeline.
 
 When the installed MolCrysKit exposes its chemistry contract, the loader also
 copies stable atom identities, bond order/type, entity dimensionality,
-stereochemical descriptors, CIP order, warnings, and evidence into immutable
+stereochemical descriptors, CIP order, generated names, linear notation,
+crystal enantiomer composition, warnings, and evidence into immutable
 `CrystalChemistryRecords`. MatterVis does not infer any of those values from
 screen distances. Older MolCrysKit releases leave `CrystalIR.chemistry` unset.
 
@@ -89,15 +90,19 @@ more it occupies a right-hand column; narrower terminals place the identical
 plain-text inspector below the viewport. It reports site provenance,
 occupancy/disorder, coordinates, MolCrysKit atom and entity records, manifested
 distances/angles, MCK bond semantics, ring provenance, stereochemical status,
-CIP order, crystal metadata, deposited CIF names, and absolute-structure
-parameters with their standard uncertainties. Missing MCK records are printed
-as `unavailable`; the inspector never fills gaps from screen distances.
+CIP order, generated IUPAC name or composition description, nomenclature
+standard/version and rule trace, OpenSMILES or MCK-LN fidelity, crystal
+enantiomer counts, deposited CIF names, and absolute-structure parameters with
+their standard uncertainties. Missing MCK records are printed as `unavailable`;
+the inspector never fills gaps from screen distances.
 
 MolCrysKit inference or ambiguity warnings remain in a one-line warning bar
 above the main viewport. `:why` expands the evidence, status, retained
-alternative count, and complete warning text. Deposited CIF systematic/common
-names remain explicitly labelled as source metadata and are not presented as
-newly validated IUPAC names.
+alternative count, crystal-stereo reason, and complete warning text. Deposited
+CIF systematic/common names remain explicitly labelled as source metadata and
+are not presented as newly generated IUPAC names. `:name` expands the actual
+MCK naming system, fixed standard version, result kind/PIN claim, and rule
+trace.
 
 ## Analytical inspection
 
