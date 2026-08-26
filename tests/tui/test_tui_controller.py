@@ -8,7 +8,7 @@ import pytest
 from mat_viewer.math.camera import Camera, ProjectionMode, project_points
 from mat_viewer.tui.compositor import viewport_from_bounds
 from mat_viewer.tui.controller import TerminalViewController
-from mat_viewer.tui.crystal_ir import AtomIR, CrystalIR, Lattice
+from mat_viewer.tui.crystal_ir import AtomIR, BondIR, CrystalIR, Lattice
 
 
 def _crystal() -> CrystalIR:
@@ -25,9 +25,26 @@ def _crystal() -> CrystalIR:
             matrix=np.diag([10.0, 10.0, 10.0]),
         ),
         atoms=[
-            AtomIR("C", np.array([-1.0, 0.0, 0.0]), np.zeros(3), label="C1", index=0),
-            AtomIR("O", np.array([1.0, 0.0, 0.0]), np.zeros(3), label="O1", index=1),
+            AtomIR(
+                "C",
+                np.array([-1.0, 0.0, 0.0]),
+                np.zeros(3),
+                atom_id="site:C1",
+                label="C1",
+                index=0,
+                display_copy_id="copy:C1",
+            ),
+            AtomIR(
+                "O",
+                np.array([1.0, 0.0, 0.0]),
+                np.zeros(3),
+                atom_id="site:O1",
+                label="O1",
+                index=1,
+                display_copy_id="copy:O1",
+            ),
         ],
+        bonds=[BondIR(0, 1, 2.0)],
     )
 
 
@@ -44,6 +61,68 @@ def test_controller_observation_is_json_safe_and_detached() -> None:
     assert changed.as_dict()["frame"]["width"] == 40
     json.dumps(changed.as_dict(), allow_nan=False)
     _assert_no_forbidden_observation_keys(changed.as_dict())
+
+
+def test_selection_is_visible_in_mono_and_survives_camera_rotation() -> None:
+    controller = TerminalViewController(_crystal(), width=40, height=12, mono=True)
+
+    selected = controller.select_atom("C1")
+    rotated = controller.orbit(yaw_deg=90.0)
+
+    assert selected.state.selection.atom_id == "site:C1"
+    assert selected.state.selection.display_copy_id == "copy:C1"
+    assert "[C1]" in selected.frame
+    assert rotated.state.selection.atom_id == "site:C1"
+    assert rotated.state.selection.display_index == 0
+    assert "[C1]" in rotated.frame
+
+
+def test_hit_map_and_atom_neighbor_traversal_are_deterministic() -> None:
+    controller = TerminalViewController(_crystal(), width=40, height=12, mono=True)
+    hits = controller.atom_hit_map()
+
+    assert [(hit.atom_id, hit.display_copy_id) for hit in hits] == [
+        ("site:C1", "copy:C1"),
+        ("site:O1", "copy:O1"),
+    ]
+    picked = controller.select_screen(row=hits[0].row, col=hits[0].col)
+    neighbor = controller.select_neighbor(step=1)
+    cycled = controller.select_next(step=1)
+
+    assert picked.state.selection.atom_id == "site:C1"
+    assert neighbor.state.selection.atom_id == "site:O1"
+    assert cycled.state.selection.atom_id == "site:C1"
+
+
+def test_directional_selection_uses_current_projected_atom_positions() -> None:
+    controller = TerminalViewController(_crystal(), width=40, height=12, mono=True)
+    hits = controller.atom_hit_map()
+    left, right = hits
+    controller.select_screen(row=left.row, col=left.col)
+    delta_col = right.col - left.col
+    delta_row = right.row - left.row
+
+    if abs(delta_col) >= abs(delta_row):
+        moved = controller.select_direction(dx=1 if delta_col > 0 else -1)
+    else:
+        moved = controller.select_direction(dy=1 if delta_row > 0 else -1)
+
+    assert moved.state.selection.atom_id == "site:O1"
+
+
+def test_selection_mode_pin_and_clear_are_explicit_state_transitions() -> None:
+    controller = TerminalViewController(_crystal(), width=40, height=12, mono=True)
+
+    active = controller.set_selection_mode(True)
+    pinned = controller.pin_selection()
+    cleared = controller.clear_selection()
+
+    assert active.state.selection.mode is True
+    assert active.state.selection.atom_id == "site:C1"
+    assert pinned.state.selection.mode is False
+    assert pinned.state.selection.pinned is True
+    assert cleared.state.selection.display_index is None
+    assert "[C1]" not in cleared.frame
 
 
 def test_controller_orbit_keeps_explicit_fit_bounds_stable() -> None:
@@ -66,7 +145,9 @@ def test_rotation_invariant_all_fit_keeps_elongated_structure_visible() -> None:
             AtomIR("C", np.array([100.0, 0.0, 0.0]), np.zeros(3), label="C2", index=1),
         ]
     )
-    controller = TerminalViewController(crystal, width=80, height=24, mono=True, show_cell=False)
+    controller = TerminalViewController(
+        crystal, width=80, height=24, mono=True, show_cell=False
+    )
 
     for yaw_deg, pitch_deg in ((0.0, 0.0), (90.0, 0.0), (45.0, 30.0), (135.0, -30.0)):
         controller.set_camera(azimuth=0.0, elevation=0.0)
@@ -205,8 +286,14 @@ def test_controller_alignment_requires_lattice() -> None:
 
 def _assert_no_forbidden_observation_keys(value) -> None:
     forbidden = {
-        "depth", "distance", "front", "collision", "score", "best_camera",
-        "cartesian", "fractional",
+        "depth",
+        "distance",
+        "front",
+        "collision",
+        "score",
+        "best_camera",
+        "cartesian",
+        "fractional",
     }
     if isinstance(value, dict):
         assert not (set(value) & forbidden)

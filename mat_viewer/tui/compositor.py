@@ -112,7 +112,7 @@ class Viewport:
     x_max: float
     y_min: float
     y_max: float
-    scale: float   # cols per data unit (uniform for both axes)
+    scale: float  # cols per data unit (uniform for both axes)
     width: int
     height: int
 
@@ -130,6 +130,55 @@ class Viewport:
 
     def in_bounds_grid(self, row: int, col: int) -> bool:
         return 0 <= row < self.height and 0 <= col < self.width
+
+
+@dataclass(frozen=True)
+class ProjectedAtomHit:
+    """One visible atom retained from the exact terminal projection."""
+
+    display_index: int
+    atom_id: str
+    display_copy_id: str
+    label: str
+    row: int
+    col: int
+    depth: float
+
+
+def build_atom_hit_map(
+    crystal: "CrystalIR",
+    pts_2d: np.ndarray,
+    depth: np.ndarray,
+    viewport: Viewport,
+    *,
+    show_minor: bool,
+) -> tuple[ProjectedAtomHit, ...]:
+    """Retain visible atom screen positions for selection and mouse hits.
+
+    The function consumes the same projection and effective viewport as the
+    compositor.  It does not infer connectivity or any chemical property.
+    """
+    hits: list[ProjectedAtomHit] = []
+    count = min(len(crystal.atoms), len(pts_2d), len(depth))
+    for index in range(count):
+        atom = crystal.atoms[index]
+        if not show_minor and atom.is_minor:
+            continue
+        row, col = viewport.to_grid(float(pts_2d[index][0]), float(pts_2d[index][1]))
+        if not viewport.in_bounds_grid(row, col):
+            continue
+        hits.append(
+            ProjectedAtomHit(
+                display_index=index,
+                atom_id=terminal_text(atom.atom_id),
+                display_copy_id=terminal_text(atom.display_copy_id),
+                label=terminal_text(atom.display_label),
+                row=row,
+                col=col,
+                depth=float(depth[index]),
+            )
+        )
+    return tuple(hits)
 
 
 def _compute_viewport(
@@ -225,9 +274,13 @@ def viewport_from_bounds(
     scale = min(scale_x, scale_y)
 
     return Viewport(
-        x_min=x_min, x_max=x_max,
-        y_min=y_min, y_max=y_max,
-        scale=scale, width=width, height=height,
+        x_min=x_min,
+        x_max=x_max,
+        y_min=y_min,
+        y_max=y_max,
+        scale=scale,
+        width=width,
+        height=height,
     )
 
 
@@ -244,7 +297,7 @@ _TIER_BACK = 2
 
 # Dimmed color for back-tier braille geometry
 _BACK_TIER_COLOR = 236  # dark grey (ANSI 256)
-_MID_TIER_COLOR = 244   # medium grey
+_MID_TIER_COLOR = 244  # medium grey
 
 
 def _atom_radius(
@@ -292,33 +345,43 @@ DISPLAY_LEVELS = ("atom", "molecule")
 
 # Offsets to try when label doesn't fit at ideal pos (row_offset, col_offset)
 _OFFSETS = [
-    (0, 0),       # ideal: centered at atom
-    (0, 1), (0, -1),
-    (-1, 0), (1, 0),
-    (-1, 1), (-1, -1),
-    (1, 1), (1, -1),
-    (0, 2), (0, -2),
-    (-2, 0), (2, 0),
-    (-1, 2), (-1, -2),
-    (1, 2), (1, -2),
+    (0, 0),  # ideal: centered at atom
+    (0, 1),
+    (0, -1),
+    (-1, 0),
+    (1, 0),
+    (-1, 1),
+    (-1, -1),
+    (1, 1),
+    (1, -1),
+    (0, 2),
+    (0, -2),
+    (-2, 0),
+    (2, 0),
+    (-1, 2),
+    (-1, -2),
+    (1, 2),
+    (1, -2),
 ]
 
 
 @dataclass
 class _AtomDraw:
     """Internal atom drawing state."""
+
     idx: int
-    x2d: float       # projected x
-    y2d: float       # projected y
-    row: int         # grid row (ideal)
-    col: int         # grid col (ideal, label center)
-    px_x: int        # subpixel x
-    px_y: int        # subpixel y
-    radius: int      # subpixel circle radius
-    text: str        # label text
-    color: int       # ANSI 256 color
+    x2d: float  # projected x
+    y2d: float  # projected y
+    row: int  # grid row (ideal)
+    col: int  # grid col (ideal, label center)
+    px_x: int  # subpixel x
+    px_y: int  # subpixel y
+    radius: int  # subpixel circle radius
+    text: str  # label text
+    color: int  # ANSI 256 color
     depth: float
-    is_partial: bool # occ < 1
+    is_partial: bool  # occ < 1
+    selected: bool = False
     depth_tier: int = _TIER_MID  # 0=front, 1=mid, 2=back
     # Placed label position (after relaxation)
     placed_row: int = -1
@@ -347,6 +410,7 @@ def compose_frame(
     pan_y: float = 0.0,
     display_level: str = "atom",
     viewport: Viewport | None = None,
+    selected_display_index: int | None = None,
 ) -> str:
     """Render crystal in ORTEP style with label relaxation.
 
@@ -383,12 +447,15 @@ def compose_frame(
     cell_verts_2d = None
     if show_cell and crystal.lattice is not None:
         from ..math.camera import project_points as _proj
+
         verts = crystal.lattice.cell_vertices()
         cell_verts_2d, _ = _proj(camera, verts)
         extra_pts.append(cell_verts_2d)
 
     if viewport is None:
-        viewport = _compute_viewport(pts_2d, extra_pts, width, height, zoom, pan_x, pan_y)
+        viewport = _compute_viewport(
+            pts_2d, extra_pts, width, height, zoom, pan_x, pan_y
+        )
     else:
         viewport = viewport_from_bounds(
             viewport.x_min,
@@ -413,8 +480,17 @@ def compose_frame(
     # ── Dispatch to display-level-specific rendering ───────────────────
     if display_level == "molecule":
         return _compose_molecule_frame(
-            crystal, camera, pts_2d, depth, viewport, canvas,
-            width, height, mono, show_minor,
+            crystal,
+            camera,
+            pts_2d,
+            depth,
+            viewport,
+            canvas,
+            width,
+            height,
+            mono,
+            show_minor,
+            selected_display_index,
         )
     # ── Depth tier computation ───────────────────────────────────────
     depth_min = float(depth.min()) if len(depth) > 0 else 0.0
@@ -437,18 +513,30 @@ def compose_frame(
             is_partial = atom.occupancy < 0.99
             if is_partial and resolved_label_mode != "dot":
                 text += "*"
+            selected = idx == selected_display_index
+            if selected:
+                text = f"[{text}]"
 
             color = ELEMENT_COLORS.get(atom.element, DEFAULT_COLOR)
 
-            atoms_draw.append(_AtomDraw(
-                idx=idx, x2d=x2d, y2d=y2d,
-                row=row, col=col,
-                px_x=px_x, px_y=px_y,
-                radius=radius, text=text,
-                color=color, depth=float(depth[idx]),
-                is_partial=is_partial,
-                depth_tier=tier,
-            ))
+            atoms_draw.append(
+                _AtomDraw(
+                    idx=idx,
+                    x2d=x2d,
+                    y2d=y2d,
+                    row=row,
+                    col=col,
+                    px_x=px_x,
+                    px_y=px_y,
+                    radius=radius,
+                    text=text,
+                    color=color,
+                    depth=float(depth[idx]),
+                    is_partial=is_partial,
+                    selected=selected,
+                    depth_tier=tier,
+                )
+            )
 
     # Sort back-to-front for drawing (far first)
     atoms_draw.sort(key=lambda a: a.depth)
@@ -510,7 +598,7 @@ def compose_frame(
 
     # ── Layer 4: Label relaxation ───────────────────────────────────────
     # Sort front-to-back for label priority (closest gets first pick)
-    label_order = sorted(atoms_draw, key=lambda a: -a.depth)
+    label_order = sorted(atoms_draw, key=lambda a: (not a.selected, -a.depth))
 
     # Grid tracks occupied cells
     occupied: set[tuple[int, int]] = set()
@@ -566,17 +654,19 @@ def compose_frame(
         lx = label_center_col * 2 + 1
         ly = label_center_row * 4 + 2
         leader_color = _tier_color(a.color, a.depth_tier)
-        canvas.draw_dashed_line(lx, ly, a.px_x, a.px_y, dash=1, gap=1, color=leader_color)
+        canvas.draw_dashed_line(
+            lx, ly, a.px_x, a.px_y, dash=1, gap=1, color=leader_color
+        )
 
     # ── Build output (color-aware) ─────────────────────────────────────
     colored_rows = canvas.render_colored()
 
     # Index placed labels by row — include depth_tier for label styling
-    label_map: dict[int, list[tuple[int, str, int, bool, int]]] = {}
+    label_map: dict[int, list[tuple[int, str, int, bool, int, bool]]] = {}
     for a in atoms_draw:
         if a.placed_row >= 0:
             label_map.setdefault(a.placed_row, []).append(
-                (a.placed_col, a.text, a.color, a.is_partial, a.depth_tier)
+                (a.placed_col, a.text, a.color, a.is_partial, a.depth_tier, a.selected)
             )
 
     output_lines: list[str] = []
@@ -610,12 +700,14 @@ def compose_frame(
             while col < width:
                 if li < len(row_labels) and row_labels[li][0] == col:
                     _flush_braille_colored()
-                    lcol, ltext, lcolor, is_partial, ltier = row_labels[li]
+                    lcol, ltext, lcolor, is_partial, ltier, selected = row_labels[li]
                     if mono:
                         parts.append(ltext)
                     else:
                         # Depth-aware label styling
-                        if is_partial:
+                        if selected:
+                            parts.append(f"\033[1;7;38;5;{lcolor}m{ltext}\033[0m")
+                        elif is_partial:
                             parts.append(f"\033[2;38;5;{lcolor}m{ltext}\033[0m")
                         elif ltier == _TIER_FRONT:
                             parts.append(f"\033[1;38;5;{lcolor}m{ltext}\033[0m")
@@ -637,6 +729,7 @@ def compose_frame(
     while output_lines and not output_lines[-1]:
         output_lines.pop()
     return "\n".join(output_lines)
+
 
 # ── Color-run helpers ───────────────────────────────────────────────────────
 
@@ -682,8 +775,8 @@ def _color_run_to_ansi(cells: list[tuple[str, int]]) -> str:
 # ── Density blob drawing ────────────────────────────────────────────────────
 
 # ANSI 256 colors for orbital lobes
-_BLOB_POS_COLOR = 208   # orange (positive lobe)
-_BLOB_NEG_COLOR = 33    # blue (negative lobe)
+_BLOB_POS_COLOR = 208  # orange (positive lobe)
+_BLOB_NEG_COLOR = 33  # blue (negative lobe)
 
 
 def _draw_density_blobs(
@@ -723,8 +816,12 @@ def _draw_density_blobs(
 
 def _draw_stippled_disk(
     canvas: "BrailleCanvas",
-    cx: int, cy: int, radius: int,
-    *, color: int = 0, density: float = 0.3,
+    cx: int,
+    cy: int,
+    radius: int,
+    *,
+    color: int = 0,
+    density: float = 0.3,
 ) -> None:
     """Draw a filled disk with deterministic stipple pattern.
 
@@ -772,10 +869,14 @@ def _draw_dashed_circle(
 
 def _oct(cx, cy, x, y):
     return (
-        (cx + x, cy + y), (cx - x, cy + y),
-        (cx + x, cy - y), (cx - x, cy - y),
-        (cx + y, cy + x), (cx - y, cy + x),
-        (cx + y, cy - x), (cx - y, cy - x),
+        (cx + x, cy + y),
+        (cx - x, cy + y),
+        (cx + x, cy - y),
+        (cx - x, cy - y),
+        (cx + y, cy + x),
+        (cx - y, cy + x),
+        (cx + y, cy - x),
+        (cx - y, cy - x),
     )
 
 
@@ -789,17 +890,17 @@ def _step(x, y, d):
 
 # Qualitative palette for molecule species (ANSI 256 high-contrast hues)
 MOLECULE_COLORS = (
-    39,   # deep sky blue
+    39,  # deep sky blue
     208,  # orange
     120,  # bright green
     201,  # magenta/pink
     226,  # yellow
-    87,   # cyan
+    87,  # cyan
     160,  # dark red
-    99,   # purple
-    48,   # sea green
+    99,  # purple
+    48,  # sea green
     214,  # amber
-    63,   # slate blue
+    63,  # slate blue
     190,  # lime
 )
 
@@ -815,6 +916,7 @@ def _compose_molecule_frame(
     height: int,
     mono: bool,
     show_minor: bool,
+    selected_display_index: int | None,
 ) -> str:
     """Render molecule-level view: convex hull outlines + formula labels."""
     from ._hull2d import convex_hull_2d
@@ -861,7 +963,9 @@ def _compose_molecule_frame(
         if len(atom_indices) < 2:
             continue
 
-        color = mol_color_map.get(mol_idx, MOLECULE_COLORS[mol_idx % len(MOLECULE_COLORS)])
+        color = mol_color_map.get(
+            mol_idx, MOLECULE_COLORS[mol_idx % len(MOLECULE_COLORS)]
+        )
 
         # Get 2D projected coordinates for this molecule's atoms
         mol_pts = [(float(pts_2d[i][0]), float(pts_2d[i][1])) for i in atom_indices]
@@ -903,6 +1007,23 @@ def _compose_molecule_frame(
     for formula, candidates in label_candidates.items():
         _, row, col, color = max(candidates, key=lambda item: item[0])
         labels_to_place.append((row, col, _display_species_name(formula), color))
+
+    # Molecule-level views still expose the exact selected atom.  The marker
+    # is intentionally textual so it survives monochrome terminals.
+    if selected_display_index is not None and 0 <= selected_display_index < len(
+        crystal.atoms
+    ):
+        atom = crystal.atoms[selected_display_index]
+        if show_minor or not atom.is_minor:
+            row, col = viewport.to_grid(*pts_2d[selected_display_index])
+            labels_to_place.append(
+                (
+                    row,
+                    col,
+                    f"[{terminal_text(atom.display_label)}]",
+                    ELEMENT_COLORS.get(atom.element, DEFAULT_COLOR),
+                )
+            )
 
     # Build output with labels
     colored_rows = canvas.render_colored()
