@@ -4,6 +4,8 @@ from .chemistry_records import (
     AtomChemistryRecord,
     BondChemistryRecord,
     CrystalChemistryRecords,
+    CrystalStereoRecord,
+    EnantiomerCountRecord,
     EntityChemistryRecord,
 )
 
@@ -11,6 +13,8 @@ __all__ = [
     "AtomChemistryRecord",
     "BondChemistryRecord",
     "CrystalChemistryRecords",
+    "CrystalStereoRecord",
+    "EnantiomerCountRecord",
     "EntityChemistryRecord",
 ]
 

@@ -67,6 +67,30 @@ class EntityChemistryRecord:
 
 
 @dataclass(frozen=True)
+class EnantiomerCountRecord:
+    """Count of one stereoisomer and the matching mirror in the unit cell."""
+
+    representative_entity_id: str
+    count: int
+    mirror_entity_id: str | None
+    mirror_count: int
+
+
+@dataclass(frozen=True)
+class CrystalStereoRecord:
+    """Immutable copy of MolCrysKit's crystal-level stereo aggregation."""
+
+    classification: str
+    status: str
+    symmetry_category: str
+    reason: str
+    enantiomer_counts: tuple[EnantiomerCountRecord, ...] = ()
+    relationships: tuple[tuple[str, str, str], ...] = ()
+    warnings: tuple[str, ...] = ()
+    evidence: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class CrystalChemistryRecords:
     status: str
     atoms: tuple[AtomChemistryRecord, ...]
@@ -78,6 +102,7 @@ class CrystalChemistryRecords:
     absolute_configuration: str | None = None
     absolute_structure: tuple[AbsoluteStructureRecord, ...] = ()
     absolute_structure_details: str | None = None
+    crystal_stereo: CrystalStereoRecord | None = None
     alternative_count: int = 0
     source: str = "molcrys_kit"
 
@@ -96,5 +121,7 @@ __all__ = [
     "AtomChemistryRecord",
     "BondChemistryRecord",
     "CrystalChemistryRecords",
+    "CrystalStereoRecord",
+    "EnantiomerCountRecord",
     "EntityChemistryRecord",
 ]

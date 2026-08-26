@@ -27,6 +27,8 @@ from .chemistry_records import (
     AtomChemistryRecord,
     BondChemistryRecord,
     CrystalChemistryRecords,
+    CrystalStereoRecord,
+    EnantiomerCountRecord,
     EntityChemistryRecord,
 )
 
@@ -106,6 +108,11 @@ def _require_molcryskit():
         "assign_stereochemistry": getattr(
             molcrys_kit,
             "assign_stereochemistry",
+            None,
+        ),
+        "analyze_crystal_stereochemistry": getattr(
+            molcrys_kit,
+            "analyze_crystal_stereochemistry",
             None,
         ),
     }
@@ -457,6 +464,7 @@ def _chemistry_records(crystal, mk) -> CrystalChemistryRecords | None:
     atom_records: list[AtomChemistryRecord] = []
     bond_records: list[BondChemistryRecord] = []
     entity_records: list[EntityChemistryRecord] = []
+    stereo_reports = {}
     warnings = list(str(value) for value in chemistry.warnings)
     cif_chemistry = dict(getattr(crystal, "metadata", {}).get("cif_chemistry", {}))
 
@@ -466,6 +474,8 @@ def _chemistry_records(crystal, mk) -> CrystalChemistryRecords | None:
         except (TypeError, ValueError) as exc:
             stereo_report = None
             warnings.append(f"{entity.entity_id}: stereochemistry unavailable: {exc}")
+        if stereo_report is not None:
+            stereo_reports[str(entity.entity_id)] = stereo_report
         stereo_by_atom = {
             descriptor.center_atom_id: descriptor
             for descriptor in getattr(stereo_report, "descriptors", ())
@@ -548,6 +558,46 @@ def _chemistry_records(crystal, mk) -> CrystalChemistryRecords | None:
         )
         warnings.extend(str(value) for value in getattr(stereo_report, "warnings", ()))
 
+    crystal_stereo = None
+    analyze_crystal_stereochemistry = mk.get("analyze_crystal_stereochemistry")
+    if callable(analyze_crystal_stereochemistry):
+        try:
+            report = analyze_crystal_stereochemistry(
+                crystal,
+                stereo_reports=stereo_reports,
+            )
+        except (TypeError, ValueError) as exc:
+            warnings.append(f"crystal stereochemistry unavailable: {exc}")
+        else:
+            crystal_stereo = CrystalStereoRecord(
+                classification=_enum_text(report.classification),
+                status=_enum_text(report.status),
+                symmetry_category=str(report.symmetry_category),
+                reason=str(report.reason),
+                enantiomer_counts=tuple(
+                    EnantiomerCountRecord(
+                        representative_entity_id=str(
+                            value.representative_entity_id
+                        ),
+                        count=int(value.count),
+                        mirror_entity_id=(
+                            None
+                            if value.mirror_entity_id is None
+                            else str(value.mirror_entity_id)
+                        ),
+                        mirror_count=int(value.mirror_count),
+                    )
+                    for value in report.enantiomer_counts
+                ),
+                relationships=tuple(
+                    (str(left), str(right), _enum_text(relationship))
+                    for left, right, relationship in report.relationships
+                ),
+                warnings=tuple(str(value) for value in report.warnings),
+                evidence=_evidence_text(report.evidence),
+            )
+            warnings.extend(crystal_stereo.warnings)
+
     absolute_source = dict(cif_chemistry.get("absolute_structure", {}))
     absolute_records = tuple(
         AbsoluteStructureRecord(
@@ -591,6 +641,7 @@ def _chemistry_records(crystal, mk) -> CrystalChemistryRecords | None:
             if not absolute_source.get("details")
             else str(absolute_source["details"])
         ),
+        crystal_stereo=crystal_stereo,
         alternative_count=len(getattr(chemistry, "alternatives", ())),
     )
 

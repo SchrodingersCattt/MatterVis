@@ -164,6 +164,17 @@ def _why_text(chemistry, atom, record, entity) -> str:
         return "\n".join([*lines, "MolCrysKit chemistry records are unavailable."])
     lines.append(f"crystal chemistry: {chemistry.status}; source={chemistry.source}")
     lines.append(f"alternative interpretations retained: {chemistry.alternative_count}")
+    if chemistry.crystal_stereo is not None:
+        lines.append(
+            "crystal stereo: "
+            f"{chemistry.crystal_stereo.classification} "
+            f"[{chemistry.crystal_stereo.status}]"
+        )
+        lines.append(f"crystal stereo reason: {chemistry.crystal_stereo.reason}")
+        lines.extend(
+            f"crystal stereo evidence: {value}"
+            for value in chemistry.crystal_stereo.evidence
+        )
     if record is not None:
         lines.append(f"atom status: {record.status}")
         lines.extend(f"atom evidence: {value}" for value in record.evidence)
@@ -208,11 +219,27 @@ def _crystal_lines(crystal, chemistry) -> list[str]:
         "CRYSTAL",
         f"formula: {terminal_text(crystal.canonical_formula or crystal.formula)}",
         f"space group: {terminal_text(crystal.spacegroup) or 'unavailable'}",
-        "enantiomer composition: unavailable (no MCK crystal stereo report)",
     ]
     if chemistry is None:
+        lines.append("enantiomer composition: unavailable")
         lines.append("absolute structure evidence: unavailable")
         return lines
+    stereo = chemistry.crystal_stereo
+    if stereo is None:
+        lines.append("enantiomer composition: unavailable (no MCK crystal stereo report)")
+    else:
+        lines.append(
+            f"enantiomer composition: {stereo.classification} [{stereo.status}]"
+        )
+        lines.append(f"symmetry category: {stereo.symmetry_category}")
+        for count in stereo.enantiomer_counts:
+            mirror = count.mirror_entity_id or "none"
+            lines.append(
+                "enantiomer count: "
+                f"{count.representative_entity_id}={count.count}; "
+                f"mirror {mirror}={count.mirror_count}"
+            )
+        lines.append(f"composition reason: {terminal_text(stereo.reason)}")
     if chemistry.absolute_configuration:
         lines.append(f"CIF absolute configuration: {chemistry.absolute_configuration}")
     if chemistry.absolute_structure:

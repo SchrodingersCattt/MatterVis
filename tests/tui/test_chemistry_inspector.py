@@ -9,6 +9,8 @@ from mat_viewer.structure.chemistry_records import (
     AtomChemistryRecord,
     BondChemistryRecord,
     CrystalChemistryRecords,
+    CrystalStereoRecord,
+    EnantiomerCountRecord,
     EntityChemistryRecord,
 )
 from mat_viewer.tui.chemistry_inspector import format_atom_inspector
@@ -98,6 +100,16 @@ def _chemistry_crystal() -> CrystalIR:
         absolute_configuration="ad",
         absolute_structure=(AbsoluteStructureRecord("flack", "0.06(3)", 0.06, 0.03),),
         absolute_structure_details="Parsons quotients",
+        crystal_stereo=CrystalStereoRecord(
+            classification="enantiopure",
+            status="provisional",
+            symmetry_category="Sohncke",
+            reason="all stereogenic entities have one handedness",
+            enantiomer_counts=(
+                EnantiomerCountRecord("molecule:0", 1, None, 0),
+            ),
+            evidence=("inferred:unit-test",),
+        ),
         alternative_count=1,
     )
     return CrystalIR(
@@ -134,6 +146,9 @@ def test_full_inspector_combines_site_bond_entity_stereo_and_crystal_records() -
     assert "tetrahedral: R [inferred]" in text
     assert "CIP: Br1 > Cl1 > F1 > H1" in text
     assert "space group: P 21" in text
+    assert "enantiomer composition: enantiopure [provisional]" in text
+    assert "symmetry category: Sohncke" in text
+    assert "enantiomer count: molecule:0=1; mirror none=0" in text
     assert "flack: 0.06(3) (value=0.06; su=0.03)" in text
     assert "! multiple chemical interpretations remain" in text
 
@@ -147,6 +162,7 @@ def test_why_and_name_keep_inference_and_source_name_provenance_visible() -> Non
     assert "crystal chemistry: provisional; source=molcrys_kit" in why
     assert "alternative interpretations retained: 1" in why
     assert "stereo reason: assigned from CIP order" in why
+    assert "crystal stereo reason: all stereogenic entities have one handedness" in why
     assert "IUPAC name: unavailable (source CIF names are not revalidated)" in name
     assert "CIF systematic name: test deposited name" in name
 

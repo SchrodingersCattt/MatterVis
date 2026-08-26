@@ -220,6 +220,23 @@ def test_analysis_copies_public_chemistry_and_stereo_records(monkeypatch):
         ),
         warnings=(),
     )
+    crystal_stereo = SimpleNamespace(
+        classification="enantiopure",
+        status="provisional",
+        symmetry_category="Sohncke",
+        reason="all stereogenic entities have one handedness",
+        enantiomer_counts=(
+            SimpleNamespace(
+                representative_entity_id="molecule:0",
+                count=1,
+                mirror_entity_id=None,
+                mirror_count=0,
+            ),
+        ),
+        relationships=(),
+        warnings=("tetrahedral scope only",),
+        evidence=(source_evidence,),
+    )
     sites = (
         SimpleNamespace(
             site_id="m0:a0",
@@ -287,13 +304,17 @@ def test_analysis_copies_public_chemistry_and_stereo_records(monkeypatch):
             "LocalGeometryCache": GeometryCache,
             "infer_chemistry": lambda value: chemistry,
             "assign_stereochemistry": lambda value, embedding: stereo,
+            "analyze_crystal_stereochemistry": lambda value, **kwargs: crystal_stereo,
         },
     )
 
     analysis = molcrys_bridge.analyze_crystal(crystal)
 
     assert analysis.chemistry.source == "molcrys_kit"
-    assert analysis.chemistry.warnings == ("coordinate-derived bond order",)
+    assert analysis.chemistry.warnings == (
+        "coordinate-derived bond order",
+        "tetrahedral scope only",
+    )
     assert analysis.chemistry.entities[0].dimension == 0
     assert analysis.chemistry.bonds[0].kind == "covalent"
     carbon = analysis.chemistry.atom("m0:a0")
@@ -309,6 +330,10 @@ def test_analysis_copies_public_chemistry_and_stereo_records(monkeypatch):
     assert analysis.chemistry.absolute_structure[0].raw == "0.06(3)"
     assert analysis.chemistry.absolute_structure[0].standard_uncertainty == pytest.approx(0.03)
     assert analysis.chemistry.absolute_structure_details == "Parsons quotients"
+    assert analysis.chemistry.crystal_stereo.classification == "enantiopure"
+    assert analysis.chemistry.crystal_stereo.symmetry_category == "Sohncke"
+    assert analysis.chemistry.crystal_stereo.enantiomer_counts[0].mirror_count == 0
+    assert "tetrahedral scope only" in analysis.chemistry.warnings
 
 
 def test_formula_unit_materialises_mck_image_shift():
