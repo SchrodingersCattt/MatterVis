@@ -28,10 +28,12 @@ _SUFFIX_FORMATS = {
     ".conf": "lammps-data",
     ".data": "lammps-data",
     ".dump": "lammps-dump-text",
+    ".extxyz": "extxyz",
     ".lammpstrj": "lammps-dump-text",
     ".lammpsdump": "lammps-dump-text",
     ".poscar": "vasp",
     ".traj": "traj",
+    ".xyz": "xyz",
     ".vasp": "vasp",
 }
 

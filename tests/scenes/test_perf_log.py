@@ -13,15 +13,15 @@ lock in the contract:
   ``?since=`` for incremental polls, and ``POST /api/v1/perf/clear``
   empties the buffer.
 """
+
 from __future__ import annotations
 
-import os
-import tempfile
 import time
 
 import pytest
 
 from mat_viewer import perf_log
+from mat_viewer.perf_log import core as perf_log_core
 
 
 @pytest.fixture(autouse=True)
@@ -29,7 +29,7 @@ def _isolated_log_file(monkeypatch, tmp_path):
     """Point the on-disk log at a tmp file so tests don't collide on
     ``/tmp/cv-perf.log`` and don't leak across runs."""
     log_path = tmp_path / "cv-perf-test.log"
-    monkeypatch.setattr(perf_log, "_LOG_PATH", str(log_path))
+    monkeypatch.setattr(perf_log_core, "_LOG_PATH", str(log_path))
     perf_log.clear()
     yield
     perf_log.clear()
@@ -86,7 +86,7 @@ def test_record_appends_to_disk_log(tmp_path):
 def test_perf_endpoint_returns_events_and_supports_since(monkeypatch, tmp_path):
     from mat_viewer.app import create_app
 
-    monkeypatch.setattr(perf_log, "_LOG_PATH", str(tmp_path / "cv-perf-app.log"))
+    monkeypatch.setattr(perf_log_core, "_LOG_PATH", str(tmp_path / "cv-perf-app.log"))
     perf_log.clear()
     app = create_app()
     server = app.server
@@ -107,7 +107,9 @@ def test_perf_endpoint_returns_events_and_supports_since(monkeypatch, tmp_path):
     # we actually care about is "since= filters by seq strictly":
     # event_one has seq <= captured seq and must not be returned;
     # event_two has seq > captured seq and must be returned.
-    test_labels = [e["label"] for e in body["events"] if e["label"].startswith("event_")]
+    test_labels = [
+        e["label"] for e in body["events"] if e["label"].startswith("event_")
+    ]
     assert test_labels == ["event_two"]
     returned_seqs = [e["seq"] for e in body["events"]]
     assert body["latest_seq"] >= max(returned_seqs, default=seq)

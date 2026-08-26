@@ -26,7 +26,6 @@ import argparse
 from contextlib import redirect_stdout
 from dataclasses import asdict, is_dataclass
 import json
-import math
 import sys
 from pathlib import Path
 from typing import Optional
@@ -41,6 +40,21 @@ from .structure.inspect import (
     file_sha256 as _file_sha256,
     inspect_payload as _inspect_payload,
     is_nonperiodic_structure as _is_nonperiodic_structure,
+)
+from .render.cli_controls import (
+    _add_render_control_arguments,
+    _animation_time_from_args,
+    _frame_annotation_from_args,
+    _camera_request,
+    _is_animation_output,
+    _render_ortep_mode,
+    _render_shading,
+    _style_groups,
+    _validate_render_options,
+)
+from .render.fast_cli import (
+    add_fast_animation_arguments,
+    render_fast_animation_if_eligible,
 )
 
 
@@ -128,8 +142,7 @@ def _build_render_parser(
         metavar="JSON",
         help="JSON file containing public world-space vector overlay groups.",
     )
-    from .render.fast_cli import add_fast_animation_arguments
-
+    _add_render_control_arguments(parser)
     add_fast_animation_arguments(parser)
     return parser
 
@@ -692,19 +705,6 @@ def _inspect_main(args: argparse.Namespace) -> None:
     _emit(payload, json_output=args.json_output)
 
 
-def _camera_request(args: argparse.Namespace) -> dict:
-    return {
-        "projection": args.projection,
-        "axis": args.camera_axis or "c",
-        "view_direction": args.view_direction,
-        "position": args.camera_position,
-        "up": args.camera_up,
-        "fit_multiplier": args.camera_distance,
-        "zoom": args.zoom,
-        "framing_margin": args.framing_margin,
-    }
-
-
 def _render_requirements(args: argparse.Namespace) -> tuple[str, ...]:
     required = list(requirements_for_render(args.output, args.backend))
     if (
@@ -713,119 +713,6 @@ def _render_requirements(args: argparse.Namespace) -> tuple[str, ...]:
     ):
         required.append("cube")
     return tuple(required)
-
-
-def _is_animation_output(args: argparse.Namespace) -> bool:
-    return Path(args.output).suffix.lower() in {".gif", ".mp4"}
-
-
-def _render_shading(args: argparse.Namespace) -> str:
-    return str(args.shading)
-
-
-def _render_ortep_mode(args: argparse.Namespace) -> str:
-    if args.style != "ortep":
-        if args.ortep_mode is not None:
-            raise ValueError("--ortep-mode requires --style ortep")
-        if args.ortep_probability is not None:
-            raise ValueError("--ortep-probability requires --style ortep")
-        return "solid"
-    modes = {
-        None: "axes",
-        "ortep_solid": "solid",
-        "ortep_axes": "axes",
-        "ortep_hatch": "hatch",
-    }
-    if args.ortep_mode == "ortep_octant":
-        raise ValueError(
-            "--ortep-mode ortep_octant is not supported by the backend-neutral "
-            "renderer; no visual fallback was attempted"
-        )
-    return modes[args.ortep_mode]
-
-
-def _validate_render_options(args: argparse.Namespace) -> None:
-    """Reject legacy flags that the backend-neutral path cannot honour."""
-
-    unsupported: list[str] = []
-    if args.monochrome:
-        unsupported.append("--monochrome")
-    if args.config is not None:
-        unsupported.append("--config")
-    if args.view_weights is not None:
-        unsupported.append("--view-weights")
-    if args.publication_layout:
-        unsupported.append("--publication-layout")
-    if args.publication_preset is not None:
-        unsupported.append("--publication-preset")
-    if args.publication_style is not None:
-        unsupported.append("--publication-style")
-    for dest, flag in (
-        ("publication_option", "--publication-option"),
-        ("publication_site_style", "--publication-site-style"),
-        ("publication_legend_entry", "--publication-legend-entry"),
-        ("publication_panel_label", "--publication-panel-label"),
-    ):
-        if getattr(args, dest):
-            unsupported.append(flag)
-    for dest, flag in (
-        ("publication_legend_footer", "--publication-legend-footer"),
-        ("title", "--title"),
-        ("subtitle", "--subtitle"),
-    ):
-        if getattr(args, dest) is not None:
-            unsupported.append(flag)
-    if unsupported:
-        raise ValueError(
-            "unsupported by the backend-neutral render command: "
-            + ", ".join(unsupported)
-        )
-
-    animation = _is_animation_output(args)
-    if animation:
-        if args.backend != "cpu":
-            raise ValueError("GIF/MP4 output requires --backend cpu")
-        if args.frame is not None:
-            raise ValueError(
-                "--frame is for static output; use --frame-range for GIF/MP4"
-            )
-        if args.polyhedron:
-            raise ValueError(
-                "animated --polyhedron overlays are not yet supported; no static "
-                "overlay was silently reused across frames"
-            )
-        if args.vector_overlays is not None:
-            raise ValueError(
-                "animated --vector-overlays are not yet supported; use static output"
-            )
-        if args.stride is not None and args.stride <= 0:
-            raise ValueError("--stride must be greater than zero")
-        if args.fps is not None and args.fps <= 0.0:
-            raise ValueError("--fps must be greater than zero")
-    else:
-        if args.frame_range is not None:
-            raise ValueError("--frame-range is only valid for GIF/MP4 output")
-        if args.stride is not None:
-            raise ValueError("--stride is only valid for GIF/MP4 output")
-        if args.fps is not None:
-            raise ValueError("--fps is only valid for GIF/MP4 output")
-    from .render.fast_cli import validate_fast_animation_options
-
-    validate_fast_animation_options(args, animation=animation)
-    if not args.polyhedron:
-        if args.polyhedron_site is not None:
-            raise ValueError("--polyhedron-site requires --polyhedron")
-        if args.polyhedron_cutoff is not None:
-            raise ValueError("--polyhedron-cutoff requires --polyhedron")
-    else:
-        if args.polyhedron_cutoff is not None and args.polyhedron_cutoff <= 0.0:
-            raise ValueError("--polyhedron-cutoff must be greater than zero")
-        from .agent_topology import parse_polyhedron_specs
-
-        parse_polyhedron_specs(args.polyhedron)
-    if not math.isfinite(args.cell_width) or args.cell_width <= 0.0:
-        raise ValueError("--cell-width must be finite and greater than zero")
-    _render_ortep_mode(args)
 
 
 def _render_check_payload(args: argparse.Namespace) -> dict:
@@ -838,7 +725,17 @@ def _render_check_payload(args: argparse.Namespace) -> dict:
         "backend": args.backend,
         "output_format": Path(args.output).suffix.lower().lstrip("."),
         "camera": _camera_request(args),
+        "render": {
+            "representation": args.style,
+            "shading": args.shading,
+            "sphere_detail": list(args.sphere_detail),
+            "cylinder_sides": args.cylinder_sides,
+        },
         "source": {"path": str(Path(args.input).expanduser().resolve())},
+        "style_groups": {
+            "atom": _style_groups(args)[0],
+            "bond": _style_groups(args)[1],
+        },
         "requirements": resolution.to_dict(),
         "warnings": [],
     }
@@ -859,7 +756,15 @@ def _hex_rgba(value: str) -> tuple[float, float, float, float]:
     return tuple(channels)  # type: ignore[return-value]
 
 
-def _scene_fit(bundle, *, display: str, show_hydrogen: bool, show_cell: bool):
+def _scene_fit(
+    bundle,
+    *,
+    display: str,
+    show_hydrogen: bool,
+    show_cell: bool,
+    include_boundary_replicas: bool = True,
+    include_cross_boundary_bond_endpoints: bool = True,
+):
     import numpy as np
 
     scene = getattr(bundle, "scene", {}) or {}
@@ -873,6 +778,8 @@ def _scene_fit(bundle, *, display: str, show_hydrogen: bool, show_cell: bool):
             bundle,
             display_mode=display,
             show_hydrogen=show_hydrogen,
+            include_boundary_replicas=include_boundary_replicas,
+            include_cross_boundary_bond_endpoints=include_cross_boundary_bond_endpoints,
         )
     bounds = scene.get("bounds") or {}
     center = np.asarray(bounds.get("center", (0.0, 0.0, 0.0)), dtype=float)
@@ -934,14 +841,57 @@ def _camera_spec(structure, args: argparse.Namespace, *, display: str):
 
     selected = structure.frames[0]
     matrix = np.asarray(getattr(selected.bundle, "M", np.eye(3)), dtype=float)
+    camera_target = getattr(args, "camera_target", None)
+    camera_clip = getattr(args, "camera_clip", None)
+    requested_ortho_scale = getattr(args, "ortho_scale", None)
+    requested_field_of_view = getattr(args, "field_of_view", None)
+    include_boundary_replicas = getattr(args, "include_boundary_replicas", None)
+    if include_boundary_replicas is None:
+        include_boundary_replicas = True
+    include_cross_boundary_bond_endpoints = getattr(
+        args, "style", "ball_stick"
+    ) not in {"ball", "space_filling"}
     _, target, radius, fit_points = _scene_fit(
         selected.bundle,
         display=display,
         show_hydrogen=args.show_hydrogen,
         show_cell=_effective_show_cell(structure, args),
+        include_boundary_replicas=include_boundary_replicas,
+        include_cross_boundary_bond_endpoints=include_cross_boundary_bond_endpoints,
     )
+    if _is_animation_output(args) and len(structure.frames) > 1:
+        from .render.viewport import ViewportAccumulator
+
+        accumulator = ViewportAccumulator()
+        accumulator.update_points(fit_points)
+        for frame in structure.frames[1:]:
+            _, _, _, frame_fit_points = _scene_fit(
+                frame.bundle,
+                display=display,
+                show_hydrogen=args.show_hydrogen,
+                show_cell=_effective_show_cell(structure, args),
+                include_boundary_replicas=include_boundary_replicas,
+                include_cross_boundary_bond_endpoints=(
+                    include_cross_boundary_bond_endpoints
+                ),
+            )
+            accumulator.update_points(frame_fit_points)
+        fit_points = accumulator.fit_points()
+        minimum = fit_points.min(axis=0)
+        maximum = fit_points.max(axis=0)
+        target = 0.5 * (minimum + maximum)
+        radius = float(np.linalg.norm(0.5 * (maximum - minimum)))
+    if camera_target is not None:
+        target = np.asarray(camera_target, dtype=float)
     aspect = max(float(args.width) / float(args.height), 1.0e-6)
-    ortho_scale = radius * 1.15 / min(aspect, 1.0)
+    ortho_scale = (
+        float(requested_ortho_scale)
+        if requested_ortho_scale is not None
+        else radius * 1.15 / min(aspect, 1.0)
+    )
+    field_of_view = (
+        float(requested_field_of_view) if requested_field_of_view is not None else 45.0
+    )
 
     if args.camera_position is not None:
         position = np.asarray(args.camera_position, dtype=float)
@@ -949,11 +899,14 @@ def _camera_spec(structure, args: argparse.Namespace, *, display: str):
         absolute_distance = float(np.linalg.norm(position - target))
         near = max(radius * 1.0e-4, absolute_distance - 1.5 * radius)
         far = max(near * 2.0, absolute_distance + 1.5 * radius)
+        if camera_clip is not None:
+            near, far = map(float, camera_clip)
         return CameraSpec(
             position=tuple(position),
             target=tuple(target),
             up=tuple(up),
             projection=args.projection,
+            fov_y_deg=field_of_view,
             near=near,
             far=far,
             ortho_scale=ortho_scale,
@@ -977,7 +930,7 @@ def _camera_spec(structure, args: argparse.Namespace, *, display: str):
         if np.linalg.norm(np.cross(direction, up)) < 1e-10:
             up = np.array([1.0, 0.0, 0.0])
     up /= np.linalg.norm(up)
-    if args.projection == "orthographic":
+    if args.projection == "orthographic" and requested_ortho_scale is None:
         view_to_camera = direction / direction_norm
         forward = -view_to_camera
         right = np.cross(forward, up)
@@ -991,12 +944,14 @@ def _camera_spec(structure, args: argparse.Namespace, *, display: str):
     if not np.isfinite(multiplier) or multiplier <= 0.0:
         raise ValueError("--camera-distance fit multiplier must be finite and positive")
     if args.projection == "perspective":
-        half_fov = np.radians(45.0 * 0.5)
+        half_fov = np.radians(field_of_view * 0.5)
         distance = multiplier * radius / np.sin(half_fov)
     else:
         distance = max(multiplier * radius, 1.5 * radius)
     near = max(radius * 1.0e-4, distance - 1.5 * radius)
     far = distance + 1.5 * radius
+    if camera_clip is not None:
+        near, far = map(float, camera_clip)
     return CameraSpec.looking_along(
         direction,
         target=target,
@@ -1004,6 +959,7 @@ def _camera_spec(structure, args: argparse.Namespace, *, display: str):
         distance=distance,
         projection=args.projection,
         ortho_scale=ortho_scale,
+        fov_y_deg=field_of_view,
         near=near,
         far=far,
     )
@@ -1047,6 +1003,10 @@ def _render_result_payload(result, structure, args: argparse.Namespace, camera) 
             "selected_frames": [frame.index for frame in structure.frames],
         },
         "result": result_payload,
+        "style_groups": {
+            "atom": _style_groups(args)[0],
+            "bond": _style_groups(args)[1],
+        },
     }
 
 
@@ -1114,17 +1074,16 @@ def _agent_render_main(args: argparse.Namespace) -> None:
             + requirements["install"],
             json_output=args.json_output,
         )
-    from .render.fast_cli import render_fast_animation_if_eligible
 
     try:
-        fast_payload = render_fast_animation_if_eligible(
+        fast_result = render_fast_animation_if_eligible(
             args,
             install_command=check_payload["requirements"]["install"],
         )
     except Exception as exc:
         _fail(str(exc), json_output=args.json_output)
-    if fast_payload is not None:
-        _emit(fast_payload, json_output=args.json_output)
+    if fast_result is not None:
+        _emit(fast_result, json_output=args.json_output)
         return
 
     from .agent import load_structure, render
@@ -1153,7 +1112,13 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                     frame=args.frame if args.frame is not None else 0,
                 )
             display = _display_mode(structure, args)
-            view = ViewSpec(display=display)
+            include_boundary_replicas = args.include_boundary_replicas
+            if include_boundary_replicas is None:
+                include_boundary_replicas = True
+            view = ViewSpec(
+                display=display,
+                include_boundary_replicas=include_boundary_replicas,
+            )
             camera = _camera_spec(structure, args, display=display)
             spec = RenderSpec(
                 representation=args.style,
@@ -1179,9 +1144,12 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                     else 0.5
                 ),
                 missing_adp_policy=args.missing_adp_policy,
+                sphere_detail=tuple(args.sphere_detail),
+                cylinder_sides=args.cylinder_sides,
             )
             from .agent_topology import build_topology_data
 
+            atom_groups, bond_groups = _style_groups(args)
             topology_data = build_topology_data(
                 structure,
                 args.polyhedron,
@@ -1192,6 +1160,8 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                     else 10.0
                 ),
             )
+            animation_time = _animation_time_from_args(args)
+            frame_annotation = _frame_annotation_from_args(args)
             result = render(
                 structure,
                 output=Path(args.output).expanduser().resolve(),
@@ -1201,7 +1171,11 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                 render_spec=spec,
                 topology_data=topology_data,
                 vector_overlays=_load_vector_overlays(args.vector_overlays),
+                atom_groups=atom_groups,
+                bond_groups=bond_groups,
                 fps=args.fps if args.fps is not None else 12.0,
+                animation_time=animation_time,
+                frame_annotation=frame_annotation,
             )
         payload = _render_result_payload(result, structure, args, camera)
     except Exception as exc:

@@ -100,7 +100,7 @@ def _worker_init(
     _WORKER_INDEX = dump_index
     _WORKER_CONFIG = config
     if config.bonded:
-        from molcrys_kit.analysis import VerletBondTracker
+        from molcrys_kit.structures import VerletBondTracker
 
         _WORKER_BOND_TRACKER = VerletBondTracker(skin=config.bond_skin)
     else:

@@ -7,8 +7,8 @@ applicable, and `verification.md`.
 ## Animation contract
 
 Read input-formats.md first. Record the trajectory, topology or type map,
-output format, half-open frame slice and stride, time/stage mapping,
-camera/projection/viewport/canvas, context layer,
+output format, half-open frame slice and stride, progress/observable/stage
+mapping, camera/projection/viewport/canvas, context layer,
 highlighted stable IDs, overlay semantics, and representative QA frames. Render
 separate requested intervals explicitly rather than silently concatenating them.
 
@@ -28,7 +28,29 @@ mat-vis render trajectory.traj -o trajectory.gif --backend cpu \
 
 mat-vis render run.dump --type-map O H -o trajectory.mp4 --backend cpu \
   --stride 10 --fps 24
+
+mat-vis render neb.extxyz -o neb.gif --backend cpu --fps 1.5 \
+  --frame-field 'lambda=metadata:lambda,role=progress' \
+  --frame-field 'angle=metadata:rotation_deg,role=observable,unit=deg' \
+  --frame-label 'lambda={lambda:.2f}  rotation={angle:.1f} deg'
 ~~~
+
+A generic frame annotation consists of repeatable `--frame-field` values and
+one `--frame-label` template. Field sources are `index`, `metadata:KEY`,
+`linear:START:STEP`, or `table:PATH:COLUMN`. Roles are `progress`,
+`observable`, or `stage`. Do not infer a scientific observable from geometry
+unless its reference, stable IDs, PBC treatment, and units are explicitly
+defined; otherwise require it as frame metadata or a provenance-bearing table.
+The physical-time flags remain a compatible shortcut and cannot be mixed with a
+generic annotation.
+
+Choose `--fps` from the motion semantics, not the input format. For discrete
+rotations, NEB images, or reaction-coordinate paths, start around 1-2 fps;
+1.5 fps is a useful first render. Smooth MD overviews can start around 8-15 fps.
+Review the animation at delivery size and lower `--fps` when intermediate states
+cannot be inspected comfortably. To slow the same scientific sequence, lower
+`--fps`; do not drop frames or increase stride unless changing temporal or path
+sampling is intended.
 
 Use --frame INDEX only for a static output. --frame-range follows Python's
 half-open START:STOP[:STEP] semantics; --stride is applied afterward.

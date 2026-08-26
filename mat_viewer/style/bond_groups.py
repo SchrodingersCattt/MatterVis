@@ -50,6 +50,7 @@ selector schema so a future "by-bond-index" or "by-fragment" filter
 can land additively under :mod:`mat_viewer.bond_groups` without
 touching atom_groups.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -69,12 +70,32 @@ def _endpoint_elements(
     n = len(atoms)
     i = int(bond.get("i", -1))
     j = int(bond.get("j", -1))
-    elem_i = str(atoms[i].get("elem")) if 0 <= i < n else ""
-    elem_j = str(atoms[j].get("elem")) if 0 <= j < n else ""
+    elem_i = (
+        str(
+            atoms[i].get("elem")
+            or atoms[i].get("symbol")
+            or atoms[i].get("element")
+            or ""
+        )
+        if 0 <= i < n
+        else ""
+    )
+    elem_j = (
+        str(
+            atoms[j].get("elem")
+            or atoms[j].get("symbol")
+            or atoms[j].get("element")
+            or ""
+        )
+        if 0 <= j < n
+        else ""
+    )
     return elem_i, elem_j
 
 
-def _bond_label_pair(bond: Dict[str, Any], atoms: Sequence[Dict[str, Any]]) -> Tuple[str, str]:
+def _bond_label_pair(
+    bond: Dict[str, Any], atoms: Sequence[Dict[str, Any]]
+) -> Tuple[str, str]:
     """Return the ``(label_i, label_j)`` pair for a bond's endpoints."""
     n = len(atoms)
     i = int(bond.get("i", -1))
@@ -177,7 +198,10 @@ def tag_bonds_with_groups(
         decorated["_render_opacity_scale"] = 1.0
         decorated["_render_opacity_group_id"] = None
         decorated["_render_radius_scale"] = 1.0
+        decorated["_render_style"] = None
         for group in bond_groups:
+            if not bool(group.get("enabled", True)):
+                continue
             selector = group.get("selector") or {}
             if not bond_matches_selector(decorated, selector, atoms=atoms):
                 continue
@@ -193,6 +217,9 @@ def tag_bonds_with_groups(
             radius_scale = group.get("radius_scale")
             if radius_scale is not None:
                 decorated["_render_radius_scale"] = max(0.0, float(radius_scale))
+            style = group.get("style")
+            if style:
+                decorated["_render_style"] = str(style)
         tagged.append(decorated)
     return tagged
 
@@ -213,17 +240,26 @@ def bond_groups_cache_key(bond_groups: Optional[Sequence[Dict[str, Any]]]) -> Tu
         parts.append(
             (
                 bool(selector.get("all", False)),
-                tuple(sorted(str(e) for e in selector.get("between_elements", []) or [])),
                 tuple(
-                    tuple(sorted(str(label) for label in pair))
-                    for pair in selector.get("labels", []) or []
-                    if isinstance(pair, (list, tuple))
+                    sorted(str(e) for e in selector.get("between_elements", []) or [])
+                ),
+                tuple(
+                    sorted(
+                        str(label)
+                        for label in selector.get("labels", []) or []
+                        if label is not None
+                    )
                 ),
                 selector.get("is_minor"),
                 str(group.get("color") or ""),
                 bool(group.get("visible", True)),
-                float(group.get("opacity")) if group.get("opacity") is not None else None,
-                float(group.get("radius_scale")) if group.get("radius_scale") is not None else None,
+                float(group.get("opacity"))
+                if group.get("opacity") is not None
+                else None,
+                float(group.get("radius_scale"))
+                if group.get("radius_scale") is not None
+                else None,
+                str(group.get("style") or ""),
                 bool(group.get("enabled", True)),
             )
         )

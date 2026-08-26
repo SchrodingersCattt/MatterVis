@@ -131,5 +131,5 @@ def test_animation_preserves_unique_plan_warnings(tmp_path, monkeypatch) -> None
     )
 
     assert result.warnings == ("frame contract warning",)
-    assert writer_options["duration"] == pytest.approx(1.0 / 12.0)
+    assert writer_options["duration"] == pytest.approx(1000.0 / 12.0)
     assert result.metadata["frame_duration_ms"] == pytest.approx(1000.0 / 12.0)

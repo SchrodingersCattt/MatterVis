@@ -166,6 +166,8 @@ def prepare_render(
     *,
     topology_data: Mapping[str, Any] | None = None,
     vector_overlays: Any = None,
+    atom_groups: Any = None,
+    bond_groups: Any = None,
 ) -> Any:
     """Compile a structure and explicit specs into a backend-neutral plan."""
 
@@ -189,6 +191,8 @@ def prepare_render(
         render=render_spec,
         topology_data=topology_data,
         vector_overlays=vector_overlays,
+        atom_groups=atom_groups,
+        bond_groups=bond_groups,
     )
     topology_warnings = tuple(
         str(warning) for warning in (topology_data or {}).get("warnings", ())
@@ -209,7 +213,11 @@ def render(
     render_spec: Any = None,
     topology_data: Mapping[str, Any] | None = None,
     vector_overlays: Any = None,
+    atom_groups: Any = None,
+    bond_groups: Any = None,
     fps: float = 12.0,
+    animation_time: Any = None,
+    frame_annotation: Any = None,
 ) -> Any:
     """Render with an explicit backend; no backend or representation fallback."""
 
@@ -220,11 +228,23 @@ def render(
         _require_plan_backend(source_or_plan, backend_name)
         if any(
             value is not None
-            for value in (view, camera, render_spec, topology_data, vector_overlays)
+            for value in (
+                view,
+                camera,
+                render_spec,
+                topology_data,
+                vector_overlays,
+                atom_groups,
+                bond_groups,
+                animation_time,
+                frame_annotation,
+            )
         ):
             raise ValueError(
-                "view, camera, render_spec, topology_data, and vector_overlays "
-                "cannot be supplied when rendering an existing RenderPlan"
+                "view, camera, render_spec, topology_data, vector_overlays, "
+                "atom_groups, bond_groups, animation_time, and frame_annotation "
+                "cannot be supplied when rendering an existing "
+                "RenderPlan"
             )
         bound_render_spec = None
     else:
@@ -261,6 +281,8 @@ def render(
                 view=view,
                 render_spec=bound_render_spec,
                 topology_data=topology_data,
+                atom_groups=atom_groups,
+                bond_groups=bond_groups,
             )
             _require_plan_backend(first_plan, backend_name)
             effective_camera = first_plan.camera
@@ -271,7 +293,11 @@ def render(
             camera=effective_camera,
             render_spec=bound_render_spec,
             topology_data=topology_data,
+            atom_groups=atom_groups,
+            bond_groups=bond_groups,
             fps=fps,
+            time_spec=animation_time,
+            annotation_spec=frame_annotation,
         )
         return _enrich_result(
             result,
@@ -291,6 +317,8 @@ def render(
             render_spec=bound_render_spec,
             topology_data=topology_data,
             vector_overlays=vector_overlays,
+            atom_groups=atom_groups,
+            bond_groups=bond_groups,
         )
         _require_plan_backend(plan, backend_name)
 
