@@ -78,6 +78,7 @@ class CrystalChemistryRecords:
     absolute_configuration: str | None = None
     absolute_structure: tuple[AbsoluteStructureRecord, ...] = ()
     absolute_structure_details: str | None = None
+    alternative_count: int = 0
     source: str = "molcrys_kit"
 
     def atom(self, atom_id: str) -> AtomChemistryRecord | None:

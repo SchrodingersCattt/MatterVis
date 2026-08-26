@@ -591,6 +591,7 @@ def _chemistry_records(crystal, mk) -> CrystalChemistryRecords | None:
             if not absolute_source.get("details")
             else str(absolute_source["details"])
         ),
+        alternative_count=len(getattr(chemistry, "alternatives", ())),
     )
 
 

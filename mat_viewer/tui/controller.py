@@ -13,6 +13,7 @@ from .compositor import (
     LABEL_MODES,
     compose_frame,
 )
+from .chemistry_inspector import chemistry_warnings, format_atom_inspector
 from .inspection import (
     inspect_atoms,
     inspect_local_geometries,
@@ -69,6 +70,7 @@ class TerminalViewController:
         "select_screen",
         "pin_selection",
         "clear_selection",
+        "inspect_selected",
         "focus_atom",
         "focus_molecule",
         "focus_selection",
@@ -223,6 +225,7 @@ class TerminalViewController:
             frame=frame,
             scope=build_observation_scope(self.crystal, state.display),
             capabilities=self.CAPABILITIES,
+            warnings=chemistry_warnings(self.crystal),
         )
 
     def set_camera(
@@ -425,6 +428,14 @@ class TerminalViewController:
         if atom.display_copy_id:
             return {"display_copy_id": atom.display_copy_id}
         return {"label": atom.label}
+
+    def inspect_selected(self, *, view: str = "full") -> str:
+        """Return a plain-text chemistry view for the selected atom."""
+        return format_atom_inspector(
+            self.crystal,
+            self._require_selected_index(),
+            view=view,
+        )
 
     def orbit(
         self, *, yaw_deg: float = 0.0, pitch_deg: float = 0.0, roll_deg: float = 0.0
