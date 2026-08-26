@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 
 from ...config import atom_radius as configured_atom_radius
-from ...loader.lammps_batch import FrameBatch, frame_box_corners
+from ...loader.frame_batch import FrameBatch, frame_box_corners
 from ..camera import CameraTransform
 from ..contracts import CameraSpec
 from ..planning import _ELEMENT_COLORS

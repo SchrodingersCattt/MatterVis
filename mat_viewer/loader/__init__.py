@@ -37,6 +37,7 @@ __all__ = [
     "count_structure_frames",
     "bundle_json",
     "FrameBatch",
+    "frame_batch_from_ase",
     "LammpsDumpIndex",
     "LammpsFrameRecord",
     "frame_box_corners",
@@ -57,11 +58,14 @@ __all__ = [
     "write_uploaded_cif",
 ]
 
-from .lammps_batch import (  # noqa: F401
+from .frame_batch import (  # noqa: F401
     FrameBatch,
+    frame_batch_from_ase,
+    frame_box_corners,
+)
+from .lammps_batch import (  # noqa: F401
     LammpsDumpIndex,
     LammpsFrameRecord,
-    frame_box_corners,
     index_lammps_dump,
     read_lammps_frame,
     repeat_frame,

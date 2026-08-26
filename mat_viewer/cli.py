@@ -53,8 +53,8 @@ from .render.cli_controls import (
     _validate_render_options,
 )
 from .render.fast_cli import (
-    add_fast_animation_arguments,
-    render_fast_animation_if_eligible,
+    add_batch_render_arguments,
+    render_batch_if_selected,
 )
 
 
@@ -143,7 +143,7 @@ def _build_render_parser(
         help="JSON file containing public world-space vector overlay groups.",
     )
     _add_render_control_arguments(parser)
-    add_fast_animation_arguments(parser)
+    add_batch_render_arguments(parser)
     return parser
 
 
@@ -1076,7 +1076,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
         )
 
     try:
-        fast_result = render_fast_animation_if_eligible(
+        fast_result = render_batch_if_selected(
             args,
             install_command=check_payload["requirements"]["install"],
         )

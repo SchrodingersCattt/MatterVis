@@ -252,7 +252,7 @@ def fit_shared_camera(
     elif camera_position is not None:
         direction = np.asarray(camera_position, dtype=float) - target
     else:
-        axis = camera_axis or "c"
+        axis = camera_axis or "a"
         if axis.endswith("*"):
             reciprocal = np.linalg.inv(matrix).T
             direction = reciprocal[{"a*": 0, "b*": 1, "c*": 2}[axis]]

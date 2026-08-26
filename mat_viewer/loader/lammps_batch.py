@@ -14,6 +14,9 @@ from typing import BinaryIO, Iterable
 
 import numpy as np
 
+from .frame_batch import FrameBatch
+from .frame_batch import frame_box_corners as frame_box_corners
+
 _FRAME_MARKER = b"ITEM: TIMESTEP"
 _COORDINATE_SETS = (
     ("x", "y", "z", False),
@@ -48,24 +51,6 @@ class LammpsDumpIndex:
 
     def __len__(self) -> int:
         return len(self.records)
-
-
-@dataclass(frozen=True)
-class FrameBatch:
-    """Contiguous numeric arrays consumed by high-throughput renderers."""
-
-    positions: np.ndarray
-    atomic_numbers: np.ndarray
-    atom_ids: np.ndarray | None
-    origin: np.ndarray
-    cell: np.ndarray
-    pbc: np.ndarray
-    timestep: int
-    source_index: int
-
-    @property
-    def natoms(self) -> int:
-        return int(self.positions.shape[0])
 
 
 def _readline(handle: BinaryIO, context: str) -> bytes:
@@ -390,21 +375,3 @@ def repeat_frame(frame: FrameBatch, repeat: tuple[int, int, int]) -> FrameBatch:
         timestep=frame.timestep,
         source_index=frame.source_index,
     )
-
-
-def frame_box_corners(frame: FrameBatch) -> np.ndarray:
-    """Return the eight Cartesian corners of a frame box."""
-    fractions = np.asarray(
-        [
-            [0, 0, 0],
-            [1, 0, 0],
-            [0, 1, 0],
-            [0, 0, 1],
-            [1, 1, 0],
-            [1, 0, 1],
-            [0, 1, 1],
-            [1, 1, 1],
-        ],
-        dtype=np.float64,
-    )
-    return frame.origin + fractions @ frame.cell
