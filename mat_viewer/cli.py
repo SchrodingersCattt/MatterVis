@@ -44,6 +44,7 @@ from .structure.inspect import (
 from .render.cli_controls import (
     _add_render_control_arguments,
     _animation_time_from_args,
+    _frame_annotation_from_args,
     _camera_request,
     _is_animation_output,
     _render_ortep_mode,
@@ -853,6 +854,28 @@ def _camera_spec(structure, args: argparse.Namespace, *, display: str):
         include_boundary_replicas=include_boundary_replicas,
         include_cross_boundary_bond_endpoints=include_cross_boundary_bond_endpoints,
     )
+    if _is_animation_output(args) and len(structure.frames) > 1:
+        from .render.viewport import ViewportAccumulator
+
+        accumulator = ViewportAccumulator()
+        accumulator.update_points(fit_points)
+        for frame in structure.frames[1:]:
+            _, _, _, frame_fit_points = _scene_fit(
+                frame.bundle,
+                display=display,
+                show_hydrogen=args.show_hydrogen,
+                show_cell=_effective_show_cell(structure, args),
+                include_boundary_replicas=include_boundary_replicas,
+                include_cross_boundary_bond_endpoints=(
+                    include_cross_boundary_bond_endpoints
+                ),
+            )
+            accumulator.update_points(frame_fit_points)
+        fit_points = accumulator.fit_points()
+        minimum = fit_points.min(axis=0)
+        maximum = fit_points.max(axis=0)
+        target = 0.5 * (minimum + maximum)
+        radius = float(np.linalg.norm(0.5 * (maximum - minimum)))
     if camera_target is not None:
         target = np.asarray(camera_target, dtype=float)
     aspect = max(float(args.width) / float(args.height), 1.0e-6)
@@ -1122,6 +1145,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                 ),
             )
             animation_time = _animation_time_from_args(args)
+            frame_annotation = _frame_annotation_from_args(args)
             result = render(
                 structure,
                 output=Path(args.output).expanduser().resolve(),
@@ -1135,6 +1159,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                 bond_groups=bond_groups,
                 fps=args.fps if args.fps is not None else 12.0,
                 animation_time=animation_time,
+                frame_annotation=frame_annotation,
             )
         payload = _render_result_payload(result, structure, args, camera)
     except Exception as exc:

@@ -16,6 +16,7 @@ scalar controls and repeatable selector rules for mixed styles.
 | Coordination polyhedra | Repeatable `--polyhedron` |
 | Frame selection and video speed | `--frame-range`, `--stride`, `--fps` |
 | Physical simulation time labels | `--display-time`, `--time-step`, `--time-step-unit`, `--dump-frequency`, `--first-frame-step`, `--time-position` |
+| Generic per-frame progress, observables, and stages | Repeatable `--frame-field`, plus `--frame-label` and `--frame-label-position` |
 
 Intentionally programmatic objects remain API-only: a precompiled `RenderPlan`
 and arbitrary in-memory `topology_data`. They are composition artifacts rather

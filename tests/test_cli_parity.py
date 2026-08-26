@@ -78,6 +78,9 @@ def test_composable_user_surfaces_have_cli_destinations() -> None:
         "dump_frequency",
         "first_frame_step",
         "time_position",
+        "frame_field",
+        "frame_label",
+        "frame_label_position",
     } <= destinations
 
 

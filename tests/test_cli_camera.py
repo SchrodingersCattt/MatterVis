@@ -38,6 +38,7 @@ def _structure(scene_overrides=None) -> SimpleNamespace:
 
 def _camera_args(**overrides) -> Namespace:
     values = {
+        "output": "figure.png",
         "width": 900,
         "height": 720,
         "show_hydrogen": False,
@@ -51,6 +52,43 @@ def _camera_args(**overrides) -> Namespace:
     }
     values.update(overrides)
     return Namespace(**values)
+
+
+def test_animation_camera_fits_all_selected_frames() -> None:
+    first = _structure(
+        {
+            "bounds": {
+                "center": [0.0, 0.0, 0.0],
+                "mins": [-1.0, -1.0, -0.1],
+                "maxs": [1.0, 1.0, 0.1],
+            }
+        }
+    ).frames[0]
+    widest = _structure(
+        {
+            "bounds": {
+                "center": [0.0, 0.0, 0.0],
+                "mins": [-1.0, -4.0, -0.1],
+                "maxs": [1.0, 4.0, 0.1],
+            }
+        }
+    ).frames[0]
+    structure = SimpleNamespace(frames=(first, widest))
+
+    animation = _camera_spec(
+        structure,
+        _camera_args(output="movie.gif", show_unit_cell=False),
+        display="formula_unit",
+    )
+    static = _camera_spec(
+        structure,
+        _camera_args(output="figure.png", show_unit_cell=False),
+        display="formula_unit",
+    )
+
+    assert animation.target == pytest.approx([0.0, 0.0, 0.0])
+    assert animation.ortho_scale == pytest.approx(4.48)
+    assert static.ortho_scale == pytest.approx(1.12)
 
 
 def test_camera_defaults_to_orthographic_positive_c_axis() -> None:

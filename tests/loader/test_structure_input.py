@@ -409,6 +409,18 @@ def test_viewport_accumulator_matches_uniform_viewport() -> None:
     assert accumulator.viewport() == scenes[0]["viewport"]
 
 
+def test_viewport_accumulator_exposes_union_fit_points() -> None:
+    from mat_viewer.renderer import ViewportAccumulator
+
+    accumulator = ViewportAccumulator(padding=0.25)
+    accumulator.update_points([[-1.0, -2.0, -3.0], [1.0, 2.0, 3.0]])
+    accumulator.update_points([[-4.0, 0.0, 0.0], [2.0, 5.0, 1.0]])
+
+    points = accumulator.fit_points()
+    assert points.min(axis=0) == pytest.approx([-4.25, -2.25, -3.25])
+    assert points.max(axis=0) == pytest.approx([2.25, 5.25, 3.25])
+
+
 def test_tui_parser_exposes_same_generic_input_contract() -> None:
     parser = argparse.ArgumentParser()
     _build_tui_parser(parser.add_subparsers(dest="command"))

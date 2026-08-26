@@ -24,6 +24,7 @@ def render_animation(
     bond_groups: Any = None,
     fps: float = 12.0,
     time_spec: Any = None,
+    annotation_spec: Any = None,
 ) -> RenderResult:
     """Render selected source frames with one CPU camera, then encode lazily."""
     try:
@@ -48,10 +49,25 @@ def render_animation(
         resolve_animation_times,
     )
 
+    from .frame_annotations import (
+        coerce_frame_annotation_spec,
+        resolve_frame_annotations,
+    )
+
     resolved_time_spec = coerce_animation_time_spec(time_spec)
+    resolved_annotation_spec = coerce_frame_annotation_spec(annotation_spec)
+    if resolved_time_spec is not None and resolved_annotation_spec is not None:
+        raise ValueError(
+            "physical-time and generic frame annotations cannot be combined"
+        )
     time_series = (
         resolve_animation_times(frames, resolved_time_spec)
         if resolved_time_spec is not None
+        else None
+    )
+    annotation_series = (
+        resolve_frame_annotations(frames, resolved_annotation_spec)
+        if resolved_annotation_spec is not None
         else None
     )
     from PIL import Image
@@ -95,11 +111,12 @@ def render_animation(
                 raise RuntimeError("CPU frame renderer did not return PNG bytes")
             with Image.open(BytesIO(frame_result.data)) as image:
                 rendered = image.convert("RGBA")
-                if time_series is not None:
+                label_series = annotation_series or time_series
+                if label_series is not None:
                     rendered = draw_time_label(
                         rendered,
-                        time_series.labels[frame_number],
-                        time_series.spec.position,
+                        label_series.labels[frame_number],
+                        label_series.spec.position,
                     )
                 rgb = np.asarray(rendered.convert("RGB"), dtype=np.uint8)
             if dimensions is None:
@@ -134,6 +151,11 @@ def render_animation(
             "simulation_time": (
                 time_series.to_metadata()
                 if time_series is not None
+                else {"displayed": False}
+            ),
+            "frame_annotation": (
+                annotation_series.to_metadata()
+                if annotation_series is not None
                 else {"displayed": False}
             ),
         },

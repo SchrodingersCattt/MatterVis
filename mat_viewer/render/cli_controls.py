@@ -116,6 +116,32 @@ def _add_render_control_arguments(parser: argparse.ArgumentParser) -> None:
         default="top-left",
         help="Corner for the physical-time label (default: top-left).",
     )
+    parser.add_argument(
+        "--frame-field",
+        action="append",
+        default=[],
+        metavar="SPEC",
+        help=(
+            "Per-frame field NAME=SOURCE[,role=...][,unit=...][,scale=...]"
+            "[,offset=...]. SOURCE is index, metadata:KEY, "
+            "linear:START:STEP, or table:PATH:COLUMN; repeat per field."
+        ),
+    )
+    parser.add_argument(
+        "--frame-label",
+        default=None,
+        metavar="TEMPLATE",
+        help=(
+            "Format template for --frame-field values, for example "
+            "'lambda={lambda:.2f}  rotation={angle:.1f} deg'."
+        ),
+    )
+    parser.add_argument(
+        "--frame-label-position",
+        choices=("top-left", "top-right", "bottom-left", "bottom-right"),
+        default="top-left",
+        help="Corner for the generic frame label (default: top-left).",
+    )
 
 
 def _camera_request(args: argparse.Namespace) -> dict:
@@ -134,7 +160,8 @@ def _camera_request(args: argparse.Namespace) -> dict:
 
 
 def _is_animation_output(args: argparse.Namespace) -> bool:
-    return Path(args.output).suffix.lower() in {".gif", ".mp4"}
+    output = getattr(args, "output", None)
+    return output is not None and Path(output).suffix.lower() in {".gif", ".mp4"}
 
 
 def _render_shading(args: argparse.Namespace) -> str:
@@ -236,6 +263,20 @@ def _validate_render_options(args: argparse.Namespace) -> None:
                 "--time-step, --dump-frequency, --first-frame-step, and "
                 "--time-position require --display-time"
             )
+        has_frame_fields = bool(args.frame_field)
+        has_frame_label = args.frame_label is not None
+        if has_frame_fields != has_frame_label:
+            raise ValueError("--frame-field and --frame-label must be used together")
+        if args.frame_label_position != "top-left" and not has_frame_fields:
+            raise ValueError(
+                "--frame-label-position requires --frame-field and --frame-label"
+            )
+        if args.display_time is not None and has_frame_fields:
+            raise ValueError(
+                "--display-time cannot be combined with generic frame annotations"
+            )
+        if has_frame_fields:
+            _frame_annotation_from_args(args)
     else:
         if args.frame_range is not None:
             raise ValueError("--frame-range is only valid for GIF/MP4 output")
@@ -251,6 +292,14 @@ def _validate_render_options(args: argparse.Namespace) -> None:
             or args.time_position != "top-left"
         ):
             raise ValueError("physical-time options are only valid for GIF/MP4 output")
+        if (
+            args.frame_field
+            or args.frame_label is not None
+            or args.frame_label_position != "top-left"
+        ):
+            raise ValueError(
+                "frame annotation options are only valid for GIF/MP4 output"
+            )
     if not args.polyhedron:
         if args.polyhedron_site is not None:
             raise ValueError("--polyhedron-site requires --polyhedron")
@@ -308,4 +357,19 @@ def _animation_time_from_args(args: argparse.Namespace):
         dump_frequency=args.dump_frequency,
         first_frame_step=args.first_frame_step,
         position=args.time_position,
+    )
+
+
+def _frame_annotation_from_args(args: argparse.Namespace):
+    if not args.frame_field:
+        return None
+    from .frame_annotations import (
+        FrameAnnotationSpec,
+        parse_frame_fields,
+    )
+
+    return FrameAnnotationSpec(
+        fields=parse_frame_fields(args.frame_field),
+        template=args.frame_label,
+        position=args.frame_label_position,
     )

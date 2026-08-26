@@ -12,13 +12,20 @@ class ViewportAccumulator:
     """Accumulate one shared viewport without retaining rendered scenes."""
 
     padding: float = 0.0
-    minimum: np.ndarray = field(
-        default_factory=lambda: np.full(3, np.inf, dtype=float)
-    )
+    minimum: np.ndarray = field(default_factory=lambda: np.full(3, np.inf, dtype=float))
     maximum: np.ndarray = field(
         default_factory=lambda: np.full(3, -np.inf, dtype=float)
     )
     count: int = 0
+
+    def _update_bounds(self, minimum: np.ndarray, maximum: np.ndarray) -> None:
+        if minimum.shape != (3,) or maximum.shape != (3,):
+            raise ValueError("viewport bounds must be three-dimensional")
+        if not np.all(np.isfinite((minimum, maximum))):
+            raise ValueError("viewport bounds must be finite")
+        self.minimum = np.minimum(self.minimum, minimum)
+        self.maximum = np.maximum(self.maximum, maximum)
+        self.count += 1
 
     def update(self, scene: dict, *, style: dict | None = None) -> None:
         scn_style = style if style is not None else scene.get("style") or {}
@@ -34,9 +41,37 @@ class ViewportAccumulator:
             )
             * atom_scale
         )
-        self.minimum = np.minimum(self.minimum, (carts - radii[:, None]).min(axis=0))
-        self.maximum = np.maximum(self.maximum, (carts + radii[:, None]).max(axis=0))
-        self.count += 1
+        self._update_bounds(
+            (carts - radii[:, None]).min(axis=0),
+            (carts + radii[:, None]).max(axis=0),
+        )
+
+    def update_points(self, points: Iterable[Iterable[float]]) -> None:
+        """Accumulate finite world-space points without retaining a scene."""
+        values = np.asarray(list(points), dtype=float)
+        if not values.size:
+            return
+        if values.ndim != 2 or values.shape[1] != 3:
+            raise ValueError("viewport points must have shape (N, 3)")
+        self._update_bounds(values.min(axis=0), values.max(axis=0))
+
+    def fit_points(self) -> np.ndarray:
+        """Return the eight corners of the accumulated padded bounds."""
+        if not self.count:
+            minimum = np.full(3, -0.5 - float(self.padding), dtype=float)
+            maximum = np.full(3, 0.5 + float(self.padding), dtype=float)
+        else:
+            minimum = self.minimum - float(self.padding)
+            maximum = self.maximum + float(self.padding)
+        return np.asarray(
+            [
+                [x, y, z]
+                for x in (minimum[0], maximum[0])
+                for y in (minimum[1], maximum[1])
+                for z in (minimum[2], maximum[2])
+            ],
+            dtype=float,
+        )
 
     def viewport(self) -> dict:
         if not self.count:

@@ -25,6 +25,12 @@ mat-vis render run.dump --type-map O H -o trajectory.gif \
   --frame-range 0:100:2 --fps 12 \
   --display-time ps --time-step 0.5 --time-step-unit fs
 
+# NEB/path animation with progress and an independently derived observable
+mat-vis render neb.extxyz -o neb.gif --fps 6 \
+  --frame-field 'lambda=metadata:lambda,role=progress' \
+  --frame-field 'angle=metadata:rotation_deg,role=observable,unit=deg' \
+  --frame-label 'lambda={lambda:.2f}  rotation={angle:.1f} deg'
+
 # Interactive HTML
 mat-vis render structure.extxyz -o interactive.html --backend plotly --orthogonal
 ~~~
@@ -107,6 +113,9 @@ for an exact install command before using an optional frontend.
 | --dump-frequency STEPS | - | MD steps between stored frames when source metadata has no step |
 | --first-frame-step STEP | 0 | Step represented by source frame 0 for the fallback mapping |
 | --time-position CORNER | top-left | `top-left`, `top-right`, `bottom-left`, or `bottom-right` |
+| --frame-field SPEC | - | Repeatable `NAME=SOURCE` field with optional role, unit, scale, and offset |
+| --frame-label TEMPLATE | - | Format template over the declared frame-field names |
+| --frame-label-position CORNER | top-left | Corner for the generic frame annotation |
 
 GIF/MP4 require at least two selected frames. All selected frames use one camera,
 canvas, and shared world-space viewport scale.
@@ -122,6 +131,15 @@ the movie plays. With `--display-time`, MatterVis resolves time in this order:
 Selection by `--frame-range` and `--stride` never renumbers source frames, so
 stride is not multiplied twice. If neither time nor step metadata exists,
 `--time-step` and `--dump-frequency` are both required.
+
+Generic frame annotations use one or more repeatable `--frame-field` values and
+one `--frame-label` template. Sources are `index`, `metadata:KEY`,
+`linear:START:STEP`, or `table:PATH:COLUMN`. Index, linear, and table lookup
+all use the original source-frame index, so slicing and stride retain scientific
+alignment. A field role is `progress`, `observable`, or `stage`; units are
+recorded but appear only when explicitly written into the label template.
+Table provenance includes the resolved path, column, row mapping, and SHA256.
+Generic annotations and the physical-time shortcut are mutually exclusive.
 
 Animations preserve one requested representation, camera, and CPU backend
 across every frame. Plotly GIF/MP4 is rejected explicitly; MatterVis never
