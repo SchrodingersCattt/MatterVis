@@ -40,6 +40,7 @@ ITEM: ATOMS id type x y z
 
 def test_cli_animation_labels_real_lammps_timesteps(tmp_path: Path) -> None:
     imageio = pytest.importorskip("imageio.v2")
+    pillow = pytest.importorskip("PIL.Image")
     source = tmp_path / "run.dump"
     output = tmp_path / "time.gif"
     _write_two_frame_dump(source)
@@ -99,3 +100,10 @@ def test_cli_animation_labels_real_lammps_timesteps(tmp_path: Path) -> None:
     assert timing["labels"] == ["t = 0.05 ps", "t = 0.08 ps"]
     assert payload["result"]["metadata"]["fps"] == 2.0
     assert len(imageio.mimread(output)) == 2
+
+    with pillow.open(output) as animation:
+        durations = []
+        for frame_index in range(animation.n_frames):
+            animation.seek(frame_index)
+            durations.append(animation.info.get("duration"))
+    assert durations == [500, 500]

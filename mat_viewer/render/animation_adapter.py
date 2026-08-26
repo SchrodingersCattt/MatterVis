@@ -82,7 +82,7 @@ def render_animation(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if output_format == "gif":
         writer_kwargs: dict[str, Any] = {
-            "duration": 1.0 / float(fps),
+            "duration": 1000.0 / float(fps),
             "loop": 0,
         }
     else:
