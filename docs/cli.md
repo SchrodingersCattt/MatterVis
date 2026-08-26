@@ -100,6 +100,11 @@ for an exact install command before using an optional frontend.
 | --frame-range START:STOP[:STEP] | all | Python half-open frame slice for GIF/MP4 |
 | --stride N | 1 | Keep every Nth selected animation frame |
 | --fps FPS | 12 | Positive animation frame rate |
+| --frame-duration SECONDS | none | Alternative to --fps; the two flags are mutually exclusive |
+| --repeat NX NY NZ | 1 1 1 | Repeat LAMMPS frames along the cell vectors before rendering |
+| --workers N | CPU/memory bounded | CPU frame workers; an explicit positive value is honored |
+| --profile-json PATH | none | Write stage timings, peak worker RSS, camera, and frame provenance |
+| --bond-skin ANGSTROM | 0.5 | Verlet skin for large `ball_stick` LAMMPS animations |
 
 GIF/MP4 require at least two selected frames. All selected frames use one camera,
 canvas, and shared world-space viewport scale.
@@ -107,6 +112,13 @@ canvas, and shared world-space viewport scale.
 Animations preserve one requested representation, camera, and CPU backend
 across every frame. Plotly GIF/MP4 is rejected explicitly; MatterVis never
 substitutes one frame backend for another.
+
+Large text LAMMPS dumps rendered as `ball` or `ball_stick` use the bounded
+array path: direct frame-offset IO, analytic screen-space spheres, optional
+MolCrysKit bond arrays, ordered streaming encoding, and one camera fitted before
+workers start. It does not build UV meshes, sample atoms, or fall back to a
+point cloud. GIF uses one global palette; MP4 uses `imageio-ffmpeg`. Other
+formats continue through the general ASE-backed IO path.
 
 ### Display options
 
@@ -133,6 +145,8 @@ are mutually exclusive.
 | `--camera-position X Y Z` | — | Explicit absolute Cartesian camera position in Å |
 | `--camera-up X Y Z` | `+b` / `+Y` | Preferred screen-up direction |
 | `--camera-distance D` | `1.8` | Positive scene-fit multiplier for axis/direction views |
+| `--zoom Z` | `1.0` | Positive zoom applied once to the shared animation viewport |
+| `--framing-margin M` | `1.12` | Positive margin applied once before animation workers start |
 
 `--camera-up` is orthogonalized against the view direction. CPU is the default
 static backend and needs neither Chrome nor Kaleido. Explicit Plotly static

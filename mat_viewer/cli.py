@@ -128,6 +128,9 @@ def _build_render_parser(
         metavar="JSON",
         help="JSON file containing public world-space vector overlay groups.",
     )
+    from .render.fast_cli import add_fast_animation_arguments
+
+    add_fast_animation_arguments(parser)
     return parser
 
 
@@ -697,6 +700,8 @@ def _camera_request(args: argparse.Namespace) -> dict:
         "position": args.camera_position,
         "up": args.camera_up,
         "fit_multiplier": args.camera_distance,
+        "zoom": args.zoom,
+        "framing_margin": args.framing_margin,
     }
 
 
@@ -804,6 +809,9 @@ def _validate_render_options(args: argparse.Namespace) -> None:
             raise ValueError("--stride is only valid for GIF/MP4 output")
         if args.fps is not None:
             raise ValueError("--fps is only valid for GIF/MP4 output")
+    from .render.fast_cli import validate_fast_animation_options
+
+    validate_fast_animation_options(args, animation=animation)
     if not args.polyhedron:
         if args.polyhedron_site is not None:
             raise ValueError("--polyhedron-site requires --polyhedron")
@@ -1106,6 +1114,18 @@ def _agent_render_main(args: argparse.Namespace) -> None:
             + requirements["install"],
             json_output=args.json_output,
         )
+    from .render.fast_cli import render_fast_animation_if_eligible
+
+    try:
+        fast_payload = render_fast_animation_if_eligible(
+            args,
+            install_command=check_payload["requirements"]["install"],
+        )
+    except Exception as exc:
+        _fail(str(exc), json_output=args.json_output)
+    if fast_payload is not None:
+        _emit(fast_payload, json_output=args.json_output)
+        return
 
     from .agent import load_structure, render
     from .render.contracts import RenderSpec, ViewSpec
