@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.containers import Container
 from textual.widgets import Footer, Header, Input, Static
 from textual.reactive import reactive
 from rich.text import Text
@@ -33,6 +34,7 @@ from .state import TerminalObservation
 ROTATE_STEP = 10.0  # degrees per keypress
 PAN_STEP = 0.1  # viewport units per keypress
 ZOOM_FACTOR = 1.3  # multiplicative zoom per keypress
+INSPECTOR_WIDE_MIN = 100
 
 
 # ── Canvas Widget ───────────────────────────────────────────────────────────
@@ -76,6 +78,35 @@ class CrystalTUI(App):
         width: 1fr;
         height: 1fr;
         overflow: hidden hidden;
+    }
+    #chemistry-warning {
+        height: 1;
+        display: none;
+        color: #ffffff;
+        background: #8b0000;
+        overflow: hidden hidden;
+    }
+    #body {
+        width: 1fr;
+        height: 1fr;
+        layout: horizontal;
+    }
+    #inspector {
+        display: none;
+        width: 44;
+        height: 1fr;
+        padding: 0 1;
+        border-left: solid #666666;
+        overflow-y: auto;
+    }
+    Screen.narrow #body {
+        layout: vertical;
+    }
+    Screen.narrow #inspector {
+        width: 1fr;
+        height: 12;
+        border-left: none;
+        border-top: solid #666666;
     }
     #command-result {
         dock: bottom;
@@ -131,6 +162,7 @@ class CrystalTUI(App):
         self.crystal = crystal
         self._command_mode = False
         self._command_selection: list[dict[str, str]] = []
+        self._inspector_view: str | None = None
         self.controller = TerminalViewController(
             crystal,
             camera=camera or Camera.from_view_name(initial_view, crystal),
@@ -177,15 +209,20 @@ class CrystalTUI(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield CrystalCanvas(id="canvas")
-        yield Static("", id="command-result")
+        yield Static("", id="chemistry-warning", markup=False)
+        with Container(id="body"):
+            yield CrystalCanvas(id="canvas")
+            yield Static("", id="inspector", markup=False)
+        yield Static("", id="command-result", markup=False)
         yield Footer()
 
     def on_mount(self) -> None:
         self.query_one("#command-result", Static).display = False
+        self._update_layout()
         self._apply_observation(self._resize_and_observe())
 
     def on_resize(self) -> None:
+        self._update_layout()
         self._apply_observation(self._resize_and_observe())
 
     def on_key(self, event) -> None:
@@ -208,6 +245,10 @@ class CrystalTUI(App):
         if self.controller.state.selection.mode:
             observation = self._handle_selection_key(char, key)
             if observation is not None:
+                if observation.state.selection.display_index is None:
+                    self._inspector_view = None
+                elif self._inspector_view is None:
+                    self._inspector_view = "full"
                 event.prevent_default()
                 event.stop()
                 self._sync_command_selection()
@@ -229,6 +270,7 @@ class CrystalTUI(App):
             observation = self.controller.orbit(pitch_deg=-ROTATE_STEP)
         elif char == "s" or key == "s":
             observation = self.controller.set_selection_mode(True)
+            self._inspector_view = "full"
         elif char == "q" or key == "q":
             observation = self.controller.orbit(yaw_deg=-ROTATE_STEP)
         elif char == "e" or key == "e":
@@ -289,6 +331,7 @@ class CrystalTUI(App):
         except ValueError:
             return
         self._sync_command_selection()
+        self._inspector_view = "full"
         self._apply_observation(observation)
 
     def _sync_command_selection(self) -> None:
@@ -315,6 +358,38 @@ class CrystalTUI(App):
         canvas = self.query_one("#canvas", CrystalCanvas)
         canvas.frame_text = observation.frame
         self.sub_title = observation.title
+        self._update_warning_bar(observation)
+        self._update_inspector()
+
+    def _update_layout(self) -> None:
+        """Switch inspector placement without changing the rendered structure."""
+        self.screen.set_class(self.size.width < INSPECTOR_WIDE_MIN, "narrow")
+
+    def _update_warning_bar(self, observation: TerminalObservation) -> None:
+        warning_bar = self.query_one("#chemistry-warning", Static)
+        if not observation.warnings:
+            warning_bar.display = False
+            warning_bar.update("")
+            return
+        suffix = (
+            ""
+            if len(observation.warnings) == 1
+            else f" | +{len(observation.warnings) - 1} more"
+        )
+        warning_bar.update(f"! {observation.warnings[0]}{suffix}")
+        warning_bar.display = True
+
+    def _update_inspector(self) -> None:
+        inspector = self.query_one("#inspector", Static)
+        if (
+            self._inspector_view is None
+            or self.controller.state.selection.display_index is None
+        ):
+            inspector.display = False
+            inspector.update("")
+            return
+        inspector.update(self.controller.inspect_selected(view=self._inspector_view))
+        inspector.display = True
 
     def _redraw(self) -> None:
         """Compatibility wrapper for callers that request a visual refresh."""
@@ -364,7 +439,8 @@ class CrystalTUI(App):
         name, args = parts[0].lower(), parts[1:]
         if name == "help":
             return (
-                "select A | next atom | focus A [depth] | distance A B [direct|mic] | "
+                "select A | next atom | inspect [A] | stereo [A] | name [A] | why [A] | "
+                "focus A [depth] | distance A B [direct|mic] | "
                 "angle A B C [direct|mic] | dihedral A B C D [direct|mic_chain] | clear",
                 None,
             )
@@ -373,16 +449,31 @@ class CrystalTUI(App):
                 raise ValueError("select requires exactly one atom label")
             observation = self.controller.select_atom(args[0])
             self._sync_command_selection()
+            self._inspector_view = "full"
             return f"selected: {observation.state.selection.label}", observation
         if name == "next":
             if args != ["atom"]:
                 raise ValueError("next supports exactly: next atom")
             observation = self.controller.select_next()
             self._sync_command_selection()
+            self._inspector_view = "full"
             return f"selected: {observation.state.selection.label}", observation
         if name == "clear":
             self._command_selection = []
+            self._inspector_view = None
             return "selection cleared", self.controller.clear_selection()
+        if name in {"inspect", "stereo", "name", "why"}:
+            if len(args) > 1:
+                raise ValueError(f"{name} accepts at most one atom label")
+            observation = (
+                self.controller.select_atom(args[0])
+                if args
+                else self.controller.observe()
+            )
+            self._inspector_view = "full" if name == "inspect" else name
+            return self.controller.inspect_selected(
+                view=self._inspector_view
+            ), observation
         if name == "focus":
             if not args and self._command_selection:
                 return "focused selection", self.controller.focus_selection(

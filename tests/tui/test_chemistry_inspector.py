@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import numpy as np
 
 from mat_viewer.structure.chemistry_records import (
@@ -10,6 +12,7 @@ from mat_viewer.structure.chemistry_records import (
     EntityChemistryRecord,
 )
 from mat_viewer.tui.chemistry_inspector import format_atom_inspector
+from mat_viewer.tui.app import CrystalTUI
 from mat_viewer.tui.controller import TerminalViewController
 from mat_viewer.tui.crystal_ir import AtomIR, BondIR, CrystalIR
 
@@ -179,3 +182,57 @@ def test_missing_chemistry_is_explicitly_indeterminate() -> None:
     assert controller.observe().warnings == (
         "CHEMISTRY UNAVAILABLE: MolCrysKit records are not attached",
     )
+
+
+def test_inspector_commands_return_full_plain_text_and_change_panel_view() -> None:
+    app = CrystalTUI(_chemistry_crystal(), mono=True)
+
+    full, selected = app.execute_command(":inspect C1")
+    stereo, _ = app.execute_command(":stereo")
+    name, _ = app.execute_command(":name")
+    why, _ = app.execute_command(":why")
+
+    assert selected is not None and selected.state.selection.label == "C1"
+    assert "ATOM [C1]" in full
+    assert "tetrahedral: R" in stereo
+    assert "CIF systematic name: test deposited name" in name
+    assert "alternative interpretations retained: 1" in why
+
+
+def test_wide_tui_shows_warning_and_side_inspector_that_tracks_selection() -> None:
+    async def exercise() -> None:
+        app = CrystalTUI(_chemistry_crystal(), mono=True, label_mode="label")
+        async with app.run_test(size=(120, 30)) as pilot:
+            await pilot.pause()
+            await pilot.press("s")
+            await pilot.pause()
+
+            warning = app.query_one("#chemistry-warning")
+            inspector = app.query_one("#inspector")
+            assert warning.display is True
+            assert "CHEMISTRY PROVISIONAL" in str(warning.render())
+            assert inspector.display is True
+            assert "ATOM [C1]" in str(inspector.render())
+            assert app.screen.has_class("narrow") is False
+
+            await pilot.press("tab")
+            await pilot.pause()
+            assert "ATOM [Br1]" in str(inspector.render())
+
+    asyncio.run(exercise())
+
+
+def test_narrow_tui_places_the_same_inspector_in_bottom_layout() -> None:
+    async def exercise() -> None:
+        app = CrystalTUI(_chemistry_crystal(), mono=True, label_mode="label")
+        async with app.run_test(size=(80, 28)) as pilot:
+            await pilot.pause()
+            await pilot.press("s")
+            await pilot.pause()
+
+            inspector = app.query_one("#inspector")
+            assert app.screen.has_class("narrow") is True
+            assert inspector.display is True
+            assert "ATOM [C1]" in str(inspector.render())
+
+    asyncio.run(exercise())

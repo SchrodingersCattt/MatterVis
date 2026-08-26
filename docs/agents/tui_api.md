@@ -84,6 +84,21 @@ manifested copy and carries the stable MolCrysKit `atom_id`; camera rotation
 therefore moves `[C12]` without changing which atom is selected. Brackets are
 part of the plain text, so selection remains legible when ANSI color is off.
 
+Selecting an atom opens a chemistry inspector. At terminal widths of 100 or
+more it occupies a right-hand column; narrower terminals place the identical
+plain-text inspector below the viewport. It reports site provenance,
+occupancy/disorder, coordinates, MolCrysKit atom and entity records, manifested
+distances/angles, MCK bond semantics, ring provenance, stereochemical status,
+CIP order, crystal metadata, deposited CIF names, and absolute-structure
+parameters with their standard uncertainties. Missing MCK records are printed
+as `unavailable`; the inspector never fills gaps from screen distances.
+
+MolCrysKit inference or ambiguity warnings remain in a one-line warning bar
+above the main viewport. `:why` expands the evidence, status, retained
+alternative count, and complete warning text. Deposited CIF systematic/common
+names remain explicitly labelled as source metadata and are not presented as
+newly validated IUPAC names.
+
 ## Analytical inspection
 
 `inspect_atom(references=None)` and `inspect_molecule(reference=None)` are pure
@@ -143,6 +158,7 @@ controller observation is the machine-readable local API.
 Press `:` in `mat-vis tui` to open a one-line command prompt:
 
 - `:select C12`, `:next atom`, `:clear`
+- `:inspect [C12]`, `:stereo [C12]`, `:name [C12]`, `:why [C12]`
 - `:focus N9 [bond_depth]`
 - `:distance A B [direct|mic]`
 - `:angle A B C [direct|mic]`
