@@ -148,3 +148,35 @@ The cached values are content-addressed so they are safe to share
 across structures, and across processes that touch the same CIF
 file. Cache invalidation happens automatically when the input atom
 positions change (e.g. after a transform).
+
+## Million-atom LAMMPS animation path (2026-08-26)
+
+Acceptance fixture: 161-frame LAMMPS text dump with 342,384 atoms per source
+frame, repeated `3 1 1` at runtime to 1,027,152 atoms per rendered frame. The
+CPU benchmark uses 32 workers, 1200x900, 10 fps, orthographic projection, one
+shared viewport, analytic spheres, and no atom sampling.
+
+```bash
+mat-vis render all.lammpstrj -o million.gif \
+  --backend cpu --style ball --repeat 3 1 1 \
+  --width 1200 --height 900 --scale 1 --fps 10 --orthogonal \
+  --camera-axis a --workers 32 --profile-json million-profile.json
+```
+
+| Output | Cold total | Bytes | Peak worker RSS | Notes |
+| --- | ---: | ---: | ---: | --- |
+| GIF spheres | 21.27 s | 8,942,353 | 206.0 MiB | one streaming global 6x7x6 palette |
+| MP4 spheres | 17.46 s | 26,847,460 | 213.4 MiB | H.264, yuv420p, ultrafast CRF 18 |
+| MP4 spheres + bonds | 58.30 s | 24,505,331 | 1,347.7 MiB | MCK inference on every frame |
+
+The profile separates indexing, camera fitting, JIT warm-up, parsing,
+replication, bond inference, projection, rasterization, palette quantization,
+encoding, and total wall time. Explicit worker counts are preserved; automatic
+mode remains bounded by available CPU and memory. Camera, projection, zoom,
+margin, dimensions, fps/frame duration, and view vectors are user-adjustable,
+but are fixed across all selected frames after fitting.
+
+All three outputs decode to 161 frames at 1200x900 and 10 fps. The bonded run
+rebuilt its Verlet candidate list on all 161 frames because the displacement
+between saved frames exceeded half the 0.5 Angstrom skin. Its summed worker CPU
+time was 868.14 s for bond inference versus 78.88 s for bonded rasterization,

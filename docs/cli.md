@@ -83,6 +83,16 @@ LAMMPS numeric types are not elements. Pass --type-map whenever the source does
 not encode element identity unambiguously; the order is type 1, type 2, and so
 on. MatterVis never guesses it from a model filename.
 
+### Renderer selection
+
+`--renderer auto|batch|general` defaults to `auto`. Every supported input is
+first normalised to the same contiguous frame arrays. Auto selection uses the
+total atom-frame workload (atoms across all selected frames, after `--repeat`),
+so both one large static structure and a long trajectory can select the array
+batch renderer. It does not branch on CIF/XYZ/LAMMPS filenames. Labels, axes,
+vectors, and other overlays are composed as rendering layers and do not decide
+the numeric base renderer. PNG, GIF, and MP4 can all use the batch path.
+
 ### Supported output formats
 
 | Extension | Format | Backend |
@@ -107,6 +117,9 @@ for an exact install command before using an optional frontend.
 | --frame-range START:STOP[:STEP] | all | Python half-open frame slice for GIF/MP4 |
 | --stride N | 1 | Keep every Nth selected animation frame |
 | --fps FPS | 12 | Video playback rate; never used as physical simulation time |
+| --frame-duration SECONDS | - | Alternative to `--fps`; seconds per frame |
+| --repeat NX NY NZ | 1 1 1 | Repeat each periodic frame before workload selection |
+| --workers N | automatic | Bound CPU animation workers |
 | --display-time UNIT | off | Draw physical time in `fs`, `ps`, or `ns` on every frame |
 | --time-step DT | - | MD integrator timestep |
 | --time-step-unit UNIT | fs | Unit of `--time-step`: `fs`, `ps`, or `ns` |

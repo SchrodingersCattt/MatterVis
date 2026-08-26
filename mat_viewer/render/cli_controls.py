@@ -332,6 +332,9 @@ def _validate_render_options(args: argparse.Namespace) -> None:
         raise ValueError("--sphere-detail must be at least 2 3")
     if args.cylinder_sides < 3:
         raise ValueError("--cylinder-sides must be at least 3")
+    from .fast_cli import validate_batch_render_options
+
+    validate_batch_render_options(args, animation=animation)
     _render_ortep_mode(args)
     _style_groups(args)
 

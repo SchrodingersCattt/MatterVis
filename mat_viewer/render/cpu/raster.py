@@ -109,11 +109,23 @@ def _render_viewport(
     background: np.ndarray,
     *,
     line_scale: int,
+    initial_color: np.ndarray | None = None,
+    initial_depth: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     transform = CameraTransform(viewport.camera, width, height)
-    color = np.empty((height, width, 4), dtype=float)
-    color[...] = background
-    z_buffer = np.full((height, width), np.inf, dtype=float)
+    if initial_color is None:
+        color = np.empty((height, width, 4), dtype=float)
+        color[...] = background
+    else:
+        color = np.array(initial_color, dtype=float, copy=True)
+        if color.shape != (height, width, 4):
+            raise ValueError("initial_color must have shape (height, width, 4)")
+    if initial_depth is None:
+        z_buffer = np.full((height, width), np.inf, dtype=float)
+    else:
+        z_buffer = np.array(initial_depth, dtype=float, copy=True)
+        if z_buffer.shape != (height, width):
+            raise ValueError("initial_depth must have shape (height, width)")
     order_buffer = np.full((height, width), np.iinfo(np.int64).max, dtype=np.int64)
     fragments: dict[int, list[_Fragment]] = {}
     primitive_order = {
@@ -169,6 +181,54 @@ def _render_viewport(
             )
     _composite_fragments(color, z_buffer, fragments)
     return color, z_buffer
+
+
+def composite_primitives(
+    rgba: np.ndarray,
+    depth: np.ndarray,
+    camera,
+    primitives,
+    *,
+    metadata: dict | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Depth-compose general overlay primitives over an analytic batch frame."""
+
+    values = np.ascontiguousarray(rgba, dtype=np.uint8)
+    if values.ndim != 3 or values.shape[2] != 4:
+        raise ValueError("rgba must have shape (height, width, 4)")
+    height, width = values.shape[:2]
+    viewport = ViewportPlan(
+        semantic_id="main",
+        camera=camera,
+        primitives=tuple(primitives),
+    )
+    color, composed_depth = _render_viewport(
+        viewport,
+        width,
+        height,
+        np.zeros(4, dtype=float),
+        line_scale=1,
+        initial_color=values.astype(float) / 255.0,
+        initial_depth=depth,
+    )
+    output = np.clip(np.rint(color * 255.0), 0.0, 255.0).astype(np.uint8)
+    plan = RenderPlan(
+        width=width,
+        height=height,
+        background=(0.0, 0.0, 0.0, 0.0),
+        viewports=(viewport,),
+        metadata=dict(metadata or {}),
+    )
+    _draw_text(output, plan, {"main": composed_depth}, scale=1)
+    if metadata:
+        from PIL import Image
+
+        from ..compass_overlay import draw_raster_compass
+
+        image = Image.fromarray(output, mode="RGBA")
+        draw_raster_compass(image, plan)
+        output[:] = np.asarray(image)
+    return output, composed_depth
 
 
 def _write_samples(

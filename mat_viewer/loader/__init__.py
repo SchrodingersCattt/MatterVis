@@ -36,6 +36,12 @@ __all__ = [
     "canonicalise_atomistic_frame",
     "count_structure_frames",
     "bundle_json",
+    "FrameBatch",
+    "frame_batch_from_ase",
+    "LammpsDumpIndex",
+    "LammpsFrameRecord",
+    "frame_box_corners",
+    "index_lammps_dump",
     "StructureFrame",
     "StructureInput",
     "AtomisticFrame",
@@ -43,6 +49,8 @@ __all__ = [
     "load_atomistic_input",
     "iter_atomistic_frames",
     "load_structure_input",
+    "read_lammps_frame",
+    "repeat_frame",
     "infer_uploaded_name",
     "load_default_catalog",
     "load_uploaded_cif",
@@ -50,6 +58,18 @@ __all__ = [
     "write_uploaded_cif",
 ]
 
+from .frame_batch import (  # noqa: F401
+    FrameBatch,
+    frame_batch_from_ase,
+    frame_box_corners,
+)
+from .lammps_batch import (  # noqa: F401
+    LammpsDumpIndex,
+    LammpsFrameRecord,
+    index_lammps_dump,
+    read_lammps_frame,
+    repeat_frame,
+)
 from .structure_input import (  # noqa: F401
     AtomisticFrame,
     AtomisticInput,
