@@ -77,6 +77,7 @@ class AtomIR:
     element: str
     cart: np.ndarray  # Cartesian position (3,)
     frac: np.ndarray  # Fractional coordinates (3,)
+    atom_id: str = ""  # Stable MolCrysKit atom identity
     label: str = ""  # CIF _atom_site_label (e.g. "Fe1", "O2", "C3A")
     occupancy: float = 1.0
     index: int = 0  # Index in the atoms list
@@ -145,6 +146,7 @@ class CrystalIR:
     # Metadata (extensible)
     metadata: dict[str, Any] = field(default_factory=dict)
     per_formula_unit: dict[str, int] = field(default_factory=dict)
+    chemistry: Any | None = None
 
     # ── Derived properties ──────────────────────────────────────────────
 
@@ -202,6 +204,7 @@ def filter_crystal(
                 element=atom.element,
                 cart=atom.cart,
                 frac=atom.frac,
+                atom_id=atom.atom_id,
                 label=atom.label,
                 occupancy=atom.occupancy,
                 index=new_index,
@@ -290,6 +293,7 @@ def filter_crystal(
         source_molecule_species=dict(crystal.source_molecule_species),
         per_formula_unit=dict(crystal.per_formula_unit),
         metadata=metadata,
+        chemistry=crystal.chemistry,
     )
 
 

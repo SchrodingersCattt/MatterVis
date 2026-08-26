@@ -148,6 +148,146 @@ def test_analysis_rebases_bond_shift_to_wrapped_site_images(monkeypatch):
     assert analysis.bond_records[0]["right_image_shift"] == [1, 0, 0]
 
 
+def test_analysis_copies_public_chemistry_and_stereo_records(monkeypatch):
+    source_evidence = SimpleNamespace(
+        source="inferred",
+        method="golden_method",
+        detail="human checked",
+    )
+    chemical_atoms = (
+        SimpleNamespace(
+            atom_id="m0:a0",
+            element="C",
+            isotope=None,
+            formal_charge=0,
+            radical_electrons=0,
+            implicit_hydrogens=1,
+            oxidation_state=None,
+            evidence=(source_evidence,),
+        ),
+        SimpleNamespace(
+            atom_id="m0:a1",
+            element="F",
+            isotope=None,
+            formal_charge=0,
+            radical_electrons=0,
+            implicit_hydrogens=0,
+            oxidation_state=None,
+            evidence=(source_evidence,),
+        ),
+    )
+
+    class FiniteChemicalEntity:
+        entity_id = "molecule:0"
+        atoms = chemical_atoms
+        bonds = (
+            SimpleNamespace(
+                atom1_id="m0:a0",
+                atom2_id="m0:a1",
+                order=1.0,
+                kind="covalent",
+                aromatic=False,
+                atom2_image_shift=(0, 0, 0),
+                stereochemistry=None,
+                evidence=(source_evidence,),
+            ),
+        )
+        embedding = object()
+        dimension = 0
+        net_charge = 0
+        status = "inferred"
+        warnings = ()
+        evidence = (source_evidence,)
+
+    entity = FiniteChemicalEntity()
+    chemistry = SimpleNamespace(
+        atom_ids_by_global_index=("m0:a0", "m0:a1"),
+        components=(entity,),
+        status="inferred",
+        warnings=("coordinate-derived bond order",),
+        evidence=(source_evidence,),
+    )
+    stereo = SimpleNamespace(
+        descriptors=(
+            SimpleNamespace(
+                center_atom_id="m0:a0",
+                descriptor="R",
+                kind="tetrahedral",
+                status="inferred",
+                cip_order=("m0:a1", "m0:a0:implicit-H"),
+                reason="golden orientation",
+            ),
+        ),
+        warnings=(),
+    )
+    sites = (
+        SimpleNamespace(
+            site_id="m0:a0",
+            global_index=0,
+            molecule_index=0,
+            local_index=0,
+            cartesian_position_A=(0.0, 0.0, 0.0),
+            image_shift=(0, 0, 0),
+        ),
+        SimpleNamespace(
+            site_id="m0:a1",
+            global_index=1,
+            molecule_index=0,
+            local_index=1,
+            cartesian_position_A=(1.0, 0.0, 0.0),
+            image_shift=(0, 0, 0),
+        ),
+    )
+
+    class Analyzer:
+        species_map = {"CF_1": [0]}
+
+        def __init__(self, crystal):
+            pass
+
+        def get_simplest_unit(self):
+            return {"CF_1": 1}
+
+        def select_formula_unit(self):
+            return SimpleNamespace(members=(SimpleNamespace(),))
+
+    class GeometryCache:
+        def __init__(self, crystal):
+            pass
+
+        def __getitem__(self, molecule_index):
+            return SimpleNamespace(rings=lambda: [])
+
+    crystal = SimpleNamespace(
+        molecules=[object()],
+        chemistry=None,
+        get_site_records=lambda: list(sites),
+        get_bond_records=lambda: [],
+    )
+    monkeypatch.setattr(
+        molcrys_bridge,
+        "_require_molcryskit",
+        lambda: {
+            "StoichiometryAnalyzer": Analyzer,
+            "LocalGeometryCache": GeometryCache,
+            "infer_chemistry": lambda value: chemistry,
+            "assign_stereochemistry": lambda value, embedding: stereo,
+        },
+    )
+
+    analysis = molcrys_bridge.analyze_crystal(crystal)
+
+    assert analysis.chemistry.source == "molcrys_kit"
+    assert analysis.chemistry.warnings == ("coordinate-derived bond order",)
+    assert analysis.chemistry.entities[0].dimension == 0
+    assert analysis.chemistry.bonds[0].kind == "covalent"
+    carbon = analysis.chemistry.atom("m0:a0")
+    assert carbon.source_index == 0
+    assert carbon.stereo_descriptor == "R"
+    assert carbon.cip_order == ("m0:a1", "m0:a0:implicit-H")
+    assert carbon.evidence == ("inferred:golden_method (human checked)",)
+
+
 def test_formula_unit_materialises_mck_image_shift():
     raw_atoms = [
         {"elem": "C", "cart": np.array([0.0, 0.0, 0.0]), "frac": np.zeros(3)},

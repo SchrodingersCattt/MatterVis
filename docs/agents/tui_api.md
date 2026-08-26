@@ -5,6 +5,12 @@ MatterVis terminal view semantically. It shares the terminal renderer and
 canonical `CrystalIR`/MolCrysKit loader path with `mat-vis tui`; it is **not** an
 HTTP service and it does not create a second chemistry or render pipeline.
 
+When the installed MolCrysKit exposes its chemistry contract, the loader also
+copies stable atom identities, bond order/type, entity dimensionality,
+stereochemical descriptors, CIP order, warnings, and evidence into immutable
+`CrystalChemistryRecords`. MatterVis does not infer any of those values from
+screen distances. Older MolCrysKit releases leave `CrystalIR.chemistry` unset.
+
 ```python
 from mat_viewer.tui import TerminalViewController
 

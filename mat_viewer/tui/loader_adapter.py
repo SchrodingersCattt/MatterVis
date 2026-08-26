@@ -94,6 +94,15 @@ def _load_bundle(
             "bond_source": ("canonical_scene" if is_cif else "distance_heuristic"),
         }
     )
+    analysis = bundle.molcrys_analysis
+    site_ids = {
+        int(record.global_index): str(record.site_id)
+        for record in analysis.site_records
+        if getattr(record, "site_id", None)
+    }
+    for atom in ir.atoms:
+        atom.atom_id = site_ids.get(atom.source_index, "")
+    ir.chemistry = getattr(analysis, "chemistry", None)
     if not is_cif:
         source_indices = {
             index
