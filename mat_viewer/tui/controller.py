@@ -11,12 +11,7 @@ from ..math.camera import Camera, ProjectionMode, project_points
 from .compositor import (
     DISPLAY_LEVELS,
     LABEL_MODES,
-    ProjectedAtomHit,
-    Viewport,
-    _compute_viewport,
-    build_atom_hit_map,
     compose_frame,
-    viewport_from_bounds,
 )
 from .inspection import (
     inspect_atoms,
@@ -30,6 +25,13 @@ from .inspection import (
     resolve_molecule_reference,
 )
 from .observation import build_observation_scope, build_terminal_title
+from .projection import (
+    ProjectedAtomHit,
+    Viewport,
+    _compute_viewport,
+    build_atom_hit_map,
+    viewport_from_bounds,
+)
 from .state import (
     TerminalCameraState,
     TerminalDisplayState,
