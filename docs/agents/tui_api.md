@@ -33,7 +33,7 @@ payload = observation.as_dict()
   Snapshot-registry operations (`save_view`, `list_views`) do not alter active
   view state and therefore do not increment it.
 - `observe()` returns `TerminalObservation` with schema
-  `mattervis.tui.observation/v1`. `as_dict()` is JSON-safe.
+  `mattervis.tui.observation/v2`. `as_dict()` is JSON-safe.
 
 The structured observation returns terminal frame text, state, title, scoped
 canonical/display/visible counts, capabilities, and warnings. It intentionally
@@ -53,7 +53,7 @@ front/back answers, collision scores, or a recommended camera.
 | `set_selection_mode(active)` | Enter or leave atom selection while retaining the current stable atom identity. |
 | `select_atom(reference)`, `select_next(step=...)` | Select by exact reference or traverse visible atoms in stable atom-id order. |
 | `select_direction(dx=..., dy=...)`, `select_screen(row=..., col=...)` | Select from the retained projection hit map; no chemistry is inferred from screen distance. |
-| `select_neighbor(step=...)` | Traverse only bonds already supplied by MolCrysKit/`CrystalIR`. |
+| `select_neighbor(step=...)` | Traverse the manifested `CrystalIR.bonds` topology. Read `topology_provenance.source` in local inspection (also shown in the inspector's `BONDS` header): CIF input reports `molcryskit`; non-CIF adapters may report `distance_heuristic`. |
 | `pin_selection()`, `clear_selection()` | Keep a highlight after leaving Select mode or clear it explicitly. |
 | `focus_local(reference, bond_depth=1)` | Fit one exact displayed atom and its manifested bond neighborhood. |
 | `reset_view()` | Restore startup camera and all-view framing while preserving display settings. |
@@ -145,9 +145,10 @@ site is ordered or major.
 
 - `q/e`, `w/z`, `a/d`: yaw/pitch/roll.
 - Outside Select mode, arrows or `i/j/k/l`: pan.
-- `s`: enter/leave Select mode. In Select mode, arrows choose the nearest atom
-  in that projected direction, `Tab`/`Shift+Tab` traverse stable atom IDs,
-  `[`/`]` traverse manifested bond neighbors, `Enter` pins, and `Esc` clears.
+- `s`: strict toggle for entering/leaving Select mode. In Select mode, `w`/`z`
+  still orbit pitch; arrows choose the nearest atom in that projected direction,
+  `Tab`/`Shift+Tab` traverse stable atom IDs, `[`/`]` traverse manifested bond
+  neighbors, `Enter` pins, and `Esc` clears only the atom selection.
 - Clicking the canvas selects the nearest projected atom.
 - `u` zooms out; `o` zooms in. Existing `+/-` and `[/]` aliases remain.
 - `p`, `c`, `b`, `t`, `m`, `n`, `Shift+L`, `r`: projection, cell, bonds,
@@ -170,13 +171,22 @@ Press `:` in `mat-vis tui` to open a one-line command prompt:
 - `:dihedral A B C D [direct|mic_chain]`
 - `:help`
 
+Supplying a label to `:inspect`, `:stereo`, `:name`, or `:why` intentionally
+makes that exact visible atom the primary selection so the ASCII highlight and
+inspector cannot disagree. Hidden minor-disorder atoms must first be exposed
+with `n`/`show_minor=True`. Omitting the label reads the current selection.
+`:clear` clears both the primary selection and local focus; `Esc` only clears
+the primary selection.
+
 Measurements use the same controller methods as programmatic callers; the UI
-does not implement a second geometry path. Command results are transient view
-text and do not mutate the source structure or manifested topology.
+does not implement a second geometry path. Each measurement command requires
+all atom labels explicitly on the same command line; it never consumes an old
+primary selection as a hidden argument. Command results are transient view text
+and do not mutate the source structure or manifested topology.
 
 ## Visual verification artifacts
 
 The checked-in `verification_screens/tui_controller/` text frames are generated
 by `scripts/10_tui_controller_visuals.py`. They cover initial/orbited mono
 views, focused mono context, disorder-visible molecule mode, and ANSI-colour
-molecule mode for DAP-4 at 80×22.
+molecule mode for DAP-4 at 80×22, plus an active monochrome atom selection.
