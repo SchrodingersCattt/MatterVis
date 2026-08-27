@@ -25,6 +25,7 @@ explicit data.
    - [molecule focus](./references/molecule-highlight.md);
    - [periodic finite views](./references/periodic-finite-views.md);
    - [polyhedra](./references/polyhedra.md);
+   - [atom-centred forces with density fields](./references/atomic-force-vectors.md);
    - [vibration displacement arrows and optional GIFs](./references/vibration-mode-vectors.md);
    - [trajectory animation](./references/trajectory-animation.md);
    - [publication layout](./references/publication-layout.md);

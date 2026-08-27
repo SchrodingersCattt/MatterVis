@@ -75,12 +75,23 @@ interpreted as Å. `tail_offset` can move the rendered origin along the displaye
 direction, but the default is zero: an arrow beginning inside an atom is
 correctly hidden by that atom.
 
+CPU and Plotly honor the same explicit arrow geometry. `shaft_radius`,
+`head_length`, `head_radius`, `head_length_ratio`, `head_radius_ratio`, and
+`sides` may be set at group level or overridden per arrow. Absolute head
+dimensions take precedence over their ratio counterparts. CPU primitives also
+retain overlay opacity and the resolved group/arrow metadata.
+
 For vibration modes, the conventional caller policy is to centre the displayed
 arrow on the equilibrium atom: set `origin = atom_position - display_vector/2`
 and pass `vector = display_vector` in `absolute` mode. Dipoles, forces, and
 polarization vectors usually keep the physical anchor as the tail. This is an
 origin policy rather than a distinct arrow type, so callers may choose either
 convention without changing mesh geometry.
+
+For an atom-centred force, keep `origin` at the nuclear Cartesian position and
+increase one documented group `scale` until the shortest retained arrow
+emerges from the rendered atom. Do not use a positive `tail_offset` merely to
+make an occluded force visible: that changes the displayed physical anchor.
 
 ## Coordinate spaces
 
