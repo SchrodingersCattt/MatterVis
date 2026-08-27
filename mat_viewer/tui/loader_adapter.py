@@ -96,9 +96,8 @@ def _load_bundle(
     )
     analysis = bundle.molcrys_analysis
     site_ids = {
-        int(record.global_index): str(record.site_id)
+        int(record.global_index): _site_id(record)
         for record in analysis.site_records
-        if getattr(record, "site_id", None)
     }
     for atom in ir.atoms:
         atom.atom_id = site_ids.get(atom.source_index, "")
@@ -124,6 +123,19 @@ def _load_bundle(
         if blobs:
             ir.metadata["density_blobs"] = blobs
     return ir
+
+
+def _site_id(record) -> str:
+    """Use the public MCK ID, with a stable pre-contract compatibility ID."""
+    explicit = getattr(record, "site_id", None)
+    if explicit:
+        return str(explicit)
+    molecule_index = int(getattr(record, "molecule_index", -1))
+    local_index = int(getattr(record, "local_index", -1))
+    if molecule_index >= 0 and local_index >= 0:
+        return f"m{molecule_index}:a{local_index}"
+    global_index = int(getattr(record, "global_index", -1))
+    return f"site:{global_index}" if global_index >= 0 else ""
 
 
 def _crystal_ir_from_scene(

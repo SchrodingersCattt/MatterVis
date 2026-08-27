@@ -331,11 +331,7 @@ class TerminalViewController:
         return self._changed()
 
     def select_neighbor(self, *, step: int = 1) -> TerminalObservation:
-        """Move to a neighbor in the manifested ``CrystalIR.bonds`` topology.
-
-        ``crystal.metadata["bond_source"]`` identifies whether that topology
-        came from MolCrysKit or a format adapter's distance heuristic.
-        """
+        """Traverse manifested bonds; ``bond_source`` identifies provenance."""
         current = self._require_selected_index()
         neighbors: set[int] = set()
         for bond in self.crystal.bonds:
