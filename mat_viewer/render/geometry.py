@@ -673,9 +673,13 @@ def arrow_primitive(
     color: Any,
     *,
     shaft_radius: float = 0.08,
+    head_length: float | None = None,
     head_radius_ratio: float = 2.2,
     head_length_ratio: float = 0.28,
+    head_radius: float | None = None,
     sides: int = 12,
+    alpha: float | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> TriangleMeshPrimitive:
     start, tip = _point(origin, name="origin"), _point(end, name="end")
     axis = tip - start
@@ -683,7 +687,20 @@ def arrow_primitive(
     if length < 1e-12:
         raise ValueError("arrow length must be positive")
     direction = axis / length
-    head_length = length * float(head_length_ratio)
+    shaft_radius = _positive(shaft_radius, name="shaft_radius")
+    if head_length is None:
+        head_length_ratio = float(head_length_ratio)
+        if not np.isfinite(head_length_ratio) or not 0.0 < head_length_ratio < 1.0:
+            raise ValueError("head_length_ratio must lie in (0, 1)")
+        head_length = length * head_length_ratio
+    head_length = float(head_length)
+    if not np.isfinite(head_length) or not 0.0 < head_length < length:
+        raise ValueError("head_length must lie between zero and arrow length")
+    if head_radius is None:
+        head_radius = shaft_radius * float(head_radius_ratio)
+    head_radius = float(head_radius)
+    if not np.isfinite(head_radius) or head_radius < shaft_radius:
+        raise ValueError("head_radius must be finite and >= shaft_radius")
     shoulder = tip - direction * head_length
     shaft_vertices, shaft_triangles, shaft_normals = cylinder_mesh(
         start, shoulder, shaft_radius, sides=sides, capped=True
@@ -698,7 +715,7 @@ def arrow_primitive(
     ring_normals = (
         np.cos(angles)[:, None] * radial_u + np.sin(angles)[:, None] * radial_v
     )
-    base = shoulder + shaft_radius * float(head_radius_ratio) * ring_normals
+    base = shoulder + head_radius * ring_normals
     cone_vertices = np.vstack((base, tip))
     cone_normals = np.vstack((ring_normals, direction))
     tip_index = len(base)
@@ -712,8 +729,8 @@ def arrow_primitive(
         vertices=np.vstack((shaft_vertices, cone_vertices)),
         triangles=np.vstack((shaft_triangles, cone_triangles + offset)),
         vertex_normals=np.vstack((shaft_normals, cone_normals)),
-        rgba=color_to_rgba(color),
-        metadata={"kind": "vector"},
+        rgba=color_to_rgba(color, alpha=alpha),
+        metadata={"kind": "vector", **dict(metadata or {})},
     )
 
 

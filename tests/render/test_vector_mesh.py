@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from mat_viewer.render.geometry import arrow_primitive
 from mat_viewer.render.meshes import arrow_mesh_geometry
 
 
@@ -31,3 +32,24 @@ def test_arrow_mesh_has_exact_origin_tip_and_no_degenerate_faces() -> None:
 def test_arrow_mesh_rejects_invalid_geometry(kwargs) -> None:
     with pytest.raises(ValueError):
         arrow_mesh_geometry(**kwargs)
+
+
+def test_backend_neutral_arrow_accepts_absolute_head_geometry_and_alpha() -> None:
+    arrow = arrow_primitive(
+        "force:O1",
+        [0.0, 0.0, 0.0],
+        [1.4, 0.0, 0.0],
+        "#A99C50",
+        shaft_radius=0.08,
+        head_length=0.36,
+        head_radius=0.22,
+        sides=12,
+        alpha=0.72,
+        metadata={"anchor": "atom-center"},
+    )
+
+    assert np.min(arrow.vertices[:, 0]) == pytest.approx(0.0)
+    assert np.max(arrow.vertices[:, 0]) == pytest.approx(1.4)
+    assert np.max(np.abs(arrow.vertices[:, 1])) == pytest.approx(0.22)
+    assert arrow.rgba[-1] == pytest.approx(0.72)
+    assert arrow.metadata == {"kind": "vector", "anchor": "atom-center"}

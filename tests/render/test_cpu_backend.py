@@ -777,12 +777,20 @@ def test_public_vector_overlays_use_declared_magnitude_policy() -> None:
             "magnitude_mode": "scaled",
             "scale": 2.0,
             "color": "#D55E00",
-            "style": {"shaft_radius": 0.05, "sides": 8},
+            "opacity": 0.65,
+            "style": {
+                "shaft_radius": 0.05,
+                "head_length": 0.40,
+                "head_radius": 0.16,
+                "sides": 8,
+            },
             "arrows": [
                 {
                     "id": "atom-0",
                     "origin": [0.0, 0.0, 0.0],
                     "vector": [1.0, 0.0, 0.0],
+                    "tail_offset": 0.20,
+                    "metadata": {"units": "eV/angstrom"},
                 }
             ],
         }
@@ -800,7 +808,13 @@ def test_public_vector_overlays_use_declared_magnitude_policy() -> None:
         if primitive.semantic_id == "vector:mode:atom-0"
     )
     assert isinstance(arrow, TriangleMeshPrimitive)
-    assert np.max(arrow.vertices[:, 0]) == pytest.approx(2.0)
+    assert np.min(arrow.vertices[:, 0]) == pytest.approx(0.20)
+    assert np.max(arrow.vertices[:, 0]) == pytest.approx(2.20)
+    assert np.max(np.abs(arrow.vertices[:, 1])) == pytest.approx(0.16)
+    assert arrow.rgba[-1] == pytest.approx(0.65)
+    assert arrow.metadata["group_id"] == "mode"
+    assert arrow.metadata["arrow_id"] == "atom-0"
+    assert arrow.metadata["units"] == "eV/angstrom"
 
 
 def test_public_vector_overlays_require_explicit_magnitude_policy() -> None:
