@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 
-OBSERVATION_SCHEMA = "mattervis.tui.observation/v1"
+OBSERVATION_SCHEMA = "mattervis.tui.observation/v2"
 
 
 @dataclass(frozen=True)

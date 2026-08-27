@@ -330,8 +330,10 @@ def test_analysis_copies_public_chemistry_and_stereo_records(monkeypatch):
         },
     )
 
-    analysis = molcrys_bridge.analyze_crystal(crystal)
+    geometry_only = molcrys_bridge.analyze_crystal(crystal)
+    analysis = molcrys_bridge.analyze_crystal(crystal, include_chemistry=True)
 
+    assert geometry_only.chemistry is None
     assert analysis.chemistry.source == "molcrys_kit"
     assert analysis.chemistry.warnings == (
         "coordinate-derived bond order",

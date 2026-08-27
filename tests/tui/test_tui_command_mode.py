@@ -239,6 +239,27 @@ def test_select_and_next_commands_update_the_ascii_highlight() -> None:
     assert next_atom is not None and "[B]" in next_atom.frame
 
 
+def test_clear_command_clears_primary_selection_and_local_focus() -> None:
+    app = CrystalTUI(_measurement_crystal(), mono=True, label_mode="label")
+    app.execute_command(":focus B")
+    app.execute_command(":select A")
+
+    text, observation = app.execute_command(":clear")
+
+    assert text == "selection and focus cleared"
+    assert observation is not None
+    assert observation.state.selection.display_index is None
+    assert observation.state.focus.kind is None
+
+
+def test_measurement_commands_require_all_atom_labels_explicitly() -> None:
+    app = CrystalTUI(_measurement_crystal(), mono=True, label_mode="label")
+    app.execute_command(":select A")
+
+    with pytest.raises(ValueError, match="requires 2 explicit atom labels"):
+        app.execute_command(":distance B")
+
+
 def test_s_enters_selection_mode_and_enter_pins_selected_atom() -> None:
     async def exercise() -> None:
         app = CrystalTUI(_measurement_crystal(), mono=True, label_mode="label")

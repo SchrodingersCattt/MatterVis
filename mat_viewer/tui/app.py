@@ -461,7 +461,8 @@ class CrystalTUI(App):
         if name == "clear":
             self._command_selection = []
             self._inspector_view = None
-            return "selection cleared", self.controller.clear_selection()
+            self.controller.clear_selection()
+            return "selection and focus cleared", self.controller.clear_focus()
         if name in {"inspect", "stereo", "name", "why"}:
             if len(args) > 1:
                 raise ValueError(f"{name} accepts at most one atom label")
@@ -512,13 +513,9 @@ class CrystalTUI(App):
         modes = {"direct", "mic", "mic_chain"}
         mode = args[-1] if args and args[-1] in modes else default_mode
         labels = args[:-1] if args and args[-1] in modes else args
-        references: list[str | int | dict[str, str]] = (
-            list(labels) if labels else list(self._command_selection)
-        )
+        references: list[str | int | dict[str, str]] = list(labels)
         if len(references) != count:
-            raise ValueError(
-                f"measurement requires {count} atoms or a {count}-atom selection"
-            )
+            raise ValueError(f"measurement requires {count} explicit atom labels")
         return references, mode
 
     @staticmethod

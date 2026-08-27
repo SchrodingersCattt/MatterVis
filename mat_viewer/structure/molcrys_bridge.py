@@ -684,6 +684,11 @@ def _chemistry_records(crystal, mk) -> CrystalChemistryRecords | None:
     )
 
 
+def chemistry_records(crystal) -> CrystalChemistryRecords | None:
+    """Project MCK chemistry records only when a chemistry consumer asks."""
+    return _chemistry_records(crystal, _require_molcryskit())
+
+
 def _enum_text(value) -> str:
     return str(getattr(value, "value", value))
 
@@ -714,8 +719,8 @@ def _evidence_text(values) -> tuple[str, ...]:
     return tuple(records)
 
 
-def analyze_crystal(crystal) -> CrystalAnalysis:
-    """Build MatterVis lookup tables from MolCrysKit public contracts only."""
+def analyze_crystal(crystal, *, include_chemistry: bool = False) -> CrystalAnalysis:
+    """Build geometry lookup tables, optionally projecting MCK chemistry."""
     mk = _require_molcryskit()
     site_records = tuple(crystal.get_site_records())
     contract_bonds = tuple(crystal.get_bond_records())
@@ -815,7 +820,7 @@ def analyze_crystal(crystal) -> CrystalAnalysis:
         site_records=site_records,
         formula_unit_selection=analyzer.select_formula_unit(),
         ring_records=ring_records,
-        chemistry=_chemistry_records(crystal, mk),
+        chemistry=_chemistry_records(crystal, mk) if include_chemistry else None,
     )
 
 
@@ -826,6 +831,7 @@ def analyze(
     max_atoms=None,
     bond_scale: float = 1.0,
     bond_thresholds=None,
+    include_chemistry: bool = False,
 ):
     """Run MolCrysKit on ``raw_atoms`` (full unit cell) and return a
     :class:`CrystalAnalysis` summarising species + per-FU counts.
@@ -842,7 +848,7 @@ def analyze(
     mk = _require_molcryskit()
     if not raw_atoms:
         crystal = mk["MolecularCrystal"](np.eye(3), [], pbc=(True, True, True))
-        return analyze_crystal(crystal)
+        return analyze_crystal(crystal, include_chemistry=include_chemistry)
 
     ase_atoms = _ase_atoms_from_raw(raw_atoms, M, mk)
     identified = mk["identify_molecules"](
@@ -855,7 +861,7 @@ def analyze(
     crystal = mk["MolecularCrystal"](
         ase_atoms.get_cell(), identified, pbc=tuple(ase_atoms.get_pbc())
     )
-    return analyze_crystal(crystal)
+    return analyze_crystal(crystal, include_chemistry=include_chemistry)
 
 
 def _translate_cluster(raw_atoms, indices, shift_frac, M, cart_positions=None):

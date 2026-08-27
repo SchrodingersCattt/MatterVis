@@ -171,6 +171,11 @@ def inspect_local_geometry(
     for neighbor_index, bond in neighbors:
         direct_vector = np.asarray(crystal.atoms[neighbor_index].cart - center.cart, dtype=float)
         mic_vector, image_shift = _minimum_image_vector(crystal, direct_vector)
+        rendered_image_relation = (
+            bond.image_relation
+            if bond.i == center_index
+            else tuple(-value for value in bond.image_relation)
+        )
         vectors[neighbor_index] = mic_vector
         bond_records.append({
             "neighbor_display_index": neighbor_index,
@@ -182,7 +187,7 @@ def inspect_local_geometry(
             "direct_distance": float(np.linalg.norm(direct_vector)),
             "mic_distance": float(np.linalg.norm(mic_vector)),
             "nearest_image_shift": list(image_shift),
-            "rendered_image_relation": list(bond.image_relation),
+            "rendered_image_relation": list(rendered_image_relation),
         })
 
     angles: list[dict[str, Any]] = []

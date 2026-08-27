@@ -11,7 +11,7 @@ from molcrys_kit.io.cif import identify_molecules
 
 @pytest.mark.skipif(
     not hasattr(molcrys_kit, "infer_chemistry"),
-    reason="requires the MolCrysKit chemistry-contract feature branch",
+    reason="shared gate: requires the MolCrysKit #143 chemistry contract",
 )
 def test_bridge_consumes_real_mck_atom_ids_bonds_entities_and_stereo() -> None:
     directions = np.asarray(
@@ -43,7 +43,7 @@ def test_bridge_consumes_real_mck_atom_ids_bonds_entities_and_stereo() -> None:
         pbc=(False, False, False),
     )
 
-    analysis = molcrys_bridge.analyze_crystal(crystal)
+    analysis = molcrys_bridge.analyze_crystal(crystal, include_chemistry=True)
 
     assert analysis.chemistry is not None
     assert [record.atom_id for record in analysis.chemistry.atoms] == [

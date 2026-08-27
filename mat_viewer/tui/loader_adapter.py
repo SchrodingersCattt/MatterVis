@@ -91,7 +91,7 @@ def _load_bundle(
             "frame_index": frame_index,
             "pbc": source_metadata.get("pbc"),
             "synthetic_cell": source_metadata.get("synthetic_cell", False),
-            "bond_source": ("canonical_scene" if is_cif else "distance_heuristic"),
+            "bond_source": ("molcryskit" if is_cif else "distance_heuristic"),
         }
     )
     analysis = bundle.molcrys_analysis
@@ -102,7 +102,13 @@ def _load_bundle(
     }
     for atom in ir.atoms:
         atom.atom_id = site_ids.get(atom.source_index, "")
-    ir.chemistry = getattr(analysis, "chemistry", None)
+    from ..structure import molcrys_bridge
+
+    chemistry = getattr(analysis, "chemistry", None)
+    source_crystal = getattr(analysis, "crystal", None)
+    if chemistry is None and source_crystal is not None:
+        chemistry = molcrys_bridge.chemistry_records(source_crystal)
+    ir.chemistry = chemistry
     if not is_cif:
         source_indices = {
             index

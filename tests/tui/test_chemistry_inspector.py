@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 
 import numpy as np
 
@@ -148,6 +149,7 @@ def _chemistry_crystal() -> CrystalIR:
         bonds=[BondIR(0, index, float(np.sqrt(3.0))) for index in range(1, 5)],
         chemistry=chemistry,
         metadata={
+            "bond_source": "molcryskit",
             "rings": (
                 {
                     "atom_indices": (0, 1, 2),
@@ -170,6 +172,7 @@ def test_full_inspector_combines_site_bond_entity_stereo_and_crystal_records() -
     assert "formula: [13C]HBrClF" in text
     assert "IUPAC name: bromochlorofluoromethane [provisional; PIN]" in text
     assert "line notation [OpenSMILES 1.0; lossless]: F[C@H](Cl)Br" in text
+    assert "BONDS (4; source=molcryskit)" in text
     assert "Br1  covalent order=1" in text
     assert "rings: 3-member non-aromatic planar" in text
     assert "tetrahedral: R [inferred]" in text
@@ -227,8 +230,45 @@ def test_missing_chemistry_is_explicitly_indeterminate() -> None:
 
     assert "chemistry: unavailable" in controller.inspect_selected()
     assert controller.observe().warnings == (
-        "CHEMISTRY UNAVAILABLE: MolCrysKit records are not attached",
+        "CHEMISTRY NOT AVAILABLE: no MolCrysKit chemistry records for this structure",
     )
+
+
+def test_inspector_matches_bond_semantics_by_oriented_periodic_image() -> None:
+    crystal = _chemistry_crystal()
+    periodic = BondChemistryRecord(
+        atom1_id="m0:a0",
+        atom2_id="m0:a1",
+        order=None,
+        kind="coordination",
+        aromatic=False,
+        atom2_image_shift=(1, 0, 0),
+        stereochemistry=None,
+        evidence=("explicit:unit-test",),
+    )
+    crystal.chemistry = replace(
+        crystal.chemistry,
+        bonds=(periodic, *crystal.chemistry.bonds),
+    )
+
+    text = format_atom_inspector(crystal, 0)
+
+    assert "Br1  covalent order=1" in text
+    assert "Br1  coordination order=?" not in text
+
+
+def test_inspector_names_implicit_hydrogen_parent_in_cip_order() -> None:
+    crystal = _chemistry_crystal()
+    center = replace(
+        crystal.chemistry.atoms[0],
+        cip_order=("m0:a1", "m0:a0:implicit-H"),
+    )
+    crystal.chemistry = replace(
+        crystal.chemistry,
+        atoms=(center, *crystal.chemistry.atoms[1:]),
+    )
+
+    assert "CIP: Br1 > H(implicit on C1)" in format_atom_inspector(crystal, 0)
 
 
 def test_inspector_commands_return_full_plain_text_and_change_panel_view() -> None:

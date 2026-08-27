@@ -471,6 +471,7 @@ def test_non_cif_ir_has_deterministic_identity_and_scopes(tmp_path) -> None:
     assert crystal.canonical_formula == "CO"
     assert crystal.metadata["display_atom_count"] == 2
     assert [atom.source_index for atom in crystal.atoms] == [0, 1]
+    assert [atom.atom_id for atom in crystal.atoms] == ["m0:a0", "m0:a1"]
     assert len({atom.display_copy_id for atom in crystal.atoms}) == 2
 
 

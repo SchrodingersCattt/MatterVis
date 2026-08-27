@@ -472,7 +472,10 @@ def compose_frame(
         # Convert label center to subpixel
         lx = label_center_col * 2 + 1
         ly = label_center_row * 4 + 2
-        leader_color = _tier_color(a.color, a.depth_tier)
+        leader_color = _tier_color(
+            a.color,
+            _TIER_FRONT if a.selected else a.depth_tier,
+        )
         canvas.draw_dashed_line(
             lx, ly, a.px_x, a.px_y, dash=1, gap=1, color=leader_color
         )

@@ -57,7 +57,7 @@ def test_controller_observation_is_json_safe_and_detached() -> None:
     assert first.revision == 0
     assert changed.revision == 1
     assert first.state.camera.azimuth != changed.state.camera.azimuth
-    assert changed.as_dict()["schema"] == "mattervis.tui.observation/v1"
+    assert changed.as_dict()["schema"] == "mattervis.tui.observation/v2"
     assert changed.as_dict()["frame"]["width"] == 40
     json.dumps(changed.as_dict(), allow_nan=False)
     _assert_no_forbidden_observation_keys(changed.as_dict())
@@ -75,6 +75,16 @@ def test_selection_is_visible_in_mono_and_survives_camera_rotation() -> None:
     assert rotated.state.selection.atom_id == "site:C1"
     assert rotated.state.selection.display_index == 0
     assert "[C1]" in rotated.frame
+
+
+def test_molecule_level_keeps_the_selected_atom_marker() -> None:
+    controller = TerminalViewController(
+        _crystal(), width=40, height=12, mono=True, display_level="molecule"
+    )
+
+    selected = controller.select_atom("C1")
+
+    assert "[C1]" in selected.frame
 
 
 def test_hit_map_and_atom_neighbor_traversal_are_deterministic() -> None:

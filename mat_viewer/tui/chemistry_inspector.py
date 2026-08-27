@@ -12,7 +12,9 @@ def chemistry_warnings(crystal) -> tuple[str, ...]:
     """Return warnings that must remain visible in the primary TUI view."""
     chemistry = crystal.chemistry
     if chemistry is None:
-        return ("CHEMISTRY UNAVAILABLE: MolCrysKit records are not attached",)
+        return (
+            "CHEMISTRY NOT AVAILABLE: no MolCrysKit chemistry records for this structure",
+        )
     values = list(chemistry.warnings)
     if chemistry.status not in {"explicit", "confirmed"}:
         values.insert(
@@ -121,11 +123,21 @@ def _entity_lines(chemistry, entity) -> list[str]:
 
 
 def _bond_lines(crystal, atom, geometry) -> list[str]:
-    lines = [f"BONDS ({geometry['coordination_number']})"]
+    provenance = geometry["topology_provenance"]
+    lines = [
+        f"BONDS ({geometry['coordination_number']}; source={provenance['source']})"
+    ]
     chemistry = crystal.chemistry
+    bond_index = _bond_index(chemistry)
     for bond in geometry["bonds"]:
         neighbor_id = bond.get("neighbor_atom_id", "")
-        chemical_bond = _find_bond(chemistry, atom.atom_id, neighbor_id)
+        chemical_bond = bond_index.get(
+            (
+                atom.atom_id,
+                neighbor_id,
+                tuple(bond["rendered_image_relation"]),
+            )
+        )
         lines.append(
             f"- {bond['neighbor_label']}  {_bond_semantics(chemical_bond)}  "
             f"{bond['mic_distance']:.3f} A image={_shift_text(tuple(bond['nearest_image_shift']))}"
@@ -159,7 +171,14 @@ def _stereo_text(crystal, atom, record) -> str:
         f"{record.stereo_kind}: {descriptor} [{record.stereo_status or record.status}]"
     )
     if record.cip_order:
-        labels = [_atom_label_for_id(crystal, atom_id) for atom_id in record.cip_order]
+        labels_by_id = {
+            item.atom_id: terminal_text(item.display_label)
+            for item in crystal.atoms
+            if item.atom_id
+        }
+        labels = [
+            _atom_label_for_id(labels_by_id, atom_id) for atom_id in record.cip_order
+        ]
         lines.append("CIP: " + " > ".join(labels))
     if record.stereo_reason:
         lines.append("reason: " + terminal_text(record.stereo_reason))
@@ -297,17 +316,15 @@ def _crystal_lines(crystal, chemistry) -> list[str]:
     return lines
 
 
-def _find_bond(chemistry, left_id: str, right_id: str):
-    if chemistry is None or not left_id or not right_id:
-        return None
-    return next(
-        (
-            bond
-            for bond in chemistry.bonds
-            if {bond.atom1_id, bond.atom2_id} == {left_id, right_id}
-        ),
-        None,
-    )
+def _bond_index(chemistry) -> dict[tuple[str, str, tuple[int, int, int]], object]:
+    if chemistry is None:
+        return {}
+    index = {}
+    for bond in chemistry.bonds:
+        shift = tuple(bond.atom2_image_shift)
+        index[(bond.atom1_id, bond.atom2_id, shift)] = bond
+        index[(bond.atom2_id, bond.atom1_id, tuple(-value for value in shift))] = bond
+    return index
 
 
 def _bond_semantics(record) -> str:
@@ -366,15 +383,12 @@ def _formula_sort_key(symbol: str) -> tuple[int, str, str]:
     return (0 if bare == "C" else 1 if bare == "H" else 2, bare, symbol)
 
 
-def _atom_label_for_id(crystal, atom_id: str) -> str:
+def _atom_label_for_id(labels_by_id: dict[str, str], atom_id: str) -> str:
     if atom_id.endswith(":implicit-H"):
-        return "implicit-H"
-    atom = next((item for item in crystal.atoms if item.atom_id == atom_id), None)
-    return (
-        terminal_text(atom.display_label)
-        if atom is not None
-        else terminal_text(atom_id)
-    )
+        parent_id = atom_id.removesuffix(":implicit-H")
+        parent = labels_by_id.get(parent_id, terminal_text(parent_id))
+        return f"H(implicit on {parent})"
+    return labels_by_id.get(atom_id, terminal_text(atom_id))
 
 
 def _relevant_warnings(chemistry, entity) -> tuple[str, ...]:
