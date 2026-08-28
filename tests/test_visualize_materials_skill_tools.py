@@ -90,6 +90,11 @@ def test_skill_routes_publication_and_multi_structure_guidance() -> None:
     )
     assert "source Cartesian frame" in vectors
     assert "synthetic-cell translation internally" in vectors
+    polyhedra = (SKILL / "references" / "polyhedra.md").read_text(encoding="utf-8")
+    assert "every matching source center in the primary" in polyhedra
+    assert '"center_images": true' in polyhedra
+    assert "`instance_overrides`" in polyhedra
+    assert "`effective_colors`" in polyhedra
 
 
 def test_released_molcryskit_minimum_is_consistent() -> None:
