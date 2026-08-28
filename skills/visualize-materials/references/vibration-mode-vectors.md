@@ -22,7 +22,10 @@ Use public native world-space `vector_overlays`; these arrows rotate with the
 structure and participate in 3D occlusion. Keep origins and endpoints in the
 input structure's source Cartesian frame; MatterVis applies any nonperiodic
 synthetic-cell translation internally. For a vibration, set `anchor: center`
-so the equilibrium atom lies at the midpoint of the displayed displacement.
+with `origin` equal to the equilibrium atom position. MatterVis then resolves
+the visible arrow as
+`tail = r_i - s q_i / 2`, `tip = r_i + s q_i / 2`, so its geometric midpoint
+is exactly the atom. Do not pre-shift the origin as well.
 
 Dipoles, forces, and polarization vectors normally start at their physical
 anchor instead. Centring is a caller policy, not a separate mesh primitive:
@@ -40,11 +43,11 @@ After applying the scale and centring above, save the arrows as a JSON list:
     "magnitude_mode": "absolute",
     "anchor": "center",
     "viewport_policy": "include",
-    "color": "#D55E00",
+    "color": "#0072B2",
     "style": {
-      "shaft_radius": 0.045,
-      "head_radius_ratio": 1.8,
-      "head_length_ratio": 0.20,
+      "shaft_radius": 0.030,
+      "head_radius_ratio": 2.15,
+      "head_length_ratio": 0.22,
       "sides": 16
     },
     "arrows": [
@@ -62,7 +65,9 @@ mat-vis render equilibrium.xyz -o mode.png --backend cpu --json \
 Use `absolute` because the caller already applied the visual scale. This static
 path needs neither Plotly nor Chrome. Keep the shaft distinctly thinner than
 ordinary bonds and the arrowhead short enough that vectors do not obscure atom
-colours or local bonding.
+colours or local bonding. For a small-molecule first candidate, use an atom
+scale around `0.65--0.75` and a bond radius around `0.10`; inspect rather than
+treating those values as chemistry.
 
 
 ## Scale and selection
@@ -76,8 +81,10 @@ colours or local bonding.
   scale before changing the physical anchor convention.
 - Apply a shared amplification at either group level or in the prepared
   vectors. Do not repeat the same scale at both group and arrow level.
-- If arrows are filtered, use a declared relative threshold such as
-  `norm(q_i) / max(norm(q)) >= eta`; hidden arrows do not imply zero motion.
+- Avoid tiny arrowhead-only fragments. For the first static candidate, filter
+  by `norm(q_i) / max(norm(q)) >= 0.10`; lower or remove that threshold only
+  when weak motion is part of the requested evidence. Hidden arrows do not
+  imply zero motion.
 - Record raw units, scale, maximum display length, and `eta` in provenance.
 
 ## Semantics
