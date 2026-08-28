@@ -98,7 +98,7 @@ def test_camera_fit_includes_polyhedron_vertices() -> None:
         "spec_results": [
             {
                 "overlays": [
-                    {"shell_coords": [[-12.0, 0.0, 0.0], [12.0, 0.0, 0.0]]}
+                    {"shell_coords": [[0.0, -12.0, 0.0], [0.0, 12.0, 0.0]]}
                 ]
             }
         ]
