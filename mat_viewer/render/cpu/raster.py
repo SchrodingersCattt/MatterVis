@@ -1,6 +1,7 @@
 """Deterministic CPU rasterizer with Z-buffer and per-pixel A-buffer."""
 
 from __future__ import annotations
+import colorsys
 
 from dataclasses import dataclass
 from hashlib import sha256
@@ -20,6 +21,21 @@ from ..contracts import (
 )
 
 _DEPTH_EPSILON = 1.0e-9
+
+
+def _polyhedron_face_rgb(rgb: np.ndarray, lambert: float) -> np.ndarray:
+    """Shade a polyhedron face in HLS space while preserving its base hue."""
+    red, green, blue = np.clip(np.asarray(rgb, dtype=float), 0.0, 1.0)
+    hue, lightness, saturation = colorsys.rgb_to_hls(red, green, blue)
+    strength = float(np.clip(lambert, 0.0, 1.0))
+    dark = max(0.08, lightness * 0.62)
+    bright = min(0.90, lightness + (1.0 - lightness) * 0.28)
+    shaded = colorsys.hls_to_rgb(
+        hue,
+        dark + (bright - dark) * strength,
+        min(1.0, saturation * (0.90 + 0.10 * strength)),
+    )
+    return np.asarray(shaded, dtype=float)
 
 
 @dataclass(frozen=True, slots=True)
@@ -530,11 +546,13 @@ def _rasterize_mesh(
         ):
             continue
         if vertex_rgb_all is None:
-            illumination = 0.68 + 0.32 * abs(
-                float(camera_normals[triangle_index] @ light)
-            )
+            lambert = abs(float(camera_normals[triangle_index] @ light))
+            if primitive.metadata.get("kind") == "polyhedron":
+                face_rgb = _polyhedron_face_rgb(primitive.rgba[:3], lambert)
+            else:
+                face_rgb = np.asarray(primitive.rgba[:3]) * (0.68 + 0.32 * lambert)
             triangle_rgb = np.tile(
-                np.asarray(primitive.rgba[:3]) * illumination,
+                face_rgb,
                 (3, 1),
             )
         else:

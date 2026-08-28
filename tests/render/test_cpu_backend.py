@@ -1513,8 +1513,8 @@ def test_structure_input_view_rebuilds_loaded_bundle_with_canonical_display_mode
     assert formula.metadata["display_mode"] == "formula_unit"
     assert unit_cell.metadata["display_mode"] == "unit_cell"
     assert [item[1:] for item in calls] == [
-        ("formula_unit", False, True, False),
-        ("unit_cell", False, True, False),
+        ("formula_unit", True, True, False),
+        ("unit_cell", True, True, False),
     ]
 
 

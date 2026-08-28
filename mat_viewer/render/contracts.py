@@ -186,7 +186,7 @@ class RenderSpec:
     background: RGBA = (1.0, 1.0, 1.0, 1.0)
     atom_scale: float = 1.0
     bond_radius: float = 0.15
-    show_hydrogen: bool = False
+    show_hydrogen: bool = True
     show_cell: bool = True
     show_axes: bool = False
     show_labels: bool = False

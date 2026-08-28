@@ -171,14 +171,15 @@ substitutes one frame backend for another.
 
 ### Camera
 
-Periodic static renders default to a reproducible view from the structure toward
-`+c`, with `+b` pointing up. Nonperiodic inputs fit the atomic coordinates and do
-not treat an ASE padding box as crystallographic data. Camera direction options
-are mutually exclusive.
+Periodic static renders default to an orthographic view normal to the largest
+lattice face: `ab -> c*`, `ac -> b*`, or `bc -> a*`, with `c*` winning
+equal-area ties. Nonperiodic inputs fit the atomic coordinates and do not treat
+an ASE padding box as crystallographic data. Camera direction options are
+mutually exclusive.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--camera-axis a|b|c|a*|b*|c*` | `c` | Align to a real or reciprocal lattice axis |
+| `--camera-axis a|b|c|a*|b*|c*` | auto | Override the largest-face default with a real or reciprocal lattice axis |
 | `--view-direction X Y Z` | — | Cartesian direction from scene toward camera |
 | `--camera-position X Y Z` | — | Explicit absolute Cartesian camera position in Å |
 | `--camera-up X Y Z` | `+b` / `+Y` | Preferred screen-up direction |
@@ -196,7 +197,7 @@ export requires `[plotly-export]`; a failure is reported without substitution.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--show-hydrogen` / `--no-hydrogen` | off | Show/hide hydrogen atoms |
+| `--show-hydrogen` / `--no-hydrogen` | on | Show/hide hydrogen atoms |
 | `--show-cell` / `--no-cell` | auto | On for periodic input and off for nonperiodic or synthetic-cell input; explicit flags override |
 | `--show-labels` / `--no-labels` | off | Show/hide atom labels |
 | `--show-axes` / `--no-axes` | off | Show/hide the camera-projected crystallographic a/b/c compass |
@@ -262,7 +263,10 @@ Legacy `--config`, `--view-weights`, `--publication-*`, `--title`, and
 silently ignored. Polyhedron overlays remain available through repeatable
 `--polyhedron` JSON objects plus `--polyhedron-site` and
 `--polyhedron-cutoff`; they use the base CPU topology path and require no Web
-module.
+module. An atom-level specification draws every matching visible centre by
+default and colours each hull from its centre element, with same-hue face
+lightness. The JSON `site` or `sites` keys and `--polyhedron-site` select
+source atom indices; molecule-level selectors use source fragment indices.
 
 
 ---

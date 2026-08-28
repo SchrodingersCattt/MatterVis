@@ -87,19 +87,19 @@ def test_animation_camera_fits_all_selected_frames() -> None:
     )
 
     assert animation.target == pytest.approx([0.0, 0.0, 0.0])
-    assert animation.ortho_scale == pytest.approx(4.48)
-    assert static.ortho_scale == pytest.approx(1.12)
+    assert animation.ortho_scale == pytest.approx(3.584)
+    assert static.ortho_scale == pytest.approx(0.896)
 
 
-def test_camera_defaults_to_orthographic_positive_c_axis() -> None:
+def test_camera_defaults_to_normal_of_largest_face() -> None:
     structure = _structure()
     matrix_before = structure.frames[0].bundle.M.copy()
     camera = _camera_spec(structure, _camera_args(), display="unit_cell")
 
     direction = np.asarray(camera.position) - np.asarray(camera.target)
     direction /= np.linalg.norm(direction)
-    assert direction == pytest.approx([0.0, 0.0, 1.0])
-    assert camera.up == pytest.approx([0.0, 1.0, 0.0])
+    assert direction == pytest.approx([1.0, 0.0, 0.0])
+    assert camera.up == pytest.approx([0.0, 0.0, 1.0])
     assert camera.projection == "orthographic"
     assert structure.frames[0].bundle.M == pytest.approx(matrix_before)
 
@@ -147,7 +147,7 @@ def test_camera_fit_includes_the_visible_unit_cell() -> None:
     )
 
     assert camera.target == pytest.approx([1.0, 1.5, 2.0])
-    assert camera.ortho_scale == pytest.approx(2.8)
+    assert camera.ortho_scale == pytest.approx(3.36)
 
     atoms_only = _camera_spec(
         structure,
@@ -399,3 +399,139 @@ def test_check_exposes_camera_and_mesh_quality_cli_parity(
     assert payload["camera"]["clip"] == [0.2, 400.0]
     assert payload["render"]["sphere_detail"] == [18, 30]
     assert payload["render"]["cylinder_sides"] == 20
+
+
+def test_camera_defaults_to_normal_of_largest_lattice_face() -> None:
+    structure = _structure()
+    structure.frames[0].bundle.M = np.diag([16.784, 51.5853, 54.3902])
+
+    camera = _camera_spec(structure, _camera_args(), display="unit_cell")
+
+    direction = np.asarray(camera.position) - np.asarray(camera.target)
+    direction /= np.linalg.norm(direction)
+    assert direction == pytest.approx([1.0, 0.0, 0.0])
+
+
+def test_explicit_camera_axis_overrides_largest_face_default() -> None:
+    structure = _structure()
+    structure.frames[0].bundle.M = np.diag([16.784, 51.5853, 54.3902])
+
+    camera = _camera_spec(
+        structure,
+        _camera_args(camera_axis="c"),
+        display="unit_cell",
+    )
+
+    direction = np.asarray(camera.position) - np.asarray(camera.target)
+    direction /= np.linalg.norm(direction)
+    assert direction == pytest.approx([0.0, 0.0, 1.0])
+
+
+def test_cli_shows_hydrogen_by_default_and_allows_explicit_hiding(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        capability_module.CapabilitySpec, "available", lambda self: True
+    )
+    base = [
+        "render",
+        str(tmp_path / "not-loaded.xyz"),
+        "-o",
+        str(tmp_path / "not-created.png"),
+        "--backend",
+        "cpu",
+        "--check",
+        "--json",
+    ]
+
+    main(base)
+    assert json.loads(capsys.readouterr().out)["show_hydrogen"] is True
+
+    main([*base, "--no-hydrogen"])
+    assert json.loads(capsys.readouterr().out)["show_hydrogen"] is False
+
+
+def test_atom_polyhedron_defaults_to_all_centres_and_center_element_color(
+    monkeypatch,
+) -> None:
+    import mat_viewer.topology as topology_module
+
+    raw_atoms = [
+        {"frac": [0.1, 0.1, 0.1]},
+        {"frac": [0.6, 0.6, 0.6]},
+    ]
+    draw_atoms = [
+        {
+            "elem": "Al",
+            "label": "Al1",
+            "_source_index": 0,
+            "_wrapped_frac": [0.1, 0.1, 0.1],
+            "frac": [0.1, 0.1, 0.1],
+            "cart": [1.0, 1.0, 1.0],
+            "color": "#BFA6A6",
+        },
+        {
+            "elem": "Al",
+            "label": "Al2",
+            "_source_index": 1,
+            "_wrapped_frac": [0.6, 0.6, 0.6],
+            "frac": [0.6, 0.6, 0.6],
+            "cart": [6.0, 6.0, 6.0],
+            "color": "#BFA6A6",
+        },
+    ]
+    bundle = SimpleNamespace(
+        raw_atoms=raw_atoms,
+        scene={"draw_atoms": draw_atoms, "fragment_table": []},
+        fragment_table=[],
+        topology_fragment_table=[],
+    )
+    structure = SimpleNamespace(frames=(SimpleNamespace(bundle=bundle),))
+
+    def fake_shells(_bundle, _cutoff, *, source_indices, **_kwargs):
+        results = {}
+        for source_index in source_indices:
+            center = np.asarray(draw_atoms[source_index]["cart"], dtype=float)
+            shell = center + np.asarray(
+                [
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                    [0.0, 0.0, 1.0],
+                    [-1.0, -1.0, -1.0],
+                ]
+            )
+            results[source_index] = {
+                "source_center_coords": center.tolist(),
+                "source_shell_coords": shell.tolist(),
+                "source_hull": {
+                    "vertices": shell.tolist(),
+                    "simplices": [[0, 1, 2], [0, 1, 3]],
+                },
+                "distances": [1.0] * 4,
+            }
+        return results
+
+    monkeypatch.setattr(
+        topology_module,
+        "extract_atom_coordination_shells",
+        fake_shells,
+    )
+    result = build_topology_data(
+        structure,
+        ['{"center":"Al","ligand":"O","level":"atom"}'],
+    )
+
+    overlays = result["spec_results"][0]["overlays"]
+    assert [overlay["center_source_index"] for overlay in overlays] == [0, 1]
+    assert {overlay["color"] for overlay in overlays} == {"#BFA6A6"}
+
+    selected = build_topology_data(
+        structure,
+        ['{"center":"Al","ligand":"O","level":"atom","sites":[1]}'],
+    )
+    assert [
+        overlay["center_source_index"]
+        for overlay in selected["spec_results"][0]["overlays"]
+    ] == [1]

@@ -149,11 +149,10 @@ def fit_shared_frame_camera(
     elif camera_position is not None:
         direction = np.asarray(camera_position, dtype=float) - target
     else:
-        axis = camera_axis or "a"
-        if axis.endswith("*"):
-            direction = np.linalg.inv(matrix).T[{"a*": 0, "b*": 1, "c*": 2}[axis]]
-        else:
-            direction = matrix[{"a": 0, "b": 1, "c": 2}[axis]]
+        from ..math.rotation import axis_camera_basis, largest_face_camera_axis
+
+        axis = camera_axis or largest_face_camera_axis(matrix)
+        direction = axis_camera_basis(matrix, axis)[2]
     norm = float(np.linalg.norm(direction))
     if norm <= 1.0e-12:
         raise ValueError("camera direction must be non-zero")

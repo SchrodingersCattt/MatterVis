@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import colorsys
+
 from typing import Any, Mapping
 
 import numpy as np
 
 from .contracts import Primitive, TriangleMeshPrimitive
 from .geometry import (
+    color_to_rgba,
     mesh_primitive,
     polyhedron_edges_primitive,
     polyhedron_primitive,
@@ -23,6 +26,18 @@ def _value(record: Any, *names: str, default: Any = ...):
     if default is not ...:
         return default
     raise ValueError(f"record is missing required field; tried {', '.join(names)}")
+
+
+def _polyhedron_edge_color(color: Any) -> tuple[float, float, float, float]:
+    """Return a darker same-hue edge color for a polyhedron material."""
+    red, green, blue, alpha = color_to_rgba(color)
+    hue, lightness, saturation = colorsys.rgb_to_hls(red, green, blue)
+    edge_rgb = colorsys.hls_to_rgb(
+        hue,
+        max(0.06, lightness * 0.45),
+        min(1.0, saturation * 1.05),
+    )
+    return (*edge_rgb, alpha)
 
 
 def polyhedron_primitives(
@@ -70,7 +85,7 @@ def polyhedron_primitives(
                 f"{semantic_id}:edges",
                 vertices,
                 faces,
-                color,
+                _polyhedron_edge_color(color),
                 alpha=float(_value(item, "edge_opacity", default=0.9)),
             )
         )

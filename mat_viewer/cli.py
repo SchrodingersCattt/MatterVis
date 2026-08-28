@@ -103,7 +103,7 @@ def _build_render_parser(
         elif action.dest == "polyhedron":
             action.help = (
                 "Add a base-renderer polyhedron from JSON. Required: center, "
-                "ligand. Optional: id, level, center_kind, cutoff, "
+                "ligand. Optional: id, level, site, sites, center_kind, cutoff, "
                 "hard_cutoff, fallback_max, color, opacity, edge_opacity."
             )
     parser.add_argument(
@@ -731,6 +731,7 @@ def _render_check_payload(args: argparse.Namespace) -> dict:
             "sphere_detail": list(args.sphere_detail),
             "cylinder_sides": args.cylinder_sides,
         },
+        "show_hydrogen": args.show_hydrogen,
         "source": {"path": str(Path(args.input).expanduser().resolve())},
         "style_groups": {
             "atom": _style_groups(args)[0],
@@ -912,19 +913,24 @@ def _camera_spec(structure, args: argparse.Namespace, *, display: str):
             ortho_scale=ortho_scale,
         )
 
+    from .math.rotation import axis_camera_basis, largest_face_camera_axis
+
     if args.view_direction is not None:
         direction = np.asarray(args.view_direction, dtype=float)
+        default_up = matrix[1]
     else:
-        axis = args.camera_axis or "c"
-        if axis.endswith("*"):
-            reciprocal = np.linalg.inv(matrix).T
-            direction = reciprocal[{"a*": 0, "b*": 1, "c*": 2}[axis]]
-        else:
-            direction = matrix[{"a": 0, "b": 1, "c": 2}[axis]]
+        axis = args.camera_axis or largest_face_camera_axis(matrix)
+        basis = axis_camera_basis(matrix, axis)
+        direction = basis[2]
+        default_up = basis[1]
     direction_norm = float(np.linalg.norm(direction))
     if direction_norm < 1.0e-12:
         raise ValueError("direction must be non-zero")
-    up = np.array(args.camera_up or matrix[1], dtype=float, copy=True)
+    up = np.array(
+        args.camera_up if args.camera_up is not None else default_up,
+        dtype=float,
+        copy=True,
+    )
     if np.linalg.norm(np.cross(direction, up)) < 1e-10:
         up = np.array([0.0, 1.0, 0.0])
         if np.linalg.norm(np.cross(direction, up)) < 1e-10:

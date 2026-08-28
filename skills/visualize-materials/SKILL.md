@@ -55,10 +55,10 @@ explicit data.
   MolCrysKit `bond_scale` before introducing element-pair thresholds. Use the
   same scale for source molecule perception and displayed bonds, then verify
   intended bonds and false contacts on the actual structure.
-- Periodic inputs default to orthographic lattice `+c`. Nonperiodic inputs use
-  atom-content fitting, `cluster`, and no cell; a synthetic ASE padding cell has
-  no crystallographic meaning. Explicit user choices override these defaults and
-  must be recorded.
+- Periodic inputs default to an orthographic view normal to the largest lattice
+  face; equal-area ties prefer `c*`. Nonperiodic inputs use atom-content fitting,
+  `cluster`, and no cell; a synthetic ASE padding cell has no crystallographic
+  meaning. Explicit user choices override these defaults and must be recorded.
 - Use MolCrysKit site, bond, ring, molecule, PBC, and formula-unit records. Do
   not reconstruct chemical identity from screen proximity.
 - A finite image of a periodic chain, layer, or framework must follow

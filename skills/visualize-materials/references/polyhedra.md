@@ -17,9 +17,9 @@ Atom-centred coordination polyhedron:
 ```bash
 mat-vis render INPUT.cif -o OUTPUT.png --backend cpu \
   --view unit_cell --style ball --shading smooth \
-  --camera-axis c --orthogonal --show-cell --show-axes \
+  --orthogonal --show-cell --show-axes \
   --cell-width 2 \
-  --polyhedron '{"center":"Pb","ligand":"I","level":"atom","fallback_max":6,"color":"#ff6600"}' \
+  --polyhedron '{"center":"Pb","ligand":"I","level":"atom","fallback_max":6}' \
   --polyhedron-cutoff 3.5
 ```
 
@@ -28,7 +28,7 @@ Molecule-centred packing shell:
 ```bash
 mat-vis render INPUT.cif -o OUTPUT.png --backend cpu \
   --view unit_cell --style ball_stick --shading smooth \
-  --camera-axis c --orthogonal \
+  --orthogonal \
   --polyhedron '{"center":"C6N2","ligand":"ClO4","level":"molecule","center_kind":"heavy_centroid","color":"#3366cc"}' \
   --polyhedron-cutoff 10.0
 ```
@@ -36,9 +36,10 @@ mat-vis render INPUT.cif -o OUTPUT.png --backend cpu \
 Repeat `--polyhedron` for multiple overlays. Optional JSON keys are `id` (or
 its alias `spec_id`), `color`, `opacity`, `edge_opacity`, `level`,
 `center_kind`, `enforce_enclosure`, `centroid_offset_frac`, `cutoff`,
-`hard_cutoff`, and `fallback_max`. Unknown or conflicting alias keys fail
-explicitly. `--polyhedron-site INDEX` restricts analysis to that displayed
-fragment index; without it, the CLI draws every matching displayed fragment.
+`hard_cutoff`, `fallback_max`, and `site` or `sites`. Unknown or
+conflicting alias keys fail explicitly. At atom level, `site`, `sites`, and
+`--polyhedron-site` select source atom indices. At molecule level they select
+source fragment indices.
 
 ## Semantics
 
@@ -55,10 +56,9 @@ fragment index; without it, the CLI draws every matching displayed fragment.
 
 - Atom level uses element symbols. `cutoff` is the hard radial cap and an
   explicit `hard_cutoff` or `center_kind` is rejected as molecule-only. A
-  centre element inside a polyatomic fragment is supported; when the fragment
-  contains multiple atoms of that element,
-  MolCrysKit/MatterVis currently select the matching record nearest the fragment
-  centre rather than an exact atom label.
+  specification draws every matching visible centre by default. Use `site` or
+  `sites` only to request a source-atom subset. The default hull hue follows
+  the centre element; face lighting varies lightness while preserving that hue.
 - Molecule level uses compact molecular formulas and canonical
   `source_molecule_index`. `center_kind` may be `centroid`, `com`, or
   `heavy_centroid`. The normal `cutoff` is the candidate search radius for the

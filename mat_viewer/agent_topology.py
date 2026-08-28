@@ -25,7 +25,38 @@ _POLYHEDRON_KEYS = {
     "color",
     "opacity",
     "edge_opacity",
+    "site",
+    "sites",
 }
+
+
+def _parse_site_indices(payload: dict[str, Any], index: int) -> tuple[int, ...] | None:
+    if "site" in payload and "sites" in payload:
+        raise ValueError(f"polyhedron {index + 1}: use site or sites, not both")
+    raw = payload.get("sites", payload.get("site"))
+    if raw is None:
+        return None
+    values = raw if isinstance(raw, list) else [raw]
+    if not values:
+        raise ValueError(f"polyhedron {index + 1}: sites must not be empty")
+    sites: list[int] = []
+    for value in values:
+        if isinstance(value, bool):
+            raise ValueError(
+                f"polyhedron {index + 1}: site indices must be non-negative integers"
+            )
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"polyhedron {index + 1}: site indices must be non-negative integers"
+            ) from exc
+        if not np.isfinite(numeric) or int(numeric) != numeric or int(numeric) < 0:
+            raise ValueError(
+                f"polyhedron {index + 1}: site indices must be non-negative integers"
+            )
+        sites.append(int(numeric))
+    return tuple(dict.fromkeys(sites))
 
 
 def parse_polyhedron_specs(raw_specs: Iterable[str]) -> list[dict[str, Any]]:
@@ -128,6 +159,7 @@ def parse_polyhedron_specs(raw_specs: Iterable[str]) -> list[dict[str, Any]]:
                 f"polyhedron {index + 1}: centroid_offset_frac must be finite "
                 "and non-negative"
             )
+        sites = _parse_site_indices(payload, index)
         spec_id = str(
             payload.get("spec_id") or payload.get("id") or f"polyhedron-{index + 1}"
         )
@@ -148,7 +180,12 @@ def parse_polyhedron_specs(raw_specs: Iterable[str]) -> list[dict[str, Any]]:
                     int(float(fallback_max)) if fallback_max is not None else None
                 ),
                 "cutoff": float(local_cutoff) if local_cutoff is not None else None,
-                "color": str(payload.get("color") or "#7C5CBF"),
+                "sites": sites,
+                "color": (
+                    str(payload["color"])
+                    if payload.get("color")
+                    else (None if level == "atom" else "#7C5CBF")
+                ),
                 "opacity": opacity,
                 "edge_opacity": edge_opacity,
             }
@@ -217,15 +254,78 @@ def build_topology_data(
     bundle = selected.bundle
     scene = getattr(bundle, "scene", {}) or {}
     fragments = list(scene.get("fragment_table") or bundle.fragment_table or ())
-    if not fragments:
-        raise ValueError("polyhedra require at least one MolCrysKit fragment")
 
-    from .topology import analyze_topology
+    from .topology import (
+        analyze_topology,
+        atom_overlay,
+        display_atom_centers_for_spec,
+        extract_atom_coordination_shells,
+    )
 
     spec_results: list[dict[str, Any]] = []
     warnings: list[str] = []
     for spec in specs:
+        if spec["level"] == "atom":
+            selected_sites = set(spec["sites"]) if spec["sites"] is not None else None
+            if site_index is not None:
+                selected_sites = (
+                    {int(site_index)}
+                    if selected_sites is None
+                    else selected_sites & {int(site_index)}
+                )
+            centers = display_atom_centers_for_spec(
+                bundle,
+                scene,
+                spec,
+                source_indices=selected_sites,
+            )
+            if not centers:
+                raise ValueError(
+                    f"no displayed {spec['center_species']} atom matches "
+                    f"polyhedron {spec['id']}"
+                )
+            shells = extract_atom_coordination_shells(
+                bundle,
+                float(spec["cutoff"] or cutoff),
+                center_species=spec["center_species"],
+                ligand_species=spec["ligand_species"],
+                source_indices={center["source_index"] for center in centers},
+                enforce_enclosure=spec["enforce_enclosure"],
+                centroid_offset_frac=spec["centroid_offset_frac"],
+                fallback_max=spec["fallback_max"],
+            )
+            overlays: list[dict[str, Any]] = []
+            for center in centers:
+                shell = shells.get(center["source_index"])
+                if shell is None:
+                    continue
+                overlay = atom_overlay(shell, center)
+                hull = overlay.get("hull") or {}
+                if len(overlay.get("shell_coords") or []) < 4 or not hull.get(
+                    "simplices"
+                ):
+                    warnings.append(
+                        f"polyhedron {spec['id']} skipped source atom "
+                        f"{center['source_index']}: shell is not a drawable "
+                        "non-coplanar hull"
+                    )
+                    continue
+                overlay["color"] = spec["color"] or overlay["color"]
+                overlays.append(overlay)
+            if not overlays:
+                raise ValueError(
+                    f"polyhedron {spec['id']} has no drawable non-coplanar shell"
+                )
+            spec_results.append({**spec, "overlays": overlays})
+            continue
+
         candidates = [fragment for fragment in fragments if _matches(fragment, spec)]
+        if spec["sites"] is not None:
+            candidates = [
+                fragment
+                for fragment in candidates
+                if int(fragment.get("index", -1)) in set(spec["sites"])
+            ]
         if site_index is not None:
             candidates = [
                 fragment
