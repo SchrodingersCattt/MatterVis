@@ -835,21 +835,6 @@ def _scene_fit(
     return scene, center, max(radius, 1.0), fit_points
 
 
-def _topology_fit_points(topology_data) -> np.ndarray:
-    """Return finite polyhedron vertices that must remain inside the viewport."""
-    import numpy as np
-
-    points = []
-    for result in (topology_data or {}).get("spec_results") or ():
-        for overlay in result.get("overlays") or ():
-            shell = np.asarray(overlay.get("shell_coords") or (), dtype=float)
-            if shell.ndim == 2 and shell.shape[1:] == (3,) and np.all(
-                np.isfinite(shell)
-            ):
-                points.append(shell)
-    return np.vstack(points) if points else np.zeros((0, 3), dtype=float)
-
-
 def _camera_spec(
     structure,
     args: argparse.Namespace,
@@ -859,6 +844,7 @@ def _camera_spec(
 ):
     import numpy as np
 
+    from .agent_topology import topology_fit_points
     from .render.contracts import CameraSpec
 
     selected = structure.frames[0]
@@ -881,7 +867,7 @@ def _camera_spec(
         include_boundary_replicas=include_boundary_replicas,
         include_cross_boundary_bond_endpoints=include_cross_boundary_bond_endpoints,
     )
-    topology_points = _topology_fit_points(topology_data)
+    topology_points = topology_fit_points(topology_data)
     if len(topology_points):
         fit_points = np.vstack((fit_points, topology_points))
         radius = max(

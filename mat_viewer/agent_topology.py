@@ -405,4 +405,17 @@ def build_topology_data(
     return {"spec_results": spec_results, "warnings": warnings}
 
 
-__all__ = ["build_topology_data", "parse_polyhedron_specs"]
+def topology_fit_points(topology_data) -> np.ndarray:
+    """Return finite polyhedron vertices that must remain inside the viewport."""
+    points = []
+    for result in (topology_data or {}).get("spec_results") or ():
+        for overlay in result.get("overlays") or ():
+            shell = np.asarray(overlay.get("shell_coords") or (), dtype=float)
+            if shell.ndim == 2 and shell.shape[1:] == (3,) and np.all(
+                np.isfinite(shell)
+            ):
+                points.append(shell)
+    return np.vstack(points) if points else np.zeros((0, 3), dtype=float)
+
+
+__all__ = ["build_topology_data", "parse_polyhedron_specs", "topology_fit_points"]
