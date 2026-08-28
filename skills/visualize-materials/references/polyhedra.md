@@ -51,8 +51,9 @@ At molecule level, `site` and `sites` select source fragment indices.
 ## Acceptance
 
 - Require exit 0 and retain the render JSON.
-- Check `polyhedra` for centre count and coordination numbers. Do not describe
-  colors unless requested; then quote `effective_colors` exactly.
+- Check `polyhedra` for centre count, coordination numbers, and `effective_colors`.
+- Do not name or describe a polyhedron color unless requested; if requested, quote
+  `effective_colors` exactly.
 - Confirm the requested cell and a/b/c axes are visible at delivery size.
 - If no centre is found, first compare `mat-vis inspect INPUT --json` with
   `center`, `ligand`, and `level`; do not inspect package internals.

@@ -25,22 +25,21 @@ delivery.
 
 ## Route once
 
-Choose one specialized reference first; do not also load quickstart:
+Read exactly one primary reference: use the first matching line.
 
-- Coordination or packing hulls: [polyhedra](./references/polyhedra.md).
 - Vibration arrows: [vibration vectors](./references/vibration-mode-vectors.md).
 - Trajectory or animation: [trajectory](./references/trajectory-animation.md).
-- Finite periodic views or molecule focus: [periodic views](./references/periodic-finite-views.md)
-  or [molecule focus](./references/molecule-highlight.md).
+- Coordination or packing hulls: [polyhedra](./references/polyhedra.md).
 - Panels or publication layouts: [panels](./references/multi-structure-panels.md)
   or [publication layout](./references/publication-layout.md).
+- Finite periodic views or molecule focus: [periodic views](./references/periodic-finite-views.md)
+  or [molecule focus](./references/molecule-highlight.md).
 
-For an ordinary static view use [quickstart](./references/quickstart.md). Only
-when needed, load [diagnosis](./references/diagnose-and-select.md),
-[input formats](./references/input-formats.md), [camera](./references/camera.md),
-[backends](./references/cpu-static.md),
+Use the default path when no specialized line matches. Load [input formats](./references/input-formats.md),
+[camera](./references/camera.md), [backends](./references/cpu-static.md),
 [capabilities](./references/capabilities-and-install.md), or
-[verification](./references/verification.md).
+[verification](./references/verification.md) only when the requested evidence or an
+actual failure requires it.
 
 ## Rules
 
@@ -48,8 +47,8 @@ when needed, load [diagnosis](./references/diagnose-and-select.md),
   extended coordination networks with polyhedra, start with `ball`.
 - When a periodic figure must show coordination relative to the unit cell, use
   `--show-cell --show-axes`. Nonperiodic structures use neither.
-- Keep MatterVis colors unless color carries evidence. Do not name a display color
-  unless requested; then quote render JSON `effective_colors` exactly.
+- For render-only requests, do not invoke separate analysis skills or write Python;
+  `mat-vis inspect` and the selected route are sufficient.
 - Do not guess Python import names or inspect package internals. On failure, use
   the exact CLI help or `mat-vis capabilities --json`, correct the reported
   issue, and keep the requested scope.

@@ -84,7 +84,8 @@ def test_skill_routes_publication_and_multi_structure_guidance() -> None:
     assert "--check" not in document
     assert "--vector-overlays" not in document
     assert "Do not guess Python import names" in document
-    assert "Do not name a display color" in document
+    assert "For render-only requests" in document
+    assert "references/quickstart.md" not in document
     assert "./references/publication-layout.md" in document
     assert "./references/multi-structure-panels.md" in document
     vectors = (SKILL / "references" / "vibration-mode-vectors.md").read_text(
