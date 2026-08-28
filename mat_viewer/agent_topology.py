@@ -299,7 +299,7 @@ def build_topology_data(
     raw_specs: Iterable[str],
     *,
     site_index: int | None = None,
-    cutoff: float = 10.0,
+    cutoff: float | None = None,
     display: str | None = None,
     show_hydrogen: bool = True,
     include_boundary_replicas: bool = True,
@@ -309,7 +309,7 @@ def build_topology_data(
     specs = parse_polyhedron_specs(raw_specs)
     if not specs:
         return None
-    if not np.isfinite(cutoff) or float(cutoff) <= 0.0:
+    if cutoff is not None and (not np.isfinite(cutoff) or float(cutoff) <= 0.0):
         raise ValueError("polyhedron cutoff must be finite and positive")
     selected = structure.frames[0]
     bundle = selected.bundle
@@ -359,9 +359,10 @@ def build_topology_data(
                     f"no displayed {spec['center_species']} atom matches "
                     f"polyhedron {spec['id']}"
                 )
+            atom_cutoff = spec["cutoff"] if spec["cutoff"] is not None else cutoff
             shells = extract_atom_coordination_shells(
                 bundle,
-                float(spec["cutoff"] or cutoff),
+                atom_cutoff,
                 center_species=spec["center_species"],
                 ligand_species=spec["ligand_species"],
                 source_indices={center["source_index"] for center in centers},
@@ -441,7 +442,7 @@ def build_topology_data(
             result = analyze_topology(
                 bundle,
                 center_index=int(topology_fragment["index"]),
-                cutoff=float(spec["cutoff"] or cutoff),
+                cutoff=float(spec["cutoff"] or cutoff or 10.0),
                 display_center=display_fragment.get("center"),
                 display_label=display_fragment.get("label"),
                 display_type=display_fragment.get("type"),
@@ -503,6 +504,9 @@ def polyhedron_summary(topology_data) -> list[dict]:
                 if overlay.get("color") or result.get("color")
             }
         )
+        coordination_numbers = sorted(
+            {len(overlay.get("distances") or []) for overlay in overlays}
+        )
         source_centers = {
             int(overlay["center_source_index"])
             for overlay in overlays
@@ -518,6 +522,7 @@ def polyhedron_summary(topology_data) -> list[dict]:
                 "unique_source_centers": len(source_centers) or len(overlays),
                 "center_images": bool(result.get("center_images", False)),
                 "effective_colors": colors,
+                "coordination_numbers": coordination_numbers,
             }
         )
     return summaries

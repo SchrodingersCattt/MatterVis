@@ -625,6 +625,7 @@ def test_polyhedron_summary_reports_effective_paint_and_count() -> None:
                             "center_source_index": 0,
                             "color": "#0072B2",
                             "visible": True,
+                            "distances": [1.0] * 6,
                         },
                         {
                             "center_source_index": 1,
@@ -647,6 +648,7 @@ def test_polyhedron_summary_reports_effective_paint_and_count() -> None:
             "unique_source_centers": 1,
             "center_images": False,
             "effective_colors": ["#0072B2"],
+            "coordination_numbers": [6],
         }
     ]
 

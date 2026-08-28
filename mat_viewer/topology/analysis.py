@@ -186,7 +186,7 @@ def _mck_polyhedron_record(
 
 def extract_atom_coordination_shells(
     bundle,
-    cutoff: float,
+    cutoff: float | None,
     *,
     center_species: str,
     ligand_species: str,
@@ -204,6 +204,8 @@ def extract_atom_coordination_shells(
         atom_kwargs["central_indices"] = sorted(
             {int(index) for index in source_indices}
         )
+    if cutoff is not None:
+        atom_kwargs["cutoff"] = float(cutoff)
     if fallback_max is not None:
         atom_kwargs["fallback_max"] = int(fallback_max)
     records = find_polyhedra_impl(
@@ -211,7 +213,6 @@ def extract_atom_coordination_shells(
         str(center_species),
         str(ligand_species),
         level="atom",
-        cutoff=float(cutoff),
         enforce_enclosure=bool(enforce_enclosure),
         centroid_offset_frac=float(centroid_offset_frac),
         **atom_kwargs,

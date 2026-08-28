@@ -311,7 +311,7 @@ def render_array_input(
     vector_overlays: Any = None,
     polyhedron_specs: Sequence[str] = (),
     polyhedron_site: int | None = None,
-    polyhedron_cutoff: float = 10.0,
+    polyhedron_cutoff: float | None = None,
     animation_time: Any = None,
     frame_annotation: Any = None,
     profile_path: str | Path | None = None,

@@ -1143,11 +1143,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                 structure,
                 args.polyhedron,
                 site_index=args.polyhedron_site,
-                cutoff=(
-                    args.polyhedron_cutoff
-                    if args.polyhedron_cutoff is not None
-                    else 10.0
-                ),
+                cutoff=args.polyhedron_cutoff,
                 display=display,
                 show_hydrogen=args.show_hydrogen,
                 include_boundary_replicas=include_boundary_replicas,

@@ -352,9 +352,9 @@ def _build_render_parser(
     p.add_argument(
         "--polyhedron-cutoff",
         type=float,
-        default=10.0,
+        default=None,
         metavar="ANGSTROM",
-        help="Default polyhedron search cutoff in Å (default: 10.0).",
+        help="Optional polyhedron cutoff in Å; omit for the natural coordination shell.",
     )
     p.add_argument(
         "--publication-layout",
@@ -547,7 +547,7 @@ def _build_cli_topology_data(
         structure,
         args.polyhedron,
         site_index=args.polyhedron_site,
-        cutoff=float(args.polyhedron_cutoff),
+        cutoff=args.polyhedron_cutoff,
     )
 
 
@@ -850,9 +850,7 @@ def _render_main(args: argparse.Namespace) -> None:
     args.view = (
         "formula_unit"
         if args.view == "auto" and input_format == "cif"
-        else "unit_cell"
-        if args.view == "auto"
-        else args.view
+        else "unit_cell" if args.view == "auto" else args.view
     )
     overrides = _build_style_overrides(args)
 

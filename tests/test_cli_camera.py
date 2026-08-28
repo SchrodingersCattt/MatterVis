@@ -96,11 +96,7 @@ def test_camera_fit_includes_polyhedron_vertices() -> None:
     plain = _camera_spec(structure, _camera_args(), display="unit_cell")
     topology_data = {
         "spec_results": [
-            {
-                "overlays": [
-                    {"shell_coords": [[0.0, -12.0, 0.0], [0.0, 12.0, 0.0]]}
-                ]
-            }
+            {"overlays": [{"shell_coords": [[0.0, -12.0, 0.0], [0.0, 12.0, 0.0]]}]}
         ]
     }
 
@@ -512,7 +508,10 @@ def test_atom_polyhedron_defaults_to_all_centres_and_center_element_color(
     )
     structure = SimpleNamespace(frames=(SimpleNamespace(bundle=bundle),))
 
+    seen_cutoffs = []
+
     def fake_shells(_bundle, _cutoff, *, source_indices, **_kwargs):
+        seen_cutoffs.append(_cutoff)
         results = {}
         for source_index in source_indices:
             center = np.asarray(draw_atoms[source_index]["cart"], dtype=float)
@@ -557,3 +556,10 @@ def test_atom_polyhedron_defaults_to_all_centres_and_center_element_color(
         overlay["center_source_index"]
         for overlay in selected["spec_results"][0]["overlays"]
     ] == [1]
+    assert seen_cutoffs == [None, None]
+
+    build_topology_data(
+        structure,
+        ['{"center":"Al","ligand":"O","level":"atom","cutoff":2.5}'],
+    )
+    assert seen_cutoffs[-1] == 2.5
