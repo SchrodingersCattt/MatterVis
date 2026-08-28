@@ -7,7 +7,6 @@ from typing import Any, Iterable
 
 import numpy as np
 
-
 _POLYHEDRON_KEYS = {
     "id",
     "spec_id",
@@ -27,6 +26,8 @@ _POLYHEDRON_KEYS = {
     "edge_opacity",
     "site",
     "sites",
+    "center_images",
+    "instance_overrides",
 }
 
 
@@ -57,6 +58,50 @@ def _parse_site_indices(payload: dict[str, Any], index: int) -> tuple[int, ...] 
             )
         sites.append(int(numeric))
     return tuple(dict.fromkeys(sites))
+
+
+def _parse_instance_overrides(
+    payload: dict[str, Any], index: int
+) -> dict[str, dict[str, Any]]:
+    raw = payload.get("instance_overrides")
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"polyhedron {index + 1}: instance_overrides must be a JSON object"
+        )
+    parsed: dict[str, dict[str, Any]] = {}
+    for label, override in raw.items():
+        name = str(label).strip()
+        if not name or not isinstance(override, dict):
+            raise ValueError(
+                f"polyhedron {index + 1}: each instance override needs a "
+                "non-empty label and JSON object"
+            )
+        unknown = sorted(set(override) - {"color", "visible"})
+        if unknown:
+            raise ValueError(
+                f"polyhedron {index + 1}: instance override {name!r} has "
+                f"unsupported key(s): {', '.join(unknown)}"
+            )
+        cleaned: dict[str, Any] = {}
+        if "color" in override:
+            color = str(override["color"]).strip()
+            if not color:
+                raise ValueError(
+                    f"polyhedron {index + 1}: instance override {name!r} "
+                    "color must not be empty"
+                )
+            cleaned["color"] = color
+        if "visible" in override:
+            if not isinstance(override["visible"], bool):
+                raise ValueError(
+                    f"polyhedron {index + 1}: instance override {name!r} "
+                    "visible must be a JSON boolean"
+                )
+            cleaned["visible"] = override["visible"]
+        parsed[name] = cleaned
+    return parsed
 
 
 def parse_polyhedron_specs(raw_specs: Iterable[str]) -> list[dict[str, Any]]:
@@ -160,6 +205,16 @@ def parse_polyhedron_specs(raw_specs: Iterable[str]) -> list[dict[str, Any]]:
                 "and non-negative"
             )
         sites = _parse_site_indices(payload, index)
+        center_images = payload.get("center_images", False)
+        if not isinstance(center_images, bool):
+            raise ValueError(
+                f"polyhedron {index + 1}: center_images must be a JSON boolean"
+            )
+        if level != "atom" and center_images:
+            raise ValueError(
+                f"polyhedron {index + 1}: center_images is only valid at atom level"
+            )
+        instance_overrides = _parse_instance_overrides(payload, index)
         spec_id = str(
             payload.get("spec_id") or payload.get("id") or f"polyhedron-{index + 1}"
         )
@@ -188,6 +243,8 @@ def parse_polyhedron_specs(raw_specs: Iterable[str]) -> list[dict[str, Any]]:
                 ),
                 "opacity": opacity,
                 "edge_opacity": edge_opacity,
+                "center_images": center_images,
+                "instance_overrides": instance_overrides,
             }
         )
     return specs
@@ -295,6 +352,7 @@ def build_topology_data(
                 scene,
                 spec,
                 source_indices=selected_sites,
+                include_images=spec["center_images"],
             )
             if not centers:
                 raise ValueError(
@@ -328,6 +386,23 @@ def build_topology_data(
                     )
                     continue
                 overlay["color"] = spec["color"] or overlay["color"]
+                override = next(
+                    (
+                        spec["instance_overrides"][key]
+                        for key in (
+                            str(overlay.get("center_source_index")),
+                            str(overlay.get("center_label") or ""),
+                        )
+                        if key in spec["instance_overrides"]
+                    ),
+                    None,
+                )
+                if override:
+                    overlay = dict(overlay)
+                    if "color" in override:
+                        overlay["color"] = override["color"]
+                    if "visible" in override:
+                        overlay["visible"] = bool(override["visible"])
                 overlays.append(overlay)
             if not overlays:
                 raise ValueError(
@@ -388,15 +463,22 @@ def build_topology_data(
                     "non-coplanar hull"
                 )
                 continue
-            overlays.append(
-                {
-                    "center_coords": result.get("center_coords"),
-                    "center_label": result.get("center_label"),
-                    "shell_coords": shell,
-                    "hull": hull,
-                    "color": spec["color"],
-                }
+            overlay = {
+                "center_coords": result.get("center_coords"),
+                "center_label": result.get("center_label"),
+                "shell_coords": shell,
+                "hull": hull,
+                "color": spec["color"],
+            }
+            override = spec["instance_overrides"].get(
+                str(overlay.get("center_label") or "")
             )
+            if override:
+                if "color" in override:
+                    overlay["color"] = override["color"]
+                if "visible" in override:
+                    overlay["visible"] = bool(override["visible"])
+            overlays.append(overlay)
         if not overlays:
             raise ValueError(
                 f"polyhedron {spec['id']} has no drawable non-coplanar shell"
@@ -405,17 +487,60 @@ def build_topology_data(
     return {"spec_results": spec_results, "warnings": warnings}
 
 
+def polyhedron_summary(topology_data) -> list[dict]:
+    """Summarize effective polyhedron count and paint for render receipts."""
+    summaries: list[dict] = []
+    for result in (topology_data or {}).get("spec_results") or []:
+        overlays = [
+            overlay
+            for overlay in result.get("overlays") or []
+            if overlay.get("visible", True)
+        ]
+        colors = sorted(
+            {
+                str(overlay.get("color") or result.get("color"))
+                for overlay in overlays
+                if overlay.get("color") or result.get("color")
+            }
+        )
+        source_centers = {
+            int(overlay["center_source_index"])
+            for overlay in overlays
+            if overlay.get("center_source_index") is not None
+        }
+        summaries.append(
+            {
+                "id": result.get("spec_id") or result.get("id"),
+                "level": result.get("level"),
+                "center": result.get("center_species"),
+                "ligand": result.get("ligand_species"),
+                "displayed_centers": len(overlays),
+                "unique_source_centers": len(source_centers) or len(overlays),
+                "center_images": bool(result.get("center_images", False)),
+                "effective_colors": colors,
+            }
+        )
+    return summaries
+
+
 def topology_fit_points(topology_data) -> np.ndarray:
     """Return finite polyhedron vertices that must remain inside the viewport."""
     points = []
     for result in (topology_data or {}).get("spec_results") or ():
         for overlay in result.get("overlays") or ():
             shell = np.asarray(overlay.get("shell_coords") or (), dtype=float)
-            if shell.ndim == 2 and shell.shape[1:] == (3,) and np.all(
-                np.isfinite(shell)
+            if (
+                shell.ndim == 2
+                and shell.shape[1:] == (3,)
+                and np.all(np.isfinite(shell))
             ):
                 points.append(shell)
     return np.vstack(points) if points else np.zeros((0, 3), dtype=float)
 
 
-__all__ = ["build_topology_data", "parse_polyhedron_specs", "topology_fit_points"]
+__all__ = [
+    "build_topology_data",
+    "parse_polyhedron_specs",
+    "polyhedron_summary",
+    "topology_fit_points",
+]

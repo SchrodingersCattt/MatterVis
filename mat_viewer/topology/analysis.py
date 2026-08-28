@@ -242,8 +242,13 @@ def display_atom_centers_for_spec(
     spec: dict[str, Any],
     *,
     source_indices: Iterable[int] | None = None,
+    include_images: bool = False,
 ) -> list[dict[str, Any]]:
-    """Return unique displayed atom centres with stable source/image identity."""
+    """Return displayed atom centres with stable source/image identity.
+
+    The default is one centre per source atom in the primary half-open cell.
+    Boundary-image centres are opt-in; their ligand shells may still cross PBC.
+    """
     from ..scene.core import source_image_identity
 
     wanted = str(spec.get("center_species") or "")
@@ -258,6 +263,8 @@ def display_atom_centers_for_spec(
             continue
         identity = source_image_identity(atom, source_atoms, draw_index)
         if identity is None or identity in seen:
+            continue
+        if not include_images and identity[1] != (0, 0, 0):
             continue
         if allowed is not None and identity[0] not in allowed:
             continue
@@ -559,12 +566,12 @@ def _analyze_topology_uncached(
         **shell,
         "shape": shape,
         "analysis_level": level,
-        "packing_shell_label": shape.get("primary_label")
-        if level == "molecule"
-        else None,
-        "coordination_polyhedron_label": shape.get("primary_label")
-        if level == "atom"
-        else None,
+        "packing_shell_label": (
+            shape.get("primary_label") if level == "molecule" else None
+        ),
+        "coordination_polyhedron_label": (
+            shape.get("primary_label") if level == "atom" else None
+        ),
         "planarity": planarity,
         "prism_analysis": prism,
     }

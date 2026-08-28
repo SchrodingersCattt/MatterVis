@@ -48,6 +48,8 @@ def polyhedron_primitives(
     if topology_data:
         for specification in topology_data.get("spec_results") or []:
             for overlay in specification.get("overlays") or []:
+                if not overlay.get("visible", True):
+                    continue
                 explicit.append(
                     {
                         "vertices": overlay.get("shell_coords"),

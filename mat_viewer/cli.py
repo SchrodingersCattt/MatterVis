@@ -104,7 +104,8 @@ def _build_render_parser(
             action.help = (
                 "Add a base-renderer polyhedron from JSON. Required: center, "
                 "ligand. Optional: id, level, site, sites, center_kind, cutoff, "
-                "hard_cutoff, fallback_max, color, opacity, edge_opacity."
+                "hard_cutoff, fallback_max, color, opacity, edge_opacity, "
+                "center_images, instance_overrides."
             )
     parser.add_argument(
         "--backend",
@@ -870,9 +871,7 @@ def _camera_spec(
     topology_points = topology_fit_points(topology_data)
     if len(topology_points):
         fit_points = np.vstack((fit_points, topology_points))
-        radius = max(
-            radius, float(np.linalg.norm(fit_points - target, axis=1).max())
-        )
+        radius = max(radius, float(np.linalg.norm(fit_points - target, axis=1).max()))
     if _is_animation_output(args) and len(structure.frames) > 1:
         from .render.viewport import ViewportAccumulator
 
@@ -1138,7 +1137,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                 display=display,
                 include_boundary_replicas=include_boundary_replicas,
             )
-            from .agent_topology import build_topology_data
+            from .agent_topology import build_topology_data, polyhedron_summary
 
             topology_data = build_topology_data(
                 structure,
@@ -1205,6 +1204,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                 frame_annotation=frame_annotation,
             )
         payload = _render_result_payload(result, structure, args, camera)
+        payload["polyhedra"] = polyhedron_summary(topology_data)
     except Exception as exc:
         _fail(str(exc), json_output=args.json_output)
     _emit(payload, json_output=args.json_output)

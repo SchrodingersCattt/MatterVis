@@ -132,8 +132,7 @@ def test_molcryskit_contract_probe_reports_incomplete_record_schema(
     monkeypatch.setattr(record_type, "__dataclass_fields__", incomplete)
 
     assert (
-        f"{record_name}.{field_name}"
-        in capability_module.molcryskit_contract_missing()
+        f"{record_name}.{field_name}" in capability_module.molcryskit_contract_missing()
     )
 
 
@@ -162,8 +161,7 @@ def test_render_check_reports_incomplete_molcryskit_schema(
     assert payload["ok"] is False
     assert payload["requirements"]["missing_capabilities"] == ["core"]
     assert any(
-        "SiteRecord.global_index" in note
-        for note in payload["requirements"]["notes"]
+        "SiteRecord.global_index" in note for note in payload["requirements"]["notes"]
     )
 
 
@@ -577,6 +575,80 @@ def test_polyhedron_json_rejects_level_specific_or_invalid_values() -> None:
         parse_polyhedron_specs(
             ['{"id":"primary","spec_id":"other","center":"Pb","ligand":"I"}']
         )
+
+
+def test_polyhedron_json_parses_primary_centers_and_instance_overrides() -> None:
+    from mat_viewer.agent_topology import parse_polyhedron_specs
+
+    parsed = parse_polyhedron_specs(
+        [
+            '{"center":"Ti","ligand":"O","level":"atom",'
+            '"instance_overrides":{"0":{"color":"#0072B2"},'
+            '"1":{"visible":false}}}'
+        ]
+    )[0]
+
+    assert parsed["center_images"] is False
+    assert parsed["instance_overrides"] == {
+        "0": {"color": "#0072B2"},
+        "1": {"visible": False},
+    }
+
+    with pytest.raises(ValueError, match="center_images is only valid at atom level"):
+        parse_polyhedron_specs(
+            ['{"center":"C6N2","ligand":"ClO4","center_images":true}']
+        )
+    with pytest.raises(ValueError, match="visible must be a JSON boolean"):
+        parse_polyhedron_specs(
+            [
+                '{"center":"Ti","ligand":"O","level":"atom",'
+                '"instance_overrides":{"0":{"visible":"yes"}}}'
+            ]
+        )
+
+
+def test_polyhedron_summary_reports_effective_paint_and_count() -> None:
+    from mat_viewer.agent_topology import polyhedron_summary
+
+    summary = polyhedron_summary(
+        {
+            "spec_results": [
+                {
+                    "spec_id": "shell",
+                    "level": "atom",
+                    "center_species": "Ti",
+                    "ligand_species": "O",
+                    "center_images": False,
+                    "color": "#BFA6A6",
+                    "overlays": [
+                        {
+                            "center_source_index": 0,
+                            "color": "#0072B2",
+                            "visible": True,
+                        },
+                        {
+                            "center_source_index": 1,
+                            "color": "#BFA6A6",
+                            "visible": False,
+                        },
+                    ],
+                }
+            ]
+        }
+    )
+
+    assert summary == [
+        {
+            "id": "shell",
+            "level": "atom",
+            "center": "Ti",
+            "ligand": "O",
+            "displayed_centers": 1,
+            "unique_source_centers": 1,
+            "center_images": False,
+            "effective_colors": ["#0072B2"],
+        }
+    ]
 
 
 def test_default_camera_fits_a_large_scene() -> None:
