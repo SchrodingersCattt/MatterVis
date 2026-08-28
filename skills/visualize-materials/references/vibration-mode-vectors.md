@@ -13,6 +13,11 @@ Convert any source format into:
 - the cell and periodicity when the structure is periodic.
 
 Fail on atom-count, order, stable-ID, coordinate-space, or unit ambiguity.
+For an ORCA `.hess`, `$normal_modes` stores Cartesian coordinates in rows and
+mode indices in columns: mode `m` is `L[:, m].reshape(N, 3)`, never `L[m, :]`.
+Convert the mass-weighted vector to Cartesian displacement with the matching
+per-atom `M^(-1/2)` factors, and confirm `m` against
+`$vibrational_frequencies` before rendering.
 MatterVis renders these arrays; parsing a simulation-code format belongs in an
 adapter outside the renderer.
 
