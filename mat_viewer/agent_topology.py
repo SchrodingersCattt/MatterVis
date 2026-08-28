@@ -118,8 +118,8 @@ def parse_polyhedron_specs(raw_specs: Iterable[str]) -> list[dict[str, Any]]:
             raise ValueError(
                 f"polyhedron {index + 1}: enforce_enclosure must be a JSON boolean"
             )
-        opacity = float(payload.get("opacity", 0.55))
-        edge_opacity = float(payload.get("edge_opacity", 0.9))
+        opacity = float(payload.get("opacity", 0.50))
+        edge_opacity = float(payload.get("edge_opacity", 0.40))
         if (
             not np.isfinite(opacity)
             or not np.isfinite(edge_opacity)

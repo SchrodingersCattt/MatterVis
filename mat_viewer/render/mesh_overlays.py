@@ -34,8 +34,8 @@ def _polyhedron_edge_color(color: Any) -> tuple[float, float, float, float]:
     hue, lightness, saturation = colorsys.rgb_to_hls(red, green, blue)
     edge_rgb = colorsys.hls_to_rgb(
         hue,
-        max(0.06, lightness * 0.45),
-        min(1.0, saturation * 1.05),
+        max(0.12, lightness * 0.55),
+        min(1.0, max(0.30, saturation * 1.10)),
     )
     return (*edge_rgb, alpha)
 
@@ -55,8 +55,8 @@ def polyhedron_primitives(
                         "color": overlay.get("color")
                         or specification.get("color")
                         or "#7C5CBF",
-                        "opacity": specification.get("opacity", 0.55),
-                        "edge_opacity": specification.get("edge_opacity", 0.9),
+                        "opacity": specification.get("opacity", 0.50),
+                        "edge_opacity": specification.get("edge_opacity", 0.40),
                         "spec_id": specification.get("spec_id"),
                     }
                 )
@@ -73,7 +73,7 @@ def polyhedron_primitives(
                 vertices,
                 faces,
                 color,
-                alpha=float(_value(item, "opacity", default=0.55)),
+                alpha=float(_value(item, "opacity", default=0.50)),
                 metadata={
                     "kind": "polyhedron",
                     "spec_id": _value(item, "spec_id", default=None),
@@ -86,7 +86,7 @@ def polyhedron_primitives(
                 vertices,
                 faces,
                 _polyhedron_edge_color(color),
-                alpha=float(_value(item, "edge_opacity", default=0.9)),
+                alpha=float(_value(item, "edge_opacity", default=0.40)),
             )
         )
     return results

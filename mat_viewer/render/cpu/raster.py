@@ -28,12 +28,13 @@ def _polyhedron_face_rgb(rgb: np.ndarray, lambert: float) -> np.ndarray:
     red, green, blue = np.clip(np.asarray(rgb, dtype=float), 0.0, 1.0)
     hue, lightness, saturation = colorsys.rgb_to_hls(red, green, blue)
     strength = float(np.clip(lambert, 0.0, 1.0))
-    dark = max(0.08, lightness * 0.62)
-    bright = min(0.90, lightness + (1.0 - lightness) * 0.28)
+    dark = max(0.14, lightness * 0.50)
+    bright = min(0.92, lightness + (1.0 - lightness) * 0.42)
+    face_saturation = max(0.46, saturation * (0.85 + 0.15 * strength))
     shaded = colorsys.hls_to_rgb(
         hue,
         dark + (bright - dark) * strength,
-        min(1.0, saturation * (0.90 + 0.10 * strength)),
+        min(1.0, face_saturation),
     )
     return np.asarray(shaded, dtype=float)
 
