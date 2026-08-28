@@ -16,19 +16,13 @@ Fail on atom-count, order, stable-ID, coordinate-space, or unit ambiguity.
 MatterVis renders these arrays; parsing a simulation-code format belongs in an
 adapter outside the renderer.
 
-## Arrow contract
+## Arrow placement
 
 Use public native world-space `vector_overlays`; these arrows rotate with the
 structure and participate in 3D occlusion. Keep origins and endpoints in the
 input structure's source Cartesian frame; MatterVis applies any nonperiodic
-synthetic-cell translation internally. A vibration vector represents motion
-about an equilibrium atom, so centre it on that atom by default:
-
-```python
-display = scale * displacement
-origin = equilibrium_position - 0.5 * display
-arrow = {"origin": origin, "vector": display}
-```
+synthetic-cell translation internally. For a vibration, set `anchor: center`
+so the equilibrium atom lies at the midpoint of the displayed displacement.
 
 Dipoles, forces, and polarization vectors normally start at their physical
 anchor instead. Centring is a caller policy, not a separate mesh primitive:
@@ -44,7 +38,15 @@ After applying the scale and centring above, save the arrows as a JSON list:
   {
     "id": "mode",
     "magnitude_mode": "absolute",
+    "anchor": "center",
     "viewport_policy": "include",
+    "color": "#D55E00",
+    "style": {
+      "shaft_radius": 0.045,
+      "head_radius_ratio": 1.8,
+      "head_length_ratio": 0.20,
+      "sides": 16
+    },
     "arrows": [
       {"id": "atom-0", "origin": [0.0, 0.0, 0.0], "vector": [0.2, 0.0, 0.0]}
     ]
@@ -58,7 +60,9 @@ mat-vis render equilibrium.xyz -o mode.png --backend cpu --json \
 ```
 
 Use `absolute` because the caller already applied the visual scale. This static
-path needs neither Plotly nor Chrome.
+path needs neither Plotly nor Chrome. Keep the shaft distinctly thinner than
+ordinary bonds and the arrowhead short enough that vectors do not obscure atom
+colours or local bonding.
 
 
 ## Scale and selection
@@ -66,6 +70,12 @@ path needs neither Plotly nor Chrome.
 - Preserve relative vector lengths within a mode.
 - Use one fixed scale across compared modes, pressures, panels, or frames.
 - State that display length is a visual amplification, not thermal amplitude.
+- As a first visual candidate, make the longest displayed vector about 15--25%
+  of the selected scene diagonal; then inspect the final-size image.
+- If centred vectors remain buried by atom spheres, reduce the context atom
+  scale before changing the physical anchor convention.
+- Apply a shared amplification at either group level or in the prepared
+  vectors. Do not repeat the same scale at both group and arrow level.
 - If arrows are filtered, use a declared relative threshold such as
   `norm(q_i) / max(norm(q)) >= eta`; hidden arrows do not imply zero motion.
 - Record raw units, scale, maximum display length, and `eta` in provenance.

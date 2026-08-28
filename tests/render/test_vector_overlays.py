@@ -49,6 +49,18 @@ def test_modes_are_explicit_and_resolve_lengths() -> None:
     assert absolute["display_magnitude"] == pytest.approx(2.0)
 
 
+def test_center_anchor_places_atom_at_arrow_midpoint() -> None:
+    groups = _groups("absolute")
+    groups[0]["anchor"] = "center"
+    groups[0]["arrows"][0]["origin"] = [3.0, 4.0, 5.0]
+    arrow = resolve_vector_overlays(groups)[0]
+
+    assert np.allclose(
+        0.5 * (arrow["origin"] + arrow["end"]),
+        [3.0, 4.0, 5.0],
+    )
+
+
 def test_fractional_origin_and_direction_use_row_vector_lattice() -> None:
     groups = _groups("absolute")
     groups[0]["arrows"][0].update({"origin": [0.5, 0, 0], "origin_space": "fractional", "vector": [0, 0.25, 0], "direction_space": "fractional"})

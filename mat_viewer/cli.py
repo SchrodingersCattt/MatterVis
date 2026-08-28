@@ -835,7 +835,28 @@ def _scene_fit(
     return scene, center, max(radius, 1.0), fit_points
 
 
-def _camera_spec(structure, args: argparse.Namespace, *, display: str):
+def _topology_fit_points(topology_data) -> np.ndarray:
+    """Return finite polyhedron vertices that must remain inside the viewport."""
+    import numpy as np
+
+    points = []
+    for result in (topology_data or {}).get("spec_results") or ():
+        for overlay in result.get("overlays") or ():
+            shell = np.asarray(overlay.get("shell_coords") or (), dtype=float)
+            if shell.ndim == 2 and shell.shape[1:] == (3,) and np.all(
+                np.isfinite(shell)
+            ):
+                points.append(shell)
+    return np.vstack(points) if points else np.zeros((0, 3), dtype=float)
+
+
+def _camera_spec(
+    structure,
+    args: argparse.Namespace,
+    *,
+    display: str,
+    topology_data=None,
+):
     import numpy as np
 
     from .render.contracts import CameraSpec
@@ -860,6 +881,12 @@ def _camera_spec(structure, args: argparse.Namespace, *, display: str):
         include_boundary_replicas=include_boundary_replicas,
         include_cross_boundary_bond_endpoints=include_cross_boundary_bond_endpoints,
     )
+    topology_points = _topology_fit_points(topology_data)
+    if len(topology_points):
+        fit_points = np.vstack((fit_points, topology_points))
+        radius = max(
+            radius, float(np.linalg.norm(fit_points - target, axis=1).max())
+        )
     if _is_animation_output(args) and len(structure.frames) > 1:
         from .render.viewport import ViewportAccumulator
 
@@ -1125,7 +1152,27 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                 display=display,
                 include_boundary_replicas=include_boundary_replicas,
             )
-            camera = _camera_spec(structure, args, display=display)
+            from .agent_topology import build_topology_data
+
+            topology_data = build_topology_data(
+                structure,
+                args.polyhedron,
+                site_index=args.polyhedron_site,
+                cutoff=(
+                    args.polyhedron_cutoff
+                    if args.polyhedron_cutoff is not None
+                    else 10.0
+                ),
+                display=display,
+                show_hydrogen=args.show_hydrogen,
+                include_boundary_replicas=include_boundary_replicas,
+                include_cross_boundary_bond_endpoints=(
+                    args.style not in {"ball", "space_filling"}
+                ),
+            )
+            camera = _camera_spec(
+                structure, args, display=display, topology_data=topology_data
+            )
             spec = RenderSpec(
                 representation=args.style,
                 shading=_render_shading(args),
@@ -1153,19 +1200,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                 sphere_detail=tuple(args.sphere_detail),
                 cylinder_sides=args.cylinder_sides,
             )
-            from .agent_topology import build_topology_data
-
             atom_groups, bond_groups = _style_groups(args)
-            topology_data = build_topology_data(
-                structure,
-                args.polyhedron,
-                site_index=args.polyhedron_site,
-                cutoff=(
-                    args.polyhedron_cutoff
-                    if args.polyhedron_cutoff is not None
-                    else 10.0
-                ),
-            )
             animation_time = _animation_time_from_args(args)
             frame_annotation = _frame_annotation_from_args(args)
             result = render(

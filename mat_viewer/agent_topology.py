@@ -243,6 +243,10 @@ def build_topology_data(
     *,
     site_index: int | None = None,
     cutoff: float = 10.0,
+    display: str | None = None,
+    show_hydrogen: bool = True,
+    include_boundary_replicas: bool = True,
+    include_cross_boundary_bond_endpoints: bool = True,
 ) -> dict[str, Any] | None:
     """Build RenderPlan polyhedra from MolCrysKit topology primitives."""
     specs = parse_polyhedron_specs(raw_specs)
@@ -252,7 +256,20 @@ def build_topology_data(
         raise ValueError("polyhedron cutoff must be finite and positive")
     selected = structure.frames[0]
     bundle = selected.bundle
-    scene = getattr(bundle, "scene", {}) or {}
+    if display is None:
+        scene = getattr(bundle, "scene", {}) or {}
+    else:
+        from .loader.core import build_bundle_scene
+
+        scene = build_bundle_scene(
+            bundle,
+            display_mode=display,
+            show_hydrogen=show_hydrogen,
+            include_boundary_replicas=include_boundary_replicas,
+            include_cross_boundary_bond_endpoints=(
+                include_cross_boundary_bond_endpoints
+            ),
+        )
     fragments = list(scene.get("fragment_table") or bundle.fragment_table or ())
 
     from .topology import (

@@ -91,6 +91,28 @@ def test_animation_camera_fits_all_selected_frames() -> None:
     assert static.ortho_scale == pytest.approx(0.896)
 
 
+def test_camera_fit_includes_polyhedron_vertices() -> None:
+    structure = _structure()
+    plain = _camera_spec(structure, _camera_args(), display="unit_cell")
+    topology_data = {
+        "spec_results": [
+            {
+                "overlays": [
+                    {"shell_coords": [[-12.0, 0.0, 0.0], [12.0, 0.0, 0.0]]}
+                ]
+            }
+        ]
+    }
+
+    fitted = _camera_spec(
+        structure,
+        _camera_args(),
+        display="unit_cell",
+        topology_data=topology_data,
+    )
+    assert fitted.ortho_scale > plain.ortho_scale
+
+
 def test_camera_defaults_to_normal_of_largest_face() -> None:
     structure = _structure()
     matrix_before = structure.frames[0].bundle.M.copy()
