@@ -348,6 +348,7 @@ def test_render_cli_exports_real_animation(
     structure_files: dict[str, Path],
     tmp_path: Path,
     extension: str,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     output = tmp_path / f"trajectory{extension}"
     cli_main(
@@ -366,6 +367,7 @@ def test_render_cli_exports_real_animation(
             "1",
             "--fps",
             "5",
+            "--json",
             "-o",
             str(output),
         ]
@@ -373,24 +375,37 @@ def test_render_cli_exports_real_animation(
 
     assert output.is_file()
     assert output.stat().st_size > 1000
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["result"]["width"] == 200
+    assert payload["result"]["height"] == 160
+    assert payload["result"]["metadata"]["frame_count"] == 2
     if extension == ".mp4":
+        import subprocess
+
         import imageio_ffmpeg
 
-        reader = imageio_ffmpeg.read_frames(str(output))
-        try:
-            metadata = next(reader)
-            frames = list(reader)
-        finally:
-            reader.close()
-        frame_shapes = [(metadata["size"][1], metadata["size"][0])] * len(frames)
+        assert output.read_bytes()[4:8] == b"ftyp"
+        decoded = subprocess.run(
+            [
+                imageio_ffmpeg.get_ffmpeg_exe(),
+                "-v",
+                "error",
+                "-i",
+                str(output),
+                "-f",
+                "null",
+                "-",
+            ],
+            capture_output=True,
+            check=False,
+        )
+        assert decoded.returncode == 0, decoded.stderr.decode(errors="replace")
     else:
-        import imageio.v3 as iio
+        from PIL import Image
 
-        with iio.imopen(output, "r") as reader:
-            frames = list(reader.iter())
-        frame_shapes = [frame.shape[:2] for frame in frames]
-    assert len(frames) == 2
-    assert all(shape == (160, 200) for shape in frame_shapes)
+        with Image.open(output) as animation:
+            assert animation.n_frames == 2
+            assert animation.size == (200, 160)
 
 
 def test_animation_viewport_has_one_world_center_and_scale() -> None:
