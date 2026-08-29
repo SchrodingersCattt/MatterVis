@@ -26,6 +26,7 @@ delivery.
 ## Route once
 
 Read exactly one primary reference: use the first matching line.
+- Atom-centred forces with density fields: [force vectors](./references/atomic-force-vectors.md).
 
 - Vibration arrows: [vibration vectors](./references/vibration-mode-vectors.md).
 - Trajectory or animation: [trajectory](./references/trajectory-animation.md).

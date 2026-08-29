@@ -262,9 +262,28 @@ def vector_primitives(vector_overlays: Any, *, lattice=None) -> list:
                 arrow["end"],
                 arrow["color"],
                 shaft_radius=float(style.get("shaft_radius", 0.08)),
+                head_length=(
+                    float(style["head_length"])
+                    if style.get("head_length") is not None
+                    else None
+                ),
                 head_radius_ratio=float(style.get("head_radius_ratio", 2.2)),
                 head_length_ratio=float(style.get("head_length_ratio", 0.28)),
+                head_radius=(
+                    float(style["head_radius"])
+                    if style.get("head_radius") is not None
+                    else None
+                ),
                 sides=int(style.get("sides", 12)),
+                alpha=arrow["opacity"],
+                metadata={
+                    "group_id": arrow["group_id"],
+                    "group_name": arrow["group_name"],
+                    "arrow_id": arrow["arrow_id"],
+                    "raw_magnitude": arrow["raw_magnitude"],
+                    "display_magnitude": arrow["display_magnitude"],
+                    **arrow["metadata"],
+                },
             )
         )
     return results
