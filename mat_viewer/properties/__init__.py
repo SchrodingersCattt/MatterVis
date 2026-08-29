@@ -310,7 +310,7 @@ def resolve_source_property_context(
             raise ValueError(
                 "sidecar atom property requested without property_data manifest"
             )
-        from .loader.property_sidecar import align_sidecar_property
+        from ..loader.property_sidecar import align_sidecar_property
 
         source_path = getattr(source, "path", None)
         if source_path is None:
@@ -422,7 +422,7 @@ def resolve_frame_batch_property_context(
             raise ValueError(
                 "sidecar atom property requested without property_data manifest"
             )
-        from .loader.property_sidecar import align_sidecar_property
+        from ..loader.property_sidecar import align_sidecar_property
 
         for descriptor in descriptors:
             if descriptor.source != "sidecar" or descriptor.name in sidecar_values:
@@ -514,7 +514,7 @@ def reduce_frame_batch_property(
     selected = []
     for descriptor in descriptors:
         if descriptor.source == "sidecar":
-            from .loader.property_sidecar import align_sidecar_property
+            from ..loader.property_sidecar import align_sidecar_property
 
             selected.append(
                 align_sidecar_property(

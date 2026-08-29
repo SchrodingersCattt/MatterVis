@@ -292,6 +292,8 @@ def _source_frame_key(frame: Any, key: str | None) -> Any:
     info = dict(getattr(frame, "info", {}) or {})
     if key in info:
         return info[key]
+    if key == "timestep" and hasattr(frame, "timestep"):
+        return getattr(frame, "timestep")
     bundle = getattr(frame, "bundle", None)
     frame_info = dict(getattr(bundle, "frame_info", {}) or {})
     if key in frame_info:

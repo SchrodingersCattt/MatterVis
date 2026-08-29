@@ -8,7 +8,9 @@ import pytest
 from ase import Atoms
 from ase.io import write
 
+from _atom_property_fixtures import write_lammps_sidecar_trajectory
 from mat_viewer.cli import main
+from mat_viewer.render.cpu.batch import NUMBA_AVAILABLE
 
 
 def test_inspect_properties_reports_bounded_array_metadata(
@@ -128,3 +130,87 @@ def test_render_check_rejects_unknown_colormap(
         )
     assert error.value.code == 2
     assert "unknown matplotlib colormap" in capsys.readouterr().err
+
+
+def test_lammps_sidecar_property_discovery(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source, manifest = write_lammps_sidecar_trajectory(tmp_path)
+
+    main(
+        [
+            "inspect",
+            str(source),
+            "--properties",
+            "--property-data",
+            str(manifest),
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    velocity = next(
+        item
+        for item in payload["properties"]
+        if item["field"] == "sidecar:velocity"
+    )
+    assert velocity == {
+        "field": "sidecar:velocity",
+        "source": "sidecar",
+        "name": "velocity",
+        "dtype": "float32",
+        "shape_tail": [3],
+        "components": ["x", "y", "z"],
+        "unit": "angstrom/ps",
+    }
+    assert payload["manifest_hash"]
+
+
+@pytest.mark.skipif(not NUMBA_AVAILABLE, reason="batch renderer requires numba")
+def test_lammps_sidecar_property_batch_render(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source, manifest = write_lammps_sidecar_trajectory(tmp_path)
+    output = tmp_path / "velocity.png"
+
+    main(
+        [
+            "render",
+            str(source),
+            "-o",
+            str(output),
+            "--backend",
+            "cpu",
+            "--renderer",
+            "batch",
+            "--frame",
+            "1",
+            "--style",
+            "ball",
+            "--width",
+            "160",
+            "--height",
+            "120",
+            "--property-data",
+            str(manifest),
+            "--color-by",
+            "sidecar:velocity",
+            "--color-reduction",
+            "magnitude",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    metadata = payload["result"]["metadata"]["atom_property_color"]
+    assert output.is_file() and output.stat().st_size > 0
+    assert payload["source"]["selected_frames"] == [1]
+    assert metadata["fields"] == ["sidecar:velocity"]
+    assert metadata["reduction"] == "magnitude"
+    assert metadata["range"] == [3.0, 4.0]
+    assert metadata["unit"] == "angstrom/ps"
+    assert metadata["finite_count"] == 2
+    assert metadata["missing_count"] == 0
+    assert metadata["manifest_hash"]

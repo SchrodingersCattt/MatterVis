@@ -10,11 +10,18 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from _atom_property_fixtures import write_lammps_sidecar_trajectory
 from mat_viewer.loader.property_sidecar import (
     align_sidecar_property,
     load_atom_property_manifest,
     strict_alignment_order,
 )
+from mat_viewer.properties import (
+    AtomPropertyColorSpec,
+    reduce_frame_batch_property,
+    resolve_frame_batch_property_context,
+)
+from mat_viewer.render.batch_pipeline import load_frame_batches
 
 
 @dataclass
@@ -117,3 +124,48 @@ def test_object_npy_is_rejected_without_pickle(tmp_path: Path) -> None:
     manifest_path.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(ValueError, match="unsafe or invalid NPY"):
         load_atom_property_manifest(manifest_path)
+
+
+def test_lammps_trajectory_sidecar_aligns_frames_ids_and_velocity(
+    tmp_path: Path,
+) -> None:
+    source, manifest_path = write_lammps_sidecar_trajectory(tmp_path)
+    frames = load_frame_batches(
+        source,
+        input_format="lammps-dump",
+        type_map=None,
+        frame_indices=(0, 1),
+        repeat=(1, 1, 1),
+    )
+    manifest = load_atom_property_manifest(manifest_path)
+
+    context = resolve_frame_batch_property_context(
+        frames,
+        AtomPropertyColorSpec(fields=("sidecar:velocity",)),
+        input_path=str(source),
+        embedded_source="column",
+        manifest=manifest,
+    )
+
+    assert [frame.timestep for frame in frames] == [10, 20]
+    assert [frame.atom_ids.tolist() for frame in frames] == [[2, 1], [1, 2]]
+    assert context.frames[0].values.tolist() == pytest.approx([2.0, 1.0])
+    assert context.frames[1].values.tolist() == pytest.approx([3.0, 4.0])
+    assert context.frames[0].reduction == "magnitude"
+    assert context.frames[0].unit == "angstrom/ps"
+    assert context.scale.value_range == (1.0, 4.0)
+    assert context.manifest_hash == manifest.manifest_hash
+
+    worker_frame = reduce_frame_batch_property(
+        frames[1],
+        AtomPropertyColorSpec(fields=("sidecar:velocity",)),
+        input_path=str(source),
+        embedded_source="column",
+        manifest=manifest,
+        sidecar_data={
+            "properties": {"velocity": manifest.open_property("velocity")},
+            "frame_ids": manifest.frame_ids(),
+            "atom_ids": manifest.atom_ids(),
+        },
+    )
+    assert worker_frame.values.tolist() == pytest.approx([3.0, 4.0])
