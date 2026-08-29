@@ -8,7 +8,10 @@ from typing import Any
 
 import numpy as np
 
-from .compass_overlay import lattice_compass_layout
+from .compass_overlay import (
+    lattice_compass_clientside_context,
+    lattice_compass_layout,
+)
 from .contracts import (
     LinePrimitive,
     RENDER_RESULT_SCHEMA,
@@ -209,10 +212,15 @@ def _add_lattice_compass(figure, plan: RenderPlan, viewport) -> None:
         )
 
 
-def build_figure(plan: RenderPlan):
+def build_figure(
+    plan: RenderPlan,
+    *,
+    interactive: bool = False,
+):
     """Convert a RenderPlan to a Plotly figure without changing its geometry."""
     go, _ = _plotly()
     figure = go.Figure()
+    live_compass = interactive and len(plan.viewports) == 1
     scene_layouts: dict[str, Any] = {}
     for index, viewport in enumerate(plan.viewports):
         scene = _scene_name(index)
@@ -222,7 +230,13 @@ def build_figure(plan: RenderPlan):
         scene_layouts[scene] = _scene_layout(viewport, aspect=viewport_aspect)
         for primitive in viewport.primitives:
             figure.add_trace(_primitive_trace(primitive, scene=scene))
-        _add_lattice_compass(figure, plan, viewport)
+        if not live_compass:
+            _add_lattice_compass(figure, plan, viewport)
+    compass_context = (
+        lattice_compass_clientside_context(plan.metadata, plan.width, plan.height)
+        if live_compass
+        else None
+    )
     figure.update_layout(
         **scene_layouts,
         width=plan.width,
@@ -231,6 +245,7 @@ def build_figure(plan: RenderPlan):
         paper_bgcolor=_rgba(plan.background),
         plot_bgcolor=_rgba(plan.background),
         showlegend=False,
+        meta={"compass": compass_context} if compass_context else {},
     )
     return figure
 
@@ -240,10 +255,12 @@ def render(
     output: str | Path | None = None,
 ) -> RenderResult:
     """Render a plan through Plotly; failures are never sent to another backend."""
+    from .html_export import _standalone_compass_script
+
     _, pio = _plotly()
-    figure = build_figure(plan)
     path = Path(output).expanduser().resolve() if output is not None else None
     output_format = path.suffix.lower().lstrip(".") if path is not None else "html"
+    figure = build_figure(plan, interactive=output_format == "html")
     if output_format not in {"html", "png", "pdf", "svg"}:
         raise ValueError("Plotly output must be HTML, PNG, PDF, or SVG")
     scale = int(plan.metadata.get("scale", 1))
@@ -253,6 +270,7 @@ def render(
                 figure,
                 include_plotlyjs=True,
                 full_html=True,
+                post_script=_standalone_compass_script(),
             ).encode("utf-8")
         else:
             data = pio.to_image(

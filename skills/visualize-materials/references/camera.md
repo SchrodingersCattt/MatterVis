@@ -23,6 +23,9 @@ plane normals.
 Comparable panels must share direction, up, projection, viewport or physical
 scale, aspect ratio, and canvas. Do not independently auto-fit them.
 
+For interactive HTML, confirm that the corner a/b/c compass changes orientation
+with a camera drag. A compass frozen at its initial projection is invalid.
+
 The static TUI `--view c` is Cartesian `+Z`, not exact lattice `c` for an
 oblique cell. Record requested and effective direction, up, projection,
 distance, and viewport.

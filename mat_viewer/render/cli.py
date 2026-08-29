@@ -727,8 +727,11 @@ def _save_static_output(
                 height=args.height,
             )
         else:
-            fig = build_figure(scene, style, topology_data=topology_data)
-        fig.write_html(str(output_path), include_plotlyjs="cdn", full_html=True)
+            html_style = {**style, "axis_key_via_svg_overlay": True}
+            fig = build_figure(scene, html_style, topology_data=topology_data)
+        from .html_export import write_interactive_html
+
+        write_interactive_html(fig, output_path)
         return {"backend": "plotly-html", "fallback_reason": None}
 
     result = render(scene, style) if topology_data is None else None
@@ -850,7 +853,9 @@ def _render_main(args: argparse.Namespace) -> None:
     args.view = (
         "formula_unit"
         if args.view == "auto" and input_format == "cif"
-        else "unit_cell" if args.view == "auto" else args.view
+        else "unit_cell"
+        if args.view == "auto"
+        else args.view
     )
     overrides = _build_style_overrides(args)
 
