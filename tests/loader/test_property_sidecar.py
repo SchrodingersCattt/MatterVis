@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dataclass_replace
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -20,8 +20,10 @@ from mat_viewer.properties import (
     AtomPropertyColorSpec,
     reduce_frame_batch_property,
     resolve_frame_batch_property_context,
+    resolve_source_property_context,
 )
 from mat_viewer.render.batch_pipeline import load_frame_batches
+from mat_viewer.loader.structure_input import load_structure_input
 
 
 @dataclass
@@ -169,3 +171,18 @@ def test_lammps_trajectory_sidecar_aligns_frames_ids_and_velocity(
         },
     )
     assert worker_frame.values.tolist() == pytest.approx([3.0, 4.0])
+
+    structure = load_structure_input(
+        source,
+        input_format="lammps-dump",
+        frame_indices=(0, 1),
+    )
+    structure = dataclass_replace(structure, property_manifest=manifest)
+    general_context = resolve_source_property_context(
+        structure,
+        AtomPropertyColorSpec(fields=("sidecar:velocity",)),
+    )
+    assert structure.frames[0].info["timestep"] == 10
+    assert structure.frames[0].atom_arrays["id"].tolist() == [1, 2]
+    assert general_context.frames[0].values.tolist() == pytest.approx([1.0, 2.0])
+    assert general_context.frames[1].values.tolist() == pytest.approx([3.0, 4.0])

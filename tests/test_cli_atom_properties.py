@@ -10,7 +10,6 @@ from ase.io import write
 
 from _atom_property_fixtures import write_lammps_sidecar_trajectory
 from mat_viewer.cli import main
-from mat_viewer.render.cpu.batch import NUMBA_AVAILABLE
 
 
 def test_inspect_properties_reports_bounded_array_metadata(
@@ -167,8 +166,7 @@ def test_lammps_sidecar_property_discovery(
     assert payload["manifest_hash"]
 
 
-@pytest.mark.skipif(not NUMBA_AVAILABLE, reason="batch renderer requires numba")
-def test_lammps_sidecar_property_batch_render(
+def test_lammps_sidecar_property_general_render(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -184,7 +182,7 @@ def test_lammps_sidecar_property_batch_render(
             "--backend",
             "cpu",
             "--renderer",
-            "batch",
+            "general",
             "--frame",
             "1",
             "--style",

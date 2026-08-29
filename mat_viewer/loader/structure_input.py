@@ -381,6 +381,30 @@ def _atom_arrays(atoms) -> dict[str, np.ndarray]:
     return arrays
 
 
+def _lammps_dump_index(source_path: Path, resolved_format: str | None):
+    if resolved_format != "lammps-dump-text":
+        return None
+    from .lammps_batch import index_lammps_dump
+
+    return index_lammps_dump(source_path)
+
+
+def _atomistic_frame(index: int, atoms: Any, *, dump_index: Any = None):
+    info = {"frame_index": index, **dict(atoms.info)}
+    arrays = _atom_arrays(atoms)
+    if dump_index is not None:
+        from .lammps_batch import read_lammps_property_frame
+
+        identity = read_lammps_property_frame(
+            dump_index, index, property_columns=()
+        )
+        if identity.atom_ids is not None:
+            order = np.argsort(identity.atom_ids, kind="stable")
+            arrays.setdefault("id", identity.atom_ids[order])
+        info.setdefault("timestep", identity.timestep)
+    return AtomisticFrame(index=index, atoms=atoms, info=info, atom_arrays=arrays)
+
+
 def load_atomistic_input(
     path: str | Path,
     *,
@@ -403,13 +427,9 @@ def load_atomistic_input(
         frame_indices,
     )
     format_name = resolved_format or "ase-auto"
+    dump_index = _lammps_dump_index(source_path, resolved_format)
     frames = tuple(
-        AtomisticFrame(
-            index=index,
-            atoms=atoms,
-            info={"frame_index": index, **dict(atoms.info)},
-            atom_arrays=_atom_arrays(atoms),
-        )
+        _atomistic_frame(index, atoms, dump_index=dump_index)
         for index, atoms in selected_atoms
     )
     return AtomisticInput(source_path, format_name, frames, total_frames)
@@ -444,17 +464,13 @@ def iter_atomistic_frames(
     selected = None if requested is None else set(requested)
     found: set[int] = set()
     format_name = resolved_format or "ase-auto"
+    dump_index = _lammps_dump_index(source_path, resolved_format)
     for index, atoms in enumerate(_ase_frames(source_path, resolved_format, symbols)):
         if selected is not None and index not in selected:
             continue
         found.add(index)
         yield (
-            AtomisticFrame(
-                index=index,
-                atoms=atoms,
-                info={"frame_index": index, **dict(atoms.info)},
-                atom_arrays=_atom_arrays(atoms),
-            ),
+            _atomistic_frame(index, atoms, dump_index=dump_index),
             format_name,
         )
     if selected is not None:
@@ -476,14 +492,17 @@ def canonicalise_atomistic_frame(
         frame_index=frame.index,
         input_format=input_format,
     )
+    atom_arrays = {
+        name: np.array(values, copy=True)
+        for name, values in frame.atom_arrays.items()
+    }
+    bundle.atom_arrays = atom_arrays
+    bundle.frame_info = dict(frame.info)
     return StructureFrame(
         frame.index,
         bundle,
-        dict(bundle.frame_info),
-        {
-            name: np.array(values, copy=True)
-            for name, values in bundle.atom_arrays.items()
-        },
+        dict(frame.info),
+        atom_arrays,
     )
 
 
