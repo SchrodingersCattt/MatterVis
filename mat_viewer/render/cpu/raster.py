@@ -112,9 +112,11 @@ def render_rgba(plan: RenderPlan, *, scale: int = 1) -> np.ndarray:
     from PIL import Image
 
     from ..compass_overlay import draw_raster_compass
+    from ..property_colorbar import draw_raster_colorbar
 
     image = Image.fromarray(canvas, mode="RGBA")
     draw_raster_compass(image, plan)
+    draw_raster_colorbar(image, plan)
     canvas[:] = np.asarray(image)
     return canvas
 

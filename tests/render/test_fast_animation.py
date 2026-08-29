@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -132,6 +133,28 @@ def test_bond_batch_changes_pixels_between_atom_centres() -> None:
     centre = (60, 80)
     assert np.all(without.rgba[centre][:3] == 255)
     assert np.any(with_bond.rgba[centre][:3] != 255)
+
+
+@pytest.mark.skipif(not NUMBA_AVAILABLE, reason="batch renderer requires numba")
+def test_bond_batch_inherits_endpoint_atom_colors() -> None:
+    frame = replace(
+        _frame([[-0.8, 0.0, 0.0], [0.8, 0.0, 0.0]], [6, 8]),
+        atom_colors=np.asarray([[255, 0, 0], [0, 0, 255]], dtype=np.uint8),
+    )
+    bonds = SimpleNamespace(pairs=np.asarray([[0, 1]], dtype=np.int32))
+    rendered = render_frame_batch(
+        frame,
+        _camera(),
+        width=160,
+        height=120,
+        show_cell=False,
+        bonds=bonds,
+        bond_radius=0.12,
+    )
+    first_half = rendered.rgba[60, 79, :3]
+    second_half = rendered.rgba[60, 80, :3]
+    assert first_half[0] > first_half[2]
+    assert second_half[2] > second_half[0]
 
 
 def _image_descriptors_have_no_local_palettes(path: Path) -> int:

@@ -26,6 +26,8 @@ delivery.
 ## Route once
 
 Read exactly one primary reference: use the first matching line.
+- Charge, velocity, stress, per-atom field, or colormap:
+  [atom property coloring](./references/atom-property-coloring.md).
 - Atom-centred forces with density fields: [force vectors](./references/atomic-force-vectors.md).
 
 - Vibration arrows: [vibration vectors](./references/vibration-mode-vectors.md).

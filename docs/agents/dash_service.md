@@ -26,7 +26,7 @@ flowchart LR
     CLIENT <-->|WS| WS["/api/v2/ws<br/>(flask-sock)"]
 
     subgraph RES["Resource groups under /api/v2"]
-        STATE["/state, /camera, /camera/action"]
+        STATE["/state, /atom-properties, /camera, /camera/action"]
         INTENT["/intent<br/>ordered UI reducer"]
         SCENES["/scenes, /scenes/active, /scenes/{id}/duplicate"]
         STRUCT["/upload, /structures, /scene/{name}"]
@@ -161,7 +161,9 @@ Notes for callers:
   Plotly camera's `projection.type`. Setting it via `POST /state`
   has the same effect as `POST /camera/action {"action":
   "projection", "type": ...}`),
-  `fast_rendering`, `camera`, `cutoff`. `material` is `mesh` or
+  `atom_property_color` (nullable public property-color spec; see
+  `atom_property_coloring.md`), `fast_rendering`, `camera`, `cutoff`.
+  `material` is `mesh` or
   `flat`; `style` is `ball`, `ball_stick`, `stick`, `ortep`, or
   `wireframe`; `disorder` is `opacity`, `dashed_bonds`,
   `outline_rings`, `color_shift`, or `none`. Fresh scenes default to
@@ -175,6 +177,10 @@ Notes for callers:
   `display_mode` accepts `formula_unit`, `unit_cell`, `asymmetric_unit`,
   or `cluster` (free molecular cluster — every parsed atom is drawn,
   no formula-unit trim, no periodic imaging of bonds).
+- `GET /atom-properties`
+  Returns bounded property descriptors for the active scene and its active
+  `atom_property_color` spec. Add `?scene_id=...` for another tab. This endpoint
+  is read-only; use `POST /state` to change coloring.
 - `POST /intent`
   Ordered mutation reducer for browser and automation clients that want
   one canonical state-machine path. Body:

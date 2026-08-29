@@ -23,6 +23,7 @@ from .contracts import (
 )
 from .geometry import (
     aromatic_ring_primitive,
+    bond_line_primitives,
     bond_primitives,
     color_to_rgba,
     ellipsoid_axes_primitive,
@@ -36,6 +37,7 @@ from .mesh_overlays import (
     isosurface_primitives as _isosurface_primitives,
     polyhedron_primitives as _polyhedron_primitives,
 )
+from .property_planning import prepare_render_property, property_color_for_atom, reserve_property_colorbar, resolve_render_property_context
 
 _ELEMENT_COLORS = {
     "H": "#FFFFFF",
@@ -67,6 +69,7 @@ def prepare_render(
     vector_overlays: Any = None,
     atom_groups: Sequence[Mapping[str, Any]] | None = None,
     bond_groups: Sequence[Mapping[str, Any]] | None = None,
+    atom_property_color: Any = None,
 ) -> RenderPlan:
     """Compile a scene, CrystalIR, or MolCrysKit object into a RenderPlan.
 
@@ -76,6 +79,7 @@ def prepare_render(
     """
     view_spec = _coerce_dataclass(ViewSpec, view)
     render_spec = _coerce_render_spec(render)
+    property_context = resolve_render_property_context(source, atom_property_color)
     camera_spec = _coerce_dataclass(CameraSpec, camera) if camera is not None else None
     scene = _normalise_source(
         source,
@@ -107,7 +111,10 @@ def prepare_render(
         from ..style.bond_groups import tag_bonds_with_groups
 
         bonds = tag_bonds_with_groups(bonds, list(bond_groups), atoms=atoms)
-    warnings: list[str] = []
+    property_colors, property_metadata_payload, warnings = prepare_render_property(
+        property_context,
+        scene,
+    )
     primitives: list[Primitive] = []
 
     visible_indices: set[int] = set()
@@ -167,13 +174,20 @@ def prepare_render(
             continue
         visible_indices.add(index)
         atom_positions[index] = position
-        color = _value(atom, "_render_color", default=None) or _value(
+        source_index = _source_atom_index(atom, index)
+        property_color = property_color_for_atom(
+            property_colors,
+            source_index,
+            index,
+        )
+        base_color = _value(
             atom,
             "color",
             default=_ELEMENT_COLORS.get(element, "#808080"),
         )
+        group_color = _value(atom, "_render_color", default=None)
+        color = group_color or property_color or base_color
         atom_colors[index] = color
-        source_index = _source_atom_index(atom, index)
         occupancy = float(_value(atom, "occ", "occupancy", default=1.0))
         disorder_group = _value(atom, "disorder_group", "dg", default=None)
         if occupancy < 1.0 - 1.0e-8 or disorder_group not in (
@@ -207,6 +221,9 @@ def prepare_render(
             "disorder_assembly": _value(atom, "disorder_assembly", "da", default=None),
             "image_shift": _integer_triplet(
                 _value(atom, "image_shift", "_image_shift", default=(0, 0, 0))
+            ),
+            "property_color_applied": bool(
+                property_color is not None and group_color is None
             ),
         }
 
@@ -404,6 +421,8 @@ def prepare_render(
                 _value(bond, "_render_radius_scale", default=1.0)
             )
             override_color = _value(bond, "_render_color", default=None)
+            first_color = override_color or atom_colors[first_index]
+            second_color = override_color or atom_colors[second_index]
             semantic_id = f"bond:{bond_index}:{first_index}-{second_index}"
             bond_metadata = {
                 "kind": "bond",
@@ -413,15 +432,15 @@ def prepare_render(
                 ),
             }
             if bond_representation == "wireframe":
-                primitives.append(
-                    LinePrimitive(
-                        semantic_id=semantic_id,
-                        segments=np.asarray([[start, end]]),
-                        rgba=color_to_rgba(
-                            override_color or _value(bond, "color", default="#333333"),
-                            alpha=alpha,
-                        ),
-                        width_px=max(1.0, radius * 8.0),
+                primitives.extend(
+                    bond_line_primitives(
+                        semantic_id,
+                        start,
+                        end,
+                        max(1.0, radius * 8.0),
+                        first_color,
+                        second_color,
+                        alpha=alpha,
                         metadata=bond_metadata,
                     )
                 )
@@ -432,18 +451,8 @@ def prepare_render(
                         start,
                         end,
                         radius,
-                        override_color
-                        or _value(
-                            bond,
-                            "color_i",
-                            default=atom_colors[first_index],
-                        ),
-                        override_color
-                        or _value(
-                            bond,
-                            "color_j",
-                            default=atom_colors[second_index],
-                        ),
+                        first_color,
+                        second_color,
                         sides=render_spec.cylinder_sides,
                         alpha=alpha,
                         metadata=bond_metadata,
@@ -533,15 +542,20 @@ def prepare_render(
     primitives = sorted(primitives, key=lambda primitive: primitive.semantic_id)
     _assert_unique_ids(primitives)
 
+    viewport_width_fraction = reserve_property_colorbar(
+        property_metadata_payload,
+        render_spec.width,
+    )
     fitted_camera = camera_spec or _fit_camera(
         primitives,
-        width=render_spec.width,
+        width=max(1, int(round(render_spec.width * viewport_width_fraction))),
         height=render_spec.height,
     )
     viewport = ViewportPlan(
         semantic_id="main",
         camera=fitted_camera,
         primitives=tuple(primitives),
+        rect=(0.0, 0.0, viewport_width_fraction, 1.0),
     )
     source_path = scene.get("source_path")
     metadata = {
@@ -559,6 +573,7 @@ def prepare_render(
         "molcrys_provenance": scene.get("molcrys_provenance"),
         "atom_groups": [dict(group) for group in (atom_groups or ())],
         "bond_groups": [dict(group) for group in (bond_groups or ())],
+        "atom_property_color": property_metadata_payload,
     }
     if render_spec.show_axes:
         attach_lattice_compass_metadata(metadata, warnings, lattice)

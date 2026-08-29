@@ -52,22 +52,26 @@ def _element_legend_annotations(scene: dict, style: dict) -> list[dict]:
     maximum = max(1, int(style.get("element_legend_max_entries_per_row", 8)))
     rows = []
     for start in range(0, len(elements), maximum):
-        rows.append(" &nbsp;&nbsp; ".join(
-            f"<span style='color:{safe_colors[element]}'><b>● {element}</b></span>"
-            for element in elements[start:start + maximum]
-        ))
+        rows.append(
+            " &nbsp;&nbsp; ".join(
+                f"<span style='color:{safe_colors[element]}'><b>● {element}</b></span>"
+                for element in elements[start : start + maximum]
+            )
+        )
     swatches = "<br>".join(rows)
-    return [{
-        "x": float(style.get("element_legend_x", 0.5)),
-        "y": float(style.get("element_legend_y", 0.02)),
-        "xref": "paper",
-        "yref": "paper",
-        "text": swatches,
-        "showarrow": False,
-        "font": {"size": float(style.get("element_legend_font_size", 13))},
-        "xanchor": "center",
-        "yanchor": "bottom",
-    }]
+    return [
+        {
+            "x": float(style.get("element_legend_x", 0.5)),
+            "y": float(style.get("element_legend_y", 0.02)),
+            "xref": "paper",
+            "yref": "paper",
+            "text": swatches,
+            "showarrow": False,
+            "font": {"size": float(style.get("element_legend_font_size", 13))},
+            "xanchor": "center",
+            "yanchor": "bottom",
+        }
+    ]
 
 
 def _publication_polyhedron_legend(spec_results: list[dict]) -> list[dict]:
@@ -78,17 +82,19 @@ def _publication_polyhedron_legend(spec_results: list[dict]) -> list[dict]:
         entries.append(f"<span style='color:{color}'><b>■ {name}</b></span>")
     if not entries:
         return []
-    return [{
-        "x": 0.99,
-        "y": 0.905,
-        "xref": "paper",
-        "yref": "paper",
-        "text": " &nbsp;&nbsp; ".join(entries),
-        "showarrow": False,
-        "font": {"size": 13},
-        "xanchor": "right",
-        "yanchor": "bottom",
-    }]
+    return [
+        {
+            "x": 0.99,
+            "y": 0.905,
+            "xref": "paper",
+            "yref": "paper",
+            "text": " &nbsp;&nbsp; ".join(entries),
+            "showarrow": False,
+            "font": {"size": 13},
+            "xanchor": "right",
+            "yanchor": "bottom",
+        }
+    ]
 
 
 def build_publication_figure(
@@ -164,41 +170,54 @@ def build_publication_figure(
             "camera": main_dict.get("layout", {}).get("scene", {}).get("camera", {}),
             "bgcolor": bgcolor,
         }
-        panel_annotations.append({
-            "x": (x0 + x1) / 2,
-            "y": 0.255,
-            "xref": "paper",
-            "yref": "paper",
-            "text": f"<b>{result.get('name') or result.get('center_species') or 'Polyhedron'}</b>",
-            "showarrow": False,
-            "font": {"size": 17, "color": color},
-            "xanchor": "center",
-            "yanchor": "bottom",
-        })
+        panel_annotations.append(
+            {
+                "x": (x0 + x1) / 2,
+                "y": 0.255,
+                "xref": "paper",
+                "yref": "paper",
+                "text": f"<b>{result.get('name') or result.get('center_species') or 'Polyhedron'}</b>",
+                "showarrow": False,
+                "font": {"size": 17, "color": color},
+                "xanchor": "center",
+                "yanchor": "bottom",
+            }
+        )
 
     main_scene_layout = dict(main_dict.get("layout", {}).get("scene") or {})
     main_scene_layout["domain"] = {"x": [0.0, 1.0], "y": [0.29, 0.94]}
     camera = dict(main_scene_layout.get("camera") or {})
     eye = dict(camera.get("eye") or {})
     if eye:
-        camera["eye"] = {
-            axis: float(value) * 0.38
-            for axis, value in eye.items()
-        }
+        camera["eye"] = {axis: float(value) * 0.38 for axis, value in eye.items()}
         main_scene_layout["camera"] = camera
     annotations = [
         {
-            "x": 0.5, "y": 0.985, "xref": "paper", "yref": "paper",
+            "x": 0.5,
+            "y": 0.985,
+            "xref": "paper",
+            "yref": "paper",
             "text": f"<b>{title or scene.get('display_title') or scene.get('title') or scene.get('name') or ''}</b>",
-            "showarrow": False, "font": {"size": 30, "color": "#111111"}, "xanchor": "center", "yanchor": "top",
+            "showarrow": False,
+            "font": {"size": 30, "color": "#111111"},
+            "xanchor": "center",
+            "yanchor": "top",
         },
     ]
     if subtitle:
-        annotations.append({
-            "x": 0.5, "y": 0.945, "xref": "paper", "yref": "paper",
-            "text": str(subtitle), "showarrow": False, "font": {"size": 15, "color": "#555555"},
-            "xanchor": "center", "yanchor": "top",
-        })
+        annotations.append(
+            {
+                "x": 0.5,
+                "y": 0.945,
+                "xref": "paper",
+                "yref": "paper",
+                "text": str(subtitle),
+                "showarrow": False,
+                "font": {"size": 15, "color": "#555555"},
+                "xanchor": "center",
+                "yanchor": "top",
+            }
+        )
     key_annotations, key_shapes = compose_axis_key_layout(scene, main_style)
     annotations.extend(key_annotations or [])
     annotations.extend(_publication_polyhedron_legend(spec_results))
@@ -284,7 +303,8 @@ def build_row_figure(
 
     # Build the subplot template to get the correct domain layout.
     fig_template = make_subplots(
-        rows=1, cols=n,
+        rows=1,
+        cols=n,
         specs=[[{"type": "scene"}] * n],
         horizontal_spacing=0.01,
     )
@@ -324,16 +344,28 @@ def build_row_figure(
         if scene.get("vector_overlays"):
             from .overlay.vectors import vector_mesh_traces
 
-            trace_dicts.extend(vector_mesh_traces(scene["vector_overlays"], lattice=scene.get("M")))
-        trace_dicts.extend(_ordered_atom_bond_trace_dicts(mesh_payload, use_fast=use_fast))
+            trace_dicts.extend(
+                vector_mesh_traces(scene["vector_overlays"], lattice=scene.get("M"))
+            )
+        trace_dicts.extend(
+            _ordered_atom_bond_trace_dicts(mesh_payload, use_fast=use_fast)
+        )
         trace_dicts.extend(_traces_to_dicts(_contact_traces(scene, style_norm)))
-        trace_dicts.extend(_traces_to_dicts(_label_traces(scene, style_norm, hidden_labels=hidden_labels_row)))
+        trace_dicts.extend(
+            _traces_to_dicts(
+                _label_traces(scene, style_norm, hidden_labels=hidden_labels_row)
+            )
+        )
         trace_dicts.extend(_traces_to_dicts(_axis_traces(scene, style_norm)))
         trace_dicts.extend(_traces_to_dicts(_unit_cell_traces(scene, style_norm)))
         trace_dicts.extend(_traces_to_dicts(_morphology_traces(scene, style_norm)))
         if include_interaction_traces:
             trace_dicts.append(
-                _round_coord_arrays(_atom_selection_trace(scene, style_norm, hidden_labels=hidden_labels_row).to_plotly_json())
+                _round_coord_arrays(
+                    _atom_selection_trace(
+                        scene, style_norm, hidden_labels=hidden_labels_row
+                    ).to_plotly_json()
+                )
             )
 
         trace_dicts = _style_trace_dicts(trace_dicts, style_norm)
@@ -371,7 +403,11 @@ def build_figure(
     if vector_overlays is not None:
         scene["vector_overlays"] = vector_overlays
     style = validate_style_schema(style)
-    xr, yr, zr = _scene_ranges(scene, style, topology_data=topology_data if style.get("topology_enabled", False) else None)
+    xr, yr, zr = _scene_ranges(
+        scene,
+        style,
+        topology_data=topology_data if style.get("topology_enabled", False) else None,
+    )
     if style.get("material") == "flat":
         style["_flat_visual_pixel_scale"] = flat_visual_pixel_scale(style)
     style["_topology_viewport_ranges"] = [list(xr), list(yr), list(zr)]
@@ -383,13 +419,14 @@ def build_figure(
     # flat+ortep is excluded: it uses the open-ORTEP billboard pipeline,
     # not the scatter fast-path.
     is_flat_ortep = style.get("material") == "flat" and style.get("style") == "ortep"
-    use_fast = (
-        bool(style.get("fast_rendering", False))
-        or (style.get("material") == "flat" and not is_flat_ortep)
+    use_fast = bool(style.get("fast_rendering", False)) or (
+        style.get("material") == "flat" and not is_flat_ortep
     )
 
     mesh_payload = _cached_atom_bond_meshes(scene, style, use_fast=use_fast)
-    topology_on = bool(style.get("topology_enabled", False)) and topology_data is not None
+    topology_on = (
+        bool(style.get("topology_enabled", False)) and topology_data is not None
+    )
 
     # Phase 2: derive labels of atoms hidden by atom_groups visible:false
     # so labels and the click-target overlay stay in sync with what's
@@ -412,15 +449,20 @@ def build_figure(
     # that machinery alone.
     trace_dicts: list[dict] = []
     if topology_on:
-        trace_dicts.extend(_traces_to_dicts(topology_background_traces(topology_data, style)))
+        trace_dicts.extend(
+            _traces_to_dicts(topology_background_traces(topology_data, style))
+        )
     # Isosurface overlay: inserted before bonds/atoms so the molecular
     # skeleton renders on top of the translucent orbital lobes.
     from .traces_isosurface import isosurface_overlay_traces
+
     trace_dicts.extend(isosurface_overlay_traces(scene, style))
     if scene.get("vector_overlays"):
         from .overlay.vectors import vector_mesh_traces
 
-        trace_dicts.extend(vector_mesh_traces(scene["vector_overlays"], lattice=scene.get("M")))
+        trace_dicts.extend(
+            vector_mesh_traces(scene["vector_overlays"], lattice=scene.get("M"))
+        )
     trace_dicts.extend(_ordered_atom_bond_trace_dicts(mesh_payload, use_fast=use_fast))
     selection_trace = selection_outline_trace(
         scene,
@@ -430,20 +472,34 @@ def build_figure(
     if selection_trace is not None:
         trace_dicts.extend(_traces_to_dicts([selection_trace]))
     if include_interaction_traces:
-        trace_dicts.extend(_traces_to_dicts([disorder_preview_outline_trace(scene, style, highlight_labels=set())]))
+        trace_dicts.extend(
+            _traces_to_dicts(
+                [disorder_preview_outline_trace(scene, style, highlight_labels=set())]
+            )
+        )
     trace_dicts.extend(_traces_to_dicts(_contact_traces(scene, style)))
     # Flat rendering emits one grouped, fully opaque white dot from
     # `_atom_scatter_traces`, placed at the screen upper-right of each atom.
     # Mesh rendering keeps its native Mesh3d lighting; no raster post-process
     # or per-atom highlight traces are used.
-    trace_dicts.extend(_traces_to_dicts(_label_traces(scene, style, hidden_labels=hidden_labels)))
+    trace_dicts.extend(
+        _traces_to_dicts(_label_traces(scene, style, hidden_labels=hidden_labels))
+    )
     trace_dicts.extend(_traces_to_dicts(_axis_traces(scene, style)))
     trace_dicts.extend(_traces_to_dicts(_unit_cell_traces(scene, style)))
     trace_dicts.extend(_traces_to_dicts(_morphology_traces(scene, style)))
     if topology_on:
-        trace_dicts.extend(_traces_to_dicts(topology_foreground_traces(topology_data, style)))
+        trace_dicts.extend(
+            _traces_to_dicts(topology_foreground_traces(topology_data, style))
+        )
     if include_interaction_traces:
-        trace_dicts.append(_round_coord_arrays(_atom_selection_trace(scene, style, hidden_labels=hidden_labels).to_plotly_json()))
+        trace_dicts.append(
+            _round_coord_arrays(
+                _atom_selection_trace(
+                    scene, style, hidden_labels=hidden_labels
+                ).to_plotly_json()
+            )
+        )
         # Phase 4: extra invisible markers so the right-click menu has
         # click targets for polyhedron centres and bond midpoints.
         if topology_on:
@@ -459,10 +515,18 @@ def build_figure(
     # ``to_plotly_json()`` upstream, so skipping here is safe and shaves
     # another ~50% off the warm rebuild path on small / medium scenes.
     trace_dicts = _style_trace_dicts(trace_dicts, style)
+    property_payload = style.get("atom_property_color") or {}
+    show_property_colorbar = bool(property_payload.get("show_colorbar"))
+    if show_property_colorbar:
+        from .property_colorbar import plotly_colorbar_trace
+
+        trace_dicts.append(plotly_colorbar_trace(property_payload))
     fig = go_Figure(data=trace_dicts, _validate=False)
 
     show_title = bool(style.get("show_title", True))
-    title_text = scene.get("display_title") or scene.get("title") or scene.get("name") or ""
+    title_text = (
+        scene.get("display_title") or scene.get("title") or scene.get("name") or ""
+    )
     top_margin = 50 if show_title else 0
 
     ui_revision = style.get("uirevision", str(scene.get("name", "scene")))
@@ -478,7 +542,10 @@ def build_figure(
         margin=dict(l=0, r=0, t=top_margin, b=0),
         scene={
             **figure_axis_layout(scene, style, xr, yr, zr),
-            "domain": {"x": [0, 1], "y": [0, 1]},
+            "domain": {
+                "x": [0, 0.86 if show_property_colorbar else 1],
+                "y": [0, 1],
+            },
         },
         meta=layout_meta,
     )
@@ -490,14 +557,20 @@ def build_figure(
 
         camera = layout_kwargs["scene"]["camera"]
         projection = camera.get("projection") or {}
-        if (projection.get("type") if isinstance(projection, dict) else projection) == "orthographic":
-            key_annotations = list(key_annotations or []) + paper_vector_label_annotations(
+        if (
+            projection.get("type") if isinstance(projection, dict) else projection
+        ) == "orthographic":
+            key_annotations = list(
+                key_annotations or []
+            ) + paper_vector_label_annotations(
                 scene["vector_overlays"],
                 lattice=scene.get("M"),
                 camera=camera,
                 ranges=(xr, yr, zr),
             )
-    key_annotations = list(key_annotations or []) + _element_legend_annotations(scene, style)
+    key_annotations = list(key_annotations or []) + _element_legend_annotations(
+        scene, style
+    )
     if key_annotations:
         layout_kwargs["annotations"] = key_annotations
     if key_shapes:

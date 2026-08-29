@@ -137,7 +137,7 @@ def test_animation_preserves_unique_plan_warnings(tmp_path, monkeypatch) -> None
 def test_animation_passes_fixed_vector_overlays_to_every_frame(
     tmp_path, monkeypatch
 ) -> None:
-    imageio = pytest.importorskip("imageio.v2")
+    pytest.importorskip("imageio.v2")
     overlays = [
         {
             "id": "mode",

@@ -88,6 +88,7 @@ def test_skill_routes_publication_and_multi_structure_guidance() -> None:
     assert "references/quickstart.md" not in document
     assert "./references/publication-layout.md" in document
     assert "./references/multi-structure-panels.md" in document
+    assert "./references/atom-property-coloring.md" in document
     vectors = (SKILL / "references" / "vibration-mode-vectors.md").read_text(
         encoding="utf-8"
     )
@@ -104,6 +105,16 @@ def test_skill_routes_publication_and_multi_structure_guidance() -> None:
     assert "`instance_overrides`" in polyhedra
     assert "Omit `cutoff` for the natural shell" in polyhedra
     assert "`effective_colors`" in polyhedra
+
+    property_coloring = (SKILL / "references" / "atom-property-coloring.md").read_text(
+        encoding="utf-8"
+    )
+    assert "mat-vis inspect INPUT --properties --json" in property_coloring
+    assert "Never let `auto` assign tensor meaning" in property_coloring
+    assert "Never rescale each frame independently" in property_coloring
+    assert "CSV or NPZ" in property_coloring
+    assert "`lut_hash`" in property_coloring
+    assert "`manifest_hash`" in property_coloring
 
 
 def test_released_molcryskit_minimum_is_consistent() -> None:
