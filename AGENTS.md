@@ -44,7 +44,12 @@ paper/                 figure-generation scripts for publications
 
 ## Testing Rules
 
-- **Full suite must stay green.** Run `pytest tests/` before pushing.
+- **Full suite must stay green.** Run
+  `python -m pytest tests/ -n 4 --dist loadfile` before pushing.
+- For a quick local signal, run
+  `python -m pytest tests/ -n 4 --dist loadfile -m "not integration and not slow"`.
+- Profile suite regressions by appending
+  `--durations=50 --durations-min=0.25` to the full command.
 - Lint with `ruff check mat_viewer/`.
 - Example regressions: run the relevant `python scripts/<n>_*.py` and
   inspect the generated artifact under `scripts/_outputs/`.

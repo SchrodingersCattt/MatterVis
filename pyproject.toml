@@ -54,6 +54,7 @@ test = [
     "pytest>=8.0",
     "pytest-cov",
     "pytest-timeout",
+    "pytest-xdist",
     "gemmi",
     "tomli; python_version < '3.11'",
 ]

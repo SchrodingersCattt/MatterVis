@@ -67,6 +67,21 @@ shorthand-issued `repeat`), so it shows up later under
 `/transforms` directly when you need to mix `repeat` with `grow_bonds`,
 `slab`, etc.
 
+## Backend lifecycle
+
+`ViewerBackend` owns a scene-store persistence thread and asynchronous render
+executors. Long-lived services keep one backend for the service lifetime.
+Short-lived callers must either use it as a context manager or call its
+idempotent `close()` method so pending scene state is flushed and those
+background resources are released:
+
+```python
+from mat_viewer.app.backend import ViewerBackend
+
+with ViewerBackend(preset_path="preset.json") as backend:
+    state = backend.get_state()
+```
+
 ## Live update contract
 
 The WebSocket is the **only** push channel; REST mutations don't reply

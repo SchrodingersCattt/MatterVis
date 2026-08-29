@@ -113,7 +113,10 @@ class _CoreBackendMixin:
             daemon=True,
         )
         self._persist_thread.start()
-        atexit.register(self.flush_scene_store)
+        self._close_lock = threading.Lock()
+        self._closed = False
+        self._atexit_flush_callback = self.flush_scene_store
+        atexit.register(self._atexit_flush_callback)
         self._intent_lock = threading.Lock()
         self._intent_seq_by_client: dict[str, int] = {}
 
