@@ -342,6 +342,7 @@ def test_render_cli_accepts_every_structure_adapter(
     assert json.loads(capsys.readouterr().out)["backend"] == "cpu"
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("extension", [".gif", ".mp4"])
 def test_render_cli_exports_real_animation(
     structure_files: dict[str, Path],
@@ -374,7 +375,8 @@ def test_render_cli_exports_real_animation(
 
     assert output.is_file()
     assert output.stat().st_size > 1000
-    frames = list(iio.imiter(output))
+    with iio.imopen(output, "r") as reader:
+        frames = list(reader.iter())
     assert len(frames) == 2
     assert all(frame.shape[:2] == (160, 200) for frame in frames)
 
