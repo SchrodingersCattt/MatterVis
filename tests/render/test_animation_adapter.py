@@ -6,6 +6,8 @@ import numpy as np
 import pytest
 
 from mat_viewer.render.animation_adapter import render_animation
+import mat_viewer.render.cpu as cpu_module
+import mat_viewer.render.planning as planning_module
 from mat_viewer.render.contracts import (
     CameraSpec,
     RenderPlan,
@@ -81,9 +83,6 @@ def test_animation_preserves_unique_plan_warnings(tmp_path, monkeypatch) -> None
         warnings=("frame contract warning",),
     )
 
-    import mat_viewer.render.cpu as cpu_module
-    import mat_viewer.render.planning as planning_module
-
     writer_options = {}
 
     class FakeWriter:
@@ -133,3 +132,62 @@ def test_animation_preserves_unique_plan_warnings(tmp_path, monkeypatch) -> None
     assert result.warnings == ("frame contract warning",)
     assert writer_options["duration"] == pytest.approx(1000.0 / 12.0)
     assert result.metadata["frame_duration_ms"] == pytest.approx(1000.0 / 12.0)
+
+
+def test_animation_passes_fixed_vector_overlays_to_every_frame(
+    tmp_path, monkeypatch
+) -> None:
+    pytest.importorskip("imageio.v2")
+    overlays = [
+        {
+            "id": "mode",
+            "magnitude_mode": "absolute",
+            "anchor": "center",
+            "arrows": [
+                {"id": "atom-0", "origin": [0, 0, 0], "vector": [0.5, 0, 0]}
+            ],
+        }
+    ]
+    captured = []
+
+    from io import BytesIO
+    from PIL import Image
+    camera = CameraSpec.looking_along(
+        (0, 0, 1), up=(0, 1, 0), distance=5.0, near=0.1, far=10.0
+    )
+    plan = RenderPlan(
+        width=8,
+        height=8,
+        background=(1.0, 1.0, 1.0, 1.0),
+        viewports=(ViewportPlan("main", camera=camera, primitives=()),),
+    )
+
+    def fake_prepare(*args, **kwargs):
+        captured.append(kwargs.get("vector_overlays"))
+        return plan
+
+    frame_buffer = BytesIO()
+    Image.fromarray(np.full((8, 8, 4), 255, dtype=np.uint8), mode="RGBA").save(
+        frame_buffer, format="PNG"
+    )
+    monkeypatch.setattr(planning_module, "prepare_render", fake_prepare)
+    monkeypatch.setattr(
+        cpu_module,
+        "render_png",
+        lambda *args, **kwargs: SimpleNamespace(data=frame_buffer.getvalue(), warnings=()),
+    )
+
+    output = tmp_path / "vectors.gif"
+    result = render_animation(
+        SimpleNamespace(frames=(object(), object())),
+        output,
+        camera=camera,
+        vector_overlays=overlays,
+    )
+
+    assert output.is_file()
+    assert captured == [overlays, overlays]
+    assert result.metadata["vector_overlays"] == {
+        "animated": True,
+        "policy": "fixed_source_frame",
+    }

@@ -286,6 +286,11 @@ Bond selectors are `all`, `minor`, `major`, `between:...`, and `label:...`.
 Bond overrides are `color`, `visible`, `opacity`, `style`, and `radius_scale`.
 Use `--check --json` to inspect the normalized rules without loading the input.
 
+For CPU GIF/MP4, `--vector-overlays JSON` applies one fixed source-frame vector
+overlay to every selected frame. This supports equilibrium-centred vibration
+arrows over moving atoms; per-frame-changing vector fields require a future
+separate contract.
+
 ### Colour and ORTEP
 
 | Flag | Default | Description |

@@ -20,6 +20,7 @@ def render_animation(
     camera: Any = None,
     render_spec: Any = None,
     topology_data: Mapping[str, Any] | None = None,
+    vector_overlays: Any = None,
     atom_groups: Any = None,
     bond_groups: Any = None,
     fps: float = 12.0,
@@ -109,6 +110,7 @@ def render_animation(
                 camera=camera,
                 render=render_spec,
                 topology_data=topology_data,
+                vector_overlays=vector_overlays,
                 atom_groups=atom_groups,
                 bond_groups=bond_groups,
                 atom_property_color=property_context,
@@ -160,6 +162,10 @@ def render_animation(
                 if atom_property_color is not None
                 else None
             ),
+            "vector_overlays": {
+                "animated": vector_overlays is not None,
+                "policy": "fixed_source_frame" if vector_overlays is not None else None,
+            },
             "simulation_time": (
                 time_series.to_metadata()
                 if time_series is not None
