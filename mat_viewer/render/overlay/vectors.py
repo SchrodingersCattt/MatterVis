@@ -12,6 +12,7 @@ from ..geometry import arrow_primitive
 
 MAGNITUDE_MODES = {"absolute", "scaled", "normalized"}
 VIEWPORT_POLICIES = {"include", "clip"}
+ANCHORS = {"tail", "center"}
 
 
 def _vec3(raw: Any, name: str) -> np.ndarray:
@@ -66,6 +67,9 @@ def normalize_vector_overlays(raw: Any) -> list[dict]:
         viewport_policy = str(group.get("viewport_policy") or "include")
         if viewport_policy not in VIEWPORT_POLICIES:
             raise ValueError("viewport_policy must be include or clip")
+        anchor = str(group.get("anchor") or "tail")
+        if anchor not in ANCHORS:
+            raise ValueError("vector overlay anchor must be tail or center")
         style = dict(group.get("style") or {})
         arrows_raw = group.get("arrows") or []
         if not isinstance(arrows_raw, list):
@@ -107,6 +111,7 @@ def normalize_vector_overlays(raw: Any) -> list[dict]:
                 "visible": bool(group.get("visible", True)),
                 "magnitude_mode": mode,
                 "viewport_policy": viewport_policy,
+                "anchor": anchor,
                 "opacity": float(group.get("opacity", 1.0)),
                 "style": style,
                 "arrows": arrows,
@@ -212,7 +217,17 @@ def resolve_vector_overlays(raw: Any, *, lattice=None) -> list[dict]:
                     )
                 display_vector = length * raw_vector / magnitude
             direction = display_vector / np.linalg.norm(display_vector)
-            origin = origin + float(arrow.get("tail_offset", 0.0)) * direction
+            anchor = str(arrow.get("anchor") or group["anchor"])
+            if anchor not in ANCHORS:
+                raise ValueError("vector overlay anchor must be tail or center")
+            anchor_offset = (
+                -0.5 * float(np.linalg.norm(display_vector))
+                if anchor == "center"
+                else 0.0
+            )
+            origin = origin + (
+                anchor_offset + float(arrow.get("tail_offset", 0.0))
+            ) * direction
             end = origin + display_vector
             resolved.append(
                 {

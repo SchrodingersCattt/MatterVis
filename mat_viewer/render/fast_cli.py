@@ -282,9 +282,9 @@ def render_batch_if_selected(
             projection=args.projection,
             camera_axis=args.camera_axis,
             view_direction=tuple(args.view_direction) if args.view_direction else None,
-            camera_position=tuple(args.camera_position)
-            if args.camera_position
-            else None,
+            camera_position=(
+                tuple(args.camera_position) if args.camera_position else None
+            ),
             camera_up=tuple(args.camera_up) if args.camera_up else None,
             fit_multiplier=args.camera_distance,
             zoom=args.zoom,
@@ -292,9 +292,9 @@ def render_batch_if_selected(
             atom_scale=args.atom_scale,
             background=background,
             show_hydrogen=args.show_hydrogen,
-            show_cell=True
-            if args.show_unit_cell is None
-            else bool(args.show_unit_cell),
+            show_cell=(
+                True if args.show_unit_cell is None else bool(args.show_unit_cell)
+            ),
             cell_color=cell_color,
             cell_width_px=args.cell_width,
             bonded=args.style == "ball_stick",
@@ -322,9 +322,9 @@ def render_batch_if_selected(
             projection=args.projection,
             camera_axis=args.camera_axis,
             view_direction=tuple(args.view_direction) if args.view_direction else None,
-            camera_position=tuple(args.camera_position)
-            if args.camera_position
-            else None,
+            camera_position=(
+                tuple(args.camera_position) if args.camera_position else None
+            ),
             camera_up=tuple(args.camera_up) if args.camera_up else None,
             fit_multiplier=args.camera_distance,
             zoom=args.zoom,
@@ -343,9 +343,7 @@ def render_batch_if_selected(
             vector_overlays=_load_vector_overlays(args.vector_overlays),
             polyhedron_specs=tuple(args.polyhedron),
             polyhedron_site=args.polyhedron_site,
-            polyhedron_cutoff=(
-                args.polyhedron_cutoff if args.polyhedron_cutoff is not None else 10.0
-            ),
+            polyhedron_cutoff=args.polyhedron_cutoff,
             animation_time=_animation_time_from_args(args),
             frame_annotation=_frame_annotation_from_args(args),
             profile_path=args.profile_json,

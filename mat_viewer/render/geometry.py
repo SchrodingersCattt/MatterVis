@@ -619,7 +619,7 @@ def polyhedron_primitive(
     faces: Sequence[Sequence[int]],
     color: Any,
     *,
-    alpha: float = 0.55,
+    alpha: float = 0.50,
     metadata: dict[str, Any] | None = None,
 ) -> TriangleMeshPrimitive:
     points = np.asarray(vertices, dtype=float)
@@ -644,7 +644,7 @@ def polyhedron_edges_primitive(
     color: Any,
     *,
     width_px: float = 1.0,
-    alpha: float = 0.9,
+    alpha: float = 0.40,
 ) -> LinePrimitive:
     points = np.asarray(vertices, dtype=float)
     edges: set[tuple[int, int]] = set()

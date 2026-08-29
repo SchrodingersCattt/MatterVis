@@ -79,17 +79,31 @@ def test_skill_has_no_second_installer_or_obsolete_package_entrypoint() -> None:
 def test_skill_routes_publication_and_multi_structure_guidance() -> None:
     document = (SKILL / "SKILL.md").read_text(encoding="utf-8")
 
-    assert 'description: "Use for any atomistic image or visualization:' in document
+    assert 'description: "Render atomistic structures with MatterVis.' in document
+    assert len(document.splitlines()) <= 60
     assert "--check" not in document
-    assert "--vector-overlays" in document
-    assert "not permission to redraw" in document
+    assert "--vector-overlays" not in document
+    assert "Do not guess Python import names" in document
+    assert "For render-only requests" in document
+    assert "references/quickstart.md" not in document
     assert "./references/publication-layout.md" in document
     assert "./references/multi-structure-panels.md" in document
     vectors = (SKILL / "references" / "vibration-mode-vectors.md").read_text(
         encoding="utf-8"
     )
+    assert "--vector-overlays" in vectors
+    assert "--vector-overlays" in vectors
     assert "source Cartesian frame" in vectors
     assert "synthetic-cell translation internally" in vectors
+    polyhedra = (SKILL / "references" / "polyhedra.md").read_text(encoding="utf-8")
+    assert len(polyhedra.splitlines()) <= 70
+    assert '"level":"atom"' in polyhedra
+    assert "--show-cell --show-axes" in polyhedra
+    assert "every matching source centre" in polyhedra
+    assert '"center_images":true' in polyhedra
+    assert "`instance_overrides`" in polyhedra
+    assert "Omit `cutoff` for the natural shell" in polyhedra
+    assert "`effective_colors`" in polyhedra
 
 
 def test_released_molcryskit_minimum_is_consistent() -> None:

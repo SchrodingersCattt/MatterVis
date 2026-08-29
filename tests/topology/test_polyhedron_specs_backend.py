@@ -18,6 +18,7 @@ replaced (alongside) the legacy ``topology_species_keys`` selector:
 DO NOT REMOVE -- this guards the contract documented in
 ``docs/agents/polyhedron_api.md``.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -279,8 +280,20 @@ def test_effective_specs_keep_disabled_for_instant_toggle(backend: ViewerBackend
     """
     state = backend.get_state()
     state["polyhedron_specs"] = [
-        {"id": "a", "center_species": "X", "color": "#000000", "enabled": False, "name": "x"},
-        {"id": "b", "center_species": "Y", "color": "#000000", "enabled": True, "name": "y"},
+        {
+            "id": "a",
+            "center_species": "X",
+            "color": "#000000",
+            "enabled": False,
+            "name": "x",
+        },
+        {
+            "id": "b",
+            "center_species": "Y",
+            "color": "#000000",
+            "enabled": True,
+            "name": "y",
+        },
     ]
     effective = backend._effective_polyhedron_specs(state)
     # All specs are kept; the enabled flag still rides on each
@@ -294,11 +307,21 @@ def test_mck_polyhedron_record_passes_packing_shell_knobs(monkeypatch):
 
     def fake_find_polyhedra(*args, **kwargs):
         captured["kwargs"] = kwargs
-        return [{"center_position": [0.0, 0.0, 0.0], "shell_coords": [], "shell_distances": []}]
+        return [
+            {
+                "center_position": [0.0, 0.0, 0.0],
+                "shell_coords": [],
+                "shell_distances": [],
+            }
+        ]
 
-    monkeypatch.setattr(topology_module.analysis, "molcrys_bridge", _molcrys_bridge_module)
+    monkeypatch.setattr(
+        topology_module.analysis, "molcrys_bridge", _molcrys_bridge_module
+    )
     # Patch molecular_crystal_from_bundle on the molcrys_bridge *module* (not the import alias).
-    monkeypatch.setattr(_molcrys_bridge_module, "molecular_crystal_from_bundle", lambda bundle: object())
+    monkeypatch.setattr(
+        _molcrys_bridge_module, "molecular_crystal_from_bundle", lambda bundle: object()
+    )
     monkeypatch.setattr(topology_module.analysis, "find_polyhedra", fake_find_polyhedra)
 
     record = topology_module.analysis._mck_polyhedron_record(
@@ -339,7 +362,9 @@ def test_extract_atom_shells_targets_raw_source_indices(monkeypatch):
             }
         ]
 
-    monkeypatch.setattr(_molcrys_bridge_module, "molecular_crystal_from_bundle", lambda bundle: object())
+    monkeypatch.setattr(
+        _molcrys_bridge_module, "molecular_crystal_from_bundle", lambda bundle: object()
+    )
     monkeypatch.setattr(topology_module.analysis, "find_polyhedra", fake_find_polyhedra)
 
     shells = topology_module.extract_atom_coordination_shells(
@@ -356,7 +381,9 @@ def test_extract_atom_shells_targets_raw_source_indices(monkeypatch):
 
 
 def test_disorder_center_dedupe_prefers_major_orientation():
-    bundle = type("Bundle", (), {"M": [[10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 10.0]]})()
+    bundle = type(
+        "Bundle", (), {"M": [[10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 10.0]]}
+    )()
     scene = {
         "draw_atoms": [
             {"is_minor": True},
@@ -457,20 +484,53 @@ def test_atom_polyhedron_centers_enumerate_unique_display_images():
     )()
     scene = {
         "draw_atoms": [
-            {"elem": "Zr", "label": "Zr0", "frac": [0.0, 0.0, 0.0], "cart": [0.0, 0.0, 0.0], "_source_index": 0},
-            {"elem": "Zr", "label": "Zr0'", "frac": [1.0, 0.0, 0.0], "cart": [10.0, 0.0, 0.0], "_source_index": 0},
-            {"elem": "Zr", "label": "duplicate", "frac": [1.0, 0.0, 0.0], "cart": [10.0, 0.0, 0.0], "_source_index": 0},
-            {"elem": "O", "label": "O1", "frac": [0.5, 0.5, 0.5], "cart": [5.0, 5.0, 5.0], "_source_index": 1},
+            {
+                "elem": "Zr",
+                "label": "Zr0",
+                "frac": [0.0, 0.0, 0.0],
+                "cart": [0.0, 0.0, 0.0],
+                "_source_index": 0,
+            },
+            {
+                "elem": "Zr",
+                "label": "Zr0'",
+                "frac": [1.0, 0.0, 0.0],
+                "cart": [10.0, 0.0, 0.0],
+                "_source_index": 0,
+            },
+            {
+                "elem": "Zr",
+                "label": "duplicate",
+                "frac": [1.0, 0.0, 0.0],
+                "cart": [10.0, 0.0, 0.0],
+                "_source_index": 0,
+            },
+            {
+                "elem": "O",
+                "label": "O1",
+                "frac": [0.5, 0.5, 0.5],
+                "cart": [5.0, 5.0, 5.0],
+                "_source_index": 1,
+            },
         ]
     }
 
-    centers = _display_atom_centers_for_spec(
+    primary = _display_atom_centers_for_spec(
         bundle,
         scene,
         {"center_species": "Zr", "level": "atom"},
     )
+    images = _display_atom_centers_for_spec(
+        bundle,
+        scene,
+        {"center_species": "Zr", "level": "atom"},
+        include_images=True,
+    )
 
-    assert [(center["source_index"], center["image"]) for center in centers] == [
+    assert [(center["source_index"], center["image"]) for center in primary] == [
+        (0, (0, 0, 0)),
+    ]
+    assert [(center["source_index"], center["image"]) for center in images] == [
         (0, (0, 0, 0)),
         (0, (1, 0, 0)),
     ]

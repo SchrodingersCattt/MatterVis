@@ -13,22 +13,24 @@ Convert any source format into:
 - the cell and periodicity when the structure is periodic.
 
 Fail on atom-count, order, stable-ID, coordinate-space, or unit ambiguity.
+For an ORCA `.hess`, `$normal_modes` stores Cartesian coordinates in rows and
+mode indices in columns: mode `m` is `L[:, m].reshape(N, 3)`, never `L[m, :]`.
+Convert the mass-weighted vector to Cartesian displacement with the matching
+per-atom `M^(-1/2)` factors, and confirm `m` against
+`$vibrational_frequencies` before rendering.
 MatterVis renders these arrays; parsing a simulation-code format belongs in an
 adapter outside the renderer.
 
-## Arrow contract
+## Arrow placement
 
 Use public native world-space `vector_overlays`; these arrows rotate with the
 structure and participate in 3D occlusion. Keep origins and endpoints in the
 input structure's source Cartesian frame; MatterVis applies any nonperiodic
-synthetic-cell translation internally. A vibration vector represents motion
-about an equilibrium atom, so centre it on that atom by default:
-
-```python
-display = scale * displacement
-origin = equilibrium_position - 0.5 * display
-arrow = {"origin": origin, "vector": display}
-```
+synthetic-cell translation internally. For a vibration, set `anchor: center`
+with `origin` equal to the equilibrium atom position. MatterVis then resolves
+the visible arrow as
+`tail = r_i - s q_i / 2`, `tip = r_i + s q_i / 2`, so its geometric midpoint
+is exactly the atom. Do not pre-shift the origin as well.
 
 Dipoles, forces, and polarization vectors normally start at their physical
 anchor instead. Centring is a caller policy, not a separate mesh primitive:
@@ -44,7 +46,15 @@ After applying the scale and centring above, save the arrows as a JSON list:
   {
     "id": "mode",
     "magnitude_mode": "absolute",
+    "anchor": "center",
     "viewport_policy": "include",
+    "color": "#0072B2",
+    "style": {
+      "shaft_radius": 0.030,
+      "head_radius_ratio": 2.15,
+      "head_length_ratio": 0.22,
+      "sides": 16
+    },
     "arrows": [
       {"id": "atom-0", "origin": [0.0, 0.0, 0.0], "vector": [0.2, 0.0, 0.0]}
     ]
@@ -58,7 +68,11 @@ mat-vis render equilibrium.xyz -o mode.png --backend cpu --json \
 ```
 
 Use `absolute` because the caller already applied the visual scale. This static
-path needs neither Plotly nor Chrome.
+path needs neither Plotly nor Chrome. Keep the shaft distinctly thinner than
+ordinary bonds and the arrowhead short enough that vectors do not obscure atom
+colours or local bonding. For a small-molecule first candidate, use an atom
+scale around `0.65--0.75` and a bond radius around `0.10`; inspect rather than
+treating those values as chemistry.
 
 
 ## Scale and selection
@@ -66,8 +80,16 @@ path needs neither Plotly nor Chrome.
 - Preserve relative vector lengths within a mode.
 - Use one fixed scale across compared modes, pressures, panels, or frames.
 - State that display length is a visual amplification, not thermal amplitude.
-- If arrows are filtered, use a declared relative threshold such as
-  `norm(q_i) / max(norm(q)) >= eta`; hidden arrows do not imply zero motion.
+- As a first visual candidate, make the longest displayed vector about 15--25%
+  of the selected scene diagonal; then inspect the final-size image.
+- If centred vectors remain buried by atom spheres, reduce the context atom
+  scale before changing the physical anchor convention.
+- Apply a shared amplification at either group level or in the prepared
+  vectors. Do not repeat the same scale at both group and arrow level.
+- Avoid tiny arrowhead-only fragments. For the first static candidate, filter
+  by `norm(q_i) / max(norm(q)) >= 0.10`; lower or remove that threshold only
+  when weak motion is part of the requested evidence. Hidden arrows do not
+  imply zero motion.
 - Record raw units, scale, maximum display length, and `eta` in provenance.
 
 ## Semantics

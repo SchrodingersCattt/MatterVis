@@ -758,6 +758,65 @@ def test_prepare_render_builds_atoms_bonds_ring_cell_and_polyhedron():
     assert any(identifier.startswith("polyhedron:") for identifier in ids)
 
 
+def test_hidden_polyhedron_instance_is_not_compiled_for_cpu() -> None:
+    topology = {
+        "spec_results": [
+            {
+                "spec_id": "shell",
+                "color": "#BFA6A6",
+                "overlays": [
+                    {
+                        "shell_coords": [
+                            [0.0, 0.0, 0.0],
+                            [1.0, 0.0, 0.0],
+                            [0.0, 1.0, 0.0],
+                            [0.0, 0.0, 1.0],
+                        ],
+                        "hull": {
+                            "simplices": [
+                                [0, 1, 2],
+                                [0, 1, 3],
+                                [0, 2, 3],
+                                [1, 2, 3],
+                            ]
+                        },
+                        "visible": False,
+                    },
+                    {
+                        "shell_coords": [
+                            [2.0, 0.0, 0.0],
+                            [3.0, 0.0, 0.0],
+                            [2.0, 1.0, 0.0],
+                            [2.0, 0.0, 1.0],
+                        ],
+                        "hull": {
+                            "simplices": [
+                                [0, 1, 2],
+                                [0, 1, 3],
+                                [0, 2, 3],
+                                [1, 2, 3],
+                            ]
+                        },
+                        "visible": True,
+                    },
+                ],
+            }
+        ]
+    }
+
+    plan = prepare_render(
+        {"atoms": [], "bonds": [], "matrix": np.eye(3)},
+        topology_data=topology,
+    )
+    polyhedra = [
+        primitive
+        for primitive in plan.primitives
+        if primitive.metadata.get("kind") in {"polyhedron", "polyhedron_edges"}
+    ]
+
+    assert len(polyhedra) == 2
+
+
 def test_public_vector_overlays_use_declared_magnitude_policy() -> None:
     scene = {
         "atoms": [
@@ -1513,8 +1572,8 @@ def test_structure_input_view_rebuilds_loaded_bundle_with_canonical_display_mode
     assert formula.metadata["display_mode"] == "formula_unit"
     assert unit_cell.metadata["display_mode"] == "unit_cell"
     assert [item[1:] for item in calls] == [
-        ("formula_unit", False, True, False),
-        ("unit_cell", False, True, False),
+        ("formula_unit", True, True, False),
+        ("unit_cell", True, True, False),
     ]
 
 
