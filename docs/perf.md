@@ -11,6 +11,46 @@ python -m mat_viewer.perf.bench --repeat 3
 python -m mat_viewer.perf.profile_app
 ```
 
+## Pytest suite baseline and tiers (issue #119)
+
+The reproducible full-suite command is:
+
+```bash
+python -m pytest tests/ -n 4 --dist loadfile \
+  --durations=50 --durations-min=0.25
+```
+
+`loadfile` keeps every test module on one worker, preserving module-level
+fixture and state assumptions while allowing independent files to run in
+parallel. Four workers are fixed deliberately: MatterVis tests create Plotly,
+Matplotlib, Dash, and topology objects, so unbounded `-n auto` can trade wall
+time for excessive memory pressure.
+
+For a quick local signal, exclude full app/subprocess/export integration tests
+and explicit performance fixtures:
+
+```bash
+python -m pytest tests/ -n 4 --dist loadfile \
+  -m "not integration and not slow"
+```
+
+On Windows with Python 3.12.8, ASE 3.29.0, and NumPy 2.5.1, the pre-fix
+baseline on 2026-08-29 was 1021 passed, 43 skipped, and 20,689 warnings in
+447.89 s serial. Adding four workers without removing repeated setup took
+278.45 s and preserved the same pass/skip result. After the issue #119 changes,
+the full command completed 1025 passed and 43 skipped in 145.50 s with no
+unhandled warnings; the fast command completed 594 passed and 32 skipped in
+77.89 s. This is a 67.5% reduction from the serial baseline and a 47.7%
+reduction from xdist alone. Both results meet the acceptance budgets of under
+190 s for the full command and under 120 s for the fast command on the same
+host. CI stores pytest logs and JUnit XML so later changes can compare both
+total time and the slowest tests.
+
+The test-only built-in catalog cache is content-addressed by the CIF SHA-256
+and every loader input. It stores one template per pytest worker and returns a
+deep copy to each backend. Tests that validate real catalog loading use the
+`real_catalog_load` marker and bypass the cache.
+
 ## Pipeline oracle benchmark
 
 Use the pipeline benchmark to record loader, scene, figure, JSON-encoding, and

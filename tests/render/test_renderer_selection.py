@@ -135,8 +135,10 @@ def test_extxyz_static_and_animation_use_the_same_array_pipeline(tmp_path) -> No
     png = tmp_path / "frame.png"
     static = _render_extxyz(source, png, frame_indices=(0,))
     assert static.selected_frames == (0,)
-    assert Image.open(png).size == (160, 120)
-    assert np.any(np.asarray(Image.open(png))[:, :, :3] != 255)
+    with Image.open(png) as image:
+        png_pixels = np.asarray(image)
+        assert image.size == (160, 120)
+    assert np.any(png_pixels[:, :, :3] != 255)
     explicit_no_cell = tmp_path / "frame-no-cell.png"
     _render_extxyz(
         source,
@@ -144,15 +146,17 @@ def test_extxyz_static_and_animation_use_the_same_array_pipeline(tmp_path) -> No
         frame_indices=(0,),
         show_cell=False,
     )
-    np.testing.assert_array_equal(
-        np.asarray(Image.open(png)),
-        np.asarray(Image.open(explicit_no_cell)),
-    )
+    with Image.open(png) as image:
+        default_pixels = np.asarray(image)
+    with Image.open(explicit_no_cell) as image:
+        no_cell_pixels = np.asarray(image)
+    np.testing.assert_array_equal(default_pixels, no_cell_pixels)
 
     gif = tmp_path / "movie.gif"
     animation = _render_extxyz(source, gif, frame_indices=(0, 1))
     assert animation.selected_frames == (0, 1)
-    assert Image.open(gif).n_frames == 2
+    with Image.open(gif) as image:
+        assert image.n_frames == 2
     assert animation.profile["shared_viewport"] is True
 
 
@@ -223,6 +227,8 @@ def test_batch_composes_axes_and_vector_layers(tmp_path) -> None:
             }
         ],
     )
-    assert not np.array_equal(
-        np.asarray(Image.open(plain)), np.asarray(Image.open(layered))
-    )
+    with Image.open(plain) as image:
+        plain_pixels = np.asarray(image)
+    with Image.open(layered) as image:
+        layered_pixels = np.asarray(image)
+    assert not np.array_equal(plain_pixels, layered_pixels)

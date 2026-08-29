@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -174,6 +175,15 @@ def test_cpu_svg_colorbar_remains_vector_geometry(tmp_path: Path) -> None:
         render={"show_cell": False, "width": 320, "height": 240},
         atom_property_color={"fields": ["charges"]},
     )
+    triangle = TriangleMeshPrimitive(
+        semantic_id="colorbar-contract-triangle",
+        vertices=np.asarray(
+            [[-0.5, -0.5, 0.0], [0.5, -0.5, 0.0], [0.0, 0.5, 0.0]],
+        ),
+        triangles=np.asarray([[0, 1, 2]], dtype=np.int64),
+    )
+    viewport = replace(plan.viewports[0], primitives=(triangle,))
+    plan = replace(plan, viewports=(viewport,))
     result = render_vector(plan, format="svg")
     svg = result.data.decode("utf-8")
     assert "<image" not in svg

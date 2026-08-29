@@ -65,7 +65,10 @@ jobs:
           python -m pip install -e ".[all,test]"
 
       - name: Run tests
-        run: pytest tests/
+        run: |
+          set -o pipefail
+          python -m pytest tests/ -n 4 --dist loadfile \
+            --durations=50 --durations-min=0.25
 
   build-package:
     name: Build package distributions

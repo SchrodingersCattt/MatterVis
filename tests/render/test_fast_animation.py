@@ -209,10 +209,10 @@ def test_global_palette_quantization_and_streaming_gif(tmp_path: Path) -> None:
     writer.append_data(np.tile(rgb[::-1], (8, 8, 1)))
     writer.close()
 
-    image = Image.open(output)
-    assert image.n_frames == 2
-    assert image.info["duration"] == 200
-    assert image.info["loop"] == 0
+    with Image.open(output) as image:
+        assert image.n_frames == 2
+        assert image.info["duration"] == 200
+        assert image.info["loop"] == 0
     assert _image_descriptors_have_no_local_palettes(output) == 2
 
 
@@ -289,8 +289,8 @@ ITEM: ATOMS id element x y z
         profile_path=profile_path,
     )
 
-    image = Image.open(output)
-    assert image.n_frames == 3
+    with Image.open(output) as image:
+        assert image.n_frames == 3
     assert result.profile["timesteps"] == [0, 10, 20]
     assert result.profile["settings"]["shared_viewport"] is True
     assert result.profile["settings"]["workers"] == 2

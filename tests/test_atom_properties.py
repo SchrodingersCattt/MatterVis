@@ -60,9 +60,10 @@ def test_component_by_name_and_von_mises() -> None:
 
 def test_exact_global_range_constant_and_centered_normalization() -> None:
     spec = AtomPropertyColorSpec(fields=("array:q",), center=0.0)
-    scale = resolve_property_scale(
-        [np.asarray([-2.0, np.nan]), np.asarray([1.0, np.inf])], spec
-    )
+    with pytest.warns(UserWarning, match="contains 2 NaN/Inf value"):
+        scale = resolve_property_scale(
+            [np.asarray([-2.0, np.nan]), np.asarray([1.0, np.inf])], spec
+        )
     assert scale.value_range == (-2.0, 1.0)
     assert scale.finite_count == 2
     assert scale.missing_count == 2
@@ -77,7 +78,8 @@ def test_explicit_range_clips_and_missing_color_is_used() -> None:
     spec = AtomPropertyColorSpec(
         fields=("array:q",), value_range=(0.0, 1.0), nan_color="#010203"
     )
-    scale = resolve_property_scale([[-9.0, 9.0, np.nan]], spec)
+    with pytest.warns(UserWarning, match="contains 1 NaN/Inf value"):
+        scale = resolve_property_scale([[-9.0, 9.0, np.nan]], spec)
     colors = map_property_colors([-1.0, 2.0, np.nan], scale, nan_color=spec.nan_color)
     assert np.array_equal(colors[0], scale.lut[0])
     assert np.array_equal(colors[1], scale.lut[-1])
