@@ -799,3 +799,63 @@ C 0.6 0 0
     assert spec.aromatic_rings == "disk"
     assert spec.missing_adp_policy == "sphere"
     assert payload["source"]["selected_frames"] == [1, 3]
+
+
+def test_agent_render_forwards_fixed_vectors_to_cpu_animation(
+    tmp_path, monkeypatch
+) -> None:
+    import mat_viewer.agent as agent_module
+
+    overlays = [
+        {
+            "id": "mode",
+            "magnitude_mode": "absolute",
+            "anchor": "center",
+            "arrows": [
+                {"id": "atom-0", "origin": [0, 0, 0], "vector": [0.5, 0, 0]}
+            ],
+        }
+    ]
+    captured = {}
+
+    def fake_animation(source, output, **kwargs):
+        captured.update(kwargs)
+        return RenderResult(
+            schema=RENDER_RESULT_SCHEMA,
+            backend="cpu",
+            format="gif",
+            width=8,
+            height=8,
+            plan_sha256="plan",
+            output_sha256="output",
+            metadata={},
+            warnings=(),
+            output=output,
+        )
+
+    monkeypatch.setattr(
+        "mat_viewer.render.animation_adapter.render_animation", fake_animation
+    )
+    monkeypatch.setattr(
+        agent_module,
+        "resolve_requirements",
+        lambda *args, **kwargs: SimpleNamespace(
+            require=lambda: None,
+            to_dict=lambda: {},
+            install_command="",
+        ),
+    )
+    from mat_viewer.render.contracts import CameraSpec
+
+    camera = CameraSpec.looking_along((0, 0, 1), up=(0, 1, 0), distance=5.0)
+    source = SimpleNamespace(frames=(object(), object()))
+    result = agent_module.render(
+        source,
+        output=tmp_path / "vectors.gif",
+        backend="cpu",
+        camera=camera,
+        vector_overlays=overlays,
+    )
+
+    assert result.backend == "cpu"
+    assert captured["vector_overlays"] is overlays

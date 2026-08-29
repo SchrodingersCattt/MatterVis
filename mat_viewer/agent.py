@@ -261,10 +261,6 @@ def render(
 
     output_suffix = Path(output).suffix.lower() if output is not None else ""
     if output_suffix in {".gif", ".mp4"}:
-        if vector_overlays is not None:
-            raise ValueError(
-                "animated vector overlays are not yet supported; use static output"
-            )
         if backend_name != "cpu":
             raise ValueError(
                 "GIF/MP4 use the shared CPU frame renderer; select backend='cpu'"
@@ -281,6 +277,7 @@ def render(
                 view=view,
                 render_spec=bound_render_spec,
                 topology_data=topology_data,
+                vector_overlays=vector_overlays,
                 atom_groups=atom_groups,
                 bond_groups=bond_groups,
             )
@@ -293,6 +290,7 @@ def render(
             camera=effective_camera,
             render_spec=bound_render_spec,
             topology_data=topology_data,
+            vector_overlays=vector_overlays,
             atom_groups=atom_groups,
             bond_groups=bond_groups,
             fps=fps,

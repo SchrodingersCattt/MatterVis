@@ -111,9 +111,12 @@ focus styling may subordinate context as wireframe, but the normal MatterVis
 style is valid when no focus hierarchy is needed. Prefer a documented lattice
 axis or explicit camera that exposes the relevant motion.
 
-Deliver the static CPU figure first. Animated vector overlays are not supported
-by this CLI path; if animation is explicitly required, report that boundary
-without switching to private code or installing Plotly/Chrome.
+Deliver the static CPU figure first. An optional CPU GIF/MP4 may reuse the same
+`--vector-overlays` JSON on every frame; this fixed source-frame policy suits
+equilibrium-centred mode arrows while atoms move. Per-frame-changing vector
+fields are not supported by this contract. Animation amplitude, frame count,
+fps, camera, context style, and GIF inclusion remain adjustable presentation
+choices rather than fixed scientific constants.
 
 Verify atom/order mapping, centred arrow endpoints, relative lengths, maximum
 display length, complete periodic fragments, bond topology, camera, clipping,
