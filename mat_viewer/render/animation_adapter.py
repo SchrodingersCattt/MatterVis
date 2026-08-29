@@ -20,6 +20,7 @@ def render_animation(
     camera: Any = None,
     render_spec: Any = None,
     topology_data: Mapping[str, Any] | None = None,
+    vector_overlays: Any = None,
     atom_groups: Any = None,
     bond_groups: Any = None,
     fps: float = 12.0,
@@ -103,6 +104,7 @@ def render_animation(
                 camera=camera,
                 render=render_spec,
                 topology_data=topology_data,
+                vector_overlays=vector_overlays,
                 atom_groups=atom_groups,
                 bond_groups=bond_groups,
             )
@@ -148,6 +150,10 @@ def render_animation(
             "frame_duration_ms": 1000.0 / float(fps),
             "duration_seconds": len(frames) / float(fps),
             "frame_plan_sha256": plan_hashes,
+            "vector_overlays": {
+                "animated": vector_overlays is not None,
+                "policy": "fixed_source_frame" if vector_overlays is not None else None,
+            },
             "simulation_time": (
                 time_series.to_metadata()
                 if time_series is not None

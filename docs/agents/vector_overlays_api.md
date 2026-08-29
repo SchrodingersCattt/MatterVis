@@ -113,7 +113,17 @@ mat-vis render structure.xyz -o mode.png --vector-overlays vectors.json
 ```
 
 Static CPU output renders these arrows without Plotly, Kaleido, or Chrome.
-Animated vector overlays are rejected explicitly rather than silently dropped.
+For CPU GIF/MP4 output, the same JSON defines one fixed source-frame overlay
+reused on every selected frame:
+
+```bash
+mat-vis render trajectory.extxyz -o motion.gif --backend cpu \
+  --vector-overlays mode-vectors.json --fps 10
+```
+
+This is appropriate for equilibrium-centred normal-mode arrows shown while
+atoms move. Per-frame vector fields are not part of this contract; prepare the
+arrows in each source frame only after a separate per-frame API is introduced.
 
 ## Figure integration
 
