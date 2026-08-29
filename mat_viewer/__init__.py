@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 __all__ = [
+    "AtomPropertyColorSpec",
     "capabilities",
     "create_app",
     "load_structure",
@@ -8,6 +9,8 @@ __all__ = [
     "render",
     "resolve_requirements",
 ]
+
+from .properties import AtomPropertyColorSpec
 
 try:
     from ._version import version as __version__

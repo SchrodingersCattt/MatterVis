@@ -127,6 +127,12 @@ Fix camera, screen-up, projection, canvas, extent, viewport, object scale,
 palette, and overlay positions. Do not auto-fit per frame. If recentering is
 needed, define it in the scene contract and apply it consistently.
 
+For per-atom property colors, fix one exact finite range across all selected
+source frames and atoms. Never normalize each frame separately. Inspect the
+property-extrema frames in addition to first/middle/last. On large LAMMPS
+trajectories, keep the selected field as an embedded column or mmap NPY
+sidecar; do not create CSV/NPZ intermediates, stack `F×N`, or sample atoms.
+
 Use one canonical output stem and leading underscores for raw frames/caches.
 Check frame count, duration, dimensions, first/middle/last decoding, identity,
 PBC bonds, clipping at maximum displacement, stable overlays, and the animation

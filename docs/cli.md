@@ -9,6 +9,7 @@ frame before scene construction.
 ~~~bash
 # Inspect and preflight without writing a file
 mat-vis inspect structure.cif --json
+mat-vis inspect trajectory.extxyz --properties --json
 mat-vis render structure.cif -o figure.png --backend cpu --check --json
 
 # Static CIF through the base CPU renderer
@@ -82,6 +83,47 @@ Supported inputs:
 LAMMPS numeric types are not elements. Pass --type-map whenever the source does
 not encode element identity unambiguously; the order is type 1, type 2, and so
 on. MatterVis never guesses it from a model filename.
+
+### Per-atom property colors
+
+Discover fields before selecting one:
+
+~~~bash
+mat-vis inspect INPUT --properties --json
+mat-vis inspect INPUT --property-data properties.json --properties --json
+~~~
+
+Fields are qualified as `array:NAME`, `column:NAME`, or `sidecar:NAME`.
+Unqualified names are accepted only when unique. Discovery reports source,
+dtype, trailing shape, components, and unit; LAMMPS discovery reads the indexed
+`ITEM: ATOMS` header without parsing atom rows.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--property-data MANIFEST` | — | `mattervis.atom-properties/v1` JSON + relative NPY sidecar |
+| `--color-by FIELD [FIELD ...]` | — | Enable continuous atom colors |
+| `--color-reduction MODE` | `auto` | `auto`, `scalar`, `magnitude`, `component`, `trace`, `mean_normal`, or `von_mises` |
+| `--color-component NAME_OR_INDEX` | — | Component used by `component` reduction |
+| `--colormap NAME` | `viridis` | Colormap used to build the shared 256-color LUT |
+| `--color-range MIN MAX` | exact selected range | Fixed clipping range; skips the global property prescan |
+| `--color-center VALUE` | — | Put this physical reference at the LUT midpoint |
+| `--nan-color COLOR` | `#BDBDBD` | Color for NaN/Inf values |
+| `--color-label TEXT` | field name | Colorbar label |
+| `--color-unit UNIT` | declared unit | Display/provenance only; no conversion |
+| `--no-colorbar` | off | Omit the reserved right-side colorbar region |
+
+Scalar fields color directly and a three-component vector uses magnitude under
+`auto`. Tensor fields require an explicit reduction; six-component tensors
+also require declared component order. Automatic range is the exact finite
+minimum/maximum over all selected source atoms and frames, before repeat or
+display filtering. Non-finite values use the missing color and are counted; an
+all-non-finite selection fails. Explicit atom-group colors override the
+property base color. Each bond half inherits its endpoint's final atom color,
+so property-colored atoms produce a two-tone bond by default. Override selected
+bonds directly with `--bond-group SELECTOR color=#RRGGBB`; for example,
+`--bond-group all color=#333333` makes every bond monochrome. See
+[`agents/atom_property_coloring.md`](agents/atom_property_coloring.md) for the
+sidecar schema, alignment, metadata, and Python/REST APIs.
 
 ### Renderer selection
 
@@ -284,6 +326,11 @@ mat-vis serve [options]
 | `--host` | `0.0.0.0` | Host to bind |
 | `--port` | `50001` | Port to expose |
 | `--cif` | — | CIF path to preload (repeat for multiple) |
+| `--input` | — | Any supported structure/trajectory input to preload |
+| `--input-format` | auto | Explicit format for an ambiguous `--input` |
+| `--type-map` | — | LAMMPS atom-type order for `--input` |
+| `--frame` | `0` | Frame of `--input`; Web v1 has no playback timeline |
+| property-color flags | — | Same sidecar, field, reduction, range, and LUT flags as render |
 | `--structure` | — | Limit catalog to named structure(s) |
 | `--preset` | — | Preset JSON to load |
 | `--api-only` | — | Reserved for automation mode |

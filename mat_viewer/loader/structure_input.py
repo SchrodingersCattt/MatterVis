@@ -76,6 +76,7 @@ class StructureInput:
     input_format: str
     frames: tuple[StructureFrame, ...]
     total_frames: int
+    property_manifest: Any | None = None
 
     @property
     def n_frames(self) -> int:
@@ -367,11 +368,17 @@ def _selected_ase_atoms(
 
 
 def _atom_arrays(atoms) -> dict[str, np.ndarray]:
-    return {
+    arrays = {
         str(name): np.array(values, copy=True)
         for name, values in atoms.arrays.items()
         if name not in {"numbers", "positions"}
     }
+    calculator = getattr(atoms, "calc", None)
+    for name, values in dict(getattr(calculator, "results", {}) or {}).items():
+        array = np.asarray(values)
+        if array.ndim >= 1 and len(array) == len(atoms):
+            arrays.setdefault(str(name), np.array(array, copy=True))
+    return arrays
 
 
 def load_atomistic_input(

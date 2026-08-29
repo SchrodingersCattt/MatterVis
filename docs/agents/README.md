@@ -26,6 +26,7 @@ flowchart LR
     STATIC --> CUBE["cube_api.md<br/>(orbitals / volumetric)"]
     STATIC --> ORTEP["ortep_api.md<br/>(thermal ellipsoids)"]
     STATIC --> COMPASS["compass_api.md<br/>(axis triads, k-paths)"]
+    STATIC --> PROPERTY["atom_property_coloring.md<br/>(charge / velocity / stress)"]
 
     OVERLAY --> POLY["polyhedron_api.md"]
     OVERLAY --> AG["atom_groups_api.md"]
@@ -48,6 +49,7 @@ The same routing as a quick table:
 | Match a dense coordination-polyhedron publication layout | [`static_publication.md`](static_publication.md) |
 | Build a static cube/orbital figure (HOMO, LUMO, density) | [`cube_api.md`](cube_api.md) |
 | Render ORTEP / thermal ellipsoid figures | [`ortep_api.md`](ortep_api.md) |
+| Color atoms by charge, velocity, stress, or another per-atom field | [`atom_property_coloring.md`](atom_property_coloring.md) |
 | Add a/b/c (or x/y/z, k-path, dipole) direction indicators to any 3D plot | [`compass_api.md`](compass_api.md) |
 | Manage named coordination polyhedra (per-row colour, ligand restriction, per-instance overrides) | [`polyhedron_api.md`](polyhedron_api.md) |
 | Apply per-element / per-group colour, visibility, material, or render-style overrides from API or CLI | [`atom_groups_api.md`](atom_groups_api.md) |

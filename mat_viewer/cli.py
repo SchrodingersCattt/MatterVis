@@ -56,7 +56,7 @@ from .render.fast_cli import (
     add_batch_render_arguments,
     render_batch_if_selected,
 )
-
+from .properties.cli import add_atom_property_arguments as _add_atom_property_arguments, atom_property_spec as _atom_property_spec
 
 def _build_render_parser(
     subparsers: argparse._SubParsersAction,
@@ -145,6 +145,7 @@ def _build_render_parser(
     )
     _add_render_control_arguments(parser)
     add_batch_render_arguments(parser)
+    _add_atom_property_arguments(parser)
     return parser
 
 
@@ -178,28 +179,13 @@ def _build_serve_parser(
     p.add_argument(
         "--api-only", action="store_true", help="Reserved for automation mode."
     )
+    p.add_argument("--input", default=None, help="Atomistic input to preload.")
+    p.add_argument("--input-format", default=None, help="Explicit input format.")
+    p.add_argument("--type-map", nargs="+", default=None, metavar="ELEMENT",
+                   help="LAMMPS atom-type order when the input lacks element symbols.")
+    p.add_argument("--frame", type=int, default=0, help="Input frame to preload.")
+    _add_atom_property_arguments(p)
     return p
-
-
-def _serve_main(args: argparse.Namespace) -> None:
-    """Execute the serve subcommand by delegating to the existing Dash app."""
-    # Build argv list matching factory._build_parser() expectations
-    argv: list[str] = []
-    if args.preset is not None:
-        argv.extend(["--preset", args.preset])
-    argv.extend(["--host", args.host])
-    argv.extend(["--port", str(args.port)])
-    if args.structure:
-        argv.append("--structure")
-        argv.extend(args.structure)
-    for cif in args.cif:
-        argv.extend(["--cif", cif])
-    if args.api_only:
-        argv.append("--api-only")
-
-    from .app.factory import main as _factory_main
-
-    _factory_main(argv)
 
 
 # ---------------------------------------------------------------------------
@@ -589,6 +575,9 @@ def _build_inspect_parser(
     parser.add_argument("--input-format", default=None, metavar="FORMAT")
     parser.add_argument("--type-map", nargs="+", default=None, metavar="ELEMENT")
     parser.add_argument("--frame", type=int, default=0)
+    parser.add_argument("--properties", action="store_true",
+                        help="Report bounded per-atom field descriptors without building a scene.")
+    _add_atom_property_arguments(parser)
     parser.add_argument(
         "--json",
         action="store_true",
@@ -685,6 +674,15 @@ def _capabilities_main(args: argparse.Namespace) -> None:
 
 
 def _inspect_main(args: argparse.Namespace) -> None:
+    if args.properties:
+        from .structure.inspect import inspect_properties_payload
+        try:
+            payload = inspect_properties_payload(args.input, input_format=args.input_format,
+                type_map=args.type_map, frame=args.frame, property_data=args.property_data)
+        except Exception as exc:
+            _fail(str(exc), json_output=args.json_output)
+        _emit(payload, json_output=args.json_output)
+        return
     from .agent import load_structure
 
     try:
@@ -718,6 +716,7 @@ def _render_requirements(args: argparse.Namespace) -> tuple[str, ...]:
 
 def _render_check_payload(args: argparse.Namespace) -> dict:
     _validate_render_options(args)
+    property_spec = _atom_property_spec(args)
     resolution = resolve_requirements(_render_requirements(args))
     return {
         "schema": "mattervis.render-check/v1",
@@ -738,6 +737,7 @@ def _render_check_payload(args: argparse.Namespace) -> dict:
             "atom": _style_groups(args)[0],
             "bond": _style_groups(args)[1],
         },
+        "atom_property_color": None if property_spec is None else asdict(property_spec),
         "requirements": resolution.to_dict(),
         "warnings": [],
     }
@@ -1121,6 +1121,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                     input_format=args.input_format,
                     type_map=args.type_map,
                     frame_indices=_animation_indices(args),
+                    property_data=args.property_data,
                 )
             else:
                 structure = load_structure(
@@ -1128,6 +1129,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                     input_format=args.input_format,
                     type_map=args.type_map,
                     frame=args.frame if args.frame is not None else 0,
+                    property_data=args.property_data,
                 )
             display = _display_mode(structure, args)
             include_boundary_replicas = args.include_boundary_replicas
@@ -1198,6 +1200,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                 fps=args.fps if args.fps is not None else 12.0,
                 animation_time=animation_time,
                 frame_annotation=frame_annotation,
+                atom_property_color=_atom_property_spec(args),
             )
         payload = _render_result_payload(result, structure, args, camera)
         payload["polyhedra"] = polyhedron_summary(topology_data)
@@ -1241,7 +1244,8 @@ def main(argv: Optional[list[str]] = None) -> None:
             resolve_requirements("web").require()
         except Exception as exc:
             _fail(str(exc), json_output=False)
-        _serve_main(args)
+        from .app.serve_cli import serve_main
+        serve_main(args)
     elif args.command == "tui":
         try:
             resolve_requirements(

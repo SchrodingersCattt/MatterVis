@@ -265,6 +265,7 @@ def render_batch_if_selected(
         or args.frame_field
     )
     if workload.lammps_dump and animation and not has_overlay_layers:
+        from ..properties.cli import atom_property_spec
         from .fast_animation import render_lammps_animation
 
         result = render_lammps_animation(
@@ -302,9 +303,12 @@ def render_batch_if_selected(
             bond_skin=args.bond_skin,
             workers=args.workers,
             profile_path=args.profile_json,
+            atom_property_color=(atom_property_spec(args) if args.color_by else None),
+            property_data=args.property_data,
         )
     else:
         from ..cli import _load_vector_overlays
+        from ..properties.cli import atom_property_spec
         from .batch_pipeline import render_array_input
         from .cli_controls import _animation_time_from_args, _frame_annotation_from_args
 
@@ -347,6 +351,8 @@ def render_batch_if_selected(
             animation_time=_animation_time_from_args(args),
             frame_annotation=_frame_annotation_from_args(args),
             profile_path=args.profile_json,
+            atom_property_color=(atom_property_spec(args) if args.color_by else None),
+            property_data=args.property_data,
         )
     return _result_payload(args, result, decision, install_command=install_command)
 

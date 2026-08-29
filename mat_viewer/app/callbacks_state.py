@@ -16,6 +16,12 @@ from .backend import ViewerBackend
 def register_state_callbacks(app, backend):
     def scene_control_outputs(state: dict[str, Any]) -> tuple[Any, ...]:
         scene_id = state.get("scene_id") or backend.active_scene_id()
+        property_payload = state.get("atom_property_color") or {}
+        property_range = property_payload.get("value_range")
+        property_options = [
+            {"label": item["field"], "value": item["field"]}
+            for item in backend.atom_properties(state)["fields"]
+        ]
         return (
             state.get("scene_label") or state["structure"],
             state["display_mode"],
@@ -30,6 +36,17 @@ def register_state_callbacks(app, backend):
             state["axis_scale"],
             state["topology_site_index"],
             ["enabled"] if state.get("topology_enabled", False) else [],
+            property_options,
+            list(property_payload.get("fields") or []),
+            property_payload.get("reduction", "auto"),
+            property_payload.get("component"),
+            property_payload.get("colormap", "viridis"),
+            "manual" if property_range is not None else "auto",
+            None if property_range is None else property_range[0],
+            None if property_range is None else property_range[1],
+            property_payload.get("center"),
+            str(property_payload.get("nan_color", "#BDBDBD"))[:7],
+            ["show"] if property_payload.get("show_colorbar", True) else [],
             state,
             _camera_store_payload(scene_id, state.get("camera")),
         )
@@ -75,7 +92,9 @@ def register_state_callbacks(app, backend):
         State("topology-site-index", "value"),
         prevent_initial_call=True,
     )
-    def refresh_fragment_options(scene_id, display_mode, display_options, current_value):
+    def refresh_fragment_options(
+        scene_id, display_mode, display_options, current_value
+    ):
         # The fragment options reflect the *scene* fragments, so they
         # change when the user switches structures, display modes
         # (formula unit / unit cell / cluster), or toggles hydrogens.
@@ -141,7 +160,9 @@ def register_state_callbacks(app, backend):
         State("scene-tab-rename-input", "value"),
         prevent_initial_call=True,
     )
-    def dispatch_scene_tab_event(_, __, ___, ____, close_clicks, active_scene_id, label):
+    def dispatch_scene_tab_event(
+        _, __, ___, ____, close_clicks, active_scene_id, label
+    ):
         triggered = getattr(callback_context, "triggered_id", None)
         if isinstance(triggered, dict):
             if not close_clicks or not any(close_clicks):
@@ -156,13 +177,24 @@ def register_state_callbacks(app, backend):
         try:
             if action == "scene-new-tab-btn":
                 result = backend.apply_intent(
-                    {"type": "crud_scene", "scene_id": active_scene_id, "payload": {"action": "duplicate"}}
+                    {
+                        "type": "crud_scene",
+                        "scene_id": active_scene_id,
+                        "payload": {"action": "duplicate"},
+                    }
                 )
-                scene = result.get("scene") or backend.scene_store.get(result["state"]["scene_id"]).to_dict()
+                scene = (
+                    result.get("scene")
+                    or backend.scene_store.get(result["state"]["scene_id"]).to_dict()
+                )
                 message = f"Duplicated scene: {scene['label']}"
             elif action == "scene-rename-btn":
                 backend.apply_intent(
-                    {"type": "crud_scene", "scene_id": active_scene_id, "payload": {"action": "rename", "label": label or ""}}
+                    {
+                        "type": "crud_scene",
+                        "scene_id": active_scene_id,
+                        "payload": {"action": "rename", "label": label or ""},
+                    }
                 )
                 scene = backend.scene_store.get(active_scene_id).to_dict()
                 message = f"Renamed scene: {scene['label']}"
@@ -170,25 +202,39 @@ def register_state_callbacks(app, backend):
                 if len(backend.scene_options()) <= 1:
                     return no_update, "At least one scene tab must remain."
                 backend.apply_intent(
-                    {"type": "crud_scene", "scene_id": active_scene_id, "payload": {"action": "delete"}}
+                    {
+                        "type": "crud_scene",
+                        "scene_id": active_scene_id,
+                        "payload": {"action": "delete"},
+                    }
                 )
                 message = "Closed scene."
             elif action == "scene-close-others-btn":
                 if len(backend.scene_options()) <= 1:
                     return no_update, "Only one scene open — nothing to close."
                 result = backend.apply_intent(
-                    {"type": "crud_scene", "scene_id": active_scene_id, "payload": {"action": "delete_others"}}
+                    {
+                        "type": "crud_scene",
+                        "scene_id": active_scene_id,
+                        "payload": {"action": "delete_others"},
+                    }
                 )
                 n = len(result.get("removed") or [])
                 message = f"Closed {n} other scene{'s' if n != 1 else ''}."
             elif action == "close-row":
-                scene_id = triggered.get("scene_id") if isinstance(triggered, dict) else None
+                scene_id = (
+                    triggered.get("scene_id") if isinstance(triggered, dict) else None
+                )
                 if not scene_id:
                     return no_update, no_update
                 if len(backend.scene_options()) <= 1:
                     return no_update, "At least one scene tab must remain."
                 backend.apply_intent(
-                    {"type": "crud_scene", "scene_id": scene_id, "payload": {"action": "delete"}}
+                    {
+                        "type": "crud_scene",
+                        "scene_id": scene_id,
+                        "payload": {"action": "delete"},
+                    }
                 )
                 message = "Closed scene."
             else:
@@ -213,7 +259,9 @@ def register_state_callbacks(app, backend):
         State("scene-tabs", "value"),
         prevent_initial_call=True,
     )
-    def manage_scene_tabs_dom(_scene_event, _native_upload_sync, _n_intervals, browser_scene_id):
+    def manage_scene_tabs_dom(
+        _scene_event, _native_upload_sync, _n_intervals, browser_scene_id
+    ):
         """Single writer for the scene-tab DOM.
 
         Two paths converge here:
@@ -274,8 +322,7 @@ def register_state_callbacks(app, backend):
         # Refresh the cached fingerprint so the next poll tick keeps its
         # short-circuit honest.
         manage_scene_tabs_dom._poll_fingerprint = tuple(
-            (str(scene.get("id")), str(scene.get("label") or ""))
-            for scene in options
+            (str(scene.get("id")), str(scene.get("label") or "")) for scene in options
         )
         return backend.scene_tabs(), backend.scene_close_buttons(), active_id
 
@@ -312,6 +359,17 @@ def register_state_callbacks(app, backend):
         Output("axis-scale-slider", "value"),
         Output("topology-site-index", "value"),
         Output("topology-toggle", "value"),
+        Output("property-field-selector", "options"),
+        Output("property-field-selector", "value"),
+        Output("property-reduction-selector", "value"),
+        Output("property-component-input", "value"),
+        Output("property-colormap-input", "value"),
+        Output("property-range-mode", "value"),
+        Output("property-range-min", "value"),
+        Output("property-range-max", "value"),
+        Output("property-center-input", "value"),
+        Output("property-nan-color-input", "value"),
+        Output("property-colorbar-toggle", "value"),
         Output("agent-state-store", "data"),
         Output("camera-state-store", "data"),
         Output("scene-switch-seq", "data"),
@@ -326,12 +384,16 @@ def register_state_callbacks(app, backend):
             if callback_context.triggered
             else None
         )
-        n_outputs = 16
+        n_outputs = 27
         if triggered == "scene-tabs":
             if not scene_id or scene_id not in backend.scene_store.scenes:
                 return (no_update,) * n_outputs
             backend.apply_intent(
-                {"type": "set_active_scene", "scene_id": scene_id, "payload": {"scene_id": scene_id}}
+                {
+                    "type": "set_active_scene",
+                    "scene_id": scene_id,
+                    "payload": {"scene_id": scene_id},
+                }
             )
             state = backend.get_state(scene_id)
             # Try to push the figure immediately via WebSocket if cached.
@@ -345,6 +407,7 @@ def register_state_callbacks(app, backend):
                 cached_entry = None
             if cached_entry is not None:
                 from .backend_camera import _figure_from_cached_dict, _plotly_camera
+
                 fig = _figure_from_cached_dict(cached_entry[0])
                 camera = _plotly_camera(state.get("camera"))
                 if camera:
@@ -406,6 +469,16 @@ def register_state_callbacks(app, backend):
         Input("axis-scale-slider", "value"),
         Input("topology-site-index", "value"),
         Input("topology-toggle", "value"),
+        Input("property-field-selector", "value"),
+        Input("property-reduction-selector", "value"),
+        Input("property-component-input", "value"),
+        Input("property-colormap-input", "value"),
+        Input("property-range-mode", "value"),
+        Input("property-range-min", "value"),
+        Input("property-range-max", "value"),
+        Input("property-center-input", "value"),
+        Input("property-nan-color-input", "value"),
+        Input("property-colorbar-toggle", "value"),
         prevent_initial_call=True,
     )
     def capture_state(
@@ -422,8 +495,22 @@ def register_state_callbacks(app, backend):
         axis_scale,
         site_index,
         topology_toggle,
+        property_fields,
+        property_reduction,
+        property_component,
+        property_colormap,
+        property_range_mode,
+        property_range_min,
+        property_range_max,
+        property_center,
+        property_nan_color,
+        property_colorbar,
     ):
-        triggered = callback_context.triggered[0]["prop_id"].split(".")[0] if callback_context.triggered else None
+        triggered = (
+            callback_context.triggered[0]["prop_id"].split(".")[0]
+            if callback_context.triggered
+            else None
+        )
         if triggered == "scene-tabs":
             return no_update
         if scene_id and scene_id not in backend.scene_store.scenes:
@@ -433,8 +520,39 @@ def register_state_callbacks(app, backend):
         prev = backend.get_state(scene_id)
         prev_options = set(prev.get("display_options") or [])
         next_options = set(display_options or [])
-        hydrogens_changed = ("hydrogens" in prev_options) != ("hydrogens" in next_options)
+        hydrogens_changed = ("hydrogens" in prev_options) != (
+            "hydrogens" in next_options
+        )
         display_changed = display_mode != prev.get("display_mode")
+        property_spec = None
+        if property_fields:
+            if property_range_mode == "manual":
+                if property_range_min is None or property_range_max is None:
+                    return no_update
+                value_range = [float(property_range_min), float(property_range_max)]
+            else:
+                value_range = None
+            component = property_component
+            if property_reduction != "component":
+                component = None
+            elif isinstance(component, str):
+                component = component.strip()
+                try:
+                    component = int(component)
+                except ValueError:
+                    pass
+            property_spec = {
+                "fields": list(property_fields),
+                "reduction": property_reduction or "auto",
+                "component": component,
+                "colormap": property_colormap or "viridis",
+                "value_range": value_range,
+                "center": property_center,
+                "nan_color": property_nan_color or "#BDBDBD",
+                "show_colorbar": "show" in (property_colorbar or []),
+                "label": None,
+                "unit": None,
+            }
         patch: dict[str, Any] = {
             "scene_id": scene_id,
             "display_mode": display_mode,
@@ -447,15 +565,19 @@ def register_state_callbacks(app, backend):
             "disorder": disorder or "outline_rings",
             "ortep_mode": ortep_mode or "ortep_axes",
             "axis_scale": axis_scale,
-            "topology_site_index": None if display_changed or site_index in ("", None) else int(site_index),
+            "topology_site_index": None
+            if display_changed or site_index in ("", None)
+            else int(site_index),
             "topology_enabled": "enabled" in (topology_toggle or []),
+            "atom_property_color": property_spec,
         }
         fast_display_options = (
             triggered != "display-options"
             or _display_options_can_fast_patch(prev_options, next_options)
         )
         if (
-            triggered in {"display-options", "axis-scale-slider", "minor-opacity-slider"}
+            triggered
+            in {"display-options", "axis-scale-slider", "minor-opacity-slider"}
             and not hydrogens_changed
             and fast_display_options
         ):
@@ -525,7 +647,7 @@ def register_state_callbacks(app, backend):
             return no_update, no_update
         if not _display_options_can_fast_patch(prev_options, next_options):
             return no_update, no_update
-        
+
         # Fetch the figure from backend cache instead of pulling 1-2MB of JSON
         # from the browser on every slider tick.
         fig, _ = backend.figure_for_state(prev)

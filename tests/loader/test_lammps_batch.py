@@ -9,6 +9,7 @@ from mat_viewer.loader.lammps_batch import (
     frame_box_corners,
     index_lammps_dump,
     read_lammps_frame,
+    read_lammps_property_frame,
     repeat_frame,
 )
 
@@ -143,3 +144,33 @@ H 0 0 0
     dump_index = index_lammps_dump(source)
     with pytest.raises(ValueError, match="declares 2 atoms"):
         read_lammps_frame(dump_index, 0)
+
+
+def test_property_only_scan_and_repeat_preserve_values(tmp_path: Path) -> None:
+    source = _write(
+        tmp_path / "property.dump",
+        """ITEM: TIMESTEP
+5
+ITEM: NUMBER OF ATOMS
+2
+ITEM: BOX BOUNDS pp pp pp
+0 3
+0 3
+0 3
+ITEM: ATOMS id element x y z q vx vy vz ignored
+2 O 1 0 0 -0.4 3 4 0 99
+1 H 0 0 0 0.2 0 0 2 98
+""",
+    )
+    dump = index_lammps_dump(source)
+    property_frame = read_lammps_property_frame(
+        dump, 0, property_columns=("q", "vx", "vy", "vz")
+    )
+    assert property_frame.atom_ids.tolist() == [2, 1]
+    assert set(property_frame.atom_arrays) == {"q", "vx", "vy", "vz"}
+    assert property_frame.atom_arrays["q"].tolist() == pytest.approx([-0.4, 0.2])
+
+    frame = read_lammps_frame(dump, 0, property_columns=("q",), sort_by_id=True)
+    repeated = repeat_frame(frame, (2, 1, 1))
+    assert frame.atom_arrays["q"].tolist() == pytest.approx([0.2, -0.4])
+    assert repeated.atom_arrays["q"].tolist() == pytest.approx([0.2, -0.4, 0.2, -0.4])

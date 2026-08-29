@@ -249,6 +249,7 @@ def _rasterize_spheres(
     camera_positions: np.ndarray,
     atomic_numbers: np.ndarray,
     colors: np.ndarray,
+    atom_colors: np.ndarray,
     radii: np.ndarray,
     rgba: np.ndarray,
     depth_buffer: np.ndarray,
@@ -347,15 +348,14 @@ def _rasterize_spheres(
                     normal_x * light_x + normal_y * light_y + normal_z * light_z
                 )
                 depth_buffer[pixel_y, pixel_x] = pixel_depth
-                rgba[pixel_y, pixel_x, 0] = min(
-                    255, int(colors[atomic_number, 0] * illumination + 0.5)
+                color = (
+                    atom_colors[atom_index]
+                    if atom_colors.shape[0]
+                    else colors[atomic_number]
                 )
-                rgba[pixel_y, pixel_x, 1] = min(
-                    255, int(colors[atomic_number, 1] * illumination + 0.5)
-                )
-                rgba[pixel_y, pixel_x, 2] = min(
-                    255, int(colors[atomic_number, 2] * illumination + 0.5)
-                )
+                rgba[pixel_y, pixel_x, 0] = min(255, int(color[0] * illumination + 0.5))
+                rgba[pixel_y, pixel_x, 1] = min(255, int(color[1] * illumination + 0.5))
+                rgba[pixel_y, pixel_x, 2] = min(255, int(color[2] * illumination + 0.5))
                 rgba[pixel_y, pixel_x, 3] = 255
 
 
@@ -365,6 +365,7 @@ def _rasterize_bonds(
     atomic_numbers: np.ndarray,
     pairs: np.ndarray,
     colors: np.ndarray,
+    atom_colors: np.ndarray,
     rgba: np.ndarray,
     depth_buffer: np.ndarray,
     projection: int,
@@ -444,16 +445,21 @@ def _rasterize_bonds(
                     continue
                 atom_index = first_index if parameter <= 0.5 else second_index
                 atomic_number = int(atomic_numbers[atom_index])
+                color = (
+                    atom_colors[atom_index]
+                    if atom_colors.shape[0]
+                    else colors[atomic_number]
+                )
                 illumination = 0.72 + 0.28 * radial
                 depth_buffer[pixel_y, pixel_x] = pixel_depth
                 rgba[pixel_y, pixel_x, 0] = min(
-                    255, int(colors[atomic_number, 0] * illumination + 0.5)
+                    255, int(color[0] * illumination + 0.5)
                 )
                 rgba[pixel_y, pixel_x, 1] = min(
-                    255, int(colors[atomic_number, 1] * illumination + 0.5)
+                    255, int(color[1] * illumination + 0.5)
                 )
                 rgba[pixel_y, pixel_x, 2] = min(
-                    255, int(colors[atomic_number, 2] * illumination + 0.5)
+                    255, int(color[2] * illumination + 0.5)
                 )
                 rgba[pixel_y, pixel_x, 3] = 255
 
@@ -564,6 +570,11 @@ def render_projected_frame(
             spheres.atomic_numbers,
             bonds.pairs,
             spheres.colors,
+            (
+                frame.atom_colors
+                if frame.atom_colors is not None
+                else np.empty((0, 3), dtype=np.uint8)
+            ),
             rgba,
             depth,
             projection,
@@ -578,6 +589,11 @@ def render_projected_frame(
         spheres.camera_positions,
         spheres.atomic_numbers,
         spheres.colors,
+        (
+            frame.atom_colors
+            if frame.atom_colors is not None
+            else np.empty((0, 3), dtype=np.uint8)
+        ),
         spheres.radii,
         rgba,
         depth,
