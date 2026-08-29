@@ -157,6 +157,28 @@ def test_bond_batch_inherits_endpoint_atom_colors() -> None:
     assert second_half[2] > second_half[0]
 
 
+@pytest.mark.skipif(not NUMBA_AVAILABLE, reason="batch renderer requires numba")
+def test_bond_batch_uses_minimum_image_vectors() -> None:
+    frame = _frame([[-1.9, 0.0, 0.0], [1.9, 0.0, 0.0]], [6, 6])
+    bonds = SimpleNamespace(
+        pairs=np.asarray([[0, 1]], dtype=np.int32),
+        vectors=np.asarray([[-0.2, 0.0, 0.0]], dtype=np.float32),
+    )
+
+    rendered = render_frame_batch(
+        frame,
+        _camera(),
+        width=160,
+        height=120,
+        show_cell=False,
+        bonds=bonds,
+        bond_radius=0.12,
+    )
+
+    assert np.all(rendered.rgba[60, 80, :3] == 255)
+    assert np.any(rendered.rgba[60, :35, :3] != 255)
+
+
 def _image_descriptors_have_no_local_palettes(path: Path) -> int:
     data = path.read_bytes()
     assert data[:6] in {b"GIF87a", b"GIF89a"}
@@ -260,8 +282,7 @@ def test_worker_override_and_shared_camera_controls() -> None:
 def test_small_lammps_animation_preserves_order_and_profile(tmp_path: Path) -> None:
     frames = []
     for index in range(3):
-        frames.append(
-            f"""ITEM: TIMESTEP
+        frames.append(f"""ITEM: TIMESTEP
 {index * 10}
 ITEM: NUMBER OF ATOMS
 2
@@ -272,8 +293,7 @@ ITEM: BOX BOUNDS pp pp pp
 ITEM: ATOMS id element x y z
 2 O {2.5 + index * 0.1} 2 2
 1 C {1.5 + index * 0.1} 2 2
-"""
-        )
+""")
     source = tmp_path / "small.lammpstrj"
     source.write_text("".join(frames), encoding="utf-8")
     output = tmp_path / "small.gif"

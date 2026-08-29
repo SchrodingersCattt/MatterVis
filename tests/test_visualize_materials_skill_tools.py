@@ -89,6 +89,20 @@ def test_skill_routes_publication_and_multi_structure_guidance() -> None:
     assert "./references/publication-layout.md" in document
     assert "./references/multi-structure-panels.md" in document
     assert "./references/atom-property-coloring.md" in document
+    assert document.index("Trajectory or animation") < document.index(
+        "Static charge, velocity, stress"
+    )
+    assert "the delegate loads this skill and selects the route" in document
+    trajectory = (SKILL / "references" / "trajectory-animation.md").read_text(
+        encoding="utf-8"
+    )
+    assert "--check" not in trajectory
+    assert "--style ball_stick --show-cell --orthogonal" in trajectory
+    assert "replace `--show-cell` with `--no-cell`" in trajectory
+    assert "Do not add `--view-direction` by default" in trajectory
+    assert "largest lattice face" in trajectory
+    assert "load another reference only after a concrete ambiguity" in trajectory
+
     vectors = (SKILL / "references" / "vibration-mode-vectors.md").read_text(
         encoding="utf-8"
     )

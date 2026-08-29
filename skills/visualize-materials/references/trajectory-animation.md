@@ -1,34 +1,43 @@
 # Trajectory and Partial-Highlight Animation
 
 Read this only for MD trajectories, GIF/MP4 exports, frame intervals, or
-molecule/fragment highlights. Also read `camera.md`, `molecule-highlight.md` when
-applicable, and `verification.md`.
+molecule/fragment highlights. It is self-contained for a routine trajectory;
+load another reference only after a concrete ambiguity or failure.
 
 ## Animation contract
 
-Read input-formats.md first. Record the trajectory, topology or type map,
-output format, half-open frame slice and stride, progress/observable/stage
-mapping, camera/projection/viewport/canvas, context layer,
-highlighted stable IDs, overlay semantics, and representative QA frames. Render
-separate requested intervals explicitly rather than silently concatenating them.
+Inspect the trajectory once and record its periodicity, cell, topology or type
+map, frame slice and stride, requested overlays, and representative QA frames.
+Render separate requested intervals explicitly rather than concatenating them.
 
+## Default render
 
-## CLI
-
-Animation encoding is optional. Preflight it before rendering:
+For a periodic molecular or covalent trajectory:
 
 ~~~bash
-mat-vis capabilities --require animation --json
-mat-vis render trajectory.traj -o trajectory.gif --backend cpu --check --json
+mat-vis inspect trajectory.dump --json
+mat-vis render trajectory.dump -o trajectory.gif --backend cpu --json \
+  --style ball_stick --show-cell --orthogonal --fps 12
 ~~~
 
+For nonperiodic or synthetic-cell input, replace `--show-cell` with `--no-cell`.
+Use `ball_stick` whenever covalent connectivity is part of the structure,
+including extended covalent networks; use `ball` only when bonds are not part of
+the requested evidence. Do not add `--view-direction` by default. Automatic
+camera selection faces the largest lattice face and the resulting camera and
+viewport stay fixed across selected frames.
+
+Add a type map only when the input does not already identify its elements:
+
 ~~~bash
-mat-vis render trajectory.traj -o trajectory.gif --backend cpu \
-  --frame-range 0:100:2 --fps 12
-
 mat-vis render run.dump --type-map O H -o trajectory.mp4 --backend cpu \
-  --stride 10 --fps 24
+  --style ball_stick --show-cell --orthogonal --stride 10 --fps 24 --json
+~~~
 
+Property-colored and annotated trajectories keep the same cell, style, and
+automatic-camera defaults:
+
+~~~bash
 mat-vis render neb.extxyz -o neb.gif --backend cpu --fps 1.5 \
   --frame-field 'lambda=metadata:lambda,role=progress' \
   --frame-field 'angle=metadata:rotation_deg,role=observable,unit=deg' \
