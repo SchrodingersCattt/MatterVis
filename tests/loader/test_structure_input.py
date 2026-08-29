@@ -349,8 +349,6 @@ def test_render_cli_exports_real_animation(
     tmp_path: Path,
     extension: str,
 ) -> None:
-    import imageio.v3 as iio
-
     output = tmp_path / f"trajectory{extension}"
     cli_main(
         [
@@ -375,10 +373,24 @@ def test_render_cli_exports_real_animation(
 
     assert output.is_file()
     assert output.stat().st_size > 1000
-    with iio.imopen(output, "r") as reader:
-        frames = list(reader.iter())
+    if extension == ".mp4":
+        import imageio_ffmpeg
+
+        reader = imageio_ffmpeg.read_frames(str(output))
+        try:
+            metadata = next(reader)
+            frames = list(reader)
+        finally:
+            reader.close()
+        frame_shapes = [(metadata["size"][1], metadata["size"][0])] * len(frames)
+    else:
+        import imageio.v3 as iio
+
+        with iio.imopen(output, "r") as reader:
+            frames = list(reader.iter())
+        frame_shapes = [frame.shape[:2] for frame in frames]
     assert len(frames) == 2
-    assert all(frame.shape[:2] == (160, 200) for frame in frames)
+    assert all(shape == (160, 200) for shape in frame_shapes)
 
 
 def test_animation_viewport_has_one_world_center_and_scale() -> None:
