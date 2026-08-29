@@ -134,3 +134,30 @@ def test_plotly_figure_paints_requested_lattice_compass() -> None:
     figure = build_figure(plan)
     assert len(figure.layout.annotations) == 5
     assert len(figure.layout.shapes) == 1
+
+
+def test_plotly_html_uses_live_lattice_compass(tmp_path) -> None:
+    pytest.importorskip("plotly")
+    base = _plan()
+    plan = RenderPlan(
+        width=base.width,
+        height=base.height,
+        background=base.background,
+        viewports=base.viewports,
+        metadata={
+            "lattice_compass": {
+                "visible": True,
+                "matrix": np.eye(3).tolist(),
+                "labels": ["a", "b", "c"],
+                "colors": ["#C7372F", "#22A660", "#2E86C1"],
+            }
+        },
+    )
+    output = tmp_path / "interactive.html"
+
+    render(plan, output)
+
+    html = output.read_text(encoding="utf-8")
+    assert "data-mattervis-compass" in html
+    assert "__mvStandaloneCompass" in html
+    assert '"compass":{' in html

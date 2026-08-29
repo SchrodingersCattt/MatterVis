@@ -145,7 +145,10 @@ def _build_render_parser(
         "--camera-axis",
         choices=_CAMERA_AXES,
         default=None,
-        help="Align the camera with a real or reciprocal lattice axis (default: c).",
+        help=(
+            "Align the camera with a real or reciprocal lattice axis "
+            "(default: reciprocal normal of the largest lattice face)."
+        ),
     )
     camera_direction.add_argument(
         "--view-direction",
@@ -174,14 +177,14 @@ def _build_render_parser(
         "--show-hydrogen",
         dest="show_hydrogen",
         action="store_true",
-        default=False,
-        help="Show hydrogen atoms.",
+        default=True,
+        help="Show hydrogen atoms (default).",
     )
     p.add_argument(
         "--no-hydrogen",
         dest="show_hydrogen",
         action="store_false",
-        help="Hide hydrogen atoms (default).",
+        help="Hide hydrogen atoms.",
     )
     p.add_argument(
         "--show-cell",
@@ -331,9 +334,9 @@ def _build_render_parser(
         metavar="JSON",
         help=(
             "Add a polyhedron overlay from a JSON object. Repeat for multiple overlays. "
-            "Required keys: center, ligand. Optional: level=atom|molecule, "
+            "Required keys: center, ligand. Optional: id, level=atom|molecule, site, sites, "
             "center_kind, cutoff, hard_cutoff, fallback_max, color, opacity, "
-            "edge_opacity, edge_width, flatshading, name."
+            "edge_opacity."
         ),
     )
     p.add_argument(
@@ -341,14 +344,17 @@ def _build_render_parser(
         type=int,
         default=None,
         metavar="INDEX",
-        help="Displayed fragment index used as the primary polyhedron analysis anchor.",
+        help=(
+            "Restrict every polyhedron to one index: raw source atom index at "
+            "atom level or displayed fragment index at molecule level."
+        ),
     )
     p.add_argument(
         "--polyhedron-cutoff",
         type=float,
-        default=10.0,
+        default=None,
         metavar="ANGSTROM",
-        help="Default polyhedron search cutoff in Å (default: 10.0).",
+        help="Optional polyhedron cutoff in Å; omit for the natural coordination shell.",
     )
     p.add_argument(
         "--publication-layout",
@@ -541,7 +547,7 @@ def _build_cli_topology_data(
         structure,
         args.polyhedron,
         site_index=args.polyhedron_site,
-        cutoff=float(args.polyhedron_cutoff),
+        cutoff=args.polyhedron_cutoff,
     )
 
 
@@ -614,7 +620,12 @@ def _apply_camera_overrides(
     """Apply deterministic CLI camera controls to Plotly and flat renderers."""
     import numpy as np
 
-    from ..math.rotation import axis_camera_basis, normalize_vector, orthogonalise_up
+    from ..math.rotation import (
+        axis_camera_basis,
+        largest_face_camera_axis,
+        normalize_vector,
+        orthogonalise_up,
+    )
 
     up_hint = np.asarray(args.camera_up or [0.0, 1.0, 0.0], dtype=float)
     if args.camera_position is not None:
@@ -626,8 +637,8 @@ def _apply_camera_overrides(
         up = orthogonalise_up(view_direction, up_hint)
         eye = view_direction * float(args.camera_distance)
     else:
-        axis = args.camera_axis or "c"
         matrix = np.asarray(scene.get("M"), dtype=float)
+        axis = args.camera_axis or largest_face_camera_axis(matrix)
         if matrix.shape == (3, 3) and np.all(np.isfinite(matrix)):
             basis = axis_camera_basis(matrix, axis)
             view_direction = basis[2]
@@ -716,8 +727,11 @@ def _save_static_output(
                 height=args.height,
             )
         else:
-            fig = build_figure(scene, style, topology_data=topology_data)
-        fig.write_html(str(output_path), include_plotlyjs="cdn", full_html=True)
+            html_style = {**style, "axis_key_via_svg_overlay": True}
+            fig = build_figure(scene, html_style, topology_data=topology_data)
+        from .html_export import write_interactive_html
+
+        write_interactive_html(fig, output_path)
         return {"backend": "plotly-html", "fallback_reason": None}
 
     result = render(scene, style) if topology_data is None else None
@@ -839,7 +853,9 @@ def _render_main(args: argparse.Namespace) -> None:
     args.view = (
         "formula_unit"
         if args.view == "auto" and input_format == "cif"
-        else "unit_cell" if args.view == "auto" else args.view
+        else "unit_cell"
+        if args.view == "auto"
+        else args.view
     )
     overrides = _build_style_overrides(args)
 

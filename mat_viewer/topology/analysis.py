@@ -18,12 +18,14 @@ from molcrys_kit.analysis.packing_shell import (
 from molcrys_kit.analysis.shape import classify_shell
 from molcrys_kit.structures.polyhedra import convex_hull_payload, ideal_polyhedra_for_cn
 
-from ..config import current_config
+from ..config import current_config, element_color
 from ..structure import molcrys_bridge
 
 __all__ = [
     "DEFAULT_CENTROID_OFFSET_FRAC",
     "_hull_encloses_center",
+    "atom_overlay",
+    "display_atom_centers_for_spec",
     "analyze_topology",
     "classify_fragments",
     "classify_shell",
@@ -58,10 +60,14 @@ def _mck_override_kwargs(func) -> dict[str, object]:
 
 
 def classify_fragments(bundle) -> list[dict[str, Any]]:
-    return list(getattr(bundle, "topology_fragment_table", None) or bundle.fragment_table)
+    return list(
+        getattr(bundle, "topology_fragment_table", None) or bundle.fragment_table
+    )
 
 
-def _shift_hull_payload(hull: dict[str, Any] | None, delta: np.ndarray) -> dict[str, Any]:
+def _shift_hull_payload(
+    hull: dict[str, Any] | None, delta: np.ndarray
+) -> dict[str, Any]:
     """Return a copy of a MolCrysKit hull payload translated by ``delta``."""
     if not hull:
         return {"vertices": [], "simplices": [], "edges": []}
@@ -101,7 +107,9 @@ def _mck_polyhedron_record(
             elems = center_fragment.get("elem_set") or []
             central_symbol = str(elems[0]) if elems else ""
         if not central_symbol or not ligand_formula:
-            raise ValueError("Atom-level topology requires center_species and ligand_species element symbols.")
+            raise ValueError(
+                "Atom-level topology requires center_species and ligand_species element symbols."
+            )
         crystal = molcrys_bridge.molecular_crystal_from_bundle(bundle)
         public_module = sys.modules.get("mat_viewer.topology")
         find_polyhedra_impl = getattr(public_module, "find_polyhedra", find_polyhedra)
@@ -127,7 +135,12 @@ def _mck_polyhedron_record(
             return None
         center = np.array(center_fragment.get("center", [0.0, 0.0, 0.0]), dtype=float)
         records.sort(
-            key=lambda rec: float(np.linalg.norm(np.array(rec.get("center_position", [0.0, 0.0, 0.0]), dtype=float) - center))
+            key=lambda rec: float(
+                np.linalg.norm(
+                    np.array(rec.get("center_position", [0.0, 0.0, 0.0]), dtype=float)
+                    - center
+                )
+            )
         )
         return records[0]
     source_molecule_index = center_fragment.get("source_molecule_index")
@@ -138,7 +151,9 @@ def _mck_polyhedron_record(
         )
     center_formula = center_fragment.get("formula") or center_fragment.get("species")
     if not center_formula or not ligand_formula:
-        raise ValueError("Both center and ligand formulas are required for MolCrysKit polyhedra.")
+        raise ValueError(
+            "Both center and ligand formulas are required for MolCrysKit polyhedra."
+        )
     crystal = molcrys_bridge.molecular_crystal_from_bundle(bundle)
     # On level="molecule", MCK's ``cutoff`` IS the candidate search radius
     # that feeds gap+enclosure (per MCK PR #32). MV's state-level ``cutoff``
@@ -171,7 +186,7 @@ def _mck_polyhedron_record(
 
 def extract_atom_coordination_shells(
     bundle,
-    cutoff: float,
+    cutoff: float | None,
     *,
     center_species: str,
     ligand_species: str,
@@ -186,7 +201,11 @@ def extract_atom_coordination_shells(
     find_polyhedra_impl = getattr(public_module, "find_polyhedra", find_polyhedra)
     atom_kwargs: dict[str, Any] = {}
     if source_indices is not None:
-        atom_kwargs["central_indices"] = sorted({int(index) for index in source_indices})
+        atom_kwargs["central_indices"] = sorted(
+            {int(index) for index in source_indices}
+        )
+    if cutoff is not None:
+        atom_kwargs["cutoff"] = float(cutoff)
     if fallback_max is not None:
         atom_kwargs["fallback_max"] = int(fallback_max)
     records = find_polyhedra_impl(
@@ -194,7 +213,6 @@ def extract_atom_coordination_shells(
         str(center_species),
         str(ligand_species),
         level="atom",
-        cutoff=float(cutoff),
         enforce_enclosure=bool(enforce_enclosure),
         centroid_offset_frac=float(centroid_offset_frac),
         **atom_kwargs,
@@ -211,10 +229,87 @@ def extract_atom_coordination_shells(
             "center_source_index": source_index,
             "source_center_coords": center.tolist(),
             "source_shell_coords": shell_coords.tolist(),
-            "distances": [float(value) for value in record.get("shell_distances") or []],
+            "distances": [
+                float(value) for value in record.get("shell_distances") or []
+            ],
             "source_hull": convex_hull_payload(shell_coords),
         }
     return shells
+
+
+def display_atom_centers_for_spec(
+    bundle,
+    scene: dict[str, Any],
+    spec: dict[str, Any],
+    *,
+    source_indices: Iterable[int] | None = None,
+    include_images: bool = False,
+) -> list[dict[str, Any]]:
+    """Return displayed atom centres with stable source/image identity.
+
+    The default is one centre per source atom in the primary half-open cell.
+    Boundary-image centres are opt-in; their ligand shells may still cross PBC.
+    """
+    from ..scene.core import source_image_identity
+
+    wanted = str(spec.get("center_species") or "")
+    allowed = (
+        {int(index) for index in source_indices} if source_indices is not None else None
+    )
+    source_atoms = list(bundle.raw_atoms)
+    seen: set[tuple[int, tuple[int, int, int]]] = set()
+    centers: list[dict[str, Any]] = []
+    for draw_index, atom in enumerate(scene.get("draw_atoms") or []):
+        if str(atom.get("elem") or "") != wanted:
+            continue
+        identity = source_image_identity(atom, source_atoms, draw_index)
+        if identity is None or identity in seen:
+            continue
+        if not include_images and identity[1] != (0, 0, 0):
+            continue
+        if allowed is not None and identity[0] not in allowed:
+            continue
+        seen.add(identity)
+        centers.append(
+            {
+                "draw_index": draw_index,
+                "source_index": identity[0],
+                "image": identity[1],
+                "label": atom.get("label") or f"{wanted}{identity[0]}",
+                "center": np.asarray(atom.get("cart"), dtype=float).tolist(),
+                "color": atom.get("color") or element_color(wanted),
+            }
+        )
+    return centers
+
+
+def atom_overlay(shell: dict[str, Any], center: dict[str, Any]) -> dict[str, Any]:
+    """Translate one source atom shell onto a displayed periodic image."""
+    source_center = np.asarray(shell["source_center_coords"], dtype=float)
+    display_center = np.asarray(center["center"], dtype=float)
+    delta = display_center - source_center
+    source_shell = np.asarray(shell.get("source_shell_coords") or [], dtype=float)
+    shell_coords = (
+        source_shell + delta if len(source_shell) else np.zeros((0, 3), dtype=float)
+    )
+    source_hull = shell.get("source_hull") or {}
+    hull = dict(source_hull)
+    source_vertices = np.asarray(source_hull.get("vertices") or [], dtype=float)
+    hull["vertices"] = (
+        (source_vertices + delta).tolist() if len(source_vertices) else []
+    )
+    return {
+        "center_coords": display_center.tolist(),
+        "center_label": center["label"],
+        "center_source_index": center["source_index"],
+        "center_image": list(center["image"]),
+        "center_draw_index": center["draw_index"],
+        "shell_coords": shell_coords.tolist(),
+        "distances": shell.get("distances") or [],
+        "hull": hull,
+        "color": center.get("color"),
+        "is_analysis_anchor": False,
+    }
 
 
 def _extract_coordination_shell_static(
@@ -232,7 +327,9 @@ def _extract_coordination_shell_static(
     fallback_max: int | None = None,
 ) -> dict[str, Any]:
     fragments = classify_fragments(bundle)
-    center_fragment = next((frag for frag in fragments if int(frag["index"]) == int(center_index)), None)
+    center_fragment = next(
+        (frag for frag in fragments if int(frag["index"]) == int(center_index)), None
+    )
     if center_fragment is None:
         raise IndexError(f"Unknown fragment index: {center_index}")
     record = _mck_polyhedron_record(
@@ -307,7 +404,9 @@ def _extract_coordination_shell_static(
             "image_shift": offset,
         }
         for idx, coord, dist, offset in zip(
-            (record or {}).get("shell_molecule_indices") or (record or {}).get("shell_indices") or [],
+            (record or {}).get("shell_molecule_indices")
+            or (record or {}).get("shell_indices")
+            or [],
             source_shell_coords.tolist(),
             shell_distances,
             (record or {}).get("shell_offsets") or [],
@@ -317,7 +416,8 @@ def _extract_coordination_shell_static(
         "center_index": int(center_index),
         "default_label": center_fragment.get("label", f"site-{center_index}"),
         "default_type": center_fragment.get("type", "?"),
-        "center_formula": center_fragment.get("formula") or center_fragment.get("species"),
+        "center_formula": center_fragment.get("formula")
+        or center_fragment.get("species"),
         "analysis_level": level,
         "source_center_coords": source_center,
         "cutoff": float(cutoff),
@@ -350,7 +450,9 @@ def extract_coordination_shell(
     hard_cutoff: float | None = None,
     fallback_max: int | None = None,
 ) -> dict[str, Any]:
-    ligand_tuple = tuple(str(item) for item in ligand_species) if ligand_species else None
+    ligand_tuple = (
+        tuple(str(item) for item in ligand_species) if ligand_species else None
+    )
     static = _extract_coordination_shell_static(
         bundle,
         int(center_index),
@@ -365,17 +467,24 @@ def extract_coordination_shell(
         fallback_max=fallback_max,
     )
     source_center = np.asarray(static["source_center_coords"], dtype=float)
-    plot_center = source_center if display_center is None else np.array(display_center, dtype=float)
+    plot_center = (
+        source_center
+        if display_center is None
+        else np.array(display_center, dtype=float)
+    )
     delta = plot_center - source_center
 
     source_shell_coords = np.asarray(static["source_shell_coords"], dtype=float)
     shell_coords = (
-        source_shell_coords + delta if len(source_shell_coords) else np.zeros((0, 3), dtype=float)
+        source_shell_coords + delta
+        if len(source_shell_coords)
+        else np.zeros((0, 3), dtype=float)
     )
     candidates = static["candidate_fragments"]
     pool_coords_arr = (
         np.array([item["center"] for item in candidates], dtype=float) + delta
-        if candidates else np.zeros((0, 3), dtype=float)
+        if candidates
+        else np.zeros((0, 3), dtype=float)
     )
     hull = _shift_hull_payload(static.get("source_hull"), delta)
     return {
@@ -446,16 +555,24 @@ def _analyze_topology_uncached(
     # via ``_analyze_topology_cache`` so it only runs once per (centre,
     # cutoff, ligand) tuple.
     public_module = sys.modules.get("mat_viewer.topology")
-    classify_shell_payload_impl = getattr(public_module, "_classify_shell_payload", _classify_shell_payload)
+    classify_shell_payload_impl = getattr(
+        public_module, "_classify_shell_payload", _classify_shell_payload
+    )
     shape = classify_shell_payload_impl(shell_coords, center)
-    planarity = planarity_analysis(shell_coords, group_size=min(5, len(shell_coords)) if shell_coords else 5)
+    planarity = planarity_analysis(
+        shell_coords, group_size=min(5, len(shell_coords)) if shell_coords else 5
+    )
     prism = detect_prism_vs_antiprism(shell_coords)
     return {
         **shell,
         "shape": shape,
         "analysis_level": level,
-        "packing_shell_label": shape.get("primary_label") if level == "molecule" else None,
-        "coordination_polyhedron_label": shape.get("primary_label") if level == "atom" else None,
+        "packing_shell_label": (
+            shape.get("primary_label") if level == "molecule" else None
+        ),
+        "coordination_polyhedron_label": (
+            shape.get("primary_label") if level == "atom" else None
+        ),
         "planarity": planarity,
         "prism_analysis": prism,
     }
@@ -502,22 +619,30 @@ _SHAPE_DROP_KEYS = ("topology",)
 
 
 def _sanitize_shape_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    cleaned = {key: value for key, value in payload.items() if key not in _SHAPE_DROP_KEYS}
+    cleaned = {
+        key: value for key, value in payload.items() if key not in _SHAPE_DROP_KEYS
+    }
     if isinstance(cleaned.get("core"), dict):
         cleaned["core"] = {
             key: value
             for key, value in cleaned["core"].items()
             if key not in _SHAPE_DROP_KEYS
         }
-    cleaned["candidates"] = [_sanitize_candidate(item) for item in cleaned.get("candidates") or []]
-    cleaned["alternatives"] = [_sanitize_candidate(item) for item in cleaned.get("alternatives") or []]
+    cleaned["candidates"] = [
+        _sanitize_candidate(item) for item in cleaned.get("candidates") or []
+    ]
+    cleaned["alternatives"] = [
+        _sanitize_candidate(item) for item in cleaned.get("alternatives") or []
+    ]
     if isinstance(cleaned.get("best_match"), dict):
         cleaned["best_match"] = _sanitize_candidate(cleaned["best_match"])
     return cleaned
 
 
 def _sanitize_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
-    cleaned = {key: value for key, value in candidate.items() if key not in _SHAPE_DROP_KEYS}
+    cleaned = {
+        key: value for key, value in candidate.items() if key not in _SHAPE_DROP_KEYS
+    }
     if isinstance(cleaned.get("core"), dict):
         cleaned["core"] = {
             key: value
@@ -571,7 +696,9 @@ def analyze_topology(
     slots. PBC image enumeration is delegated to MolCrysKit's
     ``find_polyhedra(level="molecule")`` implementation.
     """
-    ligand_tuple = tuple(str(item) for item in ligand_species) if ligand_species else None
+    ligand_tuple = (
+        tuple(str(item) for item in ligand_species) if ligand_species else None
+    )
     level = str(level or "molecule")
     center_kind = str(center_kind or "centroid")
     hard_cap = float(hard_cutoff) if hard_cutoff is not None else None
@@ -583,8 +710,12 @@ def analyze_topology(
             bundle._analyze_topology_cache = cache
         except Exception:
             return _analyze_topology_uncached(
-                bundle, center_index, cutoff,
-                display_center, display_label, display_type,
+                bundle,
+                center_index,
+                cutoff,
+                display_center,
+                display_label,
+                display_type,
                 ligand_species=ligand_tuple,
                 level=level,
                 center_species=center_species,
@@ -611,8 +742,12 @@ def analyze_topology(
     cached = cache.get(key)
     if cached is None:
         cached = _analyze_topology_uncached(
-            bundle, center_index, cutoff,
-            None, None, None,
+            bundle,
+            center_index,
+            cutoff,
+            None,
+            None,
+            None,
             ligand_species=ligand_tuple,
             level=level,
             center_species=center_species,
@@ -628,13 +763,17 @@ def analyze_topology(
     out = dict(cached)
     if display_center is not None:
         plot_center = np.array(display_center, dtype=float)
-        source_center = np.array(out.get("source_center_coords", plot_center), dtype=float)
+        source_center = np.array(
+            out.get("source_center_coords", plot_center), dtype=float
+        )
         delta = plot_center - source_center
         out["center_coords"] = plot_center.tolist()
         if out.get("source_shell_coords"):
             shell = np.array(out["source_shell_coords"], dtype=float) + delta
             out["shell_coords"] = shell.tolist()
-        out["hull"] = _shift_hull_payload(out.get("source_hull") or out.get("hull"), delta)
+        out["hull"] = _shift_hull_payload(
+            out.get("source_hull") or out.get("hull"), delta
+        )
     if display_label is not None:
         out["center_label"] = display_label
     if display_type is not None:

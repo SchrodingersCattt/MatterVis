@@ -7,7 +7,6 @@ from typing import Any, Iterable
 
 import numpy as np
 
-
 _POLYHEDRON_KEYS = {
     "id",
     "spec_id",
@@ -25,7 +24,84 @@ _POLYHEDRON_KEYS = {
     "color",
     "opacity",
     "edge_opacity",
+    "site",
+    "sites",
+    "center_images",
+    "instance_overrides",
 }
+
+
+def _parse_site_indices(payload: dict[str, Any], index: int) -> tuple[int, ...] | None:
+    if "site" in payload and "sites" in payload:
+        raise ValueError(f"polyhedron {index + 1}: use site or sites, not both")
+    raw = payload.get("sites", payload.get("site"))
+    if raw is None:
+        return None
+    values = raw if isinstance(raw, list) else [raw]
+    if not values:
+        raise ValueError(f"polyhedron {index + 1}: sites must not be empty")
+    sites: list[int] = []
+    for value in values:
+        if isinstance(value, bool):
+            raise ValueError(
+                f"polyhedron {index + 1}: site indices must be non-negative integers"
+            )
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"polyhedron {index + 1}: site indices must be non-negative integers"
+            ) from exc
+        if not np.isfinite(numeric) or int(numeric) != numeric or int(numeric) < 0:
+            raise ValueError(
+                f"polyhedron {index + 1}: site indices must be non-negative integers"
+            )
+        sites.append(int(numeric))
+    return tuple(dict.fromkeys(sites))
+
+
+def _parse_instance_overrides(
+    payload: dict[str, Any], index: int
+) -> dict[str, dict[str, Any]]:
+    raw = payload.get("instance_overrides")
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"polyhedron {index + 1}: instance_overrides must be a JSON object"
+        )
+    parsed: dict[str, dict[str, Any]] = {}
+    for label, override in raw.items():
+        name = str(label).strip()
+        if not name or not isinstance(override, dict):
+            raise ValueError(
+                f"polyhedron {index + 1}: each instance override needs a "
+                "non-empty label and JSON object"
+            )
+        unknown = sorted(set(override) - {"color", "visible"})
+        if unknown:
+            raise ValueError(
+                f"polyhedron {index + 1}: instance override {name!r} has "
+                f"unsupported key(s): {', '.join(unknown)}"
+            )
+        cleaned: dict[str, Any] = {}
+        if "color" in override:
+            color = str(override["color"]).strip()
+            if not color:
+                raise ValueError(
+                    f"polyhedron {index + 1}: instance override {name!r} "
+                    "color must not be empty"
+                )
+            cleaned["color"] = color
+        if "visible" in override:
+            if not isinstance(override["visible"], bool):
+                raise ValueError(
+                    f"polyhedron {index + 1}: instance override {name!r} "
+                    "visible must be a JSON boolean"
+                )
+            cleaned["visible"] = override["visible"]
+        parsed[name] = cleaned
+    return parsed
 
 
 def parse_polyhedron_specs(raw_specs: Iterable[str]) -> list[dict[str, Any]]:
@@ -87,8 +163,8 @@ def parse_polyhedron_specs(raw_specs: Iterable[str]) -> list[dict[str, Any]]:
             raise ValueError(
                 f"polyhedron {index + 1}: enforce_enclosure must be a JSON boolean"
             )
-        opacity = float(payload.get("opacity", 0.55))
-        edge_opacity = float(payload.get("edge_opacity", 0.9))
+        opacity = float(payload.get("opacity", 0.50))
+        edge_opacity = float(payload.get("edge_opacity", 0.40))
         if (
             not np.isfinite(opacity)
             or not np.isfinite(edge_opacity)
@@ -128,6 +204,17 @@ def parse_polyhedron_specs(raw_specs: Iterable[str]) -> list[dict[str, Any]]:
                 f"polyhedron {index + 1}: centroid_offset_frac must be finite "
                 "and non-negative"
             )
+        sites = _parse_site_indices(payload, index)
+        center_images = payload.get("center_images", False)
+        if not isinstance(center_images, bool):
+            raise ValueError(
+                f"polyhedron {index + 1}: center_images must be a JSON boolean"
+            )
+        if level != "atom" and center_images:
+            raise ValueError(
+                f"polyhedron {index + 1}: center_images is only valid at atom level"
+            )
+        instance_overrides = _parse_instance_overrides(payload, index)
         spec_id = str(
             payload.get("spec_id") or payload.get("id") or f"polyhedron-{index + 1}"
         )
@@ -148,9 +235,16 @@ def parse_polyhedron_specs(raw_specs: Iterable[str]) -> list[dict[str, Any]]:
                     int(float(fallback_max)) if fallback_max is not None else None
                 ),
                 "cutoff": float(local_cutoff) if local_cutoff is not None else None,
-                "color": str(payload.get("color") or "#7C5CBF"),
+                "sites": sites,
+                "color": (
+                    str(payload["color"])
+                    if payload.get("color")
+                    else (None if level == "atom" else "#7C5CBF")
+                ),
                 "opacity": opacity,
                 "edge_opacity": edge_opacity,
+                "center_images": center_images,
+                "instance_overrides": instance_overrides,
             }
         )
     return specs
@@ -205,27 +299,126 @@ def build_topology_data(
     raw_specs: Iterable[str],
     *,
     site_index: int | None = None,
-    cutoff: float = 10.0,
+    cutoff: float | None = None,
+    display: str | None = None,
+    show_hydrogen: bool = True,
+    include_boundary_replicas: bool = True,
+    include_cross_boundary_bond_endpoints: bool = True,
 ) -> dict[str, Any] | None:
     """Build RenderPlan polyhedra from MolCrysKit topology primitives."""
     specs = parse_polyhedron_specs(raw_specs)
     if not specs:
         return None
-    if not np.isfinite(cutoff) or float(cutoff) <= 0.0:
+    if cutoff is not None and (not np.isfinite(cutoff) or float(cutoff) <= 0.0):
         raise ValueError("polyhedron cutoff must be finite and positive")
     selected = structure.frames[0]
     bundle = selected.bundle
-    scene = getattr(bundle, "scene", {}) or {}
-    fragments = list(scene.get("fragment_table") or bundle.fragment_table or ())
-    if not fragments:
-        raise ValueError("polyhedra require at least one MolCrysKit fragment")
+    if display is None:
+        scene = getattr(bundle, "scene", {}) or {}
+    else:
+        from .loader.core import build_bundle_scene
 
-    from .topology import analyze_topology
+        scene = build_bundle_scene(
+            bundle,
+            display_mode=display,
+            show_hydrogen=show_hydrogen,
+            include_boundary_replicas=include_boundary_replicas,
+            include_cross_boundary_bond_endpoints=(
+                include_cross_boundary_bond_endpoints
+            ),
+        )
+    fragments = list(scene.get("fragment_table") or bundle.fragment_table or ())
+
+    from .topology import (
+        analyze_topology,
+        atom_overlay,
+        display_atom_centers_for_spec,
+        extract_atom_coordination_shells,
+    )
 
     spec_results: list[dict[str, Any]] = []
     warnings: list[str] = []
     for spec in specs:
+        if spec["level"] == "atom":
+            selected_sites = set(spec["sites"]) if spec["sites"] is not None else None
+            if site_index is not None:
+                selected_sites = (
+                    {int(site_index)}
+                    if selected_sites is None
+                    else selected_sites & {int(site_index)}
+                )
+            centers = display_atom_centers_for_spec(
+                bundle,
+                scene,
+                spec,
+                source_indices=selected_sites,
+                include_images=spec["center_images"],
+            )
+            if not centers:
+                raise ValueError(
+                    f"no displayed {spec['center_species']} atom matches "
+                    f"polyhedron {spec['id']}"
+                )
+            atom_cutoff = spec["cutoff"] if spec["cutoff"] is not None else cutoff
+            shells = extract_atom_coordination_shells(
+                bundle,
+                atom_cutoff,
+                center_species=spec["center_species"],
+                ligand_species=spec["ligand_species"],
+                source_indices={center["source_index"] for center in centers},
+                enforce_enclosure=spec["enforce_enclosure"],
+                centroid_offset_frac=spec["centroid_offset_frac"],
+                fallback_max=spec["fallback_max"],
+            )
+            overlays: list[dict[str, Any]] = []
+            for center in centers:
+                shell = shells.get(center["source_index"])
+                if shell is None:
+                    continue
+                overlay = atom_overlay(shell, center)
+                hull = overlay.get("hull") or {}
+                if len(overlay.get("shell_coords") or []) < 4 or not hull.get(
+                    "simplices"
+                ):
+                    warnings.append(
+                        f"polyhedron {spec['id']} skipped source atom "
+                        f"{center['source_index']}: shell is not a drawable "
+                        "non-coplanar hull"
+                    )
+                    continue
+                overlay["color"] = spec["color"] or overlay["color"]
+                override = next(
+                    (
+                        spec["instance_overrides"][key]
+                        for key in (
+                            str(overlay.get("center_source_index")),
+                            str(overlay.get("center_label") or ""),
+                        )
+                        if key in spec["instance_overrides"]
+                    ),
+                    None,
+                )
+                if override:
+                    overlay = dict(overlay)
+                    if "color" in override:
+                        overlay["color"] = override["color"]
+                    if "visible" in override:
+                        overlay["visible"] = bool(override["visible"])
+                overlays.append(overlay)
+            if not overlays:
+                raise ValueError(
+                    f"polyhedron {spec['id']} has no drawable non-coplanar shell"
+                )
+            spec_results.append({**spec, "overlays": overlays})
+            continue
+
         candidates = [fragment for fragment in fragments if _matches(fragment, spec)]
+        if spec["sites"] is not None:
+            candidates = [
+                fragment
+                for fragment in candidates
+                if int(fragment.get("index", -1)) in set(spec["sites"])
+            ]
         if site_index is not None:
             candidates = [
                 fragment
@@ -249,7 +442,7 @@ def build_topology_data(
             result = analyze_topology(
                 bundle,
                 center_index=int(topology_fragment["index"]),
-                cutoff=float(spec["cutoff"] or cutoff),
+                cutoff=float(spec["cutoff"] or cutoff or 10.0),
                 display_center=display_fragment.get("center"),
                 display_label=display_fragment.get("label"),
                 display_type=display_fragment.get("type"),
@@ -271,15 +464,22 @@ def build_topology_data(
                     "non-coplanar hull"
                 )
                 continue
-            overlays.append(
-                {
-                    "center_coords": result.get("center_coords"),
-                    "center_label": result.get("center_label"),
-                    "shell_coords": shell,
-                    "hull": hull,
-                    "color": spec["color"],
-                }
+            overlay = {
+                "center_coords": result.get("center_coords"),
+                "center_label": result.get("center_label"),
+                "shell_coords": shell,
+                "hull": hull,
+                "color": spec["color"],
+            }
+            override = spec["instance_overrides"].get(
+                str(overlay.get("center_label") or "")
             )
+            if override:
+                if "color" in override:
+                    overlay["color"] = override["color"]
+                if "visible" in override:
+                    overlay["visible"] = bool(override["visible"])
+            overlays.append(overlay)
         if not overlays:
             raise ValueError(
                 f"polyhedron {spec['id']} has no drawable non-coplanar shell"
@@ -288,4 +488,64 @@ def build_topology_data(
     return {"spec_results": spec_results, "warnings": warnings}
 
 
-__all__ = ["build_topology_data", "parse_polyhedron_specs"]
+def polyhedron_summary(topology_data) -> list[dict]:
+    """Summarize effective polyhedron count and paint for render receipts."""
+    summaries: list[dict] = []
+    for result in (topology_data or {}).get("spec_results") or []:
+        overlays = [
+            overlay
+            for overlay in result.get("overlays") or []
+            if overlay.get("visible", True)
+        ]
+        colors = sorted(
+            {
+                str(overlay.get("color") or result.get("color"))
+                for overlay in overlays
+                if overlay.get("color") or result.get("color")
+            }
+        )
+        coordination_numbers = sorted(
+            {len(overlay.get("distances") or []) for overlay in overlays}
+        )
+        source_centers = {
+            int(overlay["center_source_index"])
+            for overlay in overlays
+            if overlay.get("center_source_index") is not None
+        }
+        summaries.append(
+            {
+                "id": result.get("spec_id") or result.get("id"),
+                "level": result.get("level"),
+                "center": result.get("center_species"),
+                "ligand": result.get("ligand_species"),
+                "displayed_centers": len(overlays),
+                "unique_source_centers": len(source_centers) or len(overlays),
+                "center_images": bool(result.get("center_images", False)),
+                "effective_colors": colors,
+                "coordination_numbers": coordination_numbers,
+            }
+        )
+    return summaries
+
+
+def topology_fit_points(topology_data) -> np.ndarray:
+    """Return finite polyhedron vertices that must remain inside the viewport."""
+    points = []
+    for result in (topology_data or {}).get("spec_results") or ():
+        for overlay in result.get("overlays") or ():
+            shell = np.asarray(overlay.get("shell_coords") or (), dtype=float)
+            if (
+                shell.ndim == 2
+                and shell.shape[1:] == (3,)
+                and np.all(np.isfinite(shell))
+            ):
+                points.append(shell)
+    return np.vstack(points) if points else np.zeros((0, 3), dtype=float)
+
+
+__all__ = [
+    "build_topology_data",
+    "parse_polyhedron_specs",
+    "polyhedron_summary",
+    "topology_fit_points",
+]

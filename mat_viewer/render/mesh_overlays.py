@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import colorsys
+
 from typing import Any, Mapping
 
 import numpy as np
 
 from .contracts import Primitive, TriangleMeshPrimitive
 from .geometry import (
+    color_to_rgba,
     mesh_primitive,
     polyhedron_edges_primitive,
     polyhedron_primitive,
@@ -25,6 +28,18 @@ def _value(record: Any, *names: str, default: Any = ...):
     raise ValueError(f"record is missing required field; tried {', '.join(names)}")
 
 
+def _polyhedron_edge_color(color: Any) -> tuple[float, float, float, float]:
+    """Return a darker same-hue edge color for a polyhedron material."""
+    red, green, blue, alpha = color_to_rgba(color)
+    hue, lightness, saturation = colorsys.rgb_to_hls(red, green, blue)
+    edge_rgb = colorsys.hls_to_rgb(
+        hue,
+        max(0.12, lightness * 0.55),
+        min(1.0, max(0.30, saturation * 1.10)),
+    )
+    return (*edge_rgb, alpha)
+
+
 def polyhedron_primitives(
     scene: Mapping[str, Any], topology_data: Mapping[str, Any] | None
 ) -> list[Primitive]:
@@ -33,6 +48,8 @@ def polyhedron_primitives(
     if topology_data:
         for specification in topology_data.get("spec_results") or []:
             for overlay in specification.get("overlays") or []:
+                if not overlay.get("visible", True):
+                    continue
                 explicit.append(
                     {
                         "vertices": overlay.get("shell_coords"),
@@ -40,8 +57,8 @@ def polyhedron_primitives(
                         "color": overlay.get("color")
                         or specification.get("color")
                         or "#7C5CBF",
-                        "opacity": specification.get("opacity", 0.55),
-                        "edge_opacity": specification.get("edge_opacity", 0.9),
+                        "opacity": specification.get("opacity", 0.50),
+                        "edge_opacity": specification.get("edge_opacity", 0.40),
                         "spec_id": specification.get("spec_id"),
                     }
                 )
@@ -58,7 +75,7 @@ def polyhedron_primitives(
                 vertices,
                 faces,
                 color,
-                alpha=float(_value(item, "opacity", default=0.55)),
+                alpha=float(_value(item, "opacity", default=0.50)),
                 metadata={
                     "kind": "polyhedron",
                     "spec_id": _value(item, "spec_id", default=None),
@@ -70,8 +87,8 @@ def polyhedron_primitives(
                 f"{semantic_id}:edges",
                 vertices,
                 faces,
-                color,
-                alpha=float(_value(item, "edge_opacity", default=0.9)),
+                _polyhedron_edge_color(color),
+                alpha=float(_value(item, "edge_opacity", default=0.40)),
             )
         )
     return results
