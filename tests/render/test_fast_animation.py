@@ -316,3 +316,39 @@ ITEM: ATOMS id element x y z
     assert result.profile["settings"]["workers"] == 2
     assert result.profile["source"]["frames_selected"] == 3
     assert profile_path.is_file()
+
+
+@pytest.mark.skipif(not NUMBA_AVAILABLE, reason="batch renderer requires numba")
+def test_no_cell_animation_fits_visible_atoms_not_vacuum(tmp_path: Path) -> None:
+    frames = []
+    for index, z_value in enumerate((2.0, 3.0)):
+        frames.append(
+            f"""ITEM: TIMESTEP
+{index}
+ITEM: NUMBER OF ATOMS
+2
+ITEM: BOX BOUNDS pp pp ff
+0 10
+0 10
+0 200
+ITEM: ATOMS id element x y z
+1 C 1 1 {z_value}
+2 O 2.2 1 {z_value}
+"""
+        )
+    source = tmp_path / "slab.lammpstrj"
+    source.write_text("".join(frames), encoding="utf-8")
+
+    result = render_lammps_animation(
+        source,
+        tmp_path / "slab.gif",
+        width=160,
+        height=120,
+        show_cell=False,
+        workers=1,
+    )
+
+    assert result.profile["settings"]["camera_fit"] == "visible_atoms"
+    assert result.camera.target[2] == pytest.approx(2.5)
+    assert result.camera.ortho_scale < 10.0
+    assert all(value > 0 for value in result.profile["foreground_pixels"])

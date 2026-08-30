@@ -217,7 +217,9 @@ Periodic static renders default to an orthographic view normal to the largest
 lattice face: `ab -> c*`, `ac -> b*`, or `bc -> a*`, with `c*` winning
 equal-area ties. Nonperiodic inputs fit the atomic coordinates and do not treat
 an ASE padding box as crystallographic data. Camera direction options are
-mutually exclusive.
+mutually exclusive. When `--no-cell` hides a real periodic cell, automatic
+framing likewise fits the visible atoms rather than hidden cell edges or vacuum
+padding.
 
 | Flag | Default | Description |
 |------|---------|-------------|
