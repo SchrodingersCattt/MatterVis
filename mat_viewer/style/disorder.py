@@ -53,7 +53,7 @@ def bond_effective_opacity(bond: Mapping[str, Any], style: Mapping[str, Any]) ->
         scale_f = max(0.0, min(1.0, float(scale)))
     except (TypeError, ValueError):
         scale_f = 1.0
-    if bond.get("_render_opacity_group_id") is not None:
+    if scale_f < 0.999 or bond.get("_render_opacity_group_id") is not None:
         return scale_f
 
     is_minor = bool(bond.get("is_minor", False))

@@ -164,7 +164,7 @@ def _atom_effective_opacity(atom: dict, style: dict) -> float:
         scale_f = max(0.0, min(1.0, float(scale)))
     except (TypeError, ValueError):
         scale_f = 1.0
-    if atom.get("_render_opacity_group_id") is not None:
+    if scale_f < 0.999 or atom.get("_render_opacity_group_id") is not None:
         return scale_f
 
     is_minor = bool(atom.get("is_minor", False))
