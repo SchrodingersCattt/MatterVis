@@ -1,6 +1,6 @@
 ---
 name: visualize-materials
-description: "Use first whenever atomic coordinates must be drawn or animated with MatterVis, including structures, trajectories, polyhedra, and ORCA vibration modes."
+description: "Use first for every atomistic drawing or animation, including structures, trajectories, polyhedra, and ORCA modes. Load before any mat-vis command or help."
 ---
 
 # Visualize Materials
