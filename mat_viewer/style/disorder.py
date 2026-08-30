@@ -53,18 +53,14 @@ def bond_effective_opacity(bond: Mapping[str, Any], style: Mapping[str, Any]) ->
         scale_f = max(0.0, min(1.0, float(scale)))
     except (TypeError, ValueError):
         scale_f = 1.0
-    if scale_f < 0.999:
+    if bond.get("_render_opacity_group_id") is not None:
         return scale_f
 
     is_minor = bool(bond.get("is_minor", False))
     is_disordered = bool(bond.get("is_disordered", is_minor))
-    # Occupancy controls opacity only for a loader-confirmed disordered bond.
-    unresolved = is_disordered and not bool(bond.get("disorder_resolved", False))
-    if is_disordered and (
-        style.get("disorder") == "opacity"
-        or style.get("force_minor_fade")
-        or (unresolved and style.get("disorder") != "none")
-    ):
+    # Every loader-confirmed disorder component uses its crystallographic
+    # occupancy as visual weight unless disorder rendering is disabled.
+    if is_disordered and style.get("disorder") != "none":
         occ = bond.get("occ", 1.0)
         try:
             occ_f = float(occ)
@@ -94,8 +90,11 @@ def is_minor(at):
     return atom_is_minor(at)
 
 def disorder_alpha(at):
-    if is_minor(at):
-        return 0.22   # minor disorder: clearly faded behind major atoms
+    if atom_is_disordered(at):
+        try:
+            return max(0.0, min(1.0, float(at.get("occ", 1.0))))
+        except (TypeError, ValueError):
+            return 1.0
     return 1.0
 
 def _disorder_group_id(at):

@@ -39,7 +39,7 @@ from mat_viewer.loader import (
 )
 from mat_viewer.loader.core import (
     _fragment_table_from_atoms,
-    _tag_unresolved_partial_solvent_disorder,
+    _tag_unresolved_partial_disorder,
 )
 
 
@@ -173,19 +173,23 @@ def test_is_minor_reads_loader_flag_only(atom, expected):
     assert is_minor(atom) is expected
 
 
-def test_partial_water_sites_are_tagged_as_unresolved_disorder():
+def test_recognised_partial_sites_are_tagged_as_unresolved_disorder():
     atoms = [
         {"label": "O2W", "elem": "O", "occ": 0.06},
         {"label": "H2WA", "elem": "H", "occ": 0.06},
-        {"label": "C1", "elem": "C", "occ": 0.5},
+        {"label": "H3A", "elem": "H", "occ": 0.5, "dg": "0", "da": "."},
+        {"label": "H3B", "elem": "H", "occ": 0.5, "dg": "0", "da": "."},
+        {"label": "C1", "elem": "C", "occ": 0.5, "dg": "0", "da": "."},
     ]
 
-    tagged = _tag_unresolved_partial_solvent_disorder(atoms)
+    tagged = _tag_unresolved_partial_disorder(atoms)
 
     assert tagged[0]["is_disordered"] is True
     assert tagged[1]["is_disordered"] is True
-    assert tagged[0]["disorder_resolved"] is False
-    assert "is_disordered" not in tagged[2]
+    assert tagged[2]["is_disordered"] is True
+    assert tagged[3]["is_disordered"] is True
+    assert all(atom["disorder_resolved"] is False for atom in tagged[:4])
+    assert "is_disordered" not in tagged[4]
 
 
 def test_unresolved_partial_solvent_h_is_not_a_topology_species():
@@ -230,6 +234,11 @@ def test_has_shelx_occupancy_disorder_distinguishes_patterns():
         {"label": "H3A", "elem": "H", "occ": 0.5, "dg": ".", "da": "."},
         {"label": "H3B", "elem": "H", "occ": 0.5, "dg": ".", "da": "."},
     ]
+    # Some parsers represent the same omitted group as string zero.
+    shelx_zero = [
+        {"label": "H3A", "elem": "H", "occ": 0.5, "dg": "0", "da": "."},
+        {"label": "H3B", "elem": "H", "occ": 0.5, "dg": "0", "da": "."},
+    ]
     # Ordered special-position pattern: one partial site, blank disorder tags.
     ordered_special_position = [
         {"label": "Cu1", "elem": "Cu", "occ": 0.25, "dg": ".", "da": "."},
@@ -263,6 +272,7 @@ def test_has_shelx_occupancy_disorder_distinguishes_patterns():
     ]
 
     assert _has_shelx_occupancy_disorder(shelx) is True
+    assert _has_shelx_occupancy_disorder(shelx_zero) is True
     assert _has_shelx_occupancy_disorder(ordered_special_position) is False
     assert _has_shelx_occupancy_disorder(explicit_assembly) is True
     assert _has_shelx_occupancy_disorder(single_assembly_partner) is False

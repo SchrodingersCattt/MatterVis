@@ -190,16 +190,22 @@ def prepare_render(
         atom_colors[index] = color
         occupancy = float(_value(atom, "occ", "occupancy", default=1.0))
         disorder_group = _value(atom, "disorder_group", "dg", default=None)
-        if occupancy < 1.0 - 1.0e-8 or disorder_group not in (
-            None,
-            0,
-            "0",
-            ".",
-            "?",
-        ):
+        is_disordered = bool(_value(atom, "is_disordered", default=False))
+        if is_disordered:
             disordered_source_indices.add(source_index)
         opacity_scale = float(_value(atom, "_render_opacity_scale", default=1.0))
-        alpha = float(np.clip(occupancy * opacity_scale, 0.0, 1.0))
+        explicit_opacity = (
+            _value(atom, "_render_opacity_group_id", default=None) is not None
+        )
+        alpha = float(
+            np.clip(
+                opacity_scale
+                if explicit_opacity
+                else occupancy if is_disordered else 1.0,
+                0.0,
+                1.0,
+            )
+        )
         label = str(_value(atom, "label", default=f"{element}{index + 1}"))
         semantic_id = f"atom:{index}:{label}"
         copy_key = _display_copy_key(atom)
@@ -217,6 +223,10 @@ def prepare_render(
             "label": label,
             "source_index": source_index,
             "occupancy": occupancy,
+            "is_disordered": is_disordered,
+            "disorder_resolved": bool(
+                _value(atom, "disorder_resolved", default=False)
+            ),
             "disorder_group": disorder_group,
             "disorder_assembly": _value(atom, "disorder_assembly", "da", default=None),
             "image_shift": _integer_triplet(
@@ -336,7 +346,7 @@ def prepare_render(
         warnings.append(
             "scene contains disorder at "
             f"{len(disordered_source_indices)} source sites; occupancies are "
-            "rendered as opacity without automatic disorder resolution"
+            "rendered as opacity"
         )
 
     if bonds:

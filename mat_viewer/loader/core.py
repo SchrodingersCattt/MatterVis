@@ -182,7 +182,9 @@ def _partial_occupancy_value(atom: dict[str, Any]) -> float:
 def _blank_disorder_tags(atom: dict[str, Any]) -> bool:
     dg = str(atom.get("dg") or ".").strip()
     da = str(atom.get("da") or ".").strip()
-    return dg in (".", "?", "") and da in (".", "?", "")
+    # The CIF parser normalises an omitted disorder group to either "." or
+    # "0", depending on the input dialect. Both mean "no explicit group".
+    return dg in (".", "?", "", "0") and da in (".", "?", "", "0")
 
 
 def _site_label(atom: dict[str, Any]) -> str:
@@ -312,23 +314,27 @@ def _has_shelx_occupancy_disorder(raw_atoms) -> bool:
 _PARTIAL_SOLVENT_LABEL = re.compile(r"^[OH]\d+W", re.IGNORECASE)
 
 
-def _tag_unresolved_partial_solvent_disorder(raw_atoms):
-    """Record provenance for low-occupancy solvent sites.
+def _tag_unresolved_partial_disorder(raw_atoms):
+    """Record provenance for recognised disorder left unresolved.
 
-    Deposited CIFs often model solvent without a complete assembly/group
-    pairing (MAF-4 uses labels such as ``O2W`` and ``H2WA``). These are
-    unambiguously solvent disorder, but there is no defensible major/minor
-    choice for MatterVis to invent. Mark them as unresolved so occupancy can
-    drive their visual weight while MCK remains the connectivity authority.
+    The ordered-replica resolver may be unable to choose between equal-weight
+    alternatives. Keep every recognised alternative and let occupancy drive
+    its visual weight. A lone partial-occupancy special-position site remains
+    ordered: occupancy alone is not sufficient evidence of disorder.
     """
     out = [dict(atom) for atom in raw_atoms]
-    for atom in out:
+    recognised = _occupancy_only_disorder_indices(out)
+    recognised.update(_explicit_assembly_disorder_indices(out))
+    for index, atom in enumerate(out):
         if "_is_minor" in atom:
             atom["is_disordered"] = True
             atom["disorder_resolved"] = True
             continue
-        if _partial_occupancy_value(atom) < 0.999 and _PARTIAL_SOLVENT_LABEL.match(
-            _site_label(atom)
+        dg = str(atom.get("dg") or ".").strip()
+        shelx_part = dg.startswith("-") and dg not in ("-",)
+        partial_solvent = _PARTIAL_SOLVENT_LABEL.match(_site_label(atom))
+        if _partial_occupancy_value(atom) < 0.999 and (
+            index in recognised or shelx_part or partial_solvent
         ):
             atom["is_disordered"] = True
             atom["disorder_resolved"] = False
@@ -1159,7 +1165,7 @@ def build_loaded_crystal(
         cif_path=cif_path,
     ):
         raw_atoms = _tag_shelx_occupancy_disorder(raw_atoms, cif_path, M)
-        raw_atoms = _tag_unresolved_partial_solvent_disorder(raw_atoms)
+        raw_atoms = _tag_unresolved_partial_disorder(raw_atoms)
     from .bundle_builder import build_loaded_crystal_from_atoms
 
     return build_loaded_crystal_from_atoms(
