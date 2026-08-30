@@ -400,6 +400,7 @@ def fit_shared_camera(
     fit_multiplier: float = 1.8,
     zoom: float = 1.0,
     framing_margin: float = 1.12,
+    ortho_scale: float | None = None,
     fit_points: np.ndarray | None = None,
 ) -> CameraSpec:
     """Fit one camera to explicit visible geometry or the union of frame boxes."""
@@ -454,7 +455,12 @@ def fit_shared_camera(
     aspect = width / height
     half_width = float(np.max(np.abs(relative @ right)))
     half_height = float(np.max(np.abs(relative @ screen_up)))
-    ortho_scale = max(half_height, half_width / aspect, 0.5) * framing_margin / zoom
+    fitted_ortho_scale = (
+        max(half_height, half_width / aspect, 0.5) * framing_margin / zoom
+    )
+    resolved_ortho_scale = (
+        float(ortho_scale) if ortho_scale is not None else fitted_ortho_scale
+    )
 
     if camera_position is not None:
         position = np.asarray(camera_position, dtype=float)
@@ -479,7 +485,7 @@ def fit_shared_camera(
         projection=projection,
         near=near,
         far=far,
-        ortho_scale=ortho_scale,
+        ortho_scale=resolved_ortho_scale,
     )
 
 
@@ -627,6 +633,7 @@ def render_lammps_animation(
     fit_multiplier: float = 1.8,
     zoom: float = 1.0,
     framing_margin: float = 1.12,
+    ortho_scale: float | None = None,
     atom_scale: float = 1.0,
     background: tuple[int, int, int, int] = (255, 255, 255, 255),
     show_hydrogen: bool = True,
@@ -796,6 +803,7 @@ def render_lammps_animation(
         fit_multiplier=fit_multiplier,
         zoom=zoom,
         framing_margin=framing_margin,
+        ortho_scale=ortho_scale,
         fit_points=visible_fit_points,
     )
     camera_ready = time.perf_counter()

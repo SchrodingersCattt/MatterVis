@@ -86,6 +86,7 @@ def _render_extxyz(
     show_axes=False,
     show_hydrogen=True,
     vector_overlays=None,
+    ortho_scale=None,
 ):
     return render_array_input(
         source,
@@ -106,6 +107,7 @@ def _render_extxyz(
         fit_multiplier=1.8,
         zoom=1.0,
         framing_margin=1.12,
+        ortho_scale=ortho_scale,
         atom_scale=1.0,
         background=(255, 255, 255, 255),
         show_hydrogen=show_hydrogen,

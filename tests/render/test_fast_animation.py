@@ -275,6 +275,15 @@ def test_worker_override_and_shared_camera_controls() -> None:
         zoom=2.0,
     )
     assert zoomed.ortho_scale == pytest.approx(base.ortho_scale / 2.0)
+    fixed = fit_shared_camera(
+        (record,),
+        repeat=(1, 1, 1),
+        width=1200,
+        height=900,
+        projection="orthographic",
+        ortho_scale=17.0,
+    )
+    assert fixed.ortho_scale == pytest.approx(17.0)
     assert _default_workers(32) == 32
 
 
@@ -322,8 +331,7 @@ ITEM: ATOMS id element x y z
 def test_no_cell_animation_fits_visible_atoms_not_vacuum(tmp_path: Path) -> None:
     frames = []
     for index, z_value in enumerate((2.0, 3.0)):
-        frames.append(
-            f"""ITEM: TIMESTEP
+        frames.append(f"""ITEM: TIMESTEP
 {index}
 ITEM: NUMBER OF ATOMS
 2
@@ -334,8 +342,7 @@ ITEM: BOX BOUNDS pp pp ff
 ITEM: ATOMS id element x y z
 1 C 1 1 {z_value}
 2 O 2.2 1 {z_value}
-"""
-        )
+""")
     source = tmp_path / "slab.lammpstrj"
     source.write_text("".join(frames), encoding="utf-8")
 

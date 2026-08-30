@@ -188,6 +188,7 @@ def fit_shared_frame_camera(
     fit_multiplier: float,
     zoom: float,
     framing_margin: float,
+    ortho_scale: float | None,
     show_cell: bool | None,
     show_hydrogen: bool,
 ) -> CameraSpec:
@@ -231,7 +232,12 @@ def fit_shared_frame_camera(
     aspect = width / height
     half_width = float(np.max(np.abs(relative @ right)))
     half_height = float(np.max(np.abs(relative @ screen_up)))
-    ortho_scale = max(half_height, half_width / aspect, 0.5) * framing_margin / zoom
+    fitted_ortho_scale = (
+        max(half_height, half_width / aspect, 0.5) * framing_margin / zoom
+    )
+    resolved_ortho_scale = (
+        float(ortho_scale) if ortho_scale is not None else fitted_ortho_scale
+    )
     if camera_position is not None:
         position = np.asarray(camera_position, dtype=float)
         distance = float(np.linalg.norm(position - target))
@@ -256,7 +262,7 @@ def fit_shared_frame_camera(
         projection=projection,
         near=near,
         far=far,
-        ortho_scale=ortho_scale,
+        ortho_scale=resolved_ortho_scale,
     )
 
 
@@ -379,6 +385,7 @@ def render_array_input(
     fit_multiplier: float,
     zoom: float,
     framing_margin: float,
+    ortho_scale: float | None,
     atom_scale: float,
     background: tuple[int, int, int, int],
     show_hydrogen: bool,
@@ -443,9 +450,9 @@ def render_array_input(
             frames,
             property_spec,
             input_path=str(Path(input_path).expanduser().resolve()),
-            embedded_source="column"
-            if _is_lammps_dump(input_path, input_format)
-            else "array",
+            embedded_source=(
+                "column" if _is_lammps_dump(input_path, input_format) else "array"
+            ),
             manifest=manifest,
         )
         frames = tuple(
@@ -496,6 +503,7 @@ def render_array_input(
         fit_multiplier=fit_multiplier,
         zoom=zoom,
         framing_margin=framing_margin,
+        ortho_scale=ortho_scale,
         show_cell=show_cell,
         show_hydrogen=show_hydrogen,
     )
