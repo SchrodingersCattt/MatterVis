@@ -79,7 +79,10 @@ def test_skill_has_no_second_installer_or_obsolete_package_entrypoint() -> None:
 def test_skill_routes_publication_and_multi_structure_guidance() -> None:
     document = (SKILL / "SKILL.md").read_text(encoding="utf-8")
 
-    assert 'description: "Use to show, draw, compare, or animate atom-coordinate' in document
+    assert (
+        'description: "Use to show, draw, compare, or animate atom-coordinate'
+        in document
+    )
     assert len(document.splitlines()) <= 60
     assert "--check" not in document
     assert "--vector-overlays" not in document
@@ -89,9 +92,7 @@ def test_skill_routes_publication_and_multi_structure_guidance() -> None:
     assert "./references/publication-layout.md" in document
     assert "./references/multi-structure-panels.md" in document
     assert "./references/atom-property-coloring.md" in document
-    assert document.index("MD trajectory") < document.index(
-        "per-atom scalar"
-    )
+    assert document.index("MD trajectory") < document.index("per-atom scalar")
     assert "Read exactly one primary page" in document
     assert "Scene type wins" in document
     assert "Run the documented command before inspecting help" in document
