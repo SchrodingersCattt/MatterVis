@@ -21,6 +21,7 @@ mat-vis render trajectory.dump -o trajectory.gif --backend cpu --json \
 Omit `--type-map` when elements are already encoded. For nonperiodic or
 synthetic-cell input, use `--no-cell`. Use `ball_stick` for molecular and
 covalent trajectories; use `ball` only when bonds are not part of the evidence.
+With `--no-cell`, fit the camera to visible atoms, never to the hidden box.
 
 Do not add `--view-direction` by default. The automatic camera faces the largest
 lattice face and remains fixed across frames. `--frame-range START:STOP:STEP`

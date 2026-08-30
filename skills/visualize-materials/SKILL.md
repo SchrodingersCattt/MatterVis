@@ -1,6 +1,6 @@
 ---
 name: visualize-materials
-description: "Use first for every atomistic drawing or animation, including structures, trajectories, polyhedra, and ORCA modes. Load before any mat-vis command or help."
+description: "Use first for every atomistic drawing, model preview, or animation with MatterVis, including structures, trajectories, polyhedra, and vibrations."
 ---
 
 # Visualize Materials
@@ -40,6 +40,10 @@ for an explicit request or unresolved ambiguity.
 
 ## Execution boundary
 
+- Molecules and covalent networks default to `ball_stick`; use `ball` for dense
+  ionic or coordination structures only when bonds are not evidence.
+- If rendering starts later or is delegated, that agent loads this skill before
+  choosing a command; parent summaries and guessed flags are not a substitute.
 - Render directly; do not run a separate analysis or installation preflight.
 - Use one backend and one representation. CPU is the default static path.
 - Automatic view shows real periodic cells, hides synthetic/nonperiodic cells,
