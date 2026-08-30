@@ -74,6 +74,7 @@ def test_skill_has_no_second_installer_or_obsolete_package_entrypoint() -> None:
     assert "python -m crystal_viewer" not in text
     assert "matplotlib-flat-ortep.md" not in text
     assert "apt-get install" not in text
+    assert '"molcrys-kit==0.7.1" "matter-vis==0.0.5"' in text
 
 
 def test_skill_routes_publication_and_multi_structure_guidance() -> None:
