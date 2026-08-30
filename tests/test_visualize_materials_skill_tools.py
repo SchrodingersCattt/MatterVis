@@ -96,6 +96,8 @@ def test_skill_routes_publication_and_multi_structure_guidance() -> None:
     assert "Read exactly one primary page" in document
     assert "Scene type wins" in document
     assert "Run the documented command before inspecting help" in document
+    quickstart = (SKILL / "references" / "quickstart.md").read_text(encoding="utf-8")
+    assert "Do not convert it to another format" in quickstart
     trajectory = (SKILL / "references" / "trajectory-animation.md").read_text(
         encoding="utf-8"
     )
