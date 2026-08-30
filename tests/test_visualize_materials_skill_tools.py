@@ -80,7 +80,7 @@ def test_skill_routes_publication_and_multi_structure_guidance() -> None:
     document = (SKILL / "SKILL.md").read_text(encoding="utf-8")
 
     assert (
-        'description: "Use to show, draw, compare, or animate atom-coordinate'
+        'description: "Use before drawing, showing, comparing, or animating atomistic'
         in document
     )
     assert len(document.splitlines()) <= 60
