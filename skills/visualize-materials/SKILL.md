@@ -46,6 +46,9 @@ for an explicit request or unresolved ambiguity.
   choosing a command; parent summaries and guessed flags are not a substitute.
 - Render directly; do not run a separate analysis or installation preflight.
 - Use one backend and one representation. CPU is the default static path.
+- Memory pressure may change renderer detail, never the model: do not delete H,
+  downsample atoms, shrink the structure, or switch away from `mat-vis`.
+- Comparison renders use the same orientation, canvas, and orthographic scale.
 - Automatic view shows real periodic cells, hides synthetic/nonperiodic cells,
   and faces the largest lattice face.
 - Run the documented command before inspecting help. Only after that exact command fails, inspect its help once and make one
