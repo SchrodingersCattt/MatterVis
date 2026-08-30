@@ -10,7 +10,7 @@ with ASE plotting, raw matplotlib, or private MatterVis imports.
 
 ## Choose once
 
-Read exactly one primary page and run its first documented path:
+Read exactly one primary page and run its first documented path. Scene type wins: trajectory, vibration, and polyhedron routes take precedence over generic structure or molecule views:
 
 - ordinary structure, molecule, slab, interface, or comparison:
   [static render](./references/quickstart.md);
@@ -27,7 +27,7 @@ Read exactly one primary page and run its first documented path:
 - multiple panels or publication composition:
   [panels](./references/multi-structure-panels.md) or
   [layout](./references/publication-layout.md);
-- periodic finite views or one molecule:
+- explicitly requested periodic cropping or molecule highlighting:
   [periodic views](./references/periodic-finite-views.md) or
   [molecule focus](./references/molecule-highlight.md).
 
@@ -44,7 +44,7 @@ for an explicit request or unresolved ambiguity.
 - Use one backend and one representation. CPU is the default static path.
 - Automatic view shows real periodic cells, hides synthetic/nonperiodic cells,
   and faces the largest lattice face.
-- If the documented command fails, inspect that command's help once and make one
+- Run the documented command before inspecting help. Only after that exact command fails, inspect its help once and make one
   correction based on the exact error. Do not explore package internals, convert
   already-supported inputs, switch libraries, or enter an open-ended retry loop.
 - Inspect the final-size artifact and retain the command, JSON result, warnings,

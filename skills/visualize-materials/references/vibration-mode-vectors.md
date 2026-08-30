@@ -1,5 +1,7 @@
 # Vibration Mode Vectors
 
+This page is complete for vibration rendering. Do not open molecule, camera, runtime, or source-code references before trying its render path.
+
 Prepare equilibrium Cartesian positions and Cartesian displacements with shape
 `(N,3)` in the same atom order. For an ORCA `.hess`, mode `m` is
 `L[:, m].reshape(N, 3)`, matched to `$vibrational_frequencies`; do not use

@@ -93,6 +93,8 @@ def test_skill_routes_publication_and_multi_structure_guidance() -> None:
         "per-atom scalar"
     )
     assert "Read exactly one primary page" in document
+    assert "Scene type wins" in document
+    assert "Run the documented command before inspecting help" in document
     trajectory = (SKILL / "references" / "trajectory-animation.md").read_text(
         encoding="utf-8"
     )
@@ -107,7 +109,7 @@ def test_skill_routes_publication_and_multi_structure_guidance() -> None:
         encoding="utf-8"
     )
     assert "--vector-overlays" in vectors
-    assert "--vector-overlays" in vectors
+    assert "This page is complete for vibration rendering" in vectors
     assert "source-frame equilibrium atom coordinates" in vectors
     assert "handles synthetic-cell translation" in vectors
     polyhedra = (SKILL / "references" / "polyhedra.md").read_text(encoding="utf-8")
