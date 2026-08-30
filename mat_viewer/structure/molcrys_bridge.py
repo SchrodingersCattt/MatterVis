@@ -73,9 +73,7 @@ def _require_molcryskit():
             "public structure contracts: "
             + ", ".join(missing)
             + f". MatterVis requires molcrys-kit>={MOLCRYSKIT_MINIMUM}. "
-            "Install or upgrade it with: "
-            + MOLCRYSKIT_INSTALL
-            + "."
+            "Install or upgrade it with: " + MOLCRYSKIT_INSTALL + "."
         )
 
     return {
@@ -151,8 +149,14 @@ def _ase_atoms_from_raw(raw_atoms, M, mk):
     sym_op_index = np.array(
         [int(atom.get("_symop_index", 0) or 0) for atom in raw_atoms], dtype=int
     )
+    # Loader-generated or rewritten CIFs can preserve the key with a null value.
+    # Treat that as missing provenance and retain the stable row index fallback.
     asym_index = np.array(
-        [int(atom.get("_asym_index", i)) for i, atom in enumerate(raw_atoms)], dtype=int
+        [
+            int(i if atom.get("_asym_index") is None else atom["_asym_index"])
+            for i, atom in enumerate(raw_atoms)
+        ],
+        dtype=int,
     )
     site_symmetry_order = np.array(
         [int(atom.get("_site_symmetry_order", 1) or 1) for atom in raw_atoms], dtype=int
@@ -348,11 +352,17 @@ def require_structure_contract(
 
     site_records = getattr(analysis, "site_records", None)
     bond_records = getattr(analysis, "bond_records", None)
-    if site_records is None or getattr(analysis, "_site_records_present", True) is False:
+    if (
+        site_records is None
+        or getattr(analysis, "_site_records_present", True) is False
+    ):
         raise StructureContractError(
             "MolCrysKit analysis is missing public SiteRecord data."
         )
-    if bond_records is None or getattr(analysis, "_bond_records_present", True) is False:
+    if (
+        bond_records is None
+        or getattr(analysis, "_bond_records_present", True) is False
+    ):
         raise StructureContractError(
             "MolCrysKit analysis is missing public BondRecord data."
         )
