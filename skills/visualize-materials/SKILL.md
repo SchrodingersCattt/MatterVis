@@ -1,6 +1,6 @@
 ---
 name: visualize-materials
-description: "Use before drawing, showing, comparing, or animating atomistic structures, trajectories, polyhedra, or vibrations with MatterVis."
+description: "Use before drawing, showing, comparing, or animating atomistic structures, trajectories, coordination/polyhedron views, or vibrations with MatterVis."
 ---
 
 # Visualize Materials
