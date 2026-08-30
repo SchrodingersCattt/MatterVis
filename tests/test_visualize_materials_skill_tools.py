@@ -80,10 +80,7 @@ def test_skill_has_no_second_installer_or_obsolete_package_entrypoint() -> None:
 def test_skill_routes_publication_and_multi_structure_guidance() -> None:
     document = (SKILL / "SKILL.md").read_text(encoding="utf-8")
 
-    assert (
-        'description: "Use before drawing, showing, comparing, or animating atomistic'
-        in document
-    )
+    assert 'description: "Use first whenever atomic coordinates' in document
     assert len(document.splitlines()) <= 60
     assert "--check" not in document
     assert "--vector-overlays" not in document
