@@ -20,11 +20,13 @@ def render_animation(
     camera: Any = None,
     render_spec: Any = None,
     topology_data: Mapping[str, Any] | None = None,
+    vector_overlays: Any = None,
     atom_groups: Any = None,
     bond_groups: Any = None,
     fps: float = 12.0,
     time_spec: Any = None,
     annotation_spec: Any = None,
+    atom_property_color: Any = None,
 ) -> RenderResult:
     """Render selected source frames with one CPU camera, then encode lazily."""
     try:
@@ -42,6 +44,11 @@ def render_animation(
     frames = tuple(getattr(source, "frames", ()) or ())
     if len(frames) < 2:
         raise ValueError("animation output requires at least two selected frames")
+    property_context = None
+    if atom_property_color is not None:
+        from ..properties import resolve_source_property_context
+
+        property_context = resolve_source_property_context(source, atom_property_color)
 
     from .animation_time import (
         coerce_animation_time_spec,
@@ -103,8 +110,10 @@ def render_animation(
                 camera=camera,
                 render=render_spec,
                 topology_data=topology_data,
+                vector_overlays=vector_overlays,
                 atom_groups=atom_groups,
                 bond_groups=bond_groups,
+                atom_property_color=property_context,
             )
             frame_result = render_png(plan)
             if frame_result.data is None:  # pragma: no cover - renderer contract guard
@@ -148,6 +157,15 @@ def render_animation(
             "frame_duration_ms": 1000.0 / float(fps),
             "duration_seconds": len(frames) / float(fps),
             "frame_plan_sha256": plan_hashes,
+            "atom_property_color": (
+                dict(plan.metadata.get("atom_property_color") or {})
+                if atom_property_color is not None
+                else None
+            ),
+            "vector_overlays": {
+                "animated": vector_overlays is not None,
+                "policy": "fixed_source_frame" if vector_overlays is not None else None,
+            },
             "simulation_time": (
                 time_series.to_metadata()
                 if time_series is not None

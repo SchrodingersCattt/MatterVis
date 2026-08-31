@@ -112,7 +112,7 @@ class _IOBackendMixin:
             self._drop_placeholder()
             # Reserve the name so concurrent uploads don't collide.
             self.structure_names.append(safe_name)
-            scene_payload = self.create_scene(structure=safe_name, label=safe_name)
+            self.create_scene(structure=safe_name, label=safe_name)
 
         # Persist manifest early (idempotent protection for restarts).
         self.upload_manifest.setdefault("uploads", {})[digest] = {
@@ -240,7 +240,13 @@ class _IOBackendMixin:
         os.makedirs(safe_root, exist_ok=True)
         candidate = path if os.path.isabs(path) else os.path.join(safe_root, path)
         resolved = os.path.realpath(candidate)
-        if os.path.commonpath([resolved, safe_root]) != safe_root:
+        try:
+            inside_safe_root = os.path.commonpath([resolved, safe_root]) == safe_root
+        except ValueError:
+            # Windows rejects commonpath across drives. Such a path is
+            # necessarily outside the app-local preset directory.
+            inside_safe_root = False
+        if not inside_safe_root:
             raise ValueError(
                 f"preset path must resolve inside {safe_root!r}, got {path!r}"
             )

@@ -9,6 +9,7 @@ frame before scene construction.
 ~~~bash
 # Inspect and preflight without writing a file
 mat-vis inspect structure.cif --json
+mat-vis inspect trajectory.extxyz --properties --json
 mat-vis render structure.cif -o figure.png --backend cpu --check --json
 
 # Static CIF through the base CPU renderer
@@ -82,6 +83,47 @@ Supported inputs:
 LAMMPS numeric types are not elements. Pass --type-map whenever the source does
 not encode element identity unambiguously; the order is type 1, type 2, and so
 on. MatterVis never guesses it from a model filename.
+
+### Per-atom property colors
+
+Discover fields before selecting one:
+
+~~~bash
+mat-vis inspect INPUT --properties --json
+mat-vis inspect INPUT --property-data properties.json --properties --json
+~~~
+
+Fields are qualified as `array:NAME`, `column:NAME`, or `sidecar:NAME`.
+Unqualified names are accepted only when unique. Discovery reports source,
+dtype, trailing shape, components, and unit; LAMMPS discovery reads the indexed
+`ITEM: ATOMS` header without parsing atom rows.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--property-data MANIFEST` | — | `mattervis.atom-properties/v1` JSON + relative NPY sidecar |
+| `--color-by FIELD [FIELD ...]` | — | Enable continuous atom colors |
+| `--color-reduction MODE` | `auto` | `auto`, `scalar`, `magnitude`, `component`, `trace`, `mean_normal`, or `von_mises` |
+| `--color-component NAME_OR_INDEX` | — | Component used by `component` reduction |
+| `--colormap NAME` | `viridis` | Colormap used to build the shared 256-color LUT |
+| `--color-range MIN MAX` | exact selected range | Fixed clipping range; skips the global property prescan |
+| `--color-center VALUE` | — | Put this physical reference at the LUT midpoint |
+| `--nan-color COLOR` | `#BDBDBD` | Color for NaN/Inf values |
+| `--color-label TEXT` | field name | Colorbar label |
+| `--color-unit UNIT` | declared unit | Display/provenance only; no conversion |
+| `--no-colorbar` | off | Omit the reserved right-side colorbar region |
+
+Scalar fields color directly and a three-component vector uses magnitude under
+`auto`. Tensor fields require an explicit reduction; six-component tensors
+also require declared component order. Automatic range is the exact finite
+minimum/maximum over all selected source atoms and frames, before repeat or
+display filtering. Non-finite values use the missing color and are counted; an
+all-non-finite selection fails. Explicit atom-group colors override the
+property base color. Each bond half inherits its endpoint's final atom color,
+so property-colored atoms produce a two-tone bond by default. Override selected
+bonds directly with `--bond-group SELECTOR color=#RRGGBB`; for example,
+`--bond-group all color=#333333` makes every bond monochrome. See
+[`agents/atom_property_coloring.md`](agents/atom_property_coloring.md) for the
+sidecar schema, alignment, metadata, and Python/REST APIs.
 
 ### Renderer selection
 
@@ -171,14 +213,15 @@ substitutes one frame backend for another.
 
 ### Camera
 
-Periodic static renders default to a reproducible view from the structure toward
-`+c`, with `+b` pointing up. Nonperiodic inputs fit the atomic coordinates and do
-not treat an ASE padding box as crystallographic data. Camera direction options
-are mutually exclusive.
+Periodic static renders default to an orthographic view normal to the largest
+lattice face: `ab -> c*`, `ac -> b*`, or `bc -> a*`, with `c*` winning
+equal-area ties. Nonperiodic inputs fit the atomic coordinates and do not treat
+an ASE padding box as crystallographic data. Camera direction options are
+mutually exclusive.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--camera-axis a|b|c|a*|b*|c*` | `c` | Align to a real or reciprocal lattice axis |
+| `--camera-axis a|b|c|a*|b*|c*` | auto | Override the largest-face default with a real or reciprocal lattice axis |
 | `--view-direction X Y Z` | — | Cartesian direction from scene toward camera |
 | `--camera-position X Y Z` | — | Explicit absolute Cartesian camera position in Å |
 | `--camera-up X Y Z` | `+b` / `+Y` | Preferred screen-up direction |
@@ -196,7 +239,7 @@ export requires `[plotly-export]`; a failure is reported without substitution.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--show-hydrogen` / `--no-hydrogen` | off | Show/hide hydrogen atoms |
+| `--show-hydrogen` / `--no-hydrogen` | on | Show/hide hydrogen atoms |
 | `--show-cell` / `--no-cell` | auto | On for periodic input and off for nonperiodic or synthetic-cell input; explicit flags override |
 | `--show-labels` / `--no-labels` | off | Show/hide atom labels |
 | `--show-axes` / `--no-axes` | off | Show/hide the camera-projected crystallographic a/b/c compass |
@@ -243,6 +286,11 @@ Bond selectors are `all`, `minor`, `major`, `between:...`, and `label:...`.
 Bond overrides are `color`, `visible`, `opacity`, `style`, and `radius_scale`.
 Use `--check --json` to inspect the normalized rules without loading the input.
 
+For CPU GIF/MP4, `--vector-overlays JSON` applies one fixed source-frame vector
+overlay to every selected frame. This supports equilibrium-centred vibration
+arrows over moving atoms; per-frame-changing vector fields require a future
+separate contract.
+
 ### Colour and ORTEP
 
 | Flag | Default | Description |
@@ -262,7 +310,10 @@ Legacy `--config`, `--view-weights`, `--publication-*`, `--title`, and
 silently ignored. Polyhedron overlays remain available through repeatable
 `--polyhedron` JSON objects plus `--polyhedron-site` and
 `--polyhedron-cutoff`; they use the base CPU topology path and require no Web
-module.
+module. An atom-level specification draws every matching visible centre by
+default and colours each hull from its centre element, with same-hue face
+lightness. The JSON `site` or `sites` keys and `--polyhedron-site` select
+source atom indices; molecule-level selectors use source fragment indices.
 
 
 ---
@@ -280,6 +331,11 @@ mat-vis serve [options]
 | `--host` | `0.0.0.0` | Host to bind |
 | `--port` | `50001` | Port to expose |
 | `--cif` | — | CIF path to preload (repeat for multiple) |
+| `--input` | — | Any supported structure/trajectory input to preload |
+| `--input-format` | auto | Explicit format for an ambiguous `--input` |
+| `--type-map` | — | LAMMPS atom-type order for `--input` |
+| `--frame` | `0` | Frame of `--input`; Web v1 has no playback timeline |
+| property-color flags | — | Same sidecar, field, reduction, range, and LUT flags as render |
 | `--structure` | — | Limit catalog to named structure(s) |
 | `--preset` | — | Preset JSON to load |
 | `--api-only` | — | Reserved for automation mode |

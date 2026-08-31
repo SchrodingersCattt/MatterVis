@@ -54,6 +54,7 @@ test = [
     "pytest>=8.0",
     "pytest-cov",
     "pytest-timeout",
+    "pytest-xdist",
     "gemmi",
     "tomli; python_version < '3.11'",
 ]
@@ -61,6 +62,9 @@ dev = ["matter-vis[all,test]", "build", "ruff"]
 
 [tool.setuptools.packages.find]
 include = ["mat_viewer*"]
+
+[tool.setuptools.package-data]
+mat_viewer = ["render/assets/*.js"]
 
 [tool.setuptools_scm]
 write_to = "mat_viewer/_version.py"

@@ -1,6 +1,7 @@
 """Deterministic CPU rasterizer with Z-buffer and per-pixel A-buffer."""
 
 from __future__ import annotations
+import colorsys
 
 from dataclasses import dataclass
 from hashlib import sha256
@@ -20,6 +21,22 @@ from ..contracts import (
 )
 
 _DEPTH_EPSILON = 1.0e-9
+
+
+def _polyhedron_face_rgb(rgb: np.ndarray, lambert: float) -> np.ndarray:
+    """Shade a polyhedron face in HLS space while preserving its base hue."""
+    red, green, blue = np.clip(np.asarray(rgb, dtype=float), 0.0, 1.0)
+    hue, lightness, saturation = colorsys.rgb_to_hls(red, green, blue)
+    strength = float(np.clip(lambert, 0.0, 1.0))
+    dark = max(0.14, lightness * 0.50)
+    bright = min(0.92, lightness + (1.0 - lightness) * 0.42)
+    face_saturation = max(0.46, saturation * (0.85 + 0.15 * strength))
+    shaded = colorsys.hls_to_rgb(
+        hue,
+        dark + (bright - dark) * strength,
+        min(1.0, face_saturation),
+    )
+    return np.asarray(shaded, dtype=float)
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,9 +112,11 @@ def render_rgba(plan: RenderPlan, *, scale: int = 1) -> np.ndarray:
     from PIL import Image
 
     from ..compass_overlay import draw_raster_compass
+    from ..property_colorbar import draw_raster_colorbar
 
     image = Image.fromarray(canvas, mode="RGBA")
     draw_raster_compass(image, plan)
+    draw_raster_colorbar(image, plan)
     canvas[:] = np.asarray(image)
     return canvas
 
@@ -530,11 +549,13 @@ def _rasterize_mesh(
         ):
             continue
         if vertex_rgb_all is None:
-            illumination = 0.68 + 0.32 * abs(
-                float(camera_normals[triangle_index] @ light)
-            )
+            lambert = abs(float(camera_normals[triangle_index] @ light))
+            if primitive.metadata.get("kind") == "polyhedron":
+                face_rgb = _polyhedron_face_rgb(primitive.rgba[:3], lambert)
+            else:
+                face_rgb = np.asarray(primitive.rgba[:3]) * (0.68 + 0.32 * lambert)
             triangle_rgb = np.tile(
-                np.asarray(primitive.rgba[:3]) * illumination,
+                face_rgb,
                 (3, 1),
             )
         else:

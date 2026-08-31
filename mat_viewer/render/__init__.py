@@ -18,6 +18,7 @@ from .contracts import (
     ViewportPlan,
 )
 from .planning import prepare_render
+from ..properties import AtomPropertyColorSpec
 
 
 _LAZY_EXPORTS = {
@@ -72,6 +73,7 @@ def __getattr__(name: str):
 
 
 __all__ = [
+    "AtomPropertyColorSpec",
     "CameraSpec",
     "DENSE_COORDINATION_PRESET",
     "LinePrimitive",

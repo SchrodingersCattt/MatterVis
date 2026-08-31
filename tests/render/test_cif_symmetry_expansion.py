@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from mat_viewer.structure.cif_parse import parse_asu
 
 
@@ -29,7 +31,9 @@ O1 O 0.5 0.5 0 1
         encoding="utf-8",
     )
 
-    atoms, _cell, _M = parse_asu(str(cif))
+    with pytest.warns((UserWarning, DeprecationWarning)) as caught:
+        atoms, _cell, _M = parse_asu(str(cif))
+    assert any("auto-expanded to 48 operations" in str(item.message) for item in caught)
 
     assert len(atoms) == 5
     assert [atom["elem"] for atom in atoms].count("O") == 3

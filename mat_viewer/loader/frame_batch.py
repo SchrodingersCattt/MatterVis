@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Iterable
 
 import numpy as np
 
@@ -21,6 +21,8 @@ class FrameBatch:
     timestep: int
     source_index: int
     info: dict[str, Any] | None = None
+    atom_arrays: dict[str, np.ndarray] = field(default_factory=dict)
+    atom_colors: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         positions = np.ascontiguousarray(self.positions, dtype=np.float32)
@@ -39,6 +41,17 @@ class FrameBatch:
             atom_ids = np.ascontiguousarray(atom_ids, dtype=np.int64)
             if atom_ids.shape != (len(positions),):
                 raise ValueError("atom_ids must have shape (N,)")
+        atom_arrays: dict[str, np.ndarray] = {}
+        for name, values in dict(self.atom_arrays or {}).items():
+            array = np.ascontiguousarray(values)
+            if array.ndim < 1 or len(array) != len(positions):
+                raise ValueError(f"atom array {name!r} must begin with shape (N,...)")
+            atom_arrays[str(name)] = array
+        atom_colors = self.atom_colors
+        if atom_colors is not None:
+            atom_colors = np.ascontiguousarray(atom_colors, dtype=np.uint8)
+            if atom_colors.shape != (len(positions), 3):
+                raise ValueError("atom_colors must have shape (N,3)")
         object.__setattr__(self, "positions", positions)
         object.__setattr__(self, "atomic_numbers", numbers)
         object.__setattr__(self, "atom_ids", atom_ids)
@@ -46,6 +59,8 @@ class FrameBatch:
         object.__setattr__(self, "cell", cell)
         object.__setattr__(self, "pbc", pbc)
         object.__setattr__(self, "info", dict(self.info or {}))
+        object.__setattr__(self, "atom_arrays", atom_arrays)
+        object.__setattr__(self, "atom_colors", atom_colors)
 
     @property
     def natoms(self) -> int:
@@ -58,7 +73,12 @@ class FrameBatch:
         return int(self.source_index)
 
 
-def frame_batch_from_ase(atoms: Any, *, source_index: int = 0) -> FrameBatch:
+def frame_batch_from_ase(
+    atoms: Any,
+    *,
+    source_index: int = 0,
+    atom_array_names: Iterable[str] = (),
+) -> FrameBatch:
     """Convert an ASE frame from any supported adapter to canonical arrays."""
 
     info = dict(atoms.info)
@@ -82,6 +102,11 @@ def frame_batch_from_ase(atoms: Any, *, source_index: int = 0) -> FrameBatch:
         timestep=timestep,
         source_index=int(source_index),
         info={"frame_index": int(source_index), **info},
+        atom_arrays={
+            name: np.asarray(atoms.arrays[name])
+            for name in atom_array_names
+            if name in atoms.arrays
+        },
     )
 
 

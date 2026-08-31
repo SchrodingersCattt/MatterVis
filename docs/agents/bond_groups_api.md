@@ -21,7 +21,10 @@ order with later-wins semantics for overlapping bonds.
 | `enabled` | bool | `false` rules persist but do not paint. |
 
 Empty `bond_groups` is the default and means "no overrides".
-Rules apply on top of the canonical scene-level bond colouring.
+Without an override, each bond is split at its midpoint and both halves inherit
+the final colors of their endpoint atoms. The endpoint precedence is atom-group
+color, then active property color, then the atom/element base color. A bond-group
+`color` applies one color to both halves and overrides that inheritance.
 
 ## Selector grammar
 
@@ -121,7 +124,7 @@ group exactly once.
   wraps the mutation in `try…finally`), so subsequent invocations
   with different group lists do not see stale state.
 - The renderer's `_bond_segments` skips invisible bonds, prefers
-  `_render_color` over the canonical `color_i` / `color_j` halves,
+  `_render_color` over the final endpoint atom colors,
   and yields the radius / opacity scales so `_bond_mesh_traces`
   buckets segments by `(color, is_minor, radius_bin, opacity_bin)`
   for trace efficiency.

@@ -1,74 +1,60 @@
 ---
 name: visualize-materials
-description: "Use for any atomistic image or visualization: structures, molecules, crystals, slabs, trajectories, polyhedra, vibrations, fields, animations, comparisons, and publication figures."
+description: "Render atomistic structures with MatterVis. Use before any structure drawing, preview, comparison, coordination/polyhedron view, vibration, trajectory, or animation."
 ---
 
 # Visualize Materials
 
-Create deterministic material visualizations with the public `mat-vis` CLI.
-Treat chemical selection, camera, backend, requirements, and artifact checks as
-explicit data.
+Use the public `mat-vis` CLI for coordinate-based atomistic visuals. Do not
+replace it with ASE plotting, raw matplotlib, or private MatterVis imports.
 
-## Route
+## Default path
 
-1. Read [quickstart](./references/quickstart.md) for every task.
-2. Run `mat-vis inspect INPUT --json`, then render directly with the base CPU path.
-3. Only when the requested path is unavailable, read [capabilities and installation](./references/capabilities-and-install.md)
-   and use the exact reported extra; do not install optional stacks speculatively.
-4. Read [diagnosis](./references/diagnose-and-select.md) before selecting the
-   displayed object, and [camera](./references/camera.md) for images.
-5. Read only the requested output path:
-   - [CPU static PNG/PDF/SVG](./references/cpu-static.md) — default;
-   - [Matplotlib projected 2D PNG/PDF/SVG](./references/cpu-static.md);
-   - [Plotly HTML or explicit Plotly static export](./references/plotly-render.md);
-   - [input formats](./references/input-formats.md);
-   - [molecule focus](./references/molecule-highlight.md);
-   - [periodic finite views](./references/periodic-finite-views.md);
-   - [polyhedra](./references/polyhedra.md);
-   - [vibration displacement arrows and optional GIFs](./references/vibration-mode-vectors.md);
-   - [trajectory animation](./references/trajectory-animation.md);
-   - [publication layout](./references/publication-layout.md);
-   - [multi-structure panels](./references/multi-structure-panels.md);
-   - [terminal TUI](./references/tui.md).
-6. Read [verification](./references/verification.md) before delivery.
+1. Inspect once: `mat-vis inspect INPUT --json`.
+2. Render one artifact with the base CPU backend:
 
-## Hard boundaries
+```bash
+mat-vis render INPUT -o OUTPUT.png --backend cpu --json \
+  --orthogonal --background '#FFFFFF'
+```
 
-- Base MatterVis is the complete CPU static path. Do not install Dash, Plotly,
-  Kaleido, Textual, scikit-image, imageio, Chrome, or system libraries unless
-  the requested capability requires them.
-- Use public `mat-vis inspect`, `capabilities`, and `render` commands;
-  do not diagnose through Web/TUI startup or private Python modules.
-- Pass vibration and other anchored vectors through public `mat-vis render
-  --vector-overlays`; never invoke private renderer internals.
-- A failed or poor-looking MatterVis artifact is not permission to redraw
-  atomistic geometry with ASE or raw plotting code. Adjust supported `mat-vis`
-  controls, or retain the evidence and report the unresolved limitation.
-- Select `--backend cpu|matplotlib|plotly` explicitly. Use `matplotlib` for a
-  projected 2D drawing and `cpu` for 3D geometry. MatterVis has no silent backend or
-  representation fallback; preserve a failure and its exact install hint.
-- For a Web/API screenshot use requirement `web-screenshot`; for the Web UI's
-  Plotly static export use `static-web-export`. Both resolve the required
-  `[web,plotly-export]` combination rather than assuming one extra implies the
-  other.
-- For uniformly compressed or expanded structures, prefer one positive global
-  MolCrysKit `bond_scale` before introducing element-pair thresholds. Use the
-  same scale for source molecule perception and displayed bonds, then verify
-  intended bonds and false contacts on the actual structure.
-- Periodic inputs default to orthographic lattice `+c`. Nonperiodic inputs use
-  atom-content fitting, `cluster`, and no cell; a synthetic ASE padding cell has
-  no crystallographic meaning. Explicit user choices override these defaults and
-  must be recorded.
-- Use MolCrysKit site, bond, ring, molecule, PBC, and formula-unit records. Do
-  not reconstruct chemical identity from screen proximity.
-- A finite image of a periodic chain, layer, or framework must follow
-  [periodic finite views](./references/periodic-finite-views.md). Do not infer
-  periodic dimensionality from the camera or replicate whole cells merely to
-  make a boundary look balanced.
-- Keep comparable panels and animation frames on an explicit shared camera and
-  physical-scale contract. Never alter geometry to hide whitespace.
-- The agent CLI rejects legacy config/publication-layout flags it cannot honour.
-  Report that boundary instead of invoking private compositors.
-- Produce one requested artifact by default. Retain the JSON result, verify the
-  file signature/hash/decoding, and keep visual acceptance pending until the
-  final-size artifact has actually been reviewed.
+Auto mode shows the cell for periodic inputs and hides synthetic or nonperiodic
+cells. Keep the automatic camera unless the requested evidence needs a specific
+direction. Read the render JSON and inspect the final-size artifact before
+delivery.
+
+## Route once
+
+Read exactly one primary reference: use the first matching line.
+- Vibration arrows: [vibration vectors](./references/vibration-mode-vectors.md).
+- Trajectory or animation: [trajectory](./references/trajectory-animation.md).
+- Static charge, velocity, stress, per-atom field, or colormap:
+  [atom property coloring](./references/atom-property-coloring.md).
+- Atom-centred forces with density fields: [force vectors](./references/atomic-force-vectors.md).
+- Coordination or packing hulls: [polyhedra](./references/polyhedra.md).
+- Panels or publication layouts: [panels](./references/multi-structure-panels.md)
+  or [publication layout](./references/publication-layout.md).
+- Finite periodic views or molecule focus: [periodic views](./references/periodic-finite-views.md)
+  or [molecule focus](./references/molecule-highlight.md).
+Use the default path when no specialized line matches. Load [input formats](./references/input-formats.md),
+[camera](./references/camera.md), [backends](./references/cpu-static.md),
+[capabilities](./references/capabilities-and-install.md), or
+[verification](./references/verification.md) only when the requested evidence or an
+actual failure requires it.
+
+## Rules
+
+- Use `ball_stick` for molecules and covalent networks. For dense ionic or
+  coordination networks with polyhedra, start with `ball`.
+- When a periodic figure must show coordination relative to the unit cell, use
+  `--show-cell --show-axes`. Nonperiodic structures use neither.
+- Do not pass `--no-cell` for periodic input or `--view-direction` as a cosmetic
+  default; override either only when the requested evidence requires it.
+- When delegating, pass the evidence goal and input/output paths, not guessed
+  render flags; the delegate loads this skill and selects the route.
+- For render-only requests, do not invoke separate analysis skills or write Python;
+  `mat-vis inspect` and the selected route are sufficient.
+- Do not guess Python import names or inspect package internals. On failure, use
+  the exact CLI help or `mat-vis capabilities --json`, correct the reported
+  issue, and keep the requested scope.
+- Preserve the literal command, JSON result, warnings, and output hash.

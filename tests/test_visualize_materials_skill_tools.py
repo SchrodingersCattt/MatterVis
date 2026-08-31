@@ -79,17 +79,56 @@ def test_skill_has_no_second_installer_or_obsolete_package_entrypoint() -> None:
 def test_skill_routes_publication_and_multi_structure_guidance() -> None:
     document = (SKILL / "SKILL.md").read_text(encoding="utf-8")
 
-    assert 'description: "Use for any atomistic image or visualization:' in document
+    assert 'description: "Render atomistic structures with MatterVis.' in document
+    assert len(document.splitlines()) <= 60
     assert "--check" not in document
-    assert "--vector-overlays" in document
-    assert "not permission to redraw" in document
+    assert "--vector-overlays" not in document
+    assert "Do not guess Python import names" in document
+    assert "For render-only requests" in document
+    assert "references/quickstart.md" not in document
     assert "./references/publication-layout.md" in document
     assert "./references/multi-structure-panels.md" in document
+    assert "./references/atom-property-coloring.md" in document
+    assert document.index("Trajectory or animation") < document.index(
+        "Static charge, velocity, stress"
+    )
+    assert "the delegate loads this skill and selects the route" in document
+    trajectory = (SKILL / "references" / "trajectory-animation.md").read_text(
+        encoding="utf-8"
+    )
+    assert "--check" not in trajectory
+    assert "--style ball_stick --show-cell --orthogonal" in trajectory
+    assert "replace `--show-cell` with `--no-cell`" in trajectory
+    assert "Do not add `--view-direction` by default" in trajectory
+    assert "largest lattice face" in trajectory
+    assert "load another reference only after a concrete ambiguity" in trajectory
+
     vectors = (SKILL / "references" / "vibration-mode-vectors.md").read_text(
         encoding="utf-8"
     )
+    assert "--vector-overlays" in vectors
+    assert "--vector-overlays" in vectors
     assert "source Cartesian frame" in vectors
     assert "synthetic-cell translation internally" in vectors
+    polyhedra = (SKILL / "references" / "polyhedra.md").read_text(encoding="utf-8")
+    assert len(polyhedra.splitlines()) <= 70
+    assert '"level":"atom"' in polyhedra
+    assert "--show-cell --show-axes" in polyhedra
+    assert "every matching source centre" in polyhedra
+    assert '"center_images":true' in polyhedra
+    assert "`instance_overrides`" in polyhedra
+    assert "Omit `cutoff` for the natural shell" in polyhedra
+    assert "`effective_colors`" in polyhedra
+
+    property_coloring = (SKILL / "references" / "atom-property-coloring.md").read_text(
+        encoding="utf-8"
+    )
+    assert "mat-vis inspect INPUT --properties --json" in property_coloring
+    assert "Never let `auto` assign tensor meaning" in property_coloring
+    assert "Never rescale each frame independently" in property_coloring
+    assert "CSV or NPZ" in property_coloring
+    assert "`lut_hash`" in property_coloring
+    assert "`manifest_hash`" in property_coloring
 
 
 def test_released_molcryskit_minimum_is_consistent() -> None:

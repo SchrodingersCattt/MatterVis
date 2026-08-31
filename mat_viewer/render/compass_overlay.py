@@ -49,6 +49,37 @@ def attach_lattice_compass_metadata(
         metadata["lattice_compass"] = compass
 
 
+def lattice_compass_clientside_context(
+    metadata: Mapping[str, Any],
+    width: int,
+    height: int,
+) -> dict | None:
+    """Return the camera-independent payload used by interactive HTML."""
+    payload = metadata.get("lattice_compass")
+    if not isinstance(payload, Mapping) or not bool(payload.get("visible")):
+        return None
+    matrix = np.asarray(payload.get("matrix"), dtype=float)
+    if (
+        matrix.shape != (3, 3)
+        or not np.all(np.isfinite(matrix))
+        or np.any(np.linalg.norm(matrix, axis=1) < 1.0e-12)
+    ):
+        return None
+
+    margin = max(54.0, min(width, height) * 0.075)
+    arrow_length = max(38.0, min(58.0, min(width, height) * 0.07))
+    return {
+        "M": matrix.tolist(),
+        "labels": list(payload.get("labels") or ("a", "b", "c")),
+        "colors": list(payload.get("colors") or ("#C7372F", "#22A660", "#2E86C1")),
+        "anchor": [margin / max(width, 1), margin / max(height, 1)],
+        "pixel_length": arrow_length,
+        "line_width": 2.2,
+        "label_pixel_offset": 10.0,
+        "font_size": 12,
+    }
+
+
 def lattice_compass_layout(
     metadata: Mapping[str, Any],
     viewport: ViewportPlan,

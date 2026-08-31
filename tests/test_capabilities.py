@@ -132,8 +132,7 @@ def test_molcryskit_contract_probe_reports_incomplete_record_schema(
     monkeypatch.setattr(record_type, "__dataclass_fields__", incomplete)
 
     assert (
-        f"{record_name}.{field_name}"
-        in capability_module.molcryskit_contract_missing()
+        f"{record_name}.{field_name}" in capability_module.molcryskit_contract_missing()
     )
 
 
@@ -162,8 +161,7 @@ def test_render_check_reports_incomplete_molcryskit_schema(
     assert payload["ok"] is False
     assert payload["requirements"]["missing_capabilities"] == ["core"]
     assert any(
-        "SiteRecord.global_index" in note
-        for note in payload["requirements"]["notes"]
+        "SiteRecord.global_index" in note for note in payload["requirements"]["notes"]
     )
 
 
@@ -579,6 +577,82 @@ def test_polyhedron_json_rejects_level_specific_or_invalid_values() -> None:
         )
 
 
+def test_polyhedron_json_parses_primary_centers_and_instance_overrides() -> None:
+    from mat_viewer.agent_topology import parse_polyhedron_specs
+
+    parsed = parse_polyhedron_specs(
+        [
+            '{"center":"Ti","ligand":"O","level":"atom",'
+            '"instance_overrides":{"0":{"color":"#0072B2"},'
+            '"1":{"visible":false}}}'
+        ]
+    )[0]
+
+    assert parsed["center_images"] is False
+    assert parsed["instance_overrides"] == {
+        "0": {"color": "#0072B2"},
+        "1": {"visible": False},
+    }
+
+    with pytest.raises(ValueError, match="center_images is only valid at atom level"):
+        parse_polyhedron_specs(
+            ['{"center":"C6N2","ligand":"ClO4","center_images":true}']
+        )
+    with pytest.raises(ValueError, match="visible must be a JSON boolean"):
+        parse_polyhedron_specs(
+            [
+                '{"center":"Ti","ligand":"O","level":"atom",'
+                '"instance_overrides":{"0":{"visible":"yes"}}}'
+            ]
+        )
+
+
+def test_polyhedron_summary_reports_effective_paint_and_count() -> None:
+    from mat_viewer.agent_topology import polyhedron_summary
+
+    summary = polyhedron_summary(
+        {
+            "spec_results": [
+                {
+                    "spec_id": "shell",
+                    "level": "atom",
+                    "center_species": "Ti",
+                    "ligand_species": "O",
+                    "center_images": False,
+                    "color": "#BFA6A6",
+                    "overlays": [
+                        {
+                            "center_source_index": 0,
+                            "color": "#0072B2",
+                            "visible": True,
+                            "distances": [1.0] * 6,
+                        },
+                        {
+                            "center_source_index": 1,
+                            "color": "#BFA6A6",
+                            "visible": False,
+                        },
+                    ],
+                }
+            ]
+        }
+    )
+
+    assert summary == [
+        {
+            "id": "shell",
+            "level": "atom",
+            "center": "Ti",
+            "ligand": "O",
+            "displayed_centers": 1,
+            "unique_source_centers": 1,
+            "center_images": False,
+            "effective_colors": ["#0072B2"],
+            "coordination_numbers": [6],
+        }
+    ]
+
+
 def test_default_camera_fits_a_large_scene() -> None:
     from mat_viewer.cli import _camera_spec
 
@@ -725,3 +799,63 @@ C 0.6 0 0
     assert spec.aromatic_rings == "disk"
     assert spec.missing_adp_policy == "sphere"
     assert payload["source"]["selected_frames"] == [1, 3]
+
+
+def test_agent_render_forwards_fixed_vectors_to_cpu_animation(
+    tmp_path, monkeypatch
+) -> None:
+    import mat_viewer.agent as agent_module
+
+    overlays = [
+        {
+            "id": "mode",
+            "magnitude_mode": "absolute",
+            "anchor": "center",
+            "arrows": [
+                {"id": "atom-0", "origin": [0, 0, 0], "vector": [0.5, 0, 0]}
+            ],
+        }
+    ]
+    captured = {}
+
+    def fake_animation(source, output, **kwargs):
+        captured.update(kwargs)
+        return RenderResult(
+            schema=RENDER_RESULT_SCHEMA,
+            backend="cpu",
+            format="gif",
+            width=8,
+            height=8,
+            plan_sha256="plan",
+            output_sha256="output",
+            metadata={},
+            warnings=(),
+            output=output,
+        )
+
+    monkeypatch.setattr(
+        "mat_viewer.render.animation_adapter.render_animation", fake_animation
+    )
+    monkeypatch.setattr(
+        agent_module,
+        "resolve_requirements",
+        lambda *args, **kwargs: SimpleNamespace(
+            require=lambda: None,
+            to_dict=lambda: {},
+            install_command="",
+        ),
+    )
+    from mat_viewer.render.contracts import CameraSpec
+
+    camera = CameraSpec.looking_along((0, 0, 1), up=(0, 1, 0), distance=5.0)
+    source = SimpleNamespace(frames=(object(), object()))
+    result = agent_module.render(
+        source,
+        output=tmp_path / "vectors.gif",
+        backend="cpu",
+        camera=camera,
+        vector_overlays=overlays,
+    )
+
+    assert result.backend == "cpu"
+    assert captured["vector_overlays"] is overlays

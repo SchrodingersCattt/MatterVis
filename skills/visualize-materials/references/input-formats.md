@@ -10,6 +10,20 @@ array rows through their stable `_source_index`. Keep scientific arrays separate
 from render atom fields rather than inventing pseudo-elements or screen-space
 selection rules.
 
+Discover colorable fields without building a full scene:
+
+~~~bash
+mat-vis inspect INPUT --properties --json
+~~~
+
+Fields use `array:NAME`, `column:NAME`, or `sidecar:NAME`; a bare name is
+accepted only when unique. External properties use a
+`mattervis.atom-properties/v1` JSON manifest plus relative, read-only NPY
+arrays. Static values have shape `(N, ...)`; trajectory values have shape
+`(F, N, ...)` with explicit frame IDs. Atom alignment is by exact `id` or
+`label`, or by `row` only when the manifest declares the source SHA-256. Never
+convert a large property field to CSV/NPZ or drop identity metadata.
+
 ## Static structures
 
 ~~~bash
@@ -55,4 +69,5 @@ mat-vis render run.dump --type-map O H -o trajectory.mp4 --stride 10 --fps 24
 
 --frame-range uses Python's half-open START:STOP[:STEP] slice semantics.
 --stride subsamples that selection. MatterVis applies one camera and one physical
-viewport scale to every selected frame.
+viewport scale to every selected frame. Property-colored trajectories also use
+one exact range over all selected source frames, before repeat/display filtering.

@@ -24,6 +24,23 @@ def _frame(positions: np.ndarray) -> FrameBatch:
     )
 
 
+def _property_frame(positions: np.ndarray) -> FrameBatch:
+    frame = _frame(positions)
+    colors = np.zeros((len(positions), 3), dtype=np.uint8)
+    colors[:, 0] = 255
+    return FrameBatch(
+        positions=frame.positions,
+        atomic_numbers=frame.atomic_numbers,
+        atom_ids=frame.atom_ids,
+        origin=frame.origin,
+        cell=frame.cell,
+        pbc=frame.pbc,
+        timestep=frame.timestep,
+        source_index=frame.source_index,
+        atom_colors=colors,
+    )
+
+
 def _camera() -> CameraSpec:
     return CameraSpec(
         position=(0.0, 0.0, 120.0),
@@ -68,3 +85,18 @@ def test_100k_analytic_spheres_render_without_sampling() -> None:
     assert rendered.rgba.shape == (900, 1200, 4)
     assert np.any(rendered.rgba[:, :, :3] != 255)
     assert elapsed < 5.0
+
+
+@pytest.mark.skipif(not NUMBA_AVAILABLE, reason="batch renderer requires numba")
+def test_100k_continuous_colors_render_without_sampling() -> None:
+    rng = np.random.default_rng(20260829)
+    positions = np.ascontiguousarray(
+        rng.uniform(-50.0, 50.0, size=(100_000, 3)), dtype=np.float32
+    )
+    frame = _property_frame(positions)
+    rendered = render_frame_batch(
+        frame, _camera(), width=240, height=180, show_cell=False
+    )
+    assert frame.natoms == 100_000
+    assert frame.atom_colors.shape == (100_000, 3)
+    assert np.any(rendered.rgba[:, :, 0] > rendered.rgba[:, :, 1])

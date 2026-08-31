@@ -83,7 +83,9 @@ def lattice_axes(matrix: np.ndarray) -> dict[str, np.ndarray]:
     try:
         reciprocal = np.linalg.inv(lattice)
     except np.linalg.LinAlgError as exc:
-        raise ValueError("lattice matrix is singular; cannot build reciprocal axes") from exc
+        raise ValueError(
+            "lattice matrix is singular; cannot build reciprocal axes"
+        ) from exc
 
     return {
         key: normalize_vector(vector, name=f"lattice axis {key}")
@@ -98,13 +100,43 @@ def lattice_axes(matrix: np.ndarray) -> dict[str, np.ndarray]:
     }
 
 
+def largest_face_camera_axis(matrix: np.ndarray) -> str:
+    """Return the reciprocal normal of the largest lattice face.
+
+    Row-vector lattices define the faces normal to a*, b*, and c* as
+    b cross c, c cross a, and a cross b respectively. Ties prefer c*
+    to preserve the conventional view for cubic cells.
+    """
+    lattice = np.asarray(matrix, dtype=float)
+    if lattice.shape != (3, 3) or not np.all(np.isfinite(lattice)):
+        raise ValueError("lattice matrix must be a finite 3x3 matrix")
+    candidates = (
+        ("c*", float(np.linalg.norm(np.cross(lattice[0], lattice[1])))),
+        ("b*", float(np.linalg.norm(np.cross(lattice[2], lattice[0])))),
+        ("a*", float(np.linalg.norm(np.cross(lattice[1], lattice[2])))),
+    )
+    axis, area = max(candidates, key=lambda item: item[1])
+    if area < 1e-12:
+        raise ValueError("lattice matrix is degenerate; cannot select a face")
+    return axis
+
+
 def axis_camera_basis(matrix: np.ndarray, axis: str) -> np.ndarray:
     """Return a VESTA-style camera basis aligned to a lattice axis."""
     key = str(axis).strip().lower().replace(" ", "")
     aliases = {
-        "astar": "a*", "a-star": "a*", "areciprocal": "a*", "a_reciprocal": "a*",
-        "bstar": "b*", "b-star": "b*", "breciprocal": "b*", "b_reciprocal": "b*",
-        "cstar": "c*", "c-star": "c*", "creciprocal": "c*", "c_reciprocal": "c*",
+        "astar": "a*",
+        "a-star": "a*",
+        "areciprocal": "a*",
+        "a_reciprocal": "a*",
+        "bstar": "b*",
+        "b-star": "b*",
+        "breciprocal": "b*",
+        "b_reciprocal": "b*",
+        "cstar": "c*",
+        "c-star": "c*",
+        "creciprocal": "c*",
+        "c_reciprocal": "c*",
     }
     key = aliases.get(key, key)
     if key not in AXIS_VIEW_KEYS:
@@ -131,10 +163,12 @@ def view_vec_to_elev_azim(view_vec):
     azim = np.degrees(np.arctan2(v[1], v[0]))
     return elev, azim
 
+
 __all__ = [
     "AXIS_VIEW_KEYS",
     "axis_camera_basis",
     "lattice_axes",
+    "largest_face_camera_axis",
     "normalize_vector",
     "orthogonalise_up",
     "orthonormal_camera_basis",

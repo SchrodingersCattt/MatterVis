@@ -39,8 +39,7 @@ Formula-unit PNG:
 ```bash
 mat-vis render INPUT.cif -o OUTPUT.png --backend cpu --json \
   --view formula_unit --style ball_stick --shading smooth \
-  --camera-axis c --orthogonal \
-  --no-hydrogen --no-cell --no-labels \
+  --orthogonal --no-cell --no-labels \
   --background '#FFFFFF' --atom-scale 1.0 --bond-radius 0.15 \
   --width 1200 --height 900 --scale 1
 ```
@@ -50,7 +49,7 @@ Periodic SVG:
 ```bash
 mat-vis render INPUT.cif -o OUTPUT.svg --backend cpu --json \
   --view unit_cell --style ball_stick --shading smooth \
-  --camera-axis c --orthogonal --show-cell --no-labels \
+  --orthogonal --show-cell --no-labels \
   --background '#FFFFFF' --atom-scale 0.85 --bond-radius 0.12 \
   --width 1600 --height 1200 --scale 1
 ```
@@ -60,7 +59,7 @@ Projected 2D PNG (no lighting or 3D mesh rasterization):
 ```bash
 mat-vis render INPUT.cif -o OUTPUT.png --backend matplotlib --json \
   --view unit_cell --style ball_stick \
-  --camera-axis c --orthogonal --show-cell --no-labels \
+  --orthogonal --show-cell --no-labels \
   --background '#FFFFFF' --atom-scale 0.85 --bond-radius 0.12 \
   --width 1600 --height 1200 --scale 1
 ```

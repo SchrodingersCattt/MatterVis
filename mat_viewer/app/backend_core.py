@@ -21,21 +21,34 @@ FIGURE_CACHE_MAX = 16
 
 
 class _CoreBackendMixin:
-    def __init__(self, preset_path: str, names: Optional[Iterable[str]] = None, root_dir: Optional[str] = None):
+    def __init__(
+        self,
+        preset_path: str,
+        names: Optional[Iterable[str]] = None,
+        root_dir: Optional[str] = None,
+    ):
         self.root_dir = root_dir or WORKSPACE_DIR
         self.preset_path = preset_path
-        self.preset = load_preset(preset_path) if os.path.exists(preset_path) else default_preset()
+        self.preset = (
+            load_preset(preset_path)
+            if os.path.exists(preset_path)
+            else default_preset()
+        )
         self.server_started_at = time.time()
         self.catalog = get_default_catalog(root_dir=self.root_dir)
         self._lock = threading.Lock()
         self._bundle_lock = threading.Lock()
-        default_names = [name for name in DEFAULT_CATALOG.keys() if name in self.catalog]
+        default_names = [
+            name for name in DEFAULT_CATALOG.keys() if name in self.catalog
+        ]
         requested_names = [name for name in (names or []) if name in self.catalog]
         self.structure_names = requested_names if requested_names else default_names
         if not self.structure_names:
             self.structure_names = list(self.catalog.keys())
         self.bundles: Dict[str, LoadedCrystal] = {}
-        self.upload_manifest_path = os.path.join(self.root_dir, LOCAL_STATE_DIRNAME, "crystal_view_uploads.json")
+        self.upload_manifest_path = os.path.join(
+            self.root_dir, LOCAL_STATE_DIRNAME, "crystal_view_uploads.json"
+        )
         self.upload_manifest = self._load_upload_manifest()
         self._restore_uploaded_bundles()
         if not self.structure_names:
@@ -62,7 +75,9 @@ class _CoreBackendMixin:
                 f"referencing unknown structures: {removed_scene_ids}",
                 file=sys.stderr,
             )
-        self.scene_store.ensure(self.structure_names, default_state_factory=self.default_state)
+        self.scene_store.ensure(
+            self.structure_names, default_state_factory=self.default_state
+        )
         scene_store_after = json.dumps(
             _json_safe(self.scene_store.list()),
             sort_keys=True,
@@ -72,7 +87,10 @@ class _CoreBackendMixin:
             try:
                 self.scene_store.save()
             except OSError as exc:  # pragma: no cover - disk-full / read-only mount
-                print(f"[mat_viewer] could not persist scene store: {exc}", file=sys.stderr)
+                print(
+                    f"[mat_viewer] could not persist scene store: {exc}",
+                    file=sys.stderr,
+                )
         if self.scene_store.active_id:
             self.current_state = self.scene_state(self.scene_store.active_id)
         self._render_revisions: dict[str, int] = {
@@ -95,7 +113,10 @@ class _CoreBackendMixin:
             daemon=True,
         )
         self._persist_thread.start()
-        atexit.register(self.flush_scene_store)
+        self._close_lock = threading.Lock()
+        self._closed = False
+        self._atexit_flush_callback = self.flush_scene_store
+        atexit.register(self._atexit_flush_callback)
         self._intent_lock = threading.Lock()
         self._intent_seq_by_client: dict[str, int] = {}
 
@@ -105,10 +126,16 @@ class _CoreBackendMixin:
         style = dict(DEFAULT_STYLE)
         style.update(scene.get("style", {}))
         preset_style = self.preset.get("style", {})
-        entry_style = self.preset.get("structures", {}).get(structure, {}).get("style", {})
+        entry_style = (
+            self.preset.get("structures", {}).get(structure, {}).get("style", {})
+        )
         style.update(preset_style)
         style.update(entry_style)
-        if scene.get("has_minor") and "minor_wireframe" not in preset_style and "minor_wireframe" not in entry_style:
+        if (
+            scene.get("has_minor")
+            and "minor_wireframe" not in preset_style
+            and "minor_wireframe" not in entry_style
+        ):
             style["minor_wireframe"] = True
         # Default selected polyhedron centres: every non-halide species in
         # the structure. That generalises the old "B-site default" without
@@ -118,8 +145,12 @@ class _CoreBackendMixin:
         species_present = self._species_summary(scene.get("fragment_table") or [])
         anion_only = {"Cl", "Br", "I", "F"}
         non_anion = [
-            item for item in species_present
-            if not (set(item["elements"]) and set(item["elements"]).issubset(anion_only | {"O"}))
+            item
+            for item in species_present
+            if not (
+                set(item["elements"])
+                and set(item["elements"]).issubset(anion_only | {"O"})
+            )
         ]
         if non_anion:
             default_species = [item["formula"] for item in non_anion]
@@ -139,7 +170,9 @@ class _CoreBackendMixin:
             "axis_scale": float(style["axis_scale"]),
             "display_options": _display_options_from_style(style),
             "label_mode": str(style.get("label_mode", "unique_sites")),
-            "display_mode": style.get("display_mode", scene.get("display_mode", "formula_unit")),
+            "display_mode": style.get(
+                "display_mode", scene.get("display_mode", "formula_unit")
+            ),
             "topology_species_keys": list(default_species),
             "topology_site_index": None,
             "topology_enabled": False,
@@ -169,6 +202,9 @@ class _CoreBackendMixin:
             # ids), and ``is_minor``. Empty list = render bonds as the
             # endpoint atoms dictate. See ``docs/agents/bond_groups_api.md``.
             "bond_groups": [],
+            # Optional continuous per-atom colour field.  The stored shape is
+            # the public AtomPropertyColorSpec serialized to JSON.
+            "atom_property_color": None,
             # Phase 4: list of structure-mutation transforms. See
             # ``mat_viewer.transforms`` and
             # ``docs/agents/transforms_api.md`` for the schema. Empty list =
@@ -257,7 +293,9 @@ class _CoreBackendMixin:
                 "reason": reason,
                 "figure": figure,
                 "state": copy.deepcopy(state) if isinstance(state, dict) else None,
-                "topology": copy.deepcopy(topology_data) if isinstance(topology_data, dict) else None,
+                "topology": copy.deepcopy(topology_data)
+                if isinstance(topology_data, dict)
+                else None,
             }
             self._figure_broadcasts.append(payload)
             self._figure_broadcasts = self._figure_broadcasts[-32:]
@@ -268,7 +306,16 @@ class _CoreBackendMixin:
         key_state = {
             k: v
             for k, v in state.items()
-            if k not in ("version", "server_started_at", "render_revision", "camera", "camera_revision", "disorder_resolve", "disorder_replicas")
+            if k
+            not in (
+                "version",
+                "server_started_at",
+                "render_revision",
+                "camera",
+                "camera_revision",
+                "disorder_resolve",
+                "disorder_replicas",
+            )
         }
         # Phase 6: ``polyhedron_specs[i].enabled`` is honoured via a
         # post-cache trace-visibility patch (see ``figure_for_state``
@@ -285,7 +332,9 @@ class _CoreBackendMixin:
         specs = key_state.get("polyhedron_specs")
         if isinstance(specs, list):
             key_state["polyhedron_specs"] = [
-                {k: v for k, v in spec.items() if k != "enabled"} if isinstance(spec, dict) else spec
+                {k: v for k, v in spec.items() if k != "enabled"}
+                if isinstance(spec, dict)
+                else spec
                 for spec in specs
             ]
         return json.dumps(_json_safe(key_state), sort_keys=True, separators=(",", ":"))
@@ -302,7 +351,9 @@ class _CoreBackendMixin:
         except Exception:
             return False
         try:
-            return self._figure_state_cache_key(state) == self._figure_state_cache_key(current)
+            return self._figure_state_cache_key(state) == self._figure_state_cache_key(
+                current
+            )
         except Exception:
             return False
 
@@ -330,9 +381,13 @@ class _CoreBackendMixin:
         render_meta = {
             "scene_id": state.get("scene_id"),
             "render_revision": int(
-                state.get("render_revision", self.render_revision(state.get("scene_id"))) or 0
+                state.get(
+                    "render_revision", self.render_revision(state.get("scene_id"))
+                )
+                or 0
             ),
-            "server_started_at": state.get("server_started_at") or self.server_started_iso(),
+            "server_started_at": state.get("server_started_at")
+            or self.server_started_iso(),
         }
         if isinstance(figure, dict):
             layout = figure.setdefault("layout", {})
@@ -358,7 +413,9 @@ class _CoreBackendMixin:
         if not isinstance(state, dict) or not scene_id:
             return True
         try:
-            return int(state.get("render_revision", -1)) == self.render_revision(scene_id)
+            return int(state.get("render_revision", -1)) == self.render_revision(
+                scene_id
+            )
         except (TypeError, ValueError):
             return False
 
@@ -375,7 +432,9 @@ class _CoreBackendMixin:
         scene = self.scene_store.get(scene_id)
         before_state.update({"scene_id": str(scene_id), "scene_label": scene.label})
         after_state.update({"scene_id": str(scene_id), "scene_label": scene.label})
-        if self._figure_state_cache_key(before_state) != self._figure_state_cache_key(after_state):
+        if self._figure_state_cache_key(before_state) != self._figure_state_cache_key(
+            after_state
+        ):
             key = str(scene_id)
             self._render_revisions[key] = self._render_revisions.get(key, 0) + 1
 
@@ -395,7 +454,9 @@ class _CoreBackendMixin:
             for trace in data
         )
 
-    def broadcast_render_error(self, *, scene_id: Optional[str], error: str) -> dict[str, Any]:
+    def broadcast_render_error(
+        self, *, scene_id: Optional[str], error: str
+    ) -> dict[str, Any]:
         with self._figure_broadcast_lock:
             self._figure_broadcast_seq += 1
             payload = {
@@ -415,8 +476,12 @@ class _CoreBackendMixin:
                 copy.deepcopy(payload)
                 for payload in self._figure_broadcasts
                 if int(payload.get("figure_seq", 0) or 0) > int(seq)
-                and self._figure_revision_matches_current(payload.get("scene_id"), payload.get("state"))
-                and self._figure_state_matches_current(payload.get("scene_id"), payload.get("state"))
+                and self._figure_revision_matches_current(
+                    payload.get("scene_id"), payload.get("state")
+                )
+                and self._figure_state_matches_current(
+                    payload.get("scene_id"), payload.get("state")
+                )
             ]
 
     def latest_figure_broadcast(self) -> Optional[dict[str, Any]]:
@@ -424,8 +489,12 @@ class _CoreBackendMixin:
             for payload in reversed(self._figure_broadcasts):
                 if (
                     payload.get("type") == "figure"
-                    and self._figure_revision_matches_current(payload.get("scene_id"), payload.get("state"))
-                    and self._figure_state_matches_current(payload.get("scene_id"), payload.get("state"))
+                    and self._figure_revision_matches_current(
+                        payload.get("scene_id"), payload.get("state")
+                    )
+                    and self._figure_state_matches_current(
+                        payload.get("scene_id"), payload.get("state")
+                    )
                 ):
                     return copy.deepcopy(payload)
             return None
@@ -481,7 +550,11 @@ class _CoreBackendMixin:
         data = payload.get("payload") or {}
         if not isinstance(data, dict):
             raise ValueError("intent payload.payload must be an object")
-        scene_id = payload.get("scene_id") or data.get("scene_id") or self.scene_store.active_id
+        scene_id = (
+            payload.get("scene_id")
+            or data.get("scene_id")
+            or self.scene_store.active_id
+        )
         details: dict[str, Any] = {}
 
         if intent_type in {"set_style", "set_display_options"}:
@@ -505,7 +578,9 @@ class _CoreBackendMixin:
                 details["scene"] = scene
                 state = self.get_state(scene["id"])
             elif action == "rename":
-                details["scene"] = self.update_scene(str(scene_id), {"label": data.get("label", "")})
+                details["scene"] = self.update_scene(
+                    str(scene_id), {"label": data.get("label", "")}
+                )
                 state = self.get_state(str(scene_id))
             elif action == "delete":
                 details["removed"] = self.delete_scene(str(scene_id))
@@ -524,7 +599,9 @@ class _CoreBackendMixin:
                 "crud_atom_group": "atom_groups",
                 "crud_bond_group": "bond_groups",
             }[intent_type]
-            state = self.patch_state({key: data.get(key, data.get("items", []))}, scene_id=scene_id)
+            state = self.patch_state(
+                {key: data.get(key, data.get("items", []))}, scene_id=scene_id
+            )
         elif intent_type == "upload_complete":
             state = self.get_state(scene_id)
             self.pending_state = copy.deepcopy(state)
@@ -548,7 +625,9 @@ class _CoreBackendMixin:
         return True
 
     def server_started_iso(self) -> str:
-        return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(self.server_started_at))
+        return time.strftime(
+            "%Y-%m-%dT%H:%M:%S", time.localtime(self.server_started_at)
+        )
 
     def healthz(self) -> dict[str, Any]:
         return {
@@ -575,7 +654,9 @@ class _CoreBackendMixin:
         return payload
 
     def _save_upload_manifest(self) -> None:
-        os.makedirs(os.path.dirname(os.path.abspath(self.upload_manifest_path)), exist_ok=True)
+        os.makedirs(
+            os.path.dirname(os.path.abspath(self.upload_manifest_path)), exist_ok=True
+        )
         with open(self.upload_manifest_path, "w", encoding="utf-8") as handle:
             json.dump(self.upload_manifest, handle, indent=2, ensure_ascii=False)
 
@@ -617,276 +698,32 @@ class _CoreBackendMixin:
                 result.append(self.bundles[name].metadata())
             else:
                 entry = self.catalog.get(name, {})
-                result.append({"name": name, "title": entry.get("title", name),
-                               "source": entry.get("source", "catalog"), "loaded": False})
+                result.append(
+                    {
+                        "name": name,
+                        "title": entry.get("title", name),
+                        "source": entry.get("source", "catalog"),
+                        "loaded": False,
+                    }
+                )
         return result
 
     def structure_options(self) -> list[dict[str, str]]:
         return [
             {
-                "label": "Upload CIF to begin" if name == PLACEHOLDER_STRUCTURE else name,
+                "label": "Upload CIF to begin"
+                if name == PLACEHOLDER_STRUCTURE
+                else name,
                 "value": name,
             }
             for name in self.structure_names
         ]
 
-    def scene_options(self) -> list[dict[str, Any]]:
-        return self.scene_store.list()
-
-    def scene_tabs(self) -> list[Any]:
-        tabs = []
-        for scene in self.scene_store.list():
-            tabs.append(
-                dcc.Tab(
-                    label=scene["label"],
-                    value=scene["id"],
-                    id=f"scene-tab-{scene['id']}",
-                )
-            )
-        return tabs
-
-    def scene_close_buttons(self) -> list[Any]:
-        buttons = []
-        for scene in self.scene_store.list():
-            buttons.append(
-                html.Button(
-                    html.Span("\u00d7", id=f"scene-tab-close-{scene['id']}"),
-                    id={"type": "tab-close", "scene_id": scene["id"]},
-                    className="tab-close-x",
-                    n_clicks=0,
-                    title=f"Close {scene['label']}",
-                )
-            )
-        return buttons
-
-    def scene_state(self, scene_id: Optional[str] = None) -> dict[str, Any]:
-        scene = self.scene_store.get(scene_id)
-        defaults = self.default_state(scene.structure_name)
-        return scene.state(defaults)
-
-    def active_scene_id(self) -> Optional[str]:
-        return self.scene_store.active_id
-
-    def create_scene(
-        self,
-        *,
-        structure: Optional[str] = None,
-        label: Optional[str] = None,
-        state: Optional[dict[str, Any]] = None,
-    ) -> dict[str, Any]:
-        structure = structure or self.get_state().get("structure") or (self.structure_names[0] if self.structure_names else PLACEHOLDER_STRUCTURE)
-        if structure not in self.structure_names:
-            raise KeyError(structure)
-        base_state = self.default_state(structure)
-        if state:
-            base_state.update(self.normalize_state(state))
-        requested_label = label or structure
-        scene = self.scene_store.add(
-            label=requested_label,
-            structure_name=structure,
-            state_patch=base_state,
-            camera=base_state.get("camera"),
-            save=False,
-        )
-        self._render_revisions[str(scene.id)] = 0
-        self.current_state = self.scene_state(scene.id)
-        # ``pending_state`` is a derived broadcast snapshot. Keep it detached
-        # from the canonical scene state so poll-driven UI sync cannot alias
-        # later in-process mutations.
-        self.pending_state = self._state_snapshot(self.current_state, scene.id)
-        self._bump_version()
-        payload = scene.to_dict()
-        payload["requested_label"] = str(requested_label)
-        payload["label_renamed"] = payload["label"] != str(requested_label)
-        self._request_scene_store_save()
-        return payload
-
-    def update_scene(self, scene_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        scene = self.scene_store.get(scene_id)
-        state_before = self.scene_state(scene_id)
-        if "label" in payload and len(payload) == 1:
-            scene = self.scene_store.rename(scene_id, payload["label"], save=False)
-        else:
-            patch = dict(payload)
-            if "state" in patch:
-                state_patch = patch.pop("state") or {}
-                state_patch = self.normalize_state(state_patch, scene_id=scene_id)
-                patch.update(state_patch)
-            scene = self.scene_store.patch_scene(scene_id, patch, save=False)
-        self._bump_render_revision_if_changed(scene_id, state_before, self.scene_state(scene_id))
-        if self.scene_store.active_id == scene_id:
-            self.current_state = self.scene_state(scene_id)
-            # Poll clients consume ``pending_state`` asynchronously; take a
-            # full snapshot instead of sharing the canonical active-scene dict.
-            self.pending_state = self._state_snapshot(self.current_state, scene_id)
-        self._bump_version()
-        self._request_scene_store_save()
-        return scene.to_dict()
-
-    def delete_scene(self, scene_id: str) -> dict[str, Any]:
-        removed = self.scene_store.remove(scene_id, save=False)
-        self._render_revisions.pop(str(scene_id), None)
-        if self.scene_store.active_id:
-            self.current_state = self.scene_state(self.scene_store.active_id)
-        self.pending_state = self._state_snapshot(self.current_state, self.scene_store.active_id)
-        self._bump_version()
-        self._request_scene_store_save()
-        return removed.to_dict()
-
-    def delete_other_scenes(self, keep_id: str) -> dict[str, Any]:
-        """Close every scene except ``keep_id``.
-
-        Returns a summary ``{"kept": scene_dict, "removed": [scene_dict,
-        ...]}`` so the UI / REST caller can show a status banner. The
-        scene store is mutated in place; we only bump the version once
-        at the end to avoid invalidating ``_figure_cache`` N times in a
-        row when the user batch-closes many tabs.
-        """
-        keep_id = str(keep_id)
-        if keep_id not in self.scene_store.scenes:
-            raise KeyError(f"Unknown scene id: {keep_id}")
-        removed: list[dict[str, Any]] = []
-        for scene_id in [sid for sid in list(self.scene_store.scenes.keys()) if sid != keep_id]:
-            removed.append(self.scene_store.remove(scene_id, save=False).to_dict())
-            self._render_revisions.pop(str(scene_id), None)
-        self.scene_store.active_id = keep_id
-        self.current_state = self.scene_state(keep_id)
-        self.pending_state = self._state_snapshot(self.current_state, keep_id)
-        if removed:
-            self._bump_version()
-            self._request_scene_store_save()
-        return {"kept": self.scene_store.get(keep_id).to_dict(), "removed": removed}
-
-    def duplicate_scene(self, scene_id: str, label: Optional[str] = None) -> dict[str, Any]:
-        scene = self.scene_store.duplicate(scene_id, label=label, save=False)
-        self._render_revisions[str(scene.id)] = 0
-        self.current_state = self.scene_state(scene.id)
-        self.pending_state = self._state_snapshot(self.current_state, scene.id)
-        self._bump_version()
-        self._request_scene_store_save()
-        return scene.to_dict()
-
-    def reorder_scenes(self, order: Iterable[str]) -> list[str]:
-        order = self.scene_store.reorder(order, save=False)
-        self._bump_version()
-        self._request_scene_store_save()
-        return order
-
-    def set_active_scene(self, scene_id: str, *, broadcast: bool = True) -> dict[str, Any]:
-        # ``broadcast`` controls whether ``pending_state`` is armed for
-        # the next ``sync_agent_state`` poll. The REST API agent path
-        # (``/api/v1/scenes/.../activate``) wants this so the browser
-        # UI picks up the change. Dash callbacks that originate *from*
-        # the same UI must pass ``broadcast=False``: otherwise they
-        # echo the change back to themselves on the next poll tick,
-        # which (a) re-runs every per-control callback (refresh
-        # topology species, refresh fragment options, ...) and (b)
-        # triggers a full ``update_view`` for nothing -- doubling the
-        # 1 MB-per-frame transfer cost on every click that carries a
-        # ``scene-tabs.value`` Input.
-        scene = self.scene_store.set_active(scene_id, save=False)
-        self.current_state = self.scene_state(scene.id)
-        if broadcast:
-            self.pending_state = self._state_snapshot(self.current_state, scene.id)
-        self._bump_version()
-        self._request_scene_store_save()
-        return scene.to_dict()
-
-    @staticmethod
-    def _species_summary(fragments: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Group fragments by their stoichiometric ``formula`` (e.g. ``C8N1``,
-        ``ClO4``, ``N1``) and return one summary per distinct species,
-        sorted by heavy-atom count then occurrence count.
-
-        This is the species-checkbox source of truth: each entry carries a
-        ``formula`` (the stable selector value), a count, and the elements
-        present so the UI can colour-code or filter without re-deriving
-        from raw fragments."""
-        by_formula: dict[str, dict[str, Any]] = {}
-        for frag in fragments:
-            formula = frag.get("formula") or frag.get("species") or "?"
-            entry = by_formula.get(formula)
-            if entry is None:
-                entry = {
-                    "formula": formula,
-                    "count": 0,
-                    "heavy": int(frag.get("heavy_atom_count", 0) or 0),
-                    "elements": list(frag.get("elem_set") or []),
-                }
-                by_formula[formula] = entry
-            entry["count"] += 1
-        return sorted(by_formula.values(), key=lambda item: (item["heavy"], -item["count"]))
-
-    def species_options(self, structure: Optional[str] = None) -> list[dict[str, Any]]:
-        """Checklist options for the species-based polyhedron selector.
-
-        One entry per stoichiometrically distinct fragment present in the
-        currently displayed scene. Each entry's ``value`` is the formula
-        string (used as a stable group key) and the ``label`` shows the
-        formula together with how many sites it covers, so the user sees
-        e.g. ``C8N1 \u00d72`` for the DABCO rings of DAP-4.
-        """
-        target = structure or (self.structure_names[0] if self.structure_names else None)
-        if target is None or target not in self.bundles:
-            return []
-        scene = self.get_bundle(target).scene
-        return [
-            {
-                "label": f"{item['formula']} \u00d7{item['count']}",
-                "value": item["formula"],
-            }
-            for item in self._species_summary(scene.get("fragment_table") or [])
-        ]
-
-    def element_options(self, state: Optional[dict[str, Any]] = None) -> list[dict[str, Any]]:
-        """Distinct element symbols present in the active scene's
-        ``draw_atoms``. Used by the Phase 3 atom-group editor's
-        "by element" picker so the user can pick from real elements
-        rather than typing free-form symbols.
-
-        Returns a list of ``{"label": "O", "value": "O"}`` dicts in
-        the order elements first appear in the scene (so e.g. for a
-        perovskite the cations come first, then the anions, matching
-        the user's mental model).
-        """
-        state = state or self.get_state()
-        try:
-            scene = self.scene_for_state(state)
-        except Exception:
-            return []
-        seen: dict[str, None] = {}
-        for atom in scene.get("draw_atoms") or []:
-            elem = str(atom.get("elem") or "").strip()
-            if elem and elem not in seen:
-                seen[elem] = None
-        return [{"label": elem, "value": elem} for elem in seen]
-
-    def fragment_options(self, state: Optional[dict[str, Any]] = None) -> list[dict[str, Any]]:
-        """Dropdown options for the right-panel "Analyze fragment" selector.
-
-        One entry per fragment in the current scene. The ``value`` is the
-        fragment index (matching what ``topology_site_index`` already
-        used), the ``label`` is the human-readable id + formula. Crucially
-        this list is *not* filtered by the species checkboxes -- the user
-        can tile only ClO4 polyhedra and still ask the right panel to
-        analyse a C6N2 fragment, which is the "decouple display from
-        analysis" UX the user asked for.
-        """
-        state = state or self.get_state()
-        try:
-            scene = self.scene_for_state(state)
-        except Exception:
-            return []
-        options: list[dict[str, Any]] = []
-        for frag in scene.get("fragment_table") or []:
-            label = frag.get("label") or f"#{frag['index']}"
-            formula = frag.get("formula") or frag.get("species") or ""
-            text = f"{label}  \u00b7  {formula}" if formula else str(label)
-            options.append({"label": text, "value": int(frag["index"])})
-        return options
-
     def _drop_placeholder(self) -> None:
-        if PLACEHOLDER_STRUCTURE in self.structure_names and len(self.structure_names) == 1:
+        if (
+            PLACEHOLDER_STRUCTURE in self.structure_names
+            and len(self.structure_names) == 1
+        ):
             self.structure_names = []
         self.bundles.pop(PLACEHOLDER_STRUCTURE, None)
 
@@ -913,7 +750,9 @@ class _CoreBackendMixin:
             self.bundles[name] = built
             return built
 
-    def get_scene_json(self, name: str, *, after_transforms: bool = False) -> dict[str, Any]:
+    def get_scene_json(
+        self, name: str, *, after_transforms: bool = False
+    ) -> dict[str, Any]:
         state = self.get_state()
         if state["structure"] != name:
             state = self.normalize_state({"structure": name})
@@ -931,7 +770,9 @@ class _CoreBackendMixin:
             "summary": _structure_summary(scene),
         }
 
-    def normalize_state(self, patch: Optional[dict[str, Any]], scene_id: Optional[str] = None) -> dict[str, Any]:
+    def normalize_state(
+        self, patch: Optional[dict[str, Any]], scene_id: Optional[str] = None
+    ) -> dict[str, Any]:
         if scene_id is not None:
             state = self.scene_state(scene_id)
         else:
@@ -950,6 +791,7 @@ class _CoreBackendMixin:
                 "unit_cell_box" in (value.get("display_options") or []),
                 bool(value.get("topology_enabled", False)),
             )
+
         if "scene_id" in patch and patch["scene_id"] in self.scene_store.scenes:
             scene_id = str(patch["scene_id"])
             state = self.scene_state(scene_id)
@@ -963,7 +805,13 @@ class _CoreBackendMixin:
             scene = self.scene_store.get(scene_id)
             state["scene_label"] = scene.label
         display_signature_before = _display_signature(state)
-        for key in ("atom_scale", "bond_radius", "minor_opacity", "axis_scale", "cutoff"):
+        for key in (
+            "atom_scale",
+            "bond_radius",
+            "minor_opacity",
+            "axis_scale",
+            "cutoff",
+        ):
             if key in patch and patch[key] is not None:
                 state[key] = float(patch[key])
         for key in ("material", "style", "disorder", "ortep_mode", "label_mode"):
@@ -982,7 +830,9 @@ class _CoreBackendMixin:
             if value is None:
                 state["topology_species_keys"] = []
             else:
-                state["topology_species_keys"] = [str(item) for item in value if item is not None]
+                state["topology_species_keys"] = [
+                    str(item) for item in value if item is not None
+                ]
         # Legacy A/B/X selection: translate the type to the matching list of
         # species formulas in the active scene so existing /api/v1 callers (and
         # the example scripts shipped under scripts/) keep working without
@@ -998,12 +848,18 @@ class _CoreBackendMixin:
                     if f.get("type") == requested_type
                 }
                 state["topology_species_keys"] = [k for k in matched if k]
-        if patch.get("topology_show_all_sites") and not state.get("topology_species_keys"):
+        if patch.get("topology_show_all_sites") and not state.get(
+            "topology_species_keys"
+        ):
             structure = state.get("structure")
             if structure and structure in self.bundles:
                 fragments = self.get_bundle(structure).scene.get("fragment_table") or []
                 state["topology_species_keys"] = sorted(
-                    {f.get("formula") or f.get("species") for f in fragments if f.get("formula") or f.get("species")}
+                    {
+                        f.get("formula") or f.get("species")
+                        for f in fragments
+                        if f.get("formula") or f.get("species")
+                    }
                 )
         if "topology_site_index" in patch:
             value = patch["topology_site_index"]
@@ -1024,9 +880,17 @@ class _CoreBackendMixin:
             # Same semantics as polyhedron_specs: empty list / None
             # both mean "drop all overrides; use legacy monochrome
             # flag (if any) and element palette".
-            state["atom_groups"] = _normalize_atom_groups(patch.get("atom_groups") or [])
+            state["atom_groups"] = _normalize_atom_groups(
+                patch.get("atom_groups") or []
+            )
         if "bond_groups" in patch:
-            state["bond_groups"] = _normalize_bond_groups(patch.get("bond_groups") or [])
+            state["bond_groups"] = _normalize_bond_groups(
+                patch.get("bond_groups") or []
+            )
+        if "atom_property_color" in patch:
+            state["atom_property_color"] = _normalize_atom_property_color(
+                patch.get("atom_property_color")
+            )
         if "transforms" in patch:
             state["transforms"] = _normalize_transforms(patch.get("transforms") or [])
         if "selection" in patch:
@@ -1061,7 +925,11 @@ class _CoreBackendMixin:
             if (a, b, c) != (1, 1, 1):
                 existing_ids = {t["id"] for t in existing}
                 normalized = _normalize_transform(
-                    {"kind": "repeat", "params": {"a": a, "b": b, "c": c}, "name": f"Repeat {a}x{b}x{c}"},
+                    {
+                        "kind": "repeat",
+                        "params": {"a": a, "b": b, "c": c},
+                        "name": f"Repeat {a}x{b}x{c}",
+                    },
                     existing_ids=existing_ids,
                 )
                 if normalized is not None:
@@ -1097,7 +965,10 @@ class _CoreBackendMixin:
                 state["atom_groups"] = existing_groups + [migrated]
         display_signature_after = _display_signature(state)
         if (
-            any(key in patch for key in ("display_mode", "display_options", "topology_enabled"))
+            any(
+                key in patch
+                for key in ("display_mode", "display_options", "topology_enabled")
+            )
             and display_signature_after != display_signature_before
         ):
             # Plotly cameras live in the normalized scene cube. Reusing one
@@ -1106,7 +977,9 @@ class _CoreBackendMixin:
             state["camera"] = None
             if "camera_revision" not in patch:
                 try:
-                    state["camera_revision"] = int(state.get("camera_revision", 0) or 0) + 1
+                    state["camera_revision"] = (
+                        int(state.get("camera_revision", 0) or 0) + 1
+                    )
                 except (TypeError, ValueError):
                     state["camera_revision"] = 1
         if "camera" in patch and patch["camera"] is not None:
@@ -1127,13 +1000,15 @@ class _CoreBackendMixin:
         # dict; ``set_projection`` keeps the two in sync.
         if "projection" in patch and patch["projection"] is not None:
             state["projection"] = _coerce_projection(
-                patch["projection"], fallback=str(state.get("projection", "perspective"))
+                patch["projection"],
+                fallback=str(state.get("projection", "perspective")),
             )
         elif isinstance(patch.get("camera"), dict):
             cam_proj = patch["camera"].get("projection")
             if isinstance(cam_proj, dict) and "type" in cam_proj:
                 state["projection"] = _coerce_projection(
-                    cam_proj["type"], fallback=str(state.get("projection", "perspective"))
+                    cam_proj["type"],
+                    fallback=str(state.get("projection", "perspective")),
                 )
         return state
 
@@ -1164,16 +1039,26 @@ class _CoreBackendMixin:
         # other UI-originated patch where the browser is already
         # authoritative for the field being changed.
         with self._lock:
-            target_scene_id = scene_id or (patch or {}).get("scene_id") or self.scene_store.active_id
-            state_before = self.scene_state(target_scene_id) if target_scene_id else copy.deepcopy(self.current_state)
+            target_scene_id = (
+                scene_id or (patch or {}).get("scene_id") or self.scene_store.active_id
+            )
+            state_before = (
+                self.scene_state(target_scene_id)
+                if target_scene_id
+                else copy.deepcopy(self.current_state)
+            )
             self.current_state = self.normalize_state(patch, scene_id=target_scene_id)
             if target_scene_id:
                 scene_payload = copy.deepcopy(self.current_state)
                 scene_payload.pop("scene_id", None)
                 scene_payload.pop("scene_label", None)
                 self.scene_store.patch_scene(target_scene_id, scene_payload, save=False)
-                self._bump_render_revision_if_changed(target_scene_id, state_before, self.current_state)
-            self.current_state["render_revision"] = self.render_revision(target_scene_id)
+                self._bump_render_revision_if_changed(
+                    target_scene_id, state_before, self.current_state
+                )
+            self.current_state["render_revision"] = self.render_revision(
+                target_scene_id
+            )
             if broadcast:
                 self.pending_state = copy.deepcopy(self.current_state)
             self._bump_version()
@@ -1213,9 +1098,94 @@ class _CoreBackendMixin:
             scene["display_title"] = str(scene_label)
         bundle.scene = scene
         bundle.fragment_table = scene.get("fragment_table", bundle.fragment_table)
+        property_spec = state.get("atom_property_color")
+        if property_spec:
+            from ..properties import (
+                map_property_colors,
+                property_metadata,
+                resolve_source_property_context,
+                rgba_to_hex,
+            )
+
+            source = getattr(bundle, "_property_structure_input", None)
+            if source is None:
+                from pathlib import Path
+
+                from ..loader.structure_input import StructureFrame, StructureInput
+
+                frame_index = int(bundle.frame_info.get("frame_index", 0))
+                frame = StructureFrame(
+                    frame_index,
+                    bundle,
+                    dict(bundle.frame_info),
+                    dict(bundle.atom_arrays),
+                )
+                source = StructureInput(
+                    Path(bundle.cif_path),
+                    str(scene.get("input_format") or "cif"),
+                    (frame,),
+                    1,
+                    getattr(bundle, "_property_manifest", None),
+                )
+            context = resolve_source_property_context(source, property_spec)
+            frame_index = int(scene.get("frame_index", context.source_frame_indices[0]))
+            reduced = context.frame(frame_index)
+            colors = rgba_to_hex(
+                map_property_colors(
+                    reduced.values,
+                    context.scale,
+                    nan_color=context.spec.nan_color,
+                )
+            )
+            draw_atoms = []
+            for display_index, original in enumerate(scene.get("draw_atoms") or []):
+                atom = dict(original)
+                source_index = int(atom.get("_source_index", display_index))
+                if not 0 <= source_index < len(colors):
+                    raise ValueError(
+                        f"display atom {display_index} maps outside property array"
+                    )
+                atom["_property_color"] = colors[source_index]
+                atom["_property_value"] = float(reduced.values[source_index])
+                draw_atoms.append(atom)
+            scene = dict(scene)
+            scene["draw_atoms"] = draw_atoms
+            scene["atom_property_color"] = property_metadata(
+                context.spec,
+                reduced,
+                context.scale,
+                manifest_hash=context.manifest_hash,
+            )
         return scene
 
-    def style_for_state(self, state: Optional[dict[str, Any]] = None, scene: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    def atom_properties(
+        self,
+        state: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """Return bounded field descriptors and the active public spec."""
+
+        from ..properties import catalog_from_arrays, merge_catalogs
+
+        state = self.get_state() if state is None else state
+        bundle = self.get_bundle(state["structure"])
+        catalogs = [catalog_from_arrays(bundle.atom_arrays)]
+        manifest = getattr(bundle, "_property_manifest", None)
+        source = getattr(bundle, "_property_structure_input", None)
+        if manifest is None and source is not None:
+            manifest = getattr(source, "property_manifest", None)
+        if manifest is not None:
+            catalogs.append(manifest.catalog())
+        catalog = merge_catalogs(*catalogs)
+        return {
+            "fields": catalog.to_dict(),
+            "active": copy.deepcopy(state.get("atom_property_color")),
+        }
+
+    def style_for_state(
+        self,
+        state: Optional[dict[str, Any]] = None,
+        scene: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
         state = self.current_state if state is None else state
         scene = self.scene_for_state(state) if scene is None else scene
         if state.get("bfdh_morphology") is not None:
@@ -1234,12 +1204,20 @@ class _CoreBackendMixin:
                 ortep_mode=state.get("ortep_mode"),
             )
         )
-        style["display_mode"] = state.get("display_mode", scene.get("display_mode", "formula_unit"))
+        style["display_mode"] = state.get(
+            "display_mode", scene.get("display_mode", "formula_unit")
+        )
         style["material"] = state.get("material", style.get("material", "mesh"))
         style["style"] = state.get("style", style.get("style", "ball_stick"))
-        style["disorder"] = state.get("disorder", style.get("disorder", "outline_rings"))
-        style["ortep_mode"] = state.get("ortep_mode", style.get("ortep_mode", "ortep_axes"))
-        style["label_mode"] = state.get("label_mode", style.get("label_mode", "unique_sites"))
+        style["disorder"] = state.get(
+            "disorder", style.get("disorder", "outline_rings")
+        )
+        style["ortep_mode"] = state.get(
+            "ortep_mode", style.get("ortep_mode", "ortep_axes")
+        )
+        style["label_mode"] = state.get(
+            "label_mode", style.get("label_mode", "unique_sites")
+        )
         style["fast_rendering"] = bool(state.get("fast_rendering", False))
         style["topology_enabled"] = bool(state.get("topology_enabled", False))
         style["topology_hull_color"] = str(state.get("topology_hull_color", "#7C5CBF"))
@@ -1258,8 +1236,16 @@ class _CoreBackendMixin:
         # scene is mutable); this entry is the single source of truth
         # for downstream callers.
         style["bond_groups"] = list(state.get("bond_groups") or [])
-        style["selection"] = copy.deepcopy(state.get("selection") or {"atom_labels": [], "active_label": None, "order": []})
-        style["selection_highlight"] = current_config().colors.get("selection_highlight", "#FFD24A")
+        style["atom_property_color"] = copy.deepcopy(
+            scene.get("atom_property_color") or state.get("atom_property_color")
+        )
+        style["selection"] = copy.deepcopy(
+            state.get("selection")
+            or {"atom_labels": [], "active_label": None, "order": []}
+        )
+        style["selection_highlight"] = current_config().colors.get(
+            "selection_highlight", "#FFD24A"
+        )
         # Phase 4 (view tools): persist the camera projection choice
         # onto the style dict so the renderer's
         # ``_plotly_camera_from_scene`` picks orthographic vs.
@@ -1268,7 +1254,9 @@ class _CoreBackendMixin:
             state.get("projection", style.get("projection", "perspective")),
             fallback=str(style.get("projection", "perspective")),
         )
-        style["bfdh_morphology_color"] = str(state.get("bfdh_morphology_color", "#4f7cff"))
+        style["bfdh_morphology_color"] = str(
+            state.get("bfdh_morphology_color", "#4f7cff")
+        )
         if isinstance(state.get("camera"), dict):
             style["camera"] = copy.deepcopy(state["camera"])
         # Plotly's ``layout.scene.uirevision`` makes the WebGL camera
@@ -1305,4 +1293,3 @@ class _CoreBackendMixin:
         # render cycle during drag.
         style["axis_key_via_svg_overlay"] = True
         return style
-

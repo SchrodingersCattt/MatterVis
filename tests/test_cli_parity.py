@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import fields
 
+from mat_viewer.properties import AtomPropertyColorSpec
 from mat_viewer.cli import _build_render_parser
 from mat_viewer.render.contracts import CameraSpec, RenderSpec, ViewSpec
 
@@ -53,6 +54,18 @@ def test_backend_neutral_spec_fields_have_cli_destinations() -> None:
             "sphere_detail": "sphere_detail",
             "cylinder_sides": "cylinder_sides",
         },
+        AtomPropertyColorSpec: {
+            "fields": "color_by",
+            "reduction": "color_reduction",
+            "component": "color_component",
+            "colormap": "colormap",
+            "value_range": "color_range",
+            "center": "color_center",
+            "nan_color": "nan_color",
+            "show_colorbar": "show_colorbar",
+            "label": "color_label",
+            "unit": "color_unit",
+        },
     }
 
     for spec, mapping in mappings.items():
@@ -81,6 +94,7 @@ def test_composable_user_surfaces_have_cli_destinations() -> None:
         "frame_field",
         "frame_label",
         "frame_label_position",
+        "property_data",
     } <= destinations
 
 

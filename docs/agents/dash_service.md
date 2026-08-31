@@ -26,7 +26,7 @@ flowchart LR
     CLIENT <-->|WS| WS["/api/v2/ws<br/>(flask-sock)"]
 
     subgraph RES["Resource groups under /api/v2"]
-        STATE["/state, /camera, /camera/action"]
+        STATE["/state, /atom-properties, /camera, /camera/action"]
         INTENT["/intent<br/>ordered UI reducer"]
         SCENES["/scenes, /scenes/active, /scenes/{id}/duplicate"]
         STRUCT["/upload, /structures, /scene/{name}"]
@@ -66,6 +66,21 @@ shorthand-issued `repeat`), so it shows up later under
 `GET /transforms`. Use the shorthand for one-line "2×2×2" scripts; use
 `/transforms` directly when you need to mix `repeat` with `grow_bonds`,
 `slab`, etc.
+
+## Backend lifecycle
+
+`ViewerBackend` owns a scene-store persistence thread and asynchronous render
+executors. Long-lived services keep one backend for the service lifetime.
+Short-lived callers must either use it as a context manager or call its
+idempotent `close()` method so pending scene state is flushed and those
+background resources are released:
+
+```python
+from mat_viewer.app.backend import ViewerBackend
+
+with ViewerBackend(preset_path="preset.json") as backend:
+    state = backend.get_state()
+```
 
 ## Live update contract
 
@@ -161,7 +176,9 @@ Notes for callers:
   Plotly camera's `projection.type`. Setting it via `POST /state`
   has the same effect as `POST /camera/action {"action":
   "projection", "type": ...}`),
-  `fast_rendering`, `camera`, `cutoff`. `material` is `mesh` or
+  `atom_property_color` (nullable public property-color spec; see
+  `atom_property_coloring.md`), `fast_rendering`, `camera`, `cutoff`.
+  `material` is `mesh` or
   `flat`; `style` is `ball`, `ball_stick`, `stick`, `ortep`, or
   `wireframe`; `disorder` is `opacity`, `dashed_bonds`,
   `outline_rings`, `color_shift`, or `none`. Fresh scenes default to
@@ -175,6 +192,10 @@ Notes for callers:
   `display_mode` accepts `formula_unit`, `unit_cell`, `asymmetric_unit`,
   or `cluster` (free molecular cluster — every parsed atom is drawn,
   no formula-unit trim, no periodic imaging of bonds).
+- `GET /atom-properties`
+  Returns bounded property descriptors for the active scene and its active
+  `atom_property_color` spec. Add `?scene_id=...` for another tab. This endpoint
+  is read-only; use `POST /state` to change coloring.
 - `POST /intent`
   Ordered mutation reducer for browser and automation clients that want
   one canonical state-machine path. Body:

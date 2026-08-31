@@ -265,6 +265,7 @@ def render_batch_if_selected(
         or args.frame_field
     )
     if workload.lammps_dump and animation and not has_overlay_layers:
+        from ..properties.cli import atom_property_spec
         from .fast_animation import render_lammps_animation
 
         result = render_lammps_animation(
@@ -282,9 +283,9 @@ def render_batch_if_selected(
             projection=args.projection,
             camera_axis=args.camera_axis,
             view_direction=tuple(args.view_direction) if args.view_direction else None,
-            camera_position=tuple(args.camera_position)
-            if args.camera_position
-            else None,
+            camera_position=(
+                tuple(args.camera_position) if args.camera_position else None
+            ),
             camera_up=tuple(args.camera_up) if args.camera_up else None,
             fit_multiplier=args.camera_distance,
             zoom=args.zoom,
@@ -292,9 +293,9 @@ def render_batch_if_selected(
             atom_scale=args.atom_scale,
             background=background,
             show_hydrogen=args.show_hydrogen,
-            show_cell=True
-            if args.show_unit_cell is None
-            else bool(args.show_unit_cell),
+            show_cell=(
+                True if args.show_unit_cell is None else bool(args.show_unit_cell)
+            ),
             cell_color=cell_color,
             cell_width_px=args.cell_width,
             bonded=args.style == "ball_stick",
@@ -302,9 +303,12 @@ def render_batch_if_selected(
             bond_skin=args.bond_skin,
             workers=args.workers,
             profile_path=args.profile_json,
+            atom_property_color=(atom_property_spec(args) if args.color_by else None),
+            property_data=args.property_data,
         )
     else:
         from ..cli import _load_vector_overlays
+        from ..properties.cli import atom_property_spec
         from .batch_pipeline import render_array_input
         from .cli_controls import _animation_time_from_args, _frame_annotation_from_args
 
@@ -322,9 +326,9 @@ def render_batch_if_selected(
             projection=args.projection,
             camera_axis=args.camera_axis,
             view_direction=tuple(args.view_direction) if args.view_direction else None,
-            camera_position=tuple(args.camera_position)
-            if args.camera_position
-            else None,
+            camera_position=(
+                tuple(args.camera_position) if args.camera_position else None
+            ),
             camera_up=tuple(args.camera_up) if args.camera_up else None,
             fit_multiplier=args.camera_distance,
             zoom=args.zoom,
@@ -343,12 +347,12 @@ def render_batch_if_selected(
             vector_overlays=_load_vector_overlays(args.vector_overlays),
             polyhedron_specs=tuple(args.polyhedron),
             polyhedron_site=args.polyhedron_site,
-            polyhedron_cutoff=(
-                args.polyhedron_cutoff if args.polyhedron_cutoff is not None else 10.0
-            ),
+            polyhedron_cutoff=args.polyhedron_cutoff,
             animation_time=_animation_time_from_args(args),
             frame_annotation=_frame_annotation_from_args(args),
             profile_path=args.profile_json,
+            atom_property_color=(atom_property_spec(args) if args.color_by else None),
+            property_data=args.property_data,
         )
     return _result_payload(args, result, decision, install_command=install_command)
 

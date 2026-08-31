@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -134,6 +135,50 @@ def test_bond_batch_changes_pixels_between_atom_centres() -> None:
     assert np.any(with_bond.rgba[centre][:3] != 255)
 
 
+@pytest.mark.skipif(not NUMBA_AVAILABLE, reason="batch renderer requires numba")
+def test_bond_batch_inherits_endpoint_atom_colors() -> None:
+    frame = replace(
+        _frame([[-0.8, 0.0, 0.0], [0.8, 0.0, 0.0]], [6, 8]),
+        atom_colors=np.asarray([[255, 0, 0], [0, 0, 255]], dtype=np.uint8),
+    )
+    bonds = SimpleNamespace(pairs=np.asarray([[0, 1]], dtype=np.int32))
+    rendered = render_frame_batch(
+        frame,
+        _camera(),
+        width=160,
+        height=120,
+        show_cell=False,
+        bonds=bonds,
+        bond_radius=0.12,
+    )
+    first_half = rendered.rgba[60, 79, :3]
+    second_half = rendered.rgba[60, 80, :3]
+    assert first_half[0] > first_half[2]
+    assert second_half[2] > second_half[0]
+
+
+@pytest.mark.skipif(not NUMBA_AVAILABLE, reason="batch renderer requires numba")
+def test_bond_batch_uses_minimum_image_vectors() -> None:
+    frame = _frame([[-1.9, 0.0, 0.0], [1.9, 0.0, 0.0]], [6, 6])
+    bonds = SimpleNamespace(
+        pairs=np.asarray([[0, 1]], dtype=np.int32),
+        vectors=np.asarray([[-0.2, 0.0, 0.0]], dtype=np.float32),
+    )
+
+    rendered = render_frame_batch(
+        frame,
+        _camera(),
+        width=160,
+        height=120,
+        show_cell=False,
+        bonds=bonds,
+        bond_radius=0.12,
+    )
+
+    assert np.all(rendered.rgba[60, 80, :3] == 255)
+    assert np.any(rendered.rgba[60, :35, :3] != 255)
+
+
 def _image_descriptors_have_no_local_palettes(path: Path) -> int:
     data = path.read_bytes()
     assert data[:6] in {b"GIF87a", b"GIF89a"}
@@ -186,10 +231,10 @@ def test_global_palette_quantization_and_streaming_gif(tmp_path: Path) -> None:
     writer.append_data(np.tile(rgb[::-1], (8, 8, 1)))
     writer.close()
 
-    image = Image.open(output)
-    assert image.n_frames == 2
-    assert image.info["duration"] == 200
-    assert image.info["loop"] == 0
+    with Image.open(output) as image:
+        assert image.n_frames == 2
+        assert image.info["duration"] == 200
+        assert image.info["loop"] == 0
     assert _image_descriptors_have_no_local_palettes(output) == 2
 
 
@@ -237,8 +282,7 @@ def test_worker_override_and_shared_camera_controls() -> None:
 def test_small_lammps_animation_preserves_order_and_profile(tmp_path: Path) -> None:
     frames = []
     for index in range(3):
-        frames.append(
-            f"""ITEM: TIMESTEP
+        frames.append(f"""ITEM: TIMESTEP
 {index * 10}
 ITEM: NUMBER OF ATOMS
 2
@@ -249,8 +293,7 @@ ITEM: BOX BOUNDS pp pp pp
 ITEM: ATOMS id element x y z
 2 O {2.5 + index * 0.1} 2 2
 1 C {1.5 + index * 0.1} 2 2
-"""
-        )
+""")
     source = tmp_path / "small.lammpstrj"
     source.write_text("".join(frames), encoding="utf-8")
     output = tmp_path / "small.gif"
@@ -266,8 +309,8 @@ ITEM: ATOMS id element x y z
         profile_path=profile_path,
     )
 
-    image = Image.open(output)
-    assert image.n_frames == 3
+    with Image.open(output) as image:
+        assert image.n_frames == 3
     assert result.profile["timesteps"] == [0, 10, 20]
     assert result.profile["settings"]["shared_viewport"] is True
     assert result.profile["settings"]["workers"] == 2
