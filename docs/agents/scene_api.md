@@ -183,6 +183,16 @@ honours:
   (default `1.8`). Larger values reduce perspective depth when
   `projection="perspective"`; orthographic views keep the same visual
   scale but still use the eye direction.
+- `ortho_scale` — explicit half-height of the orthographic viewing
+  volume in world (Å) units. When set, overrides the auto-fitted scale
+  derived from visible atom bounds. Useful for locking panel sizes
+  across a figure grid.
+- `camera_fit` — strategy for fitting the camera to content.
+  `"cell_and_visible_atoms"` (default when cells are drawn) fits to
+  both cell corners and visible atoms. `"visible_atoms"` fits only to
+  atomistic content, ignoring cell geometry — use this when background
+  atoms (hydrogen, etc.) are hidden and the cell would waste viewport
+  space.
 
 Anchored scientific arrows are supplied with `vector_overlays=` or
 `scene["vector_overlays"]`; see [vector overlays](vector_overlays_api.md).

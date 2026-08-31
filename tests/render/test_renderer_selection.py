@@ -84,7 +84,9 @@ def _render_extxyz(
     frame_indices,
     show_cell=None,
     show_axes=False,
+    show_hydrogen=True,
     vector_overlays=None,
+    ortho_scale=None,
 ):
     return render_array_input(
         source,
@@ -105,9 +107,10 @@ def _render_extxyz(
         fit_multiplier=1.8,
         zoom=1.0,
         framing_margin=1.12,
+        ortho_scale=ortho_scale,
         atom_scale=1.0,
         background=(255, 255, 255, 255),
-        show_hydrogen=True,
+        show_hydrogen=show_hydrogen,
         show_cell=show_cell,
         show_axes=show_axes,
         show_labels=False,
@@ -232,3 +235,57 @@ def test_batch_composes_axes_and_vector_layers(tmp_path) -> None:
     with Image.open(layered) as image:
         layered_pixels = np.asarray(image)
     assert not np.array_equal(plain_pixels, layered_pixels)
+
+
+@pytest.mark.skipif(not NUMBA_AVAILABLE, reason="batch renderer requires numba")
+def test_hidden_periodic_cell_fits_visible_atoms_not_vacuum(tmp_path) -> None:
+    from ase import Atoms
+    from ase.io import write
+
+    source = tmp_path / "slab.extxyz"
+    atoms = Atoms(
+        "CO",
+        positions=[[1.0, 1.0, 2.0], [2.2, 1.0, 2.0]],
+        cell=[10.0, 10.0, 200.0],
+        pbc=[True, True, False],
+    )
+    write(source, atoms, format="extxyz")
+
+    hidden = _render_extxyz(
+        source,
+        tmp_path / "hidden.png",
+        frame_indices=(0,),
+        show_cell=False,
+    )
+    shown = _render_extxyz(
+        source,
+        tmp_path / "shown.png",
+        frame_indices=(0,),
+        show_cell=True,
+    )
+
+    assert hidden.profile["camera_fit"] == "visible_atoms"
+    assert hidden.camera.target[2] == pytest.approx(2.0)
+    assert hidden.camera.ortho_scale < shown.camera.ortho_scale / 10.0
+
+
+@pytest.mark.skipif(not NUMBA_AVAILABLE, reason="batch renderer requires numba")
+def test_all_background_static_render_fails_explicitly(tmp_path) -> None:
+    from ase import Atoms
+    from ase.io import write
+
+    source = tmp_path / "hydrogen.extxyz"
+    write(
+        source,
+        Atoms("H2", positions=[[0.0, 0.0, 0.0], [0.74, 0.0, 0.0]], pbc=False),
+        format="extxyz",
+    )
+
+    with pytest.raises(RuntimeError, match="all-background frame"):
+        _render_extxyz(
+            source,
+            tmp_path / "hidden-hydrogen.png",
+            frame_indices=(0,),
+            show_cell=False,
+            show_hydrogen=False,
+        )

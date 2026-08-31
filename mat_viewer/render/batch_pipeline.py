@@ -144,6 +144,37 @@ def load_frame_batches(
     return frames
 
 
+def _frame_camera_points(
+    frames: Sequence[FrameBatch],
+    *,
+    show_cell: bool | None,
+    show_hydrogen: bool,
+) -> np.ndarray:
+    """Return geometry that is actually visible in the requested viewport."""
+
+    chunks: list[np.ndarray] = []
+    for frame in frames:
+        positions = frame.positions
+        if not show_hydrogen:
+            positions = positions[frame.atomic_numbers != 1]
+        if len(positions):
+            chunks.append(np.asarray(positions, dtype=float))
+        cell_is_visible = (
+            bool(np.any(frame.pbc)) if show_cell is None else bool(show_cell)
+        )
+        if cell_is_visible:
+            chunks.append(frame_box_corners(frame))
+    if chunks:
+        return np.concatenate(chunks, axis=0)
+    return np.concatenate([frame_box_corners(frame) for frame in frames], axis=0)
+
+
+def _foreground_pixel_count(
+    rgba: np.ndarray, background: tuple[int, int, int, int]
+) -> int:
+    return int(np.count_nonzero(np.any(rgba != np.asarray(background), axis=2)))
+
+
 def fit_shared_frame_camera(
     frames: Sequence[FrameBatch],
     *,
@@ -157,12 +188,17 @@ def fit_shared_frame_camera(
     fit_multiplier: float,
     zoom: float,
     framing_margin: float,
+    ortho_scale: float | None,
+    show_cell: bool | None,
+    show_hydrogen: bool,
 ) -> CameraSpec:
-    """Fit one immutable viewport to the union of selected frame bounds."""
+    """Fit one immutable viewport to visible atoms and optional cell edges."""
 
     if not frames:
         raise ValueError("cannot fit a camera without frames")
-    points = np.concatenate([frame_box_corners(frame) for frame in frames], axis=0)
+    points = _frame_camera_points(
+        frames, show_cell=show_cell, show_hydrogen=show_hydrogen
+    )
     lower, upper = np.min(points, axis=0), np.max(points, axis=0)
     target = (lower + upper) * 0.5
     radius = max(float(np.linalg.norm(points - target, axis=1).max()), 1.0)
@@ -196,7 +232,12 @@ def fit_shared_frame_camera(
     aspect = width / height
     half_width = float(np.max(np.abs(relative @ right)))
     half_height = float(np.max(np.abs(relative @ screen_up)))
-    ortho_scale = max(half_height, half_width / aspect, 0.5) * framing_margin / zoom
+    fitted_ortho_scale = (
+        max(half_height, half_width / aspect, 0.5) * framing_margin / zoom
+    )
+    resolved_ortho_scale = (
+        float(ortho_scale) if ortho_scale is not None else fitted_ortho_scale
+    )
     if camera_position is not None:
         position = np.asarray(camera_position, dtype=float)
         distance = float(np.linalg.norm(position - target))
@@ -221,7 +262,7 @@ def fit_shared_frame_camera(
         projection=projection,
         near=near,
         far=far,
-        ortho_scale=ortho_scale,
+        ortho_scale=resolved_ortho_scale,
     )
 
 
@@ -344,6 +385,7 @@ def render_array_input(
     fit_multiplier: float,
     zoom: float,
     framing_margin: float,
+    ortho_scale: float | None,
     atom_scale: float,
     background: tuple[int, int, int, int],
     show_hydrogen: bool,
@@ -408,9 +450,9 @@ def render_array_input(
             frames,
             property_spec,
             input_path=str(Path(input_path).expanduser().resolve()),
-            embedded_source="column"
-            if _is_lammps_dump(input_path, input_format)
-            else "array",
+            embedded_source=(
+                "column" if _is_lammps_dump(input_path, input_format) else "array"
+            ),
             manifest=manifest,
         )
         frames = tuple(
@@ -434,6 +476,11 @@ def render_array_input(
     if repeat != (1, 1, 1):
         frames = tuple(repeat_frame(frame, repeat) for frame in frames)
     repeated_property = time.perf_counter()
+    cell_is_visible = (
+        any(bool(np.any(frame.pbc)) for frame in frames)
+        if show_cell is None
+        else bool(show_cell)
+    )
     content_width = width
     if property_metadata_payload and property_metadata_payload["show_colorbar"]:
         reserve = min(max(float(width) * 0.14, 72.0), 128.0)
@@ -456,6 +503,9 @@ def render_array_input(
         fit_multiplier=fit_multiplier,
         zoom=zoom,
         framing_margin=framing_margin,
+        ortho_scale=ortho_scale,
+        show_cell=show_cell,
+        show_hydrogen=show_hydrogen,
     )
     overlay_primitives = ()
     if vector_overlays:
@@ -526,6 +576,7 @@ def render_array_input(
         from .fast_animation import _mp4_writer
 
         writer = _mp4_writer(output, width=width, height=height, fps=fps)
+    foreground_pixels: list[int] = []
     try:
         for ordinal, frame in enumerate(frames):
             bonds = (
@@ -575,6 +626,14 @@ def render_array_input(
                         annotation_series.spec.position,
                     )
                 rgba = np.asarray(image)
+            content = rgba[:, :content_width]
+            foreground = _foreground_pixel_count(content, background)
+            if frame.natoms and foreground == 0:
+                raise RuntimeError(
+                    "batch renderer produced an all-background frame "
+                    f"for source frame {frame.source_index}"
+                )
+            foreground_pixels.append(foreground)
             if writer is None:
                 from PIL import Image
 
@@ -593,6 +652,10 @@ def render_array_input(
         "atom_frames": int(sum(frame.natoms for frame in frames)),
         "shared_viewport": True,
         "camera": asdict(camera),
+        "camera_fit": (
+            "cell_and_visible_atoms" if cell_is_visible else "visible_atoms"
+        ),
+        "foreground_pixels": foreground_pixels,
         "atom_property_color": property_metadata_payload,
         "property_timing_s": {
             "load_selected_fields": loaded_property - property_started,

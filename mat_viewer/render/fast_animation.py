@@ -83,6 +83,7 @@ class FastFrameResult:
     bond_count: int
     candidate_rebuilds: int
     quantize_s: float
+    foreground_pixels: int
     property_reduction_s: float = 0.0
     property_mapping_s: float = 0.0
     property_finite_count: int = 0
@@ -240,6 +241,13 @@ def _render_worker(frame_index: int) -> FastFrameResult:
         bond_radius=config.bond_radius,
     )
     rasterized = time.perf_counter()
+    foreground_pixels = int(
+        np.count_nonzero(np.any(rendered.rgba != np.asarray(config.background), axis=2))
+    )
+    if frame.natoms and foreground_pixels == 0:
+        raise RuntimeError(
+            f"batch renderer produced an all-background frame {frame_index}"
+        )
     rgb = rendered.rgba[:, :, :3]
     if config.content_width != config.width:
         canvas = np.empty(
@@ -289,6 +297,7 @@ def _render_worker(frame_index: int) -> FastFrameResult:
         bond_count=0 if bonds is None else len(bonds.pairs),
         candidate_rebuilds=rebuilds,
         quantize_s=finished - resized,
+        foreground_pixels=foreground_pixels,
         property_reduction_s=property_reduced - parsed,
         property_mapping_s=property_mapped - property_reduced,
         property_finite_count=property_finite_count,
@@ -331,6 +340,52 @@ def _frame_box_points(
     return np.concatenate(points, axis=0)
 
 
+def _bounds_corners(lower: np.ndarray, upper: np.ndarray) -> np.ndarray:
+    fractions = np.asarray(
+        [
+            [0, 0, 0],
+            [1, 0, 0],
+            [0, 1, 0],
+            [0, 0, 1],
+            [1, 1, 0],
+            [1, 0, 1],
+            [0, 1, 1],
+            [1, 1, 1],
+        ],
+        dtype=np.float64,
+    )
+    return lower + fractions * (upper - lower)
+
+
+def _visible_lammps_points(
+    dump_index: LammpsDumpIndex,
+    frame_indices: list[int],
+    *,
+    type_map: tuple[str, ...] | None,
+    repeat: tuple[int, int, int],
+    show_hydrogen: bool,
+) -> np.ndarray | None:
+    """Read selected coordinates once and return compact visible-content bounds."""
+
+    factors = np.asarray(repeat, dtype=np.int64)
+    repeats = _bounds_corners(np.zeros(3), factors - 1)
+    frame_bounds: list[np.ndarray] = []
+    for frame_index in frame_indices:
+        frame = read_lammps_frame(dump_index, frame_index, type_map=type_map)
+        positions = frame.positions
+        if not show_hydrogen:
+            positions = positions[frame.atomic_numbers != 1]
+        if not len(positions):
+            continue
+        translations = repeats @ frame.cell
+        lower = positions.min(axis=0) + translations.min(axis=0)
+        upper = positions.max(axis=0) + translations.max(axis=0)
+        frame_bounds.append(_bounds_corners(lower, upper))
+    if not frame_bounds:
+        return None
+    return np.concatenate(frame_bounds, axis=0)
+
+
 def fit_shared_camera(
     records: tuple[LammpsFrameRecord, ...],
     *,
@@ -345,8 +400,10 @@ def fit_shared_camera(
     fit_multiplier: float = 1.8,
     zoom: float = 1.0,
     framing_margin: float = 1.12,
+    ortho_scale: float | None = None,
+    fit_points: np.ndarray | None = None,
 ) -> CameraSpec:
-    """Fit one camera to the union of all frame boxes."""
+    """Fit one camera to explicit visible geometry or the union of frame boxes."""
     if not records:
         raise ValueError("cannot fit a camera without frames")
     for name, value in (
@@ -356,7 +413,13 @@ def fit_shared_camera(
     ):
         if not math.isfinite(value) or value <= 0.0:
             raise ValueError(f"{name} must be finite and positive")
-    points = _frame_box_points(records, repeat)
+    points = (
+        _frame_box_points(records, repeat)
+        if fit_points is None
+        else np.asarray(fit_points, dtype=np.float64)
+    )
+    if points.ndim != 2 or points.shape[1] != 3 or not len(points):
+        raise ValueError("fit_points must contain at least one 3D point")
     mins = points.min(axis=0)
     maxs = points.max(axis=0)
     target = (mins + maxs) * 0.5
@@ -392,7 +455,12 @@ def fit_shared_camera(
     aspect = width / height
     half_width = float(np.max(np.abs(relative @ right)))
     half_height = float(np.max(np.abs(relative @ screen_up)))
-    ortho_scale = max(half_height, half_width / aspect, 0.5) * framing_margin / zoom
+    fitted_ortho_scale = (
+        max(half_height, half_width / aspect, 0.5) * framing_margin / zoom
+    )
+    resolved_ortho_scale = (
+        float(ortho_scale) if ortho_scale is not None else fitted_ortho_scale
+    )
 
     if camera_position is not None:
         position = np.asarray(camera_position, dtype=float)
@@ -417,7 +485,7 @@ def fit_shared_camera(
         projection=projection,
         near=near,
         far=far,
-        ortho_scale=ortho_scale,
+        ortho_scale=resolved_ortho_scale,
     )
 
 
@@ -565,6 +633,7 @@ def render_lammps_animation(
     fit_multiplier: float = 1.8,
     zoom: float = 1.0,
     framing_margin: float = 1.12,
+    ortho_scale: float | None = None,
     atom_scale: float = 1.0,
     background: tuple[int, int, int, int] = (255, 255, 255, 255),
     show_hydrogen: bool = True,
@@ -710,6 +779,17 @@ def render_lammps_animation(
             reserve / width,
             0.84,
         ]
+    visible_fit_points = (
+        None
+        if show_cell
+        else _visible_lammps_points(
+            dump_index,
+            frame_indices,
+            type_map=type_map,
+            repeat=repeat,
+            show_hydrogen=show_hydrogen,
+        )
+    )
     camera = fit_shared_camera(
         selected_records,
         repeat=repeat,
@@ -723,6 +803,8 @@ def render_lammps_animation(
         fit_multiplier=fit_multiplier,
         zoom=zoom,
         framing_margin=framing_margin,
+        ortho_scale=ortho_scale,
+        fit_points=visible_fit_points,
     )
     camera_ready = time.perf_counter()
     warm_batch_renderer()
@@ -843,6 +925,7 @@ def render_lammps_animation(
             "zoom": zoom,
             "framing_margin": framing_margin,
             "shared_viewport": True,
+            "camera_fit": "cell" if show_cell else "visible_atoms",
             "representation": (
                 "analytic_spheres_and_bonds" if bonded else "analytic_spheres"
             ),
@@ -861,6 +944,7 @@ def render_lammps_animation(
             "counts": [item.bond_count for item in metrics],
             "candidate_rebuilds": sum(item.candidate_rebuilds for item in metrics),
         },
+        "foreground_pixels": [item.foreground_pixels for item in metrics],
         "atom_property_color": property_metadata_payload,
         "property_finite_count": sum(item.property_finite_count for item in metrics),
         "property_missing_count": sum(item.property_missing_count for item in metrics),
