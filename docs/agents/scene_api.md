@@ -63,6 +63,12 @@ Parses a CIF and returns a scene dict consumable by
   Cartesian coordinates. The 100 Å dummy cells that CIF exporters
   sometimes write around clusters are ignored.
 
+**CIF input notes.** The `_asym_index` column
+(`_atom_site.label_asym_id` mapped to a 0-based index) may be `None` in CIF
+inputs that lack `_atom_site_symmetry_multiplicity` or related fields. When
+`_asym_index` is absent, the loader bridge falls back to using the stable
+row-order index of each site as its asymmetric-unit identifier.
+
 ### `mat_viewer.render.assembly.build_scene_from_atoms(atoms, *, style=None, ...)`
 
 ASE `Atoms` → scene dict. Accepts the same `display_mode` values. When

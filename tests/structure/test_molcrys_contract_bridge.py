@@ -4,8 +4,42 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from ase import Atoms
 
 from mat_viewer.structure import molcrys_bridge
+
+
+def test_null_asymmetric_site_index_falls_back_to_row_index():
+    raw_atoms = [
+        {
+            "elem": "C",
+            "cart": np.zeros(3),
+            "frac": np.zeros(3),
+            "_asym_index": None,
+        },
+        {
+            "elem": "H",
+            "cart": np.ones(3),
+            "frac": np.ones(3),
+        },
+    ]
+    keys = {
+        "Atoms": Atoms,
+        "KEY_OCCUPANCY": "occupancy",
+        "KEY_DISORDER_GROUP": "disorder_group",
+        "KEY_ASSEMBLY": "assembly",
+        "KEY_LABEL": "label",
+        "KEY_SYM_OP_INDEX": "sym_op_index",
+        "KEY_ASYM_ID": "asym_id",
+        "KEY_SITE_SYMMETRY_ORDER": "site_symmetry_order",
+        "KEY_IMAGE_SHIFT": "image_shift",
+        "KEY_UISO": "uiso",
+        "KEY_U_CART": "u_cart",
+    }
+
+    atoms = molcrys_bridge._ase_atoms_from_raw(raw_atoms, np.eye(3), keys)
+
+    assert atoms.arrays["asym_id"].tolist() == [0, 1]
 
 
 def _site(global_index: int, local_index: int, position, image_shift=(0, 0, 0)):
