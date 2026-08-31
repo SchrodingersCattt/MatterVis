@@ -14,6 +14,7 @@ frontends.
 
 ## Key Features
 
+- **ASCII-first chemistry TUI** — A non-visual model can rotate the projected structure, select stable atom IDs, traverse bonds, and read MolCrysKit names, line notation, CIP descriptors, crystal enantiomer composition, warnings, and evidence without treating JSON as the primary observation
 - **Agent-ready CLI** — Five explicit subcommands (`inspect`, `capabilities`, `render`, `serve`, `tui`) separate bounded diagnosis, dependency preflight, browser-free static output, Web service, and terminal interaction
 - **Browser Viewer** — Drag-and-drop CIF upload and interactive 3D display with `Mesh3d` atoms and bonds. `Scatter3d` fast rendering is used only when explicitly selected; atom count never changes the representation
 - **Coordination Topology** — Automatic coordination-number detection via the nearest-neighbour gap, continuous shape measure (CShM) classification against 12 ideal polyhedra (CN 4–12), planarity RMS, and prism/antiprism twist analysis
@@ -97,6 +98,9 @@ does not fall back to private MolCrysKit fields or local chemistry heuristics.
 Install MatterVis, then render a crystal structure with a single command:
 
 ```bash
+# Primary terminal observation and chemistry inspection
+mat-vis tui structure.cif
+
 # PNG with default ball-and-stick style
 mat-vis inspect structure.cif --json
 mat-vis render structure.cif -o figure.png --backend cpu --check --json
@@ -153,11 +157,11 @@ mat-vis tui --help
 
 The main subcommands cover:
 
-- `mat-vis inspect ... --json` — bounded structure/source metadata for agents
+- `mat-vis tui ...` — ASCII structure observation, deterministic atom selection, and chemistry inspector for non-visual agents
+- `mat-vis inspect ... --json` — optional bounded structure/source metadata for programmatic callers
 - `mat-vis capabilities ... --json` — availability and exact install commands
 - `mat-vis render ...` — render atomistic structures and trajectories from CIF, Cube, VASP, XYZ, ASE, and LAMMPS inputs to PNG/PDF/SVG/HTML/GIF/MP4
 - `mat-vis serve ...` — launch the interactive Dash browser viewer with drag-and-drop CIF upload, topology analysis, and REST + WebSocket API
-- `mat-vis tui ...` — terminal-based crystal structure viewer for headless servers and SSH sessions
 
 ## Documentation
 

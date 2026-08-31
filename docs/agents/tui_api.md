@@ -5,6 +5,13 @@ MatterVis terminal view semantically. It shares the terminal renderer and
 canonical `CrystalIR`/MolCrysKit loader path with `mat-vis tui`; it is **not** an
 HTTP service and it does not create a second chemistry or render pipeline.
 
+When the installed MolCrysKit exposes its chemistry contract, the loader also
+copies stable atom identities, bond order/type, entity dimensionality,
+stereochemical descriptors, CIP order, generated names, linear notation,
+crystal enantiomer composition, warnings, and evidence into immutable
+`CrystalChemistryRecords`. MatterVis does not infer any of those values from
+screen distances. Older MolCrysKit releases leave `CrystalIR.chemistry` unset.
+
 ```python
 from mat_viewer.tui import TerminalViewController
 
@@ -26,7 +33,7 @@ payload = observation.as_dict()
   Snapshot-registry operations (`save_view`, `list_views`) do not alter active
   view state and therefore do not increment it.
 - `observe()` returns `TerminalObservation` with schema
-  `mattervis.tui.observation/v1`. `as_dict()` is JSON-safe.
+  `mattervis.tui.observation/v2`. `as_dict()` is JSON-safe.
 
 The structured observation returns terminal frame text, state, title, scoped
 canonical/display/visible counts, capabilities, and warnings. It intentionally
@@ -43,6 +50,11 @@ front/back answers, collision scores, or a recommended camera.
 | `pan(dx=..., dy=...)`, `zoom(factor=...)` | Move/crop the stable terminal viewport. |
 | `fit(target="all"\|"focus")` | Explicitly refit; orbit and display toggles do not refit. |
 | `set_display(...)` | Partial absolute update for `display_level`, `label_mode`, `show_cell`, `show_bonds`, `show_minor`, and `mono`. |
+| `set_selection_mode(active)` | Enter or leave atom selection while retaining the current stable atom identity. |
+| `select_atom(reference)`, `select_next(step=...)` | Select by exact reference or traverse visible atoms in stable atom-id order. |
+| `select_direction(dx=..., dy=...)`, `select_screen(row=..., col=...)` | Select from the retained projection hit map; no chemistry is inferred from screen distance. |
+| `select_neighbor(step=...)` | Traverse the manifested `CrystalIR.bonds` topology. Read `topology_provenance.source` in local inspection (also shown in the inspector's `BONDS` header): CIF input reports `molcryskit`; non-CIF adapters may report `distance_heuristic`. |
+| `pin_selection()`, `clear_selection()` | Keep a highlight after leaving Select mode or clear it explicitly. |
 | `focus_local(reference, bond_depth=1)` | Fit one exact displayed atom and its manifested bond neighborhood. |
 | `reset_view()` | Restore startup camera and all-view framing while preserving display settings. |
 
@@ -64,8 +76,33 @@ cell/bond/minor visibility. This prevents the previous auto-fit “breathing”.
 - A label means every currently manifested matching source/display copy; callers
   needing one copy must pass `display_copy_id`.
 - `save_view(name, overwrite=False)`, `restore_view(name)`, and `list_views()`
-  preserve camera, display, focus, and stable fit bounds. Snapshots never store
-  structure data or chemistry results.
+preserve camera, display, focus, selection, and stable fit bounds. Snapshots never store
+structure data or chemistry results.
+
+The compositor retains a `ProjectedAtomHit` for every visible atom using the
+same projection and viewport as the ASCII frame. Selection is held by the
+manifested copy and carries the stable MolCrysKit `atom_id`; camera rotation
+therefore moves `[C12]` without changing which atom is selected. Brackets are
+part of the plain text, so selection remains legible when ANSI color is off.
+
+Selecting an atom opens a chemistry inspector. At terminal widths of 100 or
+more it occupies a right-hand column; narrower terminals place the identical
+plain-text inspector below the viewport. It reports site provenance,
+occupancy/disorder, coordinates, MolCrysKit atom and entity records, manifested
+distances/angles, MCK bond semantics, ring provenance, stereochemical status,
+CIP order, generated IUPAC name or composition description, nomenclature
+standard/version and rule trace, OpenSMILES or MCK-LN fidelity, crystal
+enantiomer counts, deposited CIF names, and absolute-structure parameters with
+their standard uncertainties. Missing MCK records are printed as `unavailable`;
+the inspector never fills gaps from screen distances.
+
+MolCrysKit inference or ambiguity warnings remain in a one-line warning bar
+above the main viewport. `:why` expands the evidence, status, retained
+alternative count, crystal-stereo reason, and complete warning text. Deposited
+CIF systematic/common names remain explicitly labelled as source metadata and
+are not presented as newly generated IUPAC names. `:name` expands the actual
+MCK naming system, fixed standard version, result kind/PIN claim, and rule
+trace.
 
 ## Analytical inspection
 
@@ -106,8 +143,13 @@ site is ordered or major.
 
 `mat-vis tui` retains keyboard control through the same controller:
 
-- `q/e`, `w/s`, `a/d`: yaw/pitch/roll.
-- arrows or `i/j/k/l`: pan.
+- `q/e`, `w/z`, `a/d`: yaw/pitch/roll.
+- Outside Select mode, arrows or `i/j/k/l`: pan.
+- `s`: strict toggle for entering/leaving Select mode. In Select mode, `w`/`z`
+  still orbit pitch; arrows choose the nearest atom in that projected direction,
+  `Tab`/`Shift+Tab` traverse stable atom IDs, `[`/`]` traverse manifested bond
+  neighbors, `Enter` pins, and `Esc` clears only the atom selection.
+- Clicking the canvas selects the nearest projected atom.
 - `u` zooms out; `o` zooms in. Existing `+/-` and `[/]` aliases remain.
 - `p`, `c`, `b`, `t`, `m`, `n`, `Shift+L`, `r`: projection, cell, bonds,
   labels, monochrome, minor disorder, display level, and reset.
@@ -121,20 +163,30 @@ controller observation is the machine-readable local API.
 
 Press `:` in `mat-vis tui` to open a one-line command prompt:
 
-- `:select A B ...`, `:clear`
+- `:select C12`, `:next atom`, `:clear`
+- `:inspect [C12]`, `:stereo [C12]`, `:name [C12]`, `:why [C12]`
 - `:focus N9 [bond_depth]`
 - `:distance A B [direct|mic]`
 - `:angle A B C [direct|mic]`
 - `:dihedral A B C D [direct|mic_chain]`
 - `:help`
 
+Supplying a label to `:inspect`, `:stereo`, `:name`, or `:why` intentionally
+makes that exact visible atom the primary selection so the ASCII highlight and
+inspector cannot disagree. Hidden minor-disorder atoms must first be exposed
+with `n`/`show_minor=True`. Omitting the label reads the current selection.
+`:clear` clears both the primary selection and local focus; `Esc` only clears
+the primary selection.
+
 Measurements use the same controller methods as programmatic callers; the UI
-does not implement a second geometry path. Command results are transient view
-text and do not mutate the source structure or manifested topology.
+does not implement a second geometry path. Each measurement command requires
+all atom labels explicitly on the same command line; it never consumes an old
+primary selection as a hidden argument. Command results are transient view text
+and do not mutate the source structure or manifested topology.
 
 ## Visual verification artifacts
 
 The checked-in `verification_screens/tui_controller/` text frames are generated
 by `scripts/10_tui_controller_visuals.py`. They cover initial/orbited mono
 views, focused mono context, disorder-visible molecule mode, and ANSI-colour
-molecule mode for DAP-4 at 80×22.
+molecule mode for DAP-4 at 80×22, plus an active monochrome atom selection.

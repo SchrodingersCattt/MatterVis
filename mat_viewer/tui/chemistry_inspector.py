@@ -1,0 +1,423 @@
+"""Plain-text chemistry inspector over immutable MolCrysKit records."""
+
+from __future__ import annotations
+
+from collections import Counter
+
+from .inspection import inspect_local_geometry
+from .text import terminal_text
+
+
+def chemistry_warnings(crystal) -> tuple[str, ...]:
+    """Return warnings that must remain visible in the primary TUI view."""
+    chemistry = crystal.chemistry
+    if chemistry is None:
+        return (
+            "CHEMISTRY NOT AVAILABLE: no MolCrysKit chemistry records for this structure",
+        )
+    values = list(chemistry.warnings)
+    if chemistry.status not in {"explicit", "confirmed"}:
+        values.insert(
+            0,
+            f"CHEMISTRY {chemistry.status.upper()}: use :why for evidence and alternatives",
+        )
+    return tuple(dict.fromkeys(str(value) for value in values))
+
+
+def format_atom_inspector(crystal, index: int, *, view: str = "full") -> str:
+    """Format one selected atom without performing chemical inference."""
+    if view not in {"full", "stereo", "why", "name"}:
+        raise ValueError("inspector view must be full, stereo, why, or name")
+    if not 0 <= index < len(crystal.atoms):
+        raise ValueError("selected atom index is outside the displayed structure")
+    atom = crystal.atoms[index]
+    chemistry = crystal.chemistry
+    atom_record = chemistry.atom(atom.atom_id) if chemistry and atom.atom_id else None
+    entity = (
+        chemistry.entity(atom_record.entity_id)
+        if chemistry is not None and atom_record is not None
+        else None
+    )
+
+    if view == "stereo":
+        return _stereo_text(crystal, atom, atom_record)
+    if view == "why":
+        return _why_text(chemistry, atom, atom_record, entity)
+    if view == "name":
+        return _name_text(chemistry, entity)
+
+    geometry = inspect_local_geometry(
+        crystal,
+        _exact_reference(atom, index),
+        include_angles=True,
+    )
+    lines = [
+        f"ATOM [{terminal_text(atom.display_label)}]",
+        f"id: {terminal_text(atom.atom_id) or 'unavailable'}",
+        _atom_chemistry_line(atom_record),
+        f"occupancy: {atom.occupancy:g}  disorder: {atom.disorder_group or 'ordered'}",
+        (
+            f"site: source={atom.source_index} symop={atom.symmetry_operation_index} "
+            f"image={_shift_text(atom.image_shift)}"
+        ),
+        f"cart A: {_vector_text(atom.cart)}",
+        f"frac: {_vector_text(atom.frac)}",
+        "",
+    ]
+    lines.extend(_entity_lines(chemistry, entity))
+    lines.extend(["", *_bond_lines(crystal, atom, geometry)])
+    lines.extend(["", *_stereo_text(crystal, atom, atom_record).splitlines()])
+    lines.extend(["", *_crystal_lines(crystal, chemistry)])
+    warnings = _relevant_warnings(chemistry, entity)
+    if warnings:
+        lines.extend(["", "WARNINGS", *(f"! {warning}" for warning in warnings)])
+    return "\n".join(lines)
+
+
+def _atom_chemistry_line(record) -> str:
+    if record is None:
+        return "chemistry: unavailable (no MolCrysKit atom record)"
+    isotope = "natural" if record.isotope is None else str(record.isotope)
+    charge = "?" if record.formal_charge is None else _signed(record.formal_charge)
+    oxidation = (
+        "?" if record.oxidation_state is None else _signed(record.oxidation_state)
+    )
+    hydrogens = (
+        "?" if record.implicit_hydrogens is None else str(record.implicit_hydrogens)
+    )
+    radical = (
+        f"  radical-e={record.radical_electrons}" if record.radical_electrons else ""
+    )
+    return (
+        f"element: {record.element}  isotope: {isotope}  charge: {charge}  "
+        f"oxidation: {oxidation}  implicit-H: {hydrogens}{radical} [{record.status}]"
+    )
+
+
+def _entity_lines(chemistry, entity) -> list[str]:
+    if chemistry is None or entity is None:
+        return ["ENTITY", "unavailable (MolCrysKit entity record not attached)"]
+    dimension = "?" if entity.dimension is None else f"{entity.dimension}D"
+    charge = "?" if entity.net_charge is None else _signed(entity.net_charge)
+    lines = [
+        "ENTITY",
+        f"{entity.entity_id}  {entity.kind}  dimension={dimension}",
+        f"formula: {_entity_formula(chemistry, entity)}  charge={charge} [{entity.status}]",
+    ]
+    if entity.translation_generators:
+        lines.append(
+            "translations: "
+            + ", ".join(_shift_text(vector) for vector in entity.translation_generators)
+        )
+    lines.extend(_name_lines(chemistry, entity))
+    if entity.line_notation is None:
+        lines.append("line notation: unavailable (no MCK line-notation record)")
+    else:
+        notation = entity.line_notation
+        fidelity = "lossless" if notation.lossless else "lossy"
+        lines.append(
+            f"line notation [{notation.dialect} {notation.version}; {fidelity}]: "
+            f"{terminal_text(notation.value)}"
+        )
+    return lines
+
+
+def _bond_lines(crystal, atom, geometry) -> list[str]:
+    provenance = geometry["topology_provenance"]
+    lines = [
+        f"BONDS ({geometry['coordination_number']}; source={provenance['source']})"
+    ]
+    chemistry = crystal.chemistry
+    bond_index = _bond_index(chemistry)
+    for bond in geometry["bonds"]:
+        neighbor_id = bond.get("neighbor_atom_id", "")
+        chemical_bond = bond_index.get(
+            (
+                atom.atom_id,
+                neighbor_id,
+                tuple(bond["rendered_image_relation"]),
+            )
+        )
+        lines.append(
+            f"- {bond['neighbor_label']}  {_bond_semantics(chemical_bond)}  "
+            f"{bond['mic_distance']:.3f} A image={_shift_text(tuple(bond['nearest_image_shift']))}"
+        )
+    if not geometry["bonds"]:
+        lines.append("- none")
+    lines.append("coordination geometry: unavailable (not supplied by MolCrysKit)")
+    ring_lines = _ring_lines(crystal, atom.source_index)
+    lines.append("rings: " + ("; ".join(ring_lines) if ring_lines else "none reported"))
+    if geometry["angles"]:
+        angles = ", ".join(
+            f"{'-'.join(item['atoms'])}={item['angle_deg']:.1f} deg"
+            for item in geometry["angles"][:6]
+        )
+        if len(geometry["angles"]) > 6:
+            angles += f", +{len(geometry['angles']) - 6} more"
+        lines.append(f"angles: {angles}")
+    return lines
+
+
+def _stereo_text(crystal, atom, record) -> str:
+    lines = [f"STEREO [{terminal_text(atom.display_label)}]"]
+    if record is None:
+        lines.append("unavailable: no MolCrysKit stereochemistry record")
+        return "\n".join(lines)
+    if record.stereo_kind is None:
+        lines.append("not identified as a supported stereogenic unit")
+        return "\n".join(lines)
+    descriptor = record.stereo_descriptor or "indeterminate"
+    lines.append(
+        f"{record.stereo_kind}: {descriptor} [{record.stereo_status or record.status}]"
+    )
+    if record.cip_order:
+        labels_by_id = {
+            item.atom_id: terminal_text(item.display_label)
+            for item in crystal.atoms
+            if item.atom_id
+        }
+        labels = [
+            _atom_label_for_id(labels_by_id, atom_id) for atom_id in record.cip_order
+        ]
+        lines.append("CIP: " + " > ".join(labels))
+    if record.stereo_reason:
+        lines.append("reason: " + terminal_text(record.stereo_reason))
+    return "\n".join(lines)
+
+
+def _why_text(chemistry, atom, record, entity) -> str:
+    lines = [f"WHY [{terminal_text(atom.display_label)}]"]
+    if chemistry is None:
+        return "\n".join([*lines, "MolCrysKit chemistry records are unavailable."])
+    lines.append(f"crystal chemistry: {chemistry.status}; source={chemistry.source}")
+    lines.append(f"alternative interpretations retained: {chemistry.alternative_count}")
+    if chemistry.crystal_stereo is not None:
+        lines.append(
+            "crystal stereo: "
+            f"{chemistry.crystal_stereo.classification} "
+            f"[{chemistry.crystal_stereo.status}]"
+        )
+        lines.append(f"crystal stereo reason: {chemistry.crystal_stereo.reason}")
+        lines.extend(
+            f"crystal stereo evidence: {value}"
+            for value in chemistry.crystal_stereo.evidence
+        )
+    if record is not None:
+        lines.append(f"atom status: {record.status}")
+        lines.extend(f"atom evidence: {value}" for value in record.evidence)
+        if record.stereo_reason:
+            lines.append(f"stereo reason: {record.stereo_reason}")
+    if entity is not None:
+        lines.append(f"entity status: {entity.status}")
+        lines.extend(f"entity evidence: {value}" for value in entity.evidence)
+    lines.extend(f"crystal evidence: {value}" for value in chemistry.evidence)
+    lines.extend(f"WARNING: {value}" for value in _relevant_warnings(chemistry, entity))
+    return "\n".join(lines)
+
+
+def _name_text(chemistry, entity) -> str:
+    lines = ["IUPAC NAME"]
+    if chemistry is None:
+        return "\n".join(
+            [*lines, "unavailable: MolCrysKit chemistry records are absent"]
+        )
+    lines.extend(_name_lines(chemistry, entity, expanded=True))
+    if entity is not None:
+        lines.append(f"entity: {entity.entity_id}")
+    return "\n".join(lines)
+
+
+def _name_lines(chemistry, entity=None, *, expanded: bool = False) -> list[str]:
+    if entity is not None and entity.name is not None:
+        record = entity.name
+        if record.preferred is True:
+            pin = "PIN"
+        elif record.preferred is False:
+            pin = "not asserted as PIN"
+        else:
+            pin = "PIN not applicable"
+        lines = [f"IUPAC name: {terminal_text(record.name)} [{record.status}; {pin}]"]
+        if expanded:
+            lines.append(
+                f"system: {record.nomenclature}; {record.standard} {record.version}"
+            )
+            lines.append(f"result kind: {record.kind}")
+            lines.extend(f"rule: {terminal_text(value)}" for value in record.rule_trace)
+            lines.extend(
+                f"naming warning: {terminal_text(value)}" for value in record.warnings
+            )
+        lines.extend(
+            f"CIF {kind} name: {terminal_text(value)}"
+            for kind, value in chemistry.source_names
+        )
+        return lines
+    # CIF-deposited names are provenance, not output from the future MCK
+    # standards-traced naming engine. Keep that distinction visible.
+    if not chemistry.source_names:
+        return ["IUPAC name: unavailable (no MCK naming record)"]
+    return [
+        "IUPAC name: unavailable (source CIF names are not revalidated)",
+        *(
+            f"CIF {kind} name: {terminal_text(value)}"
+            for kind, value in chemistry.source_names
+        ),
+    ]
+
+
+def _crystal_lines(crystal, chemistry) -> list[str]:
+    lines = [
+        "CRYSTAL",
+        f"formula: {terminal_text(crystal.canonical_formula or crystal.formula)}",
+        f"space group: {terminal_text(crystal.spacegroup) or 'unavailable'}",
+    ]
+    if chemistry is None:
+        lines.append("enantiomer composition: unavailable")
+        lines.append("absolute structure evidence: unavailable")
+        return lines
+    if chemistry.crystal_name is not None:
+        lines.append(
+            f"crystal name: {terminal_text(chemistry.crystal_name.name)} "
+            f"[{chemistry.crystal_name.kind}; {chemistry.crystal_name.status}]"
+        )
+    stereo = chemistry.crystal_stereo
+    if stereo is None:
+        lines.append("enantiomer composition: unavailable (no MCK crystal stereo report)")
+    else:
+        lines.append(
+            f"enantiomer composition: {stereo.classification} [{stereo.status}]"
+        )
+        lines.append(f"symmetry category: {stereo.symmetry_category}")
+        for count in stereo.enantiomer_counts:
+            mirror = count.mirror_entity_id or "none"
+            lines.append(
+                "enantiomer count: "
+                f"{count.representative_entity_id}={count.count}; "
+                f"mirror {mirror}={count.mirror_count}"
+            )
+        lines.append(f"composition reason: {terminal_text(stereo.reason)}")
+    if chemistry.absolute_configuration:
+        lines.append(f"CIF absolute configuration: {chemistry.absolute_configuration}")
+    if chemistry.absolute_structure:
+        for record in chemistry.absolute_structure:
+            uncertainty = (
+                ""
+                if record.standard_uncertainty is None
+                else f"; su={record.standard_uncertainty:g}"
+            )
+            lines.append(
+                f"{record.method}: {record.raw} (value={record.value:g}{uncertainty})"
+            )
+    else:
+        lines.append("absolute structure evidence: not reported")
+    if chemistry.absolute_structure_details:
+        lines.append(
+            f"absolute structure details: {chemistry.absolute_structure_details}"
+        )
+    return lines
+
+
+def _bond_index(chemistry) -> dict[tuple[str, str, tuple[int, int, int]], object]:
+    if chemistry is None:
+        return {}
+    index = {}
+    for bond in chemistry.bonds:
+        shift = tuple(bond.atom2_image_shift)
+        index[(bond.atom1_id, bond.atom2_id, shift)] = bond
+        index[(bond.atom2_id, bond.atom1_id, tuple(-value for value in shift))] = bond
+    return index
+
+
+def _bond_semantics(record) -> str:
+    if record is None:
+        return "chemistry-unavailable"
+    order = "?" if record.order is None else f"{record.order:g}"
+    aromatic = " aromatic" if record.aromatic else ""
+    stereo = (
+        "" if record.stereochemistry is None else f" stereo={record.stereochemistry}"
+    )
+    return f"{record.kind} order={order}{aromatic}{stereo}"
+
+
+def _ring_lines(crystal, source_index: int) -> list[str]:
+    records = []
+    for ring in crystal.metadata.get("rings", ()):
+        if source_index not in ring.get("atom_indices", ()):
+            continue
+        aromatic = "aromatic" if ring.get("is_aromatic") else "non-aromatic"
+        planar = "planar" if ring.get("is_planar") else "non-planar"
+        records.append(f"{ring.get('size', '?')}-member {aromatic} {planar}")
+    return records
+
+
+def _entity_formula(chemistry, entity) -> str:
+    records = [chemistry.atom(atom_id) for atom_id in entity.atom_ids]
+    counter: Counter[str] = Counter()
+    for record in records:
+        if record is None:
+            continue
+        symbol = (
+            record.element
+            if record.isotope is None
+            else f"[{record.isotope}{record.element}]"
+        )
+        counter[symbol] += 1
+        if record.implicit_hydrogens:
+            counter["H"] += record.implicit_hydrogens
+    ordered = sorted(
+        counter,
+        key=_formula_sort_key,
+    )
+    return (
+        "".join(
+            symbol + (str(counter[symbol]) if counter[symbol] != 1 else "")
+            for symbol in ordered
+        )
+        or "?"
+    )
+
+
+def _formula_sort_key(symbol: str) -> tuple[int, str, str]:
+    bare = symbol
+    if symbol.startswith("[") and symbol.endswith("]"):
+        bare = "".join(character for character in symbol if character.isalpha())
+    return (0 if bare == "C" else 1 if bare == "H" else 2, bare, symbol)
+
+
+def _atom_label_for_id(labels_by_id: dict[str, str], atom_id: str) -> str:
+    if atom_id.endswith(":implicit-H"):
+        parent_id = atom_id.removesuffix(":implicit-H")
+        parent = labels_by_id.get(parent_id, terminal_text(parent_id))
+        return f"H(implicit on {parent})"
+    return labels_by_id.get(atom_id, terminal_text(atom_id))
+
+
+def _relevant_warnings(chemistry, entity) -> tuple[str, ...]:
+    if chemistry is None:
+        return ("MolCrysKit chemistry records are unavailable",)
+    values = [*chemistry.warnings]
+    if entity is not None:
+        values.extend(entity.warnings)
+    return tuple(dict.fromkeys(terminal_text(value) for value in values))
+
+
+def _exact_reference(atom, index: int):
+    if atom.display_copy_id:
+        return {"display_copy_id": atom.display_copy_id}
+    if atom.source_index >= 0:
+        return atom.source_index
+    return {"label": atom.label} if atom.label else index
+
+
+def _signed(value: int) -> str:
+    return f"{value:+d}"
+
+
+def _shift_text(value) -> str:
+    return "(" + ",".join(f"{int(item):+d}" for item in value) + ")"
+
+
+def _vector_text(value) -> str:
+    return "(" + ", ".join(f"{float(item):.4f}" for item in value) + ")"
+
+
+__all__ = ["chemistry_warnings", "format_atom_inspector"]

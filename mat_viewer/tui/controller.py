@@ -11,11 +11,9 @@ from ..math.camera import Camera, ProjectionMode, project_points
 from .compositor import (
     DISPLAY_LEVELS,
     LABEL_MODES,
-    Viewport,
-    _compute_viewport,
     compose_frame,
-    viewport_from_bounds,
 )
+from .chemistry_inspector import chemistry_warnings, format_atom_inspector
 from .inspection import (
     inspect_atoms,
     inspect_local_geometries,
@@ -28,11 +26,19 @@ from .inspection import (
     resolve_molecule_reference,
 )
 from .observation import build_observation_scope, build_terminal_title
+from .projection import (
+    ProjectedAtomHit,
+    Viewport,
+    _compute_viewport,
+    build_atom_hit_map,
+    viewport_from_bounds,
+)
 from .state import (
     TerminalCameraState,
     TerminalDisplayState,
     TerminalFocusState,
     TerminalObservation,
+    TerminalSelectionState,
     TerminalViewportState,
     TerminalViewSnapshot,
     TerminalViewState,
@@ -56,6 +62,15 @@ class TerminalViewController:
         "pan",
         "zoom",
         "set_display",
+        "set_selection_mode",
+        "select_atom",
+        "select_next",
+        "select_neighbor",
+        "select_direction",
+        "select_screen",
+        "pin_selection",
+        "clear_selection",
+        "inspect_selected",
         "focus_atom",
         "focus_molecule",
         "focus_selection",
@@ -98,12 +113,24 @@ class TerminalViewController:
             self.camera = replace(self.camera, target=self._all_view_center())
         self._initial_camera = self._copy_camera(self.camera)
         self._focus = TerminalFocusState()
-        self._snapshots: dict[str, tuple[Camera, TerminalDisplayState, TerminalFocusState, Viewport]] = {}
+        self._selection = TerminalSelectionState()
+        self._snapshots: dict[
+            str,
+            tuple[
+                Camera,
+                TerminalDisplayState,
+                TerminalFocusState,
+                TerminalSelectionState,
+                Viewport,
+            ],
+        ] = {}
         self._revision = 0
         self._fit_viewport = self._fit_all_viewport()
 
     @classmethod
-    def from_file(cls, path: str, *, display_mode: str = "auto", **kwargs) -> "TerminalViewController":
+    def from_file(
+        cls, path: str, *, display_mode: str = "auto", **kwargs
+    ) -> "TerminalViewController":
         """Load a structure through the canonical TUI loader."""
         from .loader_adapter import load_for_tui
 
@@ -157,6 +184,7 @@ class TerminalViewController:
             camera=camera,
             display=display,
             focus=self._focus,
+            selection=self._selection,
             viewport=viewport_state,
         )
 
@@ -181,6 +209,7 @@ class TerminalViewController:
             pan_y=self.camera.pan_y,
             display_level=self._display_level,
             viewport=self._fit_viewport,
+            selected_display_index=self._selection.display_index,
         )
         title = build_terminal_title(
             self.crystal,
@@ -196,6 +225,7 @@ class TerminalViewController:
             frame=frame,
             scope=build_observation_scope(self.crystal, state.display),
             capabilities=self.CAPABILITIES,
+            warnings=chemistry_warnings(self.crystal),
         )
 
     def set_camera(
@@ -219,13 +249,20 @@ class TerminalViewController:
                 roll=roll,
             )
         if projection is not None:
-            candidate = replace(candidate, projection=self._validate_projection(projection))
+            candidate = replace(
+                candidate, projection=self._validate_projection(projection)
+            )
         if zoom is not None:
             candidate = self._with_zoom(candidate, zoom)
         if pan_x is not None or pan_y is not None:
-            values = (pan_x if pan_x is not None else candidate.pan_x, pan_y if pan_y is not None else candidate.pan_y)
+            values = (
+                pan_x if pan_x is not None else candidate.pan_x,
+                pan_y if pan_y is not None else candidate.pan_y,
+            )
             self._validate_finite("pan", *values)
-            candidate = replace(candidate, pan_x=float(values[0]), pan_y=float(values[1]))
+            candidate = replace(
+                candidate, pan_x=float(values[0]), pan_y=float(values[1])
+            )
         target_changed = target is not None
         if target_changed:
             target_array = np.asarray(target, dtype=float)
@@ -237,7 +274,172 @@ class TerminalViewController:
             self._fit_viewport = self._fit_all_viewport()
         return self._changed()
 
-    def orbit(self, *, yaw_deg: float = 0.0, pitch_deg: float = 0.0, roll_deg: float = 0.0) -> TerminalObservation:
+    def atom_hit_map(self) -> tuple[ProjectedAtomHit, ...]:
+        """Return visible atom positions from the exact current projection."""
+        points, depth = project_points(self.camera, self.crystal.cart_coords)
+        return build_atom_hit_map(
+            self.crystal,
+            points,
+            depth,
+            self._effective_viewport(),
+            show_minor=self._show_minor,
+        )
+
+    def set_selection_mode(self, active: bool) -> TerminalObservation:
+        """Enter or leave screen-selection mode without losing the atom."""
+        active = bool(active)
+        if active and self._selection.display_index is None:
+            visible = self._selection_order()
+            if visible:
+                self._selection = self._selection_for_index(visible[0], mode=True)
+            else:
+                self._selection = replace(self._selection, mode=True, pinned=False)
+        else:
+            self._selection = replace(self._selection, mode=active)
+        return self._changed()
+
+    def select_atom(
+        self,
+        reference: str | int | dict[str, Any],
+        *,
+        pinned: bool = False,
+    ) -> TerminalObservation:
+        """Select one deterministic visible copy matching an atom reference."""
+        matches = tuple(
+            index
+            for index in resolve_atom_references(self.crystal, [reference])
+            if self._show_minor or not self.crystal.atoms[index].is_minor
+        )
+        if not matches:
+            raise ValueError("selection has no visible displayed atom")
+        index = min(matches, key=self._selection_sort_key)
+        self._selection = self._selection_for_index(index, mode=True, pinned=pinned)
+        return self._changed()
+
+    def select_next(self, *, step: int = 1) -> TerminalObservation:
+        """Traverse visible atoms in stable chemical-identity order."""
+        order = self._selection_order()
+        if not order:
+            raise ValueError("selection has no visible displayed atom")
+        direction = 1 if step >= 0 else -1
+        current = self._selection.display_index
+        if current not in order:
+            index = order[0] if direction > 0 else order[-1]
+        else:
+            index = order[(order.index(current) + direction) % len(order)]
+        self._selection = self._selection_for_index(index, mode=True)
+        return self._changed()
+
+    def select_neighbor(self, *, step: int = 1) -> TerminalObservation:
+        """Traverse manifested bonds; ``bond_source`` identifies provenance."""
+        current = self._require_selected_index()
+        neighbors: set[int] = set()
+        for bond in self.crystal.bonds:
+            if bond.i == current:
+                neighbors.add(bond.j)
+            elif bond.j == current:
+                neighbors.add(bond.i)
+        visible = sorted(
+            (
+                index
+                for index in neighbors
+                if self._show_minor or not self.crystal.atoms[index].is_minor
+            ),
+            key=self._selection_sort_key,
+        )
+        if not visible:
+            return self.observe()
+        index = visible[0] if step >= 0 else visible[-1]
+        self._selection = self._selection_for_index(index, mode=True)
+        return self._changed()
+
+    def select_direction(self, *, dx: int = 0, dy: int = 0) -> TerminalObservation:
+        """Select the nearest projected atom in one screen-space direction."""
+        if (dx, dy) == (0, 0):
+            raise ValueError("selection direction cannot be zero")
+        hits = self.atom_hit_map()
+        if not hits:
+            raise ValueError("selection has no visible projected atom")
+        current_index = self._selection.display_index
+        current = next(
+            (hit for hit in hits if hit.display_index == current_index), None
+        )
+        if current is None:
+            return self.select_screen(row=self._height // 2, col=self._width // 2)
+        candidates: list[
+            tuple[float, float, float, tuple[Any, ...], ProjectedAtomHit]
+        ] = []
+        for hit in hits:
+            if hit.display_index == current.display_index:
+                continue
+            delta_col = hit.col - current.col
+            delta_row = hit.row - current.row
+            forward = delta_col * dx + delta_row * dy
+            if forward <= 0:
+                continue
+            distance = float(np.hypot(delta_col, delta_row))
+            perpendicular = abs(delta_col * dy - delta_row * dx)
+            candidates.append(
+                (
+                    distance,
+                    perpendicular / max(float(forward), 1.0),
+                    -hit.depth,
+                    self._selection_sort_key(hit.display_index),
+                    hit,
+                )
+            )
+        if not candidates:
+            return self.observe()
+        selected = min(candidates, key=lambda item: item[:-1])[-1]
+        self._selection = self._selection_for_index(selected.display_index, mode=True)
+        return self._changed()
+
+    def select_screen(self, *, row: int, col: int) -> TerminalObservation:
+        """Select the nearest projected atom to a terminal cell."""
+        hits = self.atom_hit_map()
+        if not hits:
+            raise ValueError("selection has no visible projected atom")
+        selected = min(
+            hits,
+            key=lambda hit: (
+                (hit.row - int(row)) ** 2 + (hit.col - int(col)) ** 2,
+                -hit.depth,
+                self._selection_sort_key(hit.display_index),
+            ),
+        )
+        self._selection = self._selection_for_index(selected.display_index, mode=True)
+        return self._changed()
+
+    def pin_selection(self) -> TerminalObservation:
+        """Keep the current atom highlighted after leaving selection mode."""
+        self._require_selected_index()
+        self._selection = replace(self._selection, mode=False, pinned=True)
+        return self._changed()
+
+    def clear_selection(self, *, exit_mode: bool = True) -> TerminalObservation:
+        """Clear the selected atom and optionally leave selection mode."""
+        self._selection = TerminalSelectionState(mode=not exit_mode)
+        return self._changed()
+
+    def selected_reference(self) -> dict[str, str]:
+        """Return an unambiguous reference for the current selected copy."""
+        index = self._require_selected_index()
+        atom = self.crystal.atoms[index]
+        if atom.display_copy_id:
+            return {"display_copy_id": atom.display_copy_id}
+        return {"label": atom.label}
+
+    def inspect_selected(self, *, view: str = "full") -> str:
+        """Return a plain-text chemistry view for the selected atom."""
+        return format_atom_inspector(
+            self.crystal,
+            self._require_selected_index(),
+            view=view,
+        )
+
+    def orbit(
+        self, *, yaw_deg: float = 0.0, pitch_deg: float = 0.0, roll_deg: float = 0.0
+    ) -> TerminalObservation:
         """Orbit around a fixed world +Z up-axis and return the rendered view."""
         self.camera = self.camera.orbit_turntable(
             yaw_deg=float(yaw_deg),
@@ -289,9 +491,13 @@ class TerminalViewController:
             if label_mode is None
             else self._validate_label_mode(label_mode)
         )
-        candidate_show_bonds = self._show_bonds if show_bonds is None else bool(show_bonds)
+        candidate_show_bonds = (
+            self._show_bonds if show_bonds is None else bool(show_bonds)
+        )
         candidate_show_cell = self._show_cell if show_cell is None else bool(show_cell)
-        candidate_show_minor = self._show_minor if show_minor is None else bool(show_minor)
+        candidate_show_minor = (
+            self._show_minor if show_minor is None else bool(show_minor)
+        )
         candidate_mono = self._mono if mono is None else bool(mono)
 
         self._display_level = candidate_display_level
@@ -317,21 +523,31 @@ class TerminalViewController:
         self.camera = replace(self.camera, pan_x=0.0, pan_y=0.0)
         return self._changed()
 
-    def focus_atom(self, references: str | int | dict[str, Any] | list[str | int | dict[str, Any]]) -> TerminalObservation:
+    def focus_atom(
+        self, references: str | int | dict[str, Any] | list[str | int | dict[str, Any]]
+    ) -> TerminalObservation:
         """Fit exact displayed atom references while preserving all visual context."""
         values = references if isinstance(references, list) else [references]
         indices = resolve_atom_references(self.crystal, values)
         return self._set_focus("atom", indices)
 
-    def focus_molecule(self, reference: str | int | dict[str, Any]) -> TerminalObservation:
+    def focus_molecule(
+        self, reference: str | int | dict[str, Any]
+    ) -> TerminalObservation:
         """Fit a source or displayed molecule while preserving all visual context."""
-        return self._set_focus("molecule", resolve_molecule_reference(self.crystal, reference))
+        return self._set_focus(
+            "molecule", resolve_molecule_reference(self.crystal, reference)
+        )
 
-    def focus_selection(self, references: list[str | int | dict[str, Any]]) -> TerminalObservation:
+    def focus_selection(
+        self, references: list[str | int | dict[str, Any]]
+    ) -> TerminalObservation:
         """Focus the supplied external selection without mutating browser selection state."""
         if not references:
             raise ValueError("focus_selection requires at least one atom reference")
-        return self._set_focus("selection", resolve_atom_references(self.crystal, references))
+        return self._set_focus(
+            "selection", resolve_atom_references(self.crystal, references)
+        )
 
     def focus_local(
         self,
@@ -340,11 +556,17 @@ class TerminalViewController:
         bond_depth: int = 1,
     ) -> TerminalObservation:
         """Fit one atom and its manifested bond neighborhood."""
-        if isinstance(bond_depth, bool) or not isinstance(bond_depth, int) or bond_depth < 0:
+        if (
+            isinstance(bond_depth, bool)
+            or not isinstance(bond_depth, int)
+            or bond_depth < 0
+        ):
             raise ValueError("bond_depth must be a non-negative integer")
         centers = resolve_atom_references(self.crystal, [reference])
         if len(centers) != 1:
-            raise ValueError("local focus requires exactly one displayed atom; use display_copy_id to disambiguate")
+            raise ValueError(
+                "local focus requires exactly one displayed atom; use display_copy_id to disambiguate"
+            )
         if not self._show_minor and self.crystal.atoms[centers[0]].is_minor:
             raise ValueError("focus has no visible displayed atoms to fit")
         selected = set(centers)
@@ -358,7 +580,10 @@ class TerminalViewController:
                     neighbors.add(bond.i)
             frontier = neighbors - selected
             selected.update(neighbors)
-        return self._set_focus("local", tuple(index for index in range(self.crystal.n_atoms) if index in selected))
+        return self._set_focus(
+            "local",
+            tuple(index for index in range(self.crystal.n_atoms) if index in selected),
+        )
 
     def clear_focus(self) -> TerminalObservation:
         """Clear active focus and refit all current visible structure."""
@@ -378,6 +603,7 @@ class TerminalViewController:
             self._copy_camera(self.camera),
             display,
             self._focus,
+            self._selection,
             viewport,
         )
         return TerminalViewSnapshot(name=name, state=self.state)
@@ -385,7 +611,7 @@ class TerminalViewController:
     def restore_view(self, name: str) -> TerminalObservation:
         """Restore a previously saved view atomically."""
         try:
-            camera, display, focus, viewport = self._snapshots[name]
+            camera, display, focus, selection, viewport = self._snapshots[name]
         except KeyError as exc:
             raise ValueError(f"unknown snapshot: {name}") from exc
         self.camera = self._copy_camera(camera)
@@ -396,6 +622,7 @@ class TerminalViewController:
         self._show_minor = display.show_minor
         self._display_level = display.display_level
         self._focus = focus
+        self._selection = selection
         self._fit_viewport = self._copy_viewport(viewport)
         return self._changed()
 
@@ -403,27 +630,36 @@ class TerminalViewController:
         """List detached metadata for saved named views in name order."""
         snapshots: list[TerminalViewSnapshot] = []
         for name in sorted(self._snapshots):
-            camera, display, focus, viewport = self._snapshots[name]
+            camera, display, focus, selection, viewport = self._snapshots[name]
             state = TerminalViewState(
                 revision=self._revision,
                 camera=TerminalCameraState(
-                    azimuth=float(camera.azimuth), elevation=float(camera.elevation),
-                    roll=float(camera.roll), target=tuple(float(value) for value in camera.target),
+                    azimuth=float(camera.azimuth),
+                    elevation=float(camera.elevation),
+                    roll=float(camera.roll),
+                    target=tuple(float(value) for value in camera.target),
                     projection=camera.projection.value,
-                    zoom=float(camera.viewport_zoom), pan_x=float(camera.pan_x), pan_y=float(camera.pan_y),
+                    zoom=float(camera.viewport_zoom),
+                    pan_x=float(camera.pan_x),
+                    pan_y=float(camera.pan_y),
                 ),
                 display=display,
                 focus=focus,
+                selection=selection,
                 viewport=self._viewport_state_for(camera, viewport),
             )
             snapshots.append(TerminalViewSnapshot(name=name, state=state))
         return tuple(snapshots)
 
-    def inspect_atom(self, references: list[str | int | dict[str, Any]] | None = None) -> dict[str, Any]:
+    def inspect_atom(
+        self, references: list[str | int | dict[str, Any]] | None = None
+    ) -> dict[str, Any]:
         """Read existing atom provenance; this does not change view state."""
         return inspect_atoms(self.crystal, references, show_minor=self._show_minor)
 
-    def inspect_molecule(self, reference: str | int | dict[str, Any] | None = None) -> dict[str, Any]:
+    def inspect_molecule(
+        self, reference: str | int | dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Read existing MolCrysKit molecule provenance without re-grouping."""
         return inspect_molecules(self.crystal, reference, show_minor=self._show_minor)
 
@@ -534,7 +770,9 @@ class TerminalViewController:
         )
 
     @staticmethod
-    def _viewport_state_for(camera: Camera, viewport: Viewport) -> TerminalViewportState:
+    def _viewport_state_for(
+        camera: Camera, viewport: Viewport
+    ) -> TerminalViewportState:
         effective = viewport_from_bounds(
             viewport.x_min,
             viewport.x_max,
@@ -579,13 +817,21 @@ class TerminalViewController:
         return radius / max(near_distance * fov_scale, 1e-9)
 
     def _fit_indices_viewport(self, indices: tuple[int, ...]) -> Viewport:
-        coords = np.asarray([self.crystal.atoms[index].cart for index in indices], dtype=float)
+        coords = np.asarray(
+            [self.crystal.atoms[index].cart for index in indices], dtype=float
+        )
         points, _ = project_points(self.camera, coords)
         return _compute_viewport(points, [], self._width, self._height)
 
     def _set_focus(self, kind: str, indices: tuple[int, ...]) -> TerminalObservation:
-        matched_ids = tuple(self.crystal.atoms[index].display_copy_id for index in indices)
-        visible = tuple(index for index in indices if self._show_minor or not self.crystal.atoms[index].is_minor)
+        matched_ids = tuple(
+            self.crystal.atoms[index].display_copy_id for index in indices
+        )
+        visible = tuple(
+            index
+            for index in indices
+            if self._show_minor or not self.crystal.atoms[index].is_minor
+        )
         hidden_ids = tuple(
             self.crystal.atoms[index].display_copy_id
             for index in indices
@@ -595,7 +841,9 @@ class TerminalViewController:
         focus = TerminalFocusState(
             kind=kind,
             matched_copy_ids=matched_ids,
-            framed_copy_ids=tuple(self.crystal.atoms[index].display_copy_id for index in frame_indices),
+            framed_copy_ids=tuple(
+                self.crystal.atoms[index].display_copy_id for index in frame_indices
+            ),
             hidden_copy_ids=hidden_ids,
         )
         if not frame_indices:
@@ -608,7 +856,11 @@ class TerminalViewController:
 
     def _focused_frame_indices(self) -> tuple[int, ...]:
         ids = set(self._focus.framed_copy_ids)
-        return tuple(index for index, atom in enumerate(self.crystal.atoms) if atom.display_copy_id in ids)
+        return tuple(
+            index
+            for index, atom in enumerate(self.crystal.atoms)
+            if atom.display_copy_id in ids
+        )
 
     def _expand_frame_indices(self, indices: tuple[int, ...]) -> tuple[int, ...]:
         if self._display_level != "molecule":
@@ -621,13 +873,59 @@ class TerminalViewController:
         if not molecule_indices:
             return indices
         return tuple(
-            index for index, atom in enumerate(self.crystal.atoms)
-            if atom.molecule_index in molecule_indices and (self._show_minor or not atom.is_minor)
+            index
+            for index, atom in enumerate(self.crystal.atoms)
+            if atom.molecule_index in molecule_indices
+            and (self._show_minor or not atom.is_minor)
         )
 
     def _changed(self) -> TerminalObservation:
         self._revision += 1
         return self.observe()
+
+    def _require_selected_index(self) -> int:
+        index = self._selection.display_index
+        if index is None or not (0 <= index < len(self.crystal.atoms)):
+            raise ValueError("no atom is selected")
+        return index
+
+    def _selection_for_index(
+        self,
+        index: int,
+        *,
+        mode: bool,
+        pinned: bool = False,
+    ) -> TerminalSelectionState:
+        atom = self.crystal.atoms[index]
+        return TerminalSelectionState(
+            mode=mode,
+            pinned=pinned,
+            display_index=index,
+            display_copy_id=atom.display_copy_id or None,
+            atom_id=atom.atom_id or None,
+            label=atom.display_label,
+        )
+
+    def _selection_order(self) -> list[int]:
+        return sorted(
+            (
+                index
+                for index, atom in enumerate(self.crystal.atoms)
+                if self._show_minor or not atom.is_minor
+            ),
+            key=self._selection_sort_key,
+        )
+
+    def _selection_sort_key(self, index: int) -> tuple[Any, ...]:
+        atom = self.crystal.atoms[index]
+        return (
+            atom.atom_id or atom.label or atom.element,
+            atom.image_shift != (0, 0, 0),
+            atom.image_shift,
+            atom.source_index if atom.source_index >= 0 else index,
+            atom.display_copy_id,
+            index,
+        )
 
     @staticmethod
     def _copy_camera(camera: Camera) -> Camera:
@@ -637,9 +935,13 @@ class TerminalViewController:
     @staticmethod
     def _copy_viewport(viewport: Viewport) -> Viewport:
         return Viewport(
-            x_min=float(viewport.x_min), x_max=float(viewport.x_max),
-            y_min=float(viewport.y_min), y_max=float(viewport.y_max),
-            scale=float(viewport.scale), width=int(viewport.width), height=int(viewport.height),
+            x_min=float(viewport.x_min),
+            x_max=float(viewport.x_max),
+            y_min=float(viewport.y_min),
+            y_max=float(viewport.y_max),
+            scale=float(viewport.scale),
+            width=int(viewport.width),
+            height=int(viewport.height),
         )
 
     @staticmethod
@@ -681,7 +983,9 @@ class TerminalViewController:
         try:
             return ProjectionMode(str(projection))
         except ValueError as exc:
-            raise ValueError("projection must be 'orthographic' or 'perspective'") from exc
+            raise ValueError(
+                "projection must be 'orthographic' or 'perspective'"
+            ) from exc
 
     @staticmethod
     def _with_zoom(camera: Camera, zoom: float) -> Camera:

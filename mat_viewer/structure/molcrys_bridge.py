@@ -18,9 +18,21 @@ import copy
 import re
 
 import numpy as np
+import molcrys_kit
 from molcrys_kit.utils.geometry import cart_to_frac, frac_to_cart
 
 from ..style.disorder import atom_is_minor
+from .chemistry_records import (
+    AbsoluteStructureRecord,
+    AtomChemistryRecord,
+    BondChemistryRecord,
+    CrystalChemistryRecords,
+    CrystalStereoRecord,
+    EnantiomerCountRecord,
+    EntityChemistryRecord,
+    LineNotationRecord,
+    NamingRecord,
+)
 
 
 class StructureContractError(RuntimeError):
@@ -94,6 +106,20 @@ def _require_molcryskit():
         "KEY_IMAGE_SHIFT": KEY_IMAGE_SHIFT,
         "KEY_UISO": KEY_UISO,
         "KEY_U_CART": KEY_U_CART,
+        "infer_chemistry": getattr(molcrys_kit, "infer_chemistry", None),
+        "assign_stereochemistry": getattr(
+            molcrys_kit,
+            "assign_stereochemistry",
+            None,
+        ),
+        "analyze_crystal_stereochemistry": getattr(
+            molcrys_kit,
+            "analyze_crystal_stereochemistry",
+            None,
+        ),
+        "name_entity": getattr(molcrys_kit, "name_entity", None),
+        "name_crystal": getattr(molcrys_kit, "name_crystal", None),
+        "to_line_notation": getattr(molcrys_kit, "to_line_notation", None),
     }
 
 
@@ -297,6 +323,7 @@ class CrystalAnalysis:
         site_records=None,
         formula_unit_selection=None,
         ring_records=None,
+        chemistry=None,
     ):
         self.crystal = crystal
         self.mol_indices = mol_indices
@@ -325,6 +352,7 @@ class CrystalAnalysis:
         # stable sorted identity and the edge-connected traversal are mapped
         # to raw/global source indices before any display copies are created.
         self.ring_records: list[dict] = list(ring_records or [])
+        self.chemistry: CrystalChemistryRecords | None = chemistry
 
 
 def require_structure_contract(
@@ -421,11 +449,278 @@ def atoms_with_site_provenance(raw_atoms, analysis):
         atom.setdefault("_molecule_local_index", int(record.local_index))
         atom.setdefault("_wrapped_frac", frac - np.floor(frac))
         atom.setdefault("_mck_image_shift", list(record.image_shift))
+        if getattr(record, "site_id", None):
+            atom["_mck_atom_id"] = str(record.site_id)
     return atoms
 
 
-def analyze_crystal(crystal) -> CrystalAnalysis:
-    """Build MatterVis lookup tables from MolCrysKit public contracts only."""
+def _chemistry_records(crystal, mk) -> CrystalChemistryRecords | None:
+    """Copy MolCrysKit chemistry/stereo reports without re-deriving them."""
+    infer_chemistry = mk.get("infer_chemistry")
+    assign_stereochemistry = mk.get("assign_stereochemistry")
+    if not callable(infer_chemistry) or not callable(assign_stereochemistry):
+        return None
+
+    chemistry = getattr(crystal, "chemistry", None) or infer_chemistry(crystal)
+    source_by_atom_id = {
+        str(atom_id): source_index
+        for source_index, atom_id in enumerate(chemistry.atom_ids_by_global_index)
+    }
+    atom_records: list[AtomChemistryRecord] = []
+    bond_records: list[BondChemistryRecord] = []
+    entity_records: list[EntityChemistryRecord] = []
+    stereo_reports = {}
+    warnings = list(str(value) for value in chemistry.warnings)
+    cif_chemistry = dict(getattr(crystal, "metadata", {}).get("cif_chemistry", {}))
+    name_entity = mk.get("name_entity")
+    to_line_notation = mk.get("to_line_notation")
+
+    for entity in chemistry.components:
+        try:
+            stereo_report = assign_stereochemistry(entity, entity.embedding)
+        except (TypeError, ValueError) as exc:
+            stereo_report = None
+            warnings.append(f"{entity.entity_id}: stereochemistry unavailable: {exc}")
+        if stereo_report is not None:
+            stereo_reports[str(entity.entity_id)] = stereo_report
+        stereo_by_atom = {
+            descriptor.center_atom_id: descriptor
+            for descriptor in getattr(stereo_report, "descriptors", ())
+        }
+        entity_evidence = _evidence_text(getattr(entity, "evidence", ()))
+        dimension = getattr(entity, "dimension", None)
+        net_charge = getattr(
+            entity,
+            "net_charge",
+            getattr(entity, "net_charge_per_repeat", None),
+        )
+        entity_name = None
+        if callable(name_entity):
+            try:
+                entity_name = _naming_record(name_entity(entity))
+            except (TypeError, ValueError) as exc:
+                warnings.append(f"{entity.entity_id}: naming unavailable: {exc}")
+        line_notation = None
+        if callable(to_line_notation):
+            try:
+                notation = to_line_notation(entity)
+                line_notation = LineNotationRecord(
+                    value=str(notation.value),
+                    dialect=str(notation.dialect),
+                    version=str(notation.version),
+                    lossless=bool(notation.lossless),
+                    warnings=tuple(str(value) for value in notation.warnings),
+                )
+            except (TypeError, ValueError) as exc:
+                warnings.append(
+                    f"{entity.entity_id}: line notation unavailable: {exc}"
+                )
+        entity_records.append(
+            EntityChemistryRecord(
+                entity_id=str(entity.entity_id),
+                kind=type(entity).__name__,
+                dimension=None if dimension is None else int(dimension),
+                atom_ids=tuple(str(atom.atom_id) for atom in entity.atoms),
+                net_charge=None if net_charge is None else int(net_charge),
+                status=_enum_text(entity.status),
+                translation_generators=tuple(
+                    tuple(int(value) for value in vector)
+                    for vector in getattr(entity, "translation_generators", ())
+                ),
+                warnings=tuple(str(value) for value in entity.warnings),
+                evidence=entity_evidence,
+                name=entity_name,
+                line_notation=line_notation,
+            )
+        )
+        for atom in entity.atoms:
+            stereo = stereo_by_atom.get(atom.atom_id)
+            atom_records.append(
+                AtomChemistryRecord(
+                    atom_id=str(atom.atom_id),
+                    source_index=int(source_by_atom_id[str(atom.atom_id)]),
+                    entity_id=str(entity.entity_id),
+                    element=str(atom.element),
+                    isotope=None if atom.isotope is None else int(atom.isotope),
+                    formal_charge=(
+                        None if atom.formal_charge is None else int(atom.formal_charge)
+                    ),
+                    radical_electrons=int(atom.radical_electrons),
+                    implicit_hydrogens=(
+                        None
+                        if atom.implicit_hydrogens is None
+                        else int(atom.implicit_hydrogens)
+                    ),
+                    oxidation_state=(
+                        None if atom.oxidation_state is None else int(atom.oxidation_state)
+                    ),
+                    status=_enum_text(entity.status),
+                    stereo_descriptor=(
+                        None if stereo is None else stereo.descriptor
+                    ),
+                    stereo_kind=(
+                        None if stereo is None else _enum_text(stereo.kind)
+                    ),
+                    stereo_status=(
+                        None if stereo is None else _enum_text(stereo.status)
+                    ),
+                    cip_order=(
+                        () if stereo is None else tuple(str(value) for value in stereo.cip_order)
+                    ),
+                    stereo_reason=(None if stereo is None else str(stereo.reason)),
+                    evidence=_evidence_text(atom.evidence),
+                )
+            )
+        bond_records.extend(
+            BondChemistryRecord(
+                atom1_id=str(bond.atom1_id),
+                atom2_id=str(bond.atom2_id),
+                order=None if bond.order is None else float(bond.order),
+                kind=_enum_text(bond.kind),
+                aromatic=bool(bond.aromatic),
+                atom2_image_shift=tuple(int(value) for value in bond.atom2_image_shift),
+                stereochemistry=(
+                    None if bond.stereochemistry is None else str(bond.stereochemistry)
+                ),
+                evidence=_evidence_text(bond.evidence),
+            )
+            for bond in entity.bonds
+        )
+        warnings.extend(str(value) for value in getattr(stereo_report, "warnings", ()))
+
+    crystal_stereo = None
+    analyze_crystal_stereochemistry = mk.get("analyze_crystal_stereochemistry")
+    if callable(analyze_crystal_stereochemistry):
+        try:
+            report = analyze_crystal_stereochemistry(
+                crystal,
+                stereo_reports=stereo_reports,
+            )
+        except (TypeError, ValueError) as exc:
+            warnings.append(f"crystal stereochemistry unavailable: {exc}")
+        else:
+            crystal_stereo = CrystalStereoRecord(
+                classification=_enum_text(report.classification),
+                status=_enum_text(report.status),
+                symmetry_category=str(report.symmetry_category),
+                reason=str(report.reason),
+                enantiomer_counts=tuple(
+                    EnantiomerCountRecord(
+                        representative_entity_id=str(
+                            value.representative_entity_id
+                        ),
+                        count=int(value.count),
+                        mirror_entity_id=(
+                            None
+                            if value.mirror_entity_id is None
+                            else str(value.mirror_entity_id)
+                        ),
+                        mirror_count=int(value.mirror_count),
+                    )
+                    for value in report.enantiomer_counts
+                ),
+                relationships=tuple(
+                    (str(left), str(right), _enum_text(relationship))
+                    for left, right, relationship in report.relationships
+                ),
+                warnings=tuple(str(value) for value in report.warnings),
+                evidence=_evidence_text(report.evidence),
+            )
+            warnings.extend(crystal_stereo.warnings)
+
+    absolute_source = dict(cif_chemistry.get("absolute_structure", {}))
+    absolute_records = tuple(
+        AbsoluteStructureRecord(
+            method=method,
+            raw=str(record["raw"]),
+            value=float(record["value"]),
+            standard_uncertainty=(
+                None
+                if record.get("standard_uncertainty") is None
+                else float(record["standard_uncertainty"])
+            ),
+        )
+        for method in ("flack", "hooft", "rogers")
+        if isinstance((record := absolute_source.get(method)), dict)
+        and record.get("value") is not None
+    )
+    source_names = tuple(
+        (kind, str(cif_chemistry[key]))
+        for kind, key in (
+            ("systematic", "chemical_name_systematic"),
+            ("common", "chemical_name_common"),
+        )
+        if cif_chemistry.get(key)
+    )
+    crystal_name = None
+    name_crystal = mk.get("name_crystal")
+    if callable(name_crystal):
+        try:
+            crystal_name = _naming_record(name_crystal(crystal))
+        except (TypeError, ValueError) as exc:
+            warnings.append(f"crystal naming unavailable: {exc}")
+    return CrystalChemistryRecords(
+        status=_enum_text(chemistry.status),
+        atoms=tuple(sorted(atom_records, key=lambda record: record.source_index)),
+        bonds=tuple(bond_records),
+        entities=tuple(entity_records),
+        warnings=tuple(dict.fromkeys(warnings)),
+        evidence=_evidence_text(chemistry.evidence),
+        source_names=source_names,
+        absolute_configuration=(
+            None
+            if not cif_chemistry.get("chemical_absolute_configuration")
+            else str(cif_chemistry["chemical_absolute_configuration"])
+        ),
+        absolute_structure=absolute_records,
+        absolute_structure_details=(
+            None
+            if not absolute_source.get("details")
+            else str(absolute_source["details"])
+        ),
+        crystal_stereo=crystal_stereo,
+        crystal_name=crystal_name,
+        alternative_count=len(getattr(chemistry, "alternatives", ())),
+    )
+
+
+def chemistry_records(crystal) -> CrystalChemistryRecords | None:
+    """Project MCK chemistry records only when a chemistry consumer asks."""
+    return _chemistry_records(crystal, _require_molcryskit())
+
+
+def _enum_text(value) -> str:
+    return str(getattr(value, "value", value))
+
+
+def _naming_record(value) -> NamingRecord:
+    return NamingRecord(
+        name=str(value.name),
+        kind=_enum_text(value.kind),
+        nomenclature=str(value.nomenclature),
+        standard=str(value.standard),
+        version=str(value.version),
+        status=_enum_text(value.status),
+        preferred=value.preferred,
+        rule_trace=tuple(str(item) for item in value.rule_trace),
+        warnings=tuple(str(item) for item in value.warnings),
+        alternatives=tuple(str(item) for item in value.alternatives),
+    )
+
+
+def _evidence_text(values) -> tuple[str, ...]:
+    records = []
+    for value in values:
+        source = _enum_text(value.source)
+        text = f"{source}:{value.method}"
+        if value.detail:
+            text += f" ({value.detail})"
+        records.append(text)
+    return tuple(records)
+
+
+def analyze_crystal(crystal, *, include_chemistry: bool = False) -> CrystalAnalysis:
+    """Build geometry lookup tables, optionally projecting MCK chemistry."""
     mk = _require_molcryskit()
     site_records = tuple(crystal.get_site_records())
     contract_bonds = tuple(crystal.get_bond_records())
@@ -525,6 +820,7 @@ def analyze_crystal(crystal) -> CrystalAnalysis:
         site_records=site_records,
         formula_unit_selection=analyzer.select_formula_unit(),
         ring_records=ring_records,
+        chemistry=_chemistry_records(crystal, mk) if include_chemistry else None,
     )
 
 
@@ -535,6 +831,7 @@ def analyze(
     max_atoms=None,
     bond_scale: float = 1.0,
     bond_thresholds=None,
+    include_chemistry: bool = False,
 ):
     """Run MolCrysKit on ``raw_atoms`` (full unit cell) and return a
     :class:`CrystalAnalysis` summarising species + per-FU counts.
@@ -551,7 +848,7 @@ def analyze(
     mk = _require_molcryskit()
     if not raw_atoms:
         crystal = mk["MolecularCrystal"](np.eye(3), [], pbc=(True, True, True))
-        return analyze_crystal(crystal)
+        return analyze_crystal(crystal, include_chemistry=include_chemistry)
 
     ase_atoms = _ase_atoms_from_raw(raw_atoms, M, mk)
     identified = mk["identify_molecules"](
@@ -564,7 +861,7 @@ def analyze(
     crystal = mk["MolecularCrystal"](
         ase_atoms.get_cell(), identified, pbc=tuple(ase_atoms.get_pbc())
     )
-    return analyze_crystal(crystal)
+    return analyze_crystal(crystal, include_chemistry=include_chemistry)
 
 
 def _translate_cluster(raw_atoms, indices, shift_frac, M, cart_positions=None):

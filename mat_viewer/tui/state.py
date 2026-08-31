@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 
-OBSERVATION_SCHEMA = "mattervis.tui.observation/v1"
+OBSERVATION_SCHEMA = "mattervis.tui.observation/v2"
 
 
 @dataclass(frozen=True)
@@ -81,6 +81,33 @@ class TerminalFocusState:
 
 
 @dataclass(frozen=True)
+class TerminalSelectionState:
+    """One atom selected from the rendered projection.
+
+    ``display_index`` identifies the manifested copy for the lifetime of the
+    controller. ``atom_id`` is the stable MolCrysKit identity used to connect
+    the screen selection to chemistry records.
+    """
+
+    mode: bool = False
+    pinned: bool = False
+    display_index: int | None = None
+    display_copy_id: str | None = None
+    atom_id: str | None = None
+    label: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode,
+            "pinned": self.pinned,
+            "display_index": self.display_index,
+            "display_copy_id": self.display_copy_id,
+            "atom_id": self.atom_id,
+            "label": self.label,
+        }
+
+
+@dataclass(frozen=True)
 class TerminalViewportState:
     """Terminal viewport dimensions and stable fit scale."""
 
@@ -112,6 +139,7 @@ class TerminalViewState:
     camera: TerminalCameraState
     display: TerminalDisplayState
     focus: TerminalFocusState
+    selection: TerminalSelectionState
     viewport: TerminalViewportState
 
     def as_dict(self) -> dict[str, Any]:
@@ -120,6 +148,7 @@ class TerminalViewState:
             "camera": self.camera.as_dict(),
             "display": self.display.as_dict(),
             "focus": self.focus.as_dict(),
+            "selection": self.selection.as_dict(),
             "viewport": self.viewport.as_dict(),
         }
 
@@ -161,6 +190,7 @@ class TerminalObservation:
             "camera": self.state.camera.as_dict(),
             "display": self.state.display.as_dict(),
             "focus": self.state.focus.as_dict(),
+            "selection": self.state.selection.as_dict(),
             "viewport": self.state.viewport.as_dict(),
             "scope": dict(self.scope),
             "capabilities": list(self.capabilities),
@@ -174,6 +204,7 @@ __all__ = [
     "TerminalDisplayState",
     "TerminalFocusState",
     "TerminalObservation",
+    "TerminalSelectionState",
     "TerminalViewportState",
     "TerminalViewSnapshot",
     "TerminalViewState",

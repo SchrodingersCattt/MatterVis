@@ -5,6 +5,7 @@ from dataclasses import replace
 import io
 from pathlib import Path
 from contextlib import redirect_stdout
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -20,7 +21,7 @@ from mat_viewer.tui.compositor import (
     resolve_molecule_detail,
 )
 from mat_viewer.tui.crystal_ir import AtomIR, CrystalIR
-from mat_viewer.tui.loader_adapter import load_for_tui
+from mat_viewer.tui.loader_adapter import _site_id, load_for_tui
 from mat_viewer.tui import run_tui
 from mat_viewer.tui.serializer import serialize_crystal
 from mat_viewer.tui.summary import build_scope_summary
@@ -477,7 +478,19 @@ def test_non_cif_ir_has_deterministic_identity_and_scopes(tmp_path) -> None:
     assert crystal.canonical_formula == "CO"
     assert crystal.metadata["display_atom_count"] == 2
     assert [atom.source_index for atom in crystal.atoms] == [0, 1]
+    assert [atom.atom_id for atom in crystal.atoms] == ["m0:a0", "m0:a1"]
     assert len({atom.display_copy_id for atom in crystal.atoms}) == 2
+
+
+def test_pre_contract_mck_site_records_receive_stable_atom_ids() -> None:
+    record = SimpleNamespace(
+        site_id="",
+        molecule_index=2,
+        local_index=5,
+        global_index=11,
+    )
+
+    assert _site_id(record) == "m2:a5"
 
 
 def test_filtered_molecule_summary_drops_removed_groups(tui_crystal_factory) -> None:

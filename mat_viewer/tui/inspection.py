@@ -171,17 +171,23 @@ def inspect_local_geometry(
     for neighbor_index, bond in neighbors:
         direct_vector = np.asarray(crystal.atoms[neighbor_index].cart - center.cart, dtype=float)
         mic_vector, image_shift = _minimum_image_vector(crystal, direct_vector)
+        rendered_image_relation = (
+            bond.image_relation
+            if bond.i == center_index
+            else tuple(-value for value in bond.image_relation)
+        )
         vectors[neighbor_index] = mic_vector
         bond_records.append({
             "neighbor_display_index": neighbor_index,
             "neighbor_display_copy_id": terminal_text(crystal.atoms[neighbor_index].display_copy_id),
             "neighbor_label": terminal_text(crystal.atoms[neighbor_index].label),
             "neighbor_element": terminal_text(crystal.atoms[neighbor_index].element),
+            "neighbor_atom_id": terminal_text(crystal.atoms[neighbor_index].atom_id),
             "rendered_distance": float(bond.distance),
             "direct_distance": float(np.linalg.norm(direct_vector)),
             "mic_distance": float(np.linalg.norm(mic_vector)),
             "nearest_image_shift": list(image_shift),
-            "rendered_image_relation": list(bond.image_relation),
+            "rendered_image_relation": list(rendered_image_relation),
         })
 
     angles: list[dict[str, Any]] = []
@@ -209,6 +215,7 @@ def inspect_local_geometry(
             "display_copy_id": terminal_text(center.display_copy_id),
             "label": terminal_text(center.label),
             "element": terminal_text(center.element),
+            "atom_id": terminal_text(center.atom_id),
         },
         "coordination_number": len(neighbors),
         "bonds": bond_records,

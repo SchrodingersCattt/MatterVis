@@ -91,9 +91,23 @@ def _load_bundle(
             "frame_index": frame_index,
             "pbc": source_metadata.get("pbc"),
             "synthetic_cell": source_metadata.get("synthetic_cell", False),
-            "bond_source": ("canonical_scene" if is_cif else "distance_heuristic"),
+            "bond_source": ("molcryskit" if is_cif else "distance_heuristic"),
         }
     )
+    analysis = bundle.molcrys_analysis
+    site_ids = {
+        int(record.global_index): _site_id(record)
+        for record in analysis.site_records
+    }
+    for atom in ir.atoms:
+        atom.atom_id = site_ids.get(atom.source_index, "")
+    from ..structure import molcrys_bridge
+
+    chemistry = getattr(analysis, "chemistry", None)
+    source_crystal = getattr(analysis, "crystal", None)
+    if chemistry is None and source_crystal is not None:
+        chemistry = molcrys_bridge.chemistry_records(source_crystal)
+    ir.chemistry = chemistry
     if not is_cif:
         source_indices = {
             index
@@ -109,6 +123,19 @@ def _load_bundle(
         if blobs:
             ir.metadata["density_blobs"] = blobs
     return ir
+
+
+def _site_id(record) -> str:
+    """Use the public MCK ID, with a stable pre-contract compatibility ID."""
+    explicit = getattr(record, "site_id", None)
+    if explicit:
+        return str(explicit)
+    molecule_index = int(getattr(record, "molecule_index", -1))
+    local_index = int(getattr(record, "local_index", -1))
+    if molecule_index >= 0 and local_index >= 0:
+        return f"m{molecule_index}:a{local_index}"
+    global_index = int(getattr(record, "global_index", -1))
+    return f"site:{global_index}" if global_index >= 0 else ""
 
 
 def _crystal_ir_from_scene(
@@ -254,6 +281,7 @@ def _crystal_ir_from_scene(
             "source_site_atom_count": source_site_atom_count,
             "expanded_atom_count": expanded_atom_count,
             "display_atom_count": len(atoms),
+            "rings": tuple(scene.get("rings", ())),
         },
     )
 

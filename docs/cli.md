@@ -356,9 +356,11 @@ mat-vis tui trajectory.traj --frame 20
 mat-vis tui run.dump --type-map O H --frame 20
 ~~~
 
-Use --no-interaction for deterministic stdout. --format structured adds cell,
-atom, bond-summary, and camera data. --input-format, --type-map, and --frame use
-the same shared IO contract as render.
+The interactive ASCII view is the primary non-visual observation path. Use
+--no-interaction only when a deterministic single frame is required;
+--format structured remains an optional machine contract rather than the
+source of chemical conclusions. --input-format, --type-map, and --frame use the
+same shared IO contract as render.
 
 Important options:
 
@@ -368,10 +370,13 @@ Important options:
 - --show-minor and --hide-partial control crystallographic disorder;
 - --width and --height bound static output exactly.
 
-Interactive controls: q/e and w/s orbit, a/d roll, arrows or i/j/k/l pan, u/o
+Interactive controls: q/e and w/z orbit, a/d roll, arrows or i/j/k/l pan, u/o
 zoom, b/c/t/m/n toggle bonds/cell/labels/monochrome/minor disorder, Shift+L
-switches atom and molecule levels, r resets the view, and x quits. Press : for
-selection, neighborhood focus, and geometric measurements.
+switches atom and molecule levels, r resets the view, and x quits. Press s for
+Select mode. There, arrows choose projected neighbors, Tab traverses stable
+atom IDs, `[`/`]` traverse supplied chemical bonds, Enter pins, Esc clears, and a
+mouse click uses the retained hit map. Press : for deterministic commands such
+as `:select C12`, `:inspect`, `:stereo`, `:name`, and `:why`.
 
 ## Common recipes
 
