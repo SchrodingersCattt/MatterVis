@@ -1,60 +1,58 @@
 ---
 name: visualize-materials
-description: "Render atomistic structures with MatterVis. Use before any structure drawing, preview, comparison, coordination/polyhedron view, vibration, trajectory, or animation."
+description: "Use first for every atomistic drawing, model preview, or animation with MatterVis, including structures, trajectories, polyhedra, and vibrations."
 ---
 
 # Visualize Materials
 
-Use the public `mat-vis` CLI for coordinate-based atomistic visuals. Do not
-replace it with ASE plotting, raw matplotlib, or private MatterVis imports.
+Use the public `mat-vis` CLI for coordinate-based visuals. Do not replace it
+with ASE plotting, raw matplotlib, or private MatterVis imports.
 
-## Default path
+## Choose once
 
-1. Inspect once: `mat-vis inspect INPUT --json`.
-2. Render one artifact with the base CPU backend:
+Read exactly one primary page and run its first documented path. Scene type wins: trajectory, vibration, and polyhedron routes take precedence over generic structure or molecule views:
 
-```bash
-mat-vis render INPUT -o OUTPUT.png --backend cpu --json \
-  --orthogonal --background '#FFFFFF'
-```
+- ordinary structure, molecule, slab, interface, or comparison:
+  [static render](./references/quickstart.md);
+- MD trajectory, final frame, GIF, or MP4:
+  [trajectory](./references/trajectory-animation.md);
+- vibration or phonon displacement arrows:
+  [vibration](./references/vibration-mode-vectors.md);
+- coordination or packing hulls:
+  [polyhedra](./references/polyhedra.md);
+- per-atom scalar/tensor colors:
+  [atom properties](./references/atom-property-coloring.md);
+- forces with density fields:
+  [force vectors](./references/atomic-force-vectors.md);
+- multiple panels or publication composition:
+  [panels](./references/multi-structure-panels.md) or
+  [layout](./references/publication-layout.md);
+- explicitly requested periodic cropping or molecule highlighting:
+  [periodic views](./references/periodic-finite-views.md) or
+  [molecule focus](./references/molecule-highlight.md).
 
-Auto mode shows the cell for periodic inputs and hides synthetic or nonperiodic
-cells. Keep the automatic camera unless the requested evidence needs a specific
-direction. Read the render JSON and inspect the final-size artifact before
-delivery.
+Read [runtime capabilities](./references/capabilities-and-install.md) only after
+the direct command reports a missing capability. Read
+[input formats](./references/input-formats.md), [camera](./references/camera.md),
+[CPU details](./references/cpu-static.md), [Plotly](./references/plotly-render.md),
+[TUI](./references/tui.md), or [verification](./references/verification.md) only
+for an explicit request or unresolved ambiguity.
 
-## Route once
+## Execution boundary
 
-Read exactly one primary reference: use the first matching line.
-- Vibration arrows: [vibration vectors](./references/vibration-mode-vectors.md).
-- Trajectory or animation: [trajectory](./references/trajectory-animation.md).
-- Static charge, velocity, stress, per-atom field, or colormap:
-  [atom property coloring](./references/atom-property-coloring.md).
-- Atom-centred forces with density fields: [force vectors](./references/atomic-force-vectors.md).
-- Coordination or packing hulls: [polyhedra](./references/polyhedra.md).
-- Panels or publication layouts: [panels](./references/multi-structure-panels.md)
-  or [publication layout](./references/publication-layout.md).
-- Finite periodic views or molecule focus: [periodic views](./references/periodic-finite-views.md)
-  or [molecule focus](./references/molecule-highlight.md).
-Use the default path when no specialized line matches. Load [input formats](./references/input-formats.md),
-[camera](./references/camera.md), [backends](./references/cpu-static.md),
-[capabilities](./references/capabilities-and-install.md), or
-[verification](./references/verification.md) only when the requested evidence or an
-actual failure requires it.
-
-## Rules
-
-- Use `ball_stick` for molecules and covalent networks. For dense ionic or
-  coordination networks with polyhedra, start with `ball`.
-- When a periodic figure must show coordination relative to the unit cell, use
-  `--show-cell --show-axes`. Nonperiodic structures use neither.
-- Do not pass `--no-cell` for periodic input or `--view-direction` as a cosmetic
-  default; override either only when the requested evidence requires it.
-- When delegating, pass the evidence goal and input/output paths, not guessed
-  render flags; the delegate loads this skill and selects the route.
-- For render-only requests, do not invoke separate analysis skills or write Python;
-  `mat-vis inspect` and the selected route are sufficient.
-- Do not guess Python import names or inspect package internals. On failure, use
-  the exact CLI help or `mat-vis capabilities --json`, correct the reported
-  issue, and keep the requested scope.
-- Preserve the literal command, JSON result, warnings, and output hash.
+- Molecules and covalent networks default to `ball_stick`; use `ball` for dense
+  ionic or coordination structures only when bonds are not evidence.
+- If rendering starts later or is delegated, that agent loads this skill before
+  choosing a command; parent summaries and guessed flags are not a substitute.
+- Render directly; do not run a separate analysis or installation preflight.
+- Use one backend and one representation. CPU is the default static path.
+- Memory pressure may change renderer detail, never the model: do not delete H,
+  downsample atoms, shrink the structure, or switch away from `mat-vis`.
+- Comparison renders use the same orientation, canvas, and orthographic scale.
+- Automatic view shows real periodic cells, hides synthetic/nonperiodic cells,
+  and faces the largest lattice face.
+- Run the documented command before inspecting help. Only after that exact command fails, inspect its help once and make one
+  correction based on the exact error. Do not explore package internals, convert
+  already-supported inputs, switch libraries, or enter an open-ended retry loop.
+- Inspect the final-size artifact and retain the command, JSON result, warnings,
+  and output hash.

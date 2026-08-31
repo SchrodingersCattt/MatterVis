@@ -1,76 +1,29 @@
-# MatterVis Quickstart
+# Static Render
 
-Use this path for the normal structure-to-static-image request. It uses the CPU
-backend and requires only base MatterVis.
-
-## 1. Inspect, then render
+Run the render directly:
 
 ```bash
-mat-vis inspect INPUT --json
+mat-vis render INPUT -o OUTPUT.png --backend cpu --json \
+  --orthogonal --background '#FFFFFF'
 ```
 
-Inspect reports structure metadata including periodicity and synthetic-cell state.
+If a documented input format fails to load, report an application failure.
+Do not convert it to another format to bypass the error.
 
-Choose the displayed object from scientific intent:
+MatterVis auto-selects a periodic unit cell with visible cell edges, or a fitted
+nonperiodic/synthetic-cell object with no cell. Its automatic camera faces the
+largest lattice face. Do not add a camera direction, replication, or cell
+override unless the requested evidence needs one.
 
-- nonperiodic or synthetic-cell input: auto selects `cluster` and hides the cell;
-- periodic input: auto selects `unit_cell` and shows the cell;
-- one formula unit: `formula_unit`;
-- periodic packing: `unit_cell`;
-- crystallographic-site diagnosis: `asymmetric_unit`;
-- an explicitly finite selection: `cluster`.
+Use `--style ball_stick` for molecules and covalent networks. Use `--style ball`
+for a dense ionic/coordination structure when bonds are not part of the evidence.
+LAMMPS numeric types require the provenance-backed full `--type-map`; never
+guess elements from type numbers or a model filename.
 
-Explicit `--view` and `--show-cell`/`--no-cell` override auto. `cluster` is not a
-crop or neighbour-shell selector.
+For a comparison, render both structures with the same camera, projection,
+canvas, and physical scale. Use the panel reference only when one composed figure
+is requested.
 
-## 2. Render explicitly
-
-Nonperiodic molecule or cluster PNG:
-
-```bash
-mat-vis render INPUT.xyz -o OUTPUT.png --backend cpu --json \
-  --style ball_stick --shading smooth --orthogonal \
-  --background '#FFFFFF' --atom-scale 1.0 --bond-radius 0.15 \
-  --width 1200 --height 900 --scale 1
-```
-
-Formula-unit PNG:
-
-```bash
-mat-vis render INPUT.cif -o OUTPUT.png --backend cpu --json \
-  --view formula_unit --style ball_stick --shading smooth \
-  --orthogonal --no-cell --no-labels \
-  --background '#FFFFFF' --atom-scale 1.0 --bond-radius 0.15 \
-  --width 1200 --height 900 --scale 1
-```
-
-Periodic SVG:
-
-```bash
-mat-vis render INPUT.cif -o OUTPUT.svg --backend cpu --json \
-  --view unit_cell --style ball_stick --shading smooth \
-  --orthogonal --show-cell --no-labels \
-  --background '#FFFFFF' --atom-scale 0.85 --bond-radius 0.12 \
-  --width 1600 --height 1200 --scale 1
-```
-
-Projected 2D PNG (no lighting or 3D mesh rasterization):
-
-```bash
-mat-vis render INPUT.cif -o OUTPUT.png --backend matplotlib --json \
-  --view unit_cell --style ball_stick \
-  --orthogonal --show-cell --no-labels \
-  --background '#FFFFFF' --atom-scale 0.85 --bond-radius 0.12 \
-  --width 1600 --height 1200 --scale 1
-```
-
-Use PDF/SVG when downstream editing needs true vector geometry. Do not request
-Plotly or Kaleido for ordinary static output.
-
-## 3. Verify
-
-Require exit 0 and one JSON object on stdout. Confirm that `backend` is the
-explicitly requested `cpu` or `matplotlib`,
-the output hash matches the file, PNG decodes or PDF/SVG has the correct root,
-and no chemistry warning blocks delivery. Inspect the final-size artifact; a
-valid file and nonzero byte count do not prove visual quality.
+Accept only exit 0 with one JSON result whose backend/output match the command.
+Open the final-size image and reject clipping, excessive whitespace, missing
+atoms/bonds/cell, or an all-background result. Do not substitute a custom plot.
