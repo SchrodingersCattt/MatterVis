@@ -145,8 +145,7 @@ def _atom_effective_opacity(atom: dict, style: dict) -> float:
     """Resolve an atom's final opacity after Phase 2 atom_groups overrides.
 
     Replace semantics: when an atom_group rule supplies an explicit
-    opacity (i.e. ``_render_opacity_scale`` was set to anything other
-    than the default 1.0), we use that value directly and IGNORE the
+    opacity, we use that value directly and IGNORE the
     disorder/minor fade for this atom. Otherwise we fall back to the
     legacy per-style fade (``_minor_opacity_for``).
 
@@ -165,18 +164,14 @@ def _atom_effective_opacity(atom: dict, style: dict) -> float:
         scale_f = max(0.0, min(1.0, float(scale)))
     except (TypeError, ValueError):
         scale_f = 1.0
-    if scale_f < 0.999:
+    if scale_f < 0.999 or atom.get("_render_opacity_group_id") is not None:
         return scale_f
 
     is_minor = bool(atom.get("is_minor", False))
     is_disordered = bool(atom.get("is_disordered", is_minor))
-    # Occupancy controls opacity only for a loader-confirmed disordered atom.
-    unresolved = is_disordered and not bool(atom.get("disorder_resolved", False))
-    if is_disordered and "occ" in atom and (
-        style.get("disorder") == "opacity"
-        or style.get("force_minor_fade")
-        or (unresolved and style.get("disorder") != "none")
-    ):
+    # Every loader-confirmed disorder component uses its crystallographic
+    # occupancy as visual weight unless disorder rendering is disabled.
+    if is_disordered and "occ" in atom and style.get("disorder") != "none":
         occ = atom.get("occ", 1.0)
         try:
             occ_f = float(occ)

@@ -154,8 +154,12 @@ honours:
 - `scatter_bond_contrast_color` — optional replacement for a fast bond half
   whose colour has insufficient luminance contrast with the background.
 - `disorder` — `opacity`, `dashed_bonds`, `outline_rings`,
-  `color_shift`, or `none`. This is independent from `material` and
-  `style`; disorder no longer implies transparent atoms.
+  `color_shift`, or `none`. Occupancy-driven opacity is now applied by
+  default to **all** loader-confirmed disordered atoms (not only
+  unresolved sites): each disordered atom's alpha is proportional to its
+  crystallographic occupancy. Set `disorder="none"` to opt out and render
+  disordered atoms fully opaque. This is independent from `material` and
+  `style`.
 - Legacy aliases: `fast_rendering=True` maps to `material="flat"`;
   `minor_wireframe=True` maps to `disorder="outline_rings"`; and
   `minor_opacity` only changes visibility when `disorder="opacity"`.
