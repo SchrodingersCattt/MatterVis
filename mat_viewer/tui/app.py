@@ -63,6 +63,17 @@ class CrystalCanvas(Static):
         event.stop()
 
 
+class CommandInput(Input):
+    """One-line command prompt with reliable Esc cancellation."""
+
+    def on_key(self, event) -> None:
+        """Close command mode before the default Input key handling consumes Esc."""
+        if event.key == "escape":
+            self.app._close_command()
+            event.prevent_default()
+            event.stop()
+
+
 # ── Main App ────────────────────────────────────────────────────────────────
 
 
@@ -115,7 +126,8 @@ class CrystalTUI(App):
     }
     #command {
         dock: bottom;
-        height: 1;
+        height: 3;
+        border: solid #666666;
     }
     Header {
         dock: top;
@@ -412,7 +424,10 @@ class CrystalTUI(App):
 
     async def _mount_command(self) -> None:
         """Mount and focus the command input after mode is reserved."""
-        command = Input(placeholder=":distance A B [direct|mic]", id="command")
+        command = CommandInput(
+            placeholder=":distance A B [direct|mic]  (Esc to cancel)",
+            id="command",
+        )
         await self.mount(command, before=self.query_one(Footer))
         command.focus()
 
@@ -525,8 +540,9 @@ class CrystalTUI(App):
         return f"{result['kind']} {atoms}: {result['value']:.4f} {result['unit']} ({result['mode']}; shifts={shifts})"
 
     def _close_command(self) -> None:
-        command = self.query_one("#command", Input)
-        command.remove()
+        commands = self.query("#command").nodes
+        for command in commands:
+            command.remove()
         self._command_mode = False
 
     # ── Actions (toggle bindings only; movement is in on_key) ─────────
