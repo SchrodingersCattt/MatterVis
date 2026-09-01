@@ -280,6 +280,7 @@ def build_loaded_crystal_from_ase(
     path: str | Path,
     frame_index: int,
     input_format: str,
+    bond_scale: float | None = None,
 ) -> LoadedCrystal:
     """Convert one ASE Atoms frame into the canonical LoadedCrystal class."""
     source_path = str(Path(path).resolve())
@@ -299,6 +300,7 @@ def build_loaded_crystal_from_ase(
         M=matrix,
         title=Path(path).stem,
         source="ase",
+        bond_scale=bond_scale,
         scene_metadata_extra=metadata,
     )
     bundle.frame_info = {"frame_index": int(frame_index), **dict(atoms.info)}
@@ -484,6 +486,7 @@ def canonicalise_atomistic_frame(
     *,
     path: str | Path,
     input_format: str,
+    bond_scale: float | None = None,
 ) -> StructureFrame:
     """Build one canonical MatterVis frame while retaining ASE metadata."""
     bundle = build_loaded_crystal_from_ase(
@@ -491,6 +494,7 @@ def canonicalise_atomistic_frame(
         path=path,
         frame_index=frame.index,
         input_format=input_format,
+        bond_scale=bond_scale,
     )
     atom_arrays = {
         name: np.array(values, copy=True)
@@ -512,6 +516,7 @@ def load_structure_input(
     input_format: str | None = None,
     type_map: Iterable[str] | None = None,
     frame_indices: Iterable[int] | None = None,
+    bond_scale: float | None = None,
 ) -> StructureInput:
     """Load selected frames into the canonical renderable structure class."""
     source_path, resolved_format, symbols = _prepare_source(
@@ -531,11 +536,15 @@ def load_structure_input(
                 cif_path=str(source_path),
                 title=source_path.stem,
                 source="upload",
+                bond_scale=bond_scale,
             )
         else:
             from .cube_adapter import load_cube_file
 
-            bundle = load_cube_file(source_path)
+            bundle = load_cube_file(
+                source_path,
+                bond_scale=1.0 if bond_scale is None else bond_scale,
+            )
         frames = tuple(
             StructureFrame(0, bundle, {"frame_index": 0}, {}) for _ in selected
         )
@@ -552,6 +561,7 @@ def load_structure_input(
             frame,
             path=source_path,
             input_format=atomistic.input_format,
+            bond_scale=bond_scale,
         )
         for frame in atomistic.frames
     )

@@ -247,6 +247,7 @@ export requires `[plotly-export]`; a failure is reported without substitution.
 | `--show-axes` / `--no-axes` | off | Show/hide the camera-projected crystallographic a/b/c compass |
 | `--cell-color COLOR` | `#333333` | Unit-cell edge colour |
 | `--cell-width PX` | 2.0 | Unit-cell edge width |
+| `--cell-overlays JSON` | — | Auxiliary cells with independent matrix, origin, color, width, dash, alpha, and depth-test settings |
 
 The cell and lattice compass are foreground overlays, so dense atoms, bonds,
 or polyhedra do not depth-occlude them. `--monochrome` remains a rejected
@@ -258,6 +259,7 @@ legacy flag.
 |------|---------|-------|-------------|
 | `--atom-scale` | 1.0 | 0.3–1.8 | Atom radius scale factor |
 | `--bond-radius` | 0.15 | 0.05–0.40 | Bond cylinder radius (Å) |
+| `--bond-scale` | loader default | > 0 | MolCrysKit bond-perception coefficient; does not change visual bond radius |
 | `--camera-distance` | 1.8 | > 0 | Scene-fit multiplier (not Å) |
 | `--width` | 900 | — | Image width in pixels |
 | `--height` | 720 | — | Image height in pixels |
@@ -315,7 +317,13 @@ silently ignored. Polyhedron overlays remain available through repeatable
 module. An atom-level specification draws every matching visible centre by
 default and colours each hull from its centre element, with same-hue face
 lightness. The JSON `site` or `sites` keys and `--polyhedron-site` select
-source atom indices; molecule-level selectors use source fragment indices.
+source atom indices; molecule-level selectors use source fragment indices. The
+JSON `center_images:true` option works at both levels. At molecule level,
+MatterVis follows each displayed complete fragment image and translates the
+center, ligand shell, and hull together. Receipts keep source and display counts
+separate.
+
+`--cell-overlays` and `--bond-scale` require the general renderer. An explicit batch request fails instead of silently dropping either option.
 
 
 ---

@@ -9,6 +9,20 @@ from pathlib import Path
 
 def _add_render_control_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
+        "--bond-scale",
+        type=float,
+        default=None,
+        metavar="SCALE",
+        help="Positive MolCrysKit bond-perception scale (default: 1.0).",
+    )
+    parser.add_argument(
+        "--cell-overlays",
+        type=Path,
+        default=None,
+        metavar="JSON",
+        help="JSON file containing auxiliary unit-cell overlay definitions.",
+    )
+    parser.add_argument(
         "--atom-group",
         action="append",
         nargs="+",
@@ -192,6 +206,10 @@ def _render_ortep_mode(args: argparse.Namespace) -> str:
 def _validate_render_options(args: argparse.Namespace) -> None:
     """Reject legacy flags that the backend-neutral path cannot honour."""
 
+    if args.bond_scale is not None and (
+        not math.isfinite(args.bond_scale) or args.bond_scale <= 0.0
+    ):
+        raise ValueError("--bond-scale must be finite and positive")
     unsupported: list[str] = []
     if args.monochrome:
         unsupported.append("--monochrome")

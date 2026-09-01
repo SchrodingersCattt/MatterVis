@@ -56,6 +56,7 @@ from .render.fast_cli import (
     add_batch_render_arguments,
     render_batch_if_selected,
 )
+from .render.overlay.cells import load_overlay_file as _load_overlay_file
 from .properties.cli import add_atom_property_arguments as _add_atom_property_arguments, atom_property_spec as _atom_property_spec
 
 def _build_render_parser(
@@ -1043,16 +1044,6 @@ def _effective_show_cell(structure, args: argparse.Namespace) -> bool:
     return not _is_nonperiodic_structure(structure)
 
 
-def _load_vector_overlays(path: Path | None):
-    if path is None:
-        return None
-    with Path(path).expanduser().open("r", encoding="utf-8") as handle:
-        payload = json.load(handle)
-    if not isinstance(payload, list):
-        raise ValueError("--vector-overlays JSON root must be a list")
-    return payload
-
-
 def _animation_indices(args: argparse.Namespace) -> list[int]:
     from .loader.structure_input import count_structure_frames
     from .render.frame_selection import parse_frame_indices
@@ -1122,6 +1113,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                     type_map=args.type_map,
                     frame_indices=_animation_indices(args),
                     property_data=args.property_data,
+                    bond_scale=args.bond_scale,
                 )
             else:
                 structure = load_structure(
@@ -1130,6 +1122,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                     type_map=args.type_map,
                     frame=args.frame if args.frame is not None else 0,
                     property_data=args.property_data,
+                    bond_scale=args.bond_scale,
                 )
             display = _display_mode(structure, args)
             include_boundary_replicas = args.include_boundary_replicas
@@ -1194,7 +1187,8 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                 camera=camera,
                 render_spec=spec,
                 topology_data=topology_data,
-                vector_overlays=_load_vector_overlays(args.vector_overlays),
+                cell_overlays=_load_overlay_file(args.cell_overlays, "--cell-overlays"),
+                vector_overlays=_load_overlay_file(args.vector_overlays, "--vector-overlays"),
                 atom_groups=atom_groups,
                 bond_groups=bond_groups,
                 fps=args.fps if args.fps is not None else 12.0,

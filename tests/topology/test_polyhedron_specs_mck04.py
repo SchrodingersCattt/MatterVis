@@ -164,7 +164,6 @@ def test_polyhedra_patch_can_flip_level_to_atom(tmp_path: Path):
 
 def test_find_polyhedra_receives_hard_cutoff_and_center_kind(monkeypatch):
     """Smoke-check the topology pipeline forwards new knobs to MCK."""
-    import mat_viewer.topology as topology_public
     from mat_viewer.topology import analysis as topology_analysis
 
     captured: dict[str, object] = {}
@@ -192,8 +191,13 @@ def test_find_polyhedra_receives_hard_cutoff_and_center_kind(monkeypatch):
     }
 
     class _FakeCrystal:
-        pass
+        molecules = [object()]
 
+    monkeypatch.setattr(
+        topology_analysis,
+        "compute_topo_signature",
+        lambda molecule: "H4N|stub",
+    )
     monkeypatch.setattr(
         topology_analysis.molcrys_bridge,
         "molecular_crystal_from_bundle",
@@ -218,6 +222,7 @@ def test_find_polyhedra_receives_hard_cutoff_and_center_kind(monkeypatch):
         fallback_max=12,
     )
     kwargs = captured["kwargs"]
+    assert captured["args"][1] == "H4N"
     assert kwargs["level"] == "molecule"
     assert kwargs["center_kind"] == "com"
     assert kwargs["hard_cutoff"] == 8.0
@@ -228,7 +233,6 @@ def test_find_polyhedra_receives_hard_cutoff_and_center_kind(monkeypatch):
 
 
 def test_find_polyhedra_atom_level_skips_hard_cutoff(monkeypatch):
-    import mat_viewer.topology as topology_public
     from mat_viewer.topology import analysis as topology_analysis
 
     captured: dict[str, object] = {}

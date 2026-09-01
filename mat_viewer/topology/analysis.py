@@ -5,15 +5,17 @@ import sys
 from typing import Any, Iterable
 
 import numpy as np
-
+from molcrys_kit.analysis import compute_topo_signature
 from molcrys_kit.analysis.packing_shell import (
     DEFAULT_CENTROID_OFFSET_FRAC,
     compute_angular_signature,
     detect_coordination_number,
     detect_prism_vs_antiprism,
     find_polyhedra,
-    hull_encloses_center as _hull_encloses_center,
     planarity_analysis,
+)
+from molcrys_kit.analysis.packing_shell import (
+    hull_encloses_center as _hull_encloses_center,
 )
 from molcrys_kit.analysis.shape import classify_shell
 from molcrys_kit.structures.polyhedra import convex_hull_payload, ideal_polyhedra_for_cn
@@ -149,12 +151,25 @@ def _mck_polyhedron_record(
             f"Fragment {center_fragment.get('label') or center_fragment.get('index')} "
             "does not carry a MolCrysKit source_molecule_index."
         )
-    center_formula = center_fragment.get("formula") or center_fragment.get("species")
-    if not center_formula or not ligand_formula:
+    display_formula = center_fragment.get("formula") or center_fragment.get("species")
+    if not display_formula or not ligand_formula:
         raise ValueError(
             "Both center and ligand formulas are required for MolCrysKit polyhedra."
         )
     crystal = molcrys_bridge.molecular_crystal_from_bundle(bundle)
+    # MatterVis classifies displayed molecular fragments by their heavy-atom
+    # formula (for example ``C6N2``), whereas MolCrysKit's molecule-level
+    # packing-shell API addresses the complete formula (``C6H14N2``).  The
+    # source molecule index is the authoritative bridge between them.  This
+    # also covers NH4+ centers, whose display selector is simply ``N``.
+    molecules = getattr(crystal, "molecules", None)
+    if molecules is not None and 0 <= int(source_molecule_index) < len(molecules):
+        center_formula = compute_topo_signature(
+            molecules[int(source_molecule_index)]
+        ).split("|", 1)[0]
+    else:
+        # Compatibility for lightweight bridge objects and third-party loaders.
+        center_formula = str(display_formula)
     # On level="molecule", MCK's ``cutoff`` IS the candidate search radius
     # that feeds gap+enclosure (per MCK PR #32). MV's state-level ``cutoff``
     # is the search radius too, so the kwarg name lines up after the MCK

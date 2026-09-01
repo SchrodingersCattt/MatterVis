@@ -210,10 +210,6 @@ def parse_polyhedron_specs(raw_specs: Iterable[str]) -> list[dict[str, Any]]:
             raise ValueError(
                 f"polyhedron {index + 1}: center_images must be a JSON boolean"
             )
-        if level != "atom" and center_images:
-            raise ValueError(
-                f"polyhedron {index + 1}: center_images is only valid at atom level"
-            )
         instance_overrides = _parse_instance_overrides(payload, index)
         spec_id = str(
             payload.get("spec_id") or payload.get("id") or f"polyhedron-{index + 1}"
@@ -412,26 +408,22 @@ def build_topology_data(
             spec_results.append({**spec, "overlays": overlays})
             continue
 
-        candidates = [fragment for fragment in fragments if _matches(fragment, spec)]
-        if spec["sites"] is not None:
-            candidates = [
-                fragment
-                for fragment in candidates
-                if int(fragment.get("index", -1)) in set(spec["sites"])
-            ]
+        candidates: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        selected_sites = set(spec["sites"]) if spec["sites"] is not None else None
         if site_index is not None:
-            candidates = [
-                fragment
-                for fragment in candidates
-                if int(fragment.get("index", -1)) == int(site_index)
-            ]
-        if not candidates:
-            raise ValueError(
-                f"no displayed {spec['center_species']} center matches "
-                f"polyhedron {spec['id']}"
+            selected_sites = (
+                {int(site_index)}
+                if selected_sites is None
+                else selected_sites & {int(site_index)}
             )
-        overlays: list[dict[str, Any]] = []
-        for display_fragment in candidates:
+        for display_fragment in fragments:
+            if not _matches(display_fragment, spec):
+                continue
+            image_shift = tuple(
+                int(value) for value in display_fragment.get("image_shift", (0, 0, 0))
+            )
+            if not spec["center_images"] and image_shift != (0, 0, 0):
+                continue
             topology_fragment = _topology_fragment(bundle, display_fragment)
             if topology_fragment is None:
                 warnings.append(
@@ -439,6 +431,17 @@ def build_topology_data(
                     f"{display_fragment.get('index')}: no MolCrysKit topology fragment"
                 )
                 continue
+            source_index = int(topology_fragment["index"])
+            if selected_sites is not None and source_index not in selected_sites:
+                continue
+            candidates.append((display_fragment, topology_fragment))
+        if not candidates:
+            raise ValueError(
+                f"no displayed {spec['center_species']} center matches "
+                f"polyhedron {spec['id']}"
+            )
+        overlays: list[dict[str, Any]] = []
+        for display_fragment, topology_fragment in candidates:
             result = analyze_topology(
                 bundle,
                 center_index=int(topology_fragment["index"]),
@@ -467,12 +470,30 @@ def build_topology_data(
             overlay = {
                 "center_coords": result.get("center_coords"),
                 "center_label": result.get("center_label"),
+                "center_source_index": int(topology_fragment["index"]),
+                "center_display_index": int(display_fragment.get("index", -1)),
+                "center_image": list(
+                    display_fragment.get("image_shift", (0, 0, 0))
+                ),
+                "center_image_shift": list(
+                    display_fragment.get("image_shift", (0, 0, 0))
+                ),
                 "shell_coords": shell,
+                "distances": result.get("distances") or [],
+                "source_center_coords": result.get("source_center_coords"),
                 "hull": hull,
                 "color": spec["color"],
             }
-            override = spec["instance_overrides"].get(
-                str(overlay.get("center_label") or "")
+            override = next(
+                (
+                    spec["instance_overrides"][key]
+                    for key in (
+                        str(overlay["center_source_index"]),
+                        str(overlay.get("center_label") or ""),
+                    )
+                    if key in spec["instance_overrides"]
+                ),
+                None,
             )
             if override:
                 if "color" in override:
@@ -512,6 +533,17 @@ def polyhedron_summary(topology_data) -> list[dict]:
             for overlay in overlays
             if overlay.get("center_source_index") is not None
         }
+        center_image_shifts = sorted(
+            {
+                tuple(
+                    int(value)
+                    for value in overlay.get(
+                        "center_image_shift", overlay.get("center_image", (0, 0, 0))
+                    )
+                )
+                for overlay in overlays
+            }
+        )
         summaries.append(
             {
                 "id": result.get("spec_id") or result.get("id"),
@@ -521,6 +553,7 @@ def polyhedron_summary(topology_data) -> list[dict]:
                 "displayed_centers": len(overlays),
                 "unique_source_centers": len(source_centers) or len(overlays),
                 "center_images": bool(result.get("center_images", False)),
+                "center_image_shifts": [list(shift) for shift in center_image_shifts],
                 "effective_colors": colors,
                 "coordination_numbers": coordination_numbers,
             }

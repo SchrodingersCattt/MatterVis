@@ -31,6 +31,25 @@ flowchart LR
 
 ## Builders
 
+### `mat_viewer.agent.load_structure(..., bond_scale=None)`
+
+The agent-facing loader exposes MolCrysKit's global bond-perception coefficient
+for CIF and ASE-readable inputs. A positive explicit value is forwarded through
+canonical loading, molecule grouping, and scene construction. Omit it to retain
+the existing default. The CLI exposes the same control as `--bond-scale`.
+
+### Auxiliary cells
+
+`agent.prepare_render` and `agent.render` accept `cell_overlays=[...]`.
+The same list may be stored in a scene under the `cell_overlays` key; an
+explicit argument wins. Each entry supplies an ID, a 3 by 3 world-space matrix,
+an optional origin, color, width, dash pattern, alpha, and depth-test flag.
+Auxiliary cell corners participate in automatic camera fitting.
+
+These cells are annotations only. They do not change the structure's canonical
+lattice, atom coordinates, bonds, or periodic-image policy. See
+[`cell_overlays_api.md`](cell_overlays_api.md) for the schema and examples.
+
 ### `mat_viewer.scene.build_scene_from_cif(...)`
 
 Parses a CIF and returns a scene dict consumable by

@@ -78,6 +78,8 @@ def test_composable_user_surfaces_have_cli_destinations() -> None:
 
     assert {
         "vector_overlays",
+        "cell_overlays",
+        "bond_scale",
         "atom_group",
         "bond_group",
         "include_boundary_replicas",
@@ -96,6 +98,25 @@ def test_composable_user_surfaces_have_cli_destinations() -> None:
         "frame_label_position",
         "property_data",
     } <= destinations
+
+
+def test_cell_overlay_and_bond_scale_cli_values() -> None:
+    parser = argparse.ArgumentParser()
+    render = _build_render_parser(parser.add_subparsers())
+
+    args = render.parse_args(
+        [
+            "structure.cif",
+            "-o",
+            "figure.png",
+            "--bond-scale",
+            "0.85",
+            "--cell-overlays",
+            "cells.json",
+        ]
+    )
+    assert args.bond_scale == 0.85
+    assert str(args.cell_overlays) == "cells.json"
 
 
 def test_boundary_replica_cli_is_explicit_and_backwards_compatible() -> None:

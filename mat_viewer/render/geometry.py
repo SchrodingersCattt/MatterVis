@@ -611,8 +611,10 @@ def unit_cell_primitive(
     *,
     origin: Iterable[float] = (0.0, 0.0, 0.0),
     width_px: float = 1.0,
+    dash: Iterable[float] = (),
     alpha: float = 1.0,
     depth_test: bool = True,
+    metadata: dict[str, Any] | None = None,
 ) -> LinePrimitive:
     lattice = np.asarray(matrix, dtype=float)
     if lattice.shape != (3, 3) or not np.all(np.isfinite(lattice)):
@@ -653,8 +655,9 @@ def unit_cell_primitive(
         ),
         rgba=color_to_rgba(color, alpha=alpha),
         width_px=width_px,
+        dash=tuple(float(value) for value in dash),
         depth_test=depth_test,
-        metadata={"kind": "unit_cell"},
+        metadata=metadata or {"kind": "unit_cell"},
     )
 
 

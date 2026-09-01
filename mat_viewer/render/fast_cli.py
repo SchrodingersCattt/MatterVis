@@ -246,6 +246,26 @@ def render_batch_if_selected(
 ) -> dict | None:
     """Render through canonical arrays when workload selection chooses batch."""
 
+    general_only = [
+        flag
+        for flag, present in (
+            (
+                "--bond-scale",
+                getattr(args, "bond_scale", None) is not None,
+            ),
+            (
+                "--cell-overlays",
+                getattr(args, "cell_overlays", None) is not None,
+            ),
+        )
+        if present
+    ]
+    if general_only:
+        if args.renderer == "batch":
+            raise ValueError(
+                f"--renderer batch does not support {', '.join(general_only)}"
+            )
+        return None
     decision, workload = renderer_decision(args)
     if decision.selected != "batch":
         return None

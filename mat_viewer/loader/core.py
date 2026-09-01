@@ -699,6 +699,7 @@ def _fragment_table_from_atoms(
     image_to_local: dict[tuple[tuple[int, int, int], int], int] = {}
     pool_kept: list[dict[str, Any]] = []
     pool_source_idx: list[int] = []
+    pool_image_shift: list[tuple[int, int, int]] = []
     for local_idx, atom in enumerate(atoms):
         if ops.is_minor(atom) and not include_minor:
             continue
@@ -708,13 +709,14 @@ def _fragment_table_from_atoms(
         image_to_local[(shift_key, raw_idx)] = len(pool_kept)
         pool_kept.append(dict(atom))
         pool_source_idx.append(local_idx if not use_source_indices else raw_idx)
+        pool_image_shift.append(shift_key)
 
     if not pool_kept:
         return [], []
 
     # Group atoms by (image_shift, mol_index_k). Each replica image of a
     # MolCrysKit molecule becomes its own fragment-table row.
-    components: list[tuple[list[int], int | None]] = []
+    components: list[tuple[list[int], int | None, tuple[int, int, int]]] = []
     seen_local: set[int] = set()
     seen_images = sorted({key[0] for key in image_to_local})
     for shift_key in seen_images:
@@ -727,18 +729,18 @@ def _fragment_table_from_atoms(
                 component.append(local)
                 seen_local.add(local)
             if component:
-                components.append((sorted(component), int(mol_index)))
+                components.append((sorted(component), int(mol_index), shift_key))
     # Sweep for any kept atom that didn't make it into a molecule component.
     # These should be rare now that MCK's bond perception is disorder-aware
     # and returns both major and minor alternatives as whole fragments; keep
     # singleton rows only as diagnostics for genuinely uncovered atoms.
     for local_idx in range(len(pool_kept)):
         if local_idx not in seen_local:
-            components.append(([local_idx], None))
+            components.append(([local_idx], None, pool_image_shift[local_idx]))
             seen_local.add(local_idx)
 
     fragments = []
-    for component, mol_index in components:
+    for component, mol_index, image_shift in components:
         site_indices = sorted(pool_source_idx[idx] for idx in component)
         component_atoms = [pool_kept[idx] for idx in component]
         heavy_atoms = [atom for atom in component_atoms if atom["elem"] != "H"]
@@ -792,6 +794,7 @@ def _fragment_table_from_atoms(
             {
                 "site_indices": site_indices,
                 "source_molecule_index": mol_index,
+                "image_shift": list(image_shift),
                 "center": [float(x) for x in center_cart],
                 "frac_center": [float(x) for x in center_frac],
                 "elem_set": sorted(elem_set),
@@ -888,6 +891,7 @@ def _fragment_table_from_atoms(
                 "frac_center": frag["frac_center"],
                 "site_indices": frag["site_indices"],
                 "source_molecule_index": frag.get("source_molecule_index"),
+                "image_shift": frag.get("image_shift", [0, 0, 0]),
                 "source": bundle_name,
                 "heavy_atom_count": frag["heavy_atom_count"],
                 "cluster_size": frag["cluster_size"],
@@ -1147,6 +1151,7 @@ def build_loaded_crystal(
     preset: Optional[Dict[str, Any]] = None,
     source: str = "catalog",
     view_weights: Optional[Dict[str, float]] = None,
+    bond_scale: float | None = None,
 ) -> LoadedCrystal:
     """Parse a CIF and enter the shared canonical structure pipeline."""
     ops = scene_ops()
@@ -1178,4 +1183,5 @@ def build_loaded_crystal(
         preset=preset,
         source=source,
         view_weights=view_weights,
+        bond_scale=bond_scale,
     )
