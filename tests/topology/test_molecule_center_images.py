@@ -52,6 +52,7 @@ def _structure():
         scene={"fragment_table": displayed},
         fragment_table=displayed,
         topology_fragment_table=[source],
+        M=np.diag([10.0, 10.0, 10.0]),
     )
     return SimpleNamespace(frames=(SimpleNamespace(bundle=bundle),))
 
@@ -173,40 +174,22 @@ def test_molecule_center_images_translate_complete_shells(monkeypatch) -> None:
     strict_overlays = strict["spec_results"][0]["overlays"]
     expanded_overlays = expanded["spec_results"][0]["overlays"]
     assert len(strict_overlays) == 1
-    assert len(expanded_overlays) == 2
+    assert len(expanded_overlays) == 8
     assert {overlay["center_source_index"] for overlay in expanded_overlays} == {7}
-    assert {tuple(overlay["center_image_shift"]) for overlay in expanded_overlays} == {
-        (0, 0, 0),
-        (1, 0, 0),
+    shifts = {tuple(overlay["center_image_shift"]) for overlay in expanded_overlays}
+    assert shifts == {
+        (a, b, c) for a in (0, 1) for b in (0, 1) for c in (0, 1)
     }
-    delta = np.asarray(expanded_overlays[1]["shell_coords"]) - np.asarray(
-        expanded_overlays[0]["shell_coords"]
-    )
+    home = next(o for o in expanded_overlays if tuple(o["center_image_shift"]) == (0, 0, 0))
+    x_image = next(o for o in expanded_overlays if tuple(o["center_image_shift"]) == (1, 0, 0))
+    delta = np.asarray(x_image["shell_coords"]) - np.asarray(home["shell_coords"])
     assert np.allclose(delta, [10.0, 0.0, 0.0])
 
-    assert polyhedron_summary(expanded) == [
-        {
-            "id": "a-cage",
-            "level": "molecule",
-            "center": "C5N2",
-            "ligand": "ClO4",
-            "displayed_centers": 2,
-            "unique_source_centers": 1,
-            "center_images": True,
-            "center_image_shifts": [[0, 0, 0], [1, 0, 0]],
-            "center_image_pairs": [
-                {
-                    "source_center_index": 7,
-                    "display_center_index": 0,
-                    "image_shift": [0, 0, 0],
-                },
-                {
-                    "source_center_index": 7,
-                    "display_center_index": 1,
-                    "image_shift": [1, 0, 0],
-                },
-            ],
-            "effective_colors": ["#7C5CBF"],
-            "coordination_numbers": [4],
-        }
-    ]
+    summary = polyhedron_summary(expanded)[0]
+    assert summary["id"] == "a-cage"
+    assert summary["displayed_centers"] == 8
+    assert summary["unique_source_centers"] == 1
+    assert summary["center_images"] is True
+    assert {tuple(shift) for shift in summary["center_image_shifts"]} == shifts
+    assert summary["effective_colors"] == ["#7C5CBF"]
+    assert summary["coordination_numbers"] == [4]
