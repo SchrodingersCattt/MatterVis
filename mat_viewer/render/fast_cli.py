@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
 import json
 import math
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
@@ -366,7 +366,7 @@ def render_batch_if_selected(
             bonded=args.style == "ball_stick",
             bond_radius=args.bond_radius,
             bond_skin=args.bond_skin,
-            vector_overlays=_load_vector_overlays(args.vector_overlays),
+            vector_overlays=_load_vector_overlays(args.vector_overlays, "--vector-overlays"),
             polyhedron_specs=tuple(args.polyhedron),
             polyhedron_site=args.polyhedron_site,
             polyhedron_cutoff=args.polyhedron_cutoff,
