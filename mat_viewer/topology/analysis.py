@@ -367,9 +367,10 @@ def atom_overlay(shell: dict[str, Any], center: dict[str, Any]) -> dict[str, Any
     source_hull = shell.get("source_hull") or {}
     hull = dict(source_hull)
     source_vertices = np.asarray(source_hull.get("vertices") or [], dtype=float)
-    hull["vertices"] = (
-        (source_vertices + delta).tolist() if len(source_vertices) else []
-    )
+    if source_vertices.ndim == 2 and source_vertices.shape[1:] == (3,):
+        hull["vertices"] = (source_vertices + delta).tolist()
+    else:
+        hull["vertices"] = []
     return {
         "center_coords": display_center.tolist(),
         "center_label": center["label"],
