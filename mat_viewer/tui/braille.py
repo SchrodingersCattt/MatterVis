@@ -28,7 +28,7 @@ _BRAILLE_BASE = 0x2800
 
 
 def _ascii7_cell(bits: int) -> str:
-    """Map one 2x4 subpixel cell to a readable printable-ASCII glyph."""
+    """Approximate one 2x4 mask perceptually; this is not reversible Braille."""
     if bits == 0:
         return " "
     points = [

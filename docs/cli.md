@@ -69,6 +69,11 @@ Every input line receives one JSON response line and stdout is flushed after
 each response. Actions are selected online by the caller; MatterVis does not
 pre-plan a trajectory or repair malformed natural-language commands.
 
+JSONL observations are always monochrome and ANSI-free. The default charset is
+`unicode`, using Unicode Braille geometry without ANSI colour; pass
+`--charset ascii7` when every observation field must also serialize as ASCII
+bytes.
+
 `--charset unicode|ascii7` is available for both static and JSONL output.
 `ascii7` selects printable ASCII geometry and implies monochrome output;
 `unicode` preserves the default Braille renderer. JSONL sessions support

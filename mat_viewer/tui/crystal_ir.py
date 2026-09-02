@@ -92,8 +92,8 @@ class AtomIR:
 
     # MCK-derived fields
     molecule_index: int = -1  # Which molecule this atom belongs to (-1 = unassigned)
-    disorder_group: int = 0  # CIF disorder group (0 = ordered)
-    disorder: str = "."  # Opaque source disorder token
+    disorder_group: int = 0  # Normalized numeric CIF/render group (0 = ordered)
+    disorder: str = "."  # Lossless source token; may be nonnumeric or namespaced
     is_minor: bool = False  # Minor disorder image (should be dimmed/hidden)
 
     @property

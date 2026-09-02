@@ -102,6 +102,10 @@ Install MatterVis, then render a crystal structure with a single command:
 # Primary terminal observation and chemistry inspection
 mat-vis tui structure.cif
 
+# Stateful online agent session (one JSON action per stdin line)
+printf '%s\n' '{"action":"observe"}' '{"action":"close"}' | \
+  mat-vis tui structure.cif --session-format jsonl --charset ascii7
+
 # PNG with default ball-and-stick style
 mat-vis inspect structure.cif --json
 mat-vis render structure.cif -o figure.png --backend cpu --check --json

@@ -72,8 +72,10 @@ selection, focus, and display state.
 
 Each `SessionObservation` contains exactly `width × height` padded
 `screen_lines`, a SHA-256 of those rendered bytes, and a deterministic state
-fingerprint over structure and view state. The fingerprint excludes the
-monotonic revision and source path.
+fingerprint over camera, display, focus, selection, viewport, and charset. The
+fingerprint excludes coordinates, structure metadata, monotonic revision, and
+source path; use the screen hash or an external content identifier when the
+caller must bind an observation to a particular structure.
 
 For subprocess callers, `mat-vis tui INPUT --session-format jsonl` reads one
 `mattervis.tui.action/v1` object per stdin line and writes one
@@ -87,13 +89,24 @@ Errors are structured responses and do not terminate the session. `close`
 returns `closed: true` and exits. JSONL is a transport for caller-selected
 online actions; it does not translate natural language into actions.
 
+Session observations are always monochrome and ANSI-free in both charsets.
+Colour is an interactive Textual concern, so `set_display` does not expose the
+controller's `mono` field through the session action schema.
+
 Set `charset="ascii7"` in Python or `--charset ascii7` on the CLI for a true
 printable-ASCII renderer. This is distinct from `mono`, which only disables
 ANSI colours. The default remains the existing Unicode/Braille renderer.
+The ASCII-7 glyph mapping is a deterministic perceptual approximation of each
+2×4 subpixel mask, not a reversible encoding of Unicode Braille.
 
 ASE/extXYZ inputs preserve scalar `site_id`, `occupancy`, and opaque
 `disorder` arrays. Source `site_id` takes precedence over generated stable
-identities and must be unique, non-empty ASCII within each frame.
+identities and must be unique, non-empty ASCII within each frame; ASE-path
+occupancy is validated as finite and within `[0, 1]`. CIF occupancy and
+disorder continue through the existing MolCrysKit/CIF loader and retain their
+CIF labels plus normalized numeric disorder groups. `AtomIR.disorder` preserves
+an opaque source token that may be nonnumeric or namespaced, whereas
+`disorder_group` remains the normalized numeric render classification.
 
 ## Perceptual controls
 

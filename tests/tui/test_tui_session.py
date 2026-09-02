@@ -138,6 +138,27 @@ def test_action_rejects_unknown_arguments_without_mutating_state() -> None:
     assert session.observe().state_fingerprint == before.state_fingerprint
 
 
+def test_session_rejects_color_toggle_and_remains_usable() -> None:
+    session = TerminalSession(_crystal(), width=40, height=12)
+
+    with pytest.raises(ValueError, match="unknown arguments: mono"):
+        session.execute(TerminalAction("set_display", {"mono": False}))
+
+    observation = session.observe()
+    assert all("\x1b" not in line for line in observation.screen_lines)
+
+
+def test_state_fingerprint_excludes_structure_coordinates() -> None:
+    session = TerminalSession(_crystal(), width=40, height=12)
+    first_observation = session.observe()
+    session.crystal.atoms[0].cart = (
+        session.crystal.atoms[0].cart + np.array([0.25, 0.0, 0.0])
+    )
+    moved_observation = session.observe()
+
+    assert first_observation.state_fingerprint == moved_observation.state_fingerprint
+
+
 def test_jsonl_cli_keeps_one_live_session() -> None:
     root = Path(__file__).resolve().parents[2]
     requests = "\n".join(
@@ -182,3 +203,35 @@ def test_jsonl_cli_keeps_one_live_session() -> None:
     assert reset["state_fingerprint"] == initial["state_fingerprint"]
     assert reset["frame"]["sha256"] == initial["frame"]["sha256"]
     assert responses[3]["closed"] is True
+
+
+def test_default_unicode_jsonl_is_fixed_width_and_ansi_free() -> None:
+    root = Path(__file__).resolve().parents[2]
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "mat_viewer",
+            "tui",
+            "scripts/data/DAP-4.cif",
+            "--session-format",
+            "jsonl",
+            "--width",
+            "40",
+            "--height",
+            "12",
+        ],
+        cwd=root,
+        input='{"action":"observe"}\n{"action":"close"}\n',
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert completed.stdout.isascii()
+    responses = [json.loads(line) for line in completed.stdout.splitlines()]
+    observation = responses[0]["observation"]
+    assert responses[0]["ok"] is True
+    assert len(observation["frame"]["lines"]) == 12
+    assert all(len(line) == 40 for line in observation["frame"]["lines"])
+    assert all("\x1b" not in line for line in observation["frame"]["lines"])

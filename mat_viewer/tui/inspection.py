@@ -411,6 +411,7 @@ def _atom_record(crystal, index: int, *, show_minor: bool) -> dict[str, Any]:
         "occupancy": atom.occupancy,
         "partial_occupancy": atom.occupancy < 0.999,
         "disorder_group": atom.disorder_group,
+        "source_disorder": terminal_text(atom.disorder),
         "render_classification": "minor" if atom.is_minor else "not_minor",
         "classification_provenance_available": False,
         "source_molecule_index": atom.source_molecule_index,

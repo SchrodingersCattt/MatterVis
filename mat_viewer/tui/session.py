@@ -95,7 +95,8 @@ class TerminalSession:
         self.charset = self._controller_options.pop("charset", "unicode")
         if self.charset not in {"unicode", "ascii7"}:
             raise ValueError("charset must be 'unicode' or 'ascii7'")
-        self._controller_options.setdefault("mono", True)
+        # Machine observations never contain terminal-dependent ANSI escapes.
+        self._controller_options["mono"] = True
         self._closed = False
         self.controller = TerminalViewController(crystal, **self._controller_options)
 
@@ -163,7 +164,6 @@ class TerminalSession:
                     "show_bonds",
                     "show_cell",
                     "show_minor",
-                    "mono",
                 },
             ),
             "select": (self._select, {"atom_id", "pinned"}),
@@ -192,41 +192,39 @@ class TerminalSession:
     def _wrap(self, observation: TerminalObservation) -> SessionObservation:
         width = observation.state.viewport.width
         height = observation.state.viewport.height
-        frame = observation.frame
-        if self.charset != "unicode":
-            points, depth = project_points(
-                self.controller.camera, self.crystal.cart_coords
-            )
-            display = observation.state.display
-            viewport_state = observation.state.viewport
-            viewport = viewport_from_bounds(
-                viewport_state.x_min,
-                viewport_state.x_max,
-                viewport_state.y_min,
-                viewport_state.y_max,
-                width,
-                height,
-            )
-            frame = compose_frame(
-                self.crystal,
-                self.controller.camera,
-                points,
-                depth,
-                width=width,
-                height=height,
-                mono=True,
-                label_mode=display.label_mode,
-                show_bonds=display.show_bonds,
-                show_cell=display.show_cell,
-                show_minor=display.show_minor,
-                zoom=1.0,
-                pan_x=0.0,
-                pan_y=0.0,
-                display_level=display.display_level,
-                viewport=viewport,
-                selected_display_index=observation.state.selection.display_index,
-                charset=self.charset,
-            )
+        points, depth = project_points(self.controller.camera, self.crystal.cart_coords)
+        display = observation.state.display
+        viewport_state = observation.state.viewport
+        viewport = viewport_from_bounds(
+            viewport_state.x_min,
+            viewport_state.x_max,
+            viewport_state.y_min,
+            viewport_state.y_max,
+            width,
+            height,
+        )
+        # Sessions re-render from semantic state because both machine charsets
+        # must be fixed-width and ANSI-free, unlike the interactive TUI frame.
+        frame = compose_frame(
+            self.crystal,
+            self.controller.camera,
+            points,
+            depth,
+            width=width,
+            height=height,
+            mono=True,
+            label_mode=display.label_mode,
+            show_bonds=display.show_bonds,
+            show_cell=display.show_cell,
+            show_minor=display.show_minor,
+            zoom=1.0,
+            pan_x=0.0,
+            pan_y=0.0,
+            display_level=display.display_level,
+            viewport=viewport,
+            selected_display_index=observation.state.selection.display_index,
+            charset=self.charset,
+        )
         raw_lines = frame.splitlines()
         if len(raw_lines) > height or any(len(line) > width for line in raw_lines):
             raise ValueError("rendered frame exceeds the configured viewport")
@@ -239,27 +237,6 @@ class TerminalSession:
         state = observation.state.as_dict()
         state.pop("revision", None)
         state["charset"] = self.charset
-        state["structure"] = {
-            "atoms": [
-                {
-                    "atom_id": atom.atom_id,
-                    "element": atom.element,
-                    "cart": [float(value) for value in atom.cart],
-                    "occupancy": float(atom.occupancy),
-                    "disorder": atom.disorder,
-                    "image_shift": list(atom.image_shift),
-                }
-                for atom in self.crystal.atoms
-            ],
-            "bonds": [
-                {
-                    "i": bond.i,
-                    "j": bond.j,
-                    "image_relation": list(bond.image_relation),
-                }
-                for bond in self.crystal.bonds
-            ],
-        }
         state_material = json.dumps(
             state,
             sort_keys=True,
@@ -314,7 +291,13 @@ def run_jsonl_session(
                 "error": {"type": type(exc).__name__, "message": str(exc)},
             }
         output_stream.write(
-            json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+            json.dumps(
+                payload,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+                allow_nan=False,
+            )
             + "\n"
         )
         output_stream.flush()

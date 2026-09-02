@@ -194,6 +194,60 @@ def test_extxyz_rejects_duplicate_source_site_ids(tmp_path: Path) -> None:
         load_for_tui(path)
 
 
+def test_cif_and_extxyz_share_atom_identity_and_occupancy_semantics(
+    tmp_path: Path,
+) -> None:
+    cif = tmp_path / "partial.cif"
+    cif.write_text(
+        """data_partial
+_cell_length_a 8
+_cell_length_b 8
+_cell_length_c 8
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_space_group_name_H-M_alt 'P 1'
+loop_
+_space_group_symop_operation_xyz
+'x,y,z'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+_atom_site_disorder_assembly
+_atom_site_disorder_group
+C1 C 0.25 0.25 0.25 0.50 A 1
+""",
+        encoding="utf-8",
+    )
+    atoms = Atoms(
+        "C",
+        scaled_positions=[[0.25, 0.25, 0.25]],
+        cell=[8.0, 8.0, 8.0],
+        pbc=True,
+    )
+    atoms.arrays["site_id"] = np.array(["source:C1"])
+    atoms.arrays["occupancy"] = np.array([0.5])
+    atoms.arrays["disorder"] = np.array(["assembly:A/group:1"])
+    extxyz = tmp_path / "partial.extxyz"
+    write(extxyz, atoms, format="extxyz")
+
+    with pytest.warns((UserWarning, DeprecationWarning)):
+        cif_crystal = load_for_tui(cif)
+    extxyz_crystal = load_for_tui(extxyz)
+    cif_atom = next(atom for atom in cif_crystal.atoms if atom.label == "C1")
+    extxyz_atom = extxyz_crystal.atoms[0]
+
+    assert cif_atom.atom_id and extxyz_atom.atom_id == "source:C1"
+    assert cif_atom.occupancy == pytest.approx(extxyz_atom.occupancy)
+    assert cif_atom.disorder_group == 1
+    assert extxyz_atom.disorder == "assembly:A/group:1"
+    assert extxyz_atom.disorder_group == 0
+
+
 def test_nonperiodic_cartesian_vectors_follow_source_coordinates(
     tmp_path: Path,
 ) -> None:
