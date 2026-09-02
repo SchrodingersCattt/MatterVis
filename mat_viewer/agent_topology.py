@@ -210,10 +210,6 @@ def parse_polyhedron_specs(raw_specs: Iterable[str]) -> list[dict[str, Any]]:
             raise ValueError(
                 f"polyhedron {index + 1}: center_images must be a JSON boolean"
             )
-        if level != "atom" and center_images:
-            raise ValueError(
-                f"polyhedron {index + 1}: center_images is only valid at atom level"
-            )
         instance_overrides = _parse_instance_overrides(payload, index)
         spec_id = str(
             payload.get("spec_id") or payload.get("id") or f"polyhedron-{index + 1}"
@@ -257,6 +253,87 @@ def _matches(fragment: dict[str, Any], spec: dict[str, Any]) -> bool:
         }
     return (fragment.get("formula") or fragment.get("species")) == spec[
         "center_species"
+    ]
+
+
+def _molecule_center_image_identity(
+    display_fragment: dict[str, Any],
+    source_fragment: dict[str, Any],
+) -> tuple[int, int, int]:
+    """Return the absolute image offset of a displayed molecular center.
+
+    ``fragment_table.image_shift`` is relative to the unwrapped molecule
+    image chosen by MolCrysKit and is not a stable half-open-cell identity.
+    The display/source fractional-center difference is the invariant, just as
+    it is for atom boundary replicas.
+    """
+    display_frac = np.asarray(display_fragment.get("frac_center"), dtype=float)
+    source_frac = np.asarray(source_fragment.get("frac_center"), dtype=float)
+    if display_frac.shape != (3,) or source_frac.shape != (3,):
+        # Lightweight third-party bundles predating frac_center support may
+        # only expose the relative scene image tag. Keep those callers
+        # compatible; production fragment tables always take the invariant
+        # absolute-offset path below.
+        raw_shift = display_fragment.get("image_shift")
+        if isinstance(raw_shift, (list, tuple)) and len(raw_shift) == 3:
+            return tuple(int(value) for value in raw_shift)
+        return (0, 0, 0)
+    # MCK's topology centers are deliberately unwrapped so cross-boundary
+    # molecules remain contiguous.  The half-open source identity is defined
+    # against that center reduced to [0, 1), not against the relative tag.
+    source_frac = source_frac - np.floor(source_frac)
+    # Molecule centroids at a cell face can be -3e-18 or 1+3e-18 from
+    # floating-point averaging. Canonicalize those numerical boundaries to
+    # the half-open zero face before computing the integer image.
+    source_frac[np.isclose(source_frac, 0.0, rtol=0.0, atol=1e-6)] = 0.0
+    source_frac[np.isclose(source_frac, 1.0, rtol=0.0, atol=1e-6)] = 0.0
+    delta = display_frac - source_frac
+    image = np.rint(delta).astype(int)
+    if not np.allclose(delta, image, rtol=0.0, atol=1e-6):
+        raise ValueError(
+            "Displayed and source molecular centers do not differ by an "
+            f"integer cell offset: delta={delta.tolist()}"
+        )
+    return tuple(int(value) for value in image)
+
+
+def _molecule_center_periodic_shifts(
+    source_fragment: dict[str, Any],
+    matrix: Any,
+    *,
+    include_images: bool,
+    include_boundary_replicas: bool,
+) -> list[tuple[int, int, int]]:
+    """Return complete-cell image shifts from the source molecule COM.
+
+    The source topology fragment is authoritative.  Scene fragment rows may
+    be split or re-centred when a molecule crosses a cell face, so using their
+    COMs can create half-cell pseudo-images.  Images are selected solely from
+    the wrapped source COM, with the same 0.03 fractional-face tolerance as
+    atom/molecule boundary replication.
+    """
+    if not include_images or not include_boundary_replicas:
+        return [(0, 0, 0)]
+    frac = np.asarray(source_fragment.get("frac_center"), dtype=float)
+    if frac.shape != (3,):
+        center = np.asarray(source_fragment.get("center"), dtype=float)
+        matrix_arr = np.asarray(matrix, dtype=float)
+        if center.shape != (3,) or matrix_arr.shape != (3, 3):
+            return [(0, 0, 0)]
+        frac = center @ np.linalg.inv(matrix_arr)
+    frac = frac - np.floor(frac)
+    frac[np.isclose(frac, 1.0, rtol=0.0, atol=1e-6)] = 0.0
+    per_axis: list[list[int]] = [[0], [0], [0]]
+    for axis, value in enumerate(frac):
+        if value <= 0.03 + 1e-6:
+            per_axis[axis] = [0, 1]
+        elif value >= 1.0 - 0.03 - 1e-6:
+            per_axis[axis] = [0, -1]
+    return [
+        (int(a), int(b), int(c))
+        for a in per_axis[0]
+        for b in per_axis[1]
+        for c in per_axis[2]
     ]
 
 
@@ -412,33 +489,69 @@ def build_topology_data(
             spec_results.append({**spec, "overlays": overlays})
             continue
 
-        candidates = [fragment for fragment in fragments if _matches(fragment, spec)]
-        if spec["sites"] is not None:
-            candidates = [
-                fragment
-                for fragment in candidates
-                if int(fragment.get("index", -1)) in set(spec["sites"])
-            ]
+        candidates: list[
+            tuple[dict[str, Any], dict[str, Any], tuple[int, int, int]]
+        ] = []
+        selected_sites = set(spec["sites"]) if spec["sites"] is not None else None
         if site_index is not None:
-            candidates = [
-                fragment
-                for fragment in candidates
-                if int(fragment.get("index", -1)) == int(site_index)
-            ]
+            selected_sites = (
+                {int(site_index)}
+                if selected_sites is None
+                else selected_sites & {int(site_index)}
+            )
+        matrix = getattr(bundle, "M", None)
+        matrix_arr = np.asarray(matrix, dtype=float)
+        if matrix_arr.shape != (3, 3):
+            # Lightweight test/third-party bundles may omit M; their fake
+            # fractional coordinates are already Cartesian unit-cell values.
+            matrix_arr = np.eye(3, dtype=float)
+        source_fragments = list(
+            getattr(bundle, "topology_fragment_table", None)
+            or bundle.fragment_table
+            or ()
+        )
+        display_index = 0
+        for topology_fragment in source_fragments:
+            if not _matches(topology_fragment, spec):
+                continue
+            source_index = int(topology_fragment["index"])
+            if selected_sites is not None and source_index not in selected_sites:
+                continue
+            source_frac = np.asarray(
+                topology_fragment.get("frac_center"), dtype=float
+            )
+            if source_frac.shape != (3,):
+                source_center = np.asarray(
+                    topology_fragment.get("center"), dtype=float
+                )
+                source_frac = source_center @ np.linalg.inv(matrix_arr)
+            source_frac = source_frac - np.floor(source_frac)
+            source_frac[np.isclose(source_frac, 1.0, rtol=0.0, atol=1e-6)] = 0.0
+            for image_shift in _molecule_center_periodic_shifts(
+                topology_fragment,
+                matrix,
+                include_images=spec["center_images"],
+                include_boundary_replicas=include_boundary_replicas,
+            ):
+                display_frac = source_frac + np.asarray(image_shift, dtype=float)
+                display_center = display_frac @ matrix_arr
+                display_fragment = {
+                    "index": display_index,
+                    "center": display_center.tolist(),
+                    "frac_center": display_frac.tolist(),
+                    "label": topology_fragment.get("label")
+                    or f"{spec['center_species']}{source_index}",
+                    "type": topology_fragment.get("type"),
+                }
+                candidates.append((display_fragment, topology_fragment, image_shift))
+                display_index += 1
         if not candidates:
             raise ValueError(
                 f"no displayed {spec['center_species']} center matches "
                 f"polyhedron {spec['id']}"
             )
         overlays: list[dict[str, Any]] = []
-        for display_fragment in candidates:
-            topology_fragment = _topology_fragment(bundle, display_fragment)
-            if topology_fragment is None:
-                warnings.append(
-                    f"polyhedron {spec['id']} skipped displayed fragment "
-                    f"{display_fragment.get('index')}: no MolCrysKit topology fragment"
-                )
-                continue
+        for display_fragment, topology_fragment, image_shift in candidates:
             result = analyze_topology(
                 bundle,
                 center_index=int(topology_fragment["index"]),
@@ -467,12 +580,26 @@ def build_topology_data(
             overlay = {
                 "center_coords": result.get("center_coords"),
                 "center_label": result.get("center_label"),
+                "center_source_index": int(topology_fragment["index"]),
+                "center_display_index": int(display_fragment.get("index", -1)),
+                "center_image": list(image_shift),
+                "center_image_shift": list(image_shift),
                 "shell_coords": shell,
+                "distances": result.get("distances") or [],
+                "source_center_coords": result.get("source_center_coords"),
                 "hull": hull,
                 "color": spec["color"],
             }
-            override = spec["instance_overrides"].get(
-                str(overlay.get("center_label") or "")
+            override = next(
+                (
+                    spec["instance_overrides"][key]
+                    for key in (
+                        str(overlay["center_source_index"]),
+                        str(overlay.get("center_label") or ""),
+                    )
+                    if key in spec["instance_overrides"]
+                ),
+                None,
             )
             if override:
                 if "color" in override:
@@ -512,19 +639,54 @@ def polyhedron_summary(topology_data) -> list[dict]:
             for overlay in overlays
             if overlay.get("center_source_index") is not None
         }
-        summaries.append(
+        center_image_shifts = sorted(
             {
-                "id": result.get("spec_id") or result.get("id"),
-                "level": result.get("level"),
-                "center": result.get("center_species"),
-                "ligand": result.get("ligand_species"),
-                "displayed_centers": len(overlays),
-                "unique_source_centers": len(source_centers) or len(overlays),
-                "center_images": bool(result.get("center_images", False)),
-                "effective_colors": colors,
-                "coordination_numbers": coordination_numbers,
+                tuple(
+                    int(value)
+                    for value in overlay.get(
+                        "center_image_shift", overlay.get("center_image", (0, 0, 0))
+                    )
+                )
+                for overlay in overlays
             }
         )
+        center_image_pairs = sorted(
+            (
+                int(overlay["center_source_index"]),
+                int(overlay["center_display_index"]),
+                tuple(
+                    int(value)
+                    for value in overlay.get(
+                        "center_image_shift", overlay.get("center_image", (0, 0, 0))
+                    )
+                ),
+            )
+            for overlay in overlays
+            if overlay.get("center_source_index") is not None
+            and overlay.get("center_display_index") is not None
+        )
+        summary = {
+            "id": result.get("spec_id") or result.get("id"),
+            "level": result.get("level"),
+            "center": result.get("center_species"),
+            "ligand": result.get("ligand_species"),
+            "displayed_centers": len(overlays),
+            "unique_source_centers": len(source_centers) or len(overlays),
+            "center_images": bool(result.get("center_images", False)),
+            "center_image_shifts": [list(shift) for shift in center_image_shifts],
+            "effective_colors": colors,
+            "coordination_numbers": coordination_numbers,
+        }
+        if result.get("level") == "molecule":
+            summary["center_image_pairs"] = [
+                {
+                    "source_center_index": source_index,
+                    "display_center_index": display_index,
+                    "image_shift": list(shift),
+                }
+                for source_index, display_index, shift in center_image_pairs
+            ]
+        summaries.append(summary)
     return summaries
 
 

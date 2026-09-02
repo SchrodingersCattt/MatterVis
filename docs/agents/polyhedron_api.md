@@ -28,6 +28,7 @@ Every spec is a flat dict with these fields:
 | `center_kind` | string | **Phase 5.** Molecule-level only: `"centroid"` (default), `"com"` (mass-weighted), or `"heavy_centroid"`. Forwarded to `find_polyhedra(center_kind=...)`; ignored at atom level. |
 | `hard_cutoff` | number \| null | **Phase 5.** Molecule-level only. `null` (default) keeps the natural first shell from MCK's gap+enclosure heuristic. A positive float (e.g. `8.0`) opts that spec into MCK's historical "fill the ball" mode and reproduces classic CN=12 cuboctahedra / CN=4 square-planar interpretations. Silently dropped on atom-level rows (MCK rejects the combination). |
 | `fallback_max` | int \| null | **Phase 5.** Optional upper bound on the chosen coordination number (1--64). `null` keeps MCK's own default. |
+| `center_images` | bool | Include displayed periodic images of each center. At molecule level the cached center, shell, and hull translate together with the complete displayed fragment. Default `false`. |
 | `instance_overrides` | object | **Phase 4.** Per-fragment override map: `{fragment_label: {color, visible}}`. Empty `{}` means every matched fragment inherits the spec-level colour and visibility. Keys are the fragment-table labels exposed in `topology_data["spec_results"][i]["overlays"][j]["center_label"]`. |
 
 ### Pipeline at a glance
@@ -84,6 +85,15 @@ calls instead fill `packing_shell_label`. CShM values are comparable to
 SHAPE-style continuous shape measures: `0` is ideal; small values
 indicate clean/distorted matches, and large values are reported as
 ambiguous or irregular by MolCrysKit's `label_modifier`.
+
+For either level, center_images=false selects only the source image in the
+half-open unit cell. With center_images=true, atom-level centers follow displayed
+atom images and molecule-level centers follow complete displayed fragment
+images. Molecule-level shells are found once for the source center and translated
+as a rigid overlay; MatterVis does not re-search ligands around each display copy.
+
+Render receipts report unique_source_centers, displayed_centers, and
+center_image_shifts. Periodic images increase only the displayed count.
 
 ## REST surface
 

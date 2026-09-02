@@ -143,6 +143,7 @@ def load_structure(
     frame: int = 0,
     frame_indices: Iterable[int] | None = None,
     property_data: str | Path | None = None,
+    bond_scale: float | None = None,
 ) -> Any:
     """Load one canonical structure frame without importing any frontend."""
 
@@ -158,6 +159,7 @@ def load_structure(
         input_format=input_format,
         type_map=type_map,
         frame_indices=list(frame_indices) if frame_indices is not None else [frame],
+        bond_scale=bond_scale,
     )
     if property_data is not None:
         from .loader.property_sidecar import load_atom_property_manifest
@@ -176,6 +178,7 @@ def prepare_render(
     render_spec: Any = None,
     *,
     topology_data: Mapping[str, Any] | None = None,
+    cell_overlays: Any = None,
     vector_overlays: Any = None,
     atom_groups: Any = None,
     bond_groups: Any = None,
@@ -202,6 +205,7 @@ def prepare_render(
         camera=camera,
         render=render_spec,
         topology_data=topology_data,
+        cell_overlays=cell_overlays,
         vector_overlays=vector_overlays,
         atom_groups=atom_groups,
         bond_groups=bond_groups,
@@ -225,6 +229,7 @@ def render(
     camera: Any = None,
     render_spec: Any = None,
     topology_data: Mapping[str, Any] | None = None,
+    cell_overlays: Any = None,
     vector_overlays: Any = None,
     atom_groups: Any = None,
     bond_groups: Any = None,
@@ -247,6 +252,7 @@ def render(
                 camera,
                 render_spec,
                 topology_data,
+                cell_overlays,
                 vector_overlays,
                 atom_groups,
                 bond_groups,
@@ -256,7 +262,8 @@ def render(
             )
         ):
             raise ValueError(
-                "view, camera, render_spec, topology_data, vector_overlays, "
+                "view, camera, render_spec, topology_data, cell_overlays, "
+                "vector_overlays, "
                 "atom_groups, bond_groups, animation_time, frame_annotation, and "
                 "atom_property_color "
                 "cannot be supplied when rendering an existing "
@@ -293,6 +300,7 @@ def render(
                 view=view,
                 render_spec=bound_render_spec,
                 topology_data=topology_data,
+                cell_overlays=cell_overlays,
                 vector_overlays=vector_overlays,
                 atom_groups=atom_groups,
                 bond_groups=bond_groups,
@@ -307,6 +315,7 @@ def render(
             camera=effective_camera,
             render_spec=bound_render_spec,
             topology_data=topology_data,
+            cell_overlays=cell_overlays,
             vector_overlays=vector_overlays,
             atom_groups=atom_groups,
             bond_groups=bond_groups,
@@ -332,6 +341,7 @@ def render(
             camera=camera,
             render_spec=bound_render_spec,
             topology_data=topology_data,
+            cell_overlays=cell_overlays,
             vector_overlays=vector_overlays,
             atom_groups=atom_groups,
             bond_groups=bond_groups,

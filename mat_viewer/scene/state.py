@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..render.overlay.cells import normalize_cell_overlays
 from ..render.overlay.vectors import normalize_vector_overlays
 
 DEFAULT_OVERLAY_OVERRIDES: list[dict[str, Any]] = []
@@ -41,6 +42,7 @@ def normalize_overlay_overrides(raw: Any) -> list[dict[str, Any]]:
 __all__ = [
     "DEFAULT_OVERLAY_OVERRIDES",
     "default_overlay_overrides",
+    "normalize_cell_overlays",
     "normalize_overlay_overrides",
     "normalize_vector_overlays",
 ]

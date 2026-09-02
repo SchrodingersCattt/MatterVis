@@ -34,6 +34,7 @@ flowchart LR
     OVERLAY --> TR["transforms_api.md"]
     OVERLAY --> SEL["selection_api.md"]
     OVERLAY --> VEC["vector_overlays_api.md<br/>(anchored world vectors)"]
+    OVERLAY --> CELL["cell_overlays_api.md<br/>(multiple lattice frames)"]
     LIVE --> CONFIG["config_api.md"]
 ```
 
@@ -54,6 +55,7 @@ The same routing as a quick table:
 | Manage named coordination polyhedra (per-row colour, ligand restriction, per-instance overrides) | [`polyhedron_api.md`](polyhedron_api.md) |
 | Apply per-element / per-group colour, visibility, material, or render-style overrides from API or CLI | [`atom_groups_api.md`](atom_groups_api.md) |
 | Draw anchored polarization, dipole, force, displacement, magnetic, or response vectors with real 3D depth | [`vector_overlays_api.md`](vector_overlays_api.md) |
+| Draw conventional, transformed, or simulation cells over one atomistic scene | [cell_overlays_api.md](cell_overlays_api.md) |
 | Recolour, hide, restyle, thin out, or fade chemical bonds by selector from API or CLI | [`bond_groups_api.md`](bond_groups_api.md) |
 | Repeat a unit cell, grow by radius / bonds, complete fragments / polyhedra, or generate a slab | [`transforms_api.md`](transforms_api.md) |
 | Audit which backend-neutral render controls are available from the CLI | [`cli-api-parity.md`](cli-api-parity.md) |

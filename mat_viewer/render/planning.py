@@ -32,6 +32,7 @@ from .geometry import (
     sphere_primitive,
     unit_cell_primitive,
 )
+from .overlay.cells import attach_cell_overlays, cell_overlay_primitives
 from .overlay.vectors import attach_vector_overlays, vector_primitives
 from .mesh_overlays import (
     isosurface_primitives as _isosurface_primitives,
@@ -66,6 +67,7 @@ def prepare_render(
     render: RenderSpec | Mapping[str, Any] | None = None,
     *,
     topology_data: Mapping[str, Any] | None = None,
+    cell_overlays: Any = None,
     vector_overlays: Any = None,
     atom_groups: Sequence[Mapping[str, Any]] | None = None,
     bond_groups: Sequence[Mapping[str, Any]] | None = None,
@@ -90,6 +92,7 @@ def prepare_render(
             render_spec.representation not in {"ball", "space_filling"}
         ),
     )
+    attach_cell_overlays(scene, cell_overlays)
     attach_vector_overlays(scene, vector_overlays)
     scene_display = scene.get("display_mode")
     if scene_display is not None:
@@ -520,7 +523,6 @@ def prepare_render(
                         },
                     )
                 )
-
     lattice = scene.get("matrix")
     if render_spec.show_cell and lattice is not None:
         primitives.append(
@@ -532,7 +534,7 @@ def prepare_render(
                 depth_test=False,
             )
         )
-
+    primitives.extend(cell_overlay_primitives(scene.get("cell_overlays")))
     primitives.extend(_polyhedron_primitives(scene, topology_data))
     isosurface_primitives, isosurface_warnings = _isosurface_primitives(scene)
     primitives.extend(isosurface_primitives)
@@ -551,7 +553,6 @@ def prepare_render(
         ]
     primitives = sorted(primitives, key=lambda primitive: primitive.semantic_id)
     _assert_unique_ids(primitives)
-
     viewport_width_fraction = reserve_property_colorbar(
         property_metadata_payload,
         render_spec.width,
@@ -581,6 +582,7 @@ def prepare_render(
         "frame_index": scene.get("frame_index"),
         "frame_info": scene.get("frame_info"),
         "molcrys_provenance": scene.get("molcrys_provenance"),
+        "cell_overlays": [dict(item) for item in scene.get("cell_overlays") or ()],
         "atom_groups": [dict(group) for group in (atom_groups or ())],
         "bond_groups": [dict(group) for group in (bond_groups or ())],
         "atom_property_color": property_metadata_payload,

@@ -5,15 +5,17 @@ import sys
 from typing import Any, Iterable
 
 import numpy as np
-
+from molcrys_kit.analysis import compute_topo_signature
 from molcrys_kit.analysis.packing_shell import (
     DEFAULT_CENTROID_OFFSET_FRAC,
     compute_angular_signature,
     detect_coordination_number,
     detect_prism_vs_antiprism,
     find_polyhedra,
-    hull_encloses_center as _hull_encloses_center,
     planarity_analysis,
+)
+from molcrys_kit.analysis.packing_shell import (
+    hull_encloses_center as _hull_encloses_center,
 )
 from molcrys_kit.analysis.shape import classify_shell
 from molcrys_kit.structures.polyhedra import convex_hull_payload, ideal_polyhedra_for_cn
@@ -79,6 +81,59 @@ def _shift_hull_payload(
     else:
         out["vertices"] = []
     return out
+
+
+def _validated_mck_molecule_index(bundle, crystal, source_index: int) -> int:
+    """Validate the MatterVis/MolCrysKit molecule-index bridge.
+
+    Fragment rows carry the index used by ``CrystalAnalysis.mol_indices``.
+    Before using that value to index ``crystal.molecules``, compare the
+    molecule's global atom membership.  This turns a possible silent formula
+    mismatch after a reorder into an actionable error.
+    """
+    analysis = getattr(bundle, "molcrys_analysis", None)
+    groups = getattr(analysis, "mol_indices", None)
+    molecules = getattr(crystal, "molecules", None)
+    if not groups or molecules is None:
+        return int(source_index)
+    source_index = int(source_index)
+    if not 0 <= source_index < len(groups):
+        raise ValueError(
+            f"MolCrysKit source molecule index {source_index} is outside "
+            f"mol_indices ({len(groups)} groups)."
+        )
+
+    records_by_molecule: dict[int, set[int]] = {}
+    try:
+        for record in crystal.get_site_records():
+            records_by_molecule.setdefault(int(record.molecule_index), set()).add(
+                int(record.global_index)
+            )
+    except (AttributeError, TypeError, ValueError):
+        records_by_molecule = {}
+
+    target = {int(index) for index in groups[source_index]}
+    matches: list[int] = []
+    for molecule_index, molecule in enumerate(molecules):
+        info = getattr(molecule, "info", {}) or {}
+        members = info.get("atom_indices")
+        if members is None:
+            members = records_by_molecule.get(molecule_index)
+        if members is None:
+            continue
+        if {int(index) for index in members} == target:
+            matches.append(molecule_index)
+    if len(matches) != 1:
+        raise ValueError(
+            "Cannot verify MolCrysKit molecule ordering for source index "
+            f"{source_index}: global atom membership matched {matches}."
+        )
+    if matches[0] != source_index:
+        raise ValueError(
+            "MolCrysKit molecule ordering differs from MatterVis mol_indices: "
+            f"source {source_index} maps to crystal molecule {matches[0]}."
+        )
+    return source_index
 
 
 def _mck_polyhedron_record(
@@ -149,12 +204,29 @@ def _mck_polyhedron_record(
             f"Fragment {center_fragment.get('label') or center_fragment.get('index')} "
             "does not carry a MolCrysKit source_molecule_index."
         )
-    center_formula = center_fragment.get("formula") or center_fragment.get("species")
-    if not center_formula or not ligand_formula:
+    display_formula = center_fragment.get("formula") or center_fragment.get("species")
+    if not display_formula or not ligand_formula:
         raise ValueError(
             "Both center and ligand formulas are required for MolCrysKit polyhedra."
         )
     crystal = molcrys_bridge.molecular_crystal_from_bundle(bundle)
+    # MatterVis classifies displayed molecular fragments by their heavy-atom
+    # formula (for example ``C6N2``), whereas MolCrysKit's molecule-level
+    # packing-shell API addresses the complete formula (``C6H14N2``).  The
+    # source molecule index is the authoritative bridge between them.  This
+    # also covers NH4+ centers, whose display selector is simply ``N``.
+    molecules = getattr(crystal, "molecules", None)
+    molecule_index = int(source_molecule_index)
+    if molecules is not None and 0 <= molecule_index < len(molecules):
+        molecule_index = _validated_mck_molecule_index(
+            bundle, crystal, molecule_index
+        )
+        center_formula = compute_topo_signature(
+            molecules[molecule_index]
+        ).split("|", 1)[0]
+    else:
+        # Compatibility for lightweight bridge objects and third-party loaders.
+        center_formula = str(display_formula)
     # On level="molecule", MCK's ``cutoff`` IS the candidate search radius
     # that feeds gap+enclosure (per MCK PR #32). MV's state-level ``cutoff``
     # is the search radius too, so the kwarg name lines up after the MCK
@@ -175,7 +247,7 @@ def _mck_polyhedron_record(
         level="molecule",
         center_kind=str(center_kind or "centroid"),
         cutoff=float(cutoff),
-        central_indices=[int(source_molecule_index)],
+        central_indices=[int(molecule_index)],
         enforce_enclosure=bool(enforce_enclosure),
         centroid_offset_frac=float(centroid_offset_frac),
         **extra_kwargs,
@@ -295,9 +367,10 @@ def atom_overlay(shell: dict[str, Any], center: dict[str, Any]) -> dict[str, Any
     source_hull = shell.get("source_hull") or {}
     hull = dict(source_hull)
     source_vertices = np.asarray(source_hull.get("vertices") or [], dtype=float)
-    hull["vertices"] = (
-        (source_vertices + delta).tolist() if len(source_vertices) else []
-    )
+    if source_vertices.ndim == 2 and source_vertices.shape[1:] == (3,):
+        hull["vertices"] = (source_vertices + delta).tolist()
+    else:
+        hull["vertices"] = []
     return {
         "center_coords": display_center.tolist(),
         "center_label": center["label"],

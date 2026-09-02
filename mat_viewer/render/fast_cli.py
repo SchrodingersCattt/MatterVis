@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
 import json
 import math
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
 
 from .frame_selection import parse_frame_indices
+from .overlay.io import load_overlay_file as _load_vector_overlays
 from .renderer_selection import RendererDecision, select_renderer
 
 
@@ -246,6 +247,26 @@ def render_batch_if_selected(
 ) -> dict | None:
     """Render through canonical arrays when workload selection chooses batch."""
 
+    general_only = [
+        flag
+        for flag, present in (
+            (
+                "--bond-scale",
+                getattr(args, "bond_scale", None) is not None,
+            ),
+            (
+                "--cell-overlays",
+                getattr(args, "cell_overlays", None) is not None,
+            ),
+        )
+        if present
+    ]
+    if general_only:
+        if args.renderer == "batch":
+            raise ValueError(
+                f"--renderer batch does not support {', '.join(general_only)}"
+            )
+        return None
     decision, workload = renderer_decision(args)
     if decision.selected != "batch":
         return None
@@ -308,7 +329,6 @@ def render_batch_if_selected(
             property_data=args.property_data,
         )
     else:
-        from ..cli import _load_vector_overlays
         from ..properties.cli import atom_property_spec
         from .batch_pipeline import render_array_input
         from .cli_controls import _animation_time_from_args, _frame_annotation_from_args
@@ -346,7 +366,7 @@ def render_batch_if_selected(
             bonded=args.style == "ball_stick",
             bond_radius=args.bond_radius,
             bond_skin=args.bond_skin,
-            vector_overlays=_load_vector_overlays(args.vector_overlays),
+            vector_overlays=_load_vector_overlays(args.vector_overlays, "--vector-overlays"),
             polyhedron_specs=tuple(args.polyhedron),
             polyhedron_site=args.polyhedron_site,
             polyhedron_cutoff=args.polyhedron_cutoff,
