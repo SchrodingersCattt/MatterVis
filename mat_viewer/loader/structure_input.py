@@ -244,9 +244,24 @@ def _ase_atoms_to_pipeline(
     inverse = np.linalg.inv(matrix)
     fractional = positions @ inverse
     symbols = atoms.get_chemical_symbols()
+    arrays = _atom_arrays(atoms)
+    site_ids = _optional_scalar_array(arrays, "site_id", len(atoms))
+    occupancies = _optional_scalar_array(arrays, "occupancy", len(atoms))
+    disorder = _optional_scalar_array(arrays, "disorder", len(atoms))
+    if site_ids is not None:
+        normalized_ids = [str(value) for value in site_ids]
+        if any(not value or not value.isascii() for value in normalized_ids):
+            raise ValueError("site_id values must be non-empty ASCII text")
+        if len(set(normalized_ids)) != len(normalized_ids):
+            raise ValueError("site_id values must be unique within a frame")
+        site_ids = np.asarray(normalized_ids, dtype=object)
     raw_atoms: list[dict[str, Any]] = []
     for index, (symbol, cart, frac) in enumerate(zip(symbols, positions, fractional)):
         label = f"{symbol}{index + 1}"
+        occupancy = 1.0 if occupancies is None else float(occupancies[index])
+        if not np.isfinite(occupancy) or not 0.0 <= occupancy <= 1.0:
+            raise ValueError("occupancy values must be finite and between 0 and 1")
+        disorder_token = "." if disorder is None else str(disorder[index])
         raw_atoms.append(
             {
                 "elem": symbol,
@@ -254,9 +269,11 @@ def _ase_atoms_to_pipeline(
                 "frac": np.asarray(frac, dtype=float),
                 "label": label,
                 "_asym_label": label,
-                "occ": 1.0,
+                "occ": occupancy,
                 "dg": ".",
                 "da": ".",
+                "_source_site_id": "" if site_ids is None else str(site_ids[index]),
+                "_disorder_token": disorder_token,
                 "_symop_index": 0,
                 "_source_index": index,
                 "_bond_partners": (),
@@ -272,6 +289,18 @@ def _ase_atoms_to_pipeline(
         "origin_shift": origin_shift.tolist(),
     }
     return raw_atoms, _cell_from_matrix(matrix), matrix, metadata
+
+
+def _optional_scalar_array(
+    arrays: dict[str, np.ndarray], name: str, atom_count: int
+) -> np.ndarray | None:
+    values = arrays.get(name)
+    if values is None:
+        return None
+    result = np.asarray(values)
+    if result.shape != (atom_count,):
+        raise ValueError(f"{name} must contain exactly one value per atom")
+    return result
 
 
 def build_loaded_crystal_from_ase(

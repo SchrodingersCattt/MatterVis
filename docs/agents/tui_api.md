@@ -40,6 +40,74 @@ canonical/display/visible counts, capabilities, and warnings. It intentionally
 does **not** include atom coordinates, projected depth, pair distances,
 front/back answers, collision scores, or a recommended camera.
 
+## Stateful agent sessions
+
+`TerminalSession` keeps one controller alive while the caller chooses each next
+action from the latest observation. MatterVis executes actions but does not
+provide an agent policy, action budget, answer protocol, or oracle blacklist.
+
+```python
+from mat_viewer.tui import TerminalAction, TerminalSession
+
+session = TerminalSession.from_file(
+  "trajectory.extxyz",
+  width=100,
+  height=36,
+  charset="ascii7",
+)
+initial = session.observe()
+rotated = session.execute(
+  TerminalAction("orbit", {"yaw_deg": 30, "pitch_deg": 15})
+)
+selected = session.execute(
+  TerminalAction("select", {"atom_id": "site:C12"})
+)
+```
+
+Supported session actions are `observe`, `reset`, `orbit`, `align`, `pan`,
+`zoom`, `fit`, `set_display`, `select`, `focus`, `clear_selection`,
+`clear_focus`, and `close`. `select` and `focus` use exact stable `atom_id`
+values. `reset` reconstructs the initial controller, including camera,
+selection, focus, and display state.
+
+Each `SessionObservation` contains exactly `width × height` padded
+`screen_lines`, a SHA-256 of those rendered bytes, and a deterministic state
+fingerprint over camera, display, focus, selection, viewport, and charset. The
+fingerprint excludes coordinates, structure metadata, monotonic revision, and
+source path; use the screen hash or an external content identifier when the
+caller must bind an observation to a particular structure.
+
+For subprocess callers, `mat-vis tui INPUT --session-format jsonl` reads one
+`mattervis.tui.action/v1` object per stdin line and writes one
+`mattervis.tui.session/v1` response per stdout line. For example:
+
+```json
+{"schema":"mattervis.tui.action/v1","action":"orbit","arguments":{"yaw_deg":30,"pitch_deg":15}}
+```
+
+Errors are structured responses and do not terminate the session. `close`
+returns `closed: true` and exits. JSONL is a transport for caller-selected
+online actions; it does not translate natural language into actions.
+
+Session observations are always monochrome and ANSI-free in both charsets.
+Colour is an interactive Textual concern, so `set_display` does not expose the
+controller's `mono` field through the session action schema.
+
+Set `charset="ascii7"` in Python or `--charset ascii7` on the CLI for a true
+printable-ASCII renderer. This is distinct from `mono`, which only disables
+ANSI colours. The default remains the existing Unicode/Braille renderer.
+The ASCII-7 glyph mapping is a deterministic perceptual approximation of each
+2×4 subpixel mask, not a reversible encoding of Unicode Braille.
+
+ASE/extXYZ inputs preserve scalar `site_id`, `occupancy`, and opaque
+`disorder` arrays. Source `site_id` takes precedence over generated stable
+identities and must be unique, non-empty ASCII within each frame; ASE-path
+occupancy is validated as finite and within `[0, 1]`. CIF occupancy and
+disorder continue through the existing MolCrysKit/CIF loader and retain their
+CIF labels plus normalized numeric disorder groups. `AtomIR.disorder` preserves
+an opaque source token that may be nonnumeric or namespaced, whereas
+`disorder_group` remains the normalized numeric render classification.
+
 ## Perceptual controls
 
 | Method | Meaning |

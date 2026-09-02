@@ -100,7 +100,10 @@ def _load_bundle(
         for record in analysis.site_records
     }
     for atom in ir.atoms:
-        atom.atom_id = site_ids.get(atom.source_index, "")
+        source_atom = bundle.raw_atoms[atom.source_index]
+        source_site_id = str(source_atom.get("_source_site_id", "") or "")
+        atom.source_site_id = source_site_id
+        atom.atom_id = source_site_id or site_ids.get(atom.source_index, "")
     from ..structure import molcrys_bridge
 
     chemistry = getattr(analysis, "chemistry", None)
@@ -209,6 +212,7 @@ def _crystal_ir_from_scene(
                 element=str(atom["elem"]),
                 cart=np.asarray(atom["cart"], dtype=float),
                 frac=np.asarray(atom["frac"], dtype=float),
+                source_site_id=str(atom.get("_source_site_id", "") or ""),
                 label=str(atom.get("label", "")),
                 occupancy=float(atom.get("occ", 1.0)),
                 index=index,
@@ -224,6 +228,7 @@ def _crystal_ir_from_scene(
                 display_fragment_id=atom_to_fragment.get(index, ""),
                 molecule_index=atom_to_molecule.get(index, -1),
                 disorder_group=dg,
+                disorder=str(atom.get("_disorder_token", ".") or "."),
                 is_minor=bool(atom.get("is_minor", False)),
             )
         )

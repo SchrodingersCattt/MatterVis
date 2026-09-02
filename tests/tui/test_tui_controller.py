@@ -77,6 +77,15 @@ def test_selection_is_visible_in_mono_and_survives_camera_rotation() -> None:
     assert "[C1]" in rotated.frame
 
 
+def test_selection_accepts_exact_stable_atom_id() -> None:
+    controller = TerminalViewController(_crystal(), width=40, height=12, mono=True)
+
+    selected = controller.select_atom({"atom_id": "site:O1"})
+
+    assert selected.state.selection.atom_id == "site:O1"
+    assert "[O1]" in selected.frame
+
+
 def test_molecule_level_keeps_the_selected_atom_marker() -> None:
     controller = TerminalViewController(
         _crystal(), width=40, height=12, mono=True, display_level="molecule"

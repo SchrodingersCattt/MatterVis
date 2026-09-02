@@ -78,6 +78,7 @@ class AtomIR:
     cart: np.ndarray  # Cartesian position (3,)
     frac: np.ndarray  # Fractional coordinates (3,)
     atom_id: str = ""  # Stable MolCrysKit atom identity
+    source_site_id: str = ""  # Stable identity supplied by the source format
     label: str = ""  # CIF _atom_site_label (e.g. "Fe1", "O2", "C3A")
     occupancy: float = 1.0
     index: int = 0  # Index in the atoms list
@@ -91,7 +92,8 @@ class AtomIR:
 
     # MCK-derived fields
     molecule_index: int = -1  # Which molecule this atom belongs to (-1 = unassigned)
-    disorder_group: int = 0  # CIF disorder group (0 = ordered)
+    disorder_group: int = 0  # Normalized numeric CIF/render group (0 = ordered)
+    disorder: str = "."  # Lossless source token; may be nonnumeric or namespaced
     is_minor: bool = False  # Minor disorder image (should be dimmed/hidden)
 
     @property
@@ -205,6 +207,7 @@ def filter_crystal(
                 cart=atom.cart,
                 frac=atom.frac,
                 atom_id=atom.atom_id,
+                source_site_id=atom.source_site_id,
                 label=atom.label,
                 occupancy=atom.occupancy,
                 index=new_index,
@@ -217,6 +220,7 @@ def filter_crystal(
                 display_fragment_id=atom.display_fragment_id,
                 molecule_index=atom.molecule_index,
                 disorder_group=atom.disorder_group,
+                disorder=atom.disorder,
                 is_minor=atom.is_minor,
             )
         )

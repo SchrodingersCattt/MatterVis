@@ -273,6 +273,9 @@ def _build_tui_parser(
         default=False,
         help="Force monochrome output (no ANSI color codes).",
     )
+    from .tui.cli import add_session_arguments
+
+    add_session_arguments(p)
     p.add_argument(
         "--format",
         choices=_TUI_FORMATS,
@@ -440,6 +443,11 @@ def _tui_main(args: argparse.Namespace) -> None:
     # Apply --zoom
     cam = _replace(cam, viewport_zoom=args.zoom)
 
+    from .tui.cli import run_session
+
+    if run_session(args, crystal, cam, label_mode=label_mode):
+        return
+
     if not args.interaction:
         # Static output mode
         pts_2d, depth = project_points(cam, crystal.cart_coords)
@@ -454,21 +462,10 @@ def _tui_main(args: argparse.Namespace) -> None:
                 show_minor=args.show_minor,
             )
         else:
-            from .tui.compositor import compose_frame
+            from .tui.cli import compose_static_frame
 
-            output = compose_frame(
-                crystal,
-                cam,
-                pts_2d,
-                depth,
-                width=args.width,
-                height=args.height,
-                mono=args.mono,
-                label_mode=label_mode,
-                show_bonds=not args.no_bonds,
-                show_cell=not args.no_cell,
-                show_minor=args.show_minor,
-                zoom=cam.viewport_zoom,
+            output = compose_static_frame(
+                args, crystal, cam, pts_2d, depth, label_mode=label_mode
             )
         print(output)
     else:
