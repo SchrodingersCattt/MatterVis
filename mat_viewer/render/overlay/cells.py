@@ -11,16 +11,20 @@ from ..geometry import unit_cell_primitive
 from .io import load_overlay_file
 
 _CELL_OVERLAY_DETERMINANT_TOL = 1e-12
-_CELL_OVERLAY_KEYS = {
-    "id",
-    "matrix",
-    "origin",
-    "color",
-    "width_px",
-    "dash",
-    "alpha",
-    "depth_test",
-}
+# Keep this small runtime validation set local to avoid importing scene.types
+# during package startup (scene.state imports this module).
+_CELL_OVERLAY_KEYS = frozenset(
+    {
+        "id",
+        "matrix",
+        "origin",
+        "color",
+        "width_px",
+        "dash",
+        "alpha",
+        "depth_test",
+    }
+)
 
 
 def _finite_vector(value: Any, *, shape: tuple[int, ...], name: str) -> np.ndarray:
