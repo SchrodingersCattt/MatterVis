@@ -282,6 +282,11 @@ def _molecule_center_image_identity(
     # molecules remain contiguous.  The half-open source identity is defined
     # against that center reduced to [0, 1), not against the relative tag.
     source_frac = source_frac - np.floor(source_frac)
+    # Molecule centroids at a cell face can be -3e-18 or 1+3e-18 from
+    # floating-point averaging. Canonicalize those numerical boundaries to
+    # the half-open zero face before computing the integer image.
+    source_frac[np.isclose(source_frac, 0.0, rtol=0.0, atol=1e-6)] = 0.0
+    source_frac[np.isclose(source_frac, 1.0, rtol=0.0, atol=1e-6)] = 0.0
     delta = display_frac - source_frac
     image = np.rint(delta).astype(int)
     if not np.allclose(delta, image, rtol=0.0, atol=1e-6):
