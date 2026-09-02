@@ -56,7 +56,7 @@ from .render.fast_cli import (
     add_batch_render_arguments,
     render_batch_if_selected,
 )
-from .render.overlay.cells import load_overlay_file as _load_overlay_file
+from .render.overlay.io import load_overlay_file as _load_overlay_file
 from .properties.cli import add_atom_property_arguments as _add_atom_property_arguments, atom_property_spec as _atom_property_spec
 
 def _build_render_parser(

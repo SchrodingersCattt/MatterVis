@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from mat_viewer.app import WORKSPACE_DIR, create_app
 from mat_viewer.app.normalizers import _normalize_polyhedron_spec
 
@@ -160,6 +162,42 @@ def test_polyhedra_patch_can_flip_level_to_atom(tmp_path: Path):
 # ----------------------------------------------------------------------
 # MCK passthrough -- verify the new knobs end up on find_polyhedra(...).
 # ----------------------------------------------------------------------
+
+
+def test_mck_polyhedron_rejects_molecule_index_reorder(monkeypatch):
+    from mat_viewer.topology import analysis as topology_analysis
+
+    class _Molecule:
+        def __init__(self, atom_indices):
+            self.info = {"atom_indices": atom_indices}
+
+    class _Crystal:
+        # Deliberately reversed relative to MatterVis mol_indices.
+        molecules = [_Molecule([1]), _Molecule([0])]
+
+    bundle = type(
+        "Bundle",
+        (),
+        {"molcrys_analysis": type("Analysis", (), {"mol_indices": [[0], [1]]})()},
+    )()
+    monkeypatch.setattr(
+        topology_analysis.molcrys_bridge,
+        "molecular_crystal_from_bundle",
+        lambda _: _Crystal(),
+    )
+    with pytest.raises(ValueError, match="ordering"):
+        topology_analysis._mck_polyhedron_record(
+            bundle,
+            {
+                "index": 0,
+                "label": "A0",
+                "formula": "C",
+                "source_molecule_index": 0,
+            },
+            cutoff=8.0,
+            ligand_species=("ClO4",),
+            level="molecule",
+        )
 
 
 def test_find_polyhedra_receives_hard_cutoff_and_center_kind(monkeypatch):

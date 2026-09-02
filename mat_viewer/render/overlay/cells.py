@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+from ..contracts import LinePrimitive
 from ..geometry import unit_cell_primitive
+from .io import load_overlay_file
 
+_CELL_OVERLAY_DETERMINANT_TOL = 1e-12
 _CELL_OVERLAY_KEYS = {
     "id",
     "matrix",
@@ -20,17 +21,6 @@ _CELL_OVERLAY_KEYS = {
     "alpha",
     "depth_test",
 }
-
-
-def load_overlay_file(path: str | Path | None, option: str):
-    """Load a CLI overlay-list JSON file without backend-specific parsing."""
-    if path is None:
-        return None
-    with Path(path).expanduser().open("r", encoding="utf-8") as handle:
-        payload = json.load(handle)
-    if not isinstance(payload, list):
-        raise TypeError(f"{option} JSON root must be a list")
-    return payload
 
 
 def _finite_vector(value: Any, *, shape: tuple[int, ...], name: str) -> np.ndarray:
@@ -64,7 +54,7 @@ def normalize_cell_overlays(raw: Any) -> list[dict[str, Any]]:
         matrix = _finite_vector(
             item.get("matrix"), shape=(3, 3), name=f"cell overlay {identifier} matrix"
         )
-        if abs(float(np.linalg.det(matrix))) <= 1e-12:
+        if abs(float(np.linalg.det(matrix))) <= _CELL_OVERLAY_DETERMINANT_TOL:
             raise ValueError(f"cell overlay {identifier} matrix must be non-singular")
         origin = _finite_vector(
             item.get("origin", (0.0, 0.0, 0.0)),
@@ -116,9 +106,9 @@ def attach_cell_overlays(scene: dict[str, Any], cell_overlays: Any) -> None:
         scene["cell_overlays"] = normalize_cell_overlays(scene["cell_overlays"])
 
 
-def cell_overlay_primitives(cell_overlays: Any) -> list:
+def cell_overlay_primitives(cell_overlays: Any) -> list[LinePrimitive]:
     """Compile auxiliary cells into ordinary dashed/solid line primitives."""
-    primitives = []
+    primitives: list[LinePrimitive] = []
     for overlay in normalize_cell_overlays(cell_overlays):
         identifier = overlay["id"]
         primitives.append(

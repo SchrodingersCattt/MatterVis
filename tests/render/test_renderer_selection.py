@@ -42,6 +42,14 @@ def test_static_large_structure_and_long_trajectory_share_route_metric() -> None
     assert static.selected == trajectory.selected == "batch"
 
 
+def test_batch_cli_overlay_loader_is_importable_without_legacy_cli_symbol() -> None:
+    """The batch path must keep working when numba enables its fast branch."""
+    from mat_viewer.render.fast_cli import _load_vector_overlays
+    from mat_viewer.render.overlay.io import load_overlay_file
+
+    assert _load_vector_overlays is load_overlay_file
+
+
 def test_force_general_and_force_batch_are_explicit() -> None:
     general = select_renderer(
         "general",

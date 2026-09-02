@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 
 from .frame_selection import parse_frame_indices
+from .overlay.io import load_overlay_file as _load_vector_overlays
 from .renderer_selection import RendererDecision, select_renderer
 
 
@@ -328,7 +329,6 @@ def render_batch_if_selected(
             property_data=args.property_data,
         )
     else:
-        from ..cli import _load_vector_overlays
         from ..properties.cli import atom_property_spec
         from .batch_pipeline import render_array_input
         from .cli_controls import _animation_time_from_args, _frame_annotation_from_args

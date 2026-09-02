@@ -83,6 +83,59 @@ def _shift_hull_payload(
     return out
 
 
+def _validated_mck_molecule_index(bundle, crystal, source_index: int) -> int:
+    """Validate the MatterVis/MolCrysKit molecule-index bridge.
+
+    Fragment rows carry the index used by ``CrystalAnalysis.mol_indices``.
+    Before using that value to index ``crystal.molecules``, compare the
+    molecule's global atom membership.  This turns a possible silent formula
+    mismatch after a reorder into an actionable error.
+    """
+    analysis = getattr(bundle, "molcrys_analysis", None)
+    groups = getattr(analysis, "mol_indices", None)
+    molecules = getattr(crystal, "molecules", None)
+    if not groups or molecules is None:
+        return int(source_index)
+    source_index = int(source_index)
+    if not 0 <= source_index < len(groups):
+        raise ValueError(
+            f"MolCrysKit source molecule index {source_index} is outside "
+            f"mol_indices ({len(groups)} groups)."
+        )
+
+    records_by_molecule: dict[int, set[int]] = {}
+    try:
+        for record in crystal.get_site_records():
+            records_by_molecule.setdefault(int(record.molecule_index), set()).add(
+                int(record.global_index)
+            )
+    except (AttributeError, TypeError, ValueError):
+        records_by_molecule = {}
+
+    target = {int(index) for index in groups[source_index]}
+    matches: list[int] = []
+    for molecule_index, molecule in enumerate(molecules):
+        info = getattr(molecule, "info", {}) or {}
+        members = info.get("atom_indices")
+        if members is None:
+            members = records_by_molecule.get(molecule_index)
+        if members is None:
+            continue
+        if {int(index) for index in members} == target:
+            matches.append(molecule_index)
+    if len(matches) != 1:
+        raise ValueError(
+            "Cannot verify MolCrysKit molecule ordering for source index "
+            f"{source_index}: global atom membership matched {matches}."
+        )
+    if matches[0] != source_index:
+        raise ValueError(
+            "MolCrysKit molecule ordering differs from MatterVis mol_indices: "
+            f"source {source_index} maps to crystal molecule {matches[0]}."
+        )
+    return source_index
+
+
 def _mck_polyhedron_record(
     bundle,
     center_fragment: dict[str, Any],
@@ -163,9 +216,13 @@ def _mck_polyhedron_record(
     # source molecule index is the authoritative bridge between them.  This
     # also covers NH4+ centers, whose display selector is simply ``N``.
     molecules = getattr(crystal, "molecules", None)
-    if molecules is not None and 0 <= int(source_molecule_index) < len(molecules):
+    molecule_index = int(source_molecule_index)
+    if molecules is not None and 0 <= molecule_index < len(molecules):
+        molecule_index = _validated_mck_molecule_index(
+            bundle, crystal, molecule_index
+        )
         center_formula = compute_topo_signature(
-            molecules[int(source_molecule_index)]
+            molecules[molecule_index]
         ).split("|", 1)[0]
     else:
         # Compatibility for lightweight bridge objects and third-party loaders.
@@ -190,7 +247,7 @@ def _mck_polyhedron_record(
         level="molecule",
         center_kind=str(center_kind or "centroid"),
         cutoff=float(cutoff),
-        central_indices=[int(source_molecule_index)],
+        central_indices=[int(molecule_index)],
         enforce_enclosure=bool(enforce_enclosure),
         centroid_offset_frac=float(centroid_offset_frac),
         **extra_kwargs,

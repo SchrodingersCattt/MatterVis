@@ -206,10 +206,13 @@ def _render_ortep_mode(args: argparse.Namespace) -> str:
 def _validate_render_options(args: argparse.Namespace) -> None:
     """Reject legacy flags that the backend-neutral path cannot honour."""
 
-    if args.bond_scale is not None and (
-        not math.isfinite(args.bond_scale) or args.bond_scale <= 0.0
-    ):
-        raise ValueError("--bond-scale must be finite and positive")
+    if args.bond_scale is not None:
+        from ..structure.bonds import validate_bond_scale
+
+        try:
+            validate_bond_scale(args.bond_scale)
+        except ValueError as exc:
+            raise ValueError("--bond-scale must be finite and positive") from exc
     unsupported: list[str] = []
     if args.monochrome:
         unsupported.append("--monochrome")

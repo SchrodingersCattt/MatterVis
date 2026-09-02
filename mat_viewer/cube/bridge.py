@@ -177,9 +177,9 @@ def build_cube_figure(
         effective_bond_scale = configured_scale
     if effective_bond_scale is None:
         effective_bond_scale = 1.0
-    effective_bond_scale = float(effective_bond_scale)
-    if not np.isfinite(effective_bond_scale) or effective_bond_scale <= 0:
-        raise ValueError("bond_scale must be finite and positive")
+    from ..structure.bonds import validate_bond_scale
+
+    effective_bond_scale = validate_bond_scale(effective_bond_scale)
     merged_style["mck_bond_scale"] = effective_bond_scale
 
     cube_path = _Path(path)

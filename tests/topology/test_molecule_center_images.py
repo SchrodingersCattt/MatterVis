@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from mat_viewer.agent_topology import build_topology_data, polyhedron_summary
+from mat_viewer.loader.core import build_bundle_scene
+from mat_viewer.loader.structure_input import load_structure_input
 
 _TETRAHEDRON = np.asarray(
     [
@@ -24,6 +28,7 @@ def _structure():
         "formula": "C5N2",
         "species": "CN",
         "center": [0.0, 0.0, 0.0],
+        "frac_center": [0.0, 0.0, 0.0],
     }
     displayed = [
         {
@@ -37,7 +42,10 @@ def _structure():
             "index": 1,
             "label": "A0@1,0,0",
             "center": [10.0, 0.0, 0.0],
-            "image_shift": [1, 0, 0],
+            "frac_center": [1.0, 0.0, 0.0],
+            # Deliberately stale relative metadata: the absolute center
+            # offset is the only valid half-open-cell identity.
+            "image_shift": [0, 0, 0],
         },
     ]
     bundle = SimpleNamespace(
@@ -46,6 +54,72 @@ def _structure():
         topology_fragment_table=[source],
     )
     return SimpleNamespace(frames=(SimpleNamespace(bundle=bundle),))
+
+
+@pytest.mark.skipif(
+    not (Path(__file__).resolve().parents[2] / "scripts" / "data" / "DAP-4.cif").exists(),
+    reason="DAP-4 CIF not available",
+)
+def test_dap4_unit_cell_center_images_follow_absolute_fractional_identity():
+    path = Path(__file__).resolve().parents[2] / "scripts" / "data" / "DAP-4.cif"
+    loaded = load_structure_input(path)
+    bundle = loaded.frames[0].bundle
+    scene = build_bundle_scene(
+        bundle,
+        display_mode="unit_cell",
+        show_hydrogen=True,
+        include_boundary_replicas=True,
+    )
+    sources = {
+        int(fragment["source_molecule_index"]): fragment
+        for fragment in bundle.topology_fragment_table
+    }
+    displayed = [fragment for fragment in scene["fragment_table"] if fragment["formula"] == "N"]
+    expected_home = sum(
+        np.allclose(
+            np.asarray(fragment["frac_center"], dtype=float)
+            - (
+                np.asarray(
+                    sources[int(fragment["source_molecule_index"])]["frac_center"],
+                    dtype=float,
+                )
+                % 1.0
+            ),
+            0.0,
+            rtol=0.0,
+            atol=1e-6,
+        )
+        for fragment in displayed
+    )
+    spec = json.dumps(
+        {
+            "id": "dap4-b",
+            "center": "N",
+            "ligand": "ClO4",
+            "level": "molecule",
+            "cutoff": 10.0,
+            "center_images": False,
+        }
+    )
+    strict = build_topology_data(
+        loaded,
+        [spec],
+        display="unit_cell",
+        show_hydrogen=True,
+    )
+    expanded = build_topology_data(
+        loaded,
+        [spec.replace('"center_images": false', '"center_images": true')],
+        display="unit_cell",
+        show_hydrogen=True,
+    )
+    assert expected_home < len(displayed)
+    assert strict["spec_results"][0]["overlays"]
+    assert polyhedron_summary(strict)[0]["displayed_centers"] == expected_home
+    assert polyhedron_summary(expanded)[0]["displayed_centers"] == len(displayed)
+    assert polyhedron_summary(strict)[0]["unique_source_centers"] == len(
+        {int(fragment["source_molecule_index"]) for fragment in displayed}
+    )
 
 
 def _fake_analyze_topology(
@@ -120,6 +194,18 @@ def test_molecule_center_images_translate_complete_shells(monkeypatch) -> None:
             "unique_source_centers": 1,
             "center_images": True,
             "center_image_shifts": [[0, 0, 0], [1, 0, 0]],
+            "center_image_pairs": [
+                {
+                    "source_center_index": 7,
+                    "display_center_index": 0,
+                    "image_shift": [0, 0, 0],
+                },
+                {
+                    "source_center_index": 7,
+                    "display_center_index": 1,
+                    "image_shift": [1, 0, 0],
+                },
+            ],
             "effective_colors": ["#7C5CBF"],
             "coordination_numbers": [4],
         }

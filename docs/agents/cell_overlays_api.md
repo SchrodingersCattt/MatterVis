@@ -77,8 +77,10 @@ mat-vis render structure.cif -o figure.png --view unit_cell --bond-scale 0.85 --
 ~~~
 
 The JSON root must be a list. CLI and Python callers receive the same validation
-errors. Auxiliary cells require the general renderer; an explicit batch renderer
-request fails rather than dropping the overlay.
+errors. The path is intentionally a local-file input (as with
+``--vector-overlays``); treat files supplied by untrusted users as untrusted
+configuration. Auxiliary cells require the general renderer; an explicit batch
+renderer request fails rather than dropping the overlay.
 
 ## Periodic entities
 
@@ -88,21 +90,27 @@ overlays:
 - include_boundary_replicas=false keeps the strict half-open source cell.
 - include_boundary_replicas=true copies a complete molecular fragment when a
   member lies near a face, edge, or corner.
-- molecule-level polyhedron center_images=false keeps source centers only.
+- molecule-level polyhedron center_images=false keeps only centers whose
+  displayed/source fractional-center offset is (0, 0, 0); this is the
+  half-open source image even when a fragment row carries a relative
+  ``image_shift`` of zero.
 - molecule-level polyhedron center_images=true follows the displayed fragment
   images and translates the cached center, shell, and hull together.
 - periodic framework context atoms are not promoted into whole-framework copies.
 
-The polyhedron receipt reports unique_source_centers, displayed_centers, and
-center_image_shifts separately. Periodic images therefore never masquerade as
-new crystallographic sites.
+The polyhedron receipt reports unique_source_centers, displayed_centers,
+center_image_shifts, and center_image_pairs (source center, display row, and
+absolute image shift) separately. Periodic images therefore never masquerade
+as new crystallographic sites and every displayed copy remains traceable.
 
 ## Backend contract
 
 CPU raster/vector, Matplotlib, and Plotly consume the same LinePrimitive dash
-field. There is no backend-specific auxiliary-cell geometry. Plotly represents
-any nonempty dash sequence with its native dashed line style; CPU and
-Matplotlib preserve the numeric pattern.
+field. There is no backend-specific auxiliary-cell geometry. CPU interprets
+the numeric pattern in screen pixels; Matplotlib's adapter maps line width to
+points and uses its native dashed style, while Plotly uses its native dash
+style. The schema therefore guarantees dashed-vs-solid parity, not identical
+physical dash lengths across backends.
 
 ## Coordinate-transform example
 
