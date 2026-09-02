@@ -665,6 +665,8 @@ def build_scene_from_atoms(
         canonical_unwrapped_atoms = []
         provenance_keys = (
             "_source_index",
+            "_source_site_id",
+            "_disorder_token",
             "_source_molecule_index",
             "_molecule_index",
             "_molecule_local_index",

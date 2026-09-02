@@ -27,6 +27,32 @@ _BRAILLE_MAP = (
 _BRAILLE_BASE = 0x2800
 
 
+def _ascii7_cell(bits: int) -> str:
+    """Map one 2x4 subpixel cell to a readable printable-ASCII glyph."""
+    if bits == 0:
+        return " "
+    points = [
+        (row, col)
+        for row in range(4)
+        for col in range(2)
+        if bits & _BRAILLE_MAP[row][col]
+    ]
+    if len(points) == 1:
+        return "."
+    rows = {row for row, _ in points}
+    cols = {col for _, col in points}
+    if len(rows) == 1:
+        return "-"
+    if len(cols) == 1:
+        return "|"
+    covariance = sum((row - 1.5) * (col - 0.5) for row, col in points)
+    if len(points) <= 4 and covariance:
+        return "\\" if covariance > 0 else "/"
+    if len(points) <= 5:
+        return "+"
+    return "#"
+
+
 class BrailleCanvas:
     """Braille-based subpixel canvas for smooth line rendering.
 
@@ -192,7 +218,7 @@ class BrailleCanvas:
             lines.pop()
         return "\n".join(lines)
 
-    def render_colored(self) -> list[list[tuple[str, int]]]:
+    def render_colored(self, *, charset: str = "unicode") -> list[list[tuple[str, int]]]:
         """Render canvas with per-cell color attribution.
 
         Returns
@@ -206,9 +232,12 @@ class BrailleCanvas:
             for col_idx in range(self.width):
                 bits = self._buffer[row_idx][col_idx]
                 color = self._color_buffer[row_idx][col_idx]
-                if bits == 0:
-                    row_data.append((" ", 0))
+                if charset == "unicode":
+                    character = " " if bits == 0 else chr(_BRAILLE_BASE + bits)
+                elif charset == "ascii7":
+                    character = _ascii7_cell(bits)
                 else:
-                    row_data.append((chr(_BRAILLE_BASE + bits), color))
+                    raise ValueError("charset must be 'unicode' or 'ascii7'")
+                row_data.append((character, color if bits else 0))
             result.append(row_data)
         return result

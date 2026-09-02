@@ -15,6 +15,7 @@ frontends.
 ## Key Features
 
 - **ASCII-first chemistry TUI** — A non-visual model can rotate the projected structure, select stable atom IDs, traverse bonds, and read MolCrysKit names, line notation, CIP descriptors, crystal enantiomer composition, warnings, and evidence without treating JSON as the primary observation
+- **Stateful agent sessions** — Python and JSONL callers can choose each next semantic camera or selection action from the latest deterministic Unicode or ASCII-7 observation without driving a browser or PTY
 - **Agent-ready CLI** — Five explicit subcommands (`inspect`, `capabilities`, `render`, `serve`, `tui`) separate bounded diagnosis, dependency preflight, browser-free static output, Web service, and terminal interaction
 - **Browser Viewer** — Drag-and-drop CIF upload and interactive 3D display with `Mesh3d` atoms and bonds. `Scatter3d` fast rendering is used only when explicitly selected; atom count never changes the representation
 - **Coordination Topology** — Automatic coordination-number detection via the nearest-neighbour gap, continuous shape measure (CShM) classification against 12 ideal polyhedra (CN 4–12), planarity RMS, and prism/antiprism twist analysis

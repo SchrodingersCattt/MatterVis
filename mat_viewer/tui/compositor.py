@@ -25,7 +25,7 @@ from .projection import (
     viewport_from_bounds,
 )
 from .renderer import ELEMENT_COLORS, DEFAULT_COLOR, BOND_COLOR, CELL_COLOR
-from .text import terminal_text
+from .text import ascii7_text, terminal_text
 
 if TYPE_CHECKING:
     from .crystal_ir import CrystalIR
@@ -54,19 +54,25 @@ def _display_species_name(species_id: str) -> str:
     return safe_species_id
 
 
-def _atom_label_text(atom, label_mode: str) -> str:
+def _atom_label_text(atom, label_mode: str, charset: str = "unicode") -> str:
+    formatter = ascii7_text if charset == "ascii7" else terminal_text
     if label_mode == "dot":
-        return "●"
+        return "*" if charset == "ascii7" else "●"
     elif label_mode == "element":
         return atom.element
     elif label_mode == "label":
-        return terminal_text(atom.display_label)
+        return formatter(atom.display_label)
     elif label_mode == "molecule":
-        base = terminal_text(atom.display_label)
+        base = formatter(atom.display_label)
         if atom.molecule_index >= 0:
-            return base + _superscript(atom.molecule_index)
+            suffix = (
+                str(atom.molecule_index)
+                if charset == "ascii7"
+                else _superscript(atom.molecule_index)
+            )
+            return base + suffix
         return base
-    return terminal_text(atom.element)
+    return formatter(atom.element)
 
 
 def resolve_label_mode(
@@ -230,6 +236,7 @@ def compose_frame(
     display_level: str = "atom",
     viewport: Viewport | None = None,
     selected_display_index: int | None = None,
+    charset: str = "unicode",
 ) -> str:
     """Render crystal in ORTEP style with label relaxation.
 
@@ -248,6 +255,8 @@ def compose_frame(
             height = height or 40
     width = max(width, 1)
     height = max(height, 1)
+    if charset not in {"unicode", "ascii7"}:
+        raise ValueError("charset must be 'unicode' or 'ascii7'")
     visible_atom_count = sum(show_minor or not atom.is_minor for atom in crystal.atoms)
     resolved_label_mode = resolve_label_mode(
         label_mode,
@@ -310,6 +319,7 @@ def compose_frame(
             mono,
             show_minor,
             selected_display_index,
+            charset,
         )
     # ── Depth tier computation ───────────────────────────────────────
     depth_min = float(depth.min()) if len(depth) > 0 else 0.0
@@ -328,7 +338,7 @@ def compose_frame(
             tier = _depth_tier(float(depth[idx]), depth_min, depth_max)
             radius = _atom_radius(atom.element, tier, detail_scale)
 
-            text = _atom_label_text(atom, resolved_label_mode)
+            text = _atom_label_text(atom, resolved_label_mode, charset)
             is_partial = atom.occupancy < 0.99
             if is_partial and resolved_label_mode != "dot":
                 text += "*"
@@ -481,7 +491,7 @@ def compose_frame(
         )
 
     # ── Build output (color-aware) ─────────────────────────────────────
-    colored_rows = canvas.render_colored()
+    colored_rows = canvas.render_colored(charset=charset)
 
     # Index placed labels by row — include depth_tier for label styling
     label_map: dict[int, list[tuple[int, str, int, bool, int, bool]]] = {}
@@ -739,6 +749,7 @@ def _compose_molecule_frame(
     mono: bool,
     show_minor: bool,
     selected_display_index: int | None,
+    charset: str,
 ) -> str:
     """Render molecule-level view: convex hull outlines + formula labels."""
     from ._hull2d import convex_hull_2d
@@ -819,6 +830,8 @@ def _compose_molecule_frame(
 
         row, col = viewport.to_grid(cx, cy)
         formula = mol_formula.get(mol_idx, f"M{mol_idx}")
+        if charset == "ascii7":
+            formula = ascii7_text(formula)
         label_candidates.setdefault(formula, []).append(
             (molecule_depth, row, col, color)
         )
@@ -842,13 +855,13 @@ def _compose_molecule_frame(
                 (
                     row,
                     col,
-                    f"[{terminal_text(atom.display_label)}]",
+                    f"[{(ascii7_text if charset == 'ascii7' else terminal_text)(atom.display_label)}]",
                     ELEMENT_COLORS.get(atom.element, DEFAULT_COLOR),
                 )
             )
 
     # Build output with labels
-    colored_rows = canvas.render_colored()
+    colored_rows = canvas.render_colored(charset=charset)
     output_lines: list[str] = []
 
     # Index labels by row

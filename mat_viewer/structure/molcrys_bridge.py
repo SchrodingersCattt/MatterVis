@@ -461,6 +461,8 @@ def atoms_with_site_provenance(raw_atoms, analysis):
         atom.setdefault("_mck_image_shift", list(record.image_shift))
         if getattr(record, "site_id", None):
             atom["_mck_atom_id"] = str(record.site_id)
+        if atom.get("_source_site_id"):
+            atom["_mck_atom_id"] = str(atom["_source_site_id"])
     return atoms
 
 

@@ -19,6 +19,14 @@ def terminal_text(value: object) -> str:
     )
 
 
+def ascii7_text(value: object) -> str:
+    """Return terminal-safe printable ASCII with deterministic replacement."""
+    return "".join(
+        character if 0x20 <= ord(character) <= 0x7E else "?"
+        for character in terminal_text(value)
+    )
+
+
 def _is_terminal_safe(character: str) -> bool:
     codepoint = ord(character)
     if codepoint == 0x7F or codepoint < 0x20 or 0x80 <= codepoint <= 0x9F:
@@ -29,4 +37,4 @@ def _is_terminal_safe(character: str) -> bool:
     return True
 
 
-__all__ = ["terminal_text"]
+__all__ = ["ascii7_text", "terminal_text"]

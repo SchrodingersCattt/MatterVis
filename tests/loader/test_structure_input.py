@@ -162,6 +162,38 @@ def test_ase_frame_metadata_preserves_custom_atom_arrays(tmp_path: Path) -> None
     ] == pytest.approx(atoms.arrays["local_vector"][source_index])
 
 
+def test_extxyz_identity_occupancy_and_disorder_reach_tui(tmp_path: Path) -> None:
+    atoms = Atoms(
+        "CO",
+        positions=[[0.0, 0.0, 0.0], [1.2, 0.0, 0.0]],
+        cell=[8.0, 8.0, 8.0],
+        pbc=True,
+    )
+    atoms.arrays["site_id"] = np.array(["site:carbon", "site:oxygen"])
+    atoms.arrays["occupancy"] = np.array([1.0, 0.5])
+    atoms.arrays["disorder"] = np.array([".", "assembly-a:choice-b"])
+    path = tmp_path / "metadata.extxyz"
+    write(path, atoms, format="extxyz")
+
+    crystal = load_for_tui(path)
+    by_id = {atom.atom_id: atom for atom in crystal.atoms}
+
+    assert set(by_id) == {"site:carbon", "site:oxygen"}
+    assert by_id["site:oxygen"].occupancy == pytest.approx(0.5)
+    assert by_id["site:oxygen"].disorder == "assembly-a:choice-b"
+    assert by_id["site:oxygen"].is_minor is False
+
+
+def test_extxyz_rejects_duplicate_source_site_ids(tmp_path: Path) -> None:
+    atoms = Atoms("CO", positions=[[0.0, 0.0, 0.0], [1.2, 0.0, 0.0]])
+    atoms.arrays["site_id"] = np.array(["same", "same"])
+    path = tmp_path / "duplicate.extxyz"
+    write(path, atoms, format="extxyz")
+
+    with pytest.raises(ValueError, match="site_id values must be unique"):
+        load_for_tui(path)
+
+
 def test_nonperiodic_cartesian_vectors_follow_source_coordinates(
     tmp_path: Path,
 ) -> None:

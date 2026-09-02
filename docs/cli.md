@@ -49,6 +49,32 @@ mat-vis render structure.extxyz -o interactive.html --backend plotly --orthogona
 `inspect`, `capabilities`, and `render --check` are the agent preflight surface.
 `--check` resolves requirements only and never creates the output.
 
+## tui — terminal and online agent sessions
+
+`mat-vis tui INPUT` opens the existing Textual terminal viewer.
+`--no-interaction` prints one static frame. `--session-format jsonl` instead
+keeps one stateful controller alive and accepts caller-selected semantic
+actions on stdin:
+
+~~~bash
+printf '%s\n' \
+  '{"action":"observe"}' \
+  '{"action":"orbit","arguments":{"yaw_deg":30,"pitch_deg":15}}' \
+  '{"action":"close"}' | \
+  mat-vis tui structure.extxyz --session-format jsonl \
+    --charset ascii7 --width 100 --height 36
+~~~
+
+Every input line receives one JSON response line and stdout is flushed after
+each response. Actions are selected online by the caller; MatterVis does not
+pre-plan a trajectory or repair malformed natural-language commands.
+
+`--charset unicode|ascii7` is available for both static and JSONL output.
+`ascii7` selects printable ASCII geometry and implies monochrome output;
+`unicode` preserves the default Braille renderer. JSONL sessions support
+`observe`, `reset`, `orbit`, `align`, `pan`, `zoom`, `fit`, `set_display`,
+`select`, `focus`, `clear_selection`, `clear_focus`, and `close`.
+
 ---
 
 ## render — Structure and trajectory export
