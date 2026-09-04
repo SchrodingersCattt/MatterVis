@@ -17,6 +17,7 @@ import numpy as np
 import plotly.graph_objects as go
 
 from ..math.geometry import cylinder_vertices_faces, validate_mesh
+from ..math.implicit import implicit_surface_mesh
 
 
 _DEFAULT_COLOR = "#7C5CBF"
@@ -244,6 +245,72 @@ def cylinder_entity(
         edges=side_edges if custom_edges is None else custom_edges,
         **kwargs,
     )
+
+
+def implicit_entity(
+    field: Any,
+    bounds: Iterable[Iterable[float]],
+    *,
+    level: float = 0.0,
+    resolution: int | Iterable[int] = 32,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Build a real 3-D mesh entity from an arbitrary implicit surface.
+
+    ``field`` may be a vectorised ``field(points)`` callable, a broadcastable
+    ``field(x, y, z)`` callable, or a scalar xyz function.  ``bounds`` is the
+    finite Cartesian clipping box used to sample the otherwise potentially
+    unbounded surface.  The callable is evaluated immediately and is not
+    retained in the scene payload, so the returned entity remains JSON-safe
+    and independent of the caller's project or runtime.
+
+    The extracted triangles are passed through :func:`mesh_entity`; rendering
+    therefore uses the same depth-tested Plotly ``Mesh3d`` path as atoms,
+    bonds, BFDH facets, and coordination polyhedra.  A plane, sphere, torus,
+    signed-distance primitive, or a project-specific field all use this same
+    entry point without changes to the renderer.
+    """
+
+    # Materialise iterators once: the sampler and metadata both need the
+    # domain/resolution, and consuming a generator twice would otherwise
+    # produce an empty or misleading payload.
+    try:
+        bounds_value = np.asarray(list(bounds), dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("bounds must be an iterable of three finite pairs") from exc
+    if np.isscalar(resolution):
+        try:
+            resolution_int = int(resolution)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(
+                "resolution must be an integer or three integers >= 2"
+            ) from exc
+        resolution_value: int | list[int] = resolution_int
+        resolution_meta = [resolution_int] * 3
+    else:
+        try:
+            resolution_meta = [int(value) for value in resolution]
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("resolution must be an integer or three integers >= 2") from exc
+        resolution_value = resolution_meta
+
+    vertices, faces = implicit_surface_mesh(
+        field,
+        bounds_value,
+        level=level,
+        resolution=resolution_value,
+    )
+    user_meta = kwargs.pop("meta", None)
+    generated_meta: dict[str, Any] = {
+        "implicit": True,
+        "level": float(level),
+        "bounds": bounds_value.tolist(),
+        "resolution": resolution_meta,
+    }
+    if isinstance(user_meta, Mapping):
+        generated_meta.update(_json_safe(user_meta))
+    kwargs["meta"] = generated_meta
+    return mesh_entity(vertices, faces, **kwargs)
 
 
 def through_cylinder_entity(
@@ -512,6 +579,7 @@ def geometry_entity_traces(scene: Mapping[str, Any]) -> list[go.BaseTraceType]:
 __all__ = [
     "cylinder_entity",
     "geometry_entity_traces",
+    "implicit_entity",
     "mesh_entity",
     "through_cylinder_entity",
     "validate_geometry_style",

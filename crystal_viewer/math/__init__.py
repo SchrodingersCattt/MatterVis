@@ -6,6 +6,7 @@ from .ellipsoid import ellipsoid_principal_axes, ortep_principal_axis_segments
 from .pbc import bond_vector_mic, nearest_lattice_shift_frac
 from .rotation import view_rotation, view_vec_to_elev_azim
 from .geometry import cylinder_vertices_faces, triangulate_faces, validate_mesh
+from .implicit import implicit_surface_mesh
 
 __all__ = [
     "bond_vector_mic",
@@ -19,4 +20,5 @@ __all__ = [
     "cylinder_vertices_faces",
     "triangulate_faces",
     "validate_mesh",
+    "implicit_surface_mesh",
 ]

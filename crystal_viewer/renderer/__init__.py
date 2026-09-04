@@ -13,6 +13,7 @@ from ..render.topology import topology_histogram_figure, topology_results_markdo
 from ..render.geometry import (  # noqa: F401
     cylinder_entity,
     geometry_entity_traces,
+    implicit_entity,
     mesh_entity,
     through_cylinder_entity,
     validate_geometry_style,
