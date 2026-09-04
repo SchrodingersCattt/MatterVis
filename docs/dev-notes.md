@@ -79,3 +79,19 @@ upstream API has grown the exact hook.
 - **CIF symmetry expansion**: minimal expansion at the loader boundary
   for non-P1 CIFs missing explicit symmetry ops. This is a rendering
   precondition, not chemistry.
+
+### Arbitrary 3-D geometry and occlusion
+
+- `scene["geometry_entities"]` stores caller-owned Cartesian meshes.  Keep
+  vertices in the same world-coordinate frame as `draw_atoms`; do not project
+  them to paper coordinates before handing them to `build_figure`.
+- The Plotly `mesh` material is mandatory when entities are present.  The
+  `flat` and `flat + ortep` paths are intentionally rejected because their
+  billboard / Matplotlib primitives cannot provide a shared 3-D z-buffer.
+- Opaque (`opacity=1`) mesh faces participate in the same depth test as atom,
+  bond, BFDH, and polyhedron meshes.  Plotly's transparent WebGL surfaces
+  still use trace-level alpha compositing, so translucent geometry is a visual
+  aid rather than an exact boolean occlusion mask.
+- Keep the automatic large-scene scatter fallback disabled for entity scenes;
+  an explicit `fast_rendering=True` remains an opt-in approximation when
+  interactivity is more important than cross-object depth fidelity.

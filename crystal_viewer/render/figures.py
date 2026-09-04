@@ -5,6 +5,7 @@ from .scene_traces import *  # noqa: F403
 from .style import style_from_controls
 from .topology import topology_histogram_figure, topology_results_markdown
 from .morphology import _morphology_traces
+from .geometry import geometry_entity_traces, validate_geometry_style
 from .compass import (
     _COMPASS_ITEM_NAME,
     axis_key_overlay,
@@ -22,6 +23,23 @@ from .viewport import (
     figure_axis_layout,
     uniform_viewport,
 )
+
+
+def _should_use_fast(scene: dict, style: dict) -> bool:
+    """Resolve the atom/bond pipeline without hiding mesh entities.
+
+    Large scenes normally use billboard traces to stay interactive.  A scene
+    carrying a geometry entity is different: switching only its atoms to the
+    billboard path would make the entity/atom depth relationship unreliable.
+    Keep the explicit ``fast_rendering`` escape hatch, but disable the
+    automatic atom-count fallback for these scenes.
+    """
+
+    has_geometry_entities = bool(scene.get("geometry_entities"))
+    is_flat_ortep = style.get("material") == "flat" and style.get("style") == "ortep"
+    return bool(style.get("fast_rendering", False)) or (
+        style.get("material") == "flat" and not is_flat_ortep
+    ) or (len(scene.get("draw_atoms", [])) > 2000 and not has_geometry_entities)
 
 
 def build_row_figure(
@@ -68,12 +86,9 @@ def build_row_figure(
     all_trace_dicts: list[dict] = []
     for col_idx, (scene, style) in enumerate(scene_style_pairs):
         style_norm = validate_style_schema(style)
+        validate_geometry_style(scene, style_norm)
         xr, yr, zr = _scene_ranges(scene, style_norm)
-        use_fast = (
-            bool(style_norm.get("fast_rendering", False))
-            or style_norm.get("material") == "flat"
-            or len(scene.get("draw_atoms", [])) > 2000
-        )
+        use_fast = _should_use_fast(scene, style_norm)
         mesh_payload = _cached_atom_bond_meshes(scene, style_norm, use_fast=use_fast)
 
         # Same hidden-label propagation as build_figure.
@@ -94,6 +109,7 @@ def build_row_figure(
         trace_dicts.extend(_traces_to_dicts(_label_traces(scene, style_norm, hidden_labels=hidden_labels_row)))
         trace_dicts.extend(_traces_to_dicts(_axis_traces(scene, style_norm)))
         trace_dicts.extend(_traces_to_dicts(_unit_cell_traces(scene, style_norm)))
+        trace_dicts.extend(_traces_to_dicts(geometry_entity_traces(scene)))
         trace_dicts.extend(_traces_to_dicts(_morphology_traces(scene, style_norm)))
         trace_dicts.append(
             _round_coord_arrays(_atom_selection_trace(scene, style_norm, hidden_labels=hidden_labels_row).to_plotly_json())
@@ -123,6 +139,7 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None) ->
     from plotly.graph_objects import Figure as go_Figure
 
     style = validate_style_schema(style)
+    validate_geometry_style(scene, style)
     xr, yr, zr = _scene_ranges(scene, style, topology_data=topology_data if style.get("topology_enabled", False) else None)
     style["_topology_viewport_ranges"] = [list(xr), list(yr), list(zr)]
     # Mesh3d atoms are 3D world-coordinate spheres -- they grow when the
@@ -135,8 +152,7 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None) ->
     # fallback" checkbox remains the user-controlled escape hatch.
     # flat+ortep is excluded: it uses the open-ORTEP billboard pipeline,
     # not the scatter fast-path.
-    is_flat_ortep = style.get("material") == "flat" and style.get("style") == "ortep"
-    use_fast = bool(style.get("fast_rendering", False)) or (style.get("material") == "flat" and not is_flat_ortep) or len(scene.get("draw_atoms", [])) > 2000
+    use_fast = _should_use_fast(scene, style)
 
     mesh_payload = _cached_atom_bond_meshes(scene, style, use_fast=use_fast)
     topology_on = bool(style.get("topology_enabled", False)) and topology_data is not None
@@ -184,6 +200,7 @@ def build_figure(scene: dict, style: dict, topology_data: dict | None = None) ->
     trace_dicts.extend(_traces_to_dicts(_label_traces(scene, style, hidden_labels=hidden_labels)))
     trace_dicts.extend(_traces_to_dicts(_axis_traces(scene, style)))
     trace_dicts.extend(_traces_to_dicts(_unit_cell_traces(scene, style)))
+    trace_dicts.extend(_traces_to_dicts(geometry_entity_traces(scene)))
     trace_dicts.extend(_traces_to_dicts(_morphology_traces(scene, style)))
     if topology_on:
         trace_dicts.extend(_traces_to_dicts(topology_foreground_traces(topology_data, style)))

@@ -38,6 +38,7 @@ The same routing as a quick table:
 |---|---|
 | Drive the running Dash viewer over HTTP/WebSocket | [`dash_service.md`](dash_service.md) |
 | Build a static crystal/cluster figure from a CIF | [`scene_api.md`](scene_api.md) |
+| Add an arbitrary 3-D mesh or primitive that participates in scene occlusion | [`scene_api.md`](scene_api.md) |
 | Build a static cube/orbital figure (HOMO, LUMO, density) | [`cube_api.md`](cube_api.md) |
 | Render ORTEP / thermal ellipsoid figures | [`ortep_api.md`](ortep_api.md) |
 | Add a/b/c (or x/y/z, k-path, dipole) direction indicators to any 3D plot | [`compass_api.md`](compass_api.md) |

@@ -203,7 +203,10 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
                 part_use_fast = (
                     bool(sub_style.get("fast_rendering", False))
                     or part_material == "flat"
-                    or len(part_atoms) > 2000
+                    or (
+                        len(part_atoms) > 2000
+                        and not bool(scene.get("geometry_entities"))
+                    )
                 )
                 sub_scene = _atom_subscene(scene, part_atoms)
                 atom_traces.extend(

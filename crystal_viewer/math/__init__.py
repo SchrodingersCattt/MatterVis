@@ -5,6 +5,7 @@ from .projection import camera_screen_basis, project_to_screen
 from .ellipsoid import ellipsoid_principal_axes, ortep_principal_axis_segments
 from .pbc import bond_vector_mic, nearest_lattice_shift_frac
 from .rotation import view_rotation, view_vec_to_elev_azim
+from .geometry import cylinder_vertices_faces, triangulate_faces, validate_mesh
 
 __all__ = [
     "bond_vector_mic",
@@ -15,4 +16,7 @@ __all__ = [
     "project_to_screen",
     "view_rotation",
     "view_vec_to_elev_azim",
+    "cylinder_vertices_faces",
+    "triangulate_faces",
+    "validate_mesh",
 ]

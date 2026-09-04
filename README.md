@@ -30,6 +30,9 @@ own CIF with a single flag.
 - **Multi-panel figures** — `uniform_viewport(scenes)` stamps a shared
   world-cube on any list of scenes so every `build_figure` call emits at the
   same physical length per pixel. Drop-in for N-up comparison figures.
+- **Composable 3-D geometry** — attach validated arbitrary meshes (including
+  lattice/HKL-aligned through-cylinders) to a scene; opaque entities use the
+  same depth-tested `Mesh3d` path as atoms, bonds, BFDH facets, and polyhedra.
 - **Automation** — REST + WebSocket API on the same Flask server. Drive the
   viewer from notebooks, agents or subprocesses (`GET /api/v1/state`,
   `POST /api/v1/topology`, `GET /api/v1/screenshot`, ...).
@@ -159,6 +162,7 @@ python scripts/03_display_modes_panel.py    # formula / unit cell / shell
 python scripts/04_static_publication.py     # ORTEP-style PNG + PDF
 python scripts/05_app_and_api.py            # launch app + drive it via REST
 python scripts/06_cp2k_cube_orbital.py --cube orbital.cube  # CP2K/Gaussian cube isosurfaces
+python scripts/10_geometry_entities.py     # arbitrary 3-D mesh / cylinder entity
 ```
 
 Outputs land under `scripts/_outputs/` (gitignored). Regenerate the README
