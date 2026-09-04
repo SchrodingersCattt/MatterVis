@@ -170,6 +170,43 @@ When the axis is already known in Cartesian coordinates, use
 `cylinder_entity(center, axis, radius, length, ...)` directly; the
 `through_cylinder_entity` wrapper above is the lattice/HKL-safe variant.
 
+### Implicit surfaces
+
+Use `implicit_entity(field, bounds, ...)` when the geometry is naturally
+defined by a scalar field rather than by hand-written vertices. The sampler
+accepts a vectorised `field(points)` callable (preferred), a broadcastable
+`field(x, y, z)` callable, or a scalar xyz callable. `bounds` is always
+required because a plane or another unbounded field needs a finite clipping
+domain:
+
+```python
+from crystal_viewer.renderer import implicit_entity
+
+sphere = implicit_entity(
+    lambda points: (points**2).sum(axis=1) - 25.0,
+    ((-6.0, 6.0), (-6.0, 6.0), (-6.0, 6.0)),
+    resolution=36,
+    name="sphere",
+    color="#4F7CFF",
+)
+plane = implicit_entity(
+    lambda x, y, z: z - 1.0,
+    ((-6.0, 6.0), (-6.0, 6.0), (-6.0, 6.0)),
+    resolution=24,
+    name="plane",
+    color="#F28E2B",
+)
+scene["geometry_entities"] = [sphere, plane]
+```
+
+The field is sampled immediately with marching cubes (and a dependency-free
+marching-tetrahedra fallback), then stored only as a validated Cartesian mesh;
+callables are not retained in scene JSON. Consequently planes, spheres,
+implicit cylinders, signed-distance fields, and project-specific surfaces all
+share the same renderer and depth buffer. Increase `resolution` for curved
+surfaces, and keep opaque geometry at `opacity=1.0` when exact occlusion is
+important.
+
 ## Worked example
 
 See `scripts/04_static_publication.py` for an end-to-end recipe that

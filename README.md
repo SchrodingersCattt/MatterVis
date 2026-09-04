@@ -31,8 +31,9 @@ own CIF with a single flag.
   world-cube on any list of scenes so every `build_figure` call emits at the
   same physical length per pixel. Drop-in for N-up comparison figures.
 - **Composable 3-D geometry** — attach validated arbitrary meshes (including
-  lattice/HKL-aligned through-cylinders) to a scene; opaque entities use the
-  same depth-tested `Mesh3d` path as atoms, bonds, BFDH facets, and polyhedra.
+  lattice/HKL-aligned through-cylinders) or sample any bounded implicit field;
+  opaque entities use the same depth-tested `Mesh3d` path as atoms, bonds,
+  BFDH facets, and polyhedra.
 - **Automation** — REST + WebSocket API on the same Flask server. Drive the
   viewer from notebooks, agents or subprocesses (`GET /api/v1/state`,
   `POST /api/v1/topology`, `GET /api/v1/screenshot`, ...).

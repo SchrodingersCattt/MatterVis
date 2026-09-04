@@ -95,3 +95,14 @@ upstream API has grown the exact hook.
 - Keep the automatic large-scene scatter fallback disabled for entity scenes;
   an explicit `fast_rendering=True` remains an opt-in approximation when
   interactivity is more important than cross-object depth fidelity.
+- `implicit_entity()` is deliberately a render-side sampler, not a chemistry
+  operation. It evaluates a caller-owned scalar field on a finite Cartesian
+  box and stores the resulting mesh; no field callable or project object is
+  serialized. This keeps the API usable for planes, spheres, signed-distance
+  surfaces, and future shape factories without adding shape-specific branches
+  to MatterVis.
+- Prefer the vectorized `field(points)` or `field(x, y, z)` contracts. Scalar
+  xyz callables are accepted as a compatibility fallback, but can be much
+  slower at publication resolutions. A finite box is mandatory for unbounded
+  fields, and a level that does not cross that box is an explicit error rather
+  than an empty/ambiguous overlay.
