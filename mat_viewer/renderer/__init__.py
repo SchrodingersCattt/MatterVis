@@ -15,6 +15,7 @@ _MODULES = (
     "..render.viewport",
     "..render.overlay.cells",
     "..render.overlay.vectors",
+    "..render.geometry",
 )
 
 
@@ -50,4 +51,10 @@ __all__ = [
     "validate_style_schema",
     "vector_mesh_traces",
     "vector_overlay_bounds",
+    "cylinder_entity",
+    "geometry_entity_traces",
+    "implicit_entity",
+    "mesh_entity",
+    "through_cylinder_entity",
+    "validate_geometry_style",
 ]

@@ -25,6 +25,12 @@ _LAZY_EXPORTS = {
     "build_figure": (".figures", "build_figure"),
     "build_publication_figure": (".figures", "build_publication_figure"),
     "build_row_figure": (".figures", "build_row_figure"),
+    "cylinder_entity": (".geometry", "cylinder_entity"),
+    "geometry_entity_traces": (".geometry", "geometry_entity_traces"),
+    "implicit_entity": (".geometry", "implicit_entity"),
+    "mesh_entity": (".geometry", "mesh_entity"),
+    "through_cylinder_entity": (".geometry", "through_cylinder_entity"),
+    "validate_geometry_style": (".geometry", "validate_geometry_style"),
     "build_static_publication_figure": (
         ".publication",
         "build_static_publication_figure",
@@ -97,6 +103,12 @@ __all__ = [
     "resolve_vector_overlays",
     "vector_mesh_traces",
     "vector_overlay_bounds",
+    "cylinder_entity",
+    "geometry_entity_traces",
+    "implicit_entity",
+    "mesh_entity",
+    "through_cylinder_entity",
+    "validate_geometry_style",
 ]
 
 

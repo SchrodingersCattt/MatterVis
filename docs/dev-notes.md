@@ -112,3 +112,16 @@ upstream API has grown the exact hook.
     methods. Angle MIC is center-anchored; dihedral `mic_chain` unwraps A-B-C-D
     consecutively. Keep the applied image shifts in the returned payload and do
     not move this geometry math into Textual event handlers.
+
+
+### Arbitrary 3-D geometry and occlusion
+
+- scene["geometry_entities"] stores caller-owned Cartesian meshes. Keep vertices
+  in the same world-coordinate frame as draw_atoms; do not project them to paper
+  coordinates before calling build_figure.
+- The mesh material is mandatory when entities are present. Flat/billboard
+  paths are rejected because they cannot provide a shared 3-D z-buffer.
+- implicit_entity samples a caller-owned scalar field on a finite Cartesian box
+  and stores only the resulting mesh. The API is independent of chemistry and
+  works for planes, spheres, toroids, signed-distance fields, and future shape
+  factories.

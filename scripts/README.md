@@ -9,5 +9,9 @@ The numbered scripts are runnable examples for the public API:
 - `05_app_and_api.py`: launch the Dash app and drive REST endpoints.
 - `06_cp2k_cube_orbital.py`: cube/orbital isosurface rendering.
 - `07_ortep_modes_panel.py`, `08_ortep_export.py`, `09_ortep_publication.py`: ORTEP examples.
+- `10_geometry_entities.py`: arbitrary Cartesian mesh / HKL-aligned cylinder
+  entities in the real 3-D depth-tested renderer.
+- `11_implicit_geometry.py`: project-independent sphere, torus, and plane
+  fields sampled into real `Mesh3d` surfaces.
 
 Shared sample CIFs live in `data/`. Generated outputs land in `_outputs/`. Local or unpublished analysis belongs under `private/`, which is intentionally ignored.

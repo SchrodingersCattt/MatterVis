@@ -3,6 +3,9 @@ from __future__ import annotations
 import plotly.graph_objects as go
 import numpy as np
 
+from .geometry import geometry_entity_traces, mesh_entity
+
+
 def _morphology_traces(scene: dict, style: dict) -> list[go.Trace]:
     """Build traces for BFDH morphology overlay."""
     morph = scene.get("bfdh_morphology")
@@ -26,58 +29,52 @@ def _morphology_traces(scene: dict, style: dict) -> list[go.Trace]:
         center_offset = (a + b + c) / 2.0
 
     traces = []
-    
-    # We need to build a single Mesh3d for the morphology
+
+    # Build the Wulff surface through the same generic mesh-entity path used by
+    # caller-supplied solids.  The triangles are deliberately kept in world
+    # coordinates so Plotly's depth buffer can resolve them against atoms and
+    # bonds; this is not a paper-coordinate overlay.
     all_vertices = []
-    i_indices = []
-    j_indices = []
-    k_indices = []
-    
+    faces = []
+
     vertex_offset = 0
-    
+
     for facet in facets:
         triangles = facet.get("triangles", [])
         for tri in triangles:
             v1, v2, v3 = np.array(tri) * scale + center_offset
-            
-            i_indices.append(vertex_offset)
-            j_indices.append(vertex_offset + 1)
-            k_indices.append(vertex_offset + 2)
-            
+
+            faces.append([vertex_offset, vertex_offset + 1, vertex_offset + 2])
+
             all_vertices.extend([v1.tolist(), v2.tolist(), v3.tolist()])
             vertex_offset += 3
 
     if all_vertices:
-        all_vertices = np.array(all_vertices)
-        mesh = go.Mesh3d(
-            x=all_vertices[:, 0],
-            y=all_vertices[:, 1],
-            z=all_vertices[:, 2],
-            i=i_indices,
-            j=j_indices,
-            k=k_indices,
+        entity = mesh_entity(
+            all_vertices,
+            faces,
+            name="Morphology",
+            entity_id="bfdh-morphology",
             color=color,
             opacity=opacity,
             flatshading=True,
             lighting=dict(ambient=0.75, diffuse=0.9, specular=0.2, roughness=0.25),
-            hoverinfo="skip",
-            name="Morphology"
         )
-        traces.append(mesh)
+        traces.extend(geometry_entity_traces({"geometry_entities": [entity]}))
 
     # Add labels
     label_x = []
     label_y = []
     label_z = []
     label_text = []
-    
+
     for facet in facets:
         centroid = np.array(facet["centroid"]) * scale + center_offset
         label_x.append(centroid[0])
         label_y.append(centroid[1])
         label_z.append(centroid[2])
-        h, k, l = facet["miller"]
-        label_text.append(f"({h},{k},{l})")
+        h, k, ell = facet["miller"]
+        label_text.append(f"({h},{k},{ell})")
         
     if label_x:
         labels = go.Scatter3d(

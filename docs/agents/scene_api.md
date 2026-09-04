@@ -236,6 +236,97 @@ bubble-marker outline, which becomes a visible WebGL artifact in static export.
   orthographic projection. Programmatic callers may pass `eye` / `center` /
   `up`, or the legacy `position` / `focal_point` / `up` form.
 
+## Arbitrary 3-D geometry entities
+
+Programmatic callers may attach any Cartesian mesh to
+`scene["geometry_entities"]`.  The renderer sends each entity as a real
+Plotly `Mesh3d` trace, so opaque faces share the WebGL depth buffer with atoms,
+bonds, BFDH morphology, and coordination polyhedra.  Their vertices are also
+included in the viewport calculation, preventing an oblique object from being
+clipped at the panel edge.
+
+Use the convenience builders exported from `mat_viewer.renderer`:
+
+```python
+from mat_viewer.renderer import build_figure, through_cylinder_entity
+
+scene["geometry_entities"] = [
+    through_cylinder_entity(
+        lattice=scene["M"],
+        direction_hkl=[1, 0, 0],
+        radius=10.0,
+        center_frac=[0.5, 0.5, 0.5],
+        caps=False,                 # open through-channel
+        segments=48,
+        name="through-cylinder",
+        entity_id="void-100",
+        color="#4F7CFF",
+        opacity=1.0,
+        show_edges=True,
+    ),
+]
+fig = build_figure(scene, {"material": "mesh", "projection": "orthographic"})
+```
+
+For non-cylindrical objects, `mesh_entity(vertices, faces, ...)` accepts
+`N×3` Cartesian vertices and triangular or polygonal index faces.  Polygon
+faces are triangulated without changing their winding, so callers should use
+consistent outward-facing order when lighting matters.  `opacity=1.0` is the
+reliable mode for exact per-pixel occlusion; transparent WebGL surfaces are
+subject to Plotly's trace-level alpha compositing; atom/bond traces made
+partially transparent by disorder settings have the same limitation.
+`show_edges=True` adds
+depth-aware 3-D line segments, useful for open channels or translucent
+surfaces.  For a hand-built polygon mesh, pass an explicit `edges=` list if
+you want to suppress triangulation diagonals; the cylinder builder supplies
+clean ring/axis edges automatically.  Geometry entities are currently part of the Plotly 3-D path;
+the intentionally 2-D `flat + ortep` publication renderer rejects them instead
+of silently dropping their depth.  Likewise, `build_figure` requires
+`material="mesh"` whenever entities are present.  For such scenes the
+automatic large-scene scatter fallback is disabled, so an opaque entity and
+the atom meshes remain in the same depth-tested pipeline; callers can still
+opt into `fast_rendering=True` when approximate billboard output is preferred.
+When the axis is already known in Cartesian coordinates, use
+`cylinder_entity(center, axis, radius, length, ...)` directly; the
+`through_cylinder_entity` wrapper above is the lattice/HKL-safe variant.
+
+### Implicit surfaces
+
+Use `implicit_entity(field, bounds, ...)` when the geometry is naturally
+defined by a scalar field rather than by hand-written vertices. The sampler
+accepts a vectorised `field(points)` callable (preferred), a broadcastable
+`field(x, y, z)` callable, or a scalar xyz callable. `bounds` is always
+required because a plane or another unbounded field needs a finite clipping
+domain:
+
+```python
+from mat_viewer.renderer import implicit_entity
+
+sphere = implicit_entity(
+    lambda points: (points**2).sum(axis=1) - 25.0,
+    ((-6.0, 6.0), (-6.0, 6.0), (-6.0, 6.0)),
+    resolution=36,
+    name="sphere",
+    color="#4F7CFF",
+)
+plane = implicit_entity(
+    lambda x, y, z: z - 1.0,
+    ((-6.0, 6.0), (-6.0, 6.0), (-6.0, 6.0)),
+    resolution=24,
+    name="plane",
+    color="#F28E2B",
+)
+scene["geometry_entities"] = [sphere, plane]
+```
+
+The field is sampled immediately with marching cubes (and a dependency-free
+marching-tetrahedra fallback), then stored only as a validated Cartesian mesh;
+callables are not retained in scene JSON. Consequently planes, spheres,
+implicit cylinders, signed-distance fields, and project-specific surfaces all
+share the same renderer and depth buffer. Increase `resolution` for curved
+surfaces, and keep opaque geometry at `opacity=1.0` when exact occlusion is
+important.
+
 ## Worked example
 
 See `scripts/04_static_publication.py` for an end-to-end recipe that

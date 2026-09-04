@@ -7,7 +7,18 @@ from typing import Any, Iterable, Sequence
 
 import numpy as np
 
+
 from .contracts import LinePrimitive, RGBA, TriangleMeshPrimitive
+from .geometry_entities import (
+    cylinder_entity,
+    geometry_entity_traces,
+    implicit_entity,
+    mesh_entity,
+    through_cylinder_entity,
+    validate_geometry_style,
+)
+
+_DEFAULT_COLOR = "#7C5CBF"
 
 _BASIC_COLORS: dict[str, str] = {
     "black": "#000000",
@@ -853,4 +864,10 @@ __all__ = [
     "sphere_primitive",
     "triangulate_faces",
     "unit_cell_primitive",
+    "cylinder_entity",
+    "geometry_entity_traces",
+    "implicit_entity",
+    "mesh_entity",
+    "through_cylinder_entity",
+    "validate_geometry_style",
 ]
