@@ -6,8 +6,11 @@ from collections import OrderedDict
 from .shared import *
 from .normalizers import *
 from .rightclick import _normalize_polyhedron_specs
-from ..scene.core import source_image_identity
-from ..topology import extract_atom_coordination_shells
+from ..topology import (
+    atom_overlay as _atom_overlay,
+    display_atom_centers_for_spec as _display_atom_centers_for_spec,
+    extract_atom_coordination_shells,
+)
 
 
 _TOPOLOGY_CACHE_LIMIT = 8
@@ -152,57 +155,6 @@ def _fragment_matches_polyhedron_spec(fragment: dict[str, Any], spec: dict[str, 
     if str(spec.get("level") or "molecule") == "atom":
         return center_species in {str(elem) for elem in (fragment.get("elem_set") or [])}
     return (fragment.get("formula") or fragment.get("species")) == center_species
-
-
-def _display_atom_centers_for_spec(
-    bundle,
-    scene: dict[str, Any],
-    spec: dict[str, Any],
-) -> list[dict[str, Any]]:
-    wanted = str(spec.get("center_species") or "")
-    source_atoms = list(bundle.raw_atoms)
-    seen: set[tuple[int, tuple[int, int, int]]] = set()
-    centers: list[dict[str, Any]] = []
-    for draw_index, atom in enumerate(scene.get("draw_atoms") or []):
-        if str(atom.get("elem") or "") != wanted:
-            continue
-        identity = source_image_identity(atom, source_atoms, draw_index)
-        if identity is None or identity in seen:
-            continue
-        seen.add(identity)
-        centers.append(
-            {
-                "draw_index": draw_index,
-                "source_index": identity[0],
-                "image": identity[1],
-                "label": atom.get("label") or f"{wanted}{identity[0]}",
-                "center": np.asarray(atom.get("cart"), dtype=float).tolist(),
-            }
-        )
-    return centers
-
-
-def _atom_overlay(shell: dict[str, Any], center: dict[str, Any]) -> dict[str, Any]:
-    source_center = np.asarray(shell["source_center_coords"], dtype=float)
-    display_center = np.asarray(center["center"], dtype=float)
-    delta = display_center - source_center
-    source_shell = np.asarray(shell.get("source_shell_coords") or [], dtype=float)
-    shell_coords = source_shell + delta if len(source_shell) else np.zeros((0, 3), dtype=float)
-    source_hull = shell.get("source_hull") or {}
-    hull = dict(source_hull)
-    source_vertices = np.asarray(source_hull.get("vertices") or [], dtype=float)
-    hull["vertices"] = (source_vertices + delta).tolist() if len(source_vertices) else []
-    return {
-        "center_coords": display_center.tolist(),
-        "center_label": center["label"],
-        "center_source_index": center["source_index"],
-        "center_image": list(center["image"]),
-        "center_draw_index": center["draw_index"],
-        "shell_coords": shell_coords.tolist(),
-        "distances": shell.get("distances") or [],
-        "hull": hull,
-        "is_analysis_anchor": False,
-    }
 
 
 def compute_topology_geometry(

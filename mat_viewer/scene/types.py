@@ -222,6 +222,7 @@ class PolyhedronSpecDict(TypedDict, total=False):
     center_kind: str  # "centroid" | ...
     hard_cutoff: float | None
     fallback_max: int | None
+    center_images: bool
     instance_overrides: dict[str, dict[str, Any]]
 
 

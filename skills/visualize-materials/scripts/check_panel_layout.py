@@ -83,7 +83,12 @@ def measure_panel(
         "panel_size_px": [width, height],
         "ink_present": True,
         "ink_bbox_local_px": local_bbox,
-        "ink_bbox_global_px": [x0 + local_bbox[0], local_bbox[1], x0 + local_bbox[2], local_bbox[3]],
+        "ink_bbox_global_px": [
+            x0 + local_bbox[0],
+            local_bbox[1],
+            x0 + local_bbox[2],
+            local_bbox[3],
+        ],
         "bbox_occupancy_fraction": occupancy_bbox,
         "ink_pixel_fraction": occupancy_pixels,
         "safety_pad_px": pads,
@@ -97,22 +102,33 @@ def main() -> None:
     parser.add_argument("png", type=Path)
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--panels", type=int, help="Number of equal-width panels")
-    group.add_argument("--boundaries", help="Comma-separated pixel boundaries, including 0 and image width")
-    parser.add_argument("--background", default="255,255,255", help="RGB background, default white")
+    group.add_argument(
+        "--boundaries",
+        help="Comma-separated pixel boundaries, including 0 and image width",
+    )
+    parser.add_argument(
+        "--background", default="255,255,255", help="RGB background, default white"
+    )
     parser.add_argument("--background-tolerance", type=int, default=10)
     parser.add_argument("--min-occupancy", type=float, default=0.70)
     parser.add_argument("--max-occupancy", type=float, default=0.95)
     parser.add_argument("--min-pad", type=int, default=24)
     parser.add_argument("--max-occupancy-ratio", type=float, default=1.35)
     parser.add_argument("--output", type=Path)
-    parser.add_argument("--no-fail", action="store_true", help="Always exit zero after reporting")
+    parser.add_argument(
+        "--no-fail", action="store_true", help="Always exit zero after reporting"
+    )
     args = parser.parse_args()
 
     image = Image.open(args.png).convert("RGB")
     rgb = np.asarray(image)
-    background = np.asarray([int(value) for value in args.background.split(",")], dtype=np.uint8)
+    background = np.asarray(
+        [int(value) for value in args.background.split(",")], dtype=np.uint8
+    )
     if background.shape != (3,):
-        raise SystemExit("--background must contain exactly three comma-separated integers")
+        raise SystemExit(
+            "--background must contain exactly three comma-separated integers"
+        )
     boundaries = (
         equal_boundaries(image.width, args.panels)
         if args.panels is not None
@@ -131,8 +147,16 @@ def main() -> None:
         )
         for x0, x1 in zip(boundaries, boundaries[1:])
     ]
-    occupancies = [panel.get("bbox_occupancy_fraction") for panel in panels if panel.get("ink_present")]
-    occupancy_ratio = max(occupancies) / min(occupancies) if occupancies and min(occupancies) > 0 else None
+    occupancies = [
+        panel.get("bbox_occupancy_fraction")
+        for panel in panels
+        if panel.get("ink_present")
+    ]
+    occupancy_ratio = (
+        max(occupancies) / min(occupancies)
+        if occupancies and min(occupancies) > 0
+        else None
+    )
     failures = []
     if any(not panel["pass"] for panel in panels):
         failures.append("panel_threshold_failure")

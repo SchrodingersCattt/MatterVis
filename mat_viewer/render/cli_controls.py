@@ -147,7 +147,7 @@ def _add_render_control_arguments(parser: argparse.ArgumentParser) -> None:
 def _camera_request(args: argparse.Namespace) -> dict:
     return {
         "projection": args.projection,
-        "axis": args.camera_axis or "c",
+        "axis": args.camera_axis or "auto_largest_face",
         "view_direction": args.view_direction,
         "position": args.camera_position,
         "target": args.camera_target,
