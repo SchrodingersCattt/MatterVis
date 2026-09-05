@@ -145,7 +145,9 @@ def _bond_segments(scene: dict, style: dict, *, with_scales: bool = False):
         c_i = i_color
         c_j = j_color
         radius_scale = float(bond.get("_render_radius_scale", 1.0) or 1.0)
-        opacity_scale = float(bond.get("_render_opacity_scale", 1.0) or 1.0)
+        # Preserve an explicit zero: opacity maps use it to hide a bond when
+        # the corresponding atom is outside a focused local environment.
+        opacity_scale = float(bond.get("_render_opacity_scale", 1.0))
         opacity_group = _bond_opacity_group_id(bond)
         bond_occ = float(bond.get("occ", 1.0))
         halves = [

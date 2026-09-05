@@ -218,6 +218,26 @@ Anchored scientific arrows are supplied with `vector_overlays=` or
 They are world-space Mesh3d content and therefore differ from corner compass
 annotations.
 
+### Native analytic overlay metadata
+
+Entries in `scene["isosurfaces"]` may carry a `metadata` mapping in addition
+to `vertices`, `triangles`, `normals`, `color`, and `opacity`.  The mapping is
+preserved by the backend-neutral overlay adapter, so a renderer can opt into
+an analytic path without changing the public mesh schema.  The CPU renderer
+currently recognises the following optional sphere keys:
+
+- `_raster_shape="sphere"`, `_raster_center`, and `_raster_radius` select the
+  exact world-space sphere silhouette;
+- `_raster_light`, `_raster_ambient`, `_raster_diffuse`, and
+  `_raster_two_sided` control its deterministic directional shading.
+
+These keys are deliberately namespaced as renderer metadata.  They do not
+replace the mesh vertices or alter scientific coordinates, and backends that
+do not implement the analytic path can render the supplied mesh normally.
+An atom or bond with an explicit `_render_opacity_scale=0` is treated as
+hidden geometry, keeping opacity-based local-environment reveals from leaving
+black fragments in transparent exports.
+
 ## Static exports and interaction traces
 
 `build_figure(..., include_interaction_traces=False)` and

@@ -257,6 +257,7 @@ def _write_samples(
     pixel_depths: np.ndarray,
     pixel_rgb: np.ndarray,
     rgba: tuple[float, float, float, float],
+    pixel_alpha: np.ndarray | None = None,
     source: str,
     order: int,
     color: np.ndarray,
@@ -264,7 +265,9 @@ def _write_samples(
     order_buffer: np.ndarray,
     fragments: dict[int, list[_Fragment]],
 ) -> None:
-    if rgba[3] >= 1.0 - 1e-12:
+    # Keep the fast opaque path for ordinary primitives. Analytic overlays
+    # may supply a per-pixel alpha field for a native front/back depth cue.
+    if pixel_alpha is None and rgba[3] >= 1.0 - 1e-12:
         existing = z_buffer[pixel_y, pixel_x]
         existing_order = order_buffer[pixel_y, pixel_x]
         wins = (pixel_depths < existing - _DEPTH_EPSILON) | (
@@ -279,7 +282,17 @@ def _write_samples(
             color[winner_y, winner_x, 3] = rgba[3]
         return
     width = z_buffer.shape[1]
-    for x_value, y_value, depth, rgb in zip(pixel_x, pixel_y, pixel_depths, pixel_rgb):
+    alpha_values = (
+        np.asarray(pixel_alpha, dtype=float).reshape(-1)
+        if pixel_alpha is not None
+        else np.full(len(pixel_x), float(rgba[3]), dtype=float)
+    )
+    for x_value, y_value, depth, rgb, alpha_value in zip(
+        pixel_x, pixel_y, pixel_depths, pixel_rgb, alpha_values
+    ):
+        alpha_value = float(np.clip(alpha_value, 0.0, 1.0))
+        if alpha_value <= 1.0e-8:
+            continue
         _append_fragment(
             fragments,
             int(y_value) * width + int(x_value),
@@ -287,7 +300,7 @@ def _write_samples(
                 float(depth),
                 int(order),
                 source,
-                (float(rgb[0]), float(rgb[1]), float(rgb[2]), rgba[3]),
+                (float(rgb[0]), float(rgb[1]), float(rgb[2]), alpha_value),
             ),
         )
 
@@ -382,10 +395,55 @@ def _rasterize_sphere(
     )
     if not np.any(inside):
         return
-    light = np.asarray([-0.32, 0.42, 1.0], dtype=float)
-    light /= np.linalg.norm(light)
-    illumination = 0.68 + 0.32 * np.abs(normals @ light)
-    rgb_values = np.asarray(primitive.rgba[:3])[None, None, :] * illumination[..., None]
+    # Analytic spheres historically used a two-sided, low-contrast light so
+    # that the fallback looked pleasant for tiny atom markers.  Native
+    # geometric overlays (for example a DP cutoff sphere) need a real front /
+    # back cue instead.  Keep the legacy default, while allowing a mesh record
+    # to request a directional light without introducing a backend-specific
+    # style option.
+    metadata = primitive.metadata
+    light = np.asarray(
+        metadata.get("_raster_light", (-0.32, 0.42, 1.0)), dtype=float
+    )
+    if light.shape != (3,) or not np.all(np.isfinite(light)):
+        light = np.asarray((-0.32, 0.42, 1.0), dtype=float)
+    light /= max(float(np.linalg.norm(light)), 1.0e-12)
+    ambient = float(metadata.get("_raster_ambient", 0.68))
+    diffuse = float(metadata.get("_raster_diffuse", 0.32))
+    ambient = float(np.clip(ambient, 0.0, 1.0))
+    diffuse = float(np.clip(diffuse, 0.0, 1.0))
+    if bool(metadata.get("_raster_two_sided", True)):
+        cosine = np.abs(normals @ light)
+    else:
+        cosine = np.clip(normals @ light, 0.0, 1.0)
+    illumination = ambient + diffuse * cosine
+    base_rgb = np.asarray(primitive.rgba[:3])[None, None, :]
+    rgb_values = base_rgb * illumination[..., None]
+    # Optional native specular cue for geometric overlays.  This is evaluated
+    # in camera space, so a true analytic sphere gets a stable highlight that
+    # survives alpha compositing on white while retaining the exact circular
+    # silhouette.  Existing atom-marker spheres keep the zero default.
+    specular = float(np.clip(metadata.get("_raster_specular", 0.0), 0.0, 1.0))
+    if specular > 0.0:
+        shininess = float(np.clip(metadata.get("_raster_shininess", 32.0), 1.0, 256.0))
+        camera_view = np.array((0.0, 0.0, 1.0), dtype=float)
+        half_vector = light + camera_view
+        half_vector /= max(float(np.linalg.norm(half_vector)), 1.0e-12)
+        highlight = np.clip(normals @ half_vector, 0.0, 1.0) ** shininess
+        rgb_values = rgb_values + specular * highlight[..., None] * (1.0 - base_rgb)
+    # A front/back alpha profile gives a translucent sphere a readable near
+    # surface and a receding far surface without changing its exact circular
+    # silhouette. Factors multiply the primitive opacity and are clipped.
+    front_factor = metadata.get("_raster_alpha_front_factor")
+    back_factor = metadata.get("_raster_alpha_back_factor")
+    pixel_alpha = None
+    if front_factor is not None or back_factor is not None:
+        front_factor = float(front_factor if front_factor is not None else 1.0)
+        back_factor = float(back_factor if back_factor is not None else 1.0)
+        frontness = np.clip(normals[..., 2], -1.0, 1.0)
+        blend = 0.5 * (frontness + 1.0)
+        alpha_factor = back_factor + (front_factor - back_factor) * blend
+        pixel_alpha = np.clip(float(primitive.rgba[3]) * alpha_factor, 0.0, 1.0)
     local_y, local_x = np.nonzero(inside)
     _write_samples(
         pixel_x=local_x + minimum_x,
@@ -393,6 +451,7 @@ def _rasterize_sphere(
         pixel_depths=depth_values[local_y, local_x],
         pixel_rgb=np.clip(rgb_values[local_y, local_x], 0.0, 1.0),
         rgba=primitive.rgba,
+        pixel_alpha=None if pixel_alpha is None else pixel_alpha[local_y, local_x],
         source=primitive.semantic_id,
         order=primitive_order * 1_000_000,
         color=color,
