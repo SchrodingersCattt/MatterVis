@@ -121,6 +121,13 @@ def isosurface_primitives(
                 "phase": entry.get("phase"),
                 "level": entry.get("level"),
             }
+            # Preserve caller-supplied renderer metadata.  This is especially
+            # useful for native analytic primitives (e.g. a true sphere),
+            # which still travel through the backend-neutral isosurface API
+            # but can use the CPU renderer's exact primitive path.
+            extra_metadata = entry.get("metadata")
+            if isinstance(extra_metadata, Mapping):
+                metadata.update(dict(extra_metadata))
         elif isinstance(entry, (tuple, list)) and len(entry) >= 2:
             vertices, triangles = entry[0], entry[1]
             normals = entry[2] if len(entry) >= 3 else None
