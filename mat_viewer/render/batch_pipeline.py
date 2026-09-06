@@ -539,7 +539,7 @@ def render_array_input(
                         site_index=polyhedron_site,
                         cutoff=polyhedron_cutoff,
                     )
-                except Exception as exc:
+                except (ValueError, RuntimeError) as exc:
                     overlay_errors.append(f"frame={frame_index} spec={spec}: {type(exc).__name__}: {exc}")
                     continue
                 if topology_data is None:
@@ -563,6 +563,9 @@ def render_array_input(
                     if primitive.semantic_id.startswith("polyhedron:")
                 )
             overlay_counts.append(len(overlays))
+            if frame_index == frame_indices[0] and not overlays:
+                details = " | ".join(overlay_errors[-len(polyhedron_specs):])
+                raise RuntimeError(f"no drawable polyhedron overlay in first selected frame: {details}")
             return tuple(overlays)
 
         if len(frames) == 1:
