@@ -509,6 +509,8 @@ def render_array_input(
     )
     overlay_primitives = ()
     overlay_primitives_by_frame: tuple[tuple[Any, ...], ...] | None = None
+    overlay_errors: list[str] = []
+    overlay_counts: list[int] = []
     if vector_overlays:
         from .overlay.vectors import vector_primitives
 
@@ -537,7 +539,8 @@ def render_array_input(
                         site_index=polyhedron_site,
                         cutoff=polyhedron_cutoff,
                     )
-                except (ValueError, RuntimeError):
+                except Exception as exc:
+                    overlay_errors.append(f"frame={frame_index} spec={spec}: {type(exc).__name__}: {exc}")
                     continue
                 if topology_data is None:
                     continue
@@ -559,6 +562,7 @@ def render_array_input(
                     for primitive in viewport.primitives
                     if primitive.semantic_id.startswith("polyhedron:")
                 )
+            overlay_counts.append(len(overlays))
             return tuple(overlays)
 
         if len(frames) == 1:
@@ -683,6 +687,8 @@ def render_array_input(
             "alignment_reduction_mapping": aligned_property - loaded_property,
             "repeat": repeated_property - aligned_property,
         },
+        "polyhedron_overlay_counts": overlay_counts,
+        "polyhedron_overlay_errors": overlay_errors[:50],
     }
     if profile_path is not None:
         destination = Path(profile_path).expanduser().resolve()
