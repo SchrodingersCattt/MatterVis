@@ -179,6 +179,46 @@ def test_bond_batch_uses_minimum_image_vectors() -> None:
     assert np.any(rendered.rgba[60, :35, :3] != 255)
 
 
+@pytest.mark.skipif(not NUMBA_AVAILABLE, reason="batch renderer requires numba")
+def test_periodic_bond_raster_length_matches_minimum_image_distance() -> None:
+    frame = _frame(
+        [[0.1, 0.0, 0.0], [1.9, 0.0, 0.0]],
+        [0, 0],
+        cell=np.eye(3) * 2.0,
+    )
+    camera = CameraSpec(
+        position=(1.0, 0.0, 6.0),
+        target=(1.0, 0.0, 0.0),
+        up=(0.0, 1.0, 0.0),
+        projection="orthographic",
+        near=0.1,
+        far=20.0,
+        ortho_scale=2.5,
+        fov_y_deg=45.0,
+    )
+
+    def raster_width(vector: list[float]) -> int:
+        bonds = SimpleNamespace(
+            pairs=np.asarray([[0, 1]], dtype=np.int32),
+            vectors=np.asarray([vector], dtype=np.float32),
+        )
+        rendered = render_frame_batch(
+            frame,
+            camera,
+            width=400,
+            height=200,
+            show_cell=False,
+            bonds=bonds,
+            bond_radius=0.02,
+        )
+        foreground = np.any(rendered.rgba[:, :, :3] != 255, axis=2)
+        _, columns = np.where(foreground)
+        return int(columns.max() - columns.min() + 1)
+
+    assert raster_width([-0.2, 0.0, 0.0]) == 10
+    assert raster_width([1.8, 0.0, 0.0]) == 74
+
+
 def _image_descriptors_have_no_local_palettes(path: Path) -> int:
     data = path.read_bytes()
     assert data[:6] in {b"GIF87a", b"GIF89a"}
