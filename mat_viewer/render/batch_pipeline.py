@@ -739,7 +739,6 @@ def render_array_input(
                 cell_width_px=cell_width_px,
                 bonds=bonds,
                 bond_radius=bond_radius,
-<<<<<<< HEAD
                 overlay_primitives=(
                     overlay_primitives
                     if overlay_primitives_by_frame is None

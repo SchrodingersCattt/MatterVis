@@ -361,7 +361,7 @@ def _rasterize_spheres(
 
 @_compile(cache=True, nogil=True)
 def _rasterize_bonds(
-    bond_camera_positions: np.ndarray,
+    camera_positions: np.ndarray,
     atomic_numbers: np.ndarray,
     pairs: np.ndarray,
     second_positions: np.ndarray,
@@ -579,7 +579,7 @@ def render_projected_frame(
                 dtype=np.float32,
             )
         _rasterize_bonds(
-            bond_camera_positions,
+            spheres.camera_positions,
             spheres.atomic_numbers,
             pairs,
             second_positions,
