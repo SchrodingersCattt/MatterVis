@@ -8,6 +8,7 @@ import numpy as np
 from PIL import Image
 import pytest
 
+from mat_viewer.config import atom_radius, element_color
 from mat_viewer.loader.lammps_batch import FrameBatch, LammpsFrameRecord
 from mat_viewer.render.contracts import CameraSpec, RenderPlan, ViewportPlan
 from mat_viewer.render.cpu.batch import (
@@ -58,6 +59,18 @@ def _camera(projection: str = "orthographic") -> CameraSpec:
         ortho_scale=2.0,
         fov_y_deg=45.0,
     )
+
+
+def test_batch_element_styles_use_mattervis_configuration() -> None:
+    colors, radii = element_style_tables()
+
+    for atomic_number, symbol in ((1, "H"), (6, "C"), (7, "N"), (8, "O"), (17, "Cl")):
+        expected = tuple(
+            int(element_color(symbol).lstrip("#")[index : index + 2], 16)
+            for index in (0, 2, 4)
+        )
+        assert tuple(colors[atomic_number]) == expected
+        assert radii[atomic_number] == pytest.approx(atom_radius(symbol))
 
 
 @pytest.mark.skipif(not NUMBA_AVAILABLE, reason="batch renderer requires numba")
