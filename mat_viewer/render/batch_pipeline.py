@@ -49,7 +49,7 @@ def _fast_polyhedron_overlays(frame: FrameBatch, raw_specs: Sequence[str]) -> tu
     for spec_index, spec in enumerate(specs):
         center = str(spec.get("center") or spec.get("center_species") or "")
         ligand_n = 12 if center.startswith("C") else 6
-        color = spec.get("color", "#C97A50" if center.startswith("C") else "#4A90C4")
+        color = spec.get("color", "#7C5CBF")
         if center.startswith("C"):
             digits = "".join(ch for ch in center if ch.isdigit())
             heavy_count = int(digits) if digits else 8
