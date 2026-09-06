@@ -508,6 +508,7 @@ def render_array_input(
         show_hydrogen=show_hydrogen,
     )
     overlay_primitives = ()
+    overlay_primitives_by_frame: tuple[tuple[Any, ...], ...] | None = None
     if vector_overlays:
         from .overlay.vectors import vector_primitives
 
@@ -515,43 +516,53 @@ def render_array_input(
             vector_primitives(vector_overlays, lattice=frames[0].cell)
         )
     if polyhedron_specs:
-        if len(frames) != 1:
-            raise ValueError("animated polyhedron overlays are not supported")
         from ..agent import load_structure, prepare_render
         from ..agent_topology import build_topology_data
         from .contracts import RenderSpec
 
-        structure = load_structure(
-            input_path,
-            input_format=input_format,
-            type_map=type_map,
-            frame=frame_indices[0],
-        )
-        topology_data = build_topology_data(
-            structure,
-            list(polyhedron_specs),
-            site_index=polyhedron_site,
-            cutoff=polyhedron_cutoff,
-        )
-        plan = prepare_render(
-            structure,
-            camera=camera,
-            render_spec=RenderSpec(
-                representation="ball",
-                width=width * scale,
-                height=height * scale,
-                show_cell=False,
-                show_axes=False,
-                show_labels=False,
-            ),
-            topology_data=topology_data,
-        )
-        overlay_primitives = tuple(overlay_primitives) + tuple(
-            primitive
-            for viewport in plan.viewports
-            for primitive in viewport.primitives
-            if primitive.semantic_id.startswith("polyhedron:")
-        )
+        def frame_overlay(frame_index: int) -> tuple[Any, ...]:
+            """Recompute shells for one frame; missing shells simply vanish."""
+            structure = load_structure(
+                input_path,
+                input_format=input_format,
+                type_map=type_map,
+                frame=frame_index,
+            )
+            try:
+                topology_data = build_topology_data(
+                    structure,
+                    list(polyhedron_specs),
+                    site_index=polyhedron_site,
+                    cutoff=polyhedron_cutoff,
+                )
+            except (ValueError, RuntimeError):
+                return ()
+            plan = prepare_render(
+                structure,
+                camera=camera,
+                render_spec=RenderSpec(
+                    representation="ball",
+                    width=width * scale,
+                    height=height * scale,
+                    show_cell=False,
+                    show_axes=False,
+                    show_labels=False,
+                ),
+                topology_data=topology_data,
+            )
+            return tuple(
+                primitive
+                for viewport in plan.viewports
+                for primitive in viewport.primitives
+                if primitive.semantic_id.startswith("polyhedron:")
+            )
+
+        if len(frames) == 1:
+            overlay_primitives = tuple(overlay_primitives) + frame_overlay(frame_indices[0])
+        else:
+            overlay_primitives_by_frame = tuple(
+                frame_overlay(frame_index) for frame_index in frame_indices
+            )
     time_series = (
         resolve_animation_times(frames, animation_time) if animation_time else None
     )
@@ -605,7 +616,13 @@ def render_array_input(
                 cell_width_px=cell_width_px,
                 bonds=bonds,
                 bond_radius=bond_radius,
-                overlay_primitives=overlay_primitives,
+<<<<<<< HEAD
+                overlay_primitives=(
+                    overlay_primitives
+                    if overlay_primitives_by_frame is None
+                    else tuple(overlay_primitives)
+                    + overlay_primitives_by_frame[ordinal]
+                ),
                 content_width=content_width,
                 property_metadata_payload=property_metadata_payload,
             )
