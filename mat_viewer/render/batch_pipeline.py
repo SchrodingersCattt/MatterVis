@@ -528,34 +528,38 @@ def render_array_input(
                 type_map=type_map,
                 frame=frame_index,
             )
-            try:
-                topology_data = build_topology_data(
-                    structure,
-                    list(polyhedron_specs),
-                    site_index=polyhedron_site,
-                    cutoff=polyhedron_cutoff,
+            overlays = []
+            for spec in polyhedron_specs:
+                try:
+                    topology_data = build_topology_data(
+                        structure,
+                        [spec],
+                        site_index=polyhedron_site,
+                        cutoff=polyhedron_cutoff,
+                    )
+                except (ValueError, RuntimeError):
+                    continue
+                if topology_data is None:
+                    continue
+                overlays.extend(
+                    primitive
+                    for viewport in prepare_render(
+                        structure,
+                        camera=camera,
+                        render_spec=RenderSpec(
+                            representation="ball",
+                            width=width * scale,
+                            height=height * scale,
+                            show_cell=False,
+                            show_axes=False,
+                            show_labels=False,
+                        ),
+                        topology_data=topology_data,
+                    ).viewports
+                    for primitive in viewport.primitives
+                    if primitive.semantic_id.startswith("polyhedron:")
                 )
-            except (ValueError, RuntimeError):
-                return ()
-            plan = prepare_render(
-                structure,
-                camera=camera,
-                render_spec=RenderSpec(
-                    representation="ball",
-                    width=width * scale,
-                    height=height * scale,
-                    show_cell=False,
-                    show_axes=False,
-                    show_labels=False,
-                ),
-                topology_data=topology_data,
-            )
-            return tuple(
-                primitive
-                for viewport in plan.viewports
-                for primitive in viewport.primitives
-                if primitive.semantic_id.startswith("polyhedron:")
-            )
+            return tuple(overlays)
 
         if len(frames) == 1:
             overlay_primitives = tuple(overlay_primitives) + frame_overlay(frame_indices[0])
