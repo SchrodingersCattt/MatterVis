@@ -518,18 +518,69 @@ def render_array_input(
             vector_primitives(vector_overlays, lattice=frames[0].cell)
         )
     if polyhedron_specs:
-        from ..agent import load_structure, prepare_render
+        from ase import Atoms
+        from ..agent import prepare_render
         from ..agent_topology import build_topology_data
+        from ..loader.bundle_builder import build_loaded_crystal_from_atoms
+        from ..loader.structure_input import (
+            StructureFrame,
+            StructureInput,
+            _ase_atoms_to_pipeline,
+        )
         from .contracts import RenderSpec
+
+        reference_atoms = Atoms(
+            numbers=frames[0].atomic_numbers,
+            positions=frames[0].positions,
+            cell=frames[0].cell,
+            pbc=frames[0].pbc,
+        )
+        raw_atoms, cell, matrix, metadata = _ase_atoms_to_pipeline(reference_atoms)
+        reference_bundle = build_loaded_crystal_from_atoms(
+            name=Path(input_path).stem,
+            source_path=str(Path(input_path).resolve()),
+            raw_atoms=raw_atoms,
+            cell=cell,
+            M=matrix,
+            source="ase",
+        )
+
+        def structure_for_frame(frame: FrameBatch, frame_index: int) -> StructureInput:
+            atoms = Atoms(
+                numbers=frame.atomic_numbers,
+                positions=frame.positions,
+                cell=frame.cell,
+                pbc=frame.pbc,
+            )
+            raw, current_cell, current_matrix, current_metadata = _ase_atoms_to_pipeline(atoms)
+            bundle = build_loaded_crystal_from_atoms(
+                name=Path(input_path).stem,
+                source_path=str(Path(input_path).resolve()),
+                raw_atoms=raw,
+                cell=current_cell,
+                M=current_matrix,
+                source="ase",
+                molcrys_analysis=reference_bundle.molcrys_analysis,
+                scene_metadata_extra=current_metadata,
+            )
+            return StructureInput(
+                path=Path(input_path).resolve(),
+                input_format=str(input_format or "auto"),
+                frames=(
+                    StructureFrame(
+                        index=int(frame_index),
+                        bundle=bundle,
+                        info=current_metadata,
+                        atom_arrays={},
+                    ),
+                ),
+                total_frames=1,
+            )
 
         def frame_overlay(frame_index: int) -> tuple[Any, ...]:
             """Recompute shells for one frame; missing shells simply vanish."""
-            structure = load_structure(
-                input_path,
-                input_format=input_format,
-                type_map=type_map,
-                frame=frame_index,
-            )
+            frame_position = frame_indices.index(frame_index)
+            structure = structure_for_frame(frames[frame_position], frame_index)
             overlays = []
             for spec in polyhedron_specs:
                 try:
