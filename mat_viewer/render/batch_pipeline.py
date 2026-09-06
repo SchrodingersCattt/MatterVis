@@ -35,7 +35,9 @@ def _fast_polyhedron_overlays(frame: FrameBatch, raw_specs: Sequence[str]) -> tu
     centre groups and ligand coordinates.
     """
     from .geometry import polyhedron_edges_primitive, polyhedron_primitive
-    specs = [json.loads(item) if isinstance(item, str) else dict(item) for item in raw_specs]
+    from ..agent_topology import parse_polyhedron_specs
+
+    specs = parse_polyhedron_specs(raw_specs)
     elements = np.asarray(frame.atomic_numbers)
     positions = np.asarray(frame.positions, dtype=float)
     cell = np.asarray(frame.cell, dtype=float)
@@ -47,9 +49,9 @@ def _fast_polyhedron_overlays(frame: FrameBatch, raw_specs: Sequence[str]) -> tu
         groups_by_heavy[count] = [carbon[i:i + count] for i in range(0, len(carbon) - count + 1, count)]
     overlays: list[Any] = []
     for spec_index, spec in enumerate(specs):
-        center = str(spec.get("center") or spec.get("center_species") or "")
+        center = str(spec["center_species"])
         ligand_n = 12 if center.startswith("C") else 6
-        color = spec.get("color", "#7C5CBF")
+        color = spec["color"] or "#7C5CBF"
         if center.startswith("C"):
             digits = "".join(ch for ch in center if ch.isdigit())
             heavy_count = int(digits) if digits else 8
