@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 from dataclasses import fields
 
-from mat_viewer.properties import AtomPropertyColorSpec
 from mat_viewer.cli import _build_render_parser
+from mat_viewer.properties import AtomPropertyColorSpec
 from mat_viewer.render.contracts import CameraSpec, RenderSpec, ViewSpec
 
 
@@ -134,3 +134,25 @@ def test_boundary_replica_cli_is_explicit_and_backwards_compatible() -> None:
     assert automatic.include_boundary_replicas is None
     assert strict.include_boundary_replicas is False
     assert expanded.include_boundary_replicas is True
+
+
+def test_cube_controls_are_public_cli_options() -> None:
+    parser = argparse.ArgumentParser()
+    render = _build_render_parser(parser.add_subparsers())
+
+    args = render.parse_args(
+        [
+            "density.cube",
+            "-o",
+            "figure.png",
+            "--isovalue",
+            "0.026",
+            "--isosurface-opacity",
+            "0.6",
+            "--periodic-isosurface",
+        ]
+    )
+
+    assert args.isovalue == 0.026
+    assert args.isosurface_opacity == 0.6
+    assert args.periodic_isosurface is True

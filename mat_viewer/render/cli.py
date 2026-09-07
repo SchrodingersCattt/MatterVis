@@ -267,6 +267,35 @@ def _build_render_parser(
         help="Bond cylinder radius in Å (default: 0.15).",
     )
     p.add_argument(
+        "--isovalue",
+        type=float,
+        default=None,
+        help=(
+            "Explicit positive cube isosurface magnitude. Reuse the same value "
+            "for quantitatively comparable scalar-field panels."
+        ),
+    )
+    p.add_argument(
+        "--isosurface-opacity",
+        type=float,
+        default=None,
+        metavar="VALUE",
+        help="Cube isosurface opacity in (0, 1] (default: style value).",
+    )
+    p.add_argument(
+        "--periodic-isosurface",
+        dest="periodic_isosurface",
+        action="store_true",
+        default=None,
+        help="Close cube scalar values across opposite unit-cell faces.",
+    )
+    p.add_argument(
+        "--no-periodic-isosurface",
+        dest="periodic_isosurface",
+        action="store_false",
+        help="Do not close cube scalar values across unit-cell faces.",
+    )
+    p.add_argument(
         "--camera-distance",
         type=float,
         default=1.8,
@@ -602,6 +631,12 @@ def _build_style_overrides(args: argparse.Namespace) -> Dict[str, Any]:
     overrides["monochrome"] = args.monochrome
     overrides["atom_scale"] = args.atom_scale
     overrides["bond_radius"] = args.bond_radius
+    if args.isovalue is not None:
+        overrides["isosurface_isovalue"] = args.isovalue
+    if args.isosurface_opacity is not None:
+        overrides["isosurface_opacity"] = args.isosurface_opacity
+    if args.periodic_isosurface is not None:
+        overrides["isosurface_periodic"] = args.periodic_isosurface
     overrides["camera_eye_distance"] = args.camera_distance
     overrides["background"] = args.background
     overrides["ortep_probability"] = args.ortep_probability
@@ -734,7 +769,11 @@ def _save_static_output(
         write_interactive_html(fig, output_path)
         return {"backend": "plotly-html", "fallback_reason": None}
 
-    result = render(scene, style) if topology_data is None else None
+    result = (
+        render(scene, style, include_interaction_traces=False)
+        if topology_data is None
+        else None
+    )
     if args.publication_layout:
         from .api import FigureResult
 
@@ -754,7 +793,12 @@ def _save_static_output(
         from .api import FigureResult
 
         result = FigureResult(
-            plotly_fig=build_figure(scene, style, topology_data=topology_data)
+            plotly_fig=build_figure(
+                scene,
+                style,
+                topology_data=topology_data,
+                include_interaction_traces=False,
+            )
         )
 
     export_available, unavailable_reason = plotly_static_export_available()
@@ -803,6 +847,15 @@ def _render_main(args: argparse.Namespace) -> None:
         )
     if not math.isfinite(args.camera_distance) or args.camera_distance <= 0:
         sys.exit("Error: --camera-distance must be finite and greater than zero.")
+    if args.isovalue is not None and (
+        not math.isfinite(args.isovalue) or args.isovalue <= 0
+    ):
+        sys.exit("Error: --isovalue must be finite and greater than zero.")
+    if args.isosurface_opacity is not None and (
+        not math.isfinite(args.isosurface_opacity)
+        or not 0 < args.isosurface_opacity <= 1
+    ):
+        sys.exit("Error: --isosurface-opacity must be finite and in (0, 1].")
     if not math.isfinite(args.fps) or args.fps <= 0:
         sys.exit("Error: --fps must be finite and greater than zero.")
 

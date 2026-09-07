@@ -61,13 +61,33 @@ logs, hashes, and decoded outputs.
 Models without image inspection report objective checks only and leave visual
 acceptance pending. Chemistry and semantic-fatal warnings block delivery.
 
+For periodic molecular structures, verify from scene/topology evidence that
+every displayed finite fragment is complete. A visible cell or nonzero raster
+padding does not prove molecular completeness. If cell context is required,
+record separately that it was requested, emitted, and visibly accepted.
+
 For chains, layers, and frameworks, verify independently that every displayed
 bond is canonical, each crossing bond has the intended nearest image, no
 screen-spanning bond was introduced, and no whole-cell replication was added
 without an explicit scientific reason.
 
 For multi-panel PNGs, run `skills/visualize-materials/scripts/check_panel_layout.py`
-with explicit panel boundaries (or `--panels` only for truly equal-width final
-cells). Report each panel's ink bounding box, occupancy, and four safety pads.
+with `--grid`, explicit `--rectangles`, or `--panels` only for truly equal-width
+full-height cells. Check raw source panels before cropping and final cells after
+composition. Report each panel's ink bounding box, occupancy, and four safety pads.
 The defaults are 70–95% bounding-box occupancy and 24 px minimum pad; override
 them with CLI arguments when the figure class requires it and record the reason.
+
+## Final five-problem review
+
+After objective checks, review the latest output hash in five categories:
+
+1. scientific representation and comparability;
+2. geometry, projection, scale, and clipping;
+3. labels, legends, annotations, and cell/axis context;
+4. final-size readability, whitespace, and typography;
+5. output format, provenance, source-panel QA, and delivery discipline.
+
+Record a concrete issue or evidence for “no issue found” in every category.
+Rerender after substantive fixes and repeat the review against the new hash.
+Automated QA alone is not visual acceptance.
