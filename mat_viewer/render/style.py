@@ -99,7 +99,16 @@ def _atom_render_color(atom: dict, style: dict, *, light: bool = False) -> str:
 
 
 def _atom_render_visible(atom: dict) -> bool:
-    return bool(atom.get("_render_visible", True))
+    if not bool(atom.get("_render_visible", True)):
+        return False
+    # An explicit opacity scale of zero is a visibility request, not a black
+    # atom with a transparent material.  Skipping it here also keeps bonds
+    # and the CPU/Plotly backends consistent.
+    try:
+        value = float(atom.get("_render_opacity_scale", 1.0))
+        return bool(np.isfinite(value) and value > 1.0e-12)
+    except (TypeError, ValueError):
+        return True
 
 
 def _atom_render_opacity_scale(atom: dict) -> float:

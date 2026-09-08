@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import colorsys
+import warnings
 
 from dataclasses import dataclass
 from hashlib import sha256
@@ -19,6 +20,7 @@ from ..contracts import (
     TriangleMeshPrimitive,
     ViewportPlan,
 )
+from .raster_math import _clip_polygon_attributes, _dash_visible, _edge, _edge_array
 
 _DEPTH_EPSILON = 1.0e-9
 
@@ -257,6 +259,7 @@ def _write_samples(
     pixel_depths: np.ndarray,
     pixel_rgb: np.ndarray,
     rgba: tuple[float, float, float, float],
+    pixel_alpha: np.ndarray | None = None,
     source: str,
     order: int,
     color: np.ndarray,
@@ -264,7 +267,9 @@ def _write_samples(
     order_buffer: np.ndarray,
     fragments: dict[int, list[_Fragment]],
 ) -> None:
-    if rgba[3] >= 1.0 - 1e-12:
+    # Keep the fast opaque path for ordinary primitives. Analytic overlays
+    # may supply a per-pixel alpha field for a native front/back depth cue.
+    if pixel_alpha is None and rgba[3] >= 1.0 - 1e-12:
         existing = z_buffer[pixel_y, pixel_x]
         existing_order = order_buffer[pixel_y, pixel_x]
         wins = (pixel_depths < existing - _DEPTH_EPSILON) | (
@@ -279,7 +284,17 @@ def _write_samples(
             color[winner_y, winner_x, 3] = rgba[3]
         return
     width = z_buffer.shape[1]
-    for x_value, y_value, depth, rgb in zip(pixel_x, pixel_y, pixel_depths, pixel_rgb):
+    alpha_values = (
+        np.asarray(pixel_alpha, dtype=float).reshape(-1)
+        if pixel_alpha is not None
+        else np.full(len(pixel_x), float(rgba[3]), dtype=float)
+    )
+    for x_value, y_value, depth, rgb, alpha_value in zip(
+        pixel_x, pixel_y, pixel_depths, pixel_rgb, alpha_values
+    ):
+        alpha_value = float(np.clip(alpha_value, 0.0, 1.0))
+        if alpha_value <= 1.0e-8:
+            continue
         _append_fragment(
             fragments,
             int(y_value) * width + int(x_value),
@@ -287,7 +302,7 @@ def _write_samples(
                 float(depth),
                 int(order),
                 source,
-                (float(rgb[0]), float(rgb[1]), float(rgb[2]), rgba[3]),
+                (float(rgb[0]), float(rgb[1]), float(rgb[2]), alpha_value),
             ),
         )
 
@@ -303,6 +318,29 @@ def _rasterize_sphere(
 ) -> None:
     center = np.asarray(primitive.metadata["_raster_center"], dtype=float)
     radius = float(primitive.metadata["_raster_radius"])
+    offsets = np.asarray(primitive.vertices, dtype=float) - center[None, :]
+    radial_error = np.abs(np.linalg.norm(offsets, axis=1) - radius)
+    tolerance = max(1.0e-6, 1.0e-6 * max(radius, 1.0))
+    if float(np.max(radial_error, initial=0.0)) > tolerance:
+        warnings.warn(
+            (
+                f"{primitive.semantic_id}: sphere metadata does not match the mesh "
+                f"(max radial deviation {float(np.max(radial_error)):.3g} > "
+                f"{tolerance:.3g}); falling back to mesh rasterization"
+            ),
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        _rasterize_mesh(
+            primitive,
+            transform,
+            color,
+            z_buffer,
+            order_buffer,
+            fragments,
+            primitive_order,
+        )
+        return
     camera_center = transform.world_to_camera(center[None, :])[0]
     center_depth = -float(camera_center[2])
     if (
@@ -382,10 +420,59 @@ def _rasterize_sphere(
     )
     if not np.any(inside):
         return
-    light = np.asarray([-0.32, 0.42, 1.0], dtype=float)
-    light /= np.linalg.norm(light)
-    illumination = 0.68 + 0.32 * np.abs(normals @ light)
-    rgb_values = np.asarray(primitive.rgba[:3])[None, None, :] * illumination[..., None]
+    # Analytic spheres historically used a two-sided, low-contrast light so
+    # that the fallback looked pleasant for tiny atom markers.  Native
+    # geometric overlays (for example a DP cutoff sphere) need a real front /
+    # back cue instead.  Keep the legacy default, while allowing a mesh record
+    # to request a directional light without introducing a backend-specific
+    # style option.
+    metadata = primitive.metadata
+    light = np.asarray(
+        metadata.get("_raster_light", (-0.32, 0.42, 1.0)), dtype=float
+    )
+    if light.shape != (3,) or not np.all(np.isfinite(light)):
+        light = np.asarray((-0.32, 0.42, 1.0), dtype=float)
+    light /= max(float(np.linalg.norm(light)), 1.0e-12)
+    ambient = float(metadata.get("_raster_ambient", 0.68))
+    diffuse = float(metadata.get("_raster_diffuse", 0.32))
+    ambient = float(np.clip(ambient, 0.0, 1.0))
+    diffuse = float(np.clip(diffuse, 0.0, 1.0))
+    total_light = ambient + diffuse
+    if total_light > 1.0:
+        ambient /= total_light
+        diffuse /= total_light
+    if bool(metadata.get("_raster_two_sided", True)):
+        cosine = np.abs(normals @ light)
+    else:
+        cosine = np.clip(normals @ light, 0.0, 1.0)
+    illumination = ambient + diffuse * cosine
+    base_rgb = np.asarray(primitive.rgba[:3])[None, None, :]
+    rgb_values = base_rgb * illumination[..., None]
+    # Optional native specular cue for geometric overlays.  This is evaluated
+    # in camera space, so a true analytic sphere gets a stable highlight that
+    # survives alpha compositing on white while retaining the exact circular
+    # silhouette.  Existing atom-marker spheres keep the zero default.
+    specular = float(np.clip(metadata.get("_raster_specular", 0.0), 0.0, 1.0))
+    if specular > 0.0:
+        shininess = float(np.clip(metadata.get("_raster_shininess", 32.0), 1.0, 256.0))
+        camera_view = np.array((0.0, 0.0, 1.0), dtype=float)
+        half_vector = light + camera_view
+        half_vector /= max(float(np.linalg.norm(half_vector)), 1.0e-12)
+        highlight = np.clip(normals @ half_vector, 0.0, 1.0) ** shininess
+        rgb_values = rgb_values + specular * highlight[..., None] * (1.0 - base_rgb)
+    # A front/back alpha profile gives a translucent sphere a readable near
+    # surface and a receding far surface without changing its exact circular
+    # silhouette. Factors multiply the primitive opacity and are clipped.
+    front_factor = metadata.get("_raster_alpha_front_factor")
+    back_factor = metadata.get("_raster_alpha_back_factor")
+    pixel_alpha = None
+    if front_factor is not None or back_factor is not None:
+        front_factor = float(front_factor if front_factor is not None else 1.0)
+        back_factor = float(back_factor if back_factor is not None else 1.0)
+        frontness = np.clip(normals[..., 2], -1.0, 1.0)
+        blend = 0.5 * (frontness + 1.0)
+        alpha_factor = back_factor + (front_factor - back_factor) * blend
+        pixel_alpha = np.clip(float(primitive.rgba[3]) * alpha_factor, 0.0, 1.0)
     local_y, local_x = np.nonzero(inside)
     _write_samples(
         pixel_x=local_x + minimum_x,
@@ -393,6 +480,7 @@ def _rasterize_sphere(
         pixel_depths=depth_values[local_y, local_x],
         pixel_rgb=np.clip(rgb_values[local_y, local_x], 0.0, 1.0),
         rgba=primitive.rgba,
+        pixel_alpha=None if pixel_alpha is None else pixel_alpha[local_y, local_x],
         source=primitive.semantic_id,
         order=primitive_order * 1_000_000,
         color=color,
@@ -892,89 +980,12 @@ def _viewport_bounds(
     )
 
 
-def _clip_polygon_attributes(
-    points: np.ndarray,
-    attributes: np.ndarray,
-    *,
-    near: float,
-    far: float,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Clip camera points and linearly coupled vertex attributes together."""
-    clipped_points = np.asarray(points, dtype=float)
-    clipped_attributes = np.asarray(attributes, dtype=float)
-    for boundary, keep_nearer in ((float(near), False), (float(far), True)):
-        if len(clipped_points) == 0:
-            break
-
-        def inside(point: np.ndarray) -> bool:
-            depth = -float(point[2])
-            return (
-                depth <= boundary + 1e-12 if keep_nearer else depth >= boundary - 1e-12
-            )
-
-        next_points: list[np.ndarray] = []
-        next_attributes: list[np.ndarray] = []
-        previous_point = clipped_points[-1]
-        previous_attribute = clipped_attributes[-1]
-        previous_inside = inside(previous_point)
-        for current_point, current_attribute in zip(clipped_points, clipped_attributes):
-            current_inside = inside(current_point)
-            if current_inside != previous_inside:
-                previous_depth = -float(previous_point[2])
-                current_depth = -float(current_point[2])
-                denominator = current_depth - previous_depth
-                fraction = (
-                    0.0
-                    if abs(denominator) < 1e-15
-                    else (boundary - previous_depth) / denominator
-                )
-                fraction = float(np.clip(fraction, 0.0, 1.0))
-                next_points.append(
-                    previous_point + fraction * (current_point - previous_point)
-                )
-                next_attributes.append(
-                    previous_attribute
-                    + fraction * (current_attribute - previous_attribute)
-                )
-            if current_inside:
-                next_points.append(current_point)
-                next_attributes.append(current_attribute)
-            previous_point = current_point
-            previous_attribute = current_attribute
-            previous_inside = current_inside
-        clipped_points = np.asarray(next_points, dtype=float).reshape(-1, 3)
-        clipped_attributes = np.asarray(next_attributes, dtype=float).reshape(
-            -1, attributes.shape[1]
-        )
-    return clipped_points, clipped_attributes
 
 
-def _edge(first: np.ndarray, second: np.ndarray, point: np.ndarray) -> float:
-    return float(
-        (point[0] - first[0]) * (second[1] - first[1])
-        - (point[1] - first[1]) * (second[0] - first[0])
-    )
 
 
-def _dash_visible(distance: float, pattern: tuple[float, ...]) -> bool:
-    values = pattern if len(pattern) % 2 == 0 else pattern * 2
-    period = float(sum(values))
-    if period <= 0.0:
-        return True
-    position = float(distance) % period
-    for index, length in enumerate(values):
-        if position <= length:
-            return index % 2 == 0
-        position -= length
-    return True
 
 
-def _edge_array(
-    first: np.ndarray, second: np.ndarray, points: np.ndarray
-) -> np.ndarray:
-    return (points[..., 0] - first[0]) * (second[1] - first[1]) - (
-        points[..., 1] - first[1]
-    ) * (second[0] - first[0])
 
 
 __all__ = ["render_png", "render_rgba"]
