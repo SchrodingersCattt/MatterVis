@@ -8,9 +8,15 @@ import json
 import math
 from pathlib import Path
 from typing import Any, Iterable, Sequence
+import warnings
 
 import numpy as np
 
+from ..agent_topology import (
+    FastPolyhedronContext,
+    fast_polyhedron_overlays as _build_fast_polyhedron_overlays,
+    prepare_fast_polyhedron_context,
+)
 from ..loader.frame_batch import FrameBatch, frame_batch_from_ase, frame_box_corners
 from ..loader.lammps_batch import (
     index_lammps_dump,
@@ -23,6 +29,14 @@ from .contracts import CameraSpec, TextPrimitive
 from .cpu.batch import NUMBA_AVAILABLE, render_frame_batch, warm_batch_renderer
 from .cpu.raster import composite_primitives
 from .frame_annotations import resolve_frame_annotations
+
+
+def _fast_polyhedron_overlays(
+    frame: FrameBatch, context: FastPolyhedronContext
+) -> tuple[Any, ...]:
+    """Thin render wrapper around chemistry-layer shell selection."""
+
+    return _build_fast_polyhedron_overlays(frame, context)
 
 
 @dataclass(frozen=True, slots=True)
@@ -508,50 +522,138 @@ def render_array_input(
         show_hydrogen=show_hydrogen,
     )
     overlay_primitives = ()
+    polyhedron_context: FastPolyhedronContext | None = None
+    overlay_errors: list[str] = []
+    overlay_counts: list[int] = []
+    fast_polyhedron_animation = bool(polyhedron_specs) and len(frames) > 1
+    if fast_polyhedron_animation:
+        candidate_context = prepare_fast_polyhedron_context(
+            frames[0],
+            polyhedron_specs,
+            default_cutoff=polyhedron_cutoff,
+        )
+        if candidate_context.supported:
+            polyhedron_context = candidate_context
+        else:
+            fast_polyhedron_animation = False
+            if candidate_context.reason:
+                warnings.warn(
+                    "Falling back to the chemistry topology path for animated "
+                    f"polyhedra: {candidate_context.reason}",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
     if vector_overlays:
         from .overlay.vectors import vector_primitives
 
         overlay_primitives = tuple(
             vector_primitives(vector_overlays, lattice=frames[0].cell)
         )
-    if polyhedron_specs:
-        if len(frames) != 1:
-            raise ValueError("animated polyhedron overlays are not supported")
-        from ..agent import load_structure, prepare_render
+    if polyhedron_specs and not fast_polyhedron_animation:
+        from ase import Atoms
+        from ..agent import prepare_render
         from ..agent_topology import build_topology_data
+        from ..loader.bundle_builder import build_loaded_crystal_from_atoms
+        from ..loader.structure_input import (
+            StructureFrame,
+            StructureInput,
+            _ase_atoms_to_pipeline,
+        )
         from .contracts import RenderSpec
 
-        structure = load_structure(
-            input_path,
-            input_format=input_format,
-            type_map=type_map,
-            frame=frame_indices[0],
+        reference_atoms = Atoms(
+            numbers=frames[0].atomic_numbers,
+            positions=frames[0].positions,
+            cell=frames[0].cell,
+            pbc=frames[0].pbc,
         )
-        topology_data = build_topology_data(
-            structure,
-            list(polyhedron_specs),
-            site_index=polyhedron_site,
-            cutoff=polyhedron_cutoff,
+        raw_atoms, cell, matrix, metadata = _ase_atoms_to_pipeline(reference_atoms)
+        reference_bundle = build_loaded_crystal_from_atoms(
+            name=Path(input_path).stem,
+            source_path=str(Path(input_path).resolve()),
+            raw_atoms=raw_atoms,
+            cell=cell,
+            M=matrix,
+            source="ase",
         )
-        plan = prepare_render(
-            structure,
-            camera=camera,
-            render_spec=RenderSpec(
-                representation="ball",
-                width=width * scale,
-                height=height * scale,
-                show_cell=False,
-                show_axes=False,
-                show_labels=False,
-            ),
-            topology_data=topology_data,
-        )
-        overlay_primitives = tuple(overlay_primitives) + tuple(
-            primitive
-            for viewport in plan.viewports
-            for primitive in viewport.primitives
-            if primitive.semantic_id.startswith("polyhedron:")
-        )
+
+        def structure_for_frame(frame: FrameBatch, frame_index: int) -> StructureInput:
+            atoms = Atoms(
+                numbers=frame.atomic_numbers,
+                positions=frame.positions,
+                cell=frame.cell,
+                pbc=frame.pbc,
+            )
+            raw, current_cell, current_matrix, current_metadata = _ase_atoms_to_pipeline(atoms)
+            bundle = build_loaded_crystal_from_atoms(
+                name=Path(input_path).stem,
+                source_path=str(Path(input_path).resolve()),
+                raw_atoms=raw,
+                cell=current_cell,
+                M=current_matrix,
+                source="ase",
+                molcrys_analysis=reference_bundle.molcrys_analysis,
+                scene_metadata_extra=current_metadata,
+            )
+            return StructureInput(
+                path=Path(input_path).resolve(),
+                input_format=str(input_format or "auto"),
+                frames=(
+                    StructureFrame(
+                        index=int(frame_index),
+                        bundle=bundle,
+                        info=current_metadata,
+                        atom_arrays={},
+                    ),
+                ),
+                total_frames=1,
+            )
+
+        def frame_overlay(frame_position: int, frame_index: int) -> tuple[Any, ...]:
+            """Recompute shells for one frame; missing shells simply vanish."""
+            structure = structure_for_frame(frames[frame_position], frame_index)
+            overlays = []
+            for spec in polyhedron_specs:
+                try:
+                    topology_data = build_topology_data(
+                        structure,
+                        [spec],
+                        site_index=polyhedron_site,
+                        cutoff=polyhedron_cutoff,
+                    )
+                except (ValueError, RuntimeError) as exc:
+                    overlay_errors.append(f"frame={frame_index} spec={spec}: {type(exc).__name__}: {exc}")
+                    continue
+                if topology_data is None:
+                    continue
+                overlays.extend(
+                    primitive
+                    for viewport in prepare_render(
+                        structure,
+                        camera=camera,
+                        render_spec=RenderSpec(
+                            representation="ball",
+                            width=width * scale,
+                            height=height * scale,
+                            show_cell=False,
+                            show_axes=False,
+                            show_labels=False,
+                        ),
+                        topology_data=topology_data,
+                    ).viewports
+                    for primitive in viewport.primitives
+                    if primitive.semantic_id.startswith("polyhedron:")
+                )
+            overlay_counts.append(len(overlays))
+            if frame_index == frame_indices[0] and not overlays:
+                details = " | ".join(overlay_errors[-len(polyhedron_specs):])
+                raise RuntimeError(f"no drawable polyhedron overlay in first selected frame: {details}")
+            return tuple(overlays)
+
+        if len(frames) == 1:
+            overlay_primitives = (
+                tuple(overlay_primitives) + frame_overlay(0, frame_indices[0])
+            )
     time_series = (
         resolve_animation_times(frames, animation_time) if animation_time else None
     )
@@ -579,6 +681,16 @@ def render_array_input(
     foreground_pixels: list[int] = []
     try:
         for ordinal, frame in enumerate(frames):
+            polyhedron_frame: tuple[Any, ...] = ()
+            if polyhedron_context is not None:
+                polyhedron_frame = _fast_polyhedron_overlays(frame, polyhedron_context)
+                overlay_counts.append(len(polyhedron_frame))
+                if ordinal == 0 and not polyhedron_frame:
+                    raise RuntimeError(
+                        "no drawable polyhedron overlay in first selected frame"
+                    )
+            elif polyhedron_specs and not fast_polyhedron_animation:
+                polyhedron_frame = frame_overlay(ordinal, frame_indices[ordinal])
             bonds = (
                 tracker.update(
                     frame.positions,
@@ -605,7 +717,9 @@ def render_array_input(
                 cell_width_px=cell_width_px,
                 bonds=bonds,
                 bond_radius=bond_radius,
-                overlay_primitives=overlay_primitives,
+                overlay_primitives=(
+                    tuple(overlay_primitives) + polyhedron_frame
+                ),
                 content_width=content_width,
                 property_metadata_payload=property_metadata_payload,
             )
@@ -662,6 +776,8 @@ def render_array_input(
             "alignment_reduction_mapping": aligned_property - loaded_property,
             "repeat": repeated_property - aligned_property,
         },
+        "polyhedron_overlay_counts": overlay_counts,
+        "polyhedron_overlay_errors": overlay_errors[:50],
     }
     if profile_path is not None:
         destination = Path(profile_path).expanduser().resolve()

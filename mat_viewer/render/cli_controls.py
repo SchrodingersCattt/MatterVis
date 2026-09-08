@@ -255,11 +255,6 @@ def _validate_render_options(args: argparse.Namespace) -> None:
             raise ValueError(
                 "--frame is for static output; use --frame-range for GIF/MP4"
             )
-        if args.polyhedron:
-            raise ValueError(
-                "animated --polyhedron overlays are not yet supported; no static "
-                "overlay was silently reused across frames"
-            )
         if args.vector_overlays is not None:
             raise ValueError(
                 "animated --vector-overlays are not yet supported; use static output"

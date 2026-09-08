@@ -354,6 +354,9 @@ MatterVis follows each displayed complete fragment image and translates the
 center, ligand shell, and hull together. Receipts keep source and display counts
 separate.
 
+The same polyhedron path is used for animated CPU renders, so `--polyhedron`
+stays depth-tested and frame-synchronous in GIF and MP4 output as well.
+
 `--cell-overlays` and `--bond-scale` require the general renderer. An explicit batch request fails instead of silently dropping either option.
 
 
