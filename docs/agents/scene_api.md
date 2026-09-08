@@ -190,7 +190,15 @@ currently recognises the following optional sphere keys:
 - `_raster_shape="sphere"`, `_raster_center`, and `_raster_radius` select the
   exact world-space sphere silhouette;
 - `_raster_light`, `_raster_ambient`, `_raster_diffuse`, and
-  `_raster_two_sided` control its deterministic directional shading.
+  `_raster_two_sided` control its deterministic directional shading; the
+  light vector is camera-space, ambient plus diffuse weights are normalised
+  when their sum exceeds one, and `two_sided` changes lighting only rather
+  than culling fragments;
+- `_raster_specular` and `_raster_shininess` add an optional camera-space
+  highlight;
+- `_raster_alpha_front_factor` and `_raster_alpha_back_factor` scale the
+  primitive opacity across the visible sphere. This optional per-pixel alpha
+  path is more expensive than the ordinary opaque sphere path.
 
 These keys are deliberately namespaced as renderer metadata.  They do not
 replace the mesh vertices or alter scientific coordinates, and backends that

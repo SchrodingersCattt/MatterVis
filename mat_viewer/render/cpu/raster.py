@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import colorsys
+import warnings
 
 from dataclasses import dataclass
 from hashlib import sha256
@@ -315,6 +316,29 @@ def _rasterize_sphere(
 ) -> None:
     center = np.asarray(primitive.metadata["_raster_center"], dtype=float)
     radius = float(primitive.metadata["_raster_radius"])
+    offsets = np.asarray(primitive.vertices, dtype=float) - center[None, :]
+    radial_error = np.abs(np.linalg.norm(offsets, axis=1) - radius)
+    tolerance = max(1.0e-6, 1.0e-6 * max(radius, 1.0))
+    if float(np.max(radial_error, initial=0.0)) > tolerance:
+        warnings.warn(
+            (
+                f"{primitive.semantic_id}: sphere metadata does not match the mesh "
+                f"(max radial deviation {float(np.max(radial_error)):.3g} > "
+                f"{tolerance:.3g}); falling back to mesh rasterization"
+            ),
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        _rasterize_mesh(
+            primitive,
+            transform,
+            color,
+            z_buffer,
+            order_buffer,
+            fragments,
+            primitive_order,
+        )
+        return
     camera_center = transform.world_to_camera(center[None, :])[0]
     center_depth = -float(camera_center[2])
     if (
@@ -411,6 +435,10 @@ def _rasterize_sphere(
     diffuse = float(metadata.get("_raster_diffuse", 0.32))
     ambient = float(np.clip(ambient, 0.0, 1.0))
     diffuse = float(np.clip(diffuse, 0.0, 1.0))
+    total_light = ambient + diffuse
+    if total_light > 1.0:
+        ambient /= total_light
+        diffuse /= total_light
     if bool(metadata.get("_raster_two_sided", True)):
         cosine = np.abs(normals @ light)
     else:
