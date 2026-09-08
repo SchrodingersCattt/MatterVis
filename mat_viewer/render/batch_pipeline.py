@@ -8,10 +8,15 @@ import json
 import math
 from pathlib import Path
 from typing import Any, Iterable, Sequence
+import warnings
 
 import numpy as np
-from scipy.spatial import ConvexHull
 
+from ..agent_topology import (
+    FastPolyhedronContext,
+    fast_polyhedron_overlays as _build_fast_polyhedron_overlays,
+    prepare_fast_polyhedron_context,
+)
 from ..loader.frame_batch import FrameBatch, frame_batch_from_ase, frame_box_corners
 from ..loader.lammps_batch import (
     index_lammps_dump,
@@ -26,61 +31,12 @@ from .cpu.raster import composite_primitives
 from .frame_annotations import resolve_frame_annotations
 
 
-def _fast_polyhedron_overlays(frame: FrameBatch, raw_specs: Sequence[str]) -> tuple[Any, ...]:
-    """Build MatterVis primitives from stable element groups for trajectories.
+def _fast_polyhedron_overlays(
+    frame: FrameBatch, context: FastPolyhedronContext
+) -> tuple[Any, ...]:
+    """Thin render wrapper around chemistry-layer shell selection."""
 
-    The fast route keeps the full trajectory atoms in MatterVis and uses only
-    coordinate geometry for per-frame shell updates. Molecular graph analysis
-    remains the static/reference route; animated frames only need stable A/B
-    centre groups and ligand coordinates.
-    """
-    from .geometry import polyhedron_edges_primitive, polyhedron_primitive
-    from ..agent_topology import parse_polyhedron_specs
-
-    specs = parse_polyhedron_specs(raw_specs)
-    elements = np.asarray(frame.atomic_numbers)
-    positions = np.asarray(frame.positions, dtype=float)
-    cell = np.asarray(frame.cell, dtype=float)
-    inv = np.linalg.inv(cell)
-    carbon = np.flatnonzero(np.isin(elements, [6, 7]))
-    oxygen = np.flatnonzero(elements == 8)
-    groups_by_heavy: dict[int, list[np.ndarray]] = {}
-    for count in (6, 7, 8):
-        groups_by_heavy[count] = [carbon[i:i + count] for i in range(0, len(carbon) - count + 1, count)]
-    overlays: list[Any] = []
-    for spec_index, spec in enumerate(specs):
-        center = str(spec["center_species"])
-        ligand_n = 12 if center.startswith("C") else 6
-        color = spec["color"] or "#7C5CBF"
-        if center.startswith("C"):
-            digits = "".join(ch for ch in center if ch.isdigit())
-            heavy_count = int(digits) if digits else 8
-            centers = [g for g in groups_by_heavy.get(heavy_count, []) if len(g) == heavy_count]
-            center_positions = [positions[g].mean(axis=0) for g in centers]
-        else:
-            atomic_number = 19 if center == "K" else 7
-            ids = np.flatnonzero(elements == atomic_number)
-            center_positions = [positions[i] for i in ids]
-        for local_index, center_pos in enumerate(center_positions):
-            delta = positions[oxygen] - center_pos
-            delta -= np.rint(delta @ inv) @ cell
-            order = np.argsort(np.linalg.norm(delta, axis=1))[:ligand_n]
-            shell = center_pos + delta[order]
-            if len(shell) < 4:
-                continue
-            distances = np.linalg.norm(shell - center_pos, axis=1)
-            cutoff = 10.0 if ligand_n == 12 else 7.0
-            if float(np.max(distances)) > cutoff:
-                continue
-            try:
-                hull = ConvexHull(shell)
-            except Exception:
-                continue
-            faces = hull.simplices.tolist()
-            sid = f"polyhedron:{spec_index}:{local_index}"
-            overlays.append(polyhedron_primitive(sid, shell, faces, color, alpha=0.28, metadata={"kind": "polyhedron", "spec_id": sid}))
-            overlays.append(polyhedron_edges_primitive(f"{sid}:edges", shell, faces, color, width_px=1.0, alpha=0.85))
-    return tuple(overlays)
+    return _build_fast_polyhedron_overlays(frame, context)
 
 
 @dataclass(frozen=True, slots=True)
@@ -566,14 +522,27 @@ def render_array_input(
         show_hydrogen=show_hydrogen,
     )
     overlay_primitives = ()
-    overlay_primitives_by_frame: tuple[tuple[Any, ...], ...] | None = None
+    polyhedron_context: FastPolyhedronContext | None = None
     overlay_errors: list[str] = []
     overlay_counts: list[int] = []
     fast_polyhedron_animation = bool(polyhedron_specs) and len(frames) > 1
     if fast_polyhedron_animation:
-        overlay_primitives_by_frame = tuple(
-            _fast_polyhedron_overlays(frame, polyhedron_specs) for frame in frames
+        candidate_context = prepare_fast_polyhedron_context(
+            frames[0],
+            polyhedron_specs,
+            default_cutoff=polyhedron_cutoff,
         )
+        if candidate_context.supported:
+            polyhedron_context = candidate_context
+        else:
+            fast_polyhedron_animation = False
+            if candidate_context.reason:
+                warnings.warn(
+                    "Falling back to the chemistry topology path for animated "
+                    f"polyhedra: {candidate_context.reason}",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
     if vector_overlays:
         from .overlay.vectors import vector_primitives
 
@@ -640,9 +609,8 @@ def render_array_input(
                 total_frames=1,
             )
 
-        def frame_overlay(frame_index: int) -> tuple[Any, ...]:
+        def frame_overlay(frame_position: int, frame_index: int) -> tuple[Any, ...]:
             """Recompute shells for one frame; missing shells simply vanish."""
-            frame_position = frame_indices.index(frame_index)
             structure = structure_for_frame(frames[frame_position], frame_index)
             overlays = []
             for spec in polyhedron_specs:
@@ -683,10 +651,8 @@ def render_array_input(
             return tuple(overlays)
 
         if len(frames) == 1:
-            overlay_primitives = tuple(overlay_primitives) + frame_overlay(frame_indices[0])
-        else:
-            overlay_primitives_by_frame = tuple(
-                frame_overlay(frame_index) for frame_index in frame_indices
+            overlay_primitives = (
+                tuple(overlay_primitives) + frame_overlay(0, frame_indices[0])
             )
     time_series = (
         resolve_animation_times(frames, animation_time) if animation_time else None
@@ -715,6 +681,16 @@ def render_array_input(
     foreground_pixels: list[int] = []
     try:
         for ordinal, frame in enumerate(frames):
+            polyhedron_frame: tuple[Any, ...] = ()
+            if polyhedron_context is not None:
+                polyhedron_frame = _fast_polyhedron_overlays(frame, polyhedron_context)
+                overlay_counts.append(len(polyhedron_frame))
+                if ordinal == 0 and not polyhedron_frame:
+                    raise RuntimeError(
+                        "no drawable polyhedron overlay in first selected frame"
+                    )
+            elif polyhedron_specs and not fast_polyhedron_animation:
+                polyhedron_frame = frame_overlay(ordinal, frame_indices[ordinal])
             bonds = (
                 tracker.update(
                     frame.positions,
@@ -742,10 +718,7 @@ def render_array_input(
                 bonds=bonds,
                 bond_radius=bond_radius,
                 overlay_primitives=(
-                    overlay_primitives
-                    if overlay_primitives_by_frame is None
-                    else tuple(overlay_primitives)
-                    + overlay_primitives_by_frame[ordinal]
+                    tuple(overlay_primitives) + polyhedron_frame
                 ),
                 content_width=content_width,
                 property_metadata_payload=property_metadata_payload,

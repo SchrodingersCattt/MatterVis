@@ -28,6 +28,7 @@ from mat_viewer.render.fast_animation import (
 )
 from mat_viewer.render.fast_cli import _color8
 from mat_viewer.render.geometry import sphere_primitive
+from mat_viewer.agent_topology import prepare_fast_polyhedron_context
 
 
 def _frame(
@@ -196,7 +197,7 @@ def test_bond_batch_uses_minimum_image_vectors() -> None:
 def test_periodic_bond_raster_length_matches_minimum_image_distance() -> None:
     frame = _frame(
         [[0.1, 0.0, 0.0], [1.9, 0.0, 0.0]],
-        [0, 0],
+        [6, 6],
         cell=np.eye(3) * 2.0,
     )
     camera = CameraSpec(
@@ -230,6 +231,35 @@ def test_periodic_bond_raster_length_matches_minimum_image_distance() -> None:
 
     assert raster_width([-0.2, 0.0, 0.0]) == 10
     assert raster_width([1.8, 0.0, 0.0]) == 74
+
+
+def test_fast_polyhedron_context_uses_declared_species_and_cutoff() -> None:
+    frame = _frame(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0],
+         [0.0, 0.0, 1.0], [-1.0, 0.0, 0.0]],
+        [82, 53, 53, 53, 53],
+        cell=np.eye(3) * 20.0,
+    )
+    context = prepare_fast_polyhedron_context(
+        frame,
+        ['{"center":"Pb","ligand":"I","level":"atom",'
+         '"cutoff":2.5,"fallback_max":4}'],
+    )
+    assert context.supported is True
+    assert context.specs[0].center_indices == (0,)
+    assert context.specs[0].ligand_indices == (1, 2, 3, 4)
+    assert context.specs[0].cutoff == pytest.approx(2.5)
+    assert context.specs[0].ligand_count == 4
+
+
+def test_fast_polyhedron_context_defers_molecule_specs_to_topology() -> None:
+    frame = _frame([[0.0, 0.0, 0.0]], [6], cell=np.eye(3) * 20.0)
+    context = prepare_fast_polyhedron_context(
+        frame,
+        ['{"center":"C6N2","ligand":"ClO4"}'],
+    )
+    assert context.supported is False
+    assert "molecule-level" in (context.reason or "")
 
 
 def _image_descriptors_have_no_local_palettes(path: Path) -> int:
