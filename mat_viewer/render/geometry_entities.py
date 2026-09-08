@@ -27,15 +27,39 @@ def _json_safe(value: Any) -> Any:
     Plotly can provide its usual contextual validation error if one is used.
     """
 
-    if isinstance(value, np.ndarray):
-        return _json_safe(value.tolist())
-    if isinstance(value, (np.integer, np.floating, np.bool_)):
-        return value.item()
-    if isinstance(value, Mapping):
-        return {str(key): _json_safe(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_safe(item) for item in value]
-    return value
+    def convert(item: Any, active: set[int]) -> Any:
+        if isinstance(item, np.ndarray):
+            marker = id(item)
+            if marker in active:
+                raise ValueError("metadata contains a cyclic container")
+            active.add(marker)
+            try:
+                return convert(item.tolist(), active)
+            finally:
+                active.remove(marker)
+        if isinstance(item, (np.integer, np.floating, np.bool_)):
+            return item.item()
+        if isinstance(item, Mapping):
+            marker = id(item)
+            if marker in active:
+                raise ValueError("metadata contains a cyclic container")
+            active.add(marker)
+            try:
+                return {str(key): convert(value, active) for key, value in item.items()}
+            finally:
+                active.remove(marker)
+        if isinstance(item, (list, tuple)):
+            marker = id(item)
+            if marker in active:
+                raise ValueError("metadata contains a cyclic container")
+            active.add(marker)
+            try:
+                return [convert(value, active) for value in item]
+            finally:
+                active.remove(marker)
+        return item
+
+    return convert(value, set())
 
 
 def _opacity(value: Any, *, name: str) -> float:
@@ -358,9 +382,9 @@ def through_cylinder_entity(
         raise ValueError("direction_hkl must be non-zero")
     divisor = math.gcd(*(abs(int(value)) for value in direction))
     direction //= divisor
-    first_nonzero = int(direction[np.flatnonzero(direction)[0]])
-    if first_nonzero < 0:
-        direction *= -1
+    # Miller directions are axial for the cylinder geometry, but the sign is
+    # still meaningful metadata to callers doing direction arithmetic.  Keep
+    # the reduced input orientation instead of silently canonicalising it.
 
     try:
         center_frac_array = np.asarray(list(center_frac), dtype=float)

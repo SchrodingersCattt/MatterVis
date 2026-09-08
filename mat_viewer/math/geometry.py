@@ -105,8 +105,19 @@ def validate_mesh(
     p0 = vertex_array[triangle_array[:, 0]]
     p1 = vertex_array[triangle_array[:, 1]]
     p2 = vertex_array[triangle_array[:, 2]]
+    edge_lengths = np.stack(
+        [
+            np.linalg.norm(p1 - p0, axis=1),
+            np.linalg.norm(p2 - p1, axis=1),
+            np.linalg.norm(p0 - p2, axis=1),
+        ],
+        axis=1,
+    )
     twice_area = np.linalg.norm(np.cross(p1 - p0, p2 - p0), axis=1)
-    if np.any(twice_area <= 1e-12):
+    # Scale the degeneracy threshold with each triangle.  A fixed Cartesian
+    # 1e-12 Å cutoff rejects valid meshes expressed in very small units.
+    area_tolerance = 1e-12 * np.maximum(np.max(edge_lengths, axis=1) ** 2, np.finfo(float).tiny)
+    if np.any(twice_area <= area_tolerance):
         raise ValueError("faces contain a zero-area triangle")
 
     return np.array(vertex_array, dtype=float, copy=True), np.array(

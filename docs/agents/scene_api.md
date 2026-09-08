@@ -323,9 +323,11 @@ The field is sampled immediately with marching cubes (and a dependency-free
 marching-tetrahedra fallback), then stored only as a validated Cartesian mesh;
 callables are not retained in scene JSON. Consequently planes, spheres,
 implicit cylinders, signed-distance fields, and project-specific surfaces all
-share the same renderer and depth buffer. Increase `resolution` for curved
-surfaces, and keep opaque geometry at `opacity=1.0` when exact occlusion is
-important.
+share the same renderer and depth buffer. Vectorized or broadcast callables
+are preferred for large grids; the scalar `field(x, y, z)` compatibility form
+executes once per sample and can be substantially slower. Increase
+`resolution` for curved surfaces, and keep opaque geometry at `opacity=1.0`
+when exact occlusion is important.
 
 ## Worked example
 

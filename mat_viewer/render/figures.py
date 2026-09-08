@@ -424,17 +424,10 @@ def build_figure(
     if style.get("material") == "flat":
         style["_flat_visual_pixel_scale"] = flat_visual_pixel_scale(style)
     style["_topology_viewport_ranges"] = [list(xr), list(yr), list(zr)]
-    # Mesh3d atoms are 3D world-coordinate spheres -- they grow when the
-    # camera dollies in, which is what users expect from "zoom". Scatter3d
-    # markers are pixel-fixed and therefore must never be selected merely
-    # because a structure crosses an atom-count threshold. Fast rendering is
-    # an explicit caller/UI choice (or the deliberately selected flat material).
-    # flat+ortep is excluded: it uses the open-ORTEP billboard pipeline,
-    # not the scatter fast-path.
-    is_flat_ortep = style.get("material") == "flat" and style.get("style") == "ortep"
-    use_fast = bool(style.get("fast_rendering", False)) or (
-        style.get("material") == "flat" and not is_flat_ortep
-    )
+    # Keep the scene-level decision in one place.  In particular, a large
+    # atom cloud with a caller-supplied geometry entity must stay on the
+    # Mesh3d path so the entity participates in the same depth buffer.
+    use_fast = _should_use_fast(scene, style)
 
     mesh_payload = _cached_atom_bond_meshes(scene, style, use_fast=use_fast)
     topology_on = (

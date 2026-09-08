@@ -92,6 +92,17 @@ def test_dependency_free_fallback_handles_a_plane():
     assert np.allclose(vertices[:, 2], 0.125, atol=1e-12)
 
 
+def test_tiny_mesh_is_not_rejected_by_absolute_area_cutoff():
+    from mat_viewer.math.geometry import validate_mesh
+
+    vertices, faces = validate_mesh(
+        [[0.0, 0.0, 0.0], [1e-9, 0.0, 0.0], [0.0, 1e-9, 0.0]],
+        [[0, 1, 2]],
+    )
+    assert vertices.shape == (3, 3)
+    assert faces.shape == (1, 3)
+
+
 @pytest.mark.parametrize(
     "kwargs, message",
     [

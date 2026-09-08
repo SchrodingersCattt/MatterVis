@@ -59,6 +59,10 @@ def _morphology_traces(scene: dict, style: dict) -> list[go.Trace]:
             opacity=opacity,
             flatshading=True,
             lighting=dict(ambient=0.75, diffuse=0.9, specular=0.2, roughness=0.25),
+            # This is an internal depth-tested entity, not a caller-supplied
+            # scene geometry entity.  Keeping the provenance explicit prevents
+            # flat/publication validation from treating BFDH as an API input.
+            meta={"internal": True, "source": "bfdh_morphology"},
         )
         traces.extend(geometry_entity_traces({"geometry_entities": [entity]}))
 

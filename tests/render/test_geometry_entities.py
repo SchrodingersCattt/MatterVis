@@ -156,6 +156,17 @@ def test_through_cylinder_entity_uses_row_lattice_and_reduced_hkl():
     assert np.allclose(center, [40.0, 35.0, 30.0])
 
 
+def test_through_cylinder_entity_preserves_reduced_hkl_sign_in_metadata():
+    entity = through_cylinder_entity(
+        np.diag([10.0, 10.0, 10.0]),
+        [-2, 0, 0],
+        radius=1.0,
+        segments=8,
+    )
+    assert entity["meta"]["direction_hkl"] == [-1, 0, 0]
+    assert entity["meta"]["axis_cartesian"] == [-10.0, 0.0, 0.0]
+
+
 def test_geometry_entity_uses_mesh3d_depth_path_and_owns_viewport():
     scene = _scene()
     scene["geometry_entities"] = [
@@ -263,6 +274,37 @@ def test_geometry_entities_disable_automatic_large_scene_scatter_fallback():
     assert _should_use_fast(scene, style) is True
 
 
+def test_build_figure_uses_geometry_aware_fast_path(monkeypatch):
+    scene = _scene()
+    scene["draw_atoms"] = [
+        {**scene["draw_atoms"][0], "label": f"C{i}", "cart": [float(i), 0.0, 0.0]}
+        for i in range(2001)
+    ]
+    scene["geometry_entities"] = [
+        mesh_entity([[0, 0, 0], [1, 0, 0], [0, 1, 0]], [[0, 1, 2]])
+    ]
+    style = {
+        **DEFAULT_STYLE,
+        "material": "mesh",
+        "style": "ball",
+        "show_axes": False,
+        "show_labels": False,
+        "show_unit_cell": False,
+    }
+    import mat_viewer.render.figures as figures_module
+
+    observed: dict[str, bool] = {}
+    original = figures_module._cached_atom_bond_meshes
+
+    def capture(*args, **kwargs):
+        observed["use_fast"] = bool(kwargs["use_fast"])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(figures_module, "_cached_atom_bond_meshes", capture)
+    build_figure(scene, style)
+    assert observed["use_fast"] is False
+
+
 def test_raw_entity_edges_are_validated_with_context():
     scene = _scene()
     scene["geometry_entities"] = [
@@ -360,6 +402,47 @@ def test_bfdh_morphology_reuses_geometry_entity_depth_path():
     assert len(morphology_mesh) == 1
     assert morphology_mesh[0].type == "mesh3d"
     assert morphology_mesh[0].meta["mv_role"] == "geometry_entity"
+
+
+def test_bfdh_morphology_remains_renderable_in_flat_material():
+    scene = {
+        "M": np.diag([10.0, 10.0, 10.0]),
+        "draw_atoms": [],
+        "bonds": [],
+        "bfdh_morphology": {
+            "enabled": True,
+            "facets": [
+                {
+                    "triangles": [
+                        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+                    ],
+                    "centroid": [0.33, 0.33, 0.0],
+                    "miller": [1, 0, 0],
+                }
+            ],
+        },
+    }
+    style = {
+        **DEFAULT_STYLE,
+        "material": "flat",
+        "style": "ball",
+        "show_axes": False,
+        "show_labels": False,
+        "show_unit_cell": False,
+    }
+    figure = build_figure(scene, style)
+    assert any(trace.name == "Morphology" for trace in figure.data)
+
+
+def test_json_safe_rejects_cyclic_entity_metadata():
+    metadata: dict[str, object] = {}
+    metadata["self"] = metadata
+    with pytest.raises(ValueError, match="cyclic"):
+        mesh_entity(
+            [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+            [[0, 1, 2]],
+            meta=metadata,
+        )
 
 
 def test_viewport_accumulator_includes_geometry_only_scene():

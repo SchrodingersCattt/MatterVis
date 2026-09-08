@@ -176,13 +176,19 @@ def _evaluate_field(
     raise ValueError(message)
 
 
-def _tetra_gradient(points: np.ndarray, values: np.ndarray) -> np.ndarray:
+def _tetra_gradient(points: np.ndarray, values: np.ndarray) -> np.ndarray | None:
     """Estimate the constant scalar-field gradient inside a tetrahedron."""
 
     try:
-        return np.linalg.solve(points[1:] - points[0], values[1:] - values[0])
+        gradient = np.linalg.solve(points[1:] - points[0], values[1:] - values[0])
     except np.linalg.LinAlgError:
-        return np.zeros(3, dtype=float)
+        # A singular tetrahedron has no well-defined outward direction.  Do
+        # not fall back to an arbitrary cross product: adjacent cells could
+        # then emit the same surface with opposite winding.
+        return None
+    if not np.all(np.isfinite(gradient)):
+        return None
+    return gradient
 
 
 def _ordered_polygon(
@@ -280,6 +286,8 @@ def _marching_tetrahedra(
                     if bool(np.all(inside)) or not bool(np.any(inside)):
                         continue
                     gradient = _tetra_gradient(flat_points[ids], signed)
+                    if gradient is None or np.linalg.norm(gradient) <= 1e-14:
+                        continue
                     local_indices: list[int] = []
                     for edge_a, edge_b in tetra_edges:
                         if bool(inside[edge_a]) == bool(inside[edge_b]):
@@ -322,7 +330,7 @@ def _marching_tetrahedra(
                         normal = np.cross(p1 - p0, p2 - p0)
                         if np.linalg.norm(normal) <= 1e-12:
                             continue
-                        if np.linalg.norm(gradient) > 1e-14 and np.dot(normal, gradient) < 0:
+                        if np.dot(normal, gradient) < 0:
                             face = (face[0], face[2], face[1])
                         mesh_faces.append(face)
 
@@ -381,6 +389,13 @@ def implicit_surface_mesh(
     grid = np.stack(np.meshgrid(*axes, indexing="ij"), axis=-1)
     points = grid.reshape(-1, 3)
     values = _evaluate_field(field, points, grid)
+
+    # Give callers the stable no-crossing diagnostic before either extraction
+    # backend gets a chance to report a lower-level degenerate-mesh error.
+    value_min = float(np.min(values))
+    value_max = float(np.max(values))
+    if level_value < value_min or level_value > value_max:
+        raise ValueError(f"implicit field does not cross level {level_value:g} in bounds")
 
     try:
         from skimage.measure import marching_cubes
