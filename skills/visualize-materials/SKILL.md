@@ -8,9 +8,9 @@ description: "Use first for every atomistic drawing, model preview, or animation
 Use the public `mat-vis` CLI for coordinate-based visuals. Do not replace it
 with ASE plotting, raw matplotlib, or private MatterVis imports.
 
-## Choose once
+## Choose the scene route
 
-Read exactly one primary page and run its first documented path. Scene type wins: trajectory, vibration, and polyhedron routes take precedence over generic structure or molecule views:
+Read one scene-specific primary page and run its first path. Scene type wins:
 
 - ordinary structure, molecule, slab, interface, or comparison:
   [static render](./references/quickstart.md);
@@ -24,19 +24,23 @@ Read exactly one primary page and run its first documented path. Scene type wins
   [atom properties](./references/atom-property-coloring.md);
 - forces with density fields:
   [force vectors](./references/atomic-force-vectors.md);
-- multiple panels or publication composition:
-  [panels](./references/multi-structure-panels.md) or
-  [layout](./references/publication-layout.md);
+- multiple panels or publication composition: [panels](./references/multi-structure-panels.md)
+  or [layout](./references/publication-layout.md);
+- cube orbitals, electron density, or scalar-field panel grids:
+  [cube isosurfaces](./references/cube-isosurface-panels.md);
 - explicitly requested periodic cropping or molecule highlighting:
   [periodic views](./references/periodic-finite-views.md) or
   [molecule focus](./references/molecule-highlight.md).
 
+Before delivery, always read [verification](./references/verification.md). For
+two or more panels also read [panels](./references/multi-structure-panels.md);
+for print/publication output also read [layout](./references/publication-layout.md).
+
 Read [runtime capabilities](./references/capabilities-and-install.md) only after
-the direct command reports a missing capability. Read
+the command reports a missing capability. Read
 [input formats](./references/input-formats.md), [camera](./references/camera.md),
 [CPU details](./references/cpu-static.md), [Plotly](./references/plotly-render.md),
-[TUI](./references/tui.md), or [verification](./references/verification.md) only
-for an explicit request or unresolved ambiguity.
+[TUI](./references/tui.md) only for an explicit request or unresolved ambiguity.
 
 ## Execution boundary
 
@@ -51,8 +55,6 @@ for an explicit request or unresolved ambiguity.
 - Comparison renders use the same orientation, canvas, and orthographic scale.
 - Automatic view shows real periodic cells, hides synthetic/nonperiodic cells,
   and faces the largest lattice face.
-- Run the documented command before inspecting help. Only after that exact command fails, inspect its help once and make one
-  correction based on the exact error. Do not explore package internals, convert
-  already-supported inputs, switch libraries, or enter an open-ended retry loop.
-- Inspect the final-size artifact and retain the command, JSON result, warnings,
-  and output hash.
+- Run the documented command before inspecting help. Only after it fails,
+  inspect help once and correct the exact error; avoid an open-ended retry loop.
+- Inspect final-size output; retain the command, JSON result, warnings, and hash.
