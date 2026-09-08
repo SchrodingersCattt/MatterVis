@@ -94,10 +94,12 @@ def render(
     """
     from ..scene.style import scene_style as _scene_style
     from .style.core import validate_style_schema
+    from .geometry import validate_geometry_style
 
     # Merge user overrides with DEFAULT_STYLE so all keys exist.
     full_style = _scene_style(scene, style)
     full_style = validate_style_schema(full_style)
+    validate_geometry_style(scene, full_style)
 
     if full_style.get("material") == "flat" and full_style.get("style") == "ortep":
         from ..ortep.flat_render import render_ortep_flat

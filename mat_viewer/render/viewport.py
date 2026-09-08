@@ -1,10 +1,41 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
 import numpy as np
+
+
+def _geometry_entity_points(scene: dict) -> list[np.ndarray]:
+    """Return visible mesh vertices for viewport ownership.
+
+    Geometry entities are already in world Cartesian coordinates.  The
+    renderer validates them before building traces; this helper intentionally
+    remains tolerant of malformed hand-written entries so a bad optional
+    overlay cannot make the camera-range calculation crash before the useful
+    contextual validation error is raised by the trace builder.
+    """
+
+    points: list[np.ndarray] = []
+    entities = scene.get("geometry_entities")
+    if entities is None:
+        return points
+    if not isinstance(entities, Iterable) or isinstance(entities, (str, bytes, Mapping)):
+        return points
+    for entity in entities:
+        if not isinstance(entity, Mapping) or not bool(entity.get("visible", True)):
+            continue
+        try:
+            coords = np.asarray(entity.get("vertices"), dtype=float)
+        except (TypeError, ValueError):
+            continue
+        if coords.ndim != 2 or coords.shape[1] != 3 or len(coords) == 0:
+            continue
+        if not np.all(np.isfinite(coords)):
+            continue
+        points.extend(np.array(row, dtype=float) for row in coords)
+    return points
 
 
 @dataclass
@@ -31,20 +62,23 @@ class ViewportAccumulator:
         scn_style = style if style is not None else scene.get("style") or {}
         atom_scale = float(scn_style.get("atom_scale", 1.0))
         atoms = scene.get("draw_atoms") or []
-        if not atoms:
-            return
-        carts = np.array([atom["cart"] for atom in atoms], dtype=float)
-        radii = (
-            np.array(
-                [max(float(atom.get("atom_radius", 0.18)), 0.05) for atom in atoms],
-                dtype=float,
+        if atoms:
+            carts = np.array([atom["cart"] for atom in atoms], dtype=float)
+            radii = (
+                np.array(
+                    [max(float(atom.get("atom_radius", 0.18)), 0.05) for atom in atoms],
+                    dtype=float,
+                )
+                * atom_scale
             )
-            * atom_scale
-        )
-        self._update_bounds(
-            (carts - radii[:, None]).min(axis=0),
-            (carts + radii[:, None]).max(axis=0),
-        )
+            self._update_bounds(
+                (carts - radii[:, None]).min(axis=0),
+                (carts + radii[:, None]).max(axis=0),
+            )
+        geometry_points = _geometry_entity_points(scene)
+        if geometry_points:
+            geometry_arr = np.asarray(geometry_points, dtype=float)
+            self._update_bounds(geometry_arr.min(axis=0), geometry_arr.max(axis=0))
 
     def update_points(self, points: Iterable[Iterable[float]]) -> None:
         """Accumulate finite world-space points without retaining a scene."""
@@ -606,6 +640,12 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
                 if not _overlay_near_cell(ov_arr):
                     continue
                 extras.extend(ov_arr)
+    geometry_points = _geometry_entity_points(scene)
+    if geometry_points:
+        geometry_arr = np.asarray(geometry_points, dtype=float)
+        if overlay_bounds is None or _overlay_near_cell(geometry_arr):
+            extras.extend(geometry_arr)
+
     if extras:
         extras_arr = np.array(extras, dtype=float)
         extras_min = extras_arr.min(axis=0)
@@ -729,22 +769,36 @@ def uniform_viewport(
         scn_style = style if style is not None else scene.get("style") or {}
         atom_scale = float(scn_style.get("atom_scale", 1.0))
         atoms = scene.get("draw_atoms") or []
-        if not atoms:
+        atom_mins = atom_maxs = None
+        if atoms:
+            carts = np.array([atom["cart"] for atom in atoms], dtype=float)
+            radii = (
+                np.array(
+                    [max(float(atom.get("atom_radius", 0.18)), 0.05) for atom in atoms],
+                    dtype=float,
+                )
+                * atom_scale
+            )
+            atom_mins = (carts - radii[:, None]).min(axis=0)
+            atom_maxs = (carts + radii[:, None]).max(axis=0)
+
+        geometry_points = _geometry_entity_points(scene)
+        if geometry_points:
+            geometry_arr = np.asarray(geometry_points, dtype=float)
+            geometry_mins = geometry_arr.min(axis=0)
+            geometry_maxs = geometry_arr.max(axis=0)
+            if atom_mins is None:
+                atom_mins, atom_maxs = geometry_mins, geometry_maxs
+            else:
+                atom_mins = np.minimum(atom_mins, geometry_mins)
+                atom_maxs = np.maximum(atom_maxs, geometry_maxs)
+
+        if atom_mins is None or atom_maxs is None:
             radius_spans.append(1.0)
             centroids.append(np.zeros(3, dtype=float))
             continue
-        carts = np.array([atom["cart"] for atom in atoms], dtype=float)
-        radii = (
-            np.array(
-                [max(float(atom.get("atom_radius", 0.18)), 0.05) for atom in atoms],
-                dtype=float,
-            )
-            * atom_scale
-        )
-        mins = (carts - radii[:, None]).min(axis=0)
-        maxs = (carts + radii[:, None]).max(axis=0)
-        radius_spans.append(float((maxs - mins).max()))
-        centroids.append(0.5 * (mins + maxs))
+        radius_spans.append(float((atom_maxs - atom_mins).max()))
+        centroids.append(0.5 * (atom_mins + atom_maxs))
 
     if shared_center:
         centers_array = np.asarray(centroids, dtype=float)

@@ -21,6 +21,7 @@ frontends.
 - **Coordination Topology** — Automatic coordination-number detection via the nearest-neighbour gap, continuous shape measure (CShM) classification against 12 ideal polyhedra (CN 4–12), planarity RMS, and prism/antiprism twist analysis
 - **Publication Export** — The base CPU backend renders PNG with per-pixel depth handling and emits true-vector PDF/SVG from the same backend-neutral geometry
 - **Multi-Panel Figures** — `uniform_viewport(scenes)` stamps a shared world-cube on any list of scenes so every `build_figure` call emits at the same physical length per pixel
+- **Composable 3-D geometry**: validated Cartesian meshes, lattice/HKL-aligned through-cylinders, and bounded implicit surfaces use the depth-tested Mesh3d path.
 - **Automation API** — REST + WebSocket endpoints on the same Flask server; drive the viewer from notebooks, agents, or subprocesses
 - **Zero Catalog Required** — Ships with a bundled DAP-4.cif so `mat-vis serve` works out of the box
 

@@ -47,6 +47,7 @@ The same routing as a quick table:
 | Render CIF, Cube, VASP, XYZ, ASE trajectory, or LAMMPS files from the CLI | [`../cli.md`](../cli.md) |
 | Label trajectory frames with physical simulation time while keeping playback FPS independent | [`../cli.md`](../cli.md#frames-and-animations) |
 | Build or compose a canonical structure scene from Python | [`scene_api.md`](scene_api.md) |
+| Render project-independent 3-D mesh or implicit geometry entities with real depth | [`scene_api.md`](scene_api.md) |
 | Match a dense coordination-polyhedron publication layout | [`static_publication.md`](static_publication.md) |
 | Build a static cube/orbital figure (HOMO, LUMO, density) | [`cube_api.md`](cube_api.md) |
 | Render ORTEP / thermal ellipsoid figures | [`ortep_api.md`](ortep_api.md) |
