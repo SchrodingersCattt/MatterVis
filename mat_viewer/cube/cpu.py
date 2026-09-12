@@ -62,7 +62,9 @@ def cube_isosurface_meshes(
             vertices, faces, normals, _ = marching_cubes(values, level=level)
         except (RuntimeError, ValueError):
             continue
-        world_vertices = cube.origin + vertices @ basis
+        # Cube atom coordinates are normalized by cube_to_raw_atoms into the scene frame.
+        # Keep CPU isosurfaces in that same frame when cube.origin is nonzero.
+        world_vertices = vertices @ basis
         world_normals = normals @ inverse_normal
         lengths = np.linalg.norm(world_normals, axis=1)
         valid = lengths > 1.0e-12

@@ -185,3 +185,13 @@ def test_cube_structure_bridge_preserves_mck_boundary_bond(tmp_path: Path) -> No
     assert bundle.molcrys_analysis.bond_pairs == [(0, 1)]
     assert bundle.molcrys_analysis.bond_records[0]["right_image_shift"] == [1, 0, 0]
     assert bundle.scene["bonds"][0]["end"][0] == pytest.approx(10.2)
+
+def test_cube_meshes_keep_the_scene_origin_frame_for_nonzero_cube_origin(tmp_path: Path) -> None:
+    cube = _cube(tmp_path)
+    cube.origin = np.array([5.0, 6.0, 7.0])
+
+    meshes = cube_isosurface_meshes(cube, isovalue=0.5)
+
+    vertices = np.concatenate([mesh["vertices"] for mesh in meshes])
+    assert float(vertices.min()) >= -1.0e-8
+    assert float(vertices.max()) <= 6.0 * 0.2 + 1.0e-8
