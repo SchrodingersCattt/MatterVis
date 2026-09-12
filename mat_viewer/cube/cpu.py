@@ -85,7 +85,15 @@ def cube_isosurface_meshes(
     return meshes
 
 
-def ensure_cube_isosurfaces(source: Any) -> Any:
+def ensure_cube_isosurfaces(
+    source: Any,
+    *,
+    isovalue: float | None = None,
+    opacity: float = 0.55,
+    positive_color: str = "#D55E00",
+    negative_color: str = "#0072B2",
+    stride: int = 2,
+) -> Any:
     """Attach backend-neutral isosurfaces to every Cube scene in ``source``."""
     bundles: list[Any] = []
     if hasattr(source, "frames"):
@@ -106,7 +114,11 @@ def ensure_cube_isosurfaces(source: Any) -> Any:
             continue
         if isinstance(scene, dict) and scene.get("isosurfaces"):
             continue
-        meshes = cube_isosurface_meshes(cube)
+        meshes = cube_isosurface_meshes(
+            cube, isovalue=isovalue, opacity=opacity,
+            positive_color=positive_color, negative_color=negative_color,
+            stride=stride,
+        )
         setattr(cube, "surface_meshes", meshes)
         if isinstance(scene, dict):
             scene["isosurfaces"] = meshes

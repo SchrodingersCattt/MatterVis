@@ -198,6 +198,11 @@ class RenderSpec:
     missing_adp_policy: Literal["error", "sphere"] = "error"
     sphere_detail: tuple[int, int] = (12, 20)
     cylinder_sides: int = 12
+    isosurface_isovalue: float | None = None
+    isosurface_opacity: float = 0.55
+    isosurface_positive_color: str = "#D55E00"
+    isosurface_negative_color: str = "#0072B2"
+    isosurface_stride: int = 2
 
     def __post_init__(self) -> None:
         if self.backend not in ("cpu", "matplotlib", "plotly"):
@@ -237,6 +242,12 @@ class RenderSpec:
             raise ValueError("aromatic_rings must be bonds, circle, or disk")
         if not 0.0 < float(self.ortep_probability) < 1.0:
             raise ValueError("ortep_probability must lie in (0, 1)")
+        if self.isosurface_isovalue is not None and (not np.isfinite(self.isosurface_isovalue) or self.isosurface_isovalue <= 0):
+            raise ValueError("isosurface_isovalue must be positive when provided")
+        if not 0.0 <= float(self.isosurface_opacity) <= 1.0:
+            raise ValueError("isosurface_opacity must lie in [0, 1]")
+        if int(self.isosurface_stride) != self.isosurface_stride or int(self.isosurface_stride) <= 0:
+            raise ValueError("isosurface_stride must be a positive integer")
         lat, lon = self.sphere_detail
         if int(lat) != lat or int(lon) != lon or int(lat) < 2 or int(lon) < 3:
             raise ValueError("sphere_detail must be at least (2, 3)")

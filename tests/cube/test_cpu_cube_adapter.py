@@ -42,6 +42,15 @@ def test_cube_extra_produces_backend_neutral_positive_and_negative_meshes(
         assert mesh["normals"].shape == mesh["vertices"].shape
 
 
+def test_cube_mesh_parameters_are_explicitly_applied(tmp_path: Path) -> None:
+    meshes = cube_isosurface_meshes(
+        _cube(tmp_path), isovalue=0.5, positive_color="#C97A50",
+        negative_color="#4A90C4", opacity=0.30, stride=2,
+    )
+
+    assert {mesh["color"] for mesh in meshes} <= {"#C97A50", "#4A90C4"}
+    assert {mesh["opacity"] for mesh in meshes} == {0.30}
+
 def test_cube_meshes_are_attached_to_the_loaded_scene(tmp_path: Path) -> None:
     @dataclass
     class Bundle:

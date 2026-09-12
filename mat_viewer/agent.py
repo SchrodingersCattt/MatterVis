@@ -179,8 +179,17 @@ def prepare_render(
     ):
         resolve_requirements("cube").require()
         from .cube.cpu import ensure_cube_isosurfaces
+        from .render.planning import _coerce_render_spec
 
-        source = ensure_cube_isosurfaces(source)
+        effective_spec = _coerce_render_spec(render_spec)
+        source = ensure_cube_isosurfaces(
+            source,
+            isovalue=effective_spec.isosurface_isovalue,
+            opacity=effective_spec.isosurface_opacity,
+            positive_color=effective_spec.isosurface_positive_color,
+            negative_color=effective_spec.isosurface_negative_color,
+            stride=effective_spec.isosurface_stride,
+        )
     resolve_requirements("cpu").require()
     from .render.planning import prepare_render as _prepare_render
 

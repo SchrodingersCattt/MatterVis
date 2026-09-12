@@ -308,6 +308,12 @@ def _build_render_parser(
         help="ORTEP rendering variant (default: ortep_axes).",
     )
 
+    p.add_argument("--isosurface-isovalue", type=float, default=None, help="Positive cube isosurface threshold.")
+    p.add_argument("--isosurface-opacity", type=float, default=0.55, help="Cube isosurface opacity in [0,1].")
+    p.add_argument("--isosurface-positive-color", default="#D55E00", help="Positive cube isosurface colour.")
+    p.add_argument("--isosurface-negative-color", default="#0072B2", help="Negative cube isosurface colour.")
+    p.add_argument("--isosurface-stride", type=int, default=2, help="Cube grid stride for isosurface extraction.")
+
     # Config escape-hatch
     p.add_argument(
         "--config",
