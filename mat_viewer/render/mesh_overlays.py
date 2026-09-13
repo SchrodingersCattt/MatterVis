@@ -8,12 +8,13 @@ from typing import Any, Mapping
 
 import numpy as np
 
-from .contracts import Primitive, TriangleMeshPrimitive
+from .contracts import LinePrimitive, Primitive, RenderSpec, TriangleMeshPrimitive
 from .geometry import (
     color_to_rgba,
     mesh_primitive,
     polyhedron_edges_primitive,
     polyhedron_primitive,
+    triangle_mesh_edge_segments,
 )
 
 
@@ -96,7 +97,9 @@ def polyhedron_primitives(
 
 def isosurface_primitives(
     scene: Mapping[str, Any],
-) -> tuple[list[TriangleMeshPrimitive], list[str]]:
+    *,
+    render_spec: RenderSpec | None = None,
+) -> tuple[list[Primitive], list[str]]:
     """Consume meshes prepared lazily by the optional cube adapter."""
     entries = scene.get("isosurfaces")
     cube_data = scene.get("cube_data")
@@ -166,14 +169,38 @@ def isosurface_primitives(
             warnings.append(f"isosurface {name} is empty and was skipped")
             continue
         results.append(
-            mesh_primitive(
-                f"isosurface:{index}:{name}",
-                vertex_array,
-                triangle_array,
-                color,
-                normals=normals,
-                alpha=opacity,
-                metadata=metadata,
+            (
+                LinePrimitive(
+                    semantic_id=f"isosurface:{index}:{name}:wireframe",
+                    segments=triangle_mesh_edge_segments(
+                        vertex_array, triangle_array
+                    ),
+                    rgba=color_to_rgba(
+                        color,
+                        alpha=(
+                            render_spec.isosurface_wireframe_opacity
+                            if render_spec is not None
+                            else 1.0
+                        ),
+                    ),
+                    width_px=(
+                        render_spec.isosurface_wireframe_width
+                        if render_spec is not None
+                        else 1.0
+                    ),
+                    metadata={**metadata, "mode": "wireframe"},
+                )
+                if render_spec is not None
+                and render_spec.isosurface_mode == "wireframe"
+                else mesh_primitive(
+                    f"isosurface:{index}:{name}",
+                    vertex_array,
+                    triangle_array,
+                    color,
+                    normals=normals,
+                    alpha=opacity,
+                    metadata=metadata,
+                )
             )
         )
     return results, warnings

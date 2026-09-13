@@ -536,7 +536,9 @@ def prepare_render(
         )
     primitives.extend(cell_overlay_primitives(scene.get("cell_overlays")))
     primitives.extend(_polyhedron_primitives(scene, topology_data))
-    isosurface_primitives, isosurface_warnings = _isosurface_primitives(scene)
+    isosurface_primitives, isosurface_warnings = _isosurface_primitives(
+        scene, render_spec=render_spec
+    )
     primitives.extend(isosurface_primitives)
     warnings.extend(isosurface_warnings)
     primitives.extend(

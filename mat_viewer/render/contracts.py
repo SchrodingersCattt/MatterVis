@@ -198,6 +198,9 @@ class RenderSpec:
     missing_adp_policy: Literal["error", "sphere"] = "error"
     sphere_detail: tuple[int, int] = (12, 20)
     cylinder_sides: int = 12
+    isosurface_mode: Literal["surface", "wireframe"] = "surface"
+    isosurface_wireframe_width: float = 1.0
+    isosurface_wireframe_opacity: float = 1.0
     isosurface_isovalue: float | None = None
     isosurface_opacity: float = 0.55
     isosurface_positive_color: str = "#D55E00"
@@ -246,6 +249,12 @@ class RenderSpec:
             raise ValueError("ortep_probability must lie in (0, 1)")
         if self.isosurface_isovalue is not None and (not np.isfinite(self.isosurface_isovalue) or self.isosurface_isovalue <= 0):
             raise ValueError("isosurface_isovalue must be positive when provided")
+        if self.isosurface_mode not in {"surface", "wireframe"}:
+            raise ValueError("isosurface_mode must be 'surface' or 'wireframe'")
+        if not np.isfinite(self.isosurface_wireframe_width) or float(self.isosurface_wireframe_width) <= 0.0:
+            raise ValueError("isosurface_wireframe_width must be positive")
+        if not 0.0 <= float(self.isosurface_wireframe_opacity) <= 1.0:
+            raise ValueError("isosurface_wireframe_opacity must lie in [0, 1]")
         if not 0.0 <= float(self.isosurface_opacity) <= 1.0:
             raise ValueError("isosurface_opacity must lie in [0, 1]")
         if int(self.isosurface_stride) != self.isosurface_stride or int(self.isosurface_stride) <= 0:
