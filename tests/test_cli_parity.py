@@ -53,7 +53,7 @@ def test_backend_neutral_spec_fields_have_cli_destinations() -> None:
             "missing_adp_policy": "missing_adp_policy",
             "sphere_detail": "sphere_detail",
             "cylinder_sides": "cylinder_sides",
-            "isosurface_isovalue": "isosurface_isovalue",
+            "isosurface_isovalue": "isovalue",
             "isosurface_opacity": "isosurface_opacity",
             "isosurface_positive_color": "isosurface_positive_color",
             "isosurface_negative_color": "isosurface_negative_color",
