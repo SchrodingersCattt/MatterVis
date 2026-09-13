@@ -1170,10 +1170,8 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                 missing_adp_policy=args.missing_adp_policy,
                 sphere_detail=tuple(args.sphere_detail),
                 cylinder_sides=args.cylinder_sides,
-                isosurface_mode=args.isosurface_mode,
-                isosurface_wireframe_width=args.isosurface_wireframe_width,
-                isosurface_wireframe_opacity=args.isosurface_wireframe_opacity,
-                isosurface_isovalue=args.isovalue,
+                isosurface_mode=args.isosurface_mode, isosurface_wireframe_width=args.isosurface_wireframe_width,
+                isosurface_wireframe_opacity=args.isosurface_wireframe_opacity, isosurface_isovalue=args.isovalue,
                 isosurface_opacity=(
                     args.isosurface_opacity
                     if args.isosurface_opacity is not None
