@@ -18,6 +18,7 @@ from .contracts import (
     ViewportPlan,
 )
 from .planning import prepare_render
+from ..properties import AtomPropertyColorSpec
 
 
 _LAZY_EXPORTS = {
@@ -28,6 +29,7 @@ _LAZY_EXPORTS = {
         ".publication",
         "build_static_publication_figure",
     ),
+    "normalize_cell_overlays": (".overlay.cells", "normalize_cell_overlays"),
     "DENSE_COORDINATION_PRESET": (".publication", "DENSE_COORDINATION_PRESET"),
     "normalize_vector_overlays": (".overlay.vectors", "normalize_vector_overlays"),
     "paper_vector_label_annotations": (
@@ -72,6 +74,7 @@ def __getattr__(name: str):
 
 
 __all__ = [
+    "AtomPropertyColorSpec",
     "CameraSpec",
     "DENSE_COORDINATION_PRESET",
     "LinePrimitive",
@@ -87,6 +90,7 @@ __all__ = [
     "build_row_figure",
     "build_static_publication_figure",
     "cpu_render",
+    "normalize_cell_overlays",
     "normalize_vector_overlays",
     "paper_vector_label_annotations",
     "prepare_render",

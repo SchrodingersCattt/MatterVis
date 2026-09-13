@@ -76,6 +76,7 @@ class StructureInput:
     input_format: str
     frames: tuple[StructureFrame, ...]
     total_frames: int
+    property_manifest: Any | None = None
 
     @property
     def n_frames(self) -> int:
@@ -243,9 +244,24 @@ def _ase_atoms_to_pipeline(
     inverse = np.linalg.inv(matrix)
     fractional = positions @ inverse
     symbols = atoms.get_chemical_symbols()
+    arrays = _atom_arrays(atoms)
+    site_ids = _optional_scalar_array(arrays, "site_id", len(atoms))
+    occupancies = _optional_scalar_array(arrays, "occupancy", len(atoms))
+    disorder = _optional_scalar_array(arrays, "disorder", len(atoms))
+    if site_ids is not None:
+        normalized_ids = [str(value) for value in site_ids]
+        if any(not value or not value.isascii() for value in normalized_ids):
+            raise ValueError("site_id values must be non-empty ASCII text")
+        if len(set(normalized_ids)) != len(normalized_ids):
+            raise ValueError("site_id values must be unique within a frame")
+        site_ids = np.asarray(normalized_ids, dtype=object)
     raw_atoms: list[dict[str, Any]] = []
     for index, (symbol, cart, frac) in enumerate(zip(symbols, positions, fractional)):
         label = f"{symbol}{index + 1}"
+        occupancy = 1.0 if occupancies is None else float(occupancies[index])
+        if not np.isfinite(occupancy) or not 0.0 <= occupancy <= 1.0:
+            raise ValueError("occupancy values must be finite and between 0 and 1")
+        disorder_token = "." if disorder is None else str(disorder[index])
         raw_atoms.append(
             {
                 "elem": symbol,
@@ -253,9 +269,11 @@ def _ase_atoms_to_pipeline(
                 "frac": np.asarray(frac, dtype=float),
                 "label": label,
                 "_asym_label": label,
-                "occ": 1.0,
+                "occ": occupancy,
                 "dg": ".",
                 "da": ".",
+                "_source_site_id": "" if site_ids is None else str(site_ids[index]),
+                "_disorder_token": disorder_token,
                 "_symop_index": 0,
                 "_source_index": index,
                 "_bond_partners": (),
@@ -273,12 +291,25 @@ def _ase_atoms_to_pipeline(
     return raw_atoms, _cell_from_matrix(matrix), matrix, metadata
 
 
+def _optional_scalar_array(
+    arrays: dict[str, np.ndarray], name: str, atom_count: int
+) -> np.ndarray | None:
+    values = arrays.get(name)
+    if values is None:
+        return None
+    result = np.asarray(values)
+    if result.shape != (atom_count,):
+        raise ValueError(f"{name} must contain exactly one value per atom")
+    return result
+
+
 def build_loaded_crystal_from_ase(
     atoms,
     *,
     path: str | Path,
     frame_index: int,
     input_format: str,
+    bond_scale: float | None = None,
 ) -> LoadedCrystal:
     """Convert one ASE Atoms frame into the canonical LoadedCrystal class."""
     source_path = str(Path(path).resolve())
@@ -298,6 +329,7 @@ def build_loaded_crystal_from_ase(
         M=matrix,
         title=Path(path).stem,
         source="ase",
+        bond_scale=bond_scale,
         scene_metadata_extra=metadata,
     )
     bundle.frame_info = {"frame_index": int(frame_index), **dict(atoms.info)}
@@ -367,11 +399,41 @@ def _selected_ase_atoms(
 
 
 def _atom_arrays(atoms) -> dict[str, np.ndarray]:
-    return {
+    arrays = {
         str(name): np.array(values, copy=True)
         for name, values in atoms.arrays.items()
         if name not in {"numbers", "positions"}
     }
+    calculator = getattr(atoms, "calc", None)
+    for name, values in dict(getattr(calculator, "results", {}) or {}).items():
+        array = np.asarray(values)
+        if array.ndim >= 1 and len(array) == len(atoms):
+            arrays.setdefault(str(name), np.array(array, copy=True))
+    return arrays
+
+
+def _lammps_dump_index(source_path: Path, resolved_format: str | None):
+    if resolved_format != "lammps-dump-text":
+        return None
+    from .lammps_batch import index_lammps_dump
+
+    return index_lammps_dump(source_path)
+
+
+def _atomistic_frame(index: int, atoms: Any, *, dump_index: Any = None):
+    info = {"frame_index": index, **dict(atoms.info)}
+    arrays = _atom_arrays(atoms)
+    if dump_index is not None:
+        from .lammps_batch import read_lammps_property_frame
+
+        identity = read_lammps_property_frame(
+            dump_index, index, property_columns=()
+        )
+        if identity.atom_ids is not None:
+            order = np.argsort(identity.atom_ids, kind="stable")
+            arrays.setdefault("id", identity.atom_ids[order])
+        info.setdefault("timestep", identity.timestep)
+    return AtomisticFrame(index=index, atoms=atoms, info=info, atom_arrays=arrays)
 
 
 def load_atomistic_input(
@@ -396,13 +458,9 @@ def load_atomistic_input(
         frame_indices,
     )
     format_name = resolved_format or "ase-auto"
+    dump_index = _lammps_dump_index(source_path, resolved_format)
     frames = tuple(
-        AtomisticFrame(
-            index=index,
-            atoms=atoms,
-            info={"frame_index": index, **dict(atoms.info)},
-            atom_arrays=_atom_arrays(atoms),
-        )
+        _atomistic_frame(index, atoms, dump_index=dump_index)
         for index, atoms in selected_atoms
     )
     return AtomisticInput(source_path, format_name, frames, total_frames)
@@ -437,17 +495,13 @@ def iter_atomistic_frames(
     selected = None if requested is None else set(requested)
     found: set[int] = set()
     format_name = resolved_format or "ase-auto"
+    dump_index = _lammps_dump_index(source_path, resolved_format)
     for index, atoms in enumerate(_ase_frames(source_path, resolved_format, symbols)):
         if selected is not None and index not in selected:
             continue
         found.add(index)
         yield (
-            AtomisticFrame(
-                index=index,
-                atoms=atoms,
-                info={"frame_index": index, **dict(atoms.info)},
-                atom_arrays=_atom_arrays(atoms),
-            ),
+            _atomistic_frame(index, atoms, dump_index=dump_index),
             format_name,
         )
     if selected is not None:
@@ -461,6 +515,7 @@ def canonicalise_atomistic_frame(
     *,
     path: str | Path,
     input_format: str,
+    bond_scale: float | None = None,
 ) -> StructureFrame:
     """Build one canonical MatterVis frame while retaining ASE metadata."""
     bundle = build_loaded_crystal_from_ase(
@@ -468,15 +523,19 @@ def canonicalise_atomistic_frame(
         path=path,
         frame_index=frame.index,
         input_format=input_format,
+        bond_scale=bond_scale,
     )
+    atom_arrays = {
+        name: np.array(values, copy=True)
+        for name, values in frame.atom_arrays.items()
+    }
+    bundle.atom_arrays = atom_arrays
+    bundle.frame_info = dict(frame.info)
     return StructureFrame(
         frame.index,
         bundle,
-        dict(bundle.frame_info),
-        {
-            name: np.array(values, copy=True)
-            for name, values in bundle.atom_arrays.items()
-        },
+        dict(frame.info),
+        atom_arrays,
     )
 
 
@@ -486,6 +545,7 @@ def load_structure_input(
     input_format: str | None = None,
     type_map: Iterable[str] | None = None,
     frame_indices: Iterable[int] | None = None,
+    bond_scale: float | None = None,
 ) -> StructureInput:
     """Load selected frames into the canonical renderable structure class."""
     source_path, resolved_format, symbols = _prepare_source(
@@ -505,11 +565,15 @@ def load_structure_input(
                 cif_path=str(source_path),
                 title=source_path.stem,
                 source="upload",
+                bond_scale=bond_scale,
             )
         else:
             from .cube_adapter import load_cube_file
 
-            bundle = load_cube_file(source_path)
+            bundle = load_cube_file(
+                source_path,
+                bond_scale=1.0 if bond_scale is None else bond_scale,
+            )
         frames = tuple(
             StructureFrame(0, bundle, {"frame_index": 0}, {}) for _ in selected
         )
@@ -526,6 +590,7 @@ def load_structure_input(
             frame,
             path=source_path,
             input_format=atomistic.input_format,
+            bond_scale=bond_scale,
         )
         for frame in atomistic.frames
     )

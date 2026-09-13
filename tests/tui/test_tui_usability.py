@@ -5,6 +5,7 @@ from dataclasses import replace
 import io
 from pathlib import Path
 from contextlib import redirect_stdout
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -20,7 +21,7 @@ from mat_viewer.tui.compositor import (
     resolve_molecule_detail,
 )
 from mat_viewer.tui.crystal_ir import AtomIR, CrystalIR
-from mat_viewer.tui.loader_adapter import load_for_tui
+from mat_viewer.tui.loader_adapter import _site_id, load_for_tui
 from mat_viewer.tui import run_tui
 from mat_viewer.tui.serializer import serialize_crystal
 from mat_viewer.tui.summary import build_scope_summary
@@ -74,10 +75,10 @@ def _small_crystal() -> CrystalIR:
     return CrystalIR(title="small", formula="CO", atoms=atoms)
 
 
-def test_canonical_cif_display_modes_and_bonds() -> None:
-    automatic = load_for_tui(str(DAP4))
-    formula = load_for_tui(str(DAP4), display_mode="formula_unit")
-    asymmetric = load_for_tui(str(DAP4), display_mode="asymmetric_unit")
+def test_canonical_cif_display_modes_and_bonds(tui_crystal_factory) -> None:
+    automatic = tui_crystal_factory(DAP4)
+    formula = tui_crystal_factory(DAP4, display_mode="formula_unit")
+    asymmetric = tui_crystal_factory(DAP4, display_mode="asymmetric_unit")
 
     assert automatic.n_atoms == 581
     assert automatic.metadata["display_mode"] == "unit_cell"
@@ -110,8 +111,8 @@ def test_canonical_cif_display_modes_and_bonds() -> None:
         assert bond.distance < 3.5
 
 
-def test_displayed_boundary_molecules_have_unique_groups() -> None:
-    unit_cell = load_for_tui(str(DAP4), display_mode="unit_cell")
+def test_displayed_boundary_molecules_have_unique_groups(tui_crystal_factory) -> None:
+    unit_cell = tui_crystal_factory(DAP4, display_mode="unit_cell")
     molecule_members: dict[int, list[np.ndarray]] = {}
     for atom in unit_cell.atoms:
         if atom.molecule_index >= 0:
@@ -156,8 +157,8 @@ def test_adaptive_labels_make_crowded_views_readable() -> None:
     ) == "label"
 
 
-def test_unit_cell_molecule_view_labels_each_species_once() -> None:
-    crystal = load_for_tui(str(DAP4))
+def test_unit_cell_molecule_view_labels_each_species_once(tui_crystal_factory) -> None:
+    crystal = tui_crystal_factory(DAP4)
     camera = Camera.from_view_name("diagonal", crystal)
     points, depth = project_points(camera, crystal.cart_coords)
     frame = compose_frame(
@@ -325,7 +326,9 @@ def test_textual_can_start_in_readable_molecule_level(monkeypatch) -> None:
 def test_minor_atoms_remain_available_for_interactive_toggle(tmp_path) -> None:
     path = tmp_path / "disorder.cif"
     path.write_text(DISORDER_CIF, encoding="utf-8")
-    crystal = load_for_tui(str(path), display_mode="unit_cell")
+    with pytest.warns((UserWarning, DeprecationWarning)) as caught:
+        crystal = load_for_tui(str(path), display_mode="unit_cell")
+    assert any("Structure contains disorder" in str(item.message) for item in caught)
     assert {atom.label for atom in crystal.atoms if atom.is_minor} == {"C1B"}
 
     camera = Camera.from_view_name("diagonal", crystal)
@@ -355,7 +358,9 @@ def test_minor_atoms_remain_available_for_interactive_toggle(tmp_path) -> None:
 def test_minor_toggle_refreshes_scoped_title(tmp_path) -> None:
     path = tmp_path / "disorder.cif"
     path.write_text(DISORDER_CIF, encoding="utf-8")
-    crystal = load_for_tui(str(path), display_mode="unit_cell")
+    with pytest.warns((UserWarning, DeprecationWarning)) as caught:
+        crystal = load_for_tui(str(path), display_mode="unit_cell")
+    assert any("Structure contains disorder" in str(item.message) for item in caught)
 
     async def exercise() -> None:
         app = CrystalTUI(crystal, mono=True, show_minor=False)
@@ -424,24 +429,26 @@ def test_structured_and_public_helper_share_minor_visibility(tmp_path) -> None:
     path = tmp_path / "disorder.cif"
     path.write_text(DISORDER_CIF, encoding="utf-8")
 
-    hidden = io.StringIO()
-    with redirect_stdout(hidden):
-        run_tui(
-            str(path),
-            interactive=False,
-            format="structured",
-            projection="perspective",
-            show_minor=False,
-        )
-    shown = io.StringIO()
-    with redirect_stdout(shown):
-        run_tui(
-            str(path),
-            interactive=False,
-            format="structured",
-            projection="perspective",
-            show_minor=True,
-        )
+    with pytest.warns((UserWarning, DeprecationWarning)) as caught:
+        hidden = io.StringIO()
+        with redirect_stdout(hidden):
+            run_tui(
+                str(path),
+                interactive=False,
+                format="structured",
+                projection="perspective",
+                show_minor=False,
+            )
+        shown = io.StringIO()
+        with redirect_stdout(shown):
+            run_tui(
+                str(path),
+                interactive=False,
+                format="structured",
+                projection="perspective",
+                show_minor=True,
+            )
+    assert any("Structure contains disorder" in str(item.message) for item in caught)
 
     assert "  projection: perspective\n" in hidden.getvalue()
     assert "  - label: C1B\n" not in hidden.getvalue()
@@ -471,13 +478,25 @@ def test_non_cif_ir_has_deterministic_identity_and_scopes(tmp_path) -> None:
     assert crystal.canonical_formula == "CO"
     assert crystal.metadata["display_atom_count"] == 2
     assert [atom.source_index for atom in crystal.atoms] == [0, 1]
+    assert [atom.atom_id for atom in crystal.atoms] == ["m0:a0", "m0:a1"]
     assert len({atom.display_copy_id for atom in crystal.atoms}) == 2
 
 
-def test_filtered_molecule_summary_drops_removed_groups() -> None:
+def test_pre_contract_mck_site_records_receive_stable_atom_ids() -> None:
+    record = SimpleNamespace(
+        site_id="",
+        molecule_index=2,
+        local_index=5,
+        global_index=11,
+    )
+
+    assert _site_id(record) == "m2:a5"
+
+
+def test_filtered_molecule_summary_drops_removed_groups(tui_crystal_factory) -> None:
     from mat_viewer.cli import _filter_crystal
 
-    crystal = load_for_tui(str(DAP4), display_mode="formula_unit")
+    crystal = tui_crystal_factory(DAP4, display_mode="formula_unit")
     first_molecule = next(atom.molecule_index for atom in crystal.atoms if atom.molecule_index >= 0)
     keep = {
         index

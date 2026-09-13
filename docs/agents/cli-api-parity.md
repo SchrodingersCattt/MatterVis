@@ -7,13 +7,15 @@ scalar controls and repeatable selector rules for mixed styles.
 | Public capability | CLI surface |
 |---|---|
 | Display mode | `--view` |
-| Camera axis, direction, position, target, up, projection, fit distance, FOV, orthographic scale, and clipping | `--camera-axis`, `--view-direction`, `--camera-position`, `--camera-target`, `--camera-up`, `--orthogonal` / `--perspective`, `--camera-distance`, `--field-of-view`, `--ortho-scale`, `--camera-clip` |
+| Camera axis, direction, position, target, up, projection, fit distance, FOV, orthographic scale, camera fit, and clipping | `--camera-axis`, `--view-direction`, `--camera-position`, `--camera-target`, `--camera-up`, `--orthogonal` / `--perspective`, `--camera-distance`, `--field-of-view`, `--ortho-scale`, `--camera-fit`, `--camera-clip` |
 | Representation, shading, backend, canvas, background, atom/bond scale, visibility, cell, labels, rings, and ORTEP | Direct `mat-vis render` flags |
 | Sphere and cylinder mesh quality | `--sphere-detail`, `--cylinder-sides` |
 | Per-atom selector styles and materials | Repeatable `--atom-group` |
 | Per-bond selector styles and paint | Repeatable `--bond-group` |
 | World-space vectors | `--vector-overlays` |
+| Auxiliary conventional/transformed/simulation cells | `--cell-overlays` |
 | Coordination polyhedra | Repeatable `--polyhedron` |
+| MolCrysKit bond-perception scale | `--bond-scale` |
 | Frame selection and video speed | `--frame-range`, `--stride`, `--fps` |
 | Physical simulation time labels | `--display-time`, `--time-step`, `--time-step-unit`, `--dump-frequency`, `--first-frame-step`, `--time-position` |
 | Generic per-frame progress, observables, and stages | Repeatable `--frame-field`, plus `--frame-label` and `--frame-label-position` |

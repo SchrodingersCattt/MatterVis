@@ -25,7 +25,6 @@ import numpy as np
 import pytest
 
 from mat_viewer import topology as topology_module
-from mat_viewer.loader import build_loaded_crystal
 from mat_viewer.renderer import topology_results_markdown
 from mat_viewer.topology import (
     _classify_shell_payload,
@@ -125,8 +124,15 @@ def test_classify_shell_payload_recovers_from_pathological_input():
 
 
 @pytest.mark.skipif(not DAP4_CIF.exists(), reason="DAP-4 CIF not available")
-def test_analyze_topology_returns_shape_key_for_dap4_a_site():
-    bundle = build_loaded_crystal(name="DAP-4", cif_path=str(DAP4_CIF), title="DAP-4")
+def test_analyze_topology_returns_shape_key_for_dap4_a_site(
+    catalog_bundle_factory,
+):
+    bundle = catalog_bundle_factory(
+        name="DAP-4",
+        cif_path=str(DAP4_CIF),
+        title="DAP-4",
+        source="catalog",
+    )
     target = next(
         f for f in bundle.topology_fragment_table if f.get("formula") == "C6N2"
     )
@@ -171,8 +177,15 @@ def test_analyze_topology_returns_shape_key_for_dap4_a_site():
 
 
 @pytest.mark.skipif(not DAP4_CIF.exists(), reason="DAP-4 CIF not available")
-def test_analyze_topology_uses_mck_molecule_level_nh4_octahedra():
-    bundle = build_loaded_crystal(name="DAP-4", cif_path=str(DAP4_CIF), title="DAP-4")
+def test_analyze_topology_uses_mck_molecule_level_nh4_octahedra(
+    catalog_bundle_factory,
+):
+    bundle = catalog_bundle_factory(
+        name="DAP-4",
+        cif_path=str(DAP4_CIF),
+        title="DAP-4",
+        source="catalog",
+    )
     nh4_fragments = [
         f for f in bundle.topology_fragment_table if f.get("formula") == "N"
     ]
@@ -193,12 +206,19 @@ def test_analyze_topology_uses_mck_molecule_level_nh4_octahedra():
 
 
 @pytest.mark.skipif(not DAP4_CIF.exists(), reason="DAP-4 CIF not available")
-def test_analyze_topology_caches_shape_classification(monkeypatch):
+def test_analyze_topology_caches_shape_classification(
+    monkeypatch, catalog_bundle_factory
+):
     """The bundle-level ``_analyze_topology_cache`` must memoize the
     expensive ``classify_shell`` call so the analysis panel only pays
     the ~200 ms first-hit latency once per (centre, cutoff) tuple.
     """
-    bundle = build_loaded_crystal(name="DAP-4", cif_path=str(DAP4_CIF), title="DAP-4")
+    bundle = catalog_bundle_factory(
+        name="DAP-4",
+        cif_path=str(DAP4_CIF),
+        title="DAP-4",
+        source="catalog",
+    )
     target = next(
         f for f in bundle.topology_fragment_table if f.get("formula") == "C6N2"
     )

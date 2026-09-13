@@ -182,7 +182,9 @@ def _partial_occupancy_value(atom: dict[str, Any]) -> float:
 def _blank_disorder_tags(atom: dict[str, Any]) -> bool:
     dg = str(atom.get("dg") or ".").strip()
     da = str(atom.get("da") or ".").strip()
-    return dg in (".", "?", "") and da in (".", "?", "")
+    # The CIF parser normalises an omitted disorder group to either "." or
+    # "0", depending on the input dialect. Both mean "no explicit group".
+    return dg in (".", "?", "", "0") and da in (".", "?", "", "0")
 
 
 def _site_label(atom: dict[str, Any]) -> str:
@@ -312,23 +314,27 @@ def _has_shelx_occupancy_disorder(raw_atoms) -> bool:
 _PARTIAL_SOLVENT_LABEL = re.compile(r"^[OH]\d+W", re.IGNORECASE)
 
 
-def _tag_unresolved_partial_solvent_disorder(raw_atoms):
-    """Record provenance for low-occupancy solvent sites.
+def _tag_unresolved_partial_disorder(raw_atoms):
+    """Record provenance for recognised disorder left unresolved.
 
-    Deposited CIFs often model solvent without a complete assembly/group
-    pairing (MAF-4 uses labels such as ``O2W`` and ``H2WA``). These are
-    unambiguously solvent disorder, but there is no defensible major/minor
-    choice for MatterVis to invent. Mark them as unresolved so occupancy can
-    drive their visual weight while MCK remains the connectivity authority.
+    The ordered-replica resolver may be unable to choose between equal-weight
+    alternatives. Keep every recognised alternative and let occupancy drive
+    its visual weight. A lone partial-occupancy special-position site remains
+    ordered: occupancy alone is not sufficient evidence of disorder.
     """
     out = [dict(atom) for atom in raw_atoms]
-    for atom in out:
+    recognised = _occupancy_only_disorder_indices(out)
+    recognised.update(_explicit_assembly_disorder_indices(out))
+    for index, atom in enumerate(out):
         if "_is_minor" in atom:
             atom["is_disordered"] = True
             atom["disorder_resolved"] = True
             continue
-        if _partial_occupancy_value(atom) < 0.999 and _PARTIAL_SOLVENT_LABEL.match(
-            _site_label(atom)
+        dg = str(atom.get("dg") or ".").strip()
+        shelx_part = dg.startswith("-") and dg not in ("-",)
+        partial_solvent = _PARTIAL_SOLVENT_LABEL.match(_site_label(atom))
+        if _partial_occupancy_value(atom) < 0.999 and (
+            index in recognised or shelx_part or partial_solvent
         ):
             atom["is_disordered"] = True
             atom["disorder_resolved"] = False
@@ -693,6 +699,7 @@ def _fragment_table_from_atoms(
     image_to_local: dict[tuple[tuple[int, int, int], int], int] = {}
     pool_kept: list[dict[str, Any]] = []
     pool_source_idx: list[int] = []
+    pool_image_shift: list[tuple[int, int, int]] = []
     for local_idx, atom in enumerate(atoms):
         if ops.is_minor(atom) and not include_minor:
             continue
@@ -702,13 +709,14 @@ def _fragment_table_from_atoms(
         image_to_local[(shift_key, raw_idx)] = len(pool_kept)
         pool_kept.append(dict(atom))
         pool_source_idx.append(local_idx if not use_source_indices else raw_idx)
+        pool_image_shift.append(shift_key)
 
     if not pool_kept:
         return [], []
 
     # Group atoms by (image_shift, mol_index_k). Each replica image of a
     # MolCrysKit molecule becomes its own fragment-table row.
-    components: list[tuple[list[int], int | None]] = []
+    components: list[tuple[list[int], int | None, tuple[int, int, int]]] = []
     seen_local: set[int] = set()
     seen_images = sorted({key[0] for key in image_to_local})
     for shift_key in seen_images:
@@ -721,18 +729,18 @@ def _fragment_table_from_atoms(
                 component.append(local)
                 seen_local.add(local)
             if component:
-                components.append((sorted(component), int(mol_index)))
+                components.append((sorted(component), int(mol_index), shift_key))
     # Sweep for any kept atom that didn't make it into a molecule component.
     # These should be rare now that MCK's bond perception is disorder-aware
     # and returns both major and minor alternatives as whole fragments; keep
     # singleton rows only as diagnostics for genuinely uncovered atoms.
     for local_idx in range(len(pool_kept)):
         if local_idx not in seen_local:
-            components.append(([local_idx], None))
+            components.append(([local_idx], None, pool_image_shift[local_idx]))
             seen_local.add(local_idx)
 
     fragments = []
-    for component, mol_index in components:
+    for component, mol_index, image_shift in components:
         site_indices = sorted(pool_source_idx[idx] for idx in component)
         component_atoms = [pool_kept[idx] for idx in component]
         heavy_atoms = [atom for atom in component_atoms if atom["elem"] != "H"]
@@ -786,6 +794,7 @@ def _fragment_table_from_atoms(
             {
                 "site_indices": site_indices,
                 "source_molecule_index": mol_index,
+                "image_shift": list(image_shift),
                 "center": [float(x) for x in center_cart],
                 "frac_center": [float(x) for x in center_frac],
                 "elem_set": sorted(elem_set),
@@ -882,6 +891,7 @@ def _fragment_table_from_atoms(
                 "frac_center": frag["frac_center"],
                 "site_indices": frag["site_indices"],
                 "source_molecule_index": frag.get("source_molecule_index"),
+                "image_shift": frag.get("image_shift", [0, 0, 0]),
                 "source": bundle_name,
                 "heavy_atom_count": frag["heavy_atom_count"],
                 "cluster_size": frag["cluster_size"],
@@ -1141,6 +1151,7 @@ def build_loaded_crystal(
     preset: Optional[Dict[str, Any]] = None,
     source: str = "catalog",
     view_weights: Optional[Dict[str, float]] = None,
+    bond_scale: float | None = None,
 ) -> LoadedCrystal:
     """Parse a CIF and enter the shared canonical structure pipeline."""
     ops = scene_ops()
@@ -1159,7 +1170,7 @@ def build_loaded_crystal(
         cif_path=cif_path,
     ):
         raw_atoms = _tag_shelx_occupancy_disorder(raw_atoms, cif_path, M)
-        raw_atoms = _tag_unresolved_partial_solvent_disorder(raw_atoms)
+        raw_atoms = _tag_unresolved_partial_disorder(raw_atoms)
     from .bundle_builder import build_loaded_crystal_from_atoms
 
     return build_loaded_crystal_from_atoms(
@@ -1172,4 +1183,5 @@ def build_loaded_crystal(
         preset=preset,
         source=source,
         view_weights=view_weights,
+        bond_scale=bond_scale,
     )

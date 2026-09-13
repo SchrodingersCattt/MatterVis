@@ -4,6 +4,12 @@ Read this only when the direct base render reports a missing command/capability
 or the request explicitly needs an optional frontend. The capability resolver is
 authoritative; do not maintain a second dependency guess in an agent script.
 
+If the `mat-vis` command itself is missing, install the supported releases once:
+
+```bash
+python -m pip install "molcrys-kit==0.7.1" "matter-vis==0.0.5"
+```
+
 ## Resolve on demand
 
 ```bash

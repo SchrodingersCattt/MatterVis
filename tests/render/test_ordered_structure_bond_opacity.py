@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from mat_viewer.loader import build_loaded_crystal
 from mat_viewer.presets import DEFAULT_STYLE
 from mat_viewer.renderer import build_figure
 
@@ -28,11 +27,15 @@ def _bond_traces(fig):
 
 
 @pytest.mark.parametrize("name", FULLY_ORDERED_CIFS)
-def test_fully_ordered_catalog_structures_have_no_minor_atoms(name: str):
+def test_fully_ordered_catalog_structures_have_no_minor_atoms(
+    name: str, catalog_bundle_factory
+):
     cif_path = Path("scripts/data") / f"{name}.cif"
     if not cif_path.exists():
         pytest.skip(f"{cif_path} is not present")
-    bundle = build_loaded_crystal(name=name, cif_path=str(cif_path), title=name)
+    bundle = catalog_bundle_factory(
+        name=name, cif_path=str(cif_path), title=name, source="catalog"
+    )
     scene = bundle.scene
     assert all(not atom.get("is_minor", False) for atom in scene.get("draw_atoms", []))
     assert all(not bond.get("is_minor", False) for bond in scene.get("bonds", []))
@@ -40,7 +43,9 @@ def test_fully_ordered_catalog_structures_have_no_minor_atoms(name: str):
 
 @pytest.mark.parametrize("name", ALL_CIFS)
 @pytest.mark.parametrize("disorder", ("outline_rings", "opacity"))
-def test_major_major_bonds_render_opaque(name: str, disorder: str):
+def test_major_major_bonds_render_opaque(
+    name: str, disorder: str, catalog_bundle_factory
+):
     """Major-to-major bonds are the chemically real backbone and must
     render fully opaque regardless of the disorder mode. Minor (or
     minor-to-minor) bonds may legitimately fade under
@@ -49,7 +54,9 @@ def test_major_major_bonds_render_opaque(name: str, disorder: str):
     if not cif_path.exists():
         pytest.skip(f"{cif_path} is not present")
 
-    bundle = build_loaded_crystal(name=name, cif_path=str(cif_path), title=name)
+    bundle = catalog_bundle_factory(
+        name=name, cif_path=str(cif_path), title=name, source="catalog"
+    )
     scene = bundle.scene
 
     style = {

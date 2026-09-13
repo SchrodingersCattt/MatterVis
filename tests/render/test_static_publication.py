@@ -342,4 +342,5 @@ def test_static_publication_uses_face_stack_and_depth_layers(tmp_path) -> None:
         mpl_save_kwargs={"bbox_inches": None, "facecolor": "#FFFFFF"},
     ).save(str(output), width=640, height=480, dpi=100)
 
-    assert Image.open(output).size == (640, 480)
+    with Image.open(output) as image:
+        assert image.size == (640, 480)

@@ -193,6 +193,18 @@ def test_occupancy_scales_only_loader_confirmed_disordered_components():
     assert bond_effective_opacity({"is_minor": True, "occ": 0.4}, _style()) == 0.4
 
 
+def test_explicit_full_opacity_overrides_disorder_fade():
+    atom = _atom("disordered", is_minor=False)
+    atom.update(
+        is_disordered=True,
+        occ=0.4,
+        _render_opacity_scale=1.0,
+        _render_opacity_group_id="opaque",
+    )
+
+    assert _atom_effective_opacity(atom, _style()) == 1.0
+
+
 def test_loader_provenance_distinguishes_disorder_from_partial_occupancy():
     assert atom_is_disordered({"occ": 0.5}) is False
     assert atom_is_disordered({"occ": 0.5, "_is_minor": False}) is True

@@ -51,7 +51,8 @@ def test_checker_script_exists_and_decodes_png(tmp_path: Path) -> None:
     image[20:60, 90:140] = 0
     Image.fromarray(image).save(png)
     module = _module()
-    decoded = np.asarray(Image.open(png).convert("RGB"))
+    with Image.open(png) as rendered:
+        decoded = np.asarray(rendered.convert("RGB"))
     first = module.measure_panel(
         decoded,
         0,

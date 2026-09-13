@@ -117,6 +117,8 @@ def _enrich_result(
             "fallback": None,
         }
     )
+    if plan is not None:
+        metadata["atom_property_color"] = plan.metadata.get("atom_property_color")
     return replace(result, metadata=metadata)
 
 
@@ -140,6 +142,8 @@ def load_structure(
     type_map: Iterable[str] | None = None,
     frame: int = 0,
     frame_indices: Iterable[int] | None = None,
+    property_data: str | Path | None = None,
+    bond_scale: float | None = None,
 ) -> Any:
     """Load one canonical structure frame without importing any frontend."""
 
@@ -150,12 +154,21 @@ def load_structure(
     require_molcryskit_contract()
     from .loader.structure_input import load_structure_input
 
-    return load_structure_input(
+    loaded = load_structure_input(
         source,
         input_format=input_format,
         type_map=type_map,
         frame_indices=list(frame_indices) if frame_indices is not None else [frame],
+        bond_scale=bond_scale,
     )
+    if property_data is not None:
+        from .loader.property_sidecar import load_atom_property_manifest
+
+        loaded = replace(
+            loaded,
+            property_manifest=load_atom_property_manifest(property_data),
+        )
+    return loaded
 
 
 def prepare_render(
@@ -165,9 +178,11 @@ def prepare_render(
     render_spec: Any = None,
     *,
     topology_data: Mapping[str, Any] | None = None,
+    cell_overlays: Any = None,
     vector_overlays: Any = None,
     atom_groups: Any = None,
     bond_groups: Any = None,
+    atom_property_color: Any = None,
 ) -> Any:
     """Compile a structure and explicit specs into a backend-neutral plan."""
 
@@ -201,9 +216,11 @@ def prepare_render(
         camera=camera,
         render=render_spec,
         topology_data=topology_data,
+        cell_overlays=cell_overlays,
         vector_overlays=vector_overlays,
         atom_groups=atom_groups,
         bond_groups=bond_groups,
+        atom_property_color=atom_property_color,
     )
     topology_warnings = tuple(
         str(warning) for warning in (topology_data or {}).get("warnings", ())
@@ -223,12 +240,14 @@ def render(
     camera: Any = None,
     render_spec: Any = None,
     topology_data: Mapping[str, Any] | None = None,
+    cell_overlays: Any = None,
     vector_overlays: Any = None,
     atom_groups: Any = None,
     bond_groups: Any = None,
     fps: float = 12.0,
     animation_time: Any = None,
     frame_annotation: Any = None,
+    atom_property_color: Any = None,
 ) -> Any:
     """Render with an explicit backend; no backend or representation fallback."""
 
@@ -244,16 +263,20 @@ def render(
                 camera,
                 render_spec,
                 topology_data,
+                cell_overlays,
                 vector_overlays,
                 atom_groups,
                 bond_groups,
                 animation_time,
                 frame_annotation,
+                atom_property_color,
             )
         ):
             raise ValueError(
-                "view, camera, render_spec, topology_data, vector_overlays, "
-                "atom_groups, bond_groups, animation_time, and frame_annotation "
+                "view, camera, render_spec, topology_data, cell_overlays, "
+                "vector_overlays, "
+                "atom_groups, bond_groups, animation_time, frame_annotation, and "
+                "atom_property_color "
                 "cannot be supplied when rendering an existing "
                 "RenderPlan"
             )
@@ -272,10 +295,6 @@ def render(
 
     output_suffix = Path(output).suffix.lower() if output is not None else ""
     if output_suffix in {".gif", ".mp4"}:
-        if vector_overlays is not None:
-            raise ValueError(
-                "animated vector overlays are not yet supported; use static output"
-            )
         if backend_name != "cpu":
             raise ValueError(
                 "GIF/MP4 use the shared CPU frame renderer; select backend='cpu'"
@@ -288,12 +307,15 @@ def render(
             if not frames:
                 raise ValueError("animation source contains no selected frames")
             first_plan = prepare_render(
-                frames[0],
+                source_or_plan,
                 view=view,
                 render_spec=bound_render_spec,
                 topology_data=topology_data,
+                cell_overlays=cell_overlays,
+                vector_overlays=vector_overlays,
                 atom_groups=atom_groups,
                 bond_groups=bond_groups,
+                atom_property_color=atom_property_color,
             )
             _require_plan_backend(first_plan, backend_name)
             effective_camera = first_plan.camera
@@ -304,8 +326,11 @@ def render(
             camera=effective_camera,
             render_spec=bound_render_spec,
             topology_data=topology_data,
+            cell_overlays=cell_overlays,
+            vector_overlays=vector_overlays,
             atom_groups=atom_groups,
             bond_groups=bond_groups,
+            atom_property_color=atom_property_color,
             fps=fps,
             time_spec=animation_time,
             annotation_spec=frame_annotation,
@@ -327,9 +352,11 @@ def render(
             camera=camera,
             render_spec=bound_render_spec,
             topology_data=topology_data,
+            cell_overlays=cell_overlays,
             vector_overlays=vector_overlays,
             atom_groups=atom_groups,
             bond_groups=bond_groups,
+            atom_property_color=atom_property_color,
         )
         _require_plan_backend(plan, backend_name)
 

@@ -1042,6 +1042,8 @@ def test_disorder_opacity_and_cross_cell_bond_vector_survive_planning():
                 "occupancy": 0.5,
                 "disorder_group": 1,
                 "disorder_assembly": "A",
+                "is_disordered": True,
+                "disorder_resolved": False,
                 "_source_index": 0,
             },
             {
@@ -1081,6 +1083,45 @@ def test_disorder_opacity_and_cross_cell_bond_vector_survive_planning():
     assert bond_vertices[:, 0].max() == pytest.approx(1.1)
     assert all(item.metadata["right_image_shift"] == (1, 0, 0) for item in bond_meshes)
     assert render(plan, format="png").data.startswith(b"\x89PNG")
+
+
+def test_planning_keeps_ordered_partial_sites_opaque_and_group_opacity_replaces():
+    scene = {
+        "draw_atoms": [
+            {
+                "elem": "C",
+                "label": "ordered",
+                "cart": [0.0, 0.0, 0.0],
+                "occupancy": 0.5,
+                "is_disordered": False,
+            },
+            {
+                "elem": "H",
+                "label": "disordered",
+                "cart": [1.0, 0.0, 0.0],
+                "occupancy": 0.5,
+                "is_disordered": True,
+            },
+        ]
+    }
+
+    plan = prepare_render(
+        scene,
+        camera=_camera(),
+        render={"show_hydrogen": True, "show_cell": False},
+        atom_groups=[
+            {"id": "opaque", "selector": {"elements": ["H"]}, "opacity": 1.0}
+        ],
+    )
+    atoms = {
+        item.metadata["label"]: item
+        for item in plan.primitives
+        if item.metadata.get("kind") == "atom"
+    }
+
+    assert atoms["ordered"].rgba[3] == 1.0
+    assert atoms["disordered"].rgba[3] == 1.0
+    assert any("disorder at 1 source sites" in warning for warning in plan.warnings)
 
 
 def test_ortep_hatch_is_depth_tested_in_raster_and_vector_pipelines():

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import fields
 
+from mat_viewer.properties import AtomPropertyColorSpec
 from mat_viewer.cli import _build_render_parser
 from mat_viewer.render.contracts import CameraSpec, RenderSpec, ViewSpec
 
@@ -60,6 +61,18 @@ def test_backend_neutral_spec_fields_have_cli_destinations() -> None:
             "isosurface_ambient": "isosurface_ambient",
             "isosurface_diffuse": "isosurface_diffuse",
         },
+        AtomPropertyColorSpec: {
+            "fields": "color_by",
+            "reduction": "color_reduction",
+            "component": "color_component",
+            "colormap": "colormap",
+            "value_range": "color_range",
+            "center": "color_center",
+            "nan_color": "nan_color",
+            "show_colorbar": "show_colorbar",
+            "label": "color_label",
+            "unit": "color_unit",
+        },
     }
 
     for spec, mapping in mappings.items():
@@ -72,6 +85,8 @@ def test_composable_user_surfaces_have_cli_destinations() -> None:
 
     assert {
         "vector_overlays",
+        "cell_overlays",
+        "bond_scale",
         "atom_group",
         "bond_group",
         "include_boundary_replicas",
@@ -88,7 +103,27 @@ def test_composable_user_surfaces_have_cli_destinations() -> None:
         "frame_field",
         "frame_label",
         "frame_label_position",
+        "property_data",
     } <= destinations
+
+
+def test_cell_overlay_and_bond_scale_cli_values() -> None:
+    parser = argparse.ArgumentParser()
+    render = _build_render_parser(parser.add_subparsers())
+
+    args = render.parse_args(
+        [
+            "structure.cif",
+            "-o",
+            "figure.png",
+            "--bond-scale",
+            "0.85",
+            "--cell-overlays",
+            "cells.json",
+        ]
+    )
+    assert args.bond_scale == 0.85
+    assert str(args.cell_overlays) == "cells.json"
 
 
 def test_boundary_replica_cli_is_explicit_and_backwards_compatible() -> None:

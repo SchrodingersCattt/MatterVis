@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.containers import Container
 from textual.widgets import Footer, Header, Input, Static
 from textual.reactive import reactive
 from rich.text import Text
@@ -30,9 +31,10 @@ from .state import TerminalObservation
 
 # ── Constants ───────────────────────────────────────────────────────────────
 
-ROTATE_STEP = 10.0   # degrees per keypress
-PAN_STEP = 0.1       # viewport units per keypress
-ZOOM_FACTOR = 1.3    # multiplicative zoom per keypress
+ROTATE_STEP = 10.0  # degrees per keypress
+PAN_STEP = 0.1  # viewport units per keypress
+ZOOM_FACTOR = 1.3  # multiplicative zoom per keypress
+INSPECTOR_WIDE_MIN = 100
 
 
 # ── Canvas Widget ───────────────────────────────────────────────────────────
@@ -53,6 +55,13 @@ class CrystalCanvas(Static):
         t = Text.from_ansi(self.frame_text, no_wrap=True, overflow="crop")
         return t
 
+    def on_click(self, event) -> None:
+        """Select the nearest projected atom using canvas-local coordinates."""
+        offset = event.get_content_offset(self)
+        if offset is not None:
+            self.app.select_screen_atom(row=offset.y, col=offset.x)
+        event.stop()
+
 
 # ── Main App ────────────────────────────────────────────────────────────────
 
@@ -69,6 +78,35 @@ class CrystalTUI(App):
         width: 1fr;
         height: 1fr;
         overflow: hidden hidden;
+    }
+    #chemistry-warning {
+        height: 1;
+        display: none;
+        color: #ffffff;
+        background: #8b0000;
+        overflow: hidden hidden;
+    }
+    #body {
+        width: 1fr;
+        height: 1fr;
+        layout: horizontal;
+    }
+    #inspector {
+        display: none;
+        width: 44;
+        height: 1fr;
+        padding: 0 1;
+        border-left: solid #666666;
+        overflow-y: auto;
+    }
+    Screen.narrow #body {
+        layout: vertical;
+    }
+    Screen.narrow #inspector {
+        width: 1fr;
+        height: 12;
+        border-left: none;
+        border-top: solid #666666;
     }
     #command-result {
         dock: bottom;
@@ -103,7 +141,7 @@ class CrystalTUI(App):
         Binding("u", "zoom_out", "Zoom out", show=True),
         Binding("o", "zoom_in", "Zoom in", show=True),
         Binding("shift+semicolon", "command", "Command", show=True),
-            Binding("x", "quit", "Quit", show=True),
+        Binding("x", "quit", "Quit", show=True),
     ]
 
     def __init__(
@@ -124,6 +162,7 @@ class CrystalTUI(App):
         self.crystal = crystal
         self._command_mode = False
         self._command_selection: list[dict[str, str]] = []
+        self._inspector_view: str | None = None
         self.controller = TerminalViewController(
             crystal,
             camera=camera or Camera.from_view_name(initial_view, crystal),
@@ -170,15 +209,20 @@ class CrystalTUI(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield CrystalCanvas(id="canvas")
-        yield Static("", id="command-result")
+        yield Static("", id="chemistry-warning", markup=False)
+        with Container(id="body"):
+            yield CrystalCanvas(id="canvas")
+            yield Static("", id="inspector", markup=False)
+        yield Static("", id="command-result", markup=False)
         yield Footer()
 
     def on_mount(self) -> None:
         self.query_one("#command-result", Static).display = False
+        self._update_layout()
         self._apply_observation(self._resize_and_observe())
 
     def on_resize(self) -> None:
+        self._update_layout()
         self._apply_observation(self._resize_and_observe())
 
     def on_key(self, event) -> None:
@@ -198,6 +242,18 @@ class CrystalTUI(App):
             event.prevent_default()
             event.stop()
             return
+        if self.controller.state.selection.mode:
+            observation = self._handle_selection_key(char, key)
+            if observation is not None:
+                if observation.state.selection.display_index is None:
+                    self._inspector_view = None
+                elif self._inspector_view is None:
+                    self._inspector_view = "full"
+                event.prevent_default()
+                event.stop()
+                self._sync_command_selection()
+                self._apply_observation(observation)
+                return
         handled = True
         observation: TerminalObservation | None = None
         if char == "j" or key in ("j", "left"):
@@ -210,8 +266,11 @@ class CrystalTUI(App):
             observation = self.controller.pan(dy=PAN_STEP)
         elif char == "w" or key == "w":
             observation = self.controller.orbit(pitch_deg=ROTATE_STEP)
-        elif char == "s" or key == "s":
+        elif char == "z" or key == "z":
             observation = self.controller.orbit(pitch_deg=-ROTATE_STEP)
+        elif char == "s" or key == "s":
+            observation = self.controller.set_selection_mode(True)
+            self._inspector_view = "full"
         elif char == "q" or key == "q":
             observation = self.controller.orbit(yaw_deg=-ROTATE_STEP)
         elif char == "e" or key == "e":
@@ -222,9 +281,11 @@ class CrystalTUI(App):
             observation = self.controller.orbit(roll_deg=ROTATE_STEP)
         elif char in ("[", "-", "u") or key in ("left_square_bracket", "minus", "u"):
             observation = self.controller.zoom(factor=1.0 / ZOOM_FACTOR)
-        elif char in ("]", "+", "=", "o") or key in (
-            "right_square_bracket", "plus", "equals_sign"
-        ) or key == "o":
+        elif (
+            char in ("]", "+", "=", "o")
+            or key in ("right_square_bracket", "plus", "equals_sign")
+            or key == "o"
+        ):
             observation = self.controller.zoom(factor=ZOOM_FACTOR)
         else:
             handled = False
@@ -234,6 +295,51 @@ class CrystalTUI(App):
             event.stop()
             assert observation is not None
             self._apply_observation(observation)
+
+    def _handle_selection_key(
+        self, char: str | None, key: str
+    ) -> TerminalObservation | None:
+        """Map selection-mode keys without changing crystal chemistry."""
+        if key in ("escape",):
+            return self.controller.clear_selection()
+        if char == "s" or key == "s":
+            return self.controller.set_selection_mode(False)
+        if key == "tab":
+            return self.controller.select_next(step=1)
+        if key in ("shift+tab", "backtab"):
+            return self.controller.select_next(step=-1)
+        if key in ("left",):
+            return self.controller.select_direction(dx=-1)
+        if key in ("right",):
+            return self.controller.select_direction(dx=1)
+        if key in ("up",):
+            return self.controller.select_direction(dy=-1)
+        if key in ("down",):
+            return self.controller.select_direction(dy=1)
+        if char == "[" or key == "left_square_bracket":
+            return self.controller.select_neighbor(step=-1)
+        if char == "]" or key == "right_square_bracket":
+            return self.controller.select_neighbor(step=1)
+        if key == "enter":
+            return self.controller.pin_selection()
+        return None
+
+    def select_screen_atom(self, *, row: int, col: int) -> None:
+        """Handle a mouse hit from the canvas widget."""
+        try:
+            observation = self.controller.select_screen(row=row, col=col)
+        except ValueError:
+            return
+        self._sync_command_selection()
+        self._inspector_view = "full"
+        self._apply_observation(observation)
+
+    def _sync_command_selection(self) -> None:
+        """Expose the primary selection to measurement commands."""
+        try:
+            self._command_selection = [self.controller.selected_reference()]
+        except ValueError:
+            self._command_selection = []
 
     # ── Rendering ───────────────────────────────────────────────────────
 
@@ -252,6 +358,38 @@ class CrystalTUI(App):
         canvas = self.query_one("#canvas", CrystalCanvas)
         canvas.frame_text = observation.frame
         self.sub_title = observation.title
+        self._update_warning_bar(observation)
+        self._update_inspector()
+
+    def _update_layout(self) -> None:
+        """Switch inspector placement without changing the rendered structure."""
+        self.screen.set_class(self.size.width < INSPECTOR_WIDE_MIN, "narrow")
+
+    def _update_warning_bar(self, observation: TerminalObservation) -> None:
+        warning_bar = self.query_one("#chemistry-warning", Static)
+        if not observation.warnings:
+            warning_bar.display = False
+            warning_bar.update("")
+            return
+        suffix = (
+            ""
+            if len(observation.warnings) == 1
+            else f" | +{len(observation.warnings) - 1} more"
+        )
+        warning_bar.update(f"! {observation.warnings[0]}{suffix}")
+        warning_bar.display = True
+
+    def _update_inspector(self) -> None:
+        inspector = self.query_one("#inspector", Static)
+        if (
+            self._inspector_view is None
+            or self.controller.state.selection.display_index is None
+        ):
+            inspector.display = False
+            inspector.update("")
+            return
+        inspector.update(self.controller.inspect_selected(view=self._inspector_view))
+        inspector.display = True
 
     def _redraw(self) -> None:
         """Compatibility wrapper for callers that request a visual refresh."""
@@ -301,38 +439,69 @@ class CrystalTUI(App):
         name, args = parts[0].lower(), parts[1:]
         if name == "help":
             return (
-                "select A... | focus A [depth] | distance A B [direct|mic] | "
+                "select A | next atom | inspect [A] | stereo [A] | name [A] | why [A] | "
+                "focus A [depth] | distance A B [direct|mic] | "
                 "angle A B C [direct|mic] | dihedral A B C D [direct|mic_chain] | clear",
                 None,
             )
         if name == "select":
-            if not args:
-                raise ValueError("select requires at least one atom label")
-            atoms = self.controller.inspect_atom(args)["atoms"]
-            self._command_selection = [
-                {"display_copy_id": atom["display_copy_id"]}
-                for atom in atoms
-            ]
-            return f"selected: {' '.join(atom['label'] for atom in atoms)}", None
+            if len(args) != 1:
+                raise ValueError("select requires exactly one atom label")
+            observation = self.controller.select_atom(args[0])
+            self._sync_command_selection()
+            self._inspector_view = "full"
+            return f"selected: {observation.state.selection.label}", observation
+        if name == "next":
+            if args != ["atom"]:
+                raise ValueError("next supports exactly: next atom")
+            observation = self.controller.select_next()
+            self._sync_command_selection()
+            self._inspector_view = "full"
+            return f"selected: {observation.state.selection.label}", observation
         if name == "clear":
             self._command_selection = []
-            return "selection cleared", self.controller.clear_focus()
+            self._inspector_view = None
+            self.controller.clear_selection()
+            return "selection and focus cleared", self.controller.clear_focus()
+        if name in {"inspect", "stereo", "name", "why"}:
+            if len(args) > 1:
+                raise ValueError(f"{name} accepts at most one atom label")
+            observation = (
+                self.controller.select_atom(args[0])
+                if args
+                else self.controller.observe()
+            )
+            self._inspector_view = "full" if name == "inspect" else name
+            return self.controller.inspect_selected(
+                view=self._inspector_view
+            ), observation
         if name == "focus":
             if not args and self._command_selection:
-                return "focused selection", self.controller.focus_selection(self._command_selection)
+                return "focused selection", self.controller.focus_selection(
+                    self._command_selection
+                )
             if not args:
                 raise ValueError("focus requires an atom label or a prior selection")
             depth = int(args[1]) if len(args) > 1 else 1
-            return f"focused {args[0]} with bond depth {depth}", self.controller.focus_local(args[0], bond_depth=depth)
+            return (
+                f"focused {args[0]} with bond depth {depth}",
+                self.controller.focus_local(args[0], bond_depth=depth),
+            )
         if name == "distance":
             references, mode = self._measurement_arguments(args, 2, "mic")
-            return self._format_measurement(self.controller.measure_distance(references, mode=mode)), None
+            return self._format_measurement(
+                self.controller.measure_distance(references, mode=mode)
+            ), None
         if name == "angle":
             references, mode = self._measurement_arguments(args, 3, "mic")
-            return self._format_measurement(self.controller.measure_angle(references, mode=mode)), None
+            return self._format_measurement(
+                self.controller.measure_angle(references, mode=mode)
+            ), None
         if name == "dihedral":
             references, mode = self._measurement_arguments(args, 4, "mic_chain")
-            return self._format_measurement(self.controller.measure_dihedral(references, mode=mode)), None
+            return self._format_measurement(
+                self.controller.measure_dihedral(references, mode=mode)
+            ), None
         raise ValueError(f"unknown command: {name}; use :help")
 
     def _measurement_arguments(
@@ -344,9 +513,9 @@ class CrystalTUI(App):
         modes = {"direct", "mic", "mic_chain"}
         mode = args[-1] if args and args[-1] in modes else default_mode
         labels = args[:-1] if args and args[-1] in modes else args
-        references: list[str | int | dict[str, str]] = list(labels) if labels else list(self._command_selection)
+        references: list[str | int | dict[str, str]] = list(labels)
         if len(references) != count:
-            raise ValueError(f"measurement requires {count} atoms or a {count}-atom selection")
+            raise ValueError(f"measurement requires {count} explicit atom labels")
         return references, mode
 
     @staticmethod
@@ -363,33 +532,55 @@ class CrystalTUI(App):
     # ── Actions (toggle bindings only; movement is in on_key) ─────────
 
     def action_toggle_proj(self) -> None:
-        projection = "perspective" if self.camera.projection.value == "orthographic" else "orthographic"
+        projection = (
+            "perspective"
+            if self.camera.projection.value == "orthographic"
+            else "orthographic"
+        )
         self._apply_observation(self.controller.set_camera(projection=projection))
 
     def action_toggle_cell(self) -> None:
-        self._apply_observation(self.controller.set_display(show_cell=not self._show_cell))
+        self._apply_observation(
+            self.controller.set_display(show_cell=not self._show_cell)
+        )
 
     def action_toggle_bonds(self) -> None:
-        self._apply_observation(self.controller.set_display(show_bonds=not self._show_bonds))
+        self._apply_observation(
+            self.controller.set_display(show_bonds=not self._show_bonds)
+        )
 
     def action_toggle_mono(self) -> None:
         self._apply_observation(self.controller.set_display(mono=not self._mono))
 
     def action_toggle_label(self) -> None:
         """Cycle through label modes: element → label → molecule → dot."""
-        idx = LABEL_MODES.index(self._label_mode) if self._label_mode in LABEL_MODES else 0
+        idx = (
+            LABEL_MODES.index(self._label_mode)
+            if self._label_mode in LABEL_MODES
+            else 0
+        )
         self._apply_observation(
-            self.controller.set_display(label_mode=LABEL_MODES[(idx + 1) % len(LABEL_MODES)])
+            self.controller.set_display(
+                label_mode=LABEL_MODES[(idx + 1) % len(LABEL_MODES)]
+            )
         )
 
     def action_toggle_minor(self) -> None:
-        self._apply_observation(self.controller.set_display(show_minor=not self._show_minor))
+        self._apply_observation(
+            self.controller.set_display(show_minor=not self._show_minor)
+        )
 
     def action_cycle_level(self) -> None:
         """Cycle display level: atom → molecule."""
-        idx = DISPLAY_LEVELS.index(self._display_level) if self._display_level in DISPLAY_LEVELS else 0
+        idx = (
+            DISPLAY_LEVELS.index(self._display_level)
+            if self._display_level in DISPLAY_LEVELS
+            else 0
+        )
         self._apply_observation(
-            self.controller.set_display(display_level=DISPLAY_LEVELS[(idx + 1) % len(DISPLAY_LEVELS)])
+            self.controller.set_display(
+                display_level=DISPLAY_LEVELS[(idx + 1) % len(DISPLAY_LEVELS)]
+            )
         )
 
     def action_reset_view(self) -> None:

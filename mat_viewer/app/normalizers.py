@@ -810,4 +810,29 @@ _AUTO_LIGAND_VALUE = "__auto__"
 _PERF_FAST_MS = 50.0
 _PERF_SLOW_MS = 500.0
 
+
+def _normalize_atom_property_color(raw: Any) -> dict[str, Any] | None:
+    """Validate the REST/UI property-colour payload against the public spec."""
+
+    if raw in (None, {}):
+        return None
+    from dataclasses import asdict
+
+    from ..properties import (
+        build_color_lut,
+        coerce_atom_property_color_spec,
+    )
+
+    spec = coerce_atom_property_color_spec(raw)
+    assert spec is not None
+    # Fail during state normalisation instead of in the asynchronous renderer.
+    build_color_lut(spec.colormap)
+    payload = asdict(spec)
+    payload["fields"] = list(spec.fields)
+    payload["value_range"] = (
+        None if spec.value_range is None else list(spec.value_range)
+    )
+    return payload
+
+
 __all__ = [name for name in globals() if not name.startswith("__")]

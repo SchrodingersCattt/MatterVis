@@ -14,10 +14,10 @@ from .text import terminal_text
 def resolve_atom_references(crystal, references: Iterable[str | int | dict[str, Any]]) -> tuple[int, ...]:
     """Resolve explicit atom references to display indices without guessing.
 
-    Strings first match an exact ``display_copy_id`` and then an exact,
-    case-sensitive source label. Integer references are ``source_index`` values.
-    A mapping accepts exactly one of ``label``, ``source_index`` or
-    ``display_copy_id``. Label and source references intentionally return every
+    Strings first match an exact ``atom_id``, then ``display_copy_id``, and then
+    an exact, case-sensitive source label. Integer references are
+    ``source_index`` values. A mapping accepts exactly one declared namespace.
+    Stable atom IDs, labels, and source references intentionally return every
     currently manifested periodic copy in CrystalIR order.
     """
     resolved: list[int] = []
@@ -25,14 +25,19 @@ def resolve_atom_references(crystal, references: Iterable[str | int | dict[str, 
         if isinstance(reference, int) and not isinstance(reference, bool):
             matches = [index for index, atom in enumerate(crystal.atoms) if atom.source_index == reference]
         elif isinstance(reference, str):
+            exact_id = [index for index, atom in enumerate(crystal.atoms) if atom.atom_id == reference]
             exact_copy = [index for index, atom in enumerate(crystal.atoms) if atom.display_copy_id == reference]
-            matches = exact_copy or [index for index, atom in enumerate(crystal.atoms) if atom.label == reference]
+            matches = exact_id or exact_copy or [index for index, atom in enumerate(crystal.atoms) if atom.label == reference]
         elif isinstance(reference, dict):
             keys = set(reference)
-            if len(keys) != 1 or not keys <= {"label", "source_index", "display_copy_id"}:
-                raise ValueError("atom reference must contain exactly one of label, source_index, display_copy_id")
+            if len(keys) != 1 or not keys <= {"atom_id", "label", "source_index", "display_copy_id"}:
+                raise ValueError("atom reference must contain exactly one of atom_id, label, source_index, display_copy_id")
             key, value = next(iter(reference.items()))
-            if key == "label":
+            if key == "atom_id":
+                if not isinstance(value, str):
+                    raise TypeError("atom_id reference must be a string")
+                matches = [index for index, atom in enumerate(crystal.atoms) if atom.atom_id == value]
+            elif key == "label":
                 if not isinstance(value, str):
                     raise TypeError("atom label reference must be a string")
                 matches = [index for index, atom in enumerate(crystal.atoms) if atom.label == value]
@@ -171,17 +176,23 @@ def inspect_local_geometry(
     for neighbor_index, bond in neighbors:
         direct_vector = np.asarray(crystal.atoms[neighbor_index].cart - center.cart, dtype=float)
         mic_vector, image_shift = _minimum_image_vector(crystal, direct_vector)
+        rendered_image_relation = (
+            bond.image_relation
+            if bond.i == center_index
+            else tuple(-value for value in bond.image_relation)
+        )
         vectors[neighbor_index] = mic_vector
         bond_records.append({
             "neighbor_display_index": neighbor_index,
             "neighbor_display_copy_id": terminal_text(crystal.atoms[neighbor_index].display_copy_id),
             "neighbor_label": terminal_text(crystal.atoms[neighbor_index].label),
             "neighbor_element": terminal_text(crystal.atoms[neighbor_index].element),
+            "neighbor_atom_id": terminal_text(crystal.atoms[neighbor_index].atom_id),
             "rendered_distance": float(bond.distance),
             "direct_distance": float(np.linalg.norm(direct_vector)),
             "mic_distance": float(np.linalg.norm(mic_vector)),
             "nearest_image_shift": list(image_shift),
-            "rendered_image_relation": list(bond.image_relation),
+            "rendered_image_relation": list(rendered_image_relation),
         })
 
     angles: list[dict[str, Any]] = []
@@ -209,6 +220,7 @@ def inspect_local_geometry(
             "display_copy_id": terminal_text(center.display_copy_id),
             "label": terminal_text(center.label),
             "element": terminal_text(center.element),
+            "atom_id": terminal_text(center.atom_id),
         },
         "coordination_number": len(neighbors),
         "bonds": bond_records,
@@ -399,6 +411,7 @@ def _atom_record(crystal, index: int, *, show_minor: bool) -> dict[str, Any]:
         "occupancy": atom.occupancy,
         "partial_occupancy": atom.occupancy < 0.999,
         "disorder_group": atom.disorder_group,
+        "source_disorder": terminal_text(atom.disorder),
         "render_classification": "minor" if atom.is_minor else "not_minor",
         "classification_provenance_available": False,
         "source_molecule_index": atom.source_molecule_index,

@@ -31,6 +31,25 @@ flowchart LR
 
 ## Builders
 
+### `mat_viewer.agent.load_structure(..., bond_scale=None)`
+
+The agent-facing loader exposes MolCrysKit's global bond-perception coefficient
+for CIF and ASE-readable inputs. A positive explicit value is forwarded through
+canonical loading, molecule grouping, and scene construction. Omit it to retain
+the existing default. The CLI exposes the same control as `--bond-scale`.
+
+### Auxiliary cells
+
+`agent.prepare_render` and `agent.render` accept `cell_overlays=[...]`.
+The same list may be stored in a scene under the `cell_overlays` key; an
+explicit argument wins. Each entry supplies an ID, a 3 by 3 world-space matrix,
+an optional origin, color, width, dash pattern, alpha, and depth-test flag.
+Auxiliary cell corners participate in automatic camera fitting.
+
+These cells are annotations only. They do not change the structure's canonical
+lattice, atom coordinates, bonds, or periodic-image policy. See
+[`cell_overlays_api.md`](cell_overlays_api.md) for the schema and examples.
+
 ### `mat_viewer.scene.build_scene_from_cif(...)`
 
 Parses a CIF and returns a scene dict consumable by
@@ -62,6 +81,12 @@ Parses a CIF and returns a scene dict consumable by
   reassembly is performed, and bonds are found purely from the stored
   Cartesian coordinates. The 100 Å dummy cells that CIF exporters
   sometimes write around clusters are ignored.
+
+**CIF input notes.** The `_asym_index` column
+(`_atom_site.label_asym_id` mapped to a 0-based index) may be `None` in CIF
+inputs that lack `_atom_site_symmetry_multiplicity` or related fields. When
+`_asym_index` is absent, the loader bridge falls back to using the stable
+row-order index of each site as its asymmetric-unit identifier.
 
 ### `mat_viewer.render.assembly.build_scene_from_atoms(atoms, *, style=None, ...)`
 
@@ -148,8 +173,12 @@ honours:
 - `scatter_bond_contrast_color` — optional replacement for a fast bond half
   whose colour has insufficient luminance contrast with the background.
 - `disorder` — `opacity`, `dashed_bonds`, `outline_rings`,
-  `color_shift`, or `none`. This is independent from `material` and
-  `style`; disorder no longer implies transparent atoms.
+  `color_shift`, or `none`. Occupancy-driven opacity is now applied by
+  default to **all** loader-confirmed disordered atoms (not only
+  unresolved sites): each disordered atom's alpha is proportional to its
+  crystallographic occupancy. Set `disorder="none"` to opt out and render
+  disordered atoms fully opaque. This is independent from `material` and
+  `style`.
 - Legacy aliases: `fast_rendering=True` maps to `material="flat"`;
   `minor_wireframe=True` maps to `disorder="outline_rings"`; and
   `minor_opacity` only changes visibility when `disorder="opacity"`.
@@ -173,6 +202,16 @@ honours:
   (default `1.8`). Larger values reduce perspective depth when
   `projection="perspective"`; orthographic views keep the same visual
   scale but still use the eye direction.
+- `ortho_scale` — explicit half-height of the orthographic viewing
+  volume in world (Å) units. When set, overrides the auto-fitted scale
+  derived from visible atom bounds. Useful for locking panel sizes
+  across a figure grid.
+- `camera_fit` — strategy for fitting the camera to content.
+  `"cell_and_visible_atoms"` (default when cells are drawn) fits to
+  both cell corners and visible atoms. `"visible_atoms"` fits only to
+  atomistic content, ignoring cell geometry — use this when background
+  atoms (hydrogen, etc.) are hidden and the cell would waste viewport
+  space.
 
 Anchored scientific arrows are supplied with `vector_overlays=` or
 `scene["vector_overlays"]`; see [vector overlays](vector_overlays_api.md).

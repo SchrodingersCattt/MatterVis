@@ -8,6 +8,7 @@ from .traces_overlays import _minor_outline_traces
 from .serialize import _round_coord_arrays
 from ..style.bond_groups import bond_groups_cache_key
 
+
 def _hashable_selector(selector: dict | None) -> tuple:
     if not isinstance(selector, dict):
         return ()
@@ -73,9 +74,8 @@ def _atom_traces_for_partition(
             ortep_atom_fill_traces,
         )
 
-        is_open_ortep = (
-            bool(sub_style.get("ortep_silhouette_outline", False))
-            and bool(sub_style.get("ortep_octant_hatching", False))
+        is_open_ortep = bool(sub_style.get("ortep_silhouette_outline", False)) and bool(
+            sub_style.get("ortep_octant_hatching", False)
         )
         if is_open_ortep:
             return ortep_atom_fill_traces(sub_scene, sub_style)
@@ -117,6 +117,17 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
     # mesh_lighting as a hashable tuple (or None) for caching.
     _ml = style.get("mesh_lighting")
     _ml_key = tuple(sorted(_ml.items())) if isinstance(_ml, dict) else None
+    _property = style.get("atom_property_color") or {}
+    _property_key = (
+        tuple(_property.get("fields") or ()),
+        str(_property.get("reduction") or ""),
+        str(_property.get("component") or ""),
+        tuple(_property.get("range") or ()),
+        _property.get("center"),
+        str(_property.get("nan_color") or ""),
+        str(_property.get("lut_hash") or ""),
+        str(_property.get("manifest_hash") or ""),
+    )
     key = (
         bool(use_fast),
         str(style.get("material", "mesh")),
@@ -149,6 +160,7 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
         style.get("ortep_hydrogen_radius"),
         _atom_groups_cache_key(atom_groups),
         bond_groups_cache_key(bond_groups),
+        _property_key,
     )
     if key in cache:
         return cache[key]
@@ -187,8 +199,10 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
 
         fragment_labels = scene.get("atom_fragment_labels") or None
         tagged_atoms = tag_atoms_with_groups(
-            scene["draw_atoms"], atom_groups,
-            scene_material=scene_material, scene_style=scene_style,
+            scene["draw_atoms"],
+            atom_groups,
+            scene_material=scene_material,
+            scene_style=scene_style,
             fragment_labels=fragment_labels,
         )
         # Mutate the scene so ``_bond_segments`` (called below) sees
@@ -220,7 +234,9 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
                 )
                 sub_scene = _atom_subscene(scene, part_atoms)
                 atom_traces.extend(
-                    _atom_traces_for_partition(sub_scene, sub_style, use_fast=part_use_fast)
+                    _atom_traces_for_partition(
+                        sub_scene, sub_style, use_fast=part_use_fast
+                    )
                 )
             # Bonds use the (mutated) scene with tagged atoms so the
             # endpoint visibility check works. Per-atom-group style
@@ -239,7 +255,8 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
                 bond_traces = _wireframe_bond_traces(scene, style)
             elif effective_bond_style == "ortep":
                 bond_traces = (
-                    _bond_scatter_traces(scene, style) if use_fast
+                    _bond_scatter_traces(scene, style)
+                    if use_fast
                     else _bond_mesh_traces(scene, style)
                 )
             elif use_fast:
@@ -249,10 +266,18 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
             minor_outline = _minor_outline_traces(scene, style)
             minor_bonds = _minor_bond_wireframe_traces(scene, style)
             payload = {
-                "atom_dicts": [_round_coord_arrays(_trace_to_dict(tr)) for tr in atom_traces],
-                "bond_dicts": [_round_coord_arrays(_trace_to_dict(tr)) for tr in bond_traces],
-                "minor_outline_dicts": [_round_coord_arrays(_trace_to_dict(tr)) for tr in minor_outline],
-                "minor_bond_dicts": [_round_coord_arrays(_trace_to_dict(tr)) for tr in minor_bonds],
+                "atom_dicts": [
+                    _round_coord_arrays(_trace_to_dict(tr)) for tr in atom_traces
+                ],
+                "bond_dicts": [
+                    _round_coord_arrays(_trace_to_dict(tr)) for tr in bond_traces
+                ],
+                "minor_outline_dicts": [
+                    _round_coord_arrays(_trace_to_dict(tr)) for tr in minor_outline
+                ],
+                "minor_bond_dicts": [
+                    _round_coord_arrays(_trace_to_dict(tr)) for tr in minor_bonds
+                ],
             }
             cache[key] = payload
             return payload
@@ -286,9 +311,8 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
         #      with no shading or lighting — the bonds are plain straight
         #      strokes, not shaded cylinders.  Flat scatter bonds match
         #      that convention exactly.
-        is_open_ortep = (
-            bool(style.get("ortep_silhouette_outline", False))
-            and bool(style.get("ortep_octant_hatching", False))
+        is_open_ortep = bool(style.get("ortep_silhouette_outline", False)) and bool(
+            style.get("ortep_octant_hatching", False)
         )
         if is_open_ortep:
             # Open-ellipsoid layered z-stack (far → near):
@@ -308,7 +332,8 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
                 else ortep_atom_mesh_traces(scene, style)
             )
             bond_traces = (
-                _bond_scatter_traces(scene, style) if use_fast
+                _bond_scatter_traces(scene, style)
+                if use_fast
                 else _bond_mesh_traces(scene, style)
             )
         atom_traces.extend(ortep_octant_shade_traces(scene, style))
@@ -325,14 +350,17 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
     payload = {
         "atom_dicts": [_round_coord_arrays(_trace_to_dict(tr)) for tr in atom_traces],
         "bond_dicts": [_round_coord_arrays(_trace_to_dict(tr)) for tr in bond_traces],
-        "minor_outline_dicts": [_round_coord_arrays(_trace_to_dict(tr)) for tr in minor_outline],
-        "minor_bond_dicts": [_round_coord_arrays(_trace_to_dict(tr)) for tr in minor_bonds],
+        "minor_outline_dicts": [
+            _round_coord_arrays(_trace_to_dict(tr)) for tr in minor_outline
+        ],
+        "minor_bond_dicts": [
+            _round_coord_arrays(_trace_to_dict(tr)) for tr in minor_bonds
+        ],
     }
     cache[key] = payload
     if original_bonds is not None:
         scene["bonds"] = original_bonds
     return payload
-
 
 
 # Export all helper symbols, including private ones, for renderer.py facade compatibility.

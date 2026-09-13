@@ -249,6 +249,7 @@ def _rasterize_spheres(
     camera_positions: np.ndarray,
     atomic_numbers: np.ndarray,
     colors: np.ndarray,
+    atom_colors: np.ndarray,
     radii: np.ndarray,
     rgba: np.ndarray,
     depth_buffer: np.ndarray,
@@ -347,15 +348,14 @@ def _rasterize_spheres(
                     normal_x * light_x + normal_y * light_y + normal_z * light_z
                 )
                 depth_buffer[pixel_y, pixel_x] = pixel_depth
-                rgba[pixel_y, pixel_x, 0] = min(
-                    255, int(colors[atomic_number, 0] * illumination + 0.5)
+                color = (
+                    atom_colors[atom_index]
+                    if atom_colors.shape[0]
+                    else colors[atomic_number]
                 )
-                rgba[pixel_y, pixel_x, 1] = min(
-                    255, int(colors[atomic_number, 1] * illumination + 0.5)
-                )
-                rgba[pixel_y, pixel_x, 2] = min(
-                    255, int(colors[atomic_number, 2] * illumination + 0.5)
-                )
+                rgba[pixel_y, pixel_x, 0] = min(255, int(color[0] * illumination + 0.5))
+                rgba[pixel_y, pixel_x, 1] = min(255, int(color[1] * illumination + 0.5))
+                rgba[pixel_y, pixel_x, 2] = min(255, int(color[2] * illumination + 0.5))
                 rgba[pixel_y, pixel_x, 3] = 255
 
 
@@ -364,7 +364,9 @@ def _rasterize_bonds(
     camera_positions: np.ndarray,
     atomic_numbers: np.ndarray,
     pairs: np.ndarray,
+    second_positions: np.ndarray,
     colors: np.ndarray,
+    atom_colors: np.ndarray,
     rgba: np.ndarray,
     depth_buffer: np.ndarray,
     projection: int,
@@ -386,7 +388,7 @@ def _rasterize_bonds(
         if not show_hydrogen and (first_number == 1 or second_number == 1):
             continue
         first = camera_positions[first_index]
-        second = camera_positions[second_index]
+        second = second_positions[bond_index]
         depth0 = -first[2]
         depth1 = -second[2]
         if depth0 < near or depth0 > far or depth1 < near or depth1 > far:
@@ -444,17 +446,16 @@ def _rasterize_bonds(
                     continue
                 atom_index = first_index if parameter <= 0.5 else second_index
                 atomic_number = int(atomic_numbers[atom_index])
+                color = (
+                    atom_colors[atom_index]
+                    if atom_colors.shape[0]
+                    else colors[atomic_number]
+                )
                 illumination = 0.72 + 0.28 * radial
                 depth_buffer[pixel_y, pixel_x] = pixel_depth
-                rgba[pixel_y, pixel_x, 0] = min(
-                    255, int(colors[atomic_number, 0] * illumination + 0.5)
-                )
-                rgba[pixel_y, pixel_x, 1] = min(
-                    255, int(colors[atomic_number, 1] * illumination + 0.5)
-                )
-                rgba[pixel_y, pixel_x, 2] = min(
-                    255, int(colors[atomic_number, 2] * illumination + 0.5)
-                )
+                rgba[pixel_y, pixel_x, 0] = min(255, int(color[0] * illumination + 0.5))
+                rgba[pixel_y, pixel_x, 1] = min(255, int(color[1] * illumination + 0.5))
+                rgba[pixel_y, pixel_x, 2] = min(255, int(color[2] * illumination + 0.5))
                 rgba[pixel_y, pixel_x, 3] = 255
 
 
@@ -559,11 +560,35 @@ def render_projected_frame(
     if bonds is not None and len(bonds.pairs):
         if not np.isfinite(bond_radius) or bond_radius <= 0.0:
             raise ValueError("bond_radius must be finite and positive")
+        pairs = np.ascontiguousarray(bonds.pairs, dtype=np.int32)
+        vectors = getattr(bonds, "vectors", None)
+        if vectors is None:
+            second_positions = np.ascontiguousarray(
+                spheres.camera_positions[pairs[:, 1]],
+                dtype=np.float32,
+            )
+        else:
+            vectors = np.asarray(vectors, dtype=np.float32)
+            if vectors.shape != (len(pairs), 3):
+                raise ValueError("bond vectors must have shape (M, 3)")
+            world_endpoints = (
+                np.asarray(frame.positions[pairs[:, 0]], dtype=np.float32) + vectors
+            )
+            second_positions = np.ascontiguousarray(
+                _camera_points(world_endpoints, camera),
+                dtype=np.float32,
+            )
         _rasterize_bonds(
             spheres.camera_positions,
             spheres.atomic_numbers,
-            bonds.pairs,
+            pairs,
+            second_positions,
             spheres.colors,
+            (
+                frame.atom_colors
+                if frame.atom_colors is not None
+                else np.empty((0, 3), dtype=np.uint8)
+            ),
             rgba,
             depth,
             projection,
@@ -578,6 +603,11 @@ def render_projected_frame(
         spheres.camera_positions,
         spheres.atomic_numbers,
         spheres.colors,
+        (
+            frame.atom_colors
+            if frame.atom_colors is not None
+            else np.empty((0, 3), dtype=np.uint8)
+        ),
         spheres.radii,
         rgba,
         depth,

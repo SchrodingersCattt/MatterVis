@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from hashlib import sha256
 import json
 import math
@@ -71,6 +71,7 @@ def _bundle_to_frame(bundle: Any, *, source_index: int) -> FrameBatch:
         timestep=source_index,
         source_index=source_index,
         info={"frame_index": source_index, **dict(bundle.frame_info)},
+        atom_arrays=dict(bundle.atom_arrays),
     )
 
 
@@ -81,13 +82,20 @@ def load_frame_batches(
     type_map: Sequence[str] | None,
     frame_indices: Sequence[int],
     repeat: tuple[int, int, int],
+    atom_property_fields: Sequence[str] = (),
 ) -> tuple[FrameBatch, ...]:
     """Load any supported format into the one renderer-facing array class."""
 
     if _is_lammps_dump(path, input_format):
         dump = index_lammps_dump(path)
+        columns = tuple(
+            field.split(":", 1)[1] if field.startswith("column:") else field
+            for field in atom_property_fields
+            if not field.startswith("sidecar:")
+        )
         frames = tuple(
-            read_lammps_frame(dump, index, type_map=type_map) for index in frame_indices
+            read_lammps_frame(dump, index, type_map=type_map, property_columns=columns)
+            for index in frame_indices
         )
     else:
         resolved = str(input_format or "").lower()
@@ -100,7 +108,15 @@ def load_frame_batches(
                 frame_indices=frame_indices,
             )
             frames = tuple(
-                _bundle_to_frame(item.bundle, source_index=item.index)
+                replace(
+                    _bundle_to_frame(item.bundle, source_index=item.index),
+                    atom_arrays={
+                        name: values
+                        for name, values in item.atom_arrays.items()
+                        if f"array:{name}" in atom_property_fields
+                        or name in atom_property_fields
+                    },
+                )
                 for item in loaded.frames
             )
         else:
@@ -111,12 +127,52 @@ def load_frame_batches(
                 frame_indices=frame_indices,
             )
             frames = tuple(
-                frame_batch_from_ase(item.atoms, source_index=item.index)
+                replace(
+                    frame_batch_from_ase(item.atoms, source_index=item.index),
+                    atom_arrays={
+                        name: values
+                        for name, values in item.atom_arrays.items()
+                        if f"array:{name}" in atom_property_fields
+                        or name in atom_property_fields
+                        or name in {"id", "ids", "label", "labels"}
+                    },
+                )
                 for item in loaded.frames
             )
     if repeat != (1, 1, 1):
         frames = tuple(repeat_frame(frame, repeat) for frame in frames)
     return frames
+
+
+def _frame_camera_points(
+    frames: Sequence[FrameBatch],
+    *,
+    show_cell: bool | None,
+    show_hydrogen: bool,
+) -> np.ndarray:
+    """Return geometry that is actually visible in the requested viewport."""
+
+    chunks: list[np.ndarray] = []
+    for frame in frames:
+        positions = frame.positions
+        if not show_hydrogen:
+            positions = positions[frame.atomic_numbers != 1]
+        if len(positions):
+            chunks.append(np.asarray(positions, dtype=float))
+        cell_is_visible = (
+            bool(np.any(frame.pbc)) if show_cell is None else bool(show_cell)
+        )
+        if cell_is_visible:
+            chunks.append(frame_box_corners(frame))
+    if chunks:
+        return np.concatenate(chunks, axis=0)
+    return np.concatenate([frame_box_corners(frame) for frame in frames], axis=0)
+
+
+def _foreground_pixel_count(
+    rgba: np.ndarray, background: tuple[int, int, int, int]
+) -> int:
+    return int(np.count_nonzero(np.any(rgba != np.asarray(background), axis=2)))
 
 
 def fit_shared_frame_camera(
@@ -132,12 +188,17 @@ def fit_shared_frame_camera(
     fit_multiplier: float,
     zoom: float,
     framing_margin: float,
+    ortho_scale: float | None,
+    show_cell: bool | None,
+    show_hydrogen: bool,
 ) -> CameraSpec:
-    """Fit one immutable viewport to the union of selected frame bounds."""
+    """Fit one immutable viewport to visible atoms and optional cell edges."""
 
     if not frames:
         raise ValueError("cannot fit a camera without frames")
-    points = np.concatenate([frame_box_corners(frame) for frame in frames], axis=0)
+    points = _frame_camera_points(
+        frames, show_cell=show_cell, show_hydrogen=show_hydrogen
+    )
     lower, upper = np.min(points, axis=0), np.max(points, axis=0)
     target = (lower + upper) * 0.5
     radius = max(float(np.linalg.norm(points - target, axis=1).max()), 1.0)
@@ -171,7 +232,12 @@ def fit_shared_frame_camera(
     aspect = width / height
     half_width = float(np.max(np.abs(relative @ right)))
     half_height = float(np.max(np.abs(relative @ screen_up)))
-    ortho_scale = max(half_height, half_width / aspect, 0.5) * framing_margin / zoom
+    fitted_ortho_scale = (
+        max(half_height, half_width / aspect, 0.5) * framing_margin / zoom
+    )
+    resolved_ortho_scale = (
+        float(ortho_scale) if ortho_scale is not None else fitted_ortho_scale
+    )
     if camera_position is not None:
         position = np.asarray(camera_position, dtype=float)
         distance = float(np.linalg.norm(position - target))
@@ -196,7 +262,7 @@ def fit_shared_frame_camera(
         projection=projection,
         near=near,
         far=far,
-        ortho_scale=ortho_scale,
+        ortho_scale=resolved_ortho_scale,
     )
 
 
@@ -236,11 +302,14 @@ def _render_one(
     bonds: Any,
     bond_radius: float,
     overlay_primitives: Iterable[Any],
+    content_width: int | None = None,
+    property_metadata_payload: dict[str, Any] | None = None,
 ) -> np.ndarray:
+    local_width = int(content_width or width)
     rendered = render_frame_batch(
         frame,
         camera,
-        width=width * scale,
+        width=local_width * scale,
         height=height * scale,
         atom_scale=atom_scale,
         background=background,
@@ -266,6 +335,11 @@ def _render_one(
         primitives,
         metadata=metadata,
     )
+    if local_width != width:
+        canvas = np.empty((height * scale, width * scale, 4), dtype=np.uint8)
+        canvas[...] = np.asarray(background, dtype=np.uint8)
+        canvas[:, : local_width * scale] = rgba
+        rgba = canvas
     if scale != 1:
         from PIL import Image
 
@@ -274,6 +348,20 @@ def _render_one(
                 (width, height), resample=Image.Resampling.LANCZOS
             )
         )
+    if property_metadata_payload and property_metadata_payload.get("show_colorbar"):
+        from types import SimpleNamespace
+        from PIL import Image
+        from .property_colorbar import draw_raster_colorbar
+
+        image = Image.fromarray(rgba)
+        draw_raster_colorbar(
+            image,
+            SimpleNamespace(
+                metadata={"atom_property_color": property_metadata_payload},
+                background=tuple(channel / 255.0 for channel in background),
+            ),
+        )
+        rgba = np.asarray(image)
     return rgba
 
 
@@ -297,6 +385,7 @@ def render_array_input(
     fit_multiplier: float,
     zoom: float,
     framing_margin: float,
+    ortho_scale: float | None,
     atom_scale: float,
     background: tuple[int, int, int, int],
     show_hydrogen: bool,
@@ -315,6 +404,8 @@ def render_array_input(
     animation_time: Any = None,
     frame_annotation: Any = None,
     profile_path: str | Path | None = None,
+    atom_property_color: Any = None,
+    property_data: str | Path | None = None,
 ) -> BatchPipelineResult:
     """Render any supported input after conversion to canonical arrays."""
 
@@ -323,16 +414,86 @@ def render_array_input(
     output = Path(output_path).expanduser().resolve()
     if output.suffix.lower() not in {".png", ".gif", ".mp4"}:
         raise ValueError("batch renderer output must be PNG, GIF, or MP4")
+    import time
+
+    property_started = time.perf_counter()
+    property_spec = None
+    if atom_property_color is not None:
+        from ..properties import coerce_atom_property_color_spec
+
+        property_spec = coerce_atom_property_color_spec(atom_property_color)
     frames = load_frame_batches(
         input_path,
         input_format=input_format,
         type_map=type_map,
         frame_indices=frame_indices,
-        repeat=repeat,
+        repeat=(1, 1, 1),
+        atom_property_fields=() if property_spec is None else property_spec.fields,
     )
+    loaded_property = time.perf_counter()
+    property_context = None
+    property_metadata_payload = None
+    if property_spec is not None:
+        from ..properties import (
+            map_property_colors,
+            property_metadata,
+            resolve_frame_batch_property_context,
+        )
+        from ..loader.property_sidecar import load_atom_property_manifest
+
+        manifest = (
+            load_atom_property_manifest(property_data)
+            if property_data is not None
+            else None
+        )
+        property_context = resolve_frame_batch_property_context(
+            frames,
+            property_spec,
+            input_path=str(Path(input_path).expanduser().resolve()),
+            embedded_source=(
+                "column" if _is_lammps_dump(input_path, input_format) else "array"
+            ),
+            manifest=manifest,
+        )
+        frames = tuple(
+            replace(
+                frame,
+                atom_colors=map_property_colors(
+                    property_context.frame(frame.source_index).values,
+                    property_context.scale,
+                    nan_color=property_spec.nan_color,
+                )[:, :3],
+            )
+            for frame in frames
+        )
+        property_metadata_payload = property_metadata(
+            property_spec,
+            property_context.frames[0],
+            property_context.scale,
+            manifest_hash=property_context.manifest_hash,
+        )
+    aligned_property = time.perf_counter()
+    if repeat != (1, 1, 1):
+        frames = tuple(repeat_frame(frame, repeat) for frame in frames)
+    repeated_property = time.perf_counter()
+    cell_is_visible = (
+        any(bool(np.any(frame.pbc)) for frame in frames)
+        if show_cell is None
+        else bool(show_cell)
+    )
+    content_width = width
+    if property_metadata_payload and property_metadata_payload["show_colorbar"]:
+        reserve = min(max(float(width) * 0.14, 72.0), 128.0)
+        content_width = max(1, int(round(width - reserve)))
+        property_metadata_payload["colorbar_rect"] = [
+            content_width / width,
+            0.08,
+            reserve / width,
+            0.84,
+        ]
     camera = fit_shared_frame_camera(
         frames,
-        width=width,
+        width=content_width,
         height=height,
         projection=projection,
         camera_axis=camera_axis,
@@ -342,6 +503,9 @@ def render_array_input(
         fit_multiplier=fit_multiplier,
         zoom=zoom,
         framing_margin=framing_margin,
+        ortho_scale=ortho_scale,
+        show_cell=show_cell,
+        show_hydrogen=show_hydrogen,
     )
     overlay_primitives = ()
     if vector_overlays:
@@ -412,6 +576,7 @@ def render_array_input(
         from .fast_animation import _mp4_writer
 
         writer = _mp4_writer(output, width=width, height=height, fps=fps)
+    foreground_pixels: list[int] = []
     try:
         for ordinal, frame in enumerate(frames):
             bonds = (
@@ -441,6 +606,8 @@ def render_array_input(
                 bonds=bonds,
                 bond_radius=bond_radius,
                 overlay_primitives=overlay_primitives,
+                content_width=content_width,
+                property_metadata_payload=property_metadata_payload,
             )
             if time_series or annotation_series:
                 from PIL import Image
@@ -459,6 +626,14 @@ def render_array_input(
                         annotation_series.spec.position,
                     )
                 rgba = np.asarray(image)
+            content = rgba[:, :content_width]
+            foreground = _foreground_pixel_count(content, background)
+            if frame.natoms and foreground == 0:
+                raise RuntimeError(
+                    "batch renderer produced an all-background frame "
+                    f"for source frame {frame.source_index}"
+                )
+            foreground_pixels.append(foreground)
             if writer is None:
                 from PIL import Image
 
@@ -477,6 +652,16 @@ def render_array_input(
         "atom_frames": int(sum(frame.natoms for frame in frames)),
         "shared_viewport": True,
         "camera": asdict(camera),
+        "camera_fit": (
+            "cell_and_visible_atoms" if cell_is_visible else "visible_atoms"
+        ),
+        "foreground_pixels": foreground_pixels,
+        "atom_property_color": property_metadata_payload,
+        "property_timing_s": {
+            "load_selected_fields": loaded_property - property_started,
+            "alignment_reduction_mapping": aligned_property - loaded_property,
+            "repeat": repeated_property - aligned_property,
+        },
     }
     if profile_path is not None:
         destination = Path(profile_path).expanduser().resolve()

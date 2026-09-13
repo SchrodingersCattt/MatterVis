@@ -319,6 +319,51 @@ def bond_primitives(
     )
 
 
+def bond_line_primitives(
+    semantic_id: str,
+    start: Iterable[float],
+    end: Iterable[float],
+    width_px: float,
+    start_color: Any,
+    end_color: Any | None = None,
+    *,
+    alpha: float = 1.0,
+    metadata: dict[str, Any] | None = None,
+) -> tuple[LinePrimitive, ...]:
+    """Build one or two endpoint-coloured line halves for a bond."""
+
+    first, second = _point(start, name="start"), _point(end, name="end")
+    if float(np.linalg.norm(second - first)) < 1e-12:
+        return ()
+    if end_color is None or color_to_rgba(start_color) == color_to_rgba(end_color):
+        return (
+            LinePrimitive(
+                semantic_id=semantic_id,
+                segments=np.asarray([[first, second]]),
+                rgba=color_to_rgba(start_color, alpha=alpha),
+                width_px=width_px,
+                metadata=metadata or {},
+            ),
+        )
+    midpoint = 0.5 * (first + second)
+    return (
+        LinePrimitive(
+            semantic_id=f"{semantic_id}:a",
+            segments=np.asarray([[first, midpoint]]),
+            rgba=color_to_rgba(start_color, alpha=alpha),
+            width_px=width_px,
+            metadata=metadata or {},
+        ),
+        LinePrimitive(
+            semantic_id=f"{semantic_id}:b",
+            segments=np.asarray([[midpoint, second]]),
+            rgba=color_to_rgba(end_color, alpha=alpha),
+            width_px=width_px,
+            metadata=metadata or {},
+        ),
+    )
+
+
 def ellipsoid_principal_axes(
     displacement: Any,
     *,
@@ -566,8 +611,10 @@ def unit_cell_primitive(
     *,
     origin: Iterable[float] = (0.0, 0.0, 0.0),
     width_px: float = 1.0,
+    dash: Iterable[float] = (),
     alpha: float = 1.0,
     depth_test: bool = True,
+    metadata: dict[str, Any] | None = None,
 ) -> LinePrimitive:
     lattice = np.asarray(matrix, dtype=float)
     if lattice.shape != (3, 3) or not np.all(np.isfinite(lattice)):
@@ -608,8 +655,9 @@ def unit_cell_primitive(
         ),
         rgba=color_to_rgba(color, alpha=alpha),
         width_px=width_px,
+        dash=tuple(float(value) for value in dash),
         depth_test=depth_test,
-        metadata={"kind": "unit_cell"},
+        metadata=metadata or {"kind": "unit_cell"},
     )
 
 
@@ -788,6 +836,7 @@ def _positive(value: float, *, name: str) -> float:
 __all__ = [
     "aromatic_ring_primitive",
     "arrow_primitive",
+    "bond_line_primitives",
     "bond_primitives",
     "color_to_rgba",
     "cylinder_mesh",

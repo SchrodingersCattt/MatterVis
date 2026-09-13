@@ -28,6 +28,14 @@ def bonds_conflict(ai, aj):
 _MAX_CANDIDATE_CUTOFF = 12.0
 
 
+def validate_bond_scale(value: float) -> float:
+    """Return a finite, positive bond-perception scale."""
+    numeric = float(value)
+    if not np.isfinite(numeric) or numeric <= 0.0:
+        raise ValueError("bond_scale must be finite and positive")
+    return numeric
+
+
 def _normalize_thresholds(bond_thresholds):
     if bond_thresholds is None:
         return ()
@@ -227,8 +235,7 @@ def _effective_cutoff(atoms, *, bond_scale=None, bond_thresholds=None):
     if not elems:
         return 0.0
     if bond_scale is not None:
-        if not np.isfinite(float(bond_scale)) or float(bond_scale) <= 0:
-            raise ValueError("bond_scale must be finite and positive")
+        bond_scale = validate_bond_scale(bond_scale)
         normalized = _normalize_thresholds(bond_thresholds)
         probes = [{'elem': elem} for elem in sorted(elems)]
         cutoffs = [
@@ -438,10 +445,8 @@ def find_bonds(atoms, M=None, cell=None, *, bond_scale=None, bond_thresholds=Non
     O(N * k) where k ~ 10-20 covalent neighbours per atom -- the
     difference between 1 second and 1 minute on a 1500-atom supercell.
     """
-    if bond_scale is not None and (
-        not np.isfinite(float(bond_scale)) or float(bond_scale) <= 0
-    ):
-        raise ValueError("bond_scale must be finite and positive")
+    if bond_scale is not None:
+        bond_scale = validate_bond_scale(bond_scale)
     normalized_thresholds = _normalize_thresholds(bond_thresholds)
     telemetry_enabled = os.environ.get("MATTERVIS_BOND_PERF_EVENTS") == "1"
     started = time.perf_counter() if telemetry_enabled else None

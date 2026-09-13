@@ -9,6 +9,7 @@ frame before scene construction.
 ~~~bash
 # Inspect and preflight without writing a file
 mat-vis inspect structure.cif --json
+mat-vis inspect trajectory.extxyz --properties --json
 mat-vis render structure.cif -o figure.png --backend cpu --check --json
 
 # Static CIF through the base CPU renderer
@@ -48,6 +49,37 @@ mat-vis render structure.extxyz -o interactive.html --backend plotly --orthogona
 `inspect`, `capabilities`, and `render --check` are the agent preflight surface.
 `--check` resolves requirements only and never creates the output.
 
+## tui — terminal and online agent sessions
+
+`mat-vis tui INPUT` opens the existing Textual terminal viewer.
+`--no-interaction` prints one static frame. `--session-format jsonl` instead
+keeps one stateful controller alive and accepts caller-selected semantic
+actions on stdin:
+
+~~~bash
+printf '%s\n' \
+  '{"action":"observe"}' \
+  '{"action":"orbit","arguments":{"yaw_deg":30,"pitch_deg":15}}' \
+  '{"action":"close"}' | \
+  mat-vis tui structure.extxyz --session-format jsonl \
+    --charset ascii7 --width 100 --height 36
+~~~
+
+Every input line receives one JSON response line and stdout is flushed after
+each response. Actions are selected online by the caller; MatterVis does not
+pre-plan a trajectory or repair malformed natural-language commands.
+
+JSONL observations are always monochrome and ANSI-free. The default charset is
+`unicode`, using Unicode Braille geometry without ANSI colour; pass
+`--charset ascii7` when every observation field must also serialize as ASCII
+bytes.
+
+`--charset unicode|ascii7` is available for both static and JSONL output.
+`ascii7` selects printable ASCII geometry and implies monochrome output;
+`unicode` preserves the default Braille renderer. JSONL sessions support
+`observe`, `reset`, `orbit`, `align`, `pan`, `zoom`, `fit`, `set_display`,
+`select`, `focus`, `clear_selection`, `clear_focus`, and `close`.
+
 ---
 
 ## render — Structure and trajectory export
@@ -82,6 +114,47 @@ Supported inputs:
 LAMMPS numeric types are not elements. Pass --type-map whenever the source does
 not encode element identity unambiguously; the order is type 1, type 2, and so
 on. MatterVis never guesses it from a model filename.
+
+### Per-atom property colors
+
+Discover fields before selecting one:
+
+~~~bash
+mat-vis inspect INPUT --properties --json
+mat-vis inspect INPUT --property-data properties.json --properties --json
+~~~
+
+Fields are qualified as `array:NAME`, `column:NAME`, or `sidecar:NAME`.
+Unqualified names are accepted only when unique. Discovery reports source,
+dtype, trailing shape, components, and unit; LAMMPS discovery reads the indexed
+`ITEM: ATOMS` header without parsing atom rows.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--property-data MANIFEST` | — | `mattervis.atom-properties/v1` JSON + relative NPY sidecar |
+| `--color-by FIELD [FIELD ...]` | — | Enable continuous atom colors |
+| `--color-reduction MODE` | `auto` | `auto`, `scalar`, `magnitude`, `component`, `trace`, `mean_normal`, or `von_mises` |
+| `--color-component NAME_OR_INDEX` | — | Component used by `component` reduction |
+| `--colormap NAME` | `viridis` | Colormap used to build the shared 256-color LUT |
+| `--color-range MIN MAX` | exact selected range | Fixed clipping range; skips the global property prescan |
+| `--color-center VALUE` | — | Put this physical reference at the LUT midpoint |
+| `--nan-color COLOR` | `#BDBDBD` | Color for NaN/Inf values |
+| `--color-label TEXT` | field name | Colorbar label |
+| `--color-unit UNIT` | declared unit | Display/provenance only; no conversion |
+| `--no-colorbar` | off | Omit the reserved right-side colorbar region |
+
+Scalar fields color directly and a three-component vector uses magnitude under
+`auto`. Tensor fields require an explicit reduction; six-component tensors
+also require declared component order. Automatic range is the exact finite
+minimum/maximum over all selected source atoms and frames, before repeat or
+display filtering. Non-finite values use the missing color and are counted; an
+all-non-finite selection fails. Explicit atom-group colors override the
+property base color. Each bond half inherits its endpoint's final atom color,
+so property-colored atoms produce a two-tone bond by default. Override selected
+bonds directly with `--bond-group SELECTOR color=#RRGGBB`; for example,
+`--bond-group all color=#333333` makes every bond monochrome. See
+[`agents/atom_property_coloring.md`](agents/atom_property_coloring.md) for the
+sidecar schema, alignment, metadata, and Python/REST APIs.
 
 ### Renderer selection
 
@@ -175,7 +248,9 @@ Periodic static renders default to an orthographic view normal to the largest
 lattice face: `ab -> c*`, `ac -> b*`, or `bc -> a*`, with `c*` winning
 equal-area ties. Nonperiodic inputs fit the atomic coordinates and do not treat
 an ASE padding box as crystallographic data. Camera direction options are
-mutually exclusive.
+mutually exclusive. When `--no-cell` hides a real periodic cell, automatic
+framing likewise fits the visible atoms rather than hidden cell edges or vacuum
+padding.
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -203,6 +278,7 @@ export requires `[plotly-export]`; a failure is reported without substitution.
 | `--show-axes` / `--no-axes` | off | Show/hide the camera-projected crystallographic a/b/c compass |
 | `--cell-color COLOR` | `#333333` | Unit-cell edge colour |
 | `--cell-width PX` | 2.0 | Unit-cell edge width |
+| `--cell-overlays JSON` | — | Auxiliary cells with independent matrix, origin, color, width, dash, alpha, and depth-test settings |
 
 The cell and lattice compass are foreground overlays, so dense atoms, bonds,
 or polyhedra do not depth-occlude them. `--monochrome` remains a rejected
@@ -214,6 +290,7 @@ legacy flag.
 |------|---------|-------|-------------|
 | `--atom-scale` | 1.0 | 0.3–1.8 | Atom radius scale factor |
 | `--bond-radius` | 0.15 | 0.05–0.40 | Bond cylinder radius (Å) |
+| `--bond-scale` | loader default | > 0 | MolCrysKit bond-perception coefficient; does not change visual bond radius |
 | `--camera-distance` | 1.8 | > 0 | Scene-fit multiplier (not Å) |
 | `--width` | 900 | — | Image width in pixels |
 | `--height` | 720 | — | Image height in pixels |
@@ -244,6 +321,11 @@ Bond selectors are `all`, `minor`, `major`, `between:...`, and `label:...`.
 Bond overrides are `color`, `visible`, `opacity`, `style`, and `radius_scale`.
 Use `--check --json` to inspect the normalized rules without loading the input.
 
+For CPU GIF/MP4, `--vector-overlays JSON` applies one fixed source-frame vector
+overlay to every selected frame. This supports equilibrium-centred vibration
+arrows over moving atoms; per-frame-changing vector fields require a future
+separate contract.
+
 ### Colour and ORTEP
 
 | Flag | Default | Description |
@@ -266,7 +348,13 @@ silently ignored. Polyhedron overlays remain available through repeatable
 module. An atom-level specification draws every matching visible centre by
 default and colours each hull from its centre element, with same-hue face
 lightness. The JSON `site` or `sites` keys and `--polyhedron-site` select
-source atom indices; molecule-level selectors use source fragment indices.
+source atom indices; molecule-level selectors use source fragment indices. The
+JSON `center_images:true` option works at both levels. At molecule level,
+MatterVis follows each displayed complete fragment image and translates the
+center, ligand shell, and hull together. Receipts keep source and display counts
+separate.
+
+`--cell-overlays` and `--bond-scale` require the general renderer. An explicit batch request fails instead of silently dropping either option.
 
 
 ---
@@ -284,6 +372,11 @@ mat-vis serve [options]
 | `--host` | `0.0.0.0` | Host to bind |
 | `--port` | `50001` | Port to expose |
 | `--cif` | — | CIF path to preload (repeat for multiple) |
+| `--input` | — | Any supported structure/trajectory input to preload |
+| `--input-format` | auto | Explicit format for an ambiguous `--input` |
+| `--type-map` | — | LAMMPS atom-type order for `--input` |
+| `--frame` | `0` | Frame of `--input`; Web v1 has no playback timeline |
+| property-color flags | — | Same sidecar, field, reduction, range, and LUT flags as render |
 | `--structure` | — | Limit catalog to named structure(s) |
 | `--preset` | — | Preset JSON to load |
 | `--api-only` | — | Reserved for automation mode |
@@ -304,9 +397,11 @@ mat-vis tui trajectory.traj --frame 20
 mat-vis tui run.dump --type-map O H --frame 20
 ~~~
 
-Use --no-interaction for deterministic stdout. --format structured adds cell,
-atom, bond-summary, and camera data. --input-format, --type-map, and --frame use
-the same shared IO contract as render.
+The interactive ASCII view is the primary non-visual observation path. Use
+--no-interaction only when a deterministic single frame is required;
+--format structured remains an optional machine contract rather than the
+source of chemical conclusions. --input-format, --type-map, and --frame use the
+same shared IO contract as render.
 
 Important options:
 
@@ -316,10 +411,13 @@ Important options:
 - --show-minor and --hide-partial control crystallographic disorder;
 - --width and --height bound static output exactly.
 
-Interactive controls: q/e and w/s orbit, a/d roll, arrows or i/j/k/l pan, u/o
+Interactive controls: q/e and w/z orbit, a/d roll, arrows or i/j/k/l pan, u/o
 zoom, b/c/t/m/n toggle bonds/cell/labels/monochrome/minor disorder, Shift+L
-switches atom and molecule levels, r resets the view, and x quits. Press : for
-selection, neighborhood focus, and geometric measurements.
+switches atom and molecule levels, r resets the view, and x quits. Press s for
+Select mode. There, arrows choose projected neighbors, Tab traverses stable
+atom IDs, `[`/`]` traverse supplied chemical bonds, Enter pins, Esc clears, and a
+mouse click uses the retained hit map. Press : for deterministic commands such
+as `:select C12`, `:inspect`, `:stereo`, `:name`, and `:why`.
 
 ## Common recipes
 

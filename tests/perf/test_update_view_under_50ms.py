@@ -35,6 +35,10 @@ def test_async_figure_path_repaints_base_scene_for_cold_topology(tmp_path: Path)
         def request_topology(self, _state, _context):
             return True
 
+        def shutdown(self, *, wait=False):
+            return None
+
+    backend._render_worker.shutdown()
     backend._render_worker = Worker()
 
     def fail_if_called(**_kwargs):

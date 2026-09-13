@@ -11,6 +11,10 @@ Read this before delivering an image, vector graphic, HTML view, or animation.
 - Record input/output hashes when provenance matters.
 - Record dimensions, display, representation, shading, camera, projection,
   backend, output hash, and warning classification.
+- For per-atom colors, record field source, effective reduction/component,
+  exact range and range scope, unit, finite/missing counts, missing color,
+  LUT hash, and sidecar manifest hash. Confirm atom-group overrides win and
+  bond colors are unchanged.
 - For a finite view of periodic topology, also record the crossing bond image
     shifts, periodic translation rank/directions, finite-window policy, number of
     added image atoms/fragments, and confirm that visible endpoints are graphical
@@ -45,6 +49,8 @@ For an auditable animation, record a machine-readable manifest with:
 - camera, screen-up, projection, shared viewport, canvas, dimensions, and FPS;
 - output-specific decoded frame count and duration (GIF and MP4 may differ);
 - first/middle/last and extrema QA hashes;
+- property reduction/range/unit, finite/missing counts, LUT/manifest hashes,
+  and source frames containing property extrema when property color is active;
 - objective validation separately from `visual_acceptance`, which starts as
     `pending` until a final-size motion review.
 

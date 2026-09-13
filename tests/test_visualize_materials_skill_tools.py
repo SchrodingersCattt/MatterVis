@@ -74,36 +74,64 @@ def test_skill_has_no_second_installer_or_obsolete_package_entrypoint() -> None:
     assert "python -m crystal_viewer" not in text
     assert "matplotlib-flat-ortep.md" not in text
     assert "apt-get install" not in text
+    assert '"molcrys-kit==0.7.1" "matter-vis==0.0.5"' in text
 
 
 def test_skill_routes_publication_and_multi_structure_guidance() -> None:
     document = (SKILL / "SKILL.md").read_text(encoding="utf-8")
 
-    assert 'description: "Render atomistic structures with MatterVis.' in document
+    assert 'description: "Use first for every atomistic drawing' in document
     assert len(document.splitlines()) <= 60
     assert "--check" not in document
     assert "--vector-overlays" not in document
-    assert "Do not guess Python import names" in document
-    assert "For render-only requests" in document
-    assert "references/quickstart.md" not in document
+    assert "open-ended retry loop" in document
+    assert "do not run a separate analysis" in document
+    assert "references/quickstart.md" in document
     assert "./references/publication-layout.md" in document
     assert "./references/multi-structure-panels.md" in document
+    assert "./references/atom-property-coloring.md" in document
+    assert document.index("MD trajectory") < document.index("per-atom scalar")
+    assert "Read exactly one primary page" in document
+    assert "Scene type wins" in document
+    assert "Run the documented command before inspecting help" in document
+    quickstart = (SKILL / "references" / "quickstart.md").read_text(encoding="utf-8")
+    assert "Do not convert it to another format" in quickstart
+    trajectory = (SKILL / "references" / "trajectory-animation.md").read_text(
+        encoding="utf-8"
+    )
+    assert "--check" not in trajectory
+    assert "--style ball_stick --show-cell --orthogonal" in trajectory
+    assert "For nonperiodic or" in trajectory
+    assert "Do not add `--view-direction` by default" in trajectory
+    assert "largest" in trajectory and "lattice face" in trajectory
+    assert "Use the input directly" in trajectory
+
     vectors = (SKILL / "references" / "vibration-mode-vectors.md").read_text(
         encoding="utf-8"
     )
     assert "--vector-overlays" in vectors
-    assert "--vector-overlays" in vectors
-    assert "source Cartesian frame" in vectors
-    assert "synthetic-cell translation internally" in vectors
+    assert "This page is complete for vibration rendering" in vectors
+    assert "source-frame equilibrium atom coordinates" in vectors
+    assert "handles synthetic-cell translation" in vectors
     polyhedra = (SKILL / "references" / "polyhedra.md").read_text(encoding="utf-8")
     assert len(polyhedra.splitlines()) <= 70
     assert '"level":"atom"' in polyhedra
     assert "--show-cell --show-axes" in polyhedra
-    assert "every matching source centre" in polyhedra
+    assert "every matching center" in polyhedra
     assert '"center_images":true' in polyhedra
     assert "`instance_overrides`" in polyhedra
     assert "Omit `cutoff` for the natural shell" in polyhedra
     assert "`effective_colors`" in polyhedra
+
+    property_coloring = (SKILL / "references" / "atom-property-coloring.md").read_text(
+        encoding="utf-8"
+    )
+    assert "mat-vis inspect INPUT --properties --json" in property_coloring
+    assert "Never let `auto` assign tensor meaning" in property_coloring
+    assert "Never rescale each frame independently" in property_coloring
+    assert "CSV or NPZ" in property_coloring
+    assert "`lut_hash`" in property_coloring
+    assert "`manifest_hash`" in property_coloring
 
 
 def test_released_molcryskit_minimum_is_consistent() -> None:

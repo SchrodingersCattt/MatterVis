@@ -104,6 +104,69 @@ def _primitive_trace(primitive, *, scene: str):
     raise TypeError(f"unsupported RenderPlan primitive: {type(primitive).__name__}")
 
 
+def _viewport_traces(viewport, *, scene: str, property_active: bool):
+    """Batch property-coloured atom meshes without changing other primitives."""
+
+    if not property_active:
+        return [
+            _primitive_trace(primitive, scene=scene)
+            for primitive in viewport.primitives
+        ]
+    go, _ = _plotly()
+    groups: dict[tuple[Any, ...], list[TriangleMeshPrimitive]] = {}
+    others = []
+    for primitive in viewport.primitives:
+        if (
+            isinstance(primitive, TriangleMeshPrimitive)
+            and primitive.metadata.get("kind") == "atom"
+        ):
+            property_fill = bool(primitive.metadata.get("property_color_applied"))
+            key = (
+                "property" if property_fill else "override",
+                round(float(primitive.rgba[3]), 6),
+                None if property_fill else tuple(primitive.rgba[:3]),
+            )
+            groups.setdefault(key, []).append(primitive)
+        else:
+            others.append(_primitive_trace(primitive, scene=scene))
+    atom_traces = []
+    for (kind, opacity, solid_rgb), primitives in groups.items():
+        vertices = []
+        triangles = []
+        vertex_colors = []
+        offset = 0
+        for primitive in primitives:
+            vertices.append(primitive.vertices)
+            triangles.append(primitive.triangles + offset)
+            offset += len(primitive.vertices)
+            if kind == "property":
+                vertex_colors.extend(
+                    [_rgba((*primitive.rgba[:3], 1.0))] * len(primitive.vertices)
+                )
+        joined_vertices = np.concatenate(vertices, axis=0)
+        joined_triangles = np.concatenate(triangles, axis=0)
+        payload = {
+            "x": joined_vertices[:, 0],
+            "y": joined_vertices[:, 1],
+            "z": joined_vertices[:, 2],
+            "i": joined_triangles[:, 0],
+            "j": joined_triangles[:, 1],
+            "k": joined_triangles[:, 2],
+            "opacity": opacity,
+            "flatshading": all(item.vertex_normals is None for item in primitives),
+            "name": "atom property" if kind == "property" else "atom group override",
+            "hoverinfo": "name",
+            "showscale": False,
+            "scene": scene,
+        }
+        if kind == "property":
+            payload["vertexcolor"] = vertex_colors
+        else:
+            payload["color"] = _rgba((*solid_rgb, 1.0))
+        atom_traces.append(go.Mesh3d(**payload))
+    return [*atom_traces, *others]
+
+
 def _viewport_points(viewport) -> np.ndarray:
     points: list[np.ndarray] = []
     for primitive in viewport.primitives:
@@ -228,8 +291,12 @@ def build_figure(
             plan.height * viewport.rect[3], 1.0e-12
         )
         scene_layouts[scene] = _scene_layout(viewport, aspect=viewport_aspect)
-        for primitive in viewport.primitives:
-            figure.add_trace(_primitive_trace(primitive, scene=scene))
+        for trace in _viewport_traces(
+            viewport,
+            scene=scene,
+            property_active=bool(plan.metadata.get("atom_property_color")),
+        ):
+            figure.add_trace(trace)
         if not live_compass:
             _add_lattice_compass(figure, plan, viewport)
     compass_context = (
@@ -237,6 +304,9 @@ def build_figure(
         if live_compass
         else None
     )
+    from .property_colorbar import add_plotly_colorbar
+
+    add_plotly_colorbar(figure, plan)
     figure.update_layout(
         **scene_layouts,
         width=plan.width,

@@ -42,6 +42,14 @@ def main() -> None:
     color.set_display(display_level="molecule", show_minor=True)
     _write("05_molecule_minor_color", color)
 
+    selected = TerminalViewController.from_file(
+        str(dap4), width=80, height=22, mono=True, label_mode="label"
+    )
+    selected.select_atom(
+        {"display_copy_id": selected.crystal.atoms[0].display_copy_id}
+    )
+    _write("06_selected_atom_mono", selected)
+
 
 if __name__ == "__main__":
     main()

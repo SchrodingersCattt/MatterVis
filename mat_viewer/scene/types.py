@@ -96,6 +96,7 @@ class FragmentDict(TypedDict, total=False):
     center: list[float]
     frac_center: list[float]
     source_molecule_index: int
+    image_shift: list[int]
     elements: list[str]
     heavy_atom_count: int
     atom_count: int
@@ -164,6 +165,17 @@ class VectorOverlayGroupDict(TypedDict, total=False):
     arrows: list[VectorArrowDict]
 
 
+class CellOverlayDict(TypedDict, total=False):
+    id: str
+    matrix: list[list[float]]
+    origin: list[float]
+    color: str
+    width_px: float
+    dash: list[float]
+    alpha: float
+    depth_test: bool
+
+
 class SceneDict(TypedDict, total=False):
     """The central drawable scene dict consumed by ``build_figure()``.
 
@@ -192,6 +204,7 @@ class SceneDict(TypedDict, total=False):
     style: StyleDict
     has_minor: bool
     bonded_image_replica_count: int
+    cell_overlays: list[CellOverlayDict]
     vector_overlays: list[VectorOverlayGroupDict]
 
     # --- internal caches (DO NOT modify externally) ---

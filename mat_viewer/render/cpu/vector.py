@@ -21,6 +21,7 @@ from ..contracts import (
     ViewportPlan,
 )
 from ..compass_overlay import draw_matplotlib_compass
+from ..property_colorbar import draw_matplotlib_colorbar
 from .bsp import BSPPolygon, build_bsp, traverse_back_to_front
 from .visibility import anchor_occluded, projected_polygon_depth
 
@@ -158,6 +159,7 @@ def render_vector(
                 local_width,
                 local_height,
             )
+        draw_matplotlib_colorbar(figure, plan)
         figure.savefig(
             buffer,
             format=output_format,

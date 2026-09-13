@@ -12,6 +12,14 @@ from __future__ import annotations
 from dataclasses import replace
 
 from .controller import TerminalViewController
+from .session import (
+    ACTION_SCHEMA,
+    SESSION_SCHEMA,
+    SessionObservation,
+    TerminalAction,
+    TerminalSession,
+    run_jsonl_session,
+)
 from .state import (
     OBSERVATION_SCHEMA,
     TerminalCameraState,
@@ -25,6 +33,11 @@ from .state import (
 
 __all__ = [
     "OBSERVATION_SCHEMA",
+    "ACTION_SCHEMA",
+    "SESSION_SCHEMA",
+    "SessionObservation",
+    "TerminalAction",
+    "TerminalSession",
     "TerminalCameraState",
     "TerminalDisplayState",
     "TerminalFocusState",
@@ -33,6 +46,7 @@ __all__ = [
     "TerminalViewportState",
     "TerminalViewSnapshot",
     "TerminalViewState",
+    "run_jsonl_session",
     "run_tui",
 ]
 

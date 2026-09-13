@@ -213,6 +213,10 @@ class AsyncRenderWorker:
         self._finalize_pool.submit(_job)
         return True
 
-    def shutdown(self) -> None:
+    def shutdown(self, *, wait: bool = False) -> None:
+        if wait:
+            self._compute_pool.shutdown(wait=True, cancel_futures=True)
+            self._finalize_pool.shutdown(wait=True, cancel_futures=True)
+            return
         self._finalize_pool.shutdown(wait=False, cancel_futures=True)
         self._compute_pool.shutdown(wait=False, cancel_futures=True)

@@ -16,6 +16,7 @@ lock in the contract:
 
 from __future__ import annotations
 
+from pathlib import Path
 import time
 
 import pytest
@@ -48,11 +49,18 @@ def test_recent_returns_chronological_order_and_filters_by_since():
     middle = perf_log.record("middle")
     perf_log.record("last")
 
-    all_events = perf_log.recent()
-    assert [e["label"] for e in all_events[-3:]] == ["first", "middle", "last"]
+    expected = {"first", "middle", "last"}
+    labels = [
+        event["label"]
+        for event in perf_log.recent()
+        if event["label"] in expected
+    ]
+    assert labels == ["first", "middle", "last"]
 
     tail = perf_log.recent(since_seq=middle["seq"])
-    assert [e["label"] for e in tail] == ["last"]
+    assert [event["label"] for event in tail if event["label"] in expected] == [
+        "last"
+    ]
 
 
 def test_snapshot_returns_events_and_matching_latest_sequence():
@@ -79,7 +87,7 @@ def test_time_block_records_positive_elapsed_ms():
 
 def test_record_appends_to_disk_log(tmp_path):
     perf_log.record("disk_event", info={"k": "v"})
-    contents = open(perf_log.log_path()).read().strip().splitlines()
+    contents = Path(perf_log.log_path()).read_text(encoding="utf-8").strip().splitlines()
     assert any("disk_event" in line for line in contents)
 
 

@@ -53,6 +53,22 @@ class LammpsDumpIndex:
         return len(self.records)
 
 
+@dataclass(frozen=True, slots=True)
+class LammpsPropertyFrame:
+    """Property-only frame used by exact streaming range scans."""
+
+    source_index: int
+    timestep: int
+    natoms: int
+    atom_ids: np.ndarray | None
+    atom_arrays: dict[str, np.ndarray]
+    info: dict[str, int]
+
+    @property
+    def index(self) -> int:
+        return self.source_index
+
+
 def _readline(handle: BinaryIO, context: str) -> bytes:
     line = handle.readline()
     if not line:
@@ -299,6 +315,7 @@ def read_lammps_frame(
     *,
     type_map: Iterable[str] | None = None,
     sort_by_id: bool = False,
+    property_columns: Iterable[str] = (),
 ) -> FrameBatch:
     """Read one indexed frame into contiguous arrays."""
     record = dump_index.records[frame]
@@ -306,7 +323,16 @@ def read_lammps_frame(
         handle.seek(record.atoms_offset)
         block = handle.read(record.frame_end - record.atoms_offset)
     coordinate_names, scaled = _coordinate_columns(record.columns)
-    selected = coordinate_names + (("id",) if "id" in record.columns else ())
+    requested_properties = tuple(
+        dict.fromkeys(str(value).lower() for value in property_columns)
+    )
+    missing = [name for name in requested_properties if name not in record.columns]
+    if missing:
+        raise ValueError(f"LAMMPS frame lacks property column(s): {', '.join(missing)}")
+    base_selected = coordinate_names + (("id",) if "id" in record.columns else ())
+    selected = base_selected + tuple(
+        name for name in requested_properties if name not in base_selected
+    )
     numeric = _numeric_table(
         block,
         columns=record.columns,
@@ -319,6 +345,11 @@ def read_lammps_frame(
     atom_ids = (
         numeric[:, 3].astype(np.int64, copy=False) if "id" in record.columns else None
     )
+    numeric_by_name = {name: numeric[:, index] for index, name in enumerate(selected)}
+    atom_arrays = {
+        name: np.ascontiguousarray(numeric_by_name[name], dtype=np.float32)
+        for name in requested_properties
+    }
     atomic_numbers = _element_numbers(
         block,
         record=record,
@@ -329,6 +360,7 @@ def read_lammps_frame(
         positions = positions[order]
         atomic_numbers = atomic_numbers[order]
         atom_ids = atom_ids[order]
+        atom_arrays = {name: values[order] for name, values in atom_arrays.items()}
     return FrameBatch(
         positions=np.ascontiguousarray(positions, dtype=np.float32),
         atomic_numbers=np.ascontiguousarray(atomic_numbers, dtype=np.uint8),
@@ -342,6 +374,52 @@ def read_lammps_frame(
         pbc=record.pbc.copy(),
         timestep=record.timestep,
         source_index=record.index,
+        atom_arrays=atom_arrays,
+    )
+
+
+def read_lammps_property_frame(
+    dump_index: LammpsDumpIndex,
+    frame: int,
+    *,
+    property_columns: Iterable[str],
+) -> LammpsPropertyFrame:
+    """Read only ID and requested numeric property columns, never coordinates."""
+
+    record = dump_index.records[frame]
+    requested = tuple(dict.fromkeys(str(value).lower() for value in property_columns))
+    missing = [name for name in requested if name not in record.columns]
+    if missing:
+        raise ValueError(f"LAMMPS frame lacks property column(s): {', '.join(missing)}")
+    selected = (("id",) if "id" in record.columns else ()) + tuple(
+        name for name in requested if name != "id"
+    )
+    by_name: dict[str, np.ndarray] = {}
+    if selected:
+        with dump_index.path.open("rb") as handle:
+            handle.seek(record.atoms_offset)
+            block = handle.read(record.frame_end - record.atoms_offset)
+        numeric = _numeric_table(
+            block,
+            columns=record.columns,
+            selected=selected,
+            natoms=record.natoms,
+        )
+        by_name = {name: numeric[:, index] for index, name in enumerate(selected)}
+    return LammpsPropertyFrame(
+        source_index=record.index,
+        timestep=record.timestep,
+        natoms=record.natoms,
+        atom_ids=(
+            np.ascontiguousarray(by_name["id"], dtype=np.int64)
+            if "id" in by_name
+            else None
+        ),
+        atom_arrays={
+            name: np.ascontiguousarray(by_name[name], dtype=np.float32)
+            for name in requested
+        },
+        info={"frame_index": record.index, "timestep": record.timestep},
     )
 
 
@@ -374,4 +452,14 @@ def repeat_frame(frame: FrameBatch, repeat: tuple[int, int, int]) -> FrameBatch:
         pbc=frame.pbc.copy(),
         timestep=frame.timestep,
         source_index=frame.source_index,
+        info=frame.info,
+        atom_arrays={
+            name: np.tile(values, (len(translations),) + (1,) * (values.ndim - 1))
+            for name, values in frame.atom_arrays.items()
+        },
+        atom_colors=(
+            None
+            if frame.atom_colors is None
+            else np.tile(frame.atom_colors, (len(translations), 1))
+        ),
     )

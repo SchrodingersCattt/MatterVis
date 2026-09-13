@@ -13,6 +13,7 @@ _MODULES = (
     "..render.style",
     "..render.topology",
     "..render.viewport",
+    "..render.overlay.cells",
     "..render.overlay.vectors",
 )
 
@@ -37,6 +38,7 @@ __all__ = [
     "build_row_figure",
     "build_static_publication_figure",
     "compose_axis_key_layout",
+    "normalize_cell_overlays",
     "normalize_vector_overlays",
     "paper_vector_label_annotations",
     "render",

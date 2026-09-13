@@ -5,6 +5,8 @@ from __future__ import annotations
 from hashlib import sha256
 from pathlib import Path
 
+from ..properties import catalog_from_arrays, catalog_from_columns, merge_catalogs
+
 
 def file_sha256(path: Path) -> str:
     digest = sha256()
@@ -89,3 +91,91 @@ def inspect_payload(structure) -> dict:
         },
         "warnings": warnings,
     }
+
+
+def inspect_properties_payload(
+    path: str | Path,
+    *,
+    input_format: str | None = None,
+    type_map=None,
+    frame: int = 0,
+    property_data: str | Path | None = None,
+) -> dict:
+    """Discover bounded field metadata without constructing a render scene."""
+
+    source = Path(path).expanduser().resolve()
+    if not source.is_file():
+        raise FileNotFoundError(f"structure file not found: {source}")
+    format_name = str(input_format or "").strip().lower()
+    lammps = format_name in {
+        "lammps-dump",
+        "lammps-dump-text",
+    } or source.suffix.lower() in {
+        ".dump",
+        ".lammpstrj",
+        ".lammpsdump",
+    }
+    catalogs = []
+    total_frames = 1
+    selected_frame = int(frame)
+    if lammps:
+        from ..loader.lammps_batch import index_lammps_dump
+
+        index = index_lammps_dump(source)
+        total_frames = len(index)
+        selected_frame = (
+            selected_frame + total_frames if selected_frame < 0 else selected_frame
+        )
+        if not 0 <= selected_frame < total_frames:
+            raise ValueError(
+                f"frame {frame} is out of range for {total_frames} frame(s)"
+            )
+        catalogs.append(catalog_from_columns(index.records[selected_frame].columns))
+        resolved_format = "lammps-dump-text"
+    elif source.suffix.lower() not in {".cif", ".cube"} and format_name not in {
+        "cif",
+        "cube",
+    }:
+        from ..loader.structure_input import load_atomistic_input
+
+        loaded = load_atomistic_input(
+            source,
+            input_format=input_format,
+            type_map=type_map,
+            frame_indices=[selected_frame],
+        )
+        total_frames = loaded.total_frames
+        selected_frame = loaded.frames[0].index
+        catalogs.append(catalog_from_arrays(loaded.frames[0].atom_arrays))
+        resolved_format = loaded.input_format
+    else:
+        resolved_format = format_name or source.suffix.lower().lstrip(".")
+    manifest_hash = None
+    if property_data is not None:
+        from ..loader.property_sidecar import load_atom_property_manifest
+
+        manifest = load_atom_property_manifest(property_data)
+        catalogs.append(manifest.catalog())
+        manifest_hash = manifest.manifest_hash
+    catalog = merge_catalogs(*catalogs) if catalogs else catalog_from_arrays({})
+    return {
+        "schema": "mattervis.atom-property-catalog/v1",
+        "ok": True,
+        "source": {
+            "path": str(source),
+            "input_format": resolved_format,
+            "frame": selected_frame,
+            "total_frames": total_frames,
+        },
+        "properties": catalog.to_dict(),
+        "manifest_hash": manifest_hash,
+        "warnings": [],
+    }
+
+
+__all__ = [
+    "file_sha256",
+    "inspect_payload",
+    "inspect_properties_payload",
+    "is_nonperiodic_structure",
+]

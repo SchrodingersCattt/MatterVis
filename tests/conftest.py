@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import copy
+from hashlib import sha256
+import json
 import sys
 from pathlib import Path
+import threading
+from typing import Any
 
 import pytest
 
@@ -19,9 +24,117 @@ _TESTS_DIR = Path(__file__).resolve().parent
 if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
 
+_INTEGRATION_DIRECTORIES = {"app", "scenes", "tui"}
+_INTEGRATION_RENDER_FILES = {
+    "test_animation_adapter.py",
+    "test_atom_property_coloring.py",
+    "test_cpu_backend.py",
+    "test_export.py",
+    "test_fast_animation.py",
+    "test_plotly_plan_adapter.py",
+    "test_static_publication.py",
+}
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Derive coarse test tiers from stable directory and file boundaries."""
+    for item in items:
+        relative = Path(item.path).resolve().relative_to(ROOT)
+        parts = relative.parts
+        if len(parts) >= 2 and parts[0] == "tests" and parts[1] == "perf":
+            item.add_marker(pytest.mark.slow)
+            continue
+        if len(parts) < 2 or parts[0] != "tests":
+            continue
+        file_name = relative.name
+        directory = parts[1] if len(parts) >= 3 else ""
+        if (
+            directory in _INTEGRATION_DIRECTORIES
+            or file_name.startswith("test_cli_")
+            or file_name.endswith(("_api.py", "_rest.py"))
+            or (directory == "render" and file_name in _INTEGRATION_RENDER_FILES)
+        ):
+            item.add_marker(pytest.mark.integration)
+
+
+@pytest.fixture(scope="session")
+def catalog_bundle_factory():
+    """Return fresh copies of content-addressed built-in catalog bundles."""
+    from mat_viewer.app import backend_core
+
+    real_loader = backend_core.build_loaded_crystal
+    templates: dict[tuple[Any, ...], Any] = {}
+    file_digests: dict[tuple[str, int, int], str] = {}
+    lock = threading.Lock()
+
+    def canonical_json(value: Any) -> str:
+        return json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=repr,
+        )
+
+    def load(**kwargs):
+        source_path = Path(kwargs["cif_path"]).resolve()
+        stat = source_path.stat()
+        file_identity = (str(source_path), stat.st_size, stat.st_mtime_ns)
+        with lock:
+            digest = file_digests.get(file_identity)
+            if digest is None:
+                digest = sha256(source_path.read_bytes()).hexdigest()
+                file_digests[file_identity] = digest
+        key = (
+            str(source_path),
+            digest,
+            str(kwargs["name"]),
+            kwargs.get("title"),
+            str(kwargs.get("source", "catalog")),
+            canonical_json(kwargs.get("preset")),
+            canonical_json(kwargs.get("view_weights")),
+        )
+        with lock:
+            template = templates.get(key)
+            if template is None:
+                template = real_loader(**kwargs)
+                templates[key] = template
+            return copy.deepcopy(template)
+
+    return load
+
+
+@pytest.fixture(scope="session")
+def tui_crystal_factory():
+    """Return fresh copies of repeatedly loaded terminal-view fixtures."""
+    from mat_viewer.tui.loader_adapter import load_for_tui
+
+    templates: dict[tuple[str, str, str], Any] = {}
+    lock = threading.Lock()
+
+    def load(path: str | Path, **kwargs):
+        source_path = Path(path).resolve()
+        key = (
+            str(source_path),
+            sha256(source_path.read_bytes()).hexdigest(),
+            json.dumps(kwargs, sort_keys=True, separators=(",", ":"), default=repr),
+        )
+        with lock:
+            template = templates.get(key)
+            if template is None:
+                template = load_for_tui(str(source_path), **kwargs)
+                templates[key] = template
+            return copy.deepcopy(template)
+
+    return load
+
 
 @pytest.fixture(autouse=True)
-def _isolated_local_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def _isolated_local_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+    catalog_bundle_factory,
+):
     """Redirect every per-developer-machine local-state path to ``tmp_path``.
 
     Two pieces of state used to leak from the developer's repo into
@@ -57,6 +170,7 @@ def _isolated_local_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """
     from mat_viewer import presets as presets_pkg
     from mat_viewer.app import backend_core, backend_io, shared
+    from mat_viewer.app.backend import ViewerBackend
     from mat_viewer.presets import core as presets_core
     from mat_viewer.scenes import SceneStore
 
@@ -89,4 +203,35 @@ def _isolated_local_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from mat_viewer.app import backend_io as bio_module
     monkeypatch.setattr(bio_module._IOBackendMixin, "_upload_sync_mode", True, raising=False)
 
-    yield isolated_local
+    catalog_root = (ROOT / "scripts" / "data").resolve()
+    real_catalog_loader = backend_core.build_loaded_crystal
+    if request.node.get_closest_marker("real_catalog_load") is None:
+        def cached_catalog_loader(**kwargs):
+            source_path = Path(kwargs["cif_path"]).resolve()
+            if (
+                kwargs.get("source", "catalog") == "catalog"
+                and source_path.is_relative_to(catalog_root)
+            ):
+                return catalog_bundle_factory(**kwargs)
+            return real_catalog_loader(**kwargs)
+
+        monkeypatch.setattr(
+            backend_core,
+            "build_loaded_crystal",
+            cached_catalog_loader,
+        )
+
+    created_backends: list[ViewerBackend] = []
+    real_backend_init = ViewerBackend.__init__
+
+    def tracked_backend_init(self, *args, **kwargs):
+        real_backend_init(self, *args, **kwargs)
+        created_backends.append(self)
+
+    monkeypatch.setattr(ViewerBackend, "__init__", tracked_backend_init)
+
+    try:
+        yield isolated_local
+    finally:
+        for backend in reversed(created_backends):
+            backend.close(wait=False)

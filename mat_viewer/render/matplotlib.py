@@ -192,6 +192,9 @@ def build_figure(plan: RenderPlan, *, dpi: float = 100.0):
             local_width,
             local_height,
         )
+    from .property_colorbar import draw_matplotlib_colorbar
+
+    draw_matplotlib_colorbar(figure, plan)
     return figure
 
 

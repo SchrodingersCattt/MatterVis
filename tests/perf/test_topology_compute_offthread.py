@@ -15,6 +15,10 @@ def test_topology_request_is_deduplicated_before_worker_submit(tmp_path: Path):
             submitted.append(context["cache_key"])
             return True
 
+        def shutdown(self, *, wait=False):
+            return None
+
+    backend._render_worker.shutdown()
     backend._render_worker = Worker()
     backend.resolve_topology_site = lambda **_kwargs: 0  # type: ignore[method-assign]
     state = backend.get_state()
