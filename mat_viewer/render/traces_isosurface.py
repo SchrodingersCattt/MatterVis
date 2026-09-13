@@ -358,6 +358,13 @@ def isosurface_overlay_traces(scene: dict, style: dict) -> list[dict]:
     isovalue = style.get("isosurface_isovalue")
     percentile = float(style.get("isosurface_percentile", 98.5))
     opacity = float(style.get("isosurface_opacity", 0.55))
+    mode = str(style.get("isosurface_mode", "surface"))
+    wireframe_width = float(style.get("isosurface_wireframe_width", 1.0))
+    wireframe_opacity = float(style.get("isosurface_wireframe_opacity", 1.0))
+    if mode not in {"surface", "wireframe"}:
+        raise ValueError(
+            f"Unsupported isosurface_mode={mode!r}; expected 'surface' or 'wireframe'"
+        )
     positive_color = str(style.get("isosurface_positive_color", "#D55E00"))
     negative_color = str(style.get("isosurface_negative_color", "#0072B2"))
     stride = max(1, int(style.get("isosurface_stride", 2)))
@@ -498,6 +505,38 @@ def isosurface_overlay_traces(scene: dict, style: dict) -> list[dict]:
             "showlegend": False,
         }
 
+    def _wireframe_trace(
+        original_indices: np.ndarray, faces: np.ndarray, color: str, name: str
+    ) -> dict:
+        from .geometry import triangle_mesh_edge_segments
+
+        cart = (
+            aligned_origin[None, :]
+            + original_indices[:, 0:1] * aligned_axes[0][None, :]
+            + original_indices[:, 1:2] * aligned_axes[1][None, :]
+            + original_indices[:, 2:3] * aligned_axes[2][None, :]
+        )
+        segments = triangle_mesh_edge_segments(cart, faces)
+        coordinates = [[], [], []]
+        for start, end in segments:
+            for axis in range(3):
+                coordinates[axis].extend((start[axis], end[axis], None))
+        return {
+            "type": "scatter3d",
+            "x": np.asarray(coordinates[0], dtype=np.float32),
+            "y": np.asarray(coordinates[1], dtype=np.float32),
+            "z": np.asarray(coordinates[2], dtype=np.float32),
+            "mode": "lines",
+            "line": {
+                "color": color,
+                "width": wireframe_width,
+            },
+            "opacity": wireframe_opacity,
+            "name": name,
+            "hoverinfo": "name",
+            "showlegend": False,
+        }
+
     def _build_meshes(
         field: np.ndarray, level: float, color: str, name: str
     ) -> list[dict]:
@@ -512,7 +551,11 @@ def isosurface_overlay_traces(scene: dict, style: dict) -> list[dict]:
             )
             if periodic_meshes:
                 return [
-                    _mesh_trace(vertices, faces, color, name)
+                    (
+                        _wireframe_trace(vertices, faces, color, name)
+                        if mode == "wireframe"
+                        else _mesh_trace(vertices, faces, color, name)
+                    )
                     for vertices, faces in periodic_meshes
                 ]
         try:
@@ -527,7 +570,13 @@ def isosurface_overlay_traces(scene: dict, style: dict) -> list[dict]:
                 for axis in range(3)
             ]
         )
-        return [_mesh_trace(original_indices, faces, color, name)]
+        return [
+            (
+                _wireframe_trace(original_indices, faces, color, name)
+                if mode == "wireframe"
+                else _mesh_trace(original_indices, faces, color, name)
+            )
+        ]
 
     vmax = float(np.max(pos_field))
     vmin = float(np.min(neg_field))

@@ -121,7 +121,7 @@ def isosurface_primitives(
             )
         return [], []
 
-    results: list[TriangleMeshPrimitive] = []
+    results: list[Primitive] = []
     warnings: list[str] = []
     for index, entry in enumerate(entries):
         if isinstance(entry, Mapping):

@@ -11,6 +11,9 @@ import pytest
 from mat_viewer.cube.cpu import cube_isosurface_meshes, ensure_cube_isosurfaces
 from mat_viewer.cube.io import CubeAtom, CubeData
 from mat_viewer.cli import main
+from mat_viewer.render.contracts import LinePrimitive, RenderSpec, TriangleMeshPrimitive
+from mat_viewer.render.geometry import triangle_mesh_edge_segments
+from mat_viewer.render.mesh_overlays import isosurface_primitives
 
 
 def _cube(tmp_path: Path) -> CubeData:
@@ -56,6 +59,86 @@ def test_cube_mesh_parameters_are_explicitly_applied(tmp_path: Path) -> None:
          mesh["metadata"]["material"]["diffuse"])
         for mesh in meshes
     } == {(0.45, 0.50)}
+
+
+def test_triangle_mesh_edges_are_unique_but_keep_diagonals() -> None:
+    vertices = np.asarray(
+        [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]], dtype=float
+    )
+    triangles = np.asarray([[0, 1, 2], [0, 2, 3]], dtype=np.int64)
+
+    segments = triangle_mesh_edge_segments(vertices, triangles)
+
+    assert segments.shape == (5, 2, 3)
+    assert {
+        tuple(sorted((tuple(start), tuple(end)))) for start, end in segments
+    } == {
+        ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0)),
+        ((0.0, 0.0, 0.0), (1.0, 1.0, 0.0)),
+        ((0.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+        ((1.0, 0.0, 0.0), (1.0, 1.0, 0.0)),
+        ((0.0, 1.0, 0.0), (1.0, 1.0, 0.0)),
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("isosurface_mode", "outline", "isosurface_mode"),
+        ("isosurface_wireframe_width", 0.0, "wireframe_width"),
+        ("isosurface_wireframe_opacity", 1.1, "wireframe_opacity"),
+    ],
+)
+def test_wireframe_render_spec_validates_controls(
+    field: str, value: object, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        RenderSpec(**{field: value})
+
+
+def test_wireframe_isosurface_compiles_to_colored_line_primitives() -> None:
+    scene = {
+        "isosurfaces": [
+            {
+                "id": "cube:positive",
+                "phase": "positive",
+                "vertices": [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+                "triangles": [[0, 1, 2]],
+                "color": "#D55E00",
+                "opacity": 0.55,
+            },
+            {
+                "id": "cube:negative",
+                "phase": "negative",
+                "vertices": [[0, 0, 1], [1, 0, 1], [0, 1, 1]],
+                "triangles": [[0, 1, 2]],
+                "color": "#0072B2",
+                "opacity": 0.55,
+            },
+        ]
+    }
+
+    primitives, warnings = isosurface_primitives(
+        scene,
+        render_spec=RenderSpec(
+            isosurface_mode="wireframe",
+            isosurface_wireframe_width=1.25,
+            isosurface_wireframe_opacity=0.8,
+        ),
+    )
+
+    assert not warnings
+    assert all(isinstance(primitive, LinePrimitive) for primitive in primitives)
+    assert not any(
+        isinstance(primitive, TriangleMeshPrimitive) for primitive in primitives
+    )
+    assert [primitive.segments.shape for primitive in primitives] == [(3, 2, 3)] * 2
+    assert [primitive.width_px for primitive in primitives] == [1.25, 1.25]
+    assert [primitive.rgba[3] for primitive in primitives] == [0.8, 0.8]
+    assert [primitive.rgba[:3] for primitive in primitives] == [
+        (213 / 255, 94 / 255, 0.0),
+        (0.0, 114 / 255, 178 / 255),
+    ]
 
 
 def test_cube_mesh_material_coefficients_are_validated(tmp_path: Path) -> None:
@@ -175,6 +258,30 @@ def test_explicit_legacy_cube_trace_fails_when_cube_extra_is_missing(
             {"cube_data": _cube(tmp_path)},
             {"isosurface_enabled": True},
         )
+
+
+def test_legacy_plotly_wireframe_trace_uses_lines_without_mesh(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("plotly")
+    from mat_viewer.render.traces_isosurface import isosurface_overlay_traces
+
+    traces = isosurface_overlay_traces(
+        {"cube_data": _cube(tmp_path)},
+        {
+            "isosurface_enabled": True,
+            "isosurface_isovalue": 0.5,
+            "isosurface_mode": "wireframe",
+            "isosurface_wireframe_width": 1.25,
+            "isosurface_wireframe_opacity": 0.8,
+        },
+    )
+
+    assert traces
+    assert {trace["type"] for trace in traces} == {"scatter3d"}
+    assert all(trace["mode"] == "lines" for trace in traces)
+    assert all(trace["line"]["width"] == 1.25 for trace in traces)
+    assert all(trace["opacity"] == 0.8 for trace in traces)
 
 
 def test_public_cube_facade_excludes_bond_reinference_builders() -> None:

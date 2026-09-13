@@ -243,6 +243,9 @@ substitutes one frame backend for another.
 | --perspective | no | Perspective projection |
 | --isovalue VALUE | automatic | Explicit positive cube isosurface magnitude |
 | --isosurface-opacity VALUE | style default | Cube surface opacity in (0, 1] |
+| --isosurface-mode MODE | surface | surface or complete triangulated wireframe |
+| --isosurface-wireframe-width VALUE | 1.0 | Wireframe line width in pixels |
+| --isosurface-wireframe-opacity VALUE | 1.0 | Wireframe line opacity in [0, 1] |
 | --periodic-isosurface / --no-periodic-isosurface | off | Enable or disable scalar closure across cell faces |
 
 Static exports omit browser-only picking traces. Interactive HTML retains them.
