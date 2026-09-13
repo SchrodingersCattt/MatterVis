@@ -42,6 +42,28 @@ def test_cube_extra_produces_backend_neutral_positive_and_negative_meshes(
         assert mesh["normals"].shape == mesh["vertices"].shape
 
 
+def test_cube_mesh_parameters_are_explicitly_applied(tmp_path: Path) -> None:
+    meshes = cube_isosurface_meshes(
+        _cube(tmp_path), isovalue=0.5, positive_color="#C97A50",
+        negative_color="#4A90C4", opacity=0.30, stride=2,
+        ambient=0.45, diffuse=0.50,
+    )
+
+    assert {mesh["color"] for mesh in meshes} <= {"#C97A50", "#4A90C4"}
+    assert {mesh["opacity"] for mesh in meshes} == {0.30}
+    assert {
+        (mesh["metadata"]["material"]["ambient"],
+         mesh["metadata"]["material"]["diffuse"])
+        for mesh in meshes
+    } == {(0.45, 0.50)}
+
+
+def test_cube_mesh_material_coefficients_are_validated(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match=r"ambient \+ diffuse"):
+        cube_isosurface_meshes(
+            _cube(tmp_path), isovalue=0.5, ambient=0.7, diffuse=0.4,
+        )
+
 def test_cube_meshes_are_attached_to_the_loaded_scene(tmp_path: Path) -> None:
     @dataclass
     class Bundle:
@@ -185,3 +207,13 @@ def test_cube_structure_bridge_preserves_mck_boundary_bond(tmp_path: Path) -> No
     assert bundle.molcrys_analysis.bond_pairs == [(0, 1)]
     assert bundle.molcrys_analysis.bond_records[0]["right_image_shift"] == [1, 0, 0]
     assert bundle.scene["bonds"][0]["end"][0] == pytest.approx(10.2)
+
+def test_cube_meshes_keep_the_scene_origin_frame_for_nonzero_cube_origin(tmp_path: Path) -> None:
+    cube = _cube(tmp_path)
+    cube.origin = np.array([5.0, 6.0, 7.0])
+
+    meshes = cube_isosurface_meshes(cube, isovalue=0.5)
+
+    vertices = np.concatenate([mesh["vertices"] for mesh in meshes])
+    assert float(vertices.min()) >= -1.0e-8
+    assert float(vertices.max()) <= 6.0 * 0.2 + 1.0e-8

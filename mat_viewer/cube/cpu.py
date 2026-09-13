@@ -22,6 +22,8 @@ def cube_isosurface_meshes(
     positive_color: str = "#D55E00",
     negative_color: str = "#0072B2",
     opacity: float = 0.55,
+    ambient: float = 0.68,
+    diffuse: float = 0.32,
 ) -> list[dict[str, Any]]:
     """Extract positive/negative phases as world-space triangle meshes."""
     try:
@@ -45,6 +47,14 @@ def cube_isosurface_meshes(
         raise ValueError("Cube isovalue must be finite and positive")
     if not 0.0 <= float(opacity) <= 1.0:
         raise ValueError("Cube isosurface opacity must lie in [0, 1]")
+    if not np.isfinite(ambient) or float(ambient) < 0.0:
+        raise ValueError("Cube isosurface ambient coefficient must be non-negative")
+    if not np.isfinite(diffuse) or float(diffuse) < 0.0:
+        raise ValueError("Cube isosurface diffuse coefficient must be non-negative")
+    if float(ambient) + float(diffuse) > 1.0:
+        raise ValueError(
+            "Cube isosurface ambient + diffuse coefficients must not exceed 1"
+        )
 
     basis = np.asarray(cube.axes, dtype=float) * stride
     inverse_normal = np.linalg.inv(basis).T
@@ -62,7 +72,9 @@ def cube_isosurface_meshes(
             vertices, faces, normals, _ = marching_cubes(values, level=level)
         except (RuntimeError, ValueError):
             continue
-        world_vertices = cube.origin + vertices @ basis
+        # Cube atom coordinates are normalized by cube_to_raw_atoms into the scene frame.
+        # Keep CPU isosurfaces in that same frame when cube.origin is nonzero.
+        world_vertices = vertices @ basis
         world_normals = normals @ inverse_normal
         lengths = np.linalg.norm(world_normals, axis=1)
         valid = lengths > 1.0e-12
@@ -76,6 +88,12 @@ def cube_isosurface_meshes(
                 "normals": world_normals,
                 "color": color,
                 "opacity": float(opacity),
+                "metadata": {
+                    "material": {
+                        "ambient": float(ambient),
+                        "diffuse": float(diffuse),
+                    }
+                },
             }
         )
     if not meshes:
@@ -83,7 +101,17 @@ def cube_isosurface_meshes(
     return meshes
 
 
-def ensure_cube_isosurfaces(source: Any) -> Any:
+def ensure_cube_isosurfaces(
+    source: Any,
+    *,
+    isovalue: float | None = None,
+    opacity: float = 0.55,
+    positive_color: str = "#D55E00",
+    negative_color: str = "#0072B2",
+    stride: int = 2,
+    ambient: float = 0.68,
+    diffuse: float = 0.32,
+) -> Any:
     """Attach backend-neutral isosurfaces to every Cube scene in ``source``."""
     bundles: list[Any] = []
     if hasattr(source, "frames"):
@@ -104,7 +132,11 @@ def ensure_cube_isosurfaces(source: Any) -> Any:
             continue
         if isinstance(scene, dict) and scene.get("isosurfaces"):
             continue
-        meshes = cube_isosurface_meshes(cube)
+        meshes = cube_isosurface_meshes(
+            cube, isovalue=isovalue, opacity=opacity,
+            positive_color=positive_color, negative_color=negative_color,
+            stride=stride, ambient=ambient, diffuse=diffuse,
+        )
         setattr(cube, "surface_meshes", meshes)
         if isinstance(scene, dict):
             scene["isosurfaces"] = meshes

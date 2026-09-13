@@ -337,6 +337,24 @@ def _build_render_parser(
         help="ORTEP rendering variant (default: ortep_axes).",
     )
 
+    # Colors, stride, ambient, diffuse extend the isosurface controls
+    # added alongside --isovalue and --isosurface-opacity above.
+    p.add_argument("--isosurface-positive-color", default="#D55E00", help="Positive cube isosurface colour.")
+    p.add_argument("--isosurface-negative-color", default="#0072B2", help="Negative cube isosurface colour.")
+    p.add_argument("--isosurface-stride", type=int, default=2, help="Cube grid stride for isosurface extraction.")
+    p.add_argument(
+        "--isosurface-ambient",
+        type=float,
+        default=0.68,
+        help="Cube isosurface ambient-light coefficient (default: 0.68).",
+    )
+    p.add_argument(
+        "--isosurface-diffuse",
+        type=float,
+        default=0.32,
+        help="Cube isosurface diffuse-light coefficient (default: 0.32).",
+    )
+
     # Config escape-hatch
     p.add_argument(
         "--config",

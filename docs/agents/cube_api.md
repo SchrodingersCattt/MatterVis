@@ -62,9 +62,15 @@ the canonical loader before adding the isosurface overlay.
   the positive/negative value range or fails when no surface can exist.
 - `cube_isosurface_meshes(cube, ...)` in `mat_viewer.cube.cpu` lazily uses
   scikit-image and returns backend-neutral vertices, triangles, normals,
-  colour, and opacity.
+  colour, opacity, and ambient/diffuse material coefficients.
 - `ensure_cube_isosurfaces(structure)` attaches those meshes to the canonical
   scene consumed by CPU or Plotly renderers.
+
+The static CPU renderer accepts `--isosurface-ambient` and
+`--isosurface-diffuse` coefficients. Their sum must not exceed one. Defaults
+(`0.68` and `0.32`) preserve the standard material; lower ambient and higher
+diffuse values increase directional contrast without introducing white
+specular highlights.
 
 Standalone `bond_traces`, `build_orbital_figure`, and
 `build_orbital_panel_figure` are intentionally not exported. They inferred
