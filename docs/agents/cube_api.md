@@ -72,6 +72,27 @@ The static CPU renderer accepts `--isosurface-ambient` and
 diffuse values increase directional contrast without introducing white
 specular highlights.
 
+## Isosurface wireframe
+
+Use `--isosurface-mode wireframe` to render each positive or negative cube
+isosurface as the complete marching-cubes triangulation. Shared edges are
+deduplicated, but triangulation diagonals are retained; the filled surface is
+not drawn. This is independent of `--style wireframe`, which controls the
+atom-and-bond representation.
+
+```console
+mat-vis render density.cube -o density.svg --backend cpu \
+  --isovalue 0.005 --isosurface-mode wireframe \
+  --isosurface-wireframe-width 1.0 \
+  --isosurface-wireframe-opacity 1.0
+```
+
+The wireframe inherits `--isosurface-positive-color` and
+`--isosurface-negative-color`. `--isosurface-stride` controls the marching-cubes
+mesh density. Because this is a pure wireframe, rear edges are intentionally
+visible; hidden-line removal is not promised. Dense meshes can produce large
+SVG/PDF files.
+
 Standalone `bond_traces`, `build_orbital_figure`, and
 `build_orbital_panel_figure` are intentionally not exported. They inferred
 chemistry from direct Euclidean distances, which loses periodic boundary bonds

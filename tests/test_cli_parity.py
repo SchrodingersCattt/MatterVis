@@ -53,6 +53,9 @@ def test_backend_neutral_spec_fields_have_cli_destinations() -> None:
             "missing_adp_policy": "missing_adp_policy",
             "sphere_detail": "sphere_detail",
             "cylinder_sides": "cylinder_sides",
+            "isosurface_mode": "isosurface_mode",
+            "isosurface_wireframe_width": "isosurface_wireframe_width",
+            "isosurface_wireframe_opacity": "isosurface_wireframe_opacity",
             "isosurface_isovalue": "isovalue",
             "isosurface_opacity": "isosurface_opacity",
             "isosurface_positive_color": "isosurface_positive_color",
@@ -163,3 +166,26 @@ def test_cube_controls_are_public_cli_options() -> None:
     assert args.isovalue == 0.026
     assert args.isosurface_opacity == 0.6
     assert args.periodic_isosurface is True
+
+
+def test_cube_wireframe_controls_are_public_cli_options() -> None:
+    parser = argparse.ArgumentParser()
+    render = _build_render_parser(parser.add_subparsers())
+
+    args = render.parse_args(
+        [
+            "density.cube",
+            "-o",
+            "figure.svg",
+            "--isosurface-mode",
+            "wireframe",
+            "--isosurface-wireframe-width",
+            "1.25",
+            "--isosurface-wireframe-opacity",
+            "0.8",
+        ]
+    )
+
+    assert args.isosurface_mode == "wireframe"
+    assert args.isosurface_wireframe_width == 1.25
+    assert args.isosurface_wireframe_opacity == 0.8

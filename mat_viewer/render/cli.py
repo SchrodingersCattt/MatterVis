@@ -283,6 +283,24 @@ def _build_render_parser(
         help="Cube isosurface opacity in (0, 1] (default: style value).",
     )
     p.add_argument(
+        "--isosurface-mode",
+        choices=("surface", "wireframe"),
+        default="surface",
+        help="Cube isosurface display mode (default: surface).",
+    )
+    p.add_argument(
+        "--isosurface-wireframe-width",
+        type=float,
+        default=1.0,
+        help="Cube isosurface wireframe line width in pixels (default: 1.0).",
+    )
+    p.add_argument(
+        "--isosurface-wireframe-opacity",
+        type=float,
+        default=1.0,
+        help="Cube isosurface wireframe opacity in [0,1] (default: 1.0).",
+    )
+    p.add_argument(
         "--periodic-isosurface",
         dest="periodic_isosurface",
         action="store_true",

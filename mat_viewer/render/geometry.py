@@ -148,6 +148,39 @@ def mesh_primitive(
     )
 
 
+def triangle_mesh_edge_segments(vertices: Any, triangles: Any) -> np.ndarray:
+    """Return deterministic unique segments for every triangle edge.
+
+    Shared edges are emitted once, but triangulation diagonals are retained.
+    This is intentionally a geometry-only operation so cube wireframes can
+    reuse meshes already prepared by the optional marching-cubes adapter.
+    """
+    points = np.asarray(vertices, dtype=float)
+    faces = np.asarray(triangles, dtype=np.int64)
+    if points.ndim != 2 or points.shape[1:] != (3,):
+        raise ValueError("vertices must have shape (N, 3)")
+    if faces.ndim != 2 or faces.shape[1:] != (3,):
+        raise ValueError("triangles must have shape (M, 3)")
+    if faces.size and (faces.min() < 0 or faces.max() >= len(points)):
+        raise ValueError("triangles contain an out-of-range vertex index")
+    edges: set[tuple[int, int]] = set()
+    for first, second, third in faces.tolist():
+        edges.update(
+            {
+                tuple(sorted((first, second))),
+                tuple(sorted((second, third))),
+                tuple(sorted((third, first))),
+            }
+        )
+    ordered_edges = sorted(edges)
+    if not ordered_edges:
+        return np.empty((0, 2, 3), dtype=float)
+    return np.asarray(
+        [[points[first], points[second]] for first, second in ordered_edges],
+        dtype=float,
+    )
+
+
 def sphere_primitive(
     semantic_id: str,
     center: Iterable[float],

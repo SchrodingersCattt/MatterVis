@@ -75,6 +75,9 @@ def build_cube_figure(
     *,
     isovalue: float | None = None,
     opacity: float | None = None,
+    isosurface_mode: str | None = None,
+    isosurface_wireframe_width: float | None = None,
+    isosurface_wireframe_opacity: float | None = None,
     camera: dict[str, Any] | None = None,
     style: dict[str, Any] | None = None,
     display_mode: str = "formula_unit",
@@ -102,6 +105,12 @@ def build_cube_figure(
         of absolute non-zero values.
     opacity : float, optional
         Isosurface opacity (0–1). Default 0.55.
+    isosurface_mode : {"surface", "wireframe"}, optional
+        Display the filled isosurface or its complete triangulation as lines.
+    isosurface_wireframe_width : float, optional
+        Wireframe line width in pixels.
+    isosurface_wireframe_opacity : float, optional
+        Wireframe line opacity in [0, 1].
     camera : dict, optional
         Plotly camera dict used for both the 3D scene and the projected
         lattice compass. Pass the final camera here rather than mutating
@@ -169,6 +178,12 @@ def build_cube_figure(
         merged_style["isosurface_isovalue"] = isovalue
     if opacity is not None:
         merged_style["isosurface_opacity"] = opacity
+    if isosurface_mode is not None:
+        merged_style["isosurface_mode"] = isosurface_mode
+    if isosurface_wireframe_width is not None:
+        merged_style["isosurface_wireframe_width"] = isosurface_wireframe_width
+    if isosurface_wireframe_opacity is not None:
+        merged_style["isosurface_wireframe_opacity"] = isosurface_wireframe_opacity
     if camera is not None:
         merged_style["camera"] = camera
     if periodic is not None:

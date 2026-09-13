@@ -50,6 +50,7 @@ The same routing as a quick table:
 | Render project-independent 3-D mesh or implicit geometry entities with real depth | [`scene_api.md`](scene_api.md) |
 | Match a dense coordination-polyhedron publication layout | [`static_publication.md`](static_publication.md) |
 | Build a static cube/orbital figure (HOMO, LUMO, density) | [`cube_api.md`](cube_api.md) |
+| Render cube isosurfaces as complete triangulated wireframes | [`cube_api.md`](cube_api.md#isosurface-wireframe) |
 | Render ORTEP / thermal ellipsoid figures | [`ortep_api.md`](ortep_api.md) |
 | Color atoms by charge, velocity, stress, or another per-atom field | [`atom_property_coloring.md`](atom_property_coloring.md) |
 | Add a/b/c (or x/y/z, k-path, dipole) direction indicators to any 3D plot | [`compass_api.md`](compass_api.md) |
