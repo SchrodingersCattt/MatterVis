@@ -570,6 +570,9 @@ def _rasterize_mesh(
     rotation = transform.view_matrix[:3, :3]
     light = np.asarray([-0.32, 0.42, 1.0], dtype=float)
     light /= np.linalg.norm(light)
+    material = primitive.metadata.get("material", {})
+    ambient = float(material.get("ambient", 0.68))
+    diffuse = float(material.get("diffuse", 0.32))
     triangle_indices = np.asarray(primitive.triangles, dtype=int)
     if len(triangle_indices) == 0:
         return
@@ -593,7 +596,7 @@ def _rasterize_mesh(
         camera_vertex_normals /= np.maximum(
             np.linalg.norm(camera_vertex_normals, axis=1, keepdims=True), 1e-12
         )
-        vertex_illumination = 0.68 + 0.32 * np.abs(camera_vertex_normals @ light)
+        vertex_illumination = ambient + diffuse * np.abs(camera_vertex_normals @ light)
         vertex_rgb_all = (
             np.asarray(primitive.rgba[:3])[None, :] * vertex_illumination[:, None]
         )
@@ -611,7 +614,9 @@ def _rasterize_mesh(
             if primitive.metadata.get("kind") == "polyhedron":
                 face_rgb = _polyhedron_face_rgb(primitive.rgba[:3], lambert)
             else:
-                face_rgb = np.asarray(primitive.rgba[:3]) * (0.68 + 0.32 * lambert)
+                face_rgb = np.asarray(primitive.rgba[:3]) * (
+                    ambient + diffuse * lambert
+                )
             triangle_rgb = np.tile(
                 face_rgb,
                 (3, 1),

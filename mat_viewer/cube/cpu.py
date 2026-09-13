@@ -22,6 +22,8 @@ def cube_isosurface_meshes(
     positive_color: str = "#D55E00",
     negative_color: str = "#0072B2",
     opacity: float = 0.55,
+    ambient: float = 0.68,
+    diffuse: float = 0.32,
 ) -> list[dict[str, Any]]:
     """Extract positive/negative phases as world-space triangle meshes."""
     try:
@@ -45,6 +47,14 @@ def cube_isosurface_meshes(
         raise ValueError("Cube isovalue must be finite and positive")
     if not 0.0 <= float(opacity) <= 1.0:
         raise ValueError("Cube isosurface opacity must lie in [0, 1]")
+    if not np.isfinite(ambient) or float(ambient) < 0.0:
+        raise ValueError("Cube isosurface ambient coefficient must be non-negative")
+    if not np.isfinite(diffuse) or float(diffuse) < 0.0:
+        raise ValueError("Cube isosurface diffuse coefficient must be non-negative")
+    if float(ambient) + float(diffuse) > 1.0:
+        raise ValueError(
+            "Cube isosurface ambient + diffuse coefficients must not exceed 1"
+        )
 
     basis = np.asarray(cube.axes, dtype=float) * stride
     inverse_normal = np.linalg.inv(basis).T
@@ -78,6 +88,12 @@ def cube_isosurface_meshes(
                 "normals": world_normals,
                 "color": color,
                 "opacity": float(opacity),
+                "metadata": {
+                    "material": {
+                        "ambient": float(ambient),
+                        "diffuse": float(diffuse),
+                    }
+                },
             }
         )
     if not meshes:
@@ -93,6 +109,8 @@ def ensure_cube_isosurfaces(
     positive_color: str = "#D55E00",
     negative_color: str = "#0072B2",
     stride: int = 2,
+    ambient: float = 0.68,
+    diffuse: float = 0.32,
 ) -> Any:
     """Attach backend-neutral isosurfaces to every Cube scene in ``source``."""
     bundles: list[Any] = []
@@ -117,7 +135,7 @@ def ensure_cube_isosurfaces(
         meshes = cube_isosurface_meshes(
             cube, isovalue=isovalue, opacity=opacity,
             positive_color=positive_color, negative_color=negative_color,
-            stride=stride,
+            stride=stride, ambient=ambient, diffuse=diffuse,
         )
         setattr(cube, "surface_meshes", meshes)
         if isinstance(scene, dict):

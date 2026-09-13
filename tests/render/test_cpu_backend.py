@@ -1613,6 +1613,7 @@ def test_precomputed_cube_mesh_renders_on_cpu_without_plotly_or_skimage():
         "opacity": 0.55,
         "phase": "positive",
         "name": "+orbital",
+        "metadata": {"material": {"ambient": 0.45, "diffuse": 0.50}},
     }
     scene = {"draw_atoms": [], "bonds": [], "isosurfaces": [mesh]}
     plan = prepare_render(
@@ -1623,6 +1624,7 @@ def test_precomputed_cube_mesh_renders_on_cpu_without_plotly_or_skimage():
         item for item in plan.primitives if item.semantic_id.startswith("isosurface:")
     )
     assert surface.metadata["phase"] == "positive"
+    assert surface.metadata["material"] == {"ambient": 0.45, "diffuse": 0.50}
     assert render(plan, format="png").data.startswith(b"\x89PNG")
     assert b"<image" not in render(plan, format="svg").data.lower()
 
@@ -1636,6 +1638,40 @@ def test_precomputed_cube_mesh_renders_on_cpu_without_plotly_or_skimage():
         [sys.executable, "-c", script], check=True, capture_output=True, text=True
     )
     assert process.stdout.strip() == "0 0"
+
+
+def test_isosurface_material_controls_change_cpu_shading():
+    base_mesh = {
+        "vertices": [
+            [-0.7, -0.7, 0.0],
+            [0.7, -0.7, 0.0],
+            [0.0, 0.7, 0.0],
+            [0.0, 0.0, 0.9],
+        ],
+        "faces": [[0, 1, 2], [0, 1, 3], [1, 2, 3], [2, 0, 3]],
+        "color": "#D55E00",
+        "opacity": 0.75,
+        "phase": "positive",
+        "name": "+orbital",
+    }
+
+    def pixels(ambient: float, diffuse: float) -> bytes:
+        mesh = {
+            **base_mesh,
+            "metadata": {
+                "material": {"ambient": ambient, "diffuse": diffuse}
+            },
+        }
+        scene = {"draw_atoms": [], "bonds": [], "isosurfaces": [mesh]}
+        plan = prepare_render(
+            scene,
+            render={"width": 96, "height": 96, "show_cell": False},
+        )
+        return render(plan, format="png").data
+
+    ambient_only = pixels(1.0, 0.0)
+    directional = pixels(0.35, 0.60)
+    assert ambient_only != directional
 
 
 def test_loaded_crystal_reads_adapter_precomputed_cube_meshes():

@@ -46,10 +46,23 @@ def test_cube_mesh_parameters_are_explicitly_applied(tmp_path: Path) -> None:
     meshes = cube_isosurface_meshes(
         _cube(tmp_path), isovalue=0.5, positive_color="#C97A50",
         negative_color="#4A90C4", opacity=0.30, stride=2,
+        ambient=0.45, diffuse=0.50,
     )
 
     assert {mesh["color"] for mesh in meshes} <= {"#C97A50", "#4A90C4"}
     assert {mesh["opacity"] for mesh in meshes} == {0.30}
+    assert {
+        (mesh["metadata"]["material"]["ambient"],
+         mesh["metadata"]["material"]["diffuse"])
+        for mesh in meshes
+    } == {(0.45, 0.50)}
+
+
+def test_cube_mesh_material_coefficients_are_validated(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match=r"ambient \+ diffuse"):
+        cube_isosurface_meshes(
+            _cube(tmp_path), isovalue=0.5, ambient=0.7, diffuse=0.4,
+        )
 
 def test_cube_meshes_are_attached_to_the_loaded_scene(tmp_path: Path) -> None:
     @dataclass

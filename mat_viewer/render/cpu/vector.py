@@ -240,6 +240,9 @@ def _mesh_polygons(
     )
     for primitive_order, primitive in enumerate(meshes):
         camera_vertices = transform.world_to_camera(primitive.vertices)
+        material = primitive.metadata.get("material", {})
+        ambient = float(material.get("ambient", 0.68))
+        diffuse = float(material.get("diffuse", 0.32))
         for triangle_index, indices in enumerate(primitive.triangles):
             world_triangle = primitive.vertices[indices]
             normal = np.cross(
@@ -258,7 +261,7 @@ def _mesh_polygons(
                 averaged_length = float(np.linalg.norm(averaged))
                 if averaged_length > 1e-14:
                     shading_normal = rotation @ (averaged / averaged_length)
-            illumination = 0.68 + 0.32 * abs(float(shading_normal @ light))
+            illumination = ambient + diffuse * abs(float(shading_normal @ light))
             rgba = (
                 float(primitive.rgba[0]) * illumination,
                 float(primitive.rgba[1]) * illumination,

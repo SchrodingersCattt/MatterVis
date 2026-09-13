@@ -203,6 +203,8 @@ class RenderSpec:
     isosurface_positive_color: str = "#D55E00"
     isosurface_negative_color: str = "#0072B2"
     isosurface_stride: int = 2
+    isosurface_ambient: float = 0.68
+    isosurface_diffuse: float = 0.32
 
     def __post_init__(self) -> None:
         if self.backend not in ("cpu", "matplotlib", "plotly"):
@@ -248,6 +250,16 @@ class RenderSpec:
             raise ValueError("isosurface_opacity must lie in [0, 1]")
         if int(self.isosurface_stride) != self.isosurface_stride or int(self.isosurface_stride) <= 0:
             raise ValueError("isosurface_stride must be a positive integer")
+        for name, value in (
+            ("isosurface_ambient", self.isosurface_ambient),
+            ("isosurface_diffuse", self.isosurface_diffuse),
+        ):
+            if not np.isfinite(value) or float(value) < 0.0:
+                raise ValueError(f"{name} must be finite and non-negative")
+        if float(self.isosurface_ambient) + float(self.isosurface_diffuse) > 1.0:
+            raise ValueError(
+                "isosurface_ambient + isosurface_diffuse must not exceed 1"
+            )
         lat, lon = self.sphere_detail
         if int(lat) != lat or int(lon) != lon or int(lat) < 2 or int(lon) < 3:
             raise ValueError("sphere_detail must be at least (2, 3)")

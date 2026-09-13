@@ -189,6 +189,8 @@ def prepare_render(
             positive_color=effective_spec.isosurface_positive_color,
             negative_color=effective_spec.isosurface_negative_color,
             stride=effective_spec.isosurface_stride,
+            ambient=effective_spec.isosurface_ambient,
+            diffuse=effective_spec.isosurface_diffuse,
         )
     resolve_requirements("cpu").require()
     from .render.planning import prepare_render as _prepare_render
