@@ -116,7 +116,11 @@ Forbidden crops, dropped content, or non-proportional scaling:
 Programmatic checks and final-size inspection:
 ```
 
-As defaults, target about 88 mm for a single-column or 180 mm for a double-column
-figure, at least 7 pt ordinary text and 8 pt captions/axes/ticks/legends, and
-roughly 200–600 dpi at final physical size. Do not shrink a crowded panel until
-it becomes unreadable.
+Distinguish page size from usable figure width: A4 is 210 × 297 mm, while about
+88 mm and 180 mm are common single- and double-column figure widths. Record the
+target width, height or aspect ratio, and raster DPI together. Derive pixels as
+`length_mm / 25.4 × DPI` and inspect the artifact at that physical size.
+
+As a general delivery floor, no text may be below 8 pt at final placement size;
+9–12 pt is preferable when space permits. Font family remains caller-selectable.
+Do not shrink a crowded panel until it becomes unreadable.

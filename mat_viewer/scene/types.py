@@ -84,6 +84,32 @@ class BondDict(TypedDict, total=False):
     _render_radius_scale: float
 
 
+class GeometryEntityDict(TypedDict, total=False):
+    """A caller-supplied Cartesian mesh rendered in the 3-D scene.
+
+    ``vertices`` are ``N×3`` world coordinates and ``faces`` are polygon or
+    triangle index lists.  The render layer triangulates polygons and sends
+    the resulting mesh to Plotly's depth-tested ``Mesh3d`` pipeline.
+    """
+
+    kind: str
+    id: str
+    name: str
+    vertices: list[list[float]]
+    faces: list[list[int]]
+    color: str
+    opacity: float
+    visible: bool
+    flatshading: bool
+    lighting: dict[str, Any]
+    show_edges: bool
+    edge_color: str
+    edge_width: float
+    edge_opacity: float
+    edges: list[list[int]]
+    meta: dict[str, Any]
+
+
 class FragmentDict(TypedDict, total=False):
     """A row in a scene's ``fragment_table`` or ``topology_fragment_table``."""
 
@@ -206,6 +232,7 @@ class SceneDict(TypedDict, total=False):
     bonded_image_replica_count: int
     cell_overlays: list[CellOverlayDict]
     vector_overlays: list[VectorOverlayGroupDict]
+    geometry_entities: list[GeometryEntityDict]
 
     # --- internal caches (DO NOT modify externally) ---
     _mesh_trace_cache: dict[str, Any]

@@ -79,6 +79,8 @@ def build_cube_figure(
     style: dict[str, Any] | None = None,
     display_mode: str = "formula_unit",
     show_hydrogen: bool = False,
+    include_boundary_replicas: bool = True,
+    include_interaction_traces: bool = True,
     periodic: bool | None = None,
     periodic_image_policy: str | None = None,
     bond_scale: float | None = None,
@@ -111,6 +113,11 @@ def build_cube_figure(
         Display mode for the structure ("formula_unit", "unit_cell", etc.).
     show_hydrogen : bool
         Whether to show hydrogen atoms.
+    include_boundary_replicas : bool
+        Include complete molecular images that cross a unit-cell boundary.
+    include_interaction_traces : bool
+        Include invisible browser picking traces. Set to ``False`` before
+        static Plotly export; interactive figures keep the default ``True``.
     periodic : bool, optional
         Close the scalar grid across opposite unit-cell faces before mesh
         extraction. Use ``True`` for periodic densities and ``False`` for
@@ -193,9 +200,12 @@ def build_cube_figure(
         bundle,
         display_mode=display_mode,
         show_hydrogen=show_hydrogen,
+        include_boundary_replicas=include_boundary_replicas,
     )
     # Ensure cube_data is on the scene for the isosurface renderer
     if scene.get("cube_data") is None:
         scene["cube_data"] = bundle.cube_data
 
-    return build_figure(scene, merged_style)
+    if include_interaction_traces:
+        return build_figure(scene, merged_style)
+    return build_figure(scene, merged_style, include_interaction_traces=False)

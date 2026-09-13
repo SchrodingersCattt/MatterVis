@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Iterable
+import warnings
+from dataclasses import dataclass
+from typing import Any, Iterable, Sequence
 
 import numpy as np
 
@@ -29,6 +31,30 @@ _POLYHEDRON_KEYS = {
     "center_images",
     "instance_overrides",
 }
+
+
+@dataclass(frozen=True, slots=True)
+class FastPolyhedronSpecContext:
+    spec_index: int
+    spec_id: str
+    center_species: str
+    ligand_species: str
+    color: str
+    opacity: float
+    edge_opacity: float
+    cutoff: float
+    ligand_count: int
+    center_indices: tuple[int, ...]
+    ligand_indices: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class FastPolyhedronContext:
+    specs: tuple[FastPolyhedronSpecContext, ...]
+    cell: np.ndarray
+    inverse_cell: np.ndarray
+    supported: bool = True
+    reason: str | None = None
 
 
 def _parse_site_indices(payload: dict[str, Any], index: int) -> tuple[int, ...] | None:
@@ -256,6 +282,172 @@ def _matches(fragment: dict[str, Any], spec: dict[str, Any]) -> bool:
     ]
 
 
+def prepare_fast_polyhedron_context(
+    frame: Any,
+    raw_specs: Sequence[str],
+    *,
+    default_cutoff: float | None = None,
+) -> FastPolyhedronContext:
+    """Cache generic atom-shell selection data for trajectory animation.
+
+    The fast path intentionally handles only atom-level, single-element
+    specifications.  Molecule-level formulas, periodic image policies, and
+    enclosure rules are delegated to :func:`build_topology_data`, which is
+    the chemistry source of truth.  Keeping that boundary explicit avoids
+    silently inventing molecule grouping rules in the renderer.
+    """
+
+    specs = parse_polyhedron_specs(raw_specs)
+    elements = np.asarray(frame.atomic_numbers)
+    try:
+        from ase.data import chemical_symbols
+    except ImportError as exc:  # pragma: no cover - ASE is a runtime dependency
+        raise RuntimeError("fast polyhedron rendering requires ASE element data") from exc
+    symbols = np.asarray(
+        [chemical_symbols[int(number)] for number in elements], dtype=object
+    )
+    cell = np.asarray(frame.cell, dtype=float)
+    try:
+        inverse_cell = np.linalg.inv(cell)
+    except np.linalg.LinAlgError:
+        return FastPolyhedronContext((), cell, np.zeros((3, 3)), False, "singular cell")
+    if default_cutoff is not None and (
+        not np.isfinite(float(default_cutoff)) or float(default_cutoff) <= 0.0
+    ):
+        raise ValueError("default polyhedron cutoff must be finite and positive")
+
+    prepared: list[FastPolyhedronSpecContext] = []
+    for spec_index, spec in enumerate(specs):
+        center = str(spec["center_species"])
+        ligand = str(spec["ligand_species"])
+        if spec["level"] != "atom":
+            return FastPolyhedronContext(
+                (), cell, inverse_cell, False,
+                f"{spec['spec_id']} uses molecule-level chemistry",
+            )
+        if center not in chemical_symbols or ligand not in chemical_symbols:
+            return FastPolyhedronContext(
+                (), cell, inverse_cell, False,
+                f"{spec['spec_id']} needs formula-level chemistry",
+            )
+        center_indices = tuple(
+            int(index) for index in np.flatnonzero(symbols == center)
+        )
+        if spec["sites"] is not None:
+            selected = set(int(index) for index in spec["sites"])
+            center_indices = tuple(index for index in center_indices if index in selected)
+        ligand_indices = tuple(
+            int(index) for index in np.flatnonzero(symbols == ligand)
+        )
+        ligand_count = (
+            int(spec["fallback_max"])
+            if spec["fallback_max"] is not None
+            else len(ligand_indices)
+        )
+        if ligand_count < 4:
+            return FastPolyhedronContext(
+                (), cell, inverse_cell, False,
+                f"{spec['spec_id']} has fewer than four ligand candidates",
+            )
+        prepared.append(
+            FastPolyhedronSpecContext(
+                spec_index=spec_index,
+                spec_id=str(spec["spec_id"]),
+                center_species=center,
+                ligand_species=ligand,
+                color=str(spec["color"] or "#7C5CBF"),
+                opacity=float(spec["opacity"]),
+                edge_opacity=float(spec["edge_opacity"]),
+                cutoff=float(
+                    spec["cutoff"]
+                    if spec["cutoff"] is not None
+                    else (default_cutoff if default_cutoff is not None else 10.0)
+                ),
+                ligand_count=ligand_count,
+                center_indices=center_indices,
+                ligand_indices=ligand_indices,
+            )
+        )
+    return FastPolyhedronContext(
+        specs=tuple(prepared),
+        cell=cell,
+        inverse_cell=inverse_cell,
+    )
+
+
+def fast_polyhedron_overlays(
+    frame: Any,
+    context: FastPolyhedronContext,
+) -> tuple[Any, ...]:
+    """Build animated polyhedron primitives from cached atom-shell data."""
+
+    from .render.geometry import polyhedron_edges_primitive, polyhedron_primitive
+
+    if not context.supported:
+        return ()
+    try:
+        from scipy.spatial import ConvexHull
+    except ImportError:  # pragma: no cover - optional acceleration dependency
+        warnings.warn(
+            "SciPy is unavailable; animated polyhedron hulls were skipped",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return ()
+
+    positions = np.asarray(frame.positions, dtype=float)
+    overlays: list[Any] = []
+    warned_hull = False
+    for spec in context.specs:
+        ligand_positions = positions[np.asarray(spec.ligand_indices, dtype=int)]
+        center_positions = [positions[index] for index in spec.center_indices]
+        for local_index, center_pos in enumerate(center_positions):
+            delta = ligand_positions - center_pos
+            delta -= np.rint(delta @ context.inverse_cell) @ context.cell
+            order = np.argsort(np.linalg.norm(delta, axis=1))[: spec.ligand_count]
+            shell = center_pos + delta[order]
+            if len(shell) < 4:
+                continue
+            distances = np.linalg.norm(shell - center_pos, axis=1)
+            if float(np.max(distances)) > spec.cutoff:
+                continue
+            try:
+                hull = ConvexHull(shell)
+            except Exception as exc:
+                if not warned_hull:
+                    warnings.warn(
+                        "An animated polyhedron shell could not be triangulated; "
+                        f"skipping subsequent invalid shells ({type(exc).__name__}: {exc})",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+                    warned_hull = True
+                continue
+            faces = hull.simplices.tolist()
+            sid = f"polyhedron:{spec.spec_id}:{local_index}"
+            overlays.append(
+                polyhedron_primitive(
+                    sid,
+                    shell,
+                    faces,
+                    spec.color,
+                    alpha=spec.opacity,
+                    metadata={"kind": "polyhedron", "spec_id": sid},
+                )
+            )
+            overlays.append(
+                polyhedron_edges_primitive(
+                    f"{sid}:edges",
+                    shell,
+                    faces,
+                    spec.color,
+                    width_px=1.0,
+                    alpha=spec.edge_opacity,
+                )
+            )
+    return tuple(overlays)
+
+
 def _molecule_center_image_identity(
     display_fragment: dict[str, Any],
     source_fragment: dict[str, Any],
@@ -404,8 +596,6 @@ def build_topology_data(
                 include_cross_boundary_bond_endpoints
             ),
         )
-    fragments = list(scene.get("fragment_table") or bundle.fragment_table or ())
-
     from .topology import (
         analyze_topology,
         atom_overlay,

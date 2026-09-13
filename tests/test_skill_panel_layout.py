@@ -23,6 +23,37 @@ def test_equal_boundaries_cover_full_width() -> None:
     assert module.equal_boundaries(100, 3) == [0, 33, 66, 100]
 
 
+def test_equal_grid_rectangles_cover_rows_and_columns() -> None:
+    module = _module()
+    assert module.equal_grid_rectangles(100, 80, 2, 2) == [
+        [0, 0, 50, 40],
+        [50, 0, 100, 40],
+        [0, 40, 50, 80],
+        [50, 40, 100, 80],
+    ]
+
+
+def test_measure_rectangle_reports_cell_local_and_global_bounds() -> None:
+    module = _module()
+    rgb = np.full((100, 120, 3), 255, dtype=np.uint8)
+    rgb[60:80, 70:100] = 0
+    result = module.measure_rectangle(
+        rgb,
+        60,
+        50,
+        110,
+        90,
+        background=np.array([255, 255, 255], dtype=np.uint8),
+        tolerance=10,
+        min_occupancy=0.20,
+        max_occupancy=0.95,
+        min_pad=10,
+    )
+    assert result["ink_bbox_local_px"] == [10, 10, 40, 30]
+    assert result["ink_bbox_global_px"] == [70, 60, 100, 80]
+    assert result["pass"]
+
+
 def test_measure_panel_reports_bbox_occupancy_and_pads() -> None:
     module = _module()
     rgb = np.full((100, 120, 3), 255, dtype=np.uint8)

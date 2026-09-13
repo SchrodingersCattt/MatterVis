@@ -120,6 +120,75 @@ def test_batch_cli_exercises_vector_overlay_loader_contract(tmp_path, monkeypatc
     assert fast_cli.render_batch_if_selected(args, install_command="") == {"ok": True}
 
 
+def test_lammps_polyhedron_animation_uses_overlay_capable_pipeline(
+    tmp_path, monkeypatch
+) -> None:
+    import argparse
+    from types import SimpleNamespace
+
+    from mat_viewer.cli import _build_render_parser
+    from mat_viewer.render import batch_pipeline, fast_animation, fast_cli
+    from mat_viewer.render.fast_cli import RendererDecision, WorkloadInspection
+
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(dest="command")
+    _build_render_parser(subparsers)
+    source = tmp_path / "trajectory.lammpstrj"
+    source.write_text("placeholder", encoding="utf-8")
+    output = tmp_path / "movie.mp4"
+    args = parser.parse_args(
+        [
+            "render",
+            str(source),
+            "-o",
+            str(output),
+            "--renderer",
+            "batch",
+            "--frame-range",
+            "0:2",
+            "--polyhedron",
+            '{"center":"K","ligand":"ClO4"}',
+        ]
+    )
+    decision = RendererDecision(
+        requested="batch",
+        selected="batch",
+        atom_frames=2,
+        threshold=100_000,
+        reason="test",
+    )
+    workload = WorkloadInspection(
+        frame_indices=(0, 1),
+        atom_frames=2,
+        lammps_dump=True,
+    )
+    monkeypatch.setattr(
+        fast_cli, "renderer_decision", lambda _args: (decision, workload)
+    )
+    monkeypatch.setattr(
+        fast_animation,
+        "render_lammps_animation",
+        lambda *_args, **_kwargs: pytest.fail("streaming path drops polyhedra"),
+    )
+    captured = {}
+
+    def fake_render_array_input(*_args, **kwargs):
+        captured.update(kwargs)
+        output.write_bytes(b"fake")
+        return SimpleNamespace(
+            output=output,
+            output_sha256="0" * 64,
+            selected_frames=(0, 1),
+            profile={},
+        )
+
+    monkeypatch.setattr(batch_pipeline, "render_array_input", fake_render_array_input)
+    monkeypatch.setattr(fast_cli, "_result_payload", lambda *_args, **_kwargs: {"ok": True})
+
+    assert fast_cli.render_batch_if_selected(args, install_command="") == {"ok": True}
+    assert captured["polyhedron_specs"] == ('{"center":"K","ligand":"ClO4"}',)
+
+
 def test_force_general_and_force_batch_are_explicit() -> None:
     general = select_renderer(
         "general",

@@ -81,7 +81,8 @@ Do not start by zooming. Record:
 - whether ink touches a panel edge;
 - whether title, labels, arrows, legends, or colour bars own the observed space.
 
-Use `scripts/check_panel_layout.py` for objective PNG measurements. Its defaults
+Use `scripts/check_panel_layout.py --grid ROWS COLUMNS` or `--rectangles JSON`
+for objective cell-by-cell PNG measurements. Its defaults
 are acceptance guidance, not universal law, and every threshold has a CLI
 override.
 
@@ -190,3 +191,31 @@ Human visual acceptance: pass | pending | fail
 
 Do not deliver a multi-panel figure until those fields are known or explicitly
 marked pending.
+
+## 9. Volumetric cube grids
+
+For HOMO, LUMO, spin-density, or electron-density comparisons:
+
+- render each cube as a separate MatterVis panel before external composition;
+- remove interaction-only picking traces (`atom-selection`, `bond-selection`,
+   and disorder-preview helpers) from static exports;
+- use one explicit isovalue for every panel representing the same scalar field;
+   never compare panels that each use an independently selected percentile;
+- state the orbital indices and sign-color convention; for signed orbitals,
+   keep positive and negative colors identical across every panel;
+- derive one shared lattice/world viewport when apparent physical size is part
+   of the comparison, or explicitly declare independent isotropic fitting;
+- inspect periodic closure before enabling it: a periodic scalar component can
+   be split across opposite cell boundaries and appear as two distant objects
+   when closure/image placement does not match the displayed atom image;
+- if a whole-cell view makes the chemically relevant orbital unreadably small,
+   render a documented local-region view rather than silently applying a large
+   camera zoom or clipping unrelated fragments;
+- do not confuse successful mesh extraction with a deliverable figure. Check
+   final-size panel occupancy, clipping, stray picking marks, surface visibility,
+   and label hierarchy after composition.
+
+For a `rows × columns` grid, validate both dimensions. A checker invocation
+that treats the whole image height as one panel does not validate individual
+rows. Validate raw source panels before cropping and the final declared panel
+rectangles after composition; final padding cannot repair source clipping.

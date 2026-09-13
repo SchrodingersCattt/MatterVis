@@ -91,7 +91,8 @@ def test_skill_routes_publication_and_multi_structure_guidance() -> None:
     assert "./references/multi-structure-panels.md" in document
     assert "./references/atom-property-coloring.md" in document
     assert document.index("MD trajectory") < document.index("per-atom scalar")
-    assert "Read exactly one primary page" in document
+    assert "Read exactly one primary page" not in document
+    assert "always read [verification]" in document
     assert "Scene type wins" in document
     assert "Run the documented command before inspecting help" in document
     quickstart = (SKILL / "references" / "quickstart.md").read_text(encoding="utf-8")
@@ -105,6 +106,17 @@ def test_skill_routes_publication_and_multi_structure_guidance() -> None:
     assert "Do not add `--view-direction` by default" in trajectory
     assert "largest" in trajectory and "lattice face" in trajectory
     assert "Use the input directly" in trajectory
+
+    publication = (SKILL / "references" / "publication-layout.md").read_text(
+        encoding="utf-8"
+    )
+    assert "A4 is 210 × 297 mm" in publication
+    assert "no text may be below 8 pt" in publication
+    verification = (SKILL / "references" / "verification.md").read_text(
+        encoding="utf-8"
+    )
+    assert "Final five-problem review" in verification
+    assert "every displayed finite fragment is complete" in verification
 
     vectors = (SKILL / "references" / "vibration-mode-vectors.md").read_text(
         encoding="utf-8"

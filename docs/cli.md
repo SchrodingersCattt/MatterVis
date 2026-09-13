@@ -241,6 +241,13 @@ substitutes one frame backend for another.
 | --backend BACKEND | cpu | cpu (3D), matplotlib (projected 2D), or plotly; never selected by fallback |
 | --orthogonal | yes | Orthographic projection |
 | --perspective | no | Perspective projection |
+| --isovalue VALUE | automatic | Explicit positive cube isosurface magnitude |
+| --isosurface-opacity VALUE | style default | Cube surface opacity in (0, 1] |
+| --periodic-isosurface / --no-periodic-isosurface | off | Enable or disable scalar closure across cell faces |
+
+Static exports omit browser-only picking traces. Interactive HTML retains them.
+For comparable cube panels, pass the same explicit `--isovalue` rather than
+allowing each source to select its own percentile threshold.
 
 ### Camera
 
@@ -353,6 +360,9 @@ JSON `center_images:true` option works at both levels. At molecule level,
 MatterVis follows each displayed complete fragment image and translates the
 center, ligand shell, and hull together. Receipts keep source and display counts
 separate.
+
+The same polyhedron path is used for animated CPU renders, so `--polyhedron`
+stays depth-tested and frame-synchronous in GIF and MP4 output as well.
 
 `--cell-overlays` and `--bond-scale` require the general renderer. An explicit batch request fails instead of silently dropping either option.
 

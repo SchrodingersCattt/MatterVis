@@ -7,11 +7,13 @@ from typing import Any
 
 import numpy as np
 
-from ...config import atom_radius as configured_atom_radius
+from ...config import (
+    atom_radius as configured_atom_radius,
+    element_color as configured_element_color,
+)
 from ...loader.frame_batch import FrameBatch, frame_box_corners
 from ..camera import CameraTransform
 from ..contracts import CameraSpec
-from ..planning import _ELEMENT_COLORS
 
 try:
     from numba import njit
@@ -89,8 +91,8 @@ def element_style_tables(atom_scale: float = 1.0) -> tuple[np.ndarray, np.ndarra
     for atomic_number, symbol in enumerate(chemical_symbols):
         if atomic_number == 0 or not symbol:
             continue
-        colors[atomic_number] = _hex_rgb(_ELEMENT_COLORS.get(symbol, "#808080"))
-        radii[atomic_number] = max(configured_atom_radius(symbol), 0.2) * atom_scale
+        colors[atomic_number] = _hex_rgb(configured_element_color(symbol))
+        radii[atomic_number] = configured_atom_radius(symbol) * atom_scale
     return np.ascontiguousarray(colors), np.ascontiguousarray(radii)
 
 

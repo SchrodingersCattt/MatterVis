@@ -12,6 +12,7 @@ from .topology import (
     topology_results_markdown,
 )
 from .morphology import _morphology_traces
+from .geometry import geometry_entity_traces, validate_geometry_style
 from .compass import (
     _COMPASS_ITEM_NAME,
     axis_key_overlay,
@@ -95,6 +96,19 @@ def _publication_polyhedron_legend(spec_results: list[dict]) -> list[dict]:
             "yanchor": "bottom",
         }
     ]
+
+
+def _should_use_fast(scene: dict, style: dict) -> bool:
+    """Resolve the optional fast atom path without hiding geometry entities."""
+    is_flat_ortep = (
+        style.get("material") == "flat" and style.get("style") == "ortep"
+    )
+    return bool(style.get("fast_rendering", False)) or (
+        style.get("material") == "flat" and not is_flat_ortep
+    ) or (
+        len(scene.get("draw_atoms", [])) > 2000
+        and not bool(scene.get("geometry_entities"))
+    )
 
 
 def build_publication_figure(
@@ -321,14 +335,11 @@ def build_row_figure(
                 raise ValueError("vector_overlays_by_scene must match scene count")
             scene["vector_overlays"] = vector_overlays_by_scene[col_idx] or []
         style_norm = validate_style_schema(style)
+        validate_geometry_style(scene, style_norm)
         xr, yr, zr = _scene_ranges(scene, style_norm)
         if style_norm.get("material") == "flat":
             style_norm["_flat_visual_pixel_scale"] = flat_visual_pixel_scale(style_norm)
-        use_fast = (
-            bool(style_norm.get("fast_rendering", False))
-            or style_norm.get("material") == "flat"
-            or len(scene.get("draw_atoms", [])) > 2000
-        )
+        use_fast = _should_use_fast(scene, style_norm)
         mesh_payload = _cached_atom_bond_meshes(scene, style_norm, use_fast=use_fast)
 
         # Same hidden-label propagation as build_figure.
@@ -358,6 +369,7 @@ def build_row_figure(
         )
         trace_dicts.extend(_traces_to_dicts(_axis_traces(scene, style_norm)))
         trace_dicts.extend(_traces_to_dicts(_unit_cell_traces(scene, style_norm)))
+        trace_dicts.extend(_traces_to_dicts(geometry_entity_traces(scene)))
         trace_dicts.extend(_traces_to_dicts(_morphology_traces(scene, style_norm)))
         if include_interaction_traces:
             trace_dicts.append(
@@ -403,6 +415,7 @@ def build_figure(
     if vector_overlays is not None:
         scene["vector_overlays"] = vector_overlays
     style = validate_style_schema(style)
+    validate_geometry_style(scene, style)
     xr, yr, zr = _scene_ranges(
         scene,
         style,
@@ -411,17 +424,10 @@ def build_figure(
     if style.get("material") == "flat":
         style["_flat_visual_pixel_scale"] = flat_visual_pixel_scale(style)
     style["_topology_viewport_ranges"] = [list(xr), list(yr), list(zr)]
-    # Mesh3d atoms are 3D world-coordinate spheres -- they grow when the
-    # camera dollies in, which is what users expect from "zoom". Scatter3d
-    # markers are pixel-fixed and therefore must never be selected merely
-    # because a structure crosses an atom-count threshold. Fast rendering is
-    # an explicit caller/UI choice (or the deliberately selected flat material).
-    # flat+ortep is excluded: it uses the open-ORTEP billboard pipeline,
-    # not the scatter fast-path.
-    is_flat_ortep = style.get("material") == "flat" and style.get("style") == "ortep"
-    use_fast = bool(style.get("fast_rendering", False)) or (
-        style.get("material") == "flat" and not is_flat_ortep
-    )
+    # Keep the scene-level decision in one place.  In particular, a large
+    # atom cloud with a caller-supplied geometry entity must stay on the
+    # Mesh3d path so the entity participates in the same depth buffer.
+    use_fast = _should_use_fast(scene, style)
 
     mesh_payload = _cached_atom_bond_meshes(scene, style, use_fast=use_fast)
     topology_on = (
@@ -487,6 +493,7 @@ def build_figure(
     )
     trace_dicts.extend(_traces_to_dicts(_axis_traces(scene, style)))
     trace_dicts.extend(_traces_to_dicts(_unit_cell_traces(scene, style)))
+    trace_dicts.extend(_traces_to_dicts(geometry_entity_traces(scene)))
     trace_dicts.extend(_traces_to_dicts(_morphology_traces(scene, style)))
     if topology_on:
         trace_dicts.extend(

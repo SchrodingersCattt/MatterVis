@@ -282,6 +282,7 @@ def render_batch_if_selected(
         args.show_labels
         or args.show_axes
         or args.vector_overlays is not None
+        or args.polyhedron
         or args.display_time is not None
         or args.frame_field
     )

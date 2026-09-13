@@ -65,3 +65,33 @@ def test_static_row_figure_omits_atom_selection_trace() -> None:
     static = build_row_figure([(scene, style)], include_interaction_traces=False)
     assert "atom_selection" in _roles(interactive)
     assert "atom_selection" not in _roles(static)
+
+
+def test_cli_static_export_disables_interaction_traces(monkeypatch, tmp_path) -> None:
+    from mat_viewer.render import cli
+    from mat_viewer.render.api import FigureResult
+
+    captured = {}
+
+    def fake_render(scene, style, **kwargs):
+        captured.update(kwargs)
+        return FigureResult(mpl_fig=object())
+
+    args = type(
+        "Args",
+        (),
+        {
+            "publication_layout": False,
+            "title": None,
+            "subtitle": None,
+            "width": 100,
+            "height": 100,
+            "scale": 1,
+        },
+    )()
+    monkeypatch.setattr("mat_viewer.renderer.render", fake_render)
+    monkeypatch.setattr(FigureResult, "save", lambda *a, **k: None)
+
+    cli._save_static_output(object(), {}, {}, None, args, tmp_path / "x.png")
+
+    assert captured["include_interaction_traces"] is False

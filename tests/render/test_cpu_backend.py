@@ -21,7 +21,7 @@ from mat_viewer.render.contracts import (
 )
 from mat_viewer.render.cpu import render
 from mat_viewer.render.cpu.bsp import BSPPolygon, build_bsp, traverse_back_to_front
-from mat_viewer.render.cpu.raster import render_rgba
+from mat_viewer.render.cpu.raster import _rasterize_mesh, _rasterize_sphere, render_rgba
 from mat_viewer.render.cpu.vector import vector_scene, visible_line_segments
 from mat_viewer.render.geometry import (
     aromatic_ring_primitive,
@@ -48,11 +48,15 @@ def _camera(*, projection: str = "orthographic") -> CameraSpec:
     )
 
 
-def _plan(*primitives, camera: CameraSpec | None = None) -> RenderPlan:
+def _plan(
+    *primitives,
+    camera: CameraSpec | None = None,
+    background: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+) -> RenderPlan:
     return RenderPlan(
         width=96,
         height=96,
-        background=(1.0, 1.0, 1.0, 1.0),
+        background=background,
         viewports=(
             ViewportPlan(
                 semantic_id="main",
@@ -136,6 +140,13 @@ def _text_occlusion_plan(
 def _red_text_pixels(image: np.ndarray) -> np.ndarray:
     rgb = image[..., :3].astype(int)
     return (rgb[..., 0] > rgb[..., 1] + 32) & (rgb[..., 0] > rgb[..., 2] + 32)
+
+
+def _sphere_buffers() -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
+    color = np.zeros((96, 96, 4), dtype=float)
+    z_buffer = np.full((96, 96), np.inf, dtype=float)
+    order_buffer = np.full((96, 96), np.iinfo(np.int64).max, dtype=np.int64)
+    return color, z_buffer, order_buffer, {}
 
 
 def test_camera_uses_one_depth_convention_and_clips_before_projection():
@@ -251,6 +262,149 @@ def test_geometry_builders_emit_backend_neutral_indexed_primitives():
     assert cell.segments.shape == (12, 2, 3)
     assert isinstance(ring, TriangleMeshPrimitive)
     assert not sphere.vertices.flags.writeable
+
+
+def test_native_sphere_metadata_mismatch_falls_back_to_mesh_with_warning():
+    sphere = sphere_primitive(
+        "sphere:analytic",
+        (0.0, 0.0, 0.0),
+        0.5,
+        "#3366cc",
+        lat_steps=6,
+        lon_steps=10,
+        alpha=1.0,
+    )
+    shifted_vertices = np.array(sphere.vertices, copy=True)
+    shifted_vertices[:, 0] += 0.12
+    mismatched = TriangleMeshPrimitive(
+        semantic_id=sphere.semantic_id,
+        vertices=shifted_vertices,
+        triangles=sphere.triangles,
+        rgba=sphere.rgba,
+        vertex_normals=sphere.vertex_normals,
+        metadata=sphere.metadata,
+    )
+    mesh_only = TriangleMeshPrimitive(
+        semantic_id=sphere.semantic_id,
+        vertices=shifted_vertices,
+        triangles=sphere.triangles,
+        rgba=sphere.rgba,
+        vertex_normals=sphere.vertex_normals,
+        metadata={},
+    )
+
+    transform = CameraTransform(_camera(), 96, 96)
+
+    fallback, z_buffer, order_buffer, fragments = _sphere_buffers()
+    with pytest.warns(RuntimeWarning, match="does not match the mesh"):
+        _rasterize_sphere(
+            mismatched,
+            transform,
+            fallback,
+            z_buffer,
+            order_buffer,
+            fragments,
+            0,
+        )
+    reference, z_buffer, order_buffer, fragments = _sphere_buffers()
+    _rasterize_mesh(
+        mesh_only,
+        transform,
+        reference,
+        z_buffer,
+        order_buffer,
+        fragments,
+        0,
+    )
+    assert np.allclose(fallback, reference)
+
+    alpha_sphere = sphere_primitive(
+        "sphere:alpha",
+        (0.0, 0.0, 0.0),
+        0.55,
+        "#3366cc",
+        lat_steps=6,
+        lon_steps=10,
+        alpha=0.75,
+        metadata={
+            "_raster_ambient": 1.0,
+            "_raster_diffuse": 0.0,
+            "_raster_alpha_front_factor": 1.0,
+            "_raster_alpha_back_factor": 0.0,
+        },
+    )
+    transform = CameraTransform(_camera(), 96, 96)
+    image, z_buffer, order_buffer, fragments = _sphere_buffers()
+    _rasterize_sphere(
+        alpha_sphere,
+        transform,
+        image,
+        z_buffer,
+        order_buffer,
+        fragments,
+        0,
+    )
+    surface_point = np.array(
+        [[0.6, 0.0, float(np.sqrt(1.0 - 0.6**2))]],
+        dtype=float,
+    )
+    center_xy = np.rint(transform.project_world([[0.0, 0.0, 0.0]]).xy[0]).astype(int)
+    edge_xy = np.rint(transform.project_world(surface_point).xy[0]).astype(int)
+    def fragment_alpha_at(pixel: np.ndarray) -> float:
+        key = int(pixel[1]) * image.shape[1] + int(pixel[0])
+        return max((item.rgba[3] for item in fragments.get(key, ())), default=0.0)
+
+    center_alpha = fragment_alpha_at(center_xy)
+    edge_alpha = fragment_alpha_at(edge_xy)
+    assert center_alpha > edge_alpha >= 0.0
+
+
+def test_native_sphere_directional_light_and_weights_are_pixel_stable():
+    def raster(metadata: dict) -> np.ndarray:
+        primitive = sphere_primitive(
+            "sphere:light",
+            (0.0, 0.0, 0.0),
+            0.65,
+            "#ffffff",
+            lat_steps=6,
+            lon_steps=10,
+            alpha=1.0,
+            metadata=metadata,
+        )
+        image, z_buffer, order_buffer, fragments = _sphere_buffers()
+        _rasterize_sphere(
+            primitive,
+            CameraTransform(_camera(), 96, 96),
+            image,
+            z_buffer,
+            order_buffer,
+            fragments,
+            0,
+        )
+        return image
+
+    normalised = raster(
+        {
+            "_raster_light": (1.0, 0.0, 1.0),
+            "_raster_ambient": 1.0,
+            "_raster_diffuse": 1.0,
+            "_raster_two_sided": False,
+        }
+    )
+    explicit = raster(
+        {
+            "_raster_light": (1.0, 0.0, 1.0),
+            "_raster_ambient": 0.5,
+            "_raster_diffuse": 0.5,
+            "_raster_two_sided": False,
+        }
+    )
+    assert np.allclose(normalised, explicit)
+
+    painted = normalised[..., 3] > 0.0
+    left = normalised[:, :48, 0][painted[:, :48]].mean()
+    right = normalised[:, 48:, 0][painted[:, 48:]].mean()
+    assert right > left
 
 
 @pytest.mark.parametrize(

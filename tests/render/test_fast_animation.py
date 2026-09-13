@@ -8,6 +8,7 @@ import numpy as np
 from PIL import Image
 import pytest
 
+from mat_viewer.config import atom_radius, element_color
 from mat_viewer.loader.lammps_batch import FrameBatch, LammpsFrameRecord
 from mat_viewer.render.contracts import CameraSpec, RenderPlan, ViewportPlan
 from mat_viewer.render.cpu.batch import (
@@ -27,6 +28,7 @@ from mat_viewer.render.fast_animation import (
 )
 from mat_viewer.render.fast_cli import _color8
 from mat_viewer.render.geometry import sphere_primitive
+from mat_viewer.agent_topology import prepare_fast_polyhedron_context
 
 
 def _frame(
@@ -58,6 +60,18 @@ def _camera(projection: str = "orthographic") -> CameraSpec:
         ortho_scale=2.0,
         fov_y_deg=45.0,
     )
+
+
+def test_batch_element_styles_use_mattervis_configuration() -> None:
+    colors, radii = element_style_tables()
+
+    for atomic_number, symbol in ((1, "H"), (6, "C"), (7, "N"), (8, "O"), (17, "Cl")):
+        expected = tuple(
+            int(element_color(symbol).lstrip("#")[index : index + 2], 16)
+            for index in (0, 2, 4)
+        )
+        assert tuple(colors[atomic_number]) == expected
+        assert radii[atomic_number] == pytest.approx(atom_radius(symbol))
 
 
 @pytest.mark.skipif(not NUMBA_AVAILABLE, reason="batch renderer requires numba")
@@ -177,6 +191,75 @@ def test_bond_batch_uses_minimum_image_vectors() -> None:
 
     assert np.all(rendered.rgba[60, 80, :3] == 255)
     assert np.any(rendered.rgba[60, :35, :3] != 255)
+
+
+@pytest.mark.skipif(not NUMBA_AVAILABLE, reason="batch renderer requires numba")
+def test_periodic_bond_raster_length_matches_minimum_image_distance() -> None:
+    frame = _frame(
+        [[0.1, 0.0, 0.0], [1.9, 0.0, 0.0]],
+        [6, 6],
+        cell=np.eye(3) * 2.0,
+    )
+    camera = CameraSpec(
+        position=(1.0, 0.0, 6.0),
+        target=(1.0, 0.0, 0.0),
+        up=(0.0, 1.0, 0.0),
+        projection="orthographic",
+        near=0.1,
+        far=20.0,
+        ortho_scale=2.5,
+        fov_y_deg=45.0,
+    )
+
+    def raster_width(vector: list[float]) -> int:
+        bonds = SimpleNamespace(
+            pairs=np.asarray([[0, 1]], dtype=np.int32),
+            vectors=np.asarray([vector], dtype=np.float32),
+        )
+        rendered = render_frame_batch(
+            frame,
+            camera,
+            width=400,
+            height=200,
+            show_cell=False,
+            bonds=bonds,
+            bond_radius=0.02,
+        )
+        foreground = np.any(rendered.rgba[:, :, :3] != 255, axis=2)
+        _, columns = np.where(foreground)
+        return int(columns.max() - columns.min() + 1)
+
+    assert raster_width([-0.2, 0.0, 0.0]) == 10
+    assert raster_width([1.8, 0.0, 0.0]) == 74
+
+
+def test_fast_polyhedron_context_uses_declared_species_and_cutoff() -> None:
+    frame = _frame(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0],
+         [0.0, 0.0, 1.0], [-1.0, 0.0, 0.0]],
+        [82, 53, 53, 53, 53],
+        cell=np.eye(3) * 20.0,
+    )
+    context = prepare_fast_polyhedron_context(
+        frame,
+        ['{"center":"Pb","ligand":"I","level":"atom",'
+         '"cutoff":2.5,"fallback_max":4}'],
+    )
+    assert context.supported is True
+    assert context.specs[0].center_indices == (0,)
+    assert context.specs[0].ligand_indices == (1, 2, 3, 4)
+    assert context.specs[0].cutoff == pytest.approx(2.5)
+    assert context.specs[0].ligand_count == 4
+
+
+def test_fast_polyhedron_context_defers_molecule_specs_to_topology() -> None:
+    frame = _frame([[0.0, 0.0, 0.0]], [6], cell=np.eye(3) * 20.0)
+    context = prepare_fast_polyhedron_context(
+        frame,
+        ['{"center":"C6N2","ligand":"ClO4"}'],
+    )
+    assert context.supported is False
+    assert "molecule-level" in (context.reason or "")
 
 
 def _image_descriptors_have_no_local_palettes(path: Path) -> int:
