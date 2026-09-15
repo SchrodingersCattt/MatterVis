@@ -993,4 +993,4 @@ def _viewport_bounds(
 
 
 
-__all__ = ["render_png", "render_rgba"]
+__all__ = ["composite_primitives", "render_png", "render_rgba"]
