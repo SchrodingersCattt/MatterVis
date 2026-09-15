@@ -10,7 +10,8 @@ import pytest
 
 from mat_viewer.config import atom_radius, element_color
 from mat_viewer.loader.lammps_batch import FrameBatch, LammpsFrameRecord
-from mat_viewer.render.contracts import CameraSpec, RenderPlan, ViewportPlan
+from mat_viewer.render.contracts import CameraSpec, LinePrimitive, RenderPlan, ViewportPlan
+from mat_viewer.render.cpu import composite_primitives
 from mat_viewer.render.cpu.batch import (
     NUMBA_AVAILABLE,
     SphereBatch,
@@ -169,6 +170,43 @@ def test_bond_batch_inherits_endpoint_atom_colors() -> None:
     second_half = rendered.rgba[60, 80, :3]
     assert first_half[0] > first_half[2]
     assert second_half[2] > second_half[0]
+
+
+@pytest.mark.skipif(not NUMBA_AVAILABLE, reason="batch renderer requires numba")
+def test_native_dashed_line_composite_respects_batch_depth() -> None:
+    frame = _frame([[0.0, 0.0, 0.0]], [6])
+    camera = _camera()
+    batch = render_frame_batch(
+        frame,
+        camera,
+        width=200,
+        height=120,
+        show_cell=False,
+    )
+    line = LinePrimitive(
+        semantic_id="reaction-contact",
+        segments=np.asarray([[[-1.6, 0.0, -0.5], [1.6, 0.0, -0.5]]]),
+        rgba=(1.0, 0.0, 0.0, 1.0),
+        width_px=4.0,
+        dash=(10.0, 8.0),
+        depth_test=True,
+    )
+
+    composed, composed_depth = composite_primitives(
+        batch.rgba,
+        batch.depth,
+        camera,
+        (line,),
+    )
+
+    np.testing.assert_array_equal(composed[60, 100], batch.rgba[60, 100])
+    assert composed_depth[60, 100] == pytest.approx(batch.depth[60, 100])
+    red = (composed[60, :, 0] > 220) & (composed[60, :, 1] < 40)
+    assert red[:55].any()
+    assert red[145:].any()
+    red[80:121] = False
+    indices = np.flatnonzero(red)
+    assert np.count_nonzero(np.diff(indices) > 1) >= 2
 
 
 @pytest.mark.skipif(not NUMBA_AVAILABLE, reason="batch renderer requires numba")
