@@ -137,6 +137,14 @@ scale. The cube is the radius-aware bounding cube of the largest input
 scene. Use this for N-up grid figures where each panel must depict the
 same length per pixel.
 
+### `mat_viewer.renderer.uniform_camera(plans, *, direction=None, up=None, padding=0.0)`
+
+Return one orthographic `CameraSpec` per backend-neutral render plan. The
+cameras retain their own fitted centres and depth ranges while sharing a
+camera direction and the largest fitted `ortho_scale`, plus optional
+world-space padding. Use this before CPU or Matplotlib rendering when N-up
+panels must depict the same length per pixel without a Plotly/Kaleido path.
+
 ### `mat_viewer.renderer.build_publication_figure(...)`
 
 This is a legacy private compositor retained for the browser application's
