@@ -82,6 +82,13 @@ Parses a CIF and returns a scene dict consumable by
   Cartesian coordinates. The 100 Å dummy cells that CIF exporters
   sometimes write around clusters are ignored.
 
+`build_scene_from_atoms(..., include_minor=False)` and
+`build_bundle_scene(..., include_minor=False)` omit occupancy-minor disorder
+alternatives and every bond incident to them. The default is `True`, preserving
+the diagnostic view of both alternatives. Use the major-only option for clean
+publication formula units after the loader has assigned disorder groups; it
+does not alter the source structure or MolCrysKit connectivity.
+
 **CIF input notes.** The `_asym_index` column
 (`_atom_site.label_asym_id` mapped to a 0-based index) may be `None` in CIF
 inputs that lack `_atom_site_symmetry_multiplicity` or related fields. When

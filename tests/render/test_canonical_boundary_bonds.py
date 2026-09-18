@@ -175,6 +175,45 @@ def test_canonical_lift_does_not_cross_connect_duplicate_display_images():
     assert all(np.linalg.norm(bond["end"] - bond["start"]) < 3.5 for bond in scene["bonds"])
 
 
+def test_scene_can_omit_minor_disorder_atoms_and_their_bonds():
+    cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
+    M = np.eye(3) * 10.0
+    atoms = [
+        _atom("C1", "C", [0.45, 0.50, 0.50], M, 0),
+        _atom("O1", "O", [0.55, 0.50, 0.50], M, 1),
+        _atom("O1A", "O", [0.45, 0.60, 0.50], M, 2),
+    ]
+    atoms[2].update({"_is_minor": True, "occ": 0.35, "da": "A", "dg": "2"})
+    records = [
+        {"left": 0, "right": 1, "right_image_shift": [0, 0, 0]},
+        {"left": 0, "right": 2, "right_image_shift": [0, 0, 0]},
+    ]
+
+    scene = build_scene_from_atoms(
+        name="major-only",
+        title="major-only",
+        atoms=atoms,
+        cell=cell,
+        M=M,
+        R=np.eye(3),
+        display_mode="unit_cell",
+        ops=_ops_without_redetection(),
+        unwrapped_atoms=atoms,
+        include_boundary_replicas=False,
+        include_minor=False,
+        canonical_bond_pairs=[(0, 1), (0, 2)],
+        canonical_bond_records=records,
+        molcrys_analysis=_analysis(atoms, records),
+        preset={"style": {"show_labels": False, "show_axes": False}},
+    )
+
+    assert [atom["label"] for atom in scene["draw_atoms"]] == ["C1", "O1"]
+    assert len(scene["bonds"]) == 1
+    assert scene["bonds"][0]["i"] == 0
+    assert scene["bonds"][0]["j"] == 1
+    assert not scene["has_minor"]
+
+
 def test_dap4_boundary_fragment_instances_keep_all_internal_canonical_bonds(monkeypatch):
     del monkeypatch
     import mat_viewer.scene.core as scene_core
