@@ -1167,7 +1167,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                     if args.ortep_probability is not None
                     else 0.5
                 ),
-                missing_adp_policy=args.missing_adp_policy,
+                ortep_hydrogen_radius=args.ortep_hydrogen_radius, missing_adp_policy=args.missing_adp_policy,
                 sphere_detail=tuple(args.sphere_detail),
                 cylinder_sides=args.cylinder_sides,
                 isosurface_mode=args.isosurface_mode, isosurface_wireframe_width=args.isosurface_wireframe_width,

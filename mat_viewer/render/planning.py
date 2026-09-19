@@ -34,12 +34,12 @@ from .geometry import (
 )
 from .overlay.cells import attach_cell_overlays, cell_overlay_primitives
 from .overlay.vectors import attach_vector_overlays, vector_primitives
+from .ortep_policy import displacement_for_atom
 from .mesh_overlays import (
     isosurface_primitives as _isosurface_primitives,
     polyhedron_primitives as _polyhedron_primitives,
 )
 from .property_planning import prepare_render_property, property_color_for_atom, reserve_property_colorbar, resolve_render_property_context
-
 _ELEMENT_COLORS = {
     "H": "#FFFFFF",
     "D": "#E8F5FF",
@@ -242,11 +242,7 @@ def prepare_render(
 
         atom_primitive_start = len(primitives)
         if representation == "ortep":
-            if element == "H" and render_spec.ortep_hydrogen_radius is not None:
-                radius = float(render_spec.ortep_hydrogen_radius)
-                displacement = np.eye(3) * (radius / 1.54) ** 2
-            else:
-                displacement = _displacement_matrix(atom)
+            displacement = displacement_for_atom(atom, element=element, hydrogen_radius=render_spec.ortep_hydrogen_radius, crystallographic_displacement=_displacement_matrix)
             if displacement is None:
                 if render_spec.missing_adp_policy == "error":
                     raise ValueError(

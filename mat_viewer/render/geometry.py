@@ -34,6 +34,11 @@ _BASIC_COLORS: dict[str, str] = {
 }
 
 
+def fixed_isotropic_displacement(radius: float) -> np.ndarray:
+    """Return isotropic U whose 50%-probability ellipsoid has ``radius``."""
+    return np.eye(3) * (float(radius) / 1.54) ** 2
+
+
 def color_to_rgba(value: Any, *, alpha: float | None = None) -> RGBA:
     """Parse a compact CSS/array color without importing a graphics stack."""
     if isinstance(value, str):
