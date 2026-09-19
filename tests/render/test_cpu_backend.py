@@ -21,7 +21,12 @@ from mat_viewer.render.contracts import (
 )
 from mat_viewer.render.cpu import render
 from mat_viewer.render.cpu.bsp import BSPPolygon, build_bsp, traverse_back_to_front
-from mat_viewer.render.cpu.raster import _rasterize_mesh, _rasterize_sphere, render_rgba
+from mat_viewer.render.cpu.raster import (
+    _polyhedron_face_rgb,
+    _rasterize_mesh,
+    _rasterize_sphere,
+    render_rgba,
+)
 from mat_viewer.render.cpu.vector import vector_scene, visible_line_segments
 from mat_viewer.render.geometry import (
     aromatic_ring_primitive,
@@ -32,6 +37,7 @@ from mat_viewer.render.geometry import (
     sphere_primitive,
     unit_cell_primitive,
 )
+from mat_viewer.render.mesh_overlays import polyhedron_primitives
 from mat_viewer.render.planning import prepare_render
 
 
@@ -433,6 +439,71 @@ def test_png_transparency_uses_per_pixel_depth_sorted_fragments():
     pixel = render_rgba(_plan(near, far))[48, 48]
     assert pixel[0] > pixel[2]
     assert pixel[3] == 255
+
+
+def test_polyhedron_face_shading_preserves_neutral_colors():
+    neutral = np.asarray([0.72, 0.72, 0.72])
+    for lambert in (0.0, 0.5, 1.0):
+        shaded = _polyhedron_face_rgb(neutral, lambert)
+        assert shaded[0] == pytest.approx(shaded[1])
+        assert shaded[1] == pytest.approx(shaded[2])
+
+
+def test_polyhedron_face_shading_is_restrained_for_transparent_overlays():
+    base = np.asarray([0.72, 0.56, 0.58])
+    shadow = _polyhedron_face_rgb(base, 0.0)
+    highlight = _polyhedron_face_rgb(base, 1.0)
+    assert shadow == pytest.approx(base * 0.82)
+    assert highlight == pytest.approx(base + (1.0 - base) * 0.16)
+
+
+def test_ortep_hydrogen_radius_overrides_constrained_uiso():
+    scene = {
+        "draw_atoms": [
+            {
+                "elem": "H",
+                "label": "H1",
+                "cart": [0.0, 0.0, 0.0],
+                "uiso": 0.10,
+                "color": "#DDDDDD",
+            }
+        ],
+        "bonds": [],
+    }
+    plan = prepare_render(
+        scene,
+        render={
+            "representation": "ortep",
+            "show_cell": False,
+            "ortep_hydrogen_radius": 0.18,
+        },
+    )
+    atom = next(item for item in plan.primitives if item.semantic_id.startswith("atom:"))
+    radii = np.linalg.norm(atom.vertices - np.asarray([0.0, 0.0, 0.0]), axis=1)
+    assert radii.max() == pytest.approx(0.18, abs=5.0e-4)
+
+
+def test_ortep_hydrogen_radius_must_be_positive():
+    with pytest.raises(ValueError, match="ortep_hydrogen_radius"):
+        RenderSpec(
+            representation="ortep",
+            ortep_hydrogen_radius=0.0,
+        )
+
+
+def test_zero_opacity_polyhedron_layers_do_not_emit_primitives():
+    scene = {
+        "polyhedra": [
+            {
+                "vertices": [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]],
+                "faces": [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]],
+                "color": "#777777",
+                "opacity": 0.0,
+                "edge_opacity": 0.0,
+            }
+        ]
+    }
+    assert polyhedron_primitives(scene, None) == []
 
 
 @pytest.mark.parametrize("projection", ["orthographic", "perspective"])

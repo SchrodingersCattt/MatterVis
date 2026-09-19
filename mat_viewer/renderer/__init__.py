@@ -47,6 +47,7 @@ __all__ = [
     "style_from_controls",
     "topology_histogram_figure",
     "topology_results_markdown",
+    "uniform_camera",
     "uniform_viewport",
     "validate_style_schema",
     "vector_mesh_traces",

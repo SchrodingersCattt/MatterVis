@@ -1,7 +1,6 @@
 """Deterministic CPU rasterizer with Z-buffer and per-pixel A-buffer."""
 
 from __future__ import annotations
-import colorsys
 import warnings
 
 from dataclasses import dataclass
@@ -26,19 +25,13 @@ _DEPTH_EPSILON = 1.0e-9
 
 
 def _polyhedron_face_rgb(rgb: np.ndarray, lambert: float) -> np.ndarray:
-    """Shade a polyhedron face in HLS space while preserving its base hue."""
-    red, green, blue = np.clip(np.asarray(rgb, dtype=float), 0.0, 1.0)
-    hue, lightness, saturation = colorsys.rgb_to_hls(red, green, blue)
+    """Apply restrained face shading without tinting neutral materials."""
+    base = np.clip(np.asarray(rgb, dtype=float), 0.0, 1.0)
     strength = float(np.clip(lambert, 0.0, 1.0))
-    dark = max(0.14, lightness * 0.50)
-    bright = min(0.92, lightness + (1.0 - lightness) * 0.42)
-    face_saturation = max(0.46, saturation * (0.85 + 0.15 * strength))
-    shaded = colorsys.hls_to_rgb(
-        hue,
-        dark + (bright - dark) * strength,
-        min(1.0, face_saturation),
-    )
-    return np.asarray(shaded, dtype=float)
+    shade = 0.82 + 0.34 * strength
+    if shade >= 1.0:
+        return base + (1.0 - base) * min(shade - 1.0, 0.35)
+    return base * max(shade, 0.55)
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,7 +51,7 @@ def render_png(
 
     scale = max(1, int(plan.metadata.get("scale", 1)))
     rgba = render_rgba(plan, scale=scale)
-    image = Image.fromarray(rgba, mode="RGBA")
+    image = Image.fromarray(rgba)
     if scale != 1:
         image = image.resize(
             (plan.width, plan.height),
@@ -116,7 +109,7 @@ def render_rgba(plan: RenderPlan, *, scale: int = 1) -> np.ndarray:
     from ..compass_overlay import draw_raster_compass
     from ..property_colorbar import draw_raster_colorbar
 
-    image = Image.fromarray(canvas, mode="RGBA")
+    image = Image.fromarray(canvas)
     draw_raster_compass(image, plan)
     draw_raster_colorbar(image, plan)
     canvas[:] = np.asarray(image)
@@ -246,7 +239,7 @@ def composite_primitives(
 
         from ..compass_overlay import draw_raster_compass
 
-        image = Image.fromarray(output, mode="RGBA")
+        image = Image.fromarray(output)
         draw_raster_compass(image, plan)
         output[:] = np.asarray(image)
     return output, composed_depth
@@ -939,7 +932,7 @@ def _draw_text(
         return
     from PIL import Image, ImageDraw, ImageFont
 
-    image = Image.fromarray(canvas, mode="RGBA")
+    image = Image.fromarray(canvas)
     full_width, full_height = image.size
     for viewport, primitive in sorted(texts, key=lambda item: item[1].semantic_id):
         left, top, right, bottom = _viewport_bounds(viewport, full_width, full_height)

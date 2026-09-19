@@ -82,6 +82,13 @@ Parses a CIF and returns a scene dict consumable by
   Cartesian coordinates. The 100 Å dummy cells that CIF exporters
   sometimes write around clusters are ignored.
 
+`build_scene_from_atoms(..., include_minor=False)` and
+`build_bundle_scene(..., include_minor=False)` omit occupancy-minor disorder
+alternatives and every bond incident to them. The default is `True`, preserving
+the diagnostic view of both alternatives. Use the major-only option for clean
+publication formula units after the loader has assigned disorder groups; it
+does not alter the source structure or MolCrysKit connectivity.
+
 **CIF input notes.** The `_asym_index` column
 (`_atom_site.label_asym_id` mapped to a 0-based index) may be `None` in CIF
 inputs that lack `_atom_site_symmetry_multiplicity` or related fields. When
@@ -100,6 +107,11 @@ values below `1.0` tighten connectivity and values above `1.0` loosen it. Pass
 the same value to source loading/molecule analysis and scene construction so
 PBC unwrapping and visible bonds cannot disagree. `bond_radius` and
 `scatter_bond_scale` affect appearance only, not connectivity.
+
+Backend-neutral ORTEP render specifications accept
+`ortep_hydrogen_radius=<angstrom>`. When set, hydrogen atoms use that fixed
+isotropic display radius instead of their constrained crystallographic Uiso;
+all non-hydrogen atoms retain their requested probability ellipsoids.
 
 For uniformly compressed or expanded structures, try and validate one global
 `bond_scale` first. Use `bond_thresholds=` only when no global coefficient can
@@ -136,6 +148,14 @@ subsequent `build_figure` call renders at an identical physical length
 scale. The cube is the radius-aware bounding cube of the largest input
 scene. Use this for N-up grid figures where each panel must depict the
 same length per pixel.
+
+### `mat_viewer.renderer.uniform_camera(plans, *, direction=None, up=None, padding=0.0)`
+
+Return one orthographic `CameraSpec` per backend-neutral render plan. The
+cameras retain their own fitted centres and depth ranges while sharing a
+camera direction and the largest fitted `ortho_scale`, plus optional
+world-space padding. Use this before CPU or Matplotlib rendering when N-up
+panels must depict the same length per pixel without a Plotly/Kaleido path.
 
 ### `mat_viewer.renderer.build_publication_figure(...)`
 
