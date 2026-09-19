@@ -108,6 +108,11 @@ the same value to source loading/molecule analysis and scene construction so
 PBC unwrapping and visible bonds cannot disagree. `bond_radius` and
 `scatter_bond_scale` affect appearance only, not connectivity.
 
+Backend-neutral ORTEP render specifications accept
+`ortep_hydrogen_radius=<angstrom>`. When set, hydrogen atoms use that fixed
+isotropic display radius instead of their constrained crystallographic Uiso;
+all non-hydrogen atoms retain their requested probability ellipsoids.
+
 For uniformly compressed or expanded structures, try and validate one global
 `bond_scale` first. Use `bond_thresholds=` only when no global coefficient can
 retain all intended bonds while excluding compressed intermolecular contacts.

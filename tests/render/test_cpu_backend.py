@@ -457,6 +457,40 @@ def test_polyhedron_face_shading_is_restrained_for_transparent_overlays():
     assert highlight == pytest.approx(base + (1.0 - base) * 0.16)
 
 
+def test_ortep_hydrogen_radius_overrides_constrained_uiso():
+    scene = {
+        "draw_atoms": [
+            {
+                "elem": "H",
+                "label": "H1",
+                "cart": [0.0, 0.0, 0.0],
+                "uiso": 0.10,
+                "color": "#DDDDDD",
+            }
+        ],
+        "bonds": [],
+    }
+    plan = prepare_render(
+        scene,
+        render={
+            "representation": "ortep",
+            "show_cell": False,
+            "ortep_hydrogen_radius": 0.18,
+        },
+    )
+    atom = next(item for item in plan.primitives if item.semantic_id.startswith("atom:"))
+    radii = np.linalg.norm(atom.vertices - np.asarray([0.0, 0.0, 0.0]), axis=1)
+    assert radii.max() == pytest.approx(0.18, abs=5.0e-4)
+
+
+def test_ortep_hydrogen_radius_must_be_positive():
+    with pytest.raises(ValueError, match="ortep_hydrogen_radius"):
+        RenderSpec(
+            representation="ortep",
+            ortep_hydrogen_radius=0.0,
+        )
+
+
 def test_zero_opacity_polyhedron_layers_do_not_emit_primitives():
     scene = {
         "polyhedra": [

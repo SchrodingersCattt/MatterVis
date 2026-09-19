@@ -242,7 +242,11 @@ def prepare_render(
 
         atom_primitive_start = len(primitives)
         if representation == "ortep":
-            displacement = _displacement_matrix(atom)
+            if element == "H" and render_spec.ortep_hydrogen_radius is not None:
+                radius = float(render_spec.ortep_hydrogen_radius)
+                displacement = np.eye(3) * (radius / 1.54) ** 2
+            else:
+                displacement = _displacement_matrix(atom)
             if displacement is None:
                 if render_spec.missing_adp_policy == "error":
                     raise ValueError(

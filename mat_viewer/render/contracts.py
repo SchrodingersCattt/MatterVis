@@ -194,6 +194,7 @@ class RenderSpec:
     cell_width_px: float = 2.0
     aromatic_rings: Literal["bonds", "circle", "disk"] = "bonds"
     ortep_probability: float = 0.5
+    ortep_hydrogen_radius: float | None = None
     ortep_mode: Literal["solid", "axes", "hatch"] = "solid"
     missing_adp_policy: Literal["error", "sphere"] = "error"
     sphere_detail: tuple[int, int] = (12, 20)
@@ -247,6 +248,11 @@ class RenderSpec:
             raise ValueError("aromatic_rings must be bonds, circle, or disk")
         if not 0.0 < float(self.ortep_probability) < 1.0:
             raise ValueError("ortep_probability must lie in (0, 1)")
+        if self.ortep_hydrogen_radius is not None and (
+            not np.isfinite(self.ortep_hydrogen_radius)
+            or float(self.ortep_hydrogen_radius) <= 0.0
+        ):
+            raise ValueError("ortep_hydrogen_radius must be positive when provided")
         if self.isosurface_isovalue is not None and (not np.isfinite(self.isosurface_isovalue) or self.isosurface_isovalue <= 0):
             raise ValueError("isosurface_isovalue must be positive when provided")
         if self.isosurface_mode not in {"surface", "wireframe"}:
