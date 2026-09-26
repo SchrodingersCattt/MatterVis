@@ -44,6 +44,7 @@ the command reports a missing capability. Read
 
 ## Execution boundary
 
+- For an explicit install or source-change request, read [installation](./references/installation.md); PyPI is the default, and source checkouts are only for changing MatterVis.
 - Molecules and covalent networks default to `ball_stick`; use `ball` for dense
   ionic or coordination structures only when bonds are not evidence.
 - If rendering starts later or is delegated, that agent loads this skill before
