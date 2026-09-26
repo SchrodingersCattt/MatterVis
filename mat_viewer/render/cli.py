@@ -349,6 +349,13 @@ def _build_render_parser(
         help="ORTEP ellipsoid probability (0.0–1.0, default: 0.5).",
     )
     p.add_argument(
+        "--ortep-hydrogen-radius",
+        type=float,
+        default=None,
+        metavar="ANGSTROM",
+        help="Fixed isotropic ORTEP hydrogen display radius in Å.",
+    )
+    p.add_argument(
         "--ortep-mode",
         choices=_ORTEP_MODES,
         default="ortep_axes",

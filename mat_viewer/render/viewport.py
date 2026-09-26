@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from .contracts import CameraSpec
+
 
 def _geometry_entity_points(scene: dict) -> list[np.ndarray]:
     """Return visible mesh vertices for viewport ownership.
@@ -823,3 +825,76 @@ def uniform_viewport(
         scene["viewport"] = viewport
         viewports.append(viewport)
     return viewports
+
+
+def uniform_camera(
+    plans,
+    *,
+    direction=None,
+    up=None,
+    padding=0.0,
+):
+    """Return per-plan cameras with one direction and orthographic scale.
+
+    This is the backend-neutral counterpart of :func:`uniform_viewport` for
+    CPU and Matplotlib rendering. Each returned camera remains centred on its
+    own plan while all panels use the same world length per pixel.
+
+    Parameters
+    ----------
+    plans
+        Render plans whose fitted cameras define the panel centres and depth
+        ranges.
+    direction, up
+        Optional shared camera direction and up vector. When omitted, the
+        first plan's fitted orientation is used.
+    padding
+        Extra world-space half-height added to the largest fitted
+        ``ortho_scale``.
+    """
+    plans = list(plans)
+    if not plans:
+        return []
+
+    cameras = [plan.camera for plan in plans]
+    shared_scale = max(float(camera.ortho_scale) for camera in cameras) + float(padding)
+    if not math.isfinite(shared_scale) or shared_scale <= 0.0:
+        raise ValueError("uniform camera scale must be positive and finite")
+
+    first = cameras[0]
+    if direction is None:
+        direction_vector = np.asarray(first.position, dtype=float) - np.asarray(
+            first.target, dtype=float
+        )
+    else:
+        direction_vector = np.asarray(direction, dtype=float)
+    if direction_vector.shape != (3,) or not np.all(np.isfinite(direction_vector)):
+        raise ValueError("direction must be a finite three-dimensional vector")
+    if float(np.linalg.norm(direction_vector)) <= 1.0e-12:
+        raise ValueError("direction must be non-zero")
+
+    up_vector = np.asarray(first.up if up is None else up, dtype=float)
+    if up_vector.shape != (3,) or not np.all(np.isfinite(up_vector)):
+        raise ValueError("up must be a finite three-dimensional vector")
+    if float(np.linalg.norm(up_vector)) <= 1.0e-12:
+        raise ValueError("up must be non-zero")
+
+    out = []
+    for camera in cameras:
+        target = np.asarray(camera.target, dtype=float)
+        distance = float(
+            np.linalg.norm(np.asarray(camera.position, dtype=float) - target)
+        )
+        out.append(
+            CameraSpec.looking_along(
+                direction_vector,
+                target=target,
+                up=up_vector,
+                distance=distance,
+                projection="orthographic",
+                ortho_scale=shared_scale,
+                near=camera.near,
+                far=camera.far,
+            )
+        )
+    return out

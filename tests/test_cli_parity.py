@@ -49,6 +49,7 @@ def test_backend_neutral_spec_fields_have_cli_destinations() -> None:
             "cell_width_px": "cell_width",
             "aromatic_rings": "aromatic_rings",
             "ortep_probability": "ortep_probability",
+            "ortep_hydrogen_radius": "ortep_hydrogen_radius",
             "ortep_mode": "ortep_mode",
             "missing_adp_policy": "missing_adp_policy",
             "sphere_detail": "sphere_detail",

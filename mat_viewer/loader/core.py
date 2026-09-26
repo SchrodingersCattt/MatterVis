@@ -909,6 +909,7 @@ def build_bundle_scene(
     transforms: Optional[list[Dict[str, Any]]] = None,
     include_boundary_replicas: bool = True,
     include_cross_boundary_bond_endpoints: bool = True,
+    include_minor: bool = True,
 ) -> Dict[str, Any]:
     """Build the scene dict for ``bundle``.
 
@@ -930,11 +931,12 @@ def build_bundle_scene(
         bool(show_hydrogen),
         bool(include_boundary_replicas),
         bool(include_cross_boundary_bond_endpoints),
+        bool(include_minor),
         bundle.bond_scale,
         threshold_key,
     )
     base_scene = bundle.scene_cache.get(base_cache_key)
-    if base_scene is None and include_cross_boundary_bond_endpoints:
+    if base_scene is None and include_cross_boundary_bond_endpoints and include_minor:
         # Scenes cached before this option existed implicitly included bonded
         # boundary endpoints. Reuse those entries instead of rebuilding them
         # through a possibly unavailable source-analysis contract.
@@ -979,6 +981,7 @@ def build_bundle_scene(
             include_cross_boundary_bond_endpoints=(
                 include_cross_boundary_bond_endpoints
             ),
+            include_minor=include_minor,
             bond_scale=bundle.bond_scale,
             bond_thresholds=bundle.bond_thresholds,
             molcrys_analysis=bundle.molcrys_analysis,
@@ -996,6 +999,7 @@ def build_bundle_scene(
             bool(show_hydrogen),
             bool(include_boundary_replicas),
             bool(include_cross_boundary_bond_endpoints),
+            bool(include_minor),
         )
         cached_fragments = bundle.fragment_table_cache.get(fragment_cache_key)
         if cached_fragments is None:
@@ -1006,7 +1010,7 @@ def build_bundle_scene(
                 base_scene["M"],
                 molcrys_analysis=bundle.molcrys_analysis,
                 use_source_indices=False,
-                include_minor=True,
+                include_minor=include_minor,
             )
             bundle.fragment_table_cache[fragment_cache_key] = (
                 copy.deepcopy(fragment_table),
@@ -1046,6 +1050,7 @@ def build_bundle_scene(
         bool(show_hydrogen),
         bool(include_boundary_replicas),
         bool(include_cross_boundary_bond_endpoints),
+        bool(include_minor),
         transforms_cache_key(transforms),
     )
     cached = (
@@ -1079,7 +1084,7 @@ def build_bundle_scene(
             ),
             molcrys_analysis=bundle.molcrys_analysis,
             use_source_indices=False,
-            include_minor=True,
+            include_minor=include_minor,
         )
         transformed["fragment_table"] = fragment_table
         transformed["atom_fragment_labels"] = atom_fragment_labels

@@ -619,6 +619,7 @@ def build_scene_from_atoms(
     unwrapped_atoms=None,
     include_boundary_replicas: bool = True,
     include_cross_boundary_bond_endpoints: bool = True,
+    include_minor: bool = True,
     bond_scale: float | None = None,
     bond_thresholds: dict[tuple[str, str], float] | None = None,
     canonical_bond_pairs: list[tuple[int, int]] | None = None,
@@ -761,6 +762,8 @@ def build_scene_from_atoms(
         include_boundary_replicas=include_boundary_replicas,
     )
     draw_atoms = [dict(atom) for atom in sel_atoms if show_h or atom["elem"] != "H"]
+    if not include_minor:
+        draw_atoms = [atom for atom in draw_atoms if not ops.is_minor(atom)]
 
     image_records = list(canonical_records)
     strict_cell = display_mode == "unit_cell" and not include_boundary_replicas

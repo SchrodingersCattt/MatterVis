@@ -70,28 +70,32 @@ def polyhedron_primitives(
             continue
         semantic_id = f"polyhedron:{index}:{_value(item, 'spec_id', default='')}"
         color = _value(item, "color", default="#7C5CBF")
-        results.append(
-            polyhedron_primitive(
-                semantic_id,
-                vertices,
-                faces,
-                color,
-                alpha=float(_value(item, "opacity", default=0.50)),
-                metadata={
-                    "kind": "polyhedron",
-                    "spec_id": _value(item, "spec_id", default=None),
-                },
+        opacity = float(_value(item, "opacity", default=0.50))
+        edge_opacity = float(_value(item, "edge_opacity", default=0.40))
+        if opacity > 0.0:
+            results.append(
+                polyhedron_primitive(
+                    semantic_id,
+                    vertices,
+                    faces,
+                    color,
+                    alpha=opacity,
+                    metadata={
+                        "kind": "polyhedron",
+                        "spec_id": _value(item, "spec_id", default=None),
+                    },
+                )
             )
-        )
-        results.append(
-            polyhedron_edges_primitive(
-                f"{semantic_id}:edges",
-                vertices,
-                faces,
-                _polyhedron_edge_color(color),
-                alpha=float(_value(item, "edge_opacity", default=0.40)),
+        if edge_opacity > 0.0:
+            results.append(
+                polyhedron_edges_primitive(
+                    f"{semantic_id}:edges",
+                    vertices,
+                    faces,
+                    _polyhedron_edge_color(color),
+                    alpha=edge_opacity,
+                )
             )
-        )
     return results
 
 

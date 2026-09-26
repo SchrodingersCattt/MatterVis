@@ -525,6 +525,64 @@ def test_viewport_accumulator_matches_uniform_viewport() -> None:
     assert accumulator.viewport() == scenes[0]["viewport"]
 
 
+def test_uniform_camera_keeps_centres_and_shares_scale() -> None:
+    from types import SimpleNamespace
+
+    from mat_viewer.render.contracts import CameraSpec
+    from mat_viewer.renderer import uniform_camera
+
+    plans = [
+        SimpleNamespace(
+            camera=CameraSpec.looking_along(
+                (1.0, 1.0, 1.0), target=(0.0, 0.0, 0.0), ortho_scale=2.0
+            )
+        ),
+        SimpleNamespace(
+            camera=CameraSpec.looking_along(
+                (1.0, 1.0, 1.0), target=(8.0, 0.0, 0.0), ortho_scale=5.0
+            )
+        ),
+    ]
+
+    cameras = uniform_camera(
+        plans,
+        direction=(0.0, -1.0, 0.0),
+        up=(0.0, 0.0, 1.0),
+        padding=0.25,
+    )
+
+    assert [camera.target for camera in cameras] == [
+        pytest.approx((0.0, 0.0, 0.0)),
+        pytest.approx((8.0, 0.0, 0.0)),
+    ]
+    assert [camera.ortho_scale for camera in cameras] == pytest.approx([5.25, 5.25])
+    assert all(camera.projection == "orthographic" for camera in cameras)
+
+
+def test_uniform_camera_defaults_to_first_orientation() -> None:
+    from types import SimpleNamespace
+
+    from mat_viewer.render.contracts import CameraSpec
+    from mat_viewer.renderer import uniform_camera
+
+    first = CameraSpec.looking_along(
+        (-1.0, 2.0, 0.5), target=(1.0, 2.0, 3.0), ortho_scale=3.0
+    )
+    second = CameraSpec.looking_along(
+        (1.0, 0.0, 0.0), target=(4.0, 5.0, 6.0), ortho_scale=4.0
+    )
+    cameras = uniform_camera(
+        [SimpleNamespace(camera=first), SimpleNamespace(camera=second)]
+    )
+
+    expected = np.asarray(first.target) - np.asarray(first.position)
+    for camera in cameras:
+        actual = np.asarray(camera.target) - np.asarray(camera.position)
+        assert actual / np.linalg.norm(actual) == pytest.approx(
+            expected / np.linalg.norm(expected)
+        )
+
+
 def test_viewport_accumulator_exposes_union_fit_points() -> None:
     from mat_viewer.renderer import ViewportAccumulator
 
