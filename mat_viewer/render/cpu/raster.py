@@ -4,20 +4,16 @@ from __future__ import annotations
 import colorsys
 import warnings
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from dataclasses import dataclass
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
-from typing import Any
-
 import numpy as np
 
 from ..camera import CameraTransform, triangulate_polygon
 from ..contracts import (
-    CameraSpec,
-    LinePrimitive,
-    Primitive,
+    CameraSpec, LinePrimitive, Primitive,
     RENDER_RESULT_SCHEMA,
     RenderPlan,
     RenderResult,
@@ -215,24 +211,12 @@ def composite_primitives(
     camera: CameraSpec,
     primitives: Iterable[Primitive],
     *,
-    metadata: Mapping[str, Any] | None = None,
+    metadata: dict[str, object] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Composite overlay primitives over an existing RGBA frame and z-buffer.
-
-    ``rgba`` must have shape ``(height, width, 4)``; ``depth`` must have shape
-    ``(height, width)``. The depth buffer must come from the same viewport and
-    ``camera`` as the RGBA frame, using positive camera-space depth (``-z``),
-    not normalized device depth. This correspondence is assumed, not checked.
-
-    Inputs are read-only: this function copies the color and depth buffers and
-    returns new arrays. The returned RGBA array is ``uint8``. The returned
-    depth starts as a copy of the input and stores the nearest accepted opaque
-    hit; pixels with no opaque write retain their input depth. Transparent
-    primitives, text, and metadata overlays affect color but do not write
-    depth. An opaque ``LinePrimitive`` with ``depth_test=False`` writes
-    ``-inf`` at its covered pixels so later depth tests treat that line as
-    always in front.
-    """
+    """Composite RGBA ``(H,W,4)`` and depth ``(H,W)`` under matching camera/viewport.
+    Depth is positive camera-space ``-z`` (not NDC; assumed); inputs are copied.
+    Return new uint8 RGBA/float depth; nearest opaque hits update it, others retain input.
+    Transparent/text/metadata do not write depth; opaque ``depth_test=False`` lines set ``-inf``."""
 
     values = np.ascontiguousarray(rgba, dtype=np.uint8)
     if values.ndim != 3 or values.shape[2] != 4:
