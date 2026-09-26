@@ -600,6 +600,7 @@ def _json_safe(value: Any) -> Any:
 
 __all__ = [
     "Backend",
+    "BondStyle",
     "CameraSpec",
     "LinePrimitive",
     "Primitive",

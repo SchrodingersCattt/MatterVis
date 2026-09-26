@@ -60,3 +60,10 @@ def test_documented_public_imports_remain_available() -> None:
                 missing.append(f"{module_name}.{name}")
 
     assert not missing, "\n".join(missing)
+
+
+def test_bond_style_is_in_render_contracts_exports() -> None:
+    contracts = importlib.import_module("mat_viewer.render.contracts")
+
+    assert "BondStyle" in contracts.__all__
+    assert hasattr(contracts, "BondStyle")
