@@ -209,6 +209,49 @@ def test_native_dashed_line_composite_respects_batch_depth() -> None:
     assert np.count_nonzero(np.diff(indices) > 1) >= 2
 
 
+def test_composite_primitives_preserves_inputs_and_transparent_depth() -> None:
+    rgba = np.zeros((32, 48, 4), dtype=np.uint8)
+    depth = np.full((32, 48), np.inf, dtype=np.float32)
+    original_rgba = rgba.copy()
+    original_depth = depth.copy()
+    line = LinePrimitive(
+        semantic_id="transparent-overlay",
+        segments=np.asarray([[[-1.0, 0.0, 0.0], [1.0, 0.0, 0.0]]]),
+        rgba=(1.0, 0.0, 0.0, 0.5),
+        width_px=3.0,
+    )
+
+    composed, composed_depth = composite_primitives(
+        rgba,
+        depth,
+        _camera(),
+        (line,),
+    )
+
+    np.testing.assert_array_equal(rgba, original_rgba)
+    np.testing.assert_array_equal(depth, original_depth)
+    assert not np.shares_memory(composed, rgba)
+    assert not np.shares_memory(composed_depth, depth)
+    assert composed.dtype == np.uint8
+    assert np.any(composed[..., 3] > 0)
+    np.testing.assert_array_equal(composed_depth, original_depth)
+
+
+def test_composite_primitives_requires_expected_buffer_shapes() -> None:
+    rgba = np.zeros((32, 48, 4), dtype=np.uint8)
+
+    with pytest.raises(ValueError, match="rgba must have shape"):
+        composite_primitives(
+            np.zeros((32, 48, 3)),
+            np.zeros((32, 48)),
+            _camera(),
+            (),
+        )
+
+    with pytest.raises(ValueError, match="initial_depth must have shape"):
+        composite_primitives(rgba, np.zeros((31, 48)), _camera(), ())
+
+
 @pytest.mark.skipif(not NUMBA_AVAILABLE, reason="batch renderer requires numba")
 def test_bond_batch_uses_minimum_image_vectors() -> None:
     frame = _frame([[-1.9, 0.0, 0.0], [1.9, 0.0, 0.0]], [6, 6])
