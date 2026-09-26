@@ -14,8 +14,12 @@ def displacement_for_atom(
     *,
     element: str,
     hydrogen_radius: float | None,
+    probability: float,
     crystallographic_displacement: Callable[[object], np.ndarray | None],
 ) -> np.ndarray | None:
     if element == "H" and hydrogen_radius is not None:
-        return fixed_isotropic_displacement(hydrogen_radius)
+        return fixed_isotropic_displacement(
+            hydrogen_radius,
+            probability=probability,
+        )
     return crystallographic_displacement(atom)

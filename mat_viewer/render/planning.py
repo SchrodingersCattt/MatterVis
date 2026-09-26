@@ -242,7 +242,7 @@ def prepare_render(
 
         atom_primitive_start = len(primitives)
         if representation == "ortep":
-            displacement = displacement_for_atom(atom, element=element, hydrogen_radius=render_spec.ortep_hydrogen_radius, crystallographic_displacement=_displacement_matrix)
+            displacement = displacement_for_atom(atom, element=element, hydrogen_radius=render_spec.ortep_hydrogen_radius, probability=render_spec.ortep_probability, crystallographic_displacement=_displacement_matrix)
             if displacement is None:
                 if render_spec.missing_adp_policy == "error":
                     raise ValueError(

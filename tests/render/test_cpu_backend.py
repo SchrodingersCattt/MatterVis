@@ -457,7 +457,8 @@ def test_polyhedron_face_shading_is_restrained_for_transparent_overlays():
     assert highlight == pytest.approx(base + (1.0 - base) * 0.16)
 
 
-def test_ortep_hydrogen_radius_overrides_constrained_uiso():
+@pytest.mark.parametrize("probability", [0.5, 0.9])
+def test_ortep_hydrogen_radius_overrides_constrained_uiso(probability):
     scene = {
         "draw_atoms": [
             {
@@ -476,6 +477,7 @@ def test_ortep_hydrogen_radius_overrides_constrained_uiso():
             "representation": "ortep",
             "show_cell": False,
             "ortep_hydrogen_radius": 0.18,
+            "ortep_probability": probability,
         },
     )
     atom = next(item for item in plan.primitives if item.semantic_id.startswith("atom:"))

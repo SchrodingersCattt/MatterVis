@@ -34,9 +34,13 @@ _BASIC_COLORS: dict[str, str] = {
 }
 
 
-def fixed_isotropic_displacement(radius: float) -> np.ndarray:
-    """Return isotropic U whose 50%-probability ellipsoid has ``radius``."""
-    return np.eye(3) * (float(radius) / 1.54) ** 2
+def fixed_isotropic_displacement(
+    radius: float,
+    *,
+    probability: float = 0.5,
+) -> np.ndarray:
+    """Return isotropic U whose ellipsoid at ``probability`` has ``radius``."""
+    return np.eye(3) * (float(radius) / _chi_square_radius(probability)) ** 2
 
 
 def color_to_rgba(value: Any, *, alpha: float | None = None) -> RGBA:
