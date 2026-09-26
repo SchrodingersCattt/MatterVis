@@ -9,6 +9,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 
 from ..config import atom_radius as configured_atom_radius
+from .bond_annotations import bond_annotation_primitives
 from .compass_overlay import attach_lattice_compass_metadata
 from .contracts import (
     CameraSpec,
@@ -35,10 +36,8 @@ from .geometry import (
 from .overlay.cells import attach_cell_overlays, cell_overlay_primitives
 from .overlay.vectors import attach_vector_overlays, vector_primitives
 from .ortep_policy import displacement_for_atom
-from .mesh_overlays import (
-    isosurface_primitives as _isosurface_primitives,
-    polyhedron_primitives as _polyhedron_primitives,
-)
+from .mesh_overlays import isosurface_primitives as _isosurface_primitives
+from .mesh_overlays import polyhedron_primitives as _polyhedron_primitives
 from .property_planning import prepare_render_property, property_color_for_atom, reserve_property_colorbar, resolve_render_property_context
 _ELEMENT_COLORS = {
     "H": "#FFFFFF",
@@ -535,6 +534,7 @@ def prepare_render(
             )
         )
     primitives.extend(cell_overlay_primitives(scene.get("cell_overlays")))
+    primitives.extend(bond_annotation_primitives(scene.get("bond_annotations")))
     primitives.extend(_polyhedron_primitives(scene, topology_data))
     isosurface_primitives, isosurface_warnings = _isosurface_primitives(scene, render_spec=render_spec)
     primitives.extend(isosurface_primitives)

@@ -59,6 +59,7 @@ The same routing as a quick table:
 | Draw anchored polarization, dipole, force, displacement, magnetic, or response vectors with real 3D depth | [`vector_overlays_api.md`](vector_overlays_api.md) |
 | Draw conventional, transformed, or simulation cells over one atomistic scene | [cell_overlays_api.md](cell_overlays_api.md) |
 | Recolour, hide, restyle, thin out, or fade chemical bonds by selector from API or CLI | [`bond_groups_api.md`](bond_groups_api.md) |
+| Draw styled, depth-tested display-only bond hints without changing chemical connectivity | [`scene_api.md#display-only-bond-annotations`](scene_api.md#display-only-bond-annotations) |
 | Repeat a unit cell, grow by radius / bonds, complete fragments / polyhedra, or generate a slab | [`transforms_api.md`](transforms_api.md) |
 | Audit which backend-neutral render controls are available from the CLI | [`cli-api-parity.md`](cli-api-parity.md) |
 | Read or override global MatterVis defaults | [`config_api.md`](config_api.md) |

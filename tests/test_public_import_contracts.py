@@ -25,6 +25,7 @@ PUBLIC_IMPORTS = {
     "mat_viewer.perf_log": ("record", "recent", "time_block"),
     "mat_viewer.presets": ("DEFAULT_STYLE", "default_preset", "get_default_catalog"),
     "mat_viewer.render.assembly": ("build_scene_from_atoms",),
+    "mat_viewer.render.cpu": ("composite_primitives", "render"),
     "mat_viewer.renderer": ("build_figure", "uniform_viewport", "render"),
     "mat_viewer.scene": ("build_scene_from_cif", "scene_style", "scene_json"),
     "mat_viewer.scene.state": ("normalize_overlay_overrides",),
@@ -59,3 +60,10 @@ def test_documented_public_imports_remain_available() -> None:
                 missing.append(f"{module_name}.{name}")
 
     assert not missing, "\n".join(missing)
+
+
+def test_bond_style_is_in_render_contracts_exports() -> None:
+    contracts = importlib.import_module("mat_viewer.render.contracts")
+
+    assert "BondStyle" in contracts.__all__
+    assert hasattr(contracts, "BondStyle")

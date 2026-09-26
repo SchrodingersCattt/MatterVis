@@ -7,6 +7,7 @@ import sys
 from types import ModuleType
 
 from .contracts import (
+    BondStyle,
     CameraSpec,
     LinePrimitive,
     RenderPlan,
@@ -81,6 +82,7 @@ def __getattr__(name: str):
 
 __all__ = [
     "AtomPropertyColorSpec",
+    "BondStyle",
     "CameraSpec",
     "DENSE_COORDINATION_PRESET",
     "LinePrimitive",

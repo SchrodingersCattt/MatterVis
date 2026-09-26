@@ -50,6 +50,29 @@ These cells are annotations only. They do not change the structure's canonical
 lattice, atom coordinates, bonds, or periodic-image policy. See
 [`cell_overlays_api.md`](cell_overlays_api.md) for the schema and examples.
 
+### Display-only bond annotations
+
+`prepare_render(scene, ...)` accepts optional `scene["bond_annotations"]`. Each
+entry specifies a unique `id`, Cartesian `start` and `end`, optional
+`atom_indices` for provenance, and an optional `style` mapping (or
+`mat_viewer.render.BondStyle`) with `color`, `opacity`, `width_px`, pixel `dash`,
+and `depth_test` fields. For example:
+
+```python
+scene["bond_annotations"] = [{
+  "id": "continuity:H42-X17",
+  "start": [0.0, 0.0, 0.0],
+  "end": [1.2, 0.0, 0.0],
+  "atom_indices": [42, 17],
+  "style": {"color": "#777777", "opacity": 0.4,
+        "width_px": 2.0, "dash": (8.0, 6.0)},
+}]
+```
+
+Annotations compile to native depth-tested line primitives. They do not enter
+`scene["bonds"]`, create chemical bonds, or affect component identities or bond
+statistics. The caller owns any temporal continuity rule that selects entries.
+
 ### `mat_viewer.scene.build_scene_from_cif(...)`
 
 Parses a CIF and returns a scene dict consumable by
@@ -237,6 +260,23 @@ Anchored scientific arrows are supplied with `vector_overlays=` or
 `scene["vector_overlays"]`; see [vector overlays](vector_overlays_api.md).
 They are world-space Mesh3d content and therefore differ from corner compass
 annotations.
+
+### CPU frame overlays
+
+`mat_viewer.render.cpu.composite_primitives(rgba, depth, camera, primitives)`
+composites backend-neutral render primitives over an existing CPU-rendered
+frame. `rgba` is an `(height, width, 4)` array and `depth` is an
+`(height, width)` array; both must use the same viewport dimensions and
+`CameraSpec`. Depth values are positive camera-space distances (`-z`), not
+normalized device depth. The function assumes the supplied color and depth
+buffers were produced with that camera; it cannot verify that correspondence.
+
+The input arrays are not mutated; the function returns fresh arrays, with
+`uint8` RGBA and a depth buffer copied from the input and updated by the
+nearest accepted opaque hit. Pixels without an opaque write retain their input
+depth. Transparent primitives, text, and metadata overlays affect color but do
+not write depth. Opaque lines with `depth_test=False` write `-inf` at covered
+pixels to remain in front of later depth tests.
 
 ### Native analytic overlay metadata
 
