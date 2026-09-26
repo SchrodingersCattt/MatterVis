@@ -4,15 +4,20 @@ from __future__ import annotations
 import colorsys
 import warnings
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
+from typing import Any
+
 import numpy as np
 
 from ..camera import CameraTransform, triangulate_polygon
 from ..contracts import (
+    CameraSpec,
     LinePrimitive,
+    Primitive,
     RENDER_RESULT_SCHEMA,
     RenderPlan,
     RenderResult,
@@ -207,12 +212,27 @@ def _render_viewport(
 def composite_primitives(
     rgba: np.ndarray,
     depth: np.ndarray,
-    camera,
-    primitives,
+    camera: CameraSpec,
+    primitives: Iterable[Primitive],
     *,
-    metadata: dict | None = None,
+    metadata: Mapping[str, Any] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Depth-compose general overlay primitives over an analytic batch frame."""
+    """Composite overlay primitives over an existing RGBA frame and z-buffer.
+
+    ``rgba`` must have shape ``(height, width, 4)``; ``depth`` must have shape
+    ``(height, width)``. The depth buffer must come from the same viewport and
+    ``camera`` as the RGBA frame, using positive camera-space depth (``-z``),
+    not normalized device depth. This correspondence is assumed, not checked.
+
+    Inputs are read-only: this function copies the color and depth buffers and
+    returns new arrays. The returned RGBA array is ``uint8``. The returned
+    depth starts as a copy of the input and stores the nearest accepted opaque
+    hit; pixels with no opaque write retain their input depth. Transparent
+    primitives, text, and metadata overlays affect color but do not write
+    depth. An opaque ``LinePrimitive`` with ``depth_test=False`` writes
+    ``-inf`` at its covered pixels so later depth tests treat that line as
+    always in front.
+    """
 
     values = np.ascontiguousarray(rgba, dtype=np.uint8)
     if values.ndim != 3 or values.shape[2] != 4:
