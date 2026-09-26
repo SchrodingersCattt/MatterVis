@@ -37,8 +37,8 @@ two or more panels also read [panels](./references/multi-structure-panels.md);
 for print/publication output also read [layout](./references/publication-layout.md).
 
 Read [runtime capabilities](./references/capabilities-and-install.md) only after
-the command reports a missing capability. Read
-[input formats](./references/input-formats.md), [camera](./references/camera.md),
+the command reports a missing capability. For explicit install/source changes,
+see [installation](./references/installation.md). Read [input formats](./references/input-formats.md), [camera](./references/camera.md),
 [CPU details](./references/cpu-static.md), [Plotly](./references/plotly-render.md),
 [TUI](./references/tui.md) only for an explicit request or unresolved ambiguity.
 
