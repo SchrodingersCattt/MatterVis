@@ -4,6 +4,7 @@ from __future__ import annotations
 import colorsys
 import warnings
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from hashlib import sha256
 from io import BytesIO
@@ -12,7 +13,7 @@ import numpy as np
 
 from ..camera import CameraTransform, triangulate_polygon
 from ..contracts import (
-    LinePrimitive,
+    CameraSpec, LinePrimitive, Primitive,
     RENDER_RESULT_SCHEMA,
     RenderPlan,
     RenderResult,
@@ -207,12 +208,15 @@ def _render_viewport(
 def composite_primitives(
     rgba: np.ndarray,
     depth: np.ndarray,
-    camera,
-    primitives,
+    camera: CameraSpec,
+    primitives: Iterable[Primitive],
     *,
-    metadata: dict | None = None,
+    metadata: dict[str, object] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Depth-compose general overlay primitives over an analytic batch frame."""
+    """Composite RGBA ``(H,W,4)`` and depth ``(H,W)`` under matching camera/viewport.
+    Depth is positive camera-space ``-z`` (not NDC; assumed); inputs are copied.
+    Return new uint8 RGBA/float depth; nearest opaque hits update it, others retain input.
+    Transparent/text/metadata do not write depth; opaque ``depth_test=False`` lines set ``-inf``."""
 
     values = np.ascontiguousarray(rgba, dtype=np.uint8)
     if values.ndim != 3 or values.shape[2] != 4:
@@ -993,4 +997,4 @@ def _viewport_bounds(
 
 
 
-__all__ = ["render_png", "render_rgba"]
+__all__ = ["composite_primitives", "render_png", "render_rgba"]

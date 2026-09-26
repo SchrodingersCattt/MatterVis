@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..contracts import RenderPlan, RenderResult
-from .raster import render_png, render_rgba
+from .raster import composite_primitives, render_png, render_rgba
 from .vector import render_vector
 
 
@@ -29,4 +29,10 @@ def render(
     raise ValueError(f"CPU backend supports .png, .svg, and .pdf; got {requested!r}")
 
 
-__all__ = ["render", "render_png", "render_rgba", "render_vector"]
+__all__ = [
+    "composite_primitives",
+    "render",
+    "render_png",
+    "render_rgba",
+    "render_vector",
+]
