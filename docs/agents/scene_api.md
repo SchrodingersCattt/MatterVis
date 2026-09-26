@@ -50,6 +50,29 @@ These cells are annotations only. They do not change the structure's canonical
 lattice, atom coordinates, bonds, or periodic-image policy. See
 [`cell_overlays_api.md`](cell_overlays_api.md) for the schema and examples.
 
+### Display-only bond annotations
+
+`prepare_render(scene, ...)` accepts optional `scene["bond_annotations"]`. Each
+entry specifies a unique `id`, Cartesian `start` and `end`, optional
+`atom_indices` for provenance, and an optional `style` mapping (or
+`mat_viewer.render.BondStyle`) with `color`, `opacity`, `width_px`, pixel `dash`,
+and `depth_test` fields. For example:
+
+```python
+scene["bond_annotations"] = [{
+  "id": "continuity:H42-X17",
+  "start": [0.0, 0.0, 0.0],
+  "end": [1.2, 0.0, 0.0],
+  "atom_indices": [42, 17],
+  "style": {"color": "#777777", "opacity": 0.4,
+        "width_px": 2.0, "dash": (8.0, 6.0)},
+}]
+```
+
+Annotations compile to native depth-tested line primitives. They do not enter
+`scene["bonds"]`, create chemical bonds, or affect component identities or bond
+statistics. The caller owns any temporal continuity rule that selects entries.
+
 ### `mat_viewer.scene.build_scene_from_cif(...)`
 
 Parses a CIF and returns a scene dict consumable by

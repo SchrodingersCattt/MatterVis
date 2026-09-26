@@ -372,6 +372,8 @@ def bond_line_primitives(
     end_color: Any | None = None,
     *,
     alpha: float = 1.0,
+    dash: tuple[float, ...] = (),
+    depth_test: bool = True,
     metadata: dict[str, Any] | None = None,
 ) -> tuple[LinePrimitive, ...]:
     """Build one or two endpoint-coloured line halves for a bond."""
@@ -386,6 +388,8 @@ def bond_line_primitives(
                 segments=np.asarray([[first, second]]),
                 rgba=color_to_rgba(start_color, alpha=alpha),
                 width_px=width_px,
+                dash=dash,
+                depth_test=depth_test,
                 metadata=metadata or {},
             ),
         )
@@ -396,6 +400,8 @@ def bond_line_primitives(
             segments=np.asarray([[first, midpoint]]),
             rgba=color_to_rgba(start_color, alpha=alpha),
             width_px=width_px,
+            dash=dash,
+            depth_test=depth_test,
             metadata=metadata or {},
         ),
         LinePrimitive(
@@ -403,6 +409,8 @@ def bond_line_primitives(
             segments=np.asarray([[midpoint, second]]),
             rgba=color_to_rgba(end_color, alpha=alpha),
             width_px=width_px,
+            dash=dash,
+            depth_test=depth_test,
             metadata=metadata or {},
         ),
     )

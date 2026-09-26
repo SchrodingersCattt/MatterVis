@@ -315,6 +315,31 @@ class TriangleMeshPrimitive:
 
 
 @dataclass(frozen=True, slots=True)
+class BondStyle:
+    """Style for a world-space bond line; does not assert a chemical bond."""
+
+    color: str = "#777777"
+    opacity: float = 0.4
+    width_px: float = 2.0
+    dash: tuple[float, ...] = (8.0, 6.0)
+    depth_test: bool = True
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.color, str) or not self.color:
+            raise ValueError("bond color must be a nonempty string")
+        if not np.isfinite(self.opacity) or not 0.0 <= self.opacity <= 1.0:
+            raise ValueError("bond opacity must lie in [0, 1]")
+        if not np.isfinite(self.width_px) or self.width_px <= 0.0:
+            raise ValueError("bond width_px must be positive")
+        dash = tuple(float(value) for value in self.dash)
+        if any(not np.isfinite(value) or value <= 0.0 for value in dash):
+            raise ValueError("bond dash entries must be positive")
+        if not isinstance(self.depth_test, bool):
+            raise TypeError("bond depth_test must be a bool")
+        object.__setattr__(self, "dash", dash)
+
+
+@dataclass(frozen=True, slots=True)
 class LinePrimitive:
     semantic_id: str
     segments: np.ndarray
