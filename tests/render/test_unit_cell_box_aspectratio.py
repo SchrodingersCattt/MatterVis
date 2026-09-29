@@ -39,7 +39,7 @@ def _assert_cartesian_scale_is_isometric(fig):
         scale = spans
         assert np.allclose(scale, scale[0], rtol=1e-6, atol=1e-6), scale
     else:
-        assert fig.layout.scene.aspectmode == "data"
+        pytest.fail("automatic data aspect does not prove equal scale for padded ranges")
 
 
 def _sy_base_style(bundle):
@@ -163,15 +163,10 @@ def test_unit_cell_viewport_includes_unwrapped_boundary_fragments():
 def test_formula_unit_does_not_inherit_lattice_aspect():
     if not SY_CIF.exists():
         pytest.skip("local SY CIF fixture is not present")
-    """``display_mode='formula_unit'`` shows a molecular cluster carved out
-    of the unit cell; the cluster's bounding box is roughly equiaxed even
-    when the host cell is wildly anisotropic (SY: |c|=24.7 Å vs |a|=8.1
-    Å). The earlier ``mode != 'cluster'`` predicate in
-    ``figure_axis_layout`` blanket-applied the cell's manual aspectratio
-    here too, which stretched the molecules along the long c axis and
-    produced the visible flattening regression. The fix narrows manual aspect
-    to ``mode == 'unit_cell'``; this test pins that behaviour and
-    asserts the toggle is purely a visibility change.
+    """Formula-unit aspect follows final Cartesian ranges, not lattice lengths.
+
+    Both box states preserve equal data-unit scale, including the independently
+    padded molecular viewport. Accepting automatic ``data`` mode was insufficient.
     """
     bundle = build_loaded_crystal(name="SY", cif_path="scripts/data/SY.cif", title="SY")
     base = {**_sy_base_style(bundle), "display_mode": "formula_unit"}
@@ -179,12 +174,8 @@ def test_formula_unit_does_not_inherit_lattice_aspect():
     fig_off = build_figure(bundle.scene, base)
     fig_on = build_figure(bundle.scene, {**base, "show_unit_cell": True})
 
-    assert fig_off.layout.scene.aspectmode == "data", (
-        "formula_unit now uses data aspect to prevent near clipping plane truncation."
-    )
-    assert fig_on.layout.scene.aspectmode != "manual", (
-        "toggling Unit Cell Box must not turn on manual lattice aspect."
-    )
+    _assert_cartesian_scale_is_isometric(fig_off)
+    _assert_cartesian_scale_is_isometric(fig_on)
     assert fig_off.layout.scene.aspectmode == fig_on.layout.scene.aspectmode, (
         "box on/off must not switch between aspect modes."
     )
@@ -656,7 +647,7 @@ def test_unit_cell_viewport_grows_to_cover_every_visible_polyhedron():
     )
 
 
-def test_cluster_without_lattice_falls_back_to_auto_aspectmode():
+def test_cluster_without_lattice_preserves_equal_cartesian_scale():
     scene = {
         "name": "cluster",
         "title": "Cluster",
@@ -678,5 +669,6 @@ def test_cluster_without_lattice_falls_back_to_auto_aspectmode():
         },
     )
 
-    assert fig.layout.scene.aspectmode == "data"
-    assert "aspectratio" not in fig.layout.scene.to_plotly_json()
+    assert fig.layout.scene.aspectmode == "manual"
+    assert _aspect_tuple(fig) == (1.0, 1.0, 1.0)
+    _assert_cartesian_scale_is_isometric(fig)

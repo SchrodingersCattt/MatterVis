@@ -149,6 +149,20 @@ state and scene-store helpers.
 
 ## Style helpers
 
+### Cartesian scale in Plotly views
+
+The main figure, row-figure, skeleton and camera-patch paths derive manual
+`aspectratio` from their final Cartesian axis-range spans, in every display mode.
+Each ratio component is the corresponding span divided by the largest span, so
+one data unit has the same scale along x, y and z. This includes padding and
+caller-supplied viewports: using automatic `data` aspect with independently padded
+ranges can flatten planar molecular meshes. Atom coordinates, mesh vertices,
+viewport endpoints and explicit cameras are not changed to compensate.
+
+The compass uses the same range/aspect normalization. For comparable output
+panels, also keep pixel dimensions, projection and camera conventions consistent;
+isometric axes alone do not establish a shared scale between separate panels.
+
 ### `mat_viewer.scene.apply_element_colors(scene, element_colors, element_colors_light)`
 
 Re-skin element palettes on a finished scene. Mutates `scene` in place

@@ -323,22 +323,6 @@ def flat_visual_pixel_scale(style: dict) -> float:
     return value if np.isfinite(value) and value > 0 else 30.0
 
 
-def _should_use_manual_range_aspect(mode: str | None) -> bool:
-    """Whether layout should write a manual isometric range aspect.
-
-    Only ``display_mode='unit_cell'`` needs anisotropic screen axes: the user
-    expects the whole cell viewport to stay visible. The aspect components must
-    come from the final Cartesian ranges, not lattice-vector norms, because
-    Plotly scales the Cartesian x/y/z axes.
-    Every other mode (``formula_unit``, ``asymmetric_unit``, ``cluster``)
-    is made isometric by equalizing ranges and using ``aspectmode='cube'``.
-    Keep this predicate the single source of truth so ``figure_axis_layout`` and
-    ``_manual_aspect_scale`` cannot drift apart and leave the compass
-    projection inconsistent with the renderer.
-    """
-    return mode == "unit_cell"
-
-
 def _manual_aspect_scale(
     scene: dict, style: dict, topology_data: dict | None = None
 ) -> np.ndarray | None:
@@ -348,9 +332,6 @@ def _manual_aspect_scale(
     ``aspectratio[axis]``. A data-space vector must therefore be divided by
     ``half_range / aspectratio`` before projecting through the camera basis.
     """
-    mode = style.get("display_mode", scene.get("display_mode"))
-    if not _should_use_manual_range_aspect(mode):
-        return None
     xr, yr, zr = _scene_ranges(scene, style, topology_data=topology_data)
     aspect = _range_aspect_ratio(xr, yr, zr)
     if aspect is None:
@@ -462,10 +443,11 @@ def _axis_cube_scale(scene: dict, style: dict) -> np.ndarray | None:
 
 
 def _visible_atoms(scene: dict, style: dict):
-    atoms = scene["draw_atoms"]
+    # Compass-only callers can provide lattice/camera metadata without atoms.
+    atoms = scene.get("draw_atoms") or []
     if style.get("show_minor_only", False):
         atoms = [atom for atom in atoms if atom["is_minor"]]
-    return atoms or scene["draw_atoms"]
+    return atoms or scene.get("draw_atoms") or []
 
 
 def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
@@ -733,11 +715,16 @@ def _equalize_axis_ranges(xr, yr, zr):
 
 
 def figure_axis_layout(scene: dict, style: dict, xr, yr, zr) -> dict:
-    """Build the Plotly ``scene`` layout with stable Cartesian data scale."""
-    mode = style.get("display_mode", scene.get("display_mode"))
+    """Preserve Cartesian scale using the final, possibly padded, axis ranges.
+
+    Plotly's ``data`` aspect follows trace extents, not these explicit ranges.
+    Unequal padding can therefore flatten a planar mesh even when its own
+    vertices are isotropic. Range-derived manual aspect applies in every mode;
+    neither coordinates nor caller-supplied viewport endpoints are changed.
+    """
     aspect = _range_aspect_ratio(xr, yr, zr)
 
-    if aspect is not None and _should_use_manual_range_aspect(mode):
+    if aspect is not None:
         aspect_kwargs = {"aspectmode": "manual", "aspectratio": aspect}
     else:
         aspect_kwargs = {"aspectmode": "data"}
