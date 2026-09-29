@@ -5,6 +5,23 @@ from .shared import *
 from .normalizers import *
 from .style_helpers import _POLYHEDRON_AUTO_COLORS
 
+def _closed_rightclick_items():
+    """Keep the menu's Dash inputs mounted even when no target is open.
+
+    The action callback also consumes the permanent target store (including
+    keyboard actions). Removing its button inputs prevents browser dispatch.
+    These inactive controls are replaced by the target-specific menu on open.
+    """
+    return [
+        html.Button("", id=f"rcm-action-{action}", n_clicks=0)
+        for action in (
+            "hide", "grow-bonds", "grow-radius", "complete-fragment",
+            "analyze", "promote", "select", "select-add", "select-fragment",
+            "select-element", "selection-promote",
+        )
+    ] + [dcc.Input(id="rcm-color-picker", type="color", value=None)]
+
+
 def _dispatch_rightclick_action(
     backend: Any,
     scene_id: Optional[str],

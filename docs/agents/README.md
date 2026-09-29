@@ -43,6 +43,7 @@ The same routing as a quick table:
 | If you want to… | Read |
 |---|---|
 | Drive the running Dash viewer over HTTP/WebSocket | [`dash_service.md`](dash_service.md) |
+| Attach optional in-process panels to the existing Web or TUI viewer | [`extensions_api.md`](extensions_api.md) |
 | Control a local terminal view, select stable atom IDs, or run a stateful Python/JSONL agent session | [`tui_api.md`](tui_api.md) |
 | Render CIF, Cube, VASP, XYZ, ASE trajectory, or LAMMPS files from the CLI | [`../cli.md`](../cli.md) |
 | Label trajectory frames with physical simulation time while keeping playback FPS independent | [`../cli.md`](../cli.md#frames-and-animations) |

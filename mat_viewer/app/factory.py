@@ -17,6 +17,8 @@ from .callbacks_state import register_state_callbacks
 from .callbacks_view import register_view_callbacks
 from .backend import ViewerBackend
 from .layout_left_panel import build_left_panel
+from .rightclick import _closed_rightclick_items
+from ..extensions import ExtensionContext, _ExtensionHost
 
 
 def create_app(
@@ -30,8 +32,67 @@ def create_app(
     frame: int = 0,
     property_data: str | None = None,
     atom_property_color: Any = None,
+    *,
+    extensions=(),
+) -> Dash:
+    """Create the native viewer with optional startup-only extension panels.
+
+    Call ``app.close_extensions()`` on host shutdown (also registered at exit).
+    The existing backend retains its separate ``close()`` lifecycle.
+    """
+    import atexit
+
+    host = _ExtensionHost(extensions)
+    try:
+        app = _create_app(
+            preset_path, names, root_dir, cif_paths, input_path, input_format,
+            type_map, frame, property_data, atom_property_color,
+            extension_host=host,
+        )
+    except BaseException:
+        host.close()
+        if host.context is not None:
+            host.context.viewer.close()
+        raise
+
+    def close_extensions():
+        host.close()
+        atexit.unregister(close_extensions)
+
+    app.close_extensions = close_extensions
+    if host.extensions:
+        atexit.register(close_extensions)
+    return app
+
+
+def _create_app(
+    preset_path: str = DEFAULT_PRESET_PATH,
+    names=None,
+    root_dir: Optional[str] = None,
+    cif_paths: Optional[Iterable[str]] = None,
+    input_path: str | None = None,
+    input_format: str | None = None,
+    type_map: Optional[Iterable[str]] = None,
+    frame: int = 0,
+    property_data: str | None = None,
+    atom_property_color: Any = None,
+    *,
+    extension_host,
 ) -> Dash:
     backend = ViewerBackend(preset_path=preset_path, names=names, root_dir=root_dir)
+
+    def extension_snapshot():
+        state = backend.get_state()
+        return {
+            "frontend": "web", "structure_id": state.get("structure"),
+            "source_path": None, "scene_id": state.get("scene_id"),
+            "view_revision": state.get("render_revision"),
+            "selection": state.get("selection"),
+        }
+
+    extension_host.context = ExtensionContext(
+        "web", backend, snapshot_reader=extension_snapshot
+    )
     for cif_path in cif_paths or []:
         bundle = build_loaded_crystal(
             name=os.path.splitext(os.path.basename(cif_path))[0],
@@ -91,6 +152,12 @@ def create_app(
         assets_folder=os.path.join(WORKSPACE_DIR, "frontend", "assets"),
     )
     app.crystal_backend = backend
+    app.extension_context = extension_host.context
+    extension_panels = []
+    for extension in extension_host.extensions:
+        panel = extension.build_web_panel(extension_host.context)
+        if panel is not None:
+            extension_panels.append(panel)
 
     # gzip + brotli the JSON figure responses. ``update_view`` ships
     # ~1 MB of base64 mesh data per click and most of that string
@@ -200,7 +267,7 @@ def create_app(
                     html.Div(
                         id="rightclick-menu",
                         className="rightclick-menu rightclick-menu--hidden",
-                        children=[],
+                        children=_closed_rightclick_items(),
                         style={"top": "0px", "left": "0px"},
                     ),
                     html.Div(
@@ -293,7 +360,7 @@ def create_app(
                 html.Div(
                     id="rightclick-menu",
                     className="rightclick-menu rightclick-menu--hidden",
-                    children=[],
+                    children=_closed_rightclick_items(),
                     style={"top": "0px", "left": "0px"},
                 ),
                 html.Div(
@@ -532,33 +599,41 @@ def create_app(
                                                 ),
                                                 html.Div(
                                                     [
-                                                        html.Button(
-                                                            "+ Add",
-                                                            id="polyhedra-add-btn",
-                                                            n_clicks=0,
-                                                            style={
-                                                                "fontSize": "12px",
-                                                                "padding": "2px 8px",
-                                                                "verticalAlign": "middle",
-                                                                "cursor": "pointer",
-                                                            },
-                                                            title="Add a named polyhedron row (centre + explicit ligand restriction + colour).",
+                                                        html.Div(
+                                                            [
+                                                                html.Button(
+                                                                    "+ Add",
+                                                                    id="polyhedra-add-btn",
+                                                                    n_clicks=0,
+                                                                    style={
+                                                                        "fontSize": "12px",
+                                                                        "padding": "2px 8px",
+                                                                        "verticalAlign": "middle",
+                                                                        "cursor": "pointer",
+                                                                    },
+                                                                    title="Add a named polyhedron row (centre + explicit ligand restriction + colour).",
+                                                                ),
+                                                            ],
+                                                            style={"marginTop": "8px"},
+                                                        ),
+                                                        html.Div(
+                                                            id="polyhedra-rows-container",
+                                                            children=_polyhedra_table_rows(
+                                                                first_state.get(
+                                                                    "polyhedron_specs"
+                                                                )
+                                                                or [],
+                                                                backend.species_options(
+                                                                    first_state["structure"]
+                                                                ),
+                                                            ),
+                                                            style={"marginTop": "6px"},
                                                         ),
                                                     ],
-                                                    style={"marginTop": "8px"},
-                                                ),
-                                                html.Div(
-                                                    id="polyhedra-rows-container",
-                                                    children=_polyhedra_table_rows(
-                                                        first_state.get(
-                                                            "polyhedron_specs"
-                                                        )
-                                                        or [],
-                                                        backend.species_options(
-                                                            first_state["structure"]
-                                                        ),
+                                                    id="polyhedra-controls",
+                                                    style=_polyhedra_controls_style(
+                                                        first_state.get("topology_enabled", False)
                                                     ),
-                                                    style={"marginTop": "6px"},
                                                 ),
                                             ],
                                             className="analysis-section",
@@ -893,6 +968,12 @@ def create_app(
                         "overflowY": "auto",
                     },
                 ),
+                *([html.Div(
+                    extension_panels,
+                    id="mv-extension-panels",
+                    style={"flex": "0 0 320px", "height": "100vh",
+                           "overflowY": "auto", "borderLeft": "1px solid #DDDDDD"},
+                )] if extension_panels else []),
                 # Floating "Server log" panel (bottom-right). Polls
                 # ``/api/v1/perf`` every second to show the user which
                 # callbacks fired and how long each one took. Collapsed by
@@ -953,6 +1034,8 @@ def create_app(
     register_disorder_callbacks(app, backend)
     register_view_callbacks(app, backend)
     register_api(app, backend)
+    for extension in extension_host.extensions:
+        extension.register_web(app, extension_host.context)
     if str(os.environ.get("MATTERVIS_PREWARM", "1")).lower() not in {
         "0",
         "false",

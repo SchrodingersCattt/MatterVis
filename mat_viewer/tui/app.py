@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from .crystal_ir import CrystalIR
 
 from ..math.camera import Camera
+from ..extensions import ExtensionContext, _ExtensionHost
 from .compositor import (
     LABEL_MODES,
     DISPLAY_LEVELS,
@@ -99,6 +100,12 @@ class CrystalTUI(App):
         border-left: solid #666666;
         overflow-y: auto;
     }
+    #mv-extension-panels {
+        width: 40;
+        height: 1fr;
+        border-left: solid #666666;
+        overflow-y: auto;
+    }
     Screen.narrow #body {
         layout: vertical;
     }
@@ -157,22 +164,55 @@ class CrystalTUI(App):
         show_minor: bool = False,
         compact: bool = False,
         initial_level: str = "atom",
+        extensions=(),
     ):
+        extension_host = _ExtensionHost(extensions)
         super().__init__()
         self.crystal = crystal
         self._command_mode = False
         self._command_selection: list[dict[str, str]] = []
         self._inspector_view: str | None = None
-        self.controller = TerminalViewController(
-            crystal,
-            camera=camera or Camera.from_view_name(initial_view, crystal),
-            mono=mono,
-            show_bonds=show_bonds,
-            show_cell=show_cell,
-            label_mode=label_mode if not compact else "dot",
-            show_minor=show_minor,
-            display_level=initial_level if initial_level in DISPLAY_LEVELS else "atom",
-        )
+        try:
+            self.controller = TerminalViewController(
+                crystal,
+                camera=camera or Camera.from_view_name(initial_view, crystal),
+                mono=mono,
+                show_bonds=show_bonds,
+                show_cell=show_cell,
+                label_mode=label_mode if not compact else "dot",
+                show_minor=show_minor,
+                display_level=initial_level if initial_level in DISPLAY_LEVELS else "atom",
+            )
+        except BaseException:
+            extension_host.close()
+            raise
+        self._extension_host = extension_host
+        self.extension_context = ExtensionContext("tui", self)
+        extension_host.context = self.extension_context
+        self.extension_context._publish(source_path=crystal.source_path or None)
+        self._extension_panels = None
+        self._mounted_extensions = []
+
+    def close_extensions(self) -> None:
+        """Release plugin resources once; does not unload bindings or widgets."""
+        self._extension_host.close()
+
+    def _build_extension_panels(self):
+        from textual.widget import Widget
+
+        if self._extension_panels is None:
+            self._extension_panels = []
+            try:
+                for extension in self._extension_host.extensions:
+                    panel = extension.build_tui_panel(self.extension_context)
+                    if panel is not None:
+                        if not isinstance(panel, Widget):
+                            raise TypeError("build_tui_panel must return a Widget or None")
+                        self._extension_panels.append(panel)
+            except BaseException:
+                self.close_extensions()
+                raise
+        return self._extension_panels
 
     @property
     def camera(self) -> Camera:
@@ -208,18 +248,44 @@ class CrystalTUI(App):
         return self.controller.state.display.display_level
 
     def compose(self) -> ComposeResult:
+        panels = self._build_extension_panels()
         yield Header()
         yield Static("", id="chemistry-warning", markup=False)
         with Container(id="body"):
             yield CrystalCanvas(id="canvas")
             yield Static("", id="inspector", markup=False)
+            if panels:
+                with Container(id="mv-extension-panels"):
+                    yield from panels
         yield Static("", id="command-result", markup=False)
         yield Footer()
 
     def on_mount(self) -> None:
-        self.query_one("#command-result", Static).display = False
-        self._update_layout()
-        self._apply_observation(self._resize_and_observe())
+        try:
+            self.query_one("#command-result", Static).display = False
+            self._update_layout()
+            self._apply_observation(self._resize_and_observe())
+            for extension in self._extension_host.extensions:
+                self._mounted_extensions.append(extension)
+                extension.on_tui_mount(self, self.extension_context)
+        except BaseException:
+            self.on_unmount()
+            raise
+
+    def on_unmount(self) -> None:
+        import logging
+
+        mounted, self._mounted_extensions = self._mounted_extensions, []
+        try:
+            for extension in reversed(mounted):
+                try:
+                    extension.on_tui_unmount(self, self.extension_context)
+                except Exception:
+                    logging.getLogger(__name__).exception(
+                        "Extension unmount failed: %s", extension.name
+                    )
+        finally:
+            self.close_extensions()
 
     def on_resize(self) -> None:
         self._update_layout()
@@ -227,6 +293,11 @@ class CrystalTUI(App):
 
     def on_key(self, event) -> None:
         """Direct key handler — bypasses binding resolution for movement keys."""
+        focused = self.focused
+        while focused is not None:
+            if focused.id == "mv-extension-panels":
+                return
+            focused = focused.parent
         if self._command_mode:
             if event.key == "escape":
                 self._close_command()
@@ -355,6 +426,11 @@ class CrystalTUI(App):
 
     def _apply_observation(self, observation: TerminalObservation) -> None:
         """Apply one already-rendered semantic observation to the UI."""
+        self.extension_context._publish(
+            source_path=self.crystal.source_path or None,
+            view_revision=observation.revision,
+            selection=observation.state.selection.as_dict(),
+        )
         canvas = self.query_one("#canvas", CrystalCanvas)
         canvas.frame_text = observation.frame
         self.sub_title = observation.title

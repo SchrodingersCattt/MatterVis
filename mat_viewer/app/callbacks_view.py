@@ -45,15 +45,15 @@ def register_view_callbacks(app, backend):
         hidden_class = "rightclick-menu rightclick-menu--hidden"
         empty_style = {"top": "0px", "left": "0px"}
         if not target or not isinstance(target, dict):
-            return [], empty_style, hidden_class
+            return _closed_rightclick_items(), empty_style, hidden_class
         kind = target.get("kind")
         if kind == "_close":
-            return [], empty_style, hidden_class
+            return _closed_rightclick_items(), empty_style, hidden_class
         # Keyboard-shortcut path: just dispatch and don't render. We
         # still want the popover hidden (it might have been visible
         # before).
         if target.get("action"):
-            return [], empty_style, hidden_class
+            return _closed_rightclick_items(), empty_style, hidden_class
         payload = target.get("payload") or {}
         x = int(target.get("x") or 0)
         y = int(target.get("y") or 0)
@@ -226,7 +226,7 @@ def register_view_callbacks(app, backend):
                 html.Button("", id="rcm-action-selection-promote", n_clicks=0, style={"display": "none"}),
             ])
         else:
-            return [], empty_style, hidden_class
+            return _closed_rightclick_items(), empty_style, hidden_class
 
         children: list[Any] = [html.Div(header_text, className="rightclick-menu__header")] + items
         # Position: clamp so the menu stays inside the viewport. The
@@ -285,6 +285,14 @@ def register_view_callbacks(app, backend):
             if not action:
                 return no_update, no_update
         else:
+            # Replacing menu children inserts buttons with n_clicks=0;
+            # insertion is not a user action, even after initial page load.
+            if not any(
+                item.get("value")
+                for item in callback_context.triggered
+                if item.get("prop_id") == f"{triggered}.n_clicks"
+            ):
+                return no_update, no_update
             mapping = {
                 "rcm-action-hide": "hide",
                 "rcm-action-grow-bonds": "grow_bonds",
