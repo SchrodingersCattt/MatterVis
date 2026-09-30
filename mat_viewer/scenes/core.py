@@ -99,6 +99,9 @@ class Scene:
             self.structure_name = str(patch.pop("structure_name"))
         if "camera" in patch:
             self.camera = copy.deepcopy(patch.pop("camera"))
+            # None is an explicit reset, not permission to resurrect a camera
+            # from the creation-time state patch or the current preset defaults.
+            self.state_patch["camera"] = copy.deepcopy(self.camera)
         self.state_patch.update(patch)
         self.updated_at = _now()
 

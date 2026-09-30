@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from mat_viewer.app import ViewerBackend, _camera_from_store, _camera_store_payload
 
 
@@ -48,3 +50,36 @@ def test_backend_figure_title_prefers_scene_label(tmp_path):
     fig, _ = backend.figure_for_state(state)
 
     assert fig.layout.title.text == "1_HTP"
+
+
+@pytest.mark.parametrize("action", ["reset", "align"])
+def test_cached_figure_refreshes_camera_and_uirevision(tmp_path, monkeypatch, action):
+    from mat_viewer.app import backend_camera
+
+    backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    try:
+        backend.patch_state({"camera": CAMERA_A}, broadcast=False)
+        before = backend.get_state()
+        first, _ = backend.figure_for_state(before)
+        cache_key = backend._figure_state_cache_key(before)
+        cached_revision = backend._figure_cache[cache_key][0]["layout"]["scene"]["uirevision"]
+
+        def unexpected_build(*args, **kwargs):
+            pytest.fail("camera revision must not rebuild molecular geometry")
+
+        monkeypatch.setattr(backend_camera, "build_figure", unexpected_build)
+        backend.camera_action(action, axis="a", broadcast=False)
+        state = backend.get_state()
+        assert backend._figure_state_cache_key(state) == cache_key
+        second, _ = backend.figure_for_state(state)
+        expected = backend.style_for_state(state)["uirevision"]
+        assert second.layout.uirevision == second.layout.scene.uirevision == expected
+        assert second.layout.scene.uirevision != first.layout.scene.uirevision
+        rendered_camera = second.layout.scene.camera.to_plotly_json()
+        assert all(rendered_camera[key] == value for key, value in state["camera"].items())
+        assert rendered_camera["projection"]["type"] == state["projection"]
+        assert second.layout.meta["mattervis_render"]["camera_revision"] == state["camera_revision"]
+        assert backend._figure_cache[cache_key][0]["layout"]["scene"]["uirevision"] == cached_revision
+        assert not backend._figure_revision_matches_current(state["scene_id"], before)
+    finally:
+        backend.close()

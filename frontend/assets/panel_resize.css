@@ -2,11 +2,11 @@
   width: 8px;
   flex: 0 0 8px;
   cursor: col-resize;
-  background: linear-gradient(to right, #f2f2f2 0%, #d9d9d9 50%, #f2f2f2 100%);
+  background: #eef0f2;
 }
 
 .panel-splitter:hover {
-  background: linear-gradient(to right, #ececec 0%, #bfbfbf 50%, #ececec 100%);
+  background: #cbd5dc;
 }
 
 #left-panel,
@@ -148,14 +148,14 @@
 }
 
 .analysis-panel-toggle--active {
-  background: #2f6df6;
-  border-color: #2f6df6;
+  background: #243b53;
+  border-color: #243b53;
   color: #ffffff;
 }
 
 .analysis-panel-toggle--active:hover {
-  background: #2f6df6;
-  border-color: #2f6df6;
+  background: #243b53;
+  border-color: #243b53;
   color: #ffffff;
 }
 
@@ -339,38 +339,6 @@
   margin-top: 3px;
 }
 
-.analysis-panel.analysis-panel--collapsed {
-  width: 44px !important;
-  min-width: 44px !important;
-  max-width: 44px !important;
-  padding: 8px 6px !important;
-  overflow: hidden !important;
-}
-
-.analysis-panel.analysis-panel--collapsed .analysis-panel-header {
-  align-items: center;
-  flex-direction: column;
-  gap: 8px;
-  height: 100%;
-  margin: 0;
-}
-
-.analysis-panel.analysis-panel--collapsed .analysis-panel-toggle {
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
-  min-height: 96px;
-  padding: 10px 6px;
-}
-
-.analysis-panel.analysis-panel--collapsed .operation-panel-toggle {
-  min-height: 110px;
-}
-
-.analysis-panel.analysis-panel--collapsed .analysis-panel-heading,
-.analysis-panel.analysis-panel--collapsed .analysis-panel-body {
-  display: none;
-}
-
 body.panel-resizing,
 body.panel-resizing * {
   cursor: col-resize !important;
@@ -380,7 +348,7 @@ body.panel-resizing * {
 /* ----- Perf-log floating panel --------------------------------------- */
 
 .perf-log-panel {
-  position: fixed;
+  position: absolute;
   right: 14px;
   bottom: 14px;
   z-index: 9000;
@@ -389,7 +357,7 @@ body.panel-resizing * {
   border: 1px solid #2c3340;
   border-radius: 10px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
-  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-family: Arial, Helvetica, sans-serif;
   font-size: 11.5px;
   line-height: 1.35;
   display: flex;
@@ -397,7 +365,7 @@ body.panel-resizing * {
   overflow: hidden;
   transition: max-height 160ms ease, width 160ms ease;
   width: 540px;
-  max-width: calc(100vw - 28px);
+  max-width: calc(100% - 28px);
   pointer-events: auto;
 }
 
@@ -445,6 +413,7 @@ body.panel-resizing * {
 }
 
 .perf-log-body {
+  font-family: Consolas, monospace;
   flex: 1 1 auto;
   overflow-y: auto;
   padding: 4px 6px 8px;

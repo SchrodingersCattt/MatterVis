@@ -105,6 +105,17 @@ Parses a CIF and returns a scene dict consumable by
   Cartesian coordinates. The 100 Å dummy cells that CIF exporters
   sometimes write around clusters are ignored.
 
+Both `mat_viewer.scene.build_scene_from_atoms` and `build_scene_from_cif`
+accept `show_hydrogen: bool | None = None`. Explicit `False` hides hydrogen
+atoms and their incident bonds even when the preset enables them; explicit
+`True` shows them. Omission or `None` resolves the structure entry's
+`show_hydrogen` first, then the merged global/structure style. The effective
+boolean is recorded in both `scene["show_hydrogen"]` and
+`scene["style"]["show_hydrogen"]`; the supplied preset is not mutated.
+This is a display filter, not a change to source atoms or connectivity.
+`build_bundle_scene` retains its boolean `show_hydrogen=False` default and
+separate on/off scene-cache entries; it does not adopt omission semantics.
+
 `build_scene_from_atoms(..., include_minor=False)` and
 `build_bundle_scene(..., include_minor=False)` omit occupancy-minor disorder
 alternatives and every bond incident to them. The default is `True`, preserving

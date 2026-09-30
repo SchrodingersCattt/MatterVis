@@ -14,7 +14,6 @@
     splitter.dataset.bound = "1";
     splitter.addEventListener("mousedown", function (event) {
       event.preventDefault();
-      panel.classList.remove("analysis-panel--collapsed");
       const rootRect = root.getBoundingClientRect();
       document.body.classList.add("panel-resizing");
 
@@ -39,56 +38,61 @@
     });
   }
 
-  // ``Analysis`` and ``Operation`` are parallel tabs that share the
-  // single right-hand collapsible panel. Selecting one shows its own
-  // content frame and hides the other; clicking the already-active tab
-  // collapses the panel. Tab state is purely visual (CSS classes), so
-  // there is no server round trip.
+  // All native controls stay mounted; selecting a tool only changes visibility.
+  // Tab state is local to this page and resets to Display on refresh.
+  const toolTabs = ["display", "analysis", "operation"];
+
   function setActiveTab(panel, tab) {
-    const analysisBtn = document.getElementById("analysis-panel-toggle");
-    const operationBtn = document.getElementById("operation-panel-toggle");
-    const analysisContent = document.getElementById("analysis-panel-content");
-    const operationContent = document.getElementById("operation-panel-content");
-    const isOperation = tab === "operation";
-    if (analysisBtn) analysisBtn.classList.toggle("analysis-panel-toggle--active", !isOperation);
-    if (operationBtn) operationBtn.classList.toggle("analysis-panel-toggle--active", isOperation);
-    if (analysisContent) analysisContent.classList.toggle("analysis-tab-content--hidden", isOperation);
-    if (operationContent) operationContent.classList.toggle("analysis-tab-content--hidden", !isOperation);
+    toolTabs.forEach(function (name) {
+      const button = document.getElementById(name + "-panel-toggle");
+      const content = document.getElementById(name + "-panel-content");
+      const active = name === tab;
+      if (button) {
+        button.classList.toggle("analysis-panel-toggle--active", active);
+        button.setAttribute("aria-selected", String(active));
+        button.setAttribute("aria-pressed", String(active));
+        button.tabIndex = active ? 0 : -1;
+      }
+      if (content) {
+        content.classList.toggle("analysis-tab-content--hidden", !active);
+      }
+    });
     panel.dataset.activeTab = tab;
+    window.dispatchEvent(new Event("resize"));
   }
 
   function bindPanelTab(toggleId, tab) {
     const toggle = document.getElementById(toggleId);
-    const panel = document.getElementById("right-panel");
+    const panel = document.getElementById("left-panel");
     if (!toggle || !panel || toggle.dataset.bound === "1") {
       return;
     }
     toggle.dataset.bound = "1";
     toggle.addEventListener("click", function (event) {
       event.preventDefault();
-      const collapsed = panel.classList.contains("analysis-panel--collapsed");
-      const alreadyActive = panel.dataset.activeTab === tab;
-      if (!collapsed && alreadyActive) {
-        // Clicking the active tab again collapses the panel.
-        panel.classList.add("analysis-panel--collapsed");
-      } else {
-        panel.classList.remove("analysis-panel--collapsed");
-        setActiveTab(panel, tab);
-      }
-      window.setTimeout(function () {
-        window.dispatchEvent(new Event("resize"));
-      }, 180);
+      setActiveTab(panel, tab);
+    });
+    toggle.addEventListener("keydown", function (event) {
+      let index = toolTabs.indexOf(tab);
+      if (event.key === "ArrowRight") index = (index + 1) % toolTabs.length;
+      else if (event.key === "ArrowLeft") index = (index + toolTabs.length - 1) % toolTabs.length;
+      else if (event.key === "Home") index = 0;
+      else if (event.key === "End") index = toolTabs.length - 1;
+      else return; // Native buttons handle Enter and Space.
+      event.preventDefault();
+      setActiveTab(panel, toolTabs[index]);
+      document.getElementById(toolTabs[index] + "-panel-toggle").focus();
     });
   }
 
   function init() {
     bindSplitter("left-splitter", "left-panel", "left");
-    bindSplitter("right-splitter", "right-panel", "right");
+    bindPanelTab("display-panel-toggle", "display");
     bindPanelTab("analysis-panel-toggle", "analysis");
     bindPanelTab("operation-panel-toggle", "operation");
-    const panel = document.getElementById("right-panel");
+    const panel = document.getElementById("left-panel");
     if (panel && !panel.dataset.activeTab) {
-      setActiveTab(panel, "analysis");
+      setActiveTab(panel, "display");
     }
   }
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -75,14 +76,18 @@ def test_snapshot_returns_events_and_matching_latest_sequence():
     assert latest >= max(e["seq"] for e in events)
 
 
-def test_time_block_records_positive_elapsed_ms():
+def test_time_block_records_positive_elapsed_ms(monkeypatch):
+    # Test the seconds-to-milliseconds contract, not Windows timer granularity
+    # or scheduler behavior during a parallel suite.
+    clock = [perf_log_core._M0]
+    monkeypatch.setattr(perf_log_core, "time", SimpleNamespace(
+        monotonic=lambda: clock[0], strftime=time.strftime, localtime=time.localtime,
+    ))
     with perf_log.time_block("sleep_block"):
-        time.sleep(0.02)
+        clock[0] += 0.020
     last = perf_log.recent(limit=1)[-1]
     assert last["label"] == "sleep_block"
-    # Account for clock granularity but require >=15 ms (we slept 20).
-    assert last["ms"] >= 15.0
-    assert last["ms"] < 1000.0
+    assert last["ms"] == pytest.approx(20.0, abs=1e-6)
 
 
 def test_record_appends_to_disk_log(tmp_path):
