@@ -8,7 +8,7 @@
       },
       "fixture": {
         "path": "scripts/data/DAP-4-user-disorder.cif",
-        "sha256": "3967afbcdbded81841ea31c89d2cfdf623c8f3264b208c3c8a2f6ae2a0f9ef5d"
+        "sha256": "0753bfc0530b3bbb352f7f1755b831c965b111542ce13fc86bae5e379d71a4dd"
       },
       "oracle": {
         "counts": {
