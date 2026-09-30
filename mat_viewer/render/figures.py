@@ -556,7 +556,12 @@ def build_figure(
 
     ui_revision = style.get("uirevision", str(scene.get("name", "scene")))
     compass_ctx = compass_clientside_context(scene, style)
-    layout_meta = {"compass": compass_ctx} if compass_ctx else {}
+    layout_meta = {}
+    if compass_ctx:
+        if compass_ctx.get("enabled"):
+            layout_meta["compass"] = compass_ctx
+        if style.get("axis_key_via_svg_overlay"):
+            layout_meta["compass_context"] = compass_ctx
     if style.get("material") == "flat":
         layout_meta["flat_visual_pixel_scale"] = style.get("_flat_visual_pixel_scale")
     layout_kwargs = dict(
