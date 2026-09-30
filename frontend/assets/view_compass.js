@@ -4,6 +4,7 @@
   "use strict";
   root.MatterVisViewCompass = {
     setEnabled: function (enabled) {
+      root.__mv_axes_enabled = !!enabled;
       var gd = root.MatterVisViewCamera && root.MatterVisViewCamera.graph();
       var svg = document.getElementById("mv-compass-svg");
       if (!enabled) {

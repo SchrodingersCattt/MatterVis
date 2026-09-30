@@ -39,6 +39,12 @@ assert.equal(svg.children.length, 0, 'old arrows survived Axes off');
 frame.layout.meta = {compass: {M: [[1,0,0],[0,1,0],[0,0,1]]}};
 sandbox.redrawCompass(frame, {}, false);
 assert.equal(svg.children.length, 1, 'Axes on did not restore arrows');
+sandbox.window.__mv_axes_enabled = false;
+sandbox.redrawCompass(frame, {}, false);
+assert.equal(svg.children.length, 0, 'disabled axes were redrawn from stale figure metadata');
+sandbox.window.__mv_axes_enabled = true;
+sandbox.redrawCompass(frame, {}, false);
+assert.equal(svg.children.length, 1, 're-enabled axes did not restore arrows');
 """
     result = subprocess.run([node, "-e", program, str(source)], capture_output=True,
                             text=True, timeout=15)
