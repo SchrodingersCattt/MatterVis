@@ -200,7 +200,10 @@ def compass_clientside_context(scene: dict, style: dict) -> dict | None:
     """Serialise the inputs the clientside callback needs for reprojection."""
     show_axes = bool(style.get("show_axes", False))
     show_axis_key = bool(style.get("show_axis_key", False))
-    if not (show_axes or show_axis_key):
+    # Interactive figures keep the projection context even when the live
+    # overlay is disabled, so the browser can re-enable Axes without a full
+    # geometry rebuild.
+    if not (show_axes or show_axis_key or style.get("axis_key_via_svg_overlay")):
         return None
     M = np.asarray(scene.get("M"), dtype=float) if scene.get("M") is not None else None
     if M is None or M.ndim != 2 or M.shape != (3, 3):
@@ -226,6 +229,7 @@ def compass_clientside_context(scene: dict, style: dict) -> dict | None:
         else None
     )
     return {
+        "enabled": bool(show_axes or show_axis_key),
         "M": [[float(M[i, j]) for j in range(3)] for i in range(3)],
         "cube_scale": cube_scale_payload,
         "labels": list(axes_labels),

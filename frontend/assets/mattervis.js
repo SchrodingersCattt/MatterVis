@@ -555,7 +555,9 @@
     if (typeof meta === "string") {
       try { meta = JSON.parse(meta); } catch (err) { return null; }
     }
-    return (meta && meta.compass) ? meta.compass : null;
+    return (meta && (meta.compass || meta.compass_context))
+      ? (meta.compass || meta.compass_context)
+      : null;
   }
 
   function hasCompleteCamera(camera) {
@@ -852,7 +854,19 @@
   function redrawCompass(gd, eventCamera, preferLiveCamera) {
     if (window.__mv_compass_diag) window.__mv_compass_diag.svg_redraws += 1;
     if (!gd || !gd.layout) return;
+    if (window.__mv_axes_enabled === false) {
+      const root = graphRoot();
+      const svg = root ? root.querySelector("#" + SVG_LAYER_ID) : null;
+      if (svg) clearSvg(svg);
+      return;
+    }
     const ctx = compassFromMeta(gd.layout);
+    if (window.__mv_axes_enabled !== true && ctx && ctx.enabled === false) {
+      const root = graphRoot();
+      const svg = root ? root.querySelector("#" + SVG_LAYER_ID) : null;
+      if (svg) clearSvg(svg);
+      return;
+    }
     if (!ctx || !ctx.M) {
       // Axes off (or a scene without a lattice) must also remove the previous
       // SVG overlay; an early return otherwise leaves stale arrows on screen.

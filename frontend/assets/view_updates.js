@@ -11,6 +11,12 @@
     m = m && m.mattervis_render;
     return m || {};
   }
+  function deliveryKey(update, gd) {
+    var scene = update.scene_id;
+    var render = currentMeta(gd);
+    var v = meta(update);
+    return [scene || render.scene_id || "", Number(v.geometry_version || v.geometry || 0), Number(v.display_version || 0), Number(v.camera_version || 0)].join(":");
+  }
   function applicable(update, gd) {
     if (!update || !gd) return false;
     var scene = update.scene_id;
@@ -19,10 +25,10 @@
     var v = meta(update), current = Number(render.geometry_version || render.render_revision || 0);
     var geometry = Number(v.geometry_version || v.geometry || 0);
     if (geometry && current && geometry < current) return false;
-    var key = [scene || render.scene_id || "", geometry, Number(v.display_version || 0), Number(v.camera_version || 0)].join(":");
-    if (delivered[key]) return false;
-    delivered[key] = true;
-    return true;
+    return !delivered[deliveryKey(update, gd)];
+  }
+  function markDelivered(update, gd) {
+    delivered[deliveryKey(update, gd)] = true;
   }
   function role(trace) { var m = trace && trace.meta; return m && (m.mv_role || m.role); }
   function localDisplay(update, gd) {
@@ -65,16 +71,19 @@
     root.__mv_view_diag.submissions += 1;
     if (!applicable(update, gd)) { root.__mv_view_diag.staleDrops += 1; return "stale"; }
     if (kind === "camera") {
+      markDelivered(update, gd);
       root.__mv_view_diag.cameraUpdates += 1;
       if (root.MatterVisViewCamera) root.MatterVisViewCamera.apply((update.payload || update).camera);
       return "camera";
     }
     if (kind === "overlay" || kind === "display" || kind === "analysis") {
+      markDelivered(update, gd);
       root.__mv_view_diag.localPatches += 1;
       localDisplay(update, gd);
       return kind;
     }
     if (update.figure && root.Plotly && typeof root.Plotly.react === "function") {
+      markDelivered(update, gd);
       root.__mv_view_diag.fullFrames += 1;
       var layout = update.figure.layout || {};
       var live = root.mattervisCurrentCamera && root.mattervisCurrentCamera(gd);
@@ -83,11 +92,15 @@
       }
       return Promise.resolve(root.Plotly.react(gd, update.figure.data || [], layout)).then(function () { return "figure"; }).catch(function (error) {
         /* A failed submission must remain retryable. */
-        var v = meta(update), key = [update.scene_id || currentMeta(gd).scene_id || "", Number(v.geometry_version || 0), Number(v.display_version || 0), Number(v.camera_version || 0)].join(":");
+        var key = deliveryKey(update, gd);
         delete delivered[key];
         throw error;
       });
     }
+    // A geometry notification without a figure only confirms that a
+    // background build is pending. Do not consume its version key: the
+    // completed figure uses the same versions and must still pass through
+    // Plotly.react when it arrives over WS or the HTTP fallback.
     return "";
   }
   root.MatterVisViewUpdates = { submit: submit, apply: submit, commit: submit, applicable: applicable, reset: function () { delivered = Object.create(null); } };

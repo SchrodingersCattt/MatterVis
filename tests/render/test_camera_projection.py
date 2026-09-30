@@ -541,6 +541,7 @@ def test_compass_metadata_stashed_for_clientside_reprojection():
     assert isinstance(meta, dict)
     compass = meta.get("compass")
     assert compass is not None
+    assert compass.get("enabled") is True
     assert "M" in compass and len(compass["M"]) == 3
     assert compass.get("labels") and len(compass["labels"]) >= 3
     assert "anchor" in compass and len(compass["anchor"]) == 2
