@@ -19,22 +19,22 @@
             "ClO4": 54,
             "N": 27
           },
-        "major_atoms": 336,
-        "minor_atoms": 32,
+        "major_atoms": 368,
+        "minor_atoms": 0,
           "molecules": 40,
         "raw_atoms": 368,
           "scene_atoms": 361,
-          "scene_bonds": 288
+        "scene_bonds": 304
         },
-        "overall_digest": "004ea762bb600038de268db8a7f768d93caa97e3e0153f46cae51f342c1b4b9f",
+        "overall_digest": "33324228502692546b5fe173f64d6831f186cebd558f5f4597e7128684aea63e",
         "schema": "mattervis.perf.oracle/v1",
         "section_digests": {
           "analysis": "5ed6e7b8a958469de96ec2b50605d7fc013ac3fea97c4b2738546545ecfbdc9d",
-          "disorder": "773d8113793e7ef022ea8777e0a51e5d7fee07068a2d50511fd26fdd0b01ad1e",
+          "disorder": "b0793223559900b495cd039970a6d683f685ecc6a8bfc3b347f11e5be247294c",
           "figure": "8466672d9f1b6d520c74c9368a943b38bef96eb52fd410d97f5c3d2a63a78331",
           "formula_unit": "826776c0cec1da15cba8fc7b073ed5a9542093535fbb36e27aff5eb8d1af7757",
-          "raw_atoms": "fcc4b40b6605bb63a2267e76e98b84c0d265237845495071bc6d72ebd225152b",
-          "scene": "6088681050573d537d3852f70a88ed64032877b75942ae91df4593a2baba9a80"
+          "raw_atoms": "1d3f440677809de4f5faed1e55399c7881fc5a79089ce466cb6cab45da4303bd",
+          "scene": "f981accac0a8ff51891bebe9a082061254edecaf0269365db3e315e9b4c39b60"
         }
       }
     },
