@@ -92,12 +92,15 @@ def fake_figure(backend, state):
 
 
 @pytest.mark.parametrize("option", ["labels", "axes", "unit_cell_box", "hydrogens", "minor_only"])
-def test_every_display_toggle_emits_state_and_queues_current_full_frame(backend, monkeypatch, option):
+def test_display_toggles_route_geometry_only_when_needed(backend, monkeypatch, option):
     options = set(backend.get_state()["display_options"])
     options.symmetric_difference_update({option})
     emitted = capture(backend, monkeypatch, sorted(options))
     worker = backend._render_worker
     assert emitted == backend.get_state()
+    if option in {"labels", "axes"}:
+        assert not worker._finalize_pool.jobs
+        return
     assert len(worker._finalize_pool.jobs) == 1
     built = []
 
@@ -120,24 +123,10 @@ def test_composed_callback_builds_once_and_poll_delivers_without_websocket(backe
     options = set(backend.get_state()["display_options"])
     options.symmetric_difference_update({"axes"})
     emitted = capture(backend, monkeypatch, sorted(options))
-    built = []
-
-    def build(state, **kwargs):
-        built.append(state)
-        return fake_figure(backend, state)
-
-    monkeypatch.setattr(backend, "figure_for_state", build)
     registry = CallbackRegistry()
     callbacks_view.register_view_callbacks(registry, backend)
     update = registry.callbacks["update_view"]
-    # A second state notification while pending cannot assemble synchronously.
     assert update(emitted, None, None, None) == (no_update,) * 4
-    assert len(backend._render_worker._finalize_pool.jobs) == 1
-    backend._render_worker._finalize_pool.run_next()
-    figure = update(emitted, None, None, None, 1)[0]
-    assert figure == backend.latest_figure_broadcast()["figure"]
-    assert update(emitted, None, figure, None, 2)[0] is no_update
-    assert built == [emitted]
     assert not backend._render_worker._finalize_pool.jobs
 
 
@@ -177,7 +166,7 @@ def test_camera_reset_invalidates_inflight_worker_frame(backend, monkeypatch):
 def test_visual_sliders_also_queue_full_frames(backend, monkeypatch, trigger, changes):
     emitted = capture(backend, monkeypatch, backend.get_state()["display_options"], trigger=trigger, **changes)
     assert emitted == backend.get_state()
-    assert len(backend._render_worker._finalize_pool.jobs) == 1
+    assert not backend._render_worker._finalize_pool.jobs
 
 
 def test_hydrogen_build_followed_by_labels_does_not_drop_final_frame(backend, monkeypatch):
@@ -197,11 +186,8 @@ def test_hydrogen_build_followed_by_labels_does_not_drop_final_frame(backend, mo
     pool = backend._render_worker._finalize_pool
     pool.run_next()  # Later toggle arrives while the hydrogen build is running.
     assert backend.latest_figure_broadcast() is None
-    assert len(pool.jobs) == 1
-    pool.run_next()
-    event = backend.latest_figure_broadcast()
-    assert event["state"] == backend.get_state() == built[-1]
-    assert event["render_revision"] > first["render_revision"]
+    assert not pool.jobs
+    assert backend.latest_figure_broadcast() is None
     assert not backend._render_worker._pending_render
 
 

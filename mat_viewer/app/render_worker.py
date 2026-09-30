@@ -218,7 +218,6 @@ class AsyncRenderWorker:
         if kind in {
             UpdateKind.CAMERA.value,
             UpdateKind.OVERLAY.value,
-            UpdateKind.DISPLAY.value,
         }:
             return False
         try:

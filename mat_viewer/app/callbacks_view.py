@@ -699,8 +699,15 @@ def register_view_callbacks(app, backend):
         scene_id = state.get("scene_id")
         previous_state = getattr(update_view, "_last_state", None)
         change_kind = classify_change(previous_state, state)
+        if previous_state is None:
+            try:
+                change_kind = UpdateKind(
+                    backend._last_update_kind_by_scene.get(str(scene_id), change_kind.value)
+                )
+            except (AttributeError, ValueError):
+                pass
         update_view._last_state = copy.deepcopy(state)
-        if previous_state is not None and change_kind in {
+        if change_kind in {
             UpdateKind.CAMERA,
             UpdateKind.OVERLAY,
             UpdateKind.DISPLAY,
