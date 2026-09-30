@@ -3,38 +3,38 @@
   "entries": {
     "dap4-mattervis-051df0b-mck-f2188c1": {
       "producer": {
-        "mattervis_revision": "051df0bc175281fee331b75b741f19d9b489a60d",
+        "mattervis_revision": "9cf98e80999e693b2cf89706b4cfd22f4a98cd3d",
         "molcrys_kit_revision": "f2188c14e245b87d99dc1d13ab72e37993d972b0"
       },
       "fixture": {
         "path": "scripts/data/DAP-4.cif",
-        "sha256": "b126b65d267ae4a6930e203c2124af09c137d466d27613792f83cf519bbc454b"
+        "sha256": "3967afbcdbded81841ea31c89d2cfdf623c8f3264b208c3c8a2f6ae2a0f9ef5d"
       },
       "oracle": {
-        "schema": "mattervis.perf.oracle/v1",
-        "overall_digest": "af017df73838844750486ced9e64c60e3b405a9c44f8a60a021be418340f6301",
-        "section_digests": {
-          "analysis": "4aca310f8f4cb8158e346811e206695aa48d42d28dfbcd84874e58398716fcb0",
-          "disorder": "eb21f31cadb3609b05005ec3880f758da1bad4fbe94c44e5cafd035c6d36f0f8",
-          "figure": "8466672d9f1b6d520c74c9368a943b38bef96eb52fd410d97f5c3d2a63a78331",
-          "formula_unit": "b822193b5a1556495a2a39f4c997c575a293dfb082335b272d6c6c7ecb283166",
-          "raw_atoms": "4e50c03399881384aa7bbb960c652d5379798bb491ae3c29c6b0271262729dbe",
-          "scene": "81b44c3c894ed6a2c842c9578e173c4f4350fb6346f69db3e982e62772ce5865"
-        },
         "counts": {
-          "canonical_bonds": 312,
-          "formula_unit_atoms": 42,
+        "canonical_bonds": 344,
+        "formula_unit_atoms": 46,
           "fragment_formulas": {
             "C6N2": 8,
             "ClO4": 54,
             "N": 27
           },
-          "major_atoms": 336,
-          "minor_atoms": 0,
+        "major_atoms": 336,
+        "minor_atoms": 32,
           "molecules": 40,
-          "raw_atoms": 336,
-          "scene_atoms": 581,
-          "scene_bonds": 536
+        "raw_atoms": 368,
+          "scene_atoms": 361,
+          "scene_bonds": 288
+        },
+        "overall_digest": "004ea762bb600038de268db8a7f768d93caa97e3e0153f46cae51f342c1b4b9f",
+        "schema": "mattervis.perf.oracle/v1",
+        "section_digests": {
+          "analysis": "5ed6e7b8a958469de96ec2b50605d7fc013ac3fea97c4b2738546545ecfbdc9d",
+          "disorder": "773d8113793e7ef022ea8777e0a51e5d7fee07068a2d50511fd26fdd0b01ad1e",
+          "figure": "8466672d9f1b6d520c74c9368a943b38bef96eb52fd410d97f5c3d2a63a78331",
+          "formula_unit": "826776c0cec1da15cba8fc7b073ed5a9542093535fbb36e27aff5eb8d1af7757",
+          "raw_atoms": "fcc4b40b6605bb63a2267e76e98b84c0d265237845495071bc6d72ebd225152b",
+          "scene": "6088681050573d537d3852f70a88ed64032877b75942ae91df4593a2baba9a80"
         }
       }
     },
