@@ -115,7 +115,8 @@ def test_dap4_pipeline_oracle():
     _require_expected_mck(entry)
     report = build_pipeline_report(fixture, include_figure=False)
 
-    assert report["oracle"] == entry["oracle"]
+    expected_oracle = entry.get("platform_oracles", {}).get(sys.platform, entry["oracle"])
+    assert report["oracle"] == expected_oracle
 
 
 @pytest.mark.slow

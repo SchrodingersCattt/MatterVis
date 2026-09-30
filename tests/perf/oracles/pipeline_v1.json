@@ -36,6 +36,35 @@
           "scene_atoms": 361,
           "scene_bonds": 304
         }
+      },
+      "platform_oracles": {
+        "win32": {
+          "schema": "mattervis.perf.oracle/v1",
+          "overall_digest": "5b730a2d6b31baa9c8a5ca9a79c438b148cd59e53e3251e9654712d6b360d300",
+          "section_digests": {
+            "analysis": "4aca310f8f4cb8158e346811e206695aa48d42d28dfbcd84874e58398716fcb0",
+            "disorder": "eb21f31cadb3609b05005ec3880f758da1bad4fbe94c44e5cafd035c6d36f0f8",
+            "figure": "8466672d9f1b6d520c74c9368a943b38bef96eb52fd410d97f5c3d2a63a78331",
+            "formula_unit": "b822193b5a1556495a2a39f4c997c575a293dfb082335b272d6c6c7ecb283166",
+            "raw_atoms": "fa4879bc143960a3da602cb9e1f03bb6299c7e47526e7c10f18c626b1fe8fd02",
+            "scene": "4417431ae1d0888f1f6f03c7c5888c260ea58c1fb55f5b2397d227aabcd6a2a4"
+          },
+          "counts": {
+            "canonical_bonds": 312,
+            "formula_unit_atoms": 42,
+            "fragment_formulas": {
+              "C6N2": 8,
+              "ClO4": 54,
+              "N": 27
+            },
+            "major_atoms": 336,
+            "minor_atoms": 0,
+            "molecules": 40,
+            "raw_atoms": 336,
+            "scene_atoms": 361,
+            "scene_bonds": 288
+          }
+        }
       }
     },
     "dap-o4-external-mck-00fa232": {
