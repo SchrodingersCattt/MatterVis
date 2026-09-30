@@ -132,7 +132,7 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
         bool(use_fast),
         str(style.get("material", "mesh")),
         str(style.get("style", "ball_stick")),
-        str(style.get("disorder", "outline_rings")),
+        str(style.get("disorder", "opacity")),
         str(style.get("ortep_mode", "")),
         str(style.get("ortep_mode_minor", "")),
         round(float(style.get("ortep_probability", 0.5)), 3),

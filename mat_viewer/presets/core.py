@@ -14,7 +14,7 @@ DEFAULT_STYLE = {
     "bond_radius": 0.15,
     "material": "mesh",
     "style": "ball_stick",
-    "disorder": "outline_rings",
+    "disorder": "opacity",
     "major_opacity": 1.0,
     "minor_opacity": 0.35,
     "minor_wireframe": False,

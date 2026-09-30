@@ -196,6 +196,7 @@ Notes for callers:
   `flat`; `style` is `ball`, `ball_stick`, `stick`, `ortep`, or
   `wireframe`; `disorder` is `opacity`, `dashed_bonds`,
   `outline_rings`, `color_shift`, or `none`. Fresh scenes default to
+  occupancy-based disorder opacity (`disorder="opacity"`, `minor_opacity=0.35`),
   hydrogens + unit-cell box visible, labels hidden, and
   `label_mode="unique_sites"`.
 

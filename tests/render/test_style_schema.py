@@ -7,11 +7,34 @@ from mat_viewer.renderer import DISORDER_DISPATCH, MATERIAL_DISPATCH, STYLE_DISP
 
 
 def test_style_schema_round_trips_and_enums_are_public():
+    assert DEFAULT_STYLE["material"] == "mesh"
+    assert DEFAULT_STYLE["disorder"] == "opacity"
     style = deep_merge(DEFAULT_STYLE, {"material": "flat", "style": "wireframe", "disorder": "none"})
     assert json_safe(style)["material"] == "flat"
     assert set(MATERIAL_DISPATCH) == {"flat", "mesh"}
     assert "ortep" in STYLE_DISPATCH
     assert "outline_rings" in DISORDER_DISPATCH
+
+
+def test_opacity_mode_does_not_keep_legacy_minor_wireframe_overlay():
+    style = validate_style_schema({
+        "material": "mesh",
+        "style": "ball_stick",
+        "disorder": "opacity",
+        "minor_wireframe": True,
+    })
+    assert style["disorder"] == "opacity"
+    assert style["minor_wireframe"] is False
+
+
+def test_legacy_minor_wireframe_without_disorder_still_selects_outline_mode():
+    style = validate_style_schema({
+        "material": "mesh",
+        "style": "ball_stick",
+        "minor_wireframe": True,
+    })
+    assert style["disorder"] == "outline_rings"
+    assert style["minor_wireframe"] is True
     assert set(ORTEP_MODES) == {"ortep_solid", "ortep_octant", "ortep_hatch"}
 
 

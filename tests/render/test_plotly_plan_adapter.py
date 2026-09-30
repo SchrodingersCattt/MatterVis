@@ -71,6 +71,17 @@ def test_plotly_figure_has_one_trace_per_backend_neutral_primitive() -> None:
     assert [trace.name for trace in figure.data] == ["triangle", "line", "label"]
 
 
+def test_plotly_trace_uids_are_css_safe_for_react_updates() -> None:
+    pytest.importorskip("plotly")
+    import re
+
+    figure = build_figure(_plan())
+    uids = [str(trace.uid) for trace in figure.data]
+    assert uids
+    assert all(re.fullmatch(r"[A-Za-z_-][A-Za-z0-9_-]*", uid) for uid in uids)
+    assert all(":" not in uid for uid in uids)
+
+
 def test_plotly_layout_uses_explicit_target_direction_and_ranges() -> None:
     pytest.importorskip("plotly")
     target = np.asarray([10.0, -4.0, 2.0])

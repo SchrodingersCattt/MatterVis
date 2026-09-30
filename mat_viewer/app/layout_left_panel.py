@@ -292,7 +292,7 @@ def build_left_panel(
                             },
                             {"label": "None", "value": "none"},
                         ],
-                        value=first_state.get("disorder", "outline_rings"),
+                        value=first_state.get("disorder", "opacity"),
                         clearable=False,
                         style={"flex": "1"},
                     ),
@@ -353,13 +353,13 @@ def build_left_panel(
                         },
                         updatemode="mouseup",
                         disabled=_minor_opacity_disabled(
-                            first_state.get("disorder", "outline_rings")
+                            first_state.get("disorder", "opacity")
                         ),
                     ),
                 ],
                 id="minor-opacity-control",
                 style=_minor_opacity_control_style(
-                    first_state.get("disorder", "outline_rings")
+                    first_state.get("disorder", "opacity")
                 ),
             ),
             html.Label("Axis Scale"),

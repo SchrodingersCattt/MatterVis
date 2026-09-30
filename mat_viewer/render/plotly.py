@@ -20,6 +20,7 @@ from .contracts import (
     TextPrimitive,
     TriangleMeshPrimitive,
 )
+from .trace_ids import plotly_trace_uid
 
 
 def _plotly():
@@ -51,10 +52,11 @@ def _scene_name(index: int) -> str:
 def _tag_trace(trace, primitive):
     """Attach a stable semantic identity for local browser patches."""
     semantic_id = str(getattr(primitive, "semantic_id", "trace"))
-    trace.uid = f"mv:{semantic_id}"
+    semantic_uid = f"mv:{semantic_id}"
+    trace.uid = plotly_trace_uid(semantic_uid)
     meta = dict(getattr(trace, "meta", None) or {})
     metadata = getattr(primitive, "metadata", {}) or {}
-    meta["mv_id"] = trace.uid
+    meta["mv_id"] = semantic_uid
     if metadata.get("kind"):
         meta["mv_role"] = str(metadata["kind"])
     trace.meta = meta
@@ -171,7 +173,7 @@ def _viewport_traces(viewport, *, scene: str, property_active: bool):
             "hoverinfo": "name",
             "showscale": False,
             "scene": scene,
-            "uid": f"mv:atom:{kind}:{opacity}:{solid_rgb}",
+            "uid": plotly_trace_uid(f"mv:atom:{kind}:{opacity}:{solid_rgb}"),
             "meta": {"mv_id": f"mv:atom:{kind}:{opacity}:{solid_rgb}", "mv_role": "atom"},
         }
         if kind == "property":

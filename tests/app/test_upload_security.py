@@ -203,3 +203,88 @@ def test_reupload_existing_switches_active_scene_when_scene_already_exists(
     assert backend.active_scene_id() == original_scene_id
     assert backend.get_state()["structure"] == structure
     assert backend.version > initial_version
+
+
+def test_async_upload_registers_bundle_before_scene_and_worker(backend, monkeypatch):
+    backend._upload_sync_mode = False
+    completed = []
+
+    def finish_immediately(job_id, name, path, stem, filename, digest):
+        pending = backend.get_bundle(name)
+        assert pending._upload_pending is True
+        assert backend.get_state()["structure"] == name
+        assert any(scene["structure_name"] == name for scene in backend.scene_options())
+        # Simulate a worker finishing before add_uploaded_file_bytes returns.
+        from mat_viewer.loader import build_empty_bundle
+        loaded = build_empty_bundle(name=name, title=stem)
+        loaded.source = "upload"
+        backend.bundles[name] = loaded
+        completed.append(loaded)
+
+    monkeypatch.setattr(backend, "_submit_load_job", finish_immediately)
+    response = backend.add_uploaded_file_bytes(_VALID_CIF, "perfect_slab.cif")
+    assert response._upload_pending is True
+    assert backend.get_bundle(response.name) is completed[0]
+    assert backend.upload_manifest["uploads"]
+
+
+def test_async_upload_requests_full_render_after_placeholder_is_replaced(backend, monkeypatch):
+    import threading
+    import uuid
+
+    import mat_viewer.app.backend_io as backend_io
+    from mat_viewer.loader import build_empty_bundle
+
+    build_started = threading.Event()
+    release_build = threading.Event()
+    figure_ready = threading.Event()
+    figures = []
+    backend._upload_sync_mode = False
+
+    def fake_build(*, name, title, **_kwargs):
+        bundle = build_empty_bundle(name=name, title=title)
+        bundle.source = "upload"
+        bundle.scene["draw_atoms"] = [{
+            "label": "C1",
+            "elem": "C",
+            "cart": [0.0, 0.0, 0.0],
+            "atom_radius": 0.18,
+            "color": "#555555",
+            "color_light": "#888888",
+            "is_minor": False,
+            "is_disordered": False,
+            "occ": 1.0,
+            "uiso": 0.04,
+            "U": None,
+        }]
+        bundle.scene["bonds"] = []
+        build_started.set()
+        assert release_build.wait(5), "test build release was not signalled"
+        return bundle
+
+    original_broadcast = backend.broadcast_figure
+
+    def broadcast_figure(**kwargs):
+        payload = original_broadcast(**kwargs)
+        if payload.get("type") == "figure":
+            figures.append(payload["figure"])
+            figure_ready.set()
+        return payload
+
+    monkeypatch.setattr(backend_io, "build_loaded_crystal", fake_build)
+    monkeypatch.setattr(backend, "broadcast_figure", broadcast_figure)
+
+    payload = _VALID_CIF + f"\n# async render regression {uuid.uuid4().hex}\n".encode()
+    response = backend.add_uploaded_file_bytes(payload, "reopen_scene.cif")
+    assert response._upload_pending is True
+    assert build_started.wait(5), "upload worker did not start"
+
+    # Build the placeholder figure before allowing the real bundle to land.
+    # Without cache invalidation the later worker render reuses this empty
+    # figure and reopening the scene still shows axes with no atoms.
+    backend.figure_for_state(backend.get_state())
+    release_build.set()
+
+    assert figure_ready.wait(5), "upload completion must publish a full render"
+    assert figures
+    assert any(str(trace.get("type")) in {"mesh3d", "scatter3d"} for trace in figures[-1]["data"])
