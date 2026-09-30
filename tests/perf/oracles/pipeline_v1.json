@@ -7,7 +7,7 @@
         "molcrys_kit_revision": "f2188c14e245b87d99dc1d13ab72e37993d972b0"
       },
       "fixture": {
-        "path": "scripts/data/DAP-4.cif",
+        "path": "scripts/data/DAP-4-user-disorder.cif",
         "sha256": "3967afbcdbded81841ea31c89d2cfdf623c8f3264b208c3c8a2f6ae2a0f9ef5d"
       },
       "oracle": {

@@ -109,7 +109,7 @@ def test_revision_check_skips_when_distribution_has_no_source_revision(monkeypat
 
 def test_dap4_pipeline_oracle():
     entry = ENTRIES["dap4-mattervis-051df0b-mck-f2188c1"]
-    fixture = Path(__file__).resolve().parents[2] / "scripts" / "data" / "DAP-4.cif"
+    fixture = Path(__file__).resolve().parents[2] / entry["fixture"]["path"]
 
     assert hashlib.sha256(fixture.read_bytes()).hexdigest() == entry["fixture"]["sha256"]
     _require_expected_mck(entry)
