@@ -17,7 +17,7 @@ from typing import Iterable, Mapping
 CAPABILITIES_SCHEMA = "mattervis.capabilities/v1"
 RESOLUTION_SCHEMA = "mattervis.requirements/v1"
 DIST_NAME = "matter-vis"
-MOLCRYSKIT_MINIMUM = "0.7.0"
+MOLCRYSKIT_MINIMUM = "0.6.2.dev17"
 MOLCRYSKIT_INSTALL = (
     f'python -m pip install "molcrys-kit>={MOLCRYSKIT_MINIMUM}"'
 )

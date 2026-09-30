@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  MOLCRYSKIT_MINIMUM: "0.7.0"
+  MOLCRYSKIT_MINIMUM: "0.6.2.dev17"
 
 jobs:
   fast-tests:
