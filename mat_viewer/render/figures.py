@@ -528,6 +528,20 @@ def build_figure(
         from .property_colorbar import plotly_colorbar_trace
 
         trace_dicts.append(plotly_colorbar_trace(property_payload))
+    # Stable semantic identities let the browser patch labels, atoms, bonds
+    # and named polyhedra without relying on the incidental trace array index.
+    role_ordinals: dict[str, int] = {}
+    for trace in trace_dicts:
+        meta = trace.get("meta") if isinstance(trace.get("meta"), dict) else {}
+        role = str(meta.get("mv_role") or meta.get("kind") or trace.get("type") or "trace")
+        spec_id = meta.get("spec_id")
+        ordinal = role_ordinals.get(role, 0)
+        role_ordinals[role] = ordinal + 1
+        identity = f"mv:{role}:{spec_id or ordinal}"
+        meta = dict(meta)
+        meta["mv_id"] = identity
+        trace["meta"] = meta
+        trace.setdefault("uid", identity)
     fig = go_Figure(data=trace_dicts, _validate=False)
 
     show_title = bool(style.get("show_title", True))

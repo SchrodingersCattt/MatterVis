@@ -48,12 +48,25 @@ def _scene_name(index: int) -> str:
     return "scene" if index == 0 else f"scene{index + 1}"
 
 
+def _tag_trace(trace, primitive):
+    """Attach a stable semantic identity for local browser patches."""
+    semantic_id = str(getattr(primitive, "semantic_id", "trace"))
+    trace.uid = f"mv:{semantic_id}"
+    meta = dict(getattr(trace, "meta", None) or {})
+    metadata = getattr(primitive, "metadata", {}) or {}
+    meta["mv_id"] = trace.uid
+    if metadata.get("kind"):
+        meta["mv_role"] = str(metadata["kind"])
+    trace.meta = meta
+    return trace
+
+
 def _primitive_trace(primitive, *, scene: str):
     go, _ = _plotly()
     if isinstance(primitive, TriangleMeshPrimitive):
         vertices = primitive.vertices
         triangles = primitive.triangles
-        return go.Mesh3d(
+        return _tag_trace(go.Mesh3d(
             x=vertices[:, 0],
             y=vertices[:, 1],
             z=vertices[:, 2],
@@ -67,13 +80,13 @@ def _primitive_trace(primitive, *, scene: str):
             hoverinfo="name",
             showscale=False,
             scene=scene,
-        )
+        ), primitive)
     if isinstance(primitive, LinePrimitive):
         coordinates = [[], [], []]
         for start, end in primitive.segments:
             for axis in range(3):
                 coordinates[axis].extend((start[axis], end[axis], None))
-        return go.Scatter3d(
+        return _tag_trace(go.Scatter3d(
             x=coordinates[0],
             y=coordinates[1],
             z=coordinates[2],
@@ -87,9 +100,9 @@ def _primitive_trace(primitive, *, scene: str):
             hoverinfo="name",
             showlegend=False,
             scene=scene,
-        )
+        ), primitive)
     if isinstance(primitive, TextPrimitive):
-        return go.Scatter3d(
+        return _tag_trace(go.Scatter3d(
             x=[primitive.position[0]],
             y=[primitive.position[1]],
             z=[primitive.position[2]],
@@ -100,7 +113,7 @@ def _primitive_trace(primitive, *, scene: str):
             hoverinfo="skip",
             showlegend=False,
             scene=scene,
-        )
+        ), primitive)
     raise TypeError(f"unsupported RenderPlan primitive: {type(primitive).__name__}")
 
 
@@ -158,6 +171,8 @@ def _viewport_traces(viewport, *, scene: str, property_active: bool):
             "hoverinfo": "name",
             "showscale": False,
             "scene": scene,
+            "uid": f"mv:atom:{kind}:{opacity}:{solid_rgb}",
+            "meta": {"mv_id": f"mv:atom:{kind}:{opacity}:{solid_rgb}", "mv_role": "atom"},
         }
         if kind == "property":
             payload["vertexcolor"] = vertex_colors
