@@ -8,11 +8,7 @@ from typing import Any
 import numpy as np
 
 from ..math.camera import Camera, ProjectionMode, project_points
-from .compositor import (
-    DISPLAY_LEVELS,
-    LABEL_MODES,
-    compose_frame,
-)
+from .compositor import DISPLAY_LEVELS, LABEL_MODES, compose_frame, resolve_display_level, structure_is_framework_like
 from .chemistry_inspector import chemistry_warnings, format_atom_inspector
 from .inspection import (
     inspect_atoms,
@@ -94,7 +90,7 @@ class TerminalViewController:
         show_cell: bool = True,
         label_mode: str = "auto",
         show_minor: bool = False,
-        display_level: str = "atom",
+        display_level: str = "auto",
     ) -> None:
         self.crystal = crystal
         self._width, self._height = self._validate_dimensions(width, height)
@@ -103,7 +99,11 @@ class TerminalViewController:
         self._show_cell = bool(show_cell)
         self._label_mode = self._validate_label_mode(label_mode)
         self._show_minor = bool(show_minor)
-        self._display_level = self._validate_display_level(display_level)
+        self._display_level = resolve_display_level(
+            display_level, atom_count=len(crystal.atoms),
+            molecule_count=sum(map(len, crystal.species_map.values())),
+            framework_like=structure_is_framework_like(crystal, show_minor=show_minor),
+        )
         default_camera = camera is None
         self.camera = replace(
             self._copy_camera(camera or Camera.from_view_name("auto", crystal)),

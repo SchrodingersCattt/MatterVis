@@ -198,6 +198,7 @@ _TUI_PROJECTIONS = ("orthographic", "perspective")
 _TUI_VIEWS = ("auto", "a", "b", "c", "diagonal", "ab", "ac", "bc")
 _TUI_LABELS = ("auto", "element", "label", "molecule", "dot")
 _TUI_DISPLAYS = ("auto", "formula_unit", "unit_cell", "asymmetric_unit")
+_TUI_LEVELS = ("auto", "atom", "molecule")
 
 
 def _filter_crystal(crystal, keep_atom_set):
@@ -326,6 +327,15 @@ def _build_tui_parser(
         help="Display mode (default: auto, canonical unit_cell).",
     )
     p.add_argument(
+        "--level",
+        choices=_TUI_LEVELS,
+        default="auto",
+        help=(
+            "Rendering level: auto chooses a molecule overview for large cells; "
+            "atom or molecule forces one level."
+        ),
+    )
+    p.add_argument(
         "--show-minor",
         action="store_true",
         default=False,
@@ -451,26 +461,20 @@ def _tui_main(args: argparse.Namespace) -> None:
     if not args.interaction:
         # Static output mode
         pts_2d, depth = project_points(cam, crystal.cart_coords)
+        from .tui.cli import render_static_output
 
-        if args.format == "structured":
-            from .tui.serializer import serialize_crystal
-
-            output = serialize_crystal(
-                crystal,
-                cam,
-                pts_2d,
-                show_minor=args.show_minor,
-            )
-        else:
-            from .tui.cli import compose_static_frame
-
-            output = compose_static_frame(
-                args, crystal, cam, pts_2d, depth, label_mode=label_mode
-            )
+        output = render_static_output(
+            args, crystal, cam, pts_2d, depth, label_mode=label_mode
+        )
         print(output)
     else:
         # Interactive TUI mode
         from .tui.app import CrystalTUI
+        from .tui.compositor import resolve_display_level_for_crystal
+
+        initial_level = resolve_display_level_for_crystal(
+            args.level, crystal, show_minor=args.show_minor
+        )
 
         app = CrystalTUI(
             crystal=crystal,
@@ -481,13 +485,7 @@ def _tui_main(args: argparse.Namespace) -> None:
             show_cell=not args.no_cell,
             label_mode=label_mode,
             show_minor=args.show_minor,
-            initial_level=(
-                "molecule"
-                if args.display == "auto"
-                and crystal.species_map
-                and crystal.n_atoms > 64
-                else "atom"
-            ),
+            initial_level=initial_level,
         )
         app.run()
 

@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 from ..math.camera import Camera
 from ..extensions import ExtensionContext, _ExtensionHost
 from .compositor import (
+    AUTO_DISPLAY_LEVEL,
     LABEL_MODES,
     DISPLAY_LEVELS,
 )
@@ -163,7 +164,7 @@ class CrystalTUI(App):
         label_mode: str = "auto",
         show_minor: bool = False,
         compact: bool = False,
-        initial_level: str = "atom",
+        initial_level: str = AUTO_DISPLAY_LEVEL,
         extensions=(),
     ):
         extension_host = _ExtensionHost(extensions)
@@ -181,7 +182,11 @@ class CrystalTUI(App):
                 show_cell=show_cell,
                 label_mode=label_mode if not compact else "dot",
                 show_minor=show_minor,
-                display_level=initial_level if initial_level in DISPLAY_LEVELS else "atom",
+                display_level=(
+                    initial_level
+                    if initial_level in (*DISPLAY_LEVELS, AUTO_DISPLAY_LEVEL)
+                    else "atom"
+                ),
             )
         except BaseException:
             extension_host.close()
