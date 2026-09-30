@@ -203,3 +203,57 @@ def test_reupload_existing_switches_active_scene_when_scene_already_exists(
     assert backend.active_scene_id() == original_scene_id
     assert backend.get_state()["structure"] == structure
     assert backend.version > initial_version
+
+
+def test_async_upload_registers_bundle_before_scene_and_worker(backend, monkeypatch):
+    backend._upload_sync_mode = False
+    completed = []
+
+    def finish_immediately(job_id, name, path, stem, filename, digest):
+        pending = backend.get_bundle(name)
+        assert pending._upload_pending is True
+        assert backend.get_state()["structure"] == name
+        assert any(scene["structure_name"] == name for scene in backend.scene_options())
+        # Simulate a worker finishing before add_uploaded_file_bytes returns.
+        from mat_viewer.loader import build_empty_bundle
+        loaded = build_empty_bundle(name=name, title=stem)
+        loaded.source = "upload"
+        backend.bundles[name] = loaded
+        completed.append(loaded)
+
+    monkeypatch.setattr(backend, "_submit_load_job", finish_immediately)
+    response = backend.add_uploaded_file_bytes(_VALID_CIF, "perfect_slab.cif")
+    assert response._upload_pending is True
+    assert backend.get_bundle(response.name) is completed[0]
+    assert backend.upload_manifest["uploads"]
+
+
+def test_async_upload_requests_full_render_after_placeholder_is_replaced(backend, monkeypatch):
+    import threading
+    import uuid
+
+    import mat_viewer.app.backend_io as backend_io
+    from mat_viewer.loader import build_empty_bundle
+
+    ready = threading.Event()
+    render_states = []
+    backend._upload_sync_mode = False
+
+    def fake_build(*, name, title, **_kwargs):
+        bundle = build_empty_bundle(name=name, title=title)
+        bundle.source = "upload"
+        return bundle
+
+    def request_figure_build(state):
+        render_states.append(state)
+        ready.set()
+        return True
+
+    monkeypatch.setattr(backend_io, "build_loaded_crystal", fake_build)
+    monkeypatch.setattr(backend._render_worker, "request_figure_build", request_figure_build)
+
+    payload = _VALID_CIF + f"\n# async render regression {uuid.uuid4().hex}\n".encode()
+    response = backend.add_uploaded_file_bytes(payload, "reopen_scene.cif")
+    assert response._upload_pending is True
+    assert ready.wait(5), "upload completion must request a full render"
+    assert render_states[-1]["structure"] == "reopen_scene"

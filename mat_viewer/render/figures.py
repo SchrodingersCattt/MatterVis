@@ -31,6 +31,7 @@ from .viewport import (
     flat_visual_pixel_scale,
     uniform_viewport,
 )
+from .trace_ids import plotly_trace_uid
 
 
 def _element_legend_annotations(scene: dict, style: dict) -> list[dict]:
@@ -541,7 +542,10 @@ def build_figure(
         meta = dict(meta)
         meta["mv_id"] = identity
         trace["meta"] = meta
-        trace.setdefault("uid", identity)
+        # Plotly interpolates ``uid`` into a CSS selector during ``react``;
+        # keep the readable semantic ID in metadata but sanitize the actual
+        # UID so a colon in ``mv:bond:0`` cannot abort a scene switch.
+        trace["uid"] = plotly_trace_uid(trace.get("uid") or identity)
     fig = go_Figure(data=trace_dicts, _validate=False)
 
     show_title = bool(style.get("show_title", True))

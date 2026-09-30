@@ -105,12 +105,24 @@ class _IOBackendMixin:
         if sync_mode:
             return self._upload_sync(safe_name, path, stem, filename, digest)
 
+        # Register before creating the scene: default_state looks up its bundle.
+        # Also register before submitting work so a fast worker cannot be
+        # overwritten by the pending placeholder after it finishes.
+        job_id = f"upload_{digest[:12]}"
+        placeholder = build_empty_bundle(name=safe_name, title=stem)
+        placeholder.source = "upload"
+        placeholder.cif_path = path
+        setattr(placeholder, "_upload_existing", False)
+        setattr(placeholder, "_upload_pending", True)
+        setattr(placeholder, "_upload_job_id", job_id)
+
         # Create placeholder scene tab immediately so the UI shows
         # something while the background job runs. The scene_store
         # keeps a pending entry until the bundle is ready.
         with self._lock:
             self._drop_placeholder()
             # Reserve the name so concurrent uploads don't collide.
+            self.bundles[safe_name] = placeholder
             self.structure_names.append(safe_name)
             self.create_scene(structure=safe_name, label=safe_name)
 
@@ -128,19 +140,9 @@ class _IOBackendMixin:
         except OSError:
             pass
 
-        # Submit the heavy work to the background executor.
-        job_id = f"upload_{digest[:12]}"
+        # Submit only after the pending bundle and scene are registered.
         self._submit_load_job(job_id, safe_name, path, stem, filename, digest)
 
-        # Return a lightweight placeholder bundle so the API returns
-        # immediately. The real bundle will replace it once ready.
-        placeholder = build_empty_bundle(name=safe_name)
-        placeholder.source = "upload"
-        placeholder.cif_path = path
-        setattr(placeholder, "_upload_existing", False)
-        setattr(placeholder, "_upload_pending", True)
-        setattr(placeholder, "_upload_job_id", job_id)
-        self.bundles[safe_name] = placeholder
         return placeholder
 
     def _upload_sync(self, safe_name: str, path: str, stem: str, filename: str, digest: str) -> LoadedCrystal:
@@ -192,6 +194,7 @@ class _IOBackendMixin:
                     cif_path=path,
                 ):
                     bundle = build_loaded_crystal(name=safe_name, cif_path=path, title=stem, preset=self.preset, source="upload")
+                render_state = None
                 with perf_log.time_block("upload:register_bundle", kind="event", structure=bundle.name):
                     with self._lock:
                         self.bundles[bundle.name] = bundle
@@ -207,6 +210,13 @@ class _IOBackendMixin:
                     state = self.get_state(self.scene_store.active_id)
                     self.pending_state = copy.deepcopy(state)
                     self._bump_version()
+                    render_state = state if state.get("structure") == bundle.name else None
+                # The placeholder scene may already have produced an empty
+                # figure. Once the CIF is ready, explicitly request a full
+                # render for the active uploaded scene so reopening the tab
+                # cannot leave the browser with axes and no atoms.
+                if render_state is not None:
+                    self._render_worker.request_figure_build(render_state)
                 _prewarm_bundle_async(self, bundle.name)
             except Exception as exc:
                 print(f"[mat_viewer] background upload failed for {safe_name}: {type(exc).__name__}: {exc}", file=sys.stderr)
