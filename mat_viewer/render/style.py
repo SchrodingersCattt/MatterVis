@@ -6,7 +6,12 @@ from .common import *
 def validate_style_schema(style: dict) -> dict:
     material = str(style.get("material", "mesh"))
     render_style = str(style.get("style", "ball_stick"))
-    disorder = str(style.get("disorder", "opacity"))
+    requested_disorder = style.get("disorder")
+    disorder = (
+        str(requested_disorder)
+        if requested_disorder is not None
+        else ("outline_rings" if style.get("minor_wireframe", False) else "opacity")
+    )
     ortep_mode = style.get("ortep_mode")
     ortep_mode_minor = style.get("ortep_mode_minor")
     projection = str(style.get("projection", "perspective"))
@@ -34,7 +39,10 @@ def validate_style_schema(style: dict) -> dict:
     if ortep_mode_minor is not None:
         normalized["ortep_mode_minor"] = str(ortep_mode_minor)
     normalized["fast_rendering"] = bool(normalized.get("fast_rendering", False)) or material == "flat"
-    normalized["minor_wireframe"] = bool(normalized.get("minor_wireframe", False)) or disorder == "outline_rings"
+    # The disorder mode owns this legacy compatibility flag. In particular,
+    # explicit opacity must never retain an old wireframe overlay from a
+    # persisted state or caller style dict.
+    normalized["minor_wireframe"] = disorder == "outline_rings"
     return normalized
 
 
