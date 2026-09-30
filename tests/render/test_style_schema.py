@@ -7,6 +7,8 @@ from mat_viewer.renderer import DISORDER_DISPATCH, MATERIAL_DISPATCH, STYLE_DISP
 
 
 def test_style_schema_round_trips_and_enums_are_public():
+    assert DEFAULT_STYLE["material"] == "mesh"
+    assert DEFAULT_STYLE["disorder"] == "opacity"
     style = deep_merge(DEFAULT_STYLE, {"material": "flat", "style": "wireframe", "disorder": "none"})
     assert json_safe(style)["material"] == "flat"
     assert set(MATERIAL_DISPATCH) == {"flat", "mesh"}

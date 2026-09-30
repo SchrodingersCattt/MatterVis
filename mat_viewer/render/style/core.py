@@ -6,7 +6,7 @@ from ..common import *
 def validate_style_schema(style: dict) -> dict:
     material = str(style.get("material", "mesh"))
     render_style = str(style.get("style", "ball_stick"))
-    disorder = str(style.get("disorder", "outline_rings"))
+    disorder = str(style.get("disorder", "opacity"))
     ortep_mode = style.get("ortep_mode")
     ortep_mode_minor = style.get("ortep_mode_minor")
     projection = str(style.get("projection", "perspective"))

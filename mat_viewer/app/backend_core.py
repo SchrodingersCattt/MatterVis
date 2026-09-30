@@ -141,12 +141,6 @@ class _CoreBackendMixin:
         )
         style.update(preset_style)
         style.update(entry_style)
-        if (
-            scene.get("has_minor")
-            and "minor_wireframe" not in preset_style
-            and "minor_wireframe" not in entry_style
-        ):
-            style["minor_wireframe"] = True
         # Default selected polyhedron centres: every non-halide species in
         # the structure. That generalises the old "B-site default" without
         # baking ABX nomenclature into the UI, and gives the multi-species
@@ -175,7 +169,7 @@ class _CoreBackendMixin:
             "minor_opacity": float(style["minor_opacity"]),
             "material": str(style.get("material", "mesh")),
             "style": str(style.get("style", "ball_stick")),
-            "disorder": str(style.get("disorder", "outline_rings")),
+            "disorder": str(style.get("disorder", "opacity")),
             "ortep_mode": str(style.get("ortep_mode", "ortep_axes")),
             "axis_scale": float(style["axis_scale"]),
             "display_options": _display_options_from_style(style),
@@ -1299,7 +1293,7 @@ class _CoreBackendMixin:
         style["material"] = state.get("material", style.get("material", "mesh"))
         style["style"] = state.get("style", style.get("style", "ball_stick"))
         style["disorder"] = state.get(
-            "disorder", style.get("disorder", "outline_rings")
+            "disorder", style.get("disorder", "opacity")
         )
         style["ortep_mode"] = state.get(
             "ortep_mode", style.get("ortep_mode", "ortep_axes")

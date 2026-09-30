@@ -39,7 +39,7 @@ def register_state_callbacks(app, backend):
             state["minor_opacity"],
             state.get("material", "mesh"),
             state.get("style", "ball_stick"),
-            state.get("disorder", "outline_rings"),
+            state.get("disorder", "opacity"),
             state.get("ortep_mode", "ortep_axes"),
             state["axis_scale"],
             state["topology_site_index"],
@@ -537,7 +537,7 @@ def register_state_callbacks(app, backend):
             "minor_opacity": minor_opacity,
             "material": material or "mesh",
             "style": render_style or "ball_stick",
-            "disorder": disorder or "outline_rings",
+            "disorder": disorder or "opacity",
             "ortep_mode": ortep_mode or "ortep_axes",
             "axis_scale": axis_scale,
             "topology_site_index": None
