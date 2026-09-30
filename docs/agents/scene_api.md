@@ -105,6 +105,17 @@ Parses a CIF and returns a scene dict consumable by
   Cartesian coordinates. The 100 Å dummy cells that CIF exporters
   sometimes write around clusters are ignored.
 
+Both `mat_viewer.scene.build_scene_from_atoms` and `build_scene_from_cif`
+accept `show_hydrogen: bool | None = None`. Explicit `False` hides hydrogen
+atoms and their incident bonds even when the preset enables them; explicit
+`True` shows them. Omission or `None` resolves the structure entry's
+`show_hydrogen` first, then the merged global/structure style. The effective
+boolean is recorded in both `scene["show_hydrogen"]` and
+`scene["style"]["show_hydrogen"]`; the supplied preset is not mutated.
+This is a display filter, not a change to source atoms or connectivity.
+`build_bundle_scene` retains its boolean `show_hydrogen=False` default and
+separate on/off scene-cache entries; it does not adopt omission semantics.
+
 `build_scene_from_atoms(..., include_minor=False)` and
 `build_bundle_scene(..., include_minor=False)` omit occupancy-minor disorder
 alternatives and every bond incident to them. The default is `True`, preserving
@@ -148,6 +159,20 @@ of the render pipeline. The `scene/` namespace is reserved for per-tab
 state and scene-store helpers.
 
 ## Style helpers
+
+### Cartesian scale in Plotly views
+
+The main figure, row-figure, skeleton and camera-patch paths derive manual
+`aspectratio` from their final Cartesian axis-range spans, in every display mode.
+Each ratio component is the corresponding span divided by the largest span, so
+one data unit has the same scale along x, y and z. This includes padding and
+caller-supplied viewports: using automatic `data` aspect with independently padded
+ranges can flatten planar molecular meshes. Atom coordinates, mesh vertices,
+viewport endpoints and explicit cameras are not changed to compensate.
+
+The compass uses the same range/aspect normalization. For comparable output
+panels, also keep pixel dimensions, projection and camera conventions consistent;
+isometric axes alone do not establish a shared scale between separate panels.
 
 ### `mat_viewer.scene.apply_element_colors(scene, element_colors, element_colors_light)`
 

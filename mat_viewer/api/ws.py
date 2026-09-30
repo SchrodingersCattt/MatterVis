@@ -25,7 +25,9 @@ def register_ws_routes(server, backend) -> None:
                 for payload in backend.figure_broadcasts_since(last_figure_seq):
                     socket.send(json.dumps(payload, ensure_ascii=False))
                     last_figure_seq = max(last_figure_seq, int(payload.get("figure_seq", 0) or 0))
-                last_figure_seq = max(last_figure_seq, backend.latest_figure_seq())
+                # Only delivered events advance the cursor. A completion can
+                # arrive after the history read; sampling the latest sequence
+                # here would acknowledge that unseen frame and lose it forever.
             # Use a shorter poll interval when there are pending figure
             # broadcasts to reduce latency for cache-hit tab switches.
             has_pending = bool(backend.figure_broadcasts_since(last_figure_seq)) if include_figure else False

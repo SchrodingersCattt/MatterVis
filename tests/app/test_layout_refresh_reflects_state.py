@@ -64,14 +64,12 @@ def test_graph_fills_center_panel(app_and_backend):
 
     root = find_component(layout, "viewer-root")
     center = find_component(layout, "center-panel")
-    loading = center.children[0]
     graph = find_component(layout, "crystal-graph")
 
     assert root.style["overflow"] == "hidden"
     assert center.style["height"] == "100vh"
     assert center.style["overflow"] == "hidden"
     assert center.style["minHeight"] == 0
-    assert loading.style == {"height": "100%", "width": "100%"}
-    assert loading.parent_style == {"height": "100%", "width": "100%"}
+    assert center.children[0] is graph
     assert graph.style == {"height": "100%", "width": "100%"}
     assert graph.config.get("responsive") is True

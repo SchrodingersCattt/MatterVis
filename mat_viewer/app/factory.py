@@ -17,6 +17,9 @@ from .callbacks_state import register_state_callbacks
 from .callbacks_view import register_view_callbacks
 from .backend import ViewerBackend
 from .layout_left_panel import build_left_panel
+from .layout_workbench import assemble_workbench
+from .rightclick import _closed_rightclick_items
+from ..extensions import ExtensionContext, _ExtensionHost
 
 
 def create_app(
@@ -30,8 +33,67 @@ def create_app(
     frame: int = 0,
     property_data: str | None = None,
     atom_property_color: Any = None,
+    *,
+    extensions=(),
+) -> Dash:
+    """Create the native viewer with optional startup-only extension panels.
+
+    Call ``app.close_extensions()`` on host shutdown (also registered at exit).
+    The existing backend retains its separate ``close()`` lifecycle.
+    """
+    import atexit
+
+    host = _ExtensionHost(extensions)
+    try:
+        app = _create_app(
+            preset_path, names, root_dir, cif_paths, input_path, input_format,
+            type_map, frame, property_data, atom_property_color,
+            extension_host=host,
+        )
+    except BaseException:
+        host.close()
+        if host.context is not None:
+            host.context.viewer.close()
+        raise
+
+    def close_extensions():
+        host.close()
+        atexit.unregister(close_extensions)
+
+    app.close_extensions = close_extensions
+    if host.extensions:
+        atexit.register(close_extensions)
+    return app
+
+
+def _create_app(
+    preset_path: str = DEFAULT_PRESET_PATH,
+    names=None,
+    root_dir: Optional[str] = None,
+    cif_paths: Optional[Iterable[str]] = None,
+    input_path: str | None = None,
+    input_format: str | None = None,
+    type_map: Optional[Iterable[str]] = None,
+    frame: int = 0,
+    property_data: str | None = None,
+    atom_property_color: Any = None,
+    *,
+    extension_host,
 ) -> Dash:
     backend = ViewerBackend(preset_path=preset_path, names=names, root_dir=root_dir)
+
+    def extension_snapshot():
+        state = backend.get_state()
+        return {
+            "frontend": "web", "structure_id": state.get("structure"),
+            "source_path": None, "scene_id": state.get("scene_id"),
+            "view_revision": state.get("render_revision"),
+            "selection": state.get("selection"),
+        }
+
+    extension_host.context = ExtensionContext(
+        "web", backend, snapshot_reader=extension_snapshot
+    )
     for cif_path in cif_paths or []:
         bundle = build_loaded_crystal(
             name=os.path.splitext(os.path.basename(cif_path))[0],
@@ -89,8 +151,16 @@ def create_app(
     app = Dash(
         __name__,
         assets_folder=os.path.join(WORKSPACE_DIR, "frontend", "assets"),
+        # Background polls are not page navigations or user-visible loading.
+        update_title=None,
     )
     app.crystal_backend = backend
+    app.extension_context = extension_host.context
+    extension_panels = []
+    for extension in extension_host.extensions:
+        panel = extension.build_web_panel(extension_host.context)
+        if panel is not None:
+            extension_panels.append(panel)
 
     # gzip + brotli the JSON figure responses. ``update_view`` ships
     # ~1 MB of base64 mesh data per click and most of that string
@@ -164,6 +234,8 @@ def create_app(
                             first_state.get("scene_id"), first_state.get("camera")
                         ),
                     ),
+                    dcc.Store(id="view-update-store", data=None),
+                    html.Div(id="view-update-ack", style={"display": "none"}),
                     dcc.Store(id="fast-ui-event-store", data=None),
                     html.Div(
                         id="fast-view-metadata", children="", style={"display": "none"}
@@ -188,7 +260,7 @@ def create_app(
                         n_intervals=0,
                         disabled=True,
                     ),
-                    dcc.Interval(id="agent-state-poll", interval=30000, n_intervals=0),
+                    dcc.Interval(id="agent-state-poll", interval=500, n_intervals=0),
                     html.Div(id="state-sync-sentinel", style={"display": "none"}),
                     dcc.Store(id="rightclick-target", data=None),
                     dcc.Input(
@@ -200,7 +272,7 @@ def create_app(
                     html.Div(
                         id="rightclick-menu",
                         className="rightclick-menu rightclick-menu--hidden",
-                        children=[],
+                        children=_closed_rightclick_items(),
                         style={"top": "0px", "left": "0px"},
                     ),
                     html.Div(
@@ -228,7 +300,7 @@ def create_app(
         property_catalog = backend.atom_properties(first_state)
         property_spec = first_state.get("atom_property_color") or {}
         property_range = property_spec.get("value_range")
-        return html.Div(
+        return assemble_workbench(html.Div(
             [
                 dcc.Store(id="agent-state-store", data=first_state),
                 dcc.Store(
@@ -237,6 +309,8 @@ def create_app(
                         first_state.get("scene_id"), first_state.get("camera")
                     ),
                 ),
+                dcc.Store(id="view-update-store", data=None),
+                html.Div(id="view-update-ack", style={"display": "none"}),
                 dcc.Store(id="fast-ui-event-store", data=None),
                 html.Div(
                     id="fast-view-metadata",
@@ -272,7 +346,7 @@ def create_app(
                 # 30 s fallback poll — the WS fast lane in mattervis.js
                 # pushes state changes immediately, so this interval only
                 # serves as a safety net for missed pushes or reconnects.
-                dcc.Interval(id="agent-state-poll", interval=30000, n_intervals=0),
+                dcc.Interval(id="agent-state-poll", interval=500, n_intervals=0),
                 html.Div(id="state-sync-sentinel", style={"display": "none"}),
                 # Phase 4: right-click + keyboard shortcut wiring -----------
                 # The JS in ``assets/right_click_menu.js`` writes the
@@ -293,7 +367,7 @@ def create_app(
                 html.Div(
                     id="rightclick-menu",
                     className="rightclick-menu rightclick-menu--hidden",
-                    children=[],
+                    children=_closed_rightclick_items(),
                     style={"top": "0px", "left": "0px"},
                 ),
                 html.Div(
@@ -378,28 +452,14 @@ def create_app(
                 html.Div(id="left-splitter", className="panel-splitter"),
                 html.Div(
                     [
-                        dcc.Loading(
-                            dcc.Graph(
-                                id="crystal-graph",
-                                figure=first_figure,
-                                style={"height": "100%", "width": "100%"},
-                                config={"responsive": True, "doubleClick": False},
-                            ),
-                            type="circle",
-                            color="#7C5CBF",
-                            # Avoid a spinner flash on every short callback
-                            # (capture_state is ~10 ms; a spinner that
-                            # appears for 50 ms reads as a stutter, not
-                            # progress). The 300 ms threshold is short
-                            # enough that on slow updates (cold figure
-                            # rebuild ~1.5 s, dense topology ~600 ms)
-                            # the user still gets feedback well before
-                            # they would start wondering if the click
-                            # registered.
-                            delay_show=300,
-                            delay_hide=0,
+                        # Keep the last valid frame visible while the worker
+                        # builds its replacement. A Loading wrapper also reacts
+                        # to HTTP polling, hiding the viewer without new work.
+                        dcc.Graph(
+                            id="crystal-graph",
+                            figure=first_figure,
                             style={"height": "100%", "width": "100%"},
-                            parent_style={"height": "100%", "width": "100%"},
+                            config={"responsive": True, "doubleClick": False},
                         )
                     ],
                     id="center-panel",
@@ -411,40 +471,8 @@ def create_app(
                         "overflow": "hidden",
                     },
                 ),
-                html.Div(id="right-splitter", className="panel-splitter"),
                 html.Div(
                     [
-                        html.Div(
-                            [
-                                html.Button(
-                                    "Analysis",
-                                    id="analysis-panel-toggle",
-                                    className="analysis-panel-toggle",
-                                    n_clicks=0,
-                                    title="Show or hide analysis panel",
-                                ),
-                                html.Button(
-                                    "Operation",
-                                    id="operation-panel-toggle",
-                                    className="analysis-panel-toggle operation-panel-toggle",
-                                    n_clicks=0,
-                                    title="Show operation panel",
-                                ),
-                                html.Div(
-                                    [
-                                        html.Div(
-                                            "Analysis", className="analysis-panel-title"
-                                        ),
-                                        html.Div(
-                                            "Topology, score summaries, and future analysis modules.",
-                                            className="analysis-panel-subtitle",
-                                        ),
-                                    ],
-                                    className="analysis-panel-heading",
-                                ),
-                            ],
-                            className="analysis-panel-header",
-                        ),
                         html.Div(
                             [
                                 html.Div(
@@ -532,33 +560,41 @@ def create_app(
                                                 ),
                                                 html.Div(
                                                     [
-                                                        html.Button(
-                                                            "+ Add",
-                                                            id="polyhedra-add-btn",
-                                                            n_clicks=0,
-                                                            style={
-                                                                "fontSize": "12px",
-                                                                "padding": "2px 8px",
-                                                                "verticalAlign": "middle",
-                                                                "cursor": "pointer",
-                                                            },
-                                                            title="Add a named polyhedron row (centre + explicit ligand restriction + colour).",
+                                                        html.Div(
+                                                            [
+                                                                html.Button(
+                                                                    "+ Add",
+                                                                    id="polyhedra-add-btn",
+                                                                    n_clicks=0,
+                                                                    style={
+                                                                        "fontSize": "12px",
+                                                                        "padding": "2px 8px",
+                                                                        "verticalAlign": "middle",
+                                                                        "cursor": "pointer",
+                                                                    },
+                                                                    title="Add a named polyhedron row (centre + explicit ligand restriction + colour).",
+                                                                ),
+                                                            ],
+                                                            style={"marginTop": "8px"},
+                                                        ),
+                                                        html.Div(
+                                                            id="polyhedra-rows-container",
+                                                            children=_polyhedra_table_rows(
+                                                                first_state.get(
+                                                                    "polyhedron_specs"
+                                                                )
+                                                                or [],
+                                                                backend.species_options(
+                                                                    first_state["structure"]
+                                                                ),
+                                                            ),
+                                                            style={"marginTop": "6px"},
                                                         ),
                                                     ],
-                                                    style={"marginTop": "8px"},
-                                                ),
-                                                html.Div(
-                                                    id="polyhedra-rows-container",
-                                                    children=_polyhedra_table_rows(
-                                                        first_state.get(
-                                                            "polyhedron_specs"
-                                                        )
-                                                        or [],
-                                                        backend.species_options(
-                                                            first_state["structure"]
-                                                        ),
+                                                    id="polyhedra-controls",
+                                                    style=_polyhedra_controls_style(
+                                                        first_state.get("topology_enabled", False)
                                                     ),
-                                                    style={"marginTop": "6px"},
                                                 ),
                                             ],
                                             className="analysis-section",
@@ -746,7 +782,9 @@ def create_app(
                                         ),
                                     ],
                                     id="analysis-panel-content",
-                                    className="analysis-tab-content",
+                                    className="analysis-tab-content analysis-tab-content--hidden",
+                                    role="tabpanel",
+                                    **{"aria-labelledby": "analysis-panel-toggle"},
                                 ),
                                 html.Div(
                                     [
@@ -874,31 +912,24 @@ def create_app(
                                     ],
                                     id="operation-panel-content",
                                     className="analysis-tab-content analysis-tab-content--hidden",
+                                    role="tabpanel",
+                                    **{"aria-labelledby": "operation-panel-toggle"},
                                 ),
                             ],
                             className="analysis-panel-body",
                         ),
                     ],
                     id="right-panel",
-                    className="analysis-panel analysis-panel--collapsed",
-                    style={
-                        "width": "320px",
-                        "minWidth": "260px",
-                        "maxWidth": "640px",
-                        "flex": "0 0 auto",
-                        "padding": "16px",
-                        "borderLeft": "1px solid #DDDDDD",
-                        "backgroundColor": "#FAFAFA",
-                        "height": "100vh",
-                        "overflowY": "auto",
-                    },
+                    className="analysis-panel",
                 ),
-                # Floating "Server log" panel (bottom-right). Polls
-                # ``/api/v1/perf`` every second to show the user which
-                # callbacks fired and how long each one took. Collapsed by
-                # default to keep the UI clean; click the header to
-                # expand. Lives outside the right-panel so the analysis
-                # column can be hidden without losing the perf signal.
+                *([html.Div(
+                    extension_panels,
+                    id="mv-extension-panels",
+                    style={"flex": "0 0 320px", "height": "100vh",
+                           "overflowY": "auto", "borderLeft": "1px solid #DDDDDD"},
+                )] if extension_panels else []),
+                # The workbench mounts this overlay inside the native viewer,
+                # never over an optional extension's inputs.
                 html.Div(
                     [
                         html.Div(
@@ -942,7 +973,7 @@ def create_app(
                 "overflow": "hidden",
                 "backgroundColor": "#FFFFFF",
             },
-        )
+        ))
 
     app.layout = _serve_layout
 
@@ -953,6 +984,8 @@ def create_app(
     register_disorder_callbacks(app, backend)
     register_view_callbacks(app, backend)
     register_api(app, backend)
+    for extension in extension_host.extensions:
+        extension.register_web(app, extension_host.context)
     if str(os.environ.get("MATTERVIS_PREWARM", "1")).lower() not in {
         "0",
         "false",

@@ -360,7 +360,7 @@ class _AnalysisBackendMixin:
                                 "triangles": triangles,
                                 "centroid": centroid
                             })
-                except Exception as wulff_exc:
+                except Exception:
                     # WulffShape might fail if facets don't enclose a 3D volume
                     pass
 

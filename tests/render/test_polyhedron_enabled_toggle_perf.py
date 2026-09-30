@@ -74,8 +74,7 @@ def test_figure_state_cache_key_is_invariant_to_spec_enabled_flag(tmp_path):
     key_off = backend._figure_state_cache_key(state_one_off)
     assert key_both == key_off, (
         "Toggling polyhedron_specs[i].enabled must NOT change the "
-        "figure cache key -- otherwise every row checkbox click pays "
-        "the full build_figure cost."
+        "figure cache key because geometry is reused."
     )
 
 
@@ -407,9 +406,8 @@ def test_figure_for_state_cache_hits_and_patches_visibility_on_enabled_toggle(
     cache_size_after_second = len(backend._figure_cache)
 
     assert cache_size_after_second == cache_size_after_first, (
-        "Toggling polyhedron_specs[i].enabled must NOT add a new "
-        "_figure_cache entry. The cache key strips enabled and the "
-        "post-cache visibility patch handles the visible delta. "
+        "Toggling polyhedron_specs[i].enabled must reuse the geometry "
+        "cache entry. "
         f"sizes: first={cache_size_after_first} second={cache_size_after_second}"
     )
 

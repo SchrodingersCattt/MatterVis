@@ -13,7 +13,6 @@ Usage::
 from __future__ import annotations
 
 import math
-from typing import Any
 
 import numpy as np
 import matplotlib
@@ -28,7 +27,6 @@ from .core import (
     _atom_color,
     _atom_u,
     _probability_scale,
-    ellipsoid_principal_axes,
 )
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .shared import dcc, html
+from .display_controls import display_option_hint, display_option_items
 from .camera_helpers import _structure_summary
 from .editor_tables import _atom_groups_table_rows, _bond_groups_table_rows
 from .style_helpers import (
@@ -158,28 +159,15 @@ def build_left_panel(
             html.Label("Display"),
             dcc.Checklist(
                 id="display-options",
-                options=[
-                    {"label": "Labels", "value": "labels"},
-                    {"label": "Axes", "value": "axes"},
-                    {"label": "Disorder Only", "value": "minor_only"},
-                    {"label": "Hydrogens", "value": "hydrogens"},
-                    {
-                        "label": "Unit Cell Box (unit-cell scope)",
-                        "value": "unit_cell_box",
-                    },
-                    # Phase 3: legacy "Monochrome atoms" toggle
-                    # has been replaced by the Atom-Groups
-                    # editor below (one-click "Monochrome"
-                    # preset). Backend still honours the
-                    # ``monochrome`` flag for callers / saved
-                    # presets that set it directly.
-                ],
+                options=display_option_items(first_state["display_mode"], first_state["display_options"]),
                 value=[
                     opt
                     for opt in first_state["display_options"]
                     if opt != "monochrome"
                 ],
             ),
+            html.Div(display_option_hint(first_state["display_mode"]), id="display-options-hint",
+                     style={"fontSize": "12px", "color": "#526579", "marginTop": "6px"}),
             html.Div(style={"height": "10px"}),
             # ---- Phase 4 (view tools): VESTA-style axis-aligned
             # views + perspective / orthographic toggle.

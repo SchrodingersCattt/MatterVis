@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from dash import ALL, Input, Output, State, callback_context, no_update
+from dash import ALL, Input, Output, State, callback_context, html, no_update
 
 from .. import perf_log
 from ..topology import DEFAULT_CENTROID_OFFSET_FRAC
@@ -261,7 +261,6 @@ def register_analysis_callbacks(app, backend):
                 }
             }, scene_id=scene_id, broadcast=False)
 
-        from dash import html
         rows = []
         # Header
         rows.append(

@@ -4,6 +4,26 @@ This file holds implementation-level details that were previously in
 AGENTS.md. They are important for developers working on specific
 modules but are too granular for the top-level developer contract.
 
+## Interactive figure scheduling and delivery
+
+`capture_state` publishes state only. `update_view` schedules the ordinary
+worker build or returns a completed frame from the existing broadcast journal;
+it does not synchronously call `figure_for_state`. Tab switches follow the same
+owner instead of directly reconstructing and broadcasting cached dictionaries.
+The existing state poll supplies the no-WebSocket fallback. Server checks cover
+both render and camera revisions, including when work finishes after Reset.
+
+`mattervis.js` gates both full-figure Plotly signatures, serializes their
+promises per graph, and records an identity only after successful completion.
+Camera acquisition reuses `liveSceneCamera` (exposed internally as
+`window.mattervisCurrentCamera`), not `_fullLayout.scene.camera` alone. Queued
+frames are revalidated and read the live camera when they actually execute.
+
+Axes still uses a complete validated worker frame on a cache miss. No browser
+geometry base is assumed: in particular, toggling Axes/Labels after Hydrogens
+must not advance render metadata over an older hydrogen geometry. A metadata-
+only optimization requires a separately verified compatible geometry base.
+
 ## MolCrysKit delegation — detailed rules
 
 The boundary rule ("molcrys_kit owns chemistry, MatterVis owns

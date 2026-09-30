@@ -1,0 +1,92 @@
+/* Native workbench only; extension contents retain their own styling. */
+#viewer-root {
+  color: #253343;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+#center-panel {
+  position: relative;
+  isolation: isolate;
+}
+
+#left-panel {
+  background: #fafbfc;
+  scrollbar-gutter: stable;
+}
+
+#left-panel .workbench-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 0 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #dde3e8;
+  background: #fafbfc;
+}
+
+#left-panel .workbench-tabs button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 10px 4px;
+}
+
+#left-panel button,
+#left-panel input,
+#left-panel textarea,
+#left-panel select {
+  font-family: Arial, Helvetica, sans-serif;
+  /* Native controls have many small inline sizes; target only form text. */
+  font-size: 14px !important;
+  accent-color: #167d8d;
+}
+
+#left-panel input:not([type="checkbox"]):not([type="radio"]):not([type="color"]) {
+  box-sizing: border-box;
+  min-height: 34px;
+  border: 1px solid #cbd3dc;
+  border-radius: 5px;
+  padding: 6px 8px;
+  max-width: 100%;
+}
+
+#left-panel .Select,
+#left-panel .analysis-control {
+  font-size: 14px !important;
+}
+
+#left-panel button:focus-visible,
+#left-panel input:focus-visible,
+#left-panel summary:focus-visible,
+#left-panel [role="button"]:focus-visible {
+  outline: 2px solid #167d8d;
+  outline-offset: 2px;
+}
+
+#left-panel .is-focused:not(.is-open) > .Select-control {
+  border-color: #167d8d;
+  box-shadow: 0 0 0 2px #167d8d22;
+}
+
+#left-panel .rc-slider-track {
+  background-color: #167d8d;
+}
+
+#left-panel .rc-slider-handle {
+  border-color: #167d8d;
+}
+
+#left-panel details {
+  margin-block: 12px;
+}
+
+#left-panel summary {
+  cursor: pointer;
+  color: #243b53;
+  padding-block: 6px;
+}
+
+#left-panel code,
+#left-panel pre {
+  font-family: Consolas, monospace;
+}

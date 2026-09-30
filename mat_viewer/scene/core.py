@@ -611,7 +611,7 @@ def build_scene_from_atoms(
     cell,
     M,
     R,
-    show_hydrogen: bool = False,
+    show_hydrogen: bool | None = None,
     preset: Optional[Dict[str, Any]] = None,
     display_mode: str = "formula_unit",
     ops=None,
@@ -631,9 +631,12 @@ def build_scene_from_atoms(
     style = deep_merge(DEFAULT_STYLE, preset.get("style"))
     entry = preset.get("structures", {}).get(name, {})
     style = deep_merge(style, entry.get("style"))
-    show_h = bool(show_hydrogen) or bool(
-        entry.get("show_hydrogen", style.get("show_hydrogen", False))
+    show_h = (
+        bool(entry.get("show_hydrogen", style.get("show_hydrogen", False)))
+        if show_hydrogen is None
+        else bool(show_hydrogen)
     )
+    style["show_hydrogen"] = show_h
 
     input_atoms = [dict(atom) for atom in atoms]
     if molcrys_analysis is None:
@@ -952,7 +955,7 @@ def build_scene_from_cif(
     cif_path: str,
     title: str,
     preset: Optional[Dict[str, Any]] = None,
-    show_hydrogen: bool = False,
+    show_hydrogen: bool | None = None,
     display_mode: str = "formula_unit",
     ops=None,
 ) -> Dict[str, Any]:

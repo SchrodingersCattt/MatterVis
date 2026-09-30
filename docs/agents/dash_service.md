@@ -133,6 +133,20 @@ Notes for callers:
   response cannot overwrite a newer WebSocket figure. Figure
   delivery is asynchronous: a REST or Dash state mutation may return
   before cold topology/polyhedra overlays have been recomputed.
+- `layout.meta.mattervis_render` also includes `camera_revision`, alongside
+  `scene_id`, `render_revision`, and `server_started_at`. Reset/align revisions
+  invalidate in-flight frames even when molecular geometry has not changed.
+  Cache hits refresh both layout and scene `uirevision` through the existing
+  style owner. Clients preserve the live camera only for the same scene, server
+  epoch and `uirevision`; explicit camera revisions use the supplied camera.
+- The built-in Dash view schedules ordinary updates through the render worker
+  and reads its validated frame journal. The existing five-second state poll
+  also delivers completed frames when WebSocket is unavailable (including
+  image-backed flat/ORTEP figures). There is no new endpoint or message type.
+  Both positional Plotly calls and Dash's `react(gd, {data, layout})` use one
+  serialized browser gate, deferred during interaction. The same completed
+  frame arriving through both transports is applied once; rejected renders
+  remain retryable. Receipt of a WS sequence is not proof of successful render.
 - Scene persistence is debounced. A successful mutation updates memory
   immediately and schedules `.local/crystal_view_scenes.json` for a
   background save; explicit preset/export paths still flush before

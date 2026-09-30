@@ -8,7 +8,7 @@ from typing import Any, Mapping
 
 import numpy as np
 
-from .contracts import LinePrimitive, Primitive, RenderSpec, TriangleMeshPrimitive
+from .contracts import LinePrimitive, Primitive, RenderSpec
 from .geometry import (
     color_to_rgba,
     mesh_primitive,

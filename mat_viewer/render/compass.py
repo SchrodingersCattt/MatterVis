@@ -242,6 +242,14 @@ def compass_clientside_context(scene: dict, style: dict) -> dict | None:
     }
 
 
+def compass_description(scene: dict, style: dict) -> dict | None:
+    """Return the independent SVG overlay description for a live view."""
+    payload = compass_clientside_context(scene, style)
+    if payload is None:
+        return None
+    return {**payload, "enabled": bool(style.get("show_axes", False))}
+
+
 def compose_axis_key_layout(scene: dict, style: dict) -> tuple[list[dict], list[dict]]:
     """Produce paper-coord compass layout plus optional ORTEP caption."""
     annotations, shapes = axis_key_overlay(scene, style)
