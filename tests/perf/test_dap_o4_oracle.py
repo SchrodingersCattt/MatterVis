@@ -20,6 +20,11 @@ ORACLES = Path(__file__).with_name("oracles") / "pipeline_v1.json"
 ENTRIES = json.loads(ORACLES.read_text(encoding="utf-8"))["entries"]
 
 
+def _fixture_sha256(path: Path) -> str:
+    """Hash CIF text with platform line endings normalized."""
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+
 def _installed_mck_revision() -> str | None:
     try:
         direct_url = json.loads(importlib.metadata.distribution("molcrys-kit").read_text("direct_url.json") or "null")
@@ -112,7 +117,7 @@ def test_dap4_pipeline_oracle():
     entry = ENTRIES["dap4-mattervis-051df0b-mck-f2188c1"]
     fixture = Path(__file__).resolve().parents[2] / entry["fixture"]["path"]
 
-    assert hashlib.sha256(fixture.read_bytes()).hexdigest() == entry["fixture"]["sha256"]
+    assert _fixture_sha256(fixture) == entry["fixture"]["sha256"]
     _require_expected_mck(entry)
     report = build_pipeline_report(fixture, include_figure=False)
 
@@ -128,7 +133,7 @@ def test_dap_o4_formula_unit_oracle_when_fixture_is_configured():
     path = Path(fixture)
     expected = ENTRIES["dap-o4-external-mck-00fa232"]
 
-    assert hashlib.sha256(path.read_bytes()).hexdigest() == expected["fixture"]["sha256"]
+    assert _fixture_sha256(path) == expected["fixture"]["sha256"]
     _require_expected_mck(expected)
     report = build_pipeline_report(path, include_unit_cell=False, include_figure=False)
 
