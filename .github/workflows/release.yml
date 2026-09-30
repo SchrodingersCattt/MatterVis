@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  MOLCRYSKIT_MINIMUM: "0.6.2.dev17"
+  MOLCRYSKIT_MINIMUM: "0.7.0"
 
 jobs:
   release-checks:

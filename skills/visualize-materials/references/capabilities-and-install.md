@@ -67,11 +67,11 @@ switch backend or representation silently.
 
 ## Development checkout
 
-MatterVis requires MolCrysKit 0.6.2.dev17 or later. Install it before this checkout
+MatterVis requires MolCrysKit 0.7.0 or later. Install it before this checkout
 with:
 
 ```bash
-python -m pip install "molcrys-kit>=0.6.2.dev17"
+python -m pip install "molcrys-kit>=0.7.0"
 ```
 
 Then install this checkout.
