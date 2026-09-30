@@ -198,6 +198,10 @@ class _IOBackendMixin:
                 with perf_log.time_block("upload:register_bundle", kind="event", structure=bundle.name):
                     with self._lock:
                         self.bundles[bundle.name] = bundle
+                        # The placeholder and loaded bundle share the same
+                        # scene/state cache key. Drop the placeholder figure
+                        # before scheduling the replacement render.
+                        self._invalidate_figure_cache()
                     # Patch the pending manifest entry.
                     record = (self.upload_manifest.get("uploads") or {}).get(digest)
                     if isinstance(record, dict):
