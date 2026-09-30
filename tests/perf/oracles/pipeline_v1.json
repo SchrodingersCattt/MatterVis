@@ -3,38 +3,38 @@
   "entries": {
     "dap4-mattervis-051df0b-mck-f2188c1": {
       "producer": {
-        "mattervis_revision": "9cf98e80999e693b2cf89706b4cfd22f4a98cd3d",
+        "mattervis_revision": "051df0bc175281fee331b75b741f19d9b489a60d",
         "molcrys_kit_revision": "f2188c14e245b87d99dc1d13ab72e37993d972b0"
       },
       "fixture": {
-        "path": "scripts/data/DAP-4-user-disorder.cif",
-        "sha256": "0753bfc0530b3bbb352f7f1755b831c965b111542ce13fc86bae5e379d71a4dd"
+        "path": "scripts/data/DAP-4.cif",
+        "sha256": "b126b65d267ae4a6930e203c2124af09c137d466d27613792f83cf519bbc454b"
       },
       "oracle": {
+        "schema": "mattervis.perf.oracle/v1",
+        "overall_digest": "af017df73838844750486ced9e64c60e3b405a9c44f8a60a021be418340f6301",
+        "section_digests": {
+          "analysis": "4aca310f8f4cb8158e346811e206695aa48d42d28dfbcd84874e58398716fcb0",
+          "disorder": "eb21f31cadb3609b05005ec3880f758da1bad4fbe94c44e5cafd035c6d36f0f8",
+          "figure": "8466672d9f1b6d520c74c9368a943b38bef96eb52fd410d97f5c3d2a63a78331",
+          "formula_unit": "b822193b5a1556495a2a39f4c997c575a293dfb082335b272d6c6c7ecb283166",
+          "raw_atoms": "4e50c03399881384aa7bbb960c652d5379798bb491ae3c29c6b0271262729dbe",
+          "scene": "81b44c3c894ed6a2c842c9578e173c4f4350fb6346f69db3e982e62772ce5865"
+        },
         "counts": {
-        "canonical_bonds": 344,
-        "formula_unit_atoms": 46,
+          "canonical_bonds": 312,
+          "formula_unit_atoms": 42,
           "fragment_formulas": {
             "C6N2": 8,
             "ClO4": 54,
             "N": 27
           },
-        "major_atoms": 368,
-        "minor_atoms": 0,
+          "major_atoms": 336,
+          "minor_atoms": 0,
           "molecules": 40,
-        "raw_atoms": 368,
-          "scene_atoms": 361,
-        "scene_bonds": 304
-        },
-        "overall_digest": "33324228502692546b5fe173f64d6831f186cebd558f5f4597e7128684aea63e",
-        "schema": "mattervis.perf.oracle/v1",
-        "section_digests": {
-          "analysis": "5ed6e7b8a958469de96ec2b50605d7fc013ac3fea97c4b2738546545ecfbdc9d",
-          "disorder": "b0793223559900b495cd039970a6d683f685ecc6a8bfc3b347f11e5be247294c",
-          "figure": "8466672d9f1b6d520c74c9368a943b38bef96eb52fd410d97f5c3d2a63a78331",
-          "formula_unit": "826776c0cec1da15cba8fc7b073ed5a9542093535fbb36e27aff5eb8d1af7757",
-          "raw_atoms": "1d3f440677809de4f5faed1e55399c7881fc5a79089ce466cb6cab45da4303bd",
-          "scene": "f981accac0a8ff51891bebe9a082061254edecaf0269365db3e315e9b4c39b60"
+          "raw_atoms": 336,
+          "scene_atoms": 581,
+          "scene_bonds": 536
         }
       }
     },
