@@ -19,8 +19,10 @@ from mat_viewer.tui.compositor import (
     compose_frame,
     resolve_label_mode,
     resolve_molecule_detail,
+    resolve_display_level,
+    structure_is_framework_like,
 )
-from mat_viewer.tui.crystal_ir import AtomIR, CrystalIR
+from mat_viewer.tui.crystal_ir import AtomIR, BondIR, CrystalIR, Lattice
 from mat_viewer.tui.loader_adapter import _site_id, load_for_tui
 from mat_viewer.tui import run_tui
 from mat_viewer.tui.serializer import serialize_crystal
@@ -73,6 +75,60 @@ def _small_crystal() -> CrystalIR:
         ),
     ]
     return CrystalIR(title="small", formula="CO", atoms=atoms)
+
+
+def _framework_crystal() -> CrystalIR:
+    """Dense single-fragment chain used to exercise the network overview."""
+    atoms = []
+    for index in range(96):
+        x = float(index % 16)
+        y = float((index // 16) % 6)
+        z = float(index // 48)
+        element = "Zn" if index % 12 == 0 else "O"
+        atoms.append(
+            AtomIR(
+                element=element,
+                cart=np.array([x, y, z]),
+                frac=np.array([x / 16.0, y / 6.0, z / 2.0]),
+                label=f"{element}{index + 1}",
+                index=index,
+                molecule_index=0,
+            )
+        )
+    bonds = [BondIR(index, index + 1, 1.4) for index in range(95)]
+    return CrystalIR(
+        title="framework",
+        formula="Zn8O88",
+        lattice=Lattice(16, 6, 2, 90, 90, 90, np.diag([16.0, 6.0, 2.0])),
+        atoms=atoms,
+        bonds=bonds,
+        n_molecules=1,
+        species_map={"Zn8O88_1": [0]},
+    )
+
+
+def test_auto_large_single_fragment_uses_network_overview() -> None:
+    crystal = _framework_crystal()
+    assert structure_is_framework_like(crystal) is True
+    assert resolve_display_level(
+        "auto", atom_count=crystal.n_atoms, molecule_count=1, framework_like=True
+    ) == "molecule"
+
+    camera = Camera.from_view_name("diagonal", crystal)
+    points, depth = project_points(camera, crystal.cart_coords)
+    frame = compose_frame(
+        crystal,
+        camera,
+        points,
+        depth,
+        width=48,
+        height=14,
+        mono=True,
+        show_cell=False,
+        display_level="auto",
+        selected_display_index=0,
+    )
+    assert "[Zn1]" in frame
 
 
 def test_canonical_cif_display_modes_and_bonds(tui_crystal_factory) -> None:

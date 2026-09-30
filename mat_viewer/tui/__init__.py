@@ -62,6 +62,7 @@ def run_tui(
     height: int | None = None,
     view: str = "auto",
     display_mode: str = "auto",
+    level: str = "auto",
     show_minor: bool = False,
 ) -> None:
     """Launch the terminal material viewer.
@@ -84,6 +85,8 @@ def run_tui(
         Initial view direction: "auto", "a", "b", "c", or "diagonal".
     display_mode : str
         CIF display slice: "unit_cell", "formula_unit", or "asymmetric_unit".
+    level : str
+        Terminal rendering level: "auto", "atom", or "molecule".
     show_minor : bool
         Show minor disorder alternatives. Hidden by default.
     """
@@ -113,7 +116,22 @@ def run_tui(
                 crystal, cam, pts_2d, depth,
                 width=width, height=height, mono=mono,
                 show_minor=show_minor,
+                display_level=level,
             )
+            from .observation import build_static_header
+
+            print(build_static_header(
+                crystal,
+                cam,
+                display_level=level,
+                label_mode="auto",
+                show_bonds=True,
+                show_cell=True,
+                show_minor=show_minor,
+                mono=mono,
+                width=width or 80,
+                height=height or 24,
+            ))
             print(frame)
     else:
         from .app import CrystalTUI
@@ -124,12 +142,6 @@ def run_tui(
             initial_view=view,
             camera=cam,
             show_minor=show_minor,
-            initial_level=(
-                "molecule"
-                if display_mode == "auto"
-                and crystal.species_map
-                and crystal.n_atoms > 64
-                else "atom"
-            ),
+            initial_level=level,
         )
         app.run()

@@ -172,6 +172,14 @@ are not presented as newly generated IUPAC names. `:name` expands the actual
 MCK naming system, fixed standard version, result kind/PIN claim, and rule
 trace.
 
+For dense structures, automatic display keeps the first observation bounded.
+Discrete molecular crystals use one marker per manifested molecule. A large
+connected fragment uses a screen-space bonded skeleton with heavy-atom nodes;
+partial-occupancy and minor-disorder bonds remain dashed. Selecting an atom
+keeps that atom and its first bonded shell exact in the overview, so an agent
+can move from the global network to `inspect_local_geometry` without dumping
+the entire unit cell.
+
 ## Analytical inspection
 
 `inspect_atom(references=None)` and `inspect_molecule(reference=None)` are pure

@@ -51,8 +51,14 @@ mat-vis render structure.extxyz -o interactive.html --backend plotly --orthogona
 
 ## tui — terminal and online agent sessions
 
-`mat-vis tui INPUT` opens the existing Textual terminal viewer.
-`--no-interaction` prints one static frame. `--session-format jsonl` instead
+`mat-vis tui INPUT` opens the existing Textual terminal viewer. Large periodic
+cells start at a bounded overview. Discrete molecular crystals use one marker
+per manifested molecule and label the species. A large connected fragment, as
+in a MOF or polymer, uses a screen-space bonded skeleton so the network remains
+visible instead of collapsing to one centroid. Press `L` in the interactive
+viewer or pass `--level atom` to inspect atom geometry; `--level molecule`
+forces the overview for smaller cells as well. `--level auto` is the default.
+`--no-interaction` prints a titled static frame. `--session-format jsonl` instead
 keeps one stateful controller alive and accepts caller-selected semantic
 actions on stdin:
 
@@ -79,6 +85,12 @@ bytes.
 `unicode` preserves the default Braille renderer. JSONL sessions support
 `observe`, `reset`, `orbit`, `align`, `pan`, `zoom`, `fit`, `set_display`,
 `select`, `focus`, `clear_selection`, `clear_focus`, and `close`.
+
+The `--format structured` form keeps a compact crystal summary and molecule
+overview. For large cells it includes a bounded atom sample and reports how
+many rows were omitted; its ASCII art follows the same molecule or framework
+overview policy. Use JSONL `select`/`focus` actions for exact local inspection
+instead of passing a whole unit-cell atom dump through the terminal.
 
 ---
 

@@ -102,6 +102,9 @@ Install MatterVis, then render a crystal structure with a single command:
 ```bash
 # Primary terminal observation and chemistry inspection
 mat-vis tui structure.cif
+# Large molecular cells start with a readable molecule/framework overview;
+# force an atom-level view when a local geometry needs every site
+mat-vis tui structure.cif --no-interaction --level atom
 
 # Stateful online agent session (one JSON action per stdin line)
 printf '%s\n' '{"action":"observe"}' '{"action":"close"}' | \

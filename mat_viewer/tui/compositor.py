@@ -26,6 +26,10 @@ from .projection import (
 )
 from .renderer import ELEMENT_COLORS, DEFAULT_COLOR, BOND_COLOR, CELL_COLOR
 from .text import ascii7_text, terminal_text
+from .framework import (
+    compose_framework_frame,
+    structure_is_framework_like,
+)
 
 if TYPE_CHECKING:
     from .crystal_ir import CrystalIR
@@ -164,6 +168,47 @@ def _tier_color(element_color: int, tier: int) -> int:
 # ── Display levels ──────────────────────────────────────────────────────────
 
 DISPLAY_LEVELS = ("atom", "molecule")
+AUTO_DISPLAY_LEVEL = "auto"
+# A whole-cell atom view stops being legible once each terminal cell is asked
+# to carry several projected atoms.  The overview keeps the same camera and
+# cell geometry while reducing discrete molecules or dense frameworks to a
+# bounded set of readable markers and bonds.
+AUTO_MOLECULE_ATOM_LIMIT = 64
+
+def resolve_display_level(
+    display_level: str,
+    *,
+    atom_count: int,
+    molecule_count: int,
+    framework_like: bool = False,
+) -> str:
+    """Resolve the default terminal scale without changing the source scope.
+
+    ``auto`` is intentionally a construction-time choice.  The public state
+    only contains the concrete level (``atom`` or ``molecule``), so a session
+    can be replayed deterministically after it has been created.
+    """
+    if display_level == AUTO_DISPLAY_LEVEL:
+        if atom_count > AUTO_MOLECULE_ATOM_LIMIT and (
+            molecule_count > 1 or framework_like
+        ):
+            return "molecule"
+        return "atom"
+    if display_level not in DISPLAY_LEVELS:
+        raise ValueError(f"display_level must be one of {DISPLAY_LEVELS} or 'auto'")
+    return display_level
+
+
+def resolve_display_level_for_crystal(
+    display_level: str, crystal: "CrystalIR", *, show_minor: bool = False
+) -> str:
+    """Resolve a level using the crystal's manifested topology."""
+    return resolve_display_level(
+        display_level,
+        atom_count=len(crystal.atoms),
+        molecule_count=sum(len(indices) for indices in crystal.species_map.values()),
+        framework_like=structure_is_framework_like(crystal, show_minor=show_minor),
+    )
 
 
 # ── Label relaxation ────────────────────────────────────────────────────────
@@ -257,6 +302,12 @@ def compose_frame(
     height = max(height, 1)
     if charset not in {"unicode", "ascii7"}:
         raise ValueError("charset must be 'unicode' or 'ascii7'")
+    display_level = resolve_display_level(
+        display_level,
+        atom_count=len(crystal.atoms),
+        molecule_count=sum(len(indices) for indices in crystal.species_map.values()),
+        framework_like=structure_is_framework_like(crystal, show_minor=show_minor),
+    )
     visible_atom_count = sum(show_minor or not atom.is_minor for atom in crystal.atoms)
     resolved_label_mode = resolve_label_mode(
         label_mode,
@@ -307,6 +358,22 @@ def compose_frame(
 
     # ── Dispatch to display-level-specific rendering ───────────────────
     if display_level == "molecule":
+        if structure_is_framework_like(crystal, show_minor=show_minor):
+            return compose_framework_frame(
+                crystal,
+                camera,
+                pts_2d,
+                depth,
+                viewport,
+                canvas,
+                width,
+                height,
+                mono,
+                show_bonds,
+                show_minor,
+                selected_display_index,
+                charset,
+            )
         return _compose_molecule_frame(
             crystal,
             camera,
