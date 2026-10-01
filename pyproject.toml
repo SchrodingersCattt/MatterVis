@@ -40,7 +40,6 @@ web = [
     "dash",
     "flask-sock",
     "flask-compress",
-    "SQLAlchemy>=2.0",
 ]
 saas = [
     "SQLAlchemy>=2.0",

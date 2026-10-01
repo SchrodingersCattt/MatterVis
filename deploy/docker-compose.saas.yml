@@ -29,7 +29,7 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile.saas
-    command: ["python", "-m", "mat_viewer.saas_worker"]
+    command: ["python", "-m", "mat_viewer.saas.worker"]
     environment:
       MATTERVIS_DATABASE_URL: postgresql+psycopg://mattervis:mattervis@postgres:5432/mattervis
       MATTERVIS_REDIS_URL: redis://redis:6379/0

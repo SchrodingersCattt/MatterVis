@@ -86,9 +86,20 @@ def _create_app(
     extension_host,
 ) -> Dash:
     backend = ViewerBackend(preset_path=preset_path, names=names, root_dir=root_dir)
-    from ..saas import SaaSConfig, SaaSService
-
-    saas_service = SaaSService(config=SaaSConfig.from_env(root_dir or WORKSPACE_DIR))
+    try:
+        from ..saas import SaaSConfig, SaaSService
+    except ImportError as exc:
+        if str(os.environ.get("MATTERVIS_SAAS_REQUIRED", "0")).lower() in {"1", "true", "yes", "on"}:
+            raise SystemExit(
+                "SaaS support requires `python -m pip install 'matter-vis[saas]'`."
+            ) from exc
+        SaaSConfig = None
+        SaaSService = None
+    saas_service = (
+        SaaSService(config=SaaSConfig.from_env(root_dir or WORKSPACE_DIR))
+        if SaaSService is not None and SaaSConfig is not None
+        else None
+    )
 
     def extension_snapshot():
         state = backend.get_state()
@@ -165,7 +176,8 @@ def _create_app(
     # Flask rejects oversized multipart bodies before a route reads them.  The
     # legacy local API keeps its historical behavior when SaaS limits are not
     # configured, while hosted mode gets the explicit 100 MiB default.
-    app.server.config.setdefault("MAX_CONTENT_LENGTH", saas_service.config.max_upload_bytes)
+    if saas_service is not None:
+        app.server.config.setdefault("MAX_CONTENT_LENGTH", saas_service.config.max_upload_bytes)
     app.crystal_backend = backend
     app.extension_context = extension_host.context
     extension_panels = []

@@ -202,6 +202,13 @@ CAPABILITY_REGISTRY: Mapping[str, CapabilitySpec] = {
         imports=("plotly", "dash", "flask_sock", "flask_compress"),
         includes=("plotly",),
     ),
+    "saas": CapabilitySpec(
+        name="saas",
+        description="Tenant-scoped hosted API, persistent jobs, and private deployment adapters",
+        extra="saas",
+        packages=("sqlalchemy", "alembic", "redis", "boto3", "psycopg", "pyjwt", "authlib"),
+        imports=("sqlalchemy", "alembic", "redis", "boto3", "psycopg", "jwt", "authlib"),
+    ),
     "tui": CapabilitySpec(
         name="tui",
         description="Interactive Textual terminal viewer",
@@ -248,6 +255,7 @@ REQUIREMENT_ALIASES: Mapping[str, tuple[str, ...]] = {
     "dash": ("web",),
     "rest": ("web",),
     "websocket": ("web",),
+    "saas": ("saas",),
     "web-screenshot": ("web", "plotly-export"),
     "static-web-export": ("web", "plotly-export"),
     "tui": ("tui",),

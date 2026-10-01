@@ -1,14 +1,11 @@
-"""Redis-backed MatterVis SaaS worker entrypoint.
-
-The web process and this worker use the same repository, object-store and job
-contracts.  Local development defaults to the in-process runner instead.
-"""
+"""Redis-backed MatterVis SaaS worker entrypoint."""
 
 from __future__ import annotations
 
 import os
 
-from .saas import SaaSConfig, SaaSService
+from .config import SaaSConfig
+from .service import SaaSService
 
 
 def main() -> None:
