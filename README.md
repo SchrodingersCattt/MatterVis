@@ -23,6 +23,7 @@ frontends.
 - **Multi-Panel Figures** — `uniform_viewport(scenes)` stamps a shared world-cube on any list of scenes so every `build_figure` call emits at the same physical length per pixel
 - **Composable 3-D geometry**: validated Cartesian meshes, lattice/HKL-aligned through-cylinders, and bounded implicit surfaces use the depth-tested Mesh3d path.
 - **Automation API** — REST + WebSocket endpoints on the same Flask server; drive the viewer from notebooks, agents, or subprocesses
+- **Tenant-scoped SaaS API** — workspace/project resources, OIDC or project API-key authentication, durable parse/render/analysis jobs, signed artifacts, and a Docker Compose private-deployment baseline
 - **Zero Catalog Required** — Ships with a bundled DAP-4.cif so `mat-vis serve` works out of the box
 
 <p align="center">
@@ -134,6 +135,17 @@ mat-vis serve --cif structure.cif
 ```
 
 See [`docs/cli.md`](docs/cli.md) for the full flag reference and common recipes.
+
+### Hosted / private SaaS API
+
+The stable hosted surface is documented in [`docs/agents/saas_api.md`](docs/agents/saas_api.md).
+It uses readable `/api/workspaces/...` resource paths with `X-API-Version: 1`,
+while the existing `/api/v2` endpoints remain available for local automation.
+Local development uses SQLite and a filesystem object store; set the
+`MATTERVIS_DATABASE_URL`, `MATTERVIS_OBJECT_STORE_BACKEND`, and
+`MATTERVIS_REDIS_URL` environment variables for PostgreSQL, S3/MinIO, and the
+Redis worker. A single-tenant baseline is available at
+`deploy/docker-compose.saas.yml`.
 
 ### Python API — programmatic control
 

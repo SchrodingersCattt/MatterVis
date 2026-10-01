@@ -57,9 +57,10 @@ def register_export_routes(v2, backend) -> dict:
     def preset_save():
         payload = request.get_json(force=True, silent=True) or {}
         path = payload.get("path")
-        allow_external = bool(payload.get("allow_external")) or str(request.args.get("allow_external", "")).lower() in {"1", "true", "yes"}
+        if payload.get("allow_external") or str(request.args.get("allow_external", "")).lower() in {"1", "true", "yes"}:
+            return jsonify({"error": "external preset paths are disabled on HTTP APIs"}), 400
         try:
-            return jsonify(backend.save_preset(path=path, allow_external=allow_external))
+            return jsonify(backend.save_preset(path=path))
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
 
@@ -67,9 +68,10 @@ def register_export_routes(v2, backend) -> dict:
     def preset_load():
         payload = request.get_json(force=True, silent=True) or {}
         path = payload.get("path")
-        allow_external = bool(payload.get("allow_external")) or str(request.args.get("allow_external", "")).lower() in {"1", "true", "yes"}
+        if payload.get("allow_external") or str(request.args.get("allow_external", "")).lower() in {"1", "true", "yes"}:
+            return jsonify({"error": "external preset paths are disabled on HTTP APIs"}), 400
         try:
-            return jsonify(backend.load_preset_from_path(path, allow_external=allow_external))
+            return jsonify(backend.load_preset_from_path(path))
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
 

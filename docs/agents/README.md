@@ -36,6 +36,7 @@ flowchart LR
     OVERLAY --> VEC["vector_overlays_api.md<br/>(anchored world vectors)"]
     OVERLAY --> CELL["cell_overlays_api.md<br/>(multiple lattice frames)"]
     LIVE --> CONFIG["config_api.md"]
+    LIVE --> SAAS["saas_api.md<br/>(tenant-scoped hosted API)"]
 ```
 
 The same routing as a quick table:
@@ -43,6 +44,7 @@ The same routing as a quick table:
 | If you want to… | Read |
 |---|---|
 | Drive the running Dash viewer over HTTP/WebSocket | [`dash_service.md`](dash_service.md) |
+| Use the hosted workspace/project API, project API keys, jobs, or artifacts | [`saas_api.md`](saas_api.md) |
 | Attach optional in-process panels to the existing Web or TUI viewer | [`extensions_api.md`](extensions_api.md) |
 | Use the Web sidebar's Display / Analysis / Operations tabs and optional right-side extension panel | [`extensions_api.md#web-tool-placement`](extensions_api.md#web-tool-placement) |
 | Control a local terminal view, select stable atom IDs, or run a stateful Python/JSONL agent session | [`tui_api.md`](tui_api.md) |

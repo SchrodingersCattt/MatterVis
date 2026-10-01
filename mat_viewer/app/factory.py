@@ -57,12 +57,17 @@ def create_app(
         raise
 
     def close_extensions():
+        saas = getattr(app, "saas_service", None)
+        if saas is not None:
+            saas.close()
         host.close()
-        atexit.unregister(close_extensions)
+        try:
+            atexit.unregister(close_extensions)
+        except Exception:
+            pass
 
     app.close_extensions = close_extensions
-    if host.extensions:
-        atexit.register(close_extensions)
+    atexit.register(close_extensions)
     return app
 
 
@@ -81,6 +86,9 @@ def _create_app(
     extension_host,
 ) -> Dash:
     backend = ViewerBackend(preset_path=preset_path, names=names, root_dir=root_dir)
+    from ..saas import SaaSConfig, SaaSService
+
+    saas_service = SaaSService(config=SaaSConfig.from_env(root_dir or WORKSPACE_DIR))
 
     def extension_snapshot():
         state = backend.get_state()
@@ -154,6 +162,10 @@ def _create_app(
         # Background polls are not page navigations or user-visible loading.
         update_title=None,
     )
+    # Flask rejects oversized multipart bodies before a route reads them.  The
+    # legacy local API keeps its historical behavior when SaaS limits are not
+    # configured, while hosted mode gets the explicit 100 MiB default.
+    app.server.config.setdefault("MAX_CONTENT_LENGTH", saas_service.config.max_upload_bytes)
     app.crystal_backend = backend
     app.extension_context = extension_host.context
     extension_panels = []
@@ -228,6 +240,8 @@ def _create_app(
             return html.Div(
                 [
                     dcc.Store(id="agent-state-store", data=first_state),
+                    dcc.Store(id="saas-context-store", data={"workspace_id": None, "project_id": None, "scene_id": first_state.get("scene_id"), "revision": 0}),
+                    dcc.Store(id="saas-auth-state", data={"authenticated": False, "auth_type": None}),
                     dcc.Store(
                         id="camera-state-store",
                         data=_camera_store_payload(
@@ -303,6 +317,8 @@ def _create_app(
         return assemble_workbench(html.Div(
             [
                 dcc.Store(id="agent-state-store", data=first_state),
+                dcc.Store(id="saas-context-store", data={"workspace_id": None, "project_id": None, "scene_id": first_state.get("scene_id"), "revision": 0}),
+                dcc.Store(id="saas-auth-state", data={"authenticated": False, "auth_type": None}),
                 dcc.Store(
                     id="camera-state-store",
                     data=_camera_store_payload(
@@ -983,7 +999,8 @@ def _create_app(
     register_operations_callbacks(app, backend)
     register_disorder_callbacks(app, backend)
     register_view_callbacks(app, backend)
-    register_api(app, backend)
+    app.saas_service = saas_service
+    register_api(app, backend, saas_service=saas_service)
     for extension in extension_host.extensions:
         extension.register_web(app, extension_host.context)
     if str(os.environ.get("MATTERVIS_PREWARM", "1")).lower() not in {
