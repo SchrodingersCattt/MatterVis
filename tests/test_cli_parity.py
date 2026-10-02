@@ -4,6 +4,7 @@ import argparse
 from dataclasses import fields
 
 from mat_viewer.cli import _build_render_parser
+from mat_viewer.render.cli_controls import bond_thresholds_from_args
 from mat_viewer.properties import AtomPropertyColorSpec
 from mat_viewer.render.contracts import CameraSpec, RenderSpec, ViewSpec
 
@@ -122,11 +123,14 @@ def test_cell_overlay_and_bond_scale_cli_values() -> None:
             "figure.png",
             "--bond-scale",
             "0.85",
+            "--bond-threshold",
+            "Zn,N=2.5",
             "--cell-overlays",
             "cells.json",
         ]
     )
     assert args.bond_scale == 0.85
+    assert bond_thresholds_from_args(args) == {("N", "Zn"): 2.5}
     assert str(args.cell_overlays) == "cells.json"
 
 

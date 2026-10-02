@@ -108,7 +108,11 @@ class BondIR:
 
     i: int  # Index of first atom
     j: int  # Index of second atom
+    # ``distance`` remains the rendered/direct length for backwards
+    # compatibility.  Structured bond summaries use the explicit MIC value
+    # when it is available so a boundary bond cannot look like a 14 Å bond.
     distance: float = 0.0
+    minimum_image_distance: float | None = None
     start: np.ndarray | None = None
     end: np.ndarray | None = None
     start_display_copy_id: str = ""
@@ -260,6 +264,14 @@ def filter_crystal(
                     if collapse_source_images
                     else bond.distance
                 ),
+                minimum_image_distance=(
+                    _minimum_image_distance(
+                        new_atoms[new_j].cart - new_atoms[new_i].cart,
+                        crystal.lattice,
+                    )
+                    if collapse_source_images
+                    else bond.minimum_image_distance
+                ),
                 start=bond.start,
                 end=bond.end,
                 start_display_copy_id=new_atoms[new_i].display_copy_id,
@@ -317,3 +329,15 @@ def _formula_from_atoms(atoms: list[AtomIR]) -> str:
         element if count == 1 else f"{element}{count}"
         for element, count in sorted(counts.items(), key=lambda item: order(item[0]))
     )
+
+
+def _minimum_image_distance(vector: np.ndarray, lattice: Lattice | None) -> float:
+    if lattice is None:
+        return float(np.linalg.norm(vector))
+    try:
+        from ..math.pbc import nearest_image_vector_cart
+
+        mic, _shift = nearest_image_vector_cart(vector, lattice.matrix)
+        return float(np.linalg.norm(mic))
+    except (ValueError, np.linalg.LinAlgError):
+        return float(np.linalg.norm(vector))

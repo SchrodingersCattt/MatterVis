@@ -313,6 +313,7 @@ legacy flag.
 | `--atom-scale` | 1.0 | 0.3–1.8 | Atom radius scale factor |
 | `--bond-radius` | 0.15 | 0.05–0.40 | Bond cylinder radius (Å) |
 | `--bond-scale` | loader default | > 0 | MolCrysKit bond-perception coefficient; does not change visual bond radius |
+| `--bond-threshold ELEMENT1,ELEMENT2=CUTOFF` | none | CUTOFF > 0 | Pair-specific MolCrysKit cutoff; repeat for multiple element pairs |
 | `--camera-distance` | 1.8 | > 0 | Scene-fit multiplier (not Å) |
 | `--width` | 900 | — | Image width in pixels |
 | `--height` | 720 | — | Image height in pixels |

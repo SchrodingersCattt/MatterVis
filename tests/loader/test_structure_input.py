@@ -21,7 +21,9 @@ from mat_viewer.render.contracts import RenderSpec, TriangleMeshPrimitive, ViewS
 from mat_viewer.render.cpu import render
 from mat_viewer.render.planning import prepare_render
 from mat_viewer.render.frame_selection import parse_frame_indices
+from mat_viewer.math.camera import Camera, project_points
 from mat_viewer.tui.loader_adapter import load_for_tui
+from mat_viewer.tui.serializer import serialize_crystal
 
 
 @pytest.fixture
@@ -182,6 +184,47 @@ def test_extxyz_identity_occupancy_and_disorder_reach_tui(tmp_path: Path) -> Non
     assert by_id["site:oxygen"].occupancy == pytest.approx(0.5)
     assert by_id["site:oxygen"].disorder == "assembly-a:choice-b"
     assert by_id["site:oxygen"].is_minor is False
+
+
+def test_periodic_extxyz_unit_cell_wrap_keeps_source_atoms(tmp_path: Path) -> None:
+    atoms = Atoms(
+        "CO",
+        positions=[[5.1, 0.0, 0.0], [0.6, 0.0, 0.0]],
+        cell=[5.0, 5.0, 5.0],
+        pbc=True,
+    )
+    path = tmp_path / "outside.extxyz"
+    write(path, atoms, format="extxyz")
+
+    crystal = load_for_tui(path, display_mode="unit_cell")
+
+    assert crystal.n_atoms == 2
+    assert crystal.formula == crystal.canonical_formula == "CO"
+    assert crystal.metadata["display_atom_count"] == 2
+    assert all(atom.image_shift == (0, 0, 0) for atom in crystal.atoms)
+    assert all(0.0 <= float(value) < 1.0 for atom in crystal.atoms for value in atom.frac)
+
+
+def test_periodic_extxyz_structured_bond_summary_uses_mic_distance(tmp_path: Path) -> None:
+    atoms = Atoms(
+        "CO",
+        positions=[[4.9, 0.0, 0.0], [0.6, 0.0, 0.0]],
+        cell=[5.0, 5.0, 5.0],
+        pbc=True,
+    )
+    path = tmp_path / "wrapped.extxyz"
+    write(path, atoms, format="extxyz")
+    crystal = load_for_tui(path, display_mode="unit_cell")
+    assert crystal.bonds
+    assert crystal.bonds[0].distance == pytest.approx(4.3)
+    assert crystal.bonds[0].minimum_image_distance == pytest.approx(0.7)
+
+    camera = Camera.from_view_name("diagonal", crystal)
+    points, _depth = project_points(camera, crystal.cart_coords)
+    text = serialize_crystal(crystal, camera, points, include_art=False)
+
+    assert "C-O: count=1, avg=0.700Å, range=[0.700, 0.700]Å" in text
+    assert "4.300" not in text
 
 
 def test_extxyz_rejects_duplicate_source_site_ids(tmp_path: Path) -> None:

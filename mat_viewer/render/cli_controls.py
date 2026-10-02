@@ -7,7 +7,8 @@ import math
 from pathlib import Path
 
 
-def _add_render_control_arguments(parser: argparse.ArgumentParser) -> None:
+def add_bond_policy_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add the shared MolCrysKit connectivity controls to a parser."""
     parser.add_argument(
         "--bond-scale",
         type=float,
@@ -15,6 +16,31 @@ def _add_render_control_arguments(parser: argparse.ArgumentParser) -> None:
         metavar="SCALE",
         help="Positive MolCrysKit bond-perception scale (default: 1.0).",
     )
+    parser.add_argument(
+        "--bond-threshold",
+        action="append",
+        default=[],
+        dest="bond_threshold_specs",
+        metavar="ELEMENT1,ELEMENT2=CUTOFF",
+        help=(
+            "Override one MolCrysKit element-pair cutoff in Å; repeat the "
+            "option for multiple pairs."
+        ),
+    )
+
+
+def bond_thresholds_from_args(args: argparse.Namespace) -> dict[tuple[str, str], float]:
+    from ..structure.bonds import parse_bond_threshold_spec
+
+    result: dict[tuple[str, str], float] = {}
+    for spec in getattr(args, "bond_threshold_specs", ()) or ():
+        pair, value = parse_bond_threshold_spec(spec)
+        result[pair] = value
+    return result
+
+
+def _add_render_control_arguments(parser: argparse.ArgumentParser) -> None:
+    add_bond_policy_arguments(parser)
     parser.add_argument(
         "--cell-overlays",
         type=Path,
@@ -213,6 +239,10 @@ def _validate_render_options(args: argparse.Namespace) -> None:
             validate_bond_scale(args.bond_scale)
         except ValueError as exc:
             raise ValueError("--bond-scale must be finite and positive") from exc
+    try:
+        bond_thresholds_from_args(args)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"--bond-threshold is invalid: {exc}") from exc
     unsupported: list[str] = []
     if args.monochrome:
         unsupported.append("--monochrome")

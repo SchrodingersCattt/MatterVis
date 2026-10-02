@@ -180,15 +180,19 @@ def serialize_crystal(
     # ── Atom table ──────────────────────────────────────────────────────
     lines.append("atoms:")
     # Build neighbor map from bonds
+    def _bond_stat_distance(bond) -> float:
+        value = bond.minimum_image_distance
+        return float(bond.distance if value is None else value)
+
     neighbors: dict[int, list[tuple[str, float]]] = {}
     for bond in crystal.bonds:
         if bond.i not in visible_indices or bond.j not in visible_indices:
             continue
         neighbors.setdefault(bond.i, []).append(
-            (crystal.atoms[bond.j].element, bond.distance)
+            (crystal.atoms[bond.j].element, _bond_stat_distance(bond))
         )
         neighbors.setdefault(bond.j, []).append(
-            (crystal.atoms[bond.i].element, bond.distance)
+            (crystal.atoms[bond.i].element, _bond_stat_distance(bond))
         )
 
     atom_rows = visible_atoms
@@ -246,7 +250,7 @@ def serialize_crystal(
             e1 = crystal.atoms[bond.i].element
             e2 = crystal.atoms[bond.j].element
             key = tuple(sorted([e1, e2]))
-            bond_groups.setdefault(key, []).append(bond.distance)
+            bond_groups.setdefault(key, []).append(_bond_stat_distance(bond))
 
         for (e1, e2), dists in sorted(bond_groups.items()):
             avg_d = np.mean(dists)

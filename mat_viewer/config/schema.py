@@ -189,6 +189,9 @@ BUILTIN_CUBE: dict[str, Any] = {
 
 BUILTIN_MCK_OVERRIDES: dict[str, Any] = {
     "bond_scale": 1.0,
+    # JSON/TOML uses string keys such as ``Zn,N``; Python callers may use
+    # tuple keys and the loader normalizes both forms.
+    "bond_thresholds": [],
     "gap_threshold": None,
     "enclosure_expand_max": None,
     "default_search_cutoff": None,

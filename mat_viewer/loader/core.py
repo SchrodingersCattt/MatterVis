@@ -1157,6 +1157,7 @@ def build_loaded_crystal(
     source: str = "catalog",
     view_weights: Optional[Dict[str, float]] = None,
     bond_scale: float | None = None,
+    bond_thresholds: dict[tuple[str, str], float] | dict[str, float] | None = None,
 ) -> LoadedCrystal:
     """Parse a CIF and enter the shared canonical structure pipeline."""
     ops = scene_ops()
@@ -1189,4 +1190,5 @@ def build_loaded_crystal(
         source=source,
         view_weights=view_weights,
         bond_scale=bond_scale,
+        bond_thresholds=bond_thresholds,
     )

@@ -144,6 +144,7 @@ def load_structure(
     frame_indices: Iterable[int] | None = None,
     property_data: str | Path | None = None,
     bond_scale: float | None = None,
+    bond_thresholds: Mapping[tuple[str, str], float] | Mapping[str, float] | None = None,
 ) -> Any:
     """Load one canonical structure frame without importing any frontend."""
 
@@ -160,6 +161,7 @@ def load_structure(
         type_map=type_map,
         frame_indices=list(frame_indices) if frame_indices is not None else [frame],
         bond_scale=bond_scale,
+        bond_thresholds=bond_thresholds,
     )
     if property_data is not None:
         from .loader.property_sidecar import load_atom_property_manifest

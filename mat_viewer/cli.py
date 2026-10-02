@@ -42,6 +42,8 @@ from .structure.inspect import (
     is_nonperiodic_structure as _is_nonperiodic_structure,
 )
 from .render.cli_controls import (
+    add_bond_policy_arguments,
+    bond_thresholds_from_args,
     _add_render_control_arguments,
     _animation_time_from_args,
     _frame_annotation_from_args,
@@ -277,6 +279,7 @@ def _build_tui_parser(
     from .tui.cli import add_session_arguments
 
     add_session_arguments(p)
+    add_bond_policy_arguments(p)
     p.add_argument(
         "--format",
         choices=_TUI_FORMATS,
@@ -418,6 +421,8 @@ def _tui_main(args: argparse.Namespace) -> None:
         input_format=args.input_format,
         type_map=args.type_map,
         frame=args.frame,
+        bond_scale=args.bond_scale,
+        bond_thresholds=bond_thresholds_from_args(args),
     )
 
     keep_atom_set = {
@@ -1107,6 +1112,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                     frame_indices=_animation_indices(args),
                     property_data=args.property_data,
                     bond_scale=args.bond_scale,
+                    bond_thresholds=bond_thresholds_from_args(args),
                 )
             else:
                 structure = load_structure(
@@ -1116,6 +1122,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                     frame=args.frame if args.frame is not None else 0,
                     property_data=args.property_data,
                     bond_scale=args.bond_scale,
+                    bond_thresholds=bond_thresholds_from_args(args),
                 )
             display = _display_mode(structure, args)
             include_boundary_replicas = args.include_boundary_replicas
