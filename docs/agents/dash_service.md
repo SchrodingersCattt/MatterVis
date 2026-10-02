@@ -375,14 +375,12 @@ Notes for callers:
   `order` / `active_id`, so scene tabs, cameras, atom groups, bond
   groups, polyhedron specs, and transforms round-trip together. The
   legacy `structures` block is still written for v1-style callers.
-  Paths are jailed under `.local/` by default; pass
-  `allow_external=true` in the body or query string to explicitly write
-  outside that directory.
+  HTTP paths are always jailed under `.local/`; external filesystem paths are
+  disabled on the API surface.
 - `POST /preset/load`
   JSON body: `{"path": "custom_preset.json"}`. `version: 2` presets
   rebuild scene tabs; older presets continue to load via the legacy
-  per-structure style path. The same `.local/` jail and
-  `allow_external=true` escape hatch apply.
+  per-structure style path. The same `.local/` jail applies.
 - `POST /export`
   Triggers the vendored `mat_viewer.static_publication.plot_crystal` exporter
   with the current preset.

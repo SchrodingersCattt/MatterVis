@@ -13,9 +13,10 @@ from .v2_scenes import register_scene_routes
 from .v2_selection import register_selection_routes
 from .v2_state import register_state_routes
 from .ws import handle_ws_message, register_ws_routes
+from .saas import register_saas_routes
 
 
-def register_api(dash_app, backend) -> None:
+def register_api(dash_app, backend, saas_service=None) -> None:
     server = dash_app.server
     register_error_handler(server)
 
@@ -40,6 +41,8 @@ def register_api(dash_app, backend) -> None:
     server.register_blueprint(v1)
 
     register_ws_routes(server, backend)
+    if saas_service is not None:
+        register_saas_routes(server, saas_service)
 
 
-__all__ = ["handle_ws_message", "register_api"]
+__all__ = ["handle_ws_message", "register_api", "register_saas_routes"]
