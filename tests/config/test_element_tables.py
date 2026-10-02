@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from mat_viewer.config import atom_radius, covalent_radius, element_color
+import pytest
+
+from mat_viewer.config import atom_radius, covalent_radius, element_color, reload_config
+from mat_viewer.color_utils import ansi256_from_hex, element_ansi_color
 from mat_viewer.config.colors import (
     ATOM_RADIUS,
     COVALENT_RADIUS,
@@ -87,3 +90,36 @@ def test_charged_element_symbols_normalize_before_lookup():
     assert element_color("  Cu1+", light=True) == element_color("Cu", light=True)
     assert atom_radius("Ni3+") == atom_radius("Ni")
     assert covalent_radius("Mn3+") == covalent_radius("Mn")
+
+
+def test_canonical_palette_is_default_and_cpk_is_explicit():
+    assert element_color("C") == "#5E5E5E"
+    assert element_color("C", theme="cpk") == "#909090"
+    assert element_color("O", theme="cpk") == "#FF0D0D"
+    with pytest.raises(ValueError, match="light variant"):
+        element_color("C", theme="cpk", light=True)
+    with pytest.raises(ValueError, match="theme must be"):
+        element_color("C", theme="unknown")
+
+
+def test_tui_ansi_adapter_is_deterministic_and_uses_canonical_rgb():
+    assert ansi256_from_hex("#5E5E5E") == ansi256_from_hex("#5E5E5E")
+    assert element_ansi_color("C") == ansi256_from_hex("#5E5E5E")
+    assert element_ansi_color("O") == ansi256_from_hex(element_color("O"))
+
+
+def test_renderer_palette_contract_has_no_private_semantic_tables():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    assert "_ELEMENT_COLORS =" not in (root / "mat_viewer" / "render" / "planning.py").read_text(encoding="utf-8")
+    assert "ELEMENT_COLORS: dict" not in (root / "mat_viewer" / "tui" / "renderer.py").read_text(encoding="utf-8")
+
+
+def test_configured_canonical_override_reaches_terminal_adapter():
+    reload_config(overrides={"colors": {"elements": {"O": "#010203"}}})
+    try:
+        assert element_color("O") == "#010203"
+        assert element_ansi_color("O") == ansi256_from_hex("#010203")
+    finally:
+        reload_config("__missing_config__.toml")

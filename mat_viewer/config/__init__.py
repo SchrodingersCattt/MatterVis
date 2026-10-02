@@ -81,10 +81,31 @@ def _normalize_element_symbol(symbol: str) -> str:
     return match.group(1) if match else str(symbol or "")
 
 
-def element_color(symbol: str, *, light: bool = False) -> str:
+def element_color(
+    symbol: str,
+    *,
+    light: bool = False,
+    theme: str = "canonical",
+) -> str:
+    """Resolve an element through the canonical semantic palette.
+
+    ``theme="canonical"`` is the default for every renderer.  ``theme="cpk"``
+    is an explicit compatibility theme for cube/orbital callers that want the
+    historical bright palette; it is never selected implicitly by a backend.
+    """
     symbol = _normalize_element_symbol(symbol)
     with _CONFIG_LOCK:
-        palette = _CURRENT_CONFIG.colors.get("elements_light" if light else "elements", {})
+        normalized_theme = str(theme or "canonical").strip().lower()
+        if normalized_theme in {"canonical", "scene", "default"}:
+            palette = _CURRENT_CONFIG.colors.get(
+                "elements_light" if light else "elements", {}
+            )
+        elif normalized_theme == "cpk":
+            if light:
+                raise ValueError("the cpk theme does not provide a light variant")
+            palette = _CURRENT_CONFIG.cube.get("element_colors", {})
+        else:
+            raise ValueError("theme must be 'canonical' or 'cpk'")
     return str(palette.get(symbol, palette.get("default", "#808080")))
 
 

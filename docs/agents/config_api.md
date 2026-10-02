@@ -10,16 +10,24 @@ remain MolCrysKit-owned; MatterVis only exposes optional
 ## Python
 
 ```python
-from mat_viewer.config import CONFIG, reload_config
+from mat_viewer.config import CONFIG, element_color, reload_config
 
 style = CONFIG.style.as_dict()
 carbon = CONFIG.colors.get("elements", {})["C"]
+carbon_hex = element_color("C")
+legacy_cpk_carbon = element_color("C", theme="cpk")
 
 reload_config()  # re-read ~/.config/mattervis/config.toml
 ```
 
 `CONFIG` is read-only. To change defaults, edit the TOML override file
 or use the REST API below.
+
+`element_color(symbol)` resolves the canonical MatterVis palette used by the
+scene, publication, ORTEP, and terminal renderers. Charged labels such as
+`Fe2+` are normalized before lookup. Pass `theme="cpk"` only when a cube or
+orbital caller explicitly needs the historical CPK palette; the CPK theme has
+no light variant and raises `ValueError` when `light=True`.
 
 ## REST
 
@@ -68,6 +76,13 @@ cutoff = 2.5
 Python callers may use tuple keys such as `{("Zn", "N"): 2.5}`. Explicit
 pair thresholds are scaled by the selected `bond_scale` and are forwarded to
 all canonical loaders, not only cube loading.
+
+`mat_viewer.config.element_color(symbol)` is the canonical semantic resolver.
+All renderers use its default `theme="canonical"` palette. The historical
+bright cube/CPK values remain available only through the explicit
+`element_color(symbol, theme="cpk")` opt-in; a backend must not select that
+theme implicitly. The terminal UI converts the canonical RGB result to an
+ANSI-256 code only at its output boundary.
 
 Unknown keys are ignored so older MatterVis builds can safely read
 newer config files.

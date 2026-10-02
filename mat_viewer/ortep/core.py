@@ -332,9 +332,9 @@ def _atom_color(atom: dict, style: dict) -> str:
     if color:
         return str(color)
     try:
-        from ..config.colors import ELEMENT_COLORS
+        from ..config import element_color
 
-        return str(ELEMENT_COLORS.get(str(atom.get("elem", "")), "#808080"))
+        return str(element_color(str(atom.get("elem", ""))))
     except Exception:
         return "#808080"
 
