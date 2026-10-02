@@ -24,7 +24,7 @@ from .projection import (
     _compute_viewport,
     viewport_from_bounds,
 )
-from ..color_utils import element_ansi_color
+from ..utils.colors import element_ansi_color
 from .renderer import DEFAULT_COLOR, BOND_COLOR, CELL_COLOR
 from .text import ascii7_text, terminal_text
 from .framework import (

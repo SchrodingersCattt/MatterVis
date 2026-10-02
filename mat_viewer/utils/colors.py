@@ -54,7 +54,7 @@ def ansi256_from_hex(value: str) -> int:
 
 def element_ansi_color(symbol: str, *, default: int = 252) -> int:
     """Resolve one element through MatterVis's canonical palette."""
-    from .config import element_color
+    from ..config import element_color
 
     value = element_color(symbol)
     if not value:

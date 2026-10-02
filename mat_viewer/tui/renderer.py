@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from ..color_utils import element_ansi_color
+from ..utils.colors import element_ansi_color
 
 if TYPE_CHECKING:
     from .crystal_ir import CrystalIR

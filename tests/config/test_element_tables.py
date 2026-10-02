@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from mat_viewer.config import atom_radius, covalent_radius, element_color, reload_config
-from mat_viewer.color_utils import ansi256_from_hex, element_ansi_color
+from mat_viewer.utils.colors import ansi256_from_hex, element_ansi_color
 from mat_viewer.config.colors import (
     ATOM_RADIUS,
     COVALENT_RADIUS,
