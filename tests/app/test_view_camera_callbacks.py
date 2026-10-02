@@ -51,6 +51,18 @@ def test_projection_buttons_submit_camera_update_message(tmp_path: Path):
     assert ("fast-view-metadata", "children") in outputs
 
 
+def test_camera_capture_also_notifies_flat_ortep_render_path(tmp_path: Path):
+    app = create_app(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    callbacks = [
+        callback
+        for callback in app.callback_map.values()
+        if ("crystal-graph", "relayoutData") in _inputs(callback)
+        and ("camera-state-store", "data") in _outputs(callback)
+    ]
+    assert len(callbacks) == 1
+    assert ("agent-state-store", "data") in _outputs(callbacks[0])
+
+
 def test_camera_patch_carries_viewport_aspect_contract():
     if not SY_CIF.exists():
         pytest.skip("local SY CIF fixture is not present")

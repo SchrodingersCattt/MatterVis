@@ -536,6 +536,7 @@ def register_view_callbacks(app, backend):
 
     @app.callback(
         Output("camera-state-store", "data", allow_duplicate=True),
+        Output("agent-state-store", "data", allow_duplicate=True),
         Input("crystal-graph", "relayoutData"),
         State("camera-state-store", "data"),
         State("scene-tabs", "value"),
@@ -544,7 +545,7 @@ def register_view_callbacks(app, backend):
     def capture_camera(relayout_data, camera_state, scene_id):
         scene_id = scene_id or backend.active_scene_id()
         if scene_id and scene_id not in backend.scene_store.scenes:
-            return no_update
+            return no_update, no_update
         relayout = relayout_data if isinstance(relayout_data, dict) else {}
         full_camera_payload = bool(
             isinstance(relayout.get("scene.camera"), dict)
@@ -559,9 +560,9 @@ def register_view_callbacks(app, backend):
             current_camera,
         )
         if not camera:
-            return no_update
+            return no_update, no_update
         if isinstance(current_camera, dict) and camera == current_camera:
-            return no_update
+            return no_update, no_update
         scene_key = str(scene_id or "")
         now = time.monotonic()
         last_commit = _last_camera_commit_by_scene.get(scene_key, 0.0)
@@ -570,7 +571,7 @@ def register_view_callbacks(app, backend):
         # sync at ~4 Hz during motion, but always persist full-camera payloads
         # (mouseup/programmatic relayout) immediately.
         if not full_camera_payload and (now - last_commit) < _camera_commit_min_interval_s:
-            return no_update
+            return no_update, no_update
         # ``broadcast=False`` is essential here: the browser is the
         # source of truth for the camera, so we must NOT arm
         # ``pending_state`` -- otherwise the next 5 s ``agent-state-poll``
@@ -583,7 +584,14 @@ def register_view_callbacks(app, backend):
             {"type": "set_camera", "scene_id": scene_id, "payload": {"camera": camera}}
         )
         _last_camera_commit_by_scene[scene_key] = now
-        return _camera_store_payload(scene_id, camera)
+        state = backend.get_state(scene_id)
+        is_flat_ortep = (
+            state.get("material") == "flat" and state.get("style") == "ortep"
+        )
+        return (
+            _camera_store_payload(scene_id, camera),
+            copy.deepcopy(state) if is_flat_ortep else no_update,
+        )
 
     @app.callback(
         Output("fast-view-metadata", "children", allow_duplicate=True),
@@ -715,6 +723,15 @@ def register_view_callbacks(app, backend):
             # Labels, opacity, polyhedron visibility and Axes are delivered
             # by the clientside submitter.  No worker and no full figure
             # response is needed for these changes.
+            if (
+                change_kind == UpdateKind.CAMERA
+                and state.get("material") == "flat"
+                and state.get("style") == "ortep"
+            ):
+                # Flat+ORTEP bakes the camera basis into a PNG.  Queue a
+                # worker rebuild for this one path; ordinary Plotly cameras
+                # continue using the client-side relayout fast path.
+                backend._render_worker.request_figure_build(state)
             return (no_update,) * 4
         topo_key_preview = (
             state.get("scene_id"),

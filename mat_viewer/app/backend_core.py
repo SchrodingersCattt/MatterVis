@@ -396,6 +396,11 @@ class _CoreBackendMixin:
                 if isinstance(spec, dict) else spec
                 for spec in specs
             ]
+        # Flat+ORTEP bakes the camera basis into a Matplotlib image.  The
+        # regular Plotly path can apply camera changes after a cache hit, but
+        # an image-backed figure must rebuild when the camera rotates.
+        if state.get("material") == "flat" and state.get("style") == "ortep":
+            key_state["camera"] = state.get("camera")
         return json.dumps(key_state, sort_keys=True, separators=(",", ":"))
 
     def _figure_state_matches_current(
