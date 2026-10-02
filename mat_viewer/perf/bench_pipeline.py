@@ -13,6 +13,7 @@ import platform
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -37,7 +38,12 @@ SCHEMA = "mattervis.perf.pipeline/v1"
 def _peak_rss_mib() -> float | None:
     """Return peak resident memory when the platform exposes it."""
     if _resource is None:
-        return None
+        try:
+            import psutil
+
+            return float(psutil.Process().memory_info().rss) / 1024.0**2
+        except (ImportError, OSError):
+            return None
     peak = float(_resource.getrusage(_resource.RUSAGE_SELF).ru_maxrss)
     divisor = 1024.0**2 if sys.platform == "darwin" else 1024.0
     return peak / divisor
@@ -100,6 +106,32 @@ def _timed(call: Callable[[], Any], *, repeat: int = 1) -> tuple[dict[str, Any],
     }, result)
 
 
+def _write_plotly_export_in_child(figure: Any, output_path: Path, extension: str) -> None:
+    """Write optional Kaleido formats in a killable child process.
+
+    Kaleido/Chromium can wedge on a host without a compatible browser. Keeping
+    it outside the benchmark process lets the suite record ``unavailable``
+    instead of hanging the whole run.
+    """
+    payload_path = output_path.with_suffix(".figure.json")
+    payload_path.write_text(figure.to_json(), encoding="utf-8")
+    script = (
+        "import sys, plotly.io as pio; "
+        "fig=pio.from_json(open(sys.argv[1], encoding='utf-8').read()); "
+        "fig.write_image(sys.argv[2], format=sys.argv[3])"
+    )
+    try:
+        subprocess.run(
+            [sys.executable, "-c", script, str(payload_path), str(output_path), extension],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=60,
+        )
+    finally:
+        payload_path.unlink(missing_ok=True)
+
+
 def _scene_timings(bundle, display_mode: str, *, repeat: int) -> tuple[dict[str, Any], Any]:
     scene_cache = getattr(bundle, "scene_cache", None)
     if isinstance(scene_cache, dict):
@@ -128,6 +160,7 @@ def build_pipeline_report(
     repeat: int = 1,
     include_unit_cell: bool = True,
     include_figure: bool = True,
+    include_exports: bool = False,
 ) -> dict[str, Any]:
     cif_path = Path(cif_path).resolve()
     content = cif_path.read_bytes()
@@ -182,6 +215,61 @@ def build_pipeline_report(
             "traces": len(figure.data),
         }
 
+    exports: dict[str, Any] | None = None
+    if include_exports and figure is not None:
+        exports = {}
+        with tempfile.TemporaryDirectory(prefix="mattervis-bench-") as temp_dir:
+            temp_root = Path(temp_dir)
+            for extension in ("html", "png", "svg", "pdf"):
+                output_path = temp_root / f"figure.{extension}"
+                started = time.perf_counter()
+                try:
+                    if extension == "html":
+                        figure.write_html(str(output_path), include_plotlyjs="cdn")
+                    else:
+                        _write_plotly_export_in_child(figure, output_path, extension)
+                    exports[extension] = {
+                        "status": "ok",
+                        "duration_ms": (time.perf_counter() - started) * 1000.0,
+                        "bytes": output_path.stat().st_size,
+                    }
+                except Exception as exc:  # pragma: no cover - optional exporters
+                    exports[extension] = {
+                        "status": "unavailable",
+                        "duration_ms": (time.perf_counter() - started) * 1000.0,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+            try:
+                from ..ortep.flat_render import render_ortep_flat
+                import matplotlib.pyplot as plt
+
+                started = time.perf_counter()
+                ortep_figure = render_ortep_flat(
+                    oracle_scene,
+                    {"show_hydrogen": False, "show_labels": False},
+                )
+                ortep_exports: dict[str, Any] = {}
+                for extension in ("png", "svg", "pdf"):
+                    output_path = temp_root / f"ortep.{extension}"
+                    export_started = time.perf_counter()
+                    ortep_figure.savefig(output_path, format=extension, bbox_inches="tight")
+                    ortep_exports[extension] = {
+                        "status": "ok",
+                        "duration_ms": (time.perf_counter() - export_started) * 1000.0,
+                        "bytes": output_path.stat().st_size,
+                    }
+                exports["ortep"] = {
+                    "status": "ok",
+                    "duration_ms": (time.perf_counter() - started) * 1000.0,
+                    "formats": ortep_exports,
+                }
+                plt.close(ortep_figure)
+            except Exception as exc:  # pragma: no cover - ADP/Matplotlib dependent
+                exports["ortep"] = {
+                    "status": "unavailable",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+
     return {
         "schema": SCHEMA,
         "fixture": {
@@ -205,6 +293,13 @@ def build_pipeline_report(
         },
         "scenes": scenes,
         "figure": figure_report,
+        "exports": exports,
+        "stages": {
+            "loader": loader_timing,
+            "scene_formula_unit": formula_timing,
+            **({"scene_unit_cell": scenes["unit_cell"]["timing"]} if "unit_cell" in scenes else {}),
+            **({"figure": figure_report["assembly"]} if figure_report else {}),
+        },
         "peak_rss_mib": _peak_rss_mib(),
         "events": perf_log.recent(limit=1000, since_seq=event_cursor),
         "oracle": build_oracle_signature(bundle, scene=oracle_scene, figure=figure),

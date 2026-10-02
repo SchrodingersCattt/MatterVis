@@ -69,6 +69,34 @@ provenance, peak RSS, existing perf events, and a versioned oracle with separate
 section digests. A section digest changing is a chemistry/rendering regression
 signal, not a performance result by itself.
 
+## Manifest-driven end-to-end suite
+
+The versioned corpus lives in
+[`benchmarks/mattervis_manifest.json`](../benchmarks/mattervis_manifest.json).
+Every entry records a category, size class, provenance, license, and SHA-256.
+Run the short deterministic CI subset with:
+
+```bash
+python -m mat_viewer.perf.runner --smoke \
+  --output benchmark-smoke.json --csv benchmark-smoke.csv
+```
+
+Run the full fixture matrix and optional export stages with:
+
+```bash
+python -m mat_viewer.perf.runner --repeat 3 --exports \
+  --output benchmark-suite.json --csv benchmark-suite.csv
+```
+
+The suite JSON is `mattervis.perf.suite/v1`; each report retains the existing
+pipeline oracle and adds cold/warm loader and scene timings, figure assembly and
+JSON encoding, export status/size, peak RSS, and machine-readable correctness
+counts. CSV rows are one fixture/stage pair. `--browser --browser-url
+http://127.0.0.1:50001` measures DOM-ready and `#crystal-graph` attachment
+against an already running Dash server. Without Playwright, a browser, or a
+URL, the report records an explicit skipped/error status; it never turns a
+missing optional browser into a false zero.
+
 `tests/perf/oracles/pipeline_v1.json` stores compact expected signatures. The
 external CSD DAP-O4 fixture is intentionally not committed. Run its slow,
 formula-unit-only oracle explicitly when the fixture and matching MolCrysKit

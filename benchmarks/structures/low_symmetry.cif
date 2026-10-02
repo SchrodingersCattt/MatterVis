@@ -1,0 +1,22 @@
+data_low_symmetry
+_cell_length_a 7.3
+_cell_length_b 8.1
+_cell_length_c 9.7
+_cell_angle_alpha 78
+_cell_angle_beta 83
+_cell_angle_gamma 71
+_space_group_name_H-M_alt 'P 1'
+loop_
+_space_group_symop_operation_xyz
+'x, y, z'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+C1 C 0.1270 0.2380 0.3190 1
+N1 N 0.2810 0.4170 0.1930 1
+O1 O 0.5520 0.1740 0.6810 1
+F1 F 0.8340 0.7280 0.4510 1

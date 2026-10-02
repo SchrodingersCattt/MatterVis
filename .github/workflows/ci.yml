@@ -123,6 +123,40 @@ jobs:
       - name: Verify browser-free CIF to PNG, PDF, and SVG
         run: python tests/minimal_install_smoke.py
 
+  benchmark-smoke:
+    name: Benchmark manifest smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install benchmark dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "molcrys-kit==${MOLCRYSKIT_MINIMUM}"
+          python -m pip install -e ".[all,test]"
+
+      - name: Run stable benchmark smoke subset
+        run: |
+          python -m mat_viewer.perf.runner --smoke \
+            --output benchmark-smoke.json --csv benchmark-smoke.csv
+
+      - name: Upload benchmark smoke results
+        uses: actions/upload-artifact@v4
+        with:
+          name: mattervis-benchmark-smoke
+          path: |
+            benchmark-smoke.json
+            benchmark-smoke.csv
+
   build-package:
     name: Build source and wheel distributions
     runs-on: ubuntu-latest

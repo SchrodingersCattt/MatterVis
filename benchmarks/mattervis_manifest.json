@@ -1,0 +1,60 @@
+{
+  "schema": "mattervis.benchmarks/v1",
+  "description": "Small reproducible MatterVis benchmark corpus.",
+  "entries": [
+    {
+      "id": "molecular-water",
+      "path": "benchmarks/structures/molecular_water.cif",
+      "category": "molecular",
+      "size_class": "small",
+      "source": "MatterVis benchmark fixture",
+      "license": "MIT",
+      "sha256": "0ff66b338a221233763432ed6d599a89871c621e577be1d19a2bef47fabf0c21"
+    },
+    {
+      "id": "ionic-nacl",
+      "path": "benchmarks/structures/ionic_nacl.cif",
+      "category": "ionic",
+      "size_class": "small",
+      "source": "MatterVis benchmark fixture",
+      "license": "MIT",
+      "sha256": "66877bf6cf76c914ca5bb6027e9b92bc6d8854a8d68b6d338102c0d55fbf9aee"
+    },
+    {
+      "id": "coordination-zinc",
+      "path": "benchmarks/structures/coordination_zinc.cif",
+      "category": "coordination",
+      "size_class": "small",
+      "source": "MatterVis benchmark fixture",
+      "license": "MIT",
+      "sha256": "d9e46c61a96580473e3ad41fedb592060faf9eacd897fe81c3f69df1cb807347"
+    },
+    {
+      "id": "porous-framework",
+      "path": "benchmarks/structures/porous_framework.cif",
+      "category": "porous",
+      "size_class": "medium",
+      "source": "MatterVis benchmark fixture",
+      "license": "MIT",
+      "sha256": "9f5ffbc7fed32f07ebd671538d435986d18a95fdac2c280d10fb98646b60e8a3"
+    },
+    {
+      "id": "low-symmetry",
+      "path": "benchmarks/structures/low_symmetry.cif",
+      "category": "low_symmetry",
+      "size_class": "small",
+      "source": "MatterVis benchmark fixture",
+      "license": "MIT",
+      "sha256": "1b4c89727bc7dae5e66ca26924ef1d0818adfb123180972939ea341b92185aab"
+    },
+    {
+      "id": "dap4-stress",
+      "path": "scripts/data/DAP-4.cif",
+      "category": "stress",
+      "size_class": "large",
+      "source": "bundled MatterVis fixture",
+      "license": "MIT",
+      "sha256": "b126b65d267ae4a6930e203c2124af09c137d466d27613792f83cf519bbc454b"
+    }
+  ]
+}
