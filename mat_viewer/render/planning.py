@@ -9,6 +9,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 
 from ..config import atom_radius as configured_atom_radius
+from ..config import element_color as configured_element_color
 from .bond_annotations import bond_annotation_primitives
 from .compass_overlay import attach_lattice_compass_metadata
 from .contracts import (
@@ -39,26 +40,6 @@ from .ortep_policy import displacement_for_atom
 from .mesh_overlays import isosurface_primitives as _isosurface_primitives
 from .mesh_overlays import polyhedron_primitives as _polyhedron_primitives
 from .property_planning import prepare_render_property, property_color_for_atom, reserve_property_colorbar, resolve_render_property_context
-_ELEMENT_COLORS = {
-    "H": "#FFFFFF",
-    "D": "#E8F5FF",
-    "C": "#4A4A4A",
-    "N": "#3050F8",
-    "O": "#FF0D0D",
-    "F": "#90E050",
-    "Cl": "#1FF01F",
-    "Br": "#A62929",
-    "I": "#940094",
-    "P": "#FF8000",
-    "S": "#FFFF30",
-    "B": "#FFB5B5",
-    "Si": "#F0C8A0",
-    "Fe": "#E06633",
-    "Cu": "#C88033",
-    "Zn": "#7D80B0",
-}
-
-
 def prepare_render(
     source: Any,
     view: ViewSpec | Mapping[str, Any] | None = None,
@@ -185,7 +166,7 @@ def prepare_render(
         base_color = _value(
             atom,
             "color",
-            default=_ELEMENT_COLORS.get(element, "#808080"),
+            default=configured_element_color(element),
         )
         group_color = _value(atom, "_render_color", default=None)
         color = group_color or property_color or base_color

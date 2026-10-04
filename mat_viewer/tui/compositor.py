@@ -24,7 +24,8 @@ from .projection import (
     _compute_viewport,
     viewport_from_bounds,
 )
-from .renderer import ELEMENT_COLORS, DEFAULT_COLOR, BOND_COLOR, CELL_COLOR
+from ..utils.colors import element_ansi_color
+from .renderer import DEFAULT_COLOR, BOND_COLOR, CELL_COLOR
 from .text import ascii7_text, terminal_text
 from .framework import (
     compose_framework_frame,
@@ -413,7 +414,7 @@ def compose_frame(
             if selected:
                 text = f"[{text}]"
 
-            color = ELEMENT_COLORS.get(atom.element, DEFAULT_COLOR)
+            color = element_ansi_color(atom.element, default=DEFAULT_COLOR)
 
             atoms_draw.append(
                 _AtomDraw(
@@ -923,7 +924,7 @@ def _compose_molecule_frame(
                     row,
                     col,
                     f"[{(ascii7_text if charset == 'ascii7' else terminal_text)(atom.display_label)}]",
-                    ELEMENT_COLORS.get(atom.element, DEFAULT_COLOR),
+                    element_ansi_color(atom.element, default=DEFAULT_COLOR),
                 )
             )
 

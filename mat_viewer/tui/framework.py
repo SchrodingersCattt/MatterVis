@@ -324,7 +324,9 @@ def compose_framework_frame(
     for index in sorted(representatives, key=lambda value: float(depth[value])):
         atom = crystal.atoms[index]
         tier = _c._depth_tier(float(depth[index]), depth_min, depth_max)
-        color = _c._tier_color(_c.ELEMENT_COLORS.get(atom.element, _c.DEFAULT_COLOR), tier)
+        color = _c._tier_color(
+            _c.element_ansi_color(atom.element, default=_c.DEFAULT_COLOR), tier
+        )
         radius = _c._atom_radius(atom.element, tier, detail_scale=0.55)
         px = viewport.to_px(float(pts_2d[index][0]), float(pts_2d[index][1]))
         if atom.occupancy < 0.99 or atom.is_minor:
@@ -362,7 +364,7 @@ def compose_framework_frame(
                 row,
                 col,
                 label,
-                _c.ELEMENT_COLORS.get(atom.element, _c.DEFAULT_COLOR),
+                _c.element_ansi_color(atom.element, default=_c.DEFAULT_COLOR),
                 selected,
             )
         )

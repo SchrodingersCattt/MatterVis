@@ -9,6 +9,7 @@ from ..config.colors import (
     CUBE_ATOM_DISPLAY_RADII_ANG,
     CUBE_ELEMENT_COLORS,
 )
+from ..config import element_color as configured_element_color
 from .io import (
     CubeAtom,
     CubeData,
@@ -23,8 +24,15 @@ if TYPE_CHECKING:
     import plotly.graph_objects as go
 
 
+# Kept as a compatibility export for callers that imported the old table.
+# Rendering functions below resolve the canonical palette by default and only
+# use this historical CPK table when ``theme="cpk"`` is explicit.
 ELEMENT_COLORS = CUBE_ELEMENT_COLORS
 ATOM_DISPLAY_RADII_ANG = CUBE_ATOM_DISPLAY_RADII_ANG
+
+
+def _element_color(symbol: str, theme: str = "canonical") -> str:
+    return configured_element_color(symbol, theme=theme)
 
 
 def _plotly_go():
@@ -289,14 +297,22 @@ def orbital_mesh_traces(
     return traces
 
 
-def cube_atom_trace(cube: CubeData, *, atom_scale: float = 5.0) -> go.Scatter3d:
+def cube_atom_trace(
+    cube: CubeData,
+    *,
+    atom_scale: float = 5.0,
+    theme: str = "canonical",
+) -> go.Scatter3d:
     """Create a light atom overlay using Plotly's 2D-projected markers.
 
     Faster but less convincingly 3D than :func:`atom_sphere_traces`; kept
     for backwards compatibility and small/structureless previews.
+
+    ``theme="canonical"`` uses the shared MatterVis palette. Pass
+    ``theme="cpk"`` explicitly to retain the historical cube colors.
     """
     labels = [f"{atom.element}{idx + 1}" for idx, atom in enumerate(cube.atoms)]
-    colors = [ELEMENT_COLORS.get(atom.element, "#999999") for atom in cube.atoms]
+    colors = [_element_color(atom.element, theme) for atom in cube.atoms]
     coords = np.asarray([atom.coord for atom in cube.atoms], dtype=float)
     return _plotly_go().Scatter3d(
         x=coords[:, 0],
@@ -346,11 +362,15 @@ def atom_sphere_traces(
     n_lat: int = 12,
     n_lon: int = 18,
     flatshading: bool = False,
+    theme: str = "canonical",
 ) -> list[go.Mesh3d]:
     """Create per-element 3D sphere meshes for all atoms in the cube.
 
     Renders convincingly in static (kaleido) export, unlike Scatter3d markers
     which always look flat.
+
+    ``theme="canonical"`` uses the shared MatterVis palette; ``theme="cpk"``
+    is an explicit compatibility opt-in for the historical cube colors.
     """
     if not cube.atoms:
         return []
@@ -364,7 +384,7 @@ def atom_sphere_traces(
     traces: list[go.Mesh3d] = []
     for elem, atoms in by_elem.items():
         r = rmap.get(elem, 0.55) * radius_scale
-        color = ELEMENT_COLORS.get(elem, "#999999")
+        color = _element_color(elem, theme)
         all_v: list[np.ndarray] = []
         all_f: list[np.ndarray] = []
         nv = sphere_v.shape[0]
@@ -437,6 +457,7 @@ def _legacy_bond_traces(
     radius: float = 0.10,
     color: str = "#888888",
     n_seg: int = 8,
+    theme: str = "canonical",
 ) -> list[go.Mesh3d]:
     """Build cylinders from explicit canonical bond records.
 
@@ -478,7 +499,7 @@ def _legacy_bond_traces(
             (p_left, mid, elems[i]),
             (mid, p_right, elems[j]),
         ):
-            col = ELEMENT_COLORS.get(elem, color)
+            col = _element_color(elem, theme) if theme else color
             vertices, faces = _cylinder(p0, p1, radius=radius, n_seg=n_seg)
             if vertices.shape[0] == 0:
                 continue

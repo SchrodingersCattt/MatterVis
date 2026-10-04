@@ -11,6 +11,7 @@ from .. import perf_log
 from ..legacy import crystal_scene as legacy_scene
 from ..scene import build_scene_from_atoms, scene_ops
 from ..structure import molcrys_bridge
+from ..structure.bonds import normalize_bond_thresholds, validate_bond_scale
 from .core import (
     LoadedCrystal,
     _fragment_table_from_atoms,
@@ -45,6 +46,24 @@ def build_loaded_crystal_from_atoms(
     M = np.asarray(M, dtype=float)
     raw_atoms = [dict(atom) for atom in raw_atoms]
     n_atoms = len(raw_atoms)
+
+    # Configured MCK defaults apply to every loader when a caller omits an
+    # explicit policy.  Explicit keyword values always win, which keeps the
+    # public API deterministic for notebooks, CLI calls, and tests.
+    if bond_scale is None or bond_thresholds is None:
+        from ..config import current_config
+
+        configured = current_config().mck_overrides
+        if bond_scale is None:
+            configured_scale = configured.get("bond_scale")
+            if configured_scale is not None:
+                bond_scale = validate_bond_scale(configured_scale)
+        if bond_thresholds is None:
+            configured_thresholds = configured.get("bond_thresholds")
+            if configured_thresholds:
+                bond_thresholds = normalize_bond_thresholds(configured_thresholds)
+    if bond_thresholds is not None:
+        bond_thresholds = normalize_bond_thresholds(bond_thresholds)
 
     if molcrys_analysis is None:
         with perf_log.time_block(

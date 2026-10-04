@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .shared import *
 from ..config import current_config, delete_user_config, reload_config, write_user_config
+from ..structure.bonds import normalize_bond_thresholds, validate_bond_scale
 
 
 def register_config_routes(v2, backend) -> dict:
@@ -26,8 +27,21 @@ def register_config_routes(v2, backend) -> dict:
         payload = request.get_json(force=True, silent=True) or {}
         if not isinstance(payload, dict):
             return jsonify({"error": "JSON object payload required"}), 400
+        mck = payload.get("mck_overrides")
+        if mck is not None:
+            if not isinstance(mck, dict):
+                return jsonify({"error": "mck_overrides must be an object"}), 400
+            try:
+                if "bond_scale" in mck and mck["bond_scale"] is not None:
+                    validate_bond_scale(mck["bond_scale"])
+                if "bond_thresholds" in mck:
+                    normalize_bond_thresholds(mck["bond_thresholds"])
+            except (TypeError, ValueError) as exc:
+                return jsonify({"error": str(exc), "type": type(exc).__name__}), 400
         path = write_user_config(payload)
         cfg = reload_config(str(path))
+        if hasattr(backend, "reload_bond_policy"):
+            backend.reload_bond_policy()
         return jsonify({"path": str(path), "config": cfg.as_dict()})
 
     @v2.delete("/config")

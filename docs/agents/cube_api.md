@@ -57,6 +57,10 @@ the canonical loader before adding the isosurface overlay.
 
 - `CubeAtom` and `CubeData` hold embedded atoms, origin, axes, and scalar data.
 - `read_cube(path) -> CubeData` performs pure Cube IO.
+- `cube_atom_trace(cube, theme="canonical")` and
+  `atom_sphere_traces(cube, theme="canonical")` use the canonical MatterVis
+  element palette by default. Pass `theme="cpk"` explicitly for the legacy
+  bright CPK colors; this choice affects only the cube atom/bond overlays.
 - `tile_cube` and `tile_cube_data` explicitly replicate a scalar grid.
 - `default_isovalue(values, percentile)` chooses a threshold strictly inside
   the positive/negative value range or fails when no surface can exist.

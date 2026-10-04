@@ -220,7 +220,11 @@ class _CameraBackendMixin:
             # Flat + ORTEP: render via Matplotlib 2D and embed as a static
             # image in a Plotly figure (the web viewer needs a go.Figure).
             if style.get("material") == "flat" and style.get("style") == "ortep":
-                fig = self._flat_ortep_figure(scene, style)
+                fig = self._flat_ortep_figure(
+                    scene,
+                    style,
+                    camera=_plotly_camera(state.get("camera")),
+                )
             else:
                 fig = build_figure(scene, style, topology_data=topology_data)
         camera = _plotly_camera(state.get("camera"))
@@ -290,14 +294,28 @@ class _CameraBackendMixin:
             pass
         return fig
 
-    def _flat_ortep_figure(self, scene: dict, style: dict) -> "go.Figure":
-        """Render flat+ortep via Matplotlib and embed as a static image in a Plotly figure."""
+    def _flat_ortep_figure(
+        self,
+        scene: dict,
+        style: dict,
+        *,
+        camera: dict[str, Any] | None = None,
+    ) -> "go.Figure":
+        """Render flat+ORTEP with a hidden 3D camera interaction layer."""
         import io
         import base64
         import matplotlib.pyplot as plt
         from ..ortep.flat_render import render_ortep_flat
 
-        mpl_fig = render_ortep_flat(scene, style)
+        render_scene = dict(scene)
+        if camera:
+            eye, center, up = _camera_vectors(camera)
+            view_direction = eye - center
+            norm = float(np.linalg.norm(view_direction))
+            if norm > 1e-8:
+                render_scene["view_direction"] = view_direction / norm
+                render_scene["up"] = up
+        mpl_fig = render_ortep_flat(render_scene, style)
         buf = io.BytesIO()
         mpl_fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
         plt.close(mpl_fig)
@@ -305,6 +323,29 @@ class _CameraBackendMixin:
         encoded = base64.b64encode(buf.read()).decode("ascii")
 
         fig = go.Figure()
+        anchor_points = [
+            np.asarray(atom.get("cart"), dtype=float)
+            for atom in scene.get("draw_atoms", [])
+            if np.asarray(atom.get("cart"), dtype=float).shape == (3,)
+        ]
+        if scene.get("cell") is not None and scene.get("M") is not None:
+            anchor_points.extend(
+                np.asarray(scene["M"], dtype=float)[index]
+                for index in range(3)
+            )
+        anchors = np.asarray(anchor_points or [[0.0, 0.0, 0.0]], dtype=float)
+        fig.add_trace(
+            go.Scatter3d(
+                x=anchors[:, 0],
+                y=anchors[:, 1],
+                z=anchors[:, 2],
+                mode="markers",
+                marker=dict(size=1, opacity=0.0),
+                hoverinfo="skip",
+                showlegend=False,
+                name="flat-ortep-camera",
+            )
+        )
         fig.add_layout_image(
             dict(
                 source=f"data:image/png;base64,{encoded}",
@@ -315,6 +356,15 @@ class _CameraBackendMixin:
             )
         )
         fig.update_layout(
+            scene=dict(
+                xaxis=dict(visible=False),
+                yaxis=dict(visible=False),
+                zaxis=dict(visible=False),
+                bgcolor="white",
+                dragmode="orbit",
+                camera=camera or _plotly_camera(scene.get("camera")),
+                uirevision=style.get("uirevision", "flat-ortep"),
+            ),
             xaxis=dict(visible=False, range=[0, 1]),
             yaxis=dict(visible=False, range=[0, 1]),
             paper_bgcolor="white",

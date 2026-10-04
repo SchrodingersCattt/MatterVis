@@ -31,12 +31,14 @@ flowchart LR
 
 ## Builders
 
-### `mat_viewer.agent.load_structure(..., bond_scale=None)`
+### `mat_viewer.agent.load_structure(..., bond_scale=None, bond_thresholds=None)`
 
 The agent-facing loader exposes MolCrysKit's global bond-perception coefficient
-for CIF and ASE-readable inputs. A positive explicit value is forwarded through
-canonical loading, molecule grouping, and scene construction. Omit it to retain
-the existing default. The CLI exposes the same control as `--bond-scale`.
+and optional element-pair thresholds for CIF and ASE-readable inputs. A positive
+explicit `bond_scale` and a mapping such as `{("Zn", "N"): 2.5}` are forwarded
+through canonical loading, molecule grouping, PBC unwrapping, and scene
+construction. Omit them to retain the configured defaults. The CLI exposes the
+same controls as `--bond-scale` and repeatable `--bond-threshold Zn,N=2.5`.
 
 ### Auxiliary cells
 
@@ -152,6 +154,11 @@ For uniformly compressed or expanded structures, try and validate one global
 retain all intended bonds while excluding compressed intermolecular contacts.
 Explicit pair thresholds are also multiplied by `bond_scale`; they are not an
 independent post-processing filter.
+
+The REST config uses TOML-safe structured records for pair thresholds:
+`{"mck_overrides": {"bond_scale": 0.9, "bond_thresholds": [{"elements": ["Zn", "N"], "cutoff": 2.5}]}}`.
+Updating this policy invalidates catalog bundle and figure caches; bundles are
+rebuilt lazily with the new MolCrysKit policy.
 
 `mat_viewer.scene.build_scene_from_atoms` remains available as a
 compatibility import, but new code should treat scene assembly as part

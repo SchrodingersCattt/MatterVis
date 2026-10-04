@@ -160,9 +160,16 @@ def _toml_lines(data: Mapping[str, Any], prefix: tuple[str, ...] = ()) -> list[s
     lines: list[str] = []
     scalar_items: list[tuple[str, Any]] = []
     table_items: list[tuple[str, Mapping[str, Any]]] = []
+    array_table_items: list[tuple[str, list[Mapping[str, Any]]]] = []
     for key, value in data.items():
         if isinstance(value, Mapping):
             table_items.append((str(key), value))
+        elif (
+            isinstance(value, list)
+            and value
+            and all(isinstance(item, Mapping) for item in value)
+        ):
+            array_table_items.append((str(key), value))
         else:
             scalar_items.append((str(key), value))
     if prefix:
@@ -173,8 +180,22 @@ def _toml_lines(data: Mapping[str, Any], prefix: tuple[str, ...] = ()) -> list[s
             lines.append(f"{key} = [{rendered}]")
         else:
             lines.append(f"{key} = {_toml_scalar(value)}")
-    if lines and table_items:
+    if lines and (table_items or array_table_items):
         lines.append("")
+    for array_index, (key, values) in enumerate(array_table_items):
+        header = ".".join((*prefix, key))
+        for item_index, item in enumerate(values):
+            lines.append(f"[[{header}]]")
+            for item_key, item_value in item.items():
+                if isinstance(item_value, (list, tuple)):
+                    rendered = ", ".join(_toml_scalar(value) for value in item_value)
+                    lines.append(f"{item_key} = [{rendered}]")
+                else:
+                    lines.append(f"{item_key} = {_toml_scalar(item_value)}")
+            if item_index != len(values) - 1:
+                lines.append("")
+        if array_index != len(array_table_items) - 1 or table_items:
+            lines.append("")
     for index, (key, value) in enumerate(table_items):
         lines.extend(_toml_lines(value, (*prefix, key)))
         if index != len(table_items) - 1:

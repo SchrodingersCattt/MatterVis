@@ -7,7 +7,14 @@ from pathlib import Path
 import numpy as np
 
 from ..capabilities import requirements_for_tui, resolve_requirements
-from .crystal_ir import AtomIR, BondIR, CrystalIR, Lattice, filter_crystal
+from .crystal_ir import (
+    AtomIR,
+    BondIR,
+    CrystalIR,
+    Lattice,
+    _minimum_image_distance,
+    filter_crystal,
+)
 
 
 def load_for_tui(
@@ -17,6 +24,8 @@ def load_for_tui(
     input_format: str | None = None,
     type_map: list[str] | None = None,
     frame: int = 0,
+    bond_scale: float | None = None,
+    bond_thresholds: dict[tuple[str, str], float] | dict[str, float] | None = None,
 ) -> CrystalIR:
     """Load any supported atomistic input through the canonical structure IO."""
     resolve_requirements(requirements_for_tui(path, input_format)).require()
@@ -28,6 +37,8 @@ def load_for_tui(
         input_format=input_format,
         type_map=type_map,
         frame_indices=[frame],
+        bond_scale=bond_scale,
+        bond_thresholds=bond_thresholds,
     )
     selected = structure.frames[0]
     return _load_bundle(
@@ -244,6 +255,10 @@ def _crystal_ir_from_scene(
                 i=int(bond["i"]),
                 j=int(bond["j"]),
                 distance=float(np.linalg.norm(end - start)),
+                minimum_image_distance=_minimum_image_distance(
+                    end - start,
+                    lattice,
+                ),
                 start=start,
                 end=end,
                 start_display_copy_id=atom_i.display_copy_id,
@@ -312,7 +327,15 @@ def _source_to_display_shift(
     source_atoms: list[dict],
 ) -> tuple[int, int, int]:
     if 0 <= source_index < len(source_atoms):
-        source_frac = np.asarray(source_atoms[source_index]["frac"], dtype=float)
+        source_value = source_atoms[source_index].get("_wrapped_frac")
+        if source_value is None:
+            source_value = source_atoms[source_index].get("frac")
+        source_frac = np.asarray(source_value, dtype=float)
+        if source_frac.shape == (3,) and np.all(np.isfinite(source_frac)):
+            # Source coordinates in periodic XYZ/ExtXYZ files are allowed to
+            # lie outside the nominal cell.  Their wrapped home copy is still
+            # the source atom, not a generated periodic replica.
+            source_frac = source_frac - np.floor(source_frac)
     else:
         wrapped = atom.get("_wrapped_frac")
         if wrapped is None:

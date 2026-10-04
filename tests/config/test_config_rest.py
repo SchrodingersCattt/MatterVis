@@ -32,12 +32,29 @@ def test_config_rest_get_patch_delete(monkeypatch, tmp_path):
 
     response = client.patch(
         "/api/v2/config",
-        json={"style": {"atom_scale": 1.4}, "colors": {"selection_highlight": "#ABCDEF"}},
+        json={
+            "style": {"atom_scale": 1.4},
+            "colors": {"selection_highlight": "#ABCDEF"},
+            "mck_overrides": {
+                "bond_scale": 0.9,
+                "bond_thresholds": [{"elements": ["Zn", "N"], "cutoff": 2.5}],
+            },
+        },
     )
     assert response.status_code == 200
     body = response.get_json()
     assert body["config"]["style"]["atom_scale"] == 1.4
     assert body["config"]["colors"]["selection_highlight"] == "#ABCDEF"
+    assert body["config"]["mck_overrides"]["bond_scale"] == 0.9
+    assert body["config"]["mck_overrides"]["bond_thresholds"] == [
+        {"elements": ["Zn", "N"], "cutoff": 2.5}
+    ]
+
+    invalid = client.patch(
+        "/api/v2/config",
+        json={"mck_overrides": {"bond_thresholds": [{"elements": ["Zn"], "cutoff": 2.5}]}},
+    )
+    assert invalid.status_code == 400
 
     response = client.get("/api/v2/config/colors/elements")
     assert response.status_code == 200

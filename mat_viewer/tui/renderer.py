@@ -13,64 +13,12 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from ..utils.colors import element_ansi_color
+
 if TYPE_CHECKING:
     from .crystal_ir import CrystalIR
     from ..math.camera import Camera
 
-
-# ── Element color palette (CPK-inspired, ANSI 256) ─────────────────────────
-
-# Map element → ANSI 256-color code (approximate CPK)
-ELEMENT_COLORS: dict[str, int] = {
-    "H": 255,   # white
-    "He": 123,  # cyan
-    "Li": 129,  # violet
-    "Be": 118,  # dark green
-    "B": 216,   # salmon
-    "C": 245,   # grey
-    "N": 33,    # blue
-    "O": 196,   # red
-    "F": 82,    # green
-    "Ne": 123,  # cyan
-    "Na": 129,  # violet
-    "Mg": 34,   # dark green
-    "Al": 249,  # light grey
-    "Si": 214,  # dark orange
-    "P": 208,   # orange
-    "S": 226,   # yellow
-    "Cl": 46,   # green
-    "Ar": 123,  # cyan
-    "K": 129,   # violet
-    "Ca": 34,   # green
-    "Ti": 249,  # grey
-    "V": 249,   # grey
-    "Cr": 33,   # blue
-    "Mn": 129,  # violet
-    "Fe": 208,  # orange
-    "Co": 33,   # blue
-    "Ni": 34,   # green
-    "Cu": 208,  # orange
-    "Zn": 249,  # grey
-    "Ga": 249,  # grey
-    "Ge": 249,  # grey
-    "As": 129,  # violet
-    "Se": 208,  # orange
-    "Br": 124,  # dark red
-    "Mo": 45,   # teal
-    "Ru": 45,   # teal
-    "Pd": 33,   # blue
-    "Ag": 249,  # light grey
-    "Cd": 214,  # orange
-    "In": 249,  # grey
-    "Sn": 249,  # grey
-    "I": 90,    # dark violet
-    "Ba": 34,   # green
-    "W": 33,    # blue
-    "Pt": 249,  # grey
-    "Au": 220,  # gold
-    "Pb": 242,  # dark grey
-    "Bi": 129,  # violet
-}
 
 DEFAULT_COLOR = 252  # fallback light grey
 BOND_COLOR = 240     # dim grey
@@ -302,7 +250,7 @@ def render_ascii_frame(
             row, col = to_grid(pts_2d[idx])
             elem = crystal.atoms[idx].element
             d = float(depth[idx])
-            color = ELEMENT_COLORS.get(elem, DEFAULT_COLOR)
+            color = element_ansi_color(elem, default=DEFAULT_COLOR)
 
             if compact:
                 glyph = Glyph(

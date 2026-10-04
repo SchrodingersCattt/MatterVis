@@ -4,6 +4,7 @@ import os
 import time
 import numpy as np
 from functools import lru_cache
+from collections.abc import Mapping
 
 from .. import perf_log
 from ..style.disorder import _disorder_group_id
@@ -36,21 +37,86 @@ def validate_bond_scale(value: float) -> float:
     return numeric
 
 
-def _normalize_thresholds(bond_thresholds):
+def _normalize_element_symbol(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError("bond threshold element symbols must be non-empty")
+    return text[0].upper() + text[1:].lower()
+
+
+def normalize_bond_thresholds(bond_thresholds):
+    """Normalize public pair cutoffs into canonical unordered element keys.
+
+    Python callers may pass ``{("Zn", "N"): 2.5}``; JSON/CLI callers may
+    use ``{"Zn,N": 2.5}`` or ``{"Zn-N": 2.5}``.  The returned mapping is
+    safe to pass through MolCrysKit and is deterministic for cache keys.
+    """
     if bond_thresholds is None:
-        return ()
+        return {}
     if isinstance(bond_thresholds, tuple):
-        return bond_thresholds
-    normalized = []
+        # Backward-compatible internal cache representation.
+        return {
+            tuple(sorted((_normalize_element_symbol(left), _normalize_element_symbol(right)))): float(value)
+            for left, right, value in bond_thresholds
+        }
+    if isinstance(bond_thresholds, list):
+        records = {}
+        for item in bond_thresholds:
+            if not isinstance(item, Mapping):
+                raise TypeError(
+                    "bond_thresholds list entries must be objects with elements/cutoff"
+                )
+            elements = item.get("elements")
+            if elements is None:
+                elements = (item.get("left"), item.get("right"))
+            if not isinstance(elements, (tuple, list)) or len(elements) != 2:
+                raise ValueError(
+                    "bond_thresholds entries require exactly two elements"
+                )
+            records[tuple(elements)] = item.get("cutoff", item.get("value"))
+        bond_thresholds = records
+    if not isinstance(bond_thresholds, Mapping):
+        raise TypeError("bond_thresholds must be a mapping of element pairs to cutoffs")
+    normalized = {}
     for pair, value in bond_thresholds.items():
-        if not isinstance(pair, tuple) or len(pair) != 2:
-            raise ValueError("bond_thresholds keys must be 2-tuples of element symbols")
+        if isinstance(pair, str):
+            text = pair.replace("|", ",").replace("-", ",")
+            parts = [part.strip() for part in text.split(",") if part.strip()]
+        elif isinstance(pair, (tuple, list)) and len(pair) == 2:
+            parts = list(pair)
+        else:
+            raise ValueError(
+                "bond_thresholds keys must be 2-tuples or 'A,B' element pairs"
+            )
+        if len(parts) != 2:
+            raise ValueError(
+                "bond_thresholds keys must contain exactly two element symbols"
+            )
         numeric = float(value)
         if not np.isfinite(numeric) or numeric <= 0:
             raise ValueError("bond_thresholds values must be finite and positive")
-        left, right = str(pair[0]), str(pair[1])
-        normalized.append((left, right, numeric))
-    return tuple(sorted(normalized))
+        left, right = (_normalize_element_symbol(parts[0]), _normalize_element_symbol(parts[1]))
+        normalized[tuple(sorted((left, right)))] = numeric
+    return normalized
+
+
+def parse_bond_threshold_spec(spec: str) -> tuple[tuple[str, str], float]:
+    """Parse a CLI pair cutoff such as ``Zn,N=2.5`` or ``Zn-N=2.5``."""
+    if not isinstance(spec, str) or "=" not in spec:
+        raise ValueError("bond threshold must use ELEMENT1,ELEMENT2=CUTOFF")
+    pair_text, value_text = spec.split("=", 1)
+    normalized = normalize_bond_thresholds({pair_text: value_text})
+    if len(normalized) != 1:
+        raise ValueError("bond threshold must contain exactly one element pair")
+    return next(iter(normalized.items()))
+
+
+def _normalize_thresholds(bond_thresholds):
+    normalized = normalize_bond_thresholds(bond_thresholds)
+    return tuple(
+        (left, right, float(value))
+        for (left, right), value in sorted(normalized.items())
+    )
 
 
 @lru_cache(maxsize=512)

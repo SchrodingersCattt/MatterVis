@@ -4,7 +4,10 @@ MatterVis supports two ORTEP-style paths:
 
 - `material="mesh", style="ortep"` for real interactive Plotly Mesh3d
   ellipsoids.
-- `material="flat", style="ortep"` for publication-style billboards
+- `material="flat", style="ortep"` for publication-style billboards. In the
+  Dash viewer this path includes a hidden Plotly 3D camera anchor; orbit events
+  are converted back to the flat renderer's `view_direction`/`up` basis and
+  refresh the embedded image. Static Matplotlib export remains unchanged.
   derived from the camera projection.
 
 The CIF parser reads `_atom_site_aniso_U_*` into `atom["U"]`; missing

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from .frame_selection import parse_frame_indices as _parse_frame_indices
+from .cli_controls import bond_thresholds_from_args
 
 _DISPLAY_MODES = ("auto", "formula_unit", "unit_cell", "asymmetric_unit", "cluster")
 _STYLES = ("ball_stick", "ball", "space_filling", "stick", "ortep", "wireframe")
@@ -941,6 +942,8 @@ def _render_main(args: argparse.Namespace) -> None:
                 input_format=args.input_format,
                 type_map=args.type_map,
                 frame_indices=indices,
+                bond_scale=args.bond_scale,
+                bond_thresholds=bond_thresholds_from_args(args),
             )
         except (FileNotFoundError, ValueError) as exc:
             sys.exit(f"Error: {exc}")
