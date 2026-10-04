@@ -29,7 +29,6 @@ error. Never install `[all]` when a smaller reported extra is sufficient.
 | Interactive Plotly/WebGL HTML | `plotly` | `python -m pip install "matter-vis[plotly]"` |
 | Plotly PNG/PDF/SVG through Kaleido | `plotly-export` | `python -m pip install "matter-vis[plotly-export]"` |
 | Dash viewer, REST, and WebSocket service | `web` | `python -m pip install "matter-vis[web]"` |
-| Tenant-scoped hosted API, persistent jobs, and private deployment adapters | `saas` | `python -m pip install "matter-vis[saas]"` |
 | Interactive terminal UI | `tui` | `python -m pip install "matter-vis[tui]"` |
 | Cube input inspection and isosurfaces | `cube` | `python -m pip install "matter-vis[cube]"` |
 | GIF/MP4 encoding | `animation` | `python -m pip install "matter-vis[animation]"` |

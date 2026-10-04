@@ -15,7 +15,6 @@ read the relevant module before modifying it.
 mat_viewer/
   app/                 Dash layout, callbacks, ViewerBackend internals
   api/                 REST + WebSocket blueprints
-  saas/                tenant-scoped services, repositories, storage, jobs
   render/              Plotly viewport / traces / cache internals
   structure/           CIF parsing, bonds, formula units, MolCrysKit bridge
   loader/              CIF/fragment bundle loading facade + upload helpers
