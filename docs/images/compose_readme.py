@@ -1,25 +1,11 @@
 """Stitch the three README panels into ``feature_combined.png``.
 
-Independent fit: the panels are not on one physical scale. Render them first:
+Independent fit: the panels are not on one physical scale. The disorder and
+polyhedron panels come from ``render_panels.py``: occupancy fades atoms and
+bonds together, and DAP-7 draws molecule-level ClO4 hulls with one A site
+and one B site at opacity 0.45 and the remaining hulls at 0.08.
 
-    mat-vis render docs/images/showcase_caffeine_pair.cif \\
-      -o docs/images/panel_disorder.png --backend cpu \\
-      --orthogonal --background '#FFFFFF' --style ball_stick \\
-      --no-hydrogen --no-cell \\
-      --view-direction -0.1619 0.6070 0.7780 \\
-      --camera-up 0.9799 0.0055 0.1992 \\
-      --atom-scale 0.72 --bond-radius 0.09 \\
-      --camera-distance 1.25 --framing-margin 1.06 \\
-      --width 800 --height 800 --scale 2
-
-    mat-vis render docs/images/showcase_dap7.cif \\
-      -o docs/images/panel_polyhedron.png --backend cpu \\
-      --orthogonal --background '#FFFFFF' \\
-      --view unit_cell --style ball_stick \\
-      --show-cell --show-axes --no-hydrogen --no-boundary-replicas \\
-      --polyhedron '{"center":"C6N2","ligand":"ClO4","level":"molecule","center_kind":"heavy_centroid"}' \\
-      --atom-scale 0.82 --bond-radius 0.08 \\
-      --width 800 --height 800 --scale 2
+    PYTHONPATH=. python docs/images/render_panels.py
 
     mat-vis render docs/images/showcase_petn_molecule.xyz \\
       -o docs/images/panel_mode.png --backend cpu \\
