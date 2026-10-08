@@ -40,6 +40,9 @@ from .ortep_policy import displacement_for_atom
 from .mesh_overlays import isosurface_primitives as _isosurface_primitives
 from .mesh_overlays import polyhedron_primitives as _polyhedron_primitives
 from .property_planning import prepare_render_property, property_color_for_atom, reserve_property_colorbar, resolve_render_property_context
+from ..style.disorder import bond_effective_opacity
+
+
 def prepare_render(
     source: Any,
     view: ViewSpec | Mapping[str, Any] | None = None,
@@ -402,13 +405,24 @@ def prepare_render(
                     f"bond {bond_index} has invalid endpoints and was skipped"
                 )
                 continue
-            alpha = float(
-                np.clip(
-                    _value(bond, "alpha", default=1.0)
-                    * _value(bond, "_render_opacity_scale", default=1.0),
-                    0.0,
-                    1.0,
-                )
+            # Same occupancy weight as the Plotly mesh path. An explicit
+            # bond-group opacity replaces it; otherwise a disordered bond
+            # uses its crystallographic occupancy instead of staying opaque.
+            alpha = bond_effective_opacity(
+                {
+                    "is_minor": bool(_value(bond, "is_minor", default=False)),
+                    "is_disordered": bool(
+                        _value(bond, "is_disordered", default=False)
+                    ),
+                    "occ": _value(bond, "occ", default=1.0),
+                    "_render_opacity_scale": _value(
+                        bond, "_render_opacity_scale", default=1.0
+                    ),
+                    "_render_opacity_group_id": _value(
+                        bond, "_render_opacity_group_id", default=None
+                    ),
+                },
+                {"disorder": "opacity"},
             )
             radius = render_spec.bond_radius * float(
                 _value(bond, "_render_radius_scale", default=1.0)

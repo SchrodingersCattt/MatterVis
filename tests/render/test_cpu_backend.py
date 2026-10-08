@@ -1287,6 +1287,8 @@ def test_disorder_opacity_and_cross_cell_bond_vector_survive_planning():
                 "right_global_index": 1,
                 "vector_A": [0.3, 0.0, 0.0],
                 "right_image_shift": [1, 0, 0],
+                "is_disordered": True,
+                "occ": 0.5,
             }
         ],
     }
@@ -1309,6 +1311,7 @@ def test_disorder_opacity_and_cross_cell_bond_vector_survive_planning():
     assert bond_vertices[:, 0].min() == pytest.approx(0.8)
     assert bond_vertices[:, 0].max() == pytest.approx(1.1)
     assert all(item.metadata["right_image_shift"] == (1, 0, 0) for item in bond_meshes)
+    assert all(item.rgba[3] == pytest.approx(0.5) for item in bond_meshes)
     assert render(plan, format="png").data.startswith(b"\x89PNG")
 
 
