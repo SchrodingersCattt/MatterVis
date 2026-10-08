@@ -26,8 +26,8 @@ frontends.
 - **Zero Catalog Required** — Ships with a bundled DAP-4.cif so `mat-vis serve` works out of the box
 
 <p align="center">
-  <img src="docs/images/feature_combined.png" width="720"><br>
-  <em>Six perchlorates around ammonium. One oxygen is disordered; arrows are a mock displacement.</em>
+  <img src="docs/images/feature_combined.png" width="960"><br>
+  <em>Anhydrous caffeine disorder, perchlorate polyhedra in DAP-7, and a mock nitrate displacement on PETN.</em>
 </p>
 
 ## Installation
