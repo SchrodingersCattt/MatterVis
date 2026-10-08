@@ -10,6 +10,10 @@ Independent fit: the panels are not on one physical scale. Render them first:
       --camera-up 0.9799 0.0055 0.1992 \\
       --atom-scale 0.72 --bond-radius 0.09 \\
       --camera-distance 1.25 --framing-margin 1.06 \\
+      --atom-group major opacity=0.652 \\
+      --atom-group minor opacity=0.348 \\
+      --bond-group major opacity=0.652 \\
+      --bond-group minor opacity=0.348 \\
       --width 800 --height 800 --scale 2
 
     mat-vis render docs/images/showcase_dap7.cif \\
@@ -23,7 +27,7 @@ Independent fit: the panels are not on one physical scale. Render them first:
 
     mat-vis render docs/images/showcase_petn_molecule.xyz \\
       -o docs/images/panel_mode.png --backend cpu \\
-      --orthogonal --background '#FFFFFF' --style ball_stick \\
+      --orthogonal --background '#FFFFFF' --style ball_stick --show-hydrogen \\
       --view-direction 0.35 0.55 0.76 \\
       --vector-overlays docs/images/showcase_petn_vectors.json \\
       --atom-scale 0.72 --bond-radius 0.10 \\
