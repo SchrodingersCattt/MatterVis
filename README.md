@@ -26,28 +26,19 @@ frontends.
 - **Zero Catalog Required** — Ships with a bundled DAP-4.cif so `mat-vis serve` works out of the box
 
 <p align="center">
-  <img src="docs/images/feature_unit_cell.png" width="500"><br>
-  <em>Unit Cell — DAP-4 unit cell (flat ORTEP with element colours)</em>
+  <img src="docs/images/feature_combined.png" width="820"><br>
+  <em>One CPU render: anisotropic ellipsoids with ORTEP hatch marks, a split-occupancy ligand, a Ti–O coordination hull, and centred displacement arrows inside the unit cell.</em>
 </p>
 
 <p align="center">
-  <img src="docs/images/feature_coordination.png" width="500"><br>
-  <em>Coordination Shell — A-site coordination with convex hull overlay (CN=9, tricapped trigonal prism)</em>
+  <img src="docs/images/feature_disorder_ortep.png" width="640">
+  <img src="docs/images/feature_polyhedra.png" width="640"><br>
+  <em>Left: thermal ellipsoids, including the partially occupied Cl and O sites. Right: the same cell as balls with the coordination polyhedron (CN = 6).</em>
 </p>
 
 <p align="center">
-  <img src="docs/images/feature_three_modes.png" width="750"><br>
-  <em>Three Display Modes — Formula unit, unit cell, and coordination shell side by side</em>
-</p>
-
-<p align="center">
-  <img src="docs/images/feature_publication.png" width="500"><br>
-  <em>Publication-Quality Export — Colour ORTEP-style Matplotlib renderer with labels</em>
-</p>
-
-<p align="center">
-  <img src="docs/images/feature_asymmetric_unit.png" width="500"><br>
-  <em>Asymmetric Unit — Diagnostic crystallographic view with atom labels and unit-cell context</em>
+  <img src="docs/images/feature_vibration.png" width="720"><br>
+  <em>Displacement arrows stay in the structure frame, so they rotate and occlude with the atoms.</em>
 </p>
 
 ## Installation
