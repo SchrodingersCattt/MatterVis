@@ -3,7 +3,7 @@
 The three panels occupy equal thirds. ``render_panels.py`` draws them:
 disorder fades atoms and bonds by occupancy, DAP-7 is viewed straight down
 the b axis with one A hull and one B hull kept visible, and PETN carries a
-mock nitrate stretch plus a perpendicular arrow on each terminal oxygen.
+black mock arrow on each terminal oxygen, perpendicular to the N–O bond.
 
     PYTHONPATH=. python docs/images/render_panels.py
 
@@ -16,7 +16,7 @@ mock nitrate stretch plus a perpendicular arrow on each terminal oxygen.
       --camera-distance 1.35 --framing-margin 1.08 \\
       --width 800 --height 800 --scale 2
 
-The PETN arrows are a mock nitrate stretch, not a phonon.
+The PETN arrows are a mock displacement perpendicular to the N–O bonds, not a phonon.
 """
 
 from __future__ import annotations
