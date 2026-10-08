@@ -1,9 +1,9 @@
 """Stitch the three README panels into ``feature_combined.png``.
 
-Independent fit: the panels are not on one physical scale. The disorder and
-polyhedron panels come from ``render_panels.py``: occupancy fades atoms and
-bonds together, and DAP-7 draws molecule-level ClO4 hulls with one A site
-and one B site at opacity 0.45 and the remaining hulls at 0.08.
+The three panels occupy equal thirds. ``render_panels.py`` draws them:
+disorder fades atoms and bonds by occupancy, DAP-7 is viewed straight down
+the b axis with one A hull and one B hull kept visible, and PETN carries a
+mock nitrate stretch plus a perpendicular arrow on each terminal oxygen.
 
     PYTHONPATH=. python docs/images/render_panels.py
 
@@ -106,33 +106,30 @@ def _crop_largest(image: Image.Image, pad: int = 32) -> Image.Image:
 
 
 def main() -> None:
-    target_h = 640
-    fitted: list[tuple[Image.Image, str]] = []
-    for filename, label, mode in PANELS:
-        image = Image.open(ROOT / filename)
-        cropped = _crop_largest(image) if mode == "largest" else _crop_all(image)
-        width = max(1, int(round(cropped.width * target_h / cropped.height)))
-        fitted.append(
-            (cropped.resize((width, target_h), Image.Resampling.LANCZOS), label)
-        )
-    gap = 40
+    slot = 720
     label_h = 56
-    total_w = sum(image.width for image, _ in fitted) + gap * (len(fitted) - 1)
-    canvas = Image.new("RGB", (total_w, target_h + label_h), "white")
+    canvas = Image.new("RGB", (slot * len(PANELS), slot + label_h), "white")
     draw = ImageDraw.Draw(canvas)
     font = ImageFont.truetype("arial.ttf", 32)
-    x = 0
-    for image, label in fitted:
-        canvas.paste(image, (x, 0))
+    for index, (filename, label, mode) in enumerate(PANELS):
+        image = Image.open(ROOT / filename)
+        cropped = _crop_largest(image) if mode == "largest" else _crop_all(image)
+        scale = min(slot / cropped.width, slot / cropped.height)
+        fitted = cropped.resize(
+            (max(1, int(round(cropped.width * scale))), max(1, int(round(cropped.height * scale)))),
+            Image.Resampling.LANCZOS,
+        )
+        origin_x = index * slot + (slot - fitted.width) // 2
+        origin_y = (slot - fitted.height) // 2
+        canvas.paste(fitted, (origin_x, origin_y))
         text_box = draw.textbbox((0, 0), label, font=font)
         text_w = text_box[2] - text_box[0]
         draw.text(
-            (x + (image.width - text_w) / 2, target_h + 10),
+            (index * slot + (slot - text_w) / 2, slot + 10),
             label,
             fill="#333333",
             font=font,
         )
-        x += image.width + gap
     canvas.save(ROOT / "feature_combined.png", "PNG")
 
 
