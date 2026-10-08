@@ -11,9 +11,17 @@ from .rightclick import *
 from .status_helpers import status_banner_payload
 from ..transforms import transforms_cache_key
 from .backend import ViewerBackend
+from .display_controls import display_option_hint, display_option_items
 
 
 def register_state_callbacks(app, backend):
+    @app.callback(
+        Output("display-options", "options"), Output("display-options-hint", "children"),
+        Input("display-mode-selector", "value"), Input("display-options", "value"),
+    )
+    def update_display_availability(mode, selected):
+        return display_option_items(mode, selected), display_option_hint(mode)
+
     def scene_control_outputs(state: dict[str, Any]) -> tuple[Any, ...]:
         scene_id = state.get("scene_id") or backend.active_scene_id()
         property_payload = state.get("atom_property_color") or {}
@@ -396,36 +404,8 @@ def register_state_callbacks(app, backend):
                 }
             )
             state = backend.get_state(scene_id)
-            # Try to push the figure immediately via WebSocket if cached.
-            try:
-                cache_key = backend._figure_state_cache_key(state)
-                with backend._figure_cache_lock:
-                    cached_entry = backend._figure_cache.get(cache_key)
-                    if cached_entry is not None:
-                        backend._figure_cache.move_to_end(cache_key)
-            except Exception:
-                cached_entry = None
-            if cached_entry is not None:
-                from .backend_camera import _figure_from_cached_dict, _plotly_camera
-
-                fig = _figure_from_cached_dict(cached_entry[0])
-                camera = _plotly_camera(state.get("camera"))
-                if camera:
-                    fig.update_layout(scene_camera=camera)
-                backend.broadcast_figure(
-                    scene_id=scene_id,
-                    figure=fig.to_plotly_json(),
-                    topology_data=cached_entry[1],
-                    state=state,
-                    reason="tab-switch-cache-hit",
-                )
-                perf_log.record(
-                    "tab-switch:ws-push",
-                    kind="event",
-                    info={"scene_id": scene_id, "cache_hit": True},
-                )
-            # Always emit a unique seq to guarantee update_view fires
-            # as a fallback (in case WS is not connected).
+            # The confirmed state drives the view-update submitter. Do not
+            # bypass the cache owner's live camera/uirevision refresh here.
             seq = getattr(sync_agent_state, "_switch_seq", 0) + 1
             sync_agent_state._switch_seq = seq
             return (*scene_control_outputs(state), {"seq": seq, "scene_id": scene_id})
@@ -518,11 +498,6 @@ def register_state_callbacks(app, backend):
         if scene_id:
             backend.set_active_scene(scene_id, broadcast=False)
         prev = backend.get_state(scene_id)
-        prev_options = set(prev.get("display_options") or [])
-        next_options = set(display_options or [])
-        hydrogens_changed = ("hydrogens" in prev_options) != (
-            "hydrogens" in next_options
-        )
         display_changed = display_mode != prev.get("display_mode")
         property_spec = None
         if property_fields:
@@ -571,35 +546,6 @@ def register_state_callbacks(app, backend):
             "topology_enabled": "enabled" in (topology_toggle or []),
             "atom_property_color": property_spec,
         }
-        fast_display_options = (
-            triggered != "display-options"
-            or _display_options_can_fast_patch(prev_options, next_options)
-        )
-        if (
-            triggered
-            in {"display-options", "axis-scale-slider", "minor-opacity-slider"}
-            and not hydrogens_changed
-            and fast_display_options
-        ):
-            # Style-only controls are patched directly onto the current
-            # Plotly figure by ``patch_fast_style_controls`` below. Persist
-            # their state for API callers, but do not touch
-            # ``agent-state-store`` or the full-figure callback.
-            if all(prev.get(k) == v for k, v in patch.items() if k != "scene_id"):
-                return no_update
-            backend.apply_intent(
-                {"type": "set_style", "scene_id": scene_id, "payload": patch}
-            )
-            perf_log.record(
-                "callback:capture_state",
-                kind="cb",
-                info={
-                    "trigger": triggered,
-                    "scene_id": scene_id,
-                    "fast_path": True,
-                },
-            )
-            return no_update
         # Skip the write -- and the cascade through ``update_view`` --
         # if every captured field already matches the persisted state.
         # The chain ``Labels click -> capture_state -> agent-state-store
@@ -619,54 +565,10 @@ def register_state_callbacks(app, backend):
                 "scene_id": scene_id,
             },
         )
-        return backend.get_state()
-
-    @app.callback(
-        Output("crystal-graph", "figure", allow_duplicate=True),
-        Output("fast-view-metadata", "children", allow_duplicate=True),
-        Input("display-options", "value"),
-        Input("axis-scale-slider", "value"),
-        Input("minor-opacity-slider", "value"),
-        State("scene-tabs", "value"),
-        prevent_initial_call=True,
-    )
-    def patch_fast_style_controls(display_options, axis_scale, minor_opacity, scene_id):
-        """Patch style-only trace attributes without rebuilding the figure.
-
-        Hydrogens remain on the full scene path because they change the atom
-        and bond sets. Labels/axes/unit-cell/minor-only/minor-opacity only
-        flip trace visibility/opacity, so a small Dash Patch is enough.
-        """
-        scene_id = scene_id or backend.active_scene_id()
-        if scene_id and scene_id not in backend.scene_store.scenes:
-            return no_update, no_update
-        prev = backend.get_state(scene_id)
-        prev_options = set(prev.get("display_options") or [])
-        next_options = set(display_options or [])
-        if ("hydrogens" in prev_options) != ("hydrogens" in next_options):
-            return no_update, no_update
-        if not _display_options_can_fast_patch(prev_options, next_options):
-            return no_update, no_update
-
-        # Fetch the figure from backend cache instead of pulling 1-2MB of JSON
-        # from the browser on every slider tick.
-        fig, _ = backend.figure_for_state(prev)
-        current_figure = fig.to_plotly_json()
-
-        patch_payload = {
-            "display_options": list(display_options or []),
-            "axis_scale": axis_scale,
-            "minor_opacity": minor_opacity,
-        }
-        backend.apply_intent(
-            {"type": "set_style", "scene_id": scene_id, "payload": patch_payload}
-        )
-        fig_patch = _fast_style_patch_for_figure(
-            current_figure,
-            display_options=display_options,
-            minor_opacity=minor_opacity,
-        )
-        return fig_patch, _fast_view_metadata(backend, backend.get_state(scene_id))
+        state = backend.get_state(scene_id)
+        # Capture only publishes the authoritative state. Geometry scheduling
+        # and stale-result handling remain in the worker.
+        return state
 
     # ------------------------------------------------------------------
     # Phase 3 UI: Named-polyhedra table.

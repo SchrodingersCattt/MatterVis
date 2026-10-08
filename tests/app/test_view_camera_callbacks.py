@@ -19,7 +19,7 @@ from _layout_helpers import (  # noqa: E402  shared helpers
 )
 
 
-def test_view_buttons_patch_graph_camera_directly(tmp_path: Path):
+def test_view_buttons_submit_camera_update_message(tmp_path: Path):
     app = create_app(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
 
     callbacks = [
@@ -31,11 +31,11 @@ def test_view_buttons_patch_graph_camera_directly(tmp_path: Path):
     assert len(callbacks) == 1
     outputs = _outputs(callbacks[0])
     assert ("camera-state-store", "data") in outputs
-    assert ("crystal-graph", "figure") in outputs
+    assert ("view-update-store", "data") in outputs
     assert ("fast-view-metadata", "children") in outputs
 
 
-def test_projection_buttons_patch_graph_camera_directly(tmp_path: Path):
+def test_projection_buttons_submit_camera_update_message(tmp_path: Path):
     app = create_app(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
 
     callbacks = [
@@ -47,7 +47,7 @@ def test_projection_buttons_patch_graph_camera_directly(tmp_path: Path):
 
     assert len(callbacks) == 1
     outputs = _outputs(callbacks[0])
-    assert ("crystal-graph", "figure") in outputs
+    assert ("view-update-store", "data") in outputs
     assert ("fast-view-metadata", "children") in outputs
 
 

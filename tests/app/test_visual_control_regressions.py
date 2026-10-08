@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from mat_viewer.app import ViewerBackend
 from mat_viewer.app.dash_impl import _display_options_can_fast_patch
 from mat_viewer.app.camera_helpers import _structure_summary
@@ -192,15 +194,20 @@ def test_ws_figure_broadcast_rejects_stale_polyhedron_state(tmp_path):
         backend._render_worker.shutdown()
 
 
-def test_ws_figure_broadcast_allows_camera_revision_drift(tmp_path):
+@pytest.mark.parametrize("explicit_revision", [False, True])
+def test_ws_figure_broadcast_allows_orbit_but_rejects_reset_drift(tmp_path, explicit_revision):
     backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
     scene_id = backend.active_scene_id()
     try:
         render_state = backend.get_state(scene_id)
         current_state = dict(render_state)
         current_state["camera_revision"] = int(current_state.get("camera_revision", 0) or 0) + 1
+        patch = (
+            {"camera_revision": current_state["camera_revision"]}
+            if explicit_revision else {"camera": {"eye": {"x": 3, "y": 2, "z": 1}}}
+        )
         backend.patch_state(
-            {"camera_revision": current_state["camera_revision"]},
+            patch,
             scene_id=scene_id,
             broadcast=False,
         )
@@ -211,8 +218,13 @@ def test_ws_figure_broadcast_allows_camera_revision_drift(tmp_path):
 
         payload = backend.broadcast_figure(scene_id=scene_id, figure=valid, state=render_state)
 
-        assert payload["type"] == "figure"
-        assert backend.latest_figure_broadcast()["figure"] == valid
+        if explicit_revision:
+            assert payload["type"] == "figure_ignored"
+            assert payload["reason"] == "stale-render-revision"
+            assert backend.latest_figure_broadcast() is None
+        else:
+            assert payload["type"] == "figure"
+            assert backend.latest_figure_broadcast()["figure"] == valid
     finally:
         backend._render_worker.shutdown()
 

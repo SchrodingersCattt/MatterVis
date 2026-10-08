@@ -12,6 +12,7 @@ from mat_viewer.capabilities import (
     CAPABILITY_REGISTRY,
     MOLCRYSKIT_INSTALL,
     MOLCRYSKIT_MINIMUM,
+    MOLCRYSKIT_SOURCE_MINIMUM,
     install_command,
     resolve_requirements,
 )
@@ -153,7 +154,7 @@ def test_released_molcryskit_minimum_is_consistent() -> None:
         for dependency in data["project"]["dependencies"]
         if _dependency_name(dependency) == "molcrys-kit"
     )
-    assert molcryskit == f"molcrys-kit>={MOLCRYSKIT_MINIMUM}"
+    assert molcryskit == f"molcrys-kit>={MOLCRYSKIT_SOURCE_MINIMUM}"
     assert "git+" not in molcryskit
 
     for workflow in ("ci.yml", "release.yml"):

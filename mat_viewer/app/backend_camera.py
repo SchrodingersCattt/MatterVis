@@ -133,6 +133,8 @@ class _CameraBackendMixin:
                 fig.update_layout(
                     annotations=annotations or [],
                     shapes=shapes or [],
+                    uirevision=style_for_overlay["uirevision"],
+                    scene_uirevision=style_for_overlay["uirevision"],
                 )
                 camera = _plotly_camera(state.get("camera"))
                 if camera:
@@ -507,13 +509,17 @@ class _CameraBackendMixin:
         ``GET /state`` echoes back what was set.
         """
         normalized = _coerce_projection(projection, fallback="perspective")
-        self.patch_state({"projection": normalized}, scene_id=scene_id, broadcast=broadcast)
-        # Stamp ``projection`` onto the persisted camera dict so a
-        # subsequent ``set_camera`` round-trip (e.g. user drags the
-        # scene to a new orientation) doesn't drop the choice.
         camera = dict(self.get_camera(scene_id))
         camera["projection"] = {"type": normalized}
-        return self.set_camera(camera, scene_id=scene_id, broadcast=broadcast)
+        # Projection is a camera command.  Commit it atomically with the
+        # camera so it advances only the camera clock and cannot enqueue two
+        # competing full-frame deliveries.
+        self.patch_state(
+            {"projection": normalized, "camera": camera},
+            scene_id=scene_id,
+            broadcast=broadcast,
+        )
+        return camera
 
     def _bump_camera_revision(self, scene_id: Optional[str] = None, *, broadcast: bool = True) -> int:
         """Increment ``state['camera_revision']`` so the next figure

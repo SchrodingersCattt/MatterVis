@@ -13,6 +13,15 @@ def register_state_routes(v2, backend) -> dict:
     def healthz_v2():
         return jsonify(backend.healthz())
 
+    @v2.get("/view-updates")
+    def view_updates():
+        try:
+            since = int(request.args.get("since", 0) or 0)
+        except (TypeError, ValueError):
+            since = 0
+        events = backend.figure_broadcasts_since(since)
+        return jsonify({"updates": events, "cursor": backend.latest_figure_seq()})
+
     @v2.post("/state")
     def post_state():
         payload = request.get_json(force=True, silent=True) or {}

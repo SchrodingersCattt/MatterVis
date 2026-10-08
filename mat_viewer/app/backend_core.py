@@ -10,6 +10,15 @@ from .camera_helpers import *
 from .style_helpers import *
 from .rightclick import _normalize_polyhedron_specs
 from .render_worker import AsyncRenderWorker
+from .view_updates import (
+    UpdateKind,
+    classify_change,
+    display_state_key,
+    geometry_state_key,
+    make_update,
+    state_versions,
+    update_applies,
+)
 from ..config import current_config
 
 # Maximum number of distinct figure cache entries.  A bounded LRU
@@ -96,6 +105,7 @@ class _CoreBackendMixin:
         self._render_revisions: dict[str, int] = {
             str(scene_id): 0 for scene_id in self.scene_store.scenes
         }
+        self._last_update_kind_by_scene: dict[str, str] = {}
         self.pending_state: Optional[dict[str, Any]] = None
         self._first_figure_ready = threading.Event()
         self.version = 0
@@ -222,6 +232,10 @@ class _CoreBackendMixin:
             "selection": {"atom_labels": [], "active_label": None, "order": []},
             "fast_rendering": bool(style.get("fast_rendering", False)),
             "camera": scene.get("camera"),
+            "geometry_version": 0,
+            "display_version": 0,
+            "camera_version": 0,
+            "camera_revision": 0,
             # Phase 4: camera projection mode mirrored onto state so a
             # caller can inspect / set it via REST without diffing the
             # Plotly camera dict. ``style_for_state`` propagates this
@@ -263,7 +277,16 @@ class _CoreBackendMixin:
         state: Optional[dict[str, Any]] = None,
         reason: str = "render-ready",
     ) -> dict[str, Any]:
-        if not self._figure_payload_has_scene3d(figure):
+        # Retain image-backed flat/ORTEP for HTTP fallback in the same journal;
+        # the WS 3D fast lane may continue to ignore it.
+        flat_ortep = (
+            isinstance(state, dict)
+            and isinstance(figure, dict)
+            and state.get("material") == "flat"
+            and state.get("style") == "ortep"
+            and bool((figure.get("layout") or {}).get("images"))
+        )
+        if not self._figure_payload_has_scene3d(figure) and not flat_ortep:
             return {
                 "type": "figure_ignored",
                 "scene_id": scene_id,
@@ -297,47 +320,69 @@ class _CoreBackendMixin:
                 if isinstance(topology_data, dict)
                 else None,
             }
+            versions = state_versions(state or (self.get_state(scene_id) if scene_id in self.scene_store.scenes else {}))
+            payload.update(versions.to_dict())
+            payload["update_kind"] = UpdateKind.GEOMETRY.value
             self._figure_broadcasts.append(payload)
             self._figure_broadcasts = self._figure_broadcasts[-32:]
             return payload
 
+    def broadcast_view_update(
+        self,
+        update: Any,
+        *,
+        state: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """Publish a camera/display/overlay patch through the same journal.
+
+        The browser's single submitter consumes this envelope; no figure is
+        attached, so an Axes or camera action can never accidentally trigger a
+        full Plotly frame.
+        """
+        payload = update.to_dict() if hasattr(update, "to_dict") else dict(update)
+        scene_id = payload.get("scene_id")
+        current = state or self.get_state(scene_id)
+        if not update_applies(payload, current):
+            return {"type": "view_update_ignored", "reason": "stale-update", **payload}
+        with self._figure_broadcast_lock:
+            self._figure_broadcast_seq += 1
+            payload["figure_seq"] = self._figure_broadcast_seq
+            payload["version"] = self.version
+            payload["state"] = copy.deepcopy(current)
+            self._figure_broadcasts.append(payload)
+            self._figure_broadcasts = self._figure_broadcasts[-32:]
+        return payload
+
+    @staticmethod
+    def _geometry_cache_key(state: dict[str, Any]) -> str:
+        return geometry_state_key(state)
+
+    @staticmethod
+    def _display_state_key(state: dict[str, Any]) -> str:
+        return display_state_key(state)
+
+    @staticmethod
+    def geometry_cache_key(state: dict[str, Any]) -> str:
+        return geometry_state_key(state)
+
+    @staticmethod
+    def final_display_state_key(state: dict[str, Any]) -> str:
+        return display_state_key(state)
+
     @staticmethod
     def _figure_state_cache_key(state: dict[str, Any]) -> str:
-        key_state = {
-            k: v
-            for k, v in state.items()
-            if k
-            not in (
-                "version",
-                "server_started_at",
-                "render_revision",
-                "camera",
-                "camera_revision",
-                "disorder_resolve",
-                "disorder_replicas",
-            )
-        }
-        # Phase 6: ``polyhedron_specs[i].enabled`` is honoured via a
-        # post-cache trace-visibility patch (see ``figure_for_state``
-        # below + the ``meta.spec_id`` tag the renderer stamps on
-        # every polyhedron overlay). Stripping just ``enabled`` from
-        # the key turns "toggle the row checkbox" from a 200-400 ms
-        # full ``build_figure`` rebuild into a ~30 ms cache hit + a
-        # tiny patch over ``fig.data``. Per-fragment
-        # ``instance_overrides[label].visible`` is intentionally
-        # NOT stripped: the renderer still buckets fragments by
-        # colour into merged traces, so per-fragment visibility
-        # cannot be patched at trace level and must stay
-        # cache-busting.
+        # Geometry figures are reusable across named-polyhedron visibility
+        # toggles; the separate display-state key still records that change
+        # for versioning and the browser local patch.
+        key_state = json.loads(display_state_key(state))
         specs = key_state.get("polyhedron_specs")
         if isinstance(specs, list):
             key_state["polyhedron_specs"] = [
                 {k: v for k, v in spec.items() if k != "enabled"}
-                if isinstance(spec, dict)
-                else spec
+                if isinstance(spec, dict) else spec
                 for spec in specs
             ]
-        return json.dumps(_json_safe(key_state), sort_keys=True, separators=(",", ":"))
+        return json.dumps(key_state, sort_keys=True, separators=(",", ":"))
 
     def _figure_state_matches_current(
         self,
@@ -380,6 +425,7 @@ class _CoreBackendMixin:
     ) -> Any:
         render_meta = {
             "scene_id": state.get("scene_id"),
+            "camera_revision": int(state.get("camera_revision", 0) or 0),
             "render_revision": int(
                 state.get(
                     "render_revision", self.render_revision(state.get("scene_id"))
@@ -389,6 +435,7 @@ class _CoreBackendMixin:
             "server_started_at": state.get("server_started_at")
             or self.server_started_iso(),
         }
+        render_meta.update(state_versions(state).to_dict())
         if isinstance(figure, dict):
             layout = figure.setdefault("layout", {})
             meta = layout.get("meta")
@@ -413,10 +460,12 @@ class _CoreBackendMixin:
         if not isinstance(state, dict) or not scene_id:
             return True
         try:
-            return int(state.get("render_revision", -1)) == self.render_revision(
-                scene_id
+            return (
+                int(state.get("render_revision", -1)) == self.render_revision(scene_id)
+                and int(state.get("camera_revision", 0) or 0)
+                == int(self.get_state(scene_id).get("camera_revision", 0) or 0)
             )
-        except (TypeError, ValueError):
+        except (KeyError, TypeError, ValueError):
             return False
 
     def _bump_render_revision_if_changed(
@@ -432,9 +481,7 @@ class _CoreBackendMixin:
         scene = self.scene_store.get(scene_id)
         before_state.update({"scene_id": str(scene_id), "scene_label": scene.label})
         after_state.update({"scene_id": str(scene_id), "scene_label": scene.label})
-        if self._figure_state_cache_key(before_state) != self._figure_state_cache_key(
-            after_state
-        ):
+        if self._geometry_cache_key(before_state) != self._geometry_cache_key(after_state):
             key = str(scene_id)
             self._render_revisions[key] = self._render_revisions.get(key, 0) + 1
 
@@ -466,6 +513,7 @@ class _CoreBackendMixin:
                 "scene_id": scene_id,
                 "error": error,
             }
+            payload.update(state_versions(self.get_state(scene_id)).to_dict())
             self._figure_broadcasts.append(payload)
             self._figure_broadcasts = self._figure_broadcasts[-32:]
             return payload
@@ -484,11 +532,12 @@ class _CoreBackendMixin:
                 )
             ]
 
-    def latest_figure_broadcast(self) -> Optional[dict[str, Any]]:
+    def latest_figure_broadcast(self, scene_id: Optional[str] = None) -> Optional[dict[str, Any]]:
         with self._figure_broadcast_lock:
             for payload in reversed(self._figure_broadcasts):
                 if (
                     payload.get("type") == "figure"
+                    and (scene_id is None or payload.get("scene_id") == scene_id)
                     and self._figure_revision_matches_current(
                         payload.get("scene_id"), payload.get("state")
                     )
@@ -785,13 +834,6 @@ class _CoreBackendMixin:
             except (TypeError, ValueError):
                 pass
 
-        def _display_signature(value: dict[str, Any]) -> tuple[str, bool, bool]:
-            return (
-                str(value.get("display_mode", "")),
-                "unit_cell_box" in (value.get("display_options") or []),
-                bool(value.get("topology_enabled", False)),
-            )
-
         if "scene_id" in patch and patch["scene_id"] in self.scene_store.scenes:
             scene_id = str(patch["scene_id"])
             state = self.scene_state(scene_id)
@@ -804,7 +846,6 @@ class _CoreBackendMixin:
             state["scene_id"] = scene_id
             scene = self.scene_store.get(scene_id)
             state["scene_label"] = scene.label
-        display_signature_before = _display_signature(state)
         for key in (
             "atom_scale",
             "bond_radius",
@@ -963,25 +1004,9 @@ class _CoreBackendMixin:
             migrated = _legacy_monochrome_group(existing_ids)
             if migrated is not None:
                 state["atom_groups"] = existing_groups + [migrated]
-        display_signature_after = _display_signature(state)
-        if (
-            any(
-                key in patch
-                for key in ("display_mode", "display_options", "topology_enabled")
-            )
-            and display_signature_after != display_signature_before
-        ):
-            # Plotly cameras live in the normalized scene cube. Reusing one
-            # after a display-signature change remaps the eye through a new
-            # cube scale and makes the model look squished.
-            state["camera"] = None
-            if "camera_revision" not in patch:
-                try:
-                    state["camera_revision"] = (
-                        int(state.get("camera_revision", 0) or 0) + 1
-                    )
-                except (TypeError, ValueError):
-                    state["camera_revision"] = 1
+        # Display and geometry changes keep the user's camera.  Only the
+        # explicit camera commands below change the camera clock; resetting it
+        # here made Labels/Hydrogens/scene-range changes snap the viewport.
         if "camera" in patch and patch["camera"] is not None:
             state["camera"] = patch["camera"]
         # ``camera_revision`` is the uirevision-bump counter written by
@@ -1018,6 +1043,11 @@ class _CoreBackendMixin:
                 state = self.scene_state(scene_id)
             else:
                 state = self.current_state
+            versions = state_versions(state)
+            state.setdefault("geometry_version", versions.geometry)
+            state.setdefault("display_version", versions.display)
+            state.setdefault("camera_version", versions.camera)
+            state.setdefault("camera_revision", versions.camera)
             return self._state_snapshot(state, scene_id)
 
     def patch_state(
@@ -1048,6 +1078,36 @@ class _CoreBackendMixin:
                 else copy.deepcopy(self.current_state)
             )
             self.current_state = self.normalize_state(patch, scene_id=target_scene_id)
+            change_kind = classify_change(state_before, self.current_state)
+            before_versions = state_versions(state_before)
+            # Maintain independent clocks.  A display patch can reuse the
+            # current geometry; a camera patch never invalidates either.
+            geometry_version = before_versions.geometry
+            display_version = before_versions.display
+            camera_version = max(
+                before_versions.camera,
+                int(self.current_state.get("camera_revision", 0) or 0),
+            )
+            if change_kind == UpdateKind.GEOMETRY:
+                geometry_version += 1
+                display_version += 1
+            elif change_kind in {
+                UpdateKind.DISPLAY,
+                UpdateKind.OVERLAY,
+                UpdateKind.ANALYSIS,
+            }:
+                display_version += 1
+            elif change_kind == UpdateKind.CAMERA:
+                # Browser drag persistence changes the camera value without
+                # invalidating a command revision. Explicit Reset/align and
+                # projection commands carry a revision/projection marker.
+                if "camera_revision" in (patch or {}) or "projection" in (patch or {}):
+                    camera_version += 1
+            self.current_state["geometry_version"] = geometry_version
+            self.current_state["display_version"] = display_version
+            self.current_state["camera_version"] = camera_version
+            self.current_state["camera_revision"] = camera_version
+            self._last_update_kind_by_scene[str(target_scene_id)] = change_kind.value
             if target_scene_id:
                 scene_payload = copy.deepcopy(self.current_state)
                 scene_payload.pop("scene_id", None)
@@ -1067,6 +1127,35 @@ class _CoreBackendMixin:
             state["server_started_at"] = self.server_started_iso()
             state["render_revision"] = self.render_revision(target_scene_id)
             self._request_scene_store_save()
+            if broadcast and change_kind in {
+                UpdateKind.CAMERA,
+                UpdateKind.OVERLAY,
+                UpdateKind.DISPLAY,
+                UpdateKind.ANALYSIS,
+            }:
+                update_payload = {}
+                if change_kind == UpdateKind.CAMERA:
+                    update_payload["camera"] = copy.deepcopy(state.get("camera"))
+                elif change_kind in {UpdateKind.OVERLAY, UpdateKind.DISPLAY}:
+                    update_payload.update(
+                        {
+                            "display_options": list(state.get("display_options") or []),
+                            "axis_scale": state.get("axis_scale"),
+                            "minor_opacity": state.get("minor_opacity"),
+                            "polyhedron_specs": copy.deepcopy(
+                                state.get("polyhedron_specs") or []
+                            ),
+                        }
+                    )
+                self.broadcast_view_update(
+                    make_update(
+                        state,
+                        before=state_before,
+                        payload=update_payload,
+                        reason="state-confirmed",
+                    ),
+                    state=state,
+                )
             return state
 
     def pop_pending_state(self) -> Optional[dict[str, Any]]:

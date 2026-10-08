@@ -1,6 +1,8 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
+import copy
+
 from .shared import *
 from .camera_helpers import *
 from .style_helpers import *
@@ -9,6 +11,7 @@ from .editor_tables import *
 from .editor_transforms import *
 from .rightclick import *
 from ..transforms import transforms_cache_key
+from .view_updates import UpdateKind, classify_change, make_update
 from .backend import ViewerBackend
 
 
@@ -17,6 +20,69 @@ def register_view_callbacks(app, backend):
     # does not bump backend version on every mouse-move.
     _last_camera_commit_by_scene: dict[str, float] = {}
     _camera_commit_min_interval_s = 0.25
+
+    # Every confirmed state mutation gets one typed envelope.  The browser
+    # clientside callback below is the sole Plotly/SVG submitter for these
+    # envelopes; Dash never competes with the WebSocket frame path.
+    _last_confirmed_state: dict[str, Any] = {}
+    _last_http_frame_seq = 0
+
+    @app.callback(
+        Output("view-update-store", "data", allow_duplicate=True),
+        Input("agent-state-store", "data"),
+        prevent_initial_call=True,
+    )
+    def publish_confirmed_state(state):
+        if not isinstance(state, dict):
+            return no_update
+        scene_id = str(state.get("scene_id") or "")
+        before = _last_confirmed_state.get(scene_id)
+        _last_confirmed_state[scene_id] = copy.deepcopy(state)
+        if before is None:
+            return no_update
+        payload = {
+            "display_options": list(state.get("display_options") or []),
+            "axis_scale": state.get("axis_scale"),
+            "minor_opacity": state.get("minor_opacity"),
+            "polyhedron_specs": copy.deepcopy(state.get("polyhedron_specs") or []),
+            "label_mode": state.get("label_mode"),
+        }
+        return make_update(
+            state, before=before, payload=payload, reason="state-confirmed"
+        ).to_dict()
+
+    if hasattr(app, "clientside_callback"):
+        app.clientside_callback(
+            """
+            function(update) {
+              if (window.MatterVisViewUpdates &&
+                  typeof window.MatterVisViewUpdates.submit === 'function') {
+                return window.MatterVisViewUpdates.submit(update) || '';
+              }
+              return '';
+            }
+            """,
+            Output("view-update-ack", "children", allow_duplicate=True),
+            Input("view-update-store", "data"),
+            prevent_initial_call=True,
+        )
+
+    @app.callback(
+        Output("view-update-store", "data", allow_duplicate=True),
+        Input("agent-state-poll", "n_intervals"),
+        prevent_initial_call=True,
+    )
+    def deliver_http_fallback(_n_intervals):
+        """Deliver a completed frame without assembling or rewriting Dash UI."""
+        nonlocal _last_http_frame_seq
+        event = backend.latest_figure_broadcast()
+        if not event:
+            return no_update
+        seq = int(event.get("figure_seq", 0) or 0)
+        if seq <= _last_http_frame_seq:
+            return no_update
+        _last_http_frame_seq = seq
+        return event
 
     @app.callback(
         Output("rightclick-target", "data", allow_duplicate=True),
@@ -360,7 +426,7 @@ def register_view_callbacks(app, backend):
     # ------------------------------------------------------------------
     @app.callback(
         Output("camera-state-store", "data", allow_duplicate=True),
-        Output("crystal-graph", "figure", allow_duplicate=True),
+        Output("view-update-store", "data", allow_duplicate=True),
         Output("fast-view-metadata", "children", allow_duplicate=True),
         Input("view-align-a", "n_clicks"),
         Input("view-align-b", "n_clicks"),
@@ -402,13 +468,16 @@ def register_view_callbacks(app, backend):
         except Exception:  # pragma: no cover - best-effort, surface in console
             return no_update, no_update, no_update
         state = backend.get_state(scene_id)
-        scene = backend.scene_for_state(state)
-        style = backend.style_for_state(state, scene=scene)
         camera_payload = _camera_store_payload(scene_id, camera)
-        topology_data = backend.topology_for_state(state) if style.get("topology_enabled", False) else None
+        update = make_update(
+            state,
+            operation="camera",
+            payload={"camera": camera, "command": triggered},
+            reason="camera-command",
+        ).to_dict()
         return (
             camera_payload,
-            _camera_figure_patch(scene, style, camera, topology_data=topology_data),
+            update,
             _fast_view_metadata(backend, state, camera_payload),
         )
 
@@ -429,7 +498,7 @@ def register_view_callbacks(app, backend):
 
     @app.callback(
         Output("camera-state-store", "data", allow_duplicate=True),
-        Output("crystal-graph", "figure", allow_duplicate=True),
+        Output("view-update-store", "data", allow_duplicate=True),
         Output("fast-view-metadata", "children", allow_duplicate=True),
         Input("view-projection", "value"),
         State("scene-tabs", "value"),
@@ -452,13 +521,16 @@ def register_view_callbacks(app, backend):
         except Exception:  # pragma: no cover
             return no_update, no_update, no_update
         state = backend.get_state(scene_id)
-        scene = backend.scene_for_state(state)
-        style = backend.style_for_state(state, scene=scene)
         camera_payload = _camera_store_payload(scene_id, camera)
-        topology_data = backend.topology_for_state(state) if style.get("topology_enabled", False) else None
+        update = make_update(
+            state,
+            operation="camera",
+            payload={"camera": camera, "command": "projection"},
+            reason="projection-command",
+        ).to_dict()
         return (
             camera_payload,
-            _camera_figure_patch(scene, style, camera, topology_data=topology_data),
+            update,
             _fast_view_metadata(backend, state, camera_payload),
         )
 
@@ -520,7 +592,9 @@ def register_view_callbacks(app, backend):
         prevent_initial_call=True,
     )
     def refresh_fast_view_metadata(agent_state, camera_state):
-        state = backend.normalize_state(agent_state or backend.get_state())
+        # The store is a notification, not a second editable state owner.
+        # get_state supplies the authoritative render revision as well.
+        state = backend.get_state((agent_state or {}).get("scene_id"))
         return _fast_view_metadata(backend, state, camera_state)
 
     @app.callback(
@@ -595,24 +669,22 @@ def register_view_callbacks(app, backend):
         Output("topology-results", "children"),
         Output("structure-summary", "children"),
         Input("agent-state-store", "data"),
-        Input("scene-switch-seq", "data"),
         State("crystal-graph", "figure"),
         State("camera-state-store", "data"),
     )
-    def update_view(
-        agent_state,
-        scene_switch_seq,
-        current_figure,
-        camera_state,
-    ):
-        # ``update_view`` is the dominant cost when the user pokes a
-        # slider or a colour swatch -- it rebuilds the figure, the
-        # topology histogram, and the structure-summary table in one
-        # callback. Wrap it so the perf log makes the total wall time
-        # observable. ``figure_for_state`` itself is instrumented
-        # internally with three sub-blocks (``scene_for_state``,
-        # ``topology_for_state``, ``build_figure``) so the user can
-        # tell which leg is slow without re-profiling.
+    def update_view(agent_state, *args):
+        # Current contract is (state, current_figure, camera_state).  Accept
+        # the pre-refactor four-argument call shape for host integrations that
+        # still invoke the callback directly in tests.
+        if len(args) == 2:
+            current_figure, _camera_state = args
+        elif len(args) >= 3:
+            _, current_figure, _camera_state = args[:3]
+        else:
+            current_figure, _camera_state = None, None
+        # State notifications enqueue a full worker build. The existing poll
+        # delivers completed frames when WS is absent; neither path assembles
+        # molecular geometry synchronously in this callback.
         #
         # ``graph-interaction-store`` is intentionally NOT an Input.
         # Its sole purpose is gate deferred WS figure pushes in
@@ -623,8 +695,27 @@ def register_view_callbacks(app, backend):
         # pushes from live interaction in JS; no server-side gate is
         # needed.
         cb_start = time.monotonic()
-        state = backend.normalize_state(agent_state or backend.get_state())
+        state = backend.get_state((agent_state or {}).get("scene_id"))
         scene_id = state.get("scene_id")
+        previous_state = getattr(update_view, "_last_state", None)
+        change_kind = classify_change(previous_state, state)
+        if previous_state is None:
+            try:
+                change_kind = UpdateKind(
+                    backend._last_update_kind_by_scene.get(str(scene_id), change_kind.value)
+                )
+            except (AttributeError, ValueError):
+                pass
+        update_view._last_state = copy.deepcopy(state)
+        if change_kind in {
+            UpdateKind.CAMERA,
+            UpdateKind.OVERLAY,
+            UpdateKind.DISPLAY,
+        }:
+            # Labels, opacity, polyhedron visibility and Axes are delivered
+            # by the clientside submitter.  No worker and no full figure
+            # response is needed for these changes.
+            return (no_update,) * 4
         topo_key_preview = (
             state.get("scene_id"),
             state.get("structure"),
@@ -676,79 +767,34 @@ def register_view_callbacks(app, backend):
             ),
         )
         prev_key = getattr(update_view, "_topo_cache_key", None)
-        topology_changed = prev_key != topo_key_preview
-        camera = _camera_from_store(camera_state, state.get("scene_id"))
-        if camera:
-            state["camera"] = camera
-        # Topology overlay toggles are user-visible correctness changes.  Do
-        # them synchronously so the checkbox never leaves a stale no-overlay
-        # frame waiting on the background topology/websocket fast lane.
-        #
-        # async_figure: when the scene changes (tab switch), allow the
-        # figure to be built in the background so this callback returns
-        # immediately with a skeleton placeholder.
-        scene_changed = getattr(update_view, "_last_rendered_scene_id", None) != scene_id
-        fig, topology_data = backend.figure_for_state(
-            state,
-            async_topology=not topology_changed,
-            async_figure=scene_changed,
-        )
+        # One scheduling owner; no figure assembly on a Dash request thread.
+        # The existing broadcast journal is also the HTTP fallback when WS is
+        # absent. Never stamp a newer revision onto the browser's old geometry.
+        if not backend._figure_revision_matches_current(scene_id, state):
+            return (no_update,) * 4
+        event = backend.latest_figure_broadcast(scene_id)
+        if (
+            not event
+            or event.get("scene_id") != scene_id
+            or event.get("render_revision") != state.get("render_revision")
+            or (event.get("state") or {}).get("camera_revision", 0)
+            != state.get("camera_revision", 0)
+        ):
+            backend._render_worker.request_figure_build(state)
+            return (no_update,) * 4
+        fig, topology_data = event["figure"], event.get("topology")
+        # Dash's figure prop may lag behind a WS delivery; the browser gate
+        # deduplicates that case after successful Plotly completion.
+        current_layout = (current_figure or {}).get("layout") or {}
+        layout = fig.get("layout") or {}
+        if (
+            (current_layout.get("meta") or {}).get("mattervis_render")
+            == (layout.get("meta") or {}).get("mattervis_render")
+            and (current_layout.get("scene") or {}).get("uirevision")
+            == (layout.get("scene") or {}).get("uirevision")
+        ):
+            fig = no_update
 
-        pending_figure = False
-        if isinstance(fig, dict):
-            pending_figure = bool(fig.get("_mattervis_pending"))
-            layout_meta = (fig.get("layout") or {}).get("meta") if isinstance(fig.get("layout"), dict) else None
-            if isinstance(layout_meta, dict):
-                pending_figure = pending_figure or bool(layout_meta.get("mattervis_pending"))
-        else:
-            pending_figure = bool(getattr(fig, "_mattervis_pending", False))
-            try:
-                layout_meta = fig.layout.meta
-                if isinstance(layout_meta, dict):
-                    pending_figure = pending_figure or bool(layout_meta.get("mattervis_pending"))
-            except Exception:
-                pass
-        if pending_figure:
-            topo_key = topo_key_preview
-            if prev_key == topo_key:
-                # Callback function attributes are process-global, not
-                # browser-local. Another client may have populated this key
-                # while this browser still shows the previous scene summary.
-                # Read the already-built bundle scene (no figure rebuild) so
-                # a tab switch can never leave "Disorder: none" from a
-                # different structure on screen.
-                summary = _structure_summary(
-                    backend.get_bundle(state["structure"]).scene
-                )
-                update_view._last_rendered_scene_id = state.get("scene_id")
-                perf_log.record(
-                    "callback:update_view",
-                    duration_ms=(time.monotonic() - cb_start) * 1000.0,
-                    kind="cb",
-                    info={
-                        "scene_id": state.get("scene_id"),
-                        "figure": "pending",
-                        "side_panel": "cached",
-                    },
-                )
-                return no_update, no_update, no_update, summary
-            update_view._topo_cache_key = topo_key
-            with perf_log.time_block("update_view:side_panel", kind="event"):
-                summary = _structure_summary(backend.scene_for_state(state))
-                histogram = topology_histogram_figure(topology_data)
-                md = topology_results_markdown(topology_data)
-            update_view._last_rendered_scene_id = state.get("scene_id")
-            perf_log.record(
-                "callback:update_view",
-                duration_ms=(time.monotonic() - cb_start) * 1000.0,
-                kind="cb",
-                info={
-                    "scene_id": state.get("scene_id"),
-                    "figure": "pending",
-                    "side_panel": "rebuilt",
-                },
-            )
-            return no_update, histogram, md, summary
         # The right-hand sidebar only changes when the *topology* state
         # or the chosen scene changes. Keep a memo on the callback
         # itself so toggling Labels / Axes / Atom Scale -- which all

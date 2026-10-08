@@ -46,12 +46,35 @@ The hooks are synchronous and must return promptly. Plugins own asynchronous
 work and future polling; no background work is executed for them by this API.
 
 Panels appear only when at least one plugin returns a panel. The Web container
-`mv-extension-panels` is a sibling on the right of the existing native panels.
+`mv-extension-panels` is the optional third column, to the right of the native
+viewer. Without plugin panels, the Web layout has only a left tool sidebar and
+the center plot. Multiple plugin panels share that one extension container.
 The TUI container of the same ID is appended inside the original `body` after
 canvas and inspector (the native narrow-screen vertical layout still applies).
 Use plugin-prefixed component/widget IDs; do not reuse host IDs. With no panels,
 no extra layout container is emitted. TUI text input in plugin panels does not
 flow through the native direct movement-key handler.
+
+### Web tool placement
+
+The left sidebar keeps scene navigation and CIF upload above horizontal
+**Display / Analysis / Operations** tabs. All native controls are mounted at
+startup, including inactive panes; switching tabs changes only CSS visibility,
+not callback registration, scene state, or the renderer. Native advanced
+sections remain collapsible within their panes.
+
+Click or use Enter/Space to select a tab; Left/Right arrows and Home/End move
+between tabs. Selected and pressed ARIA states follow the active tab. Clicking
+the active tab leaves it open. Selection is browser-page-local and resets to
+Display on refresh; it is not persisted in scenes, presets, or browser storage.
+
+Existing `analysis-panel-toggle` and `operation-panel-toggle` IDs are retained;
+`display-panel-toggle` is added. The legacy `right-panel` ID now identifies the
+analysis/operations container **inside** `left-panel`, not a root column.
+Only the left sidebar has a splitter; `right-splitter` is removed. The native
+server-log overlay lives within `center-panel`, with its width constrained to
+the viewer so it cannot cover extension inputs. Plugins do not need to reserve
+space for that overlay.
 
 ## Context and snapshots
 
@@ -120,5 +143,8 @@ return value; a plugin retains its bound context on its instance if needed.
 - `tests/app/test_web_extensions.py`: native layout, panel-less plugins,
   build/register once, shared backend/context, callback registration, duplicate
   rejection and startup cleanup.
+- `tests/app/test_workbench_layout.py`: actual root columns, mounted panes,
+  unique component IDs, fixed callback dependencies, shared scene/upload tools,
+  viewer-contained diagnostics and unchanged extension mounting.
 - `tests/tui/test_tui_extensions.py`: async `run_test` composition/lifecycle,
   worker snapshots, plugin input, duplicate rejection and build-failure cleanup.
