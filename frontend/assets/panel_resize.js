@@ -1,6 +1,78 @@
 (function () {
+  const SCENE_MIN = 420;
+  const PANEL_MIN = 260;
+  const PANEL_MAX = 640;
+
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
+  }
+
+  let resizingScene = false;
+
+  function resizeScene() {
+    if (resizingScene) {
+      return;
+    }
+    resizingScene = true;
+    try {
+      const graph = document.getElementById("crystal-graph");
+      if (window.Plotly && graph) {
+        const plot = graph.classList.contains("js-plotly-plot")
+          ? graph
+          : graph.querySelector(".js-plotly-plot");
+        if (plot) {
+          window.Plotly.Plots.resize(plot);
+        }
+      }
+      window.dispatchEvent(new Event("resize"));
+    } finally {
+      resizingScene = false;
+    }
+  }
+
+  function panelWidth(id) {
+    const panel = document.getElementById(id);
+    return panel ? panel.getBoundingClientRect().width : 0;
+  }
+
+  function maxPanelWidth(panelId) {
+    const root = document.getElementById("viewer-root");
+    if (!root) {
+      return PANEL_MAX;
+    }
+    const otherId = panelId === "left-panel" ? "mv-extension-panels" : "left-panel";
+    const splitters = document.querySelectorAll("#viewer-root > .panel-splitter").length * 8;
+    const available = root.getBoundingClientRect().width - panelWidth(otherId) - SCENE_MIN - splitters;
+    if (available < PANEL_MIN) {
+      return Math.max(160, available);
+    }
+    return Math.min(PANEL_MAX, available);
+  }
+
+  function fitPanels() {
+    const left = document.getElementById("left-panel");
+    const right = document.getElementById("mv-extension-panels");
+    const root = document.getElementById("viewer-root");
+    if (!left || !root) {
+      return;
+    }
+    const splitters = document.querySelectorAll("#viewer-root > .panel-splitter").length * 8;
+    const budget = root.getBoundingClientRect().width - SCENE_MIN - splitters;
+    let leftWidth = left.getBoundingClientRect().width;
+    let rightWidth = right ? right.getBoundingClientRect().width : 0;
+    const used = leftWidth + rightWidth;
+    if (used > budget && used > 0) {
+      const scale = Math.max(budget, 160) / used;
+      leftWidth *= scale;
+      rightWidth *= scale;
+    }
+    left.style.width = clamp(leftWidth, 160, PANEL_MAX) + "px";
+    left.style.flex = "0 0 auto";
+    if (right) {
+      right.style.width = clamp(rightWidth, 160, PANEL_MAX) + "px";
+      right.style.flex = "0 0 auto";
+    }
+    resizeScene();
   }
 
   function bindSplitter(splitterId, panelId, edge) {
@@ -16,21 +88,34 @@
       event.preventDefault();
       const rootRect = root.getBoundingClientRect();
       document.body.classList.add("panel-resizing");
+      let frame = 0;
 
       function onMove(moveEvent) {
         let width;
         if (edge === "left") {
-          width = clamp(moveEvent.clientX - rootRect.left, 260, 640);
+          width = moveEvent.clientX - rootRect.left;
         } else {
-          width = clamp(rootRect.right - moveEvent.clientX, 260, 640);
+          width = rootRect.right - moveEvent.clientX;
         }
-        panel.style.width = width + "px";
+        const limit = maxPanelWidth(panelId);
+        const floor = Math.min(PANEL_MIN, limit);
+        panel.style.width = clamp(width, floor, limit) + "px";
         panel.style.flex = "0 0 auto";
+        if (!frame) {
+          frame = window.requestAnimationFrame(function () {
+            frame = 0;
+            resizeScene();
+          });
+        }
       }
 
       function onUp() {
         document.body.classList.remove("panel-resizing");
         window.removeEventListener("mousemove", onMove);
+        if (frame) {
+          window.cancelAnimationFrame(frame);
+        }
+        resizeScene();
       }
 
       window.addEventListener("mousemove", onMove);
@@ -87,6 +172,16 @@
 
   function init() {
     bindSplitter("left-splitter", "left-panel", "left");
+    bindSplitter("extension-splitter", "mv-extension-panels", "right");
+    if (!document.body.dataset.panelsFitted) {
+      document.body.dataset.panelsFitted = "1";
+      fitPanels();
+      window.addEventListener("resize", function () {
+        if (!resizingScene) {
+          fitPanels();
+        }
+      });
+    }
     bindPanelTab("display-panel-toggle", "display");
     bindPanelTab("analysis-panel-toggle", "analysis");
     bindPanelTab("operation-panel-toggle", "operation");

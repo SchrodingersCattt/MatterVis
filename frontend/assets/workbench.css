@@ -11,6 +11,12 @@
   isolation: isolate;
 }
 
+#left-panel,
+#mv-extension-panels {
+  overflow-x: hidden;
+  min-width: 0;
+}
+
 #left-panel {
   background: #fafbfc;
   scrollbar-gutter: stable;

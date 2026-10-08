@@ -922,12 +922,22 @@ def _create_app(
                     id="right-panel",
                     className="analysis-panel",
                 ),
-                *([html.Div(
-                    extension_panels,
-                    id="mv-extension-panels",
-                    style={"flex": "0 0 320px", "height": "100vh",
-                           "overflowY": "auto", "borderLeft": "1px solid #DDDDDD"},
-                )] if extension_panels else []),
+                *([
+                    html.Div(id="extension-splitter", className="panel-splitter"),
+                    html.Div(
+                        extension_panels,
+                        id="mv-extension-panels",
+                        style={
+                            "width": "320px",
+                            "flex": "0 0 auto",
+                            "minWidth": "0",
+                            "height": "100vh",
+                            "overflowX": "hidden",
+                            "overflowY": "auto",
+                            "borderLeft": "1px solid #DDDDDD",
+                        },
+                    ),
+                ] if extension_panels else []),
                 # The workbench mounts this overlay inside the native viewer,
                 # never over an optional extension's inputs.
                 html.Div(

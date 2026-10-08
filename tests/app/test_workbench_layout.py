@@ -47,6 +47,7 @@ def test_native_workbench_tree_and_dependencies(tmp_path, monkeypatch, with_exte
                 ["mv-extension-panels"] if with_extension else []
             )
             assert "right-splitter" not in ids
+            assert ("extension-splitter" in ids) is with_extension
             assert "right-panel" in layout_ids(by_id["left-panel"])
             assert "perf-log-panel" in layout_ids(by_id["center-panel"])
             assert "perf-log-panel" not in top_ids
