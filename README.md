@@ -26,28 +26,8 @@ frontends.
 - **Zero Catalog Required** — Ships with a bundled DAP-4.cif so `mat-vis serve` works out of the box
 
 <p align="center">
-  <img src="docs/images/feature_unit_cell.png" width="500"><br>
-  <em>Unit Cell — DAP-4 unit cell (flat ORTEP with element colours)</em>
-</p>
-
-<p align="center">
-  <img src="docs/images/feature_coordination.png" width="500"><br>
-  <em>Coordination Shell — A-site coordination with convex hull overlay (CN=9, tricapped trigonal prism)</em>
-</p>
-
-<p align="center">
-  <img src="docs/images/feature_three_modes.png" width="750"><br>
-  <em>Three Display Modes — Formula unit, unit cell, and coordination shell side by side</em>
-</p>
-
-<p align="center">
-  <img src="docs/images/feature_publication.png" width="500"><br>
-  <em>Publication-Quality Export — Colour ORTEP-style Matplotlib renderer with labels</em>
-</p>
-
-<p align="center">
-  <img src="docs/images/feature_asymmetric_unit.png" width="500"><br>
-  <em>Asymmetric Unit — Diagnostic crystallographic view with atom labels and unit-cell context</em>
+  <img src="docs/images/feature_combined.png" width="960"><br>
+  <em>Caffeine disorder with occupancy drawn as opacity on atoms and bonds, DAP-7 with one highlighted A and one highlighted B perchlorate hull, and a mock nitrate displacement on PETN.</em>
 </p>
 
 ## Installation

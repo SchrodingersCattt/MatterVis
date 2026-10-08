@@ -1,0 +1,122 @@
+[
+  {
+    "id": "mode",
+    "magnitude_mode": "absolute",
+    "anchor": "center",
+    "viewport_policy": "include",
+    "color": "#7AC142",
+    "note": "Mock nitrate motion perpendicular to each N-O bond. Not a phonon.",
+    "style": {
+      "shaft_radius": 0.08625,
+      "head_radius_ratio": 2.4,
+      "head_length_ratio": 0.34,
+      "sides": 16
+    },
+    "arrows": [
+      {
+        "id": "wag-13",
+        "origin": [
+          2.9622,
+          -0.9849,
+          3.3172
+        ],
+        "vector": [
+          -1.4763,
+          -0.4804,
+          0.0
+        ]
+      },
+      {
+        "id": "wag-14",
+        "origin": [
+          0.9849,
+          2.9622,
+          -3.3172
+        ],
+        "vector": [
+          0.4804,
+          -1.4763,
+          0.0
+        ]
+      },
+      {
+        "id": "wag-15",
+        "origin": [
+          -2.9622,
+          0.9849,
+          3.3172
+        ],
+        "vector": [
+          1.4763,
+          0.4804,
+          -0.0
+        ]
+      },
+      {
+        "id": "wag-16",
+        "origin": [
+          -0.9849,
+          -2.9622,
+          -3.3172
+        ],
+        "vector": [
+          -0.4804,
+          1.4763,
+          0.0
+        ]
+      },
+      {
+        "id": "wag-17",
+        "origin": [
+          3.283,
+          0.8695,
+          2.1708
+        ],
+        "vector": [
+          1.3448,
+          -0.7758,
+          0.0
+        ]
+      },
+      {
+        "id": "wag-18",
+        "origin": [
+          -0.8695,
+          3.283,
+          -2.1708
+        ],
+        "vector": [
+          0.7758,
+          1.3448,
+          -0.0
+        ]
+      },
+      {
+        "id": "wag-19",
+        "origin": [
+          -3.283,
+          -0.8695,
+          2.1708
+        ],
+        "vector": [
+          -1.3448,
+          0.7758,
+          0.0
+        ]
+      },
+      {
+        "id": "wag-20",
+        "origin": [
+          0.8695,
+          -3.283,
+          -2.1708
+        ],
+        "vector": [
+          -0.7758,
+          -1.3448,
+          0.0
+        ]
+      }
+    ]
+  }
+]
