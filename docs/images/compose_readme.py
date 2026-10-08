@@ -3,7 +3,7 @@
 The three panels occupy equal thirds. ``render_panels.py`` draws them:
 disorder fades atoms and bonds by occupancy, DAP-7 is viewed straight down
 the b axis with one A hull and one B hull kept visible, and PETN carries a
-black mock arrow on each terminal oxygen, perpendicular to the N–O bond.
+fruit-green mock arrow on each terminal oxygen, perpendicular to the N–O bond.
 
     PYTHONPATH=. python docs/images/render_panels.py
 

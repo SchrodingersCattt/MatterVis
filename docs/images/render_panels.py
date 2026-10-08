@@ -232,7 +232,7 @@ def _unit(vector: np.ndarray) -> np.ndarray:
 
 
 def _write_mode_arrows() -> list[dict]:
-    """One black arrow on each terminal oxygen, perpendicular to the N–O bond."""
+    """One fruit-green arrow on each terminal oxygen, perpendicular to the N–O bond."""
     lines = PETN.read_text(encoding="utf-8").splitlines()
     count = int(lines[0].split()[0])
     atoms = []
@@ -256,17 +256,17 @@ def _write_mode_arrows() -> list[dict]:
         along = _unit(origin - nitrogen)
         reference = np.array([0.0, 0.0, 1.0]) if abs(float(along[2])) < 0.85 else np.array([1.0, 0.0, 0.0])
         sideways = _unit(np.cross(along, reference))
-        arrows.append({"id": f"wag-{index}", "origin": origin.round(4).tolist(), "vector": (sideways * 1.35).round(4).tolist()})
+        arrows.append({"id": f"wag-{index}", "origin": origin.round(4).tolist(), "vector": (sideways * 1.35 * 1.15).round(4).tolist()})
     payload = [
         {
             "id": "mode",
             "magnitude_mode": "absolute",
             "anchor": "center",
             "viewport_policy": "include",
-            "color": "#000000",
+            "color": "#7AC142",
             "note": "Mock nitrate motion perpendicular to each N-O bond. Not a phonon.",
             "style": {
-                "shaft_radius": 0.075,
+                "shaft_radius": 0.075 * 1.15,
                 "head_radius_ratio": 2.4,
                 "head_length_ratio": 0.34,
                 "sides": 16,
