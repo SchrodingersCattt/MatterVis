@@ -27,7 +27,7 @@ frontends.
 
 <p align="center">
   <img src="docs/images/feature_combined.png" width="960"><br>
-  <em>Anhydrous caffeine disorder, perchlorate polyhedra in DAP-7, and a mock nitrate displacement on PETN.</em>
+  <em>Caffeine disorder with occupancy drawn as opacity, molecule-centred perchlorate polyhedra in DAP-7, and a mock nitrate displacement on PETN.</em>
 </p>
 
 ## Installation

@@ -17,7 +17,7 @@ Independent fit: the panels are not on one physical scale. Render them first:
       --orthogonal --background '#FFFFFF' \\
       --view unit_cell --style ball_stick \\
       --show-cell --show-axes --no-hydrogen --no-boundary-replicas \\
-      --polyhedron '{"center":"Cl","ligand":"O","level":"atom"}' \\
+      --polyhedron '{"center":"C6N2","ligand":"ClO4","level":"molecule","center_kind":"heavy_centroid"}' \\
       --atom-scale 0.82 --bond-radius 0.08 \\
       --width 800 --height 800 --scale 2
 
