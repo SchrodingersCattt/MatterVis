@@ -2,6 +2,7 @@
 
 Read this only for deterministic textual views, agent-readable summaries, or
 terminal interaction. The TUI is not an image backend or PNG/PDF fallback.
+Interactive JSONL inspection belongs to `skills/inspect-structure-tui`, not this page.
 
 Install `[tui]` only when this output was requested. Cube input crosses both
 optional boundaries, so preflight with
