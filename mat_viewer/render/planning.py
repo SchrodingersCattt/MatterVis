@@ -40,7 +40,7 @@ from .ortep_policy import displacement_for_atom
 from .mesh_overlays import isosurface_primitives as _isosurface_primitives
 from .mesh_overlays import polyhedron_primitives as _polyhedron_primitives
 from .property_planning import prepare_render_property, property_color_for_atom, reserve_property_colorbar, resolve_render_property_context
-from ..style.disorder import bond_effective_opacity
+from ..style.disorder import atom_is_disordered, bond_effective_opacity
 
 
 def prepare_render(
@@ -408,13 +408,31 @@ def prepare_render(
             # Same occupancy weight as the Plotly mesh path. An explicit
             # bond-group opacity replaces it; otherwise a disordered bond
             # uses its crystallographic occupancy instead of staying opaque.
+            #
+            # Scene builders normally materialise ``is_disordered`` and
+            # ``occ`` on every bond.  Public scene mappings and older
+            # MolCrysKit records may only carry that information on their
+            # endpoint atoms, though.  Resolve those fields from the
+            # endpoints as a fallback so the CPU planner cannot silently
+            # diverge from the atom opacity it just emitted above.
+            bond_is_disordered = _value(bond, "is_disordered", default=None)
+            if bond_is_disordered is None:
+                bond_is_disordered = atom_is_disordered(atoms[first_index]) or atom_is_disordered(
+                    atoms[second_index]
+                )
+            bond_occupancy = _value(
+                bond, "occ", "occupancy", default=None
+            )
+            if bond_occupancy is None:
+                bond_occupancy = min(
+                    float(_value(atoms[first_index], "occ", "occupancy", default=1.0)),
+                    float(_value(atoms[second_index], "occ", "occupancy", default=1.0)),
+                )
             alpha = bond_effective_opacity(
                 {
                     "is_minor": bool(_value(bond, "is_minor", default=False)),
-                    "is_disordered": bool(
-                        _value(bond, "is_disordered", default=False)
-                    ),
-                    "occ": _value(bond, "occ", default=1.0),
+                    "is_disordered": bool(bond_is_disordered),
+                    "occ": bond_occupancy,
                     "_render_opacity_scale": _value(
                         bond, "_render_opacity_scale", default=1.0
                     ),
