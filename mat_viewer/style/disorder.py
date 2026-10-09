@@ -62,6 +62,56 @@ def bond_is_disordered(atom_i: Any, atom_j: Any) -> bool:
     return atom_is_disordered(atom_i) or atom_is_disordered(atom_j)
 
 
+def _resolve_bond_fields(
+    bond: Any,
+    *,
+    atom_i: Any = None,
+    atom_j: Any = None,
+) -> tuple[bool, bool, float]:
+    """Resolve bond disorder fields, falling back to endpoint records."""
+    is_minor_value = _field(bond, "is_minor", _MISSING)
+    if is_minor_value is _MISSING and atom_i is not None and atom_j is not None:
+        is_minor = atom_is_minor(atom_i) or atom_is_minor(atom_j)
+    else:
+        is_minor = bool(is_minor_value if is_minor_value is not _MISSING else False)
+
+    is_disordered_value = _field(bond, "is_disordered", _MISSING)
+    if (
+        is_disordered_value is _MISSING or is_disordered_value is None
+    ) and atom_i is not None and atom_j is not None:
+        is_disordered = atom_is_disordered(atom_i) or atom_is_disordered(atom_j)
+    else:
+        is_disordered = bool(
+            is_disordered_value
+            if is_disordered_value is not _MISSING and is_disordered_value is not None
+            else is_minor
+        )
+
+    occupancy = _field(bond, "occ", _MISSING)
+    if occupancy is _MISSING:
+        occupancy = _field(bond, "occupancy", _MISSING)
+    if (
+        occupancy is _MISSING or occupancy is None
+    ) and is_disordered and atom_i is not None and atom_j is not None:
+        endpoint_occupancies = []
+        for atom in (atom_i, atom_j):
+            value = _field(atom, "occ", _MISSING)
+            if value is _MISSING or value is None:
+                value = _field(atom, "occupancy", 1.0)
+            try:
+                endpoint_occupancies.append(float(value))
+            except (TypeError, ValueError):
+                endpoint_occupancies.append(1.0)
+        occupancy = min(endpoint_occupancies)
+    if occupancy is _MISSING or occupancy is None:
+        occupancy = 1.0
+    try:
+        occupancy_f = float(occupancy)
+    except (TypeError, ValueError):
+        occupancy_f = 1.0
+    return is_minor, is_disordered, occupancy_f
+
+
 def minor_opacity_for(style: Mapping[str, Any], is_minor: bool) -> float:
     """Resolve the base opacity for a major/minor render group."""
     if not is_minor:
@@ -94,31 +144,14 @@ def bond_effective_opacity(
     if scale_f < 0.999 or _field(bond, "_render_opacity_group_id") is not None:
         return scale_f
 
-    is_minor = bool(_field(bond, "is_minor", False))
-    disordered_value = _field(bond, "is_disordered", _MISSING)
-    if disordered_value is _MISSING:
-        disordered_value = None
-    if disordered_value is None and atom_i is not None and atom_j is not None:
-        is_disordered = atom_is_disordered(atom_i) or atom_is_disordered(atom_j)
-    else:
-        is_disordered = bool(disordered_value if disordered_value is not None else is_minor)
+    is_minor, is_disordered, occ = _resolve_bond_fields(
+        bond,
+        atom_i=atom_i,
+        atom_j=atom_j,
+    )
     # Every loader-confirmed disorder component uses its crystallographic
     # occupancy as visual weight unless disorder rendering is disabled.
     if is_disordered and style.get("disorder") != "none":
-        occ = _field(bond, "occ", _MISSING)
-        if occ is _MISSING:
-            occ = _field(bond, "occupancy", None)
-        if occ is None and atom_i is not None and atom_j is not None:
-            endpoint_occupancies = []
-            for atom in (atom_i, atom_j):
-                value = _field(atom, "occ", _MISSING)
-                if value is _MISSING:
-                    value = _field(atom, "occupancy", 1.0)
-                try:
-                    endpoint_occupancies.append(float(value))
-                except (TypeError, ValueError):
-                    endpoint_occupancies.append(1.0)
-            occ = min(endpoint_occupancies)
         try:
             occ_f = float(occ)
         except (TypeError, ValueError):

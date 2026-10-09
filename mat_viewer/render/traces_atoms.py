@@ -6,6 +6,7 @@ from .meshes import *
 from .style import *
 from .traces_overlays import _dashed_segments, _ring_segments, _segment_cylinder_trace
 from .viewport import flat_projected_pixel_scale, flat_visual_pixel_scale
+from ..style.disorder import _resolve_bond_fields
 
 _FLAT_ATOM_MIN_PIXEL_SIZE = 3.0
 
@@ -100,10 +101,6 @@ def _bond_segments(scene: dict, style: dict, *, with_scales: bool = False):
     atoms = scene.get("draw_atoms") or []
     n_atoms = len(atoms)
     for bond in scene["bonds"]:
-        is_minor = bool(bond.get("is_minor", False))
-        is_disordered = bool(bond.get("is_disordered", is_minor))
-        if style.get("show_minor_only", False) and not is_minor:
-            continue
         # Phase 4: bond_groups can mark a bond invisible directly. We
         # honour both the bond-level ``_render_visible`` (set by
         # ``tag_bonds_with_groups``) and the per-atom visibility (set
@@ -113,6 +110,15 @@ def _bond_segments(scene: dict, style: dict, *, with_scales: bool = False):
             continue
         i = int(bond.get("i", -1))
         j = int(bond.get("j", -1))
+        atom_i = atoms[i] if 0 <= i < n_atoms else None
+        atom_j = atoms[j] if 0 <= j < n_atoms else None
+        is_minor, is_disordered, bond_occ = _resolve_bond_fields(
+            bond,
+            atom_i=atom_i,
+            atom_j=atom_j,
+        )
+        if style.get("show_minor_only", False) and not is_minor:
+            continue
         if 0 <= i < n_atoms and not _atom_render_visible(atoms[i]):
             continue
         if 0 <= j < n_atoms and not _atom_render_visible(atoms[j]):
@@ -149,7 +155,6 @@ def _bond_segments(scene: dict, style: dict, *, with_scales: bool = False):
         # the corresponding atom is outside a focused local environment.
         opacity_scale = float(bond.get("_render_opacity_scale", 1.0))
         opacity_group = _bond_opacity_group_id(bond)
-        bond_occ = float(bond.get("occ", 1.0))
         halves = [
             (c_i, is_minor, start, mid),
             (c_j, is_minor, mid, end),
