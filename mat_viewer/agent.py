@@ -109,6 +109,11 @@ def _enrich_result(
         camera_payload = _camera_metadata(camera)
     metadata.update(
         {
+            "requested_backend": (
+                plan.metadata.get("requested_backend", backend_name)
+                if plan is not None
+                else backend_name
+            ),
             "actual_backend": backend_name,
             "camera": camera_payload,
             "source": _source_metadata(source, plan),
@@ -291,7 +296,11 @@ def render(
         )
     else:
         resolution = resolve_requirements(
-            "plotly" if backend_name == "plotly" else "cpu"
+            "plotly"
+            if backend_name == "plotly"
+            else "gpu"
+            if backend_name == "gpu"
+            else "cpu"
         )
     resolution.require()
 
@@ -379,8 +388,12 @@ def render(
                 "MatterVis will not fall back to CPU implicitly."
             ) from exc
         result = _render_plotly(plan, output=output)
+    elif backend_name == "gpu":
+        from .render.gpu import render as _render_gpu
+
+        result = _render_gpu(plan, output=output)
     else:
-        raise ValueError("backend must be 'cpu', 'matplotlib', or 'plotly'")
+        raise ValueError("backend must be 'cpu', 'matplotlib', 'plotly', or 'gpu'")
     return _enrich_result(
         result,
         source=source_or_plan,

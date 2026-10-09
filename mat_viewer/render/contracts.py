@@ -17,7 +17,7 @@ from typing import Any, Literal, Mapping, TypeAlias
 import numpy as np
 
 Projection = Literal["orthographic", "perspective"]
-Backend = Literal["cpu", "matplotlib", "plotly"]
+Backend = Literal["cpu", "matplotlib", "plotly", "gpu"]
 DisplayMode = Literal["formula_unit", "unit_cell", "asymmetric_unit", "cluster"]
 RGBA: TypeAlias = tuple[float, float, float, float]
 RENDER_PLAN_SCHEMA = "mattervis.render-plan/v1"
@@ -211,8 +211,10 @@ class RenderSpec:
     isosurface_diffuse: float = 0.32
 
     def __post_init__(self) -> None:
-        if self.backend not in ("cpu", "matplotlib", "plotly"):
-            raise ValueError("backend must be 'cpu', 'matplotlib', or 'plotly'")
+        if self.backend not in ("cpu", "matplotlib", "plotly", "gpu"):
+            raise ValueError(
+                "backend must be 'cpu', 'matplotlib', 'plotly', or 'gpu'"
+            )
         if any(
             int(value) != value or int(value) <= 0
             for value in (self.width, self.height, self.scale)

@@ -111,9 +111,9 @@ def _build_render_parser(
             )
     parser.add_argument(
         "--backend",
-        choices=("cpu", "matplotlib", "plotly"),
+        choices=("cpu", "matplotlib", "plotly", "gpu"),
         default="cpu",
-        help="Backend: cpu 3D, matplotlib projected 2D, or plotly WebGL (default: cpu).",
+        help="Backend: cpu 3D, matplotlib 2D, plotly WebGL, or GPU PNG.",
     )
     parser.add_argument(
         "--check",
