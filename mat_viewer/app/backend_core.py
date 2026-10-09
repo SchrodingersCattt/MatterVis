@@ -265,20 +265,74 @@ class _CoreBackendMixin:
     def reload_bond_policy(self) -> None:
         """Drop chemistry/scene caches after a global MCK policy update.
 
-        Catalog-backed bundles are rebuilt lazily so the next request uses the
-        newly configured ``bond_scale``/``bond_thresholds``. Directly supplied
-        bundles (for example an in-memory trajectory) keep their source
-        analysis but lose derived scene caches.
+        Rebuild every populated bundle from its canonical atom/cell payload so
+        catalog, uploaded, and directly supplied structures all receive the
+        new ``bond_scale``/``bond_thresholds``. Keeping only scene caches was
+        insufficient: the cached MolCrysKit analysis owns the bond graph that
+        later scene builds reuse.
         """
-        catalog_names = set(self.catalog)
+        from ..loader.bundle_builder import build_loaded_crystal_from_atoms
+        from ..structure.bonds import normalize_bond_thresholds, validate_bond_scale
+
+        configured = current_config().mck_overrides
+        bond_scale = configured.get("bond_scale")
+        if bond_scale is not None:
+            bond_scale = validate_bond_scale(bond_scale)
+        configured_thresholds = configured.get("bond_thresholds")
+        bond_thresholds = (
+            normalize_bond_thresholds(configured_thresholds)
+            if configured_thresholds
+            else None
+        )
+
         with self._bundle_lock:
-            for name in list(self.bundles):
-                if name in catalog_names:
-                    self.bundles.pop(name, None)
-                else:
-                    bundle = self.bundles[name]
+            for name, bundle in list(self.bundles.items()):
+                # Pending/placeholder bundles have no chemistry to rebuild.
+                # Their derived caches still need clearing so they do not
+                # retain a figure made under the previous policy.
+                if not getattr(bundle, "raw_atoms", None) or getattr(
+                    bundle, "M", None
+                ) is None or getattr(bundle, "cell", None) is None:
                     bundle.scene_cache.clear()
                     bundle.fragment_table_cache.clear()
+                    getattr(bundle, "_transformed_scene_cache", {}).clear()
+                    continue
+
+                # Build from the already parsed atoms instead of re-reading a
+                # CIF. This covers in-memory/direct bundles whose ``cif_path``
+                # is only provenance and lets one reload operation update all
+                # bundle sources consistently.
+                rebuilt = build_loaded_crystal_from_atoms(
+                    name=bundle.name,
+                    source_path=bundle.cif_path,
+                    raw_atoms=bundle.raw_atoms,
+                    cell=bundle.cell,
+                    M=bundle.M,
+                    title=bundle.title,
+                    preset=self.preset,
+                    source=bundle.source,
+                    bond_scale=bond_scale,
+                    bond_thresholds=bond_thresholds,
+                )
+
+                # Preserve non-chemistry payload attached by format adapters
+                # (cube data, trajectory arrays, property manifests, upload
+                # bookkeeping) while replacing every derived field in place.
+                # In-place update also keeps references held by active scenes
+                # valid across the REST reload.
+                old_values = dict(vars(bundle))
+                bundle.__dict__.update(vars(rebuilt))
+                for key in (
+                    "cube_data",
+                    "frame_info",
+                    "atom_arrays",
+                    "pymatgen_structure",
+                ):
+                    if key in old_values and old_values[key] is not None:
+                        bundle.__dict__[key] = old_values[key]
+                for key, value in old_values.items():
+                    if key.startswith("_") and key not in bundle.__dict__:
+                        bundle.__dict__[key] = value
         self._invalidate_figure_cache()
         self._bump_version()
 
