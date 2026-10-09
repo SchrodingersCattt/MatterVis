@@ -17,3 +17,4 @@ def test_compact_layout_uses_overlay_toggles_and_breakpoint() -> None:
     assert "#viewer-root.compact-layout > #center-panel" in css
     assert "translateX(-105%)" in css
     assert "translateX(105%)" in css
+    assert "compact-panel-open ~ .compact-panel-toggle--left" in css

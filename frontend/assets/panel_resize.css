@@ -89,6 +89,16 @@
   #viewer-root.compact-layout > .compact-panel-toggle--right {
     right: 10px;
   }
+
+  /* Keep the open-panel control inside the panel header instead of covering
+     the MatterVis brand or the Chat heading. */
+  #viewer-root.compact-layout > #left-panel.compact-panel-open ~ .compact-panel-toggle--left {
+    left: calc(min(88vw, 340px) - 70px);
+  }
+
+  #viewer-root.compact-layout > #mv-extension-panels.compact-panel-open ~ .compact-panel-toggle--right {
+    right: calc(min(88vw, 340px) - 70px);
+  }
 }
 
 #left-panel,
