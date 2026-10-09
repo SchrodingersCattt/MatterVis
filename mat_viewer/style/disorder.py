@@ -46,8 +46,20 @@ def minor_opacity_for(style: Mapping[str, Any], is_minor: bool) -> float:
     return 1.0
 
 
-def bond_effective_opacity(bond: Mapping[str, Any], style: Mapping[str, Any]) -> float:
-    """Resolve final bond opacity after disorder and bond-group styling."""
+def bond_effective_opacity(
+    bond: Mapping[str, Any],
+    style: Mapping[str, Any],
+    *,
+    atom_i: Mapping[str, Any] | None = None,
+    atom_j: Mapping[str, Any] | None = None,
+) -> float:
+    """Resolve final bond opacity after disorder and bond-group styling.
+
+    ``atom_i`` and ``atom_j`` let callers that receive public, minimally
+    decorated bond records recover disorder provenance from their endpoints.
+    Scene builders normally copy these fields onto the bond itself, but the
+    endpoint fallback keeps CPU planning consistent for older/public inputs.
+    """
     scale = bond.get("_render_opacity_scale", 1.0)
     try:
         scale_f = max(0.0, min(1.0, float(scale)))
@@ -57,11 +69,20 @@ def bond_effective_opacity(bond: Mapping[str, Any], style: Mapping[str, Any]) ->
         return scale_f
 
     is_minor = bool(bond.get("is_minor", False))
-    is_disordered = bool(bond.get("is_disordered", is_minor))
+    disordered_value = bond.get("is_disordered")
+    if disordered_value is None and atom_i is not None and atom_j is not None:
+        is_disordered = atom_is_disordered(atom_i) or atom_is_disordered(atom_j)
+    else:
+        is_disordered = bool(disordered_value if disordered_value is not None else is_minor)
     # Every loader-confirmed disorder component uses its crystallographic
     # occupancy as visual weight unless disorder rendering is disabled.
     if is_disordered and style.get("disorder") != "none":
-        occ = bond.get("occ", 1.0)
+        occ = bond.get("occ", bond.get("occupancy"))
+        if occ is None and atom_i is not None and atom_j is not None:
+            occ = min(
+                float(atom_i.get("occ", atom_i.get("occupancy", 1.0))),
+                float(atom_j.get("occ", atom_j.get("occupancy", 1.0))),
+            )
         try:
             occ_f = float(occ)
         except (TypeError, ValueError):
