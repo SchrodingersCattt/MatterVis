@@ -227,6 +227,49 @@ def test_periodic_extxyz_structured_bond_summary_uses_mic_distance(tmp_path: Pat
     assert "4.300" not in text
 
 
+@pytest.mark.parametrize(
+    "positions",
+    [
+        # A source atom below the lower face is wrapped to the upper face.
+        [[-0.1, 0.0, 0.0], [0.6, 0.0, 0.0]],
+        # The same periodic geometry expressed one full cell above the cell.
+        [[4.9, 0.0, 0.0], [5.6, 0.0, 0.0]],
+    ],
+)
+def test_tui_structured_unit_cell_preserves_outside_coordinate_formula(
+    tmp_path: Path,
+    positions: list[list[float]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Structured TUI output keeps all periodic source atoms after wrapping.
+
+    ExtXYZ permits Cartesian coordinates outside the declared periodic cell.
+    The unit-cell view must wrap those coordinates before building its display
+    manifest, while its bond summary still reports the minimum-image length.
+    This exercises the actual non-interactive TUI entry point in addition to
+    the lower-level loader checks above.
+    """
+    from mat_viewer.tui import run_tui
+
+    atoms = Atoms("CO", positions=positions, cell=[5.0, 5.0, 5.0], pbc=True)
+    path = tmp_path / "outside-structured.extxyz"
+    write(path, atoms, format="extxyz")
+
+    run_tui(
+        str(path),
+        interactive=False,
+        format="structured",
+        display_mode="unit_cell",
+    )
+    output = capsys.readouterr().out
+
+    assert "display_atom_count: 2" in output
+    assert "canonical_formula: CO" in output
+    assert "display_formula: CO" in output
+    assert "C-O: count=1, avg=0.700Å, range=[0.700, 0.700]Å" in output
+    assert "4.300" not in output
+
+
 def test_extxyz_rejects_duplicate_source_site_ids(tmp_path: Path) -> None:
     atoms = Atoms("CO", positions=[[0.0, 0.0, 0.0], [1.2, 0.0, 0.0]])
     atoms.arrays["site_id"] = np.array(["same", "same"])
