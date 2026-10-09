@@ -27,7 +27,7 @@ def build_left_panel(
 ):
     return html.Div(
         [
-            html.H3("MatterVis", style={"marginTop": "0"}),
+            html.H3("MatterVis", className="workbench-brand"),
             html.Div(
                 [
                     html.Label("Scenes", style={"fontWeight": "bold"}),
@@ -52,22 +52,27 @@ def build_left_panel(
                                 className="scene-new-tab-hint",
                             ),
                         ],
-                        style={"float": "right"},
+                        className="scene-actions",
                     ),
                 ],
-                style={"marginBottom": "4px"},
-            ),
-            dcc.Tabs(
-                id="scene-tabs",
-                value=first_state.get("scene_id")
-                or backend.active_scene_id(),
-                children=backend.scene_tabs(),
-                parent_className="scene-tabs",
+                className="scene-header",
             ),
             html.Div(
-                id="scene-tab-close-row",
-                children=backend.scene_close_buttons(),
-                className="scene-tab-close-row",
+                [
+                    dcc.Tabs(
+                        id="scene-tabs",
+                        value=first_state.get("scene_id")
+                        or backend.active_scene_id(),
+                        children=backend.scene_tabs(),
+                        parent_className="scene-tabs",
+                    ),
+                    html.Div(
+                        id="scene-tab-close-row",
+                        children=backend.scene_close_buttons(),
+                        className="scene-tab-close-row",
+                    ),
+                ],
+                className="scene-tabs-card",
             ),
             html.Div(
                 [
@@ -89,18 +94,19 @@ def build_left_panel(
                         style={"marginLeft": "6px"},
                     ),
                 ],
-                style={"marginTop": "8px", "marginBottom": "8px"},
+                className="scene-rename-row",
             ),
             html.Div(
                 id="structure-summary",
                 children=_structure_summary(first_scene),
+                className="structure-summary-card",
                 style={
                     "marginBottom": "12px",
                     "fontSize": "13px",
                     "color": "#444444",
                 },
             ),
-            html.Label("Upload CIF"),
+            html.Label("Upload CIF", className="panel-section-label"),
             html.Div(
                 [
                     dcc.Input(
@@ -115,14 +121,7 @@ def build_left_panel(
                         role="button",
                         tabIndex=0,
                         **{"aria-label": "Upload CIF"},
-                        style={
-                            "border": "1px dashed #999999",
-                            "padding": "10px",
-                            "marginBottom": "12px",
-                            "textAlign": "center",
-                            "cursor": "pointer",
-                            "userSelect": "none",
-                        },
+                        className="upload-dropzone",
                     ),
                 ],
             ),
