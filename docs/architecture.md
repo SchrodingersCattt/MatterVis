@@ -20,12 +20,14 @@ flowchart TB
 
     plan --> cpu["CPU backend (base)\nZ-buffer + per-pixel fragments\nBSP + geometric splitting"]
     plan --> plotly["Plotly adapter [plotly]"]
+    plan --> gpu["Native GPU adapter [gpu]\nopaque offscreen PNG"]
     cpu --> png["PNG"]
     cpu --> vector["true-vector PDF / SVG"]
     cpu --> frames["CPU frames"]
     frames --> animation["GIF / MP4 encoder [animation]"]
     plotly --> html["HTML / WebGL"]
     plotly --> kaleido["Plotly static export [plotly-export]"]
+    gpu --> gpu_png["PNG (explicit, optional)"]
 
     cube["Cube grid [cube]\noptional marching cubes"] --> select
     web["Dash · REST · WebSocket [web]"] --> specs
@@ -41,10 +43,10 @@ flowchart TB
 | representation | ball-and-stick, space filling, wireframe, ORTEP, aromatic circle/disk | renderer selection |
 | shading | smooth, flat, ORTEP axes/hatch | chemical topology or output format |
 | camera | one homogeneous orthographic/perspective transform and clipping contract | chemistry or backend fallback |
-| backend | CPU or Plotly conversion of an existing `RenderPlan` | changing representation or chemistry |
+| backend | CPU, Plotly, or optional GPU conversion of an existing `RenderPlan` | changing representation or chemistry |
 | encoder/frontend | HTML, Web service, TUI, GIF/MP4, Cube mesh extraction | implicit installation or backend switching |
 
-ORTEP is a representation, `flat` is shading, and `cpu`/`plotly` are
+ORTEP is a representation, `flat` is shading, and `cpu`/`plotly`/`gpu` are
 backends. Those choices remain independent in both the Python contracts and
 the CLI.
 
@@ -75,6 +77,13 @@ at the operation that needs them:
 - terminal UI: `matter-vis[tui]`;
 - Cube isosurfaces: `matter-vis[cube]`;
 - GIF/MP4 encoding: `matter-vis[animation]`.
+- native offscreen opaque PNG: `matter-vis[gpu]` (wgpu; runtime device probe required).
+
+The GPU backend is explicit and PNG-only in its first release. It lowers the
+same immutable `RenderPlan`, rejects transparent, dashed, depth-disabled, and
+text primitives before device submission, and never substitutes the CPU
+renderer when the optional dependency or device is unavailable. CPU PNG and
+true-vector PDF/SVG remain the reference paths.
 
 `mat-vis capabilities` and `mat-vis render --check` are the authoritative
 dependency resolver. No skill or installer maintains a second dependency

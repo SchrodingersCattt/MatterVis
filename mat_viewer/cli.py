@@ -71,6 +71,7 @@ def _build_render_parser(
     parser.epilog = (
         "Examples:\n"
         "  %(prog)s structure.cif -o figure.png --backend cpu\n"
+        "  %(prog)s structure.cif -o figure-gpu.png --backend gpu\n"
         "  %(prog)s structure.cif -o figure.svg --backend cpu --view unit_cell\n"
         "  %(prog)s structure.cif -o figure.pdf --backend cpu --style ortep "
         "--ortep-mode ortep_hatch\n"
@@ -111,9 +112,12 @@ def _build_render_parser(
             )
     parser.add_argument(
         "--backend",
-        choices=("cpu", "matplotlib", "plotly"),
+        choices=("cpu", "matplotlib", "plotly", "gpu"),
         default="cpu",
-        help="Backend: cpu 3D, matplotlib projected 2D, or plotly WebGL (default: cpu).",
+        help=(
+            "Backend: cpu 3D, matplotlib projected 2D, plotly WebGL, or "
+            "explicit native GPU PNG (default: cpu)."
+        ),
     )
     parser.add_argument(
         "--check",

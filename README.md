@@ -95,6 +95,11 @@ mat-vis inspect structure.cif --json
 mat-vis render structure.cif -o figure.png --backend cpu --check --json
 mat-vis render structure.cif -o figure.png --backend cpu --json
 
+# Optional native offscreen GPU PNG (explicit; no CPU fallback)
+python -m pip install "matter-vis[gpu]"
+mat-vis capabilities --require gpu --json
+mat-vis render structure.cif -o figure-gpu.png --backend gpu --json
+
 # True projected 2D ball-and-stick (Matplotlib; no 3D lighting)
 mat-vis render structure.cif -o figure-2d.png --backend matplotlib --json \
   --view unit_cell --style ball_stick --camera-axis c --orthogonal
