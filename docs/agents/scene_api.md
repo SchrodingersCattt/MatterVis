@@ -155,6 +155,14 @@ retain all intended bonds while excluding compressed intermolecular contacts.
 Explicit pair thresholds are also multiplied by `bond_scale`; they are not an
 independent post-processing filter.
 
+This is the caller-facing contract for issue #58: use `bond_scale` for a
+global tolerance change and `bond_thresholds` for element-pair cutoffs. The
+same policy is accepted by `build_loaded_crystal`, `load_structure_input`,
+cube/ASE adapters, and the terminal/renderer CLIs (`--bond-scale` plus
+repeatable `--bond-threshold ELEMENT1,ELEMENT2=CUTOFF`). The REST equivalent
+is the `mck_overrides` object on `PATCH /api/v2/config`; policy changes rebuild
+affected bundles lazily so a threshold cannot silently remain cached.
+
 The REST config uses TOML-safe structured records for pair thresholds:
 `{"mck_overrides": {"bond_scale": 0.9, "bond_thresholds": [{"elements": ["Zn", "N"], "cutoff": 2.5}]}}`.
 Updating this policy invalidates catalog bundle and figure caches; bundles are
