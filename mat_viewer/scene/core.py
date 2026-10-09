@@ -52,7 +52,6 @@ from .style import (
 _selected_atoms_for_mode = selected_atoms_for_mode
 _expand_boundary_replicas = expand_boundary_replicas
 
-
 PACKAGE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORKSPACE_DIR = os.path.dirname(PACKAGE_DIR)
 from ..legacy import crystal_scene as legacy_scene  # noqa: E402
@@ -72,7 +71,6 @@ __all__ = [
     "_to_builtin",
 ]
 
-
 def scene_ops():
     return SimpleNamespace(
         parse_asu=parse_asu,
@@ -86,7 +84,6 @@ def scene_ops():
         atom_r=atom_r,
         compute_label_positions=_compute_label_positions,
     )
-
 
 def _bond_endpoints(ai, aj, cell, display_mode: str):
     start = np.array(ai["cart"], dtype=float)
@@ -108,9 +105,7 @@ def _bond_endpoints(ai, aj, cell, display_mode: str):
         end = np.array(_nearest_pbc_cart(ai["cart"], aj["cart"], cell), dtype=float)
     return start, end
 
-
 _SOURCE_IMAGE_TOL = 1e-5
-
 
 def _periodic_component_ranks(
     atom_count: int,
@@ -179,7 +174,6 @@ def _periodic_component_ranks(
         for source_index in component:
             ranks[source_index] = rank
     return ranks
-
 
 def _manifest_strict_bonded_images(
     draw_atoms: list[dict[str, Any]],
@@ -314,7 +308,6 @@ def _manifest_strict_bonded_images(
     draw_atoms.extend(additions)
     return len(additions)
 
-
 def _manifest_spanning_bond_context(
     draw_atoms: list[dict[str, Any]],
     source_atoms: list[dict[str, Any]],
@@ -442,7 +435,6 @@ def _manifest_spanning_bond_context(
     draw_atoms.extend(additions)
     return len(additions)
 
-
 def source_image_identity(
     atom: dict[str, Any],
     source_atoms: list[dict[str, Any]],
@@ -473,7 +465,6 @@ def source_image_identity(
     if not np.allclose(delta, image, rtol=0.0, atol=_SOURCE_IMAGE_TOL):
         return None
     return source_index, tuple(int(value) for value in image)
-
 
 def _canonical_display_bond_pairs(
     draw_atoms: list[dict[str, Any]],
@@ -540,7 +531,13 @@ def _canonical_display_bond_pairs(
         if len(relation) != 3:
             continue
         emitted_for_record: set[tuple[int, int]] = set()
+        # Relative fragment shifts only apply to same-cell records; cross-cell
+        # records use absolute source/image lookup to avoid home-home extras.
         for fragment_key in sorted(fragment_keys_by_source.get(left, ())):
+            # A non-zero canonical shift does not describe the home fragment;
+            # its copied boundary fragments still need the internal bond.
+            if relation != (0, 0, 0) and fragment_key[1] == (0, 0, 0):
+                continue
             members = fragment_instances[fragment_key]
             if left in members and right in members:
                 pair = (members[left], members[right])
@@ -579,7 +576,6 @@ def _canonical_display_bond_pairs(
         "missing_target_instances": missing_targets,
         "max_copies_per_record": max_copies_per_record,
     }
-
 
 def _prune_unconnected_spanning_replicas(
     draw_atoms: list[dict[str, Any]],
