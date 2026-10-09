@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
 import numpy as np
@@ -9,8 +10,19 @@ from mat_viewer.cube.core import cube_atom_trace
 from mat_viewer.cube.io import CubeAtom, CubeData
 from mat_viewer.render.cpu.batch import element_style_tables
 from mat_viewer.render.style.core import _atom_render_color
-from mat_viewer.render.style import _atom_render_color as _legacy_atom_render_color
 from mat_viewer.utils.colors import ansi256_from_hex, element_ansi_color
+
+
+def _legacy_style_module():
+    """Load the file-based compatibility renderer, bypassing the package."""
+    path = Path(__file__).parents[2] / "mat_viewer" / "render" / "style.py"
+    spec = importlib.util.spec_from_file_location(
+        "mat_viewer.render._legacy_style_file", path
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _hex_rgb(value: str) -> tuple[int, int, int]:
@@ -43,6 +55,7 @@ def test_graphical_adapters_share_the_canonical_element_palette() -> None:
     symbols = ("H", "C", "N", "O", "Cl", "K")
     colors, _radii = element_style_tables()
     atomic_numbers = {"H": 1, "C": 6, "N": 7, "O": 8, "Cl": 17, "K": 19}
+    legacy_atom_render_color = _legacy_style_module()._atom_render_color
 
     cube_trace = cube_atom_trace(_cube_for(symbols))
     cube_colors = list(cube_trace.marker.color)
@@ -53,11 +66,11 @@ def test_graphical_adapters_share_the_canonical_element_palette() -> None:
         assert cube_colors[index] == expected
         assert element_ansi_color(symbol) == ansi256_from_hex(expected)
         assert _atom_render_color({"elem": symbol}, {}) == expected
-        assert _legacy_atom_render_color({"elem": symbol}, {}) == expected
+        assert legacy_atom_render_color({"elem": symbol}, {}) == expected
         assert _atom_render_color({"elem": symbol}, {}, light=True) == element_color(
             symbol, light=True
         )
-        assert _legacy_atom_render_color({"elem": symbol}, {}, light=True) == element_color(
+        assert legacy_atom_render_color({"elem": symbol}, {}, light=True) == element_color(
             symbol, light=True
         )
 
@@ -68,11 +81,12 @@ def test_palette_overrides_reach_every_graphical_adapter() -> None:
         expected = "#010203"
         colors, _radii = element_style_tables()
         cube_trace = cube_atom_trace(_cube_for(("O",)))
+        legacy_atom_render_color = _legacy_style_module()._atom_render_color
 
         assert tuple(colors[8]) == (1, 2, 3)
         assert list(cube_trace.marker.color) == [expected]
         assert element_ansi_color("O") == ansi256_from_hex(expected)
         assert _atom_render_color({"elem": "O"}, {}) == expected
-        assert _legacy_atom_render_color({"elem": "O"}, {}) == expected
+        assert legacy_atom_render_color({"elem": "O"}, {}) == expected
     finally:
         reload_config("__missing_config__.toml")
