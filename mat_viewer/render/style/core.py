@@ -2,6 +2,7 @@ from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
 from ..common import *
+from ...config import element_color as configured_element_color
 from ...style.disorder import _field
 
 def validate_style_schema(style: dict) -> dict:
@@ -135,7 +136,17 @@ def _atom_render_color(atom: dict, style: dict, *, light: bool = False) -> str:
     override = _field(atom, field)
     if override:
         return str(override)
-    base = _field(atom, "color_light" if light else "color", "#888888")
+    base = atom.get("color_light" if light else "color")
+    if not base:
+        # Low-level renderer callers may provide only ``elem``. Resolve that
+        # case through the same configured palette used by scene assembly and
+        # the CPU/cube/TUI adapters instead of a renderer-local fallback.
+        element = atom.get("elem") or atom.get("element") or atom.get("symbol")
+        base = (
+            configured_element_color(str(element), light=light)
+            if element
+            else "#888888"
+        )
     return _style_color(base, style)
 
 
