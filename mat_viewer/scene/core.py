@@ -91,7 +91,15 @@ def scene_ops():
 def _bond_endpoints(ai, aj, cell, display_mode: str):
     start = np.array(ai["cart"], dtype=float)
     if ai.get("_strict_unit_cell") or aj.get("_strict_unit_cell"):
-        return start, np.array(aj["cart"], dtype=float)
+        # Strict unit-cell views wrap atom centres into the home cell.  The
+        # source connectivity can still describe a bond whose nearest image
+        # crosses a cell face (for example, source coordinates at -0.1 and
+        # 0.6 fractional x).  Connecting the wrapped centres directly would
+        # draw a spurious cell-spanning segment and the scene builder would
+        # drop it at the long-render threshold.  Lift the endpoint to the
+        # minimum-image position while keeping both displayed atoms in the
+        # home cell.
+        return start, np.array(_nearest_pbc_cart(start, aj["cart"], cell), dtype=float)
     if display_mode in ("formula_unit", "cluster") or (
         ai.get("_unwrapped") and aj.get("_unwrapped")
     ):
