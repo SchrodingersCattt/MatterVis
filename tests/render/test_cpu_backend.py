@@ -39,6 +39,7 @@ from mat_viewer.render.geometry import (
 )
 from mat_viewer.render.mesh_overlays import polyhedron_primitives
 from mat_viewer.render.planning import prepare_render
+from mat_viewer.tui.crystal_ir import AtomIR, BondIR, CrystalIR, Lattice
 
 
 def _camera(*, projection: str = "orthographic") -> CameraSpec:
@@ -1367,6 +1368,57 @@ def test_cpu_bond_opacity_inherits_endpoint_disorder_when_bond_metadata_is_missi
     ]
     assert atoms["C1A"].rgba[3] == pytest.approx(0.4)
     assert atoms["N1A"].rgba[3] == pytest.approx(0.7)
+    assert bonds
+    assert all(item.rgba[3] == pytest.approx(0.4) for item in bonds)
+
+
+def test_cpu_bond_opacity_accepts_object_based_crystal_ir_endpoints():
+    """The documented CrystalIR path keeps endpoint provenance on AtomIR."""
+    crystal = CrystalIR(
+        lattice=Lattice(
+            a=5.0,
+            b=5.0,
+            c=5.0,
+            alpha=90.0,
+            beta=90.0,
+            gamma=90.0,
+            matrix=np.eye(3) * 5.0,
+        ),
+        atoms=[
+            AtomIR(
+                element="C",
+                cart=np.array([0.0, 0.0, 0.0]),
+                frac=np.array([0.0, 0.0, 0.0]),
+                label="C1A",
+                occupancy=0.4,
+                is_minor=True,
+            ),
+            AtomIR(
+                element="N",
+                cart=np.array([1.2, 0.0, 0.0]),
+                frac=np.array([0.24, 0.0, 0.0]),
+                label="N1A",
+                occupancy=0.7,
+            ),
+        ],
+        bonds=[
+            BondIR(
+                i=0,
+                j=1,
+                start=np.array([0.0, 0.0, 0.0]),
+                end=np.array([1.2, 0.0, 0.0]),
+            )
+        ],
+    )
+
+    plan = prepare_render(
+        crystal,
+        camera=_camera(),
+        render={"show_cell": False, "sphere_detail": (2, 4), "cylinder_sides": 6},
+    )
+    bonds = [
+        item for item in plan.primitives if item.metadata.get("kind") == "bond"
+    ]
     assert bonds
     assert all(item.rgba[3] == pytest.approx(0.4) for item in bonds)
 
