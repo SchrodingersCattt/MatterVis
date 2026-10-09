@@ -65,6 +65,7 @@ def test_dispatcher_listens_to_upload_and_scene_events(tmp_path: Path):
     inputs = _inputs(writers[0])
     assert ("scene-event-store", "data") in inputs
     assert ("native-upload-sync", "data") in inputs
+    assert ("agent-state-poll", "n_intervals") not in inputs
 
 
 def test_sync_agent_state_no_longer_writes_scene_tabs(tmp_path: Path):
@@ -95,101 +96,49 @@ def _manage_scene_tabs_source(app):
     return inspect.getsource(writers[0]["callback"])
 
 
-def test_poll_path_does_not_overwrite_scene_tabs_value(tmp_path: Path):
-    """Regression: every 5 s ``agent-state-poll`` tick must NOT rewrite
-    ``scene-tabs.value``. The browser is the authority for which tab is
-    currently focused; the poll path used to echo
-    ``backend.active_scene_id()`` back into ``scene-tabs.value`` and
-    that overwrote in-flight tab clicks (the user-visible "switching
-    tabs has no effect after 2+ tabs" bug). On scene-CRUD / upload
-    events the callback still owns the active-id write.
+def test_scene_tab_dom_is_not_wired_to_periodic_poll(tmp_path: Path):
+    """A stale poll response must not recreate a scene after close.
 
-    This contract is asserted at the source level so the protection
-    cannot silently regress to "always write active_id". If you change
-    the implementation, also update this test, but keep the no-poll-
-    write semantics intact.
+    The control-state poll remains active elsewhere, but the scene-tab DOM is
+    rebuilt only by explicit CRUD/upload events. This prevents an older poll
+    response from arriving after a close and putting the removed tab back.
     """
     app = create_app(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
     source = _manage_scene_tabs_source(app)
 
-    assert "agent-state-poll" in source, (
-        "manage_scene_tabs_dom must explicitly branch on the agent-state-"
-        "poll trigger so it can short-circuit the poll path."
-    )
-    # The poll branch must end with a no_update on the value slot.
-    poll_branch_idx = source.index("agent-state-poll")
-    poll_branch = source[poll_branch_idx:]
-    assert "no_update" in poll_branch, (
-        "the poll branch must short-circuit to no_update so the active "
-        "scene id is never rewritten on a periodic tick"
-    )
-    # Defence-in-depth: the only ``Output(scene-tabs, value)`` write that
-    # still survives must be on the explicit-event path. Look for the
-    # explicit-event return that carries ``active_id``.
-    assert "active_id" in source
-    # And the poll branch must NOT carry ``active_id`` into its return.
-    poll_return = poll_branch.split("return", 1)[1] if "return" in poll_branch else ""
-    assert "active_id" not in poll_return.split("\n")[0], (
-        "poll branch must not return ``active_id`` for scene-tabs.value"
-    )
+    writers = _callbacks_with_output(app, "scene-tabs", "children")
+    assert len(writers) == 1
+    assert ("agent-state-poll", "n_intervals") not in _inputs(writers[0])
+    assert "older poll response" in source
 
 
 def test_explicit_event_path_writes_scene_tabs_value(tmp_path: Path):
     """The CRUD / upload event paths SHOULD write ``scene-tabs.value`` to
     the freshly created scene so the UI lands on the new tab. This is
-    the symmetric counterpart of the poll-path guard above: without
-    this, uploading a CIF would land the tab list on the new scene's
-    label but never auto-switch the focused tab. We assert this at the
+    the explicit-event path that remains after removing the race-prone poll
+    writer: without this, uploading a CIF would land the tab list on the new
+    scene's label but never auto-switch the focused tab. We assert this at the
     source level for the same reason as above.
     """
     app = create_app(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
     source = _manage_scene_tabs_source(app)
 
-    # The explicit-event branch (CRUD / upload) is everything AFTER the
-    # poll-trigger branch -- the poll branch is the early-return special
-    # case and the explicit-event return is the function's tail. Verify
-    # that tail ends by writing ``active_id`` into the third (scene-tabs.
-    # value) output slot.
+    # The explicit-event return writes ``active_id`` into the third
+    # (scene-tabs.value) output slot.
     assert source.rstrip().endswith("active_id"), (
         "the function must end with an explicit ``return ..., active_id`` "
         "on the CRUD/upload event path so tab uploads auto-switch."
     )
 
 
-def test_scene_tabs_dom_caches_fingerprint_so_poll_does_not_tear_down_react_tree(
-    tmp_path: Path,
-):
-    """The poll path used to call ``backend.scene_tabs()`` and
-    ``scene_close_buttons()`` every 5 s, returning fresh Dash component
-    trees. React would then tear down and rebuild the tab subtree,
-    cancelling any in-flight click event on a tab. With many tabs open
-    the user saw "clicks on tabs are dropped randomly" -- this test
-    pins the fingerprint short-circuit that fixes it.
-    """
+def test_scene_tabs_dom_rebuilds_only_after_explicit_events(tmp_path: Path):
+    """The tab subtree has one explicit-event writer and no poll writer."""
     app = create_app(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
-    source = _manage_scene_tabs_source(app)
-
-    assert "fingerprint" in source.lower(), (
-        "the poll branch must compute a fingerprint of the scene-list "
-        "(id + label) and short-circuit to no_update when nothing has "
-        "changed; otherwise the React subtree gets rebuilt every 5 s "
-        "and tab clicks get dropped."
-    )
-
-
-def test_scene_tabs_poll_repairs_deleted_browser_scene_id(tmp_path: Path):
-    """A REST/other-browser delete must not leave a ghost selected tab.
-
-    The poll normally preserves the browser-owned selected id, but if that id
-    no longer exists in the backend scene list it must select the backend's
-    valid active scene while rebuilding the tab children.
-    """
-    app = create_app(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
-    source = _manage_scene_tabs_source(app)
-
-    assert 'State("scene-tabs", "value")' in source
-    assert "browser_scene_is_valid" in source
-    assert "no_update if browser_scene_is_valid else active_id" in source
+    callback = _callbacks_with_output(app, "scene-tabs", "children")[0]
+    assert _inputs(callback) == {
+        ("scene-event-store", "data"),
+        ("native-upload-sync", "data"),
+    }
 
 
 def test_update_view_not_wired_to_graph_interaction_store(tmp_path: Path):

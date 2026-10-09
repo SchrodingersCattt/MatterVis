@@ -263,12 +263,10 @@ def register_state_callbacks(app, backend):
         Output("scene-tabs", "value"),
         Input("scene-event-store", "data"),
         Input("native-upload-sync", "data"),
-        Input("agent-state-poll", "n_intervals"),
-        State("scene-tabs", "value"),
         prevent_initial_call=True,
     )
     def manage_scene_tabs_dom(
-        _scene_event, _native_upload_sync, _n_intervals, browser_scene_id
+        _scene_event, _native_upload_sync
     ):
         """Single writer for the scene-tab DOM.
 
@@ -281,57 +279,22 @@ def register_state_callbacks(app, backend):
           ``scene-tabs.value`` to the new ``backend.active_scene_id()`` so
           the UI lands on the just-created / -duplicated scene.
 
-        * **Periodic poll** (``agent-state-poll.n_intervals``, every 5 s) --
-          the *browser* is the authority for the currently-focused tab;
-          rewriting ``scene-tabs.value`` from the poll path was the source
-          of the user-visible "click a tab and nothing happens" race
-          (the poll's read of the server state could fire between the
-          tab-click event and the matching ``set_active_scene`` write,
-          and would then echo the *old* active id back into
-          ``scene-tabs.value``, snapping the UI back to the previous tab).
-          We also short-circuit the children rebuild when the scene list
-          fingerprint (id + label, in display order) is unchanged so the
-          5 s tick doesn't keep tearing down and re-instantiating the tab
-          React tree (which would also drop in-flight click events).
+        There is intentionally no periodic ``agent-state-poll`` input here.
+        A poll response can be in flight while a close or upload event is
+        changing the scene store; allowing that older response to write the
+        tab children recreates a scene that the backend has already removed.
+        The state poll still refreshes the active scene's controls through its
+        dedicated callback. Scene-tab structure is rebuilt only after an
+        explicit scene event or native upload, so one callback owns the DOM
+        without an older poll response able to overwrite it.
         """
         options = backend.scene_options()
         if not options:
             return no_update, no_update, no_update
 
-        triggered_id = getattr(callback_context, "triggered_id", None)
-        triggered = str(triggered_id) if triggered_id is not None else ""
         active_id = backend.active_scene_id() or options[0]["id"]
-
-        if triggered == "agent-state-poll":
-            valid_ids = {str(scene.get("id")) for scene in options}
-            browser_scene_is_valid = str(browser_scene_id) in valid_ids
-            # Use a stable fingerprint of the visible scene list so a
-            # plain poll tick is a no-op when nothing changed since the
-            # previous render. We deliberately exclude ``active_id``
-            # from this short-circuit: the poll path must NEVER write
-            # ``scene-tabs.value`` (browser owns it).
-            fingerprint = tuple(
-                (str(scene.get("id")), str(scene.get("label") or ""))
-                for scene in options
-            )
-            cache = getattr(manage_scene_tabs_dom, "_poll_fingerprint", None)
-            if cache == fingerprint:
-                if browser_scene_is_valid:
-                    return no_update, no_update, no_update
-                return no_update, no_update, active_id
-            manage_scene_tabs_dom._poll_fingerprint = fingerprint
-            return (
-                backend.scene_tabs(),
-                backend.scene_close_buttons(),
-                no_update if browser_scene_is_valid else active_id,
-            )
-
-        # Explicit event paths (CRUD / upload) DO own the active id.
-        # Refresh the cached fingerprint so the next poll tick keeps its
-        # short-circuit honest.
-        manage_scene_tabs_dom._poll_fingerprint = tuple(
-            (str(scene.get("id")), str(scene.get("label") or "")) for scene in options
-        )
+        # Explicit event paths (CRUD / upload) own the active id and are the
+        # only paths allowed to rebuild the tab subtree.
         return backend.scene_tabs(), backend.scene_close_buttons(), active_id
 
     @app.callback(
