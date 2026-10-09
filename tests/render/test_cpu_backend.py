@@ -39,6 +39,7 @@ from mat_viewer.render.geometry import (
 )
 from mat_viewer.render.mesh_overlays import polyhedron_primitives
 from mat_viewer.render.planning import prepare_render
+from mat_viewer.tui.crystal_ir import AtomIR, BondIR, CrystalIR, Lattice
 
 
 def _camera(*, projection: str = "orthographic") -> CameraSpec:
@@ -1313,6 +1314,113 @@ def test_disorder_opacity_and_cross_cell_bond_vector_survive_planning():
     assert all(item.metadata["right_image_shift"] == (1, 0, 0) for item in bond_meshes)
     assert all(item.rgba[3] == pytest.approx(0.5) for item in bond_meshes)
     assert render(plan, format="png").data.startswith(b"\x89PNG")
+
+
+def test_cpu_bond_opacity_inherits_endpoint_disorder_when_bond_metadata_is_missing():
+    """Public scene mappings may only carry disorder on their atoms.
+
+    The CPU planner must derive the bond weight from both endpoint
+    occupancies, matching the scene-built Plotly path, instead of leaving the
+    bond opaque when the bond record has no ``is_disordered``/``occ`` fields.
+    """
+    scene = {
+        "draw_atoms": [
+            {
+                "elem": "C",
+                "label": "C1A",
+                "cart": [0.0, 0.0, 0.0],
+                "occupancy": 0.4,
+                "is_disordered": True,
+            },
+            {
+                "elem": "N",
+                "label": "N1A",
+                "cart": [1.2, 0.0, 0.0],
+                "occupancy": 0.7,
+                "is_disordered": True,
+            },
+        ],
+        "bonds": [
+            {
+                "i": 0,
+                "j": 1,
+                "start": [0.0, 0.0, 0.0],
+                "end": [1.2, 0.0, 0.0],
+                "color_i": "#333333",
+                "color_j": "#333333",
+            }
+        ],
+    }
+
+    plan = prepare_render(
+        scene,
+        camera=_camera(),
+        render={"show_cell": False, "sphere_detail": (2, 4), "cylinder_sides": 6},
+    )
+
+    atoms = {
+        item.metadata["label"]: item
+        for item in plan.primitives
+        if item.metadata.get("kind") == "atom"
+    }
+    bonds = [
+        item for item in plan.primitives if item.metadata.get("kind") == "bond"
+    ]
+    assert atoms["C1A"].rgba[3] == pytest.approx(0.4)
+    assert atoms["N1A"].rgba[3] == pytest.approx(0.7)
+    assert bonds
+    assert all(item.rgba[3] == pytest.approx(0.4) for item in bonds)
+
+
+def test_cpu_bond_opacity_accepts_object_based_crystal_ir_endpoints():
+    """The documented CrystalIR path keeps endpoint provenance on AtomIR."""
+    crystal = CrystalIR(
+        lattice=Lattice(
+            a=5.0,
+            b=5.0,
+            c=5.0,
+            alpha=90.0,
+            beta=90.0,
+            gamma=90.0,
+            matrix=np.eye(3) * 5.0,
+        ),
+        atoms=[
+            AtomIR(
+                element="C",
+                cart=np.array([0.0, 0.0, 0.0]),
+                frac=np.array([0.0, 0.0, 0.0]),
+                label="C1A",
+                occupancy=0.4,
+                is_minor=True,
+            ),
+            AtomIR(
+                element="N",
+                cart=np.array([1.2, 0.0, 0.0]),
+                frac=np.array([0.24, 0.0, 0.0]),
+                label="N1A",
+                occupancy=0.7,
+            ),
+        ],
+        bonds=[
+            BondIR(
+                i=0,
+                j=1,
+                start=np.array([0.0, 0.0, 0.0]),
+                end=np.array([1.2, 0.0, 0.0]),
+            )
+        ],
+    )
+
+    plan = prepare_render(
+        crystal,
+        camera=_camera(),
+        render={"show_cell": False, "sphere_detail": (2, 4), "cylinder_sides": 6},
+    )
+    bonds = [
+        item for item in plan.primitives if item.metadata.get("kind") == "bond"
+    ]
+    assert bonds
+    assert all(item.rgba[3] == pytest.approx(0.4) for item in bonds)
 
 
 def test_planning_keeps_ordered_partial_sites_opaque_and_group_opacity_replaces():

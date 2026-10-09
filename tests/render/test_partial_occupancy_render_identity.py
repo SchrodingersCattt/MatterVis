@@ -7,6 +7,8 @@ from mat_viewer.render.style import _atom_effective_opacity, _style_trace_dicts
 from mat_viewer.render.traces_atoms import (
     _atom_mesh_traces,
     _atom_scatter_traces,
+    _bond_mesh_traces,
+    _bond_scatter_traces,
     _bond_segments,
     _flat_highlight_center,
 )
@@ -170,6 +172,38 @@ def test_partial_occupancy_does_not_make_major_bond_minor():
 
     assert list(_bond_segments(scene, _style(show_minor_only=True))) == []
     assert bond_effective_opacity(bond, _style()) == 1.0
+
+
+@pytest.mark.parametrize("trace_builder", (_bond_mesh_traces, _bond_scatter_traces))
+def test_bond_traces_inherit_endpoint_disorder_opacity(trace_builder):
+    atoms = [_atom("A", is_minor=False), _atom("B", is_minor=False)]
+    atoms[0]["is_disordered"] = True
+    atoms[0]["occ"] = 0.4
+    atoms[1]["is_disordered"] = True
+    atoms[1]["occ"] = 0.7
+    atoms[1]["cart"] = [1.0, 0.0, 0.0]
+    scene = {
+        "draw_atoms": atoms,
+        "bonds": [
+            {
+                "i": 0,
+                "j": 1,
+                "start": atoms[0]["cart"],
+                "end": atoms[1]["cart"],
+                "color_i": "#112233",
+                "color_j": "#112233",
+            }
+        ],
+    }
+
+    style = _style(material="flat") if trace_builder is _bond_scatter_traces else _style()
+    traces = trace_builder(scene, style)
+
+    assert traces
+    if trace_builder is _bond_scatter_traces:
+        assert all(trace["opacity"] == pytest.approx(0.4) for trace in traces)
+    else:
+        assert all(trace["opacity"] == pytest.approx(0.4) for trace in traces)
 
 
 def test_occupancy_scales_only_loader_confirmed_disordered_components():

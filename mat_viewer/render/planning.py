@@ -411,10 +411,8 @@ def prepare_render(
             alpha = bond_effective_opacity(
                 {
                     "is_minor": bool(_value(bond, "is_minor", default=False)),
-                    "is_disordered": bool(
-                        _value(bond, "is_disordered", default=False)
-                    ),
-                    "occ": _value(bond, "occ", default=1.0),
+                    "is_disordered": _value(bond, "is_disordered", default=None),
+                    "occ": _value(bond, "occ", "occupancy", default=None),
                     "_render_opacity_scale": _value(
                         bond, "_render_opacity_scale", default=1.0
                     ),
@@ -423,6 +421,8 @@ def prepare_render(
                     ),
                 },
                 {"disorder": "opacity"},
+                atom_i=atoms[first_index],
+                atom_j=atoms[second_index],
             )
             radius = render_spec.bond_radius * float(
                 _value(bond, "_render_radius_scale", default=1.0)
