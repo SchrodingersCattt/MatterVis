@@ -63,3 +63,51 @@ def test_flat_ortep_cache_key_includes_camera(tmp_path):
         assert backend._figure_state_cache_key(first) != backend._figure_state_cache_key(second)
     finally:
         backend.close()
+
+
+def test_flat_ortep_camera_drag_replaces_embedded_image(monkeypatch, tmp_path):
+    """A camera orbit must produce a new PNG source, not only move the anchor.
+
+    This is the user-visible regression for issue #63: the hidden Plotly
+    anchor captures orbit events, while the publication renderer must be run
+    again so the image itself follows the new projection basis.
+    """
+
+    def fake_render(scene, _style):
+        figure, axis = plt.subplots(figsize=(2, 2))
+        direction = np.asarray(scene["view_direction"], dtype=float)
+        axis.plot([0.0, direction[0]], [0.0, direction[1]], linewidth=3.0)
+        axis.set_xlim(-1.0, 1.0)
+        axis.set_ylim(-1.0, 1.0)
+        axis.axis("off")
+        return figure
+
+    monkeypatch.setattr("mat_viewer.ortep.flat_render.render_ortep_flat", fake_render)
+    backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    try:
+        first = backend._flat_ortep_figure(
+            _scene(),
+            {"uirevision": "flat-ortep"},
+            camera=_plotly_camera(
+                {
+                    "eye": {"x": 1.0, "y": 0.0, "z": 0.0},
+                    "center": {"x": 0.0, "y": 0.0, "z": 0.0},
+                    "up": {"x": 0.0, "y": 0.0, "z": 1.0},
+                }
+            ),
+        ).to_plotly_json()
+        second = backend._flat_ortep_figure(
+            _scene(),
+            {"uirevision": "flat-ortep"},
+            camera=_plotly_camera(
+                {
+                    "eye": {"x": 0.0, "y": 1.0, "z": 0.0},
+                    "center": {"x": 0.0, "y": 0.0, "z": 0.0},
+                    "up": {"x": 0.0, "y": 0.0, "z": 1.0},
+                }
+            ),
+        ).to_plotly_json()
+    finally:
+        backend.close()
+
+    assert first["layout"]["images"][0]["source"] != second["layout"]["images"][0]["source"]
