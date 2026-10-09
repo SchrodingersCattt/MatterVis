@@ -2,6 +2,7 @@ from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
 from .common import *
+from ..config import element_color as configured_element_color
 from ..style.disorder import _field
 
 def validate_style_schema(style: dict) -> dict:
@@ -103,7 +104,16 @@ def _atom_render_color(atom: dict, style: dict, *, light: bool = False) -> str:
     override = _field(atom, field)
     if override:
         return str(override)
-    base = _field(atom, "color_light" if light else "color", "#888888")
+    base = _field(atom, "color_light" if light else "color")
+    if not base:
+        # Keep the legacy compatibility module on the same canonical palette
+        # path as ``render.style.core`` and the other render adapters.
+        element = _field(atom, "elem") or _field(atom, "element") or _field(atom, "symbol")
+        base = (
+            configured_element_color(str(element), light=light)
+            if element
+            else "#888888"
+    )
     return _style_color(base, style)
 
 

@@ -9,6 +9,7 @@ from mat_viewer.cube.core import cube_atom_trace
 from mat_viewer.cube.io import CubeAtom, CubeData
 from mat_viewer.render.cpu.batch import element_style_tables
 from mat_viewer.render.style.core import _atom_render_color
+from mat_viewer.render.style import _atom_render_color as _legacy_atom_render_color
 from mat_viewer.utils.colors import ansi256_from_hex, element_ansi_color
 
 
@@ -52,7 +53,11 @@ def test_graphical_adapters_share_the_canonical_element_palette() -> None:
         assert cube_colors[index] == expected
         assert element_ansi_color(symbol) == ansi256_from_hex(expected)
         assert _atom_render_color({"elem": symbol}, {}) == expected
+        assert _legacy_atom_render_color({"elem": symbol}, {}) == expected
         assert _atom_render_color({"elem": symbol}, {}, light=True) == element_color(
+            symbol, light=True
+        )
+        assert _legacy_atom_render_color({"elem": symbol}, {}, light=True) == element_color(
             symbol, light=True
         )
 
@@ -68,5 +73,6 @@ def test_palette_overrides_reach_every_graphical_adapter() -> None:
         assert list(cube_trace.marker.color) == [expected]
         assert element_ansi_color("O") == ansi256_from_hex(expected)
         assert _atom_render_color({"elem": "O"}, {}) == expected
+        assert _legacy_atom_render_color({"elem": "O"}, {}) == expected
     finally:
         reload_config("__missing_config__.toml")
