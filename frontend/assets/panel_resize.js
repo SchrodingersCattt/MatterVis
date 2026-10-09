@@ -2,6 +2,7 @@
   const SCENE_MIN = 420;
   const PANEL_MIN = 260;
   const PANEL_MAX = 640;
+  const COMPACT_BREAKPOINT = 756;
 
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
@@ -35,6 +36,58 @@
     return panel ? panel.getBoundingClientRect().width : 0;
   }
 
+  function isCompact(root) {
+    return !!root && root.getBoundingClientRect().width < COMPACT_BREAKPOINT;
+  }
+
+  function setCompactPanelOpen(panelId, open) {
+    const panel = document.getElementById(panelId);
+    const button = document.getElementById("compact-toggle-" + panelId);
+    if (!panel || !button) return;
+    panel.classList.toggle("compact-panel-open", open);
+    button.setAttribute("aria-expanded", String(open));
+  }
+
+  function ensureCompactToggles(root) {
+    [
+      ["left-panel", "Tools", "left"],
+      ["mv-extension-panels", "Chat", "right"],
+    ].forEach(function (entry) {
+      const panelId = entry[0];
+      const label = entry[1];
+      const side = entry[2];
+      if (!document.getElementById(panelId)) return;
+      let button = document.getElementById("compact-toggle-" + panelId);
+      if (button) return;
+      button = document.createElement("button");
+      button.type = "button";
+      button.id = "compact-toggle-" + panelId;
+      button.className = "compact-panel-toggle compact-panel-toggle--" + side;
+      button.textContent = label;
+      button.setAttribute("aria-controls", panelId);
+      button.setAttribute("aria-expanded", "false");
+      button.addEventListener("click", function () {
+        const panel = document.getElementById(panelId);
+        setCompactPanelOpen(panelId, !panel.classList.contains("compact-panel-open"));
+      });
+      root.appendChild(button);
+    });
+  }
+
+  function updateCompactLayout() {
+    const root = document.getElementById("viewer-root");
+    if (!root) return false;
+    ensureCompactToggles(root);
+    const compact = isCompact(root);
+    root.classList.toggle("compact-layout", compact);
+    if (!compact) {
+      ["left-panel", "mv-extension-panels"].forEach(function (panelId) {
+        setCompactPanelOpen(panelId, false);
+      });
+    }
+    return compact;
+  }
+
   function maxPanelWidth(panelId) {
     const root = document.getElementById("viewer-root");
     if (!root) {
@@ -54,6 +107,13 @@
     const right = document.getElementById("mv-extension-panels");
     const root = document.getElementById("viewer-root");
     if (!left || !root) {
+      return;
+    }
+    // At phone/tablet widths, sidebars become overlays controlled by the
+    // compact toggle buttons. Keeping their inline desktop widths here would
+    // reserve flex space and bring back the clipping this mode avoids.
+    if (updateCompactLayout()) {
+      resizeScene();
       return;
     }
     const splitters = document.querySelectorAll("#viewer-root > .panel-splitter").length * 8;
@@ -175,13 +235,16 @@
     bindSplitter("extension-splitter", "mv-extension-panels", "right");
     if (!document.body.dataset.panelsFitted) {
       document.body.dataset.panelsFitted = "1";
+      updateCompactLayout();
       fitPanels();
       window.addEventListener("resize", function () {
         if (!resizingScene) {
+          updateCompactLayout();
           fitPanels();
         }
       });
     }
+    updateCompactLayout();
     bindPanelTab("display-panel-toggle", "display");
     bindPanelTab("analysis-panel-toggle", "analysis");
     bindPanelTab("operation-panel-toggle", "operation");

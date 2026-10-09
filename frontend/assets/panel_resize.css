@@ -9,6 +9,88 @@
   background: #cbd5dc;
 }
 
+/* Compact workbench: keep the structure readable and make sidebars opt-in
+   overlays instead of allowing the three-column desktop minimum to clip the
+   viewport. panel_resize.js owns the open/closed state and ARIA attributes. */
+#viewer-root {
+  position: relative;
+}
+
+.compact-panel-toggle {
+  display: none;
+}
+
+@media (max-width: 755px) {
+  #viewer-root.compact-layout > #center-panel {
+    flex: 1 1 100%;
+    min-width: 0;
+    width: 100%;
+  }
+
+  #viewer-root.compact-layout > .panel-splitter {
+    display: none;
+  }
+
+  #viewer-root.compact-layout > #left-panel,
+  #viewer-root.compact-layout > #mv-extension-panels {
+    box-sizing: border-box;
+    bottom: 0;
+    display: block;
+    max-width: min(88vw, 340px);
+    min-width: 0;
+    position: absolute;
+    top: 0;
+    transition: transform 160ms ease;
+    width: min(88vw, 340px) !important;
+    z-index: 8000;
+  }
+
+  #viewer-root.compact-layout > #left-panel {
+    left: 0;
+    transform: translateX(-105%);
+  }
+
+  #viewer-root.compact-layout > #mv-extension-panels {
+    right: 0;
+    transform: translateX(105%);
+  }
+
+  #viewer-root.compact-layout > #left-panel.compact-panel-open,
+  #viewer-root.compact-layout > #mv-extension-panels.compact-panel-open {
+    transform: translateX(0);
+  }
+
+  #viewer-root.compact-layout > .compact-panel-toggle {
+    background: #ffffff;
+    border: 1px solid #c7ccd5;
+    border-radius: 7px;
+    color: #24324a;
+    cursor: pointer;
+    display: block;
+    font: 700 13px/1 Arial, Helvetica, sans-serif;
+    padding: 8px 10px;
+    position: absolute;
+    top: 10px;
+    z-index: 8100;
+  }
+
+  #viewer-root.compact-layout > .compact-panel-toggle:hover,
+  #viewer-root.compact-layout > .compact-panel-toggle:focus-visible {
+    background: #f3f6fb;
+    border-color: #167d8d;
+    outline: 2px solid #167d8d;
+    outline-offset: 2px;
+  }
+
+  #viewer-root.compact-layout > .compact-panel-toggle--left {
+    left: 10px;
+  }
+
+  #viewer-root.compact-layout > .compact-panel-toggle--right {
+    right: 10px;
+  }
+}
+
 #left-panel,
 #right-panel {
   box-sizing: border-box;
