@@ -39,6 +39,7 @@ web = ["plotly", "dash", "flask-sock", "flask-compress"]
 tui = ["textual"]
 cube = ["scikit-image"]
 animation = ["imageio", "imageio-ffmpeg"]
+gpu = ["wgpu>=0.20"]
 all = [
     "plotly",
     "kaleido",
@@ -49,6 +50,7 @@ all = [
     "scikit-image",
     "imageio",
     "imageio-ffmpeg",
+    "wgpu>=0.20",
 ]
 test = [
     "pytest>=8.0",

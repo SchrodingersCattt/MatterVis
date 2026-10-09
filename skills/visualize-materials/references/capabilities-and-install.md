@@ -32,6 +32,7 @@ error. Never install `[all]` when a smaller reported extra is sufficient.
 | Interactive terminal UI | `tui` | `python -m pip install "matter-vis[tui]"` |
 | Cube input inspection and isosurfaces | `cube` | `python -m pip install "matter-vis[cube]"` |
 | GIF/MP4 encoding | `animation` | `python -m pip install "matter-vis[animation]"` |
+| Native offscreen opaque PNG via wgpu | `gpu` | `python -m pip install "matter-vis[gpu]"` |
 <!-- capability-matrix:end -->
 
 Combined Web operations intentionally cross two optional boundaries:

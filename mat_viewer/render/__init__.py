@@ -56,6 +56,13 @@ def cpu_render(*args, **kwargs):
     return render(*args, **kwargs)
 
 
+def gpu_render(*args, **kwargs):
+    """Render through the optional native GPU backend lazily."""
+    from .gpu import render
+
+    return render(*args, **kwargs)
+
+
 class _CallableRenderModule(ModuleType):
     """Keep ``mat_viewer.render(...)`` callable after importing this subpackage.
 
@@ -98,6 +105,7 @@ __all__ = [
     "build_row_figure",
     "build_static_publication_figure",
     "cpu_render",
+    "gpu_render",
     "normalize_cell_overlays",
     "normalize_vector_overlays",
     "paper_vector_label_annotations",
