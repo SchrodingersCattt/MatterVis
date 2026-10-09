@@ -255,6 +255,10 @@ def render_batch_if_selected(
                 getattr(args, "bond_scale", None) is not None,
             ),
             (
+                "--bond-threshold",
+                bool(getattr(args, "bond_threshold_specs", ())),
+            ),
+            (
                 "--cell-overlays",
                 getattr(args, "cell_overlays", None) is not None,
             ),
