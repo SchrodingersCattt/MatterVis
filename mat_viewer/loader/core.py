@@ -12,6 +12,12 @@ import numpy as np
 from .. import perf_log
 from ..legacy import crystal_scene as legacy_scene
 from ..scene import build_scene_from_atoms, scene_metadata, scene_ops
+from ..cache_keys import (
+    fragment_table_cache_key,
+    legacy_scene_cache_key,
+    scene_cache_key,
+    transformed_scene_cache_key,
+)
 
 
 @dataclass
@@ -160,10 +166,20 @@ def build_empty_bundle(
         M=M,
         view_direction=[0.0, 0.0, 1.0],
         up=[0.0, 1.0, 0.0],
-        scene_cache={("formula_unit", False): scene},
+        scene_cache={
+            scene_cache_key(
+                display_mode="formula_unit",
+                show_hydrogen=False,
+            ): scene
+        },
         fragment_table=[],
         topology_fragment_table=[],
-        fragment_table_cache={("scene", "formula_unit", False): ([], [])},
+        fragment_table_cache={
+            fragment_table_cache_key(
+                display_mode="formula_unit",
+                show_hydrogen=False,
+            ): ([], [])
+        },
         atom_fragment_labels=[],
         source="placeholder",
     )
@@ -920,32 +936,26 @@ def build_bundle_scene(
     atom list. The base scene cache is unchanged so toggling transforms
     on/off stays cheap.
     """
-    threshold_key = tuple(
-        sorted(
-            (str(left), str(right), float(value))
-            for (left, right), value in (bundle.bond_thresholds or {}).items()
-        )
-    )
-    base_cache_key = (
-        display_mode,
-        bool(show_hydrogen),
-        bool(include_boundary_replicas),
-        bool(include_cross_boundary_bond_endpoints),
-        bool(include_minor),
-        bundle.bond_scale,
-        threshold_key,
+    base_cache_key = scene_cache_key(
+        display_mode=display_mode,
+        show_hydrogen=show_hydrogen,
+        include_boundary_replicas=include_boundary_replicas,
+        include_cross_boundary_bond_endpoints=include_cross_boundary_bond_endpoints,
+        include_minor=include_minor,
+        bond_scale=bundle.bond_scale,
+        bond_thresholds=bundle.bond_thresholds,
     )
     base_scene = bundle.scene_cache.get(base_cache_key)
     if base_scene is None and include_cross_boundary_bond_endpoints and include_minor:
         # Scenes cached before this option existed implicitly included bonded
         # boundary endpoints. Reuse those entries instead of rebuilding them
         # through a possibly unavailable source-analysis contract.
-        legacy_base_cache_key = (
-            display_mode,
-            bool(show_hydrogen),
-            bool(include_boundary_replicas),
-            bundle.bond_scale,
-            threshold_key,
+        legacy_base_cache_key = legacy_scene_cache_key(
+            display_mode=display_mode,
+            show_hydrogen=show_hydrogen,
+            include_boundary_replicas=include_boundary_replicas,
+            bond_scale=bundle.bond_scale,
+            bond_thresholds=bundle.bond_thresholds,
         )
         base_scene = bundle.scene_cache.get(legacy_base_cache_key)
     if base_scene is None:
@@ -993,13 +1003,12 @@ def build_bundle_scene(
         base_scene["rings"] = copy.deepcopy(
             getattr(bundle.molcrys_analysis, "ring_records", ())
         )
-        fragment_cache_key = (
-            "scene",
-            display_mode,
-            bool(show_hydrogen),
-            bool(include_boundary_replicas),
-            bool(include_cross_boundary_bond_endpoints),
-            bool(include_minor),
+        fragment_cache_key = fragment_table_cache_key(
+            display_mode=display_mode,
+            show_hydrogen=show_hydrogen,
+            include_boundary_replicas=include_boundary_replicas,
+            include_cross_boundary_bond_endpoints=include_cross_boundary_bond_endpoints,
+            include_minor=include_minor,
         )
         cached_fragments = bundle.fragment_table_cache.get(fragment_cache_key)
         if cached_fragments is None:
@@ -1036,7 +1045,7 @@ def build_bundle_scene(
     if not transforms:
         return base_scene
 
-    from ..transforms import apply_transforms, transforms_cache_key
+    from ..transforms import apply_transforms
 
     transformed_cache = getattr(bundle, "_transformed_scene_cache", None)
     if transformed_cache is None:
@@ -1045,13 +1054,13 @@ def build_bundle_scene(
             bundle._transformed_scene_cache = transformed_cache
         except Exception:
             pass
-    cache_key = (
-        display_mode,
-        bool(show_hydrogen),
-        bool(include_boundary_replicas),
-        bool(include_cross_boundary_bond_endpoints),
-        bool(include_minor),
-        transforms_cache_key(transforms),
+    cache_key = transformed_scene_cache_key(
+        display_mode=display_mode,
+        show_hydrogen=show_hydrogen,
+        include_boundary_replicas=include_boundary_replicas,
+        include_cross_boundary_bond_endpoints=include_cross_boundary_bond_endpoints,
+        include_minor=include_minor,
+        transforms=transforms,
     )
     cached = (
         transformed_cache.get(cache_key)
