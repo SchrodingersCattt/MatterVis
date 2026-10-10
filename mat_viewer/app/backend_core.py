@@ -19,6 +19,7 @@ from .view_updates import (
     state_versions,
     update_applies,
 )
+from .selectors import show_hydrogen, viewport_signature
 from ..config import current_config
 
 # Maximum number of distinct figure cache entries.  A bounded LRU
@@ -1185,7 +1186,7 @@ class _CoreBackendMixin:
 
     def show_hydrogen_for_state(self, state: Optional[dict[str, Any]] = None) -> bool:
         state = self.current_state if state is None else state
-        return "hydrogens" in set(state.get("display_options", []))
+        return show_hydrogen(state)
 
     def scene_for_state(self, state: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         state = self.current_state if state is None else state
@@ -1386,11 +1387,7 @@ class _CoreBackendMixin:
         # cube and a new state with a 12 Å cube, Plotly would silently
         # "preserve UI state" for the cube too, which is what made the
         # molecule look squashed after switching back to ``formula_unit``.
-        layout_signature = "{mode}|box={box}|topo={topo}".format(
-            mode=str(state.get("display_mode", scene.get("display_mode", ""))),
-            box=int(bool("unit_cell_box" in (state.get("display_options") or []))),
-            topo=int(bool(state.get("topology_enabled", False))),
-        )
+        layout_signature = viewport_signature(state)
         style["uirevision"] = "{name}__{rev}__{sig}".format(
             name=scene.get("name", "scene"),
             rev=int(state.get("camera_revision", 0) or 0),

@@ -4,6 +4,7 @@ from __future__ import annotations
 from .shared import *
 from .camera_helpers import _camera_from_store, _coerce_projection, _plotly_camera
 from ..config.colors import POLYHEDRON_AUTO_COLORS
+from .selectors import COSMETIC_DISPLAY_OPTIONS, display_option_delta
 
 def _json_safe(value: Any) -> Any:
     if isinstance(value, np.ndarray):
@@ -153,8 +154,9 @@ def _polyhedron_visibility_patch_for_figure(
 
 def _display_options_can_fast_patch(prev_options: Iterable[str] | None, next_options: Iterable[str] | None) -> bool:
     """Only cosmetic label/axis toggles are safe for trace-only patching."""
-    changed = set(prev_options or []) ^ set(next_options or [])
-    return changed.issubset({"labels", "axes"})
+    return display_option_delta(prev_options, next_options).issubset(
+        COSMETIC_DISPLAY_OPTIONS
+    )
 
 
 def _minor_opacity_disabled(disorder: Optional[str]) -> bool:

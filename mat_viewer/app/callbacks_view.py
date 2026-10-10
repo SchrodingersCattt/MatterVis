@@ -11,6 +11,7 @@ from .editor_tables import *
 from .editor_transforms import *
 from .rightclick import *
 from ..transforms import transforms_cache_key
+from .selectors import show_hydrogen
 from .view_updates import UpdateKind, classify_change, make_update
 from .backend import ViewerBackend
 
@@ -741,7 +742,7 @@ def register_view_callbacks(app, backend):
             state.get("topology_site_index"),
             state.get("topology_enabled"),
             state.get("cutoff"),
-            "hydrogens" in (state.get("display_options") or []),
+            show_hydrogen(state),
             transforms_cache_key(state.get("transforms") or []),
             tuple(
                 (
