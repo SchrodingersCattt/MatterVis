@@ -4,7 +4,11 @@ import math
 
 import numpy as np
 
-from .viewport import _axis_cube_scale, _camera_axis_projections
+from .viewport import (
+    _axis_cube_scale,
+    _camera_axis_projections,
+    resolve_viewport,
+)
 
 
 # Plotly preserves free-form ``name`` on annotations/shapes; per-item
@@ -31,7 +35,11 @@ def axis_key_overlay(scene: dict, style: dict) -> tuple[list[dict], list[dict]]:
         return [], []
     if style.get("axis_key_via_svg_overlay"):
         return [], []
-    projections = _camera_axis_projections(scene, style) or scene.get("projected_axes")
+    viewport = resolve_viewport(scene, style)
+    projections = (
+        _camera_axis_projections(scene, style, viewport=viewport)
+        or scene.get("projected_axes")
+    )
     if not projections or len(projections) < 3:
         return [], []
 
@@ -222,7 +230,8 @@ def compass_clientside_context(scene: dict, style: dict) -> dict | None:
         pixel_length = max(20.0, float(style.get("axis_scale", 0.14)) * 360.0)
     else:
         pixel_length = float(style.get("axis_key_pixel_length", 65.0))
-    cube_scale = _axis_cube_scale(scene, style)
+    viewport = resolve_viewport(scene, style)
+    cube_scale = _axis_cube_scale(scene, style, viewport=viewport)
     cube_scale_payload = (
         [float(cube_scale[0]), float(cube_scale[1]), float(cube_scale[2])]
         if cube_scale is not None

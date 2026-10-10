@@ -46,6 +46,8 @@ _LAZY_EXPORTS = {
     "resolve_vector_overlays": (".overlay.vectors", "resolve_vector_overlays"),
     "vector_mesh_traces": (".overlay.vectors", "vector_mesh_traces"),
     "vector_overlay_bounds": (".overlay.vectors", "vector_overlay_bounds"),
+    "ViewportSpec": (".viewport", "ViewportSpec"),
+    "resolve_viewport": (".viewport", "resolve_viewport"),
 }
 
 
@@ -105,6 +107,8 @@ __all__ = [
     "resolve_vector_overlays",
     "vector_mesh_traces",
     "vector_overlay_bounds",
+    "ViewportSpec",
+    "resolve_viewport",
     "cylinder_entity",
     "geometry_entity_traces",
     "implicit_entity",
