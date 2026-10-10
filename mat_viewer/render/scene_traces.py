@@ -17,8 +17,10 @@ from .viewport import (
     _plotly_camera_from_scene,
     _scene_ranges,
     _visible_atoms,
+    ViewportSpec,
     cell_aspect_ratio,
     figure_axis_layout,
+    resolve_viewport,
     uniform_viewport,
 )
 

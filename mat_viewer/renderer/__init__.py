@@ -49,6 +49,8 @@ __all__ = [
     "topology_results_markdown",
     "uniform_camera",
     "uniform_viewport",
+    "ViewportSpec",
+    "resolve_viewport",
     "validate_style_schema",
     "vector_mesh_traces",
     "vector_overlay_bounds",
