@@ -14,6 +14,8 @@ import copy
 import json
 from typing import Any, Mapping
 
+from .selectors import geometry_state_fields
+
 
 class UpdateKind(str, Enum):
     CAMERA = "camera"
@@ -101,30 +103,10 @@ def state_versions(state: Mapping[str, Any] | None) -> ViewVersions:
 
 
 def geometry_state_key(state: Mapping[str, Any] | None) -> str:
-    state = state or {}
-    # These fields can change atom/bond/mesh identity and therefore require a
-    # background geometry build.  Labels, axes, opacity and visibility are
-    # display patches and intentionally do not participate.
-    options = set(state.get("display_options") or [])
-    fields = {
-        key: state.get(key)
-        for key in (
-            "structure",
-            "display_mode",
-            # Only geometry-affecting display options belong here.  Labels,
-            # axes and visibility toggles are trace/SVG patches.
-            "display_options",
-            "transforms",
-            "disorder",
-            "disorder_resolve",
-            "disorder_replicas",
-            "cutoff",
-        )
-    }
-    fields["display_options"] = sorted(options - {"labels", "axes"})
-    fields["hydrogens"] = "hydrogens" in options
-    fields["structure"] = state.get("structure")
-    return _stable(fields)
+    # Keep the async worker's broader update identity in one selector module.
+    # The strict base-scene cache key lives beside it as
+    # ``scene_geometry_cache_key`` for the later cache-centralisation phase.
+    return _stable(geometry_state_fields(state))
 
 
 def display_state_key(state: Mapping[str, Any] | None) -> str:
