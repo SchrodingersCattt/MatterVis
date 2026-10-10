@@ -181,6 +181,17 @@ The compass uses the same range/aspect normalization. For comparable output
 panels, also keep pixel dimensions, projection and camera conventions consistent;
 isometric axes alone do not establish a shared scale between separate panels.
 
+### `mat_viewer.renderer.resolve_viewport(scene, style, topology_data=None)`
+
+Resolve one immutable `ViewportSpec` for callers that need to inspect or reuse
+the Plotly framing before building a figure. The spec exposes `ranges`,
+`aspectmode`, `aspectratio`, and `cube_scale` (data-units per rendered cube
+unit), plus a hashable `signature` for camera compatibility and cache keys.
+Pass the spec to `mat_viewer.render.viewport.figure_axis_layout(...,
+viewport=spec)` when constructing a custom layout so the main scene and compass
+consume one scale calculation. Existing `build_figure` and `build_row_figure`
+calls resolve this contract internally.
+
 ### `mat_viewer.scene.apply_element_colors(scene, element_colors, element_colors_light)`
 
 Re-skin element palettes on a finished scene. Mutates `scene` in place

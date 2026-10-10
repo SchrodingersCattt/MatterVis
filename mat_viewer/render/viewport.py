@@ -247,6 +247,144 @@ def _range_aspect_ratio(xr, yr, zr) -> dict | None:
     return {"x": float(scaled[0]), "y": float(scaled[1]), "z": float(scaled[2])}
 
 
+@dataclass(frozen=True)
+class ViewportSpec:
+    """Resolved, renderer-facing description of one scene viewport.
+
+    ``_scene_ranges`` and the Plotly layout used to be called independently by
+    the figure and compass paths.  Keeping the result together prevents those
+    paths from silently deriving different axis scales.  The signature is
+    composed only of numeric viewport inputs and is therefore safe to use as a
+    camera compatibility/cache key.
+    """
+
+    ranges: tuple[tuple[float, float], tuple[float, float], tuple[float, float]]
+    aspectmode: str
+    aspectratio: dict[str, float] | None
+    cube_scale: tuple[float, float, float]
+    signature: tuple
+
+    @property
+    def axis_ranges(self):
+        """Alias used by callers that want to make the axis ownership clear."""
+        return self.ranges
+
+    @property
+    def x_range(self) -> tuple[float, float]:
+        return self.ranges[0]
+
+    @property
+    def y_range(self) -> tuple[float, float]:
+        return self.ranges[1]
+
+    @property
+    def z_range(self) -> tuple[float, float]:
+        return self.ranges[2]
+
+    @property
+    def viewport_signature(self) -> tuple:
+        """Descriptive alias for consumers storing camera compatibility."""
+        return self.signature
+
+
+def _as_viewport_ranges(ranges) -> tuple[tuple[float, float], ...]:
+    """Convert ranges to finite immutable pairs for a viewport contract."""
+    try:
+        normalized = tuple(
+            (float(axis_range[0]), float(axis_range[1])) for axis_range in ranges
+        )
+    except (TypeError, ValueError, IndexError):
+        raise ValueError("viewport ranges must contain three numeric pairs") from None
+    if len(normalized) != 3 or any(
+        not (math.isfinite(start) and math.isfinite(end) and end > start)
+        for start, end in normalized
+    ):
+        raise ValueError("viewport ranges must contain three finite ascending pairs")
+    return normalized
+
+
+def _viewport_signature(
+    ranges: tuple[tuple[float, float], ...],
+    aspectmode: str,
+    aspectratio: dict[str, float] | None,
+    cube_scale: tuple[float, float, float],
+) -> tuple:
+    """Return a stable, hashable camera-compatibility signature."""
+    # Ranges are generated from floating point geometry.  Rounding at the
+    # contract boundary avoids cache misses from insignificant accumulation
+    # noise while retaining sub-nanometre viewport changes.
+    rounded_ranges = tuple(
+        tuple(round(float(value), 12) for value in axis_range)
+        for axis_range in ranges
+    )
+    rounded_aspect = (
+        tuple(
+            (axis, round(float(aspectratio[axis]), 12))
+            for axis in ("x", "y", "z")
+        )
+        if aspectratio is not None
+        else None
+    )
+    rounded_scale = tuple(round(float(value), 12) for value in cube_scale)
+    return (rounded_ranges, str(aspectmode), rounded_aspect, rounded_scale)
+
+
+def resolve_viewport(
+    scene: dict,
+    style: dict,
+    topology_data: dict | None = None,
+) -> ViewportSpec:
+    """Resolve all scale inputs shared by the main viewer and compass.
+
+    The returned object owns the final ranges, Plotly aspect configuration,
+    Cartesian data-units per rendered cube unit, and a compatibility
+    signature.  Callers should pass it through to layout builders rather than
+    recomputing ranges from the scene a second time.
+    """
+    resolved_ranges = _as_viewport_ranges(
+        _scene_ranges(scene, style, topology_data=topology_data)
+    )
+    xr, yr, zr = resolved_ranges
+    aspectratio = _range_aspect_ratio(xr, yr, zr)
+    aspectmode = "manual" if aspectratio is not None else "data"
+
+    if aspectratio is not None:
+        spans = np.asarray(
+            [axis_range[1] - axis_range[0] for axis_range in resolved_ranges],
+            dtype=float,
+        )
+        normalized_aspect = np.asarray(
+            [aspectratio[axis] for axis in ("x", "y", "z")], dtype=float
+        )
+        scale = spans / (2.0 * np.maximum(normalized_aspect, 1.0e-12))
+    else:
+        # This branch is retained for malformed/degenerate ranges where Plotly
+        # must use ``data`` aspect mode.  It preserves the historical fallback
+        # for scenes that expose only bounds or an explicit viewport.
+        scale = _legacy_axis_cube_scale(scene, style)
+        if scale is None:
+            scale = np.ones(3, dtype=float)
+
+    scale = np.asarray(scale, dtype=float)
+    if scale.shape != (3,) or not np.all(np.isfinite(scale)) or np.any(scale <= 0):
+        scale = np.ones(3, dtype=float)
+    cube_scale = tuple(float(value) for value in scale)
+    signature = _viewport_signature(
+        resolved_ranges, aspectmode, aspectratio, cube_scale
+    )
+    return ViewportSpec(
+        ranges=resolved_ranges,
+        aspectmode=aspectmode,
+        aspectratio=(
+            {axis: float(aspectratio[axis]) for axis in ("x", "y", "z")}
+            if aspectratio is not None
+            else None
+        ),
+        cube_scale=cube_scale,
+        signature=signature,
+    )
+
+
 def flat_projected_pixel_scale(scene: dict, style: dict, *, ranges=None) -> float:
     """Return rendered pixels per Cartesian data unit for flat primitives."""
     if ranges is None:
@@ -350,7 +488,12 @@ def _manual_aspect_scale(
     return halves / np.maximum(ar, 1e-9)
 
 
-def _camera_axis_projections(scene: dict, style: dict) -> list[list[float]] | None:
+def _camera_axis_projections(
+    scene: dict,
+    style: dict,
+    *,
+    viewport: ViewportSpec | None = None,
+) -> list[list[float]] | None:
     """Reproject unit lattice-basis directions onto the camera screen plane."""
     camera = _plotly_camera_from_scene(scene, style)
     eye_raw = camera.get("eye") or {}
@@ -394,8 +537,9 @@ def _camera_axis_projections(scene: dict, style: dict) -> list[list[float]] | No
     if M.ndim != 2 or M.shape[0] < 3 or M.shape[1] != 3:
         return None
 
-    cube_scale = _axis_cube_scale(scene, style)
-    M_cube = M[:3] / cube_scale[None, :] if cube_scale is not None else M[:3]
+    resolved_viewport = viewport or resolve_viewport(scene, style)
+    cube_scale = np.asarray(resolved_viewport.cube_scale, dtype=float)
+    M_cube = M[:3] / cube_scale[None, :]
     norms = np.linalg.norm(M_cube, axis=1)
     if not np.all(np.isfinite(norms)) or np.any(norms < 1e-12):
         return None
@@ -406,7 +550,7 @@ def _camera_axis_projections(scene: dict, style: dict) -> list[list[float]] | No
     ]
 
 
-def _axis_cube_scale(scene: dict, style: dict) -> np.ndarray | None:
+def _legacy_axis_cube_scale(scene: dict, style: dict) -> np.ndarray | None:
     """Return per-axis data units per rendered cube unit.
 
     Manual aspectratio scenes use the same range/aspect mapping as Plotly.
@@ -440,6 +584,22 @@ def _axis_cube_scale(scene: dict, style: dict) -> np.ndarray | None:
                         return None
                     return halves
     return None
+
+
+def _axis_cube_scale(
+    scene: dict,
+    style: dict,
+    *,
+    viewport: ViewportSpec | None = None,
+) -> np.ndarray | None:
+    """Return the cube scale from the shared viewport resolver.
+
+    Keep this helper as a compatibility facade for compass and legacy callers;
+    new rendering code should retain the full :class:`ViewportSpec` returned
+    by :func:`resolve_viewport`.
+    """
+    resolved_viewport = viewport or resolve_viewport(scene, style)
+    return np.asarray(resolved_viewport.cube_scale, dtype=float)
 
 
 def _visible_atoms(scene: dict, style: dict):
@@ -714,7 +874,15 @@ def _equalize_axis_ranges(xr, yr, zr):
     return out[0], out[1], out[2]
 
 
-def figure_axis_layout(scene: dict, style: dict, xr, yr, zr) -> dict:
+def figure_axis_layout(
+    scene: dict,
+    style: dict,
+    xr=None,
+    yr=None,
+    zr=None,
+    *,
+    viewport: ViewportSpec | None = None,
+) -> dict:
     """Preserve Cartesian scale using the final, possibly padded, axis ranges.
 
     Plotly's ``data`` aspect follows trace extents, not these explicit ranges.
@@ -722,12 +890,19 @@ def figure_axis_layout(scene: dict, style: dict, xr, yr, zr) -> dict:
     vertices are isotropic. Range-derived manual aspect applies in every mode;
     neither coordinates nor caller-supplied viewport endpoints are changed.
     """
-    aspect = _range_aspect_ratio(xr, yr, zr)
-
-    if aspect is not None:
-        aspect_kwargs = {"aspectmode": "manual", "aspectratio": aspect}
+    if viewport is not None:
+        xr, yr, zr = viewport.ranges
+        aspect_kwargs = {"aspectmode": viewport.aspectmode}
+        if viewport.aspectratio is not None:
+            aspect_kwargs["aspectratio"] = dict(viewport.aspectratio)
     else:
-        aspect_kwargs = {"aspectmode": "data"}
+        if xr is None or yr is None or zr is None:
+            raise TypeError("figure_axis_layout requires ranges or a viewport")
+        aspect = _range_aspect_ratio(xr, yr, zr)
+        if aspect is not None:
+            aspect_kwargs = {"aspectmode": "manual", "aspectratio": aspect}
+        else:
+            aspect_kwargs = {"aspectmode": "data"}
 
     return {
         "xaxis": {"visible": False, "range": xr},

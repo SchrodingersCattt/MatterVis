@@ -29,6 +29,7 @@ from .viewport import (
     cell_aspect_ratio,
     figure_axis_layout,
     flat_visual_pixel_scale,
+    resolve_viewport,
     uniform_viewport,
 )
 from .trace_ids import plotly_trace_uid
@@ -337,7 +338,8 @@ def build_row_figure(
             scene["vector_overlays"] = vector_overlays_by_scene[col_idx] or []
         style_norm = validate_style_schema(style)
         validate_geometry_style(scene, style_norm)
-        xr, yr, zr = _scene_ranges(scene, style_norm)
+        viewport = resolve_viewport(scene, style_norm)
+        xr, yr, zr = viewport.ranges
         if style_norm.get("material") == "flat":
             style_norm["_flat_visual_pixel_scale"] = flat_visual_pixel_scale(style_norm)
         use_fast = _should_use_fast(scene, style_norm)
@@ -387,7 +389,9 @@ def build_row_figure(
             td["scene"] = scene_name
         all_trace_dicts.extend(trace_dicts)
 
-        layout_dict[scene_name] = figure_axis_layout(scene, style_norm, xr, yr, zr)
+        layout_dict[scene_name] = figure_axis_layout(
+            scene, style_norm, viewport=viewport
+        )
         layout_dict[scene_name]["bgcolor"] = bgcolor
 
     layout_dict.update(
@@ -417,11 +421,12 @@ def build_figure(
         scene["vector_overlays"] = vector_overlays
     style = validate_style_schema(style)
     validate_geometry_style(scene, style)
-    xr, yr, zr = _scene_ranges(
+    viewport = resolve_viewport(
         scene,
         style,
         topology_data=topology_data if style.get("topology_enabled", False) else None,
     )
+    xr, yr, zr = viewport.ranges
     if style.get("material") == "flat":
         style["_flat_visual_pixel_scale"] = flat_visual_pixel_scale(style)
     style["_topology_viewport_ranges"] = [list(xr), list(yr), list(zr)]
@@ -571,7 +576,7 @@ def build_figure(
         plot_bgcolor=style.get("background", "#FFFFFF"),
         margin=dict(l=0, r=0, t=top_margin, b=0),
         scene={
-            **figure_axis_layout(scene, style, xr, yr, zr),
+            **figure_axis_layout(scene, style, viewport=viewport),
             "domain": {
                 "x": [0, 0.86 if show_property_colorbar else 1],
                 "y": [0, 1],
