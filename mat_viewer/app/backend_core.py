@@ -625,16 +625,22 @@ class _CoreBackendMixin:
         )
         details: dict[str, Any] = {}
 
+        # Phase 3 bridge: translate the wire envelope once, then use the pure
+        # reducer to calculate the transition's invalidation facts.  The
+        # existing normalizer/patch path remains responsible for compatibility
+        # coercion and persistence during this migration phase.
+        operation, invalidations = self._prepare_operation(payload, scene_id=scene_id)
+
         if intent_type in {"set_style", "set_display_options"}:
-            state = self.patch_state(data, scene_id=scene_id, broadcast=False)
+            state, _ = self.apply_operation(
+                operation, scene_id=scene_id, broadcast=False
+            )
         elif intent_type in {"patch_state", "apply_transform"}:
-            state = self.patch_state(data, scene_id=scene_id)
+            state, _ = self.apply_operation(operation, scene_id=scene_id)
         elif intent_type == "set_camera":
-            camera = data.get("camera", data)
-            patch = {"camera": camera}
-            if "camera_revision" in data:
-                patch["camera_revision"] = data["camera_revision"]
-            state = self.patch_state(patch, scene_id=scene_id, broadcast=False)
+            state, _ = self.apply_operation(
+                operation, scene_id=scene_id, broadcast=False
+            )
         elif intent_type == "set_active_scene":
             target = data.get("scene_id") or scene_id
             self.set_active_scene(str(target), broadcast=True)
@@ -662,14 +668,7 @@ class _CoreBackendMixin:
             else:
                 raise ValueError(f"unknown crud_scene action: {action}")
         elif intent_type in {"crud_polyhedron", "crud_atom_group", "crud_bond_group"}:
-            key = {
-                "crud_polyhedron": "polyhedron_specs",
-                "crud_atom_group": "atom_groups",
-                "crud_bond_group": "bond_groups",
-            }[intent_type]
-            state = self.patch_state(
-                {key: data.get(key, data.get("items", []))}, scene_id=scene_id
-            )
+            state, _ = self.apply_operation(operation, scene_id=scene_id)
         elif intent_type == "upload_complete":
             state = self.get_state(scene_id)
             self.pending_state = copy.deepcopy(state)
@@ -679,6 +678,8 @@ class _CoreBackendMixin:
         return {
             "ok": True,
             "type": intent_type,
+            "operation": operation.name,
+            "invalidations": sorted(item.value for item in invalidations),
             "version": self.version,
             "state": state,
             **details,
