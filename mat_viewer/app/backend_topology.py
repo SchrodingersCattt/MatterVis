@@ -11,6 +11,7 @@ from ..topology import (
     display_atom_centers_for_spec as _display_atom_centers_for_spec,
     extract_atom_coordination_shells,
 )
+from ..cache_keys import topology_geometry_cache_key
 
 
 _TOPOLOGY_CACHE_LIMIT = 8
@@ -585,38 +586,16 @@ class _TopologyBackendMixin:
         # That way swapping a hull colour stays a cheap re-paint and
         # doesn't recompute coordination shells for every tile.
         cutoff = float(state.get("cutoff", 10.0))
-        spec_geometry_key = frozenset(
-            (
-                spec["center_species"],
-                spec.get("ligand_species") or None,
-                bool(spec.get("enforce_enclosure", True)),
-                float(spec.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC)),
-                # MCK 0.4 radial / level knobs: each tuple must change the
-                # cache key because they change the shell topology itself
-                # (cf. SY perchlorate CN=6 vs CN=12 cuboctahedron when
-                # ``hard_cutoff`` flips ``None`` -> 8.0).
-                str(spec.get("level") or "molecule"),
-                str(spec.get("center_kind") or "centroid"),
-                spec.get("hard_cutoff"),
-                spec.get("fallback_max"),
-            )
-            for spec in effective_specs
-        )
-        # Phase 4: ``transforms`` change which fragments exist and must be
-        # in the geometry cache key. Per-spec colours and
-        # ``instance_overrides`` stay OUT of the key (they only affect
-        # the renderer's painter cache; see ``_attach_spec_colors``).
-        from ..transforms import transforms_cache_key
-
-        transforms_key = transforms_cache_key(state.get("transforms") or [])
-        cache_key = (
-            structure,
-            state.get("display_mode"),
-            bool("hydrogens" in (state.get("display_options") or [])),
-            int(site_index),
-            cutoff,
-            spec_geometry_key,
-            transforms_key,
+        # Per-spec colours and ``instance_overrides`` stay OUT of the key;
+        # they only affect the renderer's painter cache.
+        cache_key = topology_geometry_cache_key(
+            structure=structure,
+            display_mode=state.get("display_mode"),
+            show_hydrogen="hydrogens" in (state.get("display_options") or []),
+            site_index=site_index,
+            cutoff=cutoff,
+            specs=effective_specs,
+            transforms=state.get("transforms") or [],
         )
         return {
             "structure": structure,

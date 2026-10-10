@@ -19,6 +19,7 @@ from .view_updates import (
     state_versions,
     update_applies,
 )
+from ..cache_keys import figure_state_cache_key
 from ..config import current_config
 
 # Maximum number of distinct figure cache entries.  A bounded LRU
@@ -385,23 +386,7 @@ class _CoreBackendMixin:
 
     @staticmethod
     def _figure_state_cache_key(state: dict[str, Any]) -> str:
-        # Geometry figures are reusable across named-polyhedron visibility
-        # toggles; the separate display-state key still records that change
-        # for versioning and the browser local patch.
-        key_state = json.loads(display_state_key(state))
-        specs = key_state.get("polyhedron_specs")
-        if isinstance(specs, list):
-            key_state["polyhedron_specs"] = [
-                {k: v for k, v in spec.items() if k != "enabled"}
-                if isinstance(spec, dict) else spec
-                for spec in specs
-            ]
-        # Flat+ORTEP bakes the camera basis into a Matplotlib image.  The
-        # regular Plotly path can apply camera changes after a cache hit, but
-        # an image-backed figure must rebuild when the camera rotates.
-        if state.get("material") == "flat" and state.get("style") == "ortep":
-            key_state["camera"] = state.get("camera")
-        return json.dumps(key_state, sort_keys=True, separators=(",", ":"))
+        return figure_state_cache_key(state)
 
     def _figure_state_matches_current(
         self,
