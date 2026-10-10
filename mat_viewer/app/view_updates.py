@@ -14,6 +14,8 @@ import copy
 import json
 from typing import Any, Mapping
 
+from ..cache_keys import display_state_key as _canonical_display_state_key
+
 
 class UpdateKind(str, Enum):
     CAMERA = "camera"
@@ -128,8 +130,9 @@ def geometry_state_key(state: Mapping[str, Any] | None) -> str:
 
 
 def display_state_key(state: Mapping[str, Any] | None) -> str:
-    state = state or {}
-    return _stable({k: v for k, v in state.items() if k not in _VOLATILE | {"camera"}})
+    """Compatibility wrapper for the shared canonical display key."""
+
+    return _canonical_display_state_key(state)
 
 
 def classify_change(

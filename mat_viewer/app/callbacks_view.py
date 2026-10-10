@@ -10,7 +10,7 @@ from .normalizers import *
 from .editor_tables import *
 from .editor_transforms import *
 from .rightclick import *
-from ..transforms import transforms_cache_key
+from ..cache_keys import topology_side_panel_cache_key
 from .view_updates import UpdateKind, classify_change, make_update
 from .backend import ViewerBackend
 
@@ -733,56 +733,7 @@ def register_view_callbacks(app, backend):
                 # continue using the client-side relayout fast path.
                 backend._render_worker.request_figure_build(state)
             return (no_update,) * 4
-        topo_key_preview = (
-            state.get("scene_id"),
-            state.get("structure"),
-            state.get("display_mode"),
-            tuple(state.get("topology_species_keys") or ()),
-            state.get("topology_site_index"),
-            state.get("topology_enabled"),
-            state.get("cutoff"),
-            "hydrogens" in (state.get("display_options") or []),
-            transforms_cache_key(state.get("transforms") or []),
-            tuple(
-                (
-                    s.get("id"),
-                    s.get("center_species"),
-                    s.get("ligand_species"),
-                    s.get("color"),
-                    bool(s.get("enabled", True)),
-                    bool(s.get("enforce_enclosure", True)),
-                    float(s.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC)),
-                )
-                for s in (state.get("polyhedron_specs") or [])
-            ),
-            tuple(
-                (
-                    g.get("id"),
-                    bool(g.get("visible", True)),
-                    g.get("color"),
-                    g.get("opacity"),
-                    tuple(sorted((g.get("selector") or {}).get("elements") or [])) if (g.get("selector") or {}).get("elements") else None,
-                    bool((g.get("selector") or {}).get("all", False)),
-                    (g.get("selector") or {}).get("is_minor"),
-                )
-                for g in (state.get("atom_groups") or [])
-            ),
-            tuple(
-                (
-                    g.get("id"),
-                    bool(g.get("visible", True)),
-                    g.get("color"),
-                    g.get("opacity"),
-                    g.get("radius_scale"),
-                    tuple(sorted((g.get("selector") or {}).get("between_elements") or []))
-                    if (g.get("selector") or {}).get("between_elements")
-                    else None,
-                    bool((g.get("selector") or {}).get("all", False)),
-                    (g.get("selector") or {}).get("is_minor"),
-                )
-                for g in (state.get("bond_groups") or [])
-            ),
-        )
+        topo_key_preview = topology_side_panel_cache_key(state)
         prev_key = getattr(update_view, "_topo_cache_key", None)
         # One scheduling owner; no figure assembly on a Dash request thread.
         # The existing broadcast journal is also the HTTP fallback when WS is
