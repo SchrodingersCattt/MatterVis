@@ -33,19 +33,31 @@ def test_flat_ortep_figure_has_camera_anchor_and_image(monkeypatch, tmp_path):
     monkeypatch.setattr("mat_viewer.ortep.flat_render.render_ortep_flat", fake_render)
     backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
     try:
-        figure = backend._flat_ortep_figure(
-            _scene(),
-            {"uirevision": "flat-ortep"},
-            camera=_plotly_camera(
-                {"eye": {"x": 1.0, "y": 0.0, "z": 0.0}, "center": {"x": 0.0, "y": 0.0, "z": 0.0}, "up": {"x": 0.0, "y": 0.0, "z": 1.0}}
-            ),
+        # Use the same public render entry point as the viewer.  Supplying a
+        # tiny scene keeps this assertion independent of the catalog loader
+        # while still exercising style resolution and the figure cache path.
+        backend.scene_for_state = lambda _state=None: _scene()
+        state = backend.get_state()
+        state.update(
+            {
+                "material": "flat",
+                "style": "ortep",
+                "camera": _plotly_camera(
+                    {
+                        "eye": {"x": 1.0, "y": 0.0, "z": 0.0},
+                        "center": {"x": 0.0, "y": 0.0, "z": 0.0},
+                        "up": {"x": 0.0, "y": 0.0, "z": 1.0},
+                    }
+                ),
+            }
         )
+        figure, _ = backend.figure_for_state(state)
         payload = figure.to_plotly_json()
     finally:
         backend.close()
 
     assert payload["layout"]["scene"]["dragmode"] == "orbit"
-    assert payload["layout"]["scene"]["uirevision"] == "flat-ortep"
+    assert payload["layout"]["scene"]["uirevision"]
     assert any(trace.get("type") == "scatter3d" for trace in payload["data"])
     assert payload["layout"]["images"]
     assert seen and np.allclose(seen[0], [1.0, 0.0, 0.0])
