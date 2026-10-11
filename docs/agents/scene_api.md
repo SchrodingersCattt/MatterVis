@@ -161,12 +161,12 @@ same policy is accepted by `build_loaded_crystal`, `load_structure_input`,
 cube/ASE adapters, and the terminal/renderer CLIs (`--bond-scale` plus
 repeatable `--bond-threshold ELEMENT1,ELEMENT2=CUTOFF`). The REST equivalent
 is the `mck_overrides` object on `PATCH /api/v2/config`; policy changes rebuild
-affected bundles lazily so a threshold cannot silently remain cached.
+all populated catalog, uploaded, and direct bundles so a threshold cannot silently remain cached.
 
 The REST config uses TOML-safe structured records for pair thresholds:
 `{"mck_overrides": {"bond_scale": 0.9, "bond_thresholds": [{"elements": ["Zn", "N"], "cutoff": 2.5}]}}`.
-Updating this policy invalidates catalog bundle and figure caches; bundles are
-rebuilt lazily with the new MolCrysKit policy.
+Updating this policy invalidates bundle and figure caches; populated bundles are
+rebuilt with the new MolCrysKit policy.
 
 `mat_viewer.scene.build_scene_from_atoms` remains available as a
 compatibility import, but new code should treat scene assembly as part
