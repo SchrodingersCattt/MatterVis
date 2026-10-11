@@ -71,8 +71,13 @@ def test_snapshot_returns_events_and_matching_latest_sequence():
 
     events, latest = perf_log.snapshot(since_seq=middle["seq"])
 
-    assert [e["label"] for e in events] == ["last"]
-    assert latest == last["seq"]
+    # The application can emit cache/render events from background workers
+    # while this process is taking the snapshot.  Assert the strict sequence
+    # filter for the events owned by this test while allowing those ambient
+    # records to advance the global latest sequence.
+    labels = [e["label"] for e in events if e["label"] in {"first", "middle", "last"}]
+    assert labels == ["last"]
+    assert latest >= last["seq"]
     assert latest >= max(e["seq"] for e in events)
 
 
