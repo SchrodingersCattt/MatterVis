@@ -578,6 +578,23 @@ class _TopologyBackendMixin:
                     hint="Use an index from GET /api/v2/scene/{name} topology_fragment_table.",
                 )
             return None
+        display_fragment = next(
+            (
+                fragment
+                for fragment in (scene.get("fragment_table") or [])
+                if int(fragment.get("index", -1)) == int(site_index)
+            ),
+            None,
+        )
+        analysis_spec = next(
+            (
+                spec
+                for spec in effective_specs
+                if display_fragment is not None
+                and _fragment_matches_polyhedron_spec(display_fragment, spec)
+            ),
+            effective_specs[0],
+        )
         # Memoize the (heavy) topology dict on the bundle keyed on the
         # state fields that actually influence GEOMETRY. Per-spec colour
         # is intentionally not in the key -- it only affects the
@@ -604,6 +621,7 @@ class _TopologyBackendMixin:
             "effective_specs": effective_specs,
             "site_index": int(site_index),
             "cutoff": cutoff,
+            "analysis_spec_id": analysis_spec["id"],
             "cache_key": cache_key,
         }
 
@@ -627,7 +645,11 @@ class _TopologyBackendMixin:
             if strict:
                 raise TopologyUnavailable("topology analysis produced no geometry for the requested fragment")
             return None
-        return self._attach_spec_colors(cached_geometry, context["effective_specs"])
+        return self._attach_spec_colors(
+            cached_geometry,
+            context["effective_specs"],
+            analysis_spec_id=context["analysis_spec_id"],
+        )
 
     def topology_request(
         self,
@@ -677,7 +699,11 @@ class _TopologyBackendMixin:
             if strict:
                 raise TopologyUnavailable("topology analysis produced no geometry for the requested fragment")
             return None
-        return self._attach_spec_colors(cached_geometry, context["effective_specs"])
+        return self._attach_spec_colors(
+            cached_geometry,
+            context["effective_specs"],
+            analysis_spec_id=context["analysis_spec_id"],
+        )
 
     def _compute_topology_geometry(
         self,
@@ -730,6 +756,8 @@ class _TopologyBackendMixin:
         self,
         cached_geometry: dict[str, Any],
         effective_specs: list[dict[str, Any]],
+        *,
+        analysis_spec_id: str | None = None,
     ) -> dict[str, Any]:
         """Re-stamp per-spec colours and per-fragment instance overrides
         onto a geometry payload pulled from the bundle cache.
@@ -770,8 +798,15 @@ class _TopologyBackendMixin:
         overrides_by_id: dict[str, dict[str, dict[str, Any]]] = {
             spec["id"]: dict(spec.get("instance_overrides") or {}) for spec in effective_specs
         }
+        entries_by_id = {
+            str(entry.get("spec_id") or ""): entry
+            for entry in cached_geometry.get("spec_results", []) or []
+        }
         spec_results = []
-        for entry in cached_geometry.get("spec_results", []) or []:
+        for spec in effective_specs:
+            entry = entries_by_id.get(str(spec.get("id") or ""))
+            if entry is None:
+                continue
             spec_id = entry.get("spec_id")
             recoloured = dict(entry)
             recoloured.update(paint_by_id.get(spec_id, {
@@ -803,6 +838,8 @@ class _TopologyBackendMixin:
             spec_results.append(recoloured)
         out = dict(cached_geometry)
         out["spec_results"] = spec_results
+        if analysis_spec_id is not None:
+            out["analysis_spec_id"] = analysis_spec_id
         # Brand-new wrapper -> brand-new painter caches. The renderer
         # populates these on first paint and they are reused for every
         # subsequent build_figure call sharing the same paint key.

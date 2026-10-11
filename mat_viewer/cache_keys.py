@@ -164,11 +164,10 @@ def topology_spec_geometry_key(
     should not trigger an expensive MolCrysKit geometry computation.
     """
 
-    # The complete topology result is identity-bearing: consumers retain each
-    # spec's id and ordered analysis anchor in the cached payload.  Preserve
-    # that identity, multiplicity, and order here so replacing, duplicating,
-    # or reordering otherwise identical queries cannot reuse the wrong result.
-    return tuple(
+    # Keep every spec identity and occurrence, but sort the cache
+    # representation so a UI reorder can reuse expensive geometry. The
+    # consumer rebinds ordered results and the analysis anchor on each hit.
+    entries = tuple(
         (
             str(spec.get("id") or ""),
             str(spec.get("center_species") or ""),
@@ -182,6 +181,7 @@ def topology_spec_geometry_key(
         )
         for spec in specs or ()
     )
+    return tuple(sorted(entries, key=repr))
 
 
 def topology_geometry_cache_key(
