@@ -422,13 +422,64 @@ def reduce_state(state: Mapping[str, Any], operation: Operation | Mapping[str, A
     elif kind == OperationKind.SET_DISPLAY_OPTIONS.value:
         _set_display_options(after, payload.get("display_options"))
     elif kind in {OperationKind.SET_RENDER_STYLE.value, OperationKind.SET_NUMERIC_STYLE.value}:
+        # Keep the complete legacy style surface available through the typed
+        # bridge.  The compatibility normalizer still owns coercion, while
+        # the reducer records the values that the caller explicitly changed.
         allowed = {
             "material", "style", "disorder", "ortep_mode", "label_mode",
-            "atom_scale", "bond_radius", "minor_opacity", "axis_scale", "cutoff", "fast_rendering",
+            "atom_scale", "bond_radius", "minor_opacity", "major_opacity",
+            "minor_wireframe", "minor_bond_scale", "axis_scale", "axis_color",
+            "axis_opacity", "show_title", "show_hydrogen", "show_labels",
+            "show_axes", "show_axis_key", "show_unit_cell", "show_minor_only",
+            "depth_cue_enabled", "projection", "camera_eye_distance",
+            "background", "label_color", "minor_label_color", "axes_labels",
+            "axis_key_anchor", "axis_key_row_gap", "axis_key_arrow_len",
+            "axis_key_label_pad", "axis_key_pixel_length",
+            "axis_key_label_pixel_offset", "axis_key_arrow_head",
+            "axis_key_dot_threshold", "axis_key_dot_radius_px",
+            "axis_key_font_size", "axis_key_color", "axis_key_label_order",
+            "axis_key_italic", "fast_rendering", "topology_enabled",
+            "monochrome", "ortep_probability", "ortep_mode_minor",
+            "ortep_octant_shading", "ortep_octant_shadow_color",
+            "ortep_octant_shadow_alpha", "ortep_octant_hatching",
+            "ortep_octant_hatch_color", "ortep_octant_hatch_linewidth",
+            "ortep_octant_hatch_lines", "ortep_octant_hatch_arc_pts",
+            "ortep_octant_edge_color", "ortep_octant_edge_linewidth",
+            "ortep_silhouette_outline", "ortep_silhouette_color",
+            "ortep_silhouette_linewidth", "ortep_atom_fill",
+            "ortep_atom_fill_color", "ortep_z_lift_fill", "ortep_z_lift_hatch",
+            "ortep_z_lift_outline", "force_bond_color", "element_colors",
+            "element_colors_light", "topology_hull_color", "topology_species_keys",
+            "polyhedron_specs", "atom_groups", "bond_groups",
+            "atom_property_color", "transforms", "selection", "disorder_resolve",
+            "disorder_replicas", "bfdh_morphology", "bfdh_morphology_color",
+            "cutoff",
         }
         for key, value in payload.items():
             if key in allowed:
                 after[key] = copy.deepcopy(value)
+        # Historical set_style callers send booleans instead of the normalized
+        # display_options token list.  Reflect those edits into the canonical
+        # list so the existing backend persists the same user intent.
+        display_tokens = {
+            "show_labels": "labels",
+            "show_axes": "axes",
+            "show_minor_only": "minor_only",
+            "minor_wireframe": "minor_wireframe",
+            "show_hydrogen": "hydrogens",
+            "show_unit_cell": "unit_cell_box",
+            "monochrome": "monochrome",
+        }
+        if any(key in payload for key in display_tokens):
+            options = set(after.get("display_options") or [])
+            for key, token in display_tokens.items():
+                if key not in payload:
+                    continue
+                if bool(payload[key]):
+                    options.add(token)
+                else:
+                    options.discard(token)
+            after["display_options"] = sorted(options)
     elif kind == OperationKind.SET_CAMERA.value:
         if isinstance(payload.get("camera"), Mapping):
             after["camera"] = copy.deepcopy(dict(payload["camera"]))
