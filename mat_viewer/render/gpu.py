@@ -19,6 +19,7 @@ import importlib
 import importlib.metadata
 import importlib.util
 from pathlib import Path
+import threading
 import time
 from types import MappingProxyType
 from typing import Any, Literal, Mapping
@@ -526,6 +527,73 @@ def _submit_and_wait(device: Any, commands: Any) -> None:
                 continue
 
 
+def _map_readback_sync(readback: Any, *, wgpu: Any, device: Any) -> bytes:
+    """Map a staging buffer and return its bytes after GPU completion.
+
+    wgpu-py 0.20+ exposes asynchronous ``map_async`` on some backends, while
+    older releases and test doubles expose ``map_sync``.  Calling
+    ``get_mapped_range`` immediately after ``map_async`` races the device and
+    can return an empty or invalid view.  Prefer the synchronous API when it is
+    available; otherwise wait for the callback while polling the device.
+    """
+
+    mode = getattr(getattr(wgpu, "MapMode", None), "READ", 1)
+    map_sync = getattr(readback, "map_sync", None)
+    if callable(map_sync):
+        map_sync(mode)
+    else:
+        map_async = getattr(readback, "map_async", None)
+        if not callable(map_async):
+            raise GPUUnavailableError("wgpu readback buffer does not expose map_async/map_sync")
+        completed = threading.Event()
+        failure: list[BaseException] = []
+
+        def done(status: Any = None, *args: Any) -> None:
+            # wgpu-py reports ``None``/0/"success" on success depending on
+            # the release.  Preserve any non-success status for a useful
+            # error instead of reading before the mapping is ready.
+            if status not in (None, 0, "success"):
+                failure.append(RuntimeError(f"wgpu buffer map failed: {status!r}"))
+            completed.set()
+
+        try:
+            result = map_async(mode, done)
+        except TypeError:
+            # A few test doubles and older synchronous wrappers accept only
+            # the mode argument and complete after ``device.poll``.
+            result = map_async(mode)
+            completed.set()
+        if hasattr(result, "__await__"):
+            # Newer wrappers may return an awaitable.  A running event loop is
+            # not expected in the render worker; if one is present, polling
+            # below still drives the native callback.
+            try:
+                import asyncio
+
+                asyncio.run(result)
+            except RuntimeError:
+                pass
+            completed.set()
+        poll = getattr(device, "poll", None)
+        deadline = time.monotonic() + 10.0
+        while not completed.is_set() and time.monotonic() < deadline:
+            if callable(poll):
+                try:
+                    poll(True)
+                except Exception:
+                    pass
+            time.sleep(0.001)
+        if not completed.is_set():
+            raise GPUUnavailableError("timed out waiting for wgpu readback mapping")
+        if failure:
+            raise GPUUnavailableError(str(failure[0])) from failure[0]
+
+    get_range = getattr(readback, "get_mapped_range", None)
+    if not callable(get_range):
+        raise GPUUnavailableError("wgpu readback buffer does not expose mapped bytes")
+    return bytes(get_range())
+
+
 def _release_gpu_resources(resources: list[Any], device: Any) -> None:
     """Best-effort release of transient GPU resources and the device."""
 
@@ -756,16 +824,7 @@ def _wgpu_rgba(lowered: LoweredPlan, *, probe_info: GPUProbe) -> tuple[bytes, di
     )
     commands = encoder.finish()
     _submit_and_wait(device, [commands])
-    map_read_mode = getattr(getattr(wgpu, "MapMode", None), "READ", 1)
-    map_async = getattr(readback, "map_async", None)
-    if callable(map_async):
-        mapped = map_async(map_read_mode)
-        if hasattr(mapped, "__await__"):
-            raise GPUUnavailableError("wgpu readback exposes asynchronous mapping only")
-    get_range = getattr(readback, "get_mapped_range", None)
-    if not callable(get_range):
-        raise GPUUnavailableError("wgpu readback buffer does not expose mapped bytes")
-    mapped_bytes = bytes(get_range())
+    mapped_bytes = _map_readback_sync(readback, wgpu=wgpu, device=device)
     rgba = b"".join(
         mapped_bytes[row * padded_row : row * padded_row + unpadded_row]
         for row in range(lowered.height)

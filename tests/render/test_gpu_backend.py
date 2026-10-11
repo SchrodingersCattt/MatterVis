@@ -78,6 +78,36 @@ def test_gpu_render_never_falls_back_when_runtime_is_missing(monkeypatch) -> Non
         gpu.render(_plan(_triangle()))
 
 
+def test_readback_waits_for_async_map_callback() -> None:
+    class FakeBuffer:
+        def __init__(self) -> None:
+            self.callback = None
+            self.mapped = False
+
+        def map_async(self, mode, callback):
+            self.callback = callback
+
+        def get_mapped_range(self):
+            assert self.mapped
+            return b"rgba"
+
+    class FakeDevice:
+        def __init__(self, buffer) -> None:
+            self.buffer = buffer
+
+        def poll(self, _wait=True):
+            if self.buffer.callback is not None and not self.buffer.mapped:
+                self.buffer.mapped = True
+                self.buffer.callback("success")
+
+    class FakeWgpu:
+        class MapMode:
+            READ = 1
+
+    buffer = FakeBuffer()
+    assert gpu._map_readback_sync(buffer, wgpu=FakeWgpu, device=FakeDevice(buffer)) == b"rgba"
+
+
 def test_gpu_render_receipt_has_stage_timings_without_device(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(gpu, "probe", lambda: gpu.GPUProbe(True, adapter_name="test"))
     monkeypatch.setattr(
