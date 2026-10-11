@@ -84,6 +84,76 @@ def test_partition_is_non_mutating_and_keeps_transport_fields_ephemeral():
     assert state["transforms"][0]["params"]["a"] == 2
 
 
+def test_partition_round_trips_durable_render_layers():
+    state = _state(
+        fast_rendering=True,
+        overlay_overrides=[{"id": "compass", "kind": "compass", "anchor": "paper"}],
+        vector_overlays=[
+            {
+                "id": "mode-1",
+                "magnitude_mode": "absolute",
+                "arrows": [{"origin": [0, 0, 0], "vector": [1, 0, 0]}],
+            }
+        ],
+    )
+
+    slices = partition_state(state)
+    restored = dict(slices.stored)
+
+    assert restored["fast_rendering"] is True
+    assert restored["overlay_overrides"] == state["overlay_overrides"]
+    assert restored["vector_overlays"] == state["vector_overlays"]
+    restored["vector_overlays"][0]["arrows"][0]["vector"][0] = 9
+    assert state["vector_overlays"][0]["arrows"][0]["vector"][0] == 1
+
+
+def test_monochrome_selector_honours_later_group_overrides():
+    legacy = _state(display_options=["monochrome"])
+    assert partition_state(legacy).derived["monochrome"] is True
+
+    mixed = _state(
+        display_options=["monochrome"],
+        atom_groups=[
+            {"selector": {"all": True}, "color": "#000000"},
+            {"selector": {"elements": ["O"]}, "color": "#FF0000"},
+        ],
+    )
+    assert partition_state(mixed).derived["monochrome"] is False
+
+    replaced = _state(
+        atom_groups=[
+            {"selector": {"all": True}, "color": "#000000"},
+            {"selector": {"all": True}, "color": "#FFFFFF"},
+        ],
+    )
+    assert partition_state(replaced).derived["monochrome"] is False
+
+
+def test_viewport_signature_tracks_geometry_and_topology_inputs():
+    before = _state()
+    assert viewport_signature(before) != viewport_signature(_state(atom_scale=1.2))
+    assert viewport_signature(before) != viewport_signature(_state(bond_radius=0.2))
+    assert viewport_signature(before) != viewport_signature(
+        _state(
+            topology_enabled=True,
+            topology_site_index=2,
+            topology_species_keys=["Pb"],
+            polyhedron_specs=[{"id": "pb", "center_species": "Pb"}],
+        )
+    )
+
+
+def test_viewport_signature_can_use_resolved_axis_ranges():
+    resolved = {"x": [-1.0, 2.0], "y": [-2.0, 3.0], "z": [-3.0, 4.0]}
+    assert viewport_signature(
+        _state(atom_scale=1.0), resolved_viewport=resolved
+    ) == viewport_signature(_state(atom_scale=9.0), resolved_viewport=resolved)
+    changed = {**resolved, "z": [-4.0, 4.0]}
+    assert viewport_signature(
+        _state(), resolved_viewport=resolved
+    ) != viewport_signature(_state(), resolved_viewport=changed)
+
+
 def test_transform_scene_cache_ignores_row_identity_and_name():
     first = _state(
         transforms=[
@@ -92,7 +162,12 @@ def test_transform_scene_cache_ignores_row_identity_and_name():
     )
     renamed = _state(
         transforms=[
-            {"id": "renamed", "name": "User label", "kind": "repeat", "params": {"a": 2}}
+            {
+                "id": "renamed",
+                "name": "User label",
+                "kind": "repeat",
+                "params": {"a": 2},
+            }
         ]
     )
 

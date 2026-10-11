@@ -13,14 +13,13 @@ field before this module knows about it.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-import json
 from typing import Any
 
 from ..transforms import transforms_cache_key
-
 
 # Display options accepted by the viewer.  Unknown options are retained by
 # ``display_option_set`` for forwards compatibility, but are not treated as a
@@ -77,9 +76,19 @@ STORED_STATE_KEYS = frozenset(
         "transforms",
         "disorder_resolve",
         "disorder_replicas",
+        # The per-scene overlay editors and vector layer are persisted in the
+        # scene store.  Keep them in this contract so a selector partition (or
+        # a REST round-trip through it) does not silently drop user content.
+        "overlay_overrides",
+        "cell_overlays",
+        "vector_overlays",
         "selection",
         "bfdh_morphology",
         "bfdh_morphology_color",
+        # This is an explicit user setting.  ``derived_state`` also exposes
+        # the effective value (flat material implies the fast path), but the
+        # explicit flag itself must survive scene/preset round-trips.
+        "fast_rendering",
         "camera",
         "camera_revision",
     }
@@ -139,7 +148,9 @@ def _stable(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
 
 
-def display_option_set(state_or_options: Mapping[str, Any] | Iterable[str] | None) -> frozenset[str]:
+def display_option_set(
+    state_or_options: Mapping[str, Any] | Iterable[str] | None,
+) -> frozenset[str]:
     """Return display option tokens as a set without changing the input."""
 
     if isinstance(state_or_options, Mapping):
@@ -186,16 +197,39 @@ def show_labels(state: Mapping[str, Any] | None) -> bool:
 
 
 def _has_monochrome_group(state: Mapping[str, Any]) -> bool:
-    """Recognise the legacy all-atoms black group without mutating state."""
+    """Return whether the effective atom rules describe monochrome output.
 
-    for group in state.get("atom_groups") or ():
-        if not isinstance(group, Mapping):
+    Atom-group rules are applied in list order and later matching rules win.
+    Looking for *any* black ``all`` rule therefore gives the wrong answer for
+    a scene such as ``all -> black`` followed by ``all -> white`` (or by a
+    red element override).  A black all-atoms rule establishes the legacy
+    monochrome baseline; any later enabled colour override makes the result a
+    mixed palette.  This deliberately mirrors the renderer's selector-order
+    contract while remaining independent of a resolved atom list.
+    """
+
+    groups = state.get("atom_groups") or ()
+    baseline_black = False
+    for group in groups:
+        if not isinstance(group, Mapping) or not bool(group.get("enabled", True)):
             continue
         selector = group.get("selector") or {}
-        color = str(group.get("color") or "").lower()
-        if selector.get("all") and color in {"#000000", "black"}:
-            return True
-    return False
+        if not isinstance(selector, Mapping) or not selector:
+            continue
+        color = group.get("color")
+        # A null/empty colour means "leave the element palette alone" and is
+        # not an override in ``tag_atoms_with_groups``.
+        if not color:
+            continue
+        color_token = str(color).strip().lower()
+        is_black = color_token in {"#000000", "#000", "black"}
+        if selector.get("all"):
+            baseline_black = is_black
+        elif baseline_black and not is_black:
+            # Any later explicit colour selected by a narrower selector
+            # overrides at least part of the black baseline.
+            return False
+    return baseline_black
 
 
 def derived_state(state: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -206,13 +240,21 @@ def derived_state(state: Mapping[str, Any] | None) -> dict[str, Any]:
     """
 
     state = state or {}
+    groups = state.get("atom_groups") or ()
+    # Once explicit atom-group rules exist, they are the source of truth and
+    # the legacy display token is inert (see ``atom_groups_api.md``).  Keep
+    # accepting the token for old states that have not gone through migration.
+    monochrome = (
+        _has_monochrome_group(state)
+        if groups
+        else has_display_option(state, "monochrome")
+    )
     return {
         "show_hydrogen": show_hydrogen(state),
         "show_unit_cell": show_unit_cell(state),
         "show_axes": show_axes(state),
         "show_labels": show_labels(state),
-        "monochrome": has_display_option(state, "monochrome")
-        or _has_monochrome_group(state),
+        "monochrome": monochrome,
         # ``fast_rendering`` is an explicit scene setting.  Flat material is
         # the one documented style that opts into the fast path by itself.
         "fast_rendering": bool(state.get("fast_rendering", False))
@@ -269,7 +311,10 @@ def transform_scene_cache_key(state: Mapping[str, Any] | None) -> tuple[Any, ...
     """Key for transformed scene geometry, excluding row id/name metadata."""
 
     state = state or {}
-    return (*scene_geometry_cache_key(state), transforms_cache_key(state.get("transforms") or ()))
+    return (
+        *scene_geometry_cache_key(state),
+        transforms_cache_key(state.get("transforms") or ()),
+    )
 
 
 def geometry_state_fields(state: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -299,13 +344,21 @@ def geometry_state_fields(state: Mapping[str, Any] | None) -> dict[str, Any]:
     return fields
 
 
-def viewport_signature(state: Mapping[str, Any] | None) -> str:
+def viewport_signature(
+    state: Mapping[str, Any] | None,
+    *,
+    resolved_viewport: Mapping[str, Any] | None = None,
+) -> str:
     """Return the state-only viewport signature used by layout/camera code.
 
-    Scene dimensions are supplied by the render resolver in later migration
-    phases.  This signature captures the state inputs that can change those
-    dimensions and intentionally ignores label/axis toggles and camera data.
+    If a renderer has already resolved axis ranges, callers may pass them as
+    ``resolved_viewport`` and the ranges become the signature's source of
+    truth.  Otherwise this selector captures the state inputs that can change
+    those dimensions.  Label/axis toggles and camera data remain excluded.
     """
+
+    if resolved_viewport is not None:
+        return _stable({"resolved_viewport": resolved_viewport})
 
     state = state or {}
     options = display_option_set(state)
@@ -314,8 +367,25 @@ def viewport_signature(state: Mapping[str, Any] | None) -> str:
             "structure": state.get("structure"),
             "display_mode": state.get("display_mode", "formula_unit"),
             "display_options": sorted(options & VIEWPORT_DISPLAY_OPTIONS),
-            "topology_enabled": bool(state.get("topology_enabled", False)),
+            # Atom and bond scales alter the padded bounds even when the
+            # selected structure is unchanged.
+            "atom_scale": state.get("atom_scale", 1.0),
+            "bond_radius": state.get("bond_radius", 0.1),
+            # Topology overlays and vector geometry can extend the viewport.
+            # Include the complete geometry inputs rather than only the
+            # enabled bit, otherwise changing a selected polyhedron would
+            # preserve a camera framed for the previous shell.
+            "topology": {
+                "enabled": bool(state.get("topology_enabled", False)),
+                "site_index": state.get("topology_site_index"),
+                "species_keys": state.get("topology_species_keys") or [],
+                "cutoff": state.get("cutoff"),
+                "polyhedron_specs": state.get("polyhedron_specs") or [],
+                "payload": state.get("topology_payload"),
+            },
             "transforms": transforms_cache_key(state.get("transforms") or ()),
+            "vector_overlays": state.get("vector_overlays") or [],
+            "geometry_entities": state.get("geometry_entities") or [],
         }
     )
 
@@ -346,8 +416,8 @@ __all__ = [
     "has_display_option",
     "partition_state",
     "scene_geometry_cache_key",
-    "select_display_options",
     "select_derived_state",
+    "select_display_options",
     "select_ephemeral_state",
     "select_stored_state",
     "select_viewport_signature",
