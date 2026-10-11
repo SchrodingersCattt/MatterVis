@@ -147,8 +147,6 @@ def _atom_render_color(atom: dict, style: dict, *, light: bool = False) -> str:
             if element
             else "#888888"
         )
-    color_key = "color_light" if light else "color"
-    base = atom.get(color_key) or element_color(atom.get("elem", ""), light=light)
     return _style_color(base, style)
 
 
