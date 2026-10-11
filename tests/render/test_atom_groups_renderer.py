@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from mat_viewer.config import element_color
 from mat_viewer.atom_groups import (
     atom_matches_selector,
     partition_atoms_by_render_pipeline,
@@ -169,6 +170,12 @@ def test_atom_render_color_falls_back_to_element_color_when_no_override():
     style = {}
     assert _atom_render_color(atom, style) == "#FF0D0D"
     assert _atom_render_color(atom, style, light=True) == "#FF8080"
+
+
+def test_atom_render_color_missing_color_uses_canonical_element_palette():
+    atom = {"elem": "O"}
+    assert _atom_render_color(atom, {}) == element_color("O")
+    assert _atom_render_color(atom, {}, light=True) == element_color("O", light=True)
 
 
 def test_atom_render_color_monochrome_still_blackens_when_no_override():
