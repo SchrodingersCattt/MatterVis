@@ -3,6 +3,14 @@ from __future__ import annotations
 
 import re
 
+from .compass import (
+    _COMPASS_ITEM_NAME,
+    axis_key_overlay,
+    compass_clientside_context,
+    compose_axis_key_layout,
+)
+from .geometry import geometry_entity_traces, validate_geometry_style
+from .morphology import _morphology_traces
 from .scene_traces import *  # noqa: F403
 from .style import style_from_controls
 from .topology import (
@@ -11,14 +19,7 @@ from .topology import (
     topology_histogram_figure,
     topology_results_markdown,
 )
-from .morphology import _morphology_traces
-from .geometry import geometry_entity_traces, validate_geometry_style
-from .compass import (
-    _COMPASS_ITEM_NAME,
-    axis_key_overlay,
-    compass_clientside_context,
-    compose_axis_key_layout,
-)
+from .trace_ids import plotly_trace_uid
 from .viewport import (
     _axis_cube_scale,
     _camera_axis_projections,
@@ -32,7 +33,6 @@ from .viewport import (
     resolve_viewport,
     uniform_viewport,
 )
-from .trace_ids import plotly_trace_uid
 
 
 def _element_legend_annotations(scene: dict, style: dict) -> list[dict]:
@@ -560,7 +560,7 @@ def build_figure(
     top_margin = 50 if show_title else 0
 
     ui_revision = style.get("uirevision", str(scene.get("name", "scene")))
-    compass_ctx = compass_clientside_context(scene, style)
+    compass_ctx = compass_clientside_context(scene, style, viewport=viewport)
     layout_meta = {}
     if compass_ctx:
         if compass_ctx.get("enabled"):
@@ -586,7 +586,9 @@ def build_figure(
     )
     if show_title:
         layout_kwargs["title"] = dict(text=str(title_text), x=0.5)
-    key_annotations, key_shapes = compose_axis_key_layout(scene, style)
+    key_annotations, key_shapes = compose_axis_key_layout(
+        scene, style, viewport=viewport
+    )
     if scene.get("vector_overlays"):
         from .overlay.vectors import paper_vector_label_annotations
 
