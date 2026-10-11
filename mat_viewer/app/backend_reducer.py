@@ -105,6 +105,16 @@ class _ReducerBackendMixin:
             # ``set_projection`` is mirrored onto both state and camera by the
             # old backend method; carry that invariant into the bridge.
             patch["camera"] = reduced["camera"]
+        if kind == OperationKind.SET_DISPLAY_MODE.value and not operation.payload.get(
+            "reset_topology_site", True
+        ):
+            # ``patch_state`` treats a display-mode write without an explicit
+            # site as the legacy "reset site" request. Preserve the typed
+            # operation's opt-out by carrying the reduced site through even
+            # when its value did not change.
+            patch["topology_site_index"] = copy.deepcopy(
+                reduced.get("topology_site_index")
+            )
         state = self.patch_state(patch, scene_id=target_scene, broadcast=broadcast)
         # Report facts for the state that was actually committed. The
         # compatibility normalizer can add transitions that the pure reducer

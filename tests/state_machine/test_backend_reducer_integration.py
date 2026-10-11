@@ -5,6 +5,7 @@ from pathlib import Path
 from mat_viewer.app import ViewerBackend
 from mat_viewer.app.reducer import (
     Invalidation,
+    SetDisplayMode,
     SetRenderStyle,
     operation_from_intent,
     reduce_state,
@@ -84,3 +85,18 @@ def test_typed_and_legacy_style_paths_report_the_same_invalidation(tmp_path: Pat
     finally:
         legacy_backend.close()
         typed_backend.close()
+
+
+def test_typed_display_mode_can_preserve_topology_site(tmp_path: Path):
+    backend = _backend(tmp_path)
+    try:
+        scene_id = backend.active_scene_id()
+        backend.patch_state({"topology_site_index": 7}, scene_id=scene_id)
+        state, _ = backend.apply_operation(
+            SetDisplayMode("unit_cell", reset_topology_site=False),
+            scene_id=scene_id,
+        )
+        assert state["display_mode"] == "unit_cell"
+        assert state["topology_site_index"] == 7
+    finally:
+        backend.close()
