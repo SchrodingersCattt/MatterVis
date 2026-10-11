@@ -154,7 +154,9 @@ def transformed_scene_cache_key(
     )
 
 
-def topology_spec_geometry_key(specs: Iterable[Mapping[str, Any]]) -> frozenset[tuple[Any, ...]]:
+def topology_spec_geometry_key(
+    specs: Iterable[Mapping[str, Any]],
+) -> tuple[tuple[Any, ...], ...]:
     """Extract topology fields that alter coordination-shell geometry.
 
     Paint fields (colour, opacity, enabled, and instance overrides) are
@@ -162,8 +164,13 @@ def topology_spec_geometry_key(specs: Iterable[Mapping[str, Any]]) -> frozenset[
     should not trigger an expensive MolCrysKit geometry computation.
     """
 
-    return frozenset(
+    # The complete topology result is identity-bearing: consumers retain each
+    # spec's id and ordered analysis anchor in the cached payload.  Preserve
+    # that identity, multiplicity, and order here so replacing, duplicating,
+    # or reordering otherwise identical queries cannot reuse the wrong result.
+    return tuple(
         (
+            str(spec.get("id") or ""),
             str(spec.get("center_species") or ""),
             _hashable(spec.get("ligand_species") or None),
             bool(spec.get("enforce_enclosure", True)),

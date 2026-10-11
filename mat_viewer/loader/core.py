@@ -1068,7 +1068,22 @@ def build_bundle_scene(
         else None
     )
     if cached is not None:
-        return cached
+        # ``transforms_cache_key`` intentionally ignores presentation-only
+        # transform ids so raw geometry can be reused after a rename.  The
+        # cached scene still carries request-specific provenance, though;
+        # restamp that metadata on a shallow copy instead of mutating the
+        # shared cache entry.
+        cached_view = dict(cached)
+        cached_view["_transform_lineage"] = [
+            {
+                "id": transform.get("id"),
+                "kind": transform.get("kind"),
+                "params": copy.deepcopy(transform.get("params") or {}),
+            }
+            for transform in transforms
+            if transform.get("enabled", True)
+        ]
+        return cached_view
 
     transformed = apply_transforms(
         base_scene,

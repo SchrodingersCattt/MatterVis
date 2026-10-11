@@ -73,18 +73,6 @@ class ViewUpdate:
         return data
 
 
-_VOLATILE = {
-    "version",
-    "server_started_at",
-    "render_revision",
-    "geometry_version",
-    "display_version",
-    "camera_version",
-    "camera_revision",
-    "projection",
-}
-
-
 def _stable(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
 

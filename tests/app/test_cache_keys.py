@@ -95,6 +95,20 @@ def test_topology_geometry_key_ignores_paint_but_tracks_geometry_knobs():
     assert topology_spec_geometry_key([{**base, "hard_cutoff": 8.0}]) != topology_spec_geometry_key([base])
 
 
+def test_topology_geometry_key_preserves_identity_order_and_multiplicity():
+    base = {
+        "id": "a",
+        "center_species": "Zn",
+        "ligand_species": ["O"],
+        "enforce_enclosure": True,
+        "centroid_offset_frac": 0.25,
+    }
+    renamed = {**base, "id": "b"}
+    assert topology_spec_geometry_key([base]) != topology_spec_geometry_key([renamed])
+    assert topology_spec_geometry_key([base, renamed]) != topology_spec_geometry_key([base])
+    assert topology_spec_geometry_key([base, renamed]) != topology_spec_geometry_key([renamed, base])
+
+
 def test_topology_side_panel_key_uses_geometry_fields_and_ignores_paint():
     state = {
         "scene_id": "scene-a",

@@ -25,6 +25,7 @@ ALLOWED_TOP_LEVEL_PY = {
     "_version.py",
     "agent.py",
     "agent_topology.py",
+    "cache_keys.py",
     "capabilities.py",
     "cli.py",
 }

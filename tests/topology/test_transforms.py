@@ -570,6 +570,19 @@ def test_build_bundle_scene_preserves_transform_fragment_table(monkeypatch):
     assert len(out["draw_atoms"]) == 4
     assert sorted(frag["cluster_size"] for frag in out["fragment_table"]) == [2, 2]
 
+    # Transform ids are presentation/provenance metadata, so the geometry
+    # cache may be reused after a rename.  The cache hit must still expose the
+    # current lineage without mutating the first caller's scene.
+    renamed = build_bundle_scene(
+        bundle,
+        display_mode="unit_cell",
+        include_boundary_replicas=False,
+        transforms=[{"id": "t2", "kind": "repeat", "params": {"a": 2, "b": 1, "c": 1}, "enabled": True}],
+    )
+    assert renamed["_transform_lineage"][0]["id"] == "t2"
+    assert out["_transform_lineage"][0]["id"] == "t1"
+    assert renamed is not out
+
 
 def test_supercell_shorthand_one_one_one_clears_repeat():
     """``supercell = {1,1,1}`` is the way callers express "back to home
