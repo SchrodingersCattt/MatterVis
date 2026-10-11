@@ -16,10 +16,10 @@ callers begin relying on deterministic operation names and invalidations.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from enum import Enum
 import copy
 from collections.abc import Mapping
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any
 
 
@@ -67,6 +67,63 @@ class Invalidation(str, Enum):
 
 
 Invalidations = frozenset[Invalidation]
+
+
+# ``set_style`` predates the typed reducer and remains part of the public
+# agent protocol. Keep the complete style surface here so legacy payloads are
+# reduced without dropping publication, palette, or isosurface options.
+LEGACY_STYLE_FIELDS = frozenset(
+    {
+        "display_mode", "atom_scale", "bond_radius", "material", "style",
+        "disorder", "major_opacity", "minor_opacity", "minor_wireframe",
+        "minor_bond_scale", "scatter_atom_scale", "scatter_bond_scale",
+        "scatter_bond_contrast_color", "flat_visual_pixel_scale", "show_labels",
+        "label_selector", "show_element_legend", "show_axes", "show_title",
+        "show_hydrogen", "show_unit_cell", "show_minor_only", "depth_cue_enabled",
+        "projection", "camera_eye_distance", "background", "label_color",
+        "minor_label_color", "axis_scale", "axis_color", "axis_opacity",
+        "axes_labels", "show_axis_key", "axis_key_anchor", "axis_key_row_gap",
+        "axis_key_arrow_len", "axis_key_label_pad", "axis_key_pixel_length",
+        "axis_key_label_pixel_offset", "axis_key_arrow_head", "axis_key_dot_threshold",
+        "axis_key_dot_radius_px", "axis_key_font_size", "axis_key_color",
+        "axis_key_label_order", "axis_key_italic", "fast_rendering",
+        "topology_enabled", "isosurface_enabled", "isosurface_isovalue",
+        "isosurface_percentile", "isosurface_opacity", "isosurface_positive_color",
+        "isosurface_negative_color", "isosurface_stride", "isosurface_ambient",
+        "isosurface_diffuse", "isosurface_periodic", "isosurface_image_policy",
+        "isosurface_atom_mask_radius", "isosurface_min_volume_voxels",
+        "isosurface_mode", "isosurface_wireframe_width", "isosurface_wireframe_opacity",
+        "monochrome", "ortep_probability", "ortep_mode", "ortep_mode_minor",
+        "ortep_octant_shading", "ortep_octant_shadow_color", "ortep_octant_shadow_alpha",
+        "ortep_octant_hatching", "ortep_octant_hatch_color", "ortep_octant_hatch_linewidth",
+        "ortep_octant_hatch_lines", "ortep_octant_hatch_arc_pts", "ortep_octant_edge_color",
+        "ortep_octant_edge_linewidth", "ortep_silhouette_outline", "ortep_silhouette_color",
+        "ortep_silhouette_linewidth", "ortep_atom_fill", "ortep_atom_fill_color",
+        "ortep_z_lift_fill", "ortep_z_lift_hatch", "ortep_z_lift_outline",
+        "ortep_lat_steps", "ortep_lon_steps", "mesh_lighting", "ortep_hydrogen_radius",
+        "force_bond_color", "element_colors", "element_colors_light",
+        # Older scripts used these short names for global atom/isosurface
+        # overrides. They remain opaque to the reducer but must survive the
+        # adapter round trip.
+        "color", "color_light", "isosurface",
+        "topology_hull_color", "topology_species_keys", "polyhedron_specs",
+        "atom_groups", "bond_groups", "atom_property_color", "transforms",
+        "selection", "disorder_resolve", "disorder_replicas", "bfdh_morphology",
+        "bfdh_morphology_color", "cutoff",
+    }
+)
+
+# State fields with no dedicated control in ``ViewerBackend``. The backend
+# keeps these raw values so style_for_state can pass them to renderers.
+LEGACY_STYLE_STATE_FIELDS = LEGACY_STYLE_FIELDS - {
+    "display_mode", "atom_scale", "bond_radius", "material", "style",
+    "disorder", "ortep_mode", "label_mode", "axis_scale", "cutoff",
+    "display_options", "topology_enabled", "topology_hull_color",
+    "topology_species_keys", "polyhedron_specs", "atom_groups", "bond_groups",
+    "atom_property_color", "transforms", "selection", "disorder_resolve",
+    "disorder_replicas", "bfdh_morphology", "bfdh_morphology_color",
+    "fast_rendering", "camera_revision", "camera", "projection",
+}
 
 
 @dataclass(frozen=True)
@@ -375,17 +432,53 @@ def _invalidation_set(kind: str, before: Mapping[str, Any], after: Mapping[str, 
         return frozenset({Invalidation.TOPOLOGY_GEOMETRY, Invalidation.FIGURE_BODY, Invalidation.SIDE_PANEL})
     if kind == OperationKind.SET_ATOM_GROUPS.value or kind == OperationKind.SET_BOND_GROUPS.value:
         return frozenset({Invalidation.FIGURE_BODY})
-    # Generic patches use field ownership as a bridge while legacy endpoints
-    # continue accepting arbitrary state dictionaries.
+    # Generic patches use the same field ownership as typed operations while
+    # legacy endpoints continue accepting arbitrary state dictionaries.
     changed_keys = {key for key in set(before) | set(after) if before.get(key) != after.get(key)}
     invalidations: set[Invalidation] = set()
-    if changed_keys & {"structure", "display_mode", "transforms", "disorder", "disorder_resolve", "disorder_replicas", "cutoff"}:
+    if changed_keys & {"structure", "display_mode", "disorder", "disorder_resolve", "disorder_replicas", "cutoff", "show_hydrogen"}:
         invalidations.update({Invalidation.SCENE_GEOMETRY, Invalidation.TOPOLOGY_GEOMETRY, Invalidation.FIGURE_BODY, Invalidation.SIDE_PANEL, Invalidation.CAMERA_LAYOUT})
-    if changed_keys & {"atom_groups", "bond_groups", "material", "style", "minor_opacity", "atom_scale", "bond_radius", "axis_scale", "display_options", "polyhedron_specs", "overlay_overrides"}:
+    if "transforms" in changed_keys:
+        invalidations.update({Invalidation.TRANSFORM_GEOMETRY, Invalidation.TOPOLOGY_GEOMETRY, Invalidation.FIGURE_BODY, Invalidation.SIDE_PANEL, Invalidation.CAMERA_LAYOUT})
+    if "display_options" in changed_keys:
+        changed = set(before.get("display_options") or []) ^ set(after.get("display_options") or [])
+        if "hydrogens" in changed:
+            invalidations.update({Invalidation.SCENE_GEOMETRY, Invalidation.TOPOLOGY_GEOMETRY, Invalidation.FIGURE_BODY, Invalidation.SIDE_PANEL, Invalidation.CAMERA_LAYOUT})
+        elif "minor_only" in changed or "unit_cell_box" in changed:
+            invalidations.update({Invalidation.FIGURE_BODY, Invalidation.CAMERA_LAYOUT})
+        elif changed:
+            invalidations.add(Invalidation.FIGURE_BODY)
+    if "polyhedron_specs" in changed_keys:
+        invalidations.update({Invalidation.TOPOLOGY_GEOMETRY, Invalidation.FIGURE_BODY, Invalidation.SIDE_PANEL})
+    # Every legacy style key changes the rendered figure, even when a
+    # corresponding browser control is absent. Keep this broad so an old
+    # ``set_style`` payload cannot update state without an invalidation.
+    if changed_keys & (LEGACY_STYLE_FIELDS | {"label_mode", "display_options", "overlay_overrides"}):
         invalidations.add(Invalidation.FIGURE_BODY)
     if changed_keys & {"camera", "camera_revision", "projection"}:
         invalidations.add(Invalidation.CAMERA_LAYOUT)
     return frozenset(invalidations)
+
+
+def invalidations_for(
+    operation: Operation | OperationKind | str,
+    before: Mapping[str, Any],
+    after: Mapping[str, Any],
+) -> Invalidations:
+    """Compute invalidation facts for a committed operation transition.
+
+    ``reduce_state`` calls this for its planned transition. The backend
+    adapter also calls it with the state returned by ``patch_state`` so
+    normalizer side effects are reflected in the response.
+    """
+
+    if isinstance(operation, Operation):
+        kind = operation.name
+    elif isinstance(operation, OperationKind):
+        kind = operation.value
+    else:
+        kind = str(operation)
+    return _invalidation_set(kind, before, after)
 
 
 def reduce_state(state: Mapping[str, Any], operation: Operation | Mapping[str, Any]) -> tuple[dict[str, Any], Invalidations]:
@@ -425,36 +518,7 @@ def reduce_state(state: Mapping[str, Any], operation: Operation | Mapping[str, A
         # Keep the complete legacy style surface available through the typed
         # bridge.  The compatibility normalizer still owns coercion, while
         # the reducer records the values that the caller explicitly changed.
-        allowed = {
-            "material", "style", "disorder", "ortep_mode", "label_mode",
-            "atom_scale", "bond_radius", "minor_opacity", "major_opacity",
-            "minor_wireframe", "minor_bond_scale", "axis_scale", "axis_color",
-            "axis_opacity", "show_title", "show_hydrogen", "show_labels",
-            "show_axes", "show_axis_key", "show_unit_cell", "show_minor_only",
-            "depth_cue_enabled", "projection", "camera_eye_distance",
-            "background", "label_color", "minor_label_color", "axes_labels",
-            "axis_key_anchor", "axis_key_row_gap", "axis_key_arrow_len",
-            "axis_key_label_pad", "axis_key_pixel_length",
-            "axis_key_label_pixel_offset", "axis_key_arrow_head",
-            "axis_key_dot_threshold", "axis_key_dot_radius_px",
-            "axis_key_font_size", "axis_key_color", "axis_key_label_order",
-            "axis_key_italic", "fast_rendering", "topology_enabled",
-            "monochrome", "ortep_probability", "ortep_mode_minor",
-            "ortep_octant_shading", "ortep_octant_shadow_color",
-            "ortep_octant_shadow_alpha", "ortep_octant_hatching",
-            "ortep_octant_hatch_color", "ortep_octant_hatch_linewidth",
-            "ortep_octant_hatch_lines", "ortep_octant_hatch_arc_pts",
-            "ortep_octant_edge_color", "ortep_octant_edge_linewidth",
-            "ortep_silhouette_outline", "ortep_silhouette_color",
-            "ortep_silhouette_linewidth", "ortep_atom_fill",
-            "ortep_atom_fill_color", "ortep_z_lift_fill", "ortep_z_lift_hatch",
-            "ortep_z_lift_outline", "force_bond_color", "element_colors",
-            "element_colors_light", "topology_hull_color", "topology_species_keys",
-            "polyhedron_specs", "atom_groups", "bond_groups",
-            "atom_property_color", "transforms", "selection", "disorder_resolve",
-            "disorder_replicas", "bfdh_morphology", "bfdh_morphology_color",
-            "cutoff",
-        }
+        allowed = LEGACY_STYLE_FIELDS | {"label_mode"}
         for key, value in payload.items():
             if key in allowed:
                 after[key] = copy.deepcopy(value)
@@ -512,14 +576,35 @@ def reduce_state(state: Mapping[str, Any], operation: Operation | Mapping[str, A
     # Unknown operations are intentionally read-only.  They can still be
     # carried through apply_intent for compatibility, but cannot mutate state.
 
-    return after, _invalidation_set(kind, before, after)
+    return after, invalidations_for(kind, before, after)
 
 
 __all__ = [
-    "Invalidation", "Invalidations", "Operation", "OperationKind", "PatchState",
-    "LoadStructure", "SwitchScene", "RenameScene", "SetDisplayMode",
-    "SetDisplayOptions", "SetRenderStyle", "SetNumericStyle", "SetCamera",
-    "ResetCamera", "SetProjection", "SetTransforms", "SetAtomGroups",
-    "SetBondGroups", "SetPolyhedronSpecs", "SetPolyhedronInstanceOverride",
-    "SelectTopologySite", "operation_from_intent", "operation_patch", "reduce_state",
+    "LEGACY_STYLE_FIELDS",
+    "LEGACY_STYLE_STATE_FIELDS",
+    "Invalidation",
+    "Invalidations",
+    "LoadStructure",
+    "Operation",
+    "OperationKind",
+    "PatchState",
+    "RenameScene",
+    "ResetCamera",
+    "SelectTopologySite",
+    "SetAtomGroups",
+    "SetBondGroups",
+    "SetCamera",
+    "SetDisplayMode",
+    "SetDisplayOptions",
+    "SetNumericStyle",
+    "SetPolyhedronInstanceOverride",
+    "SetPolyhedronSpecs",
+    "SetProjection",
+    "SetRenderStyle",
+    "SetTransforms",
+    "SwitchScene",
+    "invalidations_for",
+    "operation_from_intent",
+    "operation_patch",
+    "reduce_state",
 ]

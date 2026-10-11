@@ -4,10 +4,12 @@ from mat_viewer.app.reducer import (
     Invalidation,
     Operation,
     OperationKind,
+    PatchState,
     SetCamera,
     SetDisplayMode,
     SetDisplayOptions,
     SetProjection,
+    SetPolyhedronSpecs,
     SetTransforms,
     operation_from_intent,
     operation_patch,
@@ -131,3 +133,17 @@ def test_mapping_operations_are_accepted_for_replay():
     assert isinstance(Operation("set_display_options", {"display_options": ["axes"]}), Operation)
     assert state["display_options"] == ["axes"]
     assert invalidations == frozenset({Invalidation.FIGURE_BODY})
+
+
+def test_legacy_patch_state_matches_typed_geometry_facts():
+    before = _state(display_options=["labels"], polyhedron_specs=[{"id": "p1"}], transforms=[])
+    cases = (
+        (SetDisplayOptions(["labels", "hydrogens"]), PatchState({"display_options": ["labels", "hydrogens"]})),
+        (SetPolyhedronSpecs([{"id": "p2"}]), PatchState({"polyhedron_specs": [{"id": "p2"}]})),
+        (SetTransforms([{"id": "t1", "kind": "repeat"}]), PatchState({"transforms": [{"id": "t1", "kind": "repeat"}]})),
+    )
+    for typed, legacy in cases:
+        typed_state, typed_facts = reduce_state(before, typed)
+        legacy_state, legacy_facts = reduce_state(before, legacy)
+        assert typed_state == legacy_state
+        assert typed_facts == legacy_facts

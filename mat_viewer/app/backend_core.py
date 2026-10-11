@@ -4,12 +4,14 @@ from __future__ import annotations
 import atexit
 from collections import OrderedDict
 
-from .shared import *
-from .normalizers import *
+from ..config import current_config
 from .camera_helpers import *
-from .style_helpers import *
-from .rightclick import _normalize_polyhedron_specs
+from .normalizers import *
+from .reducer import LEGACY_STYLE_STATE_FIELDS
 from .render_worker import AsyncRenderWorker
+from .rightclick import _normalize_polyhedron_specs
+from .shared import *
+from .style_helpers import *
 from .view_updates import (
     UpdateKind,
     classify_change,
@@ -619,13 +621,13 @@ class _CoreBackendMixin:
         operation, invalidations = self._prepare_operation(payload, scene_id=scene_id)
 
         if intent_type in {"set_style", "set_display_options"}:
-            state, _ = self.apply_operation(
+            state, invalidations = self.apply_operation(
                 operation, scene_id=scene_id, broadcast=False
             )
         elif intent_type in {"patch_state", "apply_transform"}:
-            state, _ = self.apply_operation(operation, scene_id=scene_id)
+            state, invalidations = self.apply_operation(operation, scene_id=scene_id)
         elif intent_type == "set_camera":
-            state, _ = self.apply_operation(
+            state, invalidations = self.apply_operation(
                 operation, scene_id=scene_id, broadcast=False
             )
         elif intent_type == "set_active_scene":
@@ -655,7 +657,7 @@ class _CoreBackendMixin:
             else:
                 raise ValueError(f"unknown crud_scene action: {action}")
         elif intent_type in {"crud_polyhedron", "crud_atom_group", "crud_bond_group"}:
-            state, _ = self.apply_operation(operation, scene_id=scene_id)
+            state, invalidations = self.apply_operation(operation, scene_id=scene_id)
         elif intent_type == "upload_complete":
             state = self.get_state(scene_id)
             self.pending_state = copy.deepcopy(state)
@@ -869,6 +871,11 @@ class _CoreBackendMixin:
             state["display_mode"] = "asymmetric_unit"
         if "display_options" in patch and patch["display_options"] is not None:
             state["display_options"] = list(patch["display_options"])
+
+        # Preserve old renderer/config fields without dedicated controls.
+        for key in LEGACY_STYLE_STATE_FIELDS:
+            if key in patch:
+                state[key] = copy.deepcopy(patch[key])
         if "display_mode" in patch and patch["display_mode"] is not None:
             state["display_mode"] = str(patch["display_mode"])
             if "topology_site_index" not in patch:
@@ -1317,6 +1324,10 @@ class _CoreBackendMixin:
         style["fast_rendering"] = bool(state.get("fast_rendering", False))
         style["topology_enabled"] = bool(state.get("topology_enabled", False))
         style["topology_hull_color"] = str(state.get("topology_hull_color", "#7C5CBF"))
+        # Pass through publication, isosurface, and axis-key style options.
+        for key in LEGACY_STYLE_STATE_FIELDS:
+            if key in state:
+                style[key] = copy.deepcopy(state[key])
         # Phase 2: per-scene atom-group rules ride along on the style
         # dict so the renderer dispatcher can partition draw_atoms by
         # (effective_material, effective_style) without touching the

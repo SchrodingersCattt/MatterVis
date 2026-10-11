@@ -16,6 +16,7 @@ from .reducer import (
     Invalidation,
     Operation,
     OperationKind,
+    invalidations_for,
     operation_from_intent,
     operation_patch,
     reduce_state,
@@ -105,7 +106,12 @@ class _ReducerBackendMixin:
             # old backend method; carry that invariant into the bridge.
             patch["camera"] = reduced["camera"]
         state = self.patch_state(patch, scene_id=target_scene, broadcast=broadcast)
-        return state, invalidations
+        # Report facts for the state that was actually committed. The
+        # compatibility normalizer can add transitions that the pure reducer
+        # cannot know about (for example style aliases and display-mode
+        # defaults), so returning the planned set would under-invalidate both
+        # legacy and typed callers.
+        return state, invalidations_for(operation, before, state)
 
 
 __all__ = ["_ReducerBackendMixin"]
