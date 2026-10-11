@@ -547,6 +547,7 @@ def _map_readback_sync(readback: Any, *, wgpu: Any, device: Any) -> bytes:
             raise GPUUnavailableError("wgpu readback buffer does not expose map_async/map_sync")
         completed = threading.Event()
         failure: list[BaseException] = []
+        poll = getattr(device, "poll", None)
 
         def done(status: Any = None, *args: Any) -> None:
             # wgpu-py reports ``None``/0/"success" on success depending on
@@ -560,8 +561,15 @@ def _map_readback_sync(readback: Any, *, wgpu: Any, device: Any) -> bytes:
             result = map_async(mode, done)
         except TypeError:
             # A few test doubles and older synchronous wrappers accept only
-            # the mode argument and complete after ``device.poll``.
+            # the mode argument.  Give the device a chance to drain the
+            # mapping operation before exposing the mapped range; otherwise
+            # a wrapper that completes from ``poll`` can still race here.
             result = map_async(mode)
+            if callable(poll):
+                try:
+                    poll(True)
+                except Exception:
+                    pass
             completed.set()
         if hasattr(result, "__await__"):
             # Newer wrappers may return an awaitable.  A running event loop is
@@ -574,7 +582,6 @@ def _map_readback_sync(readback: Any, *, wgpu: Any, device: Any) -> bytes:
             except RuntimeError:
                 pass
             completed.set()
-        poll = getattr(device, "poll", None)
         deadline = time.monotonic() + 10.0
         while not completed.is_set() and time.monotonic() < deadline:
             if callable(poll):

@@ -108,6 +108,37 @@ def test_readback_waits_for_async_map_callback() -> None:
     assert gpu._map_readback_sync(buffer, wgpu=FakeWgpu, device=FakeDevice(buffer)) == b"rgba"
 
 
+def test_readback_polls_one_argument_map_async_before_reading() -> None:
+    class FakeBuffer:
+        def __init__(self) -> None:
+            self.mapped = False
+
+        def map_async(self, mode):
+            del mode
+
+        def get_mapped_range(self):
+            assert self.mapped
+            return b"rgba"
+
+    class FakeDevice:
+        def __init__(self, buffer) -> None:
+            self.buffer = buffer
+            self.poll_count = 0
+
+        def poll(self, _wait=True):
+            self.poll_count += 1
+            self.buffer.mapped = True
+
+    class FakeWgpu:
+        class MapMode:
+            READ = 1
+
+    buffer = FakeBuffer()
+    device = FakeDevice(buffer)
+    assert gpu._map_readback_sync(buffer, wgpu=FakeWgpu, device=device) == b"rgba"
+    assert device.poll_count == 1
+
+
 def test_gpu_render_receipt_has_stage_timings_without_device(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(gpu, "probe", lambda: gpu.GPUProbe(True, adapter_name="test"))
     monkeypatch.setattr(
