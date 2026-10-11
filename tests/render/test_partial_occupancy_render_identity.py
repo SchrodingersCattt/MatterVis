@@ -11,6 +11,7 @@ from mat_viewer.render.traces_atoms import (
     _bond_scatter_traces,
     _bond_segments,
     _flat_highlight_center,
+    _wireframe_bond_traces,
 )
 from mat_viewer.render.traces_overlays import _minor_outline_traces
 from mat_viewer.style.disorder import atom_is_disordered, bond_effective_opacity
@@ -174,7 +175,9 @@ def test_partial_occupancy_does_not_make_major_bond_minor():
     assert bond_effective_opacity(bond, _style()) == 1.0
 
 
-@pytest.mark.parametrize("trace_builder", (_bond_mesh_traces, _bond_scatter_traces))
+@pytest.mark.parametrize(
+    "trace_builder", (_bond_mesh_traces, _bond_scatter_traces, _wireframe_bond_traces)
+)
 def test_bond_traces_inherit_endpoint_disorder_opacity(trace_builder):
     atoms = [_atom("A", is_minor=False), _atom("B", is_minor=False)]
     atoms[0]["is_disordered"] = True

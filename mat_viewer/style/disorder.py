@@ -49,7 +49,28 @@ def atom_is_disordered(atom: Any) -> bool:
         return bool(_field(atom, "is_disordered"))
     if _has_field(atom, "_is_minor"):
         return True
-    return bool(_field(atom, "is_minor", False))
+    if _has_field(atom, "is_minor") and bool(_field(atom, "is_minor")):
+        return True
+
+    # ``AtomIR`` keeps the public disorder provenance in ``disorder_group``
+    # and the lossless source token in ``disorder``.  A major alternative has
+    # ``is_minor=False`` but is still a disordered endpoint, so carry these
+    # markers through object-based render paths without treating occupancy
+    # alone as disorder.  Scene mappings are normalised by the loader and
+    # already expose an explicit ``is_disordered`` field above.
+    if not isinstance(atom, Mapping):
+        group = _field(atom, "disorder_group", _MISSING)
+        if group is not _MISSING and group is not None:
+            try:
+                if float(group) != 0.0:
+                    return True
+            except (TypeError, ValueError):
+                if str(group).strip() not in ("", ".", "?"):
+                    return True
+        token = _field(atom, "disorder", _MISSING)
+        if token is not _MISSING and str(token).strip() not in ("", ".", "?"):
+            return True
+    return False
 
 
 def bond_is_minor(atom_i: Any, atom_j: Any) -> bool:

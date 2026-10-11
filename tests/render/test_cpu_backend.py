@@ -1391,6 +1391,7 @@ def test_cpu_bond_opacity_accepts_object_based_crystal_ir_endpoints():
                 frac=np.array([0.0, 0.0, 0.0]),
                 label="C1A",
                 occupancy=0.4,
+                disorder_group=1,
                 is_minor=True,
             ),
             AtomIR(
@@ -1399,6 +1400,7 @@ def test_cpu_bond_opacity_accepts_object_based_crystal_ir_endpoints():
                 frac=np.array([0.24, 0.0, 0.0]),
                 label="N1A",
                 occupancy=0.7,
+                disorder_group=1,
             ),
         ],
         bonds=[
