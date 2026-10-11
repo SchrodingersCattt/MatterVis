@@ -9,6 +9,7 @@ already-large core while the reducer migration is in progress.
 
 from __future__ import annotations
 
+import copy
 from typing import Any, Optional
 
 from .reducer import (
@@ -77,7 +78,26 @@ class _ReducerBackendMixin:
             self.camera_action("reset", scene_id=target_scene, broadcast=broadcast)
             return self.get_state(target_scene), invalidations
 
+        # Persist the reducer's committed transition, rather than replaying
+        # the caller's intent payload.  This keeps typed operations and legacy
+        # intents on one state machine and makes unknown operations read-only.
         patch = operation_patch(operation)
+        known_kinds = {item.value for item in OperationKind} | {
+            "upload_complete",
+            "crud_scene",
+        }
+        if kind not in known_kinds:
+            patch = {}
+        else:
+            for key, value in reduced.items():
+                if before.get(key) != value and key not in {
+                    "geometry_version",
+                    "display_version",
+                    "camera_version",
+                    "render_revision",
+                    "server_started_at",
+                }:
+                    patch[key] = copy.deepcopy(value)
         if kind == OperationKind.SET_PROJECTION.value and isinstance(
             reduced.get("camera"), dict
         ):
