@@ -4,15 +4,23 @@ import math
 
 import numpy as np
 
-from .viewport import _axis_cube_scale, _camera_axis_projections
-
+from .viewport import (
+    _axis_cube_scale,
+    _camera_axis_projections,
+    resolve_viewport,
+)
 
 # Plotly preserves free-form ``name`` on annotations/shapes; per-item
 # ``meta`` is only a template-string slot.
 _COMPASS_ITEM_NAME = "mv_compass"
 
 
-def axis_key_overlay(scene: dict, style: dict) -> tuple[list[dict], list[dict]]:
+def axis_key_overlay(
+    scene: dict,
+    style: dict,
+    *,
+    viewport=None,
+) -> tuple[list[dict], list[dict]]:
     """Build Plotly paper-coord annotations + shapes for a corner compass.
 
     When ``style["axis_key_via_svg_overlay"]`` is truthy the function
@@ -31,7 +39,11 @@ def axis_key_overlay(scene: dict, style: dict) -> tuple[list[dict], list[dict]]:
         return [], []
     if style.get("axis_key_via_svg_overlay"):
         return [], []
-    projections = _camera_axis_projections(scene, style) or scene.get("projected_axes")
+    viewport = viewport or resolve_viewport(scene, style)
+    projections = (
+        _camera_axis_projections(scene, style, viewport=viewport)
+        or scene.get("projected_axes")
+    )
     if not projections or len(projections) < 3:
         return [], []
 
@@ -196,7 +208,7 @@ def axis_key_overlay(scene: dict, style: dict) -> tuple[list[dict], list[dict]]:
     return annotations, shapes
 
 
-def compass_clientside_context(scene: dict, style: dict) -> dict | None:
+def compass_clientside_context(scene: dict, style: dict, *, viewport=None) -> dict | None:
     """Serialise the inputs the clientside callback needs for reprojection."""
     show_axes = bool(style.get("show_axes", False))
     show_axis_key = bool(style.get("show_axis_key", False))
@@ -222,7 +234,8 @@ def compass_clientside_context(scene: dict, style: dict) -> dict | None:
         pixel_length = max(20.0, float(style.get("axis_scale", 0.14)) * 360.0)
     else:
         pixel_length = float(style.get("axis_key_pixel_length", 65.0))
-    cube_scale = _axis_cube_scale(scene, style)
+    viewport = viewport or resolve_viewport(scene, style)
+    cube_scale = _axis_cube_scale(scene, style, viewport=viewport)
     cube_scale_payload = (
         [float(cube_scale[0]), float(cube_scale[1]), float(cube_scale[2])]
         if cube_scale is not None
@@ -246,17 +259,22 @@ def compass_clientside_context(scene: dict, style: dict) -> dict | None:
     }
 
 
-def compass_description(scene: dict, style: dict) -> dict | None:
+def compass_description(scene: dict, style: dict, *, viewport=None) -> dict | None:
     """Return the independent SVG overlay description for a live view."""
-    payload = compass_clientside_context(scene, style)
+    payload = compass_clientside_context(scene, style, viewport=viewport)
     if payload is None:
         return None
     return {**payload, "enabled": bool(style.get("show_axes", False))}
 
 
-def compose_axis_key_layout(scene: dict, style: dict) -> tuple[list[dict], list[dict]]:
+def compose_axis_key_layout(
+    scene: dict,
+    style: dict,
+    *,
+    viewport=None,
+) -> tuple[list[dict], list[dict]]:
     """Produce paper-coord compass layout plus optional ORTEP caption."""
-    annotations, shapes = axis_key_overlay(scene, style)
+    annotations, shapes = axis_key_overlay(scene, style, viewport=viewport)
     if (
         style.get("style") == "ortep"
         and scene.get("has_minor")
