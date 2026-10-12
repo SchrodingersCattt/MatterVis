@@ -17,6 +17,7 @@ from typing import Iterable, Mapping
 CAPABILITIES_SCHEMA = "mattervis.capabilities/v1"
 RESOLUTION_SCHEMA = "mattervis.requirements/v1"
 DIST_NAME = "matter-vis"
+GPU_INSTALL = 'python -m pip install "matter-vis[gpu]"'
 MOLCRYSKIT_MINIMUM = "0.7.0"
 MOLCRYSKIT_SOURCE_MINIMUM = "0.6.2.dev17"
 MOLCRYSKIT_INSTALL = (
@@ -138,6 +139,8 @@ class CapabilitySpec:
     note: str | None = None
 
     def available(self) -> bool:
+        if self.name == "gpu":
+            return bool(gpu_probe()["available"])
         imports_available = all(
             util.find_spec(module) is not None for module in self.imports
         )
@@ -146,16 +149,105 @@ class CapabilitySpec:
         return self.name != "core" or _molcryskit_contract_available()
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        probe = gpu_probe() if self.name == "gpu" else None
+        if probe is not None and hasattr(probe, "to_dict"):
+            probe = probe.to_dict()
+        payload = {
             "name": self.name,
             "description": self.description,
             "extra": self.extra,
             "packages": list(self.packages),
             "includes": list(self.includes),
-            "available": self.available(),
+            "available": (
+                bool(probe["available"])
+                if probe is not None
+                else self.available()
+            ),
             "install": install_command((self.extra,) if self.extra else ()),
             "note": self.note,
         }
+        if probe is not None:
+            payload["probe"] = probe
+        return payload
+
+
+def gpu_probe() -> dict[str, object]:
+    """Probe the optional native GPU runtime without importing it at module load.
+
+    The probe deliberately creates and releases a device.  Importing ``wgpu``
+    only proves that the package is installed; callers need a usable adapter
+    before an explicit GPU render can be accepted.  Probe failures are returned
+    as structured data so ``capabilities --json`` remains useful on headless CI.
+    """
+
+    result: dict[str, object] = {
+        "installed": False,
+        "adapter_detected": False,
+        "device_initialized": False,
+        "hardware_accelerated": False,
+        "adapter": None,
+        "error": None,
+        "available": False,
+    }
+    try:
+        wgpu_spec = util.find_spec("wgpu")
+    except (ImportError, ValueError):
+        wgpu_spec = None
+    if wgpu_spec is None:
+        result["error"] = "wgpu is not installed"
+        return result
+    result["installed"] = True
+    try:
+        import wgpu  # type: ignore[import-not-found]
+    except Exception as exc:  # pragma: no cover - import hook failure
+        result["error"] = f"wgpu import failed: {type(exc).__name__}: {exc}"
+        return result
+    try:
+        gpu = getattr(wgpu, "gpu", None)
+        adapter = None
+        request_adapter = getattr(gpu, "request_adapter_sync", None)
+        if callable(request_adapter):
+            try:
+                adapter = request_adapter(power_preference="high-performance")
+            except TypeError:
+                adapter = request_adapter()
+        if adapter is None:
+            result["error"] = "wgpu could not find a compatible adapter"
+            return result
+        result["adapter_detected"] = True
+        summary = getattr(adapter, "summary", None)
+        if callable(summary):
+            summary = summary()
+        if isinstance(summary, Mapping):
+            adapter_payload = {str(key): str(value) for key, value in summary.items()}
+        else:
+            adapter_payload = {"summary": str(summary or adapter)}
+        result["adapter"] = adapter_payload
+        adapter_type = str(
+            adapter_payload.get("adapter_type", adapter_payload.get("type", ""))
+        ).lower()
+        result["hardware_accelerated"] = adapter_type not in {
+            "", "cpu", "software", "unknown"
+        }
+        request_device = getattr(adapter, "request_device_sync", None)
+        if not callable(request_device):
+            result["error"] = "wgpu adapter does not expose request_device_sync"
+            return result
+        try:
+            device = request_device(required_features=[], required_limits={})
+        except TypeError:
+            device = request_device()
+        if device is None:
+            result["error"] = "wgpu adapter could not initialize a device"
+            return result
+        result["device_initialized"] = True
+        result["available"] = True
+        close = getattr(device, "destroy", None)
+        if callable(close):
+            close()
+    except Exception as exc:  # pragma: no cover - depends on host drivers
+        result["error"] = f"GPU device probe failed: {type(exc).__name__}: {exc}"
+    return result
 
 
 # Keep the order stable: it is used by JSON output and the skill sync test.
@@ -173,6 +265,17 @@ CAPABILITY_REGISTRY: Mapping[str, CapabilitySpec] = {
             "Requires the renderer-ready MolCrysKit public contracts from "
             f"molcrys-kit>={MOLCRYSKIT_MINIMUM}. Upgrade with: "
             f"{MOLCRYSKIT_INSTALL}."
+        ),
+    ),
+    "gpu": CapabilitySpec(
+        name="gpu",
+        description="Optional native offscreen GPU PNG renderer (wgpu)",
+        extra="gpu",
+        packages=("wgpu",),
+        imports=("wgpu",),
+        note=(
+            "Requires a wgpu adapter and device that can render offscreen; "
+            "hardware and software adapters are reported separately."
         ),
     ),
     "plotly": CapabilitySpec(
@@ -256,6 +359,7 @@ REQUIREMENT_ALIASES: Mapping[str, tuple[str, ...]] = {
     "animation": ("animation",),
     "gif": ("animation",),
     "mp4": ("animation",),
+    "gpu": ("gpu",),
 }
 
 
@@ -302,6 +406,9 @@ class RequirementResolution:
             "missing_capabilities": list(self.missing_capabilities),
             "install": self.install_command,
             "notes": list(self.notes),
+            "capability_details": [
+                CAPABILITY_REGISTRY[name].to_dict() for name in self.capabilities
+            ],
         }
 
 
@@ -367,6 +474,10 @@ def resolve_requirements(
         for name in names
         if (spec := CAPABILITY_REGISTRY[name]).note is not None
     ]
+    if "gpu" in missing:
+        gpu_error = gpu_probe().get("error")
+        if gpu_error:
+            notes.append(f"GPU probe: {gpu_error}.")
     if "core" in missing:
         contract_missing = molcryskit_contract_missing()
         if contract_missing:
@@ -409,7 +520,15 @@ def requirements_for_render(output: str, backend: str = "cpu") -> tuple[str, ...
         raise ValueError(f"unsupported MatterVis output format: {suffix or output!r}")
     backend_name = str(backend).strip().lower()
     if backend_name not in {"cpu", "matplotlib", "plotly"}:
-        raise ValueError("backend must be 'cpu', 'matplotlib', or 'plotly'")
+        if backend_name != "gpu":
+            raise ValueError(
+                "backend must be 'cpu', 'matplotlib', 'plotly', or 'gpu'"
+            )
+    if backend_name == "gpu" and suffix != "png":
+        raise ValueError(
+            "GPU backend currently supports PNG output only; "
+            f"{suffix.upper()} is not supported"
+        )
     if suffix == "html" and backend_name != "plotly":
         raise ValueError("HTML output requires --backend plotly")
     if backend_name == "matplotlib" and suffix not in {"png", "pdf", "svg"}:
@@ -420,6 +539,8 @@ def requirements_for_render(output: str, backend: str = "cpu") -> tuple[str, ...
     required: list[str] = [suffix]
     if backend_name == "plotly":
         required.append("plotly" if suffix == "html" else "plotly-export")
+    if backend_name == "gpu":
+        required.append("gpu")
     if suffix in {"gif", "mp4"}:
         required.append("animation")
     return tuple(required)
@@ -455,6 +576,7 @@ class _CallableCapabilitiesModule(ModuleType):
 __all__ = [
     "CAPABILITIES_SCHEMA",
     "CAPABILITY_REGISTRY",
+    "GPU_INSTALL",
     "MOLCRYSKIT_MINIMUM",
     "MOLCRYSKIT_SOURCE_MINIMUM",
     "MOLCRYSKIT_INSTALL",
@@ -464,6 +586,7 @@ __all__ = [
     "MissingCapabilityError",
     "RequirementResolution",
     "capabilities",
+    "gpu_probe",
     "install_command",
     "molcryskit_contract_missing",
     "requirements_for_render",

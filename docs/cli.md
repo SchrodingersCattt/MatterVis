@@ -182,14 +182,19 @@ the numeric base renderer. PNG, GIF, and MP4 can all use the batch path.
 
 | Extension | Format | Backend |
 |-----------|--------|---------|
-| .png | Raster image | CPU 3D, Matplotlib projected 2D, or explicit Plotly + Kaleido |
+| .png | Raster image | CPU 3D, Matplotlib projected 2D, explicit Plotly + Kaleido, or native GPU (wgpu) |
 | .pdf | Vector PDF | CPU 3D, Matplotlib projected 2D, or explicit Plotly + Kaleido |
 | .svg | Vector SVG | CPU 3D, Matplotlib projected 2D, or explicit Plotly + Kaleido |
 | .html | Interactive 3D | Plotly (`[plotly]`) |
 | .gif | Multi-frame animation | CPU + `[animation]` |
 | .mp4 | H.264 animation | CPU + `[animation]` |
 
-Use `--backend cpu|matplotlib|plotly`; there is no backend or representation fallback.
+Use `--backend cpu|matplotlib|plotly|gpu`; there is no backend or representation fallback.
+The `gpu` backend is an opt-in, PNG-only offscreen renderer. Install
+`matter-vis[gpu]` and verify a usable adapter with
+`mat-vis capabilities --require gpu --json` before rendering. Unsupported
+transparent, dashed, text, or depth-disabled primitives fail explicitly; the
+command never falls back to CPU.
 Base MatterVis provides CPU 3D and Matplotlib projected 2D PNG/PDF/SVG, ORTEP, rings, polyhedra, and
 ordinary structure inputs. Run `mat-vis capabilities --require FEATURE --json`
 for an exact install command before using an optional frontend.
@@ -250,7 +255,7 @@ substitutes one frame backend for another.
 | --view MODE | auto | Periodic input uses unit_cell; nonperiodic or synthetic-cell input uses cluster |
 | --style STYLE | ball_stick | ball_stick, ball, space_filling, stick, ortep, or wireframe |
 | --shading MODE | smooth | smooth or flat mesh shading |
-| --backend BACKEND | cpu | cpu (3D), matplotlib (projected 2D), or plotly; never selected by fallback |
+| --backend BACKEND | cpu | cpu (3D), matplotlib (projected 2D), plotly, or explicit native GPU PNG; never selected by fallback |
 | --orthogonal | yes | Orthographic projection |
 | --perspective | no | Perspective projection |
 | --isovalue VALUE | automatic | Explicit positive cube isosurface magnitude |
