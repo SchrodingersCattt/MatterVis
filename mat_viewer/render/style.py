@@ -2,6 +2,7 @@ from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
 from .common import *
+from ..style.disorder import _field
 
 def validate_style_schema(style: dict) -> dict:
     material = str(style.get("material", "mesh"))
@@ -99,21 +100,21 @@ def _atom_render_color(atom: dict, style: dict, *, light: bool = False) -> str:
       only takes effect when no atom_groups are set on the scene.
     """
     field = "_render_color_light" if light else "_render_color"
-    override = atom.get(field)
+    override = _field(atom, field)
     if override:
         return str(override)
-    base = atom.get("color_light" if light else "color", "#888888")
+    base = _field(atom, "color_light" if light else "color", "#888888")
     return _style_color(base, style)
 
 
 def _atom_render_visible(atom: dict) -> bool:
-    if not bool(atom.get("_render_visible", True)):
+    if not bool(_field(atom, "_render_visible", True)):
         return False
     # An explicit opacity scale of zero is a visibility request, not a black
     # atom with a transparent material.  Skipping it here also keeps bonds
     # and the CPU/Plotly backends consistent.
     try:
-        value = float(atom.get("_render_opacity_scale", 1.0))
+        value = float(_field(atom, "_render_opacity_scale", 1.0))
         return bool(np.isfinite(value) and value > 1.0e-12)
     except (TypeError, ValueError):
         return True
@@ -121,7 +122,7 @@ def _atom_render_visible(atom: dict) -> bool:
 
 def _atom_render_opacity_scale(atom: dict) -> float:
     try:
-        return max(0.0, min(1.0, float(atom.get("_render_opacity_scale", 1.0))))
+        return max(0.0, min(1.0, float(_field(atom, "_render_opacity_scale", 1.0))))
     except (TypeError, ValueError):
         return 1.0
 
@@ -140,9 +141,9 @@ def _atom_effective_opacity(atom: dict, style: dict) -> float:
     "halved" -- and a user setting opacity=0 expects an invisible atom,
     not "0 × something".
     """
-    is_minor = bool(atom.get("is_minor", False))
+    is_minor = bool(_field(atom, "is_minor", False))
     base = _minor_opacity_for(style, is_minor)
-    scale = atom.get("_render_opacity_scale", 1.0)
+    scale = _field(atom, "_render_opacity_scale", 1.0)
     try:
         scale_f = max(0.0, min(1.0, float(scale)))
     except (TypeError, ValueError):
@@ -153,7 +154,7 @@ def _atom_effective_opacity(atom: dict, style: dict) -> float:
 
 
 def _atom_opacity_group_id(atom: dict) -> str | None:
-    group_id = atom.get("_render_opacity_group_id")
+    group_id = _field(atom, "_render_opacity_group_id")
     if group_id is None:
         return None
     text = str(group_id)
@@ -161,7 +162,7 @@ def _atom_opacity_group_id(atom: dict) -> str | None:
 
 
 def _bond_opacity_group_id(bond: dict) -> str | None:
-    group_id = bond.get("_render_opacity_group_id")
+    group_id = _field(bond, "_render_opacity_group_id")
     if group_id is None:
         return None
     text = str(group_id)

@@ -6,6 +6,7 @@ from .meshes import *
 from .style import *
 from .traces_overlays import _dashed_segments, _ring_segments, _segment_cylinder_trace
 from .viewport import flat_projected_pixel_scale, flat_visual_pixel_scale
+from ..style.disorder import _field, _resolve_bond_fields
 
 _FLAT_ATOM_MIN_PIXEL_SIZE = 3.0
 
@@ -100,30 +101,35 @@ def _bond_segments(scene: dict, style: dict, *, with_scales: bool = False):
     atoms = scene.get("draw_atoms") or []
     n_atoms = len(atoms)
     for bond in scene["bonds"]:
-        is_minor = bool(bond.get("is_minor", False))
-        is_disordered = bool(bond.get("is_disordered", is_minor))
-        if style.get("show_minor_only", False) and not is_minor:
-            continue
         # Phase 4: bond_groups can mark a bond invisible directly. We
         # honour both the bond-level ``_render_visible`` (set by
         # ``tag_bonds_with_groups``) and the per-atom visibility (set
         # by ``tag_atoms_with_groups``); a half-bond that survives
         # both is drawn.
-        if not bool(bond.get("_render_visible", True)):
+        if not bool(_field(bond, "_render_visible", True)):
             continue
-        i = int(bond.get("i", -1))
-        j = int(bond.get("j", -1))
+        i = int(_field(bond, "i", -1))
+        j = int(_field(bond, "j", -1))
+        atom_i = atoms[i] if 0 <= i < n_atoms else None
+        atom_j = atoms[j] if 0 <= j < n_atoms else None
+        is_minor, is_disordered, bond_occ = _resolve_bond_fields(
+            bond,
+            atom_i=atom_i,
+            atom_j=atom_j,
+        )
+        if style.get("show_minor_only", False) and not is_minor:
+            continue
         if 0 <= i < n_atoms and not _atom_render_visible(atoms[i]):
             continue
         if 0 <= j < n_atoms and not _atom_render_visible(atoms[j]):
             continue
-        start = np.array(bond["start"], dtype=float)
-        end = np.array(bond["end"], dtype=float)
+        start = np.array(_field(bond, "start"), dtype=float)
+        end = np.array(_field(bond, "end"), dtype=float)
         mid = (start + end) / 2.0
         # Per-bond ``_render_color`` (bond_groups override) wins over
         # everything except ``style.force_bond_color`` (which is the
         # global "publication ORTEP-III black ink" knob).
-        bond_render_color = bond.get("_render_color")
+        bond_render_color = _field(bond, "_render_color")
         if bond_render_color:
             i_color = forced if forced else bond_render_color
             j_color = forced if forced else bond_render_color
@@ -131,25 +137,24 @@ def _bond_segments(scene: dict, style: dict, *, with_scales: bool = False):
             i_color = (
                 forced
                 if forced
-                else (atoms[i].get("_render_color") if 0 <= i < n_atoms else None)
-                or (atoms[i].get("_property_color") if 0 <= i < n_atoms else None)
-                or _style_color(bond["color_i"], style)
+                else (_field(atom_i, "_render_color") if atom_i is not None else None)
+                or (_field(atom_i, "_property_color") if atom_i is not None else None)
+                or _style_color(_field(bond, "color_i", "#888888"), style)
             )
             j_color = (
                 forced
                 if forced
-                else (atoms[j].get("_render_color") if 0 <= j < n_atoms else None)
-                or (atoms[j].get("_property_color") if 0 <= j < n_atoms else None)
-                or _style_color(bond["color_j"], style)
+                else (_field(atom_j, "_render_color") if atom_j is not None else None)
+                or (_field(atom_j, "_property_color") if atom_j is not None else None)
+                or _style_color(_field(bond, "color_j", "#888888"), style)
             )
         c_i = i_color
         c_j = j_color
-        radius_scale = float(bond.get("_render_radius_scale", 1.0) or 1.0)
+        radius_scale = float(_field(bond, "_render_radius_scale", 1.0) or 1.0)
         # Preserve an explicit zero: opacity maps use it to hide a bond when
         # the corresponding atom is outside a focused local environment.
-        opacity_scale = float(bond.get("_render_opacity_scale", 1.0))
+        opacity_scale = float(_field(bond, "_render_opacity_scale", 1.0))
         opacity_group = _bond_opacity_group_id(bond)
-        bond_occ = float(bond.get("occ", 1.0))
         halves = [
             (c_i, is_minor, start, mid),
             (c_j, is_minor, mid, end),
@@ -765,7 +770,10 @@ def _wireframe_atom_traces(scene: dict, style: dict):
 
 
 def _wireframe_bond_traces(scene: dict, style: dict):
-    groups: Dict[Tuple[str, bool, str | None], dict] = {}
+    # Plotly stores opacity on the whole trace.  Keep each endpoint-resolved
+    # opacity in its own bucket so a wireframe bond cannot inherit the
+    # disorder weight of whichever segment happened to be visited last.
+    groups: Dict[Tuple[str, bool, str | None, str], dict] = {}
     for (
         color,
         is_minor,
@@ -777,27 +785,29 @@ def _wireframe_bond_traces(scene: dict, style: dict):
         opacity_group,
         bond_occ,
     ) in _bond_segments(scene, style, with_scales=True):
+        eff_opacity = bond_effective_opacity(
+            {
+                "is_minor": is_minor,
+                "is_disordered": is_disordered,
+                "_render_opacity_scale": opacity_scale,
+                "occ": bond_occ,
+            },
+            style,
+        )
+        opacity_bin = f"{eff_opacity:.2f}"
         groups.setdefault(
-            (color, is_minor, opacity_group),
-            {"segments": [], "opacity_scale": opacity_scale, "occ": bond_occ},
+            (color, is_minor, opacity_group, opacity_bin),
+            {"segments": [], "opacity_scale": opacity_scale, "opacity": eff_opacity},
         )["segments"].append((start, end))
     traces = []
-    for (color, is_minor, opacity_group), payload in groups.items():
+    for (color, is_minor, opacity_group, _opacity_bin), payload in groups.items():
         segments = payload["segments"]
         opacity_scale = float(payload["opacity_scale"])
         trace = _segment_cylinder_trace(
             segments,
             radius=max(0.01, 0.40 * float(style["bond_radius"])),
             color=color,
-            opacity=bond_effective_opacity(
-                {
-                    "is_minor": is_minor,
-                    "is_disordered": is_disordered,
-                    "_render_opacity_scale": opacity_scale,
-                    "occ": bond_occ,
-                },
-                style,
-            ),
+            opacity=payload["opacity"],
             sides=4,
             name="wireframe-bonds",
         )
