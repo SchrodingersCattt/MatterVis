@@ -10,6 +10,7 @@ from .editor_transforms import *
 from .rightclick import *
 from .status_helpers import status_banner_payload
 from ..transforms import transforms_cache_key
+from .selectors import show_hydrogen
 from .backend import ViewerBackend
 from .display_controls import display_option_hint, display_option_items
 
@@ -117,7 +118,7 @@ def register_state_callbacks(app, backend):
         # easily hit ~1s on dense unit cells. Short-circuit those.
         if scene_id and scene_id not in backend.scene_store.scenes:
             return no_update, no_update
-        hydrogens_on = "hydrogens" in (display_options or [])
+        hydrogens_on = show_hydrogen({"display_options": display_options})
         active_state = backend.get_state(scene_id)
         transforms_key = transforms_cache_key(active_state.get("transforms") or [])
         cache_key = (scene_id, display_mode, hydrogens_on, transforms_key)

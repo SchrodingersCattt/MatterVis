@@ -74,10 +74,10 @@ def atom_matches_selector(
     threads those through so the matcher stays a pure function of
     its inputs.
     """
-    if selector.get("all"):
-        return True
-
-    used_any_key = False
+    # ``all`` is a valid unconstrained selector, but selector keys are
+    # conjunctive.  Keep evaluating any additional constraints instead of
+    # treating ``{"all": True, "elements": [...]}`` as global.
+    used_any_key = bool(selector.get("all"))
 
     if "elements" in selector:
         used_any_key = True

@@ -53,6 +53,11 @@ def test_atom_matches_selector_all():
     assert atom_matches_selector(atom, {"all": True}) is True
 
 
+def test_atom_matches_selector_all_with_constraints_uses_and_semantics():
+    assert atom_matches_selector({"elem": "C"}, {"all": True, "elements": ["C"]})
+    assert not atom_matches_selector({"elem": "O"}, {"all": True, "elements": ["C"]})
+
+
 def test_atom_matches_selector_elements_membership():
     atom = {"elem": "O"}
     assert atom_matches_selector(atom, {"elements": ["O", "S"]}) is True
