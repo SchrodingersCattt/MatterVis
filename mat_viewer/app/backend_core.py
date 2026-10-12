@@ -263,24 +263,10 @@ class _CoreBackendMixin:
             self._figure_cache.clear()
 
     def reload_bond_policy(self) -> None:
-        """Drop chemistry/scene caches after a global MCK policy update.
+        """Rebuild loaded bundles after a global MCK policy update."""
+        from .bond_policy import reload_bond_policy
 
-        Catalog-backed bundles are rebuilt lazily so the next request uses the
-        newly configured ``bond_scale``/``bond_thresholds``. Directly supplied
-        bundles (for example an in-memory trajectory) keep their source
-        analysis but lose derived scene caches.
-        """
-        catalog_names = set(self.catalog)
-        with self._bundle_lock:
-            for name in list(self.bundles):
-                if name in catalog_names:
-                    self.bundles.pop(name, None)
-                else:
-                    bundle = self.bundles[name]
-                    bundle.scene_cache.clear()
-                    bundle.fragment_table_cache.clear()
-        self._invalidate_figure_cache()
-        self._bump_version()
+        reload_bond_policy(self, current_config())
 
     def broadcast_figure(
         self,

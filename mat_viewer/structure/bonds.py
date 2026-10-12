@@ -54,11 +54,19 @@ def normalize_bond_thresholds(bond_thresholds):
     if bond_thresholds is None:
         return {}
     if isinstance(bond_thresholds, tuple):
-        # Backward-compatible internal cache representation.
-        return {
-            tuple(sorted((_normalize_element_symbol(left), _normalize_element_symbol(right)))): float(value)
-            for left, right, value in bond_thresholds
-        }
+        # Backward-compatible internal cache representation uses triples, but
+        # the config loader freezes JSON lists as tuples of mapping records.
+        # Keep accepting both forms so a REST reload can feed the normalized
+        # policy back through the public loader.
+        if all(
+            isinstance(item, (tuple, list)) and len(item) == 3
+            for item in bond_thresholds
+        ):
+            return {
+                tuple(sorted((_normalize_element_symbol(left), _normalize_element_symbol(right)))): float(value)
+                for left, right, value in bond_thresholds
+            }
+        bond_thresholds = list(bond_thresholds)
     if isinstance(bond_thresholds, list):
         records = {}
         for item in bond_thresholds:

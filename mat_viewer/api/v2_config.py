@@ -48,11 +48,15 @@ def register_config_routes(v2, backend) -> dict:
     def config_delete():
         deleted = delete_user_config()
         cfg = reload_config()
+        if hasattr(backend, "reload_bond_policy"):
+            backend.reload_bond_policy()
         return jsonify({"deleted": deleted, "config": cfg.as_dict()})
 
     @v2.post("/config/reload")
     def config_reload():
         cfg = reload_config()
+        if hasattr(backend, "reload_bond_policy"):
+            backend.reload_bond_policy()
         return jsonify(cfg.as_dict())
 
     return locals()

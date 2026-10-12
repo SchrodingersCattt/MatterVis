@@ -155,10 +155,21 @@ retain all intended bonds while excluding compressed intermolecular contacts.
 Explicit pair thresholds are also multiplied by `bond_scale`; they are not an
 independent post-processing filter.
 
+This is the caller-facing contract for issue #58: use `bond_scale` for a
+global tolerance change and `bond_thresholds` for element-pair cutoffs. The
+same policy is accepted by `build_loaded_crystal`, `load_structure_input`,
+cube/ASE adapters, and the terminal/general renderer CLIs (`--bond-scale`
+plus repeatable `--bond-threshold ELEMENT1,ELEMENT2=CUTOFF`). The numeric
+batch renderer does not implement chemistry thresholds and rejects
+`--bond-threshold` when explicitly selected (and auto selection falls back to
+the general renderer), so a threshold is never silently ignored. The REST equivalent
+is the `mck_overrides` object on `PATCH /api/v2/config`; policy changes rebuild
+all populated catalog, uploaded, and direct bundles so a threshold cannot silently remain cached.
+
 The REST config uses TOML-safe structured records for pair thresholds:
 `{"mck_overrides": {"bond_scale": 0.9, "bond_thresholds": [{"elements": ["Zn", "N"], "cutoff": 2.5}]}}`.
-Updating this policy invalidates catalog bundle and figure caches; bundles are
-rebuilt lazily with the new MolCrysKit policy.
+Updating this policy invalidates bundle and figure caches; populated bundles are
+rebuilt with the new MolCrysKit policy.
 
 `mat_viewer.scene.build_scene_from_atoms` remains available as a
 compatibility import, but new code should treat scene assembly as part
