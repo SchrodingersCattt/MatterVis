@@ -223,7 +223,11 @@ def _has_monochrome_group(state: Mapping[str, Any]) -> bool:
             continue
         color_token = str(color).strip().lower()
         is_black = color_token in {"#000000", "#000", "black"}
-        if selector.get("all"):
+        # ``all`` only establishes a global baseline when it is the sole
+        # selector constraint.  Selector keys are conjunctive; e.g.
+        # ``{"all": True, "elements": ["C"]}`` is scoped and cannot prove
+        # that every rendered atom is monochrome.
+        if selector.get("all") and set(selector) <= {"all"}:
             baseline_black = is_black
         elif baseline_black and not is_black:
             # Any later explicit colour selected by a narrower selector

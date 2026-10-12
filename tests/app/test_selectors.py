@@ -128,6 +128,13 @@ def test_monochrome_selector_honours_later_group_overrides():
     )
     assert partition_state(replaced).derived["monochrome"] is False
 
+    constrained = _state(
+        atom_groups=[
+            {"selector": {"all": True, "elements": ["C"]}, "color": "#000000"}
+        ]
+    )
+    assert partition_state(constrained).derived["monochrome"] is False
+
 
 def test_viewport_signature_tracks_geometry_and_topology_inputs():
     before = _state()
