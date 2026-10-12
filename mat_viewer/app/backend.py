@@ -7,6 +7,7 @@ from .shared import ApiError, TopologyUnavailable
 from .backend_analysis import _AnalysisBackendMixin
 from .backend_camera import _CameraBackendMixin
 from .backend_core import _CoreBackendMixin
+from .backend_reducer import _ReducerBackendMixin
 from .backend_scenes import _SceneBackendMixin
 from .backend_io import _IOBackendMixin
 from .backend_operations import _OperationsBackendMixin
@@ -23,6 +24,7 @@ class ViewerBackend(
     _VectorBackendMixin,
     _SceneBackendMixin,
     _CoreBackendMixin,
+    _ReducerBackendMixin,
     _OperationsBackendMixin,
     _OverlaysBackendMixin,
     _SelectionBackendMixin,
