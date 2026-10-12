@@ -205,6 +205,7 @@ class _CameraBackendMixin:
                         topology_data = self._attach_spec_colors(
                             cached_geometry,
                             context["effective_specs"],
+                            analysis_spec_id=context["analysis_spec_id"],
                         )
             else:
                 topology_data = self.topology_for_state(state, click_data=click_data)

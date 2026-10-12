@@ -164,9 +164,9 @@ def topology_spec_geometry_key(
     should not trigger an expensive MolCrysKit geometry computation.
     """
 
-    # Keep every spec identity and occurrence in caller order.  The first
-    # matching spec is the analysis anchor, so reordering specs can change the
-    # computed primary geometry and must not collide in this cache.
+    # Keep every spec identity and occurrence, but sort the cache
+    # representation so a UI reorder can reuse expensive geometry.  The
+    # consumer rebinds ordered results and the analysis anchor on each hit.
     entries = tuple(
         (
             str(spec.get("id") or ""),
@@ -181,7 +181,7 @@ def topology_spec_geometry_key(
         )
         for spec in specs or ()
     )
-    return entries
+    return tuple(sorted(entries, key=repr))
 
 
 def topology_geometry_cache_key(

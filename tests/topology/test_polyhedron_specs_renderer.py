@@ -112,6 +112,60 @@ def test_topology_for_state_caches_geometry_across_color_changes(backend: Viewer
     assert by_color[spec["id"]] == "#00ff00", "new colour must reach spec_results"
 
 
+def test_attach_spec_colors_rebinds_anchor_after_spec_reorder(backend: ViewerBackend):
+    cached = {
+        "center_coords": [0.0, 0.0, 0.0],
+        "center_label": "site-0",
+        "shell_coords": [[1.0, 0.0, 0.0]],
+        "distances": [1.0],
+        "hull": {"simplices": []},
+        "analysis_spec_id": "spec-a",
+        "spec_results": [
+            {
+                "spec_id": "spec-a",
+                "name": "A",
+                "overlays": [{
+                    "center_coords": [0.0, 0.0, 0.0],
+                    "center_label": "site-0",
+                    "shell_coords": [[1.0, 0.0, 0.0]],
+                    "distances": [1.0],
+                    "hull": {"simplices": []},
+                    "is_analysis_anchor": True,
+                }],
+            },
+            {
+                "spec_id": "spec-b",
+                "name": "B",
+                "overlays": [{
+                    "center_coords": [0.0, 0.0, 0.0],
+                    "center_label": "site-0",
+                    "shell_coords": [[2.0, 0.0, 0.0]],
+                    "distances": [2.0],
+                    "hull": {"simplices": []},
+                    "is_analysis_anchor": False,
+                }],
+            },
+        ],
+    }
+    specs = [
+        {"id": "spec-b", "name": "B", "color": "#00ff00"},
+        {"id": "spec-a", "name": "A", "color": "#ff0000"},
+    ]
+
+    rebound = backend._attach_spec_colors(cached, specs, analysis_spec_id="spec-b")
+
+    assert rebound["analysis_spec_id"] == "spec-b"
+    assert rebound["shell_coords"] == [[2.0, 0.0, 0.0]]
+    anchors = [
+        (entry["spec_id"], overlay)
+        for entry in rebound["spec_results"]
+        for overlay in entry["overlays"]
+        if overlay.get("is_analysis_anchor")
+    ]
+    assert len(anchors) == 1
+    assert anchors[0][0] == "spec-b"
+
+
 def test_topology_for_state_does_not_fall_back_to_legacy_species_keys(backend: ViewerBackend):
     state = backend.get_state()
     state["topology_enabled"] = True

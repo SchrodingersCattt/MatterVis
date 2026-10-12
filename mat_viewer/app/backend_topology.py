@@ -803,6 +803,7 @@ class _TopologyBackendMixin:
             for entry in cached_geometry.get("spec_results", []) or []
         }
         spec_results = []
+        anchor_overlay = None
         for spec in effective_specs:
             entry = entries_by_id.get(str(spec.get("id") or ""))
             if entry is None:
@@ -816,13 +817,18 @@ class _TopologyBackendMixin:
                 "edge_width": 3.0,
                 "flatshading": True,
             }))
+            # The bundle cache owns ``entry``.  Always detach overlay dicts
+            # before restamping anchor/paint metadata on the request wrapper.
+            recoloured["overlays"] = [
+                dict(overlay) for overlay in entry.get("overlays") or []
+            ]
             spec_overrides = overrides_by_id.get(spec_id) or {}
             if spec_overrides:
                 # Patch each overlay with its per-fragment override (if
                 # any). The override key is the fragment label; we copy
                 # the overlay dict so the cached geometry stays clean.
                 new_overlays = []
-                for overlay in entry.get("overlays") or []:
+                for overlay in recoloured["overlays"]:
                     label = str(overlay.get("center_label") or "")
                     override = spec_overrides.get(label)
                     if override:
@@ -835,11 +841,56 @@ class _TopologyBackendMixin:
                     else:
                         new_overlays.append(overlay)
                 recoloured["overlays"] = new_overlays
+            if str(spec.get("id") or "") == str(analysis_spec_id or ""):
+                overlays = recoloured.get("overlays") or []
+                cached_center = cached_geometry.get("center_coords")
+                cached_label = cached_geometry.get("center_label")
+                anchor_overlay = next(
+                    (
+                        overlay
+                        for overlay in overlays
+                        if cached_center is not None
+                        and overlay.get("center_coords") == cached_center
+                    ),
+                    None,
+                )
+                if anchor_overlay is None and cached_label is not None:
+                    anchor_overlay = next(
+                        (
+                            overlay
+                            for overlay in overlays
+                            if overlay.get("center_label") == cached_label
+                        ),
+                        None,
+                    )
+                if anchor_overlay is None and len(overlays) == 1:
+                    anchor_overlay = overlays[0]
             spec_results.append(recoloured)
         out = dict(cached_geometry)
         out["spec_results"] = spec_results
         if analysis_spec_id is not None:
             out["analysis_spec_id"] = analysis_spec_id
+            # A sorted geometry key intentionally reuses the payload after a
+            # polyhedron-spec reorder.  Rebuild the identity-bearing primary
+            # fields from the current anchor's overlay so the analysis panel
+            # and foreground renderer cannot keep the previous spec's shell.
+            for entry in out["spec_results"]:
+                overlays = entry.get("overlays") or []
+                for overlay in overlays:
+                    overlay["is_analysis_anchor"] = overlay is anchor_overlay
+            if anchor_overlay is not None:
+                for field in (
+                    "center_coords",
+                    "center_label",
+                    "shell_coords",
+                    "distances",
+                    "hull",
+                    "source_center_coords",
+                    "source_shell_coords",
+                    "source_hull",
+                ):
+                    if field in anchor_overlay:
+                        out[field] = anchor_overlay[field]
         # Brand-new wrapper -> brand-new painter caches. The renderer
         # populates these on first paint and they are reused for every
         # subsequent build_figure call sharing the same paint key.
