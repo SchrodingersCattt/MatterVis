@@ -139,6 +139,21 @@ def test_readback_polls_one_argument_map_async_before_reading() -> None:
     assert device.poll_count == 1
 
 
+def test_readback_supports_wgpu_python_read_mapped_api() -> None:
+    class FakeBuffer:
+        def map_sync(self, mode):
+            assert mode == 1
+
+        def read_mapped(self):
+            return memoryview(b"rgba")
+
+    class FakeWgpu:
+        class MapMode:
+            READ = 1
+
+    assert gpu._map_readback_sync(FakeBuffer(), wgpu=FakeWgpu, device=object()) == b"rgba"
+
+
 def test_gpu_render_receipt_has_stage_timings_without_device(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(gpu, "probe", lambda: gpu.GPUProbe(True, adapter_name="test"))
     monkeypatch.setattr(

@@ -89,10 +89,16 @@ def map_readback_sync(
         if failure:
             raise error_type(str(failure[0])) from failure[0]
 
+    # wgpu-py 0.20+ exposes ``read_mapped`` instead of the browser
+    # ``getMappedRange`` spelling. Keep the latter for test doubles and older
+    # wrappers, but prefer the supported Python API when available.
+    read_mapped = getattr(readback, "read_mapped", None)
+    if callable(read_mapped):
+        return bytes(read_mapped())
     get_range = getattr(readback, "get_mapped_range", None)
-    if not callable(get_range):
-        raise error_type("wgpu readback buffer does not expose mapped bytes")
-    return bytes(get_range())
+    if callable(get_range):
+        return bytes(get_range())
+    raise error_type("wgpu readback buffer does not expose mapped bytes")
 
 
 def release_gpu_resources(resources: list[Any], device: Any) -> None:

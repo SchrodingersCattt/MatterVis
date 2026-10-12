@@ -549,8 +549,10 @@ def _wgpu_rgba(lowered: LoweredPlan, *, probe_info: GPUProbe) -> tuple[bytes, di
         raise GPUUnavailableError("wgpu adapter did not provide a device")
     resources: list[Any] = []
 
-    usage_texture = _usage(wgpu, "RENDER_ATTACHMENT")
-    copy_src = _usage(wgpu, "COPY_SRC")
+    usage_texture = getattr(getattr(wgpu, "TextureUsage", object()), "RENDER_ATTACHMENT", None)
+    # BufferUsage.COPY_SRC and TextureUsage.COPY_SRC have different bit values;
+    # do not use the generic buffer-first helper for a texture descriptor.
+    copy_src = getattr(getattr(wgpu, "TextureUsage", object()), "COPY_SRC", None)
     usage_buffer = _usage(wgpu, "COPY_DST")
     map_read = _usage(wgpu, "MAP_READ")
     uniform_usage = _usage(wgpu, "UNIFORM")
