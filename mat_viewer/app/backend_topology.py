@@ -11,6 +11,7 @@ from ..topology import (
     display_atom_centers_for_spec as _display_atom_centers_for_spec,
     extract_atom_coordination_shells,
 )
+from ..cache_keys import topology_geometry_cache_key
 
 
 _TOPOLOGY_CACHE_LIMIT = 8
@@ -577,6 +578,23 @@ class _TopologyBackendMixin:
                     hint="Use an index from GET /api/v2/scene/{name} topology_fragment_table.",
                 )
             return None
+        display_fragment = next(
+            (
+                fragment
+                for fragment in (scene.get("fragment_table") or [])
+                if int(fragment.get("index", -1)) == int(site_index)
+            ),
+            None,
+        )
+        analysis_spec = next(
+            (
+                spec
+                for spec in effective_specs
+                if display_fragment is not None
+                and _fragment_matches_polyhedron_spec(display_fragment, spec)
+            ),
+            effective_specs[0],
+        )
         # Memoize the (heavy) topology dict on the bundle keyed on the
         # state fields that actually influence GEOMETRY. Per-spec colour
         # is intentionally not in the key -- it only affects the
@@ -585,38 +603,16 @@ class _TopologyBackendMixin:
         # That way swapping a hull colour stays a cheap re-paint and
         # doesn't recompute coordination shells for every tile.
         cutoff = float(state.get("cutoff", 10.0))
-        spec_geometry_key = frozenset(
-            (
-                spec["center_species"],
-                spec.get("ligand_species") or None,
-                bool(spec.get("enforce_enclosure", True)),
-                float(spec.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC)),
-                # MCK 0.4 radial / level knobs: each tuple must change the
-                # cache key because they change the shell topology itself
-                # (cf. SY perchlorate CN=6 vs CN=12 cuboctahedron when
-                # ``hard_cutoff`` flips ``None`` -> 8.0).
-                str(spec.get("level") or "molecule"),
-                str(spec.get("center_kind") or "centroid"),
-                spec.get("hard_cutoff"),
-                spec.get("fallback_max"),
-            )
-            for spec in effective_specs
-        )
-        # Phase 4: ``transforms`` change which fragments exist and must be
-        # in the geometry cache key. Per-spec colours and
-        # ``instance_overrides`` stay OUT of the key (they only affect
-        # the renderer's painter cache; see ``_attach_spec_colors``).
-        from ..transforms import transforms_cache_key
-
-        transforms_key = transforms_cache_key(state.get("transforms") or [])
-        cache_key = (
-            structure,
-            state.get("display_mode"),
-            bool("hydrogens" in (state.get("display_options") or [])),
-            int(site_index),
-            cutoff,
-            spec_geometry_key,
-            transforms_key,
+        # Per-spec colours and ``instance_overrides`` stay OUT of the key;
+        # they only affect the renderer's painter cache.
+        cache_key = topology_geometry_cache_key(
+            structure=structure,
+            display_mode=state.get("display_mode"),
+            show_hydrogen="hydrogens" in (state.get("display_options") or []),
+            site_index=site_index,
+            cutoff=cutoff,
+            specs=effective_specs,
+            transforms=state.get("transforms") or [],
         )
         return {
             "structure": structure,
@@ -625,6 +621,7 @@ class _TopologyBackendMixin:
             "effective_specs": effective_specs,
             "site_index": int(site_index),
             "cutoff": cutoff,
+            "analysis_spec_id": analysis_spec["id"],
             "cache_key": cache_key,
         }
 
@@ -648,7 +645,11 @@ class _TopologyBackendMixin:
             if strict:
                 raise TopologyUnavailable("topology analysis produced no geometry for the requested fragment")
             return None
-        return self._attach_spec_colors(cached_geometry, context["effective_specs"])
+        return self._attach_spec_colors(
+            cached_geometry,
+            context["effective_specs"],
+            analysis_spec_id=context["analysis_spec_id"],
+        )
 
     def topology_request(
         self,
@@ -698,7 +699,11 @@ class _TopologyBackendMixin:
             if strict:
                 raise TopologyUnavailable("topology analysis produced no geometry for the requested fragment")
             return None
-        return self._attach_spec_colors(cached_geometry, context["effective_specs"])
+        return self._attach_spec_colors(
+            cached_geometry,
+            context["effective_specs"],
+            analysis_spec_id=context["analysis_spec_id"],
+        )
 
     def _compute_topology_geometry(
         self,
@@ -751,6 +756,8 @@ class _TopologyBackendMixin:
         self,
         cached_geometry: dict[str, Any],
         effective_specs: list[dict[str, Any]],
+        *,
+        analysis_spec_id: str | None = None,
     ) -> dict[str, Any]:
         """Re-stamp per-spec colours and per-fragment instance overrides
         onto a geometry payload pulled from the bundle cache.
@@ -791,8 +798,16 @@ class _TopologyBackendMixin:
         overrides_by_id: dict[str, dict[str, dict[str, Any]]] = {
             spec["id"]: dict(spec.get("instance_overrides") or {}) for spec in effective_specs
         }
+        entries_by_id = {
+            str(entry.get("spec_id") or ""): entry
+            for entry in cached_geometry.get("spec_results", []) or []
+        }
         spec_results = []
-        for entry in cached_geometry.get("spec_results", []) or []:
+        anchor_overlay = None
+        for spec in effective_specs:
+            entry = entries_by_id.get(str(spec.get("id") or ""))
+            if entry is None:
+                continue
             spec_id = entry.get("spec_id")
             recoloured = dict(entry)
             recoloured.update(paint_by_id.get(spec_id, {
@@ -802,13 +817,18 @@ class _TopologyBackendMixin:
                 "edge_width": 3.0,
                 "flatshading": True,
             }))
+            # The bundle cache owns ``entry``.  Always detach overlay dicts
+            # before restamping anchor/paint metadata on the request wrapper.
+            recoloured["overlays"] = [
+                dict(overlay) for overlay in entry.get("overlays") or []
+            ]
             spec_overrides = overrides_by_id.get(spec_id) or {}
             if spec_overrides:
                 # Patch each overlay with its per-fragment override (if
                 # any). The override key is the fragment label; we copy
                 # the overlay dict so the cached geometry stays clean.
                 new_overlays = []
-                for overlay in entry.get("overlays") or []:
+                for overlay in recoloured["overlays"]:
                     label = str(overlay.get("center_label") or "")
                     override = spec_overrides.get(label)
                     if override:
@@ -821,9 +841,56 @@ class _TopologyBackendMixin:
                     else:
                         new_overlays.append(overlay)
                 recoloured["overlays"] = new_overlays
+            if str(spec.get("id") or "") == str(analysis_spec_id or ""):
+                overlays = recoloured.get("overlays") or []
+                cached_center = cached_geometry.get("center_coords")
+                cached_label = cached_geometry.get("center_label")
+                anchor_overlay = next(
+                    (
+                        overlay
+                        for overlay in overlays
+                        if cached_center is not None
+                        and overlay.get("center_coords") == cached_center
+                    ),
+                    None,
+                )
+                if anchor_overlay is None and cached_label is not None:
+                    anchor_overlay = next(
+                        (
+                            overlay
+                            for overlay in overlays
+                            if overlay.get("center_label") == cached_label
+                        ),
+                        None,
+                    )
+                if anchor_overlay is None and len(overlays) == 1:
+                    anchor_overlay = overlays[0]
             spec_results.append(recoloured)
         out = dict(cached_geometry)
         out["spec_results"] = spec_results
+        if analysis_spec_id is not None:
+            out["analysis_spec_id"] = analysis_spec_id
+            # A sorted geometry key intentionally reuses the payload after a
+            # polyhedron-spec reorder.  Rebuild the identity-bearing primary
+            # fields from the current anchor's overlay so the analysis panel
+            # and foreground renderer cannot keep the previous spec's shell.
+            for entry in out["spec_results"]:
+                overlays = entry.get("overlays") or []
+                for overlay in overlays:
+                    overlay["is_analysis_anchor"] = overlay is anchor_overlay
+            if anchor_overlay is not None:
+                for field in (
+                    "center_coords",
+                    "center_label",
+                    "shell_coords",
+                    "distances",
+                    "hull",
+                    "source_center_coords",
+                    "source_shell_coords",
+                    "source_hull",
+                ):
+                    if field in anchor_overlay:
+                        out[field] = anchor_overlay[field]
         # Brand-new wrapper -> brand-new painter caches. The renderer
         # populates these on first paint and they are reused for every
         # subsequent build_figure call sharing the same paint key.

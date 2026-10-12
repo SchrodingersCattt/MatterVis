@@ -12,6 +12,7 @@ from ..legacy import crystal_scene as legacy_scene
 from ..scene import build_scene_from_atoms, scene_ops
 from ..structure import molcrys_bridge
 from ..structure.bonds import normalize_bond_thresholds, validate_bond_scale
+from ..cache_keys import fragment_table_cache_key, scene_cache_key
 from .core import (
     LoadedCrystal,
     _fragment_table_from_atoms,
@@ -190,7 +191,13 @@ def build_loaded_crystal_from_atoms(
         )
 
     fragment_table_cache = {
-        ("scene", "formula_unit", False): (
+        fragment_table_cache_key(
+            display_mode="formula_unit",
+            show_hydrogen=False,
+            include_boundary_replicas=True,
+            include_cross_boundary_bond_endpoints=True,
+            include_minor=True,
+        ): (
             copy.deepcopy(fragment_table),
             list(atom_fragment_labels),
         ),
@@ -214,7 +221,14 @@ def build_loaded_crystal_from_atoms(
         formula_unit_atoms=[dict(atom) for atom in formula_unit_atoms],
         unwrapped_atoms=[dict(atom) for atom in unwrapped_atoms],
         unwrap_overflow=[list(component) for component in unwrap_overflow],
-        scene_cache={("formula_unit", False): initial_scene},
+        scene_cache={
+            scene_cache_key(
+                display_mode="formula_unit",
+                show_hydrogen=False,
+                bond_scale=bond_scale,
+                bond_thresholds=bond_thresholds,
+            ): initial_scene
+        },
         fragment_table=fragment_table,
         topology_fragment_table=topology_fragment_table,
         fragment_table_cache=fragment_table_cache,
