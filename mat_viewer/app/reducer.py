@@ -436,8 +436,10 @@ def _invalidation_set(kind: str, before: Mapping[str, Any], after: Mapping[str, 
     # legacy endpoints continue accepting arbitrary state dictionaries.
     changed_keys = {key for key in set(before) | set(after) if before.get(key) != after.get(key)}
     invalidations: set[Invalidation] = set()
-    if changed_keys & {"structure", "display_mode", "disorder", "disorder_resolve", "disorder_replicas", "cutoff", "show_hydrogen"}:
+    if changed_keys & {"structure", "display_mode", "disorder", "disorder_resolve", "disorder_replicas", "show_hydrogen"}:
         invalidations.update({Invalidation.SCENE_GEOMETRY, Invalidation.TOPOLOGY_GEOMETRY, Invalidation.FIGURE_BODY, Invalidation.SIDE_PANEL, Invalidation.CAMERA_LAYOUT})
+    if "cutoff" in changed_keys:
+        invalidations.update({Invalidation.TOPOLOGY_GEOMETRY, Invalidation.FIGURE_BODY, Invalidation.SIDE_PANEL})
     if "transforms" in changed_keys:
         invalidations.update({Invalidation.TRANSFORM_GEOMETRY, Invalidation.TOPOLOGY_GEOMETRY, Invalidation.FIGURE_BODY, Invalidation.SIDE_PANEL, Invalidation.CAMERA_LAYOUT})
     if "display_options" in changed_keys:

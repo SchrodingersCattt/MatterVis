@@ -8,6 +8,7 @@ from mat_viewer.app.reducer import (
     SetCamera,
     SetDisplayMode,
     SetDisplayOptions,
+    SetNumericStyle,
     SetProjection,
     SetPolyhedronSpecs,
     SetTransforms,
@@ -147,3 +148,15 @@ def test_legacy_patch_state_matches_typed_geometry_facts():
         legacy_state, legacy_facts = reduce_state(before, legacy)
         assert typed_state == legacy_state
         assert typed_facts == legacy_facts
+
+
+def test_legacy_cutoff_patch_matches_typed_numeric_style_facts():
+    before = _state(cutoff=10.0)
+    typed_state, typed_facts = reduce_state(
+        before, SetNumericStyle({"cutoff": 8.0})
+    )
+    legacy_state, legacy_facts = reduce_state(
+        before, PatchState({"cutoff": 8.0})
+    )
+    assert typed_state == legacy_state
+    assert typed_facts == legacy_facts
