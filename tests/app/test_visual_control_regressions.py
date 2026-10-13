@@ -143,6 +143,38 @@ def test_ws_figure_broadcast_rejects_empty_2d_payload(tmp_path):
         backend._render_worker.shutdown()
 
 
+def test_figure_broadcast_snapshots_payload_and_scene_generation(tmp_path):
+    backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    scene_id = backend.active_scene_id()
+    try:
+        state = backend.get_state(scene_id)
+        figure = {
+            "data": [{"type": "scatter3d", "x": [0], "y": [0], "z": [0]}],
+            "layout": {"scene": {"camera": {"eye": {"x": 1}}}},
+        }
+        payload = backend.broadcast_figure(scene_id=scene_id, figure=figure, state=state)
+        figure["layout"]["scene"]["camera"]["eye"]["x"] = 99
+        state["camera_revision"] = 99
+        assert payload["scene_generation"] == backend.scene_generation(scene_id)
+        stored = backend.latest_figure_broadcast(scene_id)
+        assert stored["figure"]["layout"]["scene"]["camera"]["eye"]["x"] == 1
+        assert stored["state"]["camera_revision"] != 99
+    finally:
+        backend._render_worker.shutdown()
+
+
+def test_camera_revision_never_moves_backwards(tmp_path):
+    backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    scene_id = backend.active_scene_id()
+    try:
+        first = backend.get_state(scene_id)["camera_revision"]
+        backend.patch_state({"camera_revision": first + 3}, scene_id=scene_id, broadcast=False)
+        backend.patch_state({"camera_revision": 1}, scene_id=scene_id, broadcast=False)
+        assert backend.get_state(scene_id)["camera_revision"] >= first + 3
+    finally:
+        backend._render_worker.shutdown()
+
+
 def test_ws_figure_broadcast_rejects_stale_polyhedron_state(tmp_path):
     backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
     scene_id = backend.active_scene_id()

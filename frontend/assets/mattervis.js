@@ -33,6 +33,52 @@
   let sceneTabIntentId = null, sceneTabIntentAt = 0;
   let renderServerEpoch = null;
   const expectedRenderRevisionByScene = Object.create(null);
+  const expectedCameraRevisionByScene = Object.create(null);
+  const expectedSceneGenerationByScene = Object.create(null);
+  const MAX_RENDER_QUEUE = 32;
+
+  /* Plotly work is asynchronous.  Keep one bounded FIFO per graph so a
+   * burst of camera commands or duplicate Dash/WS frames cannot grow an
+   * unbounded promise chain.  Dropped entries are already superseded by a
+   * newer frame; resolving them lets their callers recover and continue. */
+  function enqueueRender(gd, task, options) {
+    if (!gd || typeof task !== "function") return Promise.resolve(gd);
+    let queue = gd.__mvRenderQueueState;
+    if (!queue) {
+      queue = {items: [], running: false, last: Promise.resolve(gd)};
+      gd.__mvRenderQueueState = queue;
+    }
+    if (queue.items.length >= MAX_RENDER_QUEUE) {
+      const dropped = queue.items.splice(0);
+      dropped.forEach(function (item) {
+        if (options && options.rejectDropped) item.reject(new Error("render queue overflow"));
+        else item.resolve(gd);
+      });
+    }
+    const result = new Promise(function (resolve, reject) {
+      queue.items.push({task: task, resolve: resolve, reject: reject});
+    });
+    queue.last = result.catch(function () { return gd; });
+    gd.__mvRenderQueue = queue.last;
+    function pump() {
+      if (queue.running || !queue.items.length) return;
+      const item = queue.items.shift();
+      queue.running = true;
+      Promise.resolve().then(item.task).then(item.resolve, item.reject).then(function () {
+        queue.running = false;
+        pump();
+      }, function () {
+        queue.running = false;
+        pump();
+      });
+    }
+    pump();
+    return result;
+  }
+  window.MatterVisRenderQueue = window.MatterVisRenderQueue || {
+    enqueue: enqueueRender,
+    maxPending: MAX_RENDER_QUEUE,
+  };
   function figurePushIsCurrent(p) {
     return !!(p && typeof p.isCurrent === "function" && p.isCurrent());
   }
@@ -77,14 +123,26 @@
     if (epoch&&renderServerEpoch&&epoch!==renderServerEpoch) {
       if (!allowEpochChange) return;
       Object.keys(expectedRenderRevisionByScene).forEach(function(key){delete expectedRenderRevisionByScene[key];});
+      Object.keys(expectedCameraRevisionByScene).forEach(function(key){delete expectedCameraRevisionByScene[key];});
+      Object.keys(expectedSceneGenerationByScene).forEach(function(key){delete expectedSceneGenerationByScene[key];});
     }
     if (epoch) renderServerEpoch=epoch;
     if (!value.scene_id) return;
     const revision=Number(value.render_revision);
     if (!Number.isFinite(revision)) return;
     const key=String(value.scene_id);
-    const previous=expectedRenderRevisionByScene[key];
+    let previous=expectedRenderRevisionByScene[key];
     const cameraRevision=Number(value.camera_revision||0);
+    const generation=String(value.scene_generation||"");
+    const priorGeneration=expectedSceneGenerationByScene[key];
+    if (priorGeneration!==undefined && priorGeneration!==generation) {
+      delete expectedRenderRevisionByScene[key];
+      delete expectedCameraRevisionByScene[key];
+      previous=null;
+    }
+    expectedSceneGenerationByScene[key]=generation;
+    const priorCamera=expectedCameraRevisionByScene[key];
+    if (priorCamera===undefined || cameraRevision>priorCamera) expectedCameraRevisionByScene[key]=cameraRevision;
     if (!previous||revision>previous.revision||(revision===previous.revision&&cameraRevision>previous.cameraRevision)) {
       expectedRenderRevisionByScene[key]={revision:revision,cameraRevision:cameraRevision};
     }
@@ -119,6 +177,8 @@
     if (expected!==null&&(!Number.isFinite(revision)||revision!==expected)) return false;
     const expectedState=sceneId&&expectedRenderRevisionByScene[sceneId];
     if (expectedState&&Number(render.camera_revision||0)!==expectedState.cameraRevision) return false;
+    if (sceneId&&expectedCameraRevisionByScene[sceneId]!==undefined && Number(render.camera_revision||0)<expectedCameraRevisionByScene[sceneId]) return false;
+    if (sceneId&&expectedSceneGenerationByScene[sceneId]!==undefined && String(render.scene_generation||"")!==expectedSceneGenerationByScene[sceneId]) return false;
     if (renderServerEpoch&&render.server_started_at&&renderServerEpoch!==String(render.server_started_at)) return false;
     return true;
   }
@@ -160,9 +220,7 @@
           };
           // Both Dash signatures and WS pass here. Retry after failures;
           // neither receipt nor a rejected react is a delivered frame.
-          const result=(gd.__mvRenderQueue||Promise.resolve()).then(deliver);
-          gd.__mvRenderQueue=result.catch(function(){});
-          return result;
+          return enqueueRender(gd, deliver);
         }
         return original.apply(this,args);
       };

@@ -109,6 +109,19 @@ class _CoreBackendMixin:
         self._render_revisions: dict[str, int] = {
             str(scene_id): 0 for scene_id in self.scene_store.scenes
         }
+        # Delivery identity is separate from the persisted scene id.  A
+        # generation changes whenever a scene is created in this server
+        # lifetime, so a late frame can never become valid for a replacement
+        # scene that happens to reuse an id.
+        self._scene_generation_counter = 0
+        self._scene_generations: dict[str, int] = {}
+        for scene_id in self.scene_store.order:
+            self._scene_generation_counter += 1
+            self._scene_generations[str(scene_id)] = self._scene_generation_counter
+        self._camera_revisions: dict[str, int] = {
+            str(scene_id): int(self.scene_state(scene_id).get("camera_revision", 0) or 0)
+            for scene_id in self.scene_store.scenes
+        }
         self._last_update_kind_by_scene: dict[str, str] = {}
         self.pending_state: Optional[dict[str, Any]] = None
         self._first_figure_ready = threading.Event()
@@ -318,12 +331,13 @@ class _CoreBackendMixin:
                 "scene_id": scene_id,
                 "render_revision": self.render_revision(scene_id),
                 "reason": reason,
-                "figure": figure,
+                "figure": copy.deepcopy(figure),
                 "state": copy.deepcopy(state) if isinstance(state, dict) else None,
                 "topology": copy.deepcopy(topology_data)
                 if isinstance(topology_data, dict)
                 else None,
             }
+            payload["scene_generation"] = self.scene_generation(scene_id)
             versions = state_versions(state or (self.get_state(scene_id) if scene_id in self.scene_store.scenes else {}))
             payload.update(versions.to_dict())
             payload["update_kind"] = UpdateKind.GEOMETRY.value
@@ -343,7 +357,7 @@ class _CoreBackendMixin:
         attached, so an Axes or camera action can never accidentally trigger a
         full Plotly frame.
         """
-        payload = update.to_dict() if hasattr(update, "to_dict") else dict(update)
+        payload = copy.deepcopy(update.to_dict() if hasattr(update, "to_dict") else dict(update))
         scene_id = payload.get("scene_id")
         current = state or self.get_state(scene_id)
         if not update_applies(payload, current):
@@ -353,6 +367,7 @@ class _CoreBackendMixin:
             payload["figure_seq"] = self._figure_broadcast_seq
             payload["version"] = self.version
             payload["state"] = copy.deepcopy(current)
+            payload["scene_generation"] = self.scene_generation(scene_id)
             self._figure_broadcasts.append(payload)
             self._figure_broadcasts = self._figure_broadcasts[-32:]
         return payload
@@ -399,6 +414,10 @@ class _CoreBackendMixin:
         target = scene_id or self.scene_store.active_id
         return int(self._render_revisions.get(str(target), 0)) if target else 0
 
+    def scene_generation(self, scene_id: Optional[str] = None) -> int:
+        target = scene_id or self.scene_store.active_id
+        return int(self._scene_generations.get(str(target), 0)) if target else 0
+
     def _state_snapshot(
         self,
         state: dict[str, Any],
@@ -409,6 +428,7 @@ class _CoreBackendMixin:
         snapshot["server_started_at"] = self.server_started_iso()
         snapshot["version"] = self.version
         snapshot["render_revision"] = self.render_revision(target)
+        snapshot["scene_generation"] = self.scene_generation(target)
         return snapshot
 
     def _stamp_figure_render_metadata(
@@ -427,6 +447,7 @@ class _CoreBackendMixin:
             ),
             "server_started_at": state.get("server_started_at")
             or self.server_started_iso(),
+            "scene_generation": self.scene_generation(state.get("scene_id")),
         }
         render_meta.update(state_versions(state).to_dict())
         if isinstance(figure, dict):
@@ -453,6 +474,8 @@ class _CoreBackendMixin:
         if not isinstance(state, dict) or not scene_id:
             return True
         try:
+            if "scene_generation" in state and int(state.get("scene_generation", 0) or 0) != self.scene_generation(scene_id):
+                return False
             return (
                 int(state.get("render_revision", -1)) == self.render_revision(scene_id)
                 and int(state.get("camera_revision", 0) or 0)
@@ -505,6 +528,7 @@ class _CoreBackendMixin:
                 "version": self.version,
                 "scene_id": scene_id,
                 "error": error,
+                "scene_generation": self.scene_generation(scene_id),
             }
             payload.update(state_versions(self.get_state(scene_id)).to_dict())
             self._figure_broadcasts.append(payload)
@@ -1086,6 +1110,7 @@ class _CoreBackendMixin:
             camera_version = max(
                 before_versions.camera,
                 int(self.current_state.get("camera_revision", 0) or 0),
+                int(self._camera_revisions.get(str(target_scene_id), 0) or 0),
             )
             if change_kind == UpdateKind.GEOMETRY:
                 geometry_version += 1
@@ -1106,6 +1131,7 @@ class _CoreBackendMixin:
             self.current_state["display_version"] = display_version
             self.current_state["camera_version"] = camera_version
             self.current_state["camera_revision"] = camera_version
+            self._camera_revisions[str(target_scene_id)] = camera_version
             self._last_update_kind_by_scene[str(target_scene_id)] = change_kind.value
             if target_scene_id:
                 scene_payload = copy.deepcopy(self.current_state)

@@ -51,6 +51,7 @@ class ViewUpdate:
     versions: ViewVersions
     payload: dict[str, Any] = field(default_factory=dict)
     reason: str = "state-confirmed"
+    scene_generation: int | str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         kind = self.kind.value if isinstance(self.kind, UpdateKind) else str(self.kind)
@@ -59,6 +60,7 @@ class ViewUpdate:
             "update_kind": kind,
             "kind": kind,
             "scene_id": self.scene_id,
+            "scene_generation": self.scene_generation,
             "reason": self.reason,
             "versions": self.versions.to_dict(),
             "geometry_version": self.versions.geometry,
@@ -158,6 +160,7 @@ def make_update(
         versions=state_versions(state),
         payload=dict(payload or {}),
         reason=reason,
+        scene_generation=state.get("scene_generation"),
     )
 
 

@@ -316,6 +316,15 @@ class _IOBackendMixin:
                 self._render_revisions = {
                     str(scene_id): 0 for scene_id in self.scene_store.scenes
                 }
+                self._scene_generation_counter += 1
+                self._scene_generations = {}
+                for scene_id in self.scene_store.order:
+                    self._scene_generation_counter += 1
+                    self._scene_generations[str(scene_id)] = self._scene_generation_counter
+                self._camera_revisions = {
+                    str(scene_id): int(self.scene_state(scene_id).get("camera_revision", 0) or 0)
+                    for scene_id in self.scene_store.scenes
+                }
                 self.scene_store.save()
         for bundle in self.bundles.values():
             bundle.scene_cache.clear()

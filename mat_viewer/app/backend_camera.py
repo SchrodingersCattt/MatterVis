@@ -584,7 +584,13 @@ class _CameraBackendMixin:
         non-camera UI toggles like Labels/Hydrogens.
         """
         state = self.get_state(scene_id)
-        current = int(state.get("camera_revision", 0) or 0)
-        self.patch_state({"camera_revision": current + 1}, scene_id=scene_id, broadcast=broadcast)
-        return current + 1
+        key = str(scene_id or self.scene_store.active_id or "")
+        current = max(
+            int(state.get("camera_revision", 0) or 0),
+            int(getattr(self, "_camera_revisions", {}).get(key, 0) or 0),
+        )
+        updated = self.patch_state(
+            {"camera_revision": current + 1}, scene_id=scene_id, broadcast=broadcast
+        )
+        return int(updated.get("camera_revision", current + 1) or current + 1)
 
