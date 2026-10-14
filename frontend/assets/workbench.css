@@ -88,6 +88,29 @@
   white-space: nowrap;
 }
 
+#scene-tabs .scene-tab-label {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  width: 100%;
+}
+
+#scene-tabs .scene-tab-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#scene-tabs .tab-close-x {
+  flex: 0 0 auto;
+  height: 20px;
+  margin-left: auto;
+  padding: 0 4px;
+  width: 20px;
+}
+
 #scene-tabs .tab--selected,
 #scene-tabs .tab--selected:hover {
   background: var(--mv-accent-soft);
@@ -96,13 +119,7 @@
 }
 
 .scene-tab-close-row {
-  align-items: center;
-  border-top: 1px solid #eef2f6;
-  display: flex;
-  gap: 0;
-  justify-content: stretch;
-  min-height: 26px;
-  padding: 0 5px;
+  display: none;
 }
 
 .scene-tab-close-row > .tab-close-x {

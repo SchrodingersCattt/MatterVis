@@ -70,3 +70,27 @@ def test_interactive_plotly_camera_keeps_existing_viewport() -> None:
     interactive = _scene_ranges(scene, {**style, "camera": scene["camera"]})
     np.testing.assert_allclose(interactive, baseline)
 
+
+def test_oblique_layered_structure_gets_full_perspective_margin() -> None:
+    """A long Brucite-like layer must not clip the projected corner."""
+    scene = {
+        "name": "brucite-like",
+        "display_mode": "formula_unit",
+        "draw_atoms": [
+            {"cart": [-8.0, -5.5, -0.2], "atom_radius": 0.7, "is_minor": False},
+            {"cart": [8.0, 5.5, 0.2], "atom_radius": 0.7, "is_minor": False},
+            {"cart": [0.0, 0.0, 2.0], "atom_radius": 0.4, "is_minor": False},
+        ],
+        "camera": {
+            "position": [1.0, 1.0, 1.0],
+            "focal_point": [0.0, 0.0, 0.0],
+            "up": [0.0, 0.0, 1.0],
+        },
+    }
+    ranges = _scene_ranges(
+        scene,
+        {"display_mode": "formula_unit", "atom_scale": 1.0, "camera": scene["camera"]},
+    )
+    for atom in scene["draw_atoms"]:
+        assert all(axis_range[0] <= atom["cart"][axis] <= axis_range[1] for axis, axis_range in enumerate(ranges))
+

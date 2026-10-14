@@ -11,9 +11,26 @@ class _SceneBackendMixin:
     def scene_tabs(self) -> list[Any]:
         tabs = []
         for scene in self.scene_store.list():
+            close_id = f"scene-tab-close-{scene['id']}"
+            close_button = html.Button(
+                html.Span("\u00d7", id=close_id, **{"aria-hidden": "true"}),
+                id={"type": "tab-close", "scene_id": scene["id"]},
+                className="tab-close-x",
+                n_clicks=0,
+                title=f"Close {scene['label']}",
+                **{"aria-label": f"Close {scene['label']} tab"},
+            )
+            label = html.Span(
+                [
+                    html.Span(scene["label"], className="scene-tab-text"),
+                    close_button,
+                ],
+                id=f"scene-tab-label-{scene['id']}",
+                className="scene-tab-label",
+            )
             tabs.append(
                 dcc.Tab(
-                    label=scene["label"],
+                    label=label,
                     value=scene["id"],
                     id=f"scene-tab-{scene['id']}",
                 )

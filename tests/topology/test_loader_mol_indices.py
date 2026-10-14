@@ -37,6 +37,7 @@ from mat_viewer.loader import (
 from mat_viewer.loader.core import (
     _explicit_group_disorder_indices,
     _fragment_table_from_atoms,
+    _mixed_occupancy_site_indices,
     _tag_unresolved_partial_disorder,
 )
 from mat_viewer.loader.periodic_unwrap import unwrap_from_bond_records
@@ -297,6 +298,34 @@ def test_has_shelx_occupancy_disorder_distinguishes_patterns():
     assert _has_shelx_occupancy_disorder(single_assembly_partner) is False
     assert _has_shelx_occupancy_disorder(part_negative) is True
     assert _has_shelx_occupancy_disorder(ordered) is False
+
+
+def test_mixed_element_occupancy_at_one_site_is_disorder():
+    """Spinel-style Mg/Fe split sites carry no SHELX group labels."""
+    mixed = [
+        {
+            "label": "A1",
+            "elem": "Mg",
+            "frac": np.array([0.125, 0.125, 0.125]),
+            "occ": 0.5,
+            "dg": ".",
+            "da": ".",
+            "_asym_index": 3,
+        },
+        {
+            "label": "A2",
+            "elem": "Fe",
+            "frac": np.array([0.125, 0.125, 0.125]),
+            "occ": 0.5,
+            "dg": ".",
+            "da": ".",
+            "_asym_index": 3,
+        },
+    ]
+    assert _mixed_occupancy_site_indices(mixed) == {0, 1}
+    assert _has_shelx_occupancy_disorder(mixed) is True
+    tagged = _tag_unresolved_partial_disorder(mixed)
+    assert all(atom["is_disordered"] for atom in tagged)
 
 
 # --------------------------------------------------------------------- #

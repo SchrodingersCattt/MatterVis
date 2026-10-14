@@ -117,8 +117,22 @@ class _IOBackendMixin:
             filename=safe,
             bytes=len(data),
         ):
-            with open(path, "wb") as handle:
-                handle.write(data)
+            # Write to a per-request temporary inode and atomically replace
+            # the content-addressed target.  Two concurrent retries can then
+            # never expose a truncated CIF to MolCrysKit while one request is
+            # still writing the shared path.
+            fd, temporary_path = tempfile.mkstemp(
+                prefix=f".{digest[:12]}-", suffix=".tmp", dir=upload_dir
+            )
+            try:
+                with os.fdopen(fd, "wb") as handle:
+                    handle.write(data)
+                os.replace(temporary_path, path)
+            finally:
+                try:
+                    os.unlink(temporary_path)
+                except FileNotFoundError:
+                    pass
         stem = os.path.splitext(safe)[0]
 
         # ── Async upload: defer build_loaded_crystal to background ──
@@ -126,6 +140,7 @@ class _IOBackendMixin:
         # (used by tests that assert the bundle is ready before the call
         # returns). Default is async for real-time responsiveness.
         sync_mode = bool(getattr(self, "_upload_sync_mode", False))
+        wait_for_sync: tuple[threading.Event, str, str] | None = None
 
         with self._lock:
             existing_record = (self.upload_manifest.get("uploads") or {}).get(digest)
@@ -146,7 +161,14 @@ class _IOBackendMixin:
                     if target_scene_id:
                         self.set_active_scene(target_scene_id, broadcast=True)
                     return bundle
-            if isinstance(existing_record, dict):
+                completion = self._upload_completion_events.get(digest)
+                if completion is not None:
+                    wait_for_sync = (
+                        completion,
+                        existing_name,
+                        str(reservation.get("job_id") or f"upload_{digest[:12]}"),
+                    )
+            if wait_for_sync is None and isinstance(existing_record, dict):
                 existing_name = str(existing_record.get("name") or "")
                 # A request already being parsed in this process is simply an
                 # idempotent retry.  Return its placeholder and let the one
@@ -199,17 +221,40 @@ class _IOBackendMixin:
                         self.create_scene(structure=existing_name, label=existing_name)
                     return bundle
 
-            safe_name = stem
-            suffix = 2
-            while (
-                safe_name in self.structure_names
-                or safe_name in self._upload_reserved_names
-            ):
-                safe_name = f"{stem}_{suffix}"
-                suffix += 1
+            if wait_for_sync is None:
+                safe_name = stem
+                suffix = 2
+                while (
+                    safe_name in self.structure_names
+                    or safe_name in self._upload_reserved_names
+                ):
+                    safe_name = f"{stem}_{suffix}"
+                    suffix += 1
 
-            job_id = f"upload_{digest[:12]}"
-            self._upload_reserved_names.add(safe_name)
+                job_id = f"upload_{digest[:12]}"
+                self._upload_reserved_names.add(safe_name)
+                if sync_mode:
+                    self._upload_completion_events[digest] = threading.Event()
+                    self._upload_reservations[digest] = {
+                        "name": safe_name,
+                        "job_id": job_id,
+                    }
+                    self._upload_jobs[job_id] = {
+                        "job_id": job_id,
+                        "name": safe_name,
+                        "status": "pending",
+                    }
+
+        if wait_for_sync is not None:
+            completion, existing_name, existing_job_id = wait_for_sync
+            completion.wait()
+            with self._lock:
+                bundle = self.bundles.get(existing_name)
+                error = self._upload_jobs.get(existing_job_id, {}).get("error")
+                if bundle is None:
+                    raise RuntimeError(error or f"upload {existing_job_id} did not complete")
+                setattr(bundle, "_upload_existing", True)
+            return bundle
 
         if sync_mode:
             try:
@@ -217,7 +262,21 @@ class _IOBackendMixin:
             except Exception:
                 with self._lock:
                     self._upload_reserved_names.discard(safe_name)
+                    self._set_upload_status_locked(
+                        job_id,
+                        status="error",
+                        error="upload failed",
+                    )
                 raise
+            finally:
+                with self._lock:
+                    self._upload_reservations.pop(digest, None)
+                    completion = self._upload_completion_events.pop(digest, None)
+                    if completion is not None:
+                        completion.set()
+                    self._upload_reserved_names.discard(safe_name)
+                    if self._upload_jobs.get(job_id, {}).get("status") == "pending":
+                        self._set_upload_status_locked(job_id, status="ready")
 
         # Register before creating the scene: default_state looks up its bundle.
         # Also register before submitting work so a fast worker cannot be

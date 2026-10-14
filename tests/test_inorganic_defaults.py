@@ -9,7 +9,10 @@ from mat_viewer.loader import build_bundle_scene
 from mat_viewer.loader.bundle_builder import build_loaded_crystal_from_atoms
 from mat_viewer.structure.cif_parse import load_cif
 from mat_viewer.presets import default_preset_path
-from mat_viewer.structure.bonds import ionic_coordinate_source_pairs
+from mat_viewer.structure.bonds import (
+    inorganic_solid_profile,
+    ionic_coordinate_source_pairs,
+)
 
 
 def test_ionic_contact_filter_only_matches_binary_metal_halides():
@@ -19,6 +22,16 @@ def test_ionic_contact_filter_only_matches_binary_metal_halides():
 
     covalent = [{"elem": "C"}, {"elem": "Cl"}]
     assert ionic_coordinate_source_pairs(covalent, records) == set()
+
+
+def test_extended_inorganic_profile_covers_oxide_lattices_without_mof_false_positive():
+    rutile = [{"elem": "Ti"}, {"elem": "O"}]
+    perovskite = [{"elem": "Ca"}, {"elem": "Ti"}, {"elem": "O"}]
+    hkust = [{"elem": "Cu"}, {"elem": "C"}, {"elem": "O"}, {"elem": "N"}]
+
+    assert inorganic_solid_profile(rutile)["is_inorganic_solid"] is True
+    assert inorganic_solid_profile(perovskite)["is_inorganic_solid"] is True
+    assert inorganic_solid_profile(hkust)["is_inorganic_solid"] is False
 
 
 def test_nacl_keeps_mck_contact_but_hides_ionic_sticks():

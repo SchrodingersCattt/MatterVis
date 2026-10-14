@@ -122,6 +122,61 @@ def test_reupload_same_bytes_is_idempotent(backend: ViewerBackend) -> None:
     assert getattr(second, "_upload_existing", False) is True
 
 
+def test_concurrent_same_bytes_share_one_sync_parse(backend: ViewerBackend) -> None:
+    """Concurrent retries must not create a second name or parse the CIF twice."""
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        bundles = list(
+            pool.map(
+                lambda _: backend.add_uploaded_file_bytes(_VALID_CIF, "parallel.cif"),
+                range(4),
+            )
+        )
+
+    assert {bundle.name for bundle in bundles} == {"parallel"}
+    assert backend.structure_names.count("parallel") == 1
+    assert len({id(bundle) for bundle in bundles}) == 1
+
+
+def test_concurrent_same_bytes_share_one_async_job(backend: ViewerBackend, monkeypatch) -> None:
+    """The browser path also reserves one digest before the heavy parse."""
+    import threading
+
+    from mat_viewer.app import backend_io
+    from mat_viewer.loader import build_empty_bundle
+
+    backend._upload_sync_mode = False
+    started = threading.Event()
+    release = threading.Event()
+    calls = []
+
+    def fake_build(*, name, title, **_kwargs):
+        calls.append(name)
+        started.set()
+        assert release.wait(5), "test worker was not released"
+        bundle = build_empty_bundle(name=name, title=title)
+        bundle.source = "upload"
+        return bundle
+
+    monkeypatch.setattr(backend_io, "build_loaded_crystal", fake_build)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first, second = list(
+            pool.map(
+                lambda _: backend.add_uploaded_file_bytes(_VALID_CIF, "async.cif"),
+                range(2),
+            )
+        )
+    assert started.wait(5)
+    assert first is second
+    assert first.name == "async"
+    assert calls == ["async"]
+    release.set()
+    for _ in range(100):
+        if backend.upload_status(first._upload_job_id)["status"] != "pending":
+            break
+        time.sleep(0.01)
+    assert backend.upload_status(first._upload_job_id)["status"] == "ready"
+
+
 def test_reupload_existing_creates_scene_when_none_points_at_structure(
     backend: ViewerBackend,
 ) -> None:

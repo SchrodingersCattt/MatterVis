@@ -49,6 +49,40 @@ _IONIC_CATIONS = frozenset(
 )
 
 
+def inorganic_solid_profile(atoms) -> dict[str, object]:
+    """Classify the compact inorganic-solid defaults from source atoms.
+
+    A periodic structure containing a metal and an anion, without carbon, is
+    an inorganic lattice even when MolCrysKit's graph is covalent (rutile and
+    perovskites are common examples).  Keep this deliberately conservative so
+    metal-organic frameworks and organometallic molecules retain their
+    molecular defaults.  The result is metadata only; bond perception remains
+    MolCrysKit's responsibility.
+    """
+    elements = sorted(
+        {
+            str(atom.get("elem") or "").strip()
+            for atom in atoms or ()
+            if str(atom.get("elem") or "").strip()
+        }
+    )
+    non_hydrogen = [element for element in elements if element != "H"]
+    metals = sorted(
+        element for element in non_hydrogen if element not in {"H", "C"} and _is_metal_element(element)
+    )
+    anions = sorted(
+        element
+        for element in non_hydrogen
+        if element not in metals and element != "C"
+    )
+    is_inorganic = bool(metals and anions and "C" not in non_hydrogen)
+    return {
+        "is_inorganic_solid": is_inorganic,
+        "inorganic_cation_elements": metals,
+        "inorganic_anion_elements": anions,
+    }
+
+
 def _is_metal_element(symbol: object) -> bool:
     """Return MolCrysKit's metal classification without importing it eagerly."""
     try:

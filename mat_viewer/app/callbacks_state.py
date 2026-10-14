@@ -278,7 +278,7 @@ def register_state_callbacks(app, backend):
         * **Explicit events** (``scene-event-store``: CRUD, rename, close;
           ``native-upload-sync``: a fresh CIF upload) -- the server is
           authoritative for which tab should be active right after the
-          event. Rebuild ``children``, ``close-row`` AND write
+          event. Rebuild ``children`` and write
           ``scene-tabs.value`` to the new ``backend.active_scene_id()`` so
           the UI lands on the just-created / -duplicated scene.
 
@@ -298,7 +298,7 @@ def register_state_callbacks(app, backend):
         active_id = backend.active_scene_id() or options[0]["id"]
         # Explicit event paths (CRUD / upload) own the active id and are the
         # only paths allowed to rebuild the tab subtree.
-        return backend.scene_tabs(), backend.scene_close_buttons(), active_id
+        return backend.scene_tabs(), [], active_id
 
     @app.callback(
         Output("status-banner", "children", allow_duplicate=True),

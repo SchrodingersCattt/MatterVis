@@ -7,6 +7,7 @@ from .shared import ApiError, TopologyUnavailable
 from .backend_analysis import _AnalysisBackendMixin
 from .backend_camera import _CameraBackendMixin
 from .backend_core import _CoreBackendMixin
+from .backend_state import _StateBackendMixin
 from .backend_reducer import _ReducerBackendMixin
 from .backend_scenes import _SceneBackendMixin
 from .backend_io import _IOBackendMixin
@@ -23,6 +24,7 @@ _PERSIST_THREAD_JOIN_TIMEOUT_SECONDS = 2.0
 class ViewerBackend(
     _VectorBackendMixin,
     _SceneBackendMixin,
+    _StateBackendMixin,
     _CoreBackendMixin,
     _ReducerBackendMixin,
     _OperationsBackendMixin,
