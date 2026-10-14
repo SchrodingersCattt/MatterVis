@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from mat_viewer.render.viewport import _scene_ranges
+from mat_viewer.presets import DEFAULT_STYLE
+from mat_viewer.render.viewport import _plotly_camera_from_scene, _scene_ranges
 
 
 def _scene(camera: dict | None = None) -> dict:
@@ -93,4 +94,57 @@ def test_oblique_layered_structure_gets_full_perspective_margin() -> None:
     )
     for atom in scene["draw_atoms"]:
         assert all(axis_range[0] <= atom["cart"][axis] <= axis_range[1] for axis, axis_range in enumerate(ranges))
+
+
+def test_unit_cell_default_uses_scene_camera_and_frames_every_cell_corner() -> None:
+    """A unit-cell default must not reuse a formula-unit camera or crop the cell."""
+    matrix = np.array(
+        [[6.0, 0.0, 0.0], [1.4, 5.2, 0.0], [0.7, 0.8, 4.8]],
+        dtype=float,
+    )
+    scene = {
+        "name": "brucite-like",
+        "M": matrix,
+        "display_mode": "unit_cell",
+        "draw_atoms": [
+            {"cart": [0.0, 0.0, 0.0], "atom_radius": 0.35, "is_minor": False},
+            {"cart": [3.0, 2.5, 2.4], "atom_radius": 0.35, "is_minor": False},
+        ],
+        "camera": {
+            "position": [12.0, 10.0, 9.0],
+            "focal_point": [3.6, 3.0, 2.4],
+            "up": [0.0, 0.0, 1.0],
+        },
+    }
+    style = {
+        **DEFAULT_STYLE,
+        "display_mode": "unit_cell",
+        "show_unit_cell": True,
+        # A lattice default leaves the state camera unset so the unit-cell
+        # scene owns the initial framing.
+        "camera": None,
+    }
+
+    ranges = _scene_ranges(scene, style)
+    corners = np.asarray(
+        [
+            np.zeros(3),
+            matrix[0],
+            matrix[1],
+            matrix[2],
+            matrix[0] + matrix[1],
+            matrix[0] + matrix[2],
+            matrix[1] + matrix[2],
+            matrix[0] + matrix[1] + matrix[2],
+        ]
+    )
+    for axis, axis_range in enumerate(ranges):
+        assert float(corners[:, axis].min()) >= axis_range[0]
+        assert float(corners[:, axis].max()) <= axis_range[1]
+
+    scene_camera = _plotly_camera_from_scene(scene, style)
+    explicit_camera = _plotly_camera_from_scene(
+        scene, {**style, "camera": scene["camera"]}
+    )
+    assert scene_camera == explicit_camera
 

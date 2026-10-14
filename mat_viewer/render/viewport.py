@@ -138,7 +138,14 @@ def _normalize(vec: Iterable[float], fallback: Iterable[float]) -> np.ndarray:
 
 
 def _plotly_camera_from_scene(scene: dict, style: dict) -> dict:
+    # A default state may intentionally leave ``style['camera']`` unset so
+    # the scene-specific camera is regenerated after a display-scope change.
+    # Use that scene camera for the initial perspective fit as well; otherwise
+    # a unit-cell default skips the orientation-aware margin and can crop a
+    # valid cell corner before the user ever interacts with the view.
     explicit = style.get("camera")
+    if not isinstance(explicit, dict):
+        explicit = scene.get("camera")
     if isinstance(explicit, dict):
 
         def _xyz_value(raw, fallback: tuple[float, float, float]) -> dict[str, float]:
@@ -734,6 +741,8 @@ def _auto_camera_fit_ranges(
     if not isinstance(style, dict):
         return ranges
     explicit = style.get("camera")
+    if not isinstance(explicit, dict):
+        explicit = scene.get("camera")
     if not isinstance(explicit, dict) or not {
         "position",
         "focal_point",

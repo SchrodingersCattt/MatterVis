@@ -1,14 +1,19 @@
 from __future__ import annotations
-# ruff: noqa: F401,F403,F405
 
+# ruff: noqa: F401
 import atexit
 from collections import OrderedDict
 
+from ..cache_keys import figure_state_cache_key
+from ..config import current_config
+from ..structure.bonds import inorganic_solid_profile
+from ..topology.analysis import _MAX_REGISTERED_CN
 from .camera_helpers import *
 from .normalizers import *
 from .reducer import LEGACY_STYLE_STATE_FIELDS
 from .render_worker import AsyncRenderWorker
 from .rightclick import _normalize_polyhedron_specs
+from .selectors import show_hydrogen, viewport_signature
 from .shared import *
 from .style_helpers import *
 from .view_updates import (
@@ -20,10 +25,6 @@ from .view_updates import (
     state_versions,
     update_applies,
 )
-from .selectors import show_hydrogen, viewport_signature
-from ..cache_keys import figure_state_cache_key
-from ..config import current_config
-from ..topology.analysis import _MAX_REGISTERED_CN
 
 # Maximum number of distinct figure cache entries.  A bounded LRU
 # (least-recently-used) eviction policy kicks in when the cache
@@ -182,8 +183,28 @@ class _CoreBackendMixin:
         # perovskites) are lattice views rather than isolated molecules.  The
         # chemistry profile is conservative about carbon-containing frameworks
         # so MOFs and molecular salts keep their existing defaults.
+        # Scene metadata is normally stamped by the loader. Recompute the
+        # conservative inorganic profile from canonical raw atoms when a
+        # legacy/cache scene predates those fields; otherwise such structures
+        # silently fall back to the molecular formula-unit presentation.
+        raw_profile = (
+            inorganic_solid_profile(bundle.raw_atoms)
+            if "is_inorganic_solid" not in scene
+            else {}
+        )
         ionic = bool(scene.get("is_ionic_solid", False))
-        inorganic = bool(scene.get("is_inorganic_solid", False))
+        inorganic = bool(
+            scene.get("is_inorganic_solid", False)
+            or raw_profile.get("is_inorganic_solid", False)
+        )
+        inorganic_cations = list(
+            scene.get("inorganic_cation_elements")
+            or raw_profile.get("inorganic_cation_elements", ())
+        )
+        inorganic_anions = list(
+            scene.get("inorganic_anion_elements")
+            or raw_profile.get("inorganic_anion_elements", ())
+        )
         lattice_default = ionic or inorganic
         default_display_mode = style.get(
             "display_mode", scene.get("display_mode", "formula_unit")
@@ -211,16 +232,25 @@ class _CoreBackendMixin:
             == float(DEFAULT_STYLE["bond_radius"])
         ):
             style["bond_radius"] = INORGANIC_DEFAULT_BOND_RADIUS
+        # ``bundle.scene`` is built once at load time in formula-unit mode so
+        # the canonical cache always has a compact molecular view available.
+        # Do not carry that camera into a lattice default: it is fitted to the
+        # formula-unit bounds and can make a unit-cell scene look like a
+        # clipped vertical rod (especially for layered hydroxides such as
+        # brucite). Leaving the camera unset lets ``scene_for_state`` supply
+        # the camera generated from the requested unit-cell scene; an
+        # explicit user camera is still persisted by the normal state path.
+        default_camera = None if lattice_default else scene.get("camera")
         ionic_specs = []
         if lattice_default:
             cations = list(
                 scene.get("ionic_cation_elements")
-                or scene.get("inorganic_cation_elements")
+                or inorganic_cations
                 or []
             )
             anions = list(
                 scene.get("ionic_anion_elements")
-                or scene.get("inorganic_anion_elements")
+                or inorganic_anions
                 or []
             )
             for index, cation in enumerate(cations):
@@ -304,7 +334,7 @@ class _CoreBackendMixin:
             "bfdh_morphology_color": "#4f7cff",
             "selection": {"atom_labels": [], "active_label": None, "order": []},
             "fast_rendering": bool(style.get("fast_rendering", False)),
-            "camera": scene.get("camera"),
+            "camera": default_camera,
             "geometry_version": 0,
             "display_version": 0,
             "camera_version": 0,
