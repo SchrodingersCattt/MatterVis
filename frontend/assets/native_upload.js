@@ -103,8 +103,6 @@
    * Hard timeout at 30 s so the status never sticks forever even if
    * the server changes shape.
    */
-  let activeSceneWait = null;
-
   function delay(milliseconds) {
     return new Promise(function (resolve) {
       window.setTimeout(resolve, milliseconds);
@@ -156,45 +154,35 @@
     throw new Error("Timed out while processing " + file.name);
   }
 
-  function waitForSceneAndSwitch(uploadedNames) {
+  async function waitForSceneAndSwitch(uploadedNames) {
     if (!uploadedNames || !uploadedNames.length) return;
-    if (activeSceneWait && typeof activeSceneWait.close === "function") {
-      activeSceneWait.close();
-    }
+    // Upload completion is already exposed by the HTTP job endpoint.  Do not
+    // open a second /api/v2/ws connection here: transient per-upload sockets
+    // race the figure subscriber during repeated uploads and can leave the
+    // browser reporting an Invalid frame header while the old scene remains
+    // selected.  Poll the scene list, then perform one explicit Dash switch.
     const wanted = new Set(uploadedNames);
     const deadline = Date.now() + 30000;
-    if (!window.WebSocket) {
-      triggerDashSync({ status: "success", names: uploadedNames });
-      setStatus("Loaded: " + uploadedNames.join(", "), "success");
-      return;
-    }
-    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(proto + "//" + window.location.host + "/api/v2/ws");
-    activeSceneWait = ws;
-    const timeout = window.setTimeout(function () {
-      if (activeSceneWait === ws) activeSceneWait = null;
-      try { ws.close(); } catch (_err) {}
-      setStatus("Uploaded: " + uploadedNames.join(", "), "success");
-      triggerDashSync({ status: "success", names: uploadedNames });
-    }, Math.max(1000, deadline - Date.now()));
-    ws.addEventListener("message", function (event) {
-      let payload = null;
+    while (Date.now() < deadline) {
       try {
-        payload = JSON.parse(event.data || "{}");
+        const response = await fetch("/api/v2/scenes", { cache: "no-store" });
+        const payload = response.ok ? await response.json() : null;
+        const scenes = (payload && payload.scenes) || [];
+        const present = new Set(
+          scenes.map(function (scene) { return scene && scene.structure_name; })
+        );
+        if (uploadedNames.every(function (name) { return present.has(name); })) {
+          await forceActiveSceneFromServer({ status: "success", names: uploadedNames });
+          setStatus("Loaded: " + uploadedNames.join(", "), "success");
+          return;
+        }
       } catch (_err) {
-        return;
+        // The next poll retries while the Dash state and scene store settle.
       }
-      const state = payload && payload.state;
-      if (state && wanted.has(state.structure)) {
-        window.clearTimeout(timeout);
-        if (activeSceneWait === ws) activeSceneWait = null;
-        try { ws.close(); } catch (_err) {}
-        const payload = { status: "success", names: uploadedNames };
-        triggerDashSync(payload);
-        forceActiveSceneFromServer(payload);
-        setStatus("Loaded: " + uploadedNames.join(", "), "success");
-      }
-    });
+      await delay(250);
+    }
+    setStatus("Uploaded: " + uploadedNames.join(", "), "success");
+    triggerDashSync({ status: "success", names: uploadedNames });
   }
 
   function uploadOne(file, index, total) {
@@ -267,11 +255,10 @@
       }
       setStatus("Uploaded CIF(s): " + names.join(", ") + ". Updating scene...", "success");
       const payload = { status: "success", names: names };
-      triggerDashSync(payload);
-      forceActiveSceneFromServer(payload);
-      // Belt-and-braces: actively wait for the scene tab to appear
-      // and switch to it. Without this the status text never clears.
-      waitForSceneAndSwitch(names);
+      // Wait for the scene store to expose every completed upload, then
+      // switch exactly once. Awaiting this sequence prevents a stale tab
+      // value from winning a Dash callback race with the upload completion.
+      await waitForSceneAndSwitch(names);
     } catch (err) {
       setStatus("Upload failed: " + (err && err.message ? err.message : String(err)), "error");
       triggerDashSync({ status: "error", names: names });

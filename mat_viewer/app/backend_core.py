@@ -4,7 +4,6 @@ from __future__ import annotations
 import atexit
 from collections import OrderedDict
 
-from ..config import current_config
 from .camera_helpers import *
 from .normalizers import *
 from .reducer import LEGACY_STYLE_STATE_FIELDS
@@ -24,6 +23,7 @@ from .view_updates import (
 from .selectors import show_hydrogen, viewport_signature
 from ..cache_keys import figure_state_cache_key
 from ..config import current_config
+from ..topology.analysis import _MAX_REGISTERED_CN
 
 # Maximum number of distinct figure cache entries.  A bounded LRU
 # (least-recently-used) eviction policy kicks in when the cache
@@ -235,6 +235,12 @@ class _CoreBackendMixin:
                         "ligand_species": ligand,
                         "level": "atom",
                         "enabled": True,
+                        # Keep the default shell inside the registered
+                        # polyhedron catalogue. Small periodic cells can
+                        # expose hundreds of image neighbours; allowing the
+                        # enclosure heuristic to consume all of them makes
+                        # shape classification combinatorial.
+                        "fallback_max": _MAX_REGISTERED_CN,
                     }
                 )
         return {

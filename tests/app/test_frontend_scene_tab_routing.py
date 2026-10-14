@@ -57,6 +57,19 @@ def test_deferred_ws_figure_keeps_and_revalidates_render_metadata():
     assert "figurePushIsCurrent(p)" in flush_body
 
 
+def test_upload_frame_is_queued_until_new_scene_tab_is_selected():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+
+    assert "pendingFigureByScene" in source
+    assert "flushQueuedSceneFigure" in source
+    rebind_idx = source.index("function rebindAll")
+    rebind_body = source[rebind_idx:source.index("new MutationObserver", rebind_idx)]
+    assert "flushQueuedSceneFigure();" in rebind_body
+    ws_idx = source.index("if (!isCurrentFigurePush(p))")
+    ws_body = source[ws_idx:source.index("if (interactionActive)", ws_idx)]
+    assert "pendingFigureByScene[String(p.scene_id)] = p;" in ws_body
+
+
 def test_plotly_apply_gate_rejects_stale_dash_figures_and_patches():
     source = MATTERVIS_JS.read_text(encoding="utf-8")
 

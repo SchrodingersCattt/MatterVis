@@ -22,11 +22,16 @@ class _SceneBackendMixin:
             )
             label = html.Span(
                 [
-                    html.Span(scene["label"], className="scene-tab-text"),
+                    html.Span(
+                        scene["label"],
+                        className="scene-tab-text",
+                        title=str(scene["label"]),
+                    ),
                     close_button,
                 ],
                 id=f"scene-tab-label-{scene['id']}",
                 className="scene-tab-label",
+                title=str(scene["label"]),
             )
             tabs.append(
                 dcc.Tab(

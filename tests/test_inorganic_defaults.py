@@ -9,6 +9,7 @@ from mat_viewer.loader import build_bundle_scene
 from mat_viewer.loader.bundle_builder import build_loaded_crystal_from_atoms
 from mat_viewer.structure.cif_parse import load_cif
 from mat_viewer.presets import default_preset_path
+from mat_viewer.topology.analysis import _MAX_REGISTERED_CN
 from mat_viewer.structure.bonds import (
     inorganic_solid_profile,
     ionic_coordinate_source_pairs,
@@ -88,3 +89,25 @@ def test_binary_ionic_default_state_uses_cell_and_atom_coordination(tmp_path: Pa
     assert state["polyhedron_specs"][0]["level"] == "atom"
     assert state["polyhedron_specs"][0]["center_species"] == "Na"
     assert state["polyhedron_specs"][0]["ligand_species"] == "Cl"
+    assert state["polyhedron_specs"][0]["fallback_max"] == 12
+
+
+def test_legacy_ionic_spec_gets_safe_coordination_cap(tmp_path: Path):
+    backend = ViewerBackend(
+        preset_path=default_preset_path(), names=[], root_dir=str(tmp_path)
+    )
+    state = backend.get_state()
+    state["polyhedron_specs"] = [
+        {
+            "id": "ionic-coordination",
+            "level": "atom",
+            "center_species": "Mg",
+            "ligand_species": "O",
+            "fallback_max": None,
+        }
+    ]
+    try:
+        effective = backend._effective_polyhedron_specs(state)
+    finally:
+        backend.close()
+    assert effective[0]["fallback_max"] == _MAX_REGISTERED_CN

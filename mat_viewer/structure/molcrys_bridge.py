@@ -17,8 +17,8 @@ from __future__ import annotations
 import copy
 import re
 
-import numpy as np
 import molcrys_kit
+import numpy as np
 from molcrys_kit.utils.geometry import cart_to_frac, frac_to_cart
 
 from ..style.disorder import atom_is_minor
@@ -32,6 +32,11 @@ from .chemistry_records import (
     EntityChemistryRecord,
     LineNotationRecord,
     NamingRecord,
+)
+from .ring_geometry import (
+    RING_MCB_EDGE_LIMIT,
+    RING_MCB_NODE_LIMIT,
+    bounded_ring_geometries as _bounded_ring_geometries,
 )
 
 
@@ -786,7 +791,21 @@ def analyze_crystal(crystal, *, include_chemistry: bool = False) -> CrystalAnaly
     ring_records: list[dict] = []
     local_geometries = mk["LocalGeometryCache"](crystal)
     for molecule_index, global_indices in enumerate(mol_indices):
-        for ring_index, ring in enumerate(local_geometries[molecule_index].rings()):
+        molecule = crystal.molecules[molecule_index]
+        graph = getattr(molecule, "graph", None)
+        use_bounded_rings = bool(
+            graph is not None
+            and (
+                graph.number_of_nodes() > RING_MCB_NODE_LIMIT
+                or graph.number_of_edges() > RING_MCB_EDGE_LIMIT
+            )
+        )
+        rings = (
+            _bounded_ring_geometries(molecule)
+            if use_bounded_rings
+            else local_geometries[molecule_index].rings()
+        )
+        for ring_index, ring in enumerate(rings):
             cycle_local = tuple(int(index) for index in ring.cycle_atom_indices)
             sorted_local = tuple(int(index) for index in ring.atom_indices)
             if not cycle_local:

@@ -30,6 +30,7 @@
   let interactionActive = false, settleTimer = null;
   let interactionSettled = Promise.resolve(), endInteraction = null;
   let pendingFigurePush = null;
+  const pendingFigureByScene = Object.create(null);
   let sceneTabIntentId = null, sceneTabIntentAt = 0;
   let renderServerEpoch = null;
   const expectedRenderRevisionByScene = Object.create(null);
@@ -183,6 +184,14 @@
     return window.Plotly.react(gd, data||[], layout||{}).catch(function(error) {
       console.warn("MatterVis frame delivery failed", error);
     });
+  }
+  function flushQueuedSceneFigure() {
+    const sceneId = currentSceneId();
+    if (!sceneId) return;
+    const queued = pendingFigureByScene[String(sceneId)];
+    if (!queued || !figurePushIsCurrent(queued)) return;
+    delete pendingFigureByScene[String(sceneId)];
+    applyFigurePush(queued.figure.data||[], queued.figure.layout||{});
   }
   function flushPendingFigurePush() {
     if (endInteraction) { endInteraction(); endInteraction=null; }
@@ -382,7 +391,16 @@
          return;
        }
       if (!p.figure||isPendingFigure(p.figure)||!has3DScene(p.figure)) return;
-      if (!isCurrentFigurePush(p)) return;
+      if (!isCurrentFigurePush(p)) {
+        // An upload can publish its frame before Dash applies the new
+        // scene-tabs.value. Keep the newest frame by scene and replay it
+        // once the selected tab reflects the server-selected scene.
+        if (p.scene_id && String(p.scene_id) !== String(currentSceneId() || "")) {
+          p.isCurrent=function(){return isCurrentFigurePush(p);};
+          pendingFigureByScene[String(p.scene_id)] = p;
+        }
+        return;
+      }
       if (interactionActive) { p.isCurrent=function(){return isCurrentFigurePush(p);}; pendingFigurePush=p; return; }
       if (sceneTabIntentId && p.scene_id && String(p.scene_id) === sceneTabIntentId) sceneTabIntentAt = 0;
        if (window.MatterVisViewUpdates && typeof window.MatterVisViewUpdates.submit === "function") {
@@ -400,6 +418,7 @@
     bindBoxSelect();
     bindDisorderHover();
     bindSceneTabIntent();
+    flushQueuedSceneFigure();
   }
   new MutationObserver(rebindAll).observe(document.documentElement, {childList:true, subtree:true});
 
