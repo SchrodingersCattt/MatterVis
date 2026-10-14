@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
+import subprocess
+
+import pytest
 
 from mat_viewer.app import create_app
 
@@ -55,6 +59,60 @@ def test_programmatic_upload_selection_clears_stale_tab_intent():
     assert "sceneTabIntentId = null" in selected_body
     assert "return domSceneId" in selected_body
     assert "window.MatterVisSelectScene" in source
+
+
+def test_nested_tab_label_and_programmatic_upload_use_real_scene_id():
+    """A click on the label must route frames by the enclosing scene id."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    program = r"""
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const stop=source.indexOf('  // ── Right-click menu');
+const prefix=source.slice(0,stop);
+let selected={id:'scene-tab-old'};
+const tabs={querySelector:()=>selected,dataset:{}};
+const sandbox={console,Date,JSON,Number,String,Object,Array,Promise,setTimeout:()=>{},clearTimeout:()=>{},
+  requestAnimationFrame:()=>{},MutationObserver:function(){this.observe=()=>{};},
+  window:{Plotly:null,WebSocket:null,location:{protocol:'http:',host:'localhost'},
+    dash_clientside:{set_props:()=>true}},
+  document:{getElementById:id=>id==='scene-tabs'?tabs:null,querySelectorAll:()=>[],
+    addEventListener:()=>{}}};
+vm.createContext(sandbox);
+vm.runInContext(prefix+'window.testScene={selectedSceneId,noteSceneTabIntent,sceneIdFromTabNode};})();',sandbox);
+const api=sandbox.window.testScene;
+api.noteSceneTabIntent({closest:()=>({id:'scene-tab-label-new'})});
+assert.equal(api.selectedSceneId(),'new');
+api.selectedSceneId();
+sandbox.window.MatterVisSelectScene('uploaded');
+assert.equal(api.selectedSceneId(),'uploaded');
+"""
+    result = subprocess.run(
+        [node, "-e", program, str(MATTERVIS_JS)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_failed_figure_socket_switches_to_one_http_fallback():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    ws_idx = source.index("(function connectWS()")
+    ws_body = source[ws_idx:source.index("  function ensureSceneTabTooltips", ws_idx)]
+    assert "__mattervisFigureFallbackActive" in ws_body
+    assert "__mattervisFigureWsDisabled" in ws_body
+    assert "Invalid frame header" in ws_body
+    assert "setTimeout(connectWS,5000)" in ws_body
+
+
+def test_tab_switch_clears_global_upload_status():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    start = source.index("function bindSceneTabIntent")
+    body = source[start:source.index("// ── WS figure fast lane", start)]
+    assert 'document.getElementById("upload-status")' in body
+    assert 'status.textContent = ""' in body
 
 
 def test_scene_tab_tooltip_is_applied_to_actual_tab_node():

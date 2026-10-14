@@ -32,6 +32,7 @@
   let pendingFigurePush = null;
   const pendingFigureByScene = Object.create(null);
   let sceneTabIntentId = null, sceneTabIntentAt = 0;
+  let sceneTabIntentSource = null;
   let renderServerEpoch = null;
   const expectedRenderRevisionByScene = Object.create(null);
   function figurePushIsCurrent(p) {
@@ -41,6 +42,12 @@
     if (!node || !node.id || node.id.indexOf("scene-tab-") !== 0) return null;
     if (node.id.indexOf("scene-tab-close-") === 0) return null;
     if (node.id === "scene-tabs" || node.id === "scene-tab-close-row") return null;
+    // Labels are nested inside the dcc.Tab and carry their own stable id.
+    // Treating ``scene-tab-label-*`` as a scene named ``label-*`` made a
+    // normal click queue the correct frame under the wrong optimistic id.
+    if (node.id.indexOf("scene-tab-label-") === 0) {
+      return node.id.slice("scene-tab-label-".length);
+    }
     return node.id.slice("scene-tab-".length);
   }
   function noteSceneTabIntent(target) {
@@ -49,6 +56,7 @@
     if (!sceneId) return;
     sceneTabIntentId = sceneId;
     sceneTabIntentAt = Date.now();
+    sceneTabIntentSource = "pointer";
   }
   function selectedSceneId() {
     const root = document.getElementById("scene-tabs");
@@ -68,7 +76,16 @@
     // upload calls set_props), the old intent must be discarded immediately;
     // keeping it for ten seconds routes the new figure to the old tab.
     if (domSceneId) {
+      if (sceneTabIntentSource === "programmatic" &&
+          String(domSceneId) !== String(sceneTabIntentId)) {
+        // Upload completion is an authoritative server selection.  Keep it
+        // ahead of the old DOM selection until Dash paints the new tab;
+        // otherwise a frame arriving during that gap is routed to the old
+        // scene and the queued frame is never flushed.
+        return sceneTabIntentId;
+      }
       if (intentLive && String(domSceneId) === String(sceneTabIntentId)) {
+        sceneTabIntentSource = null;
         return sceneTabIntentId;
       }
       // Preserve a just-clicked tab's optimistic intent for the short window
@@ -78,15 +95,17 @@
       if (sceneTabIntentId && String(domSceneId) !== String(sceneTabIntentId)) {
         sceneTabIntentId = null;
         sceneTabIntentAt = 0;
+        sceneTabIntentSource = null;
       }
       return domSceneId;
     }
-    return intentLive ? sceneTabIntentId : null;
+    return intentLive || sceneTabIntentSource === "programmatic" ? sceneTabIntentId : null;
   }
   window.MatterVisSelectScene = function (sceneId) {
     if (sceneId === null || sceneId === undefined || sceneId === "") return;
     sceneTabIntentId = String(sceneId);
     sceneTabIntentAt = Date.now();
+    sceneTabIntentSource = "programmatic";
   };
   function fastViewMetadata() {
     const node = document.getElementById("fast-view-metadata");
@@ -373,12 +392,85 @@
     root.dataset.mvSceneIntentBound = "1";
     root.addEventListener("pointerdown", function (event) { noteSceneTabIntent(event.target); }, true);
     root.addEventListener("mousedown", function (event) { noteSceneTabIntent(event.target); }, true);
-    root.addEventListener("click", function (event) { noteSceneTabIntent(event.target); }, true);
+    root.addEventListener("click", function (event) {
+      noteSceneTabIntent(event.target);
+      // Upload progress is global UI chrome. Once the user deliberately
+      // changes scenes, the previous upload result must not look like a
+      // status for the newly selected structure.
+      const status = document.getElementById("upload-status");
+      if (status && /^(Loaded|Uploaded):/.test((status.textContent || "").trim())) {
+        status.textContent = "";
+        status.className = "";
+      }
+    }, true);
   }
 
   // ── WS figure fast lane (ws_figure.js) ──────────────────────────
   (function connectWS() {
-    if (window.MATTERVIS_WS_FIGURE === false || !window.WebSocket) return;
+    function startHttpFallback() {
+      if (window.__mattervisFigureFallbackActive || !window.fetch) return;
+      window.__mattervisFigureFallbackActive = true;
+      function poll() {
+        if (!window.__mattervisFigureFallbackActive) return;
+        var since = Number(window.__mattervisFigureLastSeq || 0);
+        window.fetch("/api/v2/view-updates?since=" + encodeURIComponent(since), {credentials:"same-origin"})
+          .then(function(response){ return response.ok ? response.json() : null; })
+          .then(function(body){
+            (body && body.updates || []).forEach(handleFigurePayload);
+          })
+          .catch(function(){})
+          .then(function(){
+            if (window.__mattervisFigureFallbackActive) window.__mattervisFigureFallbackTimer = setTimeout(poll, 1000);
+          });
+      }
+      poll();
+    }
+    function stopHttpFallback() {
+      window.__mattervisFigureFallbackActive = false;
+      if (window.__mattervisFigureFallbackTimer) {
+        clearTimeout(window.__mattervisFigureFallbackTimer);
+        window.__mattervisFigureFallbackTimer = null;
+      }
+    }
+    function handleFigurePayload(p) {
+      if (!p || typeof p !== "object") return;
+      var seq = Number(p.figure_seq || p.seq || 0);
+      if (seq && seq <= Number(window.__mattervisFigureLastSeq || 0)) return;
+      if (seq) window.__mattervisFigureLastSeq = seq;
+      if (p.state&&typeof p.state==="object") rememberExpectedRender(p.state, true);
+      if (p.scene_id&&p.render_revision!==undefined) rememberExpectedRender(p, true);
+      if (p.type === "view_update" || p.type === "render_error") {
+        if (window.MatterVisViewUpdates && typeof window.MatterVisViewUpdates.submit === "function") {
+          window.MatterVisViewUpdates.submit(p);
+        } else {
+          (window.__mv_pending_view_updates = window.__mv_pending_view_updates || []).push(p);
+        }
+        return;
+      }
+      if (!p.figure||isPendingFigure(p.figure)||!has3DScene(p.figure)) return;
+      if (!isCurrentFigurePush(p)) {
+        // An upload can publish its frame before Dash applies the new
+        // scene-tabs.value. Keep the newest frame by scene and replay it
+        // once the selected tab reflects the server-selected scene.
+        if (p.scene_id && String(p.scene_id) !== String(currentSceneId() || "")) {
+          p.isCurrent=function(){return isCurrentFigurePush(p);};
+          pendingFigureByScene[String(p.scene_id)] = p;
+        }
+        return;
+      }
+      if (interactionActive) { p.isCurrent=function(){return isCurrentFigurePush(p);}; pendingFigurePush=p; return; }
+      if (sceneTabIntentId && p.scene_id && String(p.scene_id) === sceneTabIntentId) sceneTabIntentAt = 0;
+      if (window.MatterVisViewUpdates && typeof window.MatterVisViewUpdates.submit === "function") {
+        window.MatterVisViewUpdates.submit(p);
+      } else {
+        applyFigurePush(p.figure.data||[], p.figure.layout||{});
+      }
+    }
+    function canUseWebSocket() {
+      return window.MATTERVIS_WS_FIGURE !== false && !!window.WebSocket &&
+        !window.__mattervisFigureWsDisabled;
+    }
+    if (!canUseWebSocket()) { startHttpFallback(); return; }
     if (window.__mattervisFigureSocket &&
         (window.__mattervisFigureSocket.readyState === 0 ||
          window.__mattervisFigureSocket.readyState === 1)) return;
@@ -406,43 +498,47 @@
       return !!(meta && typeof meta==="object" && meta.mattervis_pending);
     }
     var proto = window.location.protocol==="https:"?"wss:":"ws:";
-    var ws = new WebSocket(proto+"//"+window.location.host+"/api/v2/ws");
+    var opened = false;
+    var ws;
+    try {
+      ws = new WebSocket(proto+"//"+window.location.host+"/api/v2/ws");
+    } catch (_) {
+      window.__mattervisFigureWsDisabled = true;
+      startHttpFallback();
+      return;
+    }
     window.__mattervisFigureSocket = ws;
-    ws.addEventListener("open",function(){ws.send(JSON.stringify({type:"subscribe_figure",enabled:true}));});
+    ws.addEventListener("open",function(){
+      opened = true;
+      stopHttpFallback();
+      try { ws.send(JSON.stringify({type:"subscribe_figure",enabled:true})); }
+      catch (_) { window.__mattervisFigureWsDisabled = true; startHttpFallback(); }
+    });
     ws.addEventListener("message",function(e){
       var p; try { p=JSON.parse(e.data||"{}"); } catch(_){return;}
-      if (p.state&&typeof p.state==="object") rememberExpectedRender(p.state, true);
-      if (p.scene_id&&p.render_revision!==undefined) rememberExpectedRender(p, true);
-       if (p.type === "view_update" || p.type === "render_error") {
-         if (window.MatterVisViewUpdates && typeof window.MatterVisViewUpdates.submit === "function") {
-           window.MatterVisViewUpdates.submit(p);
-         } else {
-           (window.__mv_pending_view_updates = window.__mv_pending_view_updates || []).push(p);
-         }
-         return;
-       }
-      if (!p.figure||isPendingFigure(p.figure)||!has3DScene(p.figure)) return;
-      if (!isCurrentFigurePush(p)) {
-        // An upload can publish its frame before Dash applies the new
-        // scene-tabs.value. Keep the newest frame by scene and replay it
-        // once the selected tab reflects the server-selected scene.
-        if (p.scene_id && String(p.scene_id) !== String(currentSceneId() || "")) {
-          p.isCurrent=function(){return isCurrentFigurePush(p);};
-          pendingFigureByScene[String(p.scene_id)] = p;
-        }
-        return;
+      handleFigurePayload(p);
+    });
+    ws.addEventListener("error",function(){
+      if (!opened) {
+        // A failed upgrade is commonly surfaced as "Invalid frame header".
+        // Stop reconnecting that broken endpoint and keep the HTTP journal
+        // delivering frames instead of flooding the browser console.
+        window.__mattervisFigureWsDisabled = true;
+        startHttpFallback();
       }
-      if (interactionActive) { p.isCurrent=function(){return isCurrentFigurePush(p);}; pendingFigurePush=p; return; }
-      if (sceneTabIntentId && p.scene_id && String(p.scene_id) === sceneTabIntentId) sceneTabIntentAt = 0;
-       if (window.MatterVisViewUpdates && typeof window.MatterVisViewUpdates.submit === "function") {
-         window.MatterVisViewUpdates.submit(p);
-       } else {
-         applyFigurePush(p.figure.data||[], p.figure.layout||{});
-       }
     });
     ws.addEventListener("close",function(){
       if (window.__mattervisFigureSocket === ws) window.__mattervisFigureSocket = null;
-      setTimeout(connectWS,1500);
+      if (!opened) {
+        window.__mattervisFigureWsDisabled = true;
+        startHttpFallback();
+        return;
+      }
+      startHttpFallback();
+      // A cleanly established socket may be retried once the endpoint has
+      // recovered.  The fallback remains active until the new handshake is
+      // confirmed, so no frame is lost during the transition.
+      setTimeout(connectWS,5000);
     });
   })();
 

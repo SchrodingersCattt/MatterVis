@@ -25,6 +25,7 @@ from .view_updates import (
     state_versions,
     update_applies,
 )
+from .wire import json_safe_wire
 
 # Maximum number of distinct figure cache entries.  A bounded LRU
 # (least-recently-used) eviction policy kicks in when the cache
@@ -413,6 +414,12 @@ class _CoreBackendMixin:
                 "scene_id": scene_id,
                 "reason": "stale-render-revision",
             }
+        # ``topology_data`` contains renderer-only painter caches with tuple
+        # keys, and Plotly can expose NaN sentinels in trace arrays.  A frame
+        # is also delivered through Dash's strict JSON encoder, so sanitize
+        # once at the shared boundary before journaling it for WS/HTTP.
+        figure = json_safe_wire(figure)
+        topology_data = json_safe_wire(topology_data, drop_private=True)
         with self._figure_broadcast_lock:
             self._figure_broadcast_seq += 1
             payload = {
@@ -424,10 +431,10 @@ class _CoreBackendMixin:
                 "render_revision": self.render_revision(scene_id),
                 "reason": reason,
                 "figure": figure,
-                "state": copy.deepcopy(state) if isinstance(state, dict) else None,
-                "topology": copy.deepcopy(topology_data)
-                if isinstance(topology_data, dict)
+                "state": json_safe_wire(copy.deepcopy(state))
+                if isinstance(state, dict)
                 else None,
+                "topology": topology_data if isinstance(topology_data, dict) else None,
             }
             versions = state_versions(state or (self.get_state(scene_id) if scene_id in self.scene_store.scenes else {}))
             payload.update(versions.to_dict())
@@ -449,6 +456,7 @@ class _CoreBackendMixin:
         full Plotly frame.
         """
         payload = update.to_dict() if hasattr(update, "to_dict") else dict(update)
+        payload = json_safe_wire(payload)
         scene_id = payload.get("scene_id")
         current = state or self.get_state(scene_id)
         if not update_applies(payload, current):
@@ -457,7 +465,7 @@ class _CoreBackendMixin:
             self._figure_broadcast_seq += 1
             payload["figure_seq"] = self._figure_broadcast_seq
             payload["version"] = self.version
-            payload["state"] = copy.deepcopy(current)
+            payload["state"] = json_safe_wire(copy.deepcopy(current))
             self._figure_broadcasts.append(payload)
             self._figure_broadcasts = self._figure_broadcasts[-32:]
         return payload

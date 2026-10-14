@@ -684,17 +684,23 @@ def register_view_callbacks(app, backend):
         Output("topology-results", "children"),
         Output("structure-summary", "children"),
         Input("agent-state-store", "data"),
+        Input("scene-switch-seq", "data"),
+        Input("view-update-store", "data"),
         State("crystal-graph", "figure"),
         State("camera-state-store", "data"),
     )
     def update_view(agent_state, *args):
-        # Current contract is (state, current_figure, camera_state).  Accept
-        # the pre-refactor four-argument call shape for host integrations that
-        # still invoke the callback directly in tests.
-        if len(args) == 2:
+        # Current Dash inputs are (state, scene_switch, view_update) followed
+        # by the two figure/camera States. Keep the older direct-call shapes
+        # working for extensions and regression tests.
+        _switch_event = None
+        view_update = None
+        if len(args) >= 4:
+            _switch_event, view_update, current_figure, _camera_state = args[:4]
+        elif len(args) == 3:
+            _, current_figure, _camera_state = args
+        elif len(args) == 2:
             current_figure, _camera_state = args
-        elif len(args) >= 3:
-            _, current_figure, _camera_state = args[:3]
         else:
             current_figure, _camera_state = None, None
         # State notifications enqueue a full worker build. The existing poll
@@ -753,7 +759,13 @@ def register_view_callbacks(app, backend):
         # absent. Never stamp a newer revision onto the browser's old geometry.
         if not backend._figure_revision_matches_current(scene_id, state):
             return (no_update,) * 4
-        event = backend.latest_figure_broadcast(scene_id)
+        event = (
+            view_update
+            if isinstance(view_update, dict)
+            and view_update.get("type") == "figure"
+            and view_update.get("scene_id") == scene_id
+            else backend.latest_figure_broadcast(scene_id)
+        )
         if (
             not event
             or event.get("scene_id") != scene_id
