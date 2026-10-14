@@ -243,6 +243,22 @@
     delete pendingFigureByScene[String(sceneId)];
     applyFigurePush(queued.figure.data||[], queued.figure.layout||{});
   }
+  // Dash applies ``scene-tabs.value`` and paints the selected tab in
+  // separate turns.  A completed upload can therefore be queued by the
+  // figure subscriber before the tab subtree changes; that change is an
+  // attribute update and is intentionally outside the child-list observer
+  // below.  Let the upload completion explicitly flush the queued frame at
+  // the selection barrier, with a couple of deferred retries for the case
+  // where Dash has not painted its value yet.
+  window.MatterVisFlushSceneFrame = function (sceneId) {
+    if (sceneId !== null && sceneId !== undefined && sceneId !== "") {
+      window.MatterVisSelectScene(sceneId);
+    }
+    flushQueuedSceneFigure();
+    [0, 50, 250].forEach(function (delay) {
+      setTimeout(flushQueuedSceneFigure, delay);
+    });
+  };
   function flushPendingFigurePush() {
     if (endInteraction) { endInteraction(); endInteraction=null; }
     if (!pendingFigurePush) return;

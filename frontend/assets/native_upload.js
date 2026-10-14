@@ -79,6 +79,9 @@
       if (activeId && typeof window.MatterVisSelectScene === "function") {
         window.MatterVisSelectScene(activeId);
       }
+      if (activeId && typeof window.MatterVisFlushSceneFrame === "function") {
+        window.MatterVisFlushSceneFrame(activeId);
+      }
       // Always poke Dash, including builds without set_props. The fallback
       // hidden-store path keeps the controls and disorder banner in sync.
       triggerDashSync(payload || { status: "success", names: [] });

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .viewport_spec import ViewportSpec, resolve_viewport
+from .viewport_spec import ViewportSpec, resolve_viewport, reuse_viewport  # noqa: F401
 
 
 def _geometry_entity_points(scene: dict) -> list[np.ndarray]:
@@ -406,9 +406,7 @@ def _camera_axis_projections(
     if M.ndim != 2 or M.shape[0] < 3 or M.shape[1] != 3:
         return None
 
-    if viewport is None:
-        viewport = resolve_viewport(scene, style)
-    resolved_viewport = viewport
+    resolved_viewport = reuse_viewport(viewport, scene, style)
     cube_scale = np.asarray(resolved_viewport.cube_scale, dtype=float)
     M_cube = M[:3] / cube_scale[None, :]
     norms = np.linalg.norm(M_cube, axis=1)
@@ -469,9 +467,7 @@ def _axis_cube_scale(
     new rendering code should retain the full :class:`ViewportSpec` returned
     by :func:`resolve_viewport`.
     """
-    if viewport is None:
-        viewport = resolve_viewport(scene, style)
-    resolved_viewport = viewport
+    resolved_viewport = reuse_viewport(viewport, scene, style)
     return np.asarray(resolved_viewport.cube_scale, dtype=float)
 
 

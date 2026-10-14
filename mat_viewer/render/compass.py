@@ -7,8 +7,8 @@ import numpy as np
 from .viewport import (
     _axis_cube_scale,
     _camera_axis_projections,
-    resolve_viewport,
 )
+from .viewport_spec import reuse_viewport
 
 # Plotly preserves free-form ``name`` on annotations/shapes; per-item
 # ``meta`` is only a template-string slot.
@@ -42,8 +42,7 @@ def axis_key_overlay(
     # ``ViewportSpec`` is the single resolver result for a figure.  Check for
     # absence explicitly so a caller-provided, falsey viewport-like object is
     # still reused instead of triggering a second resolution.
-    if viewport is None:
-        viewport = resolve_viewport(scene, style)
+    viewport = reuse_viewport(viewport, scene, style)
     projections = (
         _camera_axis_projections(scene, style, viewport=viewport)
         or scene.get("projected_axes")
@@ -238,8 +237,7 @@ def compass_clientside_context(scene: dict, style: dict, *, viewport=None) -> di
         pixel_length = max(20.0, float(style.get("axis_scale", 0.14)) * 360.0)
     else:
         pixel_length = float(style.get("axis_key_pixel_length", 65.0))
-    if viewport is None:
-        viewport = resolve_viewport(scene, style)
+    viewport = reuse_viewport(viewport, scene, style)
     cube_scale = _axis_cube_scale(scene, style, viewport=viewport)
     cube_scale_payload = (
         [float(cube_scale[0]), float(cube_scale[1]), float(cube_scale[2])]

@@ -156,6 +156,59 @@ def test_upload_frame_is_queued_until_new_scene_tab_is_selected():
     assert "pendingFigureByScene[String(p.scene_id)] = p;" in ws_body
 
 
+def test_upload_completion_flushes_frame_queued_before_tab_paint():
+    """The upload barrier must flush a frame queued before Dash paints tabs."""
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    upload_source = (ROOT / "frontend" / "assets" / "native_upload.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "window.MatterVisFlushSceneFrame" in source
+    flush_idx = source.index("window.MatterVisFlushSceneFrame")
+    flush_body = source[flush_idx : source.index("function flushPendingFigurePush", flush_idx)]
+    assert "flushQueuedSceneFigure();" in flush_body
+    assert "setTimeout(flushQueuedSceneFigure, delay)" in flush_body
+    assert "window.MatterVisFlushSceneFrame(activeId)" in upload_source
+
+
+def test_upload_flush_hook_replays_queued_hkust_frame():
+    """Exercise the spinel -> HKUST selection barrier without a browser."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    start = source.index("  function flushQueuedSceneFigure")
+    stop = source.index("  function flushPendingFigurePush", start)
+    program = r"""
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const body=source.slice(%d,%d);
+    const pending=Object.create(null);
+    const sandbox={window:{},pending,setTimeout,clearTimeout};
+vm.createContext(sandbox);
+    vm.runInContext(`
+      let current='spinel', applied=0;
+      function currentSceneId(){return current;}
+      function figurePushIsCurrent(frame){return frame.isCurrent();}
+      function applyFigurePush(){applied += 1;}
+      window.MatterVisSelectScene=id=>{current=String(id);};
+      const pendingFigureByScene=pending;
+      ${body}
+      pending.hkust={figure:{data:[{}],layout:{}},isCurrent:()=>current==='hkust'};
+      window.MatterVisFlushSceneFrame('hkust');
+      window.applied=applied;
+    `,sandbox);
+    assert.equal(sandbox.window.applied,1,'queued HKUST frame was not replayed after upload selection');
+""" % (start, stop)
+    result = subprocess.run(
+        [node, "-e", program, str(MATTERVIS_JS)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def test_plotly_apply_gate_rejects_stale_dash_figures_and_patches():
     source = MATTERVIS_JS.read_text(encoding="utf-8")
 

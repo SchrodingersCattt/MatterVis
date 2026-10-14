@@ -124,7 +124,7 @@ def test_build_figure_reuses_one_viewport_for_compass(monkeypatch) -> None:
         )
     scene.update(
         {
-            "name": "resolver",
+            "name": "__viewport_resolver_identity__",
             "M": np.eye(3).tolist(),
             "bonds": [],
             "view_direction": [0.0, 0.0, 1.0],
@@ -144,7 +144,8 @@ def test_build_figure_reuses_one_viewport_for_compass(monkeypatch) -> None:
 
     def spy(scene_arg, style_arg, topology_data=None):
         viewport = original(scene_arg, style_arg, topology_data=topology_data)
-        resolved.append(viewport)
+        if scene_arg.get("name") == "__viewport_resolver_identity__":
+            resolved.append(viewport)
         return viewport
 
     monkeypatch.setattr(figures, "resolve_viewport", spy)
@@ -181,7 +182,7 @@ def test_build_figure_reuses_a_falsey_viewport_for_compass(monkeypatch) -> None:
         )
     scene.update(
         {
-            "name": "resolver",
+            "name": "__viewport_resolver_identity__",
             "M": np.eye(3).tolist(),
             "bonds": [],
             "view_direction": [0.0, 0.0, 1.0],
@@ -199,13 +200,27 @@ def test_build_figure_reuses_a_falsey_viewport_for_compass(monkeypatch) -> None:
     original = figures.resolve_viewport
     resolved = []
 
+    # The compass module owns helper-level fallbacks too.  If any of those
+    # paths silently resolves again, this sentinel makes the regression fail
+    # instead of only counting the top-level figure resolver.
+    from mat_viewer.render import viewport_spec
+
+    monkeypatch.setattr(
+        viewport_spec,
+        "resolve_viewport",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("compass resolved a second viewport")
+        ),
+    )
+
     class FalseyViewport(ViewportSpec):
         def __bool__(self):
             return False
 
     def spy(scene_arg, style_arg, topology_data=None):
         viewport = original(scene_arg, style_arg, topology_data=topology_data)
-        resolved.append(viewport)
+        if scene_arg.get("name") == "__viewport_resolver_identity__":
+            resolved.append(viewport)
         return FalseyViewport(
             viewport.ranges,
             viewport.aspectmode,
