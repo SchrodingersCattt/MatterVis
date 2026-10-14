@@ -70,14 +70,17 @@
       }
       const scenesPayload = await response.json();
       const activeId = scenesPayload && scenesPayload.active_id;
-      if (!activeId || !window.dash_clientside || typeof window.dash_clientside.set_props !== "function") {
-        return;
+      if (activeId && window.dash_clientside && typeof window.dash_clientside.set_props === "function") {
+        // The upload completion is authoritative for the selected scene. The
+        // persistent figure client will queue its frame until this value is
+        // painted, so no second WebSocket is needed here.
+        window.dash_clientside.set_props("scene-tabs", { value: activeId });
       }
-      // The upload handler has already made the new scene active server-side.
-      // Make the browser tab selection explicit too; relying only on the
-      // pending_state/native-upload-sync callback can lose a race with the
-      // 5s poll or a concurrent store update on large uploads.
-      window.dash_clientside.set_props("scene-tabs", { value: activeId });
+      if (activeId && typeof window.MatterVisSelectScene === "function") {
+        window.MatterVisSelectScene(activeId);
+      }
+      // Always poke Dash, including builds without set_props. The fallback
+      // hidden-store path keeps the controls and disorder banner in sync.
       triggerDashSync(payload || { status: "success", names: [] });
     } catch (_err) {
       // Best effort; the normal Dash sync path still runs.

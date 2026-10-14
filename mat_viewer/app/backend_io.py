@@ -423,18 +423,24 @@ class _IOBackendMixin:
                     with self._lock:
                         self.bundles[bundle.name] = bundle
                         self._upload_reservations.pop(digest, None)
-                        self._set_upload_status_locked(
-                            job_id,
-                            status="ready",
-                            scene_id=next(
-                                (
-                                    scene_id
-                                    for scene_id, scene in self.scene_store.scenes.items()
-                                    if scene.structure_name == bundle.name
-                                ),
-                                None,
+                        scene_id = next(
+                            (
+                                scene_id
+                                for scene_id, scene in self.scene_store.scenes.items()
+                                if scene.structure_name == bundle.name
                             ),
+                            None,
                         )
+                        # The scene was created from the empty upload bundle,
+                        # whose state is deliberately ``formula_unit``.  Do
+                        # not let that placeholder patch override the loaded
+                        # bundle's inorganic defaults when the real structure
+                        # arrives.  This also refreshes the active snapshot
+                        # before the browser observes the job as ready.
+                        if scene_id is not None:
+                            self.replace_scene_state_with_defaults(
+                                scene_id, structure=bundle.name
+                            )
                         # The placeholder and loaded bundle share the same
                         # scene/state cache key. Drop the placeholder figure
                         # before scheduling the replacement render.
@@ -450,7 +456,6 @@ class _IOBackendMixin:
                         except OSError:
                             pass
                         active_scene_id = self.scene_store.active_id
-                        self._bump_version()
                     # ``get_state`` acquires ``self._lock``.  Never call it
                     # while holding that non-reentrant lock: doing so left
                     # every successful upload's placeholder in place and made
@@ -466,6 +471,16 @@ class _IOBackendMixin:
                     with self._lock:
                         self.pending_state = copy.deepcopy(state)
                     render_state = state if state.get("structure") == bundle.name else None
+                    with self._lock:
+                        # Report readiness only after the scene state and its
+                        # active snapshot have been replaced.  Otherwise the
+                        # browser can switch away from the placeholder while
+                        # the old controls/banner are still in flight.
+                        self._set_upload_status_locked(
+                            job_id,
+                            status="ready",
+                            scene_id=scene_id,
+                        )
                 # The placeholder scene may already have produced an empty
                 # figure. Once the CIF is ready, explicitly request a full
                 # render for the active uploaded scene so reopening the tab

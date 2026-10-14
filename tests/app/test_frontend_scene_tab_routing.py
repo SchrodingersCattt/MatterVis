@@ -44,6 +44,34 @@ def test_scene_tab_intent_is_bound_by_global_rebind_observer():
     rebind_body = source[rebind_idx:source.index("new MutationObserver", rebind_idx)]
 
     assert "bindSceneTabIntent();" in rebind_body
+    assert "ensureSceneTabTooltips();" in rebind_body
+
+
+def test_programmatic_upload_selection_clears_stale_tab_intent():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    selected_idx = source.index("function selectedSceneId")
+    selected_body = source[selected_idx:source.index("function fastViewMetadata", selected_idx)]
+    assert "const domSceneId" in selected_body
+    assert "sceneTabIntentId = null" in selected_body
+    assert "return domSceneId" in selected_body
+    assert "window.MatterVisSelectScene" in source
+
+
+def test_scene_tab_tooltip_is_applied_to_actual_tab_node():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    assert "function ensureSceneTabTooltips" in source
+    tooltip_idx = source.index("function ensureSceneTabTooltips")
+    tooltip_body = source[tooltip_idx:source.index("function rebindAll", tooltip_idx)]
+    assert 'tab.setAttribute("title", fullName)' in tooltip_body
+    assert 'tab.setAttribute("aria-label", fullName)' in tooltip_body
+
+
+def test_figure_socket_is_singleton_across_asset_rebinds():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    ws_idx = source.index("(function connectWS()")
+    ws_body = source[ws_idx:source.index("})();", ws_idx) + 4]
+    assert "__mattervisFigureSocket" in ws_body
+    assert "window.__mattervisFigureSocket = null" in ws_body
 
 
 def test_deferred_ws_figure_keeps_and_revalidates_render_metadata():

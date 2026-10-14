@@ -117,7 +117,13 @@ def register_state_callbacks(app, backend):
         # easily hit ~1s on dense unit cells. Short-circuit those.
         if scene_id and scene_id not in backend.scene_store.scenes:
             return no_update, no_update
-        active_state = backend.get_state(scene_id)
+        try:
+            active_state = backend.get_state(scene_id)
+        except KeyError:
+            # The tab may have been closed after Dash captured its value.
+            # Let the next explicit tab event refresh the controls instead of
+            # failing the callback request with a 500.
+            return no_update, no_update
         # Derive the key from the complete active state so a scene whose
         # structure or transform pipeline changed cannot reuse old options.
         cache_state = dict(active_state)
@@ -362,36 +368,39 @@ def register_state_callbacks(app, backend):
         if triggered == "scene-tabs":
             if not scene_id or scene_id not in backend.scene_store.scenes:
                 return (no_update,) * n_outputs
-            backend.apply_intent(
-                {
-                    "type": "set_active_scene",
-                    "scene_id": scene_id,
-                    "payload": {"scene_id": scene_id},
-                }
-            )
+            # The tab value is already the browser's confirmed scene intent.
+            # Do not arm ``pending_state`` here: a subsequent poll would
+            # replay the same scene into the controls and race the figure
+            # update store while the tab switch is still settling.
+            backend.set_active_scene(scene_id, broadcast=False)
             state = backend.get_state(scene_id)
             # The confirmed state drives the view-update submitter. Do not
             # bypass the cache owner's live camera/uirevision refresh here.
             seq = getattr(sync_agent_state, "_switch_seq", 0) + 1
             sync_agent_state._switch_seq = seq
             return (*scene_control_outputs(state), {"seq": seq, "scene_id": scene_id})
-        state = backend.pop_pending_state()
+        if triggered == "native-upload-sync":
+            # Upload completion is an explicit synchronization barrier. Drain
+            # any worker snapshot and read the server's active scene after the
+            # bundle/default-state transaction has committed. Using the
+            # browser's previous tab value here briefly paints the old
+            # disorder banner and lets its figure win the tab switch race.
+            backend.pop_pending_state()
+            state = backend.get_state()
+        else:
+            state = backend.pop_pending_state()
         # A poll can race a tab switch or an upload.  ``pending_state`` is
         # tagged with the scene that produced it; never apply that snapshot
         # to another selected tab, otherwise labels and display controls from
-        # one structure briefly overwrite the active structure.  Uploads are
-        # the one explicit event that may have changed the active scene while
-        # the browser still reports the previous value, so refresh from the
-        # requested scene (or the backend's active scene) in that case.
-        if state and state.get("scene_id") not in (None, scene_id):
-            if triggered == "native-upload-sync":
-                state = (
-                    backend.get_state(scene_id)
-                    if scene_id and scene_id in backend.scene_store.scenes
-                    else backend.get_state()
-                )
-            else:
-                return (no_update,) * n_outputs
+        # one structure briefly overwrite the active structure.  Uploads use
+        # the server's active scene above because the browser may still report
+        # the previous tab while the new tab is being inserted.
+        if (
+            state
+            and state.get("scene_id") not in (None, scene_id)
+            and triggered != "native-upload-sync"
+        ):
+            return (no_update,) * n_outputs
         # Upload completion emits ``native-upload-sync`` from the browser.
         # Depending on callback ordering, ``pending_state`` may already have
         # been consumed by a near-simultaneous poll tick. Native-upload is a

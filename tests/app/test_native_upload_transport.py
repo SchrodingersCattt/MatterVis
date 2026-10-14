@@ -14,3 +14,11 @@ def test_upload_scene_activation_does_not_open_transient_websocket():
     assert "fetch(\"/api/v2/scenes\"" in wait_body
     assert "new WebSocket" not in wait_body
     assert "await waitForSceneAndSwitch(names)" in source
+
+
+def test_upload_scene_sync_runs_even_without_dash_set_props():
+    source = ASSET.read_text(encoding="utf-8")
+    start = source.index("async function forceActiveSceneFromServer")
+    body = source[start:source.index("\n  /* Active wait", start)]
+    assert "triggerDashSync(payload" in body
+    assert "if (activeId && window.dash_clientside" in body

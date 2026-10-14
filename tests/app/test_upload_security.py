@@ -405,3 +405,44 @@ def test_async_upload_parser_error_is_observable(backend, monkeypatch):
     assert "Fe3+" in status["error"]
     assert pending.name not in backend.structure_names
     assert backend.get_state()["structure"] == "__upload__"
+
+
+def test_async_upload_replaces_placeholder_with_inorganic_defaults(backend, monkeypatch):
+    """Completion must not leave the upload tab in the empty bundle's mode."""
+    import mat_viewer.app.backend_io as backend_io
+    from mat_viewer.loader import build_empty_bundle
+
+    backend._upload_sync_mode = False
+
+    def fake_build(*, name, title, **_kwargs):
+        bundle = build_empty_bundle(name=name, title=title)
+        bundle.source = "upload"
+        bundle.scene.update(
+            {
+                "is_ionic_solid": True,
+                "is_inorganic_solid": True,
+                "ionic_cation_elements": ["Cs"],
+                "ionic_anion_elements": ["Cl"],
+                "fragment_table": [
+                    {"formula": "Cs", "elem_set": ["Cs"], "heavy_atom_count": 1}
+                ],
+            }
+        )
+        return bundle
+
+    monkeypatch.setattr(backend_io, "build_loaded_crystal", fake_build)
+    monkeypatch.setattr(backend_io, "_prewarm_bundle_async", lambda *_args: None)
+
+    pending = backend.add_uploaded_file_bytes(_VALID_CIF, "cscl.cif")
+    for _ in range(100):
+        status = backend.upload_status(pending._upload_job_id)
+        if status["status"] != "pending":
+            break
+        time.sleep(0.01)
+
+    assert status["status"] == "ready"
+    state = backend.get_state(status["scene_id"])
+    assert state["display_mode"] == "unit_cell"
+    assert state["style"] == "ball"
+    assert "unit_cell_box" in state["display_options"]
+    assert state["polyhedron_specs"][0]["center_species"] == "Cs"

@@ -602,7 +602,14 @@ def register_view_callbacks(app, backend):
     def refresh_fast_view_metadata(agent_state, camera_state):
         # The store is a notification, not a second editable state owner.
         # get_state supplies the authoritative render revision as well.
-        state = backend.get_state((agent_state or {}).get("scene_id"))
+        requested_scene = (agent_state or {}).get("scene_id")
+        try:
+            state = backend.get_state(requested_scene)
+        except KeyError:
+            # A tab can be closed between the store update and this callback.
+            # Resolve the active scene rather than returning a 500 that leaves
+            # the figure and tab strip on different generations.
+            state = backend.get_state()
         return _fast_view_metadata(backend, state, camera_state)
 
     @app.callback(
@@ -703,7 +710,13 @@ def register_view_callbacks(app, backend):
         # pushes from live interaction in JS; no server-side gate is
         # needed.
         cb_start = time.monotonic()
-        state = backend.get_state((agent_state or {}).get("scene_id"))
+        requested_scene = (agent_state or {}).get("scene_id")
+        try:
+            state = backend.get_state(requested_scene)
+        except KeyError:
+            # Uploads and tab closes can invalidate an in-flight store value.
+            # The active scene is the only safe fallback for this render pass.
+            state = backend.get_state()
         scene_id = state.get("scene_id")
         previous_state = getattr(update_view, "_last_state", None)
         change_kind = classify_change(previous_state, state)

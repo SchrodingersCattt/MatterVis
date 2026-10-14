@@ -51,16 +51,43 @@
     sceneTabIntentAt = Date.now();
   }
   function selectedSceneId() {
-    if (sceneTabIntentId && Date.now() - sceneTabIntentAt < 10000) return sceneTabIntentId;
     const root = document.getElementById("scene-tabs");
-    if (!root) return null;
-    const selected = root.querySelector("[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active");
-    if (!selected) return null;
-    const node = sceneIdFromTabNode(selected)
-      ? selected
-      : (selected.closest ? selected.closest("[id^='scene-tab-']") : null);
-    return sceneIdFromTabNode(node);
+    const intentAge = sceneTabIntentId ? Date.now() - sceneTabIntentAt : Infinity;
+    const intentLive = sceneTabIntentId && intentAge < 10000;
+    const selected = root && root.querySelector(
+      "[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active"
+    );
+    const node = selected
+      ? (sceneIdFromTabNode(selected)
+        ? selected
+        : (selected.closest ? selected.closest("[id^='scene-tab-']") : null))
+      : null;
+    const domSceneId = sceneIdFromTabNode(node);
+    // A pointer click is an optimistic intent until Dash paints the selected
+    // class. Once the DOM reports a different selection (for example after an
+    // upload calls set_props), the old intent must be discarded immediately;
+    // keeping it for ten seconds routes the new figure to the old tab.
+    if (domSceneId) {
+      if (intentLive && String(domSceneId) === String(sceneTabIntentId)) {
+        return sceneTabIntentId;
+      }
+      // Preserve a just-clicked tab's optimistic intent for the short window
+      // before Dash applies its selected class. Older intents are stale when
+      // a programmatic upload selection changes the value.
+      if (intentLive && intentAge < 750) return sceneTabIntentId;
+      if (sceneTabIntentId && String(domSceneId) !== String(sceneTabIntentId)) {
+        sceneTabIntentId = null;
+        sceneTabIntentAt = 0;
+      }
+      return domSceneId;
+    }
+    return intentLive ? sceneTabIntentId : null;
   }
+  window.MatterVisSelectScene = function (sceneId) {
+    if (sceneId === null || sceneId === undefined || sceneId === "") return;
+    sceneTabIntentId = String(sceneId);
+    sceneTabIntentAt = Date.now();
+  };
   function fastViewMetadata() {
     const node = document.getElementById("fast-view-metadata");
     const text = node ? (node.textContent||"").trim() : "";
@@ -352,6 +379,9 @@
   // ── WS figure fast lane (ws_figure.js) ──────────────────────────
   (function connectWS() {
     if (window.MATTERVIS_WS_FIGURE === false || !window.WebSocket) return;
+    if (window.__mattervisFigureSocket &&
+        (window.__mattervisFigureSocket.readyState === 0 ||
+         window.__mattervisFigureSocket.readyState === 1)) return;
     // Dash loads Plotly lazily. Missing it on the asset's first execution
     // must not permanently disable completed-frame delivery.
     if (!window.Plotly) { requestAnimationFrame(connectWS); return; }
@@ -377,6 +407,7 @@
     }
     var proto = window.location.protocol==="https:"?"wss:":"ws:";
     var ws = new WebSocket(proto+"//"+window.location.host+"/api/v2/ws");
+    window.__mattervisFigureSocket = ws;
     ws.addEventListener("open",function(){ws.send(JSON.stringify({type:"subscribe_figure",enabled:true}));});
     ws.addEventListener("message",function(e){
       var p; try { p=JSON.parse(e.data||"{}"); } catch(_){return;}
@@ -409,8 +440,26 @@
          applyFigurePush(p.figure.data||[], p.figure.layout||{});
        }
     });
-    ws.addEventListener("close",function(){setTimeout(connectWS,1500);});
+    ws.addEventListener("close",function(){
+      if (window.__mattervisFigureSocket === ws) window.__mattervisFigureSocket = null;
+      setTimeout(connectWS,1500);
+    });
   })();
+
+  function ensureSceneTabTooltips() {
+    document.querySelectorAll("#scene-tabs [id^='scene-tab-']").forEach(function (tab) {
+      if (!tab || tab.id.indexOf("scene-tab-close-") === 0 || tab.id === "scene-tabs") return;
+      const text = tab.querySelector(".scene-tab-text");
+      const fullName = text && (text.getAttribute("title") || text.textContent || "").trim();
+      if (!fullName) return;
+      // Dash may render dcc.Tab's React label inside a wrapper that does not
+      // inherit the label's title. Put the native tooltip on the actual tab
+      // node as well, which remains visible when labels are ellipsized.
+      tab.setAttribute("title", fullName);
+      tab.setAttribute("aria-label", fullName);
+      if (text) text.setAttribute("title", fullName);
+    });
+  }
 
   // ── Single MutationObserver for all re-bind needs ───────────────
   function rebindAll() {
@@ -418,6 +467,7 @@
     bindBoxSelect();
     bindDisorderHover();
     bindSceneTabIntent();
+    ensureSceneTabTooltips();
     flushQueuedSceneFigure();
   }
   new MutationObserver(rebindAll).observe(document.documentElement, {childList:true, subtree:true});

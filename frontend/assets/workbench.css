@@ -89,13 +89,17 @@
   align-items: center;
   color: var(--mv-muted);
   display: flex;
-  flex: 0 0 160px;
+  flex: 0 0 160px !important;
   font-size: 12px;
-  min-width: 140px;
+  min-width: 160px !important;
   overflow: hidden;
   padding: 10px 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+#scene-tabs .tab[title] {
+  cursor: help;
 }
 
 #scene-tabs .scene-tab-label {

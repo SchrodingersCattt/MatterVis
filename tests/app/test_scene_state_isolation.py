@@ -72,3 +72,61 @@ def test_state_poll_does_not_cross_contaminate_scene_controls(tmp_path, monkeypa
     finally:
         backend.close()
 
+
+def test_tab_switch_does_not_requeue_its_own_pending_state(tmp_path, monkeypatch):
+    backend = ViewerBackend(
+        preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path)
+    )
+    try:
+        first_id = backend.active_scene_id()
+        second = backend.create_scene(
+            structure=backend.get_state()["structure"], label="Second scene"
+        )
+        second_id = second["id"]
+        backend.pop_pending_state()
+
+        registry = _CallbackRegistry()
+        callbacks_state.register_state_callbacks(registry, backend)
+        monkeypatch.setattr(
+            callbacks_state,
+            "callback_context",
+            SimpleNamespace(triggered=[{"prop_id": "scene-tabs.value"}]),
+        )
+        result = registry.callbacks["sync_agent_state"](1, None, second_id)
+
+        assert result[-3]["scene_id"] == second_id
+        assert backend.pending_state is None
+        assert backend.active_scene_id() == second_id
+        assert first_id != second_id
+    finally:
+        backend.close()
+
+
+def test_upload_sync_reads_server_active_scene_after_stale_tab(tmp_path, monkeypatch):
+    backend = ViewerBackend(
+        preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path)
+    )
+    try:
+        first_id = backend.active_scene_id()
+        second = backend.create_scene(
+            structure=backend.get_state()["structure"], label="Second scene"
+        )
+        second_id = second["id"]
+        backend.set_active_scene(second_id, broadcast=True)
+
+        registry = _CallbackRegistry()
+        callbacks_state.register_state_callbacks(registry, backend)
+        monkeypatch.setattr(
+            callbacks_state,
+            "callback_context",
+            SimpleNamespace(
+                triggered=[{"prop_id": "native-upload-sync.data"}]
+            ),
+        )
+        result = registry.callbacks["sync_agent_state"](1, {"seq": 1}, first_id)
+
+        assert result[-3]["scene_id"] == second_id
+        assert backend.pending_state is None
+    finally:
+        backend.close()
+

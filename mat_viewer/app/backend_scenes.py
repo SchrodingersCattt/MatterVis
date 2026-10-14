@@ -61,6 +61,39 @@ class _SceneBackendMixin:
         defaults = self.default_state(scene.structure_name)
         return scene.state(defaults)
 
+    def replace_scene_state_with_defaults(
+        self,
+        scene_id: str,
+        *,
+        structure: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Replace a pending scene's placeholder state with real defaults.
+
+        Native uploads register a scene before the CIF worker has parsed the
+        structure, so the scene initially carries the empty upload bundle's
+        ``formula_unit`` state.  Merging the new defaults through
+        :meth:`scene_state` is insufficient because the placeholder patch
+        wins. Replace the patch as one transaction so inorganic uploads do
+        not inherit the placeholder presentation.
+        """
+        scene = self.scene_store.get(scene_id)
+        before = self.scene_state(scene_id)
+        target = str(structure or scene.structure_name)
+        if target != scene.structure_name:
+            scene.structure_name = target
+        defaults = self.default_state(target)
+        scene.state_patch = copy.deepcopy(defaults)
+        scene.camera = copy.deepcopy(defaults.get("camera"))
+        scene.updated_at = time.time()
+        after = self.scene_state(scene_id)
+        self._bump_render_revision_if_changed(scene_id, before, after)
+        if self.scene_store.active_id == scene_id:
+            self.current_state = after
+            self.pending_state = self._state_snapshot(after, scene_id)
+        self._bump_version()
+        self._request_scene_store_save()
+        return after
+
     def active_scene_id(self) -> Optional[str]:
         return self.scene_store.active_id
 
