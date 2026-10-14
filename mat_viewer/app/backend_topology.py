@@ -463,11 +463,26 @@ class _TopologyBackendMixin:
                     return None
                 return self.fragment_index_for_atom(scene, atom_index)
         if species_set:
-            candidates = [
-                fragment
-                for fragment in fragments
-                if (fragment.get("formula") or fragment.get("species")) in species_set
-            ]
+            atom_level = any(
+                str(spec.get("level") or "molecule") == "atom"
+                and str(spec.get("center_species") or "") in species_set
+                for spec in (state.get("polyhedron_specs") or [])
+                if isinstance(spec, dict)
+            )
+            if atom_level:
+                candidates = [
+                    fragment
+                    for fragment in fragments
+                    if species_set.intersection(
+                        {str(elem) for elem in (fragment.get("elem_set") or [])}
+                    )
+                ]
+            else:
+                candidates = [
+                    fragment
+                    for fragment in fragments
+                    if (fragment.get("formula") or fragment.get("species")) in species_set
+                ]
             if not candidates:
                 return None
         else:

@@ -700,11 +700,144 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
     pad = np.maximum(span * 0.06, 0.25)
     mins = atom_mins - pad
     maxs = atom_maxs + pad
-    return [
+    ranges = [
         [float(mins[0]), float(maxs[0])],
         [float(mins[1]), float(maxs[1])],
         [float(mins[2]), float(maxs[2])],
     ]
+    return _auto_camera_fit_ranges(scene, style, ranges)
+
+
+def _auto_camera_fit_ranges(
+    scene: dict,
+    style: dict,
+    ranges: list[list[float]],
+) -> list[list[float]]:
+    """Add a small orientation-aware margin to a default perspective view.
+
+    ``_scene_ranges`` owns the data bounding box, while Plotly maps that box
+    into a unit cube before applying the camera basis.  A diagonal camera can
+    therefore project a corner of an otherwise perfectly valid axis-aligned
+    box past the edge of the viewport.  This is especially visible for
+    uploaded co-crystals whose default view is diagonal: the left/bottom
+    molecule is clipped even though all of its Cartesian coordinates are in
+    the axis ranges.
+
+    Expand only legacy (position/focal-point) cameras.  Those cameras are the
+    scene's initial camera; an interactive camera is stored in Plotly's
+    ``eye`` form and must retain the user's exact viewport.  The expansion is
+    computed from the projected eight corners and keeps the existing bounding
+    box centre, so multi-molecule formula units remain centred on their
+    displayed bounding box.  Orthographic views do not need this correction.
+    """
+    if not isinstance(style, dict):
+        return ranges
+    explicit = style.get("camera")
+    if not isinstance(explicit, dict) or not {
+        "position",
+        "focal_point",
+    }.issubset(explicit):
+        return ranges
+
+    projection = explicit.get("projection")
+    if isinstance(projection, dict):
+        projection = projection.get("type")
+    if str(projection or style.get("projection", "perspective")).lower() in {
+        "orthographic",
+        "ortho",
+    }:
+        return ranges
+
+    try:
+        spans = np.asarray(
+            [float(axis_range[1]) - float(axis_range[0]) for axis_range in ranges],
+            dtype=float,
+        )
+        if spans.shape != (3,) or not np.all(np.isfinite(spans)) or np.any(spans <= 1e-9):
+            return ranges
+        center = np.asarray(
+            [0.5 * (float(axis_range[0]) + float(axis_range[1])) for axis_range in ranges],
+            dtype=float,
+        )
+        from ..compass import camera_screen_basis
+
+        camera = _plotly_camera_from_scene(scene, style)
+        right, screen_up = camera_screen_basis(camera)
+        aspect = spans / float(np.max(spans))
+        # Fit the displayed geometry rather than all eight corners of the
+        # axis-aligned cube.  Opposite corners of a long oblique cell are
+        # mathematically valid range points but are not necessarily drawn;
+        # using them would zoom every Z'=2 structure out unnecessarily.
+        points: list[np.ndarray] = []
+        atoms = _visible_atoms(scene, style)
+        if atoms:
+            atom_scale = float(style.get("atom_scale", 1.0))
+            for atom in atoms:
+                try:
+                    cart = np.asarray(atom.get("cart"), dtype=float)
+                    radius = max(float(atom.get("atom_radius", 0.18)), 0.05) * atom_scale
+                except (TypeError, ValueError):
+                    continue
+                if cart.shape != (3,) or not np.all(np.isfinite(cart)):
+                    continue
+                points.extend(
+                    cart + radius * np.asarray(signs, dtype=float)
+                    for signs in (
+                        (-1, -1, -1),
+                        (-1, -1, 1),
+                        (-1, 1, -1),
+                        (-1, 1, 1),
+                        (1, -1, -1),
+                        (1, -1, 1),
+                        (1, 1, -1),
+                        (1, 1, 1),
+                    )
+                )
+        mode = style.get("display_mode", scene.get("display_mode"))
+        if mode == "unit_cell" or bool(style.get("show_unit_cell", False)):
+            matrix = scene.get("M")
+            if matrix is not None:
+                matrix = np.asarray(matrix, dtype=float)
+                if matrix.shape == (3, 3) and np.all(np.isfinite(matrix)):
+                    a, b, c = matrix
+                    points.extend(
+                        np.asarray(point, dtype=float)
+                        for point in (
+                            np.zeros(3),
+                            a,
+                            b,
+                            c,
+                            a + b,
+                            a + c,
+                            b + c,
+                            a + b + c,
+                        )
+                    )
+        points.extend(_geometry_entity_points(scene))
+        if not points:
+            return ranges
+        displayed = np.asarray(points, dtype=float)
+        if displayed.ndim != 2 or displayed.shape[1] != 3:
+            return ranges
+        normalized = (displayed - center[None, :]) / (0.5 * spans)[None, :]
+        normalized *= aspect[None, :]
+        projected = np.column_stack((normalized @ right, normalized @ screen_up))
+        extent = float(np.max(np.abs(projected)))
+        if not np.isfinite(extent) or extent <= 0.9:
+            return ranges
+        # Keep roughly 8% breathing room.  The cap prevents an unusual,
+        # nearly edge-on view from turning a valid formula unit into a tiny
+        # dot; users can still zoom out through the normal camera controls.
+        scale = min(max(extent / 0.92, 1.0), 1.35)
+        if scale <= 1.0 + 1e-12:
+            return ranges
+        half = 0.5 * spans * scale
+        fitted = np.column_stack((center - half, center + half))
+        return [[float(row[0]), float(row[1])] for row in fitted]
+    except (TypeError, ValueError, KeyError, IndexError, FloatingPointError):
+        # Camera metadata is user-editable through the REST API.  A malformed
+        # camera must not make an otherwise renderable scene disappear.
+        return ranges
 
 
 def _equalize_axis_ranges(xr, yr, zr):

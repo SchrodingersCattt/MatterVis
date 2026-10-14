@@ -280,6 +280,33 @@ def _explicit_assembly_disorder_indices(raw_atoms) -> set[int]:
     return out
 
 
+def _explicit_group_disorder_indices(raw_atoms) -> set[int]:
+    """Return partial sites carrying a non-blank CIF disorder group.
+
+    A number of refinement programs emit ``_atom_site_disorder_group`` but
+    omit ``_atom_site_disorder_assembly``.  Group identifiers are explicit
+    disorder provenance even without the optional assembly namespace; the
+    previous detector therefore missed these partial sites entirely.  Keep a
+    lone partial site with *both* tags blank as the ordered-special-position
+    case handled by :func:`_occupancy_only_disorder_indices`.
+    """
+    out: set[int] = set()
+    for idx, atom in enumerate(raw_atoms):
+        if _partial_occupancy_value(atom) >= 0.999:
+            continue
+        dg = _normal_disorder_tag(atom.get("dg"))
+        da = _normal_disorder_tag(atom.get("da"))
+        # Explicit assemblies are handled by
+        # ``_explicit_assembly_disorder_indices``; this helper covers the
+        # group-only dialect where assembly is omitted.  A nonzero group is
+        # itself explicit provenance even when its competing partner is
+        # represented by symmetry or omitted from the exported CIF.
+        if da not in (".", "?", "") or dg in (".", "?", "", "0"):
+            continue
+        out.add(idx)
+    return out
+
+
 def _has_explicit_assembly_disorder(raw_atoms) -> bool:
     return bool(_explicit_assembly_disorder_indices(raw_atoms))
 
@@ -309,6 +336,10 @@ def _has_shelx_occupancy_disorder(raw_atoms) -> bool:
        standard A/1+A/2, B/1+B/2 form, e.g. HPEP). Without this branch
        the loader silently treats both alternatives as full-occupancy
        major atoms and the disorder='opacity' style has nothing to fade.
+    4. *Group-only* disorder: ``occ < 1`` with a nonzero
+       ``_atom_site_disorder_group`` and blank assembly. Some exporters omit
+       the optional assembly field even when the group token is explicit;
+       the token still carries disorder provenance.
 
     In all three cases ``parse_asu`` alone cannot resolve the disorder,
     so we hand the CIF to MolCrysKit's optimal-replica picker and tag
@@ -323,6 +354,8 @@ def _has_shelx_occupancy_disorder(raw_atoms) -> bool:
         if dg.startswith("-") and dg not in ("-",):
             return True
     if _has_explicit_assembly_disorder(raw_atoms):
+        return True
+    if _explicit_group_disorder_indices(raw_atoms):
         return True
     return bool(_occupancy_only_disorder_indices(raw_atoms))
 
@@ -341,6 +374,7 @@ def _tag_unresolved_partial_disorder(raw_atoms):
     out = [dict(atom) for atom in raw_atoms]
     recognised = _occupancy_only_disorder_indices(out)
     recognised.update(_explicit_assembly_disorder_indices(out))
+    recognised.update(_explicit_group_disorder_indices(out))
     for index, atom in enumerate(out):
         if "_is_minor" in atom:
             atom["is_disordered"] = True
@@ -484,9 +518,23 @@ generate_ordered_replicas_from_disordered_sites` for the optimal
                 generate_ordered_replicas_from_disordered_sites,
             )
 
-            replicas = generate_ordered_replicas_from_disordered_sites(
-                cif_path, method="optimal", return_kept_indices=True
-            )
+            try:
+                replicas = generate_ordered_replicas_from_disordered_sites(
+                    cif_path, method="optimal", return_kept_indices=True
+                )
+            except Exception:
+                # Ionic type symbols (Fe3+, O2-, …) are normalised by the
+                # CIF adapter through MolCrysKit's public in-memory reader.
+                # Retry disorder resolution with that canonical crystal so a
+                # charged CIF does not silently lose its disorder metadata.
+                from ..structure.cif_parse import load_cif
+
+                parsed = load_cif(cif_path)
+                replicas = generate_ordered_replicas_from_disordered_sites(
+                    method="optimal",
+                    crystal=parsed.crystal,
+                    return_kept_indices=True,
+                )
         except Exception:
             return raw_atoms
         if not replicas:
@@ -521,6 +569,7 @@ generate_ordered_replicas_from_disordered_sites` for the optimal
         disordered_idx: list[int] = []
         occupancy_only_idx = _occupancy_only_disorder_indices(out)
         explicit_assembly_idx = _explicit_assembly_disorder_indices(out)
+        explicit_group_idx = _explicit_group_disorder_indices(out)
         for idx, atom in enumerate(out):
             occ = _partial_occupancy_value(atom)
             if occ >= 0.999 or "_is_minor" in atom:
@@ -529,6 +578,7 @@ generate_ordered_replicas_from_disordered_sites` for the optimal
             if (
                 idx in occupancy_only_idx
                 or idx in explicit_assembly_idx
+                or idx in explicit_group_idx
                 or (dg.startswith("-") and dg not in ("-",))
             ):
                 disordered_idx.append(idx)

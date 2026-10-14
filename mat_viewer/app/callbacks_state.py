@@ -376,6 +376,22 @@ def register_state_callbacks(app, backend):
             sync_agent_state._switch_seq = seq
             return (*scene_control_outputs(state), {"seq": seq, "scene_id": scene_id})
         state = backend.pop_pending_state()
+        # A poll can race a tab switch or an upload.  ``pending_state`` is
+        # tagged with the scene that produced it; never apply that snapshot
+        # to another selected tab, otherwise labels and display controls from
+        # one structure briefly overwrite the active structure.  Uploads are
+        # the one explicit event that may have changed the active scene while
+        # the browser still reports the previous value, so refresh from the
+        # requested scene (or the backend's active scene) in that case.
+        if state and state.get("scene_id") not in (None, scene_id):
+            if triggered == "native-upload-sync":
+                state = (
+                    backend.get_state(scene_id)
+                    if scene_id and scene_id in backend.scene_store.scenes
+                    else backend.get_state()
+                )
+            else:
+                return (no_update,) * n_outputs
         # Upload completion emits ``native-upload-sync`` from the browser.
         # Depending on callback ordering, ``pending_state`` may already have
         # been consumed by a near-simultaneous poll tick. Native-upload is a

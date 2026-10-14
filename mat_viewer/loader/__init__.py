@@ -21,6 +21,7 @@ from .uploads import (  # noqa: F401
     load_uploaded_cif,
     write_uploaded_cif,
 )
+from .cif_export import crystal_to_cif, loaded_crystal_to_cif  # noqa: F401
 
 __all__ = [
     "LoadedCrystal",
@@ -56,6 +57,8 @@ __all__ = [
     "load_uploaded_cif",
     "perf_log",
     "write_uploaded_cif",
+    "crystal_to_cif",
+    "loaded_crystal_to_cif",
 ]
 
 from .frame_batch import (  # noqa: F401

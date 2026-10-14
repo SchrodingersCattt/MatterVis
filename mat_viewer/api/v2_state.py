@@ -78,6 +78,20 @@ def register_state_routes(v2, backend) -> dict:
             meta["job_id"] = getattr(bundle, "_upload_job_id", None)
         return jsonify(meta)
 
+    @v2.get("/upload/<job_id>")
+    def upload_status(job_id: str):
+        """Poll completion of a native multipart upload.
+
+        CIF parsing is deliberately asynchronous so the request thread stays
+        responsive for large structures.  Returning the worker's exception via
+        this small endpoint prevents a failed parser job from looking like a
+        successful upload with an empty viewport.
+        """
+        try:
+            return jsonify(backend.upload_status(job_id))
+        except KeyError:
+            return jsonify({"error": f"unknown upload job: {job_id}"}), 404
+
     @v2.get("/structures")
     def structures():
         return jsonify({"structures": backend.list_structures()})

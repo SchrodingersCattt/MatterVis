@@ -30,18 +30,18 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from mat_viewer.loader.periodic_unwrap import unwrap_from_bond_records
-from mat_viewer.structure.bonds import bonds_conflict
-from mat_viewer.style.disorder import is_minor
 from mat_viewer.loader import (
     _has_shelx_occupancy_disorder,
     build_loaded_crystal,
 )
 from mat_viewer.loader.core import (
+    _explicit_group_disorder_indices,
     _fragment_table_from_atoms,
     _tag_unresolved_partial_disorder,
 )
-
+from mat_viewer.loader.periodic_unwrap import unwrap_from_bond_records
+from mat_viewer.structure.bonds import bonds_conflict
+from mat_viewer.style.disorder import is_minor
 
 SY_CIF = Path("scripts/data/SY.cif")
 
@@ -190,6 +190,25 @@ def test_recognised_partial_sites_are_tagged_as_unresolved_disorder():
     assert tagged[3]["is_disordered"] is True
     assert all(atom["disorder_resolved"] is False for atom in tagged[:4])
     assert "is_disordered" not in tagged[4]
+
+
+def test_group_only_partial_sites_are_detected_without_assembly_tag():
+    atoms = [
+        {"label": "C1A", "_asym_label": "C1A", "occ": 0.65, "dg": "1", "da": "."},
+        {"label": "C1B", "_asym_label": "C1B", "occ": 0.35, "dg": "2", "da": "."},
+        # A blank-tag partial special-position site remains ambiguous.
+        {"label": "O1", "_asym_label": "O1", "occ": 0.5, "dg": "0", "da": "."},
+    ]
+
+    assert _explicit_group_disorder_indices(atoms) == {0, 1}
+    tagged = _tag_unresolved_partial_disorder(atoms)
+    assert all(tagged[index]["is_disordered"] for index in (0, 1))
+    assert tagged[2].get("is_disordered") is not True
+
+    # A partner may be represented by symmetry rather than repeated in the
+    # CIF loop; the explicit group token still carries disorder provenance.
+    lone_group = [{"occ": 0.5, "dg": "1", "da": "."}]
+    assert _explicit_group_disorder_indices(lone_group) == {0}
 
 
 def test_unresolved_partial_solvent_h_is_not_a_topology_species():

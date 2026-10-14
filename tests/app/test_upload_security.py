@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -288,3 +290,63 @@ def test_async_upload_requests_full_render_after_placeholder_is_replaced(backend
     assert figure_ready.wait(5), "upload completion must publish a full render"
     assert figures
     assert any(str(trace.get("type")) in {"mesh3d", "scatter3d"} for trace in figures[-1]["data"])
+
+
+def test_concurrent_uploads_keep_distinct_scene_labels(backend, monkeypatch):
+    """Two browser requests for one filename must not overwrite each other."""
+    import mat_viewer.app.backend_io as backend_io
+    from mat_viewer.loader import build_empty_bundle
+
+    backend._upload_sync_mode = False
+
+    def fake_build(*, name, title, **_kwargs):
+        loaded = build_empty_bundle(name=name, title=title)
+        loaded.source = "upload"
+        return loaded
+
+    monkeypatch.setattr(backend_io, "build_loaded_crystal", fake_build)
+    other = _VALID_CIF.replace(
+        b"C1 C 0.0 0.0 0.0 1.0", b"N1 N 0.5 0.5 0.5 1.0"
+    )
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first, second = list(
+            pool.map(
+                lambda payload: backend.add_uploaded_file_bytes(payload, "series.cif"),
+                (_VALID_CIF, other),
+            )
+        )
+
+    assert {first.name, second.name} == {"series", "series_2"}
+    assert {item["label"] for item in backend.scene_options()} == {
+        "series",
+        "series_2",
+    }
+    for bundle in (first, second):
+        for _ in range(100):
+            if backend.upload_status(bundle._upload_job_id)["status"] != "pending":
+                break
+            time.sleep(0.01)
+        assert backend.upload_status(bundle._upload_job_id)["status"] == "ready"
+
+
+def test_async_upload_parser_error_is_observable(backend, monkeypatch):
+    """A parser failure must clear the placeholder and expose its error."""
+    import mat_viewer.app.backend_io as backend_io
+
+    backend._upload_sync_mode = False
+
+    def fail_build(**_kwargs):
+        raise ValueError("invalid type symbol Fe3+")
+
+    monkeypatch.setattr(backend_io, "build_loaded_crystal", fail_build)
+    pending = backend.add_uploaded_file_bytes(_VALID_CIF, "valence.cif")
+    for _ in range(100):
+        status = backend.upload_status(pending._upload_job_id)
+        if status["status"] != "pending":
+            break
+        time.sleep(0.01)
+
+    assert status["status"] == "error"
+    assert "Fe3+" in status["error"]
+    assert pending.name not in backend.structure_names
+    assert backend.get_state()["structure"] == "__upload__"

@@ -802,14 +802,33 @@ def register_view_callbacks(app, backend):
         Output("status-banner", "children"),
         Output("status-banner", "className"),
         Output("export-download", "data"),
+        Output("cif-download", "data"),
         Output("status-dismiss-timer", "disabled"),
         Output("status-dismiss-timer", "n_intervals"),
         Input("save-preset-btn", "n_clicks"),
         Input("export-btn", "n_clicks"),
+        Input("export-cif-btn", "n_clicks"),
         prevent_initial_call=True,
     )
-    def save_or_export(_, __):
+    def save_or_export(_, __, ___):
         triggered = callback_context.triggered[0]["prop_id"].split(".")[0] if callback_context.triggered else None
+        if triggered == "export-cif-btn":
+            try:
+                result = backend.export_cif(scene_id=backend.active_scene_id())
+            except Exception as exc:
+                message, class_name = _status_message(f"CIF export failed: {exc}", "error")
+                return message, class_name, no_update, no_update, False, 0
+            message, class_name = _status_message(
+                f"CIF export ready: {result['filename']}", "success"
+            )
+            return (
+                message,
+                class_name,
+                no_update,
+                dcc.send_string(result["content"], result["filename"]),
+                False,
+                0,
+            )
         if triggered == "export-btn":
             state = backend.get_state()
             scene_label = state.get("scene_label") or "mattervis"
@@ -831,7 +850,7 @@ def register_view_callbacks(app, backend):
                 buf.seek(0)
                 filename = f"{scene_label.replace(os.sep, '_')}_ortep.pdf"
                 message, class_name = _status_message(f"Export ready: {filename}", "success")
-                return message, class_name, dcc.send_bytes(buf.getvalue, filename), False, 0
+                return message, class_name, dcc.send_bytes(buf.getvalue, filename), no_update, False, 0
 
             # Default: PNG export via Plotly
             from ..capabilities import resolve_requirements
@@ -846,13 +865,17 @@ def register_view_callbacks(app, backend):
                     f"{resolution.install_command}",
                     "error",
                 )
-                return message, class_name, no_update, False, 0
+                return message, class_name, no_update, no_update, False, 0
             filename = f"{scene_label.replace(os.sep, '_')}.png"
             message, class_name = _status_message(f"Export ready: {filename}", "success")
-            return message, class_name, dcc.send_bytes(lambda buffer: buffer.write(png), filename), False, 0
-        result = backend.save_preset()
+            return message, class_name, dcc.send_bytes(lambda buffer: buffer.write(png), filename), no_update, False, 0
+        try:
+            result = backend.save_preset()
+        except Exception as exc:
+            message, class_name = _status_message(f"Save preset failed: {exc}", "error")
+            return message, class_name, no_update, no_update, False, 0
         message, class_name = _status_message(f"Saved preset: {result['path']}", "success")
-        return message, class_name, no_update, False, 0
+        return message, class_name, no_update, no_update, False, 0
 
     @app.callback(
         Output("status-banner", "children", allow_duplicate=True),

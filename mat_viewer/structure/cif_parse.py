@@ -2,11 +2,110 @@
 
 from __future__ import annotations
 
+import re
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+# CIF ``_atom_site_type_symbol`` values are often written as ionic/species
+# labels (``Fe3+``, ``Fe+3``, ``O2-`` or ``Cl-``).  ASE, which MolCrysKit
+# uses for its canonical crystal object, accepts element symbols only.  Keep
+# charge notation out of the parser input while retaining the original path
+# and all other CIF metadata.  Charge/oxidation semantics are owned by
+# MolCrysKit's chemistry layer; this adapter only makes the element token
+# syntactically valid for its public CIF reader.
+_CHARGED_ELEMENT = re.compile(
+    r"^(?P<element>[A-Z][a-z]?)(?:(?P<magnitude_before>\d+)(?P<sign_before>[+-])|"
+    r"(?P<sign_after>[+-])(?P<magnitude_after>\d*))$"
+)
+
+
+def _normalise_element_symbol(value: str) -> str:
+    """Return an ASE-compatible element symbol for a CIF type token."""
+    token = str(value).strip()
+    match = _CHARGED_ELEMENT.fullmatch(token)
+    return match.group("element") if match else token
+
+
+def _normalise_cif_text(text: str) -> str:
+    """Strip ionic charge suffixes from atom-site type-symbol loop values.
+
+    The normaliser intentionally operates only on loops containing
+    ``_atom_site_type_symbol``.  A global replacement would corrupt formula
+    metadata such as ``_chemical_formula_moiety 'Fe3+ O2-'``.  Most CIF
+    writers put one atom row on each line; rows that use multiline values are
+    left untouched and continue through MolCrysKit unchanged.
+    """
+    lines = text.splitlines(keepends=True)
+    output = list(lines)
+    index = 0
+    while index < len(lines):
+        if lines[index].strip().lower() != "loop_":
+            index += 1
+            continue
+        header_start = index + 1
+        headers: list[str] = []
+        cursor = header_start
+        while cursor < len(lines):
+            stripped = lines[cursor].strip()
+            if not stripped or stripped.startswith("#"):
+                cursor += 1
+                continue
+            if not stripped.startswith("_"):
+                break
+            # Header names do not contain whitespace; a trailing comment is
+            # not part of the name.
+            headers.append(stripped.split()[0].lower())
+            cursor += 1
+        type_index = next(
+            (pos for pos, header in enumerate(headers)
+             if header == "_atom_site_type_symbol"),
+            None,
+        )
+        if type_index is None:
+            index = cursor
+            continue
+        data_index = cursor
+        width = len(headers)
+        while data_index < len(lines):
+            raw = lines[data_index]
+            stripped = raw.strip()
+            if not stripped:
+                data_index += 1
+                continue
+            if stripped.lower() == "loop_" or stripped.startswith("_"):
+                break
+            if stripped.startswith(";"):
+                # CIF multiline text values cannot be safely rewritten using
+                # a line-local token index.
+                data_index += 1
+                continue
+            try:
+                tokens = shlex.split(stripped, comments=False, posix=True)
+            except ValueError:
+                data_index += 1
+                continue
+            if len(tokens) == width and type_index < len(tokens):
+                symbol = _normalise_element_symbol(tokens[type_index])
+                if symbol != tokens[type_index]:
+                    # Re-emit this row as valid CIF tokens.  Quoting values
+                    # containing spaces is required; ordinary atom rows are
+                    # unchanged apart from the charged symbol itself.
+                    rendered: list[str] = []
+                    for token in tokens:
+                        if any(ch.isspace() for ch in token) or token == "#":
+                            rendered.append("'" + token.replace("'", "''") + "'")
+                        else:
+                            rendered.append(token)
+                    rendered[type_index] = symbol
+                    newline = "\n" if raw.endswith("\n") else ""
+                    output[data_index] = " ".join(rendered) + newline
+            data_index += 1
+        index = data_index
+    return "".join(output)
 
 
 @dataclass(frozen=True)
@@ -141,7 +240,18 @@ def load_cif(path: str | Path) -> ParsedCif:
     if not source.is_file():
         raise FileNotFoundError(f"CIF file not found: {source}")
     MolecularCrystal = _require_contracts()
-    crystal = MolecularCrystal.from_cif(str(source), use_asu_first=False)
+    # ``MolecularCrystal.from_cif`` accepts paths only.  Use MolCrysKit's
+    # public text reader when an atom-site type token carries oxidation
+    # notation; this keeps the original upload untouched while avoiding ASE's
+    # ``KeyError('Fe3+')``.  The normal path remains the direct fast path.
+    text = source.read_text(encoding="utf-8")
+    normalised = _normalise_cif_text(text)
+    if normalised == text:
+        crystal = MolecularCrystal.from_cif(str(source), use_asu_first=False)
+    else:
+        from molcrys_kit.io.cif import read_mol_crystal
+
+        crystal = read_mol_crystal(cif_text=normalised)
     matrix = np.asarray(crystal.lattice, dtype=float)
     return ParsedCif(
         path=source,

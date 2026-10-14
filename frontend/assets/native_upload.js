@@ -105,6 +105,57 @@
    */
   let activeSceneWait = null;
 
+  function delay(milliseconds) {
+    return new Promise(function (resolve) {
+      window.setTimeout(resolve, milliseconds);
+    });
+  }
+
+  /* The multipart POST returns as soon as the placeholder tab is registered.
+   * Poll its job id until the real bundle is installed.  A failed MolCrysKit
+   * parse must reject the upload here; otherwise the old websocket-only wait
+   * reported "Uploaded" forever while the tab contained no atoms. */
+  async function waitForUpload(meta, file, index, total) {
+    if (!meta || meta.status !== "pending" || !meta.job_id) {
+      if (meta && meta.status === "error") {
+        throw new Error(meta.error || ("Unable to parse " + file.name));
+      }
+      return meta;
+    }
+    const deadline = Date.now() + 120000;
+    while (Date.now() < deadline) {
+      let response;
+      let payload;
+      try {
+        response = await fetch(
+          "/api/v2/upload/" + encodeURIComponent(meta.job_id),
+          { cache: "no-store" }
+        );
+        payload = await response.json();
+      } catch (err) {
+        throw new Error(
+          "Could not check upload status for " + file.name + ": " +
+          (err && err.message ? err.message : String(err))
+        );
+      }
+      if (!response.ok) {
+        throw new Error(payload && payload.error ? payload.error : "Upload status unavailable");
+      }
+      if (payload.status === "error") {
+        throw new Error(payload.error || ("Unable to parse " + file.name));
+      }
+      if (payload.status === "ready" || payload.status === "complete" || payload.status === "success") {
+        return Object.assign({}, meta, payload, { status: "ready" });
+      }
+      setStatus(
+        "Processing " + file.name + " (" + index + "/" + total + ")...",
+        "info"
+      );
+      await delay(350);
+    }
+    throw new Error("Timed out while processing " + file.name);
+  }
+
   function waitForSceneAndSwitch(uploadedNames) {
     if (!uploadedNames || !uploadedNames.length) return;
     if (activeSceneWait && typeof activeSceneWait.close === "function") {
@@ -179,7 +230,7 @@
           payload = {};
         }
         if (xhr.status >= 200 && xhr.status < 300) {
-          resolve(payload);
+          waitForUpload(payload, file, index, total).then(resolve).catch(reject);
           return;
         }
         reject(new Error(payload.error || ("Upload failed with HTTP " + xhr.status)));

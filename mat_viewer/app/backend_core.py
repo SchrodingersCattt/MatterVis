@@ -50,6 +50,13 @@ class _CoreBackendMixin:
         self.server_started_at = time.time()
         self.catalog = get_default_catalog(root_dir=self.root_dir)
         self._lock = threading.Lock()
+        # Upload requests reserve their digest/name before the background
+        # parser starts.  Keeping these maps on the backend makes concurrent
+        # multipart requests idempotent and gives the browser a durable way to
+        # observe parser failures instead of waiting forever on a blank tab.
+        self._upload_jobs: dict[str, dict[str, Any]] = {}
+        self._upload_reservations: dict[str, dict[str, Any]] = {}
+        self._upload_reserved_names: set[str] = set()
         self._bundle_lock = threading.Lock()
         default_names = [
             name for name in DEFAULT_CATALOG.keys() if name in self.catalog
@@ -166,24 +173,61 @@ class _CoreBackendMixin:
             default_species = [species_present[0]["formula"]]
         else:
             default_species = []
+        # Binary ionic cells (for example NaCl and CsCl) are represented by
+        # coordination contacts in MolCrysKit.  The contacts remain available
+        # to topology, while the default view uses a unit-cell/ball
+        # presentation so the crystal is not mistaken for a diatomic molecule.
+        ionic = bool(scene.get("is_ionic_solid", False))
+        default_display_mode = style.get(
+            "display_mode", scene.get("display_mode", "formula_unit")
+        )
+        if (
+            ionic
+            and "display_mode" not in entry_style
+            and str(style.get("display_mode", "formula_unit")) == "formula_unit"
+        ):
+            default_display_mode = "unit_cell"
+        default_style = str(style.get("style", "ball_stick"))
+        if (
+            ionic
+            and "style" not in entry_style
+            and str(style.get("style", "ball_stick")) == "ball_stick"
+        ):
+            default_style = "ball"
+        display_options = _display_options_from_style(style)
+        if ionic and "unit_cell_box" not in display_options:
+            display_options.append("unit_cell_box")
+        ionic_specs = []
+        if ionic:
+            cations = list(scene.get("ionic_cation_elements") or [])
+            anions = list(scene.get("ionic_anion_elements") or [])
+            if cations and anions:
+                ionic_specs = [
+                    {
+                        "id": "ionic-coordination",
+                        "name": f"{cations[0]}–{anions[0]} coordination",
+                        "center_species": cations[0],
+                        "ligand_species": anions[0],
+                        "level": "atom",
+                        "enabled": True,
+                    }
+                ]
         return {
             "structure": structure,
             "atom_scale": float(style["atom_scale"]),
             "bond_radius": float(style["bond_radius"]),
             "minor_opacity": float(style["minor_opacity"]),
             "material": str(style.get("material", "mesh")),
-            "style": str(style.get("style", "ball_stick")),
+            "style": default_style,
             "disorder": str(style.get("disorder", "opacity")),
             "ortep_mode": str(style.get("ortep_mode", "ortep_axes")),
             "axis_scale": float(style["axis_scale"]),
-            "display_options": _display_options_from_style(style),
+            "display_options": display_options,
             "label_mode": str(style.get("label_mode", "unique_sites")),
-            "display_mode": style.get(
-                "display_mode", scene.get("display_mode", "formula_unit")
-            ),
+            "display_mode": default_display_mode,
             "topology_species_keys": list(default_species),
             "topology_site_index": None,
-            "topology_enabled": False,
+            "topology_enabled": bool(ionic_specs),
             "topology_hull_color": str(style.get("topology_hull_color", "#7C5CBF")),
             # ``polyhedron_specs`` is the new (Phase 1) per-scene named-row
             # data model: each entry is {id, name, center_species,
@@ -191,7 +235,7 @@ class _CoreBackendMixin:
             # legacy ``topology_species_keys`` + shared ``topology_hull_color``
             # behaviour (auto-derived neighbour types). See
             # ``docs/agents/polyhedron_api.md`` for the API surface.
-            "polyhedron_specs": [],
+            "polyhedron_specs": ionic_specs,
             # Phase 2: per-scene atom-group rules. Each entry is
             # {id, name, selector, color, color_light, visible, opacity,
             # material, style}. Selectors are ANDed across keys; the
@@ -763,12 +807,27 @@ class _CoreBackendMixin:
         ]
 
     def _drop_placeholder(self) -> None:
-        if (
-            PLACEHOLDER_STRUCTURE in self.structure_names
-            and len(self.structure_names) == 1
-        ):
-            self.structure_names = []
+        # The placeholder is a bootstrap scene as well as a catalog entry.
+        # Removing only the bundle left a stale blank tab behind after the
+        # first upload (and made later tab labels appear to be lost).  Drop it
+        # whenever a real structure is present, while preserving it when the
+        # viewer is genuinely empty.
+        has_real_structure = any(
+            name != PLACEHOLDER_STRUCTURE for name in self.structure_names
+        )
+        if not has_real_structure:
+            return
+        self.structure_names = [
+            name for name in self.structure_names if name != PLACEHOLDER_STRUCTURE
+        ]
         self.bundles.pop(PLACEHOLDER_STRUCTURE, None)
+        for scene_id, scene in list(self.scene_store.scenes.items()):
+            if scene.structure_name == PLACEHOLDER_STRUCTURE:
+                self.scene_store.remove(scene_id, save=False)
+                self._render_revisions.pop(str(scene_id), None)
+        if self.scene_store.active_id:
+            self.current_state = self.scene_state(self.scene_store.active_id)
+        self._request_scene_store_save()
 
     def get_bundle(self, name: str) -> LoadedCrystal:
         if name in self.bundles:

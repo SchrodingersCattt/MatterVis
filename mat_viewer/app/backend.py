@@ -51,6 +51,12 @@ class ViewerBackend(
         if threading.current_thread() is not self._persist_thread:
             self._persist_thread.join(timeout=_PERSIST_THREAD_JOIN_TIMEOUT_SECONDS)
         self._render_worker.shutdown(wait=wait)
+        load_executor = getattr(self, "_load_executor", None)
+        if load_executor is not None:
+            try:
+                load_executor.shutdown(wait=wait, cancel_futures=not wait)
+            except TypeError:  # pragma: no cover - Python < 3.9 compatibility
+                load_executor.shutdown(wait=wait)
         self.flush_scene_store()
         atexit.unregister(self._atexit_flush_callback)
 

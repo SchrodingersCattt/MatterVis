@@ -28,6 +28,80 @@ def bonds_conflict(ai, aj):
 
 _MAX_CANDIDATE_CUTOFF = 12.0
 
+# A binary alkali/metal halide is represented by a coordination graph in
+# MolCrysKit so that the same graph can drive periodic shells and polyhedra.
+# Those contacts are not covalent bonds, however, and drawing every contact
+# as a stick makes a NaCl/CsCl unit cell look like a molecule.  Keep this
+# small chemistry predicate here with the bond policy so scene assembly and
+# transform rebuilds apply the same rule.  It deliberately requires a
+# *binary* composition; metal-halide bonds in a ligand complex (or in a
+# covalent polyhalide) stay visible.
+_IONIC_HALIDES = frozenset({"F", "Cl", "Br", "I"})
+# Restrict the display-only suppression to salts whose cation is normally
+# presented as an ionic lattice site.  Transition-metal halides and Pb--Cl
+# coordination graphs can be molecular/coordination compounds; hiding those
+# sticks would discard useful structural information.
+_IONIC_CATIONS = frozenset(
+    {
+        "Li", "Na", "K", "Rb", "Cs", "Fr",
+        "Be", "Mg", "Ca", "Sr", "Ba", "Ra",
+    }
+)
+
+
+def _is_metal_element(symbol: object) -> bool:
+    """Return MolCrysKit's metal classification without importing it eagerly."""
+    try:
+        from molcrys_kit.constants import is_metal_element
+
+        return bool(is_metal_element(str(symbol)))
+    except (ImportError, TypeError, ValueError):
+        return False
+
+
+def ionic_coordinate_source_pairs(atoms, bond_records) -> set[tuple[int, int]]:
+    """Return source-index pairs that are ionic coordination contacts.
+
+    MolCrysKit intentionally includes metal--halide contacts in its signed
+    ``BondRecord`` graph because the graph is also the input to packing-shell
+    analysis.  MatterVis's ball-and-stick view should not render those
+    contacts as covalent rods for a binary ionic solid.  The returned set is
+    empty for mixed ligand structures, non-binary compositions, or records
+    containing any non metal--halide edge, so covalent/coordination examples
+    keep their normal sticks.
+    """
+    if not atoms or not bond_records:
+        return set()
+    elements = {str(atom.get("elem") or "").strip() for atom in atoms}
+    elements.discard("")
+    if len(elements) != 2:
+        return set()
+    halides = elements & _IONIC_HALIDES
+    metals = {
+        element
+        for element in elements
+        if element in _IONIC_CATIONS and _is_metal_element(element)
+    }
+    if len(halides) != 1 or len(metals) != 1:
+        return set()
+    metal = next(iter(metals))
+    halide = next(iter(halides))
+    pairs: set[tuple[int, int]] = set()
+    for record in bond_records:
+        try:
+            left = int(record["left"])
+            right = int(record["right"])
+        except (KeyError, TypeError, ValueError):
+            return set()
+        if not (0 <= left < len(atoms) and 0 <= right < len(atoms)):
+            return set()
+        left_element = str(atoms[left].get("elem") or "")
+        right_element = str(atoms[right].get("elem") or "")
+        if {left_element, right_element} != {metal, halide}:
+            return set()
+        pairs.add(tuple(sorted((left, right))))
+    return pairs
+
 
 def validate_bond_scale(value: float) -> float:
     """Return a finite, positive bond-perception scale."""

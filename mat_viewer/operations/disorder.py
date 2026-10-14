@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from functools import lru_cache
-from typing import Any, Iterable
-
+from typing import Any
 
 _VALID_METHODS = {"optimal", "enumerate", "random"}
 
@@ -45,13 +45,29 @@ def _mck_replicas(
         generate_ordered_replicas_from_disordered_sites,
     )
 
-    replicas = generate_ordered_replicas_from_disordered_sites(
-        cif_path,
-        generate_count=count,
-        method=method,
-        random_seed=seed,
-        return_kept_indices=True,
-    )
+    try:
+        replicas = generate_ordered_replicas_from_disordered_sites(
+            cif_path,
+            generate_count=count,
+            method=method,
+            random_seed=seed,
+            return_kept_indices=True,
+        )
+    except Exception:
+        # The loader accepts charged type symbols (Fe3+, O2-, …) by feeding
+        # normalised CIF text through MolCrysKit's public in-memory reader.
+        # Use the same canonical crystal for the operation so Resolve does
+        # not turn a valid uploaded CIF into an empty result.
+        from ..structure.cif_parse import load_cif
+
+        parsed = load_cif(cif_path)
+        replicas = generate_ordered_replicas_from_disordered_sites(
+            generate_count=count,
+            method=method,
+            random_seed=seed,
+            return_kept_indices=True,
+            crystal=parsed.crystal,
+        )
     out: list[tuple[int, ...]] = []
     for item in replicas or []:
         if not isinstance(item, tuple) or len(item) != 2:

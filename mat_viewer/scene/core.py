@@ -10,7 +10,7 @@ import numpy as np
 from molcrys_kit.utils.geometry import frac_to_cart  # noqa: F401
 
 from .. import perf_log
-from ..structure.bonds import bonds_conflict
+from ..structure.bonds import bonds_conflict, ionic_coordinate_source_pairs
 from ..structure.cif_parse import load_cif, parse_asu
 from ..structure import molcrys_bridge
 from ..style.disorder import (
@@ -688,6 +688,15 @@ def build_scene_from_atoms(
                     copied.setdefault(key, copy.deepcopy(source[key]))
             canonical_unwrapped_atoms.append(copied)
     canonical_records = [dict(record) for record in molcrys_analysis.bond_records]
+    # MolCrysKit's signed graph intentionally includes metal--halide
+    # coordination contacts so topology/polyhedron analysis can reuse the
+    # same periodic graph.  They are not covalent sticks in a binary ionic
+    # solid (NaCl/CsCl); retain the canonical records but suppress those
+    # contacts from the visible ball-and-stick bond list.
+    ionic_source_pairs = ionic_coordinate_source_pairs(
+        source_atoms,
+        canonical_records,
+    )
     periodic_ranks = _periodic_component_ranks(
         len(source_atoms),
         canonical_records,
@@ -830,9 +839,22 @@ def build_scene_from_atoms(
     bonds = []
     conflict_drops = 0
     render_length_drops = 0
+    ionic_bond_drops = 0
     for i, j in bond_pairs:
         ai = draw_atoms[i]
         aj = draw_atoms[j]
+        source_pair = tuple(
+            sorted(
+                (
+                    int(ai.get("_source_index", -1)),
+                    int(aj.get("_source_index", -1)),
+                )
+            )
+        )
+        if source_pair in ionic_source_pairs:
+            if telemetry_enabled:
+                ionic_bond_drops += 1
+            continue
         if bonds_conflict(ai, aj):
             if telemetry_enabled:
                 conflict_drops += 1
@@ -881,6 +903,7 @@ def build_scene_from_atoms(
                 "rendered_bonds": len(bonds),
                 "conflict_drops": conflict_drops,
                 "render_length_drops": render_length_drops,
+                "ionic_bond_drops": ionic_bond_drops,
                 "duration_ms": (time.perf_counter() - bond_started) * 1000.0,
                 **canonical_stats,
             },
@@ -928,6 +951,27 @@ def build_scene_from_atoms(
         "bonded_image_replica_count": bonded_image_replica_count,
         "framework_context_replica_count": framework_context_replica_count,
         "bond_scale": bond_scale,
+        "is_ionic_solid": bool(ionic_source_pairs),
+        "ionic_cation_elements": sorted(
+            {
+                str(source_atoms[index].get("elem"))
+                for pair in ionic_source_pairs
+                for index in pair
+                if str(source_atoms[index].get("elem")) not in {"F", "Cl", "Br", "I"}
+            }
+        ),
+        "ionic_anion_elements": sorted(
+            {
+                str(source_atoms[index].get("elem"))
+                for pair in ionic_source_pairs
+                for index in pair
+                if str(source_atoms[index].get("elem")) in {"F", "Cl", "Br", "I"}
+            }
+        ),
+        "ionic_coordinate_source_pairs": [
+            list(pair) for pair in sorted(ionic_source_pairs)
+        ],
+        "suppressed_ionic_bond_count": len(ionic_source_pairs),
         "bond_thresholds": copy.deepcopy(bond_thresholds),
         "projected_axes": projected_axes,
         "axis_labels": axis_labels,
