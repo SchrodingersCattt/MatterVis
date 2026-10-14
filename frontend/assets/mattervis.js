@@ -142,6 +142,10 @@
     const metadata = fastViewMetadata();
     return metadata&&metadata.scene_id ? String(metadata.scene_id) : null;
   }
+  // The shared view submitter runs in a separate asset and needs the same
+  // optimistic tab intent while Plotly is still displaying the previous
+  // scene.  Upload completion uses this hook before Dash paints the new tab.
+  window.MatterVisCurrentScene = function () { return currentSceneId(); };
   function currentRenderRevision() {
     const m = fastViewMetadata();
     const sceneId = currentSceneId();

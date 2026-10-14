@@ -406,7 +406,9 @@ def _camera_axis_projections(
     if M.ndim != 2 or M.shape[0] < 3 or M.shape[1] != 3:
         return None
 
-    resolved_viewport = viewport or resolve_viewport(scene, style)
+    if viewport is None:
+        viewport = resolve_viewport(scene, style)
+    resolved_viewport = viewport
     cube_scale = np.asarray(resolved_viewport.cube_scale, dtype=float)
     M_cube = M[:3] / cube_scale[None, :]
     norms = np.linalg.norm(M_cube, axis=1)
@@ -467,7 +469,9 @@ def _axis_cube_scale(
     new rendering code should retain the full :class:`ViewportSpec` returned
     by :func:`resolve_viewport`.
     """
-    resolved_viewport = viewport or resolve_viewport(scene, style)
+    if viewport is None:
+        viewport = resolve_viewport(scene, style)
+    resolved_viewport = viewport
     return np.asarray(resolved_viewport.cube_scale, dtype=float)
 
 
