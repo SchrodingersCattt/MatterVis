@@ -130,3 +130,52 @@ def test_upload_sync_reads_server_active_scene_after_stale_tab(tmp_path, monkeyp
     finally:
         backend.close()
 
+
+def test_capture_state_ignores_batched_tab_refresh_values(tmp_path, monkeypatch):
+    """A tab event batched with control refreshes must not write stale controls."""
+    backend = ViewerBackend(
+        preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path)
+    )
+    try:
+        scene_id = backend.active_scene_id()
+        registry = _CallbackRegistry()
+        callbacks_state.register_state_callbacks(registry, backend)
+        monkeypatch.setattr(
+            callbacks_state,
+            "callback_context",
+            SimpleNamespace(
+                triggered=[
+                    {"prop_id": "display-mode-selector.value"},
+                    {"prop_id": "scene-tabs.value"},
+                ]
+            ),
+        )
+        result = registry.callbacks["capture_state"](
+            scene_id,
+            "formula_unit",
+            ["axes", "hydrogens"],
+            1.0,
+            0.15,
+            0.35,
+            "mesh",
+            "ball_stick",
+            "opacity",
+            "ortep_solid",
+            0.14,
+            None,
+            [],
+            [],
+            "auto",
+            None,
+            "viridis",
+            "auto",
+            None,
+            None,
+            None,
+            "#BDBDBD",
+            ["show"],
+        )
+        assert result is no_update
+    finally:
+        backend.close()
+

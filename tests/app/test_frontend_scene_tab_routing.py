@@ -209,6 +209,43 @@ vm.createContext(sandbox);
     assert result.returncode == 0, result.stderr
 
 
+def test_user_tab_click_flushes_frame_queued_before_selected_class_paint():
+    """A click must replay a frame received while the previous tab is active."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    program = r"""
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const prefix=source.slice(0,source.indexOf('  // ── WS figure fast lane'));
+const listeners={};
+const graph={querySelector:()=>({})};
+const tabs={dataset:{},querySelector:()=>({id:'scene-tab-old'}),addEventListener:(kind,fn)=>{listeners[kind]=fn;}};
+let applied=0;
+const sandbox={console,Date,JSON,Number,String,Object,Array,Promise,setTimeout,clearTimeout,
+  requestAnimationFrame:()=>{},MutationObserver:function(){this.observe=()=>{};},
+  window:{Plotly:{react:()=>{applied+=1;return Promise.resolve();}},WebSocket:null,
+    location:{protocol:'http:',host:'localhost'},dash_clientside:{set_props:()=>true}},
+  document:{getElementById:id=>id==='scene-tabs'?tabs:(id==='crystal-graph'?graph:null),
+    querySelectorAll:()=>[],addEventListener:()=>{}}};
+vm.createContext(sandbox);
+vm.runInContext(prefix+`window.testScene={bindSceneTabIntent,pendingFigureByScene};})();`,sandbox);
+const api=sandbox.window.testScene;
+api.bindSceneTabIntent();
+api.pendingFigureByScene.new_scene={figure:{data:[{}],layout:{}},isCurrent:()=>true};
+listeners.click({target:{closest:()=>({id:'scene-tab-new_scene'})}});
+assert.equal(applied,1,'queued frame was not replayed by the user tab click');
+"""
+    result = subprocess.run(
+        [node, "-e", program, str(MATTERVIS_JS)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def test_plotly_apply_gate_rejects_stale_dash_figures_and_patches():
     source = MATTERVIS_JS.read_text(encoding="utf-8")
 

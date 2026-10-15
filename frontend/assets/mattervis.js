@@ -414,6 +414,12 @@
     root.addEventListener("mousedown", function (event) { noteSceneTabIntent(event.target); }, true);
     root.addEventListener("click", function (event) {
       noteSceneTabIntent(event.target);
+      // A figure can arrive between pointerdown and Dash applying the tab
+      // value. It is then parked in ``pendingFigureByScene`` because the old
+      // tab is still selected. The click is the handoff barrier for that
+      // frame; replay it immediately instead of waiting for an unrelated DOM
+      // child-list mutation or a later tab click.
+      flushQueuedSceneFigure();
       // Upload progress is global UI chrome. Once the user deliberately
       // changes scenes, the previous upload result must not look like a
       // status for the newly selected structure.

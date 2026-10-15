@@ -477,12 +477,17 @@ def register_state_callbacks(app, backend):
         property_nan_color,
         property_colorbar,
     ):
-        triggered = (
-            callback_context.triggered[0]["prop_id"].split(".")[0]
-            if callback_context.triggered
-            else None
-        )
-        if triggered == "scene-tabs":
+        triggered_props = [
+            item.get("prop_id", "").split(".")[0]
+            for item in callback_context.triggered
+            if item.get("prop_id")
+        ]
+        triggered = triggered_props[0] if triggered_props else None
+        # A tab change and the control refresh it causes can arrive in one
+        # Dash callback request. The tab is authoritative for that batch;
+        # never persist the previous scene's control values into the newly
+        # selected scene.
+        if "scene-tabs" in triggered_props:
             return no_update
         if scene_id and scene_id not in backend.scene_store.scenes:
             return no_update
