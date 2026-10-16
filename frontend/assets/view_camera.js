@@ -469,11 +469,6 @@
     if (Number.isFinite(requestedRevision)) {
       var currentUi = gd.layout && gd.layout.scene && gd.layout.scene.uirevision;
       patch["scene.uirevision"] = String(currentUi || "scene") + "#camera" + String(requestedRevision);
-      /* Command updates own the camera clock, so send one complete camera
-       * object as well as the dotted compatibility keys. Plotly.gl3d can
-       * otherwise preserve the internal eye when only nested keys arrive
-       * under a changed uirevision (notably after an orthographic align). */
-      patch["scene.camera"] = clone(snapshot);
     }
     if (restoresViewport(options)) {
       restoreCanonicalViewport(gd);
