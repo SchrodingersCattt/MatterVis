@@ -122,11 +122,14 @@ def test_view_updates_marks_closed_scene_terminal():
     routes = {}
 
     class V2:
-        def get(self, path):
+        def _register(self, path):
             def register(fn):
                 routes[path] = fn
                 return fn
             return register
+
+        get = _register
+        post = _register
 
     v2_state.register_state_routes(V2(), Backend())
     app = Flask(__name__)
