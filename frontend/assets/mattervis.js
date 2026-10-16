@@ -924,12 +924,14 @@
       catch (_) { window.__mattervisFigureWsDisabled = true; startHttpFallback(); }
     });
     ws.addEventListener("message",function(e){
-      /* Only stop the journal poll after a real protocol message. Some
-       * Werkzeug/proxy stacks report ``open`` for a plain HTTP 200 response
-       * and then never deliver frames; keeping fallback alive in that case
-       * is what carries camera/display updates to the graph. */
-      stopHttpFallback();
       var p; try { p=JSON.parse(e.data||"{}"); } catch(_){return;}
+      /* Only stop the journal poll after a real protocol envelope. Some
+       * Werkzeug/proxy stacks report ``open`` and even emit a text/JSON
+       * handshake for a plain HTTP 200 response; keeping fallback alive in
+       * that case is what carries camera/display updates to the graph. */
+      if (!p || typeof p !== "object" ||
+          (!p.type && !p.figure && p.figure_seq === undefined && p.seq === undefined)) return;
+      stopHttpFallback();
       handleFigurePayload(p);
     });
     ws.addEventListener("error",function(){
