@@ -124,7 +124,13 @@ def register_state_callbacks(app, backend):
         # easily hit ~1s on dense unit cells. Short-circuit those.
         if scene_id and scene_id not in backend.scene_store.scenes:
             return no_update, no_update
-        active_state = backend.get_state(scene_id)
+        try:
+            active_state = backend.get_state(scene_id)
+        except KeyError:
+            # The tab may have been closed after Dash captured its value.
+            # Let the next explicit tab event refresh the controls instead of
+            # failing the callback request with a 500.
+            return no_update, no_update
         # Derive the key from the complete active state so a scene whose
         # structure or transform pipeline changed cannot reuse old options.
         cache_state = dict(active_state)
@@ -285,7 +291,7 @@ def register_state_callbacks(app, backend):
         * **Explicit events** (``scene-event-store``: CRUD, rename, close;
           ``native-upload-sync``: a fresh CIF upload) -- the server is
           authoritative for which tab should be active right after the
-          event. Rebuild ``children``, ``close-row`` AND write
+          event. Rebuild ``children`` and write
           ``scene-tabs.value`` to the new ``backend.active_scene_id()`` so
           the UI lands on the just-created / -duplicated scene.
 
@@ -305,7 +311,7 @@ def register_state_callbacks(app, backend):
         active_id = backend.active_scene_id() or options[0]["id"]
         # Explicit event paths (CRUD / upload) own the active id and are the
         # only paths allowed to rebuild the tab subtree.
-        return backend.scene_tabs(), backend.scene_close_buttons(), active_id
+        return backend.scene_tabs(), [], active_id
 
     @app.callback(
         Output("status-banner", "children", allow_duplicate=True),
@@ -360,12 +366,20 @@ def register_state_callbacks(app, backend):
         Input("scene-tabs", "value"),
         prevent_initial_call=True,
     )
-    def sync_agent_state(
-        _n_intervals,
-        _native_upload_sync,
-        _display_defaults_clicks,
-        scene_id,
-    ):
+    def sync_agent_state(_n_intervals, _native_upload_sync, *args):
+        # Keep the callback callable with the historical three-argument
+        # signature for direct integrations/tests while Dash supplies the
+        # optional Restore Defaults click value as a fourth argument.
+        if len(args) == 1:
+            _display_defaults_clicks = None
+            scene_id = args[0]
+        elif len(args) == 2:
+            _display_defaults_clicks, scene_id = args
+        else:
+            raise TypeError(
+                "sync_agent_state expects (interval, upload, scene_id) or "
+                "(interval, upload, defaults_clicks, scene_id)"
+            )
         triggered = (
             callback_context.triggered[0]["prop_id"].split(".")[0]
             if callback_context.triggered
@@ -380,20 +394,39 @@ def register_state_callbacks(app, backend):
         if triggered == "scene-tabs":
             if not scene_id or scene_id not in backend.scene_store.scenes:
                 return (no_update,) * n_outputs
-            backend.apply_intent(
-                {
-                    "type": "set_active_scene",
-                    "scene_id": scene_id,
-                    "payload": {"scene_id": scene_id},
-                }
-            )
+            # The tab value is already the browser's confirmed scene intent.
+            # Do not arm ``pending_state`` here: a subsequent poll would
+            # replay the same scene into the controls and race the figure
+            # update store while the tab switch is still settling.
+            backend.set_active_scene(scene_id, broadcast=False)
             state = backend.get_state(scene_id)
             # The confirmed state drives the view-update submitter. Do not
             # bypass the cache owner's live camera/uirevision refresh here.
             seq = getattr(sync_agent_state, "_switch_seq", 0) + 1
             sync_agent_state._switch_seq = seq
             return (*scene_control_outputs(state), {"seq": seq, "scene_id": scene_id})
-        state = backend.pop_pending_state()
+        if triggered == "native-upload-sync":
+            # Upload completion is an explicit synchronization barrier. Drain
+            # any worker snapshot and read the server's active scene after the
+            # bundle/default-state transaction has committed. Using the
+            # browser's previous tab value here briefly paints the old
+            # disorder banner and lets its figure win the tab switch race.
+            backend.pop_pending_state()
+            state = backend.get_state()
+        else:
+            state = backend.pop_pending_state()
+        # A poll can race a tab switch or an upload.  ``pending_state`` is
+        # tagged with the scene that produced it; never apply that snapshot
+        # to another selected tab, otherwise labels and display controls from
+        # one structure briefly overwrite the active structure.  Uploads use
+        # the server's active scene above because the browser may still report
+        # the previous tab while the new tab is being inserted.
+        if (
+            state
+            and state.get("scene_id") not in (None, scene_id)
+            and triggered != "native-upload-sync"
+        ):
+            return (no_update,) * n_outputs
         # Upload completion emits ``native-upload-sync`` from the browser.
         # Depending on callback ordering, ``pending_state`` may already have
         # been consumed by a near-simultaneous poll tick. Native-upload is a
@@ -470,12 +503,17 @@ def register_state_callbacks(app, backend):
         property_nan_color,
         property_colorbar,
     ):
-        triggered = (
-            callback_context.triggered[0]["prop_id"].split(".")[0]
-            if callback_context.triggered
-            else None
-        )
-        if triggered == "scene-tabs":
+        triggered_props = [
+            item.get("prop_id", "").split(".")[0]
+            for item in callback_context.triggered
+            if item.get("prop_id")
+        ]
+        triggered = triggered_props[0] if triggered_props else None
+        # A tab change and the control refresh it causes can arrive in one
+        # Dash callback request. The tab is authoritative for that batch;
+        # never persist the previous scene's control values into the newly
+        # selected scene.
+        if "scene-tabs" in triggered_props:
             return no_update
         if scene_id and scene_id not in backend.scene_store.scenes:
             return no_update

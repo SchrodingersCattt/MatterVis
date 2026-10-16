@@ -94,3 +94,47 @@ assert.equal(calls.length, 0);
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_upload_scene_frame_is_allowed_before_plotly_layout_catches_up():
+    """A selected upload tab may precede Plotly's previous scene metadata."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "view_updates.js"
+    program = r"""
+const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+const calls = [];
+// Plotly still owns the previous scene when the upload's completed frame
+// arrives, but the tab intent has already selected the uploaded scene.
+const gd = {layout: {meta: {mattervis_render: {scene_id: 'scene-brucite', geometry_version: 8, display_version: 8, camera_version: 0}}}, data: []};
+const sandbox = {
+  console, Promise, Number, String, Object, Array,
+  window: {
+    MatterVisCurrentScene: () => 'scene-hkust',
+    MatterVisViewCamera: {graph: () => gd},
+    MatterVisViewCompass: {setEnabled: () => true},
+    Plotly: {react: (_gd, data, layout) => {calls.push({data, layout}); return Promise.resolve();}},
+  },
+};
+vm.createContext(sandbox);
+vm.runInContext(source, sandbox);
+const submit = sandbox.window.MatterVisViewUpdates.submit;
+(async () => {
+  const figure = {
+    type: 'figure', scene_id: 'scene-hkust', update_kind: 'geometry',
+    geometry_version: 1, display_version: 1, camera_version: 0,
+    figure: {data: [{type: 'scatter3d'}], layout: {scene: {}, meta: {mattervis_render: {scene_id: 'scene-hkust', render_revision: 1}}}},
+  };
+  await submit(figure);
+  assert.equal(calls.length, 1, 'selected upload scene frame was dropped as stale');
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    result = subprocess.run(
+        [node, "-e", program, str(source)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr

@@ -85,9 +85,11 @@ def build_left_panel(
                         children=backend.scene_tabs(),
                         parent_className="scene-tabs",
                     ),
+                    # Kept as an empty compatibility target for older Dash
+                    # callbacks; close controls now live inside each tab label.
                     html.Div(
                         id="scene-tab-close-row",
-                        children=backend.scene_close_buttons(),
+                        children=[],
                         className="scene-tab-close-row",
                     ),
                 ],

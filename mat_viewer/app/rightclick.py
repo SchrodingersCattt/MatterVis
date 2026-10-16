@@ -48,6 +48,7 @@ def _dispatch_rightclick_action(
                 {"a": n, "b": n, "c": n},
                 name=f"Repeat {n}x{n}x{n}",
                 scene_id=scene_id,
+                replace_repeat=True,
             )
         return
 

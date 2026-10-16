@@ -233,6 +233,7 @@ def register_operations_callbacks(app, backend):
                     {"a": n, "b": n, "c": n},
                     name=f"Repeat {n}x{n}x{n}",
                     scene_id=scene_id,
+                    replace_repeat=True,
                 )
             except Exception as exc:
                 _surface_error(f"Repeat {n}x{n}x{n}", exc)

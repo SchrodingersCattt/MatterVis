@@ -205,3 +205,21 @@ def test_operation_callback_surfaces_invalid_json_and_keeps_rows(tmp_path: Path,
         assert backend.list_transforms()[0]["enabled"] is False
     finally:
         backend.close(wait=False)
+
+
+def test_repeat_preset_replaces_active_repeat(tmp_path: Path):
+    backend = ViewerBackend(
+        preset_path=default_preset_path(), root_dir=str(tmp_path)
+    )
+    try:
+        backend.add_transform(
+            "repeat", {"a": 2, "b": 2, "c": 2}, replace_repeat=True
+        )
+        backend.add_transform(
+            "repeat", {"a": 3, "b": 3, "c": 3}, replace_repeat=True
+        )
+        repeats = [item for item in backend.list_transforms() if item["kind"] == "repeat"]
+        assert len(repeats) == 1
+        assert repeats[0]["params"] == {"a": 3, "b": 3, "c": 3}
+    finally:
+        backend.close(wait=False)

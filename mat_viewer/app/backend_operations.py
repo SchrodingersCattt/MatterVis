@@ -131,8 +131,13 @@ class _OperationsBackendMixin:
         scene_id: Optional[str] = None,
         transform_id: Optional[str] = None,
         auto_promote: bool = True,
+        replace_repeat: bool = False,
     ) -> dict[str, Any]:
         scene_id, transforms = self._resolve_transforms(scene_id)
+        # Quick Repeat presets can request replacement of the active repeat.
+        # Generic API transform creation keeps ordered composition semantics.
+        if replace_repeat and str(kind) == "repeat":
+            transforms = [t for t in transforms if t.get("kind") != "repeat"]
         existing_ids = {t["id"] for t in transforms}
         transform = _normalize_transform(
             {
