@@ -125,7 +125,13 @@
         const latest = rows.length ? rows[rows.length - 1] : null;
         const pending = !!(body && body.pending);
         if (!latest || !window.MatterVisViewUpdates || typeof window.MatterVisViewUpdates.submit !== "function") {
-          if (pending || attempt < 40) setTimeout(function () { resyncScene(sceneId, attempt + 1); }, 250);
+          // Keep retrying while a render is pending, but cap the total wait so
+          // a failed worker cannot leave an endless polling loop behind.
+          if (attempt < 40 || (pending && attempt < 120)) {
+            setTimeout(function () { resyncScene(sceneId, attempt + 1); }, 250);
+          } else if (pending && window.console && console.warn) {
+            console.warn("MatterVis scene resync timed out", sceneId);
+          }
           return;
         }
         Promise.resolve(window.MatterVisViewUpdates.submit(latest)).catch(function (error) {
