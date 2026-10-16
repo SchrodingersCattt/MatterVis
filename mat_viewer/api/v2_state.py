@@ -23,12 +23,12 @@ def register_state_routes(v2, backend) -> dict:
         scene_id = request.args.get("scene_id")
         if scene_id:
             events = [event for event in events if str(event.get("scene_id") or "") == str(scene_id)]
-            if not events and hasattr(backend, "latest_figure_broadcast"):
+            if not events:
                 latest = backend.latest_figure_broadcast(str(scene_id))
                 if latest and int(latest.get("figure_seq", 0) or 0) > since:
                     events = [latest]
             pending = False
-            if not events and hasattr(backend, "ensure_scene_figure"):
+            if not events:
                 pending = bool(backend.ensure_scene_figure(str(scene_id)))
         else:
             pending = False

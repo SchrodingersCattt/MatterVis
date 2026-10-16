@@ -255,15 +255,15 @@ async function runGestures(page) {
   await page.waitForFunction((expected) => {
     const gd = document.querySelector("#crystal-graph .js-plotly-plot");
     const eye = gd && gd.layout && gd.layout.scene && gd.layout.scene.camera && gd.layout.scene.camera.eye;
-    if (!eye) return false;
+    if (!eye || !expected) return false;
     const component = (value, index, key) => Number(value && value[key] !== undefined ? value[key] : value && value[index]);
     const got = [component(eye, 0, "x"), component(eye, 1, "y"), component(eye, 2, "z")];
-    if (!got.every(Number.isFinite)) return false;
-    const dist = Math.hypot(got[0], got[1], got[2]);
-    /* The public layout camera is the stable contract. Plotly's internal GL
-     * eye is aspect-scaled in orthographic mode, so comparing that renderer
-     * vector to the server payload spuriously rejects a successful fit. */
-    return Number.isFinite(dist) && dist > 0.05;
+    const want = [component(expected, 0, "x"), component(expected, 1, "y"), component(expected, 2, "z")];
+    if (![...got, ...want].every(Number.isFinite)) return false;
+    const gotNorm = Math.hypot(...got), wantNorm = Math.hypot(...want);
+    if (!(gotNorm > 0.05 && wantNorm > 0.05)) return false;
+    const dot = got.reduce((sum, value, index) => sum + value * want[index], 0) / (gotNorm * wantNorm);
+    return dot >= 0.95;
   }, fitEye, {timeout: 20000});
   await page.locator("#view-align-a").click();
   await page.waitForTimeout(400);

@@ -113,18 +113,22 @@ class _JournalBackendMixin:
         current = self._copy_current(refs)
         return current[0] if current else None
 
-    def ensure_active_scene_figure(self) -> bool:
-        """Queue a figure when a subscriber arrives before any journal frame."""
-        state = self.get_state()
+    def ensure_scene_figure(self, scene_id: Optional[str] = None) -> bool:
+        """Queue a complete frame for a scene missing from the journal."""
+        state = self.get_state(scene_id)
         if not isinstance(state, dict):
             return False
-        scene_id = state.get("scene_id")
-        if not scene_id or self.latest_figure_broadcast(scene_id) is not None:
+        target = state.get("scene_id")
+        if not target or self.latest_figure_broadcast(target) is not None:
             return False
         worker = getattr(self, "_render_worker", None)
         if worker is None:
             return False
         return bool(worker.request_figure_build(state))
+
+    def ensure_active_scene_figure(self) -> bool:
+        """Queue a figure when a subscriber arrives before any journal frame."""
+        return self.ensure_scene_figure()
 
     def peek_pending_state(self) -> Optional[dict[str, Any]]:
         """Return the armed poll payload without consuming it."""
