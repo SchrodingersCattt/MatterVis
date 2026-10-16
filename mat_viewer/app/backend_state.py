@@ -299,14 +299,31 @@ class _StateBackendMixin:
                 display_version += 1
             elif change_kind == UpdateKind.CAMERA:
                 # Browser drag persistence changes the camera value without
-                # invalidating a command revision. Explicit Reset/align and
-                # projection commands carry a revision/projection marker.
-                if "camera_revision" in (patch or {}) or "projection" in (patch or {}):
+                # invalidating a command revision. Explicit camera commands
+                # carry a revision/projection marker.  A caller that supplies
+                # a revision has already selected the next monotonic value;
+                # do not increment it a second time here.  This matters for
+                # orbit/pan/zoom, which write the camera and revision in one
+                # atomic patch.
+                if "camera_revision" in (patch or {}):
+                    try:
+                        requested = int(working_state.get("camera_revision", 0) or 0)
+                    except (TypeError, ValueError):
+                        requested = 0
+                    camera_version = max(before_versions.camera + 1, requested)
+                elif "projection" in (patch or {}):
                     camera_version += 1
             working_state["geometry_version"] = geometry_version
             working_state["display_version"] = display_version
             working_state["camera_version"] = camera_version
             working_state["camera_revision"] = camera_version
+            # Keep the in-memory command clock in step with the persisted
+            # state.  A later command must not reuse a revision from before a
+            # scene-scoped patch (for example after an orbit followed by a
+            # pan).
+            revisions = getattr(self, "_camera_revisions", None)
+            if isinstance(revisions, dict) and target_scene_id:
+                revisions[str(target_scene_id)] = camera_version
             self._last_update_kind_by_scene[str(target_scene_id)] = change_kind.value
             if target_scene_id:
                 scene_payload = copy.deepcopy(working_state)

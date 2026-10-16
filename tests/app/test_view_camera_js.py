@@ -255,6 +255,33 @@ assert.equal(sandbox.window.__mvRenderStatus,undefined,'replaced Plotly canvas r
     assert result.returncode == 0, result.stderr
 
 
+def test_context_loss_listener_rebinds_when_plotly_replaces_canvas():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "view_camera.js"
+    program = r"""
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+function canvas(){return {isConnected:true,listeners:{},addEventListener(name,fn){this.listeners[name]=fn;}};}
+const first=canvas(), second=canvas();
+const scene={glplot:{canvas:first}};
+const gd={data:[],_fullLayout:{scene:{_scene:scene}}};
+const sandbox={Promise,Object,Array,JSON,Number,String,Date,setTimeout,clearTimeout,
+  window:{Plotly:{},document:{getElementById:()=>({querySelector:()=>gd})}}};
+vm.createContext(sandbox);vm.runInContext(source,sandbox);
+const api=sandbox.window.MatterVisViewCamera;
+api.installContextLoss(gd);
+assert.equal(typeof first.listeners.webglcontextlost,'function');
+scene.glplot.canvas=second;
+api.installContextLoss(gd);
+assert.equal(typeof second.listeners.webglcontextlost,'function','replacement canvas did not receive a listener');
+assert.equal(gd.__mvContextLossCanvas,second);
+"""
+    result = subprocess.run([node, "-e", program, str(source)], capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+
+
 def test_camera_delivery_retries_while_plotly_replaces_the_graph():
     node = shutil.which("node")
     if node is None:

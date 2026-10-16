@@ -808,6 +808,13 @@
 
   // ── WS figure fast lane (ws_figure.js) ──────────────────────────
   (function connectWS() {
+    function socketCensus() {
+      var census = window.__mvCensus = window.__mvCensus || {};
+      census.socketsOpened = Number(census.socketsOpened || 0);
+      census.socketsOpen = Number(census.socketsOpen || 0);
+      census.compassBinds = Number(census.compassBinds || 0);
+      return census;
+    }
     function startHttpFallback() {
       if (window.__mattervisFigureFallbackActive || !window.fetch) return;
       window.__mattervisFigureFallbackActive = true;
@@ -909,9 +916,16 @@
       startHttpFallback();
       return;
     }
+    var census = socketCensus();
+    census.socketsOpened += 1;
+    ws.__mvCensusCountedOpen = false;
     window.__mattervisFigureSocket = ws;
     ws.addEventListener("open",function(){
       opened = true;
+      if (!ws.__mvCensusCountedOpen) {
+        ws.__mvCensusCountedOpen = true;
+        census.socketsOpen += 1;
+      }
       stopHttpFallback();
       try { ws.send(JSON.stringify({type:"subscribe_figure",enabled:true})); }
       catch (_) { window.__mattervisFigureWsDisabled = true; startHttpFallback(); }
@@ -930,6 +944,10 @@
       }
     });
     ws.addEventListener("close",function(){
+      if (ws.__mvCensusCountedOpen) {
+        ws.__mvCensusCountedOpen = false;
+        census.socketsOpen = Math.max(0, Number(census.socketsOpen || 0) - 1);
+      }
       if (window.__mattervisFigureSocket === ws) window.__mattervisFigureSocket = null;
       if (!opened) {
         window.__mattervisFigureWsDisabled = true;

@@ -25,7 +25,7 @@ class Socket {
   send(value) { this.sent = JSON.parse(value); }
 }
 const window = {WebSocket: Socket, location: {protocol: 'http:', host: 'localhost:8058'}};
-const sandbox = {window, WebSocket: Socket, requestAnimationFrame: fn => callbacks.push(fn), noteBuildIdentity() {}};
+const sandbox = {window, WebSocket: Socket, requestAnimationFrame: fn => callbacks.push(fn), setTimeout:()=>{}, noteBuildIdentity() {}};
 vm.createContext(sandbox);
 vm.runInContext(source.slice(start, end), sandbox);
 assert.equal(connections.length, 0);
@@ -37,6 +37,10 @@ assert.equal(callbacks.length, 0);
 connections[0].listeners.open();
 assert.equal(connections[0].sent.type, 'subscribe_figure');
 assert.equal(connections[0].sent.enabled, true);
+assert.equal(window.__mvCensus.socketsOpened, 1);
+assert.equal(window.__mvCensus.socketsOpen, 1);
+connections[0].listeners.close();
+assert.equal(window.__mvCensus.socketsOpen, 0);
 """
     result = subprocess.run([node, "-e", program, str(source)], capture_output=True,
                             text=True, timeout=15)

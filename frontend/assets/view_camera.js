@@ -321,10 +321,16 @@
     }
   }
   function installContextLoss(gd) {
-    if (!gd || gd.__mvContextLossInstalled) return;
+    if (!gd) return;
     var scene = gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
     var canvas = (scene && scene.glplot && scene.glplot.canvas) || (gd.querySelector && gd.querySelector("canvas")) || gd;
     if (!canvas || !canvas.addEventListener) return;
+    /* Plotly replaces the gl3d canvas when switching projection or rebuilding
+     * a scene.  Keep the listener identity on the canvas itself rather than
+     * on the graph div so a replacement receives a fresh handler.  The old
+     * handler remains harmless: it checks __mvContextRetired/detached and
+     * compares its canvas with the currently live Plotly canvas below. */
+    if (gd.__mvContextLossCanvas === canvas) return;
     canvas.addEventListener("webglcontextlost", function (event) {
       if (event && event.preventDefault) event.preventDefault();
       /* Plotly replaces the gl3d canvas during a projection relayout.  The
@@ -341,6 +347,7 @@
       var latest = gd.__mvLatestCamera && gd.__mvLatestCamera.snapshot;
       if (latest) recover(gd, latest);
     });
+    gd.__mvContextLossCanvas = canvas;
     gd.__mvContextLossInstalled = true;
   }
   function postcondition(gd, camera, options) {

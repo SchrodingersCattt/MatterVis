@@ -776,10 +776,13 @@ class _CameraBackendMixin:
         elif isinstance(self.get_state(scene_id).get("projection"), str):
             projection = self.get_state(scene_id)["projection"]
         camera = _camera_payload(eye, center, up, projection=projection)
-        # Orbit, pan, and zoom are commands, not drag persistence. The
-        # revision key makes Plotly take the new eye; drag patches omit it
-        # so a later toggle does not snap the WebGL camera back.
-        revision = int(self.get_state(scene_id).get("camera_revision", 0) or 0)
+        # Orbit, pan, and zoom are commands, not drag persistence. Advance
+        # the camera clock explicitly with the camera write so Plotly takes
+        # the new eye.  Drag patches omit this key so a later display toggle
+        # does not snap the WebGL camera back.  ``patch_state`` treats an
+        # explicit value as the requested next revision and keeps it
+        # monotonic across scene-scoped updates.
+        revision = int(self.get_state(scene_id).get("camera_revision", 0) or 0) + 1
         self.patch_state(
             {"camera": camera, "camera_revision": revision},
             scene_id=scene_id,

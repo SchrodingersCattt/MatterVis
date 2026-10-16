@@ -213,14 +213,14 @@ def test_orbit_pan_and_zoom_advance_the_camera_revision(tmp_path: Path):
     before_eye = tuple(backend.get_camera()["eye"][axis] for axis in "xyz")
     backend.camera_action("orbit", yaw_deg=25.0, pitch_deg=10.0, broadcast=False)
     orbited = backend.get_camera()["eye"]
-    assert int(backend.get_state()["camera_revision"]) > before
+    assert int(backend.get_state()["camera_revision"]) == before + 1
     assert tuple(orbited[axis] for axis in "xyz") != before_eye
     revision = int(backend.get_state()["camera_revision"])
     backend.camera_action("pan", dx=0.2, dy=0.0, dz=0.0, broadcast=False)
-    assert int(backend.get_state()["camera_revision"]) > revision
+    assert int(backend.get_state()["camera_revision"]) == revision + 1
     revision = int(backend.get_state()["camera_revision"])
     backend.camera_action("zoom", factor=1.2, broadcast=False)
-    assert int(backend.get_state()["camera_revision"]) > revision
+    assert int(backend.get_state()["camera_revision"]) == revision + 1
 
 
 def test_normalize_state_accepts_projection_patch(tmp_path: Path):

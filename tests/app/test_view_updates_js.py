@@ -405,9 +405,18 @@ const submit = sandbox.window.MatterVisViewUpdates.submit;
 
 def test_only_mattervis_opens_the_figure_socket():
     assets = Path(__file__).resolve().parents[2] / "frontend" / "assets"
-    assert not (assets / "view_transport.js").exists()
+    transport = assets / "view_transport.js"
+    assert transport.exists(), "main's shared view transport asset must remain available"
+    transport_source = transport.read_text(encoding="utf-8")
+    assert "MatterVisViewTransport" in transport_source
+    assert "__mattervisFigureSocket" in transport_source
     hits = []
     for path in sorted(assets.glob("*.js")):
+        # The restored transport exposes an opt-in connect() helper but does
+        # not invoke it at module load.  MatterVis remains the sole default
+        # figure-socket owner.
+        if path.name == "view_transport.js":
+            continue
         text = path.read_text(encoding="utf-8")
         if "/api/v2/ws" in text and "WebSocket" in text:
             hits.append(path.name)
