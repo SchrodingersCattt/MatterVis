@@ -48,12 +48,17 @@
     // display frames can share one geometry revision while arriving out of
     // order.  Reject every older clock before it can overwrite the newest
     // frame in Plotly.
-    if (kind === "display" || kind === "overlay" || kind === "analysis") {
-      if (display < currentDisplay) return false;
-    } else if (kind === "camera") {
-      if (camera < currentCamera) return false;
-    } else if (display < currentDisplay || camera < currentCamera) {
-      return false;
+    // A complete frame for the newly selected scene establishes a new clock
+    // domain.  Plotly still exposes the previous scene's display/camera
+    // versions during this handoff, so those clocks cannot reject the frame.
+    if (!sceneChanged) {
+      if (kind === "display" || kind === "overlay" || kind === "analysis") {
+        if (display < currentDisplay) return false;
+      } else if (kind === "camera") {
+        if (camera < currentCamera) return false;
+      } else if (display < currentDisplay || camera < currentCamera) {
+        return false;
+      }
     }
     return !delivered[deliveryKey(update, gd)];
   }
