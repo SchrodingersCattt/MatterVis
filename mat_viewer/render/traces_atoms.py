@@ -156,6 +156,23 @@ def _bond_segments(scene: dict, style: dict, *, with_scales: bool = False):
         # the corresponding atom is outside a focused local environment.
         opacity_scale = float(_field(bond, "_render_opacity_scale", 1.0))
         opacity_group = _bond_opacity_group_id(bond)
+        # A zero-opacity bond group is a visibility rule in practice.  Do not
+        # emit its cylinder/line segments at all: Plotly/WebGL can still
+        # depth-test and show non-empty geometry when a trace merely carries
+        # ``opacity=0``.  This also keeps the mesh, scatter, and wireframe
+        # paths consistent with the minor-wireframe guard below.
+        effective_opacity = bond_effective_opacity(
+            {
+                "is_minor": is_minor,
+                "is_disordered": is_disordered,
+                "_render_opacity_scale": opacity_scale,
+                "_render_opacity_group_id": opacity_group,
+                "occ": bond_occ,
+            },
+            style,
+        )
+        if effective_opacity <= 1.0e-12:
+            continue
         halves = [
             (c_i, is_minor, start, mid),
             (c_j, is_minor, mid, end),
@@ -232,10 +249,13 @@ def _bond_mesh_traces(scene: dict, style: dict):
                 "is_minor": is_minor,
                 "is_disordered": is_disordered,
                 "_render_opacity_scale": opacity_scale,
+                "_render_opacity_group_id": opacity_group,
                 "occ": bond_occ,
             },
             style,
         )
+        if eff_opacity <= 1.0e-12:
+            continue
         opacity_bin = f"{eff_opacity:.2f}"
         key = (color, is_minor, radius_bin, opacity_group, opacity_bin)
         groups.setdefault(
@@ -468,10 +488,13 @@ def _bond_scatter_traces(scene: dict, style: dict):
                 "is_minor": is_minor,
                 "is_disordered": is_disordered,
                 "_render_opacity_scale": opacity_scale,
+                "_render_opacity_group_id": opacity_group,
                 "occ": bond_occ,
             },
             style,
         )
+        if eff_opacity <= 1.0e-12:
+            continue
         opacity_bin = f"{eff_opacity:.2f}"
         occ_bin = f"{bond_occ:.2f}"
         groups.setdefault(
@@ -701,6 +724,8 @@ def _minor_bond_wireframe_traces(scene: dict, style: dict):
     groups: Dict[str, list[tuple[np.ndarray, np.ndarray]]] = {}
     for bond in scene["bonds"]:
         if not bond["is_minor"]:
+            continue
+        if not bool(_field(bond, "_render_visible", True)):
             continue
         try:
             if float(_field(bond, "_render_opacity_scale", 1.0)) <= 1.0e-12:

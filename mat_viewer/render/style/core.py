@@ -342,8 +342,19 @@ def _style_trace_dicts(trace_dicts: list[dict], style: dict) -> list[dict]:
                 copied["opacity"] = opacity
         elif role == "bond":
             if str(group_id) in bond_group_opacity:
-                pseudo_bond = {"is_minor": is_minor, "_render_opacity_scale": bond_group_opacity[str(group_id)]}
-                copied["opacity"] = bond_effective_opacity(pseudo_bond, style)
+                pseudo_bond = {
+                    "is_minor": is_minor,
+                    "_render_opacity_scale": bond_group_opacity[str(group_id)],
+                    "_render_opacity_group_id": group_id,
+                }
+                opacity = bond_effective_opacity(pseudo_bond, style)
+                copied["opacity"] = opacity
+                # Cached traces can predate a style-only opacity update.  A
+                # zero-opacity group must therefore also flip Plotly's
+                # visibility flag, otherwise the stale mesh geometry remains
+                # drawable/depth-testable even though its trace opacity is 0.
+                if opacity <= 1.0e-12:
+                    copied["visible"] = False
             else:
                 # Preserve the trace's existing opacity (set by
                 # _bond_mesh_traces using bond_effective_opacity with occ).

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from mat_viewer.loader import build_empty_bundle
 from mat_viewer.render.planning import prepare_render
@@ -120,9 +121,10 @@ def test_minor_only_keeps_ordered_structure_visible():
     assert all(trace.visible is not False for trace in atoms)
 
 
-def test_zero_bond_group_opacity_suppresses_minor_wireframe():
+@pytest.mark.parametrize("material", ["mesh", "flat"])
+def test_zero_bond_group_opacity_suppresses_minor_wireframe(material):
     style = {
-        "material": "mesh",
+        "material": material,
         "style": "ball_stick",
         "disorder": "outline_rings",
         "atom_scale": 1.0,
@@ -139,4 +141,10 @@ def test_zero_bond_group_opacity_suppresses_minor_wireframe():
     traces = [
         trace for trace in figure.data if (trace.meta or {}).get("mv_role") == "bond"
     ]
-    assert all(float(trace.opacity or 0.0) == 0.0 for trace in traces)
+    # Zero opacity is a visibility rule: no thick cylinder/line geometry may
+    # remain for Plotly/WebGL to depth-test.  The cached replay path also
+    # stamps ``visible=False`` for any legacy trace that did survive.
+    assert not traces or all(
+        float(trace.opacity or 0.0) == 0.0 and trace.visible is False
+        for trace in traces
+    )
