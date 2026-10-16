@@ -20,6 +20,9 @@ def register_state_routes(v2, backend) -> dict:
         except (TypeError, ValueError):
             since = 0
         events = backend.figure_broadcasts_since(since)
+        scene_id = request.args.get("scene_id")
+        if scene_id:
+            events = [event for event in events if str(event.get("scene_id") or "") == str(scene_id)]
         return jsonify({"updates": events, "cursor": backend.latest_figure_seq()})
 
     @v2.post("/state")

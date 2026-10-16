@@ -115,7 +115,7 @@
   }
   function resyncScene(sceneId) {
     if (!window.fetch || !sceneId) return;
-    window.fetch("/api/v2/view-updates?since=0", {credentials: "same-origin"})
+    window.fetch("/api/v2/view-updates?since=0&scene_id=" + encodeURIComponent(String(sceneId)), {credentials: "same-origin"})
       .then(function (response) { return response.ok ? response.json() : null; })
       .then(function (body) {
         const rows = (body && body.updates || []).filter(function (item) {
