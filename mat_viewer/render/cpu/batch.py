@@ -14,6 +14,7 @@ from ...config import (
 from ...loader.frame_batch import FrameBatch, frame_box_corners
 from ..camera import CameraTransform
 from ..contracts import CameraSpec
+from ..radius import hydrogen_radius_floor
 
 try:
     from numba import njit
@@ -80,7 +81,12 @@ def _hex_rgb(value: str) -> tuple[int, int, int]:
     return tuple(int(text[index : index + 2], 16) for index in (0, 2, 4))
 
 
-def element_style_tables(atom_scale: float = 1.0) -> tuple[np.ndarray, np.ndarray]:
+def element_style_tables(
+    atom_scale: float = 1.0,
+    *,
+    bond_radius: float | None = None,
+    min_atom_radius: float | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
     """Build atomic-number indexed colour and radius arrays."""
     if not np.isfinite(atom_scale) or atom_scale <= 0.0:
         raise ValueError("atom_scale must be finite and positive")
@@ -88,11 +94,21 @@ def element_style_tables(atom_scale: float = 1.0) -> tuple[np.ndarray, np.ndarra
 
     colors = np.full((len(chemical_symbols), 3), 128, dtype=np.uint8)
     radii = np.full(len(chemical_symbols), 0.5, dtype=np.float32)
+    h_floor = (
+        hydrogen_radius_floor(
+            bond_radius=bond_radius,
+            min_atom_radius=min_atom_radius,
+        )
+        if bond_radius is not None or min_atom_radius is not None
+        else None
+    )
     for atomic_number, symbol in enumerate(chemical_symbols):
         if atomic_number == 0 or not symbol:
             continue
         colors[atomic_number] = _hex_rgb(configured_element_color(symbol))
         radii[atomic_number] = configured_atom_radius(symbol) * atom_scale
+        if symbol in {"H", "D"} and h_floor is not None:
+            radii[atomic_number] = max(float(radii[atomic_number]), h_floor)
     return np.ascontiguousarray(colors), np.ascontiguousarray(radii)
 
 
@@ -101,9 +117,15 @@ def build_sphere_batch(
     camera_positions: np.ndarray,
     *,
     atom_scale: float = 1.0,
+    bond_radius: float | None = None,
+    min_atom_radius: float | None = None,
 ) -> SphereBatch:
     """Build the renderer-facing sphere arrays without per-atom objects."""
-    colors, radii = element_style_tables(atom_scale)
+    colors, radii = element_style_tables(
+        atom_scale,
+        bond_radius=bond_radius,
+        min_atom_radius=min_atom_radius,
+    )
     return SphereBatch(
         camera_positions=camera_positions,
         atomic_numbers=frame.atomic_numbers,
@@ -499,6 +521,7 @@ def render_frame_batch(
     cell_width_px: float = 2.0,
     bonds: Any = None,
     bond_radius: float = 0.15,
+    min_atom_radius: float | None = None,
 ) -> BatchRenderResult:
     """Render analytic spheres from contiguous arrays into one fixed viewport."""
     camera_positions = project_frame(frame, camera)
@@ -516,6 +539,7 @@ def render_frame_batch(
         cell_width_px=cell_width_px,
         bonds=bonds,
         bond_radius=bond_radius,
+        min_atom_radius=min_atom_radius,
     )
 
 
@@ -534,13 +558,20 @@ def render_projected_frame(
     cell_width_px: float = 2.0,
     bonds: Any = None,
     bond_radius: float = 0.15,
+    min_atom_radius: float | None = None,
 ) -> BatchRenderResult:
     """Rasterize a frame that has already been transformed by one camera."""
     if width <= 0 or height <= 0:
         raise ValueError("width and height must be positive")
     if camera_positions.shape != frame.positions.shape:
         raise ValueError("camera_positions must match frame.positions")
-    spheres = build_sphere_batch(frame, camera_positions, atom_scale=atom_scale)
+    spheres = build_sphere_batch(
+        frame,
+        camera_positions,
+        atom_scale=atom_scale,
+        bond_radius=bond_radius,
+        min_atom_radius=min_atom_radius,
+    )
     rgba, depth = _fill_background(
         int(height), int(width), np.asarray(background, dtype=np.uint8)
     )

@@ -186,6 +186,7 @@ class RenderSpec:
     background: RGBA = (1.0, 1.0, 1.0, 1.0)
     atom_scale: float = 1.0
     bond_radius: float = 0.15
+    min_atom_radius: float | None = None
     show_hydrogen: bool = True
     show_cell: bool = True
     show_axes: bool = False
@@ -244,6 +245,10 @@ class RenderSpec:
             raise ValueError("atom_scale must be positive")
         if not np.isfinite(self.bond_radius) or float(self.bond_radius) <= 0.0:
             raise ValueError("bond_radius must be positive")
+        if self.min_atom_radius is not None and (
+            not np.isfinite(self.min_atom_radius) or float(self.min_atom_radius) < 0.0
+        ):
+            raise ValueError("min_atom_radius must be finite and non-negative")
         if not np.isfinite(self.cell_width_px) or float(self.cell_width_px) <= 0.0:
             raise ValueError("cell_width_px must be positive")
         if self.aromatic_rings not in ("bonds", "circle", "disk"):

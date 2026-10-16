@@ -9,13 +9,16 @@ import numpy as np
 
 try:
     from ..style.disorder import atom_is_minor, bond_is_minor
+    from ..render.radius import atom_visual_radius
 except ImportError:  # pragma: no cover - allows direct script execution
     from mat_viewer.style.disorder import atom_is_minor, bond_is_minor  # type: ignore
+    from mat_viewer.render.radius import atom_visual_radius  # type: ignore
 
 
 DEFAULT_STYLE = {
     "atom_scale": 1.0,
     "bond_radius": 0.15,
+    "min_atom_radius": None,
     "major_opacity": 1.0,
     "minor_opacity": 0.35,
     "minor_wireframe": False,
@@ -163,7 +166,17 @@ def _camera_from_bounds(bounds, view_y, view_z):
     }
 
 
-def _compute_bounds(atoms, view_x, view_y, view_z, *, atom_scale=1.0, extra_pad=0.35):
+def _compute_bounds(
+    atoms,
+    view_x,
+    view_y,
+    view_z,
+    *,
+    atom_scale=1.0,
+    bond_radius=0.15,
+    min_atom_radius=None,
+    extra_pad=0.35,
+):
     """Compute the world-space bounds used to size the Matplotlib Axes3D
     viewport. The box is inflated by each atom's visual radius so large
     elements (e.g. Cl, I, Br) are not clipped at the panel edge.
@@ -195,9 +208,19 @@ def _compute_bounds(atoms, view_x, view_y, view_z, *, atom_scale=1.0, extra_pad=
         return empty_bounds
     carts = np.array([at["cart"] for at in atoms], dtype=float)
     radii = np.array(
-        [max(float(at.get("atom_radius", 0.18)), 0.05) for at in atoms],
+        [
+            atom_visual_radius(
+                max(float(at.get("atom_radius", 0.18)), 0.05),
+                element=str(at.get("elem", "C")),
+                representation="ball",
+                atom_scale=float(atom_scale),
+                bond_radius=float(bond_radius),
+                min_atom_radius=min_atom_radius,
+            )
+            for at in atoms
+        ],
         dtype=float,
-    ) * float(atom_scale)
+    )
 
     mins = (carts - radii[:, None]).min(axis=0)
     maxs = (carts + radii[:, None]).max(axis=0)
@@ -332,6 +355,8 @@ def build_scene_from_atoms(
         view_y,
         view_z,
         atom_scale=float(style.get("atom_scale", 1.0)),
+        bond_radius=float(style.get("bond_radius", 0.15)),
+        min_atom_radius=style.get("min_atom_radius"),
     )
     camera = entry.get("camera") or _camera_from_bounds(bounds, view_y, view_z)
 

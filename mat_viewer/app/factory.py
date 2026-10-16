@@ -254,7 +254,6 @@ def _create_app(
                     dcc.Store(id="disorder-preview-sink", data=None),
                     dcc.Store(id="disorder-persist-sink", data=None),
                     dcc.Download(id="export-download"),
-                    dcc.Download(id="cif-download"),
                     dcc.Interval(
                         id="status-dismiss-timer",
                         interval=5000,
@@ -301,6 +300,9 @@ def _create_app(
         property_catalog = backend.atom_properties(first_state)
         property_spec = first_state.get("atom_property_color") or {}
         property_range = property_spec.get("value_range")
+        property_visible_range = property_range
+        if property_range is None and property_spec.get("fields"):
+            property_visible_range = backend.resolved_atom_property_range(first_state)
         return assemble_workbench(html.Div(
             [
                 dcc.Store(id="agent-state-store", data=first_state),
@@ -338,7 +340,6 @@ def _create_app(
                 dcc.Store(id="disorder-preview-sink", data=None),
                 dcc.Store(id="disorder-persist-sink", data=None),
                 dcc.Download(id="export-download"),
-                dcc.Download(id="cif-download"),
                 dcc.Interval(
                     id="status-dismiss-timer",
                     interval=5000,
@@ -449,6 +450,7 @@ def _create_app(
                     property_catalog=property_catalog,
                     property_spec=property_spec,
                     property_range=property_range,
+                    property_visible_range=property_visible_range,
                     preset_path=preset_path,
                 ),
                 html.Div(id="left-splitter", className="panel-splitter"),
@@ -461,7 +463,20 @@ def _create_app(
                             id="crystal-graph",
                             figure=first_figure,
                             style={"height": "100%", "width": "100%"},
-                            config={"responsive": True, "doubleClick": False},
+                            config={
+                                "responsive": True,
+                                "doubleClick": False,
+                                "displaylogo": False,
+                                # Keep the mode-bar download local and
+                                # deterministic.  Plotly's default button
+                                # can use a cloud export path and an opaque
+                                # browser-generated filename.
+                                "toImageButtonOptions": {
+                                    "format": "png",
+                                    "filename": "mattervis-figure",
+                                    "scale": 2,
+                                },
+                            },
                         )
                     ],
                     id="center-panel",

@@ -6,6 +6,7 @@ from collections.abc import Iterable, Mapping
 import numpy as np
 
 from .contracts import CameraSpec
+from .radius import atom_visual_radius
 
 
 def _geometry_entity_points(scene: dict) -> list[np.ndarray]:
@@ -26,6 +27,23 @@ def _geometry_entity_points(scene: dict) -> list[np.ndarray]:
     return points
 
 
+def _display_atom_radii(atoms: list[dict], style: Mapping[str, object]) -> np.ndarray:
+    atom_scale = float(style.get("atom_scale", 1.0))
+    return np.asarray(
+        [
+            atom_visual_radius(
+                max(float(atom.get("atom_radius", 0.18)), 0.05),
+                element=str(atom.get("elem") or atom.get("symbol") or "C"),
+                representation="ball",
+                atom_scale=atom_scale,
+                style=style,
+            )
+            for atom in atoms
+        ],
+        dtype=float,
+    )
+
+
 def uniform_viewport(
     scenes,
     *,
@@ -42,18 +60,11 @@ def uniform_viewport(
     centroids = []
     for scene in scenes:
         scn_style = style if style is not None else scene.get("style") or {}
-        atom_scale = float(scn_style.get("atom_scale", 1.0))
         atoms = scene.get("draw_atoms") or []
         atom_mins = atom_maxs = None
         if atoms:
             carts = np.array([atom["cart"] for atom in atoms], dtype=float)
-            radii = (
-                np.array(
-                    [max(float(atom.get("atom_radius", 0.18)), 0.05) for atom in atoms],
-                    dtype=float,
-                )
-                * atom_scale
-            )
+            radii = _display_atom_radii(atoms, scn_style)
             atom_mins = (carts - radii[:, None]).min(axis=0)
             atom_maxs = (carts + radii[:, None]).max(axis=0)
 

@@ -48,6 +48,52 @@ _DISPLAY_TO_STRUCTURAL_HINT: dict[str, str] = {
 class _OperationsBackendMixin:
     """Disorder resolve, transform CRUD, and structural operations."""
 
+    def validate_transform(
+        self,
+        transform: dict[str, Any],
+        *,
+        scene_id: Optional[str] = None,
+    ) -> None:
+        """Validate an enabled display transform before committing it.
+
+        Transform assembly normally happens in the asynchronous render path,
+        but editor input errors need to be reported by the operation callback
+        while the offending row is still visible.  Keep this check small and
+        deterministic; chemistry and rendering remain in the transform
+        pipeline.
+        """
+        if not isinstance(transform, dict) or not transform.get("enabled", True):
+            return
+        kind = str(transform.get("kind") or "")
+        params = transform.get("params") or {}
+        if kind == "by_symmetry":
+            raise NotImplementedError(
+                "Apply symmetry transform is not available for the current strict transform API"
+            )
+        if kind == "slab":
+            miller = params.get("miller")
+            if not isinstance(miller, (list, tuple)) or len(miller) != 3:
+                raise ValueError("slab Miller indices must contain exactly three integers")
+            if all(int(value) == 0 for value in miller):
+                raise ValueError("slab Miller indices cannot all be zero")
+        if kind != "repeat":
+            return
+        try:
+            counts = tuple(max(1, int(params.get(axis, 1) or 1)) for axis in ("a", "b", "c"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("repeat counts must be positive integers") from exc
+        target_scene_id = scene_id or self.active_scene_id()
+        state = self.get_state(target_scene_id)
+        base_state = dict(state)
+        base_state["transforms"] = []
+        atom_count = len(self.scene_for_state(base_state).get("draw_atoms") or [])
+        projected = atom_count * counts[0] * counts[1] * counts[2]
+        if projected > MAX_ATOMS_AFTER_TRANSFORM:
+            raise ValueError(
+                f"repeat transform would produce {projected} atoms, "
+                f"exceeds MAX_ATOMS_AFTER_TRANSFORM={MAX_ATOMS_AFTER_TRANSFORM}"
+            )
+
     # ------------------------------------------------------------------
     # Disorder resolve (original)
     # ------------------------------------------------------------------
@@ -100,6 +146,7 @@ class _OperationsBackendMixin:
         )
         if transform is None:
             raise ValueError(f"invalid transform spec (unknown kind?): kind={kind!r}, params={params!r}")
+        self.validate_transform(transform, scene_id=scene_id)
         state = self.get_state(scene_id)
         warnings: list[str] = []
         promoted_from: str | None = None
@@ -190,6 +237,7 @@ class _OperationsBackendMixin:
                     raise ValueError(
                         f"invalid transform patch for {transform_id!r}: {patch!r}"
                     )
+                self.validate_transform(replacement, scene_id=scene_id)
                 transforms[index] = replacement
                 self.patch_state({"transforms": transforms}, scene_id=scene_id)
                 return replacement

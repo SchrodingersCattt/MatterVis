@@ -42,6 +42,7 @@ def test_backend_neutral_spec_fields_have_cli_destinations() -> None:
             "background": "background",
             "atom_scale": "atom_scale",
             "bond_radius": "bond_radius",
+            "min_atom_radius": "min_atom_radius",
             "show_hydrogen": "show_hydrogen",
             "show_cell": "show_unit_cell",
             "show_axes": "show_axes",

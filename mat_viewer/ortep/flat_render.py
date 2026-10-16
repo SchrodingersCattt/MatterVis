@@ -28,6 +28,7 @@ from .core import (
     _atom_u,
     _probability_scale,
 )
+from ..render.radius import hydrogen_radius_floor
 
 
 # ── Projection helpers ──────────────────────────────────────────────────────
@@ -145,6 +146,7 @@ def render_ortep_flat(scene: dict, style: dict | None = None) -> plt.Figure:
     show_labels = bool(style.get("show_labels", True))
     bond_lw = max(1.0, 12.0 * float(style.get("bond_radius", 0.12)))
     h_radius_override = style.get("ortep_hydrogen_radius")
+    h_radius_floor = hydrogen_radius_floor(style)
     n_hatch_lines = int(style.get("ortep_octant_hatch_lines", 5))
     figsize = style.get("figsize", (7, 6))
     dpi = int(style.get("dpi", 150))
@@ -195,6 +197,10 @@ def render_ortep_flat(scene: dict, style: dict | None = None) -> plt.Figure:
             atom_ellipses[idx] = (cx, cy, 2 * r, 2 * r, 0.0)
         else:
             params = _ellipse_params_2d(atom, view_x, view_y, probability)
+            if elem in ("H", "D"):
+                cx, cy, width, height, angle = params
+                diameter = max(float(width), float(height), 2.0 * h_radius_floor)
+                params = (cx, cy, diameter, diameter, angle)
             atom_ellipses[idx] = params
         cx, cy = atom_ellipses[idx][0], atom_ellipses[idx][1]
         atom_2d[idx] = (cx, cy)

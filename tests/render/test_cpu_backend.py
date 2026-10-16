@@ -1886,7 +1886,12 @@ def test_direct_molecular_crystal_uses_configured_element_visual_radii():
         rendered_radius = float(
             np.max(np.linalg.norm(primitive.vertices - center, axis=1))
         )
-        assert rendered_radius == pytest.approx(max(atom_radius(element), 0.2))
+        expected_radius = max(atom_radius(element), 0.2)
+        if element in {"H", "D"}:
+            # The display contract keeps hydrogen visible beside the default
+            # 0.15 Å bond, so the effective floor is 1.5 × bond radius.
+            expected_radius = max(expected_radius, 1.5 * 0.15)
+        assert rendered_radius == pytest.approx(expected_radius)
 
 
 def test_structure_input_view_rebuilds_loaded_bundle_with_canonical_display_mode(

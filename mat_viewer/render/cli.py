@@ -268,6 +268,16 @@ def _build_render_parser(
         help="Bond cylinder radius in Å (default: 0.15).",
     )
     p.add_argument(
+        "--min-atom-radius",
+        type=float,
+        default=None,
+        metavar="ANGSTROM",
+        help=(
+            "Minimum rendered atom radius in Å; hydrogen defaults to 1.5 × "
+            "bond radius when omitted."
+        ),
+    )
+    p.add_argument(
         "--isovalue",
         type=float,
         default=None,
@@ -675,6 +685,7 @@ def _build_style_overrides(args: argparse.Namespace) -> Dict[str, Any]:
     overrides["monochrome"] = args.monochrome
     overrides["atom_scale"] = args.atom_scale
     overrides["bond_radius"] = args.bond_radius
+    overrides["min_atom_radius"] = args.min_atom_radius
     if args.isovalue is not None:
         overrides["isosurface_isovalue"] = args.isovalue
     if args.isosurface_opacity is not None:

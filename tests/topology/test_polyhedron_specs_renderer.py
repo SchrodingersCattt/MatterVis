@@ -86,6 +86,50 @@ def test_topology_for_state_emits_spec_results_per_enabled_spec(backend: ViewerB
     assert topology.get("analysis_spec_id") in {spec_a["id"], spec_b["id"]}
 
 
+def test_selected_x_fragment_keeps_its_anchor_when_specs_target_cations(
+    backend: ViewerBackend,
+):
+    """Analyzing X0 must not be rebound to the first N/C6N2 overlay.
+
+    The analysis selector is independent from the tiled polyhedron rows.  A
+    molecule-level spec can therefore target cation centres while the user
+    asks the right panel to inspect an X (ClO4) fragment.  Previously the
+    paint-wrapper fallback treated the lone first-spec overlay as the anchor,
+    reporting ``B0 (N2)`` instead of the selected ``X0 (ClO4)``.
+    """
+    backend.add_polyhedron_spec(center_species="N", ligand_species="ClO4")
+    backend.add_polyhedron_spec(center_species="C6N2", ligand_species="ClO4")
+    state = backend.get_state()
+    state["topology_enabled"] = True
+    scene = backend.scene_for_state(state)
+    selected = next(
+        fragment for fragment in scene["fragment_table"] if fragment.get("label") == "X0"
+    )
+    state["topology_site_index"] = int(selected["index"])
+
+    topology = backend.topology_for_state(state)
+    assert topology is not None
+    assert topology["center_label"] == "X0"
+    assert topology["center_formula"] == "ClO4"
+    assert not any(
+        topology.get("center_label") == label for label in ("B0", "A0")
+    )
+
+
+def test_molecule_shell_items_have_fragment_labels_and_species(
+    backend: ViewerBackend,
+):
+    """Topology shell rows expose the source fragment identity to the UI."""
+    backend.add_polyhedron_spec(center_species="N", ligand_species="ClO4")
+    state = backend.get_state()
+    state["topology_enabled"] = True
+    topology = backend.topology_for_state(state)
+    assert topology is not None
+    assert topology["shell"]
+    assert all(item.get("label") and item.get("species") for item in topology["shell"])
+    assert all(item["label"] != "?" and item["species"] != "?" for item in topology["shell"])
+
+
 def test_topology_for_state_caches_geometry_across_color_changes(backend: ViewerBackend):
     spec = backend.add_polyhedron_spec(center_species="N", ligand_species="ClO4", color="#FF0000")
     state = backend.get_state()

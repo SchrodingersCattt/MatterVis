@@ -42,6 +42,7 @@ def _operation_panel_section(disorder_resolve: dict[str, Any] | None = None):
                                 id="disorder-resolve-count",
                                 type="number",
                                 min=1,
+                                max=128,
                                 step=1,
                                 value=_operation_count(disorder_resolve.get("count")),
                                 debounce=True,
@@ -79,24 +80,6 @@ def _operation_panel_section(disorder_resolve: dict[str, Any] | None = None):
                                 )
                             ],
                         ),
-                    ),
-                ],
-                className="operation-subsection",
-            ),
-            html.Div(
-                [
-                    html.Div("Current structure", className="operation-subsection-title"),
-                    html.Div(
-                        "Download the loaded source structure as a CIF file. "
-                        "Display scope and view transforms do not change the source.",
-                        className="operation-help-text",
-                    ),
-                    html.Button(
-                        "Export CIF",
-                        id="export-cif-btn",
-                        n_clicks=0,
-                        className="operation-button",
-                        title="Download the current source structure as a CIF file",
                     ),
                 ],
                 className="operation-subsection",

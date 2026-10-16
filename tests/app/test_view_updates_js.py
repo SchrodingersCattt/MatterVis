@@ -50,12 +50,12 @@ const submit = sandbox.window.MatterVisViewUpdates.submit;
         capture_output=True,
         text=True,
         timeout=15,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
 
 
-def test_upload_scene_frame_is_allowed_before_plotly_layout_catches_up():
-    """A selected upload tab may precede Plotly's previous scene metadata."""
+def test_out_of_order_display_and_camera_updates_are_rejected():
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node.js is needed to execute the frontend regression")
@@ -64,35 +64,33 @@ def test_upload_scene_frame_is_allowed_before_plotly_layout_catches_up():
 const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
 const source = fs.readFileSync(process.argv[1], 'utf8');
 const calls = [];
-// Plotly still owns the previous scene when the upload's completed frame
-// arrives, but the tab intent has already selected the uploaded scene.
-const gd = {layout: {meta: {mattervis_render: {scene_id: 'scene-brucite', geometry_version: 8, display_version: 8, camera_version: 0}}}, data: []};
+const gd = {layout: {meta: {mattervis_render: {
+  scene_id: 'scene-a', geometry_version: 3, display_version: 8, camera_version: 5
+}}}, data: []};
 const sandbox = {
   console, Promise, Number, String, Object, Array,
   window: {
-    MatterVisCurrentScene: () => 'scene-hkust',
     MatterVisViewCamera: {graph: () => gd},
     MatterVisViewCompass: {setEnabled: () => true},
-    Plotly: {react: (_gd, data, layout) => {calls.push({data, layout}); return Promise.resolve();}},
+    Plotly: {relayout: (_gd, payload) => {calls.push(payload); return Promise.resolve();}},
   },
 };
 vm.createContext(sandbox);
 vm.runInContext(source, sandbox);
 const submit = sandbox.window.MatterVisViewUpdates.submit;
-(async () => {
-  const figure = {
-    type: 'figure', scene_id: 'scene-hkust', update_kind: 'geometry',
-    geometry_version: 1, display_version: 1, camera_version: 0,
-    figure: {data: [{type: 'scatter3d'}], layout: {scene: {}, meta: {mattervis_render: {scene_id: 'scene-hkust', render_revision: 1}}}},
-  };
-  await submit(figure);
-  assert.equal(calls.length, 1, 'selected upload scene frame was dropped as stale');
-})().catch(error => { console.error(error); process.exitCode = 1; });
+assert.equal(submit({type:'view_update', update_kind:'display', scene_id:'scene-a',
+  geometry_version:3, display_version:7, camera_version:5,
+  payload:{display_options:['labels']}}), 'stale');
+assert.equal(submit({type:'view_update', update_kind:'camera', scene_id:'scene-a',
+  geometry_version:3, display_version:8, camera_version:4,
+  payload:{camera:{eye:{x:9}}}}), 'stale');
+assert.equal(calls.length, 0);
 """
     result = subprocess.run(
         [node, "-e", program, str(source)],
         capture_output=True,
         text=True,
         timeout=15,
+        check=False,
     )
     assert result.returncode == 0, result.stderr

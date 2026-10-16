@@ -41,6 +41,7 @@ from .mesh_overlays import isosurface_primitives as _isosurface_primitives
 from .mesh_overlays import polyhedron_primitives as _polyhedron_primitives
 from .property_planning import prepare_render_property, property_color_for_atom, reserve_property_colorbar, resolve_render_property_context
 from ..style.disorder import bond_effective_opacity
+from .radius import atom_visual_radius, clamp_displacement_radius, hydrogen_radius_floor
 
 
 def prepare_render(
@@ -226,6 +227,19 @@ def prepare_render(
         atom_primitive_start = len(primitives)
         if representation == "ortep":
             displacement = displacement_for_atom(atom, element=element, hydrogen_radius=render_spec.ortep_hydrogen_radius, probability=render_spec.ortep_probability, crystallographic_displacement=_displacement_matrix)
+            if (
+                displacement is not None
+                and element in {"H", "D"}
+                and render_spec.ortep_hydrogen_radius is None
+            ):
+                displacement = clamp_displacement_radius(
+                    displacement,
+                    hydrogen_radius_floor(
+                        bond_radius=render_spec.bond_radius,
+                        min_atom_radius=render_spec.min_atom_radius,
+                    ),
+                    probability=render_spec.ortep_probability,
+                )
             if displacement is None:
                 if render_spec.missing_adp_policy == "error":
                     raise ValueError(
@@ -233,8 +247,13 @@ def prepare_render(
                         "set missing_adp_policy='sphere' to request an explicit placeholder"
                     )
                 placeholder_radius = (
-                    _atom_radius(atom, representation="ball_stick")
-                    * render_spec.atom_scale
+                    _atom_radius(
+                        atom,
+                        representation="ball_stick",
+                        atom_scale=render_spec.atom_scale,
+                        bond_radius=render_spec.bond_radius,
+                        min_atom_radius=render_spec.min_atom_radius,
+                    )
                 )
                 displacement = np.eye(3) * (placeholder_radius / 1.54) ** 2
                 warnings.append(
@@ -274,8 +293,13 @@ def prepare_render(
                 )
         elif representation not in {"stick", "wireframe"}:
             radius = (
-                _atom_radius(atom, representation=representation)
-                * render_spec.atom_scale
+                _atom_radius(
+                    atom,
+                    representation=representation,
+                    atom_scale=render_spec.atom_scale,
+                    bond_radius=render_spec.bond_radius,
+                    min_atom_radius=render_spec.min_atom_radius,
+                )
             )
             primitives.append(
                 sphere_primitive(
@@ -1241,11 +1265,26 @@ def _ring_display_cycles(
     return result
 
 
-def _atom_radius(atom: Any, *, representation: str) -> float:
+def _atom_radius(
+    atom: Any,
+    *,
+    representation: str,
+    atom_scale: float = 1.0,
+    bond_radius: float | None = None,
+    min_atom_radius: float | None = None,
+) -> float:
     value = float(_value(atom, "atom_radius", "radius", default=0.5))
-    if representation == "space_filling" or representation == "ball":
-        return max(value, 0.2)
-    return max(value * 0.46, 0.16)
+    rendered = atom_visual_radius(
+        value,
+        element=str(_value(atom, "symbol", "elem", "element", default="C")),
+        representation=representation,
+        atom_scale=atom_scale,
+        bond_radius=bond_radius,
+        min_atom_radius=min_atom_radius,
+    )
+    if representation in {"space_filling", "ball"}:
+        return max(rendered, 0.2)
+    return max(rendered, 0.16)
 
 
 def _displacement_matrix(atom: Any) -> np.ndarray | None:

@@ -341,6 +341,17 @@ def geometry_state_fields(state: Mapping[str, Any] | None) -> dict[str, Any]:
             "disorder_resolve",
             "disorder_replicas",
             "cutoff",
+            # These controls alter trace geometry/viewport and therefore
+            # must schedule a worker frame.  Treating them as cosmetic
+            # display patches leaves rapid slider and bond-group changes in
+            # the browser with the previous figure indefinitely.
+            "atom_scale",
+            "bond_radius",
+            "material",
+            "style",
+            "ortep_mode",
+            "atom_groups",
+            "bond_groups",
         )
     }
     fields["display_options"] = sorted(options - {"labels", "axes"})

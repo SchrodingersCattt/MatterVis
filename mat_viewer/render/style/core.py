@@ -50,6 +50,11 @@ def validate_style_schema(style: dict) -> dict:
     normalized["disorder"] = disorder
     normalized["projection"] = projection
     normalized["camera_eye_distance"] = float(normalized.get("camera_eye_distance", 1.8))
+    if normalized.get("min_atom_radius") is not None:
+        value = float(normalized["min_atom_radius"])
+        if not np.isfinite(value) or value < 0.0:
+            raise ValueError("min_atom_radius must be finite and non-negative")
+        normalized["min_atom_radius"] = value
     if ortep_mode is not None:
         normalized["ortep_mode"] = str(ortep_mode)
         normalized.update(ORTEP_MODES[normalized["ortep_mode"]])
@@ -273,7 +278,15 @@ def _style_trace_dicts(trace_dicts: list[dict], style: dict) -> list[dict]:
     trace-property edits, so replay cached vertex arrays and stamp the
     current visible/opacity values onto shallow copies.
     """
-    show_minor_only = bool(style.get("show_minor_only", False))
+    requested_minor_only = bool(style.get("show_minor_only", False))
+    has_minor = any(
+        isinstance(trace.get("meta"), dict)
+        and bool(trace["meta"].get("mv_minor", False))
+        for trace in trace_dicts
+    )
+    # "Minor only" is a focus mode. If a structure has no disorder at all,
+    # keep its ordinary atoms visible instead of presenting an empty canvas.
+    show_minor_only = requested_minor_only and has_minor
     show_labels = bool(style.get("show_labels", True))
     show_axes = bool(style.get("show_axes", True))
     show_unit_cell = bool(style.get("show_unit_cell", False))

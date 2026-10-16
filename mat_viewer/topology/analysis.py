@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import inspect
 import sys
-from collections.abc import Iterable
-from typing import Any
+from typing import Any, Iterable
 
 import numpy as np
 from molcrys_kit.analysis import compute_topo_signature
@@ -19,11 +18,7 @@ from molcrys_kit.analysis.packing_shell import (
     hull_encloses_center as _hull_encloses_center,
 )
 from molcrys_kit.analysis.shape import classify_shell
-from molcrys_kit.structures.polyhedra import (
-    all_ideal_polyhedra,
-    convex_hull_payload,
-    ideal_polyhedra_for_cn,
-)
+from molcrys_kit.structures.polyhedra import convex_hull_payload, ideal_polyhedra_for_cn
 
 from ..config import current_config, element_color
 from ..structure import molcrys_bridge
@@ -45,15 +40,6 @@ __all__ = [
     "ideal_polyhedra_for_cn",
     "planarity_analysis",
 ]
-
-
-# ``classify_shell`` is intentionally exhaustive for the small registered
-# coordination polyhedra (CN 4--12).  Applying the same residual sweep to a
-# periodic atom shell with hundreds of image neighbours is combinatorial and
-# can monopolise the render worker.  Large shells still get a useful local
-# shape classification below: the nearest registered-size points are fit with
-# the rigid (k=0) classifier, while the full shell CN remains in the payload.
-_MAX_REGISTERED_CN = max(int(cn) for cn in all_ideal_polyhedra())
 
 
 def _mck_override_kwargs(func) -> dict[str, object]:
@@ -483,22 +469,67 @@ def _extract_coordination_shell_static(
             "search_cutoff": record.get("search_cutoff"),
             "hard_cutoff": record.get("hard_cutoff"),
         }
-    shell = [
-        {
-            "index": int(idx),
-            "center": coord,
-            "distance": dist,
-            "image_shift": offset,
-        }
-        for idx, coord, dist, offset in zip(
-            (record or {}).get("shell_molecule_indices")
-            or (record or {}).get("shell_indices")
-            or [],
-            source_shell_coords.tolist(),
-            shell_distances,
-            (record or {}).get("shell_offsets") or [],
+    # MolCrysKit reports shell members by source molecule index.  The
+    # analysis card needs the stable MatterVis fragment identity as well;
+    # leaving this translation to the renderer produced ``?(?)`` labels and
+    # made it impossible to tell an N centre from a ClO4 neighbour.  Keep the
+    # MCK index for callers that use it as a chemistry key, then add the
+    # corresponding fragment label/formula when the bundle carries the
+    # canonical topology table.
+    fragments_by_source_molecule = {
+        int(fragment["source_molecule_index"]): fragment
+        for fragment in fragments
+        if fragment.get("source_molecule_index") is not None
+    }
+    shell_indices = (
+        (record or {}).get("shell_molecule_indices")
+        or (record or {}).get("shell_indices")
+        or []
+    )
+    shell_offsets = (record or {}).get("shell_offsets") or []
+    shell = []
+    for idx, coord, dist, offset in zip(
+        shell_indices,
+        source_shell_coords.tolist(),
+        shell_distances,
+        shell_offsets,
+    ):
+        fragment = fragments_by_source_molecule.get(int(idx))
+        raw_atom = None
+        if fragment is None:
+            try:
+                raw_atom = bundle.raw_atoms[int(idx)]
+            except (AttributeError, IndexError, TypeError, ValueError):
+                raw_atom = None
+        shell.append(
+            {
+                "index": int(idx),
+                "fragment_index": (
+                    None if fragment is None else int(fragment["index"])
+                ),
+                "label": (
+                    str(raw_atom.get("label") or f"site-{int(idx)}")
+                    if fragment is None and raw_atom is not None
+                    else (
+                        f"site-{int(idx)}"
+                        if fragment is None
+                        else str(fragment.get("label") or f"site-{int(idx)}")
+                    )
+                ),
+                "species": (
+                    str(raw_atom.get("elem") or "?")
+                    if fragment is None and raw_atom is not None
+                    else (
+                        "?"
+                        if fragment is None
+                        else str(fragment.get("formula") or fragment.get("species") or "?")
+                    )
+                ),
+                "center": coord,
+                "distance": dist,
+                "image_shift": offset,
+            }
         )
-    ]
     return {
         "center_index": int(center_index),
         "default_label": center_fragment.get("label", f"site-{center_index}"),
@@ -646,21 +677,10 @@ def _analyze_topology_uncached(
         public_module, "_classify_shell_payload", _classify_shell_payload
     )
     shape = classify_shell_payload_impl(shell_coords, center)
-    # The diagnostics panel also asks MolCrysKit for a best planar subset;
-    # that helper enumerates C(N, 5) combinations. Reuse the same bounded
-    # nearest-neighbour cage for oversized periodic shells so the complete
-    # topology request remains finite after shape classification returns.
-    diagnostics = shape.get("diagnostics") if isinstance(shape, dict) else None
-    sample_indices = diagnostics.get("sample_indices") if isinstance(diagnostics, dict) else None
-    if sample_indices:
-        diagnostic_coords = [shell_coords[int(index)] for index in sample_indices]
-    else:
-        diagnostic_coords = shell_coords
     planarity = planarity_analysis(
-        diagnostic_coords,
-        group_size=min(5, len(diagnostic_coords)) if len(diagnostic_coords) else 5,
+        shell_coords, group_size=min(5, len(shell_coords)) if shell_coords else 5
     )
-    prism = detect_prism_vs_antiprism(diagnostic_coords)
+    prism = detect_prism_vs_antiprism(shell_coords)
     return {
         **shell,
         "shape": shape,
@@ -689,24 +709,6 @@ def _classify_shell_payload(
     """
     if len(np.asarray(shell_coords)) == 0:
         return _empty_shape_payload()
-    coords_arr = np.asarray(shell_coords, dtype=float)
-    classification_coords = coords_arr
-    bounded_sample = False
-    sample_indices: list[int] = []
-    if len(coords_arr) > _MAX_REGISTERED_CN:
-        # A shell can contain many periodic image neighbours when the source
-        # cell is small.  The registered shape catalogue cannot describe an
-        # arbitrary CN, and classify_shell's residual decomposition would
-        # enumerate C(N, k) subsets.  Fit the nearest registered-size local
-        # cage with the rigid path instead; retain the true CN below so the
-        # caller can distinguish the approximation from a complete shell.
-        center_arr = np.asarray(center, dtype=float)
-        distances = np.linalg.norm(coords_arr - center_arr, axis=1)
-        sample_indices = np.argsort(distances, kind="mergesort")[
-            :_MAX_REGISTERED_CN
-        ].astype(int).tolist()
-        classification_coords = coords_arr[sample_indices]
-        bounded_sample = True
     try:
         # Delegate the shell label policy to molcrys_kit's current
         # classifier. Earlier MatterVis pinned ``max_strip=0`` to force a
@@ -716,25 +718,14 @@ def _classify_shell_payload(
         # ``max_strip`` unset keeps MV aligned with upstream MCK labels while
         # still returning a JSON-safe payload for the renderer/scripts.
         result = classify_shell(
-            classification_coords,
+            shell_coords,
             center=center,
             n_random_inits=4,
             top_k=3,
-            max_strip=0 if bounded_sample else None,
         )
     except Exception as exc:
         return {**_empty_shape_payload(), "error": str(exc)}
-    payload = _sanitize_shape_payload(result)
-    if bounded_sample:
-        payload["coordination_number"] = len(coords_arr)
-        payload["diagnostics"] = {
-            **(payload.get("diagnostics") or {}),
-            "search_mode": "bounded_local_cage",
-            "sample_size": len(classification_coords),
-            "sample_indices": sample_indices,
-            "max_registered_cn": _MAX_REGISTERED_CN,
-        }
-    return payload
+    return _sanitize_shape_payload(result)
 
 
 # Fields under ``shape["topology"]`` (and inside each candidate's
