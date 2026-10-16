@@ -433,15 +433,24 @@
   function deferGraphCamera(camera, options) {
     options = options || {};
     var retries = Number(options.__mvGraphRetries || 0);
-    if (retries >= 8) return null;
+    if (retries >= 20) return null;
     options.__mvGraphRetries = retries + 1;
     return new Promise(function (resolve, reject) {
       var settled = false;
       var timer = null;
-      var target = graph();
+      var target = null;
+      var observer = null;
       var host = (root.document && root.document.getElementById) ? root.document.getElementById("crystal-graph") : null;
+      function bindTarget() {
+        var next = graph();
+        if (!next || next === target) return;
+        target = next;
+        if (target.once) { try { target.once("plotly_afterplot", onAfterplot); } catch (_) {} }
+        else if (target.on) { try { target.on("plotly_afterplot", onAfterplot); } catch (_) {} }
+      }
       function cleanup() {
         if (timer) { clearTimeout(timer); timer = null; }
+        if (observer && observer.disconnect) { try { observer.disconnect(); } catch (_) {} }
         if (target && target.removeListener && onAfterplot) { try { target.removeListener("plotly_afterplot", onAfterplot); } catch (_) {} }
         if (host && host.removeEventListener && onAfterplot) { try { host.removeEventListener("plotly_afterplot", onAfterplot); } catch (_) {} }
       }
@@ -452,10 +461,12 @@
         applyAsync(camera, options).then(resolve, reject);
       }
       function onAfterplot() { retry(); }
-      if (target && typeof target.once === "function") {
-        try { target.once("plotly_afterplot", onAfterplot); } catch (_) {}
-      } else if (target && typeof target.on === "function") {
-        try { target.on("plotly_afterplot", onAfterplot); } catch (_) {}
+      bindTarget();
+      if (host && root.MutationObserver) {
+        try {
+          observer = new root.MutationObserver(bindTarget);
+          observer.observe(host, {childList: true, subtree: true});
+        } catch (_) {}
       }
       if (host && host.addEventListener) {
         try { host.addEventListener("plotly_afterplot", onAfterplot, {once: true}); } catch (_) {}
