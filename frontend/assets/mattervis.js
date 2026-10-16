@@ -885,6 +885,12 @@
     // Dash loads Plotly lazily. Missing it on the asset's first execution
     // must not permanently disable completed-frame delivery.
     if (!window.Plotly) { requestAnimationFrame(connectWS); return; }
+    /* Keep the journal poll alive while the WebSocket upgrade is in flight.
+     * Werkzeug and a few reverse proxies answer the upgrade URL with a plain
+     * HTTP 200; Chromium can leave that socket pending long enough to hide a
+     * camera update. A successful open stops the poll before subscribing, so
+     * there is still one active delivery path after the handshake. */
+    startHttpFallback();
     noteBuildIdentity(null);
     function isCurrentFigurePush(p) {
       if (!p || !p.figure) return false;
@@ -1038,6 +1044,12 @@
        * that cleanup cannot surface a spurious recovery error. */
       canvas.__mvContextRetired = true;
       loseWebGL(canvas);
+      if (retiredInGraph && canvas.parentNode && typeof canvas.parentNode.removeChild === "function") {
+        /* Plotly leaves replaced gl3d canvases in the graph wrapper while
+         * their contexts are retired. Remove only canvases we proved are no
+         * longer the live scene so rapid tab switches cannot grow the DOM. */
+        try { canvas.parentNode.removeChild(canvas); } catch (_) {}
+      }
       trackedGL.splice(i, 1);
     }
     if (window.__mvCensus) window.__mvCensus.webglContexts = trackedGL.length;

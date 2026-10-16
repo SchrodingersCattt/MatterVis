@@ -107,6 +107,15 @@ def test_failed_figure_socket_switches_to_one_http_fallback():
     assert "setTimeout(connectWS,5000)" in ws_body
 
 
+def test_figure_socket_keeps_http_journal_polling_during_upgrade():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    ws_idx = source.index("(function connectWS()")
+    ws_body = source[ws_idx:source.index("  function ensureSceneTabTooltips", ws_idx)]
+    upgrade_idx = ws_body.index("ws = new WebSocket")
+    assert "startHttpFallback();" in ws_body[:upgrade_idx]
+    assert ws_body.index("startHttpFallback();") < upgrade_idx
+
+
 def test_tab_switch_clears_global_upload_status():
     source = MATTERVIS_JS.read_text(encoding="utf-8")
     start = source.index("function bindSceneTabIntent")
