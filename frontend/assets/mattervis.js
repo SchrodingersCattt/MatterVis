@@ -818,13 +818,28 @@
     function startHttpFallback() {
       if (window.__mattervisFigureFallbackActive || !window.fetch) return;
       window.__mattervisFigureFallbackActive = true;
+      function deliverFallbackPayload(payload) {
+        if (!payload || typeof payload !== "object") return;
+        /* The journal contains complete frames for every scene. During a
+         * tab handoff, never submit a non-selected frame through the generic
+         * view gate: it can be marked stale against the canvas scene before
+         * Dash paints the selected tab. Keep the newest one parked for the
+         * normal selection barrier instead. Camera/display patches continue
+         * through the typed gate and are scene-scoped there. */
+        if (payload.figure && payload.scene_id &&
+            String(payload.scene_id) !== String(currentSceneId() || "")) {
+          pendingFigureByScene[String(payload.scene_id)] = payload;
+          return;
+        }
+        handleFigurePayload(payload);
+      }
       function poll() {
         if (!window.__mattervisFigureFallbackActive) return;
         var since = Number(window.__mattervisFigureLastSeq || 0);
         window.fetch("/api/v2/view-updates?since=" + encodeURIComponent(since), {credentials:"same-origin"})
           .then(function(response){ return response.ok ? response.json() : null; })
           .then(function(body){
-            (body && body.updates || []).forEach(handleFigurePayload);
+            (body && body.updates || []).forEach(deliverFallbackPayload);
           })
           .catch(function(){})
           .then(function(){
