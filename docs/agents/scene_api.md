@@ -265,6 +265,9 @@ honours:
 - `style` — `ball`, `ball_stick`, `stick`, `ortep`, or `wireframe`.
 - `scatter_atom_scale` — multiplier for fixed-pixel atom markers in the
   explicitly selected fast Scatter3d mode (default `0.45`).
+- `min_atom_radius` — optional Angstrom floor for rendered H/D atoms. When
+  omitted, the floor is `1.5 * bond_radius`; non-hydrogen caller radii are
+  preserved.
 - `scatter_bond_scale` — multiplier for fast Scatter3d bond-line width
   (default `1.0`).
 - `scatter_bond_contrast_color` — optional replacement for a fast bond half

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from collections.abc import Iterable
 from functools import lru_cache
 from typing import Any
@@ -33,8 +34,7 @@ def _coerce_seed(seed: Any) -> int | None:
         return None
 
 
-@lru_cache(maxsize=32)
-def _mck_replicas(
+def _generate_mck_replicas(
     cif_path: str,
     *,
     method: str,
@@ -45,29 +45,38 @@ def _mck_replicas(
         generate_ordered_replicas_from_disordered_sites,
     )
 
-    try:
-        replicas = generate_ordered_replicas_from_disordered_sites(
-            cif_path,
-            generate_count=count,
-            method=method,
-            random_seed=seed,
-            return_kept_indices=True,
+    with warnings.catch_warnings():
+        # MCK's resolver currently trips NumPy 2.5's shape-assignment
+        # deprecation inside its geometry path.  The warning is unrelated to
+        # the caller's operation and pytest treats deprecations as errors.
+        warnings.filterwarnings(
+            "ignore",
+            message=r"Setting the shape on a NumPy array has been deprecated in NumPy 2\.5\.",
+            category=DeprecationWarning,
         )
-    except Exception:
-        # The loader accepts charged type symbols (Fe3+, O2-, …) by feeding
-        # normalised CIF text through MolCrysKit's public in-memory reader.
-        # Use the same canonical crystal for the operation so Resolve does
-        # not turn a valid uploaded CIF into an empty result.
-        from ..structure.cif_parse import load_cif
+        try:
+            replicas = generate_ordered_replicas_from_disordered_sites(
+                cif_path,
+                generate_count=count,
+                method=method,
+                random_seed=seed,
+                return_kept_indices=True,
+            )
+        except Exception:
+            # The loader accepts charged type symbols (Fe3+, O2-, …) by feeding
+            # normalised CIF text through MolCrysKit's public in-memory reader.
+            # Use the same canonical crystal for the operation so Resolve does
+            # not turn a valid uploaded CIF into an empty result.
+            from ..structure.cif_parse import load_cif
 
-        parsed = load_cif(cif_path)
-        replicas = generate_ordered_replicas_from_disordered_sites(
-            generate_count=count,
-            method=method,
-            random_seed=seed,
-            return_kept_indices=True,
-            crystal=parsed.crystal,
-        )
+            parsed = load_cif(cif_path)
+            replicas = generate_ordered_replicas_from_disordered_sites(
+                generate_count=count,
+                method=method,
+                random_seed=seed,
+                return_kept_indices=True,
+                crystal=parsed.crystal,
+            )
     out: list[tuple[int, ...]] = []
     for item in replicas or []:
         if not isinstance(item, tuple) or len(item) != 2:
@@ -79,6 +88,91 @@ def _mck_replicas(
             continue
         out.append(kept)
     return tuple(out)
+
+
+@lru_cache(maxsize=32)
+def _cached_mck_replicas(
+    cif_path: str,
+    *,
+    method: str,
+    count: int,
+    seed: int | None,
+) -> tuple[tuple[int, ...], ...]:
+    """Cache deterministic resolver calls only.
+
+    A random resolve with ``seed=None`` is intentionally excluded from this
+    cache.  Caching that call would turn the UI's unseeded "Random sample"
+    mode into a one-time sample that repeats forever for the same CIF.
+    """
+    return _generate_mck_replicas(
+        cif_path,
+        method=method,
+        count=count,
+        seed=seed,
+    )
+
+
+def _mck_replicas(
+    cif_path: str,
+    *,
+    method: str,
+    count: int,
+    seed: int | None,
+) -> tuple[tuple[int, ...], ...]:
+    if method == "random" and seed is None:
+        return _generate_mck_replicas(
+            cif_path,
+            method=method,
+            count=count,
+            seed=seed,
+        )
+    return _cached_mck_replicas(
+        cif_path,
+        method=method,
+        count=count,
+        seed=seed,
+    )
+
+
+def _source_disorder_detected(bundle: Any) -> bool | None:
+    """Return source disorder status when the CIF scanner can determine it.
+
+    MolCrysKit emits one ordered structure even for a fully ordered CIF, so
+    treating any resolver result as a disorder replica makes the UI claim
+    disorder where none exists.  Prefer the public ``scan_cif_disorder``
+    contract and fall back to the raw atom provenance carried by MatterVis.
+    ``None`` means the source could not be inspected; callers may continue
+    resolving in that case for synthetic/test bundles.
+    """
+    cif_path = str(getattr(bundle, "cif_path", "") or "")
+    scanner_status: bool | None = None
+    if cif_path:
+        try:
+            from molcrys_kit.io import scan_cif_disorder
+
+            info = scan_cif_disorder(cif_path)
+            scanner_status = bool(getattr(info, "has_disorder", False))
+        except Exception:
+            pass
+
+    raw_atoms = list(getattr(bundle, "raw_atoms", []) or [])
+    if not raw_atoms:
+        return scanner_status
+    for atom in raw_atoms:
+        if not isinstance(atom, dict):
+            continue
+        try:
+            if float(atom.get("occ", 1.0)) < 0.999:
+                return True
+        except (TypeError, ValueError):
+            pass
+        for key in ("dg", "da", "_atom_site_disorder_group", "_atom_site_disorder_assembly"):
+            value = str(atom.get(key) or "").strip()
+            if value and value not in {".", "?", "0"}:
+                return True
+    if scanner_status is not None:
+        return scanner_status
+    return None
 
 
 def _disorder_raw_indices(raw_atoms: list[dict[str, Any]]) -> set[int]:
@@ -127,6 +221,10 @@ def resolve_disorder(
     method = _coerce_method(method)
     count = _coerce_count(count, method=method)
     seed = _coerce_seed(seed)
+
+    source_disorder = _source_disorder_detected(bundle)
+    if source_disorder is False:
+        return []
 
     try:
         optimal_sets = _mck_replicas(cif_path, method="optimal", count=1, seed=None)

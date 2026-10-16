@@ -13,6 +13,8 @@ from .style_helpers import (
     _minor_opacity_disabled,
     _status_class,
 )
+from ..properties import available_colormaps
+from ..capabilities import resolve_requirements
 
 
 def build_left_panel(
@@ -24,7 +26,24 @@ def build_left_panel(
     property_spec: dict[str, Any],
     property_range: Any,
     preset_path: str,
+    property_visible_range: Any = None,
 ):
+    static_export_resolution = resolve_requirements("static-web-export")
+    static_export_hint = (
+        ""
+        if static_export_resolution.available
+        else (
+            "Static export unavailable in this install. "
+            f"Install with: {static_export_resolution.install_command}"
+        )
+    )
+    # Auto mode stores no ``value_range`` in state, but the resolved source
+    # range is still useful to show in the two numeric inputs. Keep the mode
+    # decision tied to ``property_range`` while allowing those inputs to use
+    # a derived visible range.
+    visible_range = (
+        property_range if property_visible_range is None else property_visible_range
+    )
     return html.Div(
         [
             html.H3("MatterVis", className="workbench-brand"),
@@ -166,6 +185,13 @@ def build_left_panel(
                     for opt in first_state["display_options"]
                     if opt != "monochrome"
                 ],
+            ),
+            html.Button(
+                "Restore display defaults",
+                id="display-defaults-btn",
+                n_clicks=0,
+                className="display-defaults-btn",
+                title="Restore shipped/config display defaults for this scene",
             ),
             html.Div(display_option_hint(first_state["display_mode"]), id="display-options-hint",
                      style={"fontSize": "12px", "color": "#526579", "marginTop": "6px"}),
@@ -426,11 +452,14 @@ def build_left_panel(
                 },
             ),
             html.Label("Colormap"),
-            dcc.Input(
+            dcc.Dropdown(
                 id="property-colormap-input",
-                type="text",
+                options=[
+                    {"label": name, "value": name}
+                    for name in available_colormaps()
+                ],
                 value=property_spec.get("colormap", "viridis"),
-                debounce=True,
+                clearable=False,
                 style={"width": "100%", "marginBottom": "8px"},
             ),
             dcc.RadioItems(
@@ -448,8 +477,8 @@ def build_left_panel(
                         id="property-range-min",
                         type="number",
                         value=None
-                        if property_range is None
-                        else property_range[0],
+                        if visible_range is None
+                        else visible_range[0],
                         placeholder="minimum",
                         style={"width": "49%"},
                     ),
@@ -457,8 +486,8 @@ def build_left_panel(
                         id="property-range-max",
                         type="number",
                         value=None
-                        if property_range is None
-                        else property_range[1],
+                        if visible_range is None
+                        else visible_range[1],
                         placeholder="maximum",
                         style={"width": "49%"},
                     ),
@@ -624,7 +653,18 @@ def build_left_panel(
                 "Export Static Figure",
                 id="export-btn",
                 n_clicks=0,
+                disabled=not static_export_resolution.available,
                 style={"marginLeft": "8px"},
+                title=static_export_hint or "Download a static PNG or ORTEP PDF",
+            ),
+            html.Div(
+                static_export_hint,
+                id="export-capability-hint",
+                style={
+                    "fontSize": "11px",
+                    "color": "#8a4b08",
+                    "marginTop": "4px",
+                },
             ),
             html.Div(
                 id="status-banner",

@@ -479,6 +479,64 @@ class _StateBackendMixin:
             "active": copy.deepcopy(state.get("atom_property_color")),
         }
 
+    def resolved_atom_property_range(
+        self,
+        state: Optional[dict[str, Any]] = None,
+    ) -> tuple[float, float] | None:
+        """Return the visible range for the active auto-scaled field.
+
+        ``AtomPropertyColorSpec.value_range`` deliberately stays ``None`` in
+        auto mode so the persisted state continues to mean *derive this from
+        the selected source frames*.  The panel still needs to show the range
+        that was derived, though.  Resolve just the property context here
+        (without assembling geometry) so control refreshes can populate the
+        two range inputs while retaining auto mode.
+        """
+
+        state = self.get_state() if state is None else state
+        spec = state.get("atom_property_color") or {}
+        if not spec or not spec.get("fields"):
+            return None
+        if spec.get("value_range") is not None:
+            try:
+                lower, upper = spec["value_range"]
+                return float(lower), float(upper)
+            except (TypeError, ValueError):
+                return None
+
+        try:
+            bundle = self.get_bundle(state["structure"])
+            source = getattr(bundle, "_property_structure_input", None)
+            if source is None:
+                from pathlib import Path
+
+                from ..loader.structure_input import StructureFrame, StructureInput
+
+                frame_index = int(bundle.frame_info.get("frame_index", 0))
+                frame = StructureFrame(
+                    frame_index,
+                    bundle,
+                    dict(bundle.frame_info),
+                    dict(bundle.atom_arrays),
+                )
+                source = StructureInput(
+                    Path(bundle.cif_path),
+                    str(bundle.scene.get("input_format") or "cif"),
+                    (frame,),
+                    1,
+                    getattr(bundle, "_property_manifest", None),
+                )
+            from ..properties import resolve_source_property_context
+
+            context = resolve_source_property_context(source, spec)
+        except (OSError, TypeError, ValueError, KeyError, IndexError):
+            # The renderer reports malformed/missing fields through its normal
+            # state validation path. A control refresh should remain usable if
+            # an externally edited scene briefly contains such a spec.
+            return None
+        return tuple(float(value) for value in context.scale.value_range)
+
+
     def style_for_state(
         self,
         state: Optional[dict[str, Any]] = None,

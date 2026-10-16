@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from .radius import atom_visual_radius
 from .viewport_spec import ViewportSpec, resolve_viewport, reuse_viewport  # noqa: F401
 
 
@@ -40,6 +41,25 @@ def _geometry_entity_points(scene: dict) -> list[np.ndarray]:
     return points
 
 
+def _display_atom_radii(atoms: list[dict], style: Mapping[str, object]) -> np.ndarray:
+    """Return radii used by both traces and viewport fitting."""
+    atom_scale = float(style.get("atom_scale", 1.0))
+    values = []
+    for atom in atoms:
+        raw = max(float(atom.get("atom_radius", 0.18)), 0.05)
+        element = str(atom.get("elem") or atom.get("symbol") or "C")
+        values.append(
+            atom_visual_radius(
+                raw,
+                element=element,
+                representation="ball",
+                atom_scale=atom_scale,
+                style=style,
+            )
+        )
+    return np.asarray(values, dtype=float)
+
+
 @dataclass
 class ViewportAccumulator:
     """Accumulate one shared viewport without retaining rendered scenes."""
@@ -62,17 +82,10 @@ class ViewportAccumulator:
 
     def update(self, scene: dict, *, style: dict | None = None) -> None:
         scn_style = style if style is not None else scene.get("style") or {}
-        atom_scale = float(scn_style.get("atom_scale", 1.0))
         atoms = scene.get("draw_atoms") or []
         if atoms:
             carts = np.array([atom["cart"] for atom in atoms], dtype=float)
-            radii = (
-                np.array(
-                    [max(float(atom.get("atom_radius", 0.18)), 0.05) for atom in atoms],
-                    dtype=float,
-                )
-                * atom_scale
-            )
+            radii = _display_atom_radii(atoms, scn_style)
             self._update_bounds(
                 (carts - radii[:, None]).min(axis=0),
                 (carts + radii[:, None]).max(axis=0),
@@ -523,8 +536,6 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
         ]
 
     atoms = _visible_atoms(scene, style)
-    atom_scale = float(style.get("atom_scale", 1.0))
-
     atom_mins = None
     atom_maxs = None
     cell_corners = _cell_corners()
@@ -555,13 +566,7 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
         atom_maxs = cell_max.copy()
         if atoms:
             carts = np.array([atom["cart"] for atom in atoms], dtype=float)
-            radii = (
-                np.array(
-                    [max(float(atom.get("atom_radius", 0.18)), 0.05) for atom in atoms],
-                    dtype=float,
-                )
-                * atom_scale
-            )
+            radii = _display_atom_radii(atoms, style)
             cell_span = np.maximum(cell_max - cell_min, 1e-6)
             slack = 0.15 * cell_span
             keep = np.all(carts >= cell_min - slack, axis=1) & np.all(
@@ -578,13 +583,7 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
                 )
     elif atoms:
         carts = np.array([atom["cart"] for atom in atoms], dtype=float)
-        radii = (
-            np.array(
-                [max(float(atom.get("atom_radius", 0.18)), 0.05) for atom in atoms],
-                dtype=float,
-            )
-            * atom_scale
-        )
+        radii = _display_atom_radii(atoms, style)
         atom_mins = (carts - radii[:, None]).min(axis=0)
         atom_maxs = (carts + radii[:, None]).max(axis=0)
 

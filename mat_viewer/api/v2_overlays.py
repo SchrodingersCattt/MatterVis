@@ -249,7 +249,7 @@ def register_overlay_routes(v2, backend) -> dict:
                 transform_id=payload.get("id"),
                 auto_promote=str(request.args.get("auto_promote", "true")).lower() not in {"0", "false", "no"},
             )
-        except ValueError as exc:
+        except (ValueError, NotImplementedError) as exc:
             return jsonify({"error": str(exc)}), 400
         return jsonify(transform)
 
@@ -264,7 +264,7 @@ def register_overlay_routes(v2, backend) -> dict:
             )
         except KeyError as exc:
             return jsonify({"error": str(exc)}), 404
-        except ValueError as exc:
+        except (ValueError, NotImplementedError) as exc:
             return jsonify({"error": str(exc)}), 400
         return jsonify(transform)
 

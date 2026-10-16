@@ -42,6 +42,7 @@ def _operation_panel_section(disorder_resolve: dict[str, Any] | None = None):
                                 id="disorder-resolve-count",
                                 type="number",
                                 min=1,
+                                max=128,
                                 step=1,
                                 value=_operation_count(disorder_resolve.get("count")),
                                 debounce=True,

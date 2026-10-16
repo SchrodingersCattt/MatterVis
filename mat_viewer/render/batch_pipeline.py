@@ -315,6 +315,7 @@ def _render_one(
     cell_width_px: float,
     bonds: Any,
     bond_radius: float,
+    min_atom_radius: float | None = None,
     overlay_primitives: Iterable[Any],
     content_width: int | None = None,
     property_metadata_payload: dict[str, Any] | None = None,
@@ -333,6 +334,7 @@ def _render_one(
         cell_width_px=cell_width_px * scale,
         bonds=bonds,
         bond_radius=bond_radius,
+        min_atom_radius=min_atom_radius,
     )
     primitives = list(overlay_primitives)
     if show_labels:
@@ -411,6 +413,7 @@ def render_array_input(
     bonded: bool,
     bond_radius: float,
     bond_skin: float,
+    min_atom_radius: float | None = None,
     vector_overlays: Any = None,
     polyhedron_specs: Sequence[str] = (),
     polyhedron_site: int | None = None,

@@ -39,6 +39,27 @@
     var v = meta(update), current = Number(render.geometry_version || render.render_revision || 0);
     var geometry = Number(v.geometry_version || v.geometry || 0);
     if (!sceneChanged && geometry && current && geometry < current) return false;
+    var display = Number(v.display_version || 0);
+    var camera = Number(v.camera_version || 0);
+    var currentDisplay = Number(render.display_version || 0);
+    var currentCamera = Number(render.camera_version || render.camera_revision || 0);
+    var kind = String(update.update_kind || update.kind || "full");
+    // Geometry equality alone is insufficient for rapid slider updates: two
+    // display frames can share one geometry revision while arriving out of
+    // order.  Reject every older clock before it can overwrite the newest
+    // frame in Plotly.
+    // A complete frame for the newly selected scene establishes a new clock
+    // domain.  Plotly still exposes the previous scene's display/camera
+    // versions during this handoff, so those clocks cannot reject the frame.
+    if (!sceneChanged) {
+      if (kind === "display" || kind === "overlay" || kind === "analysis") {
+        if (display < currentDisplay) return false;
+      } else if (kind === "camera") {
+        if (camera < currentCamera) return false;
+      } else if (display < currentDisplay || camera < currentCamera) {
+        return false;
+      }
+    }
     return !delivered[deliveryKey(update, gd)];
   }
   function markDelivered(update, gd) {

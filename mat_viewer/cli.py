@@ -1155,6 +1155,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                 background=_hex_rgba(args.background),
                 atom_scale=args.atom_scale,
                 bond_radius=args.bond_radius,
+                min_atom_radius=args.min_atom_radius,
                 show_hydrogen=args.show_hydrogen,
                 show_cell=_effective_show_cell(structure, args),
                 show_axes=bool(args.show_axes),

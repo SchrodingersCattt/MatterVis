@@ -26,6 +26,13 @@ def register_state_callbacks(app, backend):
         scene_id = state.get("scene_id") or backend.active_scene_id()
         property_payload = state.get("atom_property_color") or {}
         property_range = property_payload.get("value_range")
+        # Auto mode intentionally keeps ``value_range`` unset in persisted
+        # state. Show the exact range resolved from the source data in the
+        # controls anyway, so switching tabs or toggling another display
+        # option does not make the visible min/max disappear.
+        visible_range = property_range
+        if visible_range is None and property_payload.get("fields"):
+            visible_range = backend.resolved_atom_property_range(state)
         property_options = [
             {"label": item["field"], "value": item["field"]}
             for item in backend.atom_properties(state)["fields"]
@@ -50,8 +57,8 @@ def register_state_callbacks(app, backend):
             property_payload.get("component"),
             property_payload.get("colormap", "viridis"),
             "manual" if property_range is not None else "auto",
-            None if property_range is None else property_range[0],
-            None if property_range is None else property_range[1],
+            None if visible_range is None else visible_range[0],
+            None if visible_range is None else visible_range[1],
             property_payload.get("center"),
             str(property_payload.get("nan_color", "#BDBDBD"))[:7],
             ["show"] if property_payload.get("show_colorbar", True) else [],
@@ -355,16 +362,35 @@ def register_state_callbacks(app, backend):
         Output("scene-switch-seq", "data"),
         Input("agent-state-poll", "n_intervals"),
         Input("native-upload-sync", "data"),
+        Input("display-defaults-btn", "n_clicks"),
         Input("scene-tabs", "value"),
         prevent_initial_call=True,
     )
-    def sync_agent_state(_n_intervals, _native_upload_sync, scene_id):
+    def sync_agent_state(_n_intervals, _native_upload_sync, *args):
+        # Keep the callback callable with the historical three-argument
+        # signature for direct integrations/tests while Dash supplies the
+        # optional Restore Defaults click value as a fourth argument.
+        if len(args) == 1:
+            _display_defaults_clicks = None
+            scene_id = args[0]
+        elif len(args) == 2:
+            _display_defaults_clicks, scene_id = args
+        else:
+            raise TypeError(
+                "sync_agent_state expects (interval, upload, scene_id) or "
+                "(interval, upload, defaults_clicks, scene_id)"
+            )
         triggered = (
             callback_context.triggered[0]["prop_id"].split(".")[0]
             if callback_context.triggered
             else None
         )
         n_outputs = 27
+        if triggered == "display-defaults-btn":
+            if not scene_id or scene_id not in backend.scene_store.scenes:
+                return (no_update,) * n_outputs
+            state = backend.restore_display_defaults(scene_id=scene_id, broadcast=True)
+            return (*scene_control_outputs(state), no_update)
         if triggered == "scene-tabs":
             if not scene_id or scene_id not in backend.scene_store.scenes:
                 return (no_update,) * n_outputs
@@ -500,7 +526,14 @@ def register_state_callbacks(app, backend):
             if property_range_mode == "manual":
                 if property_range_min is None or property_range_max is None:
                     return no_update
-                value_range = [float(property_range_min), float(property_range_max)]
+                try:
+                    lower = float(property_range_min)
+                    upper = float(property_range_max)
+                except (TypeError, ValueError):
+                    return no_update
+                if not np.isfinite((lower, upper)).all() or lower >= upper:
+                    return no_update
+                value_range = [lower, upper]
             else:
                 value_range = None
             component = property_component

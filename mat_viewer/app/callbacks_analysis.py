@@ -14,6 +14,10 @@ from dash import ALL, Input, Output, State, callback_context, html, no_update
 
 from .. import perf_log
 from ..topology import DEFAULT_CENTROID_OFFSET_FRAC
+from .backend_analysis import (
+    _coerce_bfdh_max_index,
+    _coerce_bfdh_top_n,
+)
 from .editor_tables import _polyhedra_table_rows
 from .normalizers import _AUTO_LIGAND_VALUE
 from .shared import _POLY_SHELL_MODE_ENCLOSURE, _POLY_SHELL_MODE_GAP
@@ -224,10 +228,11 @@ def register_analysis_callbacks(app, backend):
 
         scene_id = active_scene_id or backend.active_scene_id()
         try:
-            max_idx = int(max_index) if max_index is not None else 2
-            n = int(top_n) if top_n is not None else 10
-        except (TypeError, ValueError):
-            max_idx, n = 2, 10
+            max_idx = _coerce_bfdh_max_index(max_index)
+        except ValueError as exc:
+            _surface_error("BFDH Analysis", exc)
+            return html.Div(str(exc), style={"color": "#A00"})
+        n = _coerce_bfdh_top_n(top_n)
 
         t0 = time.perf_counter()
         result = backend.run_bfdh_analysis(scene_id=scene_id, max_index=max_idx, top_n=n)

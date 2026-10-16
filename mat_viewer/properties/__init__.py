@@ -68,11 +68,19 @@ class AtomPropertyColorSpec:
         if reduction != "component" and self.component is not None:
             raise ValueError("component is only valid with reduction='component'")
         if self.value_range is not None:
-            if len(self.value_range) != 2:
+            try:
+                if len(self.value_range) != 2:
+                    raise ValueError
+            except (TypeError, ValueError):
                 raise ValueError("value_range must contain (minimum, maximum)")
-            lower, upper = (float(value) for value in self.value_range)
-            if not np.isfinite((lower, upper)).all() or lower > upper:
-                raise ValueError("value_range must contain finite MIN <= MAX")
+            try:
+                lower, upper = (float(value) for value in self.value_range)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "value_range must contain finite MIN < MAX"
+                ) from exc
+            if not np.isfinite((lower, upper)).all() or lower >= upper:
+                raise ValueError("value_range must contain finite MIN < MAX")
             object.__setattr__(self, "value_range", (lower, upper))
         if self.center is not None and not np.isfinite(float(self.center)):
             raise ValueError("center must be finite")
@@ -82,6 +90,11 @@ class AtomPropertyColorSpec:
         object.__setattr__(self, "colormap", str(self.colormap).strip())
         if not self.colormap:
             raise ValueError("colormap must not be empty")
+        # Validate at the public-spec boundary so invalid names are rejected
+        # before an asynchronous render (or a deferred callback) can fail.
+        # ``build_color_lut`` is defined below and resolved at instance
+        # construction time after this module has finished importing.
+        build_color_lut(self.colormap)
         _parse_color(self.nan_color)
         if not isinstance(self.show_colorbar, bool):
             raise TypeError("show_colorbar must be a bool")
@@ -686,6 +699,21 @@ def build_color_lut(colormap: str) -> np.ndarray:
     )
 
 
+def available_colormaps() -> tuple[str, ...]:
+    """Return the matplotlib colormap names accepted by property specs.
+
+    Keeping this list beside :func:`build_color_lut` means the web control and
+    every other frontend use the same validation source.  Matplotlib exposes
+    aliases (for example ``gray`` and ``grey``) through the registry; keeping
+    those aliases is intentional because they are valid names at the renderer
+    boundary too.
+    """
+
+    from matplotlib import colormaps
+
+    return tuple(sorted(str(name) for name in colormaps))
+
+
 def normalize_property_values(
     values: Any,
     *,
@@ -907,6 +935,7 @@ __all__ = [
     "ResolvedPropertyScale",
     "SourcePropertyContext",
     "build_color_lut",
+    "available_colormaps",
     "catalog_from_arrays",
     "catalog_from_columns",
     "coerce_atom_property_color_spec",

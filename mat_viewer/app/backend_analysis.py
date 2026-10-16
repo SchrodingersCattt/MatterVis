@@ -23,6 +23,30 @@ from .style_helpers import _POLYHEDRON_AUTO_COLORS
 from ..topology.analysis import _MAX_REGISTERED_CN
 
 
+BFDH_DEFAULT_MAX_INDEX = 2
+BFDH_DEFAULT_TOP_N = 10
+
+
+def _coerce_bfdh_max_index(value: Any) -> int:
+    """Coerce the UI/API value and reject invalid Miller index bounds."""
+    try:
+        max_index = int(value)
+    except (TypeError, ValueError):
+        return BFDH_DEFAULT_MAX_INDEX
+    if max_index < 1:
+        raise ValueError("Max Index must be at least 1")
+    return max_index
+
+
+def _coerce_bfdh_top_n(value: Any) -> int:
+    """Coerce Top N; blank and non-positive values use the default 10."""
+    try:
+        top_n = int(value)
+    except (TypeError, ValueError):
+        return BFDH_DEFAULT_TOP_N
+    return BFDH_DEFAULT_TOP_N if top_n < 1 else top_n
+
+
 class _AnalysisBackendMixin:
     """Polyhedron spec CRUD + analysis dispatch.
 
@@ -315,14 +339,24 @@ class _AnalysisBackendMixin:
         self,
         scene_id: Optional[str] = None,
         *,
-        max_index: int = 2,
-        top_n: int = 10,
+        max_index: int = BFDH_DEFAULT_MAX_INDEX,
+        top_n: int = BFDH_DEFAULT_TOP_N,
     ) -> dict[str, Any]:
         """Run BFDH morphology analysis synchronously and return the results.
 
         Returns:
         ``{"facets": [...], "status": "ok"|"error", "warnings": [...]}``
         """
+        try:
+            max_index = _coerce_bfdh_max_index(max_index)
+        except ValueError as exc:
+            return {
+                "facets": [],
+                "status": "error",
+                "warnings": [str(exc)],
+            }
+        top_n = _coerce_bfdh_top_n(top_n)
+
         state = self.get_state(scene_id)
         structure = str(state.get("structure") or "")
         bundle = self.get_bundle(structure)

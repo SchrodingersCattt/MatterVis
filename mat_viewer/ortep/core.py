@@ -6,6 +6,7 @@ from typing import Iterable
 import numpy as np
 
 from ..presets import ORTEP_MODES
+from ..render.radius import clamp_displacement_radius, hydrogen_radius_floor
 
 
 def _plotly_go():
@@ -454,6 +455,7 @@ def ortep_atom_mesh_traces(scene: dict, style: dict):
     # Fixed H-atom sphere radius (Å) in ORTEP mode. When set, hydrogen
     # atoms are rendered as small spheres instead of ADP ellipsoids.
     h_radius = style.get("ortep_hydrogen_radius")
+    h_floor = hydrogen_radius_floor(style)
 
     # Mesh3d lighting passthrough.
     mesh_lighting = style.get("mesh_lighting")
@@ -493,6 +495,17 @@ def ortep_atom_mesh_traces(scene: dict, style: dict):
                 atom["cart"], float(h_radius), lat_steps=lat_steps, lon_steps=lon_steps
             )
         else:
+            if elem in ("H", "D"):
+                clamp_source = (
+                    U
+                    if U is not None
+                    else np.eye(3, dtype=float) * float(uiso or 0.0)
+                )
+                U = clamp_displacement_radius(
+                    clamp_source,
+                    h_floor,
+                    probability=probability,
+                )
             verts, tris = ortep_mesh3d(
                 atom["cart"],
                 U,
@@ -551,6 +564,15 @@ def ortep_atom_billboard_traces(scene: dict, style: dict):
         if not _atom_render_visible(atom):
             continue
         U, uiso = _atom_u(atom)
+        if _atom_element(atom) in ("H", "D"):
+            clamp_source = (
+                U if U is not None else np.eye(3, dtype=float) * float(uiso or 0.0)
+            )
+            U = clamp_displacement_radius(
+                clamp_source,
+                hydrogen_radius_floor(style),
+                probability=probability,
+            )
         ring, _, _ = ortep_billboard_polygon(
             atom["cart"], U, view_x, view_y, probability=probability, uiso=uiso
         )

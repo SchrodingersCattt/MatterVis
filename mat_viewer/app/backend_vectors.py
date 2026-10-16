@@ -5,8 +5,8 @@ import copy
 
 
 class _VectorBackendMixin:
-    def default_state(self, structure: str) -> dict:
-        state = super().default_state(structure)
+    def default_state(self, structure: str, *, preset=None) -> dict:
+        state = super().default_state(structure, preset=preset)
         state["vector_overlays"] = []
         return state
 

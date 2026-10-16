@@ -68,6 +68,9 @@ BUILTIN_STYLE: dict[str, Any] = {
     "display_mode": "formula_unit",
     "atom_scale": 1.0,
     "bond_radius": 0.15,
+    # H/D atoms use 1.5 * bond_radius when this is None.  Callers can set
+    # an explicit Angstrom floor for publication or per-backend styling.
+    "min_atom_radius": None,
     "material": "mesh",
     "style": "ball_stick",
     "disorder": "opacity",

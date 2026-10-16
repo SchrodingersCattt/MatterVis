@@ -483,22 +483,67 @@ def _extract_coordination_shell_static(
             "search_cutoff": record.get("search_cutoff"),
             "hard_cutoff": record.get("hard_cutoff"),
         }
-    shell = [
-        {
-            "index": int(idx),
-            "center": coord,
-            "distance": dist,
-            "image_shift": offset,
-        }
-        for idx, coord, dist, offset in zip(
-            (record or {}).get("shell_molecule_indices")
-            or (record or {}).get("shell_indices")
-            or [],
-            source_shell_coords.tolist(),
-            shell_distances,
-            (record or {}).get("shell_offsets") or [],
+    # MolCrysKit reports shell members by source molecule index.  The
+    # analysis card needs the stable MatterVis fragment identity as well;
+    # leaving this translation to the renderer produced ``?(?)`` labels and
+    # made it impossible to tell an N centre from a ClO4 neighbour.  Keep the
+    # MCK index for callers that use it as a chemistry key, then add the
+    # corresponding fragment label/formula when the bundle carries the
+    # canonical topology table.
+    fragments_by_source_molecule = {
+        int(fragment["source_molecule_index"]): fragment
+        for fragment in fragments
+        if fragment.get("source_molecule_index") is not None
+    }
+    shell_indices = (
+        (record or {}).get("shell_molecule_indices")
+        or (record or {}).get("shell_indices")
+        or []
+    )
+    shell_offsets = (record or {}).get("shell_offsets") or []
+    shell = []
+    for idx, coord, dist, offset in zip(
+        shell_indices,
+        source_shell_coords.tolist(),
+        shell_distances,
+        shell_offsets,
+    ):
+        fragment = fragments_by_source_molecule.get(int(idx))
+        raw_atom = None
+        if fragment is None:
+            try:
+                raw_atom = bundle.raw_atoms[int(idx)]
+            except (AttributeError, IndexError, TypeError, ValueError):
+                raw_atom = None
+        shell.append(
+            {
+                "index": int(idx),
+                "fragment_index": (
+                    None if fragment is None else int(fragment["index"])
+                ),
+                "label": (
+                    str(raw_atom.get("label") or f"site-{int(idx)}")
+                    if fragment is None and raw_atom is not None
+                    else (
+                        f"site-{int(idx)}"
+                        if fragment is None
+                        else str(fragment.get("label") or f"site-{int(idx)}")
+                    )
+                ),
+                "species": (
+                    str(raw_atom.get("elem") or "?")
+                    if fragment is None and raw_atom is not None
+                    else (
+                        "?"
+                        if fragment is None
+                        else str(fragment.get("formula") or fragment.get("species") or "?")
+                    )
+                ),
+                "center": coord,
+                "distance": dist,
+                "image_shift": offset,
+            }
         )
-    ]
     return {
         "center_index": int(center_index),
         "default_label": center_fragment.get("label", f"site-{center_index}"),

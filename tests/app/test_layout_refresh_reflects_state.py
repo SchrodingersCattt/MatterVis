@@ -73,3 +73,29 @@ def test_graph_fills_center_panel(app_and_backend):
     assert center.children[0] is graph
     assert graph.style == {"height": "100%", "width": "100%"}
     assert graph.config.get("responsive") is True
+
+
+def test_graph_png_download_uses_local_deterministic_options(app_and_backend):
+    app, _ = app_and_backend
+    graph = find_component(app.layout(), "crystal-graph")
+
+    options = graph.config.get("toImageButtonOptions")
+    assert graph.config.get("displaylogo") is False
+    assert options["format"] == "png"
+    assert options["filename"] == "mattervis-figure"
+    assert options["scale"] == 2
+
+
+def test_static_export_button_explains_missing_capability(app_and_backend):
+    app, _ = app_and_backend
+    export = find_component(app.layout(), "export-btn")
+    hint = find_component(app.layout(), "export-capability-hint")
+
+    from mat_viewer.capabilities import resolve_requirements
+
+    resolution = resolve_requirements("static-web-export")
+    assert export.disabled is (not resolution.available)
+    if resolution.available:
+        assert hint.children == ""
+    else:
+        assert resolution.install_command in hint.children

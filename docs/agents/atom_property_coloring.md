@@ -30,6 +30,12 @@ with the dataclass fields is also accepted. `value_range=None` scans every
 selected source frame and atom exactly. A supplied range clips outliers and
 avoids that scan. A constant field maps to the LUT midpoint.
 
+Explicit `value_range` bounds must be finite with `MIN < MAX`; auto mode keeps
+the range unset in the saved spec and derives the visible bounds from the
+selected source values. Colormap names are validated against Matplotlib's
+registry when the spec is constructed. The web field selector is populated
+from the available array, column, and sidecar descriptors.
+
 ## Sidecar v1
 
 ```json

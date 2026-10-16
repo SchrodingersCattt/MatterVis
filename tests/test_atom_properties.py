@@ -96,6 +96,26 @@ def test_lut_is_deterministic_and_invalid_colormap_fails() -> None:
     assert np.array_equal(build_color_lut("viridis"), build_color_lut("viridis"))
     with pytest.raises(ValueError, match="unknown matplotlib colormap"):
         build_color_lut("mattervis-no-such-map")
+    with pytest.raises(ValueError, match="unknown matplotlib colormap"):
+        AtomPropertyColorSpec(
+            fields=("array:q",), colormap="mattervis-no-such-map"
+        )
+
+
+@pytest.mark.parametrize(
+    "value_range",
+    [
+        (1.0, 1.0),
+        (2.0, 1.0),
+        (float("nan"), 1.0),
+        (1.0, float("inf")),
+    ],
+)
+def test_explicit_property_range_requires_finite_strict_bounds(
+    value_range: tuple[float, float],
+) -> None:
+    with pytest.raises(ValueError, match="finite MIN < MAX"):
+        AtomPropertyColorSpec(fields=("array:q",), value_range=value_range)
 
 
 def test_unqualified_field_requires_unique_source() -> None:

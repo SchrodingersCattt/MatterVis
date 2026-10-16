@@ -35,6 +35,24 @@ def test_view_buttons_submit_camera_update_message(tmp_path: Path):
     assert ("fast-view-metadata", "children") in outputs
 
 
+def test_camera_reset_restores_default_zoom_after_a_deep_zoom(tmp_path: Path):
+    app = create_app(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    backend = app.crystal_backend
+    scene_id = backend.active_scene_id()
+    default = backend.default_camera(backend.get_state(scene_id))
+    zoomed = {
+        "eye": {"x": 0.08, "y": 0.06, "z": 0.04},
+        "center": {"x": 0.0, "y": 0.0, "z": 0.0},
+        "up": {"x": 0.0, "y": 1.0, "z": 0.0},
+    }
+    backend.patch_state({"camera": zoomed}, scene_id=scene_id, broadcast=False)
+
+    reset = backend.camera_action("reset", scene_id=scene_id, broadcast=False)
+
+    assert reset == default
+    assert reset["eye"] != zoomed["eye"]
+
+
 def test_projection_buttons_submit_camera_update_message(tmp_path: Path):
     app = create_app(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
 

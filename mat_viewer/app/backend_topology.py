@@ -531,7 +531,18 @@ class _TopologyBackendMixin:
                         ),
                         None,
                     )
-                if anchor_overlay is None and len(overlays) == 1:
+                # A single overlay is only a safe fallback for atom-level
+                # specs.  Molecule-level rows may be enabled for N/C6N2
+                # while the user explicitly analyses an X0 ClO4 fragment;
+                # rebinding that unmatched anchor to the lone N overlay is
+                # the source of the historical ``B0 (N2)`` report.  Keep the
+                # selected fragment's identity when no overlay agrees with
+                # its centre.
+                if (
+                    anchor_overlay is None
+                    and len(overlays) == 1
+                    and str(spec.get("level") or "molecule") == "atom"
+                ):
                     anchor_overlay = overlays[0]
             spec_results.append(recoloured)
         out = dict(cached_geometry)

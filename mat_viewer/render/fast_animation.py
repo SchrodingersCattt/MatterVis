@@ -57,6 +57,7 @@ class FastAnimationConfig:
     cell_width_px: float
     bonded: bool
     bond_radius: float
+    min_atom_radius: float | None
     bond_skin: float
     indexed_gif: bool
     content_width: int
@@ -239,6 +240,7 @@ def _render_worker(frame_index: int) -> FastFrameResult:
         cell_width_px=config.cell_width_px * config.scale,
         bonds=bonds,
         bond_radius=config.bond_radius,
+        min_atom_radius=config.min_atom_radius,
     )
     rasterized = time.perf_counter()
     foreground_pixels = int(
@@ -642,6 +644,7 @@ def render_lammps_animation(
     cell_width_px: float = 2.0,
     bonded: bool = False,
     bond_radius: float = 0.15,
+    min_atom_radius: float | None = None,
     bond_skin: float = 0.5,
     workers: int | None = None,
     profile_path: str | Path | None = None,
@@ -826,6 +829,9 @@ def render_lammps_animation(
         cell_width_px=float(cell_width_px),
         bonded=bool(bonded),
         bond_radius=float(bond_radius),
+        min_atom_radius=(
+            None if min_atom_radius is None else float(min_atom_radius)
+        ),
         bond_skin=float(bond_skin),
         indexed_gif=output.suffix.lower() == ".gif",
         content_width=content_width,

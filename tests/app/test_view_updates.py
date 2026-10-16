@@ -58,3 +58,16 @@ def test_polyhedron_enabled_is_part_of_display_identity():
     assert geometry_state_key(before) == geometry_state_key(after)
     assert classify_change(before, after) is UpdateKind.DISPLAY
 
+
+def test_render_style_and_group_edits_advance_geometry_identity():
+    before = _state(atom_scale=1.0, bond_radius=0.15, bond_groups=[])
+    after = _state(
+        atom_scale=1.3,
+        bond_radius=0.22,
+        bond_groups=[{"id": "custom", "selector": {"all": True}}],
+        geometry_version=4,
+        display_version=5,
+    )
+    assert geometry_state_key(before) != geometry_state_key(after)
+    assert classify_change(before, after) is UpdateKind.GEOMETRY
+

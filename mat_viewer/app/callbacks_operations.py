@@ -15,6 +15,60 @@ from .editor_transforms import _seed_text_to_selector, _transforms_table_rows
 from .status_helpers import surface_callback_error
 
 
+def _parse_symmetry_ops(value: Any) -> list[Any]:
+    """Parse and validate the JSON entered in an Apply symmetry row.
+
+    The state normalizer intentionally tolerates malformed REST payloads for
+    backwards compatibility.  The interactive editor needs a stricter path:
+    silently replacing a typo with ``[]`` leaves an enabled transform that
+    later fails in the renderer and looks like a dead button.
+    """
+    import json
+    import math
+
+    if value is None or not str(value).strip():
+        return []
+    try:
+        parsed = json.loads(str(value))
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("symmetry operations must be valid JSON") from exc
+    if not isinstance(parsed, list):
+        raise TypeError("symmetry operations JSON must be a list")
+    for index, op in enumerate(parsed):
+        if not isinstance(op, (list, tuple)) or len(op) != 2:
+            raise TypeError(f"symmetry operation {index + 1} must be [rotation, translation]")
+        rotation, translation = op
+        if not isinstance(rotation, (list, tuple)) or len(rotation) != 3:
+            raise TypeError(f"symmetry operation {index + 1} rotation must be 3x3")
+        if not all(isinstance(row, (list, tuple)) and len(row) == 3 for row in rotation):
+            raise TypeError(f"symmetry operation {index + 1} rotation must be 3x3")
+        if not isinstance(translation, (list, tuple)) or len(translation) != 3:
+            raise TypeError(f"symmetry operation {index + 1} translation must have 3 values")
+        try:
+            numbers = [float(item) for row in rotation for item in row]
+            numbers.extend(float(item) for item in translation)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"symmetry operation {index + 1} contains non-numeric values") from exc
+        if not all(math.isfinite(number) for number in numbers):
+            raise ValueError(f"symmetry operation {index + 1} contains non-finite values")
+    return parsed
+
+
+def _validate_seed_selector(seeds: dict[str, Any]) -> None:
+    elements = seeds.get("elements") if isinstance(seeds, dict) else None
+    if not elements:
+        return
+    try:
+        from ase.data import chemical_symbols
+
+        known = set(chemical_symbols[1:])
+    except ImportError:  # pragma: no cover - ASE is a MolCrysKit dependency
+        known = set()
+    invalid = [str(symbol) for symbol in elements if str(symbol) not in known]
+    if invalid:
+        raise ValueError(f"unknown element selector: {', '.join(invalid)}")
+
+
 def _build_transforms(
     *,
     enabled_ids: list[dict[str, Any]],
@@ -52,6 +106,7 @@ def _build_transforms(
         elif kind in ("grow_radius", "grow_bonds", "complete_fragment", "complete_polyhedron", "by_symmetry"):
             seeds_text = param_seeds[index] if index < len(param_seeds) else None
             seeds = _seed_text_to_selector(seeds_text) if seeds_text is not None else base["params"].get("seeds") or {}
+            _validate_seed_selector(seeds)
             params["seeds"] = seeds
             if kind == "grow_radius":
                 params["radius"] = float(param_radius[index]) if index < len(param_radius) and param_radius[index] is not None else float(base["params"].get("radius", 0.0) or 0.0)
@@ -64,11 +119,7 @@ def _build_transforms(
             elif kind == "by_symmetry":
                 ops_text = param_ops[index] if index < len(param_ops) else None
                 if ops_text:
-                    try:
-                        import json as _json
-                        params["ops"] = _json.loads(ops_text)
-                    except (ValueError, TypeError):
-                        params["ops"] = base["params"].get("ops") or []
+                    params["ops"] = _parse_symmetry_ops(ops_text)
                 else:
                     params["ops"] = base["params"].get("ops") or []
         elif kind == "slab":
@@ -84,6 +135,8 @@ def _build_transforms(
                 "layers": int(layers_val) if layers_val is not None else None,
                 "vacuum": float(vacuum_val or 10.0),
             }
+            if miller == [0, 0, 0]:
+                raise ValueError("slab Miller indices cannot all be zero")
         new_transforms.append(
             {
                 "id": transform_id,
@@ -180,6 +233,7 @@ def register_operations_callbacks(app, backend):
                     {"a": n, "b": n, "c": n},
                     name=f"Repeat {n}x{n}x{n}",
                     scene_id=scene_id,
+                    replace_repeat=True,
                 )
             except Exception as exc:
                 _surface_error(f"Repeat {n}x{n}x{n}", exc)
@@ -259,26 +313,34 @@ def register_operations_callbacks(app, backend):
             if not enabled_ids:
                 return no_update, no_update
             existing = {t["id"]: t for t in backend.list_transforms(scene_id=scene_id)}
-            new_transforms = _build_transforms(
-                enabled_ids=enabled_ids,
-                enableds=enableds,
-                param_a=param_a,
-                param_b=param_b,
-                param_c=param_c,
-                param_seeds=param_seeds,
-                param_radius=param_radius,
-                param_hops=param_hops,
-                param_maxhops=param_maxhops,
-                param_cutoff=param_cutoff,
-                param_ops=param_ops,
-                param_miller0=param_miller0,
-                param_miller1=param_miller1,
-                param_miller2=param_miller2,
-                param_layers=param_layers,
-                param_vacuum=param_vacuum,
-                existing=existing,
-            )
             try:
+                new_transforms = _build_transforms(
+                    enabled_ids=enabled_ids,
+                    enableds=enableds,
+                    param_a=param_a,
+                    param_b=param_b,
+                    param_c=param_c,
+                    param_seeds=param_seeds,
+                    param_radius=param_radius,
+                    param_hops=param_hops,
+                    param_maxhops=param_maxhops,
+                    param_cutoff=param_cutoff,
+                    param_ops=param_ops,
+                    param_miller0=param_miller0,
+                    param_miller1=param_miller1,
+                    param_miller2=param_miller2,
+                    param_layers=param_layers,
+                    param_vacuum=param_vacuum,
+                    existing=existing,
+                )
+            except Exception as exc:
+                _surface_error("Update transform", exc)
+                return _rebuild(), no_update
+            try:
+                validator = getattr(backend, "validate_transform", None)
+                if callable(validator):
+                    for transform in new_transforms:
+                        validator(transform, scene_id=scene_id)
                 backend.patch_state({"transforms": new_transforms}, scene_id=scene_id, broadcast=False)
             except Exception as exc:
                 _surface_error("Update transform", exc)

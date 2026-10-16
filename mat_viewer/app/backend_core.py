@@ -148,14 +148,34 @@ class _CoreBackendMixin:
         self._intent_lock = threading.Lock()
         self._intent_seq_by_client: dict[str, int] = {}
 
-    def default_state(self, structure: str) -> dict[str, Any]:
+    def default_state(
+        self,
+        structure: str,
+        *,
+        preset: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """Build a fresh state from a preset source.
+
+        ``preset`` is intentionally injectable for the Display Defaults
+        action.  Normal scene creation keeps using the loaded preset (which
+        may contain user customisations), while that action passes the
+        shipped/config-backed :func:`default_preset` so it cannot
+        accidentally restore the very customised preset the user is trying
+        to clear.
+        """
         bundle = self.get_bundle(structure)
         scene = bundle.scene
+        effective_preset = self.preset if preset is None else preset
         style = dict(DEFAULT_STYLE)
-        style.update(scene.get("style", {}))
-        preset_style = self.preset.get("style", {})
+        # A bundle's scene style was materialised when it was loaded and may
+        # already contain values from the user's persisted preset.  When an
+        # explicit preset source is supplied (the Restore Defaults action),
+        # skip that baked style so it cannot leak custom values back in.
+        if preset is None:
+            style.update(scene.get("style", {}))
+        preset_style = effective_preset.get("style", {})
         entry_style = (
-            self.preset.get("structures", {}).get(structure, {}).get("style", {})
+            effective_preset.get("structures", {}).get(structure, {}).get("style", {})
         )
         style.update(preset_style)
         style.update(entry_style)
@@ -350,6 +370,66 @@ class _CoreBackendMixin:
             ),
             "cutoff": 10.0,
         }
+
+
+    def restore_display_defaults(
+        self,
+        scene_id: Optional[str] = None,
+        *,
+        broadcast: bool = True,
+    ) -> dict[str, Any]:
+        """Restore shipped/config display defaults for one active scene.
+
+        Scene identity and structural operations remain attached to the
+        current tab.  The loaded preset is deliberately ignored: it is a
+        persisted user customisation, whereas the button promises the
+        effective shipped/config defaults.  Returning the committed state
+        lets Dash update all controls in one transaction.
+        """
+        current = self.get_state(scene_id)
+        target_scene_id = scene_id or current.get("scene_id") or self.active_scene_id()
+        structure = str(current.get("structure") or "")
+        defaults = self.default_state(structure, preset=default_preset())
+
+        # Operations and source identity belong to the scene, not to its
+        # display skin.  Keep those durable fields while replacing every
+        # display/editor value (including custom atom/bond/polyhedron rules).
+        preserved = {
+            key: copy.deepcopy(current.get(key))
+            for key in (
+                "scene_id",
+                "scene_label",
+                "structure",
+                "transforms",
+                "disorder_resolve",
+                "disorder_replicas",
+                "vector_overlays",
+                "cell_overlays",
+                "overlay_overrides",
+                "selection",
+                "bfdh_morphology",
+                "bfdh_morphology_color",
+            )
+            if key in current
+        }
+        replacement = {**defaults, **preserved}
+        replacement["structure"] = structure
+
+        # Defaults from the source scene are valid for ordinary scenes.  For
+        # a transformed tab, ask the scene builder for its effective camera
+        # after preserving the transform operation rather than retaining a
+        # zoomed/rotated camera from the customised state.
+        candidate = self.normalize_state(replacement, scene_id=target_scene_id)
+        try:
+            candidate_scene = self.scene_for_state(candidate)
+            if isinstance(candidate_scene.get("camera"), dict):
+                candidate["camera"] = copy.deepcopy(candidate_scene["camera"])
+        except Exception:
+            # Camera fitting is a convenience; a malformed optional
+            # transform must not prevent the display controls from resetting.
+            candidate["camera"] = copy.deepcopy(defaults.get("camera"))
+        return self.patch_state(candidate, scene_id=target_scene_id, broadcast=broadcast)
+
 
     def _bump_version(self):
         # ``_figure_cache`` is keyed on the *content* of the state dict

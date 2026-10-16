@@ -6,7 +6,7 @@ import numpy as np
 from ase import Atoms
 from ase.io import write
 
-from _layout_helpers import layout_ids
+from _layout_helpers import find_component, layout_ids
 from mat_viewer.app import create_app
 
 
@@ -67,7 +67,15 @@ def test_web_property_catalog_state_controls_and_trace_batching(tmp_path: Path) 
         "property-nan-color-input",
         "property-colorbar-toggle",
     }
-    assert expected_controls <= layout_ids(app.layout())
+    layout = app.layout()
+    assert expected_controls <= layout_ids(layout)
+    field_control = find_component(layout, "property-field-selector")
+    assert field_control.options == [
+        {"label": "array:charges", "value": "array:charges"}
+    ]
+    colormap_control = find_component(layout, "property-colormap-input")
+    colormap_names = {item["value"] for item in colormap_control.options}
+    assert {"viridis", "plasma", "coolwarm"} <= colormap_names
 
     figure, _ = backend.figure_for_state(state)
     traces = figure.to_plotly_json()["data"]

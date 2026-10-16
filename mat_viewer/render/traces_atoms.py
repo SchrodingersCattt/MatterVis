@@ -7,6 +7,7 @@ from .style import *
 from .traces_overlays import _dashed_segments, _ring_segments, _segment_cylinder_trace
 from .viewport import flat_projected_pixel_scale, flat_visual_pixel_scale
 from ..style.disorder import _field, _resolve_bond_fields
+from .radius import atom_visual_radius
 
 _FLAT_ATOM_MIN_PIXEL_SIZE = 3.0
 
@@ -155,6 +156,23 @@ def _bond_segments(scene: dict, style: dict, *, with_scales: bool = False):
         # the corresponding atom is outside a focused local environment.
         opacity_scale = float(_field(bond, "_render_opacity_scale", 1.0))
         opacity_group = _bond_opacity_group_id(bond)
+        # A zero-opacity bond group is a visibility rule in practice.  Do not
+        # emit its cylinder/line segments at all: Plotly/WebGL can still
+        # depth-test and show non-empty geometry when a trace merely carries
+        # ``opacity=0``.  This also keeps the mesh, scatter, and wireframe
+        # paths consistent with the minor-wireframe guard below.
+        effective_opacity = bond_effective_opacity(
+            {
+                "is_minor": is_minor,
+                "is_disordered": is_disordered,
+                "_render_opacity_scale": opacity_scale,
+                "_render_opacity_group_id": opacity_group,
+                "occ": bond_occ,
+            },
+            style,
+        )
+        if effective_opacity <= 1.0e-12:
+            continue
         halves = [
             (c_i, is_minor, start, mid),
             (c_j, is_minor, mid, end),
@@ -231,10 +249,13 @@ def _bond_mesh_traces(scene: dict, style: dict):
                 "is_minor": is_minor,
                 "is_disordered": is_disordered,
                 "_render_opacity_scale": opacity_scale,
+                "_render_opacity_group_id": opacity_group,
                 "occ": bond_occ,
             },
             style,
         )
+        if eff_opacity <= 1.0e-12:
+            continue
         opacity_bin = f"{eff_opacity:.2f}"
         key = (color, is_minor, radius_bin, opacity_group, opacity_bin)
         groups.setdefault(
@@ -363,7 +384,13 @@ def _atom_mesh_traces(scene: dict, style: dict):
                 "opacity_group": opacity_group,
             },
         )
-        radius = float(atom["atom_radius"]) * float(style["atom_scale"])
+        radius = atom_visual_radius(
+            float(atom["atom_radius"]),
+            element=str(atom.get("elem", "C")),
+            representation="ball",
+            atom_scale=float(style["atom_scale"]),
+            style=style,
+        )
         groups[key]["centers"].append(atom["cart"])
         groups[key]["radii"].append(radius)
         groups[key]["colors"].append(color)
@@ -461,10 +488,13 @@ def _bond_scatter_traces(scene: dict, style: dict):
                 "is_minor": is_minor,
                 "is_disordered": is_disordered,
                 "_render_opacity_scale": opacity_scale,
+                "_render_opacity_group_id": opacity_group,
                 "occ": bond_occ,
             },
             style,
         )
+        if eff_opacity <= 1.0e-12:
+            continue
         opacity_bin = f"{eff_opacity:.2f}"
         occ_bin = f"{bond_occ:.2f}"
         groups.setdefault(
@@ -581,7 +611,18 @@ def _atom_scatter_traces(scene: dict, style: dict):
             payload["color"].append(color)
         elif not payload["color"]:
             payload["color"] = color
-        base_size = _flat_atom_marker_size(atom["atom_radius"], style, visual_scale)
+        marker_radius = atom_visual_radius(
+            float(atom["atom_radius"]),
+            element=str(atom.get("elem", "C")),
+            representation="ball",
+            atom_scale=float(style["atom_scale"]),
+            style=style,
+        )
+        base_size = _flat_atom_marker_size(
+            marker_radius,
+            {**style, "atom_scale": 1.0},
+            visual_scale,
+        )
         payload["x"].append(float(atom["cart"][0]))
         payload["y"].append(float(atom["cart"][1]))
         payload["z"].append(float(atom["cart"][2]))
@@ -684,6 +725,13 @@ def _minor_bond_wireframe_traces(scene: dict, style: dict):
     for bond in scene["bonds"]:
         if not bond["is_minor"]:
             continue
+        if not bool(_field(bond, "_render_visible", True)):
+            continue
+        try:
+            if float(_field(bond, "_render_opacity_scale", 1.0)) <= 1.0e-12:
+                continue
+        except (TypeError, ValueError):
+            pass
         # Phase 2: skip bonds whose endpoint atom was hidden by an
         # atom_groups ``visible: false`` rule -- otherwise the wireframe
         # ring sits in empty space and reads as a rendering bug.
@@ -746,7 +794,13 @@ def _wireframe_atom_traces(scene: dict, style: dict):
             continue
         if not _atom_render_visible(atom):
             continue
-        radius = max(0.05, float(atom["atom_radius"]) * float(style["atom_scale"]))
+        radius = atom_visual_radius(
+            float(atom["atom_radius"]),
+            element=str(atom.get("elem", "C")),
+            representation="ball",
+            atom_scale=float(style["atom_scale"]),
+            style=style,
+        )
         is_minor = bool(atom.get("is_minor", False))
         key = (_atom_render_color(atom, style, light=is_minor), is_minor)
         bucket = groups.setdefault(key, [])
