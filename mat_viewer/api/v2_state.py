@@ -23,6 +23,10 @@ def register_state_routes(v2, backend) -> dict:
         scene_id = request.args.get("scene_id")
         if scene_id:
             events = [event for event in events if str(event.get("scene_id") or "") == str(scene_id)]
+            if not events and hasattr(backend, "latest_figure_broadcast"):
+                latest = backend.latest_figure_broadcast(str(scene_id))
+                if latest and int(latest.get("figure_seq", 0) or 0) > since:
+                    events = [latest]
         return jsonify({"updates": events, "cursor": backend.latest_figure_seq()})
 
     @v2.post("/state")

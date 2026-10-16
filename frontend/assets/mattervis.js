@@ -113,8 +113,9 @@
     lastHovered = null;
     resyncScene(sceneId);
   }
-  function resyncScene(sceneId) {
+  function resyncScene(sceneId, attempt) {
     if (!window.fetch || !sceneId) return;
+    attempt = Number(attempt || 0);
     window.fetch("/api/v2/view-updates?since=0&scene_id=" + encodeURIComponent(String(sceneId)), {credentials: "same-origin"})
       .then(function (response) { return response.ok ? response.json() : null; })
       .then(function (body) {
@@ -122,11 +123,16 @@
           return item && String(item.scene_id || "") === String(sceneId) && (item.figure || item.type === "view_update" || item.type === "render_error");
         });
         const latest = rows.length ? rows[rows.length - 1] : null;
-        if (!latest || !window.MatterVisViewUpdates || typeof window.MatterVisViewUpdates.submit !== "function") return;
+        if (!latest || !window.MatterVisViewUpdates || typeof window.MatterVisViewUpdates.submit !== "function") {
+          if (attempt < 8) setTimeout(function () { resyncScene(sceneId, attempt + 1); }, 250);
+          return;
+        }
         Promise.resolve(window.MatterVisViewUpdates.submit(latest)).catch(function (error) {
           console.error("MatterVis scene resync failed", error);
         });
-      }).catch(function () {});
+      }).catch(function () {
+        if (attempt < 8) setTimeout(function () { resyncScene(sceneId, attempt + 1); }, 250);
+      });
   }
   function selectedSceneId() {
     const root = document.getElementById("scene-tabs");
@@ -176,6 +182,7 @@
     sceneTabIntentId = String(sceneId);
     sceneTabIntentAt = Date.now();
     sceneTabIntentSource = "programmatic";
+    resyncScene(sceneTabIntentId);
   };
   function fastViewMetadata() {
     const node = document.getElementById("fast-view-metadata");

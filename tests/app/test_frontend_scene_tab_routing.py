@@ -51,6 +51,14 @@ def test_scene_tab_intent_is_bound_by_global_rebind_observer():
     assert "ensureSceneTabTooltips();" in rebind_body
 
 
+def test_scene_resync_runs_for_programmatic_selection_and_scene_cursor():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    select_idx = source.index("window.MatterVisSelectScene")
+    select_body = source[select_idx:source.index("function fastViewMetadata", select_idx)]
+    assert "resyncScene(sceneTabIntentId)" in select_body
+    assert "scene_id=" in source
+
+
 def test_programmatic_upload_selection_clears_stale_tab_intent():
     source = MATTERVIS_JS.read_text(encoding="utf-8")
     selected_idx = source.index("function selectedSceneId")
