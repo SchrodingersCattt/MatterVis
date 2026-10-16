@@ -229,15 +229,18 @@ async function nonblank(page) {
 }
 
 async function postAction(page, body) {
-  const status = await page.evaluate(async (payload) => {
+  const result = await page.evaluate(async (payload) => {
     const response = await fetch("/api/v2/camera/action", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify(payload),
     });
-    return response.status;
+    let body = null;
+    try { body = await response.json(); } catch (_) {}
+    return {status: response.status, body};
   }, body);
-  if (status !== 200) fail(`camera action failed: ${status} ${JSON.stringify(body)}`);
+  if (result.status !== 200) fail(`camera action failed: ${result.status} ${JSON.stringify(body)}`);
+  return result.body;
 }
 
 async function runGestures(page) {
@@ -267,7 +270,7 @@ async function runGestures(page) {
     eyeComponent(aligned.eye, 1, "y"),
     eyeComponent(aligned.eye, 2, "z"),
   ];
-  await postAction(page, {action: "orbit", yaw_deg: 25, pitch_deg: 10});
+  const orbitResult = await postAction(page, {action: "orbit", yaw_deg: 25, pitch_deg: 10});
   try {
     await page.waitForFunction((previous) => {
       const gd = document.querySelector("#crystal-graph .js-plotly-plot");
@@ -280,12 +283,13 @@ async function runGestures(page) {
     }, alignedEye, {timeout: 20000});
   } catch (error) {
     const now = await readView(page);
-    const diagnostics = await page.evaluate(() => ({
+    const diagnostics = await page.evaluate((orbitResult) => ({
       view: window.__mv_view_diag || null,
       camera: window.__mv_camera_diag || null,
       render: window.__mvRenderStatus || null,
       metadata: document.getElementById("fast-view-metadata")?.textContent || "",
-    }));
+      orbitResult,
+    }), orbitResult);
     fail(`orbit left the eye unchanged (${JSON.stringify(aligned.eye)} -> ${JSON.stringify(now.eye)}), diagnostics=${JSON.stringify(diagnostics)}`);
   }
   const beforePan = await readView(page);

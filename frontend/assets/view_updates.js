@@ -215,6 +215,23 @@
     }
     return Promise.resolve(applied);
   }
+  function noteDrop(update, gd, reason) {
+    var v = meta(update), current = currentMeta(gd);
+    root.__mv_view_diag.lastDrop = {
+      reason: String(reason || "stale"),
+      kind: updateKind(update),
+      scene: update && update.scene_id || null,
+      generation: v.scene_generation,
+      geometry: Number(v.geometry_version || v.geometry || 0),
+      display: Number(v.display_version || 0),
+      camera: Number(v.camera_version || v.camera_revision || 0),
+      currentScene: current.scene_id || null,
+      currentGeneration: current.scene_generation,
+      currentGeometry: Number(current.geometry_version || current.geometry || 0),
+      currentDisplay: Number(current.display_version || 0),
+      currentCamera: Number(current.camera_version || current.camera_revision || 0),
+    };
+  }
   function submit(update) {
     if (!update || typeof update !== "object") return "";
     var gd = graph();
@@ -233,14 +250,14 @@
       return "error";
     }
     root.__mv_view_diag.submissions += 1;
-    if (!applicable(snapshot, gd)) { root.__mv_view_diag.staleDrops += 1; return "stale"; }
+    if (!applicable(snapshot, gd)) { root.__mv_view_diag.staleDrops += 1; noteDrop(snapshot, gd, "inapplicable"); return "stale"; }
     rememberVersions(snapshot, gd);
     if (kind === "camera") {
       root.__mv_view_diag.cameraUpdates += 1;
       var scope = cameraScope(snapshot, gd);
       var revision = cameraRevision(snapshot);
       if (latestCameraRevision[scope] === undefined || revision > latestCameraRevision[scope]) latestCameraRevision[scope] = revision;
-      if (!cameraIsCurrent(snapshot, gd)) { root.__mv_view_diag.staleDrops += 1; return "stale"; }
+      if (!cameraIsCurrent(snapshot, gd)) { root.__mv_view_diag.staleDrops += 1; noteDrop(snapshot, gd, "camera-order"); return "stale"; }
       var cameraKey = deliveryKey(snapshot, gd);
       if (pending[cameraKey]) return pending[cameraKey];
       var camera = snapshot.payload || snapshot;
