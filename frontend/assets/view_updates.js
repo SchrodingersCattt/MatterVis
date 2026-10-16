@@ -217,6 +217,14 @@
   }
   function noteDrop(update, gd, reason) {
     var v = meta(update), current = currentMeta(gd);
+    if (updateKind(update) === "camera") {
+      root.__mv_view_diag.lastCameraStale = {
+        reason: String(reason || "stale"),
+        scope: cameraScope(update, gd),
+        key: deliveryKey(update, gd),
+        revision: cameraRevision(update),
+      };
+    }
     root.__mv_view_diag.lastDrop = {
       reason: String(reason || "stale"),
       kind: updateKind(update),
