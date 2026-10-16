@@ -460,6 +460,16 @@
     installContextLoss(gd);
     var snapshot = clone(camera);
     var patch = requestedPatch(snapshot);
+    var requestedRevision = Number(options.camera_version);
+    /* A dotted camera patch still needs a new scene.uirevision whenever it
+     * advances the backend camera clock. Without this marker Plotly preserves
+     * the previous gl3d camera and can acknowledge orbit/pan/zoom as a no-op
+     * even though the eye payload changed. Browser drag persistence omits the
+     * revision and therefore keeps the existing uirevision continuity. */
+    if (Number.isFinite(requestedRevision)) {
+      var currentUi = gd.layout && gd.layout.scene && gd.layout.scene.uirevision;
+      patch["scene.uirevision"] = String(currentUi || "scene") + "#camera" + String(requestedRevision);
+    }
     if (restoresViewport(options)) {
       restoreCanonicalViewport(gd);
       var canonical = gd.__mvCanonicalViewport;
@@ -471,7 +481,6 @@
       patch["scene.uirevision"] = String(previousUi || "scene") + "#reset" + String(options.camera_version || Date.now());
     }
     if (!Object.keys(patch).length) return Promise.reject(new Error("invalid camera payload"));
-    var requestedRevision = Number(options.camera_version);
     var revisionScope = String(options.scene_id || "") + ":" + String(options.scene_generation === undefined ? "" : options.scene_generation);
     if (gd.__mvCameraRevisionScope !== revisionScope) {
       gd.__mvCameraRevisionScope = revisionScope;

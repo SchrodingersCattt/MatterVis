@@ -711,19 +711,27 @@ class _CameraBackendMixin:
         **payload,
     ) -> dict[str, Any]:
         if action == "reset":
-            self._bump_camera_revision(scene_id=scene_id, broadcast=broadcast)
-            return self.set_camera(
-                self.default_camera(self.get_state(scene_id)),
+            state = self.get_state(scene_id)
+            camera = self.default_camera(state)
+            revision = int(state.get("camera_revision", 0) or 0) + 1
+            self.patch_state(
+                {"camera": camera, "camera_revision": revision},
                 scene_id=scene_id,
                 broadcast=broadcast,
             )
+            return self.get_camera(scene_id)
 
         if action == "align":
-            self._bump_camera_revision(scene_id=scene_id, broadcast=broadcast)
-            return self.align_camera(payload.get("axis"), scene_id=scene_id, broadcast=broadcast)
+            state = self.get_state(scene_id)
+            revision = int(state.get("camera_revision", 0) or 0) + 1
+            return self.align_camera(
+                payload.get("axis"),
+                scene_id=scene_id,
+                broadcast=broadcast,
+                camera_revision=revision,
+            )
 
         if action == "fit":
-            self._bump_camera_revision(scene_id=scene_id, broadcast=broadcast)
             state = self.get_state(scene_id)
             camera = self.default_camera(state)
             # Plotly uses unitless eye vectors against the already fixed
@@ -733,7 +741,13 @@ class _CameraBackendMixin:
             if norm > 1e-8:
                 scale = 1.55 / norm
                 camera["eye"] = {axis: float(eye.get(axis, 0.0)) * scale for axis in ("x", "y", "z")}
-            return self.set_camera(camera, scene_id=scene_id, broadcast=broadcast)
+            revision = int(state.get("camera_revision", 0) or 0) + 1
+            self.patch_state(
+                {"camera": camera, "camera_revision": revision},
+                scene_id=scene_id,
+                broadcast=broadcast,
+            )
+            return self.get_camera(scene_id)
 
         if action in ("projection", "set_projection"):
             return self.set_projection(
@@ -796,6 +810,7 @@ class _CameraBackendMixin:
         scene_id: Optional[str] = None,
         *,
         broadcast: bool = True,
+        camera_revision: Optional[int] = None,
     ) -> dict[str, Any]:
         """Look down the requested lattice axis (``a``/``b``/``c``) or
         reciprocal axis (``a*``/``b*``/``c*``).
@@ -831,7 +846,11 @@ class _CameraBackendMixin:
             center=center,
             projection=projection,
         )
-        return self.set_camera(camera, scene_id=scene_id, broadcast=broadcast)
+        patch = {"camera": camera}
+        if camera_revision is not None:
+            patch["camera_revision"] = int(camera_revision)
+        self.patch_state(patch, scene_id=scene_id, broadcast=broadcast)
+        return self.get_camera(scene_id)
 
     def set_projection(
         self,
