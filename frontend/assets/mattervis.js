@@ -753,6 +753,15 @@
     const root = document.getElementById("scene-tabs");
     if (!root || root.dataset.mvSceneIntentBound === "1") return;
     root.dataset.mvSceneIntentBound = "1";
+    const selectionObserver = new MutationObserver(function () {
+      flushQueuedSceneFigure();
+    });
+    selectionObserver.observe(root, {
+      attributes: true,
+      attributeFilter: ["class", "aria-selected"],
+      subtree: true,
+    });
+    root.__mvSceneSelectionObserver = selectionObserver;
     root.addEventListener("pointerdown", function (event) { noteSceneTabIntent(event.target); }, true);
     root.addEventListener("mousedown", function (event) { noteSceneTabIntent(event.target); }, true);
     root.addEventListener("click", function (event) {
@@ -763,6 +772,13 @@
       // frame; replay it immediately instead of waiting for an unrelated DOM
       // child-list mutation or a later tab click.
       flushQueuedSceneFigure();
+      // Dash applies the selected class/aria-selected attribute in a later
+      // mutation turn. Replay after those handoff turns as well; otherwise a
+      // frame parked while the old tab was still selected can remain frozen
+      // until the next unrelated click.
+      [0, 50, 250].forEach(function (delay) {
+        setTimeout(flushQueuedSceneFigure, delay);
+      });
       // Upload progress is global UI chrome. Once the user deliberately
       // changes scenes, the previous upload result must not look like a
       // status for the newly selected structure.
