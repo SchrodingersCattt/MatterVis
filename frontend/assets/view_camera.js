@@ -477,7 +477,13 @@
   function applyAsync(camera, options) {
     options = options || {};
     var gd = graph();
-    if (!gd || !root.Plotly || typeof root.Plotly.relayout !== "function" || !camera) {
+    if (!camera) {
+      diag("missingPayload");
+      root.__mv_camera_diag.lastMissingPayload = {camera_version: Number(options.camera_version), scene_id: options.scene_id || null};
+      reportStatus("error", "The camera payload is missing. The last good frame was kept.");
+      return Promise.reject(new Error("camera payload missing"));
+    }
+    if (!gd || !root.Plotly || typeof root.Plotly.relayout !== "function") {
       /* Plotly briefly removes the graph while replacing a gl3d canvas. A
        * camera update arriving in that window must remain retryable rather
        * than poisoning the delivery key and leaving an error toast behind.
@@ -584,8 +590,15 @@
     return enqueue(gd, run, {isCurrent: current, group: "camera"}).then(function () { return true; }).catch(function (error) { diag("failures"); throw error; });
   }
   function apply(camera, options) {
+    options = options || {};
     var gd = graph();
-    if (!gd || !root.Plotly || typeof root.Plotly.relayout !== "function" || !camera) {
+    if (!camera) {
+      diag("missingPayload");
+      root.__mv_camera_diag.lastMissingPayload = {camera_version: Number(options.camera_version), scene_id: options.scene_id || null};
+      reportStatus("error", "The camera payload is missing. The last good frame was kept.");
+      return Promise.reject(new Error("camera payload missing"));
+    }
+    if (!gd || !root.Plotly || typeof root.Plotly.relayout !== "function") {
       reportStatus("error", "The 3D view is not ready. The last good frame was kept.");
       return false;
     }

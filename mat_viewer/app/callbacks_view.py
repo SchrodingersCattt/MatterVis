@@ -72,12 +72,23 @@ def register_view_callbacks(app, backend):
             kind = str(getattr(backend, "_last_update_kind_by_scene", {}).get(scene_id) or "")
             if not kind:
                 return no_update
+            if kind == UpdateKind.CAMERA.value:
+                payload["camera"] = copy.deepcopy(state.get("camera"))
+                payload["command"] = "state-confirmed"
             return make_update(
                 state, operation=kind, payload=payload, reason="state-confirmed"
             ).to_dict()
-        return make_update(
+        update = make_update(
             state, before=before, payload=payload, reason="state-confirmed"
-        ).to_dict()
+        )
+        if str(update.kind) == UpdateKind.CAMERA.value:
+            update = make_update(
+                state,
+                before=before,
+                payload={**payload, "camera": copy.deepcopy(state.get("camera")), "command": "state-confirmed"},
+                reason="state-confirmed",
+            )
+        return update.to_dict()
 
     if hasattr(app, "clientside_callback"):
         app.clientside_callback(

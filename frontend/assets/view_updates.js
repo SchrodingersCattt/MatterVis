@@ -6,7 +6,7 @@
   var pending = Object.create(null);
   var latestCameraRevision = Object.create(null);
   var latestVersions = Object.create(null);
-  root.__mv_view_diag = root.__mv_view_diag || {submissions: 0, fullFrames: 0, localPatches: 0, cameraUpdates: 0, staleDrops: 0, cameraStale: 0, cameraDeduped: 0, graphUnavailable: 0};
+  root.__mv_view_diag = root.__mv_view_diag || {submissions: 0, fullFrames: 0, localPatches: 0, cameraUpdates: 0, staleDrops: 0, cameraStale: 0, cameraDeduped: 0, graphUnavailable: 0, cameraMissingPayload: 0};
   function graph() { return root.MatterVisViewCamera && root.MatterVisViewCamera.graph(); }
   function clone(value) {
     if (value === undefined || value === null) return value;
@@ -283,6 +283,11 @@
         return pending[cameraKey];
       }
       var camera = snapshot.payload || snapshot;
+      if (!camera || !camera.camera) {
+        root.__mv_view_diag.cameraMissingPayload += 1;
+        root.__mv_view_diag.lastCameraMissingPayload = {key: cameraKey, revision: revision, scene: snapshot.scene_id};
+        return "camera-missing";
+      }
       var cameraOptions = {
         scene_id: snapshot.scene_id,
         scene_generation: meta(snapshot).scene_generation,
