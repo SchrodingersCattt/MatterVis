@@ -920,11 +920,15 @@
     window.__mattervisFigureSocket = ws;
     ws.addEventListener("open",function(){
       opened = true;
-      stopHttpFallback();
       try { ws.send(JSON.stringify({type:"subscribe_figure",enabled:true})); }
       catch (_) { window.__mattervisFigureWsDisabled = true; startHttpFallback(); }
     });
     ws.addEventListener("message",function(e){
+      /* Only stop the journal poll after a real protocol message. Some
+       * Werkzeug/proxy stacks report ``open`` for a plain HTTP 200 response
+       * and then never deliver frames; keeping fallback alive in that case
+       * is what carries camera/display updates to the graph. */
+      stopHttpFallback();
       var p; try { p=JSON.parse(e.data||"{}"); } catch(_){return;}
       handleFigurePayload(p);
     });
