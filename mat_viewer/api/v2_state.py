@@ -27,7 +27,12 @@ def register_state_routes(v2, backend) -> dict:
                 latest = backend.latest_figure_broadcast(str(scene_id))
                 if latest and int(latest.get("figure_seq", 0) or 0) > since:
                     events = [latest]
-        return jsonify({"updates": events, "cursor": backend.latest_figure_seq()})
+            pending = False
+            if not events and hasattr(backend, "ensure_scene_figure"):
+                pending = bool(backend.ensure_scene_figure(str(scene_id)))
+        else:
+            pending = False
+        return jsonify({"updates": events, "cursor": backend.latest_figure_seq(), "pending": pending})
 
     @v2.post("/state")
     def post_state():

@@ -94,6 +94,14 @@ def test_empty_subscribe_requests_one_figure_until_a_frame_exists():
     assert len(backend._render_worker.states) == 1
 
 
+def test_missing_scene_frame_queues_scene_scoped_build():
+    backend = _JournalStub()
+    backend._figure_broadcasts.append({"type": "figure", "figure_seq": 4, "scene_id": "other"})
+    backend._figure_broadcast_seq = 4
+    assert backend.ensure_scene_figure("s1") is True
+    assert backend._render_worker.states == [{"scene_id": "s1"}]
+
+
 def test_http_cursor_is_per_client_and_per_scene():
     class Backend:
         def __init__(self):

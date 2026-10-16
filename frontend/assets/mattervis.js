@@ -123,15 +123,16 @@
           return item && String(item.scene_id || "") === String(sceneId) && (item.figure || item.type === "view_update" || item.type === "render_error");
         });
         const latest = rows.length ? rows[rows.length - 1] : null;
+        const pending = !!(body && body.pending);
         if (!latest || !window.MatterVisViewUpdates || typeof window.MatterVisViewUpdates.submit !== "function") {
-          if (attempt < 8) setTimeout(function () { resyncScene(sceneId, attempt + 1); }, 250);
+          if (pending || attempt < 40) setTimeout(function () { resyncScene(sceneId, attempt + 1); }, 250);
           return;
         }
         Promise.resolve(window.MatterVisViewUpdates.submit(latest)).catch(function (error) {
           console.error("MatterVis scene resync failed", error);
         });
       }).catch(function () {
-        if (attempt < 8) setTimeout(function () { resyncScene(sceneId, attempt + 1); }, 250);
+        if (attempt < 40) setTimeout(function () { resyncScene(sceneId, attempt + 1); }, 250);
       });
   }
   function selectedSceneId() {
