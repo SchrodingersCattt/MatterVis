@@ -32,6 +32,7 @@
   let interactionSettled = Promise.resolve(), endInteraction = null;
   let pendingFigurePush = null;
   const pendingFigureByScene = Object.create(null);
+  const latestFigureSeqByScene = Object.create(null);
   let sceneTabIntentId = null, sceneTabIntentAt = 0;
   let sceneTabIntentSource = null;
   let renderServerEpoch = null;
@@ -825,16 +826,25 @@
          * render-revision fences as a WebSocket frame.  Without these fields
          * flushQueuedSceneFigure treats it as stale forever, and a later WS
          * snapshot can overwrite it while Dash is painting the selected tab. */
+        const sceneKey = String(payload.scene_id);
         const seq = Number(payload.figure_seq || payload.seq || 0);
-        const previous = pendingFigureByScene[String(payload.scene_id)];
+        const previous = pendingFigureByScene[sceneKey];
         const previousSeq = Number(previous && (previous.figure_seq || previous.seq) || 0);
-        if (seq && seq <= Number(window.__mattervisFigureLastSeq || 0)) return;
-        if (seq) window.__mattervisFigureLastSeq = seq;
+        const seenSeq = Number(latestFigureSeqByScene[sceneKey] || 0);
+        /* The HTTP cursor is global, but tab handoff fences are per scene.
+         * A WS frame for scene A can advance the global cursor before the
+         * selected scene B frame is polled; rejecting B on that cursor would
+         * strand its newest frame and leave the old canvas visible forever. */
+        if (seq && seq <= Math.max(seenSeq, previousSeq)) return;
+        if (seq) {
+          latestFigureSeqByScene[sceneKey] = seq;
+          window.__mattervisFigureLastSeq = Math.max(Number(window.__mattervisFigureLastSeq || 0), seq);
+        }
         if (payload.state && typeof payload.state === "object") rememberExpectedRender(payload.state, true);
         if (payload.render_revision !== undefined) rememberExpectedRender(payload, true);
         payload.isCurrent = function () { return isCurrentFigurePush(payload); };
         if (!previous || !previousSeq || (seq && seq >= previousSeq)) {
-          pendingFigureByScene[String(payload.scene_id)] = payload;
+          pendingFigureByScene[sceneKey] = payload;
         }
       }
       function deliverFallbackPayload(payload) {
