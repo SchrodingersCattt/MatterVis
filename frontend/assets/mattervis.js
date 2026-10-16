@@ -932,12 +932,18 @@
         ws.__mvCensusCountedOpen = true;
         census.socketsOpen += 1;
       }
-      stopHttpFallback();
       try { ws.send(JSON.stringify({type:"subscribe_figure",enabled:true})); }
       catch (_) { window.__mattervisFigureWsDisabled = true; startHttpFallback(); }
     });
     ws.addEventListener("message",function(e){
       var p; try { p=JSON.parse(e.data||"{}"); } catch(_){return;}
+      /* A Werkzeug/proxy HTTP-200 upgrade can report ``open`` and emit a
+       * plain snapshot without ever becoming a figure transport. Keep the
+       * journal poll alive until a real view envelope arrives; camera and
+       * display updates must not wait for the socket's eventual close. */
+      if (!p || typeof p !== "object" ||
+          (!p.type && !p.figure && p.figure_seq === undefined && p.seq === undefined)) return;
+      stopHttpFallback();
       handleFigurePayload(p);
     });
     ws.addEventListener("error",function(){
