@@ -878,6 +878,14 @@
     // Dash loads Plotly lazily. Missing it on the asset's first execution
     // must not permanently disable completed-frame delivery.
     if (!window.Plotly) { requestAnimationFrame(connectWS); return; }
+    /* Keep the journal poll running while the upgrade is in flight. The
+     * Werkzeug development server (and a few reverse proxies) answer the
+     * WebSocket URL with a plain HTTP 200 instead of completing an upgrade;
+     * in that case the browser can take several seconds to emit ``close``.
+     * Camera/display view_updates must still reach the graph during that
+     * window. A successful ``open`` stops this poll before subscribing so
+     * there is only one active transport. */
+    startHttpFallback();
     noteBuildIdentity(null);
     function isCurrentFigurePush(p) {
       if (!p || !p.figure) return false;
