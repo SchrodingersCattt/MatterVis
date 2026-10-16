@@ -22,17 +22,26 @@ def register_state_routes(v2, backend) -> dict:
         events = backend.figure_broadcasts_since(since)
         scene_id = request.args.get("scene_id")
         if scene_id:
-            events = [event for event in events if str(event.get("scene_id") or "") == str(scene_id)]
+            scene_id = str(scene_id)
+            events = [event for event in events if str(event.get("scene_id") or "") == scene_id]
             if not events:
-                latest = backend.latest_figure_broadcast(str(scene_id))
+                latest = backend.latest_figure_broadcast(scene_id)
                 if latest and int(latest.get("figure_seq", 0) or 0) > since:
                     events = [latest]
             pending = False
+            terminal = False
             if not events:
-                pending = bool(backend.ensure_scene_figure(str(scene_id)))
+                try:
+                    pending = bool(backend.ensure_scene_figure(scene_id))
+                except KeyError:
+                    # A tab can outlive its scene (for example after closing an
+                    # upload).  This is a terminal state, not a render that can
+                    # become ready through polling.
+                    terminal = True
         else:
             pending = False
-        return jsonify({"updates": events, "cursor": backend.latest_figure_seq(), "pending": pending})
+            terminal = False
+        return jsonify({"updates": events, "cursor": backend.latest_figure_seq(), "pending": pending, "terminal": terminal})
 
     @v2.post("/state")
     def post_state():

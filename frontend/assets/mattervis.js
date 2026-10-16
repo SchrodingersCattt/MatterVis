@@ -124,6 +124,7 @@
         });
         const latest = rows.length ? rows[rows.length - 1] : null;
         const pending = !!(body && body.pending);
+        if (body && body.terminal) return;
         if (!latest || !window.MatterVisViewUpdates || typeof window.MatterVisViewUpdates.submit !== "function") {
           // Keep retrying while a render is pending, but cap the total wait so
           // a failed worker cannot leave an endless polling loop behind.

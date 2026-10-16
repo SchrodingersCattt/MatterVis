@@ -102,6 +102,40 @@ def test_missing_scene_frame_queues_scene_scoped_build():
     assert backend._render_worker.states == [{"scene_id": "s1"}]
 
 
+def test_view_updates_marks_closed_scene_terminal():
+    from flask import Flask
+    from mat_viewer.api import v2_state
+
+    class Backend:
+        def figure_broadcasts_since(self, since):
+            return []
+
+        def latest_figure_broadcast(self, scene_id):
+            return None
+
+        def ensure_scene_figure(self, scene_id):
+            raise KeyError(scene_id)
+
+        def latest_figure_seq(self):
+            return 7
+
+    routes = {}
+
+    class V2:
+        def get(self, path):
+            def register(fn):
+                routes[path] = fn
+                return fn
+            return register
+
+    v2_state.register_state_routes(V2(), Backend())
+    app = Flask(__name__)
+    with app.test_request_context("/api/v2/view-updates?scene_id=closed"):
+        response = routes["/view-updates"]()
+    assert response.get_json()["terminal"] is True
+    assert response.get_json()["pending"] is False
+
+
 def test_http_cursor_is_per_client_and_per_scene():
     class Backend:
         def __init__(self):
