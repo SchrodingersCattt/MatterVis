@@ -116,6 +116,18 @@ def test_figure_socket_keeps_http_journal_polling_during_upgrade():
     assert ws_body.index("startHttpFallback();") < upgrade_idx
 
 
+def test_fallback_parked_frames_keep_revision_and_sequence_fences():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    ws_idx = source.index("(function connectWS()")
+    ws_body = source[ws_idx:source.index("  function ensureSceneTabTooltips", ws_idx)]
+    park_idx = ws_body.index("function parkFallbackFigure")
+    park_body = ws_body[park_idx:ws_body.index("function deliverFallbackPayload", park_idx)]
+    assert "rememberExpectedRender(payload, true)" in park_body
+    assert "payload.isCurrent = function" in park_body
+    assert "__mattervisFigureLastSeq" in park_body
+    assert "previousSeq" in park_body
+
+
 def test_tab_switch_clears_global_upload_status():
     source = MATTERVIS_JS.read_text(encoding="utf-8")
     start = source.index("function bindSceneTabIntent")

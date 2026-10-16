@@ -818,6 +818,24 @@
     function startHttpFallback() {
       if (window.__mattervisFigureFallbackActive || !window.fetch) return;
       window.__mattervisFigureFallbackActive = true;
+      function parkFallbackFigure(payload) {
+        if (!payload || typeof payload !== "object" || !payload.figure || !payload.scene_id) return;
+        /* A parked journal frame still participates in the same sequence and
+         * render-revision fences as a WebSocket frame.  Without these fields
+         * flushQueuedSceneFigure treats it as stale forever, and a later WS
+         * snapshot can overwrite it while Dash is painting the selected tab. */
+        const seq = Number(payload.figure_seq || payload.seq || 0);
+        const previous = pendingFigureByScene[String(payload.scene_id)];
+        const previousSeq = Number(previous && (previous.figure_seq || previous.seq) || 0);
+        if (seq && seq <= Number(window.__mattervisFigureLastSeq || 0)) return;
+        if (seq) window.__mattervisFigureLastSeq = seq;
+        if (payload.state && typeof payload.state === "object") rememberExpectedRender(payload.state, true);
+        if (payload.render_revision !== undefined) rememberExpectedRender(payload, true);
+        payload.isCurrent = function () { return isCurrentFigurePush(payload); };
+        if (!previous || !previousSeq || (seq && seq >= previousSeq)) {
+          pendingFigureByScene[String(payload.scene_id)] = payload;
+        }
+      }
       function deliverFallbackPayload(payload) {
         if (!payload || typeof payload !== "object") return;
         /* The journal contains complete frames for every scene. During a
@@ -828,7 +846,7 @@
          * through the typed gate and are scene-scoped there. */
         if (payload.figure && payload.scene_id &&
             String(payload.scene_id) !== String(currentSceneId() || "")) {
-          pendingFigureByScene[String(payload.scene_id)] = payload;
+          parkFallbackFigure(payload);
           return;
         }
         handleFigurePayload(payload);
