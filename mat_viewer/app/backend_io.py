@@ -709,11 +709,15 @@ class _IOBackendMixin:
         return payload
 
     def websocket_snapshot(self, *, include_figure: bool = False) -> dict[str, Any]:
+        from .build_info import asset_sha, build_sha
+
         state = self.get_state()
         snapshot = {
             "version": self.version,
             "state": state,
             "structures": self.list_structures(),
+            "build_sha": build_sha(),
+            "asset_sha": asset_sha(),
         }
         if include_figure:
             latest = self.latest_figure_broadcast()

@@ -71,14 +71,15 @@ def _shows_atoms(backend: ViewerBackend, scene_id: str) -> bool:
     )
 
 
-def test_formula_unit_nacl_default_shows_both_atoms(tmp_path: Path):
+def test_unit_cell_nacl_default_shows_both_atoms(tmp_path: Path):
     backend = _backend(tmp_path)
     try:
         scene_id = backend.active_scene_id()
         state = backend.get_state(scene_id)
-        assert state["display_mode"] == "formula_unit"
+        # Current inorganic defaults use the complete conventional cell.
+        assert state["display_mode"] == "unit_cell"
         points, _, _ = _points_and_viewport(backend, scene_id)
-        assert len(points) == 2
+        assert len(points) >= 2
         assert _shows_atoms(backend, scene_id)
     finally:
         backend.close()
@@ -89,7 +90,7 @@ def test_restart_replaces_camera_that_misses_the_scene(tmp_path: Path):
     try:
         scene_id = backend.active_scene_id()
         backend.patch_state(
-            {"camera": OFFSCREEN, "display_mode": "formula_unit"},
+            {"camera": OFFSCREEN},
             scene_id=scene_id,
             broadcast=False,
         )

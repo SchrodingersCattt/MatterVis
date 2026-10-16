@@ -74,19 +74,57 @@
 }
 
 #scene-tabs {
-  /* The visible strip is the chip row. This component only holds the
-   * selected scene id for the existing callbacks. */
-  display: none;
+  background: var(--mv-panel);
+  min-width: 0;
+}
+
+#scene-tabs .tab-container {
+  display: flex;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 #scene-tabs .tab {
+  align-items: center;
   color: var(--mv-muted);
+  display: flex;
+  flex: 0 0 160px !important;
   font-size: 12px;
-  min-width: 0;
+  min-width: 160px !important;
   overflow: hidden;
   padding: 10px 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+#scene-tabs .tab[title] {
+  cursor: help;
+}
+
+#scene-tabs .scene-tab-label {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  width: 100%;
+}
+
+#scene-tabs .scene-tab-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#scene-tabs .tab-close-x {
+  flex: 0 0 auto;
+  height: 20px;
+  margin-left: auto;
+  padding: 0 4px;
+  width: 20px;
 }
 
 #scene-tabs .tab--selected,
@@ -97,58 +135,7 @@
 }
 
 .scene-tab-close-row {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  min-height: 0;
-  padding: 8px;
-}
-
-.scene-tab-chip {
-  align-items: center;
-  background: #ffffff;
-  border: 1px solid var(--mv-line);
-  border-radius: 8px;
-  display: inline-flex;
-  max-width: 100%;
-  min-width: 0;
-}
-
-.scene-tab-chip--selected {
-  background: var(--mv-accent-soft);
-  border-color: #86bdb4;
-}
-
-#left-panel .scene-tab-chip .tab-select {
-  background: transparent;
-  border: 0;
-  flex: 1 1 auto;
-  font-weight: 650;
-  max-width: 220px;
-  min-height: 30px;
-  overflow: hidden;
-  padding: 4px 8px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-#left-panel .scene-tab-chip .tab-close-x {
-  background: transparent;
-  border: 0;
-  border-radius: 7px;
-  color: #667085;
-  flex: 0 0 22px;
-  height: 22px;
-  min-height: 22px;
-  min-width: 22px;
-  padding: 0;
-  width: 22px;
-}
-
-#left-panel .scene-tab-chip .tab-close-x:hover {
-  background: #fff1f0;
-  color: #b42318;
+  display: none;
 }
 
 .mv-style-row {

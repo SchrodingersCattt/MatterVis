@@ -67,7 +67,9 @@ function eyeComponent(eye, index, name) {
 }
 
 function visibleTab(page, name) {
-  return page.locator("#scene-tab-close-row .tab-select").filter({ hasText: name }).first();
+  // The current workbench keeps the dcc.Tabs strip visible. Each tab owns
+  // its close button and carries the scene label in .scene-tab-text.
+  return page.locator("#scene-tabs .tab").filter({ hasText: name }).first();
 }
 
 async function selectedTabLabel(page) {
@@ -86,9 +88,6 @@ async function clickTab(page, name) {
   const chip = visibleTab(page, name);
   const hidden = tabs.getByText(name, { exact: false }).first();
   try {
-    // The chip row is the visible control. It can appear a moment after an
-    // upload status line, so wait for it instead of falling through to the
-    // hidden scene-tab strip.
     await chip.click({ timeout: 15000 });
   } catch (chipError) {
     try {

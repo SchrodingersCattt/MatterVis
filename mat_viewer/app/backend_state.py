@@ -54,8 +54,6 @@ class _StateBackendMixin:
         for key in ("material", "style", "disorder", "ortep_mode", "label_mode"):
             if key in patch and patch[key] is not None:
                 state[key] = str(patch[key])
-        if state.get("style") == "ortep" and "display_mode" not in patch:
-            state["display_mode"] = "asymmetric_unit"
         if "display_options" in patch and patch["display_options"] is not None:
             state["display_options"] = list(patch["display_options"])
 
@@ -330,6 +328,7 @@ class _StateBackendMixin:
             state["version"] = self.version
             state["server_started_at"] = self.server_started_iso()
             state["render_revision"] = self.render_revision(target_scene_id)
+            state["scene_generation"] = self.scene_generation(target_scene_id)
             self._request_scene_store_save()
             if broadcast and change_kind in {
                 UpdateKind.CAMERA,

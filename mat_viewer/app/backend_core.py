@@ -901,6 +901,8 @@ class _CoreBackendMixin:
         )
 
     def healthz(self) -> dict[str, Any]:
+        from .build_info import asset_sha, build_sha
+
         return {
             "ok": True,
             "uptime_s": max(0.0, time.time() - self.server_started_at),
@@ -908,6 +910,8 @@ class _CoreBackendMixin:
             "scenes": len(self.scene_store.scenes),
             "structures": len(self.structure_names),
             "version": self.version,
+            "build_sha": build_sha(),
+            "asset_sha": asset_sha(),
         }
 
     def _load_upload_manifest(self) -> dict[str, Any]:

@@ -11,6 +11,7 @@ from .backend_state import _StateBackendMixin
 from .backend_reducer import _ReducerBackendMixin
 from .backend_scenes import _SceneBackendMixin
 from .backend_io import _IOBackendMixin
+from .backend_journal import _JournalBackendMixin
 from .backend_operations import _OperationsBackendMixin
 from .backend_overlays import _OverlaysBackendMixin
 from .backend_selection import _SelectionBackendMixin
@@ -24,6 +25,7 @@ _PERSIST_THREAD_JOIN_TIMEOUT_SECONDS = 2.0
 class ViewerBackend(
     _VectorBackendMixin,
     _SceneBackendMixin,
+    _JournalBackendMixin,
     _StateBackendMixin,
     _CoreBackendMixin,
     _ReducerBackendMixin,

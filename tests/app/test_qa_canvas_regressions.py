@@ -76,7 +76,9 @@ def test_orthographic_figure_keeps_projection_for_position_camera(tmp_path: Path
             broadcast=False,
         )
         state = backend.get_state(scene_id)
-        assert "eye" not in state["camera"]
+        # Inorganic unit-cell defaults leave camera fitting to the viewport
+        # resolver; the persisted scene camera is intentionally unset.
+        assert state["camera"] is None
         fig, _ = backend.figure_for_state(state)
         rendered = fig.layout.scene.camera.to_plotly_json()
         assert rendered["projection"]["type"] == "orthographic"
