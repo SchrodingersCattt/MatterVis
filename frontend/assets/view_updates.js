@@ -290,7 +290,11 @@
         command: String(camera.command || snapshot.reason || ""),
         graph_generation: Number(gd.__mvGraphGeneration || 0),
         isCurrent: function () {
-          return cameraIsCurrent(snapshot, gd) && applicable(snapshot, gd);
+          /* A camera command may outlive a Plotly remount. Resolve the graph
+           * at check time so a retry after plotly_afterplot is not rejected
+           * against the detached graph captured by submit(). */
+          var live = graph() || gd;
+          return cameraIsCurrent(snapshot, live) && applicable(snapshot, live);
         },
       };
       var hasAsyncCamera = root.MatterVisViewCamera && typeof root.MatterVisViewCamera.applyAsync === "function";
