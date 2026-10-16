@@ -34,6 +34,13 @@ def _dispatch_rightclick_action(
     radius: Optional[float] = None,
     hops: Optional[int] = None,
 ) -> None:
+    origin = None
+    if isinstance(target, dict):
+        origin = target.get("scene_id")
+    if origin is None and isinstance(payload, dict):
+        origin = payload.get("scene_id")
+    if origin and scene_id and str(origin) != str(scene_id):
+        return
     if action in ("supercell_2x", "supercell_clear"):
         n = 2 if action == "supercell_2x" else 1
         if n == 1:
@@ -296,7 +303,7 @@ def _dispatch_rightclick_action(
                     backend.scene_for_state(state), int(atom_index)
                 )
                 if site_index is not None:
-                    backend.patch_state(
+                    backend.commit_patch(
                         {"topology_site_index": int(site_index)}, scene_id=scene_id
                     )
             except Exception:

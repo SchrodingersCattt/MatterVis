@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from mat_viewer.app import create_app
+from mat_viewer.app.build_info import asset_url_token, build_sha
 
 
 def test_healthz_v2_returns_lightweight_liveness_payload():
@@ -18,6 +19,21 @@ def test_healthz_v2_returns_lightweight_liveness_payload():
     assert isinstance(body["server_started_at"], str)
     assert body["scenes"] >= 1
     assert body["structures"] >= 1
+    assert body["build_sha"] == build_sha()
+    assert body["asset_sha"] == body["build_sha"]
+    state = client.get("/api/v2/state").get_json()
+    assert "build_sha" not in state
+    assert "asset_sha" not in state
+    page = client.get("/")
+    assert page.status_code == 200
+    assert "no-store" in (page.headers.get("Cache-Control") or "")
+    html = page.get_data(as_text=True)
+    assert "MATTERVIS_BUILD" in html
+    assert f"/assets/{asset_url_token()}/" in html
+    snapshot = app.crystal_backend.websocket_snapshot()
+    assert snapshot["build_sha"] == body["build_sha"]
+    assert snapshot["asset_sha"] == body["asset_sha"]
+    assert "build_sha" not in snapshot["state"]
 
 
 def test_state_echoes_server_started_at_for_restart_detection():

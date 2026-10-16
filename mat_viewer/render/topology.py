@@ -626,14 +626,24 @@ def topology_histogram_figure(topology_data: dict | None) -> go.Figure:
     if distances:
         colors = ["#7C5CBF" if dist in shell else "#C9C9E8" for dist in distances]
         fig.add_trace(go.Bar(x=list(range(1, len(distances) + 1)), y=distances, marker_color=colors))
+    else:
+        fig.add_annotation(
+            text="No shell distances yet. Choose a fragment to analyse.",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font=dict(size=12, color="#667085"),
+        )
     fig.update_layout(
-        margin=dict(l=18, r=18, t=28, b=28),
+        margin=dict(l=48, r=16, t=48, b=40),
         paper_bgcolor="white",
         plot_bgcolor="white",
         xaxis_title="Neighbor rank",
         yaxis_title="Distance (Å)",
         showlegend=False,
-        title="Distance Histogram",
+        title=dict(text="Distance histogram", x=0.02, xanchor="left"),
     )
     return fig
 

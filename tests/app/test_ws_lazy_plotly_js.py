@@ -25,7 +25,7 @@ class Socket {
   send(value) { this.sent = JSON.parse(value); }
 }
 const window = {WebSocket: Socket, location: {protocol: 'http:', host: 'localhost:8058'}};
-const sandbox = {window, WebSocket: Socket, requestAnimationFrame: fn => callbacks.push(fn)};
+const sandbox = {window, WebSocket: Socket, requestAnimationFrame: fn => callbacks.push(fn), noteBuildIdentity() {}};
 vm.createContext(sandbox);
 vm.runInContext(source.slice(start, end), sandbox);
 assert.equal(connections.length, 0);

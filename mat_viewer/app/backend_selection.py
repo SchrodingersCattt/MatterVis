@@ -5,6 +5,18 @@ from .shared import *
 from .normalizers import _normalize_selection
 
 
+def _selection_part(atom: dict[str, Any]) -> dict[str, Any]:
+    part = atom.get("part") or atom.get("disorder_group") or atom.get("disorder_assembly")
+    entry: dict[str, Any] = {
+        "label": str(atom.get("label") or ""),
+        "is_minor": bool(atom.get("is_minor")),
+        "elem": str(atom.get("elem") or ""),
+    }
+    if part not in (None, ""):
+        entry["part"] = str(part)
+    return entry
+
+
 class _SelectionBackendMixin:
     def get_selection(self, scene_id: Optional[str] = None) -> dict[str, Any]:
         return copy.deepcopy(_normalize_selection(self.get_state(scene_id).get("selection")))
@@ -12,7 +24,7 @@ class _SelectionBackendMixin:
     def set_selection(self, atom_labels: Iterable[Any], scene_id: Optional[str] = None) -> dict[str, Any]:
         labels = [str(label) for label in atom_labels if str(label).strip()]
         selection = _normalize_selection({"atom_labels": labels, "order": labels})
-        self.patch_state({"selection": selection}, scene_id=scene_id)
+        self.commit_patch({"selection": selection}, scene_id=scene_id)
         return self.get_selection(scene_id)
 
     def add_to_selection(self, atom_labels: Iterable[Any], scene_id: Optional[str] = None) -> dict[str, Any]:
@@ -27,7 +39,7 @@ class _SelectionBackendMixin:
                 order.append(label)
                 seen.add(label)
         selection = _normalize_selection({"atom_labels": labels, "order": order, "active_label": order[-1] if order else None})
-        self.patch_state({"selection": selection}, scene_id=scene_id)
+        self.commit_patch({"selection": selection}, scene_id=scene_id)
         return self.get_selection(scene_id)
 
     def remove_from_selection(self, atom_labels: Iterable[Any], scene_id: Optional[str] = None) -> dict[str, Any]:
@@ -36,11 +48,11 @@ class _SelectionBackendMixin:
         labels = [label for label in current.get("atom_labels", []) if label not in remove]
         order = [label for label in current.get("order", []) if label in labels]
         selection = _normalize_selection({"atom_labels": labels, "order": order})
-        self.patch_state({"selection": selection}, scene_id=scene_id)
+        self.commit_patch({"selection": selection}, scene_id=scene_id)
         return self.get_selection(scene_id)
 
     def clear_selection(self, scene_id: Optional[str] = None) -> dict[str, Any]:
-        self.patch_state({"selection": {"atom_labels": [], "active_label": None, "order": []}}, scene_id=scene_id)
+        self.commit_patch({"selection": {"atom_labels": [], "active_label": None, "order": []}}, scene_id=scene_id)
         return self.get_selection(scene_id)
 
     def toggle_selection(self, atom_labels: Iterable[Any], scene_id: Optional[str] = None) -> dict[str, Any]:
@@ -87,6 +99,7 @@ class _SelectionBackendMixin:
         *,
         additive: bool = False,
         scene_id: Optional[str] = None,
+        commit: bool = True,
     ) -> dict[str, Any]:
         try:
             x0, y0, x1, y1 = [float(v) for v in rect_pixels]
@@ -99,33 +112,71 @@ class _SelectionBackendMixin:
             return self.select_all(scene_id)
         state = self.get_state(scene_id)
         scene = self.scene_for_state(state)
-        camera = state.get("camera") or scene.get("camera") or self.default_camera(state)
-        try:
-            from mat_viewer.math.projection import camera_screen_basis
-
-            right, screen_up = camera_screen_basis(camera)
-        except Exception:
-            return self.get_selection(scene_id)
         atoms = scene.get("draw_atoms") or []
         if not atoms:
             return self.get_selection(scene_id)
         coords = np.asarray([atom.get("cart", [0.0, 0.0, 0.0]) for atom in atoms], dtype=float)
-        center = coords.mean(axis=0)
-        rel = coords - center[None, :]
-        projected = np.stack([rel @ right, rel @ screen_up], axis=1)
-        mins = projected.min(axis=0)
-        maxs = projected.max(axis=0)
-        span = np.maximum(maxs - mins, 1e-9)
-        px = (projected[:, 0] - mins[0]) / span[0] * width
-        py = height - ((projected[:, 1] - mins[1]) / span[1] * height)
-        picked = [
-            str(atom.get("label") or "")
-            for atom, sx, sy in zip(atoms, px, py)
-            if lo_x <= float(sx) <= hi_x and lo_y <= float(sy) <= hi_y
-        ]
+        try:
+            from mat_viewer.render.screen_projection import project_gl3d_pixels
+            from mat_viewer.render.viewport import _plotly_camera_from_scene
+            from mat_viewer.render.viewport_spec import resolve_viewport
+
+            style = self.style_for_state(state, scene)
+            viewport = resolve_viewport(scene, style)
+            # Stored cameras are often position/focal. Projecting those
+            # with the default eye picks the wrong atom.
+            camera = _plotly_camera_from_scene(scene, style)
+            projection = state.get("projection")
+            xy = project_gl3d_pixels(
+                coords,
+                camera=camera,
+                ranges=viewport.ranges,
+                aspectratio=viewport.aspectratio,
+                width=width,
+                height=height,
+                projection=str(projection) if projection else None,
+            )
+        except Exception:
+            return self.get_selection(scene_id)
+        center_x = 0.5 * (lo_x + hi_x)
+        center_y = 0.5 * (lo_y + hi_y)
+        hits: list[tuple[float, dict[str, Any]]] = []
+        for atom, sx, sy in zip(atoms, xy[:, 0], xy[:, 1]):
+            if not (np.isfinite(sx) and np.isfinite(sy)):
+                continue
+            if lo_x <= float(sx) <= hi_x and lo_y <= float(sy) <= hi_y:
+                dist = (float(sx) - center_x) ** 2 + (float(sy) - center_y) ** 2
+                hits.append((dist, atom))
+        click = (hi_x - lo_x) <= 48.0 and (hi_y - lo_y) <= 48.0
+        if click and hits:
+            hits = [min(hits, key=lambda item: item[0])]
+        parts = [_selection_part(atom) for _dist, atom in hits]
+        picked = [part["label"] for part in parts if part["label"]]
+        selection = _normalize_selection(
+            {"atom_labels": picked, "order": picked, "parts": parts}
+        )
         if additive:
-            return self.add_to_selection(picked, scene_id=scene_id)
-        return self.set_selection(picked, scene_id=scene_id)
+            current = self.get_selection(scene_id)
+            merged_labels = list(current.get("atom_labels") or [])
+            merged_parts = list(current.get("parts") or [])
+            seen = set(merged_labels)
+            for part in parts:
+                label = part["label"]
+                if label and label not in seen:
+                    merged_labels.append(label)
+                    merged_parts.append(part)
+                    seen.add(label)
+            selection = _normalize_selection(
+                {
+                    "atom_labels": merged_labels,
+                    "order": merged_labels,
+                    "parts": merged_parts,
+                }
+            )
+        if not commit:
+            return selection
+        self.commit_patch({"selection": selection}, scene_id=scene_id)
+        return self.get_selection(scene_id)
 
     def select_fragment(self, fragment_label: str, scene_id: Optional[str] = None) -> dict[str, Any]:
         state = self.get_state(scene_id)

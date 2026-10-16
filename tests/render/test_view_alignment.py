@@ -207,6 +207,22 @@ def test_orbit_preserves_projection(tmp_path: Path):
     assert cam.get("projection") == {"type": "orthographic"}
 
 
+def test_orbit_pan_and_zoom_advance_the_camera_revision(tmp_path: Path):
+    backend = _backend(tmp_path)
+    before = int(backend.get_state()["camera_revision"])
+    before_eye = tuple(backend.get_camera()["eye"][axis] for axis in "xyz")
+    backend.camera_action("orbit", yaw_deg=25.0, pitch_deg=10.0, broadcast=False)
+    orbited = backend.get_camera()["eye"]
+    assert int(backend.get_state()["camera_revision"]) > before
+    assert tuple(orbited[axis] for axis in "xyz") != before_eye
+    revision = int(backend.get_state()["camera_revision"])
+    backend.camera_action("pan", dx=0.2, dy=0.0, dz=0.0, broadcast=False)
+    assert int(backend.get_state()["camera_revision"]) > revision
+    revision = int(backend.get_state()["camera_revision"])
+    backend.camera_action("zoom", factor=1.2, broadcast=False)
+    assert int(backend.get_state()["camera_revision"]) > revision
+
+
 def test_normalize_state_accepts_projection_patch(tmp_path: Path):
     backend = _backend(tmp_path)
     backend.patch_state({"projection": "orthographic"})

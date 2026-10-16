@@ -351,11 +351,23 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
         atom_traces.extend(ortep_octant_hatch_traces(scene, style))
         atom_traces.extend(ortep_silhouette_outline_traces(scene, style))
     elif use_fast:
-        atom_traces = _atom_scatter_traces(scene, style)
-        bond_traces = _bond_scatter_traces(scene, style)
+        atom_traces = (
+            []
+            if style.get("style") == "stick"
+            else _atom_scatter_traces(scene, style)
+        )
+        bond_traces = (
+            []
+            if style.get("style") == "ball"
+            else _bond_scatter_traces(scene, style)
+        )
     else:
-        atom_traces = _atom_mesh_traces(scene, style)
-        bond_traces = _bond_mesh_traces(scene, style)
+        atom_traces = (
+            [] if style.get("style") == "stick" else _atom_mesh_traces(scene, style)
+        )
+        bond_traces = (
+            [] if style.get("style") == "ball" else _bond_mesh_traces(scene, style)
+        )
     minor_outline = _minor_outline_traces(scene, style)
     minor_bonds = _minor_bond_wireframe_traces(scene, style)
     payload = {

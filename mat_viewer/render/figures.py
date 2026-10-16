@@ -608,9 +608,10 @@ def build_figure(
     key_annotations = list(key_annotations or []) + _element_legend_annotations(
         scene, style
     )
-    if key_annotations:
-        layout_kwargs["annotations"] = key_annotations
-    if key_shapes:
-        layout_kwargs["shapes"] = key_shapes
+    # Always send both lists. Plotly.react keeps the previous paper
+    # annotation when the key is omitted, so the flat-ORTEP caption
+    # survived a switch back to ball-and-stick.
+    layout_kwargs["annotations"] = key_annotations or []
+    layout_kwargs["shapes"] = key_shapes or []
     fig.update_layout(**layout_kwargs)
     return fig

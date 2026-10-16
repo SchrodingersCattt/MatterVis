@@ -73,7 +73,7 @@
       if (activeId && window.dash_clientside && typeof window.dash_clientside.set_props === "function") {
         // The upload completion is authoritative for the selected scene. The
         // persistent figure client will queue its frame until this value is
-        // painted, so no second WebSocket is needed here.
+        // painted, so no second figure socket is needed here.
         window.dash_clientside.set_props("scene-tabs", { value: activeId });
       }
       if (activeId && typeof window.MatterVisSelectScene === "function") {
@@ -163,7 +163,7 @@
   async function waitForSceneAndSwitch(uploadedNames) {
     if (!uploadedNames || !uploadedNames.length) return;
     // Upload completion is already exposed by the HTTP job endpoint.  Do not
-    // open a second /api/v2/ws connection here: transient per-upload sockets
+    // open a second figure connection here: transient per-upload sockets
     // race the figure subscriber during repeated uploads and can leave the
     // browser reporting an Invalid frame header while the old scene remains
     // selected.  Poll the scene list, then perform one explicit Dash switch.

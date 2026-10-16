@@ -61,14 +61,10 @@ def build_left_panel(
                                 style={"marginRight": "6px"},
                             ),
                             html.Button(
-                                "+",
+                                ["+", html.Span(" Duplicate", className="scene-new-tab-hint")],
                                 id="scene-new-tab-btn",
                                 n_clicks=0,
                                 title="Duplicate active scene as new tab",
-                            ),
-                            html.Span(
-                                "Duplicate tab",
-                                className="scene-new-tab-hint",
                             ),
                         ],
                         className="scene-actions",
@@ -271,7 +267,8 @@ def build_left_panel(
             html.Div(style={"height": "10px"}),
             html.Label("Material / Style / Disorder"),
             html.Div(
-                [
+                className="mv-style-row",
+                children=[
                     dcc.Dropdown(
                         id="material-selector",
                         options=[
@@ -283,7 +280,7 @@ def build_left_panel(
                         ],
                         value=first_state.get("material", "mesh"),
                         clearable=False,
-                        style={"flex": "1"},
+                        style={"flex": "1", "minWidth": "140px"},
                     ),
                     dcc.Dropdown(
                         id="style-selector",
@@ -296,7 +293,7 @@ def build_left_panel(
                         ],
                         value=first_state.get("style", "ball_stick"),
                         clearable=False,
-                        style={"flex": "1"},
+                        style={"flex": "1", "minWidth": "140px"},
                     ),
                     dcc.Dropdown(
                         id="disorder-selector",
@@ -675,7 +672,7 @@ def build_left_panel(
         ],
         id="left-panel",
         style={
-            "width": "340px",
+            "width": "380px",
             "minWidth": "0",
             "maxWidth": "640px",
             "flex": "0 0 auto",

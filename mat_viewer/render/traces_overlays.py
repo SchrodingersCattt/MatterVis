@@ -342,13 +342,30 @@ def _dashed_segments(segments, *, dash_len: float, gap_len: float):
     return out
 
 
+def _supercell_counts(scene: dict) -> tuple[int, int, int]:
+    """Lattice repeats already applied to ``scene``, or ``(1, 1, 1)``."""
+    na = nb = nc = 1
+    for step in scene.get("_transform_lineage") or ():
+        if not isinstance(step, dict) or step.get("kind") != "repeat":
+            continue
+        params = step.get("params") or {}
+        try:
+            na *= max(1, int(params.get("a") or 1))
+            nb *= max(1, int(params.get("b") or 1))
+            nc *= max(1, int(params.get("c") or 1))
+        except (TypeError, ValueError):
+            continue
+    return na, nb, nc
+
+
 def _unit_cell_traces(scene: dict, style: dict):
     if scene.get("M") is None or style.get("display_mode") != "unit_cell":
         return []
+    na, nb, nc = _supercell_counts(scene)
     origin = np.zeros(3, dtype=float)
-    a = np.array(scene["M"][0], dtype=float)
-    b = np.array(scene["M"][1], dtype=float)
-    c = np.array(scene["M"][2], dtype=float)
+    a = np.array(scene["M"][0], dtype=float) * na
+    b = np.array(scene["M"][1], dtype=float) * nb
+    c = np.array(scene["M"][2], dtype=float) * nc
     corners = {
         "000": origin,
         "100": a,

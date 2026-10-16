@@ -18,6 +18,10 @@ promises per graph, and records an identity only after successful completion.
 Camera acquisition reuses `liveSceneCamera` (exposed internally as
 `window.mattervisCurrentCamera`), not `_fullLayout.scene.camera` alone. Queued
 frames are revalidated and read the live camera when they actually execute.
+Camera-only updates use dotted `scene.camera.*` relayout keys, acknowledge
+only after the internal projection still matches, and abandon a Plotly promise
+that never settles so a later Reset can run on a fresh queue. A redraw of the
+same scene does not drop that latest camera command; a different scene does.
 
 Axes still uses a complete validated worker frame on a cache miss. No browser
 geometry base is assumed: in particular, toggling Axes/Labels after Hydrogens

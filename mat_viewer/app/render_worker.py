@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 import copy
 import json
@@ -19,6 +20,9 @@ from .view_updates import UpdateKind
 # for CPU-isolated topology on hosts where MolCrysKit objects are
 # reliably picklable.
 _TOPOLOGY_WORKER_MODE = os.environ.get("MATTERVIS_TOPOLOGY_WORKER", "thread")
+# Terminal render records are diagnostic. Keep the newest window so a long
+# session cannot grow one entry per render key without bound.
+_TASK_STATUS_LIMIT = 256
 
 
 class AsyncRenderWorker:
@@ -60,7 +64,7 @@ class AsyncRenderWorker:
         self._pending_render: set[str] = set()
         self._latest_render_by_scene: dict[str, str] = {}
         self._render_futures: dict[str, Future] = {}
-        self._task_status: dict[str, dict[str, Any]] = {}
+        self._task_status: OrderedDict[str, dict[str, Any]] = OrderedDict()
 
     def task_status(self, scene_id: str | None = None) -> dict[str, dict[str, Any]]:
         with self._lock:
@@ -72,6 +76,21 @@ class AsyncRenderWorker:
                     if value.get("scene_id") == str(scene_id)
                 }
             return copy.deepcopy(values)
+
+    def _set_task_status(self, key: str, **fields: Any) -> None:
+        with self._lock:
+            record = self._task_status.get(key)
+            if record is None:
+                if "scene_id" not in fields:
+                    return
+                record = {}
+                self._task_status[key] = record
+            if "scene_id" in fields:
+                record.clear()
+            record.update(fields)
+            self._task_status.move_to_end(key)
+            while len(self._task_status) > _TASK_STATUS_LIMIT:
+                self._task_status.popitem(last=False)
 
     def _is_current(self, state: dict[str, Any]) -> bool:
         scene_id = state.get("scene_id")
@@ -209,16 +228,18 @@ class AsyncRenderWorker:
 
     def _request_render(self, state: dict[str, Any], *, reason: str) -> bool:
         state = copy.deepcopy(state)
-        kind = str(
-            state.get("update_kind")
-            or getattr(self.backend, "_last_update_kind_by_scene", {}).get(
-                str(state.get("scene_id") or ""), ""
-            )
-        )
-        if kind in {
-            UpdateKind.CAMERA.value,
-            UpdateKind.OVERLAY.value,
-        }:
+        # Only an explicit camera/overlay request is display-local. The
+        # scene's previous kind must not suppress a later complete frame:
+        # switching back to a scene whose last edit was Reset still needs
+        # its geometry. Flat+ORTEP is the exception that bakes the camera
+        # into an image, so that camera request is a real rebuild.
+        # ``update_kind`` is a request flag, not scene state. Leaving it on
+        # the snapshot would make the figure cache key miss the live state.
+        kind = str(state.pop("update_kind", "") or "")
+        flat_ortep = state.get("material") == "flat" and state.get("style") == "ortep"
+        if kind in {UpdateKind.CAMERA.value, UpdateKind.OVERLAY.value} and not (
+            kind == UpdateKind.CAMERA.value and flat_ortep
+        ):
             return False
         try:
             render_key = json.dumps(
@@ -246,32 +267,24 @@ class AsyncRenderWorker:
                 if previous_future is not None:
                     previous_future.cancel()
                 self._pending_render.discard(previous_key)
-                if previous_key in self._task_status:
-                    self._task_status[previous_key]["status"] = "cancelled"
+                self._set_task_status(previous_key, status="cancelled")
             self._latest_render_by_scene[scene_id] = render_key
             if render_key in self._pending_render:
                 return True
             self._pending_render.add(render_key)
-            self._task_status[render_key] = {
-                "scene_id": scene_id,
-                "status": "queued",
-                "reason": reason,
-            }
+            self._set_task_status(
+                render_key, scene_id=scene_id, status="queued", reason=reason
+            )
 
         def _job() -> None:
-            with self._lock:
-                if render_key in self._task_status:
-                    self._task_status[render_key]["status"] = "running"
+            self._set_task_status(render_key, status="running")
             if not self._is_current(state):
-                with self._lock:
-                    if render_key in self._task_status:
-                        self._task_status[render_key]["status"] = "cancelled"
+                self._set_task_status(render_key, status="cancelled")
                 return
             fig, topology_data = self.backend.figure_for_state(state, async_topology=False)
             with self._lock:
                 if self._is_current(state):
-                    if render_key in self._task_status:
-                        self._task_status[render_key]["status"] = "completed"
+                    self._set_task_status(render_key, status="completed")
                     self.backend.broadcast_figure(
                         scene_id=state.get("scene_id"),
                         figure=fig.to_plotly_json(),
@@ -287,16 +300,10 @@ class AsyncRenderWorker:
             if not future.cancelled():
                 exc = future.exception()
                 if exc is not None:
-                    with self._lock:
-                        if render_key in self._task_status:
-                            self._task_status[render_key].update(
-                                status="failed", error=str(exc)
-                            )
+                    self._set_task_status(render_key, status="failed", error=str(exc))
                     self._report_error(state, exc)
             else:
-                with self._lock:
-                    if render_key in self._task_status:
-                        self._task_status[render_key]["status"] = "cancelled"
+                self._set_task_status(render_key, status="cancelled")
 
         try:
             future = self._finalize_pool.submit(_job)
@@ -308,12 +315,13 @@ class AsyncRenderWorker:
                 self._render_futures.pop(render_key, None)
                 if self._latest_render_by_scene.get(scene_id) == render_key:
                     self._latest_render_by_scene.pop(scene_id, None)
-                self._task_status[render_key] = {
-                    "scene_id": scene_id,
-                    "status": "failed",
-                    "reason": reason,
-                    "error": str(exc),
-                }
+                self._set_task_status(
+                    render_key,
+                    scene_id=scene_id,
+                    status="failed",
+                    reason=reason,
+                    error=str(exc),
+                )
             self._report_error(state, exc)
             return False
         future.add_done_callback(completed)

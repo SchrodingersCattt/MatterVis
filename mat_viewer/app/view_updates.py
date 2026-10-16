@@ -51,6 +51,7 @@ class ViewUpdate:
     versions: ViewVersions
     payload: dict[str, Any] = field(default_factory=dict)
     reason: str = "state-confirmed"
+    scene_generation: int | str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         kind = self.kind.value if isinstance(self.kind, UpdateKind) else str(self.kind)
@@ -59,6 +60,7 @@ class ViewUpdate:
             "update_kind": kind,
             "kind": kind,
             "scene_id": self.scene_id,
+            "scene_generation": self.scene_generation,
             "reason": self.reason,
             "versions": self.versions.to_dict(),
             "geometry_version": self.versions.geometry,
@@ -104,6 +106,51 @@ def display_state_key(state: Mapping[str, Any] | None) -> str:
     return _canonical_display_state_key(state)
 
 
+# Fields the browser cannot patch by restyling an existing trace. A change
+# to any of them needs a complete frame. Multi-field edits take the
+# strongest of these requirements.
+_COMPLETE_FRAME_FIELDS = (
+    "atom_scale",
+    "bond_radius",
+    "material",
+    "style",
+    "ortep_mode",
+    "label_mode",
+    "atom_property_color",
+    "minor_bond_scale",
+    "scatter_atom_scale",
+    "scatter_bond_scale",
+    "fast_rendering",
+    "vector_overlays",
+    "selection",
+    "cell_overlays",
+    "overlay_overrides",
+)
+
+
+def _polyhedron_specs_need_rebuild(before: Mapping[str, Any], after: Mapping[str, Any]) -> bool:
+    """Visibility-only polyhedron edits stay on the local display path."""
+
+    def stripped(value: Any) -> list[Any]:
+        if not isinstance(value, list):
+            return []
+        rows = []
+        for spec in value:
+            if isinstance(spec, dict):
+                rows.append({key: item for key, item in spec.items() if key != "enabled"})
+            else:
+                rows.append(spec)
+        return rows
+
+    return stripped(before.get("polyhedron_specs")) != stripped(after.get("polyhedron_specs"))
+
+
+def _needs_complete_frame(before: Mapping[str, Any], after: Mapping[str, Any]) -> bool:
+    if any(before.get(key) != after.get(key) for key in _COMPLETE_FRAME_FIELDS):
+        return True
+    return _polyhedron_specs_need_rebuild(before, after)
+
+
 def classify_change(
     before: Mapping[str, Any] | None,
     after: Mapping[str, Any] | None,
@@ -132,10 +179,14 @@ def classify_change(
             return UpdateKind.CAMERA
     if geometry_state_key(before) != geometry_state_key(after):
         return UpdateKind.GEOMETRY
+    if _needs_complete_frame(before, after):
+        return UpdateKind.GEOMETRY
     before_opts = set(before.get("display_options") or [])
     after_opts = set(after.get("display_options") or [])
     option_delta = before_opts ^ after_opts
-    if (option_delta and option_delta <= {"axes"}) or before.get("axis_scale") != after.get("axis_scale"):
+    if option_delta and option_delta <= {"axes"}:
+        return UpdateKind.OVERLAY
+    if not option_delta and before.get("axis_scale") != after.get("axis_scale"):
         return UpdateKind.OVERLAY
     if before.get("bfdh_morphology") != after.get("bfdh_morphology"):
         return UpdateKind.ANALYSIS
@@ -158,6 +209,7 @@ def make_update(
         versions=state_versions(state),
         payload=dict(payload or {}),
         reason=reason,
+        scene_generation=state.get("scene_generation"),
     )
 
 

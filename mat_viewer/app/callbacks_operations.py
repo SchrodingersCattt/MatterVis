@@ -221,6 +221,13 @@ def register_operations_callbacks(app, backend):
         def _rebuild():
             return _transforms_table_rows(backend.list_transforms(scene_id=scene_id))
 
+        def _framed_state():
+            try:
+                backend.refit_scene_camera(scene_id, force=True)
+            except (KeyError, ValueError, OSError, TypeError):
+                pass
+            return backend.get_state()
+
         if triggered == "scene-tabs":
             return _rebuild(), no_update
 
@@ -238,7 +245,7 @@ def register_operations_callbacks(app, backend):
             except Exception as exc:
                 _surface_error(f"Repeat {n}x{n}x{n}", exc)
                 return _rebuild(), no_update
-            return _rebuild(), backend.get_state()
+            return _rebuild(), _framed_state()
 
         if triggered == "transforms-clear-repeat":
             try:
@@ -249,15 +256,15 @@ def register_operations_callbacks(app, backend):
             except Exception as exc:
                 _surface_error("Clear repeat", exc)
                 return _rebuild(), no_update
-            return _rebuild(), backend.get_state()
+            return _rebuild(), _framed_state()
 
         if triggered == "transforms-clear-btn":
             try:
-                backend.patch_state({"transforms": []}, scene_id=scene_id)
+                backend.commit_patch({"transforms": []}, scene_id=scene_id)
             except Exception as exc:
                 _surface_error("Clear all transforms", exc)
                 return _rebuild(), no_update
-            return _rebuild(), backend.get_state()
+            return _rebuild(), _framed_state()
 
         if triggered == "transforms-add-btn":
             kind = kind_select or "repeat"
@@ -279,14 +286,14 @@ def register_operations_callbacks(app, backend):
             except Exception as exc:
                 _surface_error(f"Add {kind} transform", exc)
                 return _rebuild(), no_update
-            return _rebuild(), backend.get_state()
+            return _rebuild(), _framed_state()
 
         if isinstance(triggered, dict) and triggered.get("type") == "trf-row-delete":
             transform_id = triggered.get("transform_id")
             if not transform_id:
                 return no_update, no_update
             backend.remove_transform(transform_id, scene_id=scene_id)
-            return _rebuild(), backend.get_state()
+            return _rebuild(), _framed_state()
 
         if isinstance(triggered, dict) and triggered.get("type") in ("trf-row-up", "trf-row-down"):
             transform_id = triggered.get("transform_id")
@@ -341,7 +348,8 @@ def register_operations_callbacks(app, backend):
                 if callable(validator):
                     for transform in new_transforms:
                         validator(transform, scene_id=scene_id)
-                backend.patch_state({"transforms": new_transforms}, scene_id=scene_id, broadcast=False)
+                backend.commit_patch({"transforms": new_transforms}, scene_id=scene_id, broadcast=False)
+
             except Exception as exc:
                 _surface_error("Update transform", exc)
                 return _rebuild(), no_update
@@ -355,6 +363,6 @@ def register_operations_callbacks(app, backend):
                     "scene_id": scene_id,
                 },
             )
-            return no_update, backend.get_state()
+            return no_update, _framed_state()
 
         return no_update, no_update

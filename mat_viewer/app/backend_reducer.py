@@ -16,6 +16,7 @@ from .reducer import (
     Invalidation,
     Operation,
     OperationKind,
+    PatchState,
     invalidations_for,
     operation_from_intent,
     operation_patch,
@@ -122,6 +123,25 @@ class _ReducerBackendMixin:
         # defaults), so returning the planned set would under-invalidate both
         # legacy and typed callers.
         return state, invalidations_for(operation, before, state)
+
+    def commit_patch(
+        self,
+        patch: dict[str, Any],
+        scene_id: Optional[str] = None,
+        *,
+        broadcast: bool = True,
+    ) -> dict[str, Any]:
+        """Persist one patch through the reducer.
+
+        Callbacks and selection edits call this instead of ``patch_state``.
+        ``patch_state`` remains the persistence sink used by this method.
+        """
+        state, _invalidations = self.apply_operation(
+            PatchState(dict(patch), scene_id=scene_id),
+            scene_id=scene_id,
+            broadcast=broadcast,
+        )
+        return state
 
 
 __all__ = ["_ReducerBackendMixin"]

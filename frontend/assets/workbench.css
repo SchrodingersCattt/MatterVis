@@ -74,57 +74,19 @@
 }
 
 #scene-tabs {
-  background: var(--mv-panel);
-  min-width: 0;
-}
-
-#scene-tabs .tab-container {
-  display: flex;
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: thin;
+  /* The visible strip is the chip row. This component only holds the
+   * selected scene id for the existing callbacks. */
+  display: none;
 }
 
 #scene-tabs .tab {
-  align-items: center;
   color: var(--mv-muted);
-  display: flex;
-  flex: 0 0 160px !important;
   font-size: 12px;
-  min-width: 160px !important;
+  min-width: 0;
   overflow: hidden;
   padding: 10px 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-#scene-tabs .tab[title] {
-  cursor: help;
-}
-
-#scene-tabs .scene-tab-label {
-  align-items: center;
-  display: inline-flex;
-  gap: 6px;
-  max-width: 100%;
-  min-width: 0;
-  width: 100%;
-}
-
-#scene-tabs .scene-tab-text {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-#scene-tabs .tab-close-x {
-  flex: 0 0 auto;
-  height: 20px;
-  margin-left: auto;
-  padding: 0 4px;
-  width: 20px;
 }
 
 #scene-tabs .tab--selected,
@@ -135,28 +97,153 @@
 }
 
 .scene-tab-close-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 0;
+  padding: 8px;
+}
+
+.scene-tab-chip {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid var(--mv-line);
+  border-radius: 8px;
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.scene-tab-chip--selected {
+  background: var(--mv-accent-soft);
+  border-color: #86bdb4;
+}
+
+#left-panel .scene-tab-chip .tab-select {
+  background: transparent;
+  border: 0;
+  flex: 1 1 auto;
+  font-weight: 650;
+  max-width: 220px;
+  min-height: 30px;
+  overflow: hidden;
+  padding: 4px 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#left-panel .scene-tab-chip .tab-close-x {
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  color: #667085;
+  flex: 0 0 22px;
+  height: 22px;
+  min-height: 22px;
+  min-width: 22px;
+  padding: 0;
+  width: 22px;
+}
+
+#left-panel .scene-tab-chip .tab-close-x:hover {
+  background: #fff1f0;
+  color: #b42318;
+}
+
+.mv-style-row {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mv-style-row > div {
+  flex: 1 1 160px;
+  min-width: 160px;
+}
+
+#left-panel .Select-value-label,
+#left-panel .Select-placeholder {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#left-panel .Select-menu-outer {
+  min-width: 180px;
+  z-index: 30;
+}
+
+.mv-canvas-toolbar {
+  bottom: 16px;
+  display: flex;
+  gap: 6px;
+  left: 12px;
+  position: absolute;
+  z-index: 20;
+}
+
+.mv-canvas-tool {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid #c7d2df;
+  border-radius: 7px;
+  color: #172b4d;
+  cursor: pointer;
+  font: 650 12px/1 Inter, ui-sans-serif, system-ui, sans-serif;
+  padding: 7px 10px;
+}
+
+.mv-render-status {
+  background: rgba(23, 43, 77, 0.88);
+  border-radius: 8px;
+  bottom: 16px;
+  color: #ffffff;
+  font: 600 13px/1.3 Inter, ui-sans-serif, system-ui, sans-serif;
+  left: 50%;
+  padding: 8px 12px;
+  pointer-events: none;
+  position: absolute;
+  transform: translateX(-50%);
+  z-index: 21;
+}
+
+.mv-render-status[hidden] {
   display: none;
 }
 
-.scene-tab-close-row > .tab-close-x {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: 5px;
-  color: #8793a5;
-  cursor: pointer;
-  display: flex;
-  flex: 1 1 0;
-  font-size: 15px;
-  height: 24px;
-  justify-content: flex-end;
-  line-height: 1;
-  padding: 0 8px;
+#mv-atom-tip {
+  background: rgba(23, 43, 77, 0.94);
+  border-radius: 6px;
+  color: #ffffff;
+  font: 600 12px/1.3 Inter, ui-sans-serif, system-ui, sans-serif;
+  padding: 4px 8px;
+  pointer-events: none;
+  position: fixed;
+  white-space: nowrap;
+  z-index: 10000;
 }
 
-.scene-tab-close-row > .tab-close-x:hover {
-  background: #fff1f0;
-  color: #b42318;
+#mv-atom-tip[hidden] {
+  display: none;
+}
+
+.disorder-row.is-selected {
+  background: #e7f4f1;
+  outline: 1px solid #86bdb4;
+}
+
+#left-panel .rc-slider {
+  margin: 10px 8px 22px;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+.js-plotly-plot .modebar-container,
+.js-plotly-plot .modebar {
+  display: none !important;
 }
 
 .scene-rename-row {

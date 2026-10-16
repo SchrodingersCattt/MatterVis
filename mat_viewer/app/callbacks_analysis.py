@@ -191,7 +191,7 @@ def register_analysis_callbacks(app, backend):
                 existing=existing,
             )
             try:
-                backend.patch_state({"polyhedron_specs": new_specs}, scene_id=scene_id, broadcast=False)
+                backend.commit_patch({"polyhedron_specs": new_specs}, scene_id=scene_id, broadcast=False)
             except Exception as exc:
                 _surface_error("Update polyhedron", exc)
                 return _rebuild(), no_update
@@ -257,14 +257,14 @@ def register_analysis_callbacks(app, backend):
 
         wulff_facets = result.get("wulff_facets") or []
         if wulff_facets:
-            backend.patch_state({
+            backend.commit_patch({
                 "bfdh_morphology": {
                     "facets": wulff_facets,
                     "enabled": True,
                     "scale": 1.0,
                     "opacity": 0.3
                 }
-            }, scene_id=scene_id, broadcast=False)
+            }, scene_id=scene_id, broadcast=True)
 
         rows = []
         # Header
@@ -320,5 +320,5 @@ def register_analysis_callbacks(app, backend):
                 str(state.get("bfdh_morphology_color", "#4f7cff")),
             )
         if patch:
-            backend.patch_state(patch, scene_id=scene_id, broadcast=False)
+            backend.commit_patch(patch, scene_id=scene_id, broadcast=True)
         return no_update

@@ -130,8 +130,12 @@ def test_sync_agent_state_poll_path_returns_no_update_for_camera_store() -> None
         # ``output`` may be a single Output or a list; we want the
         # callback whose output set covers ``camera-state-store.data``
         # AND ``agent-state-store.data``.
-        rendered = repr(outputs)
-        if "camera-state-store.data" in rendered and "agent-state-store.data" in rendered:
+        rendered = repr(cb)
+        if (
+            "camera-state-store.data" in rendered
+            and "agent-state-store.data" in rendered
+            and "agent-state-poll" in rendered
+        ):
             sync_cb = cb
             break
     assert sync_cb is not None, "could not locate sync_agent_state in callback_map"

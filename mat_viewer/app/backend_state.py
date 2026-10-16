@@ -273,13 +273,14 @@ class _StateBackendMixin:
             target_scene_id = (
                 scene_id or (patch or {}).get("scene_id") or self.scene_store.active_id
             )
+            active_scene_id = self.scene_store.active_id
             state_before = (
                 self.scene_state(target_scene_id)
                 if target_scene_id
                 else copy.deepcopy(self.current_state)
             )
-            self.current_state = self.normalize_state(patch, scene_id=target_scene_id)
-            change_kind = classify_change(state_before, self.current_state)
+            working_state = self.normalize_state(patch, scene_id=target_scene_id)
+            change_kind = classify_change(state_before, working_state)
             before_versions = state_versions(state_before)
             # Maintain independent clocks.  A display patch can reuse the
             # current geometry; a camera patch never invalidates either.
@@ -287,7 +288,7 @@ class _StateBackendMixin:
             display_version = before_versions.display
             camera_version = max(
                 before_versions.camera,
-                int(self.current_state.get("camera_revision", 0) or 0),
+                int(working_state.get("camera_revision", 0) or 0),
             )
             if change_kind == UpdateKind.GEOMETRY:
                 geometry_version += 1
@@ -304,26 +305,28 @@ class _StateBackendMixin:
                 # projection commands carry a revision/projection marker.
                 if "camera_revision" in (patch or {}) or "projection" in (patch or {}):
                     camera_version += 1
-            self.current_state["geometry_version"] = geometry_version
-            self.current_state["display_version"] = display_version
-            self.current_state["camera_version"] = camera_version
-            self.current_state["camera_revision"] = camera_version
+            working_state["geometry_version"] = geometry_version
+            working_state["display_version"] = display_version
+            working_state["camera_version"] = camera_version
+            working_state["camera_revision"] = camera_version
             self._last_update_kind_by_scene[str(target_scene_id)] = change_kind.value
             if target_scene_id:
-                scene_payload = copy.deepcopy(self.current_state)
+                scene_payload = copy.deepcopy(working_state)
                 scene_payload.pop("scene_id", None)
                 scene_payload.pop("scene_label", None)
                 self.scene_store.patch_scene(target_scene_id, scene_payload, save=False)
                 self._bump_render_revision_if_changed(
-                    target_scene_id, state_before, self.current_state
+                    target_scene_id, state_before, working_state
                 )
-            self.current_state["render_revision"] = self.render_revision(
+            working_state["render_revision"] = self.render_revision(
                 target_scene_id
             )
-            if broadcast:
-                self.pending_state = copy.deepcopy(self.current_state)
+            if str(target_scene_id or "") == str(active_scene_id or ""):
+                self.current_state = working_state
+            if broadcast and str(target_scene_id or "") == str(active_scene_id or ""):
+                self.pending_state = copy.deepcopy(working_state)
             self._bump_version()
-            state = copy.deepcopy(self.current_state)
+            state = copy.deepcopy(working_state)
             state["version"] = self.version
             state["server_started_at"] = self.server_started_iso()
             state["render_revision"] = self.render_revision(target_scene_id)

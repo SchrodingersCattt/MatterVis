@@ -446,3 +446,42 @@ def test_async_upload_replaces_placeholder_with_inorganic_defaults(backend, monk
     assert state["style"] == "ball"
     assert "unit_cell_box" in state["display_options"]
     assert state["polyhedron_specs"][0]["center_species"] == "Cs"
+
+def test_invalid_cif_bytes_do_not_create_a_scene(backend: ViewerBackend) -> None:
+    before = set(backend.scene_store.scenes)
+    with pytest.raises(ValueError, match="not a CIF"):
+        backend.add_uploaded_file_bytes(b"this is not a CIF file", "mv-invalid.cif")
+    assert set(backend.scene_store.scenes) == before
+    assert "mv-invalid" not in backend.structure_names
+
+
+def test_failed_upload_manifest_cannot_poison_restart(tmp_path: Path) -> None:
+    import json
+
+    local = tmp_path / ".local"
+    local.mkdir()
+    poison = tmp_path / "mv-invalid.cif"
+    poison.write_bytes(b"this is not a CIF file")
+    (local / "crystal_view_uploads.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "uploads": {
+                    "deadbeef": {
+                        "name": "mv-invalid",
+                        "path": str(poison),
+                        "sha256": "deadbeef",
+                        "status": "failed",
+                        "error": "IndexError: list index out of range",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    restarted = ViewerBackend(preset_path=default_preset_path(), root_dir=str(tmp_path))
+    try:
+        assert "mv-invalid" not in restarted.structure_names
+        assert restarted.get_state()["structure"] != "mv-invalid"
+    finally:
+        restarted.close()

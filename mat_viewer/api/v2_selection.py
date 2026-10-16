@@ -66,6 +66,7 @@ def register_selection_routes(v2, backend) -> dict:
             payload.get("viewport_size") or payload.get("viewport") or [],
             additive=bool(payload.get("additive", False)),
             scene_id=_scene_id_from_request(),
+            commit=bool(payload.get("commit", True)),
         )
         return jsonify({"selection": selection})
 

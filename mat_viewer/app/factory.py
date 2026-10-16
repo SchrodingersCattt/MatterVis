@@ -20,6 +20,7 @@ from .layout_left_panel import build_left_panel
 from .layout_workbench import assemble_workbench
 from .rightclick import _closed_rightclick_items
 from ..extensions import ExtensionContext, _ExtensionHost
+from .build_info import asset_url_token, install_index_identity
 
 
 def create_app(
@@ -151,6 +152,7 @@ def _create_app(
     app = Dash(
         __name__,
         assets_folder=os.path.join(WORKSPACE_DIR, "frontend", "assets"),
+        assets_url_path=f"assets/{asset_url_token()}",
         # Background polls are not page navigations or user-visible loading.
         update_title=None,
     )
@@ -161,6 +163,8 @@ def _create_app(
         panel = extension.build_web_panel(extension_host.context)
         if panel is not None:
             extension_panels.append(panel)
+
+    install_index_identity(app)
 
     # gzip + brotli the JSON figure responses. ``update_view`` ships
     # ~1 MB of base64 mesh data per click and most of that string
@@ -234,7 +238,9 @@ def _create_app(
                             first_state.get("scene_id"), first_state.get("camera")
                         ),
                     ),
+                    dcc.Store(id="camera-capture-store", data=None),
                     dcc.Store(id="view-update-store", data=None),
+                    dcc.Store(id="view-http-cursor", data={}),
                     html.Div(id="view-update-ack", style={"display": "none"}),
                     dcc.Store(id="fast-ui-event-store", data=None),
                     html.Div(
@@ -313,7 +319,9 @@ def _create_app(
                         first_state.get("scene_id"), first_state.get("camera")
                     ),
                 ),
+                dcc.Store(id="camera-capture-store", data=None),
                 dcc.Store(id="view-update-store", data=None),
+                dcc.Store(id="view-http-cursor", data={}),
                 html.Div(id="view-update-ack", style={"display": "none"}),
                 dcc.Store(id="fast-ui-event-store", data=None),
                 html.Div(
@@ -348,9 +356,9 @@ def _create_app(
                     n_intervals=0,
                     disabled=True,
                 ),
-                # 30 s fallback poll — the WS fast lane in mattervis.js
-                # pushes state changes immediately, so this interval only
-                # serves as a safety net for missed pushes or reconnects.
+                # 500 ms while the figure socket is down. mattervis.js backs
+                # this off to 30 s once /api/v2/ws is open; the socket is the
+                # steady-state path and this interval only fills gaps.
                 dcc.Interval(id="agent-state-poll", interval=500, n_intervals=0),
                 html.Div(id="state-sync-sentinel", style={"display": "none"}),
                 # Phase 4: right-click + keyboard shortcut wiring -----------
@@ -458,9 +466,6 @@ def _create_app(
                 html.Div(id="left-splitter", className="panel-splitter"),
                 html.Div(
                     [
-                        # Keep the last valid frame visible while the worker
-                        # builds its replacement. A Loading wrapper also reacts
-                        # to HTTP polling, hiding the viewer without new work.
                         dcc.Graph(
                             id="crystal-graph",
                             figure=first_figure,
@@ -468,21 +473,37 @@ def _create_app(
                             config={
                                 "responsive": True,
                                 "doubleClick": False,
+                                "displayModeBar": False,
                                 "displaylogo": False,
-                                # Keep the mode-bar download local and
-                                # deterministic.  Plotly's default button
-                                # can use a cloud export path and an opaque
-                                # browser-generated filename.
                                 "toImageButtonOptions": {
                                     "format": "png",
                                     "filename": "mattervis-figure",
                                     "scale": 2,
                                 },
                             },
-                        )
+                        ),
+                        html.Div(
+                            [
+                                html.Button(
+                                    "Reset",
+                                    id="canvas-view-reset",
+                                    className="mv-canvas-tool",
+                                    title="Reset the camera",
+                                ),
+                                html.Button(
+                                    "Fit",
+                                    id="canvas-view-fit",
+                                    className="mv-canvas-tool",
+                                    title="Fit the structure in the canvas",
+                                ),
+                            ],
+                            className="mv-canvas-toolbar",
+                        ),
+                        html.Div(id="mv-render-status", className="mv-render-status")
                     ],
                     id="center-panel",
                     style={
+                        "position": "relative",
                         "flex": "1 1 auto",
                         "minWidth": 0,
                         "minHeight": 0,
@@ -531,6 +552,10 @@ def _create_app(
                                                     ),
                                                     className="analysis-graph",
                                                     style={"height": "260px"},
+                                                    config={
+                                                        "displayModeBar": False,
+                                                        "displaylogo": False,
+                                                    },
                                                 ),
                                                 html.Pre(
                                                     id="topology-results",
