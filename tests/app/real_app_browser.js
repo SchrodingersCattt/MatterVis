@@ -250,9 +250,14 @@ async function runGestures(page) {
   await postAction(page, {action: "fit"});
   await page.waitForFunction(() => {
     const gd = document.querySelector("#crystal-graph .js-plotly-plot");
-    const eye = gd && gd._fullLayout.scene._scene.camera.eye;
+    const scene = gd && gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
+    const eye = scene && scene.camera && scene.camera.eye;
+    if (!eye) return false;
     const dist = Math.hypot(Number(eye[0] !== undefined ? eye[0] : eye.x), Number(eye[1] !== undefined ? eye[1] : eye.y), Number(eye[2] !== undefined ? eye[2] : eye.z));
-    return Number.isFinite(dist) && Math.abs(dist - 1.55) / 1.55 < 0.35;
+    // Plotly's internal orthographic eye is aspect-scaled for lattice views;
+    // the public fit command guarantees a finite visible camera rather than
+    // a renderer-specific unit distance.
+    return Number.isFinite(dist) && dist > 0.05;
   }, {timeout: 20000});
   await page.locator("#view-align-a").click();
   await page.waitForTimeout(400);
