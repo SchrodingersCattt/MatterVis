@@ -81,7 +81,7 @@ def register_view_callbacks(app, backend):
         update = make_update(
             state, before=before, payload=payload, reason="state-confirmed"
         )
-        if str(update.kind) == UpdateKind.CAMERA.value:
+        if getattr(update.kind, "value", update.kind) == UpdateKind.CAMERA.value:
             update = make_update(
                 state,
                 before=before,
