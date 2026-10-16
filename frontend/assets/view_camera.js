@@ -430,6 +430,39 @@
     reportStatus("ok", "");
     gd.__mvCameraResets = 0;
   }
+  function deferGraphCamera(camera, options) {
+    options = options || {};
+    var retries = Number(options.__mvGraphRetries || 0);
+    if (retries >= 8) return null;
+    options.__mvGraphRetries = retries + 1;
+    return new Promise(function (resolve, reject) {
+      var settled = false;
+      var timer = null;
+      var target = graph();
+      var host = (root.document && root.document.getElementById) ? root.document.getElementById("crystal-graph") : null;
+      function cleanup() {
+        if (timer) { clearTimeout(timer); timer = null; }
+        if (target && target.removeListener && onAfterplot) { try { target.removeListener("plotly_afterplot", onAfterplot); } catch (_) {} }
+        if (host && host.removeEventListener && onAfterplot) { try { host.removeEventListener("plotly_afterplot", onAfterplot); } catch (_) {} }
+      }
+      function retry() {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        applyAsync(camera, options).then(resolve, reject);
+      }
+      function onAfterplot() { retry(); }
+      if (target && typeof target.once === "function") {
+        try { target.once("plotly_afterplot", onAfterplot); } catch (_) {}
+      } else if (target && typeof target.on === "function") {
+        try { target.on("plotly_afterplot", onAfterplot); } catch (_) {}
+      }
+      if (host && host.addEventListener) {
+        try { host.addEventListener("plotly_afterplot", onAfterplot, {once: true}); } catch (_) {}
+      }
+      timer = setTimeout(retry, 250);
+    });
+  }
   function applyAsync(camera, options) {
     options = options || {};
     var gd = graph();
@@ -439,23 +472,20 @@
        * than poisoning the delivery key and leaving an error toast behind.
        * Bound the wait so a genuinely missing graph still fails visibly. */
       if (camera && root.Plotly && typeof root.Plotly.relayout === "function") {
-        var waitUntil = Number(options.__mvGraphWaitUntil || 0);
-        if (!waitUntil) {
-          waitUntil = Date.now() + 2000;
-          options.__mvGraphWaitUntil = waitUntil;
-        }
-        if (Date.now() < waitUntil && typeof root.setTimeout === "function") {
-          return new Promise(function (resolve, reject) {
-            root.setTimeout(function () {
-              applyAsync(camera, options).then(resolve, reject);
-            }, 25);
-          });
-        }
+        diag("graphUnavailable");
+        root.__mv_camera_diag.lastGraphUnavailable = {
+          camera_version: Number(options.camera_version),
+          scene_id: options.scene_id || null,
+          scene_generation: options.scene_generation,
+        };
+        var deferred = deferGraphCamera(camera, options);
+        if (deferred) return deferred;
       }
       reportStatus("error", "The 3D view is not ready. The last good frame was kept.");
       return Promise.reject(new Error("camera graph unavailable"));
     }
     delete options.__mvGraphWaitUntil;
+    delete options.__mvGraphRetries;
     installWheelZoom(gd);
     installContextLoss(gd);
     var snapshot = clone(camera);

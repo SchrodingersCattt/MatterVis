@@ -250,18 +250,20 @@ async function runGestures(page) {
   await page.waitForTimeout(300);
   const ortho = await nonblank(page);
   if (!ortho.ortho) fail("orthographic radio did not reach the GL camera");
-  await postAction(page, {action: "fit"});
-  await page.waitForFunction(() => {
+  const fitResult = await postAction(page, {action: "fit"});
+  const fitEye = fitResult && fitResult.camera && fitResult.camera.eye;
+  await page.waitForFunction((expected) => {
     const gd = document.querySelector("#crystal-graph .js-plotly-plot");
-    const scene = gd && gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
-    const eye = scene && scene.camera && scene.camera.eye;
-    if (!eye) return false;
-    const dist = Math.hypot(Number(eye[0] !== undefined ? eye[0] : eye.x), Number(eye[1] !== undefined ? eye[1] : eye.y), Number(eye[2] !== undefined ? eye[2] : eye.z));
-    // Plotly's internal orthographic eye is aspect-scaled for lattice views;
-    // the public fit command guarantees a finite visible camera rather than
-    // a renderer-specific unit distance.
-    return Number.isFinite(dist) && dist > 0.05;
-  }, {timeout: 20000});
+    const eye = gd && gd.layout && gd.layout.scene && gd.layout.scene.camera && gd.layout.scene.camera.eye;
+    if (!eye || !expected) return false;
+    const component = (value, index, key) => Number(value && value[key] !== undefined ? value[key] : value && value[index]);
+    const got = [component(eye, 0, "x"), component(eye, 1, "y"), component(eye, 2, "z")];
+    const want = [component(expected, 0, "x"), component(expected, 1, "y"), component(expected, 2, "z")];
+    if (![...got, ...want].every(Number.isFinite)) return false;
+    const error = Math.hypot(got[0] - want[0], got[1] - want[1], got[2] - want[2]);
+    const scale = Math.max(Math.hypot(want[0], want[1], want[2]), 1e-6);
+    return error / scale < 0.35;
+  }, fitEye, {timeout: 20000});
   await page.locator("#view-align-a").click();
   await page.waitForTimeout(400);
   const aligned = await nonblank(page);

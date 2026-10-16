@@ -820,6 +820,7 @@
       window.__mattervisFigureFallbackActive = true;
       function parkFallbackFigure(payload) {
         if (!payload || typeof payload !== "object" || !payload.figure || !payload.scene_id) return;
+        if (isPendingFigure(payload.figure) || !has3DScene(payload.figure)) return;
         /* A parked journal frame still participates in the same sequence and
          * render-revision fences as a WebSocket frame.  Without these fields
          * flushQueuedSceneFigure treats it as stale forever, and a later WS

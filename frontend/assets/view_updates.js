@@ -6,7 +6,7 @@
   var pending = Object.create(null);
   var latestCameraRevision = Object.create(null);
   var latestVersions = Object.create(null);
-  root.__mv_view_diag = root.__mv_view_diag || {submissions: 0, fullFrames: 0, localPatches: 0, cameraUpdates: 0, staleDrops: 0};
+  root.__mv_view_diag = root.__mv_view_diag || {submissions: 0, fullFrames: 0, localPatches: 0, cameraUpdates: 0, staleDrops: 0, cameraStale: 0, cameraDeduped: 0, graphUnavailable: 0};
   function graph() { return root.MatterVisViewCamera && root.MatterVisViewCamera.graph(); }
   function clone(value) {
     if (value === undefined || value === null) return value;
@@ -250,16 +250,30 @@
       return "error";
     }
     root.__mv_view_diag.submissions += 1;
-    if (!applicable(snapshot, gd)) { root.__mv_view_diag.staleDrops += 1; noteDrop(snapshot, gd, "inapplicable"); return "stale"; }
+    if (!applicable(snapshot, gd)) {
+      root.__mv_view_diag.staleDrops += 1;
+      if (kind === "camera") root.__mv_view_diag.cameraStale += 1;
+      noteDrop(snapshot, gd, "inapplicable");
+      return "stale";
+    }
     rememberVersions(snapshot, gd);
     if (kind === "camera") {
       root.__mv_view_diag.cameraUpdates += 1;
       var scope = cameraScope(snapshot, gd);
       var revision = cameraRevision(snapshot);
       if (latestCameraRevision[scope] === undefined || revision > latestCameraRevision[scope]) latestCameraRevision[scope] = revision;
-      if (!cameraIsCurrent(snapshot, gd)) { root.__mv_view_diag.staleDrops += 1; noteDrop(snapshot, gd, "camera-order"); return "stale"; }
+      if (!cameraIsCurrent(snapshot, gd)) {
+        root.__mv_view_diag.staleDrops += 1;
+        root.__mv_view_diag.cameraStale += 1;
+        noteDrop(snapshot, gd, "camera-order");
+        return "stale";
+      }
       var cameraKey = deliveryKey(snapshot, gd);
-      if (pending[cameraKey]) return pending[cameraKey];
+      if (pending[cameraKey]) {
+        root.__mv_view_diag.cameraDeduped += 1;
+        root.__mv_view_diag.lastCameraDeduped = {key: cameraKey, revision: revision};
+        return pending[cameraKey];
+      }
       var camera = snapshot.payload || snapshot;
       var cameraOptions = {
         scene_id: snapshot.scene_id,
@@ -271,10 +285,18 @@
           return cameraIsCurrent(snapshot, gd) && applicable(snapshot, gd);
         },
       };
-      var cameraWork = root.MatterVisViewCamera && root.MatterVisViewCamera.applyAsync
+      var hasAsyncCamera = root.MatterVisViewCamera && typeof root.MatterVisViewCamera.applyAsync === "function";
+      if (!hasAsyncCamera) root.__mv_view_diag.graphUnavailable += 1;
+      var cameraWork = hasAsyncCamera
         ? root.MatterVisViewCamera.applyAsync(clone(camera.camera), cameraOptions)
-        : Promise.resolve(root.MatterVisViewCamera && root.MatterVisViewCamera.apply(camera.camera));
-      pending[cameraKey] = Promise.resolve(cameraWork).then(function () {
+        : Promise.reject(new Error("camera graph unavailable"));
+      pending[cameraKey] = Promise.resolve(cameraWork).catch(function (error) {
+        if (/graph unavailable|not ready/i.test(String(error && error.message || error))) {
+          root.__mv_view_diag.graphUnavailable += 1;
+          root.__mv_view_diag.lastGraphUnavailable = {key: cameraKey, revision: revision, scene: snapshot.scene_id};
+        }
+        throw error;
+      }).then(function () {
         markDelivered(snapshot, gd, cameraKey);
         return "camera";
       }).finally(function () { delete pending[cameraKey]; });
