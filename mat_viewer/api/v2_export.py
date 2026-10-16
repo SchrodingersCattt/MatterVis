@@ -78,6 +78,29 @@ def register_export_routes(v2, backend) -> dict:
         payload = request.get_json(force=True, silent=True) or {}
         return jsonify(backend.export_static(output_path=payload.get("output_path")))
 
+    @v2.route("/export/cif", methods=["GET", "POST"])
+    def export_cif():
+        """Download the active source structure as a CIF file."""
+
+        payload = request.get_json(force=True, silent=True) or {}
+        scene_id = request.args.get("scene_id") or payload.get("scene_id")
+        try:
+            exported = backend.export_cif(scene_id=scene_id)
+        except ValueError as exc:
+            return _error_response(exc, 400)
+        except RuntimeError as exc:
+            return _error_response(exc, 409)
+
+        # API clients that need a JSON envelope can opt in; the default is a
+        # browser-friendly attachment so the same endpoint powers a simple
+        # curl download and the Operations panel.
+        if request.args.get("json") in {"1", "true", "yes"} or payload.get("json"):
+            return jsonify(exported)
+        response = Response(exported["content"], mimetype="chemical/x-cif")
+        response.headers["Content-Disposition"] = f'attachment; filename="{exported["filename"]}"'
+        response.headers["X-MatterVis-Structure"] = str(exported["structure"])
+        return response
+
     # ----- polyhedron specs (Phase 1) -----------------------------------
     #
     # Per-scene named-row data model for coordination polymers. Each spec

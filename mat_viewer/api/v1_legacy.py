@@ -14,6 +14,7 @@ def register_v1_routes(v1, backend, handlers: dict) -> None:
     preset_save = handlers["preset_save"]
     preset_load = handlers["preset_load"]
     export_static = handlers["export_static"]
+    export_cif = handlers["export_cif"]
     @v1.get("/perf")
     def perf_get_v1():
         return _perf_payload()
@@ -126,3 +127,7 @@ def register_v1_routes(v1, backend, handlers: dict) -> None:
     @v1.post("/export")
     def v1_export_static():
         return export_static()
+
+    @v1.route("/export/cif", methods=["GET", "POST"])
+    def v1_export_cif():
+        return export_cif()

@@ -123,6 +123,53 @@ def test_classify_shell_payload_recovers_from_pathological_input():
         assert isinstance(payload["error"], str) and payload["error"]
 
 
+def test_large_shell_uses_bounded_local_cage_classification():
+    """Periodic image neighbours must not trigger C(N, k) residual sweeps."""
+    rng = np.random.default_rng(9002348)
+    coords = rng.normal(size=(210, 3))
+    payload = _classify_shell_payload(coords, [0.0, 0.0, 0.0])
+
+    assert payload["coordination_number"] == 210
+    diagnostics = payload["diagnostics"]
+    assert diagnostics["search_mode"] == "bounded_local_cage"
+    assert diagnostics["sample_size"] == 12
+    assert len(diagnostics["sample_indices"]) == 12
+
+
+def test_large_shell_diagnostics_reuse_bounded_sample(monkeypatch):
+    from mat_viewer.topology import analysis as topology_analysis
+
+    rng = np.random.default_rng(210)
+    coords = rng.normal(size=(210, 3)).tolist()
+    observed: list[int] = []
+
+    monkeypatch.setattr(
+        topology_analysis,
+        "extract_coordination_shell",
+        lambda *_args, **_kwargs: {
+            "center_coords": [0.0, 0.0, 0.0],
+            "shell_coords": coords,
+        },
+    )
+    monkeypatch.setattr(
+        topology_analysis,
+        "planarity_analysis",
+        lambda points, **_kwargs: (observed.append(len(points)) or {}),
+    )
+    monkeypatch.setattr(
+        topology_analysis,
+        "detect_prism_vs_antiprism",
+        lambda points: {"sample_size": len(points)},
+    )
+
+    result = topology_analysis._analyze_topology_uncached(
+        object(), 0, 10.0, None, None, None
+    )
+
+    assert observed == [12]
+    assert result["prism_analysis"]["sample_size"] == 12
+
+
 @pytest.mark.skipif(not DAP4_CIF.exists(), reason="DAP-4 CIF not available")
 def test_analyze_topology_returns_shape_key_for_dap4_a_site(
     catalog_bundle_factory,

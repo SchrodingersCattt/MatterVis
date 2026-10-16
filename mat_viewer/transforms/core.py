@@ -693,6 +693,7 @@ def rebuild_scene_with_atoms(
     from ..legacy import crystal_scene as legacy_scene
     from ..scene import scene_ops
     from ..scene.core import _canonical_display_bond_pairs
+    from ..structure.bonds import ionic_coordinate_source_pairs
 
     ops = scene_ops()
     style = style or dict(base_scene.get("style", {}))
@@ -727,6 +728,10 @@ def rebuild_scene_with_atoms(
         contract_sites,
         contract_bonds,
     )
+    ionic_source_pairs = ionic_coordinate_source_pairs(
+        contract_sources,
+        contract_bonds,
+    )
 
     draw_atoms = [dict(atom) for atom in new_atoms]
     if draw_atoms:
@@ -750,6 +755,16 @@ def rebuild_scene_with_atoms(
     for i, j in bond_pairs:
         ai = draw_atoms[int(i)]
         aj = draw_atoms[int(j)]
+        source_pair = tuple(
+            sorted(
+                (
+                    int(ai.get("_source_index", -1)),
+                    int(aj.get("_source_index", -1)),
+                )
+            )
+        )
+        if source_pair in ionic_source_pairs:
+            continue
         start = np.asarray(ai["cart"], dtype=float)
         end = np.asarray(aj["cart"], dtype=float)
         bonds.append(
@@ -799,6 +814,11 @@ def rebuild_scene_with_atoms(
     out["_canonical_source_atoms"] = copy.deepcopy(contract_sources)
     out["_canonical_site_records"] = copy.deepcopy(contract_sites)
     out["_canonical_bond_records"] = copy.deepcopy(contract_bonds)
+    out["is_ionic_solid"] = bool(ionic_source_pairs)
+    out["ionic_coordinate_source_pairs"] = [
+        list(pair) for pair in sorted(ionic_source_pairs)
+    ]
+    out["suppressed_ionic_bond_count"] = len(ionic_source_pairs)
     return out
 
 

@@ -6,8 +6,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .contracts import CameraSpec
-from .viewport_spec import ViewportSpec, resolve_viewport
+from .viewport_spec import ViewportSpec, resolve_viewport, reuse_viewport  # noqa: F401
 
 
 def _geometry_entity_points(scene: dict) -> list[np.ndarray]:
@@ -139,7 +138,14 @@ def _normalize(vec: Iterable[float], fallback: Iterable[float]) -> np.ndarray:
 
 
 def _plotly_camera_from_scene(scene: dict, style: dict) -> dict:
+    # A default state may intentionally leave ``style['camera']`` unset so
+    # the scene-specific camera is regenerated after a display-scope change.
+    # Use that scene camera for the initial perspective fit as well; otherwise
+    # a unit-cell default skips the orientation-aware margin and can crop a
+    # valid cell corner before the user ever interacts with the view.
     explicit = style.get("camera")
+    if not isinstance(explicit, dict):
+        explicit = scene.get("camera")
     if isinstance(explicit, dict):
 
         def _xyz_value(raw, fallback: tuple[float, float, float]) -> dict[str, float]:
@@ -400,7 +406,7 @@ def _camera_axis_projections(
     if M.ndim != 2 or M.shape[0] < 3 or M.shape[1] != 3:
         return None
 
-    resolved_viewport = viewport or resolve_viewport(scene, style)
+    resolved_viewport = reuse_viewport(viewport, scene, style)
     cube_scale = np.asarray(resolved_viewport.cube_scale, dtype=float)
     M_cube = M[:3] / cube_scale[None, :]
     norms = np.linalg.norm(M_cube, axis=1)
@@ -461,7 +467,7 @@ def _axis_cube_scale(
     new rendering code should retain the full :class:`ViewportSpec` returned
     by :func:`resolve_viewport`.
     """
-    resolved_viewport = viewport or resolve_viewport(scene, style)
+    resolved_viewport = reuse_viewport(viewport, scene, style)
     return np.asarray(resolved_viewport.cube_scale, dtype=float)
 
 
@@ -700,11 +706,157 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
     pad = np.maximum(span * 0.06, 0.25)
     mins = atom_mins - pad
     maxs = atom_maxs + pad
-    return [
+    ranges = [
         [float(mins[0]), float(maxs[0])],
         [float(mins[1]), float(maxs[1])],
         [float(mins[2]), float(maxs[2])],
     ]
+    return _auto_camera_fit_ranges(scene, style, ranges, extra_points=extras)
+
+
+def _auto_camera_fit_ranges(
+    scene: dict,
+    style: dict,
+    ranges: list[list[float]],
+    *,
+    extra_points: Iterable[Iterable[float]] | None = None,
+) -> list[list[float]]:
+    """Add a small orientation-aware margin to a default perspective view.
+
+    ``_scene_ranges`` owns the data bounding box, while Plotly maps that box
+    into a unit cube before applying the camera basis.  A diagonal camera can
+    therefore project a corner of an otherwise perfectly valid axis-aligned
+    box past the edge of the viewport.  This is especially visible for
+    uploaded co-crystals whose default view is diagonal: the left/bottom
+    molecule is clipped even though all of its Cartesian coordinates are in
+    the axis ranges.
+
+    Expand only legacy (position/focal-point) cameras.  Those cameras are the
+    scene's initial camera; an interactive camera is stored in Plotly's
+    ``eye`` form and must retain the user's exact viewport.  The expansion is
+    computed from the projected eight corners and keeps the existing bounding
+    box centre, so multi-molecule formula units remain centred on their
+    displayed bounding box.  Orthographic views do not need this correction.
+    """
+    if not isinstance(style, dict):
+        return ranges
+    explicit = style.get("camera")
+    if not isinstance(explicit, dict):
+        explicit = scene.get("camera")
+    if not isinstance(explicit, dict) or not {
+        "position",
+        "focal_point",
+    }.issubset(explicit):
+        return ranges
+
+    projection = explicit.get("projection")
+    if isinstance(projection, dict):
+        projection = projection.get("type")
+    if str(projection or style.get("projection", "perspective")).lower() in {
+        "orthographic",
+        "ortho",
+    }:
+        return ranges
+
+    try:
+        spans = np.asarray(
+            [float(axis_range[1]) - float(axis_range[0]) for axis_range in ranges],
+            dtype=float,
+        )
+        if spans.shape != (3,) or not np.all(np.isfinite(spans)) or np.any(spans <= 1e-9):
+            return ranges
+        center = np.asarray(
+            [0.5 * (float(axis_range[0]) + float(axis_range[1])) for axis_range in ranges],
+            dtype=float,
+        )
+        from ..compass import camera_screen_basis
+
+        camera = _plotly_camera_from_scene(scene, style)
+        right, screen_up = camera_screen_basis(camera)
+        aspect = spans / float(np.max(spans))
+        # Fit the displayed geometry rather than all eight corners of the
+        # axis-aligned cube.  Opposite corners of a long oblique cell are
+        # mathematically valid range points but are not necessarily drawn;
+        # using them would zoom every Z'=2 structure out unnecessarily.
+        points: list[np.ndarray] = []
+        atoms = _visible_atoms(scene, style)
+        if atoms:
+            atom_scale = float(style.get("atom_scale", 1.0))
+            for atom in atoms:
+                try:
+                    cart = np.asarray(atom.get("cart"), dtype=float)
+                    radius = max(float(atom.get("atom_radius", 0.18)), 0.05) * atom_scale
+                except (TypeError, ValueError):
+                    continue
+                if cart.shape != (3,) or not np.all(np.isfinite(cart)):
+                    continue
+                points.extend(
+                    cart + radius * np.asarray(signs, dtype=float)
+                    for signs in (
+                        (-1, -1, -1),
+                        (-1, -1, 1),
+                        (-1, 1, -1),
+                        (-1, 1, 1),
+                        (1, -1, -1),
+                        (1, -1, 1),
+                        (1, 1, -1),
+                        (1, 1, 1),
+                    )
+                )
+        mode = style.get("display_mode", scene.get("display_mode"))
+        if mode == "unit_cell" or bool(style.get("show_unit_cell", False)):
+            matrix = scene.get("M")
+            if matrix is not None:
+                matrix = np.asarray(matrix, dtype=float)
+                if matrix.shape == (3, 3) and np.all(np.isfinite(matrix)):
+                    a, b, c = matrix
+                    points.extend(
+                        np.asarray(point, dtype=float)
+                        for point in (
+                            np.zeros(3),
+                            a,
+                            b,
+                            c,
+                            a + b,
+                            a + c,
+                            b + c,
+                            a + b + c,
+                        )
+                    )
+        points.extend(_geometry_entity_points(scene))
+        if extra_points:
+            for point in extra_points:
+                try:
+                    candidate = np.asarray(point, dtype=float)
+                except (TypeError, ValueError):
+                    continue
+                if candidate.shape == (3,) and np.all(np.isfinite(candidate)):
+                    points.append(candidate)
+        if not points:
+            return ranges
+        displayed = np.asarray(points, dtype=float)
+        if displayed.ndim != 2 or displayed.shape[1] != 3:
+            return ranges
+        normalized = (displayed - center[None, :]) / (0.5 * spans)[None, :]
+        normalized *= aspect[None, :]
+        projected = np.column_stack((normalized @ right, normalized @ screen_up))
+        extent = float(np.max(np.abs(projected)))
+        if not np.isfinite(extent) or extent <= 0.9:
+            return ranges
+        # Keep roughly 8% breathing room.  Never cap this safety expansion:
+        # an oblique view of a layered hydroxide (for example Brucite) can
+        # project a valid corner well beyond the axis-aligned box, and a hard
+        # cap turns that corner into a clipped atom on the initial frame.
+        scale = max(extent / 0.92, 1.0)
+        if scale <= 1.0 + 1e-12:
+            return ranges
+        half = 0.5 * spans * scale
+        fitted = np.column_stack((center - half, center + half))
+        return [[float(row[0]), float(row[1])] for row in fitted]
+    except (TypeError, ValueError, KeyError, IndexError, FloatingPointError):
+        # Camera metadata is user-editable through the REST API.  A malformed
+        # camera must not make an otherwise renderable scene disappear.
+        return ranges
 
 
 def _equalize_axis_ranges(xr, yr, zr):
@@ -778,148 +930,5 @@ def figure_axis_layout(
     }
 
 
-def uniform_viewport(
-    scenes,
-    *,
-    style=None,
-    padding=0.0,
-    shared_center=False,
-):
-    """Stamp equal-scale viewports, optionally with one shared world centre."""
-    scenes = list(scenes)
-    if not scenes:
-        return []
 
-    radius_spans = []
-    centroids = []
-    for scene in scenes:
-        scn_style = style if style is not None else scene.get("style") or {}
-        atom_scale = float(scn_style.get("atom_scale", 1.0))
-        atoms = scene.get("draw_atoms") or []
-        atom_mins = atom_maxs = None
-        if atoms:
-            carts = np.array([atom["cart"] for atom in atoms], dtype=float)
-            radii = (
-                np.array(
-                    [max(float(atom.get("atom_radius", 0.18)), 0.05) for atom in atoms],
-                    dtype=float,
-                )
-                * atom_scale
-            )
-            atom_mins = (carts - radii[:, None]).min(axis=0)
-            atom_maxs = (carts + radii[:, None]).max(axis=0)
-
-        geometry_points = _geometry_entity_points(scene)
-        if geometry_points:
-            geometry_arr = np.asarray(geometry_points, dtype=float)
-            geometry_mins = geometry_arr.min(axis=0)
-            geometry_maxs = geometry_arr.max(axis=0)
-            if atom_mins is None:
-                atom_mins, atom_maxs = geometry_mins, geometry_maxs
-            else:
-                atom_mins = np.minimum(atom_mins, geometry_mins)
-                atom_maxs = np.maximum(atom_maxs, geometry_maxs)
-
-        if atom_mins is None or atom_maxs is None:
-            radius_spans.append(1.0)
-            centroids.append(np.zeros(3, dtype=float))
-            continue
-        radius_spans.append(float((atom_maxs - atom_mins).max()))
-        centroids.append(0.5 * (atom_mins + atom_maxs))
-
-    if shared_center:
-        centers_array = np.asarray(centroids, dtype=float)
-        spans_array = np.asarray(radius_spans, dtype=float)[:, None]
-        global_min = np.min(centers_array - 0.5 * spans_array, axis=0)
-        global_max = np.max(centers_array + 0.5 * spans_array, axis=0)
-        common_center = 0.5 * (global_min + global_max)
-        half = 0.5 * float(np.max(global_max - global_min)) + float(padding)
-        centroids = [common_center for _ in scenes]
-    else:
-        half = 0.5 * max(radius_spans) + float(padding)
-
-    viewports = []
-    for scene, center in zip(scenes, centroids):
-        viewport = {
-            "x": [float(center[0] - half), float(center[0] + half)],
-            "y": [float(center[1] - half), float(center[1] + half)],
-            "z": [float(center[2] - half), float(center[2] + half)],
-            "center": [float(center[0]), float(center[1]), float(center[2])],
-            "half_span": float(half),
-        }
-        scene["viewport"] = viewport
-        viewports.append(viewport)
-    return viewports
-
-
-def uniform_camera(
-    plans,
-    *,
-    direction=None,
-    up=None,
-    padding=0.0,
-):
-    """Return per-plan cameras with one direction and orthographic scale.
-
-    This is the backend-neutral counterpart of :func:`uniform_viewport` for
-    CPU and Matplotlib rendering. Each returned camera remains centred on its
-    own plan while all panels use the same world length per pixel.
-
-    Parameters
-    ----------
-    plans
-        Render plans whose fitted cameras define the panel centres and depth
-        ranges.
-    direction, up
-        Optional shared camera direction and up vector. When omitted, the
-        first plan's fitted orientation is used.
-    padding
-        Extra world-space half-height added to the largest fitted
-        ``ortho_scale``.
-    """
-    plans = list(plans)
-    if not plans:
-        return []
-
-    cameras = [plan.camera for plan in plans]
-    shared_scale = max(float(camera.ortho_scale) for camera in cameras) + float(padding)
-    if not math.isfinite(shared_scale) or shared_scale <= 0.0:
-        raise ValueError("uniform camera scale must be positive and finite")
-
-    first = cameras[0]
-    if direction is None:
-        direction_vector = np.asarray(first.position, dtype=float) - np.asarray(
-            first.target, dtype=float
-        )
-    else:
-        direction_vector = np.asarray(direction, dtype=float)
-    if direction_vector.shape != (3,) or not np.all(np.isfinite(direction_vector)):
-        raise ValueError("direction must be a finite three-dimensional vector")
-    if float(np.linalg.norm(direction_vector)) <= 1.0e-12:
-        raise ValueError("direction must be non-zero")
-
-    up_vector = np.asarray(first.up if up is None else up, dtype=float)
-    if up_vector.shape != (3,) or not np.all(np.isfinite(up_vector)):
-        raise ValueError("up must be a finite three-dimensional vector")
-    if float(np.linalg.norm(up_vector)) <= 1.0e-12:
-        raise ValueError("up must be non-zero")
-
-    out = []
-    for camera in cameras:
-        target = np.asarray(camera.target, dtype=float)
-        distance = float(
-            np.linalg.norm(np.asarray(camera.position, dtype=float) - target)
-        )
-        out.append(
-            CameraSpec.looking_along(
-                direction_vector,
-                target=target,
-                up=up_vector,
-                distance=distance,
-                projection="orthographic",
-                ortho_scale=shared_scale,
-                near=camera.near,
-                far=camera.far,
-            )
-        )
-    return out
+from .viewport_uniform import uniform_camera, uniform_viewport  # noqa: F401

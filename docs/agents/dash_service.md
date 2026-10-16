@@ -32,7 +32,7 @@ flowchart LR
         STRUCT["/upload, /structures, /scene/{name}"]
         OVERLAY["/polyhedra (+ instance_overrides)<br/>/atom_groups<br/>/bond_groups<br/>/transforms<br/>(+ supercell shorthand on /state)"]
         TOPO["/topology"]
-        EXPORT["/screenshot, /export,<br/>/preset/save, /preset/load"]
+        EXPORT["/screenshot, /export, /export/cif,<br/>/preset/save, /preset/load"]
         OBS["/healthz, /perf, /perf/clear"]
     end
 
@@ -386,6 +386,14 @@ Notes for callers:
 - `POST /export`
   Triggers the vendored `mat_viewer.static_publication.plot_crystal` exporter
   with the current preset.
+- `GET` or `POST /export/cif`
+  Downloads the active scene's loaded source structure as a CIF attachment.
+  Pass `scene_id` as a query parameter (or in a POST JSON body) to export a
+  specific scene. Add `?json=1` when a JSON envelope is preferred; it contains
+  `filename`, `structure`, `scene_id`, and the CIF `content`. Display scope and
+  view transforms are presentation state and do not change the source crystal
+  serialized by this endpoint. The `/api/v1/export/cif` compatibility route
+  has the same behavior.
 - `GET /perf?since=N&limit=M`
   Tail of the in-process perf-event ring buffer. Returns
   `{"events": [...], "latest_seq": N, "log_path": "/tmp/cv-perf.log"}`.
@@ -456,6 +464,7 @@ flowchart LR
         V3["crystal-graph"]
         V4["topology-histogram / topology-results"]
         V5["save-preset-btn / export-btn"]
+        V6["export-cif-btn / cif-download"]
     end
 ```
 
@@ -511,6 +520,7 @@ The full list (authoritative; the diagram only groups them):
 - `topology-results`
 - `save-preset-btn`
 - `export-btn`
+- `export-cif-btn` and `cif-download`
 
 ## Suggested automation pattern
 

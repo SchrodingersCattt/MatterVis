@@ -78,14 +78,53 @@
   min-width: 0;
 }
 
-#scene-tabs .tab {
-  color: var(--mv-muted);
-  font-size: 12px;
+#scene-tabs .tab-container {
+  display: flex;
   min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+#scene-tabs .tab {
+  align-items: center;
+  color: var(--mv-muted);
+  display: flex;
+  flex: 0 0 160px !important;
+  font-size: 12px;
+  min-width: 160px !important;
   overflow: hidden;
   padding: 10px 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+#scene-tabs .tab[title] {
+  cursor: help;
+}
+
+#scene-tabs .scene-tab-label {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  width: 100%;
+}
+
+#scene-tabs .scene-tab-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#scene-tabs .tab-close-x {
+  flex: 0 0 auto;
+  height: 20px;
+  margin-left: auto;
+  padding: 0 4px;
+  width: 20px;
 }
 
 #scene-tabs .tab--selected,
@@ -96,13 +135,7 @@
 }
 
 .scene-tab-close-row {
-  align-items: center;
-  border-top: 1px solid #eef2f6;
-  display: flex;
-  gap: 0;
-  justify-content: stretch;
-  min-height: 26px;
-  padding: 0 5px;
+  display: none;
 }
 
 .scene-tab-close-row > .tab-close-x {

@@ -191,6 +191,32 @@ def test_hydrogen_build_followed_by_labels_does_not_drop_final_frame(backend, mo
     assert not backend._render_worker._pending_render
 
 
+def test_completed_scene_frame_also_refreshes_sidebar_after_switch(backend):
+    """The HTTP journal event must wake the scene summary after a tab switch."""
+    registry = CallbackRegistry()
+    callbacks_view.register_view_callbacks(registry, backend)
+    state = backend.get_state()
+    figure, _ = fake_figure(backend, state)
+    event = backend.broadcast_figure(
+        scene_id=state["scene_id"],
+        figure=figure.to_plotly_json(),
+        state=state,
+    )
+
+    result = registry.callbacks["update_view"](
+        state,
+        {"seq": 1, "scene_id": state["scene_id"]},
+        event,
+        None,
+        None,
+    )
+
+    from dash import no_update
+
+    assert result[0]["data"][0]["type"] == "scatter3d"
+    assert result[3] is not no_update
+
+
 @pytest.mark.parametrize("method", ["request_figure_build", "prewarm"])
 @pytest.mark.parametrize("submit_failure", [False, True])
 def test_render_failure_reports_and_allows_resubmit(backend, monkeypatch, submit_failure, method):

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
+import subprocess
+
+import pytest
 
 from mat_viewer.app import create_app
 
@@ -44,6 +48,88 @@ def test_scene_tab_intent_is_bound_by_global_rebind_observer():
     rebind_body = source[rebind_idx:source.index("new MutationObserver", rebind_idx)]
 
     assert "bindSceneTabIntent();" in rebind_body
+    assert "ensureSceneTabTooltips();" in rebind_body
+
+
+def test_programmatic_upload_selection_clears_stale_tab_intent():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    selected_idx = source.index("function selectedSceneId")
+    selected_body = source[selected_idx:source.index("function fastViewMetadata", selected_idx)]
+    assert "const domSceneId" in selected_body
+    assert "sceneTabIntentId = null" in selected_body
+    assert "return domSceneId" in selected_body
+    assert "window.MatterVisSelectScene" in source
+
+
+def test_nested_tab_label_and_programmatic_upload_use_real_scene_id():
+    """A click on the label must route frames by the enclosing scene id."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    program = r"""
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const stop=source.indexOf('  // ── Right-click menu');
+const prefix=source.slice(0,stop);
+let selected={id:'scene-tab-old'};
+const tabs={querySelector:()=>selected,dataset:{}};
+const sandbox={console,Date,JSON,Number,String,Object,Array,Promise,setTimeout:()=>{},clearTimeout:()=>{},
+  requestAnimationFrame:()=>{},MutationObserver:function(){this.observe=()=>{};},
+  window:{Plotly:null,WebSocket:null,location:{protocol:'http:',host:'localhost'},
+    dash_clientside:{set_props:()=>true}},
+  document:{getElementById:id=>id==='scene-tabs'?tabs:null,querySelectorAll:()=>[],
+    addEventListener:()=>{}}};
+vm.createContext(sandbox);
+vm.runInContext(prefix+'window.testScene={selectedSceneId,noteSceneTabIntent,sceneIdFromTabNode};})();',sandbox);
+const api=sandbox.window.testScene;
+api.noteSceneTabIntent({closest:()=>({id:'scene-tab-label-new'})});
+assert.equal(api.selectedSceneId(),'new');
+api.selectedSceneId();
+sandbox.window.MatterVisSelectScene('uploaded');
+assert.equal(api.selectedSceneId(),'uploaded');
+"""
+    result = subprocess.run(
+        [node, "-e", program, str(MATTERVIS_JS)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_failed_figure_socket_switches_to_one_http_fallback():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    ws_idx = source.index("(function connectWS()")
+    ws_body = source[ws_idx:source.index("  function ensureSceneTabTooltips", ws_idx)]
+    assert "__mattervisFigureFallbackActive" in ws_body
+    assert "__mattervisFigureWsDisabled" in ws_body
+    assert "Invalid frame header" in ws_body
+    assert "setTimeout(connectWS,5000)" in ws_body
+
+
+def test_tab_switch_clears_global_upload_status():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    start = source.index("function bindSceneTabIntent")
+    body = source[start:source.index("// ── WS figure fast lane", start)]
+    assert 'document.getElementById("upload-status")' in body
+    assert 'status.textContent = ""' in body
+
+
+def test_scene_tab_tooltip_is_applied_to_actual_tab_node():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    assert "function ensureSceneTabTooltips" in source
+    tooltip_idx = source.index("function ensureSceneTabTooltips")
+    tooltip_body = source[tooltip_idx:source.index("function rebindAll", tooltip_idx)]
+    assert 'tab.setAttribute("title", fullName)' in tooltip_body
+    assert 'tab.setAttribute("aria-label", fullName)' in tooltip_body
+
+
+def test_figure_socket_is_singleton_across_asset_rebinds():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    ws_idx = source.index("(function connectWS()")
+    ws_body = source[ws_idx:source.index("})();", ws_idx) + 4]
+    assert "__mattervisFigureSocket" in ws_body
+    assert "window.__mattervisFigureSocket = null" in ws_body
 
 
 def test_deferred_ws_figure_keeps_and_revalidates_render_metadata():
@@ -55,6 +141,109 @@ def test_deferred_ws_figure_keeps_and_revalidates_render_metadata():
     flush_idx = source.index("function flushPendingFigurePush")
     flush_body = source[flush_idx:source.index("function markActive", flush_idx)]
     assert "figurePushIsCurrent(p)" in flush_body
+
+
+def test_upload_frame_is_queued_until_new_scene_tab_is_selected():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+
+    assert "pendingFigureByScene" in source
+    assert "flushQueuedSceneFigure" in source
+    rebind_idx = source.index("function rebindAll")
+    rebind_body = source[rebind_idx:source.index("new MutationObserver", rebind_idx)]
+    assert "flushQueuedSceneFigure();" in rebind_body
+    ws_idx = source.index("if (!isCurrentFigurePush(p))")
+    ws_body = source[ws_idx:source.index("if (interactionActive)", ws_idx)]
+    assert "pendingFigureByScene[String(p.scene_id)] = p;" in ws_body
+
+
+def test_upload_completion_flushes_frame_queued_before_tab_paint():
+    """The upload barrier must flush a frame queued before Dash paints tabs."""
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    upload_source = (ROOT / "frontend" / "assets" / "native_upload.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "window.MatterVisFlushSceneFrame" in source
+    flush_idx = source.index("window.MatterVisFlushSceneFrame")
+    flush_body = source[flush_idx : source.index("function flushPendingFigurePush", flush_idx)]
+    assert "flushQueuedSceneFigure();" in flush_body
+    assert "setTimeout(flushQueuedSceneFigure, delay)" in flush_body
+    assert "window.MatterVisFlushSceneFrame(activeId)" in upload_source
+
+
+def test_upload_flush_hook_replays_queued_hkust_frame():
+    """Exercise the spinel -> HKUST selection barrier without a browser."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    start = source.index("  function flushQueuedSceneFigure")
+    stop = source.index("  function flushPendingFigurePush", start)
+    program = r"""
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const body=source.slice(%d,%d);
+    const pending=Object.create(null);
+    const sandbox={window:{},pending,setTimeout,clearTimeout};
+vm.createContext(sandbox);
+    vm.runInContext(`
+      let current='spinel', applied=0;
+      function currentSceneId(){return current;}
+      function figurePushIsCurrent(frame){return frame.isCurrent();}
+      function applyFigurePush(){applied += 1;}
+      window.MatterVisSelectScene=id=>{current=String(id);};
+      const pendingFigureByScene=pending;
+      ${body}
+      pending.hkust={figure:{data:[{}],layout:{}},isCurrent:()=>current==='hkust'};
+      window.MatterVisFlushSceneFrame('hkust');
+      window.applied=applied;
+    `,sandbox);
+    assert.equal(sandbox.window.applied,1,'queued HKUST frame was not replayed after upload selection');
+""" % (start, stop)
+    result = subprocess.run(
+        [node, "-e", program, str(MATTERVIS_JS)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_user_tab_click_flushes_frame_queued_before_selected_class_paint():
+    """A click must replay a frame received while the previous tab is active."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    program = r"""
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const prefix=source.slice(0,source.indexOf('  // ── WS figure fast lane'));
+const listeners={};
+const graph={querySelector:()=>({})};
+const tabs={dataset:{},querySelector:()=>({id:'scene-tab-old'}),addEventListener:(kind,fn)=>{listeners[kind]=fn;}};
+let applied=0;
+const sandbox={console,Date,JSON,Number,String,Object,Array,Promise,setTimeout,clearTimeout,
+  requestAnimationFrame:()=>{},MutationObserver:function(){this.observe=()=>{};},
+  window:{Plotly:{react:()=>{applied+=1;return Promise.resolve();}},WebSocket:null,
+    location:{protocol:'http:',host:'localhost'},dash_clientside:{set_props:()=>true}},
+  document:{getElementById:id=>id==='scene-tabs'?tabs:(id==='crystal-graph'?graph:null),
+    querySelectorAll:()=>[],addEventListener:()=>{}}};
+vm.createContext(sandbox);
+vm.runInContext(prefix+`window.testScene={bindSceneTabIntent,pendingFigureByScene};})();`,sandbox);
+const api=sandbox.window.testScene;
+api.bindSceneTabIntent();
+api.pendingFigureByScene.new_scene={figure:{data:[{}],layout:{}},isCurrent:()=>true};
+listeners.click({target:{closest:()=>({id:'scene-tab-new_scene'})}});
+assert.equal(applied,1,'queued frame was not replayed by the user tab click');
+"""
+    result = subprocess.run(
+        [node, "-e", program, str(MATTERVIS_JS)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_plotly_apply_gate_rejects_stale_dash_figures_and_patches():

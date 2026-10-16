@@ -23,8 +23,9 @@ selects.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from functools import lru_cache
-from typing import Any, Iterable
+from typing import Any
 
 import numpy as np
 
@@ -39,9 +40,22 @@ def _element(atom: dict[str, Any]) -> str:
     for key in ("elem", "element", "symbol"):
         value = atom.get(key)
         if value:
-            return str(value)
+            return _normalise_element(str(value))
     match = re.match(r"([A-Za-z]+)", str(atom.get("label", "")))
     return match.group(1) if match else ""
+
+
+_CHARGED_ELEMENT = re.compile(
+    r"^(?P<element>[A-Z][a-z]?)(?:(?:\d+[+-])|(?:[+-]\d*))$"
+)
+
+
+def _normalise_element(value: str) -> str:
+    token = str(value).strip()
+    match = _CHARGED_ELEMENT.fullmatch(token)
+    if match:
+        return token[:2] if len(token) > 1 and token[1].islower() else token[:1]
+    return token
 
 
 def _wrapped(frac: Any) -> np.ndarray | None:
@@ -66,8 +80,10 @@ def _scan_disorder_info(cif_path: str) -> tuple[tuple[float, ...], ...] | None:
         return None
     rows: list[tuple[float, ...]] = []
     for idx in range(len(frac)):
-        sym = str(symbols[idx]) if idx < len(symbols) else ""
-        rows.append((sym, float(frac[idx][0]), float(frac[idx][1]), float(frac[idx][2])))
+        sym = _normalise_element(symbols[idx]) if idx < len(symbols) else ""
+        rows.append(
+            (sym, float(frac[idx][0]), float(frac[idx][1]), float(frac[idx][2]))
+        )
     return tuple(rows)
 
 

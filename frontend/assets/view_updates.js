@@ -21,10 +21,24 @@
     if (!update || !gd) return false;
     var scene = update.scene_id;
     var render = currentMeta(gd);
-    if (scene && render.scene_id && String(scene) !== String(render.scene_id)) return false;
+    var sceneChanged = false;
+    if (scene && render.scene_id && String(scene) !== String(render.scene_id)) {
+      // A tab switch is asynchronous: the upload path selects the new scene
+      // before Dash/Plotly has painted its layout.  The selected tab is the
+      // authoritative scene during that handoff, so allow its frame through
+      // while continuing to reject frames for any other scene.
+      var selected = typeof root.MatterVisCurrentScene === "function"
+        ? root.MatterVisCurrentScene()
+        : null;
+      // Only a complete figure can establish the newly selected scene. A
+      // display/camera patch must wait for that geometry frame instead of
+      // mutating traces that still belong to the previous scene.
+      if (!selected || String(selected) !== String(scene) || !update.figure) return false;
+      sceneChanged = true;
+    }
     var v = meta(update), current = Number(render.geometry_version || render.render_revision || 0);
     var geometry = Number(v.geometry_version || v.geometry || 0);
-    if (geometry && current && geometry < current) return false;
+    if (!sceneChanged && geometry && current && geometry < current) return false;
     return !delivered[deliveryKey(update, gd)];
   }
   function markDelivered(update, gd) {

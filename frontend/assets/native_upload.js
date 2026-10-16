@@ -70,14 +70,20 @@
       }
       const scenesPayload = await response.json();
       const activeId = scenesPayload && scenesPayload.active_id;
-      if (!activeId || !window.dash_clientside || typeof window.dash_clientside.set_props !== "function") {
-        return;
+      if (activeId && window.dash_clientside && typeof window.dash_clientside.set_props === "function") {
+        // The upload completion is authoritative for the selected scene. The
+        // persistent figure client will queue its frame until this value is
+        // painted, so no second WebSocket is needed here.
+        window.dash_clientside.set_props("scene-tabs", { value: activeId });
       }
-      // The upload handler has already made the new scene active server-side.
-      // Make the browser tab selection explicit too; relying only on the
-      // pending_state/native-upload-sync callback can lose a race with the
-      // 5s poll or a concurrent store update on large uploads.
-      window.dash_clientside.set_props("scene-tabs", { value: activeId });
+      if (activeId && typeof window.MatterVisSelectScene === "function") {
+        window.MatterVisSelectScene(activeId);
+      }
+      if (activeId && typeof window.MatterVisFlushSceneFrame === "function") {
+        window.MatterVisFlushSceneFrame(activeId);
+      }
+      // Always poke Dash, including builds without set_props. The fallback
+      // hidden-store path keeps the controls and disorder banner in sync.
       triggerDashSync(payload || { status: "success", names: [] });
     } catch (_err) {
       // Best effort; the normal Dash sync path still runs.
@@ -103,47 +109,86 @@
    * Hard timeout at 30 s so the status never sticks forever even if
    * the server changes shape.
    */
-  let activeSceneWait = null;
+  function delay(milliseconds) {
+    return new Promise(function (resolve) {
+      window.setTimeout(resolve, milliseconds);
+    });
+  }
 
-  function waitForSceneAndSwitch(uploadedNames) {
-    if (!uploadedNames || !uploadedNames.length) return;
-    if (activeSceneWait && typeof activeSceneWait.close === "function") {
-      activeSceneWait.close();
+  /* The multipart POST returns as soon as the placeholder tab is registered.
+   * Poll its job id until the real bundle is installed.  A failed MolCrysKit
+   * parse must reject the upload here; otherwise the old websocket-only wait
+   * reported "Uploaded" forever while the tab contained no atoms. */
+  async function waitForUpload(meta, file, index, total) {
+    if (!meta || meta.status !== "pending" || !meta.job_id) {
+      if (meta && meta.status === "error") {
+        throw new Error(meta.error || ("Unable to parse " + file.name));
+      }
+      return meta;
     }
+    const deadline = Date.now() + 120000;
+    while (Date.now() < deadline) {
+      let response;
+      let payload;
+      try {
+        response = await fetch(
+          "/api/v2/upload/" + encodeURIComponent(meta.job_id),
+          { cache: "no-store" }
+        );
+        payload = await response.json();
+      } catch (err) {
+        throw new Error(
+          "Could not check upload status for " + file.name + ": " +
+          (err && err.message ? err.message : String(err))
+        );
+      }
+      if (!response.ok) {
+        throw new Error(payload && payload.error ? payload.error : "Upload status unavailable");
+      }
+      if (payload.status === "error") {
+        throw new Error(payload.error || ("Unable to parse " + file.name));
+      }
+      if (payload.status === "ready" || payload.status === "complete" || payload.status === "success") {
+        return Object.assign({}, meta, payload, { status: "ready" });
+      }
+      setStatus(
+        "Processing " + file.name + " (" + index + "/" + total + ")...",
+        "info"
+      );
+      await delay(350);
+    }
+    throw new Error("Timed out while processing " + file.name);
+  }
+
+  async function waitForSceneAndSwitch(uploadedNames) {
+    if (!uploadedNames || !uploadedNames.length) return;
+    // Upload completion is already exposed by the HTTP job endpoint.  Do not
+    // open a second /api/v2/ws connection here: transient per-upload sockets
+    // race the figure subscriber during repeated uploads and can leave the
+    // browser reporting an Invalid frame header while the old scene remains
+    // selected.  Poll the scene list, then perform one explicit Dash switch.
     const wanted = new Set(uploadedNames);
     const deadline = Date.now() + 30000;
-    if (!window.WebSocket) {
-      triggerDashSync({ status: "success", names: uploadedNames });
-      setStatus("Loaded: " + uploadedNames.join(", "), "success");
-      return;
-    }
-    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(proto + "//" + window.location.host + "/api/v2/ws");
-    activeSceneWait = ws;
-    const timeout = window.setTimeout(function () {
-      if (activeSceneWait === ws) activeSceneWait = null;
-      try { ws.close(); } catch (_err) {}
-      setStatus("Uploaded: " + uploadedNames.join(", "), "success");
-      triggerDashSync({ status: "success", names: uploadedNames });
-    }, Math.max(1000, deadline - Date.now()));
-    ws.addEventListener("message", function (event) {
-      let payload = null;
+    while (Date.now() < deadline) {
       try {
-        payload = JSON.parse(event.data || "{}");
+        const response = await fetch("/api/v2/scenes", { cache: "no-store" });
+        const payload = response.ok ? await response.json() : null;
+        const scenes = (payload && payload.scenes) || [];
+        const present = new Set(
+          scenes.map(function (scene) { return scene && scene.structure_name; })
+        );
+        if (uploadedNames.every(function (name) { return present.has(name); })) {
+          await forceActiveSceneFromServer({ status: "success", names: uploadedNames });
+          setStatus("Loaded: " + uploadedNames.join(", "), "success");
+          return;
+        }
       } catch (_err) {
-        return;
+        // The next poll retries while the Dash state and scene store settle.
       }
-      const state = payload && payload.state;
-      if (state && wanted.has(state.structure)) {
-        window.clearTimeout(timeout);
-        if (activeSceneWait === ws) activeSceneWait = null;
-        try { ws.close(); } catch (_err) {}
-        const payload = { status: "success", names: uploadedNames };
-        triggerDashSync(payload);
-        forceActiveSceneFromServer(payload);
-        setStatus("Loaded: " + uploadedNames.join(", "), "success");
-      }
-    });
+      await delay(250);
+    }
+    setStatus("Uploaded: " + uploadedNames.join(", "), "success");
+    triggerDashSync({ status: "success", names: uploadedNames });
   }
 
   function uploadOne(file, index, total) {
@@ -179,7 +224,7 @@
           payload = {};
         }
         if (xhr.status >= 200 && xhr.status < 300) {
-          resolve(payload);
+          waitForUpload(payload, file, index, total).then(resolve).catch(reject);
           return;
         }
         reject(new Error(payload.error || ("Upload failed with HTTP " + xhr.status)));
@@ -216,11 +261,10 @@
       }
       setStatus("Uploaded CIF(s): " + names.join(", ") + ". Updating scene...", "success");
       const payload = { status: "success", names: names };
-      triggerDashSync(payload);
-      forceActiveSceneFromServer(payload);
-      // Belt-and-braces: actively wait for the scene tab to appear
-      // and switch to it. Without this the status text never clears.
-      waitForSceneAndSwitch(names);
+      // Wait for the scene store to expose every completed upload, then
+      // switch exactly once. Awaiting this sequence prevents a stale tab
+      // value from winning a Dash callback race with the upload completion.
+      await waitForSceneAndSwitch(names);
     } catch (err) {
       setStatus("Upload failed: " + (err && err.message ? err.message : String(err)), "error");
       triggerDashSync({ status: "error", names: names });

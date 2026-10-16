@@ -2,11 +2,99 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import networkx as nx
 import numpy as np
 import pytest
 from ase import Atoms
 
-from mat_viewer.structure import molcrys_bridge
+from mat_viewer.structure import molcrys_bridge, ring_geometry
+
+
+def test_large_molecule_ring_projection_uses_bounded_cycle_basis(monkeypatch):
+    """Framework-sized graphs must bypass NetworkX minimum_cycle_basis."""
+    graph = nx.cycle_graph(100)
+    # Add enough chords to mimic a dense framework while retaining a local
+    # six-member chemical ring for the bounded cycle basis.
+    graph.add_edges_from((index, index + 2) for index in range(0, 96, 2))
+    molecule = SimpleNamespace(
+        graph=graph,
+        get_positions=lambda: np.array(
+            [[np.cos(index), np.sin(index), 0.0] for index in range(100)],
+            dtype=float,
+        ),
+        get_chemical_symbols=lambda: ["C"] * 100,
+    )
+
+    called = False
+
+    def fail_if_minimum_cycle_basis(*_args, **_kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("large framework used minimum_cycle_basis")
+
+    monkeypatch.setattr(ring_geometry.nx, "minimum_cycle_basis", fail_if_minimum_cycle_basis)
+    rings = molcrys_bridge._bounded_ring_geometries(molecule)
+
+    assert called is False
+    assert rings
+    assert all(ring.size <= 8 for ring in rings)
+
+
+def test_analyze_crystal_bypasses_lazy_mck_ring_cache_for_framework(monkeypatch):
+    graph = nx.cycle_graph(100)
+    graph.add_edges_from((index, index + 2) for index in range(0, 96, 2))
+    positions = np.array(
+        [[np.cos(index), np.sin(index), 0.0] for index in range(100)], dtype=float
+    )
+    molecule = SimpleNamespace(
+        graph=graph,
+        get_positions=lambda: positions,
+        get_chemical_symbols=lambda: ["C"] * 100,
+    )
+    sites = tuple(
+        SimpleNamespace(
+            global_index=index,
+            molecule_index=0,
+            local_index=index,
+            cartesian_position_A=tuple(position),
+            image_shift=(0, 0, 0),
+        )
+        for index, position in enumerate(positions)
+    )
+
+    class Analyzer:
+        species_map = {"C100_1": [0]}
+
+        def __init__(self, _crystal):
+            pass
+
+        def get_simplest_unit(self):
+            return {"C100_1": 1}
+
+        def select_formula_unit(self):
+            return SimpleNamespace(members=())
+
+    class GeometryCache:
+        def __init__(self, _crystal):
+            pass
+
+        def __getitem__(self, _molecule_index):
+            raise AssertionError("large framework initialized MCK ring cache")
+
+    crystal = SimpleNamespace(
+        molecules=[molecule],
+        get_site_records=lambda: list(sites),
+        get_bond_records=lambda: [],
+    )
+    monkeypatch.setattr(
+        molcrys_bridge,
+        "_require_molcryskit",
+        lambda: {"LocalGeometryCache": GeometryCache, "StoichiometryAnalyzer": Analyzer},
+    )
+
+    analysis = molcrys_bridge.analyze_crystal(crystal)
+
+    assert analysis.ring_records
 
 
 def test_null_asymmetric_site_index_falls_back_to_row_index():

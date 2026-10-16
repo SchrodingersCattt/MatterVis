@@ -171,3 +171,21 @@ def resolve_viewport(
         cube_scale=cube_scale,
         signature=signature,
     )
+
+
+def reuse_viewport(
+    viewport: ViewportSpec | None,
+    scene: dict,
+    style: dict,
+    topology_data: dict | None = None,
+) -> ViewportSpec:
+    """Return a caller-owned viewport, resolving only when it is absent.
+
+    Render assembly passes the same immutable ``ViewportSpec`` through the
+    axis layout and compass paths.  Keeping this identity check in one helper
+    avoids version-dependent truthiness behavior and prevents a second range
+    calculation from drifting from the figure's viewport.
+    """
+    if viewport is not None:
+        return viewport
+    return resolve_viewport(scene, style, topology_data=topology_data)

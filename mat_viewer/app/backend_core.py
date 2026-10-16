@@ -1,15 +1,19 @@
 from __future__ import annotations
-# ruff: noqa: F401,F403,F405
 
+# ruff: noqa: F401
 import atexit
 from collections import OrderedDict
 
+from ..cache_keys import figure_state_cache_key
 from ..config import current_config
+from ..structure.bonds import inorganic_solid_profile
+from ..topology.analysis import _MAX_REGISTERED_CN
 from .camera_helpers import *
 from .normalizers import *
 from .reducer import LEGACY_STYLE_STATE_FIELDS
 from .render_worker import AsyncRenderWorker
 from .rightclick import _normalize_polyhedron_specs
+from .selectors import show_hydrogen, viewport_signature
 from .shared import *
 from .style_helpers import *
 from .view_updates import (
@@ -21,9 +25,7 @@ from .view_updates import (
     state_versions,
     update_applies,
 )
-from .selectors import show_hydrogen, viewport_signature
-from ..cache_keys import figure_state_cache_key
-from ..config import current_config
+from .wire import json_safe_wire
 
 # Maximum number of distinct figure cache entries.  A bounded LRU
 # (least-recently-used) eviction policy kicks in when the cache
@@ -31,6 +33,10 @@ from ..config import current_config
 # comfortably covers typical tab-switch + display-mode + slider
 # patterns without unbounded memory growth.
 FIGURE_CACHE_MAX = 16
+# Ionic and extended inorganic lattices are read more clearly with a thin
+# coordination stroke.  Keep the value in state construction so callers can
+# still override it through a preset or an explicit state patch.
+INORGANIC_DEFAULT_BOND_RADIUS = 0.12
 
 
 class _CoreBackendMixin:
@@ -50,6 +56,14 @@ class _CoreBackendMixin:
         self.server_started_at = time.time()
         self.catalog = get_default_catalog(root_dir=self.root_dir)
         self._lock = threading.Lock()
+        # Upload requests reserve their digest/name before the background
+        # parser starts.  Keeping these maps on the backend makes concurrent
+        # multipart requests idempotent and gives the browser a durable way to
+        # observe parser failures instead of waiting forever on a blank tab.
+        self._upload_jobs: dict[str, dict[str, Any]] = {}
+        self._upload_reservations: dict[str, dict[str, Any]] = {}
+        self._upload_reserved_names: set[str] = set()
+        self._upload_completion_events: dict[str, threading.Event] = {}
         self._bundle_lock = threading.Lock()
         default_names = [
             name for name in DEFAULT_CATALOG.keys() if name in self.catalog
@@ -166,24 +180,116 @@ class _CoreBackendMixin:
             default_species = [species_present[0]["formula"]]
         else:
             default_species = []
+        # Ionic and extended inorganic cells (NaCl, CsCl, CaF2, rutile, and
+        # perovskites) are lattice views rather than isolated molecules.  The
+        # chemistry profile is conservative about carbon-containing frameworks
+        # so MOFs and molecular salts keep their existing defaults.
+        # Scene metadata is normally stamped by the loader. Recompute the
+        # conservative inorganic profile from canonical raw atoms when a
+        # legacy/cache scene predates those fields; otherwise such structures
+        # silently fall back to the molecular formula-unit presentation.
+        raw_profile = (
+            inorganic_solid_profile(bundle.raw_atoms)
+            if "is_inorganic_solid" not in scene
+            else {}
+        )
+        ionic = bool(scene.get("is_ionic_solid", False))
+        inorganic = bool(
+            scene.get("is_inorganic_solid", False)
+            or raw_profile.get("is_inorganic_solid", False)
+        )
+        inorganic_cations = list(
+            scene.get("inorganic_cation_elements")
+            or raw_profile.get("inorganic_cation_elements", ())
+        )
+        inorganic_anions = list(
+            scene.get("inorganic_anion_elements")
+            or raw_profile.get("inorganic_anion_elements", ())
+        )
+        lattice_default = ionic or inorganic
+        default_display_mode = style.get(
+            "display_mode", scene.get("display_mode", "formula_unit")
+        )
+        if (
+            lattice_default
+            and "display_mode" not in entry_style
+            and str(style.get("display_mode", "formula_unit")) == "formula_unit"
+        ):
+            default_display_mode = "unit_cell"
+        default_style = str(style.get("style", "ball_stick"))
+        if (
+            lattice_default
+            and "style" not in entry_style
+            and str(style.get("style", "ball_stick")) == "ball_stick"
+        ):
+            default_style = "ball"
+        display_options = _display_options_from_style(style)
+        if lattice_default and "unit_cell_box" not in display_options:
+            display_options.append("unit_cell_box")
+        if (
+            lattice_default
+            and "bond_radius" not in entry_style
+            and float(style.get("bond_radius", DEFAULT_STYLE["bond_radius"]))
+            == float(DEFAULT_STYLE["bond_radius"])
+        ):
+            style["bond_radius"] = INORGANIC_DEFAULT_BOND_RADIUS
+        # ``bundle.scene`` is built once at load time in formula-unit mode so
+        # the canonical cache always has a compact molecular view available.
+        # Do not carry that camera into a lattice default: it is fitted to the
+        # formula-unit bounds and can make a unit-cell scene look like a
+        # clipped vertical rod (especially for layered hydroxides such as
+        # brucite). Leaving the camera unset lets ``scene_for_state`` supply
+        # the camera generated from the requested unit-cell scene; an
+        # explicit user camera is still persisted by the normal state path.
+        default_camera = None if lattice_default else scene.get("camera")
+        ionic_specs = []
+        if lattice_default:
+            cations = list(
+                scene.get("ionic_cation_elements")
+                or inorganic_cations
+                or []
+            )
+            anions = list(
+                scene.get("ionic_anion_elements")
+                or inorganic_anions
+                or []
+            )
+            for index, cation in enumerate(cations):
+                if not anions:
+                    break
+                ligand = anions[0]
+                ionic_specs.append(
+                    {
+                        "id": "ionic-coordination" if index == 0 else f"ionic-coordination-{index + 1}",
+                        "name": f"{cation}–{ligand} coordination",
+                        "center_species": cation,
+                        "ligand_species": ligand,
+                        "level": "atom",
+                        "enabled": True,
+                        # Keep the default shell inside the registered
+                        # polyhedron catalogue. Small periodic cells can
+                        # expose hundreds of image neighbours; allowing the
+                        # enclosure heuristic to consume all of them makes
+                        # shape classification combinatorial.
+                        "fallback_max": _MAX_REGISTERED_CN,
+                    }
+                )
         return {
             "structure": structure,
             "atom_scale": float(style["atom_scale"]),
             "bond_radius": float(style["bond_radius"]),
             "minor_opacity": float(style["minor_opacity"]),
             "material": str(style.get("material", "mesh")),
-            "style": str(style.get("style", "ball_stick")),
+            "style": default_style,
             "disorder": str(style.get("disorder", "opacity")),
             "ortep_mode": str(style.get("ortep_mode", "ortep_axes")),
             "axis_scale": float(style["axis_scale"]),
-            "display_options": _display_options_from_style(style),
+            "display_options": display_options,
             "label_mode": str(style.get("label_mode", "unique_sites")),
-            "display_mode": style.get(
-                "display_mode", scene.get("display_mode", "formula_unit")
-            ),
+            "display_mode": default_display_mode,
             "topology_species_keys": list(default_species),
             "topology_site_index": None,
-            "topology_enabled": False,
+            "topology_enabled": bool(ionic_specs),
             "topology_hull_color": str(style.get("topology_hull_color", "#7C5CBF")),
             # ``polyhedron_specs`` is the new (Phase 1) per-scene named-row
             # data model: each entry is {id, name, center_species,
@@ -191,7 +297,7 @@ class _CoreBackendMixin:
             # legacy ``topology_species_keys`` + shared ``topology_hull_color``
             # behaviour (auto-derived neighbour types). See
             # ``docs/agents/polyhedron_api.md`` for the API surface.
-            "polyhedron_specs": [],
+            "polyhedron_specs": ionic_specs,
             # Phase 2: per-scene atom-group rules. Each entry is
             # {id, name, selector, color, color_light, visible, opacity,
             # material, style}. Selectors are ANDed across keys; the
@@ -229,7 +335,7 @@ class _CoreBackendMixin:
             "bfdh_morphology_color": "#4f7cff",
             "selection": {"atom_labels": [], "active_label": None, "order": []},
             "fast_rendering": bool(style.get("fast_rendering", False)),
-            "camera": scene.get("camera"),
+            "camera": default_camera,
             "geometry_version": 0,
             "display_version": 0,
             "camera_version": 0,
@@ -308,6 +414,12 @@ class _CoreBackendMixin:
                 "scene_id": scene_id,
                 "reason": "stale-render-revision",
             }
+        # ``topology_data`` contains renderer-only painter caches with tuple
+        # keys, and Plotly can expose NaN sentinels in trace arrays.  A frame
+        # is also delivered through Dash's strict JSON encoder, so sanitize
+        # once at the shared boundary before journaling it for WS/HTTP.
+        figure = json_safe_wire(figure)
+        topology_data = json_safe_wire(topology_data, drop_private=True)
         with self._figure_broadcast_lock:
             self._figure_broadcast_seq += 1
             payload = {
@@ -319,10 +431,10 @@ class _CoreBackendMixin:
                 "render_revision": self.render_revision(scene_id),
                 "reason": reason,
                 "figure": figure,
-                "state": copy.deepcopy(state) if isinstance(state, dict) else None,
-                "topology": copy.deepcopy(topology_data)
-                if isinstance(topology_data, dict)
+                "state": json_safe_wire(copy.deepcopy(state))
+                if isinstance(state, dict)
                 else None,
+                "topology": topology_data if isinstance(topology_data, dict) else None,
             }
             versions = state_versions(state or (self.get_state(scene_id) if scene_id in self.scene_store.scenes else {}))
             payload.update(versions.to_dict())
@@ -344,6 +456,7 @@ class _CoreBackendMixin:
         full Plotly frame.
         """
         payload = update.to_dict() if hasattr(update, "to_dict") else dict(update)
+        payload = json_safe_wire(payload)
         scene_id = payload.get("scene_id")
         current = state or self.get_state(scene_id)
         if not update_applies(payload, current):
@@ -352,7 +465,7 @@ class _CoreBackendMixin:
             self._figure_broadcast_seq += 1
             payload["figure_seq"] = self._figure_broadcast_seq
             payload["version"] = self.version
-            payload["state"] = copy.deepcopy(current)
+            payload["state"] = json_safe_wire(copy.deepcopy(current))
             self._figure_broadcasts.append(payload)
             self._figure_broadcasts = self._figure_broadcasts[-32:]
         return payload
@@ -763,12 +876,27 @@ class _CoreBackendMixin:
         ]
 
     def _drop_placeholder(self) -> None:
-        if (
-            PLACEHOLDER_STRUCTURE in self.structure_names
-            and len(self.structure_names) == 1
-        ):
-            self.structure_names = []
+        # The placeholder is a bootstrap scene as well as a catalog entry.
+        # Removing only the bundle left a stale blank tab behind after the
+        # first upload (and made later tab labels appear to be lost).  Drop it
+        # whenever a real structure is present, while preserving it when the
+        # viewer is genuinely empty.
+        has_real_structure = any(
+            name != PLACEHOLDER_STRUCTURE for name in self.structure_names
+        )
+        if not has_real_structure:
+            return
+        self.structure_names = [
+            name for name in self.structure_names if name != PLACEHOLDER_STRUCTURE
+        ]
         self.bundles.pop(PLACEHOLDER_STRUCTURE, None)
+        for scene_id, scene in list(self.scene_store.scenes.items()):
+            if scene.structure_name == PLACEHOLDER_STRUCTURE:
+                self.scene_store.remove(scene_id, save=False)
+                self._render_revisions.pop(str(scene_id), None)
+        if self.scene_store.active_id:
+            self.current_state = self.scene_state(self.scene_store.active_id)
+        self._request_scene_store_save()
 
     def get_bundle(self, name: str) -> LoadedCrystal:
         if name in self.bundles:
@@ -812,572 +940,3 @@ class _CoreBackendMixin:
             "topology_fragment_table": copy.deepcopy(bundle.topology_fragment_table),
             "summary": _structure_summary(scene),
         }
-
-    def normalize_state(
-        self, patch: Optional[dict[str, Any]], scene_id: Optional[str] = None
-    ) -> dict[str, Any]:
-        if scene_id is not None:
-            state = self.scene_state(scene_id)
-        else:
-            state = copy.deepcopy(self.current_state)
-        patch = patch or {}
-
-        if "render_revision" in patch and patch["render_revision"] is not None:
-            try:
-                state["render_revision"] = int(patch["render_revision"])
-            except (TypeError, ValueError):
-                pass
-
-        if "scene_id" in patch and patch["scene_id"] in self.scene_store.scenes:
-            scene_id = str(patch["scene_id"])
-            state = self.scene_state(scene_id)
-        if "structure" in patch and patch["structure"] in self.structure_names:
-            structure = patch["structure"]
-            defaults = self.default_state(structure)
-            state.update(defaults)
-            state["structure"] = structure
-        if scene_id is not None:
-            state["scene_id"] = scene_id
-            scene = self.scene_store.get(scene_id)
-            state["scene_label"] = scene.label
-        for key in (
-            "atom_scale",
-            "bond_radius",
-            "minor_opacity",
-            "axis_scale",
-            "cutoff",
-        ):
-            if key in patch and patch[key] is not None:
-                state[key] = float(patch[key])
-        for key in ("material", "style", "disorder", "ortep_mode", "label_mode"):
-            if key in patch and patch[key] is not None:
-                state[key] = str(patch[key])
-        if state.get("style") == "ortep" and "display_mode" not in patch:
-            state["display_mode"] = "asymmetric_unit"
-        if "display_options" in patch and patch["display_options"] is not None:
-            state["display_options"] = list(patch["display_options"])
-
-        # Preserve old renderer/config fields without dedicated controls.
-        for key in LEGACY_STYLE_STATE_FIELDS:
-            if key in patch:
-                state[key] = copy.deepcopy(patch[key])
-        if "display_mode" in patch and patch["display_mode"] is not None:
-            state["display_mode"] = str(patch["display_mode"])
-            if "topology_site_index" not in patch:
-                state["topology_site_index"] = None
-        if "topology_species_keys" in patch:
-            value = patch["topology_species_keys"]
-            if value is None:
-                state["topology_species_keys"] = []
-            else:
-                state["topology_species_keys"] = [
-                    str(item) for item in value if item is not None
-                ]
-        # Legacy A/B/X selection: translate the type to the matching list of
-        # species formulas in the active scene so existing /api/v1 callers (and
-        # the example scripts shipped under scripts/) keep working without
-        # learning the new species-checkbox vocabulary.
-        if patch.get("topology_fragment_type"):
-            requested_type = str(patch["topology_fragment_type"])
-            structure = state.get("structure")
-            if structure and structure in self.bundles:
-                fragments = self.get_bundle(structure).scene.get("fragment_table") or []
-                matched = {
-                    f.get("formula") or f.get("species")
-                    for f in fragments
-                    if f.get("type") == requested_type
-                }
-                state["topology_species_keys"] = [k for k in matched if k]
-        if patch.get("topology_show_all_sites") and not state.get(
-            "topology_species_keys"
-        ):
-            structure = state.get("structure")
-            if structure and structure in self.bundles:
-                fragments = self.get_bundle(structure).scene.get("fragment_table") or []
-                state["topology_species_keys"] = sorted(
-                    {
-                        f.get("formula") or f.get("species")
-                        for f in fragments
-                        if f.get("formula") or f.get("species")
-                    }
-                )
-        if "topology_site_index" in patch:
-            value = patch["topology_site_index"]
-            state["topology_site_index"] = None if value in ("", None) else int(value)
-        if "topology_enabled" in patch:
-            state["topology_enabled"] = bool(patch["topology_enabled"])
-        if "topology_hull_color" in patch and patch["topology_hull_color"]:
-            state["topology_hull_color"] = str(patch["topology_hull_color"])
-        if "polyhedron_specs" in patch:
-            # Empty list is a valid override (= "drop all named specs and
-            # fall back to legacy topology_species_keys"); ``None`` means
-            # the same. Treat both uniformly.
-            state["polyhedron_specs"] = _normalize_polyhedron_specs(
-                patch.get("polyhedron_specs") or [],
-                fallback_color=state.get("topology_hull_color", "#7C5CBF"),
-            )
-        if "atom_groups" in patch:
-            # Same semantics as polyhedron_specs: empty list / None
-            # both mean "drop all overrides; use legacy monochrome
-            # flag (if any) and element palette".
-            state["atom_groups"] = _normalize_atom_groups(
-                patch.get("atom_groups") or []
-            )
-        if "bond_groups" in patch:
-            state["bond_groups"] = _normalize_bond_groups(
-                patch.get("bond_groups") or []
-            )
-        if "atom_property_color" in patch:
-            state["atom_property_color"] = _normalize_atom_property_color(
-                patch.get("atom_property_color")
-            )
-        if "transforms" in patch:
-            state["transforms"] = _normalize_transforms(patch.get("transforms") or [])
-        if "selection" in patch:
-            state["selection"] = _normalize_selection(patch.get("selection"))
-        if "disorder_resolve" in patch:
-            state["disorder_resolve"] = _normalize_disorder_resolve(
-                patch.get("disorder_resolve"),
-                state.get("disorder_resolve"),
-            )
-        if "disorder_replicas" in patch:
-            replicas = patch.get("disorder_replicas") or []
-            state["disorder_replicas"] = replicas if isinstance(replicas, list) else []
-        # ``supercell`` is a v2 shorthand: ``{"a": Na, "b": Nb, "c": Nc}``
-        # is rewritten to a single ``repeat`` transform appended to the
-        # transforms list. Keeps the AI scripting path one-line for the
-        # most common "show me a 2x2x2" request without forcing the
-        # caller to construct a transform spec.
-        if "supercell" in patch and patch["supercell"] is not None:
-            sc = patch["supercell"]
-            try:
-                a = max(1, int(sc.get("a", 1) if isinstance(sc, dict) else sc[0]))
-                b = max(1, int(sc.get("b", 1) if isinstance(sc, dict) else sc[1]))
-                c = max(1, int(sc.get("c", 1) if isinstance(sc, dict) else sc[2]))
-            except (TypeError, ValueError, KeyError, IndexError):
-                a = b = c = 1
-            existing = list(state.get("transforms") or [])
-            # Always replace any existing repeat transform from a previous
-            # supercell shorthand call instead of stacking; otherwise the AI
-            # ends up with [repeat 2x2x2, repeat 3x3x3] and the user gets a
-            # 6x6x6. ``{1,1,1}`` therefore acts as "clear the supercell".
-            existing = [t for t in existing if t.get("kind") != "repeat"]
-            if (a, b, c) != (1, 1, 1):
-                existing_ids = {t["id"] for t in existing}
-                normalized = _normalize_transform(
-                    {
-                        "kind": "repeat",
-                        "params": {"a": a, "b": b, "c": c},
-                        "name": f"Repeat {a}x{b}x{c}",
-                    },
-                    existing_ids=existing_ids,
-                )
-                if normalized is not None:
-                    existing.append(normalized)
-            state["transforms"] = existing
-        if "fast_rendering" in patch:
-            state["fast_rendering"] = bool(patch["fast_rendering"])
-        if "bfdh_morphology" in patch:
-            morphology = patch.get("bfdh_morphology")
-            if isinstance(morphology, dict):
-                state["bfdh_morphology"] = copy.deepcopy(morphology)
-            else:
-                state["bfdh_morphology"] = None
-        if "bfdh_morphology_color" in patch and patch["bfdh_morphology_color"]:
-            state["bfdh_morphology_color"] = str(patch["bfdh_morphology_color"])
-        # ---- legacy migration: monochrome=True --> atom_group rule ----
-        #
-        # Old presets / agent scripts may still set ``monochrome=True``
-        # on the display options (or via ``"monochrome"`` in
-        # ``display_options``). Promote that to a single all-atoms
-        # black ``atom_group`` so the renderer has a single source of
-        # truth and the legacy flag becomes inert. Idempotent: we skip
-        # if the user already has any explicit colour rule.
-        wants_mono = False
-        if "display_options" in patch:
-            wants_mono = "monochrome" in (state.get("display_options") or [])
-        existing_groups = list(state.get("atom_groups") or [])
-        has_explicit_color_rule = any(g.get("color") for g in existing_groups)
-        if wants_mono and not has_explicit_color_rule:
-            existing_ids = {g["id"] for g in existing_groups}
-            migrated = _legacy_monochrome_group(existing_ids)
-            if migrated is not None:
-                state["atom_groups"] = existing_groups + [migrated]
-        # Display and geometry changes keep the user's camera.  Only the
-        # explicit camera commands below change the camera clock; resetting it
-        # here made Labels/Hydrogens/scene-range changes snap the viewport.
-        if "camera" in patch and patch["camera"] is not None:
-            state["camera"] = patch["camera"]
-        # ``camera_revision`` is the uirevision-bump counter written by
-        # ``camera_action`` / ``align_camera``. ``normalize_state``
-        # whitelists keys, so without an explicit pass-through the
-        # bump silently drops on the floor and Plotly keeps clamping
-        # the figure to whatever rotation the user drag-saved last.
-        if "camera_revision" in patch and patch["camera_revision"] is not None:
-            try:
-                state["camera_revision"] = int(patch["camera_revision"])
-            except (TypeError, ValueError):
-                pass
-        # Phase 4 (view tools): top-level ``projection`` is a v2 state
-        # key that mirrors ``camera.projection.type``. Accept either
-        # spelling so AI callers don't have to dig into the camera
-        # dict; ``set_projection`` keeps the two in sync.
-        if "projection" in patch and patch["projection"] is not None:
-            state["projection"] = _coerce_projection(
-                patch["projection"],
-                fallback=str(state.get("projection", "perspective")),
-            )
-        elif isinstance(patch.get("camera"), dict):
-            cam_proj = patch["camera"].get("projection")
-            if isinstance(cam_proj, dict) and "type" in cam_proj:
-                state["projection"] = _coerce_projection(
-                    cam_proj["type"],
-                    fallback=str(state.get("projection", "perspective")),
-                )
-        return state
-
-    def get_state(self, scene_id: Optional[str] = None) -> dict[str, Any]:
-        with self._lock:
-            if scene_id is not None:
-                state = self.scene_state(scene_id)
-            else:
-                state = self.current_state
-            versions = state_versions(state)
-            state.setdefault("geometry_version", versions.geometry)
-            state.setdefault("display_version", versions.display)
-            state.setdefault("camera_version", versions.camera)
-            state.setdefault("camera_revision", versions.camera)
-            return self._state_snapshot(state, scene_id)
-
-    def patch_state(
-        self,
-        patch: Optional[dict[str, Any]],
-        scene_id: Optional[str] = None,
-        *,
-        broadcast: bool = True,
-    ) -> dict[str, Any]:
-        # ``broadcast`` controls whether ``pending_state`` is armed for
-        # the next ``sync_agent_state`` poll. REST/WS callers want this
-        # so the browser UI picks up the change. Dash callbacks that
-        # originate *from* the same UI (``capture_camera`` in
-        # particular) must pass ``broadcast=False``: otherwise the next
-        # 5 s poll echoes that camera back into ``camera-state-store``,
-        # ``update_view`` rebuilds with the stale-by-debounce camera
-        # value, and the user sees the view "snap back" to where the
-        # last ``relayoutData`` left it. The same logic applies to any
-        # other UI-originated patch where the browser is already
-        # authoritative for the field being changed.
-        with self._lock:
-            target_scene_id = (
-                scene_id or (patch or {}).get("scene_id") or self.scene_store.active_id
-            )
-            state_before = (
-                self.scene_state(target_scene_id)
-                if target_scene_id
-                else copy.deepcopy(self.current_state)
-            )
-            self.current_state = self.normalize_state(patch, scene_id=target_scene_id)
-            change_kind = classify_change(state_before, self.current_state)
-            before_versions = state_versions(state_before)
-            # Maintain independent clocks.  A display patch can reuse the
-            # current geometry; a camera patch never invalidates either.
-            geometry_version = before_versions.geometry
-            display_version = before_versions.display
-            camera_version = max(
-                before_versions.camera,
-                int(self.current_state.get("camera_revision", 0) or 0),
-            )
-            if change_kind == UpdateKind.GEOMETRY:
-                geometry_version += 1
-                display_version += 1
-            elif change_kind in {
-                UpdateKind.DISPLAY,
-                UpdateKind.OVERLAY,
-                UpdateKind.ANALYSIS,
-            }:
-                display_version += 1
-            elif change_kind == UpdateKind.CAMERA:
-                # Browser drag persistence changes the camera value without
-                # invalidating a command revision. Explicit Reset/align and
-                # projection commands carry a revision/projection marker.
-                if "camera_revision" in (patch or {}) or "projection" in (patch or {}):
-                    camera_version += 1
-            self.current_state["geometry_version"] = geometry_version
-            self.current_state["display_version"] = display_version
-            self.current_state["camera_version"] = camera_version
-            self.current_state["camera_revision"] = camera_version
-            self._last_update_kind_by_scene[str(target_scene_id)] = change_kind.value
-            if target_scene_id:
-                scene_payload = copy.deepcopy(self.current_state)
-                scene_payload.pop("scene_id", None)
-                scene_payload.pop("scene_label", None)
-                self.scene_store.patch_scene(target_scene_id, scene_payload, save=False)
-                self._bump_render_revision_if_changed(
-                    target_scene_id, state_before, self.current_state
-                )
-            self.current_state["render_revision"] = self.render_revision(
-                target_scene_id
-            )
-            if broadcast:
-                self.pending_state = copy.deepcopy(self.current_state)
-            self._bump_version()
-            state = copy.deepcopy(self.current_state)
-            state["version"] = self.version
-            state["server_started_at"] = self.server_started_iso()
-            state["render_revision"] = self.render_revision(target_scene_id)
-            self._request_scene_store_save()
-            if broadcast and change_kind in {
-                UpdateKind.CAMERA,
-                UpdateKind.OVERLAY,
-                UpdateKind.DISPLAY,
-                UpdateKind.ANALYSIS,
-            }:
-                update_payload = {}
-                if change_kind == UpdateKind.CAMERA:
-                    update_payload["camera"] = copy.deepcopy(state.get("camera"))
-                elif change_kind in {UpdateKind.OVERLAY, UpdateKind.DISPLAY}:
-                    update_payload.update(
-                        {
-                            "display_options": list(state.get("display_options") or []),
-                            "axis_scale": state.get("axis_scale"),
-                            "minor_opacity": state.get("minor_opacity"),
-                            "polyhedron_specs": copy.deepcopy(
-                                state.get("polyhedron_specs") or []
-                            ),
-                        }
-                    )
-                self.broadcast_view_update(
-                    make_update(
-                        state,
-                        before=state_before,
-                        payload=update_payload,
-                        reason="state-confirmed",
-                    ),
-                    state=state,
-                )
-            return state
-
-    def pop_pending_state(self) -> Optional[dict[str, Any]]:
-        with self._lock:
-            pending = self.pending_state
-            self.pending_state = None
-            return copy.deepcopy(pending) if pending else None
-
-    def show_hydrogen_for_state(self, state: Optional[dict[str, Any]] = None) -> bool:
-        state = self.current_state if state is None else state
-        return show_hydrogen(state)
-
-    def scene_for_state(self, state: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-        state = self.current_state if state is None else state
-        bundle = self.get_bundle(state["structure"])
-        # Phase 4: ``state["transforms"]`` is the structure-mutation
-        # pipeline. ``build_bundle_scene`` short-circuits when the list
-        # is empty so the no-transform path stays a single dict lookup.
-        transforms = list(state.get("transforms") or [])
-        scene = build_bundle_scene(
-            bundle,
-            display_mode=state.get("display_mode", "formula_unit"),
-            show_hydrogen=self.show_hydrogen_for_state(state),
-            preset=self.preset,
-            transforms=transforms,
-        )
-        scene_label = state.get("scene_label")
-        if scene_label:
-            scene["display_title"] = str(scene_label)
-        bundle.scene = scene
-        bundle.fragment_table = scene.get("fragment_table", bundle.fragment_table)
-        property_spec = state.get("atom_property_color")
-        if property_spec:
-            from ..properties import (
-                map_property_colors,
-                property_metadata,
-                resolve_source_property_context,
-                rgba_to_hex,
-            )
-
-            source = getattr(bundle, "_property_structure_input", None)
-            if source is None:
-                from pathlib import Path
-
-                from ..loader.structure_input import StructureFrame, StructureInput
-
-                frame_index = int(bundle.frame_info.get("frame_index", 0))
-                frame = StructureFrame(
-                    frame_index,
-                    bundle,
-                    dict(bundle.frame_info),
-                    dict(bundle.atom_arrays),
-                )
-                source = StructureInput(
-                    Path(bundle.cif_path),
-                    str(scene.get("input_format") or "cif"),
-                    (frame,),
-                    1,
-                    getattr(bundle, "_property_manifest", None),
-                )
-            context = resolve_source_property_context(source, property_spec)
-            frame_index = int(scene.get("frame_index", context.source_frame_indices[0]))
-            reduced = context.frame(frame_index)
-            colors = rgba_to_hex(
-                map_property_colors(
-                    reduced.values,
-                    context.scale,
-                    nan_color=context.spec.nan_color,
-                )
-            )
-            draw_atoms = []
-            for display_index, original in enumerate(scene.get("draw_atoms") or []):
-                atom = dict(original)
-                source_index = int(atom.get("_source_index", display_index))
-                if not 0 <= source_index < len(colors):
-                    raise ValueError(
-                        f"display atom {display_index} maps outside property array"
-                    )
-                atom["_property_color"] = colors[source_index]
-                atom["_property_value"] = float(reduced.values[source_index])
-                draw_atoms.append(atom)
-            scene = dict(scene)
-            scene["draw_atoms"] = draw_atoms
-            scene["atom_property_color"] = property_metadata(
-                context.spec,
-                reduced,
-                context.scale,
-                manifest_hash=context.manifest_hash,
-            )
-        return scene
-
-    def atom_properties(
-        self,
-        state: Optional[dict[str, Any]] = None,
-    ) -> dict[str, Any]:
-        """Return bounded field descriptors and the active public spec."""
-
-        from ..properties import catalog_from_arrays, merge_catalogs
-
-        state = self.get_state() if state is None else state
-        bundle = self.get_bundle(state["structure"])
-        catalogs = [catalog_from_arrays(bundle.atom_arrays)]
-        manifest = getattr(bundle, "_property_manifest", None)
-        source = getattr(bundle, "_property_structure_input", None)
-        if manifest is None and source is not None:
-            manifest = getattr(source, "property_manifest", None)
-        if manifest is not None:
-            catalogs.append(manifest.catalog())
-        catalog = merge_catalogs(*catalogs)
-        return {
-            "fields": catalog.to_dict(),
-            "active": copy.deepcopy(state.get("atom_property_color")),
-        }
-
-    def style_for_state(
-        self,
-        state: Optional[dict[str, Any]] = None,
-        scene: Optional[dict[str, Any]] = None,
-    ) -> dict[str, Any]:
-        state = self.current_state if state is None else state
-        scene = self.scene_for_state(state) if scene is None else scene
-        if state.get("bfdh_morphology") is not None:
-            scene["bfdh_morphology"] = copy.deepcopy(state.get("bfdh_morphology"))
-        style = dict(scene.get("style", {}))
-        style.update(
-            style_from_controls(
-                state["atom_scale"],
-                state["bond_radius"],
-                state["minor_opacity"],
-                state["axis_scale"],
-                state["display_options"],
-                material=state.get("material"),
-                render_style=state.get("style"),
-                disorder=state.get("disorder"),
-                ortep_mode=state.get("ortep_mode"),
-            )
-        )
-        style["display_mode"] = state.get(
-            "display_mode", scene.get("display_mode", "formula_unit")
-        )
-        style["material"] = state.get("material", style.get("material", "mesh"))
-        style["style"] = state.get("style", style.get("style", "ball_stick"))
-        style["disorder"] = state.get(
-            "disorder", style.get("disorder", "opacity")
-        )
-        style["ortep_mode"] = state.get(
-            "ortep_mode", style.get("ortep_mode", "ortep_axes")
-        )
-        style["label_mode"] = state.get(
-            "label_mode", style.get("label_mode", "unique_sites")
-        )
-        style["fast_rendering"] = bool(state.get("fast_rendering", False))
-        style["topology_enabled"] = bool(state.get("topology_enabled", False))
-        style["topology_hull_color"] = str(state.get("topology_hull_color", "#7C5CBF"))
-        # Pass through publication, isosurface, and axis-key style options.
-        for key in LEGACY_STYLE_STATE_FIELDS:
-            if key in state:
-                style[key] = copy.deepcopy(state[key])
-        # Phase 2: per-scene atom-group rules ride along on the style
-        # dict so the renderer dispatcher can partition draw_atoms by
-        # (effective_material, effective_style) without touching the
-        # backend layer. Renderer reads ``style["atom_groups"]`` only
-        # if the list is non-empty; the legacy ``monochrome`` flag is
-        # otherwise honoured untouched.
-        style["atom_groups"] = list(state.get("atom_groups") or [])
-        # Phase 4: bond-group rules ride on the style dict so the
-        # renderer's bond pipeline (``_bond_segments``) can decorate
-        # each bond with ``_render_color`` / ``_render_visible`` /
-        # ``_render_opacity_scale`` / ``_render_radius_scale``. The
-        # tagging itself happens in ``figure_for_state`` (where the
-        # scene is mutable); this entry is the single source of truth
-        # for downstream callers.
-        style["bond_groups"] = list(state.get("bond_groups") or [])
-        style["atom_property_color"] = copy.deepcopy(
-            scene.get("atom_property_color") or state.get("atom_property_color")
-        )
-        style["selection"] = copy.deepcopy(
-            state.get("selection")
-            or {"atom_labels": [], "active_label": None, "order": []}
-        )
-        style["selection_highlight"] = current_config().colors.get(
-            "selection_highlight", "#FFD24A"
-        )
-        # Phase 4 (view tools): persist the camera projection choice
-        # onto the style dict so the renderer's
-        # ``_plotly_camera_from_scene`` picks orthographic vs.
-        # perspective without rebuilding the scene.
-        style["projection"] = _coerce_projection(
-            state.get("projection", style.get("projection", "perspective")),
-            fallback=str(style.get("projection", "perspective")),
-        )
-        style["bfdh_morphology_color"] = str(
-            state.get("bfdh_morphology_color", "#4f7cff")
-        )
-        if isinstance(state.get("camera"), dict):
-            style["camera"] = copy.deepcopy(state["camera"])
-        # Plotly's ``layout.scene.uirevision`` makes the WebGL camera
-        # state persist across redraws -- reusing the same revision
-        # means a mouse-drag rotation survives a Labels toggle. The
-        # flip side: when the user clicks Reset / down-a / down-b /
-        # ... the layout's new camera is silently ignored unless the
-        # revision changes. ``camera_revision`` (bumped by
-        # ``camera_action`` and ``align_camera``) gives the renderer
-        # exactly that signal: Reset triggers a fresh revision so
-        # Plotly accepts the new camera, while pan/orbit updates that
-        # flow through ``patch_state`` directly leave it untouched.
-        #
-        # We also bake ``display_mode`` / ``unit_cell_box`` /
-        # ``topology_enabled`` into the uirevision: those toggles change
-        # the *scene cube extent* (``unit_cell`` mode owns the box and
-        # all polyhedra extras, the others don't — see ``_scene_ranges``).
-        # If the same revision string covered an old state with a 25 Å
-        # cube and a new state with a 12 Å cube, Plotly would silently
-        # "preserve UI state" for the cube too, which is what made the
-        # molecule look squashed after switching back to ``formula_unit``.
-        layout_signature = viewport_signature(state)
-        style["uirevision"] = "{name}__{rev}__{sig}".format(
-            name=scene.get("name", "scene"),
-            rev=int(state.get("camera_revision", 0) or 0),
-            sig=layout_signature,
-        )
-        # The interactive Dash app uses a separate SVG overlay for the
-        # compass to avoid Plotly.relayout calls that interrupt gl3d's
-        # render cycle during drag.
-        style["axis_key_via_svg_overlay"] = True
-        return style

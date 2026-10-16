@@ -7,6 +7,7 @@ from .shared import ApiError, TopologyUnavailable
 from .backend_analysis import _AnalysisBackendMixin
 from .backend_camera import _CameraBackendMixin
 from .backend_core import _CoreBackendMixin
+from .backend_state import _StateBackendMixin
 from .backend_reducer import _ReducerBackendMixin
 from .backend_scenes import _SceneBackendMixin
 from .backend_io import _IOBackendMixin
@@ -23,6 +24,7 @@ _PERSIST_THREAD_JOIN_TIMEOUT_SECONDS = 2.0
 class ViewerBackend(
     _VectorBackendMixin,
     _SceneBackendMixin,
+    _StateBackendMixin,
     _CoreBackendMixin,
     _ReducerBackendMixin,
     _OperationsBackendMixin,
@@ -51,6 +53,12 @@ class ViewerBackend(
         if threading.current_thread() is not self._persist_thread:
             self._persist_thread.join(timeout=_PERSIST_THREAD_JOIN_TIMEOUT_SECONDS)
         self._render_worker.shutdown(wait=wait)
+        load_executor = getattr(self, "_load_executor", None)
+        if load_executor is not None:
+            try:
+                load_executor.shutdown(wait=wait, cancel_futures=not wait)
+            except TypeError:  # pragma: no cover - Python < 3.9 compatibility
+                load_executor.shutdown(wait=wait)
         self.flush_scene_store()
         atexit.unregister(self._atexit_flush_callback)
 

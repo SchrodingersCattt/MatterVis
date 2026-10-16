@@ -17,16 +17,26 @@
     return true;
   }
   function connect() {
-    if (stopped || root.MATTERVIS_WS_FIGURE === false || !root.WebSocket) return;
+    if (stopped || root.MATTERVIS_WS_FIGURE === false || !root.WebSocket ||
+        root.__mattervisFigureWsDisabled) { fallback(); return; }
+    // ``mattervis.js`` normally owns the subscriber.  A host that opts into
+    // this transport must still share that socket rather than opening a
+    // second handshake (which is what produced the repeated Invalid frame
+    // header errors during asset rebinds).
+    if (root.__mattervisFigureSocket &&
+        (root.__mattervisFigureSocket.readyState === 0 ||
+         root.__mattervisFigureSocket.readyState === 1)) return;
     if (!root.Plotly) { root.requestAnimationFrame(connect); return; }
     var protocol = root.location.protocol === "https:" ? "wss:" : "ws:";
     try { socket = new root.WebSocket(protocol + "//" + root.location.host + "/api/v2/ws"); }
     catch (_) { fallback(); return; }
+    root.__mattervisFigureSocket = socket;
     socket.addEventListener("open", function () { socket.send(JSON.stringify({type: "subscribe_figure", enabled: true})); });
     socket.addEventListener("message", function (event) {
       try { deliver(JSON.parse(event.data || "{}")); } catch (_) {}
     });
     socket.addEventListener("close", function () {
+      if (root.__mattervisFigureSocket === socket) root.__mattervisFigureSocket = null;
       socket = null;
       if (!stopped) { clearTimeout(reconnectTimer); reconnectTimer = setTimeout(connect, 1500); }
     });

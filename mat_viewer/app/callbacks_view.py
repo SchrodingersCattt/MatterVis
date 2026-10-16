@@ -602,7 +602,14 @@ def register_view_callbacks(app, backend):
     def refresh_fast_view_metadata(agent_state, camera_state):
         # The store is a notification, not a second editable state owner.
         # get_state supplies the authoritative render revision as well.
-        state = backend.get_state((agent_state or {}).get("scene_id"))
+        requested_scene = (agent_state or {}).get("scene_id")
+        try:
+            state = backend.get_state(requested_scene)
+        except KeyError:
+            # A tab can be closed between the store update and this callback.
+            # Resolve the active scene rather than returning a 500 that leaves
+            # the figure and tab strip on different generations.
+            state = backend.get_state()
         return _fast_view_metadata(backend, state, camera_state)
 
     @app.callback(
@@ -677,17 +684,23 @@ def register_view_callbacks(app, backend):
         Output("topology-results", "children"),
         Output("structure-summary", "children"),
         Input("agent-state-store", "data"),
+        Input("scene-switch-seq", "data"),
+        Input("view-update-store", "data"),
         State("crystal-graph", "figure"),
         State("camera-state-store", "data"),
     )
     def update_view(agent_state, *args):
-        # Current contract is (state, current_figure, camera_state).  Accept
-        # the pre-refactor four-argument call shape for host integrations that
-        # still invoke the callback directly in tests.
-        if len(args) == 2:
+        # Current Dash inputs are (state, scene_switch, view_update) followed
+        # by the two figure/camera States. Keep the older direct-call shapes
+        # working for extensions and regression tests.
+        _switch_event = None
+        view_update = None
+        if len(args) >= 4:
+            _switch_event, view_update, current_figure, _camera_state = args[:4]
+        elif len(args) == 3:
+            _, current_figure, _camera_state = args
+        elif len(args) == 2:
             current_figure, _camera_state = args
-        elif len(args) >= 3:
-            _, current_figure, _camera_state = args[:3]
         else:
             current_figure, _camera_state = None, None
         # State notifications enqueue a full worker build. The existing poll
@@ -703,7 +716,13 @@ def register_view_callbacks(app, backend):
         # pushes from live interaction in JS; no server-side gate is
         # needed.
         cb_start = time.monotonic()
-        state = backend.get_state((agent_state or {}).get("scene_id"))
+        requested_scene = (agent_state or {}).get("scene_id")
+        try:
+            state = backend.get_state(requested_scene)
+        except KeyError:
+            # Uploads and tab closes can invalidate an in-flight store value.
+            # The active scene is the only safe fallback for this render pass.
+            state = backend.get_state()
         scene_id = state.get("scene_id")
         previous_state = getattr(update_view, "_last_state", None)
         change_kind = classify_change(previous_state, state)
@@ -740,7 +759,13 @@ def register_view_callbacks(app, backend):
         # absent. Never stamp a newer revision onto the browser's old geometry.
         if not backend._figure_revision_matches_current(scene_id, state):
             return (no_update,) * 4
-        event = backend.latest_figure_broadcast(scene_id)
+        event = (
+            view_update
+            if isinstance(view_update, dict)
+            and view_update.get("type") == "figure"
+            and view_update.get("scene_id") == scene_id
+            else backend.latest_figure_broadcast(scene_id)
+        )
         if (
             not event
             or event.get("scene_id") != scene_id
@@ -802,14 +827,33 @@ def register_view_callbacks(app, backend):
         Output("status-banner", "children"),
         Output("status-banner", "className"),
         Output("export-download", "data"),
+        Output("cif-download", "data"),
         Output("status-dismiss-timer", "disabled"),
         Output("status-dismiss-timer", "n_intervals"),
         Input("save-preset-btn", "n_clicks"),
         Input("export-btn", "n_clicks"),
+        Input("export-cif-btn", "n_clicks"),
         prevent_initial_call=True,
     )
-    def save_or_export(_, __):
+    def save_or_export(_, __, ___):
         triggered = callback_context.triggered[0]["prop_id"].split(".")[0] if callback_context.triggered else None
+        if triggered == "export-cif-btn":
+            try:
+                result = backend.export_cif(scene_id=backend.active_scene_id())
+            except Exception as exc:
+                message, class_name = _status_message(f"CIF export failed: {exc}", "error")
+                return message, class_name, no_update, no_update, False, 0
+            message, class_name = _status_message(
+                f"CIF export ready: {result['filename']}", "success"
+            )
+            return (
+                message,
+                class_name,
+                no_update,
+                dcc.send_string(result["content"], result["filename"]),
+                False,
+                0,
+            )
         if triggered == "export-btn":
             state = backend.get_state()
             scene_label = state.get("scene_label") or "mattervis"
@@ -831,7 +875,7 @@ def register_view_callbacks(app, backend):
                 buf.seek(0)
                 filename = f"{scene_label.replace(os.sep, '_')}_ortep.pdf"
                 message, class_name = _status_message(f"Export ready: {filename}", "success")
-                return message, class_name, dcc.send_bytes(buf.getvalue, filename), False, 0
+                return message, class_name, dcc.send_bytes(buf.getvalue, filename), no_update, False, 0
 
             # Default: PNG export via Plotly
             from ..capabilities import resolve_requirements
@@ -846,13 +890,17 @@ def register_view_callbacks(app, backend):
                     f"{resolution.install_command}",
                     "error",
                 )
-                return message, class_name, no_update, False, 0
+                return message, class_name, no_update, no_update, False, 0
             filename = f"{scene_label.replace(os.sep, '_')}.png"
             message, class_name = _status_message(f"Export ready: {filename}", "success")
-            return message, class_name, dcc.send_bytes(lambda buffer: buffer.write(png), filename), False, 0
-        result = backend.save_preset()
+            return message, class_name, dcc.send_bytes(lambda buffer: buffer.write(png), filename), no_update, False, 0
+        try:
+            result = backend.save_preset()
+        except Exception as exc:
+            message, class_name = _status_message(f"Save preset failed: {exc}", "error")
+            return message, class_name, no_update, no_update, False, 0
         message, class_name = _status_message(f"Saved preset: {result['path']}", "success")
-        return message, class_name, no_update, False, 0
+        return message, class_name, no_update, no_update, False, 0
 
     @app.callback(
         Output("status-banner", "children", allow_duplicate=True),

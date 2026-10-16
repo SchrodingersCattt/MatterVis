@@ -20,6 +20,7 @@ from .shared import *
 from .normalizers import *
 from .rightclick import _normalize_polyhedron_specs, _normalize_polyhedron_spec
 from .style_helpers import _POLYHEDRON_AUTO_COLORS
+from ..topology.analysis import _MAX_REGISTERED_CN
 
 
 class _AnalysisBackendMixin:
@@ -221,7 +222,18 @@ class _AnalysisBackendMixin:
         """
         explicit = list(state.get("polyhedron_specs") or [])
         if explicit:
-            return [dict(spec) for spec in explicit]
+            resolved = [dict(spec) for spec in explicit]
+            # Upgrade persisted inorganic defaults created before bounded
+            # coordination shells were added; reopening such a scene must
+            # not revive an unbounded periodic shell classification.
+            for spec in resolved:
+                if (
+                    str(spec.get("id") or "").startswith("ionic-coordination")
+                    and str(spec.get("level") or "molecule") == "atom"
+                    and spec.get("fallback_max") is None
+                ):
+                    spec["fallback_max"] = _MAX_REGISTERED_CN
+            return resolved
         return []
 
     def run_analysis(

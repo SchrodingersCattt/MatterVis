@@ -124,7 +124,7 @@ def test_build_figure_reuses_one_viewport_for_compass(monkeypatch) -> None:
         )
     scene.update(
         {
-            "name": "resolver",
+            "name": "__viewport_resolver_identity__",
             "M": np.eye(3).tolist(),
             "bonds": [],
             "view_direction": [0.0, 0.0, 1.0],
@@ -144,7 +144,8 @@ def test_build_figure_reuses_one_viewport_for_compass(monkeypatch) -> None:
 
     def spy(scene_arg, style_arg, topology_data=None):
         viewport = original(scene_arg, style_arg, topology_data=topology_data)
-        resolved.append(viewport)
+        if scene_arg.get("name") == "__viewport_resolver_identity__":
+            resolved.append(viewport)
         return viewport
 
     monkeypatch.setattr(figures, "resolve_viewport", spy)
@@ -163,3 +164,81 @@ def test_build_figure_reuses_one_viewport_for_compass(monkeypatch) -> None:
     assert figure.layout.scene.xaxis.range == viewport.x_range
     assert viewport.x_range[1] > 8.0
     assert figure.layout.meta["compass"]["cube_scale"] == list(viewport.cube_scale)
+
+
+def test_build_figure_reuses_a_falsey_viewport_for_compass(monkeypatch) -> None:
+    """Viewport handoff must use identity, rather than truthiness, checks."""
+    from mat_viewer.render import figures
+
+    scene = _scene()
+    for index, atom in enumerate(scene["draw_atoms"], start=1):
+        atom.update(
+            {
+                "label": f"C{index}",
+                "elem": "C",
+                "color": "#000000",
+                "is_minor": False,
+            }
+        )
+    scene.update(
+        {
+            "name": "__viewport_resolver_identity__",
+            "M": np.eye(3).tolist(),
+            "bonds": [],
+            "view_direction": [0.0, 0.0, 1.0],
+            "up": [0.0, 1.0, 0.0],
+        }
+    )
+    style = {
+        "display_mode": "formula_unit",
+        "atom_scale": 1.0,
+        "bond_radius": 0.1,
+        "show_axes": True,
+        "show_axis_key": True,
+        "topology_enabled": True,
+    }
+    original = figures.resolve_viewport
+    resolved = []
+
+    # The compass module owns helper-level fallbacks too.  If any of those
+    # paths silently resolves again, this sentinel makes the regression fail
+    # instead of only counting the top-level figure resolver.
+    from mat_viewer.render import viewport_spec
+
+    monkeypatch.setattr(
+        viewport_spec,
+        "resolve_viewport",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("compass resolved a second viewport")
+        ),
+    )
+
+    class FalseyViewport(ViewportSpec):
+        def __bool__(self):
+            return False
+
+    def spy(scene_arg, style_arg, topology_data=None):
+        viewport = original(scene_arg, style_arg, topology_data=topology_data)
+        if scene_arg.get("name") == "__viewport_resolver_identity__":
+            resolved.append(viewport)
+        return FalseyViewport(
+            viewport.ranges,
+            viewport.aspectmode,
+            viewport.aspectratio,
+            viewport.cube_scale,
+            viewport.signature,
+        )
+
+    monkeypatch.setattr(figures, "resolve_viewport", spy)
+    figure = figures.build_figure(
+        scene,
+        style,
+        topology_data={
+            "center_coords": [0.0, 0.0, 0.0],
+            "shell_coords": [[8.0, 0.0, 0.0]],
+            "distances": [1.0],
+        },
+    )
+
+    assert len(resolved) == 1
+    assert figure.layout.meta["compass"]["cube_scale"] == list(resolved[0].cube_scale)

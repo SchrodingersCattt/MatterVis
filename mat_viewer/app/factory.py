@@ -254,6 +254,7 @@ def _create_app(
                     dcc.Store(id="disorder-preview-sink", data=None),
                     dcc.Store(id="disorder-persist-sink", data=None),
                     dcc.Download(id="export-download"),
+                    dcc.Download(id="cif-download"),
                     dcc.Interval(
                         id="status-dismiss-timer",
                         interval=5000,
@@ -337,6 +338,7 @@ def _create_app(
                 dcc.Store(id="disorder-preview-sink", data=None),
                 dcc.Store(id="disorder-persist-sink", data=None),
                 dcc.Download(id="export-download"),
+                dcc.Download(id="cif-download"),
                 dcc.Interval(
                     id="status-dismiss-timer",
                     interval=5000,
