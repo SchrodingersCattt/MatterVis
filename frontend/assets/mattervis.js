@@ -878,14 +878,6 @@
     // Dash loads Plotly lazily. Missing it on the asset's first execution
     // must not permanently disable completed-frame delivery.
     if (!window.Plotly) { requestAnimationFrame(connectWS); return; }
-    /* Keep the journal poll running while the upgrade is in flight. The
-     * Werkzeug development server (and a few reverse proxies) answer the
-     * WebSocket URL with a plain HTTP 200 instead of completing an upgrade;
-     * in that case the browser can take several seconds to emit ``close``.
-     * Camera/display view_updates must still reach the graph during that
-     * window. A successful ``open`` stops this poll before subscribing so
-     * there is only one active transport. */
-    startHttpFallback();
     noteBuildIdentity(null);
     function isCurrentFigurePush(p) {
       if (!p || !p.figure) return false;
@@ -920,18 +912,12 @@
     window.__mattervisFigureSocket = ws;
     ws.addEventListener("open",function(){
       opened = true;
+      stopHttpFallback();
       try { ws.send(JSON.stringify({type:"subscribe_figure",enabled:true})); }
       catch (_) { window.__mattervisFigureWsDisabled = true; startHttpFallback(); }
     });
     ws.addEventListener("message",function(e){
       var p; try { p=JSON.parse(e.data||"{}"); } catch(_){return;}
-      /* Only stop the journal poll after a real protocol envelope. Some
-       * Werkzeug/proxy stacks report ``open`` and even emit a text/JSON
-       * handshake for a plain HTTP 200 response; keeping fallback alive in
-       * that case is what carries camera/display updates to the graph. */
-      if (!p || typeof p !== "object" ||
-          (!p.type && !p.figure && p.figure_seq === undefined && p.seq === undefined)) return;
-      stopHttpFallback();
       handleFigurePayload(p);
     });
     ws.addEventListener("error",function(){
