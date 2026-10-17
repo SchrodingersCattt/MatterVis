@@ -81,6 +81,40 @@ def test_drag_camera_stays_on_the_scene_that_produced_it(tmp_path):
         backend.close()
 
 
+def test_drag_camera_without_projection_keeps_scene_projection(tmp_path):
+    """A late Plotly camera payload must not reset an orthographic scene.
+
+    Plotly's ``scene.camera`` relayout payload omits ``projection`` for many
+    drag events.  If that payload arrives after the selected tab has changed,
+    persistence still has to inherit the projection from the stamped scene.
+    """
+    backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    try:
+        scene_id = backend.active_scene_id()
+        backend.patch_state({"projection": "orthographic"}, scene_id=scene_id, broadcast=False)
+        before = backend.get_state(scene_id)
+        relayout_camera = {
+            "eye": {"x": 1.2, "y": 1.1, "z": 1.0},
+            "center": {"x": 0.1, "y": -0.1, "z": 0.0},
+            "up": {"x": 0.0, "y": 0.0, "z": 1.0},
+        }
+        result = _persist_relayout_camera(
+            backend,
+            {"scene_id": scene_id, "relayout": {"scene.camera": relayout_camera}},
+            _camera_store_payload(scene_id, before["camera"]),
+            now=10.0,
+            last_commit=0.0,
+            min_interval_s=0.25,
+        )
+        assert result is not None
+        stored = backend.get_state(scene_id)
+        assert stored["projection"] == "orthographic"
+        assert stored["camera"]["projection"] == {"type": "orthographic"}
+        assert stored["camera"]["eye"] == relayout_camera["eye"]
+    finally:
+        backend.close()
+
+
 def test_backend_figure_title_prefers_scene_label(tmp_path):
     backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
     scene_id = backend.active_scene_id()
