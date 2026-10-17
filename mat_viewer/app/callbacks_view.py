@@ -779,7 +779,7 @@ def register_view_callbacks(app, backend):
                 # Flat+ORTEP bakes the camera basis into a PNG.  Queue a
                 # worker rebuild for this one path; ordinary Plotly cameras
                 # continue using the client-side relayout fast path.
-                backend._render_worker.request_figure_build(state)
+                backend._render_worker.request_figure_build(state, force=True)
             return (no_update,) * 4
         topo_key_preview = topology_side_panel_cache_key(state)
         prev_key = getattr(update_view, "_topo_cache_key", None)
