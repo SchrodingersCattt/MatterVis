@@ -108,7 +108,7 @@ LEGACY_STYLE_FIELDS = frozenset(
         "color", "color_light", "isosurface",
         "topology_hull_color", "topology_species_keys", "polyhedron_specs",
         "atom_groups", "bond_groups", "atom_property_color", "transforms",
-        "selection", "disorder_resolve", "disorder_replicas", "bfdh_morphology",
+        "selection", "style_overrides", "disorder_resolve", "disorder_replicas", "bfdh_morphology",
         "bfdh_morphology_color", "cutoff",
     }
 )
@@ -120,7 +120,7 @@ LEGACY_STYLE_STATE_FIELDS = LEGACY_STYLE_FIELDS - {
     "disorder", "ortep_mode", "label_mode", "axis_scale", "cutoff",
     "display_options", "topology_enabled", "topology_hull_color",
     "topology_species_keys", "polyhedron_specs", "atom_groups", "bond_groups",
-    "atom_property_color", "transforms", "selection", "disorder_resolve",
+    "atom_property_color", "transforms", "selection", "style_overrides", "disorder_resolve",
     "disorder_replicas", "bfdh_morphology", "bfdh_morphology_color",
     "fast_rendering", "camera_revision", "camera", "projection",
 }

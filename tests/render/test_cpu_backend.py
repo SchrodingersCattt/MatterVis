@@ -694,6 +694,38 @@ def test_backend_neutral_import_does_not_load_optional_frontends():
     assert json.loads(process.stdout) == []
 
 
+def test_shared_trace_namespace_keeps_plotly_lazy():
+    """Importing trace helpers must not pull in the optional Plotly backend."""
+    script = (
+        "import sys; import mat_viewer.render.common; "
+        "import mat_viewer.render.scene_traces; "
+        "print(int('plotly' in sys.modules))"
+    )
+    process = subprocess.run(
+        [sys.executable, "-c", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert process.stdout.strip() == "0"
+
+
+
+def test_legacy_renderer_schema_import_keeps_plotly_lazy():
+    """The top-level style facade must remain usable without Plotly."""
+    script = (
+        "import sys; from mat_viewer.renderer import validate_style_schema; "
+        "validate_style_schema({'material':'mesh','style':'ball_stick'}); "
+        "print(int('plotly' in sys.modules))"
+    )
+    process = subprocess.run(
+        [sys.executable, "-c", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert process.stdout.strip() == "0"
+
 def test_vector_outputs_are_true_vector_without_embedded_page_image():
     plan = _plan(
         _triangle("triangle", 0.0, (0.2, 0.5, 0.8, 0.7)),

@@ -9,6 +9,8 @@ from typing import Any, Iterable, Sequence
 
 import numpy as np
 
+from .render.picking import polyhedron_instance_id
+
 _POLYHEDRON_KEYS = {
     "id",
     "spec_id",
@@ -643,6 +645,11 @@ def build_topology_data(
                 if shell is None:
                     continue
                 overlay = atom_overlay(shell, center)
+                overlay["instance_id"] = polyhedron_instance_id(
+                    spec["id"],
+                    overlay,
+                    len(overlays),
+                )
                 hull = overlay.get("hull") or {}
                 if len(overlay.get("shell_coords") or []) < 4 or not hull.get(
                     "simplices"
@@ -780,6 +787,11 @@ def build_topology_data(
                 "hull": hull,
                 "color": spec["color"],
             }
+            overlay["instance_id"] = polyhedron_instance_id(
+                spec["id"],
+                overlay,
+                len(overlays),
+            )
             override = next(
                 (
                     spec["instance_overrides"][key]

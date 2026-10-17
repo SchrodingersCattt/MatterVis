@@ -313,6 +313,17 @@ honours:
   atoms (hydrogen, etc.) are hidden and the cell would waste viewport
   space.
 
+### Interactive style overrides
+
+`PATCH /api/v2/style_overrides` accepts the same renderer-safe colour subset
+for `color` and `edge_color`: `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, or one
+of the portable basic names `black`, `white`, `red`, `green`, `blue`, `gray`,
+`grey`, `yellow`, `orange`, and `purple`. CSS functions (`rgb(...)`,
+`rgba(...)`, `hsl(...)`) and bare hexadecimal strings are rejected with HTTP
+400 rather than being deferred to Plotly's renderer. Persisted state is
+normalised with the same rules, so a malformed legacy override is ignored
+without taking down a render callback.
+
 Anchored scientific arrows are supplied with `vector_overlays=` or
 `scene["vector_overlays"]`; see [vector overlays](vector_overlays_api.md).
 They are world-space Mesh3d content and therefore differ from corner compass

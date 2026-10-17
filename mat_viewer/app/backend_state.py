@@ -135,6 +135,8 @@ class _StateBackendMixin:
             state["transforms"] = _normalize_transforms(patch.get("transforms") or [])
         if "selection" in patch:
             state["selection"] = _normalize_selection(patch.get("selection"))
+        if "style_overrides" in patch:
+            state["style_overrides"] = normalize_style_overrides(patch.get("style_overrides"))
         if "disorder_resolve" in patch:
             state["disorder_resolve"] = _normalize_disorder_resolve(
                 patch.get("disorder_resolve"),
@@ -620,10 +622,11 @@ class _StateBackendMixin:
         )
         style["selection"] = copy.deepcopy(
             state.get("selection")
-            or {"atom_labels": [], "active_label": None, "order": []}
+            or {"atom_labels": [], "active_label": None, "order": [], "targets": [], "active_target": None}
         )
+        style["style_overrides"] = copy.deepcopy(state.get("style_overrides") or {})
         style["selection_highlight"] = current_config().colors.get(
-            "selection_highlight", "#FFD24A"
+            "selection_highlight", "#74808C"
         )
         # Phase 4 (view tools): persist the camera projection choice
         # onto the style dict so the renderer's

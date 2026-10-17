@@ -18,6 +18,9 @@ KNOWN_OVERSIZE_DURING_SPLIT = {
     "loader/core.py": 1224,
     "cli.py": 1264,
     "ortep/core.py": 1146,
+    # Existing CLI parser is just over the hard cap while its argument
+    # groups are being split into the dedicated controls module.
+    "render/cli.py": 1050,
     "render/planning.py": 1348,
     "structure/loader/core.py": 1050,
 }

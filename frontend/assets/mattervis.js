@@ -14,10 +14,44 @@
   function decodeCustomdata(cd) {
     if (!Array.isArray(cd) || cd.length === 0) return null;
     const kind = cd[0];
-    if (kind === "atom") return { kind:"atom", index:cd[1], label:cd[2], element:cd[3], is_minor:!!cd[4], fragment_label:cd[5]||"", part:cd.length>6?String(cd[6]||""):"" };
-    if (kind === "polyhedron") return { kind:"polyhedron", spec_id:cd[1], fragment_label:cd[2]||"", is_anchor:!!cd[3] };
-    if (kind === "bond") return { kind:"bond", label_pair:cd[1], element_pair:cd[2], is_minor:!!cd[3] };
+    if (kind === "atom") return { kind:"atom", index:cd[1], label:cd[2], element:cd[3], is_minor:!!cd[4], fragment_label:cd[5]||"", id:cd[6]||("atom:index:"+cd[1]), source_index:cd[7], image_shift:cd[8], disorder_group:cd[9], part:cd[10]||"" };
+    if (kind === "polyhedron") return { kind:"polyhedron", spec_id:cd[1], fragment_label:cd[2]||"", is_anchor:!!cd[3], id:cd[4]||("polyhedron:"+cd[1]+":"+cd[2]), source_index:cd[5], image_shift:cd[6] };
+    if (kind === "bond") return { kind:"bond", label_pair:cd[1], element_pair:cd[2], is_minor:!!cd[3], id:cd[4]||("bond:"+cd[1]), endpoint_ids:[cd[5],cd[6]] };
+    if (kind === "facet") return { kind:"facet", id:String(cd[1]||""), miller:cd[2], parent_id:"morphology:bfdh-morphology" };
     return null;
+  }
+
+  // Mesh3d has used both pointNumber and pointIndex in Plotly event payloads
+  // across releases.  Some versions also expose the underlying cell as
+  // faceNumber/faceIndex.  Always prefer an explicit face ordinal and never
+  // let null coerce to zero: a zero fallback would select the first facet for
+  // clicks whose event did not carry an ordinal at all.
+  function meshFaceOrdinal(point) {
+    if (!point || typeof point !== "object") return -1;
+    const keys = ["faceNumber", "faceIndex", "pointNumber", "pointIndex"];
+    for (let i = 0; i < keys.length; i++) {
+      const raw = point[keys[i]];
+      if (raw === undefined || raw === null || raw === "") continue;
+      const value = Number(raw);
+      if (Number.isInteger(value) && value >= 0) return value;
+    }
+    return -1;
+  }
+
+  function faceIdAt(meta, point) {
+    const faceIds = meta && Array.isArray(meta.face_ids) ? meta.face_ids : [];
+    const vertexIds = meta && Array.isArray(meta.vertex_face_ids) ? meta.vertex_face_ids : [];
+    if (!point || typeof point !== "object") return null;
+    // Plotly's faceNumber/faceIndex are triangle ordinals.  In releases
+    // exposing only pointNumber/pointIndex, those values are vertex ordinals
+    // and must use the explicit per-vertex map emitted by MatterVis.
+    const hasFaceOrdinal = point.faceNumber !== undefined && point.faceNumber !== null && point.faceNumber !== ""
+      || point.faceIndex !== undefined && point.faceIndex !== null && point.faceIndex !== "";
+    const ordinal = meshFaceOrdinal(point);
+    const ids = hasFaceOrdinal || !vertexIds.length ? faceIds : vertexIds;
+    return ordinal >= 0 && ordinal < ids.length && ids[ordinal]
+      ? String(ids[ordinal])
+      : null;
   }
 
   function setDashStore(id, data) {
@@ -540,7 +574,82 @@
   function inGraph(target) { return !!(target && target.closest && target.closest("#crystal-graph")); }
 
   // ── Right-click menu (right_click_menu.js) ─────────────────────
-  let lastHovered = null, lastClient = {x:0,y:0};
+  let lastHovered = null, lastHoverPoint = null, lastClient = {x:0,y:0};
+  // Keep additive/toggle picks isolated per scene.  A single browser-global
+  // list leaked selections from the previous tab into the next tab because
+  // the Dash store is only updated after the click callback returns.
+  const persistentTargetsByScene = Object.create(null);
+  function sceneSelectionKey(sceneId) {
+    return sceneId === null || sceneId === undefined || sceneId === "" ? "__default__" : String(sceneId);
+  }
+  function persistentTargetsForScene(sceneId) {
+    const key = sceneSelectionKey(sceneId);
+    if (!Array.isArray(persistentTargetsByScene[key])) persistentTargetsByScene[key] = [];
+    return persistentTargetsByScene[key];
+  }
+  function prunePersistentTargets() {
+    const live = Object.create(null);
+    let foundTab = false;
+    document.querySelectorAll("#scene-tabs [id^='scene-tab-']").forEach(function (tab) {
+      const id = sceneIdFromTabNode(tab);
+      if (id) { live[String(id)] = true; foundTab = true; }
+    });
+    // During the initial Dash paint there may be no tab nodes yet.  Do not
+    // discard valid scene state in that transient gap; prune only after at
+    // least one real tab is present (including after a tab is removed).
+    if (!foundTab) return;
+    Object.keys(persistentTargetsByScene).forEach(function (key) {
+      if (key !== "__default__" && !live[key]) delete persistentTargetsByScene[key];
+    });
+  }
+  function targetFromPoint(point) {
+    if (!point || typeof point !== "object") return null;
+    const payload = decodeCustomdata(point.customdata);
+    if (payload) return payload;
+    const trace = point.data || point.fullData || {};
+    const meta = trace.meta && typeof trace.meta === "object" ? trace.meta : {};
+    const role = String(meta.mv_role || meta.kind || "").toLowerCase();
+    const pointNumber = Number(point.pointNumber !== undefined ? point.pointNumber : point.pointIndex);
+    if (role === "geometry_entity" || role === "geometry_entity_edge") {
+      const geometryId = meta.geometry_id || meta.id;
+      if (!geometryId) return null;
+      const subentity = faceIdAt(meta, point);
+      // BFDH is rendered through the generic depth-tested geometry path, but
+      // each face has its own semantic facet ID. Preserve that identity so a
+      // click on a morphology face can drive facet selection/style overrides
+      // instead of collapsing to the parent mesh entity.
+      if (String(meta.source || "") === "bfdh_morphology" && subentity) {
+        return {kind:"facet", id:String(subentity), parent_id:"morphology:bfdh-morphology", subentity_id:String(subentity)};
+      }
+      return {kind:"geometry", id:String(geometryId), geometry_id:String(geometryId), subentity_id:subentity, face_id:subentity};
+    }
+    if (role === "polyhedron" || meta.spec_id) {
+      const subentity = faceIdAt(meta, point);
+      const id = subentity || meta.instance_id || ("polyhedron:"+String(meta.spec_id||"unknown"));
+      return {kind:"polyhedron", id:String(id), spec_id:meta.spec_id||null, subentity_id:subentity};
+    }
+    if (role === "facet" || role === "morphology") {
+      const facetIds = Array.isArray(meta.facet_ids) ? meta.facet_ids : [];
+      const ordinal = meshFaceOrdinal(point);
+      const id = ordinal >= 0 && ordinal < facetIds.length && facetIds[ordinal]
+        ? facetIds[ordinal] : (meta.geometry_id || "facet:bfdh-morphology");
+      return {kind:"facet", id:String(id), parent_id:"morphology:bfdh-morphology"};
+    }
+    return null;
+  }
+  function publishSemanticSelection(target, mode) {
+    if (!target && mode !== "clear") return;
+    const nextMode = mode || "replace";
+    const sceneId = currentSceneId();
+    const persistentTargets = persistentTargetsForScene(sceneId);
+    if (nextMode === "clear") persistentTargetsByScene[sceneSelectionKey(sceneId)] = [];
+    else if (nextMode === "add") persistentTargets.push(target);
+    else if (nextMode === "toggle") {
+      const found = persistentTargets.findIndex(function(item){return item.kind===target.kind&&item.id===target.id;});
+      if (found >= 0) persistentTargets.splice(found, 1); else persistentTargets.push(target);
+    } else persistentTargetsByScene[sceneSelectionKey(sceneId)] = [target];
+    setDashStore("scene-selection-store", {scene_id:sceneId, targets:persistentTargetsForScene(sceneId).slice(), mode:nextMode, ts:Date.now()});
+  }
   function hoverIsCurrent() {
     if (!lastHovered) return false;
     const scene = currentSceneId();
@@ -563,6 +672,18 @@
     const input = document.getElementById("rightclick-target-fallback");
     if (input) { input.value = JSON.stringify(payload); input.dispatchEvent(new Event("input",{bubbles:true})); }
   }
+  function clearSelectionIfGraphBackground() {
+    const gd = graphDiv();
+    const hoverdata = gd && gd._hoverdata;
+    // Plotly gl3d does not consistently emit plotly_click for an empty
+    // canvas pixel. Its hover cache is updated on pointer movement, so a
+    // deferred click fallback can distinguish a background click from a
+    // point click and clear the semantic selection reliably.
+    if (!hoverdata || !Array.isArray(hoverdata.points) || !hoverdata.points.length) {
+      const sceneId = currentSceneId();
+      if (persistentTargetsForScene(sceneId).length) publishSemanticSelection(null, "clear");
+    }
+  }
   function bindRightClick() {
     const container = document.getElementById("crystal-graph");
     if (!container || container.dataset.rcmBound === "1") return;
@@ -573,9 +694,26 @@
       container.dataset.rcmBound = "0";
       return;
     }
+    let plotlyClickObserved = false;
     try {
-      inner.on("plotly_hover", function (ed) { if (ed && ed.points && ed.points.length) noteHover(decodeCustomdata(ed.points[0].customdata)); });
-      inner.on("plotly_unhover", function () { lastHovered = null; });
+      inner.on("plotly_hover", function (ed) {
+        if (ed && ed.points && ed.points.length) {
+          lastHovered = targetFromPoint(ed.points[0]);
+          if (lastHovered) {
+            noteHover(lastHovered);
+            lastHoverPoint = {x:lastClient.x, y:lastClient.y, at:Date.now()};
+          }
+        }
+      });
+      inner.on("plotly_unhover", function () { lastHovered = null; lastHoverPoint = null; });
+      inner.on("plotly_click", function (ed) {
+        plotlyClickObserved = true;
+        const target = ed && ed.points && ed.points.length ? targetFromPoint(ed.points[0]) : null;
+        if (!target) { publishSemanticSelection(null, "clear"); return; }
+        const native = ed && ed.event;
+        const additive = !!(native && (native.shiftKey || native.ctrlKey || native.metaKey));
+        publishSemanticSelection(target, additive ? (native.ctrlKey || native.metaKey ? "toggle" : "add") : "replace");
+      });
     } catch (_) {
       container.dataset.rcmBound = "0";
       return;
@@ -693,6 +831,16 @@
        * explicit secondary/middle button. */
       primaryPick(e);
     });
+    container.addEventListener("click", function (e) {
+      if (e.defaultPrevented) return;
+      setTimeout(function () {
+        // A point click is delivered through Plotly's custom event rather
+        // than the DOM event. Avoid clearing a fresh semantic pick.
+        if (plotlyClickObserved) { plotlyClickObserved = false; return; }
+        clearSelectionIfGraphBackground();
+      }, 0);
+    }, true);
+    container.addEventListener("mousemove", function (e) { lastClient = {x:e.clientX, y:e.clientY}; }, {passive:true});
     container.addEventListener("contextmenu", function (e) {
       e.preventDefault();
       const sceneId = currentSceneId();
@@ -702,6 +850,9 @@
         pushTarget({kind:lastHovered.kind, payload:lastHovered, scene_id:sceneId, x:x, y:y, ts:Date.now()});
         return;
       }
+      // Plotly can retain a hover payload after the pointer moved away. Never
+      // use one older than a quarter second for a context-menu action.
+      if (lastHoverPoint && Date.now() - lastHoverPoint.at > 250) lastHovered = null;
       const picked = pickRect(e.clientX, e.clientY, 14);
       postSelection(picked.rect, picked.viewport, false).then(function (body) {
         const selection = body && body.selection;
@@ -1237,6 +1388,7 @@
     if (window.__mvCensus) window.__mvCensus.webglContexts = trackedGL.length;
   }
   function rebindAll() {
+    prunePersistentTargets();
     bindRightClick();
     bindBoxSelect();
     bindDisorderHover();

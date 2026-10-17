@@ -3,6 +3,12 @@ from __future__ import annotations
 
 from .shared import *
 from .normalizers import _normalize_selection
+from ..render.picking import normalize_target
+from ..render.style.resolver import (
+    merge_style_override,
+    normalize_style_overrides,
+    validate_style_override_patch,
+)
 
 
 def _selection_part(atom: dict[str, Any]) -> dict[str, Any]:
@@ -26,6 +32,91 @@ class _SelectionBackendMixin:
         selection = _normalize_selection({"atom_labels": labels, "order": labels})
         self.commit_patch({"selection": selection}, scene_id=scene_id)
         return self.get_selection(scene_id)
+
+    def set_target_selection(
+        self,
+        targets: Iterable[Any] | Any,
+        scene_id: Optional[str] = None,
+        *,
+        additive: bool = False,
+        toggle: bool = False,
+    ) -> dict[str, Any]:
+        """Select exact semantic targets while preserving atom-label clients.
+
+        ``targets`` are canonical ``{kind, id}`` payloads emitted by Plotly
+        interaction traces.  Atom labels are mirrored only as a compatibility
+        projection for legacy selection actions; they are never used as the
+        identity of a non-atom target.
+        """
+
+        if isinstance(targets, dict):
+            values = [targets]
+        else:
+            values = list(targets or [])
+        normalized = []
+        seen: set[tuple[str, str]] = set()
+        for value in values:
+            target = normalize_target(value)
+            if target is None:
+                continue
+            key = (target["kind"], target["id"])
+            if key not in seen:
+                normalized.append(target)
+                seen.add(key)
+        current = self.get_selection(scene_id)
+        existing = list(current.get("targets") or []) if additive or toggle else []
+        by_key = {(item.get("kind"), item.get("id")): item for item in existing}
+        for target in normalized:
+            key = (target["kind"], target["id"])
+            if toggle and key in by_key:
+                by_key.pop(key, None)
+            else:
+                by_key[key] = target
+        final_targets = list(by_key.values())
+        labels = [str(item.get("label")) for item in final_targets if item.get("kind") == "atom" and item.get("label")]
+        selection = _normalize_selection({
+            "atom_labels": labels,
+            "order": labels,
+            "targets": final_targets,
+            "active_target": normalized[-1] if normalized else (final_targets[-1] if final_targets else None),
+        })
+        self.patch_state({"selection": selection}, scene_id=scene_id)
+        return self.get_selection(scene_id)
+
+    def clear_target_selection(self, scene_id: Optional[str] = None) -> dict[str, Any]:
+        return self.clear_selection(scene_id=scene_id)
+
+    def set_style_override(
+        self,
+        target_id: str,
+        kind: str,
+        patch: dict[str, Any],
+        scene_id: Optional[str] = None,
+    ) -> dict[str, dict[str, Any]]:
+        validate_style_override_patch(kind, patch)
+        state = self.get_state(scene_id)
+        overrides = merge_style_override(state.get("style_overrides"), str(target_id), str(kind), patch)
+        self.patch_state({"style_overrides": overrides}, scene_id=scene_id)
+        return copy.deepcopy(self.get_state(scene_id).get("style_overrides") or {})
+
+    def reset_style_override(
+        self,
+        target_id: str,
+        scene_id: Optional[str] = None,
+        *,
+        field: str | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        state = self.get_state(scene_id)
+        overrides = normalize_style_overrides(state.get("style_overrides"))
+        key = str(target_id)
+        if field and key in overrides:
+            overrides[key].pop(str(field), None)
+            if set(overrides[key]) <= {"kind"}:
+                overrides.pop(key, None)
+        else:
+            overrides.pop(key, None)
+        self.patch_state({"style_overrides": overrides}, scene_id=scene_id)
+        return copy.deepcopy(self.get_state(scene_id).get("style_overrides") or {})
 
     def add_to_selection(self, atom_labels: Iterable[Any], scene_id: Optional[str] = None) -> dict[str, Any]:
         current = self.get_selection(scene_id)
@@ -52,7 +143,23 @@ class _SelectionBackendMixin:
         return self.get_selection(scene_id)
 
     def clear_selection(self, scene_id: Optional[str] = None) -> dict[str, Any]:
-        self.commit_patch({"selection": {"atom_labels": [], "active_label": None, "order": []}}, scene_id=scene_id)
+        # Clear exact semantic targets as well as the legacy label projection.
+        # Omitting ``targets`` happened to work while the normalizer rebuilt
+        # the whole selection object, but left this contract dependent on that
+        # implementation detail and made atom-only outlines linger after a
+        # clear event in older state payloads.
+        self.patch_state(
+            {
+                "selection": {
+                    "atom_labels": [],
+                    "active_label": None,
+                    "order": [],
+                    "targets": [],
+                    "active_target": None,
+                }
+            },
+            scene_id=scene_id,
+        )
         return self.get_selection(scene_id)
 
     def toggle_selection(self, atom_labels: Iterable[Any], scene_id: Optional[str] = None) -> dict[str, Any]:

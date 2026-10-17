@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from copy import deepcopy
 
 from .compass import (
     _COMPASS_ITEM_NAME,
@@ -13,7 +14,9 @@ from .geometry import geometry_entity_traces, validate_geometry_style
 from .morphology import _morphology_traces
 from .scene_traces import *  # noqa: F403
 from .style import style_from_controls
+from .style.resolver import apply_scene_style_overrides
 from .topology import (
+    apply_topology_style_overrides,
     representative_polyhedron_overlay,
     representative_polyhedron_traces,
     topology_histogram_figure,
@@ -137,10 +140,13 @@ def build_publication_figure(
         "axis_key_fig_height": float(height),
         "axis_key_anchor": [0.075, 0.455],
     }
+    # Rendering stamps private semantic IDs and painter caches onto topology
+    # wrappers.  Keep publication assembly side-effect free for callers that
+    # reuse the analysis payload for panel selection or serialization.
     main_figure = build_figure(
         scene,
         main_style,
-        topology_data=topology_data,
+        topology_data=deepcopy(topology_data),
         force_quality=True,
         vector_overlays=vector_overlays,
     )
@@ -337,6 +343,7 @@ def build_row_figure(
                 raise ValueError("vector_overlays_by_scene must match scene count")
             scene["vector_overlays"] = vector_overlays_by_scene[col_idx] or []
         style_norm = validate_style_schema(style)
+        scene = apply_scene_style_overrides(scene, style_norm)
         validate_geometry_style(scene, style_norm)
         viewport = resolve_viewport(scene, style_norm)
         xr, yr, zr = viewport.ranges
@@ -420,6 +427,8 @@ def build_figure(
     if vector_overlays is not None:
         scene["vector_overlays"] = vector_overlays
     style = validate_style_schema(style)
+    scene = apply_scene_style_overrides(scene, style)
+    topology_data = apply_topology_style_overrides(topology_data, style)
     validate_geometry_style(scene, style)
     viewport = resolve_viewport(
         scene,
@@ -476,10 +485,17 @@ def build_figure(
             vector_mesh_traces(scene["vector_overlays"], lattice=scene.get("M"))
         )
     trace_dicts.extend(_ordered_atom_bond_trace_dicts(mesh_payload, use_fast=use_fast))
+    selection_state = style.get("selection") or {}
+    selected_targets = {
+        str(item.get("id"))
+        for item in (selection_state.get("targets") or [])
+        if isinstance(item, dict) and item.get("kind") == "atom" and item.get("id")
+    }
     selection_trace = selection_outline_trace(
         scene,
         style,
-        selected_labels=set((style.get("selection") or {}).get("atom_labels") or []),
+        selected_labels=set(selection_state.get("atom_labels") or []),
+        selected_targets=selected_targets,
     )
     if selection_trace is not None:
         trace_dicts.extend(_traces_to_dicts([selection_trace]))
@@ -499,7 +515,7 @@ def build_figure(
     )
     trace_dicts.extend(_traces_to_dicts(_axis_traces(scene, style)))
     trace_dicts.extend(_traces_to_dicts(_unit_cell_traces(scene, style)))
-    trace_dicts.extend(_traces_to_dicts(geometry_entity_traces(scene)))
+    trace_dicts.extend(_traces_to_dicts(geometry_entity_traces(scene, style)))
     trace_dicts.extend(_traces_to_dicts(_morphology_traces(scene, style)))
     if topology_on:
         trace_dicts.extend(

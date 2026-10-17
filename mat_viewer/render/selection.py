@@ -4,6 +4,12 @@ from __future__ import annotations
 from .common import *
 from .meshes import _append_mesh, _sphere_mesh
 from .style import *
+from .picking import (
+    atom_instance_id,
+    bond_instance_id,
+    ensure_polyhedron_instance_ids,
+    polyhedron_instance_id,
+)
 
 
 def _atom_outline_payload(
@@ -74,15 +80,46 @@ def selection_outline_trace(
     style: dict,
     *,
     selected_labels: set[str] | None = None,
+    selected_targets: set[str] | None = None,
 ):
+    """Build the atom outline for exact atom targets and legacy labels.
+
+    Semantic selection also carries polyhedron/facet/geometry targets, but
+    those kinds deliberately do not create an atom shell. Their renderers
+    own their geometry-specific highlight path; filtering to atom IDs here
+    prevents a non-atom click from outlining every atom or leaving a stale
+    atom outline after the target list is cleared. Disorder-aware ``parts``
+    remain supported for legacy box-selection payloads.
+    """
     selection = style.get("selection") if isinstance(style.get("selection"), dict) else {}
     parts = list(selection.get("parts") or [])
     selected = set(selected_labels or selection.get("atom_labels") or [])
-    if not selected and not parts:
+    targets = set(selected_targets or [])
+    if not selected and not parts and not targets:
         return None
     payload = _atom_outline_payload(
         scene, style, labels=selected, parts=parts, radius_scale=1.18
     )
+    if targets:
+        exact_payload = {"x": [], "y": [], "z": [], "i": [], "j": [], "k": []}
+        atom_scale = float(style.get("atom_scale", 1.0))
+        for index, atom in enumerate(scene.get("draw_atoms") or []):
+            if atom_instance_id(atom, index) not in targets or not _atom_render_visible(atom):
+                continue
+            radius = max(float(atom.get("atom_radius", 0.18)), 0.05) * atom_scale * 1.18
+            vertices, triangles = _sphere_mesh(atom.get("cart", [0.0, 0.0, 0.0]), radius, lat_steps=8, lon_steps=12)
+            _append_mesh(exact_payload, vertices, triangles)
+        if exact_payload["x"]:
+            if payload["x"]:
+                base = len(payload["x"])
+                payload["x"].extend(exact_payload["x"])
+                payload["y"].extend(exact_payload["y"])
+                payload["z"].extend(exact_payload["z"])
+                payload["i"].extend([int(value) + base for value in exact_payload["i"]])
+                payload["j"].extend([int(value) + base for value in exact_payload["j"]])
+                payload["k"].extend([int(value) + base for value in exact_payload["k"]])
+            else:
+                payload = exact_payload
     if not payload["x"]:
         return None
     return _annotate_trace(go.Mesh3d(
@@ -92,8 +129,8 @@ def selection_outline_trace(
         i=payload["i"],
         j=payload["j"],
         k=payload["k"],
-        color=str(style.get("selection_highlight", "#FFD24A")),
-        opacity=float(style.get("selection_opacity", 0.55)),
+        color=str(style.get("selection_highlight", "#74808c")),
+        opacity=float(style.get("selection_opacity", 0.42)),
         flatshading=False,
         hoverinfo="skip",
         showlegend=False,
@@ -170,6 +207,10 @@ def _atom_selection_trace(scene: dict, style: dict, hidden_labels: set | None = 
             str(atom["elem"]),
             int(bool(atom.get("is_minor"))),
             frag_label,
+            atom_instance_id(atom, idx),
+            atom.get("_source_index", idx),
+            atom.get("_image_shift", atom.get("_pbc_image", "")),
+            atom.get("disorder_group", atom.get("dg", "")),
             str(part),
         ])
     return _annotate_trace(go.Scatter3d(
@@ -208,10 +249,12 @@ def _polyhedron_selection_trace(topology_data: dict | None) -> "go.Scatter3d | N
     """
     if not topology_data:
         return None
+    ensure_polyhedron_instance_ids(topology_data)
     spec_results = topology_data.get("spec_results") or []
     if not spec_results:
         return None
     xs, ys, zs, customdata, hover = [], [], [], [], []
+    ordinal = 0
     for entry in spec_results:
         spec_id = str(entry.get("spec_id") or "")
         spec_name = str(entry.get("name") or "")
@@ -223,13 +266,18 @@ def _polyhedron_selection_trace(topology_data: dict | None) -> "go.Scatter3d | N
             xs.append(float(center[0]))
             ys.append(float(center[1]))
             zs.append(float(center[2]))
+            instance_id = polyhedron_instance_id(spec_id, overlay, ordinal)
             customdata.append([
                 "polyhedron",
                 spec_id,
                 label,
                 int(bool(overlay.get("is_analysis_anchor"))),
+                instance_id,
+                overlay.get("center_source_index"),
+                overlay.get("center_image_shift", overlay.get("center_image", "")),
             ])
             hover.append(f"{spec_name} \u00b7 {label}")
+            ordinal += 1
     if not xs:
         return None
     return go.Scatter3d(
@@ -267,7 +315,7 @@ def _bond_selection_trace(scene: dict, style: dict) -> "go.Scatter3d | None":
         return None
     n = len(atoms)
     xs, ys, zs, customdata, hover = [], [], [], [], []
-    for bond in bonds:
+    for bond_index, bond in enumerate(bonds):
         if not bool(bond.get("_render_visible", True)):
             continue
         i = int(bond.get("i", -1))
@@ -291,6 +339,9 @@ def _bond_selection_trace(scene: dict, style: dict) -> "go.Scatter3d | None":
             f"{label_i}-{label_j}",
             f"{elem_i}-{elem_j}",
             int(bool(bond.get("is_minor"))),
+            bond_instance_id(bond, atoms, bond_index),
+            atom_instance_id(atoms[i], i),
+            atom_instance_id(atoms[j], j),
         ])
         hover.append(f"{label_i} \u2014 {label_j}")
     if not xs:
