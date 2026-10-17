@@ -111,6 +111,12 @@ def test_scene_switch_and_upload_replace_the_canvas(mattervis_url):
 
 
 @pytest.mark.timeout(180)
+def test_duplicate_and_rename_scene_controls_update_canvas(mattervis_url):
+    """Duplicate/rename controls select the new tab and repaint its title."""
+    _run(mattervis_url, "scene-controls")
+
+
+@pytest.mark.timeout(180)
 def test_fit_align_orbit_and_pan_keep_a_visible_projection(mattervis_url):
     _run(mattervis_url, "gestures", structure="ionic_nacl")
 

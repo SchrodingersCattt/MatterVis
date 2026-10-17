@@ -65,6 +65,8 @@ def build_left_panel(
                                 id="scene-new-tab-btn",
                                 n_clicks=0,
                                 title="Duplicate active scene as new tab",
+                                className="scene-new-tab-btn",
+                                **{"aria-label": "Duplicate active scene as new tab"},
                             ),
                         ],
                         className="scene-actions",
