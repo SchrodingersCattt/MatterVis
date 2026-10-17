@@ -54,6 +54,25 @@ def test_web_colormap_catalog_is_curated_but_specs_keep_full_registry() -> None:
     assert "Spectral" not in web_colormaps()
 
 
+def test_active_noncurated_colormap_stays_in_browser_options(tmp_path: Path) -> None:
+    path = tmp_path / "charges.extxyz"
+    _trajectory(path)
+    app = create_app(
+        preset_path=str(tmp_path / "preset.json"),
+        root_dir=str(tmp_path),
+        input_path=str(path),
+        atom_property_color={"fields": ["array:charges"], "colormap": "Spectral"},
+    )
+    try:
+        control = find_component(app.layout(), "property-colormap-input")
+        values = [item["value"] for item in control.options]
+        assert control.value == "Spectral"
+        assert "Spectral" in values
+        assert "viridis" in values
+    finally:
+        app.crystal_backend.close()
+
+
 def test_web_property_catalog_state_controls_and_trace_batching(tmp_path: Path) -> None:
     path = tmp_path / "charges.extxyz"
     _trajectory(path)
