@@ -12,6 +12,7 @@ from .status_helpers import status_banner_payload
 from ..cache_keys import fragment_options_cache_key
 from .backend import ViewerBackend
 from .display_controls import display_option_hint, display_option_items
+from ..properties import web_colormap_options
 
 
 def register_state_callbacks(app, backend):
@@ -37,6 +38,7 @@ def register_state_callbacks(app, backend):
             {"label": item["field"], "value": item["field"]}
             for item in backend.atom_properties(state)["fields"]
         ]
+        active_colormap = property_payload.get("colormap", "viridis")
         return (
             state.get("scene_label") or state["structure"],
             state["display_mode"],
@@ -55,7 +57,8 @@ def register_state_callbacks(app, backend):
             list(property_payload.get("fields") or []),
             property_payload.get("reduction", "auto"),
             property_payload.get("component"),
-            property_payload.get("colormap", "viridis"),
+            web_colormap_options(active_colormap),
+            active_colormap,
             "manual" if property_range is not None else "auto",
             None if visible_range is None else visible_range[0],
             None if visible_range is None else visible_range[1],
@@ -361,6 +364,7 @@ def register_state_callbacks(app, backend):
         Output("property-field-selector", "value"),
         Output("property-reduction-selector", "value"),
         Output("property-component-input", "value"),
+        Output("property-colormap-input", "options"),
         Output("property-colormap-input", "value"),
         Output("property-range-mode", "value"),
         Output("property-range-min", "value"),
@@ -396,7 +400,7 @@ def register_state_callbacks(app, backend):
             if callback_context.triggered
             else None
         )
-        n_outputs = 27
+        n_outputs = 28
         if triggered == "display-defaults-btn":
             if not scene_id or scene_id not in backend.scene_store.scenes:
                 return (no_update,) * n_outputs

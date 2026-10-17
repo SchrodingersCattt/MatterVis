@@ -13,7 +13,7 @@ from .style_helpers import (
     _minor_opacity_disabled,
     _status_class,
 )
-from ..properties import available_colormaps
+from ..properties import web_colormap_options
 from ..capabilities import resolve_requirements
 
 
@@ -44,6 +44,12 @@ def build_left_panel(
     visible_range = (
         property_range if property_visible_range is None else property_visible_range
     )
+    # Keep the browser list concise while preserving a valid active value
+    # supplied by an API/CLI caller. Dash drops a dropdown value that is not
+    # present in ``options`` during a layout refresh, so append that one value
+    # when it is a valid non-curated colormap such as ``Spectral``.
+    active_colormap = property_spec.get("colormap", "viridis")
+    web_colormap_names = web_colormap_options(active_colormap)
     return html.Div(
         [
             html.H3("MatterVis", className="workbench-brand"),
@@ -451,11 +457,8 @@ def build_left_panel(
             html.Label("Colormap"),
             dcc.Dropdown(
                 id="property-colormap-input",
-                options=[
-                    {"label": name, "value": name}
-                    for name in available_colormaps()
-                ],
-                value=property_spec.get("colormap", "viridis"),
+                options=web_colormap_names,
+                value=active_colormap,
                 clearable=False,
                 style={"width": "100%", "marginBottom": "8px"},
             ),

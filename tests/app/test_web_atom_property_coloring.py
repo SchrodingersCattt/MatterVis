@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 from ase import Atoms
 from ase.io import write
 
 from _layout_helpers import find_component, layout_ids
-from mat_viewer.app import create_app
+from mat_viewer.app import callbacks_state, create_app
+from mat_viewer.properties import (
+    available_colormaps,
+    web_colormap_options,
+    web_colormaps,
+)
 
 
 def _trajectory(path: Path) -> None:
@@ -24,6 +30,121 @@ def _trajectory(path: Path) -> None:
         atoms.arrays["charge"] = np.linspace(-scale, scale, 32)
         frames.append(atoms)
     write(path, frames, format="extxyz")
+
+
+def test_web_colormap_catalog_is_curated_but_specs_keep_full_registry() -> None:
+    assert web_colormaps() == (
+        "viridis",
+        "plasma",
+        "inferno",
+        "magma",
+        "cividis",
+        "coolwarm",
+        "RdBu",
+        "PiYG",
+        "PRGn",
+        "BrBG",
+        "tab10",
+        "Set2",
+        "Dark2",
+        "Paired",
+        "viridis_r",
+        "plasma_r",
+        "coolwarm_r",
+        "RdBu_r",
+    )
+    assert len(web_colormaps()) < len(available_colormaps())
+    assert set(web_colormaps()) <= set(available_colormaps())
+    assert "Spectral" in available_colormaps()
+    assert "Spectral" not in web_colormaps()
+
+
+def test_active_noncurated_colormap_stays_in_browser_options(tmp_path: Path) -> None:
+    path = tmp_path / "charges.extxyz"
+    _trajectory(path)
+    app = create_app(
+        preset_path=str(tmp_path / "preset.json"),
+        root_dir=str(tmp_path),
+        input_path=str(path),
+        atom_property_color={"fields": ["array:charges"], "colormap": "Spectral"},
+    )
+    try:
+        control = find_component(app.layout(), "property-colormap-input")
+        values = [item["value"] for item in control.options]
+        assert control.value == "Spectral"
+        assert "Spectral" in values
+        assert "viridis" in values
+    finally:
+        app.crystal_backend.close()
+
+
+def test_web_colormap_options_keep_active_noncurated_map() -> None:
+    options = web_colormap_options("Spectral")
+    assert options[:2] == [
+        {"label": "viridis", "value": "viridis"},
+        {"label": "plasma", "value": "plasma"},
+    ]
+    assert options[-1] == {"label": "Spectral", "value": "Spectral"}
+    assert web_colormap_options("viridis") == [
+        {"label": name, "value": name} for name in web_colormaps()
+    ]
+
+
+def test_sync_state_refresh_keeps_active_noncurated_map_option(
+    tmp_path: Path, monkeypatch
+) -> None:
+    path = tmp_path / "charges.extxyz"
+    _trajectory(path)
+    app = create_app(
+        preset_path=str(tmp_path / "preset.json"),
+        root_dir=str(tmp_path),
+        input_path=str(path),
+        atom_property_color={
+            "fields": ["array:charges"],
+            "colormap": "Spectral",
+        },
+    )
+
+    class _CallbackRegistry:
+        def __init__(self):
+            self.callbacks = {}
+
+        def callback(self, *args, **kwargs):
+            def register(fn):
+                self.callbacks[fn.__name__] = fn
+                return fn
+
+            return register
+
+    try:
+        backend = app.crystal_backend
+        scene_id = backend.active_scene_id()
+        backend.patch_state(
+            {
+                "atom_property_color": {
+                    "fields": ["array:charges"],
+                    "colormap": "Spectral",
+                }
+            },
+            scene_id=scene_id,
+            broadcast=True,
+        )
+        registry = _CallbackRegistry()
+        callbacks_state.register_state_callbacks(registry, backend)
+        monkeypatch.setattr(
+            callbacks_state,
+            "callback_context",
+            SimpleNamespace(
+                triggered=[{"prop_id": "agent-state-poll.n_intervals"}]
+            ),
+        )
+        result = registry.callbacks["sync_agent_state"](1, None, scene_id)
+        options = result[17]
+        value = result[18]
+        assert value == "Spectral"
+        assert {item["value"] for item in options} >= {"viridis", "Spectral"}
+    finally:
+        app.crystal_backend.close()
 
 
 def test_web_property_catalog_state_controls_and_trace_batching(tmp_path: Path) -> None:
