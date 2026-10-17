@@ -713,10 +713,8 @@ def available_colormaps() -> tuple[str, ...]:
     return tuple(sorted(str(name) for name in colormaps))
 
 
-# Keep the browser-facing editor concise while covering the common scientific
-# choices: perceptually uniform sequential maps, a handful of diverging maps,
-# and a few qualitative palettes.  Reversed variants are included only for
-# the sequential and diverging families, where direction has a clear meaning.
+# Keep the browser-facing editor concise with common sequential, diverging,
+# qualitative, and selected reversed maps.
 _WEB_COLORMAPS: tuple[str, ...] = (
     "viridis",
     "plasma",
@@ -751,14 +749,7 @@ def web_colormaps() -> tuple[str, ...]:
 
 
 def web_colormap_options(active: str | None = None) -> list[dict[str, str]]:
-    """Return browser dropdown options, retaining the active valid map.
-
-    The web editor intentionally exposes a compact curated list, while API
-    and CLI callers may select any Matplotlib colormap.  A callback refresh
-    must therefore include an active non-curated value (for example,
-    ``Spectral``) in the dropdown options or Dash will clear the value when
-    it receives the updated state.
-    """
+    """Return curated browser options while retaining active non-curated maps."""
 
     names = list(web_colormaps())
     active_name = "" if active is None else str(active).strip()
