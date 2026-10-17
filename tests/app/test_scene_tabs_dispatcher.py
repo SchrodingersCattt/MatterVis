@@ -253,10 +253,16 @@ def test_rename_scene_advances_render_revision_for_canvas_title(tmp_path: Path):
     backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
     try:
         scene_id = backend.active_scene_id()
+        display_before = backend.get_state(scene_id)["display_version"]
         before = backend.render_revision(scene_id)
         backend.update_scene(scene_id, {"label": "QA renamed scene"})
         assert backend.render_revision(scene_id) > before
-        figure, _ = backend.figure_for_state(backend.get_state(scene_id))
+        state = backend.get_state(scene_id)
+        assert state["display_version"] > display_before
+        figure, _ = backend.figure_for_state(state)
         assert figure.layout.title.text == "QA renamed scene"
+        wire_figure = figure.to_plotly_json() if hasattr(figure, "to_plotly_json") else figure
+        event = backend.broadcast_figure(scene_id=scene_id, figure=wire_figure, state=state)
+        assert event["state"]["display_version"] == state["display_version"]
     finally:
         backend.close()

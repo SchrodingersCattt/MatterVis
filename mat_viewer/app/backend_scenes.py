@@ -172,6 +172,12 @@ class _SceneBackendMixin:
         state_before = self.scene_state(scene_id)
         if "label" in payload and len(payload) == 1:
             scene = self.scene_store.rename(scene_id, payload["label"], save=False)
+            # Scene labels are rendered into the Plotly title. Keep the
+            # display clock monotonic for a rename so the resulting full
+            # frame cannot be deduplicated against the previous title.
+            next_display_version = int(state_before.get("display_version", 0) or 0) + 1
+            scene.state_patch["display_version"] = next_display_version
+            state_after = self.scene_state(scene_id)
         else:
             patch = dict(payload)
             if "state" in patch:
@@ -179,11 +185,12 @@ class _SceneBackendMixin:
                 state_patch = self.normalize_state(state_patch, scene_id=scene_id)
                 patch.update(state_patch)
             scene = self.scene_store.patch_scene(scene_id, patch, save=False)
+            state_after = self.scene_state(scene_id)
         self._bump_render_revision_if_changed(
-            scene_id, state_before, self.scene_state(scene_id)
+            scene_id, state_before, state_after
         )
         if self.scene_store.active_id == scene_id:
-            self.current_state = self.scene_state(scene_id)
+            self.current_state = state_after
             # Poll clients consume ``pending_state`` asynchronously; take a
             # full snapshot instead of sharing the canonical active-scene dict.
             self.pending_state = self._state_snapshot(self.current_state, scene_id)
