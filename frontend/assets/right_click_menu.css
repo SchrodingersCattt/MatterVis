@@ -83,6 +83,21 @@
   cursor: pointer;
 }
 
+/* Browser-only hover inspector.  It is deliberately neutral and compact so
+   pointer motion never recolours or obscures scientific geometry. */
+.mv-hover-inspector {
+  position: fixed;
+  z-index: 10000;
+  pointer-events: none;
+  padding: 3px 7px;
+  border: 1px solid rgba(116, 128, 140, 0.55);
+  border-radius: 3px;
+  background: rgba(28, 34, 40, 0.86);
+  color: #e8edf1;
+  font: 11px/1.35 system-ui, sans-serif;
+  white-space: nowrap;
+}
+
 .rightclick-menu__color label {
   font-size: 11px;
   color: #666;

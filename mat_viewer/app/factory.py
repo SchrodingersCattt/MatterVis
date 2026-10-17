@@ -252,6 +252,7 @@ def _create_app(
                     dcc.Store(
                         id="graph-interaction-store", data={"active": False, "ts": 0}
                     ),
+                    dcc.Store(id="scene-selection-store", data=None),
                     dcc.Store(
                         id="disorder-replicas-store",
                         data={"replicas": [], "scene_id": None, "status": "idle"},
@@ -341,6 +342,7 @@ def _create_app(
                 dcc.Store(
                     id="graph-interaction-store", data={"active": False, "ts": 0}
                 ),
+                dcc.Store(id="scene-selection-store", data=None),
                 dcc.Store(
                     id="disorder-replicas-store",
                     data={"replicas": [], "scene_id": None, "status": "idle"},

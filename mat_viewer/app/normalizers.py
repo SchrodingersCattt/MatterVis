@@ -4,6 +4,8 @@ from __future__ import annotations
 import math
 
 from .shared import *
+from ..render.style.resolver import normalize_style_overrides
+from ..render.style.resolver import normalize_style_overrides
 
 _HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
@@ -29,7 +31,7 @@ def _coerce_species_value(value: Any) -> Optional[str]:
 
 def _normalize_selection(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
-        return {"atom_labels": [], "active_label": None, "order": []}
+        return {"atom_labels": [], "active_label": None, "order": [], "targets": [], "active_target": None}
 
     def _labels(values: Any) -> list[str]:
         if values is None:
@@ -54,6 +56,8 @@ def _normalize_selection(raw: Any) -> dict[str, Any]:
     if active not in atom_labels:
         active = atom_labels[-1] if atom_labels else None
     result = {"atom_labels": atom_labels, "active_label": active, "order": order}
+
+    # Preserve disorder-aware labels/parts from the main selection contract.
     parts_raw = raw.get("parts")
     parts: list[dict[str, Any]] = []
     if isinstance(parts_raw, list):
@@ -76,6 +80,32 @@ def _normalize_selection(raw: Any) -> dict[str, Any]:
             parts.append(entry)
     if parts:
         result["parts"] = parts
+
+    # Semantic targets identify exact displayed instances and non-atom geometry.
+    from ..render.picking import normalize_target
+    raw_targets = raw.get("targets")
+    targets: list[dict[str, Any]] = []
+    if isinstance(raw_targets, (list, tuple, set)):
+        seen_targets: set[tuple[str, str]] = set()
+        for value in raw_targets:
+            normalized = normalize_target(value)
+            if normalized is None:
+                continue
+            key = (str(normalized["kind"]), str(normalized["id"]))
+            if key not in seen_targets:
+                targets.append(normalized)
+                seen_targets.add(key)
+    active_target = raw.get("active_target")
+    active_target_normalized = normalize_target(active_target)
+    if active_target_normalized is not None:
+        key = (active_target_normalized["kind"], active_target_normalized["id"])
+        if key not in {(item["kind"], item["id"]) for item in targets}:
+            targets.append(active_target_normalized)
+        active_target_value: dict[str, Any] | None = active_target_normalized
+    else:
+        active_target_value = targets[-1] if targets else None
+    result["targets"] = targets
+    result["active_target"] = active_target_value
     return result
 
 

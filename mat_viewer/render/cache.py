@@ -44,6 +44,20 @@ def _atom_groups_cache_key(atom_groups: list[dict] | None) -> tuple:
     )
 
 
+def _style_overrides_cache_key(overrides: dict | None) -> tuple:
+    """Hash exact target paint overrides for the geometry cache key."""
+    if not isinstance(overrides, dict):
+        return ()
+    return tuple(
+        (
+            str(target_id),
+            tuple(sorted((str(key), repr(value)) for key, value in value_map.items())),
+        )
+        for target_id, value_map in sorted(overrides.items(), key=lambda item: str(item[0]))
+        if isinstance(value_map, dict)
+    )
+
+
 def _atom_subscene(scene: dict, sub_atoms: list[dict]) -> dict:
     """Shallow copy of ``scene`` with ``draw_atoms`` replaced. Other
     fields (``bonds``, ``M``, ``label_items``, ...) keep the original
@@ -163,6 +177,7 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
         style.get("ortep_hydrogen_radius"),
         _atom_groups_cache_key(atom_groups),
         bond_groups_cache_key(bond_groups),
+        _style_overrides_cache_key(style.get("style_overrides")),
         _property_key,
     )
     if key in cache:

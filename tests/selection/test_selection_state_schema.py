@@ -12,7 +12,10 @@ def test_selection_backend_replace_add_remove_clear():
     assert backend.set_selection(labels[:1], scene_id=scene_id)["atom_labels"] == labels[:1]
     assert backend.add_to_selection(labels[1:3], scene_id=scene_id)["atom_labels"] == labels[:3]
     assert backend.remove_from_selection(labels[1:2], scene_id=scene_id)["atom_labels"] == [labels[0], labels[2]]
-    assert backend.clear_selection(scene_id)["atom_labels"] == []
+    cleared = backend.clear_selection(scene_id)
+    assert cleared["atom_labels"] == []
+    assert cleared["targets"] == []
+    assert cleared["active_target"] is None
 
 
 def test_selection_is_scoped_per_scene():

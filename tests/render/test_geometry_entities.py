@@ -404,6 +404,78 @@ def test_bfdh_morphology_reuses_geometry_entity_depth_path():
     assert morphology_mesh[0].meta["mv_role"] == "geometry_entity"
 
 
+def test_bfdh_face_ordinals_stay_aligned_with_semantic_facet_ids():
+    scene = _scene()
+    scene["bfdh_morphology"] = {
+        "enabled": True,
+        "scale": 1.0,
+        "opacity": 0.3,
+        "facets": [
+            {
+                "miller": [1, 0, 0],
+                "triangles": [
+                    [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+                    [[0, 0, 1], [1, 0, 1], [0, 1, 1]],
+                ],
+                "centroid": [0.3, 0.3, 0.0],
+            },
+            {
+                "miller": [0, 1, 0],
+                "triangles": [[[0, 0, 0], [0, 1, 0], [0, 0, 1]]],
+                "centroid": [0.0, 0.3, 0.3],
+            },
+        ],
+    }
+    traces = _morphology_traces(scene, {"bfdh_morphology_color": "#123456"})
+    mesh = next(trace for trace in traces if trace.name == "Morphology")
+    assert list(mesh.meta["face_ordinals"]) == [0, 0, 1]
+    assert mesh.meta["face_ids"][0] == mesh.meta["face_ids"][1]
+    assert mesh.meta["face_ids"][1] != mesh.meta["face_ids"][2]
+    labels = next(trace for trace in traces if trace.name == "Morphology Labels")
+    assert labels.customdata[0][1] == mesh.meta["face_ids"][0]
+    assert labels.customdata[1][1] == mesh.meta["face_ids"][2]
+
+
+def test_bfdh_hidden_facets_are_omitted_and_opacity_is_trace_scoped():
+    from mat_viewer.render.picking import facet_instance_id
+
+    scene = _scene()
+    scene["bfdh_morphology"] = {
+        "enabled": True,
+        "opacity": 0.8,
+        "facets": [
+            {
+                "miller": [1, 0, 0],
+                "triangles": [[[0, 0, 0], [1, 0, 0], [0, 1, 0]]],
+                "centroid": [0.3, 0.3, 0.0],
+            },
+            {
+                "miller": [0, 1, 0],
+                "triangles": [[[0, 0, 1], [1, 0, 1], [0, 1, 1]]],
+                "centroid": [0.3, 0.3, 1.0],
+            },
+        ],
+    }
+    hidden_id = facet_instance_id([1, 0, 0], 0)
+    faded_id = facet_instance_id([0, 1, 0], 1)
+    traces = _morphology_traces(
+        scene,
+        {
+            "bfdh_morphology_color": "#123456",
+            "style_overrides": {
+                hidden_id: {"kind": "facet", "visible": False},
+                faded_id: {"kind": "facet", "opacity": 0.25, "color": "#ff0000"},
+            },
+        },
+    )
+    meshes = [trace for trace in traces if trace.name == "Morphology"]
+    assert len(meshes) == 1
+    assert float(meshes[0].opacity) == 0.25
+    assert list(meshes[0].meta["face_ids"]) == [faded_id]
+    labels = next(trace for trace in traces if trace.name == "Morphology Labels")
+    assert list(labels.customdata[0][1]) == list(faded_id)
+
+
 def test_bfdh_morphology_remains_renderable_in_flat_material():
     scene = {
         "M": np.diag([10.0, 10.0, 10.0]),

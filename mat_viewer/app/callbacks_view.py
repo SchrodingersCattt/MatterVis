@@ -138,6 +138,33 @@ def register_view_callbacks(app, backend):
             return no_update
 
     @app.callback(
+        Output("agent-state-store", "data", allow_duplicate=True),
+        Input("scene-selection-store", "data"),
+        State("scene-tabs", "value"),
+        prevent_initial_call=True,
+    )
+    def commit_scene_target_selection(selection, active_scene_id):
+        """Persist semantic browser picks without routing pointer motion through Dash."""
+
+        if not isinstance(selection, dict) or not isinstance(selection.get("targets"), list):
+            return no_update
+        scene_id = str(selection.get("scene_id") or active_scene_id or backend.active_scene_id())
+        mode = str(selection.get("mode") or "replace")
+        if mode == "clear":
+            backend.clear_target_selection(scene_id=scene_id)
+        else:
+            # The browser store carries the complete post-click target list.
+            # Applying ``toggle`` to that whole list would toggle every
+            # already-selected item a second time, so treat it as the
+            # authoritative snapshot and replace the server list.  This is
+            # especially important for Ctrl/Cmd clicks that remove one item.
+            backend.set_target_selection(
+                selection.get("targets") or [],
+                scene_id=scene_id,
+            )
+        return backend.get_state(scene_id)
+
+    @app.callback(
         Output("rightclick-menu", "children"),
         Output("rightclick-menu", "style"),
         Output("rightclick-menu", "className"),
