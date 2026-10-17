@@ -220,6 +220,7 @@ vm.createContext(sandbox);
       function currentSceneId(){return current;}
       function figurePushIsCurrent(frame){return frame.isCurrent();}
       function applyFigurePush(){applied += 1;}
+      const pendingFigureRetryTimers=Object.create(null);
       window.MatterVisSelectScene=id=>{current=String(id);};
       const pendingFigureByScene=pending;
       ${body}
@@ -228,6 +229,49 @@ vm.createContext(sandbox);
       window.applied=applied;
     `,sandbox);
     assert.equal(sandbox.window.applied,1,'queued HKUST frame was not replayed after upload selection');
+""" % (start, stop)
+    result = subprocess.run(
+        [node, "-e", program, str(MATTERVIS_JS)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_revision_zero_scene_frame_retries_after_selection_barrier():
+    """A first frame for an unvisited scene must survive a late tab paint."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    start = source.index("  function scheduleQueuedSceneFigureRetry")
+    stop = source.index("  function flushPendingFigurePush", start)
+    program = r"""
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const body=source.slice(%d,%d);
+const timers=[];
+const pending=Object.create(null);
+const sandbox={window:{},pending,timers,setTimeout:(fn)=>{timers.push(fn);return timers.length;},clearTimeout:()=>{}};
+vm.createContext(sandbox);
+vm.runInContext(`
+  let current='old', applied=0;
+  function currentSceneId(){return current;}
+  function figurePushIsCurrent(frame){return frame.isCurrent();}
+  function applyFigurePush(){applied += 1;}
+  const pendingFigureRetryTimers=Object.create(null);
+  const pendingFigureByScene=pending;
+  ${body}
+  pending.new_scene={figure:{data:[{}],layout:{}},render_revision:0,isCurrent:()=>current==='new'};
+  flushQueuedSceneFigure('new_scene');
+  window.before=applied;
+  current='new';
+  while (timers.length) timers.shift()();
+  window.after=applied;
+`,sandbox);
+assert.equal(sandbox.window.before,0,'frame painted before the new tab was selected');
+assert.equal(sandbox.window.after,1,'revision-0 frame was dropped after the new tab painted');
 """ % (start, stop)
     result = subprocess.run(
         [node, "-e", program, str(MATTERVIS_JS)],
