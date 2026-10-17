@@ -13,7 +13,7 @@ from .style_helpers import (
     _minor_opacity_disabled,
     _status_class,
 )
-from ..properties import web_colormaps
+from ..properties import web_colormap_options
 from ..capabilities import resolve_requirements
 
 
@@ -49,9 +49,7 @@ def build_left_panel(
     # present in ``options`` during a layout refresh, so append that one value
     # when it is a valid non-curated colormap such as ``Spectral``.
     active_colormap = property_spec.get("colormap", "viridis")
-    web_colormap_names = list(web_colormaps())
-    if active_colormap and active_colormap not in web_colormap_names:
-        web_colormap_names.append(active_colormap)
+    web_colormap_names = web_colormap_options(active_colormap)
     return html.Div(
         [
             html.H3("MatterVis", className="workbench-brand"),
@@ -459,10 +457,7 @@ def build_left_panel(
             html.Label("Colormap"),
             dcc.Dropdown(
                 id="property-colormap-input",
-                options=[
-                    {"label": name, "value": name}
-                    for name in web_colormap_names
-                ],
+                options=web_colormap_names,
                 value=active_colormap,
                 clearable=False,
                 style={"width": "100%", "marginBottom": "8px"},

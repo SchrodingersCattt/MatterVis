@@ -750,6 +750,23 @@ def web_colormaps() -> tuple[str, ...]:
     return _WEB_COLORMAPS
 
 
+def web_colormap_options(active: str | None = None) -> list[dict[str, str]]:
+    """Return browser dropdown options, retaining the active valid map.
+
+    The web editor intentionally exposes a compact curated list, while API
+    and CLI callers may select any Matplotlib colormap.  A callback refresh
+    must therefore include an active non-curated value (for example,
+    ``Spectral``) in the dropdown options or Dash will clear the value when
+    it receives the updated state.
+    """
+
+    names = list(web_colormaps())
+    active_name = "" if active is None else str(active).strip()
+    if active_name and active_name not in names:
+        names.append(active_name)
+    return [{"label": name, "value": name} for name in names]
+
+
 def normalize_property_values(
     values: Any,
     *,
@@ -987,4 +1004,5 @@ __all__ = [
     "resolve_source_property_context",
     "rgba_to_hex",
     "web_colormaps",
+    "web_colormap_options",
 ]
