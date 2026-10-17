@@ -142,6 +142,96 @@
         if (attempt < 40) setTimeout(function () { resyncScene(sceneId, attempt + 1); }, 250);
       });
   }
+  function sceneTabNodeForId(sceneId) {
+    if (sceneId === null || sceneId === undefined || sceneId === "") return null;
+    const root = document.getElementById("scene-tabs");
+    if (!root || typeof root.querySelectorAll !== "function") return null;
+    const wanted = String(sceneId);
+    const nodes = root.querySelectorAll("[id^='scene-tab-']");
+    for (let index = 0; index < nodes.length; index += 1) {
+      const node = nodes[index];
+      if (sceneIdFromTabNode(node) === wanted) return node;
+    }
+    return null;
+  }
+  function selectedSceneTabId() {
+    const root = document.getElementById("scene-tabs");
+    if (!root || typeof root.querySelector !== "function") return null;
+    const selected = root.querySelector(
+      "[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active"
+    );
+    if (!selected) return null;
+    const node = sceneIdFromTabNode(selected)
+      ? selected
+      : (selected.closest ? selected.closest("[id^='scene-tab-']") : null);
+    return sceneIdFromTabNode(node);
+  }
+  // Keep the last real DOM selection so attribute churn on a tab (for
+  // example, a tooltip/class update) cannot repeatedly scroll the active tab.
+  // A null selection is transient while Dash swaps tab nodes; retain the last
+  // known scene so that clearing and restoring the same selection is a no-op.
+  let observedSceneTabId = null;
+  let pendingSceneTabScrollId = null;
+  let lastScrolledSceneId = null;
+  function syncSceneTabSelection(schedule) {
+    const current = selectedSceneTabId();
+    if (!current) return;
+    const changed = observedSceneTabId !== null &&
+      String(current) !== String(observedSceneTabId);
+    observedSceneTabId = String(current);
+    if (changed && pendingSceneTabScrollId !== null &&
+        String(current) !== String(pendingSceneTabScrollId)) {
+      pendingSceneTabScrollId = null;
+    }
+    const pendingMatches = pendingSceneTabScrollId !== null &&
+      String(current) === String(pendingSceneTabScrollId);
+    if (schedule && String(current) !== lastScrolledSceneId &&
+        (changed || pendingMatches)) {
+      scheduleSceneTabScroll(current);
+    }
+  }
+  function scrollSceneTabIntoView(sceneId) {
+    const root = document.getElementById("scene-tabs");
+    if (!root) return false;
+    const hasExplicitSceneId = sceneId !== null && sceneId !== undefined && sceneId !== "";
+    let tab = hasExplicitSceneId ? sceneTabNodeForId(sceneId) : null;
+    // An upload selects its new scene before Dash paints the corresponding
+    // tab node. Never fall back to the old selected tab in that gap: doing so
+    // consumes the scroll request and leaves the new tab off-screen forever.
+    if (!tab && hasExplicitSceneId) return false;
+    if (!tab && typeof root.querySelector === "function") {
+      const selected = root.querySelector(
+        "[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active"
+      );
+      tab = selected && (sceneIdFromTabNode(selected)
+        ? selected
+        : (selected.closest ? selected.closest("[id^='scene-tab-']") : null));
+    }
+    if (!tab || typeof tab.scrollIntoView !== "function") return false;
+    // ``nearest`` keeps the side panel stationary and only moves the tab
+    // strip when the selected tab is outside its horizontal viewport.
+    tab.scrollIntoView({block: "nearest", inline: "nearest"});
+    const scrolledSceneId = sceneIdFromTabNode(tab);
+    if (scrolledSceneId) {
+      lastScrolledSceneId = String(scrolledSceneId);
+      if (String(pendingSceneTabScrollId) === lastScrolledSceneId) {
+        pendingSceneTabScrollId = null;
+      }
+    }
+    return true;
+  }
+  function scheduleSceneTabScroll(sceneId) {
+    const run = function () {
+      if (sceneId !== null && sceneId !== undefined && sceneId !== "" &&
+          String(sceneId) === lastScrolledSceneId) return;
+      scrollSceneTabIntoView(sceneId);
+    };
+    if (typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(run);
+    } else {
+      setTimeout(run, 0);
+    }
+  }
   function selectedSceneId() {
     const root = document.getElementById("scene-tabs");
     const intentAge = sceneTabIntentId ? Date.now() - sceneTabIntentAt : Infinity;
@@ -412,6 +502,10 @@
   window.MatterVisFlushSceneFrame = function (sceneId) {
     if (sceneId !== null && sceneId !== undefined && sceneId !== "") {
       window.MatterVisSelectScene(sceneId);
+      pendingSceneTabScrollId = String(sceneId);
+      if (typeof scheduleSceneTabScroll === "function") {
+        scheduleSceneTabScroll(sceneId);
+      }
     }
     flushQueuedSceneFigure();
     [0, 50, 250].forEach(function (delay) {
@@ -769,6 +863,8 @@
     const root = document.getElementById("scene-tabs");
     if (!root || root.dataset.mvSceneIntentBound === "1") return;
     root.dataset.mvSceneIntentBound = "1";
+    const initialSelection = selectedSceneTabId();
+    if (initialSelection) observedSceneTabId = String(initialSelection);
     const selectionObserver = new MutationObserver(function () {
       flushQueuedSceneFigure();
     });
@@ -782,6 +878,12 @@
     root.addEventListener("mousedown", function (event) { noteSceneTabIntent(event.target); }, true);
     root.addEventListener("click", function (event) {
       noteSceneTabIntent(event.target);
+      const clickedNode = event.target && event.target.closest
+        ? event.target.closest("[id^='scene-tab-']")
+        : null;
+      const clickedSceneId = sceneIdFromTabNode(clickedNode);
+      if (clickedSceneId) pendingSceneTabScrollId = String(clickedSceneId);
+      scheduleSceneTabScroll(clickedSceneId);
       // A figure can arrive between pointerdown and Dash applying the tab
       // value. It is then parked in ``pendingFigureByScene`` because the old
       // tab is still selected. The click is the handoff barrier for that
@@ -804,6 +906,20 @@
         status.className = "";
       }
     }, true);
+    // Dash changes the selected class/aria-selected attribute after the click
+    // callback. Observe those changes so keyboard navigation and programmatic
+    // uploads get the same scroll-into-view behavior as pointer clicks.
+    if (typeof MutationObserver === "function") {
+      const observer = new MutationObserver(function () {
+        ensureSceneTabTooltips();
+        syncSceneTabSelection(true);
+      });
+      observer.observe(root, {
+        attributes: true,
+        attributeFilter: ["aria-selected", "class"],
+        subtree: true,
+      });
+    }
   }
 
   function showBuildMismatch() {
@@ -821,6 +937,7 @@
     var assetSha = (payload && payload.asset_sha) || build.assets;
     if (processSha && assetSha && processSha !== assetSha) showBuildMismatch();
   }
+
 
   // ── WS figure fast lane (ws_figure.js) ──────────────────────────
   (function connectWS() {
@@ -1125,6 +1242,7 @@
     bindDisorderHover();
     bindSceneTabIntent();
     ensureSceneTabTooltips();
+    syncSceneTabSelection(true);
     flushQueuedSceneFigure();
     const gd = graphDiv();
     releaseStaleWebGL(gd);
