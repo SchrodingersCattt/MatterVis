@@ -35,6 +35,7 @@
   const latestFigureSeqByScene = Object.create(null);
   let sceneTabIntentId = null, sceneTabIntentAt = 0;
   let sceneTabIntentSource = null;
+  const pendingFigureRetryTimers = Object.create(null);
   let renderServerEpoch = null;
   const expectedRenderRevisionByScene = Object.create(null);
   const expectedCameraRevisionByScene = Object.create(null);
@@ -394,11 +395,33 @@
       console.warn("MatterVis frame delivery failed", error);
     });
   }
-  function flushQueuedSceneFigure() {
-    const sceneId = currentSceneId();
+  function scheduleQueuedSceneFigureRetry(sceneId, attempt) {
+    const key = String(sceneId || "");
+    if (!key || pendingFigureRetryTimers[key] || !pendingFigureByScene[key]) return;
+    attempt = Number(attempt || 0);
+    if (attempt >= 24) return;
+    pendingFigureRetryTimers[key] = setTimeout(function () {
+      delete pendingFigureRetryTimers[key];
+      flushQueuedSceneFigure(key, attempt + 1);
+    }, Math.min(250, 25 * (attempt + 1)));
+  }
+  function flushQueuedSceneFigure(targetSceneId, attempt) {
+    const sceneId = targetSceneId ? String(targetSceneId) : currentSceneId();
     if (!sceneId) return;
     const queued = pendingFigureByScene[String(sceneId)];
-    if (!queued || !figurePushIsCurrent(queued)) return;
+    if (!queued) return;
+    if (!figurePushIsCurrent(queued)) {
+      // A completed frame may beat Dash's selected-tab paint by several
+      // turns. Keep the revision-0 frame parked by scene and retry the handoff
+      // briefly instead of evaluating its fence only once while the previous
+      // scene is still selected.
+      if (targetSceneId) scheduleQueuedSceneFigureRetry(sceneId, attempt);
+      return;
+    }
+    if (pendingFigureRetryTimers[String(sceneId)]) {
+      clearTimeout(pendingFigureRetryTimers[String(sceneId)]);
+      delete pendingFigureRetryTimers[String(sceneId)];
+    }
     delete pendingFigureByScene[String(sceneId)];
     applyFigurePush(queued.figure.data||[], queued.figure.layout||{});
   }
@@ -860,6 +883,7 @@
         payload.isCurrent = function () { return isCurrentFigurePush(payload); };
         if (!previous || !previousSeq || (seq && seq >= previousSeq)) {
           pendingFigureByScene[sceneKey] = payload;
+          scheduleQueuedSceneFigureRetry(sceneKey, 0);
         }
       }
       function deliverFallbackPayload(payload) {
@@ -922,6 +946,7 @@
         if (p.scene_id && String(p.scene_id) !== String(currentSceneId() || "")) {
           p.isCurrent=function(){return isCurrentFigurePush(p);};
           pendingFigureByScene[String(p.scene_id)] = p;
+          scheduleQueuedSceneFigureRetry(String(p.scene_id), 0);
         }
         return;
       }
