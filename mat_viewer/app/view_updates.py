@@ -180,7 +180,10 @@ def classify_change(
     # The scene label is rendered into the Plotly figure title. It cannot be
     # applied by the local display patch path (which only restyles existing
     # traces), so a rename must enqueue a complete frame for the browser.
-    if before.get("scene_label") != after.get("scene_label"):
+    if (
+        before.get("scene_id") == after.get("scene_id")
+        and before.get("scene_label") != after.get("scene_label")
+    ):
         return UpdateKind.FULL
     if geometry_state_key(before) != geometry_state_key(after):
         return UpdateKind.GEOMETRY
