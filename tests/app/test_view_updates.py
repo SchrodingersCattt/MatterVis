@@ -74,6 +74,12 @@ def test_polyhedron_enabled_is_part_of_display_identity():
     assert classify_change(before, after) is UpdateKind.DISPLAY
 
 
+def test_scene_label_change_requires_a_complete_frame_for_canvas_title():
+    before = _state(scene_label="Original scene")
+    after = _state(scene_label="Renamed scene", display_version=5)
+    assert classify_change(before, after) is UpdateKind.FULL
+
+
 def test_render_style_and_group_edits_advance_geometry_identity():
     before = _state(atom_scale=1.0, bond_radius=0.15, bond_groups=[])
     after = _state(

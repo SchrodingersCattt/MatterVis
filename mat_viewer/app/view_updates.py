@@ -177,6 +177,11 @@ def classify_change(
         # still belongs to the geometry transaction.
         if geometry_state_key(before) == geometry_state_key(after) and display_state_key(before) == display_state_key(after):
             return UpdateKind.CAMERA
+    # The scene label is rendered into the Plotly figure title. It cannot be
+    # applied by the local display patch path (which only restyles existing
+    # traces), so a rename must enqueue a complete frame for the browser.
+    if before.get("scene_label") != after.get("scene_label"):
+        return UpdateKind.FULL
     if geometry_state_key(before) != geometry_state_key(after):
         return UpdateKind.GEOMETRY
     if _needs_complete_frame(before, after):
