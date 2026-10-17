@@ -234,10 +234,24 @@ def _camera_from_relayout_data(
         return None
     direct = relayout_data.get("scene.camera")
     if isinstance(direct, dict):
-        return direct
+        # Plotly's complete relayout payloads commonly omit ``projection``.
+        # Keep the projection belonging to the scene that produced the drag;
+        # otherwise an orthographic scene is persisted with Plotly's implicit
+        # perspective default when a late relayout arrives during a tab swap.
+        camera = copy.deepcopy(direct)
+        if "projection" not in camera and isinstance(current_camera, dict):
+            projection = current_camera.get("projection")
+            if projection is not None:
+                camera["projection"] = copy.deepcopy(projection)
+        return camera
     scene_payload = relayout_data.get("scene")
     if isinstance(scene_payload, dict) and isinstance(scene_payload.get("camera"), dict):
-        return scene_payload["camera"]
+        camera = copy.deepcopy(scene_payload["camera"])
+        if "projection" not in camera and isinstance(current_camera, dict):
+            projection = current_camera.get("projection")
+            if projection is not None:
+                camera["projection"] = copy.deepcopy(projection)
+        return camera
 
     base = copy.deepcopy(_plotly_camera(current_camera) or {})
     changed = False
