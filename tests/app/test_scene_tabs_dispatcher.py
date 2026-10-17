@@ -240,9 +240,23 @@ def test_duplicate_scene_selects_new_tab_and_updates_canvas_title(tmp_path: Path
         duplicate = backend.duplicate_scene(original)
         assert duplicate["id"] != original
         assert backend.active_scene_id() == duplicate["id"]
+        assert backend.render_revision(duplicate["id"]) > 0
         state = backend.get_state(duplicate["id"])
         assert state["scene_label"] == duplicate["label"]
         figure, _ = backend.figure_for_state(state)
         assert figure.layout.title.text == duplicate["label"]
+    finally:
+        backend.close()
+
+
+def test_rename_scene_advances_render_revision_for_canvas_title(tmp_path: Path):
+    backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    try:
+        scene_id = backend.active_scene_id()
+        before = backend.render_revision(scene_id)
+        backend.update_scene(scene_id, {"label": "QA renamed scene"})
+        assert backend.render_revision(scene_id) > before
+        figure, _ = backend.figure_for_state(backend.get_state(scene_id))
+        assert figure.layout.title.text == "QA renamed scene"
     finally:
         backend.close()

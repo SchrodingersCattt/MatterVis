@@ -236,12 +236,15 @@ class _SceneBackendMixin:
     def duplicate_scene(
         self, scene_id: str, label: Optional[str] = None
     ) -> dict[str, Any]:
+        state_before = self.scene_state(scene_id)
         scene = self.scene_store.duplicate(scene_id, label=label, save=False)
         self._render_revisions[str(scene.id)] = 0
         self._scene_generation_counter += 1
         self._scene_generations[str(scene.id)] = self._scene_generation_counter
-        self._camera_revisions[str(scene.id)] = int(self.scene_state(scene.id).get("camera_revision", 0) or 0)
-        self.current_state = self.scene_state(scene.id)
+        state_after = self.scene_state(scene.id)
+        self._bump_render_revision_if_changed(scene.id, state_before, state_after)
+        self._camera_revisions[str(scene.id)] = int(state_after.get("camera_revision", 0) or 0)
+        self.current_state = state_after
         self.pending_state = self._state_snapshot(self.current_state, scene.id)
         self._bump_version()
         self._request_scene_store_save()
