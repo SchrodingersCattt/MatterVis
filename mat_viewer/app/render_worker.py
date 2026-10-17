@@ -109,6 +109,67 @@ class AsyncRenderWorker:
                     error=f"{type(exc).__name__}: {exc}",
                 )
 
+    def _camera_advanced_state(self, state: dict[str, Any]) -> dict[str, Any] | None:
+        """Return the live state when only the camera changed mid-build.
+
+        Camera commands intentionally do not advance ``render_revision`` or
+        the figure-body cache key. A command can still arrive while the
+        expensive figure build is running, though, which makes the snapshot
+        fail ``_is_current`` and used to drop the completed frame forever.
+        Requeue the same body against the newer camera revision so the worker
+        can publish a frame stamped with the live state. Geometry/display
+        changes return ``None`` and remain guarded by the normal stale-frame
+        path.
+        """
+        scene_id = state.get("scene_id")
+        if not scene_id:
+            return None
+        try:
+            current = self.backend.get_state(scene_id)
+            if not isinstance(current, dict):
+                return None
+            if str(current.get("scene_id") or scene_id) != str(scene_id):
+                return None
+            if int(current.get("scene_generation", 0) or 0) != int(
+                state.get("scene_generation", 0) or 0
+            ):
+                return None
+            if int(current.get("render_revision", -1)) != int(
+                state.get("render_revision", -1)
+            ):
+                return None
+            # ``figure_state_cache_key`` deliberately omits camera fields for
+            # ordinary Plotly figures. Flat+ORTEP retains the camera because
+            # it is baked into the raster image, so a camera-only transition
+            # changes that key even though the in-flight body is still the
+            # same scene. The generation and render revision checks above
+            # already guard against geometry/display changes; skip the body
+            # key comparison for this camera-dependent renderer.
+            flat_ortep = (
+                current.get("material") == "flat"
+                and current.get("style") == "ortep"
+            )
+            if not flat_ortep and self.backend._figure_state_cache_key(state) != self.backend._figure_state_cache_key(
+                current
+            ):
+                return None
+            if int(current.get("camera_revision", 0) or 0) == int(
+                state.get("camera_revision", 0) or 0
+            ):
+                return None
+            return current
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return None
+
+    def _resubmit_camera_advanced(self, state: dict[str, Any], *, reason: str) -> bool:
+        """Queue the current camera revision after a stale build result."""
+        current = self._camera_advanced_state(state)
+        if current is None:
+            return False
+        # ``force`` bypasses the camera-only fast path: this is the recovery
+        # request created for a build that was already in flight.
+        return bool(self._request_render(current, reason=reason, force=True))
+
     def request_topology(self, state: dict[str, Any], context: dict[str, Any]) -> bool:
         state = copy.deepcopy(state)
         cache_key = context["cache_key"]
@@ -217,16 +278,16 @@ class AsyncRenderWorker:
     def prewarm(self, state: dict[str, Any]) -> None:
         self._request_render(state, reason="prewarm-ready")
 
-    def request_figure_build(self, state: dict[str, Any]) -> bool:
+    def request_figure_build(self, state: dict[str, Any], *, force: bool = False) -> bool:
         """Submit a full figure build to the background pool.
 
         Returns True if the build was submitted (or already running).
         The completed figure is pushed to clients via WebSocket
         ``broadcast_figure(reason="figure-ready")``.
         """
-        return self._request_render(state, reason="figure-ready")
+        return self._request_render(state, reason="figure-ready", force=force)
 
-    def _request_render(self, state: dict[str, Any], *, reason: str) -> bool:
+    def _request_render(self, state: dict[str, Any], *, reason: str, force: bool = False) -> bool:
         state = copy.deepcopy(state)
         # Only an explicit camera/overlay request is display-local. The
         # scene's previous kind must not suppress a later complete frame:
@@ -237,17 +298,25 @@ class AsyncRenderWorker:
         # the snapshot would make the figure cache key miss the live state.
         kind = str(state.pop("update_kind", "") or "")
         flat_ortep = state.get("material") == "flat" and state.get("style") == "ortep"
-        if kind in {UpdateKind.CAMERA.value, UpdateKind.OVERLAY.value} and not (
+        if not force and kind in {UpdateKind.CAMERA.value, UpdateKind.OVERLAY.value} and not (
             kind == UpdateKind.CAMERA.value and flat_ortep
         ):
             return False
         try:
+            render_key_state = {
+                key: value
+                for key, value in state.items()
+                if key not in {"version", "server_started_at", "camera"}
+            }
+            # Flat+ORTEP rasterizes the camera basis into the figure image.
+            # Include the camera in its worker identity so a forced rebuild
+            # triggered by a drag cannot deduplicate against an older image
+            # that is still in flight. Ordinary Plotly figures apply camera
+            # after the body build and keep the historical camera-free key.
+            if flat_ortep:
+                render_key_state["camera"] = state.get("camera")
             render_key = json.dumps(
-                {
-                    key: value
-                    for key, value in state.items()
-                    if key not in {"version", "server_started_at", "camera"}
-                },
+                render_key_state,
                 sort_keys=True,
                 default=str,
                 separators=(",", ":"),
@@ -279,19 +348,34 @@ class AsyncRenderWorker:
         def _job() -> None:
             self._set_task_status(render_key, status="running")
             if not self._is_current(state):
-                self._set_task_status(render_key, status="cancelled")
+                if self._resubmit_camera_advanced(state, reason=reason):
+                    self._set_task_status(render_key, status="superseded")
+                else:
+                    self._set_task_status(render_key, status="cancelled")
                 return
             fig, topology_data = self.backend.figure_for_state(state, async_topology=False)
+            stale = False
             with self._lock:
                 if self._is_current(state):
-                    self._set_task_status(render_key, status="completed")
-                    self.backend.broadcast_figure(
+                    payload = self.backend.broadcast_figure(
                         scene_id=state.get("scene_id"),
                         figure=fig.to_plotly_json(),
                         topology_data=topology_data,
                         state=state,
                         reason=reason,
                     )
+                    published = isinstance(payload, dict) and payload.get("type") == "figure"
+                    if published:
+                        self._set_task_status(render_key, status="completed")
+                    else:
+                        stale = True
+                else:
+                    stale = True
+            if stale:
+                if self._resubmit_camera_advanced(state, reason=reason):
+                    self._set_task_status(render_key, status="superseded")
+                else:
+                    self._set_task_status(render_key, status="cancelled")
 
         def completed(future: Future) -> None:
             with self._lock:

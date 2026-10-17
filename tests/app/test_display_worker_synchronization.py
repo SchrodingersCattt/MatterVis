@@ -201,6 +201,82 @@ def test_camera_reset_invalidates_inflight_worker_frame(backend, monkeypatch):
     assert backend.latest_figure_broadcast() is None
 
 
+@pytest.mark.parametrize(
+    "state_patch",
+    [
+        {"display_mode": "unit_cell"},
+        {"display_mode": "asymmetric_unit", "material": "flat", "style": "ortep"},
+    ],
+    ids=["default", "flat-ortep"],
+)
+def test_camera_fit_during_display_mode_build_resubmits_current_frame(
+    backend, monkeypatch, state_patch
+):
+    """A Fit that lands during a mode build must not strand the scene."""
+    state = backend.patch_state(state_patch, broadcast=False)
+    builds = []
+
+    def build(snapshot, **kwargs):
+        builds.append(deepcopy(snapshot))
+        if len(builds) == 1:
+            # Simulate the user pressing Fit while the worker is assembling
+            # the full unit-cell figure. Fit advances only camera_revision.
+            backend.camera_action("fit", broadcast=False)
+        return fake_figure(backend, snapshot)
+
+    monkeypatch.setattr(backend, "figure_for_state", build)
+    worker = backend._render_worker
+    assert worker.request_figure_build(state)
+
+    # The stale first result queues a second build for the live camera. The
+    # controlled pool keeps both transitions deterministic and sleep-free.
+    worker._finalize_pool.run_next()
+    assert backend.latest_figure_broadcast() is None
+    assert len(worker._finalize_pool.jobs) == 1
+    worker._finalize_pool.run_next()
+
+    current = backend.get_state(state["scene_id"])
+    event = backend.latest_figure_broadcast(state["scene_id"])
+    assert event is not None and event["type"] == "figure"
+    assert event["render_revision"] == current["render_revision"]
+    assert event["state"]["camera_revision"] == current["camera_revision"]
+    assert len(builds) == 2
+    assert not worker._pending_render
+
+
+def test_flat_ortep_camera_drag_forces_distinct_inflight_build(
+    backend, monkeypatch
+):
+    """A drag with no camera revision bump must replace an old flat image."""
+    from dash import no_update
+
+    state = backend.patch_state(
+        {"display_mode": "asymmetric_unit", "material": "flat", "style": "ortep"},
+        broadcast=False,
+    )
+    worker = backend._render_worker
+    monkeypatch.setattr(backend, "figure_for_state", lambda snapshot, **kwargs: fake_figure(backend, snapshot))
+    assert worker.request_figure_build(state)
+
+    camera = deepcopy(state["camera"])
+    camera["position"] = [1.0, 0.0, 7.0]
+    backend.apply_intent({"type": "set_camera", "payload": {"camera": camera}})
+    current = backend.get_state(state["scene_id"])
+
+    registry = CallbackRegistry()
+    callbacks_view.register_view_callbacks(registry, backend)
+    update_view = registry.callbacks["update_view"]
+    assert update_view(current, None, None, None) == (no_update,) * 4
+
+    # The first queued job was superseded by the forced request. Running the
+    # cancelled slot and then the replacement slot keeps the race deterministic.
+    worker._finalize_pool.run_next()
+    worker._finalize_pool.run_next()
+    event = backend.latest_figure_broadcast(state["scene_id"])
+    assert event is not None and event["type"] == "figure"
+    assert event["state"]["camera"] == current["camera"]
+
+
 @pytest.mark.parametrize("trigger,changes", [
     ("axis-scale-slider", {"axis_scale": 1.7}),
     ("minor-opacity-slider", {"minor_opacity": 0.61}),
