@@ -153,6 +153,159 @@ def test_scene_tab_tooltip_is_applied_to_actual_tab_node():
     assert 'tab.setAttribute("aria-label", fullName)' in tooltip_body
 
 
+def test_scene_tab_scrolls_the_selected_tab_into_view():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+
+    assert "function scrollSceneTabIntoView" in source
+    assert "scrollIntoView({block: \"nearest\", inline: \"nearest\"})" in source
+    assert "scheduleSceneTabScroll(clickedSceneId);" in source
+    assert "scheduleSceneTabScroll(sceneId);" in source
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    start = source.index("  function sceneTabNodeForId")
+    stop = source.index("  function selectedSceneId", start)
+    program = r"""
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const body=source.slice(%d,%d);
+let calls=[];
+const selected={id:'scene-tab-new_scene',scrollIntoView:options=>calls.push(options)};
+const root={querySelectorAll:()=>[selected],querySelector:()=>selected};
+const sandbox={String,document:{getElementById:id=>id==='scene-tabs'?root:null},
+  window:{requestAnimationFrame:callback=>callback()},setTimeout};
+vm.createContext(sandbox);
+vm.runInContext(`
+  function sceneIdFromTabNode(node) {
+    if (!node || !node.id || node.id.indexOf('scene-tab-') !== 0) return null;
+    if (node.id.indexOf('scene-tab-close-') === 0) return null;
+    if (node.id.indexOf('scene-tab-label-') === 0) return node.id.slice('scene-tab-label-'.length);
+    return node.id.slice('scene-tab-'.length);
+  }
+  ${body}
+  scrollSceneTabIntoView('new_scene');
+`,sandbox);
+assert.equal(calls.length,1,'selected scene tab was not scrolled into view');
+assert.equal(calls[0].block,'nearest');
+assert.equal(calls[0].inline,'nearest');
+""" % (start, stop)
+    result = subprocess.run(
+        [node, "-e", program, str(MATTERVIS_JS)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_scene_tab_mutations_scroll_only_after_selection_changes():
+    """Tab class churn must not repeatedly scroll the active scene tab."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    stop = source.index("  // ── WS figure fast lane")
+    program = r"""
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const prefix=source.slice(0,%d);
+let active='scene-a', calls=[], listeners={}, observerCallback=null;
+const tabs={
+  'scene-a':{id:'scene-tab-scene-a',querySelector:()=>null,scrollIntoView:options=>calls.push(['scene-a',options])},
+  'scene-b':{id:'scene-tab-scene-b',querySelector:()=>null,scrollIntoView:options=>calls.push(['scene-b',options])},
+};
+const root={dataset:{},querySelector:()=>tabs[active],querySelectorAll:()=>Object.values(tabs),
+  addEventListener:(kind,fn)=>{listeners[kind]=fn;}};
+function FakeMutationObserver(callback){observerCallback=callback;}
+FakeMutationObserver.prototype.observe=()=>{};
+const sandbox={console,Date,JSON,Number,String,Object,Array,Promise,setTimeout:()=>{},clearTimeout:()=>{},
+  requestAnimationFrame:callback=>callback(),MutationObserver:FakeMutationObserver,
+  window:{requestAnimationFrame:callback=>callback(),Plotly:null,WebSocket:null,location:{protocol:'http:',host:'localhost'},
+    dash_clientside:{set_props:()=>true}},
+  document:{getElementById:id=>id==='scene-tabs'?root:null,querySelectorAll:()=>[],addEventListener:()=>{}}};
+vm.createContext(sandbox);
+vm.runInContext(prefix+`function ensureSceneTabTooltips(){} window.testScene={bindSceneTabIntent};})();`,sandbox);
+sandbox.window.testScene.bindSceneTabIntent();
+// Initial bind establishes a baseline but does not scroll.
+assert.equal(calls.length,0);
+// An unrelated class/aria mutation on the same active tab is a no-op.
+observerCallback([]);
+assert.equal(calls.length,0);
+// Keyboard navigation changes the selected DOM tab and scrolls exactly once.
+active='scene-b';
+observerCallback([]);
+assert.equal(calls.length,1);
+assert.equal(calls[0][0],'scene-b');
+observerCallback([]);
+assert.equal(calls.length,1);
+""" % stop
+    result = subprocess.run(
+        [node, "-e", program, str(MATTERVIS_JS)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_upload_tab_scroll_waits_for_new_tab_dom_node():
+    """An upload must scroll the new tab after Dash paints it, not the old tab."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    stop = source.index("  // ── WS figure fast lane")
+    program = r"""
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const prefix=source.slice(0,%d);
+let active='scene-a', calls=[], observerCallback=null;
+const tabNodes={
+  'scene-a':{id:'scene-tab-scene-a',scrollIntoView:options=>calls.push(['scene-a',options])},
+};
+const root={dataset:{},
+  querySelector:()=>tabNodes[active] || null,
+  querySelectorAll:()=>Object.values(tabNodes),
+  addEventListener:()=>{},
+};
+function FakeMutationObserver(callback){observerCallback=callback;}
+FakeMutationObserver.prototype.observe=()=>{};
+const sandbox={console,Date,JSON,Number,String,Object,Array,Promise,
+  setTimeout:()=>{},clearTimeout:()=>{},
+  MutationObserver:FakeMutationObserver,
+  window:{requestAnimationFrame:callback=>callback(),Plotly:null,WebSocket:null,
+    location:{protocol:'http:',host:'localhost'},
+    dash_clientside:{set_props:()=>true}},
+  document:{getElementById:id=>id==='scene-tabs'?root:null,
+    querySelectorAll:()=>[],addEventListener:()=>{}}};
+vm.createContext(sandbox);
+vm.runInContext(prefix+`function ensureSceneTabTooltips(){} window.testScene={bindSceneTabIntent};})();`,sandbox);
+sandbox.window.testScene.bindSceneTabIntent();
+// Upload completion selects the new scene before its tab is painted. The
+// explicit request must not fall back to scrolling the old selected tab.
+sandbox.window.MatterVisFlushSceneFrame('scene-b');
+assert.equal(calls.length,0,'missing upload tab incorrectly scrolled old tab');
+// Dash then inserts/selects the new tab; the observer retries and reaches it.
+tabNodes['scene-b']={id:'scene-tab-scene-b',scrollIntoView:options=>calls.push(['scene-b',options])};
+active='scene-b';
+observerCallback([]);
+assert.equal(calls.length,1,'new upload tab was not scrolled after it appeared');
+assert.equal(calls[0][0],'scene-b');
+assert.equal(calls[0][1].inline,'nearest');
+// Attribute churn on the selected tab must not scroll it again.
+observerCallback([]);
+assert.equal(calls.length,1);
+""" % stop
+    result = subprocess.run(
+        [node, "-e", program, str(MATTERVIS_JS)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def test_figure_socket_is_singleton_across_asset_rebinds():
     source = MATTERVIS_JS.read_text(encoding="utf-8")
     ws_idx = source.index("(function connectWS()")

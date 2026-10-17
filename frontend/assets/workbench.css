@@ -7,6 +7,7 @@
   --mv-panel: #ffffff;
   --mv-accent: #0f766e;
   --mv-accent-soft: #e7f4f1;
+  --mv-scene-tab-min-width: 160px;
 }
 
 #viewer-root {
@@ -82,18 +83,22 @@
   display: flex;
   min-width: 0;
   overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scroll-padding-inline: 8px;
   scrollbar-width: thin;
 }
 
 #scene-tabs .tab {
   align-items: center;
+  box-sizing: border-box;
   color: var(--mv-muted);
   display: flex;
-  flex: 0 0 160px !important;
+  flex: 0 0 var(--mv-scene-tab-min-width) !important;
   font-size: 12px;
-  min-width: 160px !important;
+  min-width: var(--mv-scene-tab-min-width) !important;
   overflow: hidden;
   padding: 10px 12px;
+  scroll-margin-inline: 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
