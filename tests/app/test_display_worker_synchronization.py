@@ -146,6 +146,48 @@ def test_flat_ortep_worker_frame_has_http_fallback(backend, monkeypatch):
     assert update(state, None, None, None, 1)[0] == figure
 
 
+def test_prior_camera_edit_does_not_block_a_later_figure_build(backend, monkeypatch):
+    state = backend.patch_state(
+        {"camera": {"eye": {"x": 2.0, "y": 1.0, "z": 1.0}, "up": {"x": 0, "y": 0, "z": 1}}},
+        broadcast=False,
+    )
+    assert backend._last_update_kind_by_scene[state["scene_id"]] == "camera"
+    monkeypatch.setattr(backend, "figure_for_state", lambda snapshot, **kw: fake_figure(backend, snapshot))
+    assert backend._render_worker.request_figure_build(state)
+    backend._render_worker._finalize_pool.run_next()
+    event = backend.latest_figure_broadcast(state["scene_id"])
+    assert event is not None and event["type"] == "figure"
+    assert event["scene_id"] == state["scene_id"]
+
+
+def test_explicit_camera_request_skips_rebuild_unless_flat_ortep(backend, monkeypatch):
+    state = dict(backend.get_state())
+    state["update_kind"] = "camera"
+    assert backend._render_worker.request_figure_build(state) is False
+    assert not backend._render_worker._finalize_pool.jobs
+
+    ortep = backend.patch_state({"material": "flat", "style": "ortep"}, broadcast=False)
+    ortep = dict(ortep)
+    ortep["update_kind"] = "camera"
+    monkeypatch.setattr(backend, "figure_for_state", lambda snapshot, **kw: fake_figure(backend, snapshot))
+    assert backend._render_worker.request_figure_build(ortep)
+    backend._render_worker._finalize_pool.run_next()
+    event = backend.latest_figure_broadcast(ortep["scene_id"])
+    assert event is not None and event["type"] == "figure"
+
+
+def test_update_view_queues_flat_ortep_camera_rebuild(backend):
+    state = backend.patch_state({"material": "flat", "style": "ortep"}, broadcast=False)
+    backend._last_update_kind_by_scene[state["scene_id"]] = "camera"
+    registry = CallbackRegistry()
+    callbacks_view.register_view_callbacks(registry, backend)
+    update = registry.callbacks["update_view"]
+    from dash import no_update
+
+    assert update(state, None, None) == (no_update,) * 4
+    assert backend._render_worker._finalize_pool.jobs
+
+
 def test_camera_reset_invalidates_inflight_worker_frame(backend, monkeypatch):
     state = backend.get_state()
 

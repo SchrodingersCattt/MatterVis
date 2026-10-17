@@ -78,10 +78,13 @@ def test_typed_and_legacy_style_paths_report_the_same_invalidation(tmp_path: Pat
         assert set(legacy["invalidations"]) == {
             item.value for item in typed_invalidations
         }
-        # The normalizer promotes ORTEP to an asymmetric unit.  The bridge
-        # must report geometry invalidation for the committed transition.
-        assert Invalidation.SCENE_GEOMETRY.value in legacy["invalidations"]
+        # ORTEP is a paint style. It must not switch the display scope, so
+        # the committed transition repaints the figure and leaves the scene
+        # geometry alone.
+        assert Invalidation.FIGURE_BODY.value in legacy["invalidations"]
+        assert Invalidation.SCENE_GEOMETRY.value not in legacy["invalidations"]
         assert typed_state["display_mode"] == legacy["state"]["display_mode"]
+        assert legacy["state"]["style"] == "ortep"
     finally:
         legacy_backend.close()
         typed_backend.close()

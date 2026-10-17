@@ -9,7 +9,6 @@ def display_option_items(mode, selected=()):
         {"label": "Disorder only", "value": "minor_only"},
         {"label": "Hydrogens", "value": "hydrogens"},
         {"label": "Cell boundary", "value": "unit_cell_box",
-         # Saved selected values remain actionable so they can be switched off.
          "disabled": mode != "unit_cell" and "unit_cell_box" not in selected},
     ]
 

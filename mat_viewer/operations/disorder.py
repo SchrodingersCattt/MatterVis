@@ -218,6 +218,14 @@ def resolve_disorder(
     if not cif_path:
         return []
 
+    raw_atoms = list(getattr(bundle, "raw_atoms", []) or [])
+    # A loaded scene the structure summary calls "none detected" has atoms
+    # and no occupancy disorder. Enumerating that still used to return MCK
+    # replicas. An empty raw-atom list is not that signal: callers that only
+    # have a CIF path still go through MolCrysKit.
+    if raw_atoms and not _disorder_raw_indices(raw_atoms):
+        return []
+
     method = _coerce_method(method)
     count = _coerce_count(count, method=method)
     seed = _coerce_seed(seed)
@@ -235,7 +243,6 @@ def resolve_disorder(
     if not replica_sets:
         return []
 
-    raw_atoms = list(getattr(bundle, "raw_atoms", []) or [])
     disorder_sites = _disorder_raw_indices(raw_atoms)
 
     # MCK kept indices live in ``scan_cif_disorder`` space, which does not line
@@ -279,6 +286,7 @@ def resolve_disorder(
                 "method": method,
                 "index": index,
                 "kept_indices": list(kept_tuple),
+                "kept_raw_indices": sorted(kept),
                 "kept_count": len(kept_tuple),
                 "highlight_indices": highlight,
                 "added_indices": added,

@@ -27,6 +27,7 @@ All endpoints live under `/api/v2` and accept optional `scene_id`.
 | `DELETE` | `/selection` | | Clear selection. |
 | `POST` | `/selection/by_fragment` | `{"fragment_label":"A0"}` | Select all atom labels in one MCK fragment. |
 | `POST` | `/selection/by_element` | `{"element":"Cl"}` | Select all visible labels of an element. |
+| `POST` | `/selection/by_box` | `{"rect_pixels":[x0,y0,x1,y1],"viewport_size":[w,h],"commit":true}` | Pick atoms whose centres project into the rectangle. `commit: false` returns the hit without writing the scene selection (used by the hover tooltip). A rectangle at most 48 px on both axes keeps only the nearest centre. |
 | `POST` | `/selection/all` | | Select all visible atom labels. |
 | `POST` | `/selection/invert` | | Invert against visible atom labels. |
 | `POST` | `/selection/promote` | `{"name":"picked atoms","color":"#FFD24A"}` | Create an `atom_group` from the selection and clear it. |

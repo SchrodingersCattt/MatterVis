@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from mat_viewer.app import ViewerBackend, _camera_from_store, _camera_store_payload
+from mat_viewer.app import (
+    ViewerBackend,
+    _camera_from_store,
+    _camera_store_payload,
+    _persist_relayout_camera,
+)
 
 
 CAMERA_A = {
@@ -39,6 +44,41 @@ def test_backend_figures_use_each_scene_camera(tmp_path):
     assert fig_a.layout.scene.camera.center.x == CAMERA_A["center"]["x"]
     assert fig_b.layout.scene.camera.eye.x == CAMERA_B["eye"]["x"]
     assert fig_b.layout.scene.camera.center.x == CAMERA_B["center"]["x"]
+
+
+def test_drag_camera_stays_on_the_scene_that_produced_it(tmp_path):
+    """A relayout stamped for scene A must not land on the selected scene B.
+
+    A drag that misses scene A is replaced on A only. Scene B keeps the
+    camera it had, and the active tab stays B.
+    """
+    backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    try:
+        scene_a = backend.active_scene_id()
+        scene_b = backend.create_scene(structure=backend.get_state()["structure"], label="Second")["id"]
+        before_b = backend.get_state(scene_b).get("camera")
+        missed = {
+            "eye": {"x": 0.0, "y": 0.0, "z": 50.0},
+            "center": {"x": 20.0, "y": 20.0, "z": 20.0},
+            "up": {"x": 0.0, "y": 0.0, "z": 1.0},
+        }
+        result = _persist_relayout_camera(
+            backend,
+            {"scene_id": scene_a, "relayout": {"scene.camera": missed}},
+            _camera_store_payload(scene_b, before_b),
+            now=10.0,
+            last_commit=0.0,
+            min_interval_s=0.25,
+        )
+        assert result is not None
+        assert result["refit"] is True
+        assert result["scene_id"] == scene_a
+        stored = backend.get_state(scene_a)["camera"]
+        assert stored["center"]["y"] != missed["center"]["y"]
+        assert backend.get_state(scene_b).get("camera") == before_b
+        assert backend.active_scene_id() == scene_b
+    finally:
+        backend.close()
 
 
 def test_backend_figure_title_prefers_scene_label(tmp_path):

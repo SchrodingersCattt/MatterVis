@@ -123,6 +123,19 @@ class _CoreBackendMixin:
         self._render_revisions: dict[str, int] = {
             str(scene_id): 0 for scene_id in self.scene_store.scenes
         }
+        # Delivery identity is separate from the persisted scene id. A
+        # generation changes whenever a scene is created in this server
+        # lifetime, so a late frame cannot become valid for a replacement
+        # scene that happens to reuse an id.
+        self._scene_generation_counter = 0
+        self._scene_generations: dict[str, int] = {}
+        for scene_id in self.scene_store.order:
+            self._scene_generation_counter += 1
+            self._scene_generations[str(scene_id)] = self._scene_generation_counter
+        self._camera_revisions: dict[str, int] = {
+            str(scene_id): int(self.scene_state(scene_id).get("camera_revision", 0) or 0)
+            for scene_id in self.scene_store.scenes
+        }
         self._last_update_kind_by_scene: dict[str, str] = {}
         self.pending_state: Optional[dict[str, Any]] = None
         self._first_figure_ready = threading.Event()
@@ -147,6 +160,7 @@ class _CoreBackendMixin:
         atexit.register(self._atexit_flush_callback)
         self._intent_lock = threading.Lock()
         self._intent_seq_by_client: dict[str, int] = {}
+        self.refit_offscreen_cameras()
 
     def default_state(
         self,
@@ -508,6 +522,7 @@ class _CoreBackendMixin:
                 "figure_version": self.version,
                 "version": self.version,
                 "scene_id": scene_id,
+                "scene_generation": self.scene_generation(scene_id),
                 "render_revision": self.render_revision(scene_id),
                 "reason": reason,
                 "figure": figure,
@@ -546,6 +561,7 @@ class _CoreBackendMixin:
             payload["figure_seq"] = self._figure_broadcast_seq
             payload["version"] = self.version
             payload["state"] = json_safe_wire(copy.deepcopy(current))
+            payload["scene_generation"] = self.scene_generation(scene_id)
             self._figure_broadcasts.append(payload)
             self._figure_broadcasts = self._figure_broadcasts[-32:]
         return payload
@@ -592,6 +608,10 @@ class _CoreBackendMixin:
         target = scene_id or self.scene_store.active_id
         return int(self._render_revisions.get(str(target), 0)) if target else 0
 
+    def scene_generation(self, scene_id: Optional[str] = None) -> int:
+        target = scene_id or self.scene_store.active_id
+        return int(self._scene_generations.get(str(target), 0)) if target else 0
+
     def _state_snapshot(
         self,
         state: dict[str, Any],
@@ -602,6 +622,7 @@ class _CoreBackendMixin:
         snapshot["server_started_at"] = self.server_started_iso()
         snapshot["version"] = self.version
         snapshot["render_revision"] = self.render_revision(target)
+        snapshot["scene_generation"] = self.scene_generation(target)
         return snapshot
 
     def _stamp_figure_render_metadata(
@@ -611,6 +632,7 @@ class _CoreBackendMixin:
     ) -> Any:
         render_meta = {
             "scene_id": state.get("scene_id"),
+            "scene_generation": self.scene_generation(state.get("scene_id")),
             "camera_revision": int(state.get("camera_revision", 0) or 0),
             "render_revision": int(
                 state.get(
@@ -646,6 +668,8 @@ class _CoreBackendMixin:
         if not isinstance(state, dict) or not scene_id:
             return True
         try:
+            if "scene_generation" in state and int(state.get("scene_generation", 0) or 0) != self.scene_generation(scene_id):
+                return False
             return (
                 int(state.get("render_revision", -1)) == self.render_revision(scene_id)
                 and int(state.get("camera_revision", 0) or 0)
@@ -690,6 +714,7 @@ class _CoreBackendMixin:
     def broadcast_render_error(
         self, *, scene_id: Optional[str], error: str
     ) -> dict[str, Any]:
+        state = self.get_state(scene_id)
         with self._figure_broadcast_lock:
             self._figure_broadcast_seq += 1
             payload = {
@@ -697,42 +722,41 @@ class _CoreBackendMixin:
                 "figure_seq": self._figure_broadcast_seq,
                 "version": self.version,
                 "scene_id": scene_id,
+                "scene_generation": self.scene_generation(scene_id),
                 "error": error,
             }
-            payload.update(state_versions(self.get_state(scene_id)).to_dict())
+            payload.update(state_versions(state).to_dict())
             self._figure_broadcasts.append(payload)
             self._figure_broadcasts = self._figure_broadcasts[-32:]
             return payload
 
     def figure_broadcasts_since(self, seq: int = 0) -> list[dict[str, Any]]:
         with self._figure_broadcast_lock:
-            return [
-                copy.deepcopy(payload)
-                for payload in self._figure_broadcasts
-                if int(payload.get("figure_seq", 0) or 0) > int(seq)
-                and self._figure_revision_matches_current(
-                    payload.get("scene_id"), payload.get("state")
-                )
-                and self._figure_state_matches_current(
-                    payload.get("scene_id"), payload.get("state")
-                )
-            ]
+            candidates = [copy.deepcopy(payload) for payload in self._figure_broadcasts
+                          if int(payload.get("figure_seq", 0) or 0) > int(seq)]
+        return [
+            payload for payload in candidates
+            if self._figure_revision_matches_current(
+                payload.get("scene_id"), payload.get("state")
+            )
+            and self._figure_state_matches_current(
+                payload.get("scene_id"), payload.get("state")
+            )
+        ]
 
     def latest_figure_broadcast(self, scene_id: Optional[str] = None) -> Optional[dict[str, Any]]:
         with self._figure_broadcast_lock:
-            for payload in reversed(self._figure_broadcasts):
-                if (
-                    payload.get("type") == "figure"
-                    and (scene_id is None or payload.get("scene_id") == scene_id)
-                    and self._figure_revision_matches_current(
-                        payload.get("scene_id"), payload.get("state")
-                    )
-                    and self._figure_state_matches_current(
-                        payload.get("scene_id"), payload.get("state")
-                    )
-                ):
-                    return copy.deepcopy(payload)
-            return None
+            candidates = [copy.deepcopy(payload) for payload in reversed(self._figure_broadcasts)
+                          if payload.get("type") == "figure"
+                          and (scene_id is None or payload.get("scene_id") == scene_id)]
+        for payload in candidates:
+            if self._figure_revision_matches_current(
+                payload.get("scene_id"), payload.get("state")
+            ) and self._figure_state_matches_current(
+                payload.get("scene_id"), payload.get("state")
+            ):
+                return payload
+        return None
 
     def latest_figure_seq(self) -> int:
         with self._figure_broadcast_lock:
@@ -770,6 +794,17 @@ class _CoreBackendMixin:
     def apply_intent(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, dict):
             raise ValueError("intent payload must be an object")
+        base_version = payload.get("base_version")
+        if base_version is not None:
+            try:
+                expected_version = int(base_version)
+            except (TypeError, ValueError) as exc:
+                raise ApiError("base_version must be an integer", status_code=409) from exc
+            if expected_version != int(self.version):
+                raise ApiError(
+                    f"stale intent base_version {expected_version} != {self.version}",
+                    status_code=409,
+                )
         client_id = str(payload.get("client_id") or "default")
         if "client_seq" in payload and payload["client_seq"] is not None:
             client_seq = int(payload["client_seq"])
@@ -866,6 +901,8 @@ class _CoreBackendMixin:
         )
 
     def healthz(self) -> dict[str, Any]:
+        from .build_info import asset_sha, build_sha
+
         return {
             "ok": True,
             "uptime_s": max(0.0, time.time() - self.server_started_at),
@@ -873,6 +910,8 @@ class _CoreBackendMixin:
             "scenes": len(self.scene_store.scenes),
             "structures": len(self.structure_names),
             "version": self.version,
+            "build_sha": build_sha(),
+            "asset_sha": asset_sha(),
         }
 
     def _load_upload_manifest(self) -> dict[str, Any]:

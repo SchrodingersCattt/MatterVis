@@ -72,10 +72,21 @@ def register_state_callbacks(app, backend):
         State("scene-tabs", "value"),
         State("display-mode-selector", "value"),
         State("display-options", "value"),
+        State("crystal-graph", "figure"),
         prevent_initial_call=True,
     )
-    def click_to_select_fragment(click_data, scene_id, display_mode, display_options):
+    def click_to_select_fragment(
+        click_data, scene_id, display_mode, display_options, figure
+    ):
         if not click_data or not click_data.get("points"):
+            return no_update
+        layout = (figure or {}).get("layout") if isinstance(figure, dict) else None
+        meta = (layout or {}).get("meta") if isinstance(layout, dict) else None
+        render = meta.get("mattervis_render") if isinstance(meta, dict) else None
+        rendered_scene = render.get("scene_id") if isinstance(render, dict) else None
+        # A click is stamped by the figure that was on screen. A tab change
+        # that lands first must not interpret that click in the new scene.
+        if rendered_scene and scene_id and str(rendered_scene) != str(scene_id):
             return no_update
         try:
             structure = backend.get_state(scene_id).get("structure")
@@ -414,6 +425,17 @@ def register_state_callbacks(app, backend):
             backend.pop_pending_state()
             state = backend.get_state()
         else:
+            peeked = backend.peek_pending_state()
+            # Each page follows its own selected scene. A pending payload for
+            # a different scene belongs to another client and must stay
+            # queued for that client's next poll.
+            if (
+                peeked
+                and scene_id
+                and peeked.get("scene_id")
+                and str(peeked.get("scene_id")) != str(scene_id)
+            ):
+                return (no_update,) * n_outputs
             state = backend.pop_pending_state()
         # A poll can race a tab switch or an upload.  ``pending_state`` is
         # tagged with the scene that produced it; never apply that snapshot

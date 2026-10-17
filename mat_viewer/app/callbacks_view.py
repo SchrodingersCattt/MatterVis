@@ -15,6 +15,27 @@ from .view_updates import UpdateKind, classify_change, make_update
 from .backend import ViewerBackend
 
 
+def client_http_frame(backend, cursor, scene_id):
+    """Return the selected scene's newest frame once for this cursor.
+
+    The cursor is browser state, keyed by scene id. One client's sequence
+    cannot hide a frame from another client, and a higher sequence on scene
+    A cannot hide an older sequence that still belongs to scene B.
+    """
+    stored = dict(cursor) if isinstance(cursor, dict) else {}
+    if not scene_id:
+        return None, stored
+    event = backend.latest_figure_broadcast(str(scene_id))
+    if not event:
+        return None, stored
+    seq = int(event.get("figure_seq") or 0)
+    key = str(scene_id)
+    if int(stored.get(key) or 0) >= seq:
+        return None, stored
+    stored[key] = seq
+    return event, stored
+
+
 def register_view_callbacks(app, backend):
     # Throttle high-frequency drag relayout frames so camera persistence
     # does not bump backend version on every mouse-move.
@@ -25,7 +46,6 @@ def register_view_callbacks(app, backend):
     # clientside callback below is the sole Plotly/SVG submitter for these
     # envelopes; Dash never competes with the WebSocket frame path.
     _last_confirmed_state: dict[str, Any] = {}
-    _last_http_frame_seq = 0
 
     @app.callback(
         Output("view-update-store", "data", allow_duplicate=True),
@@ -38,8 +58,6 @@ def register_view_callbacks(app, backend):
         scene_id = str(state.get("scene_id") or "")
         before = _last_confirmed_state.get(scene_id)
         _last_confirmed_state[scene_id] = copy.deepcopy(state)
-        if before is None:
-            return no_update
         payload = {
             "display_options": list(state.get("display_options") or []),
             "axis_scale": state.get("axis_scale"),
@@ -47,9 +65,30 @@ def register_view_callbacks(app, backend):
             "polyhedron_specs": copy.deepcopy(state.get("polyhedron_specs") or []),
             "label_mode": state.get("label_mode"),
         }
-        return make_update(
+        if before is None:
+            # The first confirmed edit of a scene is still a real edit.
+            # prevent_initial_call means this callback never saw the seed
+            # state, so classify from the kind the reducer just recorded.
+            kind = str(getattr(backend, "_last_update_kind_by_scene", {}).get(scene_id) or "")
+            if not kind:
+                return no_update
+            if kind == UpdateKind.CAMERA.value:
+                payload["camera"] = copy.deepcopy(state.get("camera"))
+                payload["command"] = "state-confirmed"
+            return make_update(
+                state, operation=kind, payload=payload, reason="state-confirmed"
+            ).to_dict()
+        update = make_update(
             state, before=before, payload=payload, reason="state-confirmed"
-        ).to_dict()
+        )
+        if getattr(update.kind, "value", update.kind) == UpdateKind.CAMERA.value:
+            update = make_update(
+                state,
+                before=before,
+                payload={**payload, "camera": copy.deepcopy(state.get("camera")), "command": "state-confirmed"},
+                reason="state-confirmed",
+            )
+        return update.to_dict()
 
     if hasattr(app, "clientside_callback"):
         app.clientside_callback(
@@ -69,20 +108,19 @@ def register_view_callbacks(app, backend):
 
     @app.callback(
         Output("view-update-store", "data", allow_duplicate=True),
+        Output("view-http-cursor", "data"),
         Input("agent-state-poll", "n_intervals"),
+        State("view-http-cursor", "data"),
+        State("agent-state-store", "data"),
         prevent_initial_call=True,
     )
-    def deliver_http_fallback(_n_intervals):
-        """Deliver a completed frame without assembling or rewriting Dash UI."""
-        nonlocal _last_http_frame_seq
-        event = backend.latest_figure_broadcast()
-        if not event:
-            return no_update
-        seq = int(event.get("figure_seq", 0) or 0)
-        if seq <= _last_http_frame_seq:
-            return no_update
-        _last_http_frame_seq = seq
-        return event
+    def deliver_http_fallback(_n_intervals, cursor, state):
+        """Deliver one scene's newest frame to this browser's own cursor."""
+        scene_id = state.get("scene_id") if isinstance(state, dict) else None
+        event, stored = client_http_frame(backend, cursor, scene_id)
+        if event is None:
+            return no_update, no_update
+        return event, stored
 
     @app.callback(
         Output("rightclick-target", "data", allow_duplicate=True),
@@ -487,14 +525,17 @@ def register_view_callbacks(app, backend):
         prevent_initial_call=True,
     )
     def sync_view_projection_from_state(state):
-        # Mirror ``state["projection"]`` onto the radio so externally
-        # driven changes (REST mutations, scene switches) keep the UI
-        # honest. The matched-value short-circuit in
-        # ``apply_view_projection`` prevents the round-trip from
-        # ratcheting the figure cache.
+        # Mirror the live scene projection onto the radio. The store
+        # payload can be a scene switch that was already in flight when
+        # the user picked Orthographic; writing that older value back
+        # would undo the click.
         if not isinstance(state, dict):
             return no_update
-        return _coerce_projection(state.get("projection") or "perspective")
+        scene_id = state.get("scene_id")
+        live = state
+        if scene_id and scene_id in backend.scene_store.scenes:
+            live = backend.get_state(scene_id)
+        return _coerce_projection(live.get("projection") or "perspective")
 
     @app.callback(
         Output("camera-state-store", "data", allow_duplicate=True),
@@ -534,63 +575,66 @@ def register_view_callbacks(app, backend):
             _fast_view_metadata(backend, state, camera_payload),
         )
 
+    if hasattr(app, "clientside_callback"):
+        app.clientside_callback(
+            """
+            function(relayout) {
+              if (!relayout || typeof relayout !== "object") return window.dash_clientside.no_update;
+              var keys = Object.keys(relayout);
+              var touches = false;
+              for (var i = 0; i < keys.length; i++) {
+                var key = keys[i];
+                if (key === "scene.camera" || key.indexOf("scene.camera.") === 0) touches = true;
+                if (key === "scene" && relayout.scene && relayout.scene.camera) touches = true;
+              }
+              if (!touches) return window.dash_clientside.no_update;
+              var gd = document.querySelector("#crystal-graph .js-plotly-plot");
+              var meta = gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
+              var canvasId = meta && meta.scene_id ? String(meta.scene_id) : "";
+              var gestureId = window.__mvGestureSceneId ? String(window.__mvGestureSceneId) : "";
+              if (gestureId && canvasId && gestureId !== canvasId) return window.dash_clientside.no_update;
+              var sceneId = gestureId || canvasId;
+              if (!sceneId) return window.dash_clientside.no_update;
+              return {scene_id: sceneId, relayout: relayout, seq: Date.now()};
+            }
+            """,
+            Output("camera-capture-store", "data"),
+            Input("crystal-graph", "relayoutData"),
+            prevent_initial_call=True,
+        )
+
     @app.callback(
         Output("camera-state-store", "data", allow_duplicate=True),
         Output("agent-state-store", "data", allow_duplicate=True),
-        Input("crystal-graph", "relayoutData"),
+        Output("view-update-store", "data", allow_duplicate=True),
+        Input("camera-capture-store", "data"),
         State("camera-state-store", "data"),
-        State("scene-tabs", "value"),
         prevent_initial_call=True,
     )
-    def capture_camera(relayout_data, camera_state, scene_id):
-        scene_id = scene_id or backend.active_scene_id()
-        if scene_id and scene_id not in backend.scene_store.scenes:
-            return no_update, no_update
-        relayout = relayout_data if isinstance(relayout_data, dict) else {}
-        full_camera_payload = bool(
-            isinstance(relayout.get("scene.camera"), dict)
-            or (
-                isinstance(relayout.get("scene"), dict)
-                and isinstance((relayout.get("scene") or {}).get("camera"), dict)
-            )
-        )
-        current_camera = _camera_from_store(camera_state, scene_id) or backend.get_state(scene_id).get("camera")
-        camera = _camera_from_relayout_data(
-            relayout,
-            current_camera,
-        )
-        if not camera:
-            return no_update, no_update
-        if isinstance(current_camera, dict) and camera == current_camera:
-            return no_update, no_update
-        scene_key = str(scene_id or "")
+    def capture_camera(capture, camera_state):
+        # The stamp is the scene under the pointer when the drag started.
+        # ``scene-tabs`` can already be the destination tab.
+        scene_key = str((capture or {}).get("scene_id") or "")
         now = time.monotonic()
-        last_commit = _last_camera_commit_by_scene.get(scene_key, 0.0)
-        # Dragging emits dotted partial camera updates every frame; persisting
-        # each one churns backend version and WS snapshots. Keep the server in
-        # sync at ~4 Hz during motion, but always persist full-camera payloads
-        # (mouseup/programmatic relayout) immediately.
-        if not full_camera_payload and (now - last_commit) < _camera_commit_min_interval_s:
-            return no_update, no_update
-        # ``broadcast=False`` is essential here: the browser is the
-        # source of truth for the camera, so we must NOT arm
-        # ``pending_state`` -- otherwise the next 5 s ``agent-state-poll``
-        # echoes this camera back through ``sync_agent_state`` ->
-        # ``camera-state-store`` -> ``update_view`` and the figure
-        # re-renders with whatever camera was captured at that exact
-        # moment, snapping the user's view back periodically. See
-        # ``tests/app/test_camera_capture_no_poll_echo.py``.
-        backend.apply_intent(
-            {"type": "set_camera", "scene_id": scene_id, "payload": {"camera": camera}}
+        result = _persist_relayout_camera(
+            backend,
+            capture,
+            camera_state,
+            now=now,
+            last_commit=_last_camera_commit_by_scene.get(scene_key, 0.0),
+            min_interval_s=_camera_commit_min_interval_s,
         )
-        _last_camera_commit_by_scene[scene_key] = now
-        state = backend.get_state(scene_id)
-        is_flat_ortep = (
-            state.get("material") == "flat" and state.get("style") == "ortep"
-        )
+        if result is None:
+            return no_update, no_update, no_update
+        _last_camera_commit_by_scene[result["scene_id"]] = now
+        # A drag Plotly already applied can leave the structure outside the
+        # orthographic window. Push the replacement back; a drag that still
+        # shows an atom does not.
+        view_update = result.get("view_update")
         return (
-            _camera_store_payload(scene_id, camera),
-            copy.deepcopy(state) if is_flat_ortep else no_update,
+            result["camera_store"],
+            result["agent_state"] if result["agent_state"] is not None else no_update,
+            view_update if view_update is not None else no_update,
         )
 
     @app.callback(
@@ -602,14 +646,7 @@ def register_view_callbacks(app, backend):
     def refresh_fast_view_metadata(agent_state, camera_state):
         # The store is a notification, not a second editable state owner.
         # get_state supplies the authoritative render revision as well.
-        requested_scene = (agent_state or {}).get("scene_id")
-        try:
-            state = backend.get_state(requested_scene)
-        except KeyError:
-            # A tab can be closed between the store update and this callback.
-            # Resolve the active scene rather than returning a 500 that leaves
-            # the figure and tab strip on different generations.
-            state = backend.get_state()
+        state = backend.get_state((agent_state or {}).get("scene_id"))
         return _fast_view_metadata(backend, state, camera_state)
 
     @app.callback(
@@ -684,23 +721,17 @@ def register_view_callbacks(app, backend):
         Output("topology-results", "children"),
         Output("structure-summary", "children"),
         Input("agent-state-store", "data"),
-        Input("scene-switch-seq", "data"),
-        Input("view-update-store", "data"),
         State("crystal-graph", "figure"),
         State("camera-state-store", "data"),
     )
     def update_view(agent_state, *args):
-        # Current Dash inputs are (state, scene_switch, view_update) followed
-        # by the two figure/camera States. Keep the older direct-call shapes
-        # working for extensions and regression tests.
-        _switch_event = None
-        view_update = None
-        if len(args) >= 4:
-            _switch_event, view_update, current_figure, _camera_state = args[:4]
-        elif len(args) == 3:
-            _, current_figure, _camera_state = args
-        elif len(args) == 2:
+        # Current contract is (state, current_figure, camera_state).  Accept
+        # the pre-refactor four-argument call shape for host integrations that
+        # still invoke the callback directly in tests.
+        if len(args) == 2:
             current_figure, _camera_state = args
+        elif len(args) >= 3:
+            _, current_figure, _camera_state = args[:3]
         else:
             current_figure, _camera_state = None, None
         # State notifications enqueue a full worker build. The existing poll
@@ -716,13 +747,11 @@ def register_view_callbacks(app, backend):
         # pushes from live interaction in JS; no server-side gate is
         # needed.
         cb_start = time.monotonic()
-        requested_scene = (agent_state or {}).get("scene_id")
-        try:
-            state = backend.get_state(requested_scene)
-        except KeyError:
-            # Uploads and tab closes can invalidate an in-flight store value.
-            # The active scene is the only safe fallback for this render pass.
-            state = backend.get_state()
+        # ``no_update`` is truthy. A style capture that did not change state
+        # must not be treated as a scene payload.
+        if agent_state is not None and not isinstance(agent_state, dict):
+            return (no_update,) * 4
+        state = backend.get_state((agent_state or {}).get("scene_id"))
         scene_id = state.get("scene_id")
         previous_state = getattr(update_view, "_last_state", None)
         change_kind = classify_change(previous_state, state)
@@ -759,13 +788,7 @@ def register_view_callbacks(app, backend):
         # absent. Never stamp a newer revision onto the browser's old geometry.
         if not backend._figure_revision_matches_current(scene_id, state):
             return (no_update,) * 4
-        event = (
-            view_update
-            if isinstance(view_update, dict)
-            and view_update.get("type") == "figure"
-            and view_update.get("scene_id") == scene_id
-            else backend.latest_figure_broadcast(scene_id)
-        )
+        event = backend.latest_figure_broadcast(scene_id)
         if (
             not event
             or event.get("scene_id") != scene_id
@@ -841,7 +864,9 @@ def register_view_callbacks(app, backend):
             try:
                 result = backend.export_cif(scene_id=backend.active_scene_id())
             except Exception as exc:
-                message, class_name = _status_message(f"CIF export failed: {exc}", "error")
+                message, class_name = _status_message(
+                    f"CIF export failed: {exc}", "error"
+                )
                 return message, class_name, no_update, no_update, False, 0
             message, class_name = _status_message(
                 f"CIF export ready: {result['filename']}", "success"
@@ -897,7 +922,9 @@ def register_view_callbacks(app, backend):
         try:
             result = backend.save_preset()
         except Exception as exc:
-            message, class_name = _status_message(f"Save preset failed: {exc}", "error")
+            message, class_name = _status_message(
+                f"Save preset failed: {exc}", "error"
+            )
             return message, class_name, no_update, no_update, False, 0
         message, class_name = _status_message(f"Saved preset: {result['path']}", "success")
         return message, class_name, no_update, no_update, False, 0

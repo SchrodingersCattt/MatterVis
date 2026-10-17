@@ -99,7 +99,7 @@ sequenceDiagram
     participant W as WS /api/v2/ws
 
     C->>W: connect
-    W-->>C: snapshot {version: N, state, structures}
+    W-->>C: snapshot {version: N, state, structures, build_sha, asset_sha}
     C->>W: {"type":"subscribe_figure","enabled":true}
 
     C->>API: POST /state {"atom_scale": 1.2, "scene_id": "s2"}
@@ -150,7 +150,17 @@ Notes for callers:
 - Scene persistence is debounced. A successful mutation updates memory
   immediately and schedules `.local/crystal_view_scenes.json` for a
   background save; explicit preset/export paths still flush before
-  writing their own artifacts.
+  writing their own artifacts. On startup, and again on every drag
+  capture, a camera that misses the scene or collapses it to a clipped
+  speck or thin line is replaced with that scene's default camera. A
+  display-scope change always installs the default, because the previous
+  look-at belongs to a different frustum. The replacement keeps the
+  active projection, including orthographic, and the figure camera is
+  stamped with that projection when the stored camera omitted it. A drag
+  that was replaced is pushed back to the browser as a camera view
+  update. Reset does the same replacement. A zoom whose visible centers
+  still span the viewport is left unchanged. Switching to ORTEP does not
+  change display scope.
 - For one-shot "wait for my change to land" scripts, the synchronous
   `GET /screenshot?at_version=N` path is simpler than running the WS;
   it blocks until the backend reaches version `N`.
@@ -165,7 +175,15 @@ Notes for callers:
 - `GET /healthz`
   Lightweight liveness probe for automation retry loops. Returns
   `{"ok": true, "uptime_s": ..., "server_started_at": ..., "scenes": N,
-  "structures": N, "version": N}` without building a figure.
+  "structures": N, "version": N, "build_sha": ..., "asset_sha": ...}`
+  without building a figure. `build_sha` is frozen when the process
+  first computes it. `asset_sha` is recomputed from the frontend files
+  on disk. The WebSocket snapshot carries the same two fields beside
+  `state`; they are not part of scene state and are not stored. The
+  index page embeds them as `window.MATTERVIS_BUILD` and, when they
+  differ, asks the user to restart the server and reload. Asset URLs
+  include the frozen token, and the index response is
+  `Cache-Control: no-store`.
 - `POST /state`
   Accepts any subset of:
   `structure`, `display_mode`, `atom_scale`, `bond_radius`,
@@ -535,16 +553,17 @@ The full list (authoritative; the diagram only groups them):
 
 ## Right-click / picking layer
 
-The `crystal-graph` figure includes invisible `Scatter3d` "selection"
-traces overlaid on atoms, polyhedra, and bond midpoints. Each marker
-carries a `customdata` array whose first element is a kind tag, so
-client-side code (the right-click menu, custom Plotly listeners,
-external automation) can identify what was clicked without parsing
-trace names:
+The `crystal-graph` figure includes `Scatter3d` pick traces overlaid on
+atoms, polyhedra, and bond midpoints. Each marker carries a `customdata`
+array whose first element is a kind tag. Atom meshes are opaque, so a
+marker at the atom centre is behind the mesh and Plotly's hover event
+does not fire. The page therefore projects the same rectangle through
+`POST /selection/by_box` with `commit: false` for the tooltip, and
+commits the selection on left click:
 
 | `customdata[0]` | Following fields |
 |---|---|
-| `"atom"` | `[atom_index, label, element, fragment_label]` |
+| `"atom"` | `[atom_index, label, element, is_minor, fragment_label, part]` |
 | `"polyhedron"` | `[spec_id, fragment_label, is_anchor]` |
 | `"bond"` | `[[label_i, label_j], [elem_i, elem_j], is_minor]` |
 

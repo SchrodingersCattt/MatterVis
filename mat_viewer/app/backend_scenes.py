@@ -43,18 +43,43 @@ class _SceneBackendMixin:
         return tabs
 
     def scene_close_buttons(self) -> list[Any]:
-        buttons = []
+        """Visible tab chips. The close control sits inside the chip.
+
+        ``dcc.Tabs`` stays mounted so existing callbacks can read
+        ``scene-tabs.value``, and is hidden. Selecting a chip writes that
+        value from the browser.
+        """
+        active = self.active_scene_id()
+        chips = []
         for scene in self.scene_store.list():
-            buttons.append(
-                html.Button(
-                    html.Span("\u00d7", id=f"scene-tab-close-{scene['id']}"),
-                    id={"type": "tab-close", "scene_id": scene["id"]},
-                    className="tab-close-x",
-                    n_clicks=0,
-                    title=f"Close {scene['label']}",
+            selected = scene["id"] == active
+            chips.append(
+                html.Div(
+                    [
+                        html.Button(
+                            scene["label"],
+                            id={"type": "tab-select", "scene_id": scene["id"]},
+                            className="tab-select",
+                            n_clicks=0,
+                            title=scene["label"],
+                        ),
+                        html.Button(
+                            html.Span(
+                                "\u00d7",
+                                id=f"scene-tab-close-{scene['id']}",
+                            ),
+                            id={"type": "tab-close", "scene_id": scene["id"]},
+                            className="tab-close-x",
+                            n_clicks=0,
+                            title=f"Close {scene['label']}",
+                        ),
+                    ],
+                    className="scene-tab-chip"
+                    + (" scene-tab-chip--selected" if selected else ""),
+                    title=scene["label"],
                 )
             )
-        return buttons
+        return chips
 
     def scene_state(self, scene_id: Optional[str] = None) -> dict[str, Any]:
         scene = self.scene_store.get(scene_id)
@@ -127,6 +152,9 @@ class _SceneBackendMixin:
             save=False,
         )
         self._render_revisions[str(scene.id)] = 0
+        self._scene_generation_counter += 1
+        self._scene_generations[str(scene.id)] = self._scene_generation_counter
+        self._camera_revisions[str(scene.id)] = int(base_state.get("camera_revision", 0) or 0)
         self.current_state = self.scene_state(scene.id)
         # ``pending_state`` is a derived broadcast snapshot. Keep it detached
         # from the canonical scene state so poll-driven UI sync cannot alias
@@ -166,6 +194,8 @@ class _SceneBackendMixin:
     def delete_scene(self, scene_id: str) -> dict[str, Any]:
         removed = self.scene_store.remove(scene_id, save=False)
         self._render_revisions.pop(str(scene_id), None)
+        self._scene_generations.pop(str(scene_id), None)
+        self._camera_revisions.pop(str(scene_id), None)
         if self.scene_store.active_id:
             self.current_state = self.scene_state(self.scene_store.active_id)
         self.pending_state = self._state_snapshot(
@@ -193,6 +223,8 @@ class _SceneBackendMixin:
         ]:
             removed.append(self.scene_store.remove(scene_id, save=False).to_dict())
             self._render_revisions.pop(str(scene_id), None)
+            self._scene_generations.pop(str(scene_id), None)
+            self._camera_revisions.pop(str(scene_id), None)
         self.scene_store.active_id = keep_id
         self.current_state = self.scene_state(keep_id)
         self.pending_state = self._state_snapshot(self.current_state, keep_id)
@@ -206,6 +238,9 @@ class _SceneBackendMixin:
     ) -> dict[str, Any]:
         scene = self.scene_store.duplicate(scene_id, label=label, save=False)
         self._render_revisions[str(scene.id)] = 0
+        self._scene_generation_counter += 1
+        self._scene_generations[str(scene.id)] = self._scene_generation_counter
+        self._camera_revisions[str(scene.id)] = int(self.scene_state(scene.id).get("camera_revision", 0) or 0)
         self.current_state = self.scene_state(scene.id)
         self.pending_state = self._state_snapshot(self.current_state, scene.id)
         self._bump_version()

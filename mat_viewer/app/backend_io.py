@@ -374,7 +374,14 @@ class _IOBackendMixin:
             structure=safe_name,
             cif_path=path,
         ):
-            bundle = build_loaded_crystal(name=safe_name, cif_path=path, title=stem, preset=self.preset, source="upload")
+            try:
+                bundle = build_loaded_crystal(name=safe_name, cif_path=path, title=stem, preset=self.preset, source="upload")
+            except IndexError as exc:
+                # MolCrysKit currently surfaces an empty/invalid CIF as an
+                # IndexError while scanning its first data block. Keep the
+                # upload API's stable ValueError contract and avoid creating
+                # a scene for bytes that are not a CIF document.
+                raise ValueError("not a CIF file") from exc
         with perf_log.time_block("upload:create_scene", kind="event", structure=bundle.name):
             with self._lock:
                 self.bundles[bundle.name] = bundle
@@ -702,11 +709,15 @@ class _IOBackendMixin:
         return payload
 
     def websocket_snapshot(self, *, include_figure: bool = False) -> dict[str, Any]:
+        from .build_info import asset_sha, build_sha
+
         state = self.get_state()
         snapshot = {
             "version": self.version,
             "state": state,
             "structures": self.list_structures(),
+            "build_sha": build_sha(),
+            "asset_sha": asset_sha(),
         }
         if include_figure:
             latest = self.latest_figure_broadcast()

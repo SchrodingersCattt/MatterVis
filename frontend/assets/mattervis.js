@@ -14,7 +14,7 @@
   function decodeCustomdata(cd) {
     if (!Array.isArray(cd) || cd.length === 0) return null;
     const kind = cd[0];
-    if (kind === "atom") return { kind:"atom", index:cd[1], label:cd[2], element:cd[3], is_minor:!!cd[4], fragment_label:cd[5]||"" };
+    if (kind === "atom") return { kind:"atom", index:cd[1], label:cd[2], element:cd[3], is_minor:!!cd[4], fragment_label:cd[5]||"", part:cd.length>6?String(cd[6]||""):"" };
     if (kind === "polyhedron") return { kind:"polyhedron", spec_id:cd[1], fragment_label:cd[2]||"", is_anchor:!!cd[3] };
     if (kind === "bond") return { kind:"bond", label_pair:cd[1], element_pair:cd[2], is_minor:!!cd[3] };
     return null;
@@ -27,14 +27,67 @@
   }
 
   // ── Interaction state (graph_interaction_store.js) ─────────────
-  let interactionActive = false, settleTimer = null;
+  const INTERACTION_SETTLE_MS = 40;
+  let interactionActive = false, settleTimer = null, gestureGeneration = 0;
   let interactionSettled = Promise.resolve(), endInteraction = null;
   let pendingFigurePush = null;
   const pendingFigureByScene = Object.create(null);
+  const latestFigureSeqByScene = Object.create(null);
   let sceneTabIntentId = null, sceneTabIntentAt = 0;
   let sceneTabIntentSource = null;
   let renderServerEpoch = null;
   const expectedRenderRevisionByScene = Object.create(null);
+  const expectedCameraRevisionByScene = Object.create(null);
+  const expectedSceneGenerationByScene = Object.create(null);
+  const MAX_RENDER_QUEUE = 32;
+
+  /* Plotly work is asynchronous.  Keep one bounded FIFO per graph so a
+   * burst of camera commands or duplicate Dash/WS frames cannot grow an
+   * unbounded promise chain.  Dropped entries are already superseded by a
+   * newer frame; resolving them lets their callers recover and continue. */
+  function enqueueRender(gd, task, options) {
+    if (!gd || typeof task !== "function") return Promise.resolve(gd);
+    let queue = gd.__mvRenderQueueState;
+    if (!queue) {
+      queue = {items: [], running: false, last: Promise.resolve(gd)};
+      gd.__mvRenderQueueState = queue;
+    }
+    if (queue.items.length >= MAX_RENDER_QUEUE) {
+      const dropped = queue.items.splice(0);
+      dropped.forEach(function (item) {
+        if (options && options.rejectDropped) item.reject(new Error("render queue overflow"));
+        else item.resolve(gd);
+      });
+    }
+    const result = new Promise(function (resolve, reject) {
+      queue.items.push({task: task, resolve: resolve, reject: reject, isCurrent: options && options.isCurrent});
+    });
+    queue.last = result.catch(function () { return gd; });
+    gd.__mvRenderQueue = queue.last;
+    function pump() {
+      if (queue.running || !queue.items.length) return;
+      const item = queue.items.shift();
+      if (item.isCurrent && !item.isCurrent()) {
+        item.reject(new Error("stale render command"));
+        pump();
+        return;
+      }
+      queue.running = true;
+      Promise.resolve().then(item.task).then(item.resolve, item.reject).then(function () {
+        queue.running = false;
+        pump();
+      }, function () {
+        queue.running = false;
+        pump();
+      });
+    }
+    pump();
+    return result;
+  }
+  window.MatterVisRenderQueue = window.MatterVisRenderQueue || {
+    enqueue: enqueueRender,
+    maxPending: MAX_RENDER_QUEUE,
+  };
   function figurePushIsCurrent(p) {
     return !!(p && typeof p.isCurrent === "function" && p.isCurrent());
   }
@@ -57,6 +110,37 @@
     sceneTabIntentId = sceneId;
     sceneTabIntentAt = Date.now();
     sceneTabIntentSource = "pointer";
+    lastHovered = null;
+    resyncScene(sceneId);
+  }
+  function resyncScene(sceneId, attempt) {
+    if (!window.fetch || !sceneId) return;
+    attempt = Number(attempt || 0);
+    window.fetch("/api/v2/view-updates?since=0&scene_id=" + encodeURIComponent(String(sceneId)), {credentials: "same-origin"})
+      .then(function (response) { return response.ok ? response.json() : null; })
+      .then(function (body) {
+        const rows = (body && body.updates || []).filter(function (item) {
+          return item && String(item.scene_id || "") === String(sceneId) && (item.figure || item.type === "view_update" || item.type === "render_error");
+        });
+        const latest = rows.length ? rows[rows.length - 1] : null;
+        const pending = !!(body && body.pending);
+        if (body && body.terminal) return;
+        if (!latest || !window.MatterVisViewUpdates || typeof window.MatterVisViewUpdates.submit !== "function") {
+          // Keep retrying while a render is pending, but cap the total wait so
+          // a failed worker cannot leave an endless polling loop behind.
+          if (attempt < 40 || (pending && attempt < 120)) {
+            setTimeout(function () { resyncScene(sceneId, attempt + 1); }, 250);
+          } else if (pending && window.console && console.warn) {
+            console.warn("MatterVis scene resync timed out", sceneId);
+          }
+          return;
+        }
+        Promise.resolve(window.MatterVisViewUpdates.submit(latest)).catch(function (error) {
+          console.error("MatterVis scene resync failed", error);
+        });
+      }).catch(function () {
+        if (attempt < 40) setTimeout(function () { resyncScene(sceneId, attempt + 1); }, 250);
+      });
   }
   function selectedSceneId() {
     const root = document.getElementById("scene-tabs");
@@ -106,6 +190,7 @@
     sceneTabIntentId = String(sceneId);
     sceneTabIntentAt = Date.now();
     sceneTabIntentSource = "programmatic";
+    resyncScene(sceneTabIntentId);
   };
   function fastViewMetadata() {
     const node = document.getElementById("fast-view-metadata");
@@ -124,14 +209,26 @@
     if (epoch&&renderServerEpoch&&epoch!==renderServerEpoch) {
       if (!allowEpochChange) return;
       Object.keys(expectedRenderRevisionByScene).forEach(function(key){delete expectedRenderRevisionByScene[key];});
+      Object.keys(expectedCameraRevisionByScene).forEach(function(key){delete expectedCameraRevisionByScene[key];});
+      Object.keys(expectedSceneGenerationByScene).forEach(function(key){delete expectedSceneGenerationByScene[key];});
     }
     if (epoch) renderServerEpoch=epoch;
     if (!value.scene_id) return;
     const revision=Number(value.render_revision);
     if (!Number.isFinite(revision)) return;
     const key=String(value.scene_id);
-    const previous=expectedRenderRevisionByScene[key];
+    let previous=expectedRenderRevisionByScene[key];
     const cameraRevision=Number(value.camera_revision||0);
+    const generation=String(value.scene_generation||"");
+    const priorGeneration=expectedSceneGenerationByScene[key];
+    if (priorGeneration!==undefined && priorGeneration!==generation) {
+      delete expectedRenderRevisionByScene[key];
+      delete expectedCameraRevisionByScene[key];
+      previous=null;
+    }
+    expectedSceneGenerationByScene[key]=generation;
+    const priorCamera=expectedCameraRevisionByScene[key];
+    if (priorCamera===undefined || cameraRevision>priorCamera) expectedCameraRevisionByScene[key]=cameraRevision;
     if (!previous||revision>previous.revision||(revision===previous.revision&&cameraRevision>previous.cameraRevision)) {
       expectedRenderRevisionByScene[key]={revision:revision,cameraRevision:cameraRevision};
     }
@@ -161,15 +258,32 @@
     const render=meta&&typeof meta==="object"?meta.mattervis_render:null;
     return render&&typeof render==="object"?render:null;
   }
+  function canvasSceneId() {
+    const gd = graphDiv();
+    const render = renderMetadataFromLayout(gd && gd.layout);
+    return render && render.scene_id ? String(render.scene_id) : "";
+  }
   function figureMetadataIsCurrent(render) {
     if (!render) return true;
     const sceneId=currentSceneId();
     if (sceneId&&render.scene_id&&String(render.scene_id)!==sceneId) return false;
+    /* A background build for a scene the user did not select must not
+     * replace the structure already on the canvas. */
+    if (!sceneId && render.scene_id && canvasSceneId() && String(render.scene_id)!==canvasSceneId()) return false;
     const expected=currentRenderRevision();
     const revision=Number(render.render_revision);
-    if (expected!==null&&(!Number.isFinite(revision)||revision!==expected)) return false;
-    const expectedState=sceneId&&expectedRenderRevisionByScene[sceneId];
-    if (expectedState&&Number(render.camera_revision||0)!==expectedState.cameraRevision) return false;
+    if (expected!==null&&(!Number.isFinite(revision)||revision<expected)) return false;
+    /* A complete frame for a different scene must paint even when that
+     * scene's remembered camera revision is ahead of the cached figure.
+     * Dropping it leaves the previous scene frozen on the canvas. Same-scene
+     * frames still have to honor a newer Reset. */
+    const replacingScene = !!(render.scene_id && canvasSceneId() && String(render.scene_id) !== canvasSceneId());
+    if (!replacingScene) {
+      const expectedState=sceneId&&expectedRenderRevisionByScene[sceneId];
+      if (expectedState&&Number(render.camera_revision||0)<expectedState.cameraRevision) return false;
+      if (sceneId&&expectedCameraRevisionByScene[sceneId]!==undefined && Number(render.camera_revision||0)<expectedCameraRevisionByScene[sceneId]) return false;
+    }
+    if (sceneId&&expectedSceneGenerationByScene[sceneId]!==undefined && String(render.scene_generation||"")!==expectedSceneGenerationByScene[sceneId]) return false;
     if (renderServerEpoch&&render.server_started_at&&renderServerEpoch!==String(render.server_started_at)) return false;
     return true;
   }
@@ -187,15 +301,45 @@
         else if (name==="update") layout=args[2];
         else if (name==="relayout") layout=args[1];
         const render=renderMetadataFromLayout(layout);
+        if (name==="relayout" && layout) {
+          const gd=typeof args[0]==="string"?document.getElementById(args[0]):args[0];
+          const shown=renderMetadataFromLayout(gd && gd.layout);
+          const canvasId=shown && shown.scene_id ? String(shown.scene_id) : "";
+          const gestureId=window.__mvGestureSceneId ? String(window.__mvGestureSceneId) : "";
+          const touchesCamera=layout["scene.camera"] || (layout.scene && layout.scene.camera) ||
+            Object.keys(layout).some(function(key){return key.indexOf("scene.camera.")===0;});
+          if (gestureId && canvasId && gestureId!==canvasId && touchesCamera && gd && gd.__mvSceneCamera && gd.__mvSceneCameraOwner===canvasId) {
+            return Promise.resolve(original.call(this, gd, {"scene.camera": JSON.parse(JSON.stringify(gd.__mvSceneCamera))}));
+          }
+        }
         if (render&&!figureMetadataIsCurrent(render)) return Promise.resolve(args[0]);
         const gd=typeof args[0]==="string"?document.getElementById(args[0]):args[0];
         if (fullFigure&&render&&gd) {
           const receiver=this;
           const revision=function(lay) {return lay&&lay.scene&&lay.scene.uirevision!==undefined?lay.scene.uirevision:lay&&lay.uirevision;};
           const key=JSON.stringify([render.server_started_at,render.scene_id,render.render_revision,render.camera_revision||0,revision(layout)]);
-          const deliver=function() {
+            const deliver=function() {
             if (interactionActive) return interactionSettled.then(deliver);
-            if (!figureMetadataIsCurrent(render)||gd.__mvDeliveredFrame===key) return gd;
+            const shown = renderMetadataFromLayout(gd.layout);
+            const shownScene = shown && shown.scene_id ? String(shown.scene_id) : "";
+            const incomingScene = render.scene_id ? String(render.scene_id) : "";
+            const alreadyShowing = gd.__mvDeliveredFrame===key && (!incomingScene || !shownScene || incomingScene===shownScene);
+            /* Do not leave the busy pill behind when a stale/duplicate frame
+             * is rejected. Mark the request busy only after the frame gate
+             * confirms that this Plotly call will actually run. */
+            if (!figureMetadataIsCurrent(render)||alreadyShowing) return gd;
+            const statusNode = document.getElementById("mv-render-status");
+            if (statusNode) {
+              statusNode.hidden = false;
+              statusNode.textContent = "Rendering structure…";
+              statusNode.setAttribute("data-level", "busy");
+            }
+            if (layout && layout.scene) {
+              gd.__mvCanonicalViewport = {
+                aspectmode: layout.scene.aspectmode || null,
+                aspectratio: layout.scene.aspectratio ? JSON.parse(JSON.stringify(layout.scene.aspectratio)) : null,
+              };
+            }
             const previous=renderMetadataFromLayout(gd.layout);
             let next=layout;
             if (layout.scene&&previous&&previous.scene_id===render.scene_id&&previous.server_started_at===render.server_started_at&&revision(gd.layout)===revision(layout)) {
@@ -205,15 +349,30 @@
             if (objectFigure) args[1]=Object.assign({},args[1],{layout:next});
             else args[2]=next;
             return Promise.resolve(original.apply(receiver,args)).then(function(result) {
+              const done = document.getElementById("mv-render-status");
+              if (done && done.getAttribute("data-level") === "busy") {
+                done.hidden = true;
+                done.textContent = "";
+              }
               gd.__mvDeliveredFrame=key;
+              gd.__mvGraphGeneration=Number(gd.__mvGraphGeneration||0)+1;
+              if (next && next.scene && next.scene.camera) {
+                gd.__mvSceneCamera = JSON.parse(JSON.stringify(next.scene.camera));
+                gd.__mvSceneCameraOwner = String(render.scene_id || "");
+              }
+              if (typeof releaseStaleWebGL === "function") releaseStaleWebGL(gd);
+              if (window.MatterVisViewCamera && typeof window.MatterVisViewCamera.installWheelZoom === "function") {
+                window.MatterVisViewCamera.installWheelZoom(gd);
+              }
+              if (window.MatterVisViewCamera && typeof window.MatterVisViewCamera.installCanvasRefit === "function") {
+                window.MatterVisViewCamera.installCanvasRefit(gd);
+              }
               return result;
             });
           };
           // Both Dash signatures and WS pass here. Retry after failures;
           // neither receipt nor a rejected react is a delivered frame.
-          const result=(gd.__mvRenderQueue||Promise.resolve()).then(deliver);
-          gd.__mvRenderQueue=result.catch(function(){});
-          return result;
+          return enqueueRender(gd, deliver);
         }
         return original.apply(this,args);
       };
@@ -267,6 +426,7 @@
     if (figurePushIsCurrent(p)) applyFigurePush(p.figure.data||[], p.figure.layout||{});
   }
   function markActive() {
+    gestureGeneration += 1;
     if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
     if (!interactionActive) {
       interactionActive = true;
@@ -275,16 +435,35 @@
     }
   }
   function markInactiveSoon() {
+    const generation = gestureGeneration;
     if (settleTimer) clearTimeout(settleTimer);
     settleTimer = setTimeout(function () {
       settleTimer = null;
+      if (generation !== gestureGeneration) return;
       if (interactionActive) { interactionActive = false; setInteraction(false); flushPendingFigurePush(); }
-    }, 220);
+    }, INTERACTION_SETTLE_MS);
   }
   function inGraph(target) { return !!(target && target.closest && target.closest("#crystal-graph")); }
 
   // ── Right-click menu (right_click_menu.js) ─────────────────────
   let lastHovered = null, lastClient = {x:0,y:0};
+  function hoverIsCurrent() {
+    if (!lastHovered) return false;
+    const scene = currentSceneId();
+    if (lastHovered.scene_id && scene && String(lastHovered.scene_id) !== String(scene)) return false;
+    const gd = graphDiv();
+    const generation = gd ? Number(gd.__mvGraphGeneration || 0) : 0;
+    if (lastHovered.graph_generation !== undefined && Number(lastHovered.graph_generation) !== generation) return false;
+    return true;
+  }
+  function noteHover(raw) {
+    if (!raw) { lastHovered = null; return; }
+    const gd = graphDiv();
+    lastHovered = Object.assign({}, raw, {
+      scene_id: currentSceneId() || "",
+      graph_generation: gd ? Number(gd.__mvGraphGeneration || 0) : 0,
+    });
+  }
   function pushTarget(payload) {
     if (setDashStore("rightclick-target", payload)) return;
     const input = document.getElementById("rightclick-target-fallback");
@@ -296,13 +475,156 @@
     const inner = container.querySelector(".js-plotly-plot");
     if (!inner || typeof inner.on !== "function") { requestAnimationFrame(bindRightClick); return; }
     container.dataset.rcmBound = "1";
-    inner.on("plotly_hover", function (ed) { if (ed && ed.points && ed.points.length) lastHovered = decodeCustomdata(ed.points[0].customdata); });
-    inner.on("plotly_unhover", function () { lastHovered = null; });
-    container.addEventListener("mousemove", function (e) { lastClient = {x:e.clientX, y:e.clientY}; }, {passive:true});
+    if (typeof inner.on !== "function") {
+      container.dataset.rcmBound = "0";
+      return;
+    }
+    try {
+      inner.on("plotly_hover", function (ed) { if (ed && ed.points && ed.points.length) noteHover(decodeCustomdata(ed.points[0].customdata)); });
+      inner.on("plotly_unhover", function () { lastHovered = null; });
+    } catch (_) {
+      container.dataset.rcmBound = "0";
+      return;
+    }
+    function handlePointerMove(e) {
+      lastClient = {x:e.clientX, y:e.clientY};
+      if (e.target && e.target.closest && e.target.closest(".mv-canvas-toolbar, .modebar")) return;
+      queueHover(e.clientX, e.clientY);
+    }
+    /* Plotly emits native mouse events for real input, while automation and
+     * assistive clients often dispatch PointerEvents directly. Keep the
+     * coordinate-based path on both event families so mesh3d depth picking
+     * cannot suppress atom hover/selection. */
+    container.addEventListener("mousemove", handlePointerMove, {passive:true});
+    container.addEventListener("pointermove", handlePointerMove, {passive:true});
+    function handlePointerLeave() {
+      tipSeq += 1;
+      if (tipTimer) clearTimeout(tipTimer);
+      hideAtomTip();
+    }
+    container.addEventListener("mouseleave", handlePointerLeave);
+    container.addEventListener("pointerleave", handlePointerLeave);
+    function pickRect(clientX, clientY, pad) {
+      /* Selection coordinates are defined in the Plotly viewport.  The
+       * outer crystal-graph also contains toolbars/overlays, so using its
+       * bounds offsets every click and makes the backend miss the projected
+       * atom centre. */
+      const viewportNode = inner || container;
+      const gr = viewportNode.getBoundingClientRect();
+      const x = clientX - gr.left;
+      const y = clientY - gr.top;
+      return {
+        rect: [x - pad, y - pad, x + pad, y + pad],
+        viewport: [gr.width, gr.height],
+      };
+    }
+    function postSelection(rect, viewport, additive, commit) {
+      return fetch("/api/v2/selection/by_box", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          rect_pixels: rect,
+          viewport_size: viewport,
+          scene_id: currentSceneId(),
+          additive: !!additive,
+          commit: commit !== false,
+        }),
+      }).then(function (response) { return response.json(); });
+    }
+    let tipSeq = 0;
+    let tipTimer = null;
+    function atomTip() {
+      let tip = document.getElementById("mv-atom-tip");
+      if (tip) return tip;
+      tip = document.createElement("div");
+      tip.id = "mv-atom-tip";
+      tip.hidden = true;
+      document.body.appendChild(tip);
+      return tip;
+    }
+    function hideAtomTip() {
+      const tip = document.getElementById("mv-atom-tip");
+      if (tip) tip.hidden = true;
+    }
+    function showAtomTip(clientX, clientY, selection) {
+      const tip = atomTip();
+      const part = (selection && selection.parts && selection.parts[0]) || {};
+      const label = (selection && selection.atom_labels && selection.atom_labels[0]) || "";
+      if (!label) { tip.hidden = true; return; }
+      const disorder = part.part ? " · " + part.part : (part.is_minor ? " · minor" : "");
+      tip.textContent = label + (part.elem ? " (" + part.elem + ")" : "") + disorder;
+      tip.style.left = (clientX + 14) + "px";
+      tip.style.top = (clientY + 16) + "px";
+      tip.hidden = false;
+    }
+    function queueHover(clientX, clientY) {
+      const seq = ++tipSeq;
+      if (tipTimer) clearTimeout(tipTimer);
+      tipTimer = setTimeout(function () {
+        const picked = pickRect(clientX, clientY, 14);
+        postSelection(picked.rect, picked.viewport, false, false).then(function (body) {
+          if (seq !== tipSeq) return;
+          showAtomTip(clientX, clientY, body && body.selection);
+        }).catch(function () {});
+      }, 90);
+    }
+    let pointerDown = null;
+    let lastPrimaryPick = null;
+    function primaryPick(e) {
+      if ((e.button !== undefined && e.button !== 0) || e.shiftKey || e.altKey) return;
+      if (e.target && e.target.closest && e.target.closest(".mv-canvas-toolbar, .modebar, .rightclick-menu")) return;
+      const now = Date.now();
+      /* A real primary pointer produces both pointerup and click. Avoid
+       * posting the same selection twice while still accepting synthetic
+       * pointerup-only clients. */
+      if (lastPrimaryPick && now - lastPrimaryPick.at < 80 &&
+          Math.abs(lastPrimaryPick.x - e.clientX) < 1 &&
+          Math.abs(lastPrimaryPick.y - e.clientY) < 1) return;
+      lastPrimaryPick = {at: now, x: e.clientX, y: e.clientY};
+      const picked = pickRect(e.clientX, e.clientY, 14);
+      postSelection(picked.rect, picked.viewport, e.ctrlKey || e.metaKey).catch(function () {});
+    }
+    container.addEventListener("pointerdown", function (e) {
+      if (e.button === undefined || e.button === 0) pointerDown = {x:e.clientX, y:e.clientY};
+    }, {passive:true});
+    container.addEventListener("pointerup", function (e) {
+      if (!pointerDown) return;
+      const moved = Math.hypot(e.clientX - pointerDown.x, e.clientY - pointerDown.y);
+      pointerDown = null;
+      if (moved <= 4) primaryPick(e);
+    });
+    container.addEventListener("click", function (e) {
+      /* Synthetic click events do not always populate ``button``. Treat an
+       * omitted value as the normal primary click while still ignoring an
+       * explicit secondary/middle button. */
+      primaryPick(e);
+    });
     container.addEventListener("contextmenu", function (e) {
-      if (!lastHovered) return;
       e.preventDefault();
-      pushTarget({kind:lastHovered.kind, payload:lastHovered, x:lastClient.x, y:lastClient.y, ts:Date.now()});
+      const sceneId = currentSceneId();
+      const x = lastClient.x || e.clientX;
+      const y = lastClient.y || e.clientY;
+      if (hoverIsCurrent()) {
+        pushTarget({kind:lastHovered.kind, payload:lastHovered, scene_id:sceneId, x:x, y:y, ts:Date.now()});
+        return;
+      }
+      const picked = pickRect(e.clientX, e.clientY, 14);
+      postSelection(picked.rect, picked.viewport, false).then(function (body) {
+        const selection = body && body.selection;
+        const labels = selection && selection.atom_labels || [];
+        const parts = selection && selection.parts || [];
+        const part = parts[0] || {};
+        const payload = labels.length ? {
+          kind: "atom",
+          label: labels[0],
+          is_minor: !!part.is_minor,
+          part: part.part || "",
+          scene_id: sceneId,
+        } : null;
+        pushTarget({kind: payload ? "atom" : "_global", payload: payload, scene_id: sceneId, x: e.clientX, y: e.clientY, ts: Date.now()});
+      }).catch(function () {
+        pushTarget({kind:"_global", payload:null, scene_id:sceneId, x:e.clientX, y:e.clientY, ts:Date.now()});
+      });
     });
     document.addEventListener("click", function (e) {
       const menu = document.getElementById("rightclick-menu");
@@ -320,11 +642,14 @@
 
   // ── Keyboard shortcuts (keyboard_shortcuts.js) ──────────────────
   function pushAction(action, extra) {
-    setDashStore("rightclick-target", Object.assign(
-      {kind:lastHovered?lastHovered.kind:"_global", payload:lastHovered, action:action, ts:Date.now()},
+    if (lastHovered && !hoverIsCurrent()) lastHovered = null;
+    const sceneId = currentSceneId();
+    return setDashStore("rightclick-target", Object.assign(
+      {kind:lastHovered?lastHovered.kind:"_global", payload:lastHovered, action:action, scene_id:sceneId, ts:Date.now()},
       extra||{}
     ));
   }
+  window.MatterVisShortcuts = { pushAction: pushAction, isTypingTarget: isTypingTarget, hoverIsCurrent: hoverIsCurrent };
   function isTypingTarget(el) {
     if (!el) return false;
     const tag = (el.tagName||"").toLowerCase();
@@ -390,26 +715,69 @@
       if (overlay) { overlay.remove(); overlay = null; }
       start = null;
       if (Math.abs(rect[2]-rect[0])>=4 && Math.abs(rect[3]-rect[1])>=4) {
-        setDashStore("rightclick-target", {kind:"_global", action:"select_box", rect_pixels:rect, viewport_size:[gr.width,gr.height], additive:!!e.shiftKey, ts:Date.now()});
+        setDashStore("rightclick-target", {kind:"_global", action:"select_box", rect_pixels:rect, viewport_size:[gr.width,gr.height], additive:!!e.shiftKey, scene_id:currentSceneId(), ts:Date.now()});
       }
       e.preventDefault(); e.stopPropagation();
     }, true);
   }
 
   // ── Disorder hover (disorder_hover.js) ──────────────────────────
+  let disorderHoverInstalled = false;
   function bindDisorderHover() {
-    document.querySelectorAll(".disorder-row").forEach(function (row) {
-      if (row.dataset.boundDisorderHover==="1") return;
-      row.dataset.boundDisorderHover = "1";
-      row.addEventListener("mouseenter", function () { setDashStore("disorder-hover-id", row.dataset.replicaId||null); });
-      row.addEventListener("mouseleave", function () { setDashStore("disorder-hover-id", null); });
+    if (disorderHoverInstalled) return;
+    disorderHoverInstalled = true;
+    document.addEventListener("mouseover", function (event) {
+      const row = event.target && event.target.closest && event.target.closest(".disorder-row");
+      if (!row) return;
+      setDashStore("disorder-hover-id", row.dataset.replicaId || null);
+    });
+    document.addEventListener("click", function (event) {
+      const row = event.target && event.target.closest && event.target.closest(".disorder-row");
+      if (!row) return;
+      document.querySelectorAll(".disorder-row.is-selected").forEach(function (el) {
+        el.classList.remove("is-selected");
+      });
+      row.classList.add("is-selected");
+      setDashStore("disorder-selected-id", row.dataset.replicaId || null);
+      setDashStore("disorder-hover-id", row.dataset.replicaId || null);
     });
   }
+
+  document.addEventListener("click", function (event) {
+    const select = event.target && event.target.closest && event.target.closest(".tab-select");
+    if (select) {
+      let parsed = null;
+      try { parsed = JSON.parse(select.id); } catch (_) { parsed = null; }
+      if (parsed && parsed.scene_id && window.dash_clientside && dash_clientside.set_props) {
+        const status = document.getElementById("upload-status");
+        if (status) status.textContent = "";
+        dash_clientside.set_props("scene-tabs", {value: parsed.scene_id});
+      }
+      return;
+    }
+    const tool = event.target && event.target.closest && event.target.closest("#canvas-view-reset, #canvas-view-fit");
+    if (!tool) return;
+    const action = tool.id === "canvas-view-fit" ? "fit" : "reset";
+    fetch("/api/v2/camera/action", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({action: action, scene_id: currentSceneId()}),
+    }).catch(function () {});
+  });
 
   function bindSceneTabIntent() {
     const root = document.getElementById("scene-tabs");
     if (!root || root.dataset.mvSceneIntentBound === "1") return;
     root.dataset.mvSceneIntentBound = "1";
+    const selectionObserver = new MutationObserver(function () {
+      flushQueuedSceneFigure();
+    });
+    selectionObserver.observe(root, {
+      attributes: true,
+      attributeFilter: ["class", "aria-selected"],
+      subtree: true,
+    });
+    root.__mvSceneSelectionObserver = selectionObserver;
     root.addEventListener("pointerdown", function (event) { noteSceneTabIntent(event.target); }, true);
     root.addEventListener("mousedown", function (event) { noteSceneTabIntent(event.target); }, true);
     root.addEventListener("click", function (event) {
@@ -420,6 +788,13 @@
       // frame; replay it immediately instead of waiting for an unrelated DOM
       // child-list mutation or a later tab click.
       flushQueuedSceneFigure();
+      // Dash applies the selected class/aria-selected attribute in a later
+      // mutation turn. Replay after those handoff turns as well; otherwise a
+      // frame parked while the old tab was still selected can remain frozen
+      // until the next unrelated click.
+      [0, 50, 250].forEach(function (delay) {
+        setTimeout(flushQueuedSceneFigure, delay);
+      });
       // Upload progress is global UI chrome. Once the user deliberately
       // changes scenes, the previous upload result must not look like a
       // status for the newly selected structure.
@@ -431,18 +806,84 @@
     }, true);
   }
 
+  function showBuildMismatch() {
+    if (document.getElementById("mv-build-mismatch")) return;
+    var node = document.createElement("div");
+    node.id = "mv-build-mismatch";
+    node.setAttribute("role", "status");
+    node.textContent = "This server is still running older code than the files on disk. Restart the server, then reload this page.";
+    node.style.cssText = "position:sticky;top:0;z-index:10000;background:#7a1f1f;color:#fff;padding:10px 14px;font:14px/1.4 sans-serif";
+    (document.body || document.documentElement).prepend(node);
+  }
+  function noteBuildIdentity(payload) {
+    var build = window.MATTERVIS_BUILD || {};
+    var processSha = (payload && payload.build_sha) || build.process;
+    var assetSha = (payload && payload.asset_sha) || build.assets;
+    if (processSha && assetSha && processSha !== assetSha) showBuildMismatch();
+  }
+
   // ── WS figure fast lane (ws_figure.js) ──────────────────────────
   (function connectWS() {
+    function socketCensus() {
+      var census = window.__mvCensus = window.__mvCensus || {};
+      census.socketsOpened = Number(census.socketsOpened || 0);
+      census.socketsOpen = Number(census.socketsOpen || 0);
+      census.compassBinds = Number(census.compassBinds || 0);
+      return census;
+    }
     function startHttpFallback() {
       if (window.__mattervisFigureFallbackActive || !window.fetch) return;
       window.__mattervisFigureFallbackActive = true;
+      function parkFallbackFigure(payload) {
+        if (!payload || typeof payload !== "object" || !payload.figure || !payload.scene_id) return;
+        if (isPendingFigure(payload.figure) || !has3DScene(payload.figure)) return;
+        /* A parked journal frame still participates in the same sequence and
+         * render-revision fences as a WebSocket frame.  Without these fields
+         * flushQueuedSceneFigure treats it as stale forever, and a later WS
+         * snapshot can overwrite it while Dash is painting the selected tab. */
+        const sceneKey = String(payload.scene_id);
+        const seq = Number(payload.figure_seq || payload.seq || 0);
+        const previous = pendingFigureByScene[sceneKey];
+        const previousSeq = Number(previous && (previous.figure_seq || previous.seq) || 0);
+        const seenSeq = Number(latestFigureSeqByScene[sceneKey] || 0);
+        /* The HTTP cursor is global, but tab handoff fences are per scene.
+         * A WS frame for scene A can advance the global cursor before the
+         * selected scene B frame is polled; rejecting B on that cursor would
+         * strand its newest frame and leave the old canvas visible forever. */
+        if (seq && seq <= Math.max(seenSeq, previousSeq)) return;
+        if (seq) {
+          latestFigureSeqByScene[sceneKey] = seq;
+          window.__mattervisFigureLastSeq = Math.max(Number(window.__mattervisFigureLastSeq || 0), seq);
+        }
+        if (payload.state && typeof payload.state === "object") rememberExpectedRender(payload.state, true);
+        if (payload.render_revision !== undefined) rememberExpectedRender(payload, true);
+        payload.isCurrent = function () { return isCurrentFigurePush(payload); };
+        if (!previous || !previousSeq || (seq && seq >= previousSeq)) {
+          pendingFigureByScene[sceneKey] = payload;
+        }
+      }
+      function deliverFallbackPayload(payload) {
+        if (!payload || typeof payload !== "object") return;
+        /* The journal contains complete frames for every scene. During a
+         * tab handoff, never submit a non-selected frame through the generic
+         * view gate: it can be marked stale against the canvas scene before
+         * Dash paints the selected tab. Keep the newest one parked for the
+         * normal selection barrier instead. Camera/display patches continue
+         * through the typed gate and are scene-scoped there. */
+        if (payload.figure && payload.scene_id &&
+            String(payload.scene_id) !== String(currentSceneId() || "")) {
+          parkFallbackFigure(payload);
+          return;
+        }
+        handleFigurePayload(payload);
+      }
       function poll() {
         if (!window.__mattervisFigureFallbackActive) return;
         var since = Number(window.__mattervisFigureLastSeq || 0);
         window.fetch("/api/v2/view-updates?since=" + encodeURIComponent(since), {credentials:"same-origin"})
           .then(function(response){ return response.ok ? response.json() : null; })
           .then(function(body){
-            (body && body.updates || []).forEach(handleFigurePayload);
+            (body && body.updates || []).forEach(deliverFallbackPayload);
           })
           .catch(function(){})
           .then(function(){
@@ -503,13 +944,20 @@
     // Dash loads Plotly lazily. Missing it on the asset's first execution
     // must not permanently disable completed-frame delivery.
     if (!window.Plotly) { requestAnimationFrame(connectWS); return; }
+    /* Keep the journal poll alive while the WebSocket upgrade is in flight.
+     * Werkzeug and a few reverse proxies answer the upgrade URL with a plain
+     * HTTP 200; Chromium can leave that socket pending long enough to hide a
+     * camera update. A successful open stops the poll before subscribing, so
+     * there is still one active delivery path after the handshake. */
+    startHttpFallback();
+    noteBuildIdentity(null);
     function isCurrentFigurePush(p) {
       if (!p || !p.figure) return false;
       var cur=currentSceneId();
       if (cur&&p.scene_id&&String(p.scene_id)!==cur) return false;
       var currentRevision=currentRenderRevision();
       var pushedRevision=Number(p.render_revision);
-      return currentRevision===null || (Number.isFinite(pushedRevision)&&pushedRevision===currentRevision);
+      return currentRevision===null || (Number.isFinite(pushedRevision)&&pushedRevision>=currentRevision);
     }
     function has3DScene(fig) {
       const lay = fig && fig.layout;
@@ -533,15 +981,28 @@
       startHttpFallback();
       return;
     }
+    var census = socketCensus();
+    census.socketsOpened += 1;
+    ws.__mvCensusCountedOpen = false;
     window.__mattervisFigureSocket = ws;
     ws.addEventListener("open",function(){
       opened = true;
-      stopHttpFallback();
+      if (!ws.__mvCensusCountedOpen) {
+        ws.__mvCensusCountedOpen = true;
+        census.socketsOpen += 1;
+      }
       try { ws.send(JSON.stringify({type:"subscribe_figure",enabled:true})); }
       catch (_) { window.__mattervisFigureWsDisabled = true; startHttpFallback(); }
     });
     ws.addEventListener("message",function(e){
       var p; try { p=JSON.parse(e.data||"{}"); } catch(_){return;}
+      /* A Werkzeug/proxy HTTP-200 upgrade can report ``open`` and emit a
+       * plain snapshot without ever becoming a figure transport. Keep the
+       * journal poll alive until a real view envelope arrives; camera and
+       * display updates must not wait for the socket's eventual close. */
+      if (!p || typeof p !== "object" ||
+          (!p.type && !p.figure && p.figure_seq === undefined && p.seq === undefined)) return;
+      stopHttpFallback();
       handleFigurePayload(p);
     });
     ws.addEventListener("error",function(){
@@ -554,6 +1015,10 @@
       }
     });
     ws.addEventListener("close",function(){
+      if (ws.__mvCensusCountedOpen) {
+        ws.__mvCensusCountedOpen = false;
+        census.socketsOpen = Math.max(0, Number(census.socketsOpen || 0) - 1);
+      }
       if (window.__mattervisFigureSocket === ws) window.__mattervisFigureSocket = null;
       if (!opened) {
         window.__mattervisFigureWsDisabled = true;
@@ -584,6 +1049,76 @@
   }
 
   // ── Single MutationObserver for all re-bind needs ───────────────
+  window.MatterVisSelectedScene = currentSceneId;
+  const trackedGL = [];
+  function installWebGLLedger() {
+    const proto = window.HTMLCanvasElement && HTMLCanvasElement.prototype;
+    if (!proto || !proto.getContext || proto.getContext.__mvLedger) return;
+    const original = proto.getContext;
+    function wrapped(type) {
+      const gl = original.apply(this, arguments);
+      const kind = String(type || "").toLowerCase();
+      if (gl && kind.indexOf("webgl") === 0) {
+        this.__mvGL = gl;
+        const root = document.getElementById("crystal-graph");
+        if (root && root.contains(this)) this.__mvCrystalCanvas = true;
+        if (this.__mvCrystalCanvas && trackedGL.indexOf(this) < 0) trackedGL.push(this);
+      }
+      return gl;
+    }
+    wrapped.__mvLedger = true;
+    proto.getContext = wrapped;
+  }
+  installWebGLLedger();
+  function liveGLCanvas(gd) {
+    const scene = gd && gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
+    const plot = scene && scene.glplot;
+    if (plot && plot.canvas) return plot.canvas;
+    const gl = plot && plot.regl && plot.regl._gl;
+    if (gl && gl.canvas) return gl.canvas;
+    return null;
+  }
+  function loseWebGL(canvas) {
+    if (!canvas || canvas.__mvContextReleased) return;
+    const gl = canvas.__mvGL;
+    if (!gl) return;
+    canvas.__mvContextReleased = true;
+    try {
+      if (typeof gl.isContextLost === "function" && gl.isContextLost()) return;
+      const lose = gl.getExtension("WEBGL_lose_context");
+      if (lose) lose.loseContext();
+    } catch (_) {}
+  }
+  function releaseStaleWebGL(gd) {
+    const root = document.getElementById("crystal-graph");
+    const live = liveGLCanvas(gd);
+    if (root) {
+      root.querySelectorAll("canvas").forEach(function (canvas) {
+        if (canvas.__mvGL) canvas.__mvCrystalCanvas = true;
+        if (canvas.__mvCrystalCanvas && trackedGL.indexOf(canvas) < 0) trackedGL.push(canvas);
+      });
+    }
+    for (let i = trackedGL.length - 1; i >= 0; i -= 1) {
+      const canvas = trackedGL[i];
+      if (live && canvas === live && canvas.isConnected) continue;
+      const detached = !canvas.isConnected;
+      const retiredInGraph = !!(live && root && root.contains(canvas) && canvas !== live);
+      if (!detached && !retiredInGraph) continue;
+      /* view_camera.js listens for genuine losses on the live canvas. Mark
+       * this one before deliberately releasing a retired Plotly canvas so
+       * that cleanup cannot surface a spurious recovery error. */
+      canvas.__mvContextRetired = true;
+      loseWebGL(canvas);
+      if (retiredInGraph && canvas.parentNode && typeof canvas.parentNode.removeChild === "function") {
+        /* Plotly leaves replaced gl3d canvases in the graph wrapper while
+         * their contexts are retired. Remove only canvases we proved are no
+         * longer the live scene so rapid tab switches cannot grow the DOM. */
+        try { canvas.parentNode.removeChild(canvas); } catch (_) {}
+      }
+      trackedGL.splice(i, 1);
+    }
+    if (window.__mvCensus) window.__mvCensus.webglContexts = trackedGL.length;
+  }
   function rebindAll() {
     bindRightClick();
     bindBoxSelect();
@@ -591,12 +1126,48 @@
     bindSceneTabIntent();
     ensureSceneTabTooltips();
     flushQueuedSceneFigure();
+    const gd = graphDiv();
+    releaseStaleWebGL(gd);
+    if (gd && window.MatterVisViewCamera && typeof window.MatterVisViewCamera.installWheelZoom === "function") {
+      window.MatterVisViewCamera.installWheelZoom(gd);
+    }
   }
-  new MutationObserver(rebindAll).observe(document.documentElement, {childList:true, subtree:true});
+  let rebindScheduled = false;
+  let rebindObserver = null;
+  function scheduleRebind() {
+    if (rebindScheduled) return;
+    rebindScheduled = true;
+    const schedule = window.requestAnimationFrame || function (fn) { return setTimeout(fn, 16); };
+    schedule(function () {
+      rebindScheduled = false;
+      attachRebindObserver();
+      rebindAll();
+    });
+  }
+  function attachRebindObserver() {
+    const preferred = document.getElementById("viewer-root");
+    const root = preferred || document.body || document.documentElement;
+    if (!root || (rebindObserver && rebindObserver.__root === root)) return;
+    if (rebindObserver) rebindObserver.disconnect();
+    rebindObserver = new MutationObserver(scheduleRebind);
+    rebindObserver.__root = root;
+    rebindObserver.observe(root, { childList: true, subtree: true });
+  }
+  attachRebindObserver();
 
   // ── Pointer/wheel interaction tracking ──────────────────────────
-  document.addEventListener("pointerdown", function(e) { if (inGraph(e.target)) markActive(); }, true);
-  document.addEventListener("pointerup", function() { if (interactionActive) markInactiveSoon(); });
+  document.addEventListener("pointerdown", function(e) {
+    if (!inGraph(e.target)) return;
+    window.__mvGestureSceneId = canvasSceneId() || window.__mvGestureSceneId || "";
+    markActive();
+  }, true);
+  document.addEventListener("pointerup", function() {
+    if (interactionActive) markInactiveSoon();
+    const stamped = window.__mvGestureSceneId || "";
+    setTimeout(function() {
+      if ((window.__mvGestureSceneId || "") === stamped) window.__mvGestureSceneId = "";
+    }, 1000);
+  });
   document.addEventListener("pointercancel", function() { if (interactionActive) markInactiveSoon(); });
   document.addEventListener("wheel", function(e) { if (inGraph(e.target)) { markActive(); markInactiveSoon(); } }, {passive:true, capture:true});
   window.addEventListener("blur", function() { if (interactionActive) { interactionActive = false; setInteraction(false); flushPendingFigurePush(); } });
@@ -1229,29 +1800,36 @@
     }, 250);
   }
 
-  /* Strip the Python-side compass from Plotly annotations / shapes
-     ONCE per gd. Doing this on every relayout would break static
-     export pipelines that share the figure JSON. */
-  const stripped = new WeakSet();
+  /* Strip Python compass decorations whenever a layout generation puts
+     them back. Identity of the graph div is not enough: Plotly.react
+     reuses the same div and can restore annotations. */
+  function layoutHasCompass(gd) {
+    if (!gd || !gd.layout) return false;
+    const annotations = Array.isArray(gd.layout.annotations) ? gd.layout.annotations : [];
+    const shapes = Array.isArray(gd.layout.shapes) ? gd.layout.shapes : [];
+    return annotations.some(function (a) { return a && a.name === COMPASS_ITEM_NAME; })
+      || shapes.some(function (s) { return s && s.name === COMPASS_ITEM_NAME; });
+  }
   function stripPlotlyCompassOnce(gd) {
-    if (!gd || stripped.has(gd)) return;
-    if (!gd.layout || !window.Plotly || typeof window.Plotly.relayout !== "function") return;
+    if (!gd || gd.__mvCompassStripping || !layoutHasCompass(gd)) return;
+    if (!window.Plotly || typeof window.Plotly.relayout !== "function") return;
     if (window.__mv_compass_diag) window.__mv_compass_diag.strip_attempts += 1;
     const annotations = Array.isArray(gd.layout.annotations) ? gd.layout.annotations : [];
     const shapes = Array.isArray(gd.layout.shapes) ? gd.layout.shapes : [];
-    const hasCompassAnn = annotations.some(function (a) { return a && a.name === COMPASS_ITEM_NAME; });
-    const hasCompassShape = shapes.some(function (s) { return s && s.name === COMPASS_ITEM_NAME; });
-    if (!hasCompassAnn && !hasCompassShape) {
-      stripped.add(gd);
-      return;
-    }
     const filteredAnn = annotations.filter(function (a) { return !(a && a.name === COMPASS_ITEM_NAME); });
     const filteredShapes = shapes.filter(function (s) { return !(s && s.name === COMPASS_ITEM_NAME); });
+    gd.__mvCompassStripping = true;
     try {
-      window.Plotly.relayout(gd, { annotations: filteredAnn, shapes: filteredShapes });
-      stripped.add(gd);
+      const result = window.Plotly.relayout(gd, { annotations: filteredAnn, shapes: filteredShapes });
+      if (result && typeof result.finally === "function") {
+        result.finally(function () { gd.__mvCompassStripping = false; });
+      } else {
+        gd.__mvCompassStripping = false;
+      }
       if (window.__mv_compass_diag) window.__mv_compass_diag.strip_completed += 1;
-    } catch (err) { /* tolerate; SVG overlay still works */ }
+    } catch (err) {
+      gd.__mvCompassStripping = false;
+    }
   }
 
   const attached = new WeakSet();
@@ -1271,6 +1849,8 @@
       return;
     }
     attached.add(gd);
+    window.__mvCensus = window.__mvCensus || {socketsOpened: 0, socketsOpen: 0, compassBinds: 0};
+    window.__mvCensus.compassBinds += 1;
     if (window.__mv_compass_diag) window.__mv_compass_diag.maybe_attach_attached += 1;
 
     /* Plotly events: mouseup commit and (when emitted) per-frame
@@ -1349,13 +1929,8 @@
              scene swap, ...) we need to re-strip and re-draw because
              Plotly may have reinjected the compass annotations. */
           const gd = graphDiv();
-          if (gd && stripped.has(gd)) {
-            /* Already stripped; just redraw. */
-            scheduleRedraw(gd, null);
-          } else {
-            stripPlotlyCompassOnce(gd);
-            scheduleRedraw(gd, null);
-          }
+          stripPlotlyCompassOnce(gd);
+          scheduleRedraw(gd, null);
         });
         scopedObserver.observe(root, { childList: true, subtree: true });
       }
@@ -1377,7 +1952,8 @@
       var root = graphRoot();
       var svg = root ? root.querySelector("#" + SVG_LAYER_ID) : null;
       if (svg) clearSvg(svg);
-    }
+    },
+    strip: function (gd) { stripPlotlyCompassOnce(gd); },
   };
 
   if (document.readyState === "loading") {

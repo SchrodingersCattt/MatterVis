@@ -918,10 +918,18 @@ def figure_axis_layout(
         else:
             aspect_kwargs = {"aspectmode": "data"}
 
+    hidden_axis = {
+        "visible": False,
+        "showgrid": False,
+        "showbackground": False,
+        "showspikes": False,
+        "showticklabels": False,
+        "ticks": "",
+    }
     return {
-        "xaxis": {"visible": False, "range": xr},
-        "yaxis": {"visible": False, "range": yr},
-        "zaxis": {"visible": False, "range": zr},
+        "xaxis": {**hidden_axis, "range": xr},
+        "yaxis": {**hidden_axis, "range": yr},
+        "zaxis": {**hidden_axis, "range": zr},
         "camera": _plotly_camera_from_scene(scene, style),
         "uirevision": style.get("uirevision", str(scene.get("name", "scene"))),
         "bgcolor": style.get("background", "#FFFFFF"),

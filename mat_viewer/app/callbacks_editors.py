@@ -203,7 +203,7 @@ def register_editor_callbacks(app, backend):
                 styles=styles,
             )
             try:
-                backend.patch_state({"atom_groups": new_groups}, scene_id=scene_id, broadcast=False)
+                backend.commit_patch({"atom_groups": new_groups}, scene_id=scene_id, broadcast=False)
             except Exception as exc:
                 _surface_error("Update atom group", exc)
                 return _rebuild(), no_update
@@ -294,7 +294,7 @@ def register_editor_callbacks(app, backend):
                 radius_scales=radius_scales,
             )
             try:
-                backend.patch_state({"bond_groups": new_groups}, scene_id=scene_id, broadcast=False)
+                backend.commit_patch({"bond_groups": new_groups}, scene_id=scene_id, broadcast=False)
             except Exception as exc:
                 _surface_error("Update bond group", exc)
                 return _rebuild(), no_update

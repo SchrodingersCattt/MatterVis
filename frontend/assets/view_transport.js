@@ -7,6 +7,12 @@
   var socket = null;
   var reconnectTimer = null;
   var stopped = false;
+  function socketCensus() {
+    var census = root.__mvCensus = root.__mvCensus || {};
+    census.socketsOpened = Number(census.socketsOpened || 0);
+    census.socketsOpen = Number(census.socketsOpen || 0);
+    return census;
+  }
   function on(listener) { if (typeof listener === "function") listeners.push(listener); }
   function deliver(message) {
     if (!message || typeof message !== "object") return false;
@@ -30,12 +36,25 @@
     var protocol = root.location.protocol === "https:" ? "wss:" : "ws:";
     try { socket = new root.WebSocket(protocol + "//" + root.location.host + "/api/v2/ws"); }
     catch (_) { fallback(); return; }
+    var census = socketCensus();
+    census.socketsOpened += 1;
+    socket.__mvCensusCountedOpen = false;
     root.__mattervisFigureSocket = socket;
-    socket.addEventListener("open", function () { socket.send(JSON.stringify({type: "subscribe_figure", enabled: true})); });
+    socket.addEventListener("open", function () {
+      if (!socket.__mvCensusCountedOpen) {
+        socket.__mvCensusCountedOpen = true;
+        census.socketsOpen += 1;
+      }
+      socket.send(JSON.stringify({type: "subscribe_figure", enabled: true}));
+    });
     socket.addEventListener("message", function (event) {
       try { deliver(JSON.parse(event.data || "{}")); } catch (_) {}
     });
     socket.addEventListener("close", function () {
+      if (socket.__mvCensusCountedOpen) {
+        socket.__mvCensusCountedOpen = false;
+        census.socketsOpen = Math.max(0, Number(census.socketsOpen || 0) - 1);
+      }
       if (root.__mattervisFigureSocket === socket) root.__mattervisFigureSocket = null;
       socket = null;
       if (!stopped) { clearTimeout(reconnectTimer); reconnectTimer = setTimeout(connect, 1500); }

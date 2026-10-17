@@ -22,15 +22,10 @@ def register_ws_routes(server, backend) -> None:
                 socket.send(json.dumps(snapshot, ensure_ascii=False))
                 last_version = version
             if include_figure:
-                for payload in backend.figure_broadcasts_since(last_figure_seq):
-                    socket.send(json.dumps(payload, ensure_ascii=False))
-                    last_figure_seq = max(last_figure_seq, int(payload.get("figure_seq", 0) or 0))
-                # Only delivered events advance the cursor. A completion can
-                # arrive after the history read; sampling the latest sequence
-                # here would acknowledge that unseen frame and lose it forever.
+                last_figure_seq = _deliver_figures(backend, socket, last_figure_seq)
             # Use a shorter poll interval when there are pending figure
             # broadcasts to reduce latency for cache-hit tab switches.
-            has_pending = bool(backend.figure_broadcasts_since(last_figure_seq)) if include_figure else False
+            has_pending = _figures_pending(backend, last_figure_seq) if include_figure else False
             poll_timeout = 0.05 if has_pending else 0.5
             try:
                 message = socket.receive(timeout=poll_timeout)
@@ -45,10 +40,44 @@ def register_ws_routes(server, backend) -> None:
                 if isinstance(payload, dict) and payload.get("type") == "subscribe_figure":
                     include_figure = bool(payload.get("enabled", True))
                     last_version = -1
+                    if include_figure:
+                        ensure = getattr(backend, "ensure_active_scene_figure", None)
+                        if ensure is not None:
+                            ensure()
                     continue
                 handle_ws_message(backend, payload)
 
     sock.route("/api/v1/ws")(ws_state)
+
+
+def _deliver_figures(backend, socket, last_figure_seq: int) -> int:
+    """Send one journal snapshot and return the cursor to keep.
+
+    Delivered events advance the cursor. When that snapshot contained only
+    filtered frames, advance to its head so the poll does not spin. A frame
+    appended after the snapshot has a higher sequence than that head and is
+    still delivered on the next turn.
+    """
+    reader = getattr(backend, "figure_broadcasts_since_with_head", None)
+    if reader is None:
+        payloads = list(backend.figure_broadcasts_since(last_figure_seq))
+        snapshot_head = last_figure_seq
+    else:
+        payloads, snapshot_head = reader(last_figure_seq)
+        snapshot_head = int(snapshot_head)
+    for payload in payloads:
+        socket.send(json.dumps(payload, ensure_ascii=False))
+        last_figure_seq = max(last_figure_seq, int(payload.get("figure_seq", 0) or 0))
+    if not payloads and snapshot_head > last_figure_seq:
+        last_figure_seq = snapshot_head
+    return last_figure_seq
+
+
+def _figures_pending(backend, last_figure_seq: int) -> bool:
+    seq_fn = getattr(backend, "figure_journal_seq", None)
+    if seq_fn is None:
+        return bool(backend.figure_broadcasts_since(last_figure_seq))
+    return int(seq_fn()) > int(last_figure_seq)
 
 
 def handle_ws_message(backend, payload: dict) -> None:

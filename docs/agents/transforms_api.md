@@ -76,6 +76,12 @@ unique while the home-cell `(0,0,0)` replica keeps its original
 labels untouched (so `atom_groups` rules and click handlers continue
 matching against the canonical names).
 
+Repeat copies the home-cell atoms only. Unit-cell display already
+draws boundary replicas on the faces of that cell; copying those
+replicas again would stack atoms and drop their bonds. The unit-cell
+box is drawn around the supercell (`Na·a`, `Nb·b`, `Nc·c`) so the
+repeated atoms stay inside the outline.
+
 #### `grow_radius`
 
 ```json

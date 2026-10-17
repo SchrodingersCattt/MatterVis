@@ -74,11 +74,12 @@ def test_camera_capture_also_notifies_flat_ortep_render_path(tmp_path: Path):
     callbacks = [
         callback
         for callback in app.callback_map.values()
-        if ("crystal-graph", "relayoutData") in _inputs(callback)
+        if ("camera-capture-store", "data") in _inputs(callback)
         and ("camera-state-store", "data") in _outputs(callback)
     ]
     assert len(callbacks) == 1
     assert ("agent-state-store", "data") in _outputs(callbacks[0])
+    assert ("view-update-store", "data") in _outputs(callbacks[0])
 
 
 def test_camera_patch_carries_viewport_aspect_contract():

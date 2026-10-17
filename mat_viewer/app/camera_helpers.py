@@ -117,10 +117,105 @@ def _plotly_camera(camera: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]
         up = np.array([0.0, 1.0, 0.0], dtype=float)
     else:
         up = up / up_norm
-    return {
+    converted = {
         "eye": {"x": float(eye[0]), "y": float(eye[1]), "z": float(eye[2])},
         "center": {"x": 0.0, "y": 0.0, "z": 0.0},
         "up": {"x": float(up[0]), "y": float(up[1]), "z": float(up[2])},
+    }
+    raw_projection = camera.get("projection")
+    if isinstance(raw_projection, dict) and raw_projection.get("type"):
+        converted["projection"] = {"type": str(raw_projection["type"])}
+    elif isinstance(raw_projection, str) and raw_projection:
+        converted["projection"] = {"type": raw_projection}
+    return converted
+
+
+def _relayout_touches_camera(relayout_data: Optional[dict[str, Any]]) -> bool:
+    if not isinstance(relayout_data, dict):
+        return False
+    if isinstance(relayout_data.get("scene.camera"), dict):
+        return True
+    scene_payload = relayout_data.get("scene")
+    if isinstance(scene_payload, dict) and isinstance(scene_payload.get("camera"), dict):
+        return True
+    return any(str(key).startswith("scene.camera.") for key in relayout_data)
+
+
+def _persist_relayout_camera(
+    backend,
+    capture,
+    camera_state,
+    *,
+    now: float,
+    last_commit: float,
+    min_interval_s: float,
+):
+    """Store a drag on the scene that produced it.
+
+    ``capture["scene_id"]`` is stamped from the canvas when the gesture
+    starts. The tab selected by the time Dash runs the callback can
+    already be the next scene, and must not receive this camera.
+    ``apply_intent`` persists ``set_camera`` with ``broadcast=False`` so
+    the poll does not echo this camera back into the figure.
+    """
+    if not isinstance(capture, dict):
+        return None
+    scene_id = capture.get("scene_id")
+    if not scene_id or scene_id not in backend.scene_store.scenes:
+        return None
+    relayout = capture.get("relayout") if isinstance(capture.get("relayout"), dict) else {}
+    if not _relayout_touches_camera(relayout):
+        return None
+    full_camera_payload = bool(
+        isinstance(relayout.get("scene.camera"), dict)
+        or (
+            isinstance(relayout.get("scene"), dict)
+            and isinstance((relayout.get("scene") or {}).get("camera"), dict)
+        )
+    )
+    state_before = backend.get_state(scene_id)
+    current_camera = _camera_from_store(camera_state, scene_id) or state_before.get("camera")
+    camera = _camera_from_relayout_data(relayout, current_camera)
+    if not camera or (isinstance(current_camera, dict) and camera == current_camera):
+        return None
+    if not full_camera_payload and (now - last_commit) < min_interval_s:
+        return None
+    replaced = False
+    try:
+        scene = backend.scene_for_state(state_before)
+        style = backend.style_for_state(state_before, scene=scene)
+        camera, replaced = backend.camera_that_frames(
+            state_before, camera, scene=scene, style=style
+        )
+    except (KeyError, ValueError, OSError, TypeError):
+        replaced = False
+    payload: dict[str, Any] = {"camera": camera}
+    # The current revision is enough. ``patch_state`` adds one when the
+    # patch carries ``camera_revision``, so a drag that still frames does
+    # not move the clock and a replacement moves it once.
+    if replaced:
+        payload["camera_revision"] = int(state_before.get("camera_revision", 0) or 0)
+    backend.apply_intent(
+        {"type": "set_camera", "scene_id": scene_id, "payload": payload}
+    )
+    state = backend.get_state(scene_id)
+    flat_ortep = state.get("material") == "flat" and state.get("style") == "ortep"
+    view_update = None
+    if replaced:
+        from .view_updates import make_update
+
+        view_update = make_update(
+            state,
+            operation="camera",
+            payload={"camera": copy.deepcopy(state.get("camera")), "command": "refit"},
+            reason="camera-refit",
+        ).to_dict()
+    return {
+        "scene_id": str(scene_id),
+        "camera_store": _camera_store_payload(scene_id, state.get("camera")),
+        "agent_state": copy.deepcopy(state) if flat_ortep else None,
+        "refit": replaced,
+        "view_update": view_update,
     }
 
 

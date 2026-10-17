@@ -63,6 +63,80 @@ def _apply_polyhedron_visibility_patch(fig: go.Figure, state: dict[str, Any] | N
         trace.visible = bool(enabled_map.get(str(spec_id), True))
 
 
+def _with_state_projection(
+    camera: Optional[dict[str, Any]], state: dict[str, Any]
+) -> Optional[dict[str, Any]]:
+    """Attach the scene projection when a stamped camera omitted it.
+
+    Position/focal cameras convert to an eye dict without ``projection``.
+    Plotly then paints perspective even when the radio is orthographic,
+    and the next ortho apply looks at that eye through the wrong frustum.
+    """
+    if not isinstance(camera, dict):
+        return camera
+    if _camera_projection_name(camera):
+        return camera
+    stamped = copy.deepcopy(camera)
+    stamped["projection"] = {
+        "type": _coerce_projection(state.get("projection") or "perspective")
+    }
+    return stamped
+
+
+def _camera_projection_name(camera: Optional[dict[str, Any]]) -> Optional[str]:
+    if not isinstance(camera, dict):
+        return None
+    raw = camera.get("projection")
+    if isinstance(raw, dict) and raw.get("type"):
+        return _coerce_projection(raw.get("type"))
+    if isinstance(raw, str) and raw:
+        return _coerce_projection(raw)
+    return None
+
+
+def _component_values(raw: Any) -> Optional[tuple[float, float, float]]:
+    if isinstance(raw, dict):
+        try:
+            return (float(raw.get("x", 0.0)), float(raw.get("y", 0.0)), float(raw.get("z", 0.0)))
+        except (TypeError, ValueError):
+            return None
+    try:
+        values = [float(value) for value in raw]
+    except (TypeError, ValueError):
+        return None
+    if len(values) != 3:
+        return None
+    return (values[0], values[1], values[2])
+
+
+def _camera_components_finite(camera: dict[str, Any]) -> bool:
+    """Reject a drag whose eye, center, or up is present but non-finite.
+
+    Missing center or up is a usable camera: the Plotly converter fills
+    those from its defaults. A present NaN is not.
+    """
+    import math
+    if "eye" in camera:
+        required = ("eye",)
+    elif "position" in camera or "focal_point" in camera:
+        required = tuple(
+            group for group in ("position", "focal_point") if group in camera
+        )
+    else:
+        return False
+    for group in required:
+        values = _component_values(camera.get(group))
+        if values is None or not all(math.isfinite(value) for value in values):
+            return False
+    for group in ("center", "up", "focal_point"):
+        if group not in camera or camera.get(group) is None:
+            continue
+        values = _component_values(camera.get(group))
+        if values is None or not all(math.isfinite(value) for value in values):
+            return False
+    return True
+
+
 class _CameraBackendMixin:
     def figure_for_state(
         self,
@@ -130,13 +204,20 @@ class _CameraBackendMixin:
                 # ``TypeError: 'NoneType' object is not iterable``
                 # because the lazy compound-array initialiser tries to
                 # iterate the stored value. Pass an empty list instead.
+                title_text = (
+                    scene_for_overlay.get("display_title")
+                    or scene_for_overlay.get("title")
+                    or scene_for_overlay.get("name")
+                    or ""
+                )
                 fig.update_layout(
                     annotations=annotations or [],
                     shapes=shapes or [],
                     uirevision=style_for_overlay["uirevision"],
                     scene_uirevision=style_for_overlay["uirevision"],
+                    title=dict(text=str(title_text), x=0.5),
                 )
-                camera = _plotly_camera(state.get("camera"))
+                camera = self._layout_camera(state, scene_for_overlay, style_for_overlay)
                 if camera:
                     fig.update_layout(scene_camera=camera)
             except Exception:  # pragma: no cover - defensive, fall back to verbatim cache
@@ -218,17 +299,23 @@ class _CameraBackendMixin:
             replicas=replica_count,
         ):
             style = self.style_for_state(state, scene=scene)
+            camera = self._layout_camera(state, scene, style)
             # Flat + ORTEP: render via Matplotlib 2D and embed as a static
             # image in a Plotly figure (the web viewer needs a go.Figure).
             if style.get("material") == "flat" and style.get("style") == "ortep":
+                # The publication image follows the camera the caller stored.
+                # ``camera`` may be a framing substitute for the WebGL orbit
+                # anchors; baking that substitute would ignore an orbit that
+                # still points at the atoms.
+                stored_camera = state.get("camera")
+                ortep_camera = stored_camera if isinstance(stored_camera, dict) else camera
                 fig = self._flat_ortep_figure(
                     scene,
                     style,
-                    camera=_plotly_camera(state.get("camera")),
+                    camera=ortep_camera,
                 )
             else:
                 fig = build_figure(scene, style, topology_data=topology_data)
-        camera = _plotly_camera(state.get("camera"))
         if camera:
             fig.update_layout(scene_camera=camera)
         if cache_key is not None and not topology_pending:
@@ -277,7 +364,7 @@ class _CameraBackendMixin:
         trace_dicts = _style_trace_dicts(trace_dicts, style)
         fig = go.Figure(data=trace_dicts, _validate=False)
         scene_layout = figure_axis_layout(scene, style, xr, yr, zr)
-        camera = _plotly_camera(state.get("camera"))
+        camera = self._layout_camera(state, scene, style)
         if camera:
             scene_layout["camera"] = camera
         fig.update_layout(
@@ -410,9 +497,196 @@ class _CameraBackendMixin:
                 raise
             raise RuntimeError(f"Plotly/Kaleido PNG export failed: {exc}") from exc
 
+    def camera_that_frames(
+        self,
+        state: dict[str, Any],
+        camera: Optional[dict[str, Any]],
+        *,
+        scene: dict[str, Any],
+        style: dict[str, Any],
+    ) -> tuple[dict[str, Any], bool]:
+        """Return a camera that shows ``scene``, and whether it replaced ``camera``.
+
+        A non-finite eye, or an eye that has collapsed onto the center, misses
+        the frustum. A view that only clips a speck or a thin line is treated
+        the same way. When the structure default shows the atoms, that default
+        is returned. The default keeps the candidate's projection, so an
+        orthographic drag is not replaced by a perspective camera. A zoom
+        whose visible centers still span the viewport is returned unchanged.
+        When neither camera shows the scene, the candidate is kept.
+        """
+        from ..render.screen_projection import camera_shows_scene
+        from ..render.viewport import _plotly_camera_from_scene
+        from ..render.viewport_spec import resolve_viewport
+
+        probe = dict(style)
+        if isinstance(camera, dict):
+            probe["camera"] = copy.deepcopy(camera)
+        viewport = resolve_viewport(scene, probe)
+        points = [
+            atom.get("cart")
+            for atom in (scene.get("draw_atoms") or [])
+            if isinstance(atom, dict) and atom.get("cart") is not None
+        ]
+        if not points:
+            xr, yr, zr = viewport.ranges
+            points = [[x, y, z] for x in xr for y in yr for z in zr]
+        projection = probe.get("projection")
+
+        def _frames(candidate: Optional[dict[str, Any]], candidate_projection: Any) -> bool:
+            if not isinstance(candidate, dict) or not _camera_components_finite(candidate):
+                return False
+            return camera_shows_scene(
+                candidate,
+                points,
+                ranges=viewport.ranges,
+                aspectratio=viewport.aspectratio,
+                projection=candidate_projection,
+            )
+
+        current = None
+        if isinstance(camera, dict):
+            try:
+                current = _plotly_camera_from_scene(scene, probe)
+            except (TypeError, ValueError, ZeroDivisionError):
+                current = None
+        if _frames(current, projection):
+            return copy.deepcopy(camera), False
+
+        fitted_state = dict(state)
+        candidate_projection = _camera_projection_name(camera)
+        if candidate_projection:
+            fitted_state["projection"] = candidate_projection
+        fitted = self.default_camera(fitted_state)
+        fitted_projection = _camera_projection_name(fitted) or projection
+        if _frames(fitted, fitted_projection):
+            return fitted, True
+        if isinstance(camera, dict):
+            return copy.deepcopy(camera), False
+        return fitted, False
+
+    def _layout_camera(
+        self,
+        state: dict[str, Any],
+        scene: dict[str, Any],
+        style: dict[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        """Camera stamped onto a figure.
+
+        The stored camera is used when it shows the scene. A camera that
+        leaves every atom outside the frustum is replaced for this figure
+        only; capture and startup persist that replacement separately.
+        """
+        raw = state.get("camera")
+        if not isinstance(raw, dict):
+            return _with_state_projection(_plotly_camera(raw), state)
+        try:
+            fitted, replaced = self.camera_that_frames(
+                state, raw, scene=scene, style=style
+            )
+        except (KeyError, ValueError, OSError, TypeError):
+            return _with_state_projection(_plotly_camera(raw), state)
+        if not replaced:
+            return _with_state_projection(_plotly_camera(raw), state)
+        return _with_state_projection(fitted, state)
+
+    def refit_scene_camera(
+        self, scene_id: Optional[str] = None, *, force: bool = False
+    ) -> dict[str, Any]:
+        """Persist the default camera when the stored one misses the scene.
+
+        Display-scope changes install the structure default: the previous
+        look-at belongs to a different frustum, and Reset was the only
+        control that brought the atoms back. ``force`` does that install.
+        A drag or a startup camera that no longer shows the scene is
+        replaced the same way. A zoom that still spans the viewport is
+        left unchanged, including its revision.
+        """
+        state = self.get_state(scene_id)
+        target = state.get("scene_id") or scene_id
+        camera = state.get("camera")
+        if force:
+            fitted = self.default_camera(state)
+            if isinstance(camera, dict) and camera == fitted:
+                return state
+            self.patch_state(
+                {
+                    "camera": fitted,
+                    "camera_revision": int(state.get("camera_revision", 0) or 0),
+                },
+                scene_id=target,
+                broadcast=False,
+            )
+            return self.get_state(target)
+        if not isinstance(camera, dict):
+            return state
+        try:
+            scene = self.scene_for_state(state)
+            style = self.style_for_state(state, scene=scene)
+            fitted, replaced = self.camera_that_frames(
+                state, camera, scene=scene, style=style
+            )
+        except (KeyError, ValueError, OSError, TypeError):
+            return state
+        if not replaced:
+            return state
+        self.patch_state(
+            {
+                "camera": fitted,
+                "camera_revision": int(state.get("camera_revision", 0) or 0),
+            },
+            scene_id=target,
+            broadcast=False,
+        )
+        return self.get_state(target)
+
+    def refit_offscreen_cameras(self) -> list[str]:
+        """Replace persisted cameras that leave the scene outside the frustum.
+
+        Scene cameras survive a restart. A drag that was stored on the
+        wrong scene, or zoomed until the atoms left the view, is painted
+        again on the next launch. The same check runs on every drag and
+        display capture. Reset already installs the structure default;
+        this pass does that for cameras loaded from the store when the
+        default itself shows the scene.
+        """
+        refit: list[str] = []
+        for scene_id in list(self.scene_store.order):
+            try:
+                before = self.scene_state(scene_id)
+            except (KeyError, ValueError, OSError):
+                continue
+            if not isinstance(before.get("camera"), dict):
+                continue
+            try:
+                after = self.refit_scene_camera(scene_id)
+            except (KeyError, ValueError, OSError, TypeError):
+                continue
+            before_camera = before.get("camera")
+            after_camera = after.get("camera")
+            if before_camera != after_camera:
+                refit.append(str(scene_id))
+        return refit
+
     def default_camera(self, state: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-        scene = self.scene_for_state(self.get_state() if state is None else state)
-        return _plotly_camera(scene.get("camera")) or _plotly_camera(None)
+        """Canonical unzoomed camera for Reset and Fit.
+
+        The eye comes from the structure scene, not from the live camera
+        the browser persisted after a wheel zoom. The active projection
+        is kept so Reset does not bounce orthographic back to perspective.
+        """
+        state = self.get_state() if state is None else state
+        scene = self.scene_for_state(state)
+        camera = copy.deepcopy(_plotly_camera(scene.get("camera")) or {})
+        if "eye" not in camera:
+            camera = {
+                "eye": {"x": 1.25, "y": 1.25, "z": 1.25},
+                "center": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "up": {"x": 0.0, "y": 0.0, "z": 1.0},
+            }
+        projection = _coerce_projection((state or {}).get("projection"))
+        camera["projection"] = {"type": projection}
+        return camera
 
     def get_camera(self, scene_id: Optional[str] = None) -> dict[str, Any]:
         state = self.get_state(scene_id)
@@ -437,19 +711,27 @@ class _CameraBackendMixin:
         **payload,
     ) -> dict[str, Any]:
         if action == "reset":
-            self._bump_camera_revision(scene_id=scene_id, broadcast=broadcast)
-            return self.set_camera(
-                self.default_camera(self.get_state(scene_id)),
+            state = self.get_state(scene_id)
+            camera = self.default_camera(state)
+            revision = int(state.get("camera_revision", 0) or 0) + 1
+            self.patch_state(
+                {"camera": camera, "camera_revision": revision},
                 scene_id=scene_id,
                 broadcast=broadcast,
             )
+            return self.get_camera(scene_id)
 
         if action == "align":
-            self._bump_camera_revision(scene_id=scene_id, broadcast=broadcast)
-            return self.align_camera(payload.get("axis"), scene_id=scene_id, broadcast=broadcast)
+            state = self.get_state(scene_id)
+            revision = int(state.get("camera_revision", 0) or 0) + 1
+            return self.align_camera(
+                payload.get("axis"),
+                scene_id=scene_id,
+                broadcast=broadcast,
+                camera_revision=revision,
+            )
 
         if action == "fit":
-            self._bump_camera_revision(scene_id=scene_id, broadcast=broadcast)
             state = self.get_state(scene_id)
             camera = self.default_camera(state)
             # Plotly uses unitless eye vectors against the already fixed
@@ -459,7 +741,13 @@ class _CameraBackendMixin:
             if norm > 1e-8:
                 scale = 1.55 / norm
                 camera["eye"] = {axis: float(eye.get(axis, 0.0)) * scale for axis in ("x", "y", "z")}
-            return self.set_camera(camera, scene_id=scene_id, broadcast=broadcast)
+            revision = int(state.get("camera_revision", 0) or 0) + 1
+            self.patch_state(
+                {"camera": camera, "camera_revision": revision},
+                scene_id=scene_id,
+                broadcast=broadcast,
+            )
+            return self.get_camera(scene_id)
 
         if action in ("projection", "set_projection"):
             return self.set_projection(
@@ -502,7 +790,19 @@ class _CameraBackendMixin:
         elif isinstance(self.get_state(scene_id).get("projection"), str):
             projection = self.get_state(scene_id)["projection"]
         camera = _camera_payload(eye, center, up, projection=projection)
-        return self.set_camera(camera, scene_id=scene_id, broadcast=broadcast)
+        # Orbit, pan, and zoom are commands, not drag persistence. Advance
+        # the camera clock explicitly with the camera write so Plotly takes
+        # the new eye.  Drag patches omit this key so a later display toggle
+        # does not snap the WebGL camera back.  ``patch_state`` treats an
+        # explicit value as the requested next revision and keeps it
+        # monotonic across scene-scoped updates.
+        revision = int(self.get_state(scene_id).get("camera_revision", 0) or 0) + 1
+        self.patch_state(
+            {"camera": camera, "camera_revision": revision},
+            scene_id=scene_id,
+            broadcast=broadcast,
+        )
+        return self.get_camera(scene_id)
 
     def align_camera(
         self,
@@ -510,6 +810,7 @@ class _CameraBackendMixin:
         scene_id: Optional[str] = None,
         *,
         broadcast: bool = True,
+        camera_revision: Optional[int] = None,
     ) -> dict[str, Any]:
         """Look down the requested lattice axis (``a``/``b``/``c``) or
         reciprocal axis (``a*``/``b*``/``c*``).
@@ -545,7 +846,11 @@ class _CameraBackendMixin:
             center=center,
             projection=projection,
         )
-        return self.set_camera(camera, scene_id=scene_id, broadcast=broadcast)
+        patch = {"camera": camera}
+        if camera_revision is not None:
+            patch["camera_revision"] = int(camera_revision)
+        self.patch_state(patch, scene_id=scene_id, broadcast=broadcast)
+        return self.get_camera(scene_id)
 
     def set_projection(
         self,
@@ -560,17 +865,32 @@ class _CameraBackendMixin:
         ``GET /state`` echoes back what was set.
         """
         normalized = _coerce_projection(projection, fallback="perspective")
+        state = self.get_state(scene_id)
         camera = dict(self.get_camera(scene_id))
         camera["projection"] = {"type": normalized}
+        trial = dict(state)
+        trial["projection"] = normalized
+        trial["camera"] = camera
+        try:
+            scene = self.scene_for_state(trial)
+            style = self.style_for_state(trial, scene=scene)
+            fitted, replaced = self.camera_that_frames(
+                trial, camera, scene=scene, style=style
+            )
+        except (KeyError, ValueError, OSError, TypeError):
+            fitted, replaced = camera, False
         # Projection is a camera command.  Commit it atomically with the
         # camera so it advances only the camera clock and cannot enqueue two
-        # competing full-frame deliveries.
-        self.patch_state(
-            {"projection": normalized, "camera": camera},
-            scene_id=scene_id,
-            broadcast=broadcast,
-        )
-        return camera
+        # competing full-frame deliveries. A projection that pushes every
+        # atom outside the new frustum is replaced in the same write.
+        payload: dict[str, Any] = {
+            "projection": normalized,
+            "camera": fitted if replaced else camera,
+        }
+        if replaced:
+            payload["camera_revision"] = int(state.get("camera_revision", 0) or 0)
+        self.patch_state(payload, scene_id=scene_id, broadcast=broadcast)
+        return self.get_camera(scene_id)
 
     def _bump_camera_revision(self, scene_id: Optional[str] = None, *, broadcast: bool = True) -> int:
         """Increment ``state['camera_revision']`` so the next figure
@@ -584,7 +904,13 @@ class _CameraBackendMixin:
         non-camera UI toggles like Labels/Hydrogens.
         """
         state = self.get_state(scene_id)
-        current = int(state.get("camera_revision", 0) or 0)
-        self.patch_state({"camera_revision": current + 1}, scene_id=scene_id, broadcast=broadcast)
-        return current + 1
+        key = str(scene_id or self.scene_store.active_id or "")
+        current = max(
+            int(state.get("camera_revision", 0) or 0),
+            int(getattr(self, "_camera_revisions", {}).get(key, 0) or 0),
+        )
+        updated = self.patch_state(
+            {"camera_revision": current + 1}, scene_id=scene_id, broadcast=broadcast
+        )
+        return int(updated.get("camera_revision", current + 1) or current + 1)
 

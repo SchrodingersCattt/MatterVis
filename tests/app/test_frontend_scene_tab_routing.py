@@ -51,6 +51,14 @@ def test_scene_tab_intent_is_bound_by_global_rebind_observer():
     assert "ensureSceneTabTooltips();" in rebind_body
 
 
+def test_scene_resync_runs_for_programmatic_selection_and_scene_cursor():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    select_idx = source.index("window.MatterVisSelectScene")
+    select_body = source[select_idx:source.index("function fastViewMetadata", select_idx)]
+    assert "resyncScene(sceneTabIntentId)" in select_body
+    assert "scene_id=" in source
+
+
 def test_programmatic_upload_selection_clears_stale_tab_intent():
     source = MATTERVIS_JS.read_text(encoding="utf-8")
     selected_idx = source.index("function selectedSceneId")
@@ -105,6 +113,27 @@ def test_failed_figure_socket_switches_to_one_http_fallback():
     assert "__mattervisFigureWsDisabled" in ws_body
     assert "Invalid frame header" in ws_body
     assert "setTimeout(connectWS,5000)" in ws_body
+
+
+def test_figure_socket_keeps_http_journal_polling_during_upgrade():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    ws_idx = source.index("(function connectWS()")
+    ws_body = source[ws_idx:source.index("  function ensureSceneTabTooltips", ws_idx)]
+    upgrade_idx = ws_body.index("ws = new WebSocket")
+    assert "startHttpFallback();" in ws_body[:upgrade_idx]
+    assert ws_body.index("startHttpFallback();") < upgrade_idx
+
+
+def test_fallback_parked_frames_keep_revision_and_sequence_fences():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    ws_idx = source.index("(function connectWS()")
+    ws_body = source[ws_idx:source.index("  function ensureSceneTabTooltips", ws_idx)]
+    park_idx = ws_body.index("function parkFallbackFigure")
+    park_body = ws_body[park_idx:ws_body.index("function deliverFallbackPayload", park_idx)]
+    assert "rememberExpectedRender(payload, true)" in park_body
+    assert "payload.isCurrent = function" in park_body
+    assert "__mattervisFigureLastSeq" in park_body
+    assert "previousSeq" in park_body
 
 
 def test_tab_switch_clears_global_upload_status():

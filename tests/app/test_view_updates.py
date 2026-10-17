@@ -51,6 +51,21 @@ def test_display_patch_requires_matching_geometry_version():
     assert not update_applies(update, _state(geometry_version=4, display_version=5))
 
 
+def _with(state, **changes):
+    merged = dict(state)
+    merged.update(changes)
+    return merged
+
+
+def test_atom_scale_and_style_require_a_complete_frame():
+    before = _state(atom_scale=1.0, bond_radius=0.1, material="standard", style="ball_and_stick", axis_scale=1.0)
+    assert classify_change(before, _with(before, atom_scale=1.4)) is UpdateKind.GEOMETRY
+    assert classify_change(before, _with(before, bond_radius=0.2)) is UpdateKind.GEOMETRY
+    assert classify_change(before, _with(before, material="flat", style="ortep")) is UpdateKind.GEOMETRY
+    assert classify_change(before, _with(before, atom_scale=1.4, axis_scale=2.0)) is UpdateKind.GEOMETRY
+    assert classify_change(before, _with(before, axis_scale=2.0)) is UpdateKind.OVERLAY
+
+
 def test_polyhedron_enabled_is_part_of_display_identity():
     before = _state(polyhedron_specs=[{"id": "p", "enabled": True}])
     after = _state(polyhedron_specs=[{"id": "p", "enabled": False}], display_version=5)
@@ -70,4 +85,16 @@ def test_render_style_and_group_edits_advance_geometry_identity():
     )
     assert geometry_state_key(before) != geometry_state_key(after)
     assert classify_change(before, after) is UpdateKind.GEOMETRY
+
+
+def test_update_serialization_copies_nested_payload_and_scene_generation():
+    payload = {"camera": {"eye": {"x": 1.0}}, "items": [{"id": "a"}]}
+    state = _state(scene_generation=7)
+    update = make_update(state, payload=payload)
+    serialized = update.to_dict()
+    payload["camera"]["eye"]["x"] = 99.0
+    payload["items"][0]["id"] = "changed"
+    assert serialized["scene_generation"] == 7
+    assert serialized["payload"]["camera"]["eye"]["x"] == 1.0
+    assert serialized["payload"]["items"][0]["id"] == "a"
 

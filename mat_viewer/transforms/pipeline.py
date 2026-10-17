@@ -29,6 +29,24 @@ def _normalise_repeat_params(params: Dict[str, Any]) -> Tuple[int, int, int]:
     )
 
 
+def _atoms_for_repeat(atoms: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Repeat the home cell, not the copies already drawn on its faces.
+
+    Unit-cell display adds boundary replicas so a single cell looks closed.
+    Replicating those copies stacks several atoms on one site. The bond
+    lifter then drops every collided identity, which leaves floating atoms
+    and a supercell whose bonds do not grow with the repeat counts.
+    """
+    home = [
+        atom
+        for atom in atoms
+        if not atom.get("_is_boundary_replica")
+        and not atom.get("_is_framework_context_replica")
+        and not atom.get("_is_bonded_image_replica")
+    ]
+    return list(home) if home else list(atoms)
+
+
 def apply_one_transform(
     scene: Dict[str, Any],
     transform: Dict[str, Any],
@@ -52,7 +70,9 @@ def apply_one_transform(
         na, nb, nc = _normalise_repeat_params(params)
         if (na, nb, nc) == (1, 1, 1):
             return scene
-        new_atoms = replicate_atoms(atoms, M, na=na, nb=nb, nc=nc)
+        new_atoms = replicate_atoms(
+            _atoms_for_repeat(atoms), M, na=na, nb=nb, nc=nc
+        )
         return rebuild_scene_with_atoms(scene, new_atoms, style=style)
 
     if kind == "grow_radius":

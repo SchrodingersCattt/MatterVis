@@ -1,6 +1,6 @@
 (function () {
   const SCENE_MIN = 420;
-  const PANEL_MIN = 260;
+  const PANEL_MIN = 300;
   const PANEL_MAX = 640;
   const COMPACT_BREAKPOINT = 756;
 
@@ -9,23 +9,35 @@
   }
 
   let resizingScene = false;
+  let lastGraphRect = "";
 
   function resizeScene() {
     if (resizingScene) {
       return;
     }
+    const graph = document.getElementById("crystal-graph");
+    if (!graph) {
+      return;
+    }
+    const rect = graph.getBoundingClientRect();
+    const key = Math.round(rect.width) + "x" + Math.round(rect.height);
+    if (key === lastGraphRect) {
+      return;
+    }
+    lastGraphRect = key;
     resizingScene = true;
     try {
-      const graph = document.getElementById("crystal-graph");
-      if (window.Plotly && graph) {
+      if (window.Plotly) {
         const plot = graph.classList.contains("js-plotly-plot")
           ? graph
           : graph.querySelector(".js-plotly-plot");
-        if (plot) {
+        if (plot && typeof plot.on === "function" && window.Plotly.Plots && typeof window.Plotly.Plots.resize === "function") {
           window.Plotly.Plots.resize(plot);
         }
       }
-      window.dispatchEvent(new Event("resize"));
+      if (window.MatterVisCompass && typeof window.MatterVisCompass.redraw === "function") {
+        window.MatterVisCompass.redraw();
+      }
     } finally {
       resizingScene = false;
     }
@@ -260,8 +272,25 @@
     init();
   }
 
-  const observer = new MutationObserver(function () {
-    init();
-  });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  let panelObserver = null;
+  let panelObserveScheduled = false;
+  function schedulePanelInit() {
+    if (panelObserveScheduled) return;
+    panelObserveScheduled = true;
+    const schedule = window.requestAnimationFrame || function (fn) { return setTimeout(fn, 16); };
+    schedule(function () {
+      panelObserveScheduled = false;
+      attachPanelObserver();
+      init();
+    });
+  }
+  function attachPanelObserver() {
+    const root = document.getElementById("viewer-root") || document.body;
+    if (!root || (panelObserver && panelObserver.__root === root)) return;
+    if (panelObserver) panelObserver.disconnect();
+    panelObserver = new MutationObserver(schedulePanelInit);
+    panelObserver.__root = root;
+    panelObserver.observe(root, { childList: true, subtree: true });
+  }
+  attachPanelObserver();
 })();

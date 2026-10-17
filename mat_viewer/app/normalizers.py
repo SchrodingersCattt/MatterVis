@@ -53,7 +53,30 @@ def _normalize_selection(raw: Any) -> dict[str, Any]:
     active = str(raw.get("active_label") or "").strip() or None
     if active not in atom_labels:
         active = atom_labels[-1] if atom_labels else None
-    return {"atom_labels": atom_labels, "active_label": active, "order": order}
+    result = {"atom_labels": atom_labels, "active_label": active, "order": order}
+    parts_raw = raw.get("parts")
+    parts: list[dict[str, Any]] = []
+    if isinstance(parts_raw, list):
+        known = set(atom_labels)
+        for item in parts_raw:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label") or "").strip()
+            if not label or label not in known:
+                continue
+            entry: dict[str, Any] = {"label": label}
+            if "is_minor" in item:
+                entry["is_minor"] = bool(item["is_minor"])
+            elem = item.get("elem")
+            if elem not in (None, ""):
+                entry["elem"] = str(elem)
+            part = item.get("part")
+            if part not in (None, ""):
+                entry["part"] = str(part)
+            parts.append(entry)
+    if parts:
+        result["parts"] = parts
+    return result
 
 
 def _normalize_disorder_resolve(

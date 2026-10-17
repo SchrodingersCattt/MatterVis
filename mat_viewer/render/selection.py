@@ -12,6 +12,7 @@ def _atom_outline_payload(
     *,
     labels: set[str] | None = None,
     source_indices: set[int] | None = None,
+    parts: list[dict] | None = None,
     radius_scale: float = 1.18,
 ) -> dict[str, list]:
     """Build outline-sphere mesh for the atoms selected by ``labels``
@@ -25,11 +26,32 @@ def _atom_outline_payload(
     payload = {"x": [], "y": [], "z": [], "i": [], "j": [], "k": []}
     labels = labels or set()
     source_indices = source_indices or set()
-    if not labels and not source_indices:
+    parts = list(parts or [])
+    if not labels and not source_indices and not parts:
         return payload
     atom_scale = float(style.get("atom_scale", 1.0))
     for atom in scene.get("draw_atoms") or []:
-        matched = bool(labels) and str(atom.get("label") or "") in labels
+        if parts:
+            matched = False
+            for part in parts:
+                if str(atom.get("label") or "") != str(part.get("label") or ""):
+                    continue
+                if "is_minor" in part and bool(atom.get("is_minor")) != bool(part["is_minor"]):
+                    continue
+                wanted = part.get("part")
+                if wanted not in (None, ""):
+                    actual = (
+                        atom.get("part")
+                        or atom.get("disorder_group")
+                        or atom.get("disorder_assembly")
+                        or ""
+                    )
+                    if str(actual) != str(wanted):
+                        continue
+                matched = True
+                break
+        else:
+            matched = bool(labels) and str(atom.get("label") or "") in labels
         if not matched and source_indices:
             source = atom.get("_source_index")
             if source is not None:
@@ -53,10 +75,14 @@ def selection_outline_trace(
     *,
     selected_labels: set[str] | None = None,
 ):
-    selected = set(selected_labels or [])
-    if not selected:
+    selection = style.get("selection") if isinstance(style.get("selection"), dict) else {}
+    parts = list(selection.get("parts") or [])
+    selected = set(selected_labels or selection.get("atom_labels") or [])
+    if not selected and not parts:
         return None
-    payload = _atom_outline_payload(scene, style, labels=selected, radius_scale=1.18)
+    payload = _atom_outline_payload(
+        scene, style, labels=selected, parts=parts, radius_scale=1.18
+    )
     if not payload["x"]:
         return None
     return _annotate_trace(go.Mesh3d(
@@ -136,13 +162,15 @@ def _atom_selection_trace(scene: dict, style: dict, hidden_labels: set | None = 
         frag_label = (
             str(fragment_labels[idx]) if idx < len(fragment_labels) and fragment_labels[idx] is not None else ""
         )
+        part = atom.get("part") or atom.get("disorder_group") or atom.get("disorder_assembly") or ""
         customdata.append([
             "atom",
             int(idx),
             str(atom["label"]),
             str(atom["elem"]),
-            int(atom["is_minor"]),
+            int(bool(atom.get("is_minor"))),
             frag_label,
+            str(part),
         ])
     return _annotate_trace(go.Scatter3d(
         x=xs,
@@ -151,8 +179,11 @@ def _atom_selection_trace(scene: dict, style: dict, hidden_labels: set | None = 
         mode="markers",
         marker={
             "size": sizes,
-            "color": "rgba(0,0,0,0)",
-            "opacity": 0.02,
+            # gl3d drops fragments whose alpha is ~0, so hover and click
+            # never see this trace. A faint marker still reads as invisible
+            # and stays in the pick buffer.
+            "color": "rgba(255,255,255,0.2)",
+            "opacity": 0.2,
             "line": {"width": 0, "color": "rgba(0,0,0,0)"},
         },
         customdata=customdata,

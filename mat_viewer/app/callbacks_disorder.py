@@ -101,115 +101,23 @@ def _replica_rows(replicas: list[dict[str, Any]], *, status: str = "ok") -> list
 #    camera before any restore can run.
 _PREPARE_PREVIEW_JS = """
 function(store) {
-    var nope = window.dash_clientside.no_update;
-    var gd = document.querySelector('#crystal-graph .js-plotly-plot')
-             || document.getElementById('crystal-graph');
-    if (!gd || !window.Plotly || !gd.data) { return nope; }
-
-    var prefix = 'disorder-preview-outline:';
-    var oldIndices = [];
-    for (var i = 0; i < gd.data.length; i++) {
-        if (String(gd.data[i].name || '').indexOf(prefix) === 0) {
-            oldIndices.push(i);
-        }
-    }
-
-    function liveViewport() {
-        try {
-            var sc = gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
-            if (!sc || typeof sc.getCamera !== 'function') { return null; }
-            return {
-                scene: sc,
-                camera: JSON.parse(JSON.stringify(sc.getCamera())),
-                aspectratio: sc.glplot && sc.glplot.getAspectratio && sc.glplot.getAspectratio(),
-            };
-        } catch (e) {
-            return null;
-        }
-    }
-
-    function restoreViewport(viewport) {
-        if (!viewport || !viewport.scene || !viewport.camera) { return; }
-        try {
-            viewport.scene.setViewport({
-                camera: viewport.camera,
-                aspectratio: viewport.aspectratio
-                    || (viewport.scene.glplot && viewport.scene.glplot.getAspectratio && viewport.scene.glplot.getAspectratio()),
-            });
-        } catch (e) {}
-    }
-
-    var traces = [];
-    if (store && store.replicas) {
-        for (var r = 0; r < store.replicas.length; r++) {
-            var rep = store.replicas[r] || {};
-            var mesh = rep.preview_mesh || {};
-            var replicaId = String(rep.id || '');
-            if (!replicaId || !mesh.x || !mesh.x.length) { continue; }
-            traces.push({
-                type: 'mesh3d',
-                name: prefix + replicaId,
-                x: mesh.x || [],
-                y: mesh.y || [],
-                z: mesh.z || [],
-                i: mesh.i || [],
-                j: mesh.j || [],
-                k: mesh.k || [],
-                color: '#FFD400',
-                opacity: 0,
-                flatshading: false,
-                hoverinfo: 'skip',
-                showlegend: false,
-                visible: true,
-                meta: {kind: 'disorder-preview-outline', replica_id: replicaId},
-            });
-        }
-    }
-
-    var viewport = liveViewport();
-    var p = Promise.resolve();
-    if (oldIndices.length) {
-        p = p.then(function() { return window.Plotly.deleteTraces(gd, oldIndices); });
-    }
-    if (traces.length) {
-        p = p.then(function() { return window.Plotly.addTraces(gd, traces); });
-    }
-    p.then(function() {
-        window.requestAnimationFrame(function() { restoreViewport(viewport); });
-    });
-    return nope;
+    if (window.MatterVisDisorderPreview) return window.MatterVisDisorderPreview.prepare(store);
+    return window.dash_clientside.no_update;
 }
 """
 
 _HOVER_PREVIEW_JS = """
 function(replicaId, store) {
-    var nope = window.dash_clientside.no_update;
-    var gd = document.querySelector('#crystal-graph .js-plotly-plot')
-             || document.getElementById('crystal-graph');
-    if (!gd || !window.Plotly || !gd.data) { return nope; }
-    var prefix = 'disorder-preview-outline:';
-    var indices = [];
-    var opacity = [];
-    for (var t = 0; t < gd.data.length; t++) {
-        var name = String(gd.data[t].name || '');
-        if (name.indexOf(prefix) !== 0) { continue; }
-        indices.push(t);
-        opacity.push(Boolean(replicaId) && name === prefix + String(replicaId) ? 0.55 : 0);
-    }
-    if (!indices.length) {
-        // Trace preparation may still be in flight right after Resolve.
-        return nope;
-    }
-    window.Plotly.restyle(gd, {opacity: opacity}, indices);
-    return nope;
+    if (window.MatterVisDisorderPreview) return window.MatterVisDisorderPreview.hover(replicaId, store);
+    return window.dash_clientside.no_update;
 }
 """
 
 
 def register_disorder_callbacks(app, backend):
     @app.callback(
-        Output("disorder-replicas-store", "data"),
-        Output("disorder-replicas-list", "children"),
+        Output("disorder-replicas-store", "data", allow_duplicate=True),
+        Output("disorder-replicas-list", "children", allow_duplicate=True),
         Input("disorder-resolve-btn", "n_clicks"),
         State("scene-tabs", "value"),
         State("disorder-resolve-method", "value"),
@@ -251,10 +159,15 @@ def register_disorder_callbacks(app, backend):
                 for replica in replicas:
                     highlight_indices = replica.get("highlight_indices") or []
                     replica["highlight_count"] = _matched_draw_count(scene, highlight_indices)
+                    drawn_kept = _matched_draw_count(
+                        scene, replica.get("kept_raw_indices") or []
+                    )
+                    if drawn_kept:
+                        replica["kept_count"] = drawn_kept
                     replica["preview_mesh"] = _preview_mesh_for_indices(scene, style, highlight_indices)
             # Persist only the lightweight resolve settings + index list;
             # the mesh stays in the browser store, not in scene state.
-            backend.patch_state(
+            backend.commit_patch(
                 {
                     "disorder_resolve": {"method": method, "count": count, "seed": seed},
                     "disorder_replicas": [
@@ -321,8 +234,32 @@ def register_disorder_callbacks(app, backend):
         next_value = {"method": method, "count": count, "seed": seed}
         if current == next_value:
             return no_update
-        backend.patch_state({"disorder_resolve": next_value}, scene_id=scene_id, broadcast=False)
+        backend.commit_patch({"disorder_resolve": next_value}, scene_id=scene_id, broadcast=False)
         return no_update
+
+    @app.callback(
+        Output("disorder-replicas-store", "data", allow_duplicate=True),
+        Output("disorder-replicas-list", "children", allow_duplicate=True),
+        Input("scene-tabs", "value"),
+        State("disorder-replicas-store", "data"),
+        prevent_initial_call=True,
+    )
+    def clear_disorder_rows_on_scene_change(scene_id, store):
+        """Resolve results live in one global list, not on the scene tab.
+
+        Leaving them mounted showed the previous structure's enumerations
+        after a tab change.
+        """
+        if not isinstance(store, dict):
+            return no_update, no_update
+        stored = str(store.get("scene_id") or "")
+        if not stored or stored == str(scene_id or ""):
+            return no_update, no_update
+        return {
+            "scene_id": scene_id,
+            "status": "cleared",
+            "replicas": [],
+        }, []
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

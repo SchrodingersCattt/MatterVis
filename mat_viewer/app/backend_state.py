@@ -54,8 +54,6 @@ class _StateBackendMixin:
         for key in ("material", "style", "disorder", "ortep_mode", "label_mode"):
             if key in patch and patch[key] is not None:
                 state[key] = str(patch[key])
-        if state.get("style") == "ortep" and "display_mode" not in patch:
-            state["display_mode"] = "asymmetric_unit"
         if "display_options" in patch and patch["display_options"] is not None:
             state["display_options"] = list(patch["display_options"])
 
@@ -273,13 +271,14 @@ class _StateBackendMixin:
             target_scene_id = (
                 scene_id or (patch or {}).get("scene_id") or self.scene_store.active_id
             )
+            active_scene_id = self.scene_store.active_id
             state_before = (
                 self.scene_state(target_scene_id)
                 if target_scene_id
                 else copy.deepcopy(self.current_state)
             )
-            self.current_state = self.normalize_state(patch, scene_id=target_scene_id)
-            change_kind = classify_change(state_before, self.current_state)
+            working_state = self.normalize_state(patch, scene_id=target_scene_id)
+            change_kind = classify_change(state_before, working_state)
             before_versions = state_versions(state_before)
             # Maintain independent clocks.  A display patch can reuse the
             # current geometry; a camera patch never invalidates either.
@@ -287,7 +286,7 @@ class _StateBackendMixin:
             display_version = before_versions.display
             camera_version = max(
                 before_versions.camera,
-                int(self.current_state.get("camera_revision", 0) or 0),
+                int(working_state.get("camera_revision", 0) or 0),
             )
             if change_kind == UpdateKind.GEOMETRY:
                 geometry_version += 1
@@ -300,33 +299,53 @@ class _StateBackendMixin:
                 display_version += 1
             elif change_kind == UpdateKind.CAMERA:
                 # Browser drag persistence changes the camera value without
-                # invalidating a command revision. Explicit Reset/align and
-                # projection commands carry a revision/projection marker.
-                if "camera_revision" in (patch or {}) or "projection" in (patch or {}):
+                # invalidating a command revision. Explicit camera commands
+                # carry a revision/projection marker.  A caller that supplies
+                # a revision has already selected the next monotonic value;
+                # do not increment it a second time here.  This matters for
+                # orbit/pan/zoom, which write the camera and revision in one
+                # atomic patch.
+                if "camera_revision" in (patch or {}):
+                    try:
+                        requested = int(working_state.get("camera_revision", 0) or 0)
+                    except (TypeError, ValueError):
+                        requested = 0
+                    camera_version = max(before_versions.camera + 1, requested)
+                elif "projection" in (patch or {}):
                     camera_version += 1
-            self.current_state["geometry_version"] = geometry_version
-            self.current_state["display_version"] = display_version
-            self.current_state["camera_version"] = camera_version
-            self.current_state["camera_revision"] = camera_version
+            working_state["geometry_version"] = geometry_version
+            working_state["display_version"] = display_version
+            working_state["camera_version"] = camera_version
+            working_state["camera_revision"] = camera_version
+            # Keep the in-memory command clock in step with the persisted
+            # state.  A later command must not reuse a revision from before a
+            # scene-scoped patch (for example after an orbit followed by a
+            # pan).
+            revisions = getattr(self, "_camera_revisions", None)
+            if isinstance(revisions, dict) and target_scene_id:
+                revisions[str(target_scene_id)] = camera_version
             self._last_update_kind_by_scene[str(target_scene_id)] = change_kind.value
             if target_scene_id:
-                scene_payload = copy.deepcopy(self.current_state)
+                scene_payload = copy.deepcopy(working_state)
                 scene_payload.pop("scene_id", None)
                 scene_payload.pop("scene_label", None)
                 self.scene_store.patch_scene(target_scene_id, scene_payload, save=False)
                 self._bump_render_revision_if_changed(
-                    target_scene_id, state_before, self.current_state
+                    target_scene_id, state_before, working_state
                 )
-            self.current_state["render_revision"] = self.render_revision(
+            working_state["render_revision"] = self.render_revision(
                 target_scene_id
             )
-            if broadcast:
-                self.pending_state = copy.deepcopy(self.current_state)
+            if str(target_scene_id or "") == str(active_scene_id or ""):
+                self.current_state = working_state
+            if broadcast and str(target_scene_id or "") == str(active_scene_id or ""):
+                self.pending_state = copy.deepcopy(working_state)
             self._bump_version()
-            state = copy.deepcopy(self.current_state)
+            state = copy.deepcopy(working_state)
             state["version"] = self.version
             state["server_started_at"] = self.server_started_iso()
             state["render_revision"] = self.render_revision(target_scene_id)
+            state["scene_generation"] = self.scene_generation(target_scene_id)
             self._request_scene_store_save()
             if broadcast and change_kind in {
                 UpdateKind.CAMERA,
