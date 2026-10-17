@@ -8,6 +8,7 @@ from ase.io import write
 
 from _layout_helpers import find_component, layout_ids
 from mat_viewer.app import create_app
+from mat_viewer.properties import available_colormaps, web_colormaps
 
 
 def _trajectory(path: Path) -> None:
@@ -24,6 +25,33 @@ def _trajectory(path: Path) -> None:
         atoms.arrays["charge"] = np.linspace(-scale, scale, 32)
         frames.append(atoms)
     write(path, frames, format="extxyz")
+
+
+def test_web_colormap_catalog_is_curated_but_specs_keep_full_registry() -> None:
+    assert web_colormaps() == (
+        "viridis",
+        "plasma",
+        "inferno",
+        "magma",
+        "cividis",
+        "coolwarm",
+        "RdBu",
+        "PiYG",
+        "PRGn",
+        "BrBG",
+        "tab10",
+        "Set2",
+        "Dark2",
+        "Paired",
+        "viridis_r",
+        "plasma_r",
+        "coolwarm_r",
+        "RdBu_r",
+    )
+    assert len(web_colormaps()) < len(available_colormaps())
+    assert set(web_colormaps()) <= set(available_colormaps())
+    assert "Spectral" in available_colormaps()
+    assert "Spectral" not in web_colormaps()
 
 
 def test_web_property_catalog_state_controls_and_trace_batching(tmp_path: Path) -> None:

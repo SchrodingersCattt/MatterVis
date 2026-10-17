@@ -702,16 +702,52 @@ def build_color_lut(colormap: str) -> np.ndarray:
 def available_colormaps() -> tuple[str, ...]:
     """Return the matplotlib colormap names accepted by property specs.
 
-    Keeping this list beside :func:`build_color_lut` means the web control and
-    every other frontend use the same validation source.  Matplotlib exposes
-    aliases (for example ``gray`` and ``grey``) through the registry; keeping
-    those aliases is intentional because they are valid names at the renderer
-    boundary too.
+    This is the complete registry, including aliases.  It intentionally stays
+    available to API and CLI callers that need to select any valid Matplotlib
+    map.  The web editor uses :func:`web_colormaps` instead so its dropdown
+    remains useful without hiding any renderer capability.
     """
 
     from matplotlib import colormaps
 
     return tuple(sorted(str(name) for name in colormaps))
+
+
+# Keep the browser-facing editor concise while covering the common scientific
+# choices: perceptually uniform sequential maps, a handful of diverging maps,
+# and a few qualitative palettes.  Reversed variants are included only for
+# the sequential and diverging families, where direction has a clear meaning.
+_WEB_COLORMAPS: tuple[str, ...] = (
+    "viridis",
+    "plasma",
+    "inferno",
+    "magma",
+    "cividis",
+    "coolwarm",
+    "RdBu",
+    "PiYG",
+    "PRGn",
+    "BrBG",
+    "tab10",
+    "Set2",
+    "Dark2",
+    "Paired",
+    "viridis_r",
+    "plasma_r",
+    "coolwarm_r",
+    "RdBu_r",
+)
+
+
+def web_colormaps() -> tuple[str, ...]:
+    """Return the curated colormap names shown by the web editor.
+
+    Keep this separate from :func:`available_colormaps`: valid API and CLI
+    specs still accept the full Matplotlib registry, while a compact stable
+    list makes the browser dropdown easier to scan.
+    """
+
+    return _WEB_COLORMAPS
 
 
 def normalize_property_values(
@@ -950,4 +986,5 @@ __all__ = [
     "resolve_frame_batch_property_context",
     "resolve_source_property_context",
     "rgba_to_hex",
+    "web_colormaps",
 ]

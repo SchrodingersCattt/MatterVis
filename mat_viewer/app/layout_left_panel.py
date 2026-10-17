@@ -13,7 +13,7 @@ from .style_helpers import (
     _minor_opacity_disabled,
     _status_class,
 )
-from ..properties import available_colormaps
+from ..properties import web_colormaps
 from ..capabilities import resolve_requirements
 
 
@@ -453,7 +453,7 @@ def build_left_panel(
                 id="property-colormap-input",
                 options=[
                     {"label": name, "value": name}
-                    for name in available_colormaps()
+                    for name in web_colormaps()
                 ],
                 value=property_spec.get("colormap", "viridis"),
                 clearable=False,
