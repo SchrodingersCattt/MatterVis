@@ -201,6 +201,39 @@ def test_camera_reset_invalidates_inflight_worker_frame(backend, monkeypatch):
     assert backend.latest_figure_broadcast() is None
 
 
+def test_camera_fit_during_display_mode_build_resubmits_current_frame(backend, monkeypatch):
+    """A Fit that lands during a mode build must not strand the scene."""
+    state = backend.patch_state({"display_mode": "unit_cell"}, broadcast=False)
+    builds = []
+
+    def build(snapshot, **kwargs):
+        builds.append(deepcopy(snapshot))
+        if len(builds) == 1:
+            # Simulate the user pressing Fit while the worker is assembling
+            # the full unit-cell figure. Fit advances only camera_revision.
+            backend.camera_action("fit", broadcast=False)
+        return fake_figure(backend, snapshot)
+
+    monkeypatch.setattr(backend, "figure_for_state", build)
+    worker = backend._render_worker
+    assert worker.request_figure_build(state)
+
+    # The stale first result queues a second build for the live camera. The
+    # controlled pool keeps both transitions deterministic and sleep-free.
+    worker._finalize_pool.run_next()
+    assert backend.latest_figure_broadcast() is None
+    assert len(worker._finalize_pool.jobs) == 1
+    worker._finalize_pool.run_next()
+
+    current = backend.get_state(state["scene_id"])
+    event = backend.latest_figure_broadcast(state["scene_id"])
+    assert event is not None and event["type"] == "figure"
+    assert event["render_revision"] == current["render_revision"]
+    assert event["state"]["camera_revision"] == current["camera_revision"]
+    assert len(builds) == 2
+    assert not worker._pending_render
+
+
 @pytest.mark.parametrize("trigger,changes", [
     ("axis-scale-slider", {"axis_scale": 1.7}),
     ("minor-opacity-slider", {"minor_opacity": 0.61}),
