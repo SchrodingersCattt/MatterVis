@@ -405,6 +405,20 @@ Use this for Kaleido/publication exports. The default remains `True` for the
 interactive Dash viewer, where these traces provide hover and right-click hit
 targets.
 
+Mesh face target maps (`face_ids`, `face_ordinals`, and `vertex_face_ids`) are
+also interaction metadata. They are included when interaction traces are
+enabled so a browser hit can resolve a stable facet/polyhedron ID, and omitted
+from static figure payloads by default. Callers that assemble geometry traces
+directly can opt in with `geometry_entity_traces(..., include_face_ids=True)`.
+This keeps publication JSON/SVG payloads free of transient browser target
+state while preserving exact IDs for interactive picking.
+
+Atom instance IDs are scoped as `source` plus either a periodic `image` or an
+explicit `symmetry` operation. A symmetry transform therefore cannot collide
+with a real boundary replica that happens to use the same integer tuple. The
+source token remains stable when display order, hydrogen visibility, or scope
+changes reorder the manifested atom list.
+
 Picking markers explicitly disable their Plotly marker outlines. Relying on a
 transparent marker fill alone is unsafe because Plotly may resolve a white
 bubble-marker outline, which becomes a visible WebGL artifact in static export.
