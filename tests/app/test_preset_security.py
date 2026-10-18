@@ -134,3 +134,12 @@ def test_preset_style_overrides_promote_into_fresh_defaults(backend: ViewerBacke
         "color": "#123456",
         "opacity": 0.4,
     }
+
+
+def test_preset_reload_advances_scene_generation_for_stale_frame_rejection(
+    backend: ViewerBackend,
+) -> None:
+    backend.save_preset(path="generation.json")
+    before = backend.scene_generation()
+    backend.load_preset_from_path("generation.json")
+    assert backend.scene_generation() > before
