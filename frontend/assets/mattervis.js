@@ -638,6 +638,8 @@
     let activeGestureId = null;
     let lastPointerGesture = null;
     let semanticClickGesture = null;
+    let semanticClickAt = 0;
+    let semanticClickPoint = null;
     try {
       inner.on("plotly_hover", function (ed) {
         if (ed && ed.points && ed.points.length) {
@@ -661,9 +663,17 @@
           ? lastPointerGesture.id : null;
         const gestureId = activeGestureId || recentPointer || ++gestureSequence;
         semanticClickGesture = gestureId;
+        semanticClickAt = Date.now();
+        semanticClickPoint = native && native.clientX !== undefined
+          ? {x:native.clientX, y:native.clientY}
+          : {x:lastClient.x, y:lastClient.y};
         setTimeout(function () { plotlyClickObserved = false; }, 0);
         setTimeout(function () {
-          if (semanticClickGesture === gestureId) semanticClickGesture = null;
+          if (semanticClickGesture === gestureId) {
+            semanticClickGesture = null;
+            semanticClickAt = 0;
+            semanticClickPoint = null;
+          }
         }, 120);
         const target = ed && ed.points && ed.points.length ? targetFromPoint(ed.points[0]) : null;
         if (!target) { publishSemanticSelection(null, "clear"); return; }
@@ -772,8 +782,12 @@
         const recentPointer = lastPointerGesture && now - lastPointerGesture.at < 120 &&
           Math.abs(lastPointerGesture.x - e.clientX) < 1 &&
           Math.abs(lastPointerGesture.y - e.clientY) < 1;
+        const recentSemantic = semanticClickGesture && semanticClickPoint &&
+          now - semanticClickAt < 120 &&
+          Math.abs(semanticClickPoint.x - e.clientX) < 1 &&
+          Math.abs(semanticClickPoint.y - e.clientY) < 1;
         gestureId = activeGestureId || (recentPointer ? lastPointerGesture.id : null) ||
-          semanticClickGesture || ++gestureSequence;
+          (recentSemantic ? semanticClickGesture : null) || ++gestureSequence;
       }
       /* A native click follows pointerup for one gesture. Keep the id across
        * both events and defer the coordinate fallback so Plotly's custom
