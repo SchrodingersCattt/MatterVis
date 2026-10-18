@@ -143,8 +143,14 @@ def test_orthographic_unit_cell_drag_keeps_dap4_visible(mattervis_url):
 
 @pytest.mark.timeout(240)
 def test_semantic_atom_click_survives_gl_fallback(mattervis_url):
-    """A native click keeps the atom and an additive non-atom target."""
-    _run(mattervis_url, "semantic-pick", structure="ionic_nacl", timeout=220)
+    """A native click keeps the atom and an additive non-atom target.
+
+    DAP-4 has stable covalent bond selection markers in its initial figure;
+    ionic NaCl intentionally suppresses bond traces and computes polyhedra
+    asynchronously, which makes it a poor deterministic fixture for the
+    second half of this gesture regression.
+    """
+    _run(mattervis_url, "semantic-pick", structure="DAP-4", timeout=220)
 
 
 @pytest.mark.timeout(240)

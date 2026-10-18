@@ -664,10 +664,31 @@ async function runSemanticPick(page) {
       && Array.isArray(targets) && targets.some((target) => target && target.kind === "atom");
   }, atomLabel, {timeout: 20000});
 
-  // Ionic NaCl has default coordination overlays (polyhedron markers). The
-  // scan also accepts a BFDH facet when that is the non-atom target painted by
-  // a renderer/version. Read Plotly's hover cache after each real move so
-  // this remains a native click rather than a synthetic event.
+  // The first graph frame can arrive before the semantic selection overlay
+  // lands. Give that render a bounded chance to settle before scanning the
+  // WebGL hover cache.
+  try {
+    await page.waitForFunction(() => {
+      const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+      return Array.isArray(gd && gd.data) && gd.data.some((trace) => {
+        const meta = trace && trace.meta || {};
+        const role = String(meta.mv_role || meta.kind || "").toLowerCase();
+        const rows = Array.isArray(trace && trace.customdata) ? trace.customdata : [];
+        return role === "polyhedron" || role === "facet" || role === "morphology"
+          || role === "bond_selection"
+          || (role === "geometry_entity" && String(meta.source || "") === "bfdh_morphology")
+          || rows.some((row) => Array.isArray(row)
+            && (row[0] === "polyhedron" || row[0] === "facet" || row[0] === "bond"));
+      });
+    }, {timeout: 20000});
+  } catch (_) {
+    // Keep the diagnostic below: a missing semantic trace is a real regression
+    // even after the async render grace period.
+  }
+
+  // Prefer a real hover on any non-atom semantic trace (polyhedron, facet, or
+  // bond), and read Plotly's hover cache after each move so this remains a
+  // native click.
   const nonAtomHit = await scanCanvas(page, async () => {
     return page.evaluate(() => {
       const gd = document.querySelector("#crystal-graph .js-plotly-plot");
@@ -678,10 +699,11 @@ async function runSemanticPick(page) {
         const trace = item && (item.data || item.fullData || {});
         const meta = trace && trace.meta;
         const role = String((meta && (meta.mv_role || meta.kind)) || "").toLowerCase();
-        return (Array.isArray(cd) && (cd[0] === "polyhedron" || cd[0] === "facet"))
+        return (Array.isArray(cd) && (cd[0] === "polyhedron" || cd[0] === "facet" || cd[0] === "bond"))
           || role === "polyhedron"
           || role === "facet"
           || role === "morphology"
+          || role === "bond_selection"
           || (role === "geometry_entity" && String((meta && meta.source) || "") === "bfdh_morphology");
       });
       if (!point) return null;
@@ -692,13 +714,17 @@ async function runSemanticPick(page) {
       if (Array.isArray(cd) && (cd[0] === "polyhedron" || cd[0] === "facet")) {
         return {kind: String(cd[0]), id: String(cd[4] || cd[1] || "")};
       }
+      if (Array.isArray(cd) && cd[0] === "bond") {
+        return {kind: "bond", id: String(cd[4] || cd[1] || "")};
+      }
       const ordinal = Number(point.faceNumber !== undefined ? point.faceNumber
         : point.faceIndex !== undefined ? point.faceIndex
         : point.pointNumber !== undefined ? point.pointNumber : point.pointIndex);
       const ids = Array.isArray(meta.face_ids) ? meta.face_ids : [];
       const id = Number.isInteger(ordinal) && ordinal >= 0 && ordinal < ids.length
         ? String(ids[ordinal]) : "";
-      const kind = role === "geometry_entity" && String(meta.source || "") === "bfdh_morphology"
+      const kind = role === "bond_selection" ? "bond"
+        : role === "geometry_entity" && String(meta.source || "") === "bfdh_morphology"
         ? "facet" : (role === "facet" || role === "morphology" ? "facet" : "polyhedron");
       return {kind, id};
     });
@@ -711,29 +737,33 @@ async function runSemanticPick(page) {
     await page.mouse.click(nonAtomHit.x, nonAtomHit.y);
     await page.keyboard.up("Control");
   } else {
-    // SwiftShader can depth-occlude the transparent centre marker at every
-    // screen sample even though the figure still contains a pickable
-    // polyhedron/facet trace. Exercise the same browser event path with that
-    // trace's real Plotly payload after a native canvas click.
+    // SwiftShader can depth-occlude transparent semantic markers at every
+    // screen sample even though the figure still contains a pickable bond or
+    // overlay trace. Exercise the same browser event path with that trace's
+    // real Plotly payload after a native canvas click.
     const overlay = await page.evaluate(() => {
       const gd = document.querySelector("#crystal-graph .js-plotly-plot");
       for (let curveNumber = 0; curveNumber < (gd.data || []).length; curveNumber += 1) {
         const trace = gd.data[curveNumber] || {};
         const meta = trace.meta || {};
         const role = String(meta.mv_role || meta.kind || "").toLowerCase();
-        if (!(role === "polyhedron" || role === "facet" || role === "morphology"
-          || (role === "geometry_entity" && String(meta.source || "") === "bfdh_morphology"))) continue;
         const rows = Array.isArray(trace.customdata) ? trace.customdata : [];
-        const row = rows[0];
-        const kind = Array.isArray(row) && (row[0] === "facet" || row[0] === "polyhedron")
+        const rowIndex = rows.findIndex((row) => Array.isArray(row)
+          && (row[0] === "bond" || row[0] === "facet" || row[0] === "polyhedron"));
+        const row = rowIndex >= 0 ? rows[rowIndex] : null;
+        const isBond = Array.isArray(row) && row[0] === "bond";
+        if (!(isBond || role === "polyhedron" || role === "facet" || role === "morphology"
+          || (role === "geometry_entity" && String(meta.source || "") === "bfdh_morphology"))) continue;
+        const kind = isBond ? "bond"
+          : Array.isArray(row) && (row[0] === "facet" || row[0] === "polyhedron")
           ? String(row[0])
           : (role === "facet" || role === "morphology" || role === "geometry_entity" ? "facet" : "polyhedron");
         const id = Array.isArray(row) ? String(row[4] || row[1] || "") : "";
-        return {curveNumber, pointNumber: 0, kind, id};
+        return {curveNumber, pointNumber: rowIndex >= 0 ? rowIndex : 0, kind, id};
       }
       return null;
     });
-    if (!overlay) fail("figure has no polyhedron or facet trace to click");
+    if (!overlay) fail("figure has no non-atom semantic trace to click");
     const atomTarget = await page.evaluate(async () => {
       const body = await fetch("/api/v2/selection", {cache: "no-store"}).then((response) => response.json());
       return (body && body.selection && body.selection.targets || []).find((target) => target && target.kind === "atom") || null;
@@ -741,12 +771,14 @@ async function runSemanticPick(page) {
     const canvas = page.locator("#crystal-graph canvas").first();
     const box = await canvas.boundingBox();
     if (!box) fail("crystal canvas has no box for semantic overlay click");
-    await page.keyboard.down("Control");
-    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    await page.keyboard.up("Control");
-    await page.evaluate(({overlay, atomTarget}) => {
-      const gd = document.querySelector("#crystal-graph .js-plotly-plot");
-      if (atomTarget) {
+    const clientX = box.x + box.width / 2;
+    const clientY = box.y + box.height / 2;
+    // Publish the atom replacement before opening the additive gesture. Then
+    // keep Control held across pointerdown -> semantic overlay click -> up so
+    // the browser path exercises the same gesture ownership as a user click.
+    if (atomTarget) {
+      await page.evaluate((atomTarget) => {
+        const gd = document.querySelector("#crystal-graph .js-plotly-plot");
         for (let curveNumber = 0; curveNumber < (gd.data || []).length; curveNumber += 1) {
           const trace = gd.data[curveNumber] || {};
           const rows = Array.isArray(trace.customdata) ? trace.customdata : [];
@@ -755,18 +787,27 @@ async function runSemanticPick(page) {
           const customdata = rows[pointNumber];
           gd.emit("plotly_click", {
             points: [{curveNumber, pointNumber, data: trace, fullData: trace, customdata}],
-            event: {ctrlKey: false, metaKey: false, shiftKey: false},
+            event: {ctrlKey: false, metaKey: false, shiftKey: false, clientX: 0, clientY: 0},
           });
           break;
         }
-      }
+      }, atomTarget);
+    }
+    await page.keyboard.down("Control");
+    await page.mouse.move(clientX, clientY);
+    await page.mouse.down();
+    await page.evaluate(({overlay, clientX, clientY}) => {
+      const gd = document.querySelector("#crystal-graph .js-plotly-plot");
       const trace = gd.data[overlay.curveNumber];
       const customdata = Array.isArray(trace.customdata) ? trace.customdata[overlay.pointNumber] : undefined;
       gd.emit("plotly_click", {
         points: [{curveNumber: overlay.curveNumber, pointNumber: overlay.pointNumber, data: trace, fullData: trace, customdata}],
-        event: {ctrlKey: true, metaKey: false, shiftKey: false},
+        event: {ctrlKey: true, metaKey: false, shiftKey: false, clientX, clientY},
       });
-    }, {overlay, atomTarget});
+    }, {overlay, clientX, clientY});
+    await page.waitForTimeout(150);
+    await page.mouse.up();
+    await page.keyboard.up("Control");
     nonAtomHit = {result: {kind: overlay.kind, id: overlay.id}};
   }
   await page.waitForFunction(async ({kind, id, label}) => {

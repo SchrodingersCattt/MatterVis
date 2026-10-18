@@ -849,6 +849,12 @@
         // through the semantic store so it cannot overwrite a non-atom target
         // and Ctrl/Cmd uses the same toggle path as Plotly clicks.
         postSelection(picked.rect, picked.viewport, false, false).then(function (body) {
+          // A newer pointer gesture owns the selection now. Do not let a
+          // slower preview response from an older click overwrite it.
+          if (gestureSequence !== gestureId) {
+            finishCoordinateGesture(gestureId);
+            return;
+          }
           const selection = body && body.selection;
           const semanticTargets = selection && selection.targets || [];
           const atomTarget = semanticTargets.find(function (item) { return item && item.kind === "atom"; });
@@ -914,7 +920,14 @@
       setTimeout(function () {
         // A point click is delivered through Plotly's custom event rather
         // than the DOM event. Avoid clearing a fresh semantic pick.
-        if (plotlyClickObserved || hasPendingCoordinateGesture()) {
+        const recentPointer = lastPointerGesture
+          && Date.now() - lastPointerGesture.at < gestureGraceMs
+          && Math.abs(lastPointerGesture.x - e.clientX) < 1
+          && Math.abs(lastPointerGesture.y - e.clientY) < 1
+          ? lastPointerGesture : null;
+        const modifier = !!(e.ctrlKey || e.metaKey || e.shiftKey)
+          || !!(recentPointer && (recentPointer.ctrlKey || recentPointer.metaKey || recentPointer.shiftKey));
+        if (plotlyClickObserved || hasPendingCoordinateGesture() || modifier) {
           plotlyClickObserved = false;
           return;
         }

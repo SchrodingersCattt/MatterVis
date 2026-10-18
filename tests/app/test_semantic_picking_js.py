@@ -55,7 +55,12 @@ def test_semantic_plotly_click_owns_left_click_before_coordinate_fallback():
     assert "publishSemanticSelection(atomTarget, mode)" in body
     assert "setTimeout(function () {" in body
     assert "setTimeout(function () { plotlyClickObserved = false; }, 0);" in body
-    assert "if (plotlyClickObserved || hasPendingCoordinateGesture())" in body
+    assert "plotlyClickObserved || hasPendingCoordinateGesture() || modifier" in body
+    assert "gestureSequence !== gestureId" in body
+    assert "e.ctrlKey || e.metaKey || e.shiftKey" in body
     assert "clearSemanticClickGesture(semanticClickGesture)" in body
     assert "pointerDown && pointerDown.id === gestureId" in body
+    assert "ctrlKey:!!e.ctrlKey" in body
+    assert "metaKey:!!e.metaKey" in body
+    assert "shiftKey:!!e.shiftKey" in body
     assert plotly_click < body.index('container.addEventListener("contextmenu"')
