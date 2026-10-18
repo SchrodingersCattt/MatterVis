@@ -147,13 +147,18 @@ def _static_export_dict(
         # leak transient target IDs into publication artifacts.  Copy only
         # the affected trace/meta mapping so saving never mutates the live
         # Dash figure that may be reused by a later callback.
-        if isinstance(trace, dict) and isinstance(meta, dict):
-            if face_metadata_keys.intersection(meta):
+        if isinstance(trace, dict):
+            trace_face_keys = face_metadata_keys.intersection(trace)
+            meta_face_keys = face_metadata_keys.intersection(meta or {})
+            if trace_face_keys or meta_face_keys:
                 cleaned = dict(trace)
-                cleaned_meta = dict(meta)
-                for key in face_metadata_keys:
-                    cleaned_meta.pop(key, None)
-                cleaned["meta"] = cleaned_meta
+                for key in trace_face_keys:
+                    cleaned.pop(key, None)
+                if isinstance(meta, dict):
+                    cleaned_meta = dict(meta)
+                    for key in meta_face_keys:
+                        cleaned_meta.pop(key, None)
+                    cleaned["meta"] = cleaned_meta
                 traces.append(cleaned)
                 continue
         traces.append(trace)

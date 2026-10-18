@@ -76,6 +76,7 @@ def test_static_save_payload_strips_face_target_metadata_without_mutating_figure
             {
                 "type": "mesh3d",
                 "name": "hull",
+                "face_id": "polyhedron:spec:a|source:x",
                 "meta": {
                     "mv_role": "polyhedron",
                     "face_ids": ["polyhedron:spec:a|source:x"],
@@ -89,6 +90,7 @@ def test_static_save_payload_strips_face_target_metadata_without_mutating_figure
     assert "face_ids" not in static["data"][0]["meta"]
     assert "vertex_face_ids" not in static["data"][0]["meta"]
     assert "facet_ids" not in static["data"][0]["meta"]
+    assert "face_id" not in static["data"][0]
     assert payload["data"][0]["meta"]["face_ids"]
     interactive = _static_export_dict(payload, include_interaction_traces=True)
     assert interactive["data"][0]["meta"]["face_ids"]
