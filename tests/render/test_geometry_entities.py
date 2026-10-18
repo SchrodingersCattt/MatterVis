@@ -218,7 +218,9 @@ def test_static_geometry_export_omits_face_target_metadata():
         name="picked-face",
         entity_id="mesh-face",
         meta={
+            "face_id": "caller-face",
             "face_ids": ["caller-face"],
+            "subentity_id": "caller-face",
             "face_ranges": [{"id": "caller-face", "start": 0, "end": 1}],
         },
     )
@@ -237,7 +239,11 @@ def test_static_geometry_export_omits_face_target_metadata():
     static_mesh = next(trace for trace in static.data if trace.name == "picked-face")
     assert list(interactive_mesh.meta["face_ids"]) == ["caller-face"]
     assert list(interactive_mesh.meta["face_ranges"]) == [{"id": "caller-face", "start": 0, "end": 1}]
+    assert interactive_mesh.meta["face_id"] == "caller-face"
+    assert interactive_mesh.meta["subentity_id"] == "caller-face"
     assert "face_ids" not in (static_mesh.meta or {})
+    assert "face_id" not in (static_mesh.meta or {})
+    assert "subentity_id" not in (static_mesh.meta or {})
     assert "face_ranges" not in (static_mesh.meta or {})
 
 

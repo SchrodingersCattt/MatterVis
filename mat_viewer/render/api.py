@@ -125,7 +125,9 @@ def _static_export_dict(
     traces = []
     face_metadata_keys = frozenset(
         {
+            "face_id",
             "face_ids",
+            "subentity_id",
             "subentity_ids",
             "facet_ids",
             "facet_millers",

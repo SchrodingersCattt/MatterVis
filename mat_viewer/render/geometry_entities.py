@@ -497,7 +497,9 @@ def _trace_meta(
     # this interaction-only payload: omitting it materially reduces SVG/JSON
     # size and avoids leaking browser target IDs into publication artifacts.
     face_keys = (
+        "face_id",
         "face_ids",
+        "subentity_id",
         "subentity_ids",
         "facet_ids",
         "facet_millers",
