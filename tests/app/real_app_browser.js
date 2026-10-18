@@ -659,7 +659,9 @@ async function runSemanticPick(page) {
     if (!response.ok) return false;
     const body = await response.json();
     const labels = body && body.selection && body.selection.atom_labels;
-    return Array.isArray(labels) && labels.includes(label);
+    const targets = body && body.selection && body.selection.targets;
+    return Array.isArray(labels) && labels.includes(label)
+      && Array.isArray(targets) && targets.some((target) => target && target.kind === "atom");
   }, atomLabel, {timeout: 20000});
 
   // Ionic NaCl has default coordination overlays (polyhedron markers). The
