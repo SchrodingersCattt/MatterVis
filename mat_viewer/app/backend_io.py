@@ -605,7 +605,11 @@ class _IOBackendMixin:
                 # server lifetime.  Reset delivery generations and camera
                 # clocks so an in-flight frame for the old scene cannot pass
                 # the revision checks and paint over the newly loaded state.
-                self._scene_generation_counter = 0
+                # Do not restart the counter at zero: a replacement store
+                # with one scene must not receive the same generation number
+                # as the old store's one scene.
+                generation_epoch = int(getattr(self, "_scene_generation_counter", 0) or 0)
+                self._scene_generation_counter = generation_epoch
                 self._scene_generations = {}
                 self._camera_revisions = {}
                 self._last_update_kind_by_scene = {}
