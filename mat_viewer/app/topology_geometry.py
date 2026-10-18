@@ -12,6 +12,7 @@ from ..topology import (
     extract_atom_coordination_shells,
 )
 from ..cache_keys import topology_geometry_cache_key
+from ..render.picking import polyhedron_instance_id
 
 
 _TOPOLOGY_CACHE_LIMIT = 8
@@ -159,6 +160,87 @@ def _fragment_matches_polyhedron_spec(fragment: dict[str, Any], spec: dict[str, 
     return (fragment.get("formula") or fragment.get("species")) == center_species
 
 
+def _molecule_center_image_shift(
+    display_fragment: dict[str, Any],
+    source_fragment: dict[str, Any],
+) -> list[int]:
+    """Return the stable complete-cell image of a displayed molecule.
+
+    Molecule-level topology overlays are translated from a source fragment to
+    each displayed fragment.  ``fragment_table.image_shift`` is relative to
+    MolCrysKit's unwrapped molecule and therefore is not a stable identity
+    token.  Prefer the absolute fractional-centre difference (the same
+    convention used by the agent topology path), and retain the legacy field
+    as a fallback for lightweight test/third-party bundles.
+    """
+
+    display_frac = np.asarray(display_fragment.get("frac_center"), dtype=float)
+    source_frac = np.asarray(source_fragment.get("frac_center"), dtype=float)
+    if display_frac.shape == (3,) and source_frac.shape == (3,):
+        source_frac = source_frac - np.floor(source_frac)
+        source_frac[np.isclose(source_frac, 0.0, rtol=0.0, atol=1e-6)] = 0.0
+        source_frac[np.isclose(source_frac, 1.0, rtol=0.0, atol=1e-6)] = 0.0
+        delta = display_frac - source_frac
+        image = np.rint(delta).astype(int)
+        if np.allclose(delta, image, rtol=0.0, atol=1e-6):
+            return [int(value) for value in image]
+    raw_shift = display_fragment.get("image_shift")
+    if isinstance(raw_shift, (list, tuple)) and len(raw_shift) == 3:
+        try:
+            return [int(value) for value in raw_shift]
+        except (TypeError, ValueError):
+            pass
+    return [0, 0, 0]
+
+
+def _molecule_overlay_identity(
+    display_fragment: dict[str, Any],
+    source_fragment: dict[str, Any],
+) -> dict[str, Any]:
+    """Build identity metadata shared by mesh faces and pick markers."""
+
+    # ``center_source_index`` names the canonical topology-fragment index,
+    # matching the agent topology payload.  ``source_molecule_index`` is a
+    # MolCrysKit bridge key and may differ after MatterVis sorts fragments.
+    source_index = source_fragment.get("index")
+    if source_index is None:
+        source_index = source_fragment.get("source_molecule_index")
+    if source_index is None:
+        source_index = display_fragment.get("source_molecule_index")
+    try:
+        source_index = int(source_index)
+    except (TypeError, ValueError):
+        source_index = None
+    display_index = display_fragment.get("index")
+    try:
+        display_index = int(display_index)
+    except (TypeError, ValueError):
+        display_index = None
+    image_shift = _molecule_center_image_shift(display_fragment, source_fragment)
+    identity = {
+        "center_source_index": source_index,
+        "center_display_index": display_index,
+        "center_image": list(image_shift),
+        "center_image_shift": list(image_shift),
+    }
+    return identity
+
+
+def _stamp_molecule_overlay_identity(
+    overlay: dict[str, Any],
+    *,
+    spec_id: str,
+    display_fragment: dict[str, Any],
+    source_fragment: dict[str, Any],
+    ordinal: int,
+) -> dict[str, Any]:
+    """Stamp a deterministic ID and source metadata onto one overlay."""
+
+    overlay.update(_molecule_overlay_identity(display_fragment, source_fragment))
+    overlay["instance_id"] = polyhedron_instance_id(spec_id, overlay, ordinal)
+    return overlay
+
+
 def compute_topology_geometry(
     *,
     bundle,
@@ -244,11 +326,22 @@ def compute_topology_geometry(
                 centroid_offset_frac=centroid_offset_frac,
                 fallback_max=spec_fallback_max,
             )
-            overlays = [
-                _atom_overlay(shells[center["source_index"]], center)
-                for center in atom_centers
-                if center["source_index"] in shells
-            ]
+            overlays = []
+            for overlay_ordinal, center in enumerate(atom_centers):
+                if center["source_index"] not in shells:
+                    continue
+                overlay = _atom_overlay(shells[center["source_index"]], center)
+                # ``_atom_overlay`` predates semantic polyhedron picking and
+                # only carried ``center_image``/``center_draw_index``.  Stamp
+                # the canonical aliases so merged meshes and pick markers use
+                # the same ID even when style buckets or skipped overlays
+                # change their local ordinal.
+                overlay["center_image_shift"] = list(center.get("image") or [0, 0, 0])
+                overlay["center_display_index"] = int(center.get("draw_index", overlay_ordinal))
+                overlay["instance_id"] = polyhedron_instance_id(
+                    str(spec["id"]), overlay, overlay_ordinal
+                )
+                overlays.append(overlay)
             if overlays and index == analysis_spec_index:
                 overlays[0]["is_analysis_anchor"] = True
             spec_results.append(
@@ -278,23 +371,32 @@ def compute_topology_geometry(
             if _fragment_matches_polyhedron_spec(frag, spec)
         ]
         center_fragments = _dedupe_disorder_center_fragments(bundle, scene, candidate_fragments)
-        for frag in center_fragments:
+        for overlay_ordinal, frag in enumerate(center_fragments):
             is_anchor = (
                 index == analysis_spec_index
                 and primary_display_index is not None
                 and int(frag["index"]) == primary_display_index
             )
             if is_anchor:
-                overlays.append(
-                    {
-                        "center_coords": primary["center_coords"],
-                        "center_label": primary.get("center_label"),
-                        "shell_coords": primary["shell_coords"],
-                        "distances": primary["distances"],
-                        "hull": primary.get("hull"),
-                        "is_analysis_anchor": True,
-                    }
+                overlay = {
+                    "center_coords": primary["center_coords"],
+                    "center_label": primary.get("center_label"),
+                    "shell_coords": primary["shell_coords"],
+                    "distances": primary["distances"],
+                    "hull": primary.get("hull"),
+                        "source_center_coords": primary.get("source_center_coords"),
+                        "source_shell_coords": primary.get("source_shell_coords"),
+                        "source_hull": primary.get("source_hull"),
+                    "is_analysis_anchor": True,
+                }
+                _stamp_molecule_overlay_identity(
+                    overlay,
+                    spec_id=str(spec["id"]),
+                    display_fragment=frag,
+                    source_fragment=topology_fragment,
+                    ordinal=overlay_ordinal,
                 )
+                overlays.append(overlay)
                 continue
             mapped = map_display_fragment_to_topology_for_bundle(bundle, frag)
             if mapped is None:
@@ -326,8 +428,18 @@ def compute_topology_geometry(
                 "shell_coords": extra.get("shell_coords"),
                 "distances": extra.get("distances"),
                 "hull": extra.get("hull"),
+                "source_center_coords": extra.get("source_center_coords"),
+                "source_shell_coords": extra.get("source_shell_coords"),
+                "source_hull": extra.get("source_hull"),
                 "is_analysis_anchor": False,
             }
+            _stamp_molecule_overlay_identity(
+                overlay,
+                spec_id=str(spec["id"]),
+                display_fragment=frag,
+                source_fragment=mapped,
+                ordinal=overlay_ordinal,
+            )
             overlays.append(overlay)
             legacy_extras.append(
                 {
@@ -336,6 +448,14 @@ def compute_topology_geometry(
                     "shell_coords": overlay["shell_coords"],
                     "distances": overlay["distances"],
                     "hull": overlay.get("hull"),
+                    "source_center_coords": overlay.get("source_center_coords"),
+                    "source_shell_coords": overlay.get("source_shell_coords"),
+                    "source_hull": overlay.get("source_hull"),
+                    "center_source_index": overlay.get("center_source_index"),
+                    "center_display_index": overlay.get("center_display_index"),
+                    "center_image": overlay.get("center_image"),
+                    "center_image_shift": overlay.get("center_image_shift"),
+                    "instance_id": overlay.get("instance_id"),
                 }
             )
         spec_results.append(

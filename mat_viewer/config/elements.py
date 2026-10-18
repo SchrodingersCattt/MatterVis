@@ -278,7 +278,10 @@ POLYHEDRON_AUTO_COLORS = (
     "#BCBD22",
 )
 
-SELECTION_HIGHLIGHT = "#FFD24A"
+# Neutral blue-grey keeps persistent selection readable without washing out
+# chemistry/property colours.  Hover is rendered browser-side with an even
+# lighter contour; this colour is reserved for the stronger persistent cue.
+SELECTION_HIGHLIGHT = "#74808C"
 
 __all__ = [
     "ATOM_RADIUS",

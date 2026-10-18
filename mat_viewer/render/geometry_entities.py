@@ -475,17 +475,53 @@ def _entity_edges(
     return sorted(edges)
 
 
-def _trace_meta(entity: Mapping[str, Any], role: str) -> dict[str, Any]:
+def _trace_meta(
+    entity: Mapping[str, Any],
+    role: str,
+    *,
+    faces: np.ndarray | None = None,
+    vertex_count: int | None = None,
+) -> dict[str, Any]:
     raw = entity.get("meta")
     meta = dict(raw) if isinstance(raw, Mapping) else {}
     meta["mv_role"] = role
     meta.setdefault("kind", "geometry_entity")
     if entity.get("id") is not None:
         meta["geometry_id"] = str(entity["id"])
+    # Mesh3d surfaces have no reliable per-face ``customdata`` event in all
+    # Plotly versions.  Keep a stable face/subentity map in metadata so the
+    # browser controller can resolve ``pointNumber`` without depending on the
+    # trace's incidental position in a figure.
+    face_ids = entity.get("face_ids") or entity.get("subentity_ids")
+    if isinstance(face_ids, (list, tuple)):
+        meta["face_ids"] = [str(value) for value in face_ids]
+        # Keep the mapping explicit for clients that expose a face ordinal
+        # separately from Plotly's pointNumber/pointIndex alias.  This is
+        # especially useful for BFDH, where many triangles share one facet
+        # identity and hidden/filtered faces must never shift later IDs.
+        ordinals = entity.get("face_ordinals")
+        if isinstance(ordinals, (list, tuple)) and len(ordinals) == len(face_ids):
+            meta["face_ordinals"] = [int(value) for value in ordinals]
+        # Plotly Mesh3d reports ``pointNumber`` as a vertex ordinal on
+        # versions that do not expose ``faceNumber``.  Keep a parallel
+        # per-vertex map so a hit on a triangle fan cannot index the
+        # per-face list with the wrong ordinal (BFDH emits three vertices
+        # per facet triangle).  Face-level IDs remain for newer events.
+        if faces is not None and vertex_count is not None and len(face_ids) == len(faces):
+            vertex_ids = [None] * int(vertex_count)
+            for face, face_id in zip(np.asarray(faces, dtype=int), face_ids):
+                for vertex in face.tolist():
+                    index = int(vertex)
+                    if 0 <= index < len(vertex_ids) and vertex_ids[index] is None:
+                        vertex_ids[index] = str(face_id)
+            meta["vertex_face_ids"] = [value or "" for value in vertex_ids]
+    meta.setdefault("pickable", True)
     return meta
 
 
-def geometry_entity_traces(scene: Mapping[str, Any]) -> list[go.BaseTraceType]:
+def geometry_entity_traces(
+    scene: Mapping[str, Any], style: Mapping[str, Any] | None = None
+) -> list[go.BaseTraceType]:
     """Build Plotly traces for ``scene["geometry_entities"]``.
 
     Every surface is a genuine ``Mesh3d`` trace in world coordinates.  No
@@ -502,21 +538,33 @@ def geometry_entity_traces(scene: Mapping[str, Any]) -> list[go.BaseTraceType]:
         raise ValueError('scene["geometry_entities"] must be a list of mesh entities')
 
     import plotly.graph_objects as go
+    from .style.resolver import normalize_style_overrides
 
     traces: list[go.BaseTraceType] = []
+    raw_overrides = (style or {}).get("style_overrides") if isinstance(style, Mapping) else None
+    overrides = normalize_style_overrides(raw_overrides)
     for entity_index, raw_entity in enumerate(entities):
         if not isinstance(raw_entity, Mapping):
             raise ValueError(f"geometry_entities[{entity_index}] must be a mapping")
-        if not bool(raw_entity.get("visible", True)):
+        entity = dict(raw_entity)
+        target_id = str(entity.get("id") or "")
+        override = overrides.get(target_id) if isinstance(overrides, Mapping) else None
+        if isinstance(override, Mapping):
+            # Geometry-specific controls are validated by the shared resolver
+            # at the state boundary; ignore unknown fields defensively here.
+            for key in ("color", "opacity", "visible", "flatshading", "edge_color", "edge_width", "edge_opacity"):
+                if key in override:
+                    entity[key] = override[key]
+        if not bool(entity.get("visible", True)):
             continue
         try:
             vertices, faces = validate_mesh(
-                raw_entity.get("vertices"), raw_entity.get("faces")
+                entity.get("vertices"), entity.get("faces")
             )
-            opacity_value = _opacity(raw_entity.get("opacity", 1.0), name="opacity")
-            raw_color = raw_entity.get("color", _DEFAULT_COLOR)
+            opacity_value = _opacity(entity.get("opacity", 1.0), name="opacity")
+            raw_color = entity.get("color", _DEFAULT_COLOR)
             color = _DEFAULT_COLOR if raw_color is None else str(raw_color)
-            name = str(raw_entity.get("name", raw_entity.get("id", "geometry")))
+            name = str(entity.get("name", entity.get("id", "geometry")))
             mesh_kwargs: dict[str, Any] = {
                 "x": vertices[:, 0],
                 "y": vertices[:, 1],
@@ -526,21 +574,32 @@ def geometry_entity_traces(scene: Mapping[str, Any]) -> list[go.BaseTraceType]:
                 "k": faces[:, 2],
                 "color": color,
                 "opacity": opacity_value,
-                "flatshading": bool(raw_entity.get("flatshading", True)),
-                "hoverinfo": "skip",
+                "flatshading": bool(entity.get("flatshading", True)),
+                "hoverinfo": "name",
+                "hovertemplate": "%{fullData.name}<extra></extra>",
                 "showlegend": False,
                 "name": name,
-                "meta": _json_safe(_trace_meta(raw_entity, "geometry_entity")),
+                "meta": _json_safe(
+                    _trace_meta(
+                        entity,
+                        "geometry_entity",
+                        faces=faces,
+                        vertex_count=len(vertices),
+                    )
+                ),
             }
-            lighting = raw_entity.get("lighting")
+            facecolor = entity.get("facecolor")
+            if isinstance(facecolor, (list, tuple)) and len(facecolor) == len(faces):
+                mesh_kwargs["facecolor"] = [str(value) for value in facecolor]
+            lighting = entity.get("lighting")
             if isinstance(lighting, Mapping):
                 mesh_kwargs["lighting"] = dict(lighting)
             traces.append(go.Mesh3d(**mesh_kwargs))
 
-            if bool(raw_entity.get("show_edges", False)):
+            if bool(entity.get("show_edges", False)):
                 edge_list = _entity_edges(
                     faces,
-                    raw_entity.get("edges"),
+                    entity.get("edges"),
                     vertex_count=len(vertices),
                 )
                 if edge_list:
@@ -558,10 +617,10 @@ def geometry_entity_traces(scene: Mapping[str, Any]) -> list[go.BaseTraceType]:
                             [float(vertices[start, 2]), float(vertices[end, 2]), None]
                         )
                     edge_opacity_value = _opacity(
-                        raw_entity.get("edge_opacity", 1.0), name="edge_opacity"
+                        entity.get("edge_opacity", 1.0), name="edge_opacity"
                     )
                     try:
-                        edge_width = float(raw_entity.get("edge_width", 2.0))
+                        edge_width = float(entity.get("edge_width", 2.0))
                     except (TypeError, ValueError) as exc:
                         raise ValueError(
                             "edge_width must be a finite non-negative number"
@@ -577,7 +636,7 @@ def geometry_entity_traces(scene: Mapping[str, Any]) -> list[go.BaseTraceType]:
                             z=zs,
                             mode="lines",
                             line={
-                                "color": str(raw_entity.get("edge_color") or color),
+                                "color": str(entity.get("edge_color") or color),
                                 "width": edge_width,
                             },
                             opacity=edge_opacity_value,
@@ -585,7 +644,7 @@ def geometry_entity_traces(scene: Mapping[str, Any]) -> list[go.BaseTraceType]:
                             showlegend=False,
                             name=f"{name} edges",
                             meta=_json_safe(
-                                _trace_meta(raw_entity, "geometry_entity_edge")
+                                _trace_meta(entity, "geometry_entity_edge")
                             ),
                         )
                     )

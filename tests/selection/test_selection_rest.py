@@ -40,3 +40,77 @@ def test_selection_by_fragment_and_element():
     response = client.post("/api/v2/selection/by_element", json={"element": element})
     assert response.status_code == 200
     assert response.get_json()["selection"]["atom_labels"]
+
+
+def test_semantic_targets_and_style_overrides_round_trip():
+    app = create_app()
+    app.server.config["TESTING"] = True
+    client = app.server.test_client()
+    target = {"kind": "geometry", "id": "mesh-test"}
+    response = client.post("/api/v2/selection/targets", json={"target": target})
+    assert response.status_code == 200
+    assert response.get_json()["selection"]["targets"][0]["id"] == "mesh-test"
+
+    response = client.patch(
+        "/api/v2/style_overrides",
+        json={"target_id": "mesh-test", "kind": "geometry", "style": {"color": "#123456", "opacity": 0.4}},
+    )
+    assert response.status_code == 200
+    assert response.get_json()["style_overrides"]["mesh-test"]["color"] == "#123456"
+    response = client.patch(
+        "/api/v2/style_overrides",
+        json={"target_id": "mesh-test", "kind": "geometry", "style": {"opacity": 9, "edge_width": "bad"}},
+    )
+    assert response.status_code == 400
+    assert any(field in response.get_json()["error"] for field in ("opacity", "edge_width"))
+    unchanged = client.get("/api/v2/style_overrides").get_json()["style_overrides"]["mesh-test"]
+    assert unchanged["opacity"] == 0.4
+    invalid = client.patch(
+        "/api/v2/style_overrides",
+        json={"target_id": "mesh-test", "kind": "geometry", "style": {"bogus": "value"}},
+    )
+    assert invalid.status_code == 400
+    assert "unsupported style field" in invalid.get_json()["error"]
+    missing_kind = client.patch(
+        "/api/v2/style_overrides",
+        json={"target_id": "mesh-test", "style": {"color": "#abcdef"}},
+    )
+    assert missing_kind.status_code == 400
+    empty = client.patch(
+        "/api/v2/style_overrides",
+        json={"target_id": "mesh-test", "kind": "geometry", "style": {}},
+    )
+    assert empty.status_code == 400
+    response = client.patch("/api/v2/style_overrides", json={"target_id": "mesh-test", "reset": True})
+    assert response.get_json()["style_overrides"] == {}
+
+
+def test_semantic_target_toggle_removes_target_without_reinserting_it():
+    app = create_app()
+    app.server.config["TESTING"] = True
+    client = app.server.test_client()
+
+    first = {"kind": "geometry", "id": "mesh-first"}
+    second = {"kind": "geometry", "id": "mesh-second"}
+    client.post("/api/v2/selection/targets", json={"target": first})
+    response = client.post(
+        "/api/v2/selection/targets",
+        json={"target": second, "additive": True},
+    )
+    assert response.get_json()["selection"]["targets"] == [first, second]
+
+    response = client.post(
+        "/api/v2/selection/targets",
+        json={"target": second, "additive": True, "toggle": True},
+    )
+    selection = response.get_json()["selection"]
+    assert selection["targets"] == [first]
+    assert selection["active_target"] == first
+
+    response = client.post(
+        "/api/v2/selection/targets",
+        json={"target": first, "additive": True, "toggle": True},
+    )
+    selection = response.get_json()["selection"]
+    assert selection["targets"] == []
+    assert selection["active_target"] is None

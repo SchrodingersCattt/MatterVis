@@ -83,6 +83,7 @@ STORED_STATE_KEYS = frozenset(
         "cell_overlays",
         "vector_overlays",
         "selection",
+        "style_overrides",
         "bfdh_morphology",
         "bfdh_morphology_color",
         # This is an explicit user setting.  ``derived_state`` also exposes

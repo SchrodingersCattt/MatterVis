@@ -26,6 +26,7 @@ import pytest
 from mat_viewer.app import WORKSPACE_DIR, ViewerBackend
 from mat_viewer.presets import default_preset_path
 from mat_viewer.renderer import topology_background_traces, topology_foreground_traces
+from mat_viewer.render.selection import _polyhedron_selection_trace
 
 
 @pytest.fixture
@@ -84,6 +85,27 @@ def test_topology_for_state_emits_spec_results_per_enabled_spec(backend: ViewerB
         "renderer would render two anchor markers and confuse the user"
     )
     assert topology.get("analysis_spec_id") in {spec_a["id"], spec_b["id"]}
+
+
+def test_molecule_overlays_carry_stable_source_and_instance_identity(
+    backend: ViewerBackend,
+):
+    backend.add_polyhedron_spec(center_species="N", ligand_species="ClO4")
+    state = backend.get_state()
+    state["topology_enabled"] = True
+    topology = backend.topology_for_state(state)
+    assert topology is not None
+    overlays = [
+        overlay
+        for entry in topology.get("spec_results") or []
+        if str(entry.get("level") or "molecule") == "molecule"
+        for overlay in entry.get("overlays") or []
+    ]
+    assert overlays
+    assert all(overlay.get("center_source_index") is not None for overlay in overlays)
+    assert all(overlay.get("center_display_index") is not None for overlay in overlays)
+    assert all(overlay.get("center_image_shift") is not None for overlay in overlays)
+    assert all(overlay.get("instance_id") for overlay in overlays)
 
 
 def test_selected_x_fragment_keeps_its_anchor_when_specs_target_cations(
@@ -325,6 +347,60 @@ def test_topology_background_traces_legacy_path_still_works():
         if isinstance(tr.get("line"), dict)
     }
     assert "#abcdef" in rendered
+
+
+def test_polyhedron_face_ids_match_selection_ids_when_overlays_are_grouped():
+    """Paint buckets and skipped overlays must not renumber pick targets."""
+
+    tetra = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    topology_data = {
+        "spec_results": [
+            {
+                "spec_id": "a",
+                "color": "#ff0000",
+                "overlays": [
+                    # This centre has no drawable hull but remains visible in
+                    # the selection layer.  It used to shift the mesh's
+                    # style-local ordinal and produce a different ID.
+                    {
+                        "center_coords": [-1, -1, -1],
+                        "center_label": "skipped",
+                        "shell_coords": [[0, 0, 0]],
+                    },
+                    {
+                        "center_coords": [0.25, 0.25, 0.25],
+                        "center_label": "drawn-a",
+                        "shell_coords": tetra,
+                        "is_analysis_anchor": True,
+                    },
+                ],
+            },
+            {
+                "spec_id": "b",
+                "color": "#00ff00",
+                "overlays": [
+                    {
+                        "center_coords": [5.25, 5.25, 5.25],
+                        "center_label": "drawn-b",
+                        "shell_coords": [[5 + x, 5 + y, 5 + z] for x, y, z in tetra],
+                    }
+                ],
+            },
+        ],
+    }
+
+    traces = topology_background_traces(topology_data)
+    face_ids = {
+        face_id
+        for trace in traces
+        for face_id in (trace.get("meta") or {}).get("face_ids", [])
+    }
+    selection = _polyhedron_selection_trace(topology_data)
+    assert selection is not None
+    selection_ids = {row[4] for row in selection.customdata}
+    assert face_ids <= selection_ids
+    assert {"polyhedron:spec:a|source:drawn-a", "polyhedron:spec:b|source:drawn-b"} <= face_ids
+
 
 
 def test_topology_foreground_paints_anchor_distance_with_anchor_spec_color():

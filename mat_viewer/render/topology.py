@@ -2,6 +2,7 @@ from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
 from .common import *
+from .picking import ensure_polyhedron_instance_ids, polyhedron_instance_id
 from .meshes import *
 from .style import *
 from .serialize import _trace_to_json_safe_dict
@@ -162,7 +163,13 @@ def _merged_hull_mesh(
         simplices = _hull_simplices(coords, hull)
         if len(simplices) == 0:
             continue
-        bin_payload = bins.setdefault(round(float(opacity), 4), {"x": [], "y": [], "z": [], "i": [], "j": [], "k": []})
+        bin_payload = bins.setdefault(
+            round(float(opacity), 4),
+            {
+                "x": [], "y": [], "z": [], "i": [], "j": [], "k": [],
+                "face_ids": [], "vertex_face_ids": [], "face_ranges": [],
+            },
+        )
         base = len(bin_payload["x"])
         bin_payload["x"].extend(coords[:, 0].tolist())
         bin_payload["y"].extend(coords[:, 1].tolist())
@@ -170,8 +177,17 @@ def _merged_hull_mesh(
         bin_payload["i"].extend((simplices[:, 0] + base).tolist())
         bin_payload["j"].extend((simplices[:, 1] + base).tolist())
         bin_payload["k"].extend((simplices[:, 2] + base).tolist())
+        instance_id = polyhedron_instance_id(spec_id, overlay, len(bin_payload["face_ranges"]))
+        start = len(bin_payload["face_ids"])
+        bin_payload["face_ids"].extend([instance_id] * len(simplices))
+        # Mesh3d click payloads commonly expose a vertex ``pointNumber``
+        # rather than a face ordinal.  Every vertex in this appended overlay
+        # belongs to one semantic polyhedron, so a per-vertex map resolves
+        # those events without guessing from a triangle index.
+        bin_payload["vertex_face_ids"].extend([instance_id] * len(coords))
+        bin_payload["face_ranges"].append({"id": instance_id, "start": start, "end": start + len(simplices)})
     traces = []
-    meta = {"spec_id": str(spec_id), "kind": "polyhedron"} if spec_id else None
+    meta_base = {"spec_id": str(spec_id), "kind": "polyhedron"} if spec_id else {"kind": "polyhedron"}
     for opacity, payload in bins.items():
         if not payload["x"]:
             continue
@@ -186,10 +202,18 @@ def _merged_hull_mesh(
                 color=color,
                 opacity=float(opacity),
                 flatshading=flatshading,
-                hoverinfo="skip",
+                # ``skip`` suppresses Plotly click/hover events. ``none``
+                # keeps the hull visually quiet while leaving it pickable.
+                hoverinfo="none",
                 showlegend=False,
                 name="coordination-hull",
-                meta=meta,
+                meta={
+                    **meta_base,
+                    "face_ids": payload.get("face_ids", []),
+                    "vertex_face_ids": payload.get("vertex_face_ids", []),
+                    "face_ranges": payload.get("face_ranges", []),
+                    "pickable": True,
+                },
             )
         )
     return traces
@@ -419,6 +443,81 @@ def _multi_spec_cache_key(topology_data: dict, fallback_color: str) -> tuple:
     return (tuple(parts), fallback_color)
 
 
+def apply_topology_style_overrides(
+    topology_data: dict | None, style: dict | None = None
+) -> dict | None:
+    """Materialize exact polyhedron-instance paint overrides for this frame."""
+
+    if not topology_data:
+        return topology_data
+    ensure_polyhedron_instance_ids(topology_data)
+    raw = (style or {}).get("style_overrides") if isinstance(style, dict) else None
+    raw = normalize_style_overrides(raw)
+    # Atom/bond/geometry overrides do not touch topology paint.  Keep the
+    # original wrapper (and its warm painter caches) for those updates.
+    polyhedron_overrides = {
+        key: value
+        for key, value in raw.items()
+        if isinstance(value, dict) and str(value.get("kind", "geometry")) == "polyhedron"
+    }
+    if not polyhedron_overrides:
+        return topology_data
+
+    # A style PATCH can trigger a full figure rebuild while the effective
+    # polyhedron override remains unchanged.  Reusing one wrapper per
+    # normalized override set keeps the renderer's background/foreground
+    # trace caches alive instead of throwing them away on every frame.
+    try:
+        import json
+        override_key = json.dumps(polyhedron_overrides, sort_keys=True, separators=(",", ":"), default=str)
+    except Exception:  # pragma: no cover - defensive for unusual mappings
+        override_key = repr(sorted(polyhedron_overrides.items(), key=lambda item: str(item[0])))
+    wrapper_cache = topology_data.setdefault("_style_override_wrapper_cache", {})
+    cached = wrapper_cache.get(override_key)
+    if cached is not None:
+        return cached
+
+    output = dict(topology_data)
+    # The copied overlays carry different colours/visibility, so they need a
+    # distinct painter cache from the unoverridden topology payload.  That
+    # cache is created once for this key and retained in ``wrapper_cache``.
+    output.pop("_background_dict_cache", None)
+    output.pop("_foreground_dict_cache", None)
+    output.pop("_style_override_wrapper_cache", None)
+    entries = []
+    ordinal = 0
+    for value in topology_data.get("spec_results") or []:
+        entry = dict(value)
+        overlays = []
+        spec_id = str(entry.get("spec_id") or "")
+        for value_overlay in value.get("overlays") or []:
+            overlay = dict(value_overlay)
+            target_id = polyhedron_instance_id(spec_id, overlay, ordinal)
+            overlay.setdefault("instance_id", target_id)
+            override = raw.get(target_id)
+            if isinstance(override, dict) and str(override.get("kind", "polyhedron")) == "polyhedron":
+                for key in ("color", "opacity", "visible", "edge_color", "edge_opacity", "edge_width", "flatshading"):
+                    if key in override:
+                        overlay[key] = override[key]
+            overlays.append(overlay)
+            # Keep the ordinal in lockstep with _polyhedron_selection_trace:
+            # non-drawable overlays never receive a browser pick marker and
+            # therefore must not shift the IDs of later visible instances.
+            if overlay.get("center_coords") is not None and overlay.get("visible", True):
+                ordinal += 1
+        entry["overlays"] = overlays
+        entries.append(entry)
+    if entries:
+        output["spec_results"] = entries
+    # Keep a small bounded set of paint permutations.  The underlying
+    # geometry cache remains shared; only these thin wrapper dictionaries are
+    # retained per normalized override key.
+    if len(wrapper_cache) >= 8:
+        wrapper_cache.pop(next(iter(wrapper_cache)))
+    wrapper_cache[override_key] = output
+    return output
+
+
 def topology_background_traces(topology_data: dict | None, style: dict | None = None):
     """Hull mesh + edges for every overlay, painted per-spec when
     ``topology_data["spec_results"]`` is set; otherwise falls back to the
@@ -434,6 +533,7 @@ def topology_background_traces(topology_data: dict | None, style: dict | None = 
     """
     if not topology_data:
         return []
+    ensure_polyhedron_instance_ids(topology_data)
     style = style or {}
     fallback_color = str(style.get("topology_hull_color", "#7C5CBF"))
     viewport_ranges = _viewport_ranges_from_style(style)
@@ -465,7 +565,7 @@ def topology_background_traces(topology_data: dict | None, style: dict | None = 
             # ``instance_overrides[label].visible`` still gets
             # filtered here -- the figure cache key drops it too,
             # because the post-cache patch can re-evaluate it.
-            overlays_by_color: dict[str, list[tuple[list, float]]] = {}
+            overlays_by_style: dict[tuple, list[tuple[list, float]]] = {}
             for overlay in entry.get("overlays") or []:
                 shell = overlay.get("shell_coords")
                 if not shell:
@@ -475,14 +575,19 @@ def topology_background_traces(topology_data: dict | None, style: dict | None = 
                 if not overlay.get("is_analysis_anchor") and not _overlay_within_viewport(overlay, viewport_ranges):
                     continue
                 color = str(overlay.get("color") or spec_color)
-                overlays_by_color.setdefault(color, []).append((overlay, spec_opacity))
-            for color, group in overlays_by_color.items():
+                opacity = float(overlay.get("opacity", spec_opacity))
+                edge_color = str(overlay.get("edge_color") or color)
+                edge_alpha = float(overlay.get("edge_opacity", edge_opacity))
+                edge_width_value = float(overlay.get("edge_width", edge_width))
+                key = (color, opacity, edge_color, edge_alpha, edge_width_value)
+                overlays_by_style.setdefault(key, []).append((overlay, opacity))
+            for (color, _opacity, edge_color, edge_alpha, edge_width_value), group in overlays_by_style.items():
                 traces.extend(_merged_hull_mesh(
                     group, color=color, flatshading=flatshading, spec_id=spec_id,
                 ))
                 traces.extend(_merged_hull_edges(
-                    [overlay for overlay, _ in group], color=color,
-                    opacity=edge_opacity, width=edge_width, spec_id=spec_id,
+                    [overlay for overlay, _ in group], color=edge_color,
+                    opacity=edge_alpha, width=edge_width_value, spec_id=spec_id,
                 ))
     else:
         # Legacy single-colour path: callers (or test fixtures) that
@@ -512,6 +617,7 @@ def topology_foreground_traces(topology_data: dict | None, style: dict | None = 
     """
     if not topology_data:
         return []
+    ensure_polyhedron_instance_ids(topology_data)
     style = style or {}
     fallback_color = str(style.get("topology_hull_color", "#7C5CBF"))
     viewport_ranges = _viewport_ranges_from_style(style)

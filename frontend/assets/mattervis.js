@@ -14,10 +14,44 @@
   function decodeCustomdata(cd) {
     if (!Array.isArray(cd) || cd.length === 0) return null;
     const kind = cd[0];
-    if (kind === "atom") return { kind:"atom", index:cd[1], label:cd[2], element:cd[3], is_minor:!!cd[4], fragment_label:cd[5]||"", part:cd.length>6?String(cd[6]||""):"" };
-    if (kind === "polyhedron") return { kind:"polyhedron", spec_id:cd[1], fragment_label:cd[2]||"", is_anchor:!!cd[3] };
-    if (kind === "bond") return { kind:"bond", label_pair:cd[1], element_pair:cd[2], is_minor:!!cd[3] };
+    if (kind === "atom") return { kind:"atom", index:cd[1], label:cd[2], element:cd[3], is_minor:!!cd[4], fragment_label:cd[5]||"", id:cd[6]||("atom:index:"+cd[1]), source_index:cd[7], image_shift:cd[8], disorder_group:cd[9], part:cd[10]||"" };
+    if (kind === "polyhedron") return { kind:"polyhedron", spec_id:cd[1], fragment_label:cd[2]||"", is_anchor:!!cd[3], id:cd[4]||("polyhedron:"+cd[1]+":"+cd[2]), source_index:cd[5], image_shift:cd[6] };
+    if (kind === "bond") return { kind:"bond", label_pair:cd[1], element_pair:cd[2], is_minor:!!cd[3], id:cd[4]||("bond:"+cd[1]), endpoint_ids:[cd[5],cd[6]] };
+    if (kind === "facet") return { kind:"facet", id:String(cd[1]||""), miller:cd[2], parent_id:"morphology:bfdh-morphology" };
     return null;
+  }
+
+  // Mesh3d has used both pointNumber and pointIndex in Plotly event payloads
+  // across releases.  Some versions also expose the underlying cell as
+  // faceNumber/faceIndex.  Always prefer an explicit face ordinal and never
+  // let null coerce to zero: a zero fallback would select the first facet for
+  // clicks whose event did not carry an ordinal at all.
+  function meshFaceOrdinal(point) {
+    if (!point || typeof point !== "object") return -1;
+    const keys = ["faceNumber", "faceIndex", "pointNumber", "pointIndex"];
+    for (let i = 0; i < keys.length; i++) {
+      const raw = point[keys[i]];
+      if (raw === undefined || raw === null || raw === "") continue;
+      const value = Number(raw);
+      if (Number.isInteger(value) && value >= 0) return value;
+    }
+    return -1;
+  }
+
+  function faceIdAt(meta, point) {
+    const faceIds = meta && Array.isArray(meta.face_ids) ? meta.face_ids : [];
+    const vertexIds = meta && Array.isArray(meta.vertex_face_ids) ? meta.vertex_face_ids : [];
+    if (!point || typeof point !== "object") return null;
+    // Plotly's faceNumber/faceIndex are triangle ordinals.  In releases
+    // exposing only pointNumber/pointIndex, those values are vertex ordinals
+    // and must use the explicit per-vertex map emitted by MatterVis.
+    const hasFaceOrdinal = point.faceNumber !== undefined && point.faceNumber !== null && point.faceNumber !== ""
+      || point.faceIndex !== undefined && point.faceIndex !== null && point.faceIndex !== "";
+    const ordinal = meshFaceOrdinal(point);
+    const ids = hasFaceOrdinal || !vertexIds.length ? faceIds : vertexIds;
+    return ordinal >= 0 && ordinal < ids.length && ids[ordinal]
+      ? String(ids[ordinal])
+      : null;
   }
 
   function setDashStore(id, data) {
@@ -634,7 +668,85 @@
   function inGraph(target) { return !!(target && target.closest && target.closest("#crystal-graph")); }
 
   // ── Right-click menu (right_click_menu.js) ─────────────────────
-  let lastHovered = null, lastClient = {x:0,y:0};
+  let lastHovered = null, lastHoverPoint = null, lastClient = {x:0,y:0};
+  // Keep additive/toggle picks isolated per scene.  A single browser-global
+  // list leaked selections from the previous tab into the next tab because
+  // the Dash store is only updated after the click callback returns.
+  const persistentTargetsByScene = Object.create(null);
+  function sceneSelectionKey(sceneId) {
+    return sceneId === null || sceneId === undefined || sceneId === "" ? "__default__" : String(sceneId);
+  }
+  function persistentTargetsForScene(sceneId) {
+    const key = sceneSelectionKey(sceneId);
+    if (!Array.isArray(persistentTargetsByScene[key])) persistentTargetsByScene[key] = [];
+    return persistentTargetsByScene[key];
+  }
+  function prunePersistentTargets() {
+    const live = Object.create(null);
+    let foundTab = false;
+    document.querySelectorAll("#scene-tabs [id^='scene-tab-']").forEach(function (tab) {
+      const id = sceneIdFromTabNode(tab);
+      if (id) { live[String(id)] = true; foundTab = true; }
+    });
+    // During the initial Dash paint there may be no tab nodes yet.  Do not
+    // discard valid scene state in that transient gap; prune only after at
+    // least one real tab is present (including after a tab is removed).
+    if (!foundTab) return;
+    Object.keys(persistentTargetsByScene).forEach(function (key) {
+      if (key !== "__default__" && !live[key]) delete persistentTargetsByScene[key];
+    });
+  }
+  function targetFromPoint(point) {
+    if (!point || typeof point !== "object") return null;
+    const payload = decodeCustomdata(point.customdata);
+    if (payload) return payload;
+    const trace = point.data || point.fullData || {};
+    const meta = trace.meta && typeof trace.meta === "object" ? trace.meta : {};
+    const role = String(meta.mv_role || meta.kind || "").toLowerCase();
+    const pointNumber = Number(point.pointNumber !== undefined ? point.pointNumber : point.pointIndex);
+    if (role === "geometry_entity" || role === "geometry_entity_edge") {
+      const geometryId = meta.geometry_id || meta.id;
+      if (!geometryId) return null;
+      const subentity = faceIdAt(meta, point);
+      // BFDH is rendered through the generic depth-tested geometry path, but
+      // each face has its own semantic facet ID. Preserve that identity so a
+      // click on a morphology face can drive facet selection/style overrides
+      // instead of collapsing to the parent mesh entity.
+      if (String(meta.source || "") === "bfdh_morphology" && subentity) {
+        return {kind:"facet", id:String(subentity), parent_id:"morphology:bfdh-morphology", subentity_id:String(subentity)};
+      }
+      return {kind:"geometry", id:String(geometryId), geometry_id:String(geometryId), subentity_id:subentity, face_id:subentity};
+    }
+    if (role === "polyhedron" || meta.spec_id) {
+      const subentity = faceIdAt(meta, point);
+      const id = subentity || meta.instance_id || ("polyhedron:"+String(meta.spec_id||"unknown"));
+      return {kind:"polyhedron", id:String(id), spec_id:meta.spec_id||null, subentity_id:subentity};
+    }
+    if (role === "facet" || role === "morphology") {
+      const facetIds = Array.isArray(meta.facet_ids) ? meta.facet_ids : [];
+      const ordinal = meshFaceOrdinal(point);
+      const id = ordinal >= 0 && ordinal < facetIds.length && facetIds[ordinal]
+        ? facetIds[ordinal] : (meta.geometry_id || "facet:bfdh-morphology");
+      return {kind:"facet", id:String(id), parent_id:"morphology:bfdh-morphology"};
+    }
+    return null;
+  }
+  function publishSemanticSelection(target, mode) {
+    if (!target && mode !== "clear") return;
+    const nextMode = mode || "replace";
+    const sceneId = currentSceneId();
+    const persistentTargets = persistentTargetsForScene(sceneId);
+    if (nextMode === "clear") persistentTargetsByScene[sceneSelectionKey(sceneId)] = [];
+    else if (nextMode === "add") {
+      const exists = persistentTargets.some(function(item){return item.kind===target.kind&&item.id===target.id;});
+      if (!exists) persistentTargets.push(target);
+    }
+    else if (nextMode === "toggle") {
+      const found = persistentTargets.findIndex(function(item){return item.kind===target.kind&&item.id===target.id;});
+      if (found >= 0) persistentTargets.splice(found, 1); else persistentTargets.push(target);
+    } else persistentTargetsByScene[sceneSelectionKey(sceneId)] = [target];
+    setDashStore("scene-selection-store", {scene_id:sceneId, targets:persistentTargetsForScene(sceneId).slice(), mode:nextMode, ts:Date.now()});
+  }
   function hoverIsCurrent() {
     if (!lastHovered) return false;
     const scene = currentSceneId();
@@ -657,6 +769,48 @@
     const input = document.getElementById("rightclick-target-fallback");
     if (input) { input.value = JSON.stringify(payload); input.dispatchEvent(new Event("input",{bubbles:true})); }
   }
+  function hoverInspector(target, event) {
+    let inspector = document.getElementById("mv-hover-inspector");
+    if (!target) {
+      if (inspector) inspector.remove();
+      return;
+    }
+    // Atoms already have a coordinate tooltip.  Avoid painting a second
+    // semantic label over it when Plotly also reports an atom hover.
+    if (target.kind === "atom") {
+      const tip = document.getElementById("mv-atom-tip");
+      if (tip && !tip.hidden) {
+        if (inspector) inspector.remove();
+        return;
+      }
+    }
+    if (!inspector) {
+      inspector = document.createElement("div");
+      inspector.id = "mv-hover-inspector";
+      inspector.className = "mv-hover-inspector";
+      inspector.setAttribute("role", "status");
+      document.body.appendChild(inspector);
+    }
+    const label = target.label || target.fragment_label || target.spec_id ||
+      target.geometry_id || target.id || "";
+    inspector.textContent = String(target.kind || "target") + (label ? " · " + label : "");
+    const x = event && event.clientX !== undefined ? event.clientX : (event && event.x) || lastClient.x;
+    const y = event && event.clientY !== undefined ? event.clientY : (event && event.y) || lastClient.y;
+    inspector.style.left = (Number(x) + 10) + "px";
+    inspector.style.top = (Number(y) + 10) + "px";
+  }
+  function clearSelectionIfGraphBackground() {
+    const gd = graphDiv();
+    const hoverdata = gd && gd._hoverdata;
+    // Plotly gl3d does not consistently emit plotly_click for an empty
+    // canvas pixel. Its hover cache is updated on pointer movement, so a
+    // deferred click fallback can distinguish a background click from a
+    // point click and clear the semantic selection reliably.
+    if (!hoverdata || !Array.isArray(hoverdata.points) || !hoverdata.points.length) {
+      const sceneId = currentSceneId();
+      if (persistentTargetsForScene(sceneId).length) publishSemanticSelection(null, "clear");
+    }
+  }
   function bindRightClick() {
     const container = document.getElementById("crystal-graph");
     if (!container || container.dataset.rcmBound === "1") return;
@@ -667,9 +821,92 @@
       container.dataset.rcmBound = "0";
       return;
     }
+    let plotlyClickObserved = false;
+    let gestureSequence = 0;
+    let activeGestureId = null;
+    let lastPointerGesture = null;
+    let semanticClickGesture = null;
+    let semanticClickAt = 0;
+    let semanticClickPoint = null;
+    // Coordinate picking is asynchronous. Keep a gesture pending until its
+    // preview request settles so the capture-phase background clear cannot
+    // erase a Ctrl/Shift toggle first.
+    let pendingCoordinateGesture = null;
+    const gestureGraceMs = 1000;
+
+    function clearSemanticClickGesture(gestureId) {
+      if (semanticClickGesture !== gestureId) return;
+      semanticClickGesture = null;
+      semanticClickAt = 0;
+      semanticClickPoint = null;
+    }
+
+    function releaseSemanticClickGesture(gestureId) {
+      // A gl3d plotly_click may arrive while the pointer is still held. Keep
+      // ownership through pointerup/click, with a grace period for slower
+      // native gestures.
+      setTimeout(function () {
+        if (semanticClickGesture !== gestureId) return;
+        if (pointerDown && pointerDown.id === gestureId) {
+          releaseSemanticClickGesture(gestureId);
+          return;
+        }
+        if (pendingCoordinateGesture && pendingCoordinateGesture.id === gestureId) {
+          releaseSemanticClickGesture(gestureId);
+          return;
+        }
+        clearSemanticClickGesture(gestureId);
+      }, gestureGraceMs);
+    }
+
+    function finishCoordinateGesture(gestureId) {
+      if (pendingCoordinateGesture && pendingCoordinateGesture.id === gestureId) {
+        pendingCoordinateGesture = null;
+      }
+    }
+
+    function hasPendingCoordinateGesture() {
+      return !!(pendingCoordinateGesture
+        && Date.now() - pendingCoordinateGesture.at < gestureGraceMs * 2);
+    }
     try {
-      inner.on("plotly_hover", function (ed) { if (ed && ed.points && ed.points.length) noteHover(decodeCustomdata(ed.points[0].customdata)); });
-      inner.on("plotly_unhover", function () { lastHovered = null; });
+      inner.on("plotly_hover", function (ed) {
+        if (ed && ed.points && ed.points.length) {
+          lastHovered = targetFromPoint(ed.points[0]);
+          if (lastHovered) {
+            noteHover(lastHovered);
+            lastHoverPoint = {x:lastClient.x, y:lastClient.y, at:Date.now()};
+          }
+          hoverInspector(lastHovered, lastClient);
+        }
+      });
+      inner.on("plotly_unhover", function () {
+        lastHovered = null;
+        lastHoverPoint = null;
+        hoverInspector(null);
+      });
+      inner.on("plotly_click", function (ed) {
+        const native = ed && ed.event;
+        plotlyClickObserved = true;
+        const recentPointer = lastPointerGesture && Date.now() - lastPointerGesture.at < gestureGraceMs
+          ? lastPointerGesture.id : null;
+        const gestureId = activeGestureId || recentPointer || ++gestureSequence;
+        semanticClickGesture = gestureId;
+        semanticClickAt = Date.now();
+        semanticClickPoint = native && native.clientX !== undefined
+          ? {x:native.clientX, y:native.clientY}
+          : {x:lastClient.x, y:lastClient.y};
+        setTimeout(function () { plotlyClickObserved = false; }, 0);
+        releaseSemanticClickGesture(gestureId);
+        const target = ed && ed.points && ed.points.length ? targetFromPoint(ed.points[0]) : null;
+        if (!target) { publishSemanticSelection(null, "clear"); return; }
+        const pointer = lastPointerGesture && lastPointerGesture.id === gestureId
+          ? lastPointerGesture
+          : pointerDown && pointerDown.id === gestureId ? pointerDown : null;
+        const ctrl = !!(native && (native.ctrlKey || native.metaKey)) || !!(pointer && (pointer.ctrlKey || pointer.metaKey));
+        const shift = !!(native && native.shiftKey) || !!(pointer && pointer.shiftKey);
+        publishSemanticSelection(target, ctrl ? "toggle" : (shift ? "add" : "replace"));
+      });
     } catch (_) {
       container.dataset.rcmBound = "0";
       return;
@@ -680,15 +917,16 @@
       queueHover(e.clientX, e.clientY);
     }
     /* Plotly emits native mouse events for real input, while automation and
-     * assistive clients often dispatch PointerEvents directly. Keep the
-     * coordinate-based path on both event families so mesh3d depth picking
-     * cannot suppress atom hover/selection. */
+     * assistive clients often dispatch PointerEvents directly. Keep semantic
+     * hover sampling on both event families so the inspector and context menu
+     * stay in sync with mesh3d depth picking. */
     container.addEventListener("mousemove", handlePointerMove, {passive:true});
     container.addEventListener("pointermove", handlePointerMove, {passive:true});
     function handlePointerLeave() {
       tipSeq += 1;
       if (tipTimer) clearTimeout(tipTimer);
       hideAtomTip();
+      hoverInspector(null);
     }
     container.addEventListener("mouseleave", handlePointerLeave);
     container.addEventListener("pointerleave", handlePointerLeave);
@@ -744,6 +982,9 @@
       tip.style.left = (clientX + 14) + "px";
       tip.style.top = (clientY + 16) + "px";
       tip.hidden = false;
+      // The atom tip is the authoritative hover label for coordinate hits;
+      // remove a semantic inspector that may have been painted first.
+      hoverInspector(null);
     }
     function queueHover(clientX, clientY) {
       const seq = ++tipSeq;
@@ -758,44 +999,171 @@
     }
     let pointerDown = null;
     let lastPrimaryPick = null;
-    function primaryPick(e) {
-      if ((e.button !== undefined && e.button !== 0) || e.shiftKey || e.altKey) return;
+    function primaryPick(e, gestureId) {
+      if ((e.button !== undefined && e.button !== 0) || e.altKey) return;
       if (e.target && e.target.closest && e.target.closest(".mv-canvas-toolbar, .modebar, .rightclick-menu")) return;
       const now = Date.now();
-      /* A real primary pointer produces both pointerup and click. Avoid
-       * posting the same selection twice while still accepting synthetic
-       * pointerup-only clients. */
-      if (lastPrimaryPick && now - lastPrimaryPick.at < 80 &&
-          Math.abs(lastPrimaryPick.x - e.clientX) < 1 &&
-          Math.abs(lastPrimaryPick.y - e.clientY) < 1) return;
-      lastPrimaryPick = {at: now, x: e.clientX, y: e.clientY};
+      if (!gestureId) {
+        const recentPointer = lastPointerGesture && now - lastPointerGesture.at < gestureGraceMs &&
+          Math.abs(lastPointerGesture.x - e.clientX) < 1 &&
+          Math.abs(lastPointerGesture.y - e.clientY) < 1;
+        const recentSemantic = semanticClickGesture && semanticClickPoint &&
+          now - semanticClickAt < gestureGraceMs &&
+          Math.abs(semanticClickPoint.x - e.clientX) < 1 &&
+          Math.abs(semanticClickPoint.y - e.clientY) < 1;
+        gestureId = activeGestureId || (recentPointer ? lastPointerGesture.id : null) ||
+          (recentSemantic ? semanticClickGesture : null) || ++gestureSequence;
+      }
+      /* A native click follows pointerup for one gesture. Keep the id across
+       * both events and defer the coordinate fallback so Plotly's custom
+       * plotly_click handler can claim the gesture first. */
+      if (lastPrimaryPick && lastPrimaryPick.id === gestureId) return;
+      lastPrimaryPick = {id:gestureId, at:now, x:e.clientX, y:e.clientY};
       const picked = pickRect(e.clientX, e.clientY, 14);
-      postSelection(picked.rect, picked.viewport, e.ctrlKey || e.metaKey).catch(function () {});
+      pendingCoordinateGesture = {
+        id: gestureId,
+        at: now,
+        ctrlKey: !!e.ctrlKey || !!e.metaKey,
+        shiftKey: !!e.shiftKey,
+      };
+      const schedule = window.requestAnimationFrame || function (callback) { setTimeout(callback, 0); };
+      schedule(function () {
+        setTimeout(function () {
+        if (semanticClickGesture === gestureId) {
+          finishCoordinateGesture(gestureId);
+          return;
+        }
+        // Coordinate picking is a preview. Publish the resulting atom target
+        // through the semantic store so it cannot overwrite a non-atom target
+        // and Ctrl/Cmd uses the same toggle path as Plotly clicks.
+        postSelection(picked.rect, picked.viewport, false, false).then(function (body) {
+          // A newer pointer gesture owns the selection now. Do not let a
+          // slower preview response from an older click overwrite it.
+          if (gestureSequence !== gestureId) {
+            finishCoordinateGesture(gestureId);
+            return;
+          }
+          const selection = body && body.selection;
+          const semanticTargets = selection && selection.targets || [];
+          const atomTarget = semanticTargets.find(function (item) { return item && item.kind === "atom"; });
+          if (!atomTarget) {
+            publishSemanticSelection(null, "clear");
+            finishCoordinateGesture(gestureId);
+            return;
+          }
+          const mode = e.ctrlKey || e.metaKey ? "toggle" : (e.shiftKey ? "add" : "replace");
+          publishSemanticSelection(atomTarget, mode);
+          finishCoordinateGesture(gestureId);
+        }).catch(function () {
+          finishCoordinateGesture(gestureId);
+        });
+        }, 50);
+      });
     }
     container.addEventListener("pointerdown", function (e) {
-      if (e.button === undefined || e.button === 0) pointerDown = {x:e.clientX, y:e.clientY};
+      if (e.button === undefined || e.button === 0) {
+        const id = ++gestureSequence;
+        if (semanticClickGesture !== null && semanticClickGesture !== id) {
+          clearSemanticClickGesture(semanticClickGesture);
+        }
+        plotlyClickObserved = false;
+        activeGestureId = id;
+        pointerDown = {
+          x:e.clientX,
+          y:e.clientY,
+          id:id,
+          ctrlKey:!!e.ctrlKey,
+          metaKey:!!e.metaKey,
+          shiftKey:!!e.shiftKey,
+        };
+      }
     }, {passive:true});
     container.addEventListener("pointerup", function (e) {
       if (!pointerDown) return;
       const moved = Math.hypot(e.clientX - pointerDown.x, e.clientY - pointerDown.y);
+      const gesture = pointerDown;
+      lastPointerGesture = {
+        id:gesture.id,
+        at:Date.now(),
+        x:e.clientX,
+        y:e.clientY,
+        moved:moved > 4,
+        ctrlKey:!!e.ctrlKey,
+        metaKey:!!e.metaKey,
+        shiftKey:!!e.shiftKey,
+      };
       pointerDown = null;
-      if (moved <= 4) primaryPick(e);
+      if (moved <= 4) primaryPick(e, gesture.id);
+      setTimeout(function () {
+        if (activeGestureId === gesture.id) activeGestureId = null;
+      }, 0);
     });
     container.addEventListener("click", function (e) {
       /* Synthetic click events do not always populate ``button``. Treat an
        * omitted value as the normal primary click while still ignoring an
        * explicit secondary/middle button. */
+      const recentPointer = lastPointerGesture
+        && Date.now() - lastPointerGesture.at < gestureGraceMs
+        && Math.abs(lastPointerGesture.x - e.clientX) < 1
+        && Math.abs(lastPointerGesture.y - e.clientY) < 1
+        ? lastPointerGesture : null;
+      if (recentPointer && recentPointer.moved) return;
       primaryPick(e);
     });
+    container.addEventListener("click", function (e) {
+      if (e.defaultPrevented) return;
+      setTimeout(function () {
+        // A point click is delivered through Plotly's custom event rather
+        // than the DOM event. Avoid clearing a fresh semantic pick.
+        const recentPointer = lastPointerGesture
+          && Date.now() - lastPointerGesture.at < gestureGraceMs
+          && Math.abs(lastPointerGesture.x - e.clientX) < 1
+          && Math.abs(lastPointerGesture.y - e.clientY) < 1
+          ? lastPointerGesture : null;
+        const modifier = !!(e.ctrlKey || e.metaKey || e.shiftKey)
+          || !!(recentPointer && (recentPointer.ctrlKey || recentPointer.metaKey || recentPointer.shiftKey));
+        if (plotlyClickObserved || hasPendingCoordinateGesture() || modifier
+          || !!(recentPointer && recentPointer.moved)) {
+          plotlyClickObserved = false;
+          return;
+        }
+        clearSelectionIfGraphBackground();
+      }, 0);
+    }, true);
+    container.addEventListener("mousemove", function (e) { lastClient = {x:e.clientX, y:e.clientY}; }, {passive:true});
     container.addEventListener("contextmenu", function (e) {
-      e.preventDefault();
       const sceneId = currentSceneId();
       const x = lastClient.x || e.clientX;
       const y = lastClient.y || e.clientY;
-      if (hoverIsCurrent()) {
-        pushTarget({kind:lastHovered.kind, payload:lastHovered, scene_id:sceneId, x:x, y:y, ts:Date.now()});
+      let current = lastHovered;
+      // Plotly can retain a hover payload after the pointer moved away. Never
+      // use one older than a quarter second for a context-menu action.
+      if (lastHoverPoint && Date.now() - lastHoverPoint.at > 250) current = null;
+      // The graph's hover cache describes the pointer location more reliably
+      // than the browser event ordering around contextmenu. Prefer it when it
+      // contains a semantic point, even if lastHovered came from an earlier
+      // Plotly hover callback.
+      const gd = graphDiv();
+      const hoverdata = gd && gd._hoverdata;
+      if (hoverdata && hoverdata.points && hoverdata.points.length) {
+        const liveTarget = targetFromPoint(hoverdata.points[0]);
+        if (liveTarget) {
+          // Stamp the cache-derived target so the scene/generation guard below
+          // applies to the same object that is actually under the pointer.
+          noteHover(liveTarget);
+          lastHoverPoint = {x:x, y:y, at:Date.now()};
+          current = lastHovered;
+        } else current = null;
+      }
+      if (current && hoverIsCurrent()) {
+        e.preventDefault();
+        pushTarget({kind:current.kind, payload:current, scene_id:sceneId, x:x, y:y, ts:Date.now()});
         return;
       }
+      // With no usable Plotly hover payload, retain the coordinate picker as
+      // a right-click fallback so an atom can still open the menu without a
+      // preceding hover event.
+      e.preventDefault();
       const picked = pickRect(e.clientX, e.clientY, 14);
       postSelection(picked.rect, picked.viewport, false).then(function (body) {
         const selection = body && body.selection;
@@ -809,7 +1177,7 @@
           part: part.part || "",
           scene_id: sceneId,
         } : null;
-        pushTarget({kind: payload ? "atom" : "_global", payload: payload, scene_id: sceneId, x: e.clientX, y: e.clientY, ts: Date.now()});
+        pushTarget({kind: payload ? "atom" : "_global", payload: payload, scene_id: sceneId, x:e.clientX, y:e.clientY, ts:Date.now()});
       }).catch(function () {
         pushTarget({kind:"_global", payload:null, scene_id:sceneId, x:e.clientX, y:e.clientY, ts:Date.now()});
       });
@@ -1334,6 +1702,7 @@
     if (window.__mvCensus) window.__mvCensus.webglContexts = trackedGL.length;
   }
   function rebindAll() {
+    prunePersistentTargets();
     bindRightClick();
     bindBoxSelect();
     bindDisorderHover();

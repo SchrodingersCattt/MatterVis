@@ -5,6 +5,7 @@ import numpy as np
 from mat_viewer.app import create_app
 import mat_viewer.render.viewport_spec as viewport_spec
 from mat_viewer.render.screen_projection import project_gl3d_pixels
+from mat_viewer.render.picking import atom_instance_id
 from mat_viewer.render.viewport_spec import ViewportSpec
 
 
@@ -56,6 +57,14 @@ def test_select_box_full_view_selects_visible_atoms():
         expected = {str(atom["label"]) for atom in scene["draw_atoms"]}
         selection = backend.select_box([0, 0, 800, 600], [800, 600])
         assert set(selection["atom_labels"]) == expected
+        assert {
+            target["id"]
+            for target in selection["targets"]
+            if target["kind"] == "atom"
+        } == {
+            atom_instance_id(atom, index)
+            for index, atom in enumerate(scene["draw_atoms"])
+        }
     finally:
         backend.close()
 
@@ -77,6 +86,11 @@ def test_select_box_follows_gl3d_pixels_for_zoom_pan_and_aspect():
         x, y = pixels[index]
         selection = backend.select_box([x - 3, y - 3, x + 3, y + 3], [width, height])
         assert selection["atom_labels"] == [str(scene["draw_atoms"][index]["label"])]
+        target = selection["targets"][0]
+        assert target["kind"] == "atom"
+        assert target["id"] == atom_instance_id(scene["draw_atoms"][index], index)
+        assert target["label"] == str(scene["draw_atoms"][index]["label"])
+        assert target["element"] == str(scene["draw_atoms"][index]["elem"])
 
         backend.set_projection("orthographic")
         scene, pixels = _pixels(backend, 900, 500)
