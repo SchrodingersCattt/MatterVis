@@ -97,6 +97,15 @@ _STATIC_INTERACTION_ROLES = frozenset(
         "selection",
     }
 )
+_STATIC_INTERACTION_NAMES = frozenset(
+    {
+        "selection-outline",
+        "atom-selection",
+        "bond-selection",
+        "polyhedron-selection",
+        "disorder-preview-outline",
+    }
+)
 
 
 def _static_export_dict(
@@ -117,7 +126,8 @@ def _static_export_dict(
     for trace in output.get("data") or []:
         meta = trace.get("meta") if isinstance(trace, dict) else None
         role = meta.get("mv_role") if isinstance(meta, dict) else None
-        if role in _STATIC_INTERACTION_ROLES:
+        name = trace.get("name") if isinstance(trace, dict) else None
+        if role in _STATIC_INTERACTION_ROLES or name in _STATIC_INTERACTION_NAMES:
             continue
         traces.append(trace)
     output["data"] = traces

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from mat_viewer.render.style.resolver import (
     apply_scene_style_overrides,
+    merge_style_overrides_for_targets,
     merge_style_override,
     normalize_style_overrides,
     resolve_entity_style,
+    style_fields_for_targets,
     validate_style_override_patch,
 )
 
@@ -145,3 +147,72 @@ def test_scene_style_overrides_materialize_exact_atom_and_bond_targets():
     assert scene["bonds"][0]["_render_color"] == "#00ff00"
     assert scene["bonds"][0]["_render_opacity_scale"] == 0.2
     assert scene["bonds"][0]["_render_visible"] is False
+
+
+def test_style_defaults_cover_geometry_polyhedron_and_bfdh_facet():
+    assert resolve_entity_style({"kind": "mesh"})["color"] == "#7C5CBF"
+    assert resolve_entity_style({"kind": "polyhedron"})["opacity"] == 0.55
+    assert resolve_entity_style({"kind": "bfdh"})["color"] == "#4f7cff"
+
+
+def test_named_theme_changes_defaults_but_exact_override_wins():
+    light = resolve_entity_style({"kind": "geometry"}, theme="light")
+    dark = resolve_entity_style({"kind": "geometry"}, theme="dark")
+    assert light["color"] != dark["color"]
+    assert resolve_entity_style(
+        {"kind": "geometry", "id": "mesh"},
+        theme="dark",
+        overrides={"mesh": {"kind": "geometry", "color": "#00ff00"}},
+    )["color"] == "#00ff00"
+
+
+def test_parent_and_child_overrides_are_fieldwise_and_siblings_are_isolated():
+    child = resolve_entity_style(
+        {"kind": "facet", "id": "facet-a", "parent_id": "poly-a"},
+        overrides={
+            "poly-a": {"kind": "polyhedron", "color": "#111111", "opacity": 0.2},
+            "facet-a": {"kind": "facet", "edge_color": "#222222"},
+            "facet-b": {"kind": "facet", "color": "#333333"},
+        },
+    )
+    assert child["color"] == "#111111"
+    assert child["opacity"] == 0.2
+    assert child["edge_color"] == "#222222"
+    sibling = resolve_entity_style({"kind": "facet", "id": "facet-b"}, overrides={
+        "poly-a": {"kind": "polyhedron", "color": "#111111"},
+        "facet-a": {"kind": "facet", "edge_color": "#222222"},
+        "facet-b": {"kind": "facet", "color": "#333333"},
+    })
+    assert sibling["color"] == "#333333"
+    assert sibling["edge_color"] == "#4f7cff"
+
+
+def test_multi_selection_uses_supported_property_intersection_atomically():
+    targets = [
+        {"kind": "atom", "id": "a1"},
+        {"kind": "polyhedron", "id": "p1"},
+    ]
+    fields = style_fields_for_targets(targets)
+    assert {"color", "opacity", "visible"} <= fields
+    assert "radius" not in fields
+    merged = merge_style_overrides_for_targets(None, targets, {"color": "#abcdef"})
+    assert merged["a1"]["color"] == "#abcdef"
+    assert merged["p1"]["color"] == "#abcdef"
+
+    import pytest
+
+    with pytest.raises(ValueError, match="selection"):
+        merge_style_overrides_for_targets(None, targets, {"radius": 0.2})
+
+
+def test_property_color_override_is_independent_from_solid_color():
+    from mat_viewer.render.picking import atom_instance_id
+
+    atoms = [{"label": "C1", "elem": "C", "cart": [0, 0, 0], "_source_index": 0}]
+    atom_id = atom_instance_id(atoms[0], 0)
+    scene = apply_scene_style_overrides(
+        {"draw_atoms": atoms, "bonds": []},
+        {"style_overrides": {atom_id: {"kind": "atom", "property_color": "#abcdef"}}},
+    )
+    assert scene["draw_atoms"][0]["_property_color"] == "#abcdef"
+    assert "_render_color" not in scene["draw_atoms"][0]

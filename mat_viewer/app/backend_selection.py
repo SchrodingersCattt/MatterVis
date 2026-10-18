@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from .shared import *
 from .normalizers import _normalize_selection
-from ..render.picking import atom_instance_id, normalize_target
+from ..render.picking import atom_instance_id, bond_instance_id, facet_instance_id, normalize_target
 from ..render.style.resolver import (
     merge_style_override,
+    merge_style_overrides_for_targets,
     normalize_style_overrides,
     validate_style_override_patch,
 )
@@ -56,6 +57,102 @@ def _selection_target(atom: dict[str, Any], display_index: int) -> dict[str, Any
 
 
 class _SelectionBackendMixin:
+    def _reconcile_semantic_targets(self, state: dict[str, Any]) -> dict[str, Any]:
+        """Drop selection/paint targets that no longer exist in a scene.
+
+        Target IDs are intentionally stable across redraws, but a structure or
+        display-scope change can remove an atom image, bond, or caller geometry
+        entirely.  Retaining those IDs makes a later style patch appear to
+        succeed while silently applying to an unrelated object if IDs are
+        reused.  Reconcile only the inexpensive scene-owned identities here;
+        topology overlays are generated lazily and remain untouched until the
+        topology painter can resolve them.
+        """
+        try:
+            scene = self.scene_for_state(state)
+        except Exception:
+            # An upload may still be parsing.  Keep the previous state rather
+            # than clearing valid targets because a temporary scene failure is
+            # not evidence that the targets are stale.
+            return state
+
+        atoms = list(scene.get("draw_atoms") or [])
+        bonds = list(scene.get("bonds") or [])
+        valid: dict[str, set[str]] = {
+            "atom": {
+                atom_instance_id(atom, index) for index, atom in enumerate(atoms)
+            },
+            "bond": {
+                bond_instance_id(bond, atoms, index)
+                for index, bond in enumerate(bonds)
+            },
+            "geometry": set(),
+            "geometry_entity": set(),
+            "facet": set(),
+            "morphology": set(),
+        }
+        for entity in scene.get("geometry_entities") or []:
+            if not isinstance(entity, dict) or entity.get("id") in (None, ""):
+                continue
+            entity_id = str(entity["id"])
+            valid["geometry"].add(entity_id)
+            valid["geometry_entity"].add(entity_id)
+        morphology = scene.get("bfdh_morphology") or {}
+        if isinstance(morphology, dict):
+            for index, facet in enumerate(morphology.get("facets") or []):
+                if not isinstance(facet, dict):
+                    continue
+                valid["facet"].add(
+                    facet_instance_id(
+                        facet.get("miller", [0, 0, 0]),
+                        index,
+                        morphology_id="bfdh-morphology",
+                    )
+                )
+            if morphology.get("enabled"):
+                valid["morphology"].add("bfdh-morphology")
+
+        selection = _normalize_selection(state.get("selection"))
+        targets = []
+        for target in selection.get("targets") or []:
+            kind = str(target.get("kind") or "").lower()
+            entity_id = str(target.get("id") or "")
+            # Polyhedron IDs include source/image provenance and are resolved
+            # by topology geometry after this scene pass. Keep them here so a
+            # display-only repaint does not discard a valid topology pick.
+            if kind in {"polyhedron", "molecule", "part"}:
+                targets.append(target)
+            elif entity_id and entity_id in valid.get(kind, set()):
+                targets.append(target)
+        target_keys = {(item.get("kind"), item.get("id")) for item in targets}
+        active = selection.get("active_target")
+        if not isinstance(active, dict) or (active.get("kind"), active.get("id")) not in target_keys:
+            active = targets[-1] if targets else None
+        labels = [
+            str(atom.get("label") or "")
+            for atom in atoms
+            if str(atom.get("label") or "")
+        ]
+        label_set = set(labels)
+        selection["targets"] = targets
+        selection["active_target"] = active
+        selection["atom_labels"] = [label for label in selection.get("atom_labels", []) if label in label_set]
+        selection["order"] = [label for label in selection.get("order", []) if label in set(selection["atom_labels"])]
+        if selection.get("active_label") not in selection["atom_labels"]:
+            selection["active_label"] = selection["order"][-1] if selection["order"] else None
+        state = dict(state)
+        state["selection"] = selection
+
+        overrides = normalize_style_overrides(state.get("style_overrides"))
+        for target_id, override in list(overrides.items()):
+            kind = str(override.get("kind") or "geometry").lower()
+            if kind in {"polyhedron", "molecule", "part"}:
+                continue
+            if target_id not in valid.get(kind, set()):
+                overrides.pop(target_id, None)
+        state["style_overrides"] = overrides
+        return state
+
     def get_selection(self, scene_id: Optional[str] = None) -> dict[str, Any]:
         return copy.deepcopy(_normalize_selection(self.get_state(scene_id).get("selection")))
 
@@ -132,6 +229,26 @@ class _SelectionBackendMixin:
         validate_style_override_patch(kind, patch)
         state = self.get_state(scene_id)
         overrides = merge_style_override(state.get("style_overrides"), str(target_id), str(kind), patch)
+        self.patch_state({"style_overrides": overrides}, scene_id=scene_id)
+        return copy.deepcopy(self.get_state(scene_id).get("style_overrides") or {})
+
+    def set_style_overrides(
+        self,
+        targets: Iterable[Mapping[str, Any]],
+        patch: dict[str, Any],
+        scene_id: Optional[str] = None,
+    ) -> dict[str, dict[str, Any]]:
+        """Apply one paint patch to every selected target atomically.
+
+        The resolver validates the intersection of fields supported by all
+        target kinds before mutating state, so a mixed atom/polyhedron pick
+        cannot partially apply a radius or representation change.
+        """
+
+        state = self.get_state(scene_id)
+        overrides = merge_style_overrides_for_targets(
+            state.get("style_overrides"), targets, patch
+        )
         self.patch_state({"style_overrides": overrides}, scene_id=scene_id)
         return copy.deepcopy(self.get_state(scene_id).get("style_overrides") or {})
 
@@ -253,7 +370,27 @@ class _SelectionBackendMixin:
         lo_y, hi_y = sorted((y0, y1))
         state = self.get_state(scene_id)
         scene = self.scene_for_state(state)
-        atoms = scene.get("draw_atoms") or []
+        # Box/coordinate picking must follow the same visibility contract as
+        # the Plotly interaction trace.  ``draw_atoms`` is the complete
+        # structural list and therefore still contains atoms hidden by an
+        # ``atom_groups`` rule (or a zero-opacity override).  Projecting that
+        # list would make a click on an empty pixel select an invisible atom.
+        # Keep the original display index alongside each visible atom so
+        # stable IDs continue to match the customdata emitted by the figure.
+        atoms = list(scene.get("draw_atoms") or [])
+        atom_rows = list(enumerate(atoms))
+        atom_groups = state.get("atom_groups") or []
+        if atom_groups:
+            from ..style.atom_groups import tag_atoms_with_groups
+            from ..render.style.core import _atom_render_visible
+
+            tagged = tag_atoms_with_groups(atoms, list(atom_groups))
+            atom_rows = [
+                (index, atom)
+                for index, atom in enumerate(tagged)
+                if _atom_render_visible(atom)
+            ]
+            atoms = [atom for _index, atom in atom_rows]
         if lo_x <= 0.0 and lo_y <= 0.0 and hi_x >= width and hi_y >= height:
             # Keep the fast full-cell path, but include exact atom targets so
             # this API has the same semantic contract as a small coordinate
@@ -261,7 +398,7 @@ class _SelectionBackendMixin:
             # legacy keyboard/API callers.
             parts = [_selection_part(atom) for atom in atoms]
             picked = [part["label"] for part in parts if part["label"]]
-            targets = [_selection_target(atom, index) for index, atom in enumerate(atoms)]
+            targets = [_selection_target(atom, index) for index, atom in atom_rows]
             selection = _normalize_selection(
                 {
                     "atom_labels": picked,
@@ -327,12 +464,13 @@ class _SelectionBackendMixin:
         center_x = 0.5 * (lo_x + hi_x)
         center_y = 0.5 * (lo_y + hi_y)
         hits: list[tuple[float, int, dict[str, Any]]] = []
-        for index, (atom, sx, sy) in enumerate(zip(atoms, xy[:, 0], xy[:, 1])):
+        for row_index, (atom, sx, sy) in enumerate(zip(atoms, xy[:, 0], xy[:, 1])):
             if not (np.isfinite(sx) and np.isfinite(sy)):
                 continue
             if lo_x <= float(sx) <= hi_x and lo_y <= float(sy) <= hi_y:
                 dist = (float(sx) - center_x) ** 2 + (float(sy) - center_y) ** 2
-                hits.append((dist, index, atom))
+                display_index = atom_rows[row_index][0]
+                hits.append((dist, display_index, atom))
         click = (hi_x - lo_x) <= 48.0 and (hi_y - lo_y) <= 48.0
         if click and hits:
             hits = [min(hits, key=lambda item: item[0])]

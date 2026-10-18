@@ -85,6 +85,38 @@ def test_semantic_targets_and_style_overrides_round_trip():
     assert response.get_json()["style_overrides"] == {}
 
 
+def test_multi_target_style_patch_uses_common_field_intersection():
+    app = create_app()
+    app.server.config["TESTING"] = True
+    client = app.server.test_client()
+    targets = [
+        {"kind": "atom", "id": "atom-test"},
+        {"kind": "polyhedron", "id": "poly-test"},
+    ]
+    response = client.patch(
+        "/api/v2/style_overrides",
+        json={"targets": targets, "style": {"color": "#123456"}},
+    )
+    assert response.status_code == 200
+    overrides = response.get_json()["style_overrides"]
+    assert overrides["atom-test"]["color"] == "#123456"
+    assert overrides["poly-test"]["color"] == "#123456"
+
+    invalid = client.patch(
+        "/api/v2/style_overrides",
+        json={"targets": targets, "style": {"radius": 0.2}},
+    )
+    assert invalid.status_code == 400
+    assert "selection" in invalid.get_json()["error"]
+
+    reset = client.patch(
+        "/api/v2/style_overrides",
+        json={"targets": targets, "reset": True, "field": "color"},
+    )
+    assert reset.status_code == 200
+    assert reset.get_json()["style_overrides"] == {}
+
+
 def test_semantic_target_toggle_removes_target_without_reinserting_it():
     app = create_app()
     app.server.config["TESTING"] = True

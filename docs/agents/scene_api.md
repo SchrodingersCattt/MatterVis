@@ -324,6 +324,28 @@ of the portable basic names `black`, `white`, `red`, `green`, `blue`, `gray`,
 normalised with the same rules, so a malformed legacy override is ignored
 without taking down a render callback.
 
+The endpoint also accepts `targets: [{"id": "...", "kind": "..."}, ...]`
+with one `style` object. The server computes the common supported fields and
+applies the patch to every target only when the full patch is valid; use
+`reset: true` with the same list to clear each target. `property_color` is a
+valid atom field and can be reset independently of `color`.
+
+Style resolution is field-wise. The resolver applies renderer defaults, then
+the selected theme, kind defaults, matching rules, parent/scope overrides, and
+the exact instance override; a child override therefore changes only the
+fields it supplies and cannot repaint a sibling. Generic geometry (`mesh`),
+coordination polyhedra, and BFDH facets have stable defaults even when a scene
+payload omits a paint field. `theme="dark"`/`"light"` may be supplied by
+library callers, or a mapping can provide exact theme colours.
+
+For a multi-selection, use
+`mat_viewer.render.style.resolver.style_fields_for_targets(...)` to obtain the
+intersection of fields supported by every selected kind. Applying a patch with
+`merge_style_overrides_for_targets(...)` rejects fields outside that
+intersection atomically. Atom `property_color` is independent from the solid
+`color` override, so removing that field restores the active continuous
+property map on the next scene rebuild.
+
 Anchored scientific arrows are supplied with `vector_overlays=` or
 `scene["vector_overlays"]`; see [vector overlays](vector_overlays_api.md).
 They are world-space Mesh3d content and therefore differ from corner compass
