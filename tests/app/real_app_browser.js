@@ -673,11 +673,32 @@ async function runSemanticPick(page) {
       if (!Array.isArray(points)) return null;
       const point = points.find((item) => {
         const cd = item && item.customdata;
-        return Array.isArray(cd) && (cd[0] === "polyhedron" || cd[0] === "facet");
+        const trace = item && (item.data || item.fullData || {});
+        const meta = trace && trace.meta;
+        const role = String((meta && (meta.mv_role || meta.kind)) || "").toLowerCase();
+        return (Array.isArray(cd) && (cd[0] === "polyhedron" || cd[0] === "facet"))
+          || role === "polyhedron"
+          || role === "facet"
+          || role === "morphology"
+          || (role === "geometry_entity" && String((meta && meta.source) || "") === "bfdh_morphology");
       });
       if (!point) return null;
       const cd = point.customdata;
-      return {kind: String(cd[0]), id: String(cd[4] || cd[1] || "")};
+      const trace = point.data || point.fullData || {};
+      const meta = trace.meta || {};
+      const role = String(meta.mv_role || meta.kind || "").toLowerCase();
+      if (Array.isArray(cd) && (cd[0] === "polyhedron" || cd[0] === "facet")) {
+        return {kind: String(cd[0]), id: String(cd[4] || cd[1] || "")};
+      }
+      const ordinal = Number(point.faceNumber !== undefined ? point.faceNumber
+        : point.faceIndex !== undefined ? point.faceIndex
+        : point.pointNumber !== undefined ? point.pointNumber : point.pointIndex);
+      const ids = Array.isArray(meta.face_ids) ? meta.face_ids : [];
+      const id = Number.isInteger(ordinal) && ordinal >= 0 && ordinal < ids.length
+        ? String(ids[ordinal]) : "";
+      const kind = role === "geometry_entity" && String(meta.source || "") === "bfdh_morphology"
+        ? "facet" : (role === "facet" || role === "morphology" ? "facet" : "polyhedron");
+      return {kind, id};
     });
   }, {columns: 18, rows: 12, pause: 80});
   if (!nonAtomHit) fail("could not hover a polyhedron or facet for the additive semantic click");
