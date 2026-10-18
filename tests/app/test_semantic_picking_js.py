@@ -17,6 +17,8 @@ def test_frontend_uses_one_semantic_target_decoder_and_modifier_selection():
     assert "plotlyClickObserved" in SOURCE
     assert 'native.shiftKey' in SOURCE
     assert 'native.ctrlKey' in SOURCE
+    assert "function hoverInspector" in SOURCE
+    assert 'inspector.id = "mv-hover-inspector"' in SOURCE
 
 
 def test_frontend_resolves_mesh_face_aliases_without_null_zero_fallback():
@@ -31,3 +33,14 @@ def test_context_menu_does_not_unconditionally_reuse_stale_hover():
     assert "gd._hoverdata" in body
     assert "Date.now() - lastHoverPoint.at" in body
     assert 'if (!lastHovered) return' not in body
+    assert "targetFromPoint(hoverdata.points[0])" in body
+    assert 'postSelection(picked.rect, picked.viewport, false)' in body
+
+
+def test_semantic_plotly_click_owns_left_click_before_coordinate_fallback():
+    body = SOURCE[SOURCE.index("function bindRightClick"):SOURCE.index("// ── Keyboard shortcuts")]
+    plotly_click = body.index('inner.on("plotly_click"')
+    assert "function primaryPick" not in body
+    assert "pointerup" not in body
+    assert "setTimeout(function () { plotlyClickObserved = false; }, 0);" in body
+    assert plotly_click < body.index('container.addEventListener("contextmenu"')

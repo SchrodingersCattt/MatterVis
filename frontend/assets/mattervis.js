@@ -578,6 +578,27 @@
     const input = document.getElementById("rightclick-target-fallback");
     if (input) { input.value = JSON.stringify(payload); input.dispatchEvent(new Event("input",{bubbles:true})); }
   }
+  function hoverInspector(target, event) {
+    let inspector = document.getElementById("mv-hover-inspector");
+    if (!target) {
+      if (inspector) inspector.remove();
+      return;
+    }
+    if (!inspector) {
+      inspector = document.createElement("div");
+      inspector.id = "mv-hover-inspector";
+      inspector.className = "mv-hover-inspector";
+      inspector.setAttribute("role", "status");
+      document.body.appendChild(inspector);
+    }
+    const label = target.label || target.fragment_label || target.spec_id ||
+      target.geometry_id || target.id || "";
+    inspector.textContent = String(target.kind || "target") + (label ? " · " + label : "");
+    const x = event && event.clientX !== undefined ? event.clientX : (event && event.x) || lastClient.x;
+    const y = event && event.clientY !== undefined ? event.clientY : (event && event.y) || lastClient.y;
+    inspector.style.left = (Number(x) + 10) + "px";
+    inspector.style.top = (Number(y) + 10) + "px";
+  }
   function clearSelectionIfGraphBackground() {
     const gd = graphDiv();
     const hoverdata = gd && gd._hoverdata;
@@ -609,14 +630,20 @@
             noteHover(lastHovered);
             lastHoverPoint = {x:lastClient.x, y:lastClient.y, at:Date.now()};
           }
+          hoverInspector(lastHovered, lastClient);
         }
       });
-      inner.on("plotly_unhover", function () { lastHovered = null; lastHoverPoint = null; });
+      inner.on("plotly_unhover", function () {
+        lastHovered = null;
+        lastHoverPoint = null;
+        hoverInspector(null);
+      });
       inner.on("plotly_click", function (ed) {
+        const native = ed && ed.event;
         plotlyClickObserved = true;
+        setTimeout(function () { plotlyClickObserved = false; }, 0);
         const target = ed && ed.points && ed.points.length ? targetFromPoint(ed.points[0]) : null;
         if (!target) { publishSemanticSelection(null, "clear"); return; }
-        const native = ed && ed.event;
         const additive = !!(native && (native.shiftKey || native.ctrlKey || native.metaKey));
         publishSemanticSelection(target, additive ? (native.ctrlKey || native.metaKey ? "toggle" : "add") : "replace");
       });
@@ -630,9 +657,9 @@
       queueHover(e.clientX, e.clientY);
     }
     /* Plotly emits native mouse events for real input, while automation and
-     * assistive clients often dispatch PointerEvents directly. Keep the
-     * coordinate-based path on both event families so mesh3d depth picking
-     * cannot suppress atom hover/selection. */
+     * assistive clients often dispatch PointerEvents directly. Keep semantic
+     * hover sampling on both event families so the inspector and context menu
+     * stay in sync with mesh3d depth picking. */
     container.addEventListener("mousemove", handlePointerMove, {passive:true});
     container.addEventListener("pointermove", handlePointerMove, {passive:true});
     function handlePointerLeave() {
@@ -706,37 +733,6 @@
         }).catch(function () {});
       }, 90);
     }
-    let pointerDown = null;
-    let lastPrimaryPick = null;
-    function primaryPick(e) {
-      if ((e.button !== undefined && e.button !== 0) || e.shiftKey || e.altKey) return;
-      if (e.target && e.target.closest && e.target.closest(".mv-canvas-toolbar, .modebar, .rightclick-menu")) return;
-      const now = Date.now();
-      /* A real primary pointer produces both pointerup and click. Avoid
-       * posting the same selection twice while still accepting synthetic
-       * pointerup-only clients. */
-      if (lastPrimaryPick && now - lastPrimaryPick.at < 80 &&
-          Math.abs(lastPrimaryPick.x - e.clientX) < 1 &&
-          Math.abs(lastPrimaryPick.y - e.clientY) < 1) return;
-      lastPrimaryPick = {at: now, x: e.clientX, y: e.clientY};
-      const picked = pickRect(e.clientX, e.clientY, 14);
-      postSelection(picked.rect, picked.viewport, e.ctrlKey || e.metaKey).catch(function () {});
-    }
-    container.addEventListener("pointerdown", function (e) {
-      if (e.button === undefined || e.button === 0) pointerDown = {x:e.clientX, y:e.clientY};
-    }, {passive:true});
-    container.addEventListener("pointerup", function (e) {
-      if (!pointerDown) return;
-      const moved = Math.hypot(e.clientX - pointerDown.x, e.clientY - pointerDown.y);
-      pointerDown = null;
-      if (moved <= 4) primaryPick(e);
-    });
-    container.addEventListener("click", function (e) {
-      /* Synthetic click events do not always populate ``button``. Treat an
-       * omitted value as the normal primary click while still ignoring an
-       * explicit secondary/middle button. */
-      primaryPick(e);
-    });
     container.addEventListener("click", function (e) {
       if (e.defaultPrevented) return;
       setTimeout(function () {
@@ -748,17 +744,38 @@
     }, true);
     container.addEventListener("mousemove", function (e) { lastClient = {x:e.clientX, y:e.clientY}; }, {passive:true});
     container.addEventListener("contextmenu", function (e) {
-      e.preventDefault();
       const sceneId = currentSceneId();
       const x = lastClient.x || e.clientX;
       const y = lastClient.y || e.clientY;
-      if (hoverIsCurrent()) {
-        pushTarget({kind:lastHovered.kind, payload:lastHovered, scene_id:sceneId, x:x, y:y, ts:Date.now()});
-        return;
-      }
+      let current = lastHovered;
       // Plotly can retain a hover payload after the pointer moved away. Never
       // use one older than a quarter second for a context-menu action.
-      if (lastHoverPoint && Date.now() - lastHoverPoint.at > 250) lastHovered = null;
+      if (lastHoverPoint && Date.now() - lastHoverPoint.at > 250) current = null;
+      // The graph's hover cache describes the pointer location more reliably
+      // than the browser event ordering around contextmenu. Prefer it when it
+      // contains a semantic point, even if lastHovered came from an earlier
+      // Plotly hover callback.
+      const gd = graphDiv();
+      const hoverdata = gd && gd._hoverdata;
+      if (hoverdata && hoverdata.points && hoverdata.points.length) {
+        const liveTarget = targetFromPoint(hoverdata.points[0]);
+        if (liveTarget) {
+          // Stamp the cache-derived target so the scene/generation guard below
+          // applies to the same object that is actually under the pointer.
+          noteHover(liveTarget);
+          lastHoverPoint = {x:x, y:y, at:Date.now()};
+          current = lastHovered;
+        } else current = null;
+      }
+      if (current && hoverIsCurrent()) {
+        e.preventDefault();
+        pushTarget({kind:current.kind, payload:current, scene_id:sceneId, x:x, y:y, ts:Date.now()});
+        return;
+      }
+      // With no usable Plotly hover payload, retain the coordinate picker as
+      // a right-click fallback so an atom can still open the menu without a
+      // preceding hover event.
+      e.preventDefault();
       const picked = pickRect(e.clientX, e.clientY, 14);
       postSelection(picked.rect, picked.viewport, false).then(function (body) {
         const selection = body && body.selection;
@@ -772,7 +789,7 @@
           part: part.part || "",
           scene_id: sceneId,
         } : null;
-        pushTarget({kind: payload ? "atom" : "_global", payload: payload, scene_id: sceneId, x: e.clientX, y: e.clientY, ts: Date.now()});
+        pushTarget({kind: payload ? "atom" : "_global", payload: payload, scene_id: sceneId, x:e.clientX, y:e.clientY, ts:Date.now()});
       }).catch(function () {
         pushTarget({kind:"_global", payload:null, scene_id:sceneId, x:e.clientX, y:e.clientY, ts:Date.now()});
       });

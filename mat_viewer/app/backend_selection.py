@@ -78,7 +78,11 @@ class _SelectionBackendMixin:
             "atom_labels": labels,
             "order": labels,
             "targets": final_targets,
-            "active_target": normalized[-1] if normalized else (final_targets[-1] if final_targets else None),
+            # Derive the active target from the resulting set.  In toggle
+            # mode ``normalized[-1]`` may be the target that was just
+            # removed; passing it to the normalizer would add it back to
+            # ``targets`` as a side effect.
+            "active_target": final_targets[-1] if final_targets else None,
         })
         self.patch_state({"selection": selection}, scene_id=scene_id)
         return self.get_selection(scene_id)

@@ -83,3 +83,34 @@ def test_semantic_targets_and_style_overrides_round_trip():
     assert empty.status_code == 400
     response = client.patch("/api/v2/style_overrides", json={"target_id": "mesh-test", "reset": True})
     assert response.get_json()["style_overrides"] == {}
+
+
+def test_semantic_target_toggle_removes_target_without_reinserting_it():
+    app = create_app()
+    app.server.config["TESTING"] = True
+    client = app.server.test_client()
+
+    first = {"kind": "geometry", "id": "mesh-first"}
+    second = {"kind": "geometry", "id": "mesh-second"}
+    client.post("/api/v2/selection/targets", json={"target": first})
+    response = client.post(
+        "/api/v2/selection/targets",
+        json={"target": second, "additive": True},
+    )
+    assert response.get_json()["selection"]["targets"] == [first, second]
+
+    response = client.post(
+        "/api/v2/selection/targets",
+        json={"target": second, "additive": True, "toggle": True},
+    )
+    selection = response.get_json()["selection"]
+    assert selection["targets"] == [first]
+    assert selection["active_target"] == first
+
+    response = client.post(
+        "/api/v2/selection/targets",
+        json={"target": first, "additive": True, "toggle": True},
+    )
+    selection = response.get_json()["selection"]
+    assert selection["targets"] == []
+    assert selection["active_target"] is None
