@@ -282,6 +282,49 @@ assert.equal(sandbox.window.after,1,'revision-0 frame was dropped after the new 
     assert result.returncode == 0, result.stderr
 
 
+def test_direct_scene_frame_cancels_older_parked_retry():
+    """A newer direct frame must not be overwritten by an older parked frame."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    handler_start = source.index("    function handleFigurePayload")
+    handler_body = source[handler_start:source.index("    function canUseWebSocket", handler_start)]
+    assert "clearQueuedSceneFigure(p.scene_id, seq);" in handler_body
+    start = source.index("  function scheduleQueuedSceneFigureRetry")
+    stop = source.index("  function flushPendingFigurePush", start)
+    program = r"""
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const body=source.slice(%d,%d);
+const timers=[];
+const cancelled=[];
+const pending=Object.create(null);
+const sandbox={window:{},pending,timers,cancelled,setTimeout:(fn)=>{timers.push(fn);return timers.length;},clearTimeout:(id)=>{cancelled.push(id);}};
+vm.createContext(sandbox);
+vm.runInContext(`
+  function flushQueuedSceneFigure(){ }
+  const pendingFigureRetryTimers=Object.create(null);
+  const pendingFigureByScene=pending;
+  ${body}
+  pending.scene={figure:{data:[{}],layout:{}},figure_seq:10};
+  scheduleQueuedSceneFigureRetry('scene',0);
+  clearQueuedSceneFigure('scene',11);
+  window.remaining=!!pending.scene;
+  window.cancelled=cancelled.length;
+`,sandbox);
+assert.equal(sandbox.window.remaining,false,'older parked frame was retained after newer direct frame');
+assert.equal(sandbox.window.cancelled,1,'parked-frame retry timer was not cancelled');
+""" % (start, stop)
+    result = subprocess.run(
+        [node, "-e", program, str(MATTERVIS_JS)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def test_user_tab_click_flushes_frame_queued_before_selected_class_paint():
     """A click must replay a frame received while the previous tab is active."""
     node = shutil.which("node")
