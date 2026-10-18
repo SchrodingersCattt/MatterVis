@@ -142,6 +142,12 @@ def test_orthographic_unit_cell_drag_keeps_dap4_visible(mattervis_url):
 
 
 @pytest.mark.timeout(240)
+def test_semantic_atom_click_survives_gl_fallback(mattervis_url):
+    """A native click keeps the atom and an additive non-atom target."""
+    _run(mattervis_url, "semantic-pick", structure="ionic_nacl", timeout=220)
+
+
+@pytest.mark.timeout(240)
 def test_one_hundred_scene_switches_do_not_leak_sockets(mattervis_url):
     _run(mattervis_url, "leak", timeout=220)
 

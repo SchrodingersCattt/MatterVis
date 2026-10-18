@@ -615,6 +615,86 @@ async function runNaclFrame(page) {
   await assertNaclFraming(page, baseline);
 }
 
+async function scanCanvas(page, callback, options) {
+  const canvas = page.locator("#crystal-graph canvas").first();
+  const box = await canvas.boundingBox();
+  if (!box) fail("crystal canvas has no box");
+  const columns = (options && options.columns) || 14;
+  const rows = (options && options.rows) || 10;
+  const pause = (options && options.pause) || 115;
+  for (let row = 1; row < rows; row += 1) {
+    const y = box.y + (box.height * row) / rows;
+    for (let column = 1; column < columns; column += 1) {
+      const x = box.x + (box.width * column) / columns;
+      await page.mouse.move(x, y);
+      await page.waitForTimeout(pause);
+      const result = await callback(x, y);
+      if (result) return {x, y, result};
+    }
+  }
+  return null;
+}
+
+async function runSemanticPick(page) {
+  await clickTab(page, structure || "ionic_nacl");
+  await graphReady(page);
+
+  // SwiftShader does not consistently emit Plotly's gl3d click event for an
+  // atom. Find a point through the coordinate hover endpoint and click it as
+  // a real browser gesture.
+  const atomHit = await scanCanvas(page, async () => {
+    return page.evaluate(() => {
+      const tip = document.getElementById("mv-atom-tip");
+      const text = String((tip && tip.textContent) || "").trim();
+      return tip && !tip.hidden && text ? text : null;
+    });
+  });
+  if (!atomHit) fail("could not hover an atom long enough to show #mv-atom-tip");
+  const atomLabel = String(atomHit.result).split(" (")[0].trim();
+  await page.mouse.click(atomHit.x, atomHit.y);
+  await page.waitForFunction(async (label) => {
+    const response = await fetch("/api/v2/selection", {cache: "no-store"});
+    if (!response.ok) return false;
+    const body = await response.json();
+    const labels = body && body.selection && body.selection.atom_labels;
+    return Array.isArray(labels) && labels.includes(label);
+  }, atomLabel, {timeout: 20000});
+
+  // Ionic NaCl has default coordination overlays (polyhedron markers). The
+  // scan also accepts a BFDH facet when that is the non-atom target painted by
+  // a renderer/version. Read Plotly's hover cache after each real move so
+  // this remains a native click rather than a synthetic event.
+  const nonAtomHit = await scanCanvas(page, async () => {
+    return page.evaluate(() => {
+      const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+      const points = gd && gd._hoverdata && gd._hoverdata.points;
+      if (!Array.isArray(points)) return null;
+      const point = points.find((item) => {
+        const cd = item && item.customdata;
+        return Array.isArray(cd) && (cd[0] === "polyhedron" || cd[0] === "facet");
+      });
+      if (!point) return null;
+      const cd = point.customdata;
+      return {kind: String(cd[0]), id: String(cd[4] || cd[1] || "")};
+    });
+  }, {columns: 18, rows: 12, pause: 80});
+  if (!nonAtomHit) fail("could not hover a polyhedron or facet for the additive semantic click");
+  await page.keyboard.down("Shift");
+  await page.mouse.click(nonAtomHit.x, nonAtomHit.y);
+  await page.keyboard.up("Shift");
+  await page.waitForFunction(async ({kind, id, label}) => {
+    const response = await fetch("/api/v2/selection", {cache: "no-store"});
+    if (!response.ok) return false;
+    const body = await response.json();
+    const selection = body && body.selection;
+    const labels = selection && selection.atom_labels;
+    const targets = selection && selection.targets;
+    return Array.isArray(labels) && labels.includes(label)
+      && Array.isArray(targets)
+      && targets.some((target) => target && target.kind === kind && (!id || String(target.id) === id));
+  }, {kind: nonAtomHit.result.kind, id: nonAtomHit.result.id, label: atomLabel}, {timeout: 20000});
+}
+
 // A blank orthographic canvas is the page background. DAP-4's unit cell
 // paints well above this; the axes triad is an SVG overlay, not canvas ink.
 const CANVAS_INK_FLOOR = 0.02;
@@ -924,6 +1004,7 @@ async function runSwitch(page) {
   else if (mode === "leak") await runLeak(page);
   else if (mode === "restart") await runRestart(page);
   else if (mode === "nacl-frame") await runNaclFrame(page);
+  else if (mode === "semantic-pick") await runSemanticPick(page);
   else if (mode === "ortho-drag") await runOrthoDrag(page);
   else fail("unknown mode " + mode);
   if (problems.length) fail(problems.slice(0, 8).join("\n"));
