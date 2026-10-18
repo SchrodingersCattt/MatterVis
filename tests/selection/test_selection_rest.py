@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from mat_viewer.app import create_app
+from mat_viewer.render.picking import atom_instance_id
 
 
 def test_selection_rest_round_trip_and_promote():
@@ -146,3 +147,54 @@ def test_semantic_target_toggle_removes_target_without_reinserting_it():
     selection = response.get_json()["selection"]
     assert selection["targets"] == []
     assert selection["active_target"] is None
+
+
+def test_selection_scope_expands_atom_source_and_excludes_hidden_rows():
+    app = create_app()
+    app.server.config["TESTING"] = True
+    client = app.server.test_client()
+    backend = app.crystal_backend
+    scene = backend.scene_for_state(backend.get_state())
+    atoms = list(scene["draw_atoms"])
+    assert atoms
+    first = atoms[0]
+    target = {
+        "kind": "atom",
+        "id": atom_instance_id(first, 0),
+        "source_index": first.get("_source_index", first.get("source_index", 0)),
+    }
+    response = client.post("/api/v2/selection/scope", json={"target": target, "scope": "source"})
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["scope"] == "source"
+    assert body["count"] == len(body["targets"])
+    assert body["selection"]["targets"] == body["targets"]
+
+    hidden = str(first["label"])
+    backend.patch_state(
+        {
+            "atom_groups": [
+                {
+                    "id": "hide-scope-test",
+                    "selector": {"labels": [hidden]},
+                    "visible": False,
+                    "enabled": True,
+                }
+            ]
+        }
+    )
+    response = client.post("/api/v2/selection/scope", json={"target": target, "scope": "source"})
+    assert response.status_code == 200
+    labels = {item.get("label") for item in response.get_json()["targets"]}
+    assert hidden not in labels
+
+
+def test_selection_scope_rejects_unknown_scope_and_malformed_target():
+    app = create_app()
+    app.server.config["TESTING"] = True
+    client = app.server.test_client()
+    target = {"kind": "atom", "id": "atom:source:0"}
+    response = client.post("/api/v2/selection/scope", json={"target": target, "scope": "unknown"})
+    assert response.status_code == 400
+    response = client.post("/api/v2/selection/scope", json={"target": {}})
+    assert response.status_code == 400

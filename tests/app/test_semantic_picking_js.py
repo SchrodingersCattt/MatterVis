@@ -34,7 +34,38 @@ def test_context_menu_does_not_unconditionally_reuse_stale_hover():
     assert "Date.now() - lastHoverPoint.at" in body
     assert 'if (!lastHovered) return' not in body
     assert "targetFromPoint(hoverdata.points[0])" in body
-    assert 'postSelection(picked.rect, picked.viewport, false)' in body
+    assert 'postSelection(picked.rect, picked.viewport, false, false)' in body
+
+
+def test_context_menu_coordinate_fallback_preserves_semantic_target_without_hover():
+    body = SOURCE[SOURCE.index("function bindRightClick"):SOURCE.index("// ── Keyboard shortcuts")]
+    assert "function targetFromSelectionResponse" in SOURCE
+    assert "postSelection(picked.rect, picked.viewport, false, false)" in body
+    assert "targetFromSelectionResponse(body, sceneId)" in body
+    assert 'kind: payload ? payload.kind : "_global"' in body
+    assert "const x = Number(e.clientX);" in body
+    assert "const y = Number(e.clientY);" in body
+
+
+def test_escape_clears_local_targets_and_render_tab_handoffs_invalidate_hover():
+    shortcuts = SOURCE[SOURCE.index("// ── Keyboard shortcuts"):SOURCE.index("// ── Box selection")]
+    assert 'publishSemanticSelection(null, "clear")' in shortcuts
+    assert "MatterVisInvalidateSemanticHover" in shortcuts
+    assert "function invalidateSemanticHover" in SOURCE
+    assert "gd.__mvGraphGeneration=Number(gd.__mvGraphGeneration||0)+1" in SOURCE
+    assert "window.MatterVisInvalidateSemanticHover();" in SOURCE
+
+
+def test_shift_box_selection_is_pointer_safe_and_uses_plotly_viewport():
+    body = SOURCE[SOURCE.index("// ── Box selection"):SOURCE.index("// ── Disorder hover")]
+    assert "function begin(e)" in body
+    assert "function finish(e, cancelled)" in body
+    assert 'container.addEventListener("pointerdown", begin, true)' in body
+    assert 'document.addEventListener("pointercancel"' in body
+    assert 'source:"shift-drag"' in body
+    assert "start.additive = true" in body
+    assert 'container.querySelector(".js-plotly-plot")' in body
+    assert "additive:additive" in body
 
 
 def test_semantic_plotly_click_owns_left_click_before_coordinate_fallback():

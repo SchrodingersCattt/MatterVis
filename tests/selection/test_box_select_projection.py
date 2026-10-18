@@ -69,6 +69,46 @@ def test_select_box_full_view_selects_visible_atoms():
         backend.close()
 
 
+def test_select_box_skips_atoms_hidden_by_atom_group_and_preserves_ids():
+    backend = _backend()
+    try:
+        scene = backend.scene_for_state(backend.get_state())
+        atoms = list(scene["draw_atoms"])
+        assert len(atoms) >= 2
+        hidden = str(atoms[0]["label"])
+        backend.patch_state(
+            {
+                "atom_groups": [
+                    {
+                        "id": "qa-hidden",
+                        "selector": {"labels": [hidden]},
+                        "visible": False,
+                        "enabled": True,
+                    }
+                ]
+            }
+        )
+        selection = backend.select_box([0, 0, 800, 600], [800, 600])
+        labels = set(selection["atom_labels"])
+        assert hidden not in labels
+        assert labels == {
+            str(atom["label"])
+            for atom in atoms[1:]
+        }
+        target_ids = {
+            target["id"]
+            for target in selection["targets"]
+            if target["kind"] == "atom"
+        }
+        assert atom_instance_id(atoms[0], 0) not in target_ids
+        assert target_ids == {
+            atom_instance_id(atom, index)
+            for index, atom in enumerate(atoms[1:], start=1)
+        }
+    finally:
+        backend.close()
+
+
 def test_select_box_follows_gl3d_pixels_for_zoom_pan_and_aspect():
     backend = _backend()
     try:
