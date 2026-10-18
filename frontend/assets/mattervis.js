@@ -1190,6 +1190,10 @@
       const x = Number(e.clientX);
       const y = Number(e.clientY);
       let current = lastHovered;
+      const cachedHover = lastHoverPoint;
+      const cachedHoverFresh = !cachedHover ||
+        (Date.now() - cachedHover.at <= 250 &&
+         Math.hypot(x - Number(cachedHover.x || 0), y - Number(cachedHover.y || 0)) <= 64);
       // Plotly can retain a hover payload after the pointer moved away. Never
       // use one older than a quarter second for a context-menu action.
       if (lastHoverPoint && Date.now() - lastHoverPoint.at > 250) current = null;
@@ -1201,7 +1205,7 @@
       const hoverdata = gd && gd._hoverdata;
       if (hoverdata && hoverdata.points && hoverdata.points.length) {
         const liveTarget = targetFromPoint(hoverdata.points[0]);
-        if (liveTarget) {
+        if (liveTarget && cachedHoverFresh) {
           // Stamp the cache-derived target so the scene/generation guard below
           // applies to the same object that is actually under the pointer.
           noteHover(liveTarget);

@@ -664,6 +664,36 @@ async function runSemanticPick(page) {
       && Array.isArray(targets) && targets.some((target) => target && target.kind === "atom");
   }, atomLabel, {timeout: 20000});
 
+  // Selection is a persistent visual cue, not just a server-side label
+  // update. The outline trace should contain geometry for the selected atom
+  // after the asynchronous figure refresh settles.
+  await page.waitForFunction((label) => {
+    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+    return Array.isArray(gd && gd.data) && gd.data.some((trace) => {
+      const meta = trace && trace.meta || {};
+      const role = String(meta.mv_role || meta.kind || "").toLowerCase();
+      const name = String(trace && trace.name || "").toLowerCase();
+      const x = Array.isArray(trace && trace.x) ? trace.x : [];
+      return (role === "selection" || name === "selection-outline")
+        && trace.visible !== false && x.length > 0;
+    });
+  }, atomLabel, {timeout: 20000});
+
+  // Esc clears both the local target cache and the persisted selection. This
+  // catches the race where a stale outline used to remain until the next
+  // figure update.
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(async () => {
+    const response = await fetch("/api/v2/selection", {cache: "no-store"});
+    if (!response.ok) return false;
+    const body = await response.json();
+    const selection = body && body.selection;
+    return Array.isArray(selection && selection.atom_labels)
+      && selection.atom_labels.length === 0
+      && Array.isArray(selection && selection.targets)
+      && selection.targets.length === 0;
+  }, null, {timeout: 20000});
+
   // The first graph frame can arrive before the semantic selection overlay
   // lands. Give that render a bounded chance to settle before scanning the
   // WebGL hover cache.
