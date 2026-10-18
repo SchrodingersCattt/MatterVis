@@ -893,6 +893,61 @@ async function runSwitch(page) {
   }
 }
 
+async function runSceneControls(page) {
+  // Exercise the high-risk scene-tab path end to end: duplicate must create
+  // and select a new tab, rename must repaint the canvas title, and an empty
+  // label must be rejected without changing the active tab.
+  await graphReady(page);
+  const before = await readView(page);
+  const tabs = page.locator("#scene-tabs .scene-tab-text");
+  const beforeCount = await tabs.count();
+  const duplicate = page.locator("#scene-new-tab-btn");
+  if (!(await duplicate.isVisible())) fail("duplicate scene control is not visible");
+  const aria = await duplicate.getAttribute("aria-label");
+  if (aria !== "Duplicate active scene as new tab") fail(`duplicate control lacks accessible label: ${aria}`);
+  await duplicate.click();
+  await page.waitForFunction((count) => {
+    return document.querySelectorAll("#scene-tabs .scene-tab-text").length === count + 1;
+  }, beforeCount, {timeout: 30000});
+  await page.waitForFunction(() => {
+    return [...document.querySelectorAll("#scene-tabs .scene-tab-text")]
+      .some((node) => /copy/i.test(node.textContent || ""));
+  }, null, {timeout: 30000});
+  await page.waitForFunction(() => {
+    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+    const title = gd && gd.layout && gd.layout.title;
+    const text = title && (title.text || title);
+    return /copy/i.test(String(text || ""));
+  }, null, {timeout: 45000});
+  const duplicateView = await readView(page);
+  if (!/copy/i.test(duplicateView.title || "")) {
+    fail(`duplicate did not select/repaint the copy tab: ${JSON.stringify({before, duplicateView})}`);
+  }
+
+  const renamed = `QA scene ${Date.now()}`;
+  const renameInput = page.locator("#scene-tab-rename-input");
+  await renameInput.fill(renamed);
+  await page.locator("#scene-rename-btn").click();
+  await page.waitForFunction((name) => {
+    const labels = [...document.querySelectorAll("#scene-tabs .scene-tab-text")]
+      .map((node) => node.textContent || "");
+    const title = document.querySelector("#crystal-graph .js-plotly-plot");
+    const text = title && title.layout && title.layout.title && (title.layout.title.text || title.layout.title);
+    return labels.some((label) => label.includes(name))
+      && String(text || "").includes(name);
+  }, renamed, {timeout: 45000});
+  const afterRename = await readView(page);
+  if (!afterRename.title.includes(renamed)) fail(`canvas title did not follow rename: ${afterRename.title}`);
+
+  await renameInput.fill("   ");
+  await page.locator("#scene-rename-btn").click();
+  await page.waitForFunction(() => /scene action failed:.*cannot be empty/i.test(
+    document.getElementById("status-banner")?.textContent || ""
+  ), null, {timeout: 30000});
+  const afterEmpty = await readView(page);
+  if (!afterEmpty.title.includes(renamed)) fail(`empty rename changed canvas title: ${afterEmpty.title}`);
+}
+
 (async () => {
   log("launch " + mode);
   const browser = await chromium.launch({
@@ -917,6 +972,7 @@ async function runSwitch(page) {
   log("ready");
   if (mode === "reset") await runReset(page);
   else if (mode === "switch") await runSwitch(page);
+  else if (mode === "scene-controls") await runSceneControls(page);
   else if (mode === "gestures") await runGestures(page);
   else if (mode === "held") await runHeld(page);
   else if (mode === "rapid") await runRapid(page);

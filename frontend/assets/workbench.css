@@ -345,11 +345,26 @@ html, body {
   padding: 4px 8px;
 }
 
-#left-panel #scene-new-tab-btn {
+#left-panel #scene-new-tab-btn,
+#left-panel .scene-new-tab-btn {
   color: var(--mv-accent);
   font-size: 17px !important;
   line-height: 1;
-  padding: 2px 8px;
+  min-width: 88px;
+  padding: 4px 9px;
+}
+
+#left-panel #scene-new-tab-btn:hover,
+#left-panel .scene-new-tab-btn:hover {
+  background: #ecfdf5;
+  border-color: var(--mv-accent);
+  color: #115e59;
+}
+
+#left-panel #scene-new-tab-btn:focus-visible,
+#left-panel .scene-new-tab-btn:focus-visible {
+  outline: 2px solid var(--mv-accent);
+  outline-offset: 2px;
 }
 
 #left-panel input:not([type="checkbox"]):not([type="radio"]):not([type="color"]) {

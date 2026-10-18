@@ -582,6 +582,13 @@ class _StateBackendMixin:
         style["display_mode"] = state.get(
             "display_mode", scene.get("display_mode", "formula_unit")
         )
+        # An isolated cluster is explicitly non-periodic.  The display
+        # options list is intentionally retained when switching scopes so a
+        # user can turn Cell boundary off before returning to Unit cell, but
+        # that stale token must never resurrect a lattice box (or its camera
+        # extent) while the active scope is ``cluster``.
+        if style["display_mode"] == "cluster":
+            style["show_unit_cell"] = False
         style["material"] = state.get("material", style.get("material", "mesh"))
         style["style"] = state.get("style", style.get("style", "ball_stick"))
         style["disorder"] = state.get(

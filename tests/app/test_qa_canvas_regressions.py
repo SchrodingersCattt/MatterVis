@@ -219,6 +219,37 @@ def test_cluster_figure_has_no_periodic_cell(tmp_path: Path):
         backend.close()
 
 
+def test_cluster_scope_suppresses_a_stale_cell_boundary_option(tmp_path: Path):
+    """Switching to Isolated cluster must hide a previously checked cell box.
+
+    The control state deliberately keeps ``unit_cell_box`` so switching back
+    to Unit cell can restore the user's choice.  Rendering must nevertheless
+    treat cluster as non-periodic and omit the unit-cell trace while that
+    stale token is present.
+    """
+    backend = _backend(tmp_path)
+    try:
+        scene_id = backend.active_scene_id()
+        backend.patch_state(
+            {
+                "display_mode": "cluster",
+                "display_options": ["labels", "unit_cell_box"],
+            },
+            scene_id=scene_id,
+            broadcast=False,
+        )
+        state = backend.get_state(scene_id)
+        style = backend.style_for_state(state)
+        assert state["display_options"] == ["labels", "unit_cell_box"]
+        assert style["display_mode"] == "cluster"
+        assert style["show_unit_cell"] is False
+        fig, _ = backend.figure_for_state(state)
+        names = [str(getattr(trace, "name", "") or "") for trace in fig.data]
+        assert "unit-cell-box" not in names
+    finally:
+        backend.close()
+
+
 def _home_atoms(atoms: list) -> list:
     return [
         atom

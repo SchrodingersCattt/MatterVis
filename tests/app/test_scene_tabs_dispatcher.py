@@ -45,6 +45,21 @@ def test_layout_contains_scene_event_store(tmp_path: Path):
     assert "scene-event-store" in ids
 
 
+def test_duplicate_scene_control_is_explicit_and_accessible(tmp_path: Path):
+    app = create_app(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+
+    buttons = [
+        component
+        for component in _walk(app.layout)
+        if getattr(component, "id", None) == "scene-new-tab-btn"
+    ]
+    assert len(buttons) == 1
+    button = buttons[0]
+    assert "scene-new-tab-btn" in (getattr(button, "className", "") or "")
+    assert getattr(button, "aria-label", None) == "Duplicate active scene as new tab"
+    assert getattr(button, "title", None) == "Duplicate active scene as new tab"
+
+
 def test_scene_tabs_dom_has_single_writer(tmp_path: Path):
     app = create_app(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
 
@@ -216,3 +231,38 @@ def test_backend_upload_append_and_close_actions_drive_scene_options(tmp_path: P
     second = backend.duplicate_scene(duplicate["id"])
     backend.delete_scene(second["id"])
     assert [scene["id"] for scene in backend.scene_options()] == [duplicate["id"]]
+
+
+def test_duplicate_scene_selects_new_tab_and_updates_canvas_title(tmp_path: Path):
+    backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    try:
+        original = backend.active_scene_id()
+        duplicate = backend.duplicate_scene(original)
+        assert duplicate["id"] != original
+        assert backend.active_scene_id() == duplicate["id"]
+        assert backend.render_revision(duplicate["id"]) > 0
+        state = backend.get_state(duplicate["id"])
+        assert state["scene_label"] == duplicate["label"]
+        figure, _ = backend.figure_for_state(state)
+        assert figure.layout.title.text == duplicate["label"]
+    finally:
+        backend.close()
+
+
+def test_rename_scene_advances_render_revision_for_canvas_title(tmp_path: Path):
+    backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    try:
+        scene_id = backend.active_scene_id()
+        display_before = backend.get_state(scene_id)["display_version"]
+        before = backend.render_revision(scene_id)
+        backend.update_scene(scene_id, {"label": "QA renamed scene"})
+        assert backend.render_revision(scene_id) > before
+        state = backend.get_state(scene_id)
+        assert state["display_version"] > display_before
+        figure, _ = backend.figure_for_state(state)
+        assert figure.layout.title.text == "QA renamed scene"
+        wire_figure = figure.to_plotly_json() if hasattr(figure, "to_plotly_json") else figure
+        event = backend.broadcast_figure(scene_id=scene_id, figure=wire_figure, state=state)
+        assert event["state"]["display_version"] == state["display_version"]
+    finally:
+        backend.close()
