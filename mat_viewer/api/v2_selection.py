@@ -49,6 +49,23 @@ def register_selection_routes(v2, backend) -> dict:
     def selection_targets_get():
         return jsonify({"selection": backend.get_selection(scene_id=_scene_id_from_request())})
 
+    @v2.post("/selection/scope")
+    def selection_scope():
+        payload = request.get_json(force=True, silent=True) or {}
+        target = payload.get("target")
+        scope = payload.get("scope", "instance")
+        if not isinstance(target, dict):
+            return jsonify({"error": "target must be an object"}), 400
+        try:
+            result = backend.expand_selection_scope(
+                target,
+                scope,
+                scene_id=_scene_id_from_request(),
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(result)
+
     @v2.post("/selection/targets")
     def selection_targets_set():
         payload = request.get_json(force=True, silent=True) or {}
@@ -98,6 +115,9 @@ def register_selection_routes(v2, backend) -> dict:
                         value = value.get("id") or value.get("target_id")
                     if value not in (None, ""):
                         target_ids.append(str(value))
+                if not target_ids:
+                    return jsonify({"error": "targets must contain target IDs"}), 400
+                overrides = backend.get_state(scene_id=scene_id).get("style_overrides") or {}
                 for selected_id in target_ids:
                     overrides = backend.reset_style_override(
                         selected_id, scene_id=scene_id, field=field
