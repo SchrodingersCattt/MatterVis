@@ -496,7 +496,14 @@ def _trace_meta(
     # trace's incidental position in a figure.  Static exports do not need
     # this interaction-only payload: omitting it materially reduces SVG/JSON
     # size and avoids leaking browser target IDs into publication artifacts.
-    face_keys = ("face_ids", "subentity_ids", "face_ordinals", "vertex_face_ids")
+    face_keys = (
+        "face_ids",
+        "subentity_ids",
+        "facet_ids",
+        "facet_millers",
+        "face_ordinals",
+        "vertex_face_ids",
+    )
     if not include_face_ids:
         for key in face_keys:
             meta.pop(key, None)

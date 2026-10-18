@@ -80,6 +80,7 @@ def test_static_save_payload_strips_face_target_metadata_without_mutating_figure
                     "mv_role": "polyhedron",
                     "face_ids": ["polyhedron:spec:a|source:x"],
                     "vertex_face_ids": ["polyhedron:spec:a|source:x"],
+                    "facet_ids": ["facet:bfdh-morphology:1,0,0:0"],
                 },
             }
         ]
@@ -87,6 +88,7 @@ def test_static_save_payload_strips_face_target_metadata_without_mutating_figure
     static = _static_export_dict(payload)
     assert "face_ids" not in static["data"][0]["meta"]
     assert "vertex_face_ids" not in static["data"][0]["meta"]
+    assert "facet_ids" not in static["data"][0]["meta"]
     assert payload["data"][0]["meta"]["face_ids"]
     interactive = _static_export_dict(payload, include_interaction_traces=True)
     assert interactive["data"][0]["meta"]["face_ids"]

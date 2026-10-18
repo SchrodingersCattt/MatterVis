@@ -124,7 +124,15 @@ def _static_export_dict(
         return output
     traces = []
     face_metadata_keys = frozenset(
-        {"face_ids", "subentity_ids", "face_ordinals", "vertex_face_ids", "face_ranges"}
+        {
+            "face_ids",
+            "subentity_ids",
+            "facet_ids",
+            "facet_millers",
+            "face_ordinals",
+            "vertex_face_ids",
+            "face_ranges",
+        }
     )
     for trace in output.get("data") or []:
         meta = trace.get("meta") if isinstance(trace, dict) else None
