@@ -217,7 +217,10 @@ def test_static_geometry_export_omits_face_target_metadata():
         [[0, 1, 2]],
         name="picked-face",
         entity_id="mesh-face",
-        meta={"face_ids": ["caller-face"]},
+        meta={
+            "face_ids": ["caller-face"],
+            "face_ranges": [{"id": "caller-face", "start": 0, "end": 1}],
+        },
     )
     entity["face_ids"] = ["caller-face"]
     scene["geometry_entities"] = [entity]
@@ -233,7 +236,9 @@ def test_static_geometry_export_omits_face_target_metadata():
     interactive_mesh = next(trace for trace in interactive.data if trace.name == "picked-face")
     static_mesh = next(trace for trace in static.data if trace.name == "picked-face")
     assert list(interactive_mesh.meta["face_ids"]) == ["caller-face"]
+    assert list(interactive_mesh.meta["face_ranges"]) == [{"id": "caller-face", "start": 0, "end": 1}]
     assert "face_ids" not in (static_mesh.meta or {})
+    assert "face_ranges" not in (static_mesh.meta or {})
 
 
 def test_geometry_entity_requires_real_mesh_material_for_depth():

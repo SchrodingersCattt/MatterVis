@@ -503,6 +503,7 @@ def _trace_meta(
         "facet_millers",
         "face_ordinals",
         "vertex_face_ids",
+        "face_ranges",
     )
     if not include_face_ids:
         for key in face_keys:
