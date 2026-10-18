@@ -68,6 +68,30 @@ def test_static_row_figure_omits_atom_selection_trace() -> None:
     assert "atom_selection" not in _roles(static)
 
 
+def test_static_save_payload_strips_face_target_metadata_without_mutating_figure() -> None:
+    from mat_viewer.render.api import _static_export_dict
+
+    payload = {
+        "data": [
+            {
+                "type": "mesh3d",
+                "name": "hull",
+                "meta": {
+                    "mv_role": "polyhedron",
+                    "face_ids": ["polyhedron:spec:a|source:x"],
+                    "vertex_face_ids": ["polyhedron:spec:a|source:x"],
+                },
+            }
+        ]
+    }
+    static = _static_export_dict(payload)
+    assert "face_ids" not in static["data"][0]["meta"]
+    assert "vertex_face_ids" not in static["data"][0]["meta"]
+    assert payload["data"][0]["meta"]["face_ids"]
+    interactive = _static_export_dict(payload, include_interaction_traces=True)
+    assert interactive["data"][0]["meta"]["face_ids"]
+
+
 def test_cli_static_export_disables_interaction_traces(monkeypatch, tmp_path) -> None:
     from mat_viewer.render import cli
     from mat_viewer.render.api import FigureResult
