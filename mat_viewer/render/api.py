@@ -114,7 +114,7 @@ def _static_export_dict(
     """Return a JSON-safe Plotly payload without browser-only pick traces.
 
     This is intentionally a shallow, role-based filter.  Persistent
-    Persistent selection/hover feedback is transient view state and is omitted
+    selection/hover feedback is transient view state and is omitted
     alongside the transparent hit-test traces and disorder preview layer.
     Keeping this at the save boundary also covers callers that build a figure
     directly instead of going through the CLI helper.
