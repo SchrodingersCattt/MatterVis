@@ -667,8 +667,10 @@
         }, 120);
         const target = ed && ed.points && ed.points.length ? targetFromPoint(ed.points[0]) : null;
         if (!target) { publishSemanticSelection(null, "clear"); return; }
-        const additive = !!(native && (native.shiftKey || native.ctrlKey || native.metaKey));
-        publishSemanticSelection(target, additive ? (native.ctrlKey || native.metaKey ? "toggle" : "add") : "replace");
+        const pointer = lastPointerGesture && lastPointerGesture.id === gestureId ? lastPointerGesture : null;
+        const ctrl = !!(native && (native.ctrlKey || native.metaKey)) || !!(pointer && (pointer.ctrlKey || pointer.metaKey));
+        const shift = !!(native && native.shiftKey) || !!(pointer && pointer.shiftKey);
+        publishSemanticSelection(target, ctrl ? "toggle" : (shift ? "add" : "replace"));
       });
     } catch (_) {
       container.dataset.rcmBound = "0";
@@ -811,7 +813,15 @@
       if (!pointerDown) return;
       const moved = Math.hypot(e.clientX - pointerDown.x, e.clientY - pointerDown.y);
       const gesture = pointerDown;
-      lastPointerGesture = {id:gesture.id, at:Date.now(), x:e.clientX, y:e.clientY};
+      lastPointerGesture = {
+        id:gesture.id,
+        at:Date.now(),
+        x:e.clientX,
+        y:e.clientY,
+        ctrlKey:!!e.ctrlKey,
+        metaKey:!!e.metaKey,
+        shiftKey:!!e.shiftKey,
+      };
       pointerDown = null;
       if (moved <= 4) primaryPick(e, gesture.id);
       setTimeout(function () {
