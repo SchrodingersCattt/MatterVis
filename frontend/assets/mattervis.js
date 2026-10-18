@@ -934,7 +934,8 @@
           ? lastPointerGesture : null;
         const modifier = !!(e.ctrlKey || e.metaKey || e.shiftKey)
           || !!(recentPointer && (recentPointer.ctrlKey || recentPointer.metaKey || recentPointer.shiftKey));
-        if (plotlyClickObserved || hasPendingCoordinateGesture() || modifier) {
+        if (plotlyClickObserved || hasPendingCoordinateGesture() || modifier
+          || !!(recentPointer && recentPointer.moved)) {
           plotlyClickObserved = false;
           return;
         }

@@ -56,6 +56,7 @@ def test_semantic_plotly_click_owns_left_click_before_coordinate_fallback():
     assert "setTimeout(function () {" in body
     assert "setTimeout(function () { plotlyClickObserved = false; }, 0);" in body
     assert "plotlyClickObserved || hasPendingCoordinateGesture() || modifier" in body
+    assert "recentPointer && recentPointer.moved" in body
     assert "gestureSequence !== gestureId" in body
     assert "e.ctrlKey || e.metaKey || e.shiftKey" in body
     assert "clearSemanticClickGesture(semanticClickGesture)" in body
