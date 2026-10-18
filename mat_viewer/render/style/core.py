@@ -2,6 +2,7 @@ from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
 from ..common import *
+from ..picking import pick_trace_metadata
 from ...config import element_color as configured_element_color
 from ...style.disorder import _field
 
@@ -240,6 +241,10 @@ def _latency_meta(
     opacity_group: str | None = None,
     opacity_scale: float | None = None,
 ) -> dict:
+    # Every 3-D trace carries the same small hit policy metadata.  Plotly
+    # event order is presentation state and can change when meshes are
+    # regrouped; the browser/adapter can therefore resolve overlapping hits
+    # from camera depth, opacity, and this deterministic kind tie-breaker.
     meta = {"mv_role": role}
     if is_minor is not None:
         meta["mv_minor"] = bool(is_minor)
@@ -247,6 +252,12 @@ def _latency_meta(
         meta["mv_opacity_group"] = str(opacity_group)
     if opacity_scale is not None:
         meta["mv_opacity_scale"] = float(opacity_scale)
+    meta.update(
+        pick_trace_metadata(
+            role,
+            opacity=opacity_scale if opacity_scale is not None else 1.0,
+        )
+    )
     return meta
 
 
