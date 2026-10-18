@@ -577,6 +577,7 @@ def merge_style_overrides_for_targets(
             "unsupported style field(s) for selection: " + ", ".join(unknown)
         )
     result = normalize_style_overrides(overrides)
+    applied = 0
     for value in values:
         if isinstance(value, Mapping):
             target_id = value.get("id") or value.get("target_id") or value.get("instance_id")
@@ -585,8 +586,11 @@ def merge_style_overrides_for_targets(
         else:
             target_id, kind = value, "geometry"
         if target_id in (None, ""):
-            continue
+            raise ValueError("selection target must contain an id")
         result = merge_style_override(result, str(target_id), str(kind or "geometry"), patch)
+        applied += 1
+    if not applied:
+        raise ValueError("selection has no targets")
     return result
 
 
