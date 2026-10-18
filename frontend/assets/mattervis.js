@@ -549,7 +549,10 @@
     const sceneId = currentSceneId();
     const persistentTargets = persistentTargetsForScene(sceneId);
     if (nextMode === "clear") persistentTargetsByScene[sceneSelectionKey(sceneId)] = [];
-    else if (nextMode === "add") persistentTargets.push(target);
+    else if (nextMode === "add") {
+      const exists = persistentTargets.some(function(item){return item.kind===target.kind&&item.id===target.id;});
+      if (!exists) persistentTargets.push(target);
+    }
     else if (nextMode === "toggle") {
       const found = persistentTargets.findIndex(function(item){return item.kind===target.kind&&item.id===target.id;});
       if (found >= 0) persistentTargets.splice(found, 1); else persistentTargets.push(target);
@@ -583,6 +586,15 @@
     if (!target) {
       if (inspector) inspector.remove();
       return;
+    }
+    // Atoms already have a coordinate tooltip.  Avoid painting a second
+    // semantic label over it when Plotly also reports an atom hover.
+    if (target.kind === "atom") {
+      const tip = document.getElementById("mv-atom-tip");
+      if (tip && !tip.hidden) {
+        if (inspector) inspector.remove();
+        return;
+      }
     }
     if (!inspector) {
       inspector = document.createElement("div");
@@ -733,6 +745,9 @@
       tip.style.left = (clientX + 14) + "px";
       tip.style.top = (clientY + 16) + "px";
       tip.hidden = false;
+      // The atom tip is the authoritative hover label for coordinate hits;
+      // remove a semantic inspector that may have been painted first.
+      hoverInspector(null);
     }
     function queueHover(clientX, clientY) {
       const seq = ++tipSeq;
@@ -748,7 +763,7 @@
     let pointerDown = null;
     let lastPrimaryPick = null;
     function primaryPick(e, gestureId) {
-      if ((e.button !== undefined && e.button !== 0) || e.shiftKey || e.altKey) return;
+      if ((e.button !== undefined && e.button !== 0) || e.altKey) return;
       if (e.target && e.target.closest && e.target.closest(".mv-canvas-toolbar, .modebar, .rightclick-menu")) return;
       const now = Date.now();
       if (!gestureId) {
@@ -764,39 +779,26 @@
       if (lastPrimaryPick && lastPrimaryPick.id === gestureId) return;
       lastPrimaryPick = {id:gestureId, at:now, x:e.clientX, y:e.clientY};
       const picked = pickRect(e.clientX, e.clientY, 14);
-      const additive = !!(e.ctrlKey || e.metaKey);
-      setTimeout(function () {
-        if (plotlyClickObserved || semanticClickGesture === gestureId) return;
+      const schedule = window.requestAnimationFrame || function (callback) { setTimeout(callback, 0); };
+      schedule(function () {
+        setTimeout(function () {
+        if (semanticClickGesture === gestureId) return;
         // Coordinate picking is a preview. Publish the resulting atom target
         // through the semantic store so it cannot overwrite a non-atom target
         // and Ctrl/Cmd uses the same toggle path as Plotly clicks.
-        postSelection(picked.rect, picked.viewport, additive, false).then(function (body) {
+        postSelection(picked.rect, picked.viewport, false, false).then(function (body) {
           const selection = body && body.selection;
-          const labels = selection && selection.atom_labels || [];
-          const parts = selection && selection.parts || [];
           const semanticTargets = selection && selection.targets || [];
-          if (!labels.length) {
+          const atomTarget = semanticTargets.find(function (item) { return item && item.kind === "atom"; });
+          if (!atomTarget) {
             publishSemanticSelection(null, "clear");
             return;
           }
-          labels.forEach(function (label, index) {
-            const part = parts[index] || {};
-            const semantic = semanticTargets[index] || {};
-            const target = {
-              kind: String(semantic.kind || "atom"),
-              id: String(semantic.id || part.id || "atom:label:" + label),
-              label: String(label),
-              element: part.elem || "",
-              is_minor: !!part.is_minor,
-              part: part.part || "",
-            };
-            const mode = additive
-              ? (index === 0 && (e.ctrlKey || e.metaKey) ? "toggle" : "add")
-              : (index === 0 ? "replace" : "add");
-            publishSemanticSelection(target, mode);
-          });
+          const mode = e.ctrlKey || e.metaKey ? "toggle" : (e.shiftKey ? "add" : "replace");
+          publishSemanticSelection(atomTarget, mode);
         }).catch(function () {});
-      }, 0);
+        }, 50);
+      });
     }
     container.addEventListener("pointerdown", function (e) {
       if (e.button === undefined || e.button === 0) {
