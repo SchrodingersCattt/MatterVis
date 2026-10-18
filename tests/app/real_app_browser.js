@@ -689,7 +689,7 @@ async function runSemanticPick(page) {
   // Prefer a real hover on any non-atom semantic trace (polyhedron, facet, or
   // bond), and read Plotly's hover cache after each move so this remains a
   // native click.
-  const nonAtomHit = await scanCanvas(page, async () => {
+  let nonAtomHit = await scanCanvas(page, async () => {
     return page.evaluate(() => {
       const gd = document.querySelector("#crystal-graph .js-plotly-plot");
       const points = gd && gd._hoverdata && gd._hoverdata.points;

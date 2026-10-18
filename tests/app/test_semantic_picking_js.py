@@ -60,6 +60,8 @@ def test_semantic_plotly_click_owns_left_click_before_coordinate_fallback():
     assert "e.ctrlKey || e.metaKey || e.shiftKey" in body
     assert "clearSemanticClickGesture(semanticClickGesture)" in body
     assert "pointerDown && pointerDown.id === gestureId" in body
+    assert "moved:moved > 4" in body
+    assert "if (recentPointer && recentPointer.moved) return;" in body
     assert "ctrlKey:!!e.ctrlKey" in body
     assert "metaKey:!!e.metaKey" in body
     assert "shiftKey:!!e.shiftKey" in body

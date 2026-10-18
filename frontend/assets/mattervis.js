@@ -899,6 +899,7 @@
         at:Date.now(),
         x:e.clientX,
         y:e.clientY,
+        moved:moved > 4,
         ctrlKey:!!e.ctrlKey,
         metaKey:!!e.metaKey,
         shiftKey:!!e.shiftKey,
@@ -913,6 +914,12 @@
       /* Synthetic click events do not always populate ``button``. Treat an
        * omitted value as the normal primary click while still ignoring an
        * explicit secondary/middle button. */
+      const recentPointer = lastPointerGesture
+        && Date.now() - lastPointerGesture.at < gestureGraceMs
+        && Math.abs(lastPointerGesture.x - e.clientX) < 1
+        && Math.abs(lastPointerGesture.y - e.clientY) < 1
+        ? lastPointerGesture : null;
+      if (recentPointer && recentPointer.moved) return;
       primaryPick(e);
     });
     container.addEventListener("click", function (e) {
