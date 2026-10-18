@@ -367,6 +367,28 @@ def _raw_trace(point: Mapping[str, Any]) -> Mapping[str, Any]:
     return trace if isinstance(trace, Mapping) else {}
 
 
+def _mesh_face_id(point: Mapping[str, Any], meta: Mapping[str, Any]) -> str | None:
+    """Resolve a Mesh3d face/vertex ordinal against stable metadata."""
+
+    face_ids = meta.get("face_ids") if isinstance(meta.get("face_ids"), (list, tuple)) else []
+    vertex_ids = meta.get("vertex_face_ids") if isinstance(meta.get("vertex_face_ids"), (list, tuple)) else []
+    has_face_ordinal = any(
+        point.get(key) not in (None, "") for key in ("faceNumber", "faceIndex")
+    )
+    raw_ordinal = next(
+        (point.get(key) for key in ("faceNumber", "faceIndex", "pointNumber", "pointIndex") if point.get(key) not in (None, "")),
+        None,
+    )
+    try:
+        ordinal = int(raw_ordinal)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    ids = face_ids if has_face_ordinal or not vertex_ids else vertex_ids
+    if 0 <= ordinal < len(ids) and ids[ordinal] not in (None, ""):
+        return str(ids[ordinal])
+    return None
+
+
 def _decode_custom_target(customdata: Any) -> dict[str, Any] | None:
     """Decode the compact customdata schema emitted by selection traces."""
 
@@ -441,16 +463,17 @@ def adapt_plotly_hit(point: Mapping[str, Any] | None) -> dict[str, Any] | None:
     if target_value is None:
         geometry_id = meta.get("geometry_id") or meta.get("id")
         role = _pick_kind(meta.get("mv_pick_kind") or meta.get("mv_role") or meta.get("kind"))
+        subentity = point.get("face_id") or point.get("subentity_id") or _mesh_face_id(point, meta)
         if role in {"geometry_entity", "geometry", "mesh3d"} and geometry_id:
             target_value = normalize_target(
                 {
                     "kind": "geometry",
                     "id": geometry_id,
-                    "subentity_id": point.get("face_id") or point.get("subentity_id"),
+                    "subentity_id": subentity,
                 }
             )
         elif role in {"polyhedron", "facet", "morphology"}:
-            entity_id = point.get("face_id") or point.get("subentity_id") or meta.get("instance_id") or meta.get("geometry_id")
+            entity_id = subentity or meta.get("instance_id") or meta.get("geometry_id")
             if entity_id:
                 target_value = normalize_target({"kind": "facet" if role in {"facet", "morphology"} else "polyhedron", "id": entity_id})
     if target_value is None:
