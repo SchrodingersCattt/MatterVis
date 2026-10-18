@@ -2,13 +2,60 @@
  * the Plotly canvas; the Dash callback assigns inline `top`/`left`
  * from the click coords and toggles the `--hidden` modifier.
  */
+:root {
+  /* One restrained interaction palette shared by the context menu and the
+     browser-only hover inspector.  Persistent selection geometry keeps its
+     own configured colour; these values never recolour the chemistry scene. */
+  --mv-interaction-panel: #ffffff;
+  --mv-interaction-ink: #222222;
+  --mv-interaction-muted: #666666;
+  --mv-interaction-line: #bbbbbb;
+  --mv-interaction-divider: #eeeeee;
+  --mv-interaction-hover: #f0f4ff;
+  --mv-hover-bg: rgba(28, 34, 40, 0.86);
+  --mv-hover-ink: #e8edf1;
+  --mv-hover-line: rgba(116, 128, 140, 0.55);
+}
+
+:root[data-mattervis-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-mattervis-theme="dark"] {
+  color-scheme: dark;
+  --mv-interaction-panel: #20252b;
+  --mv-interaction-ink: #e7edf2;
+  --mv-interaction-muted: #aeb9c4;
+  --mv-interaction-line: #515d68;
+  --mv-interaction-divider: #39434d;
+  --mv-interaction-hover: #2c3c50;
+  --mv-hover-bg: rgba(8, 12, 16, 0.94);
+  --mv-hover-ink: #f4f7fa;
+  --mv-hover-line: rgba(174, 193, 210, 0.65);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-mattervis-theme="light"]) {
+    color-scheme: dark;
+    --mv-interaction-panel: #20252b;
+    --mv-interaction-ink: #e7edf2;
+    --mv-interaction-muted: #aeb9c4;
+    --mv-interaction-line: #515d68;
+    --mv-interaction-divider: #39434d;
+    --mv-interaction-hover: #2c3c50;
+    --mv-hover-bg: rgba(8, 12, 16, 0.94);
+    --mv-hover-ink: #f4f7fa;
+    --mv-hover-line: rgba(174, 193, 210, 0.65);
+  }
+}
+
 .rightclick-menu {
   position: fixed;
   z-index: 9999;
   min-width: 180px;
   max-width: 260px;
-  background: #ffffff;
-  border: 1px solid #BBBBBB;
+  background: var(--mv-interaction-panel);
+  border: 1px solid var(--mv-interaction-line);
   border-radius: 4px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
   font-family: Arial, sans-serif;
@@ -24,9 +71,9 @@
 .rightclick-menu__header {
   font-size: 11px;
   font-weight: bold;
-  color: #444;
+  color: var(--mv-interaction-muted);
   padding: 4px 8px;
-  border-bottom: 1px solid #EEE;
+  border-bottom: 1px solid var(--mv-interaction-divider);
   margin-bottom: 2px;
   word-break: break-all;
 }
@@ -40,16 +87,16 @@
   padding: 6px 10px;
   cursor: pointer;
   border-radius: 3px;
-  color: #222;
+  color: var(--mv-interaction-ink);
   line-height: 1.3;
 }
 
 .rightclick-menu__item:hover {
-  background: #F0F4FF;
+  background: var(--mv-interaction-hover);
 }
 
 .rightclick-menu__item:disabled {
-  color: #AAA;
+  color: var(--mv-interaction-muted);
   cursor: not-allowed;
   background: transparent !important;
 }
@@ -64,7 +111,7 @@
 
 .rightclick-menu__divider {
   height: 1px;
-  background: #EEE;
+  background: var(--mv-interaction-divider);
   margin: 3px 4px;
 }
 
@@ -90,17 +137,17 @@
   z-index: 10000;
   pointer-events: none;
   padding: 3px 7px;
-  border: 1px solid rgba(116, 128, 140, 0.55);
+  border: 1px solid var(--mv-hover-line);
   border-radius: 3px;
-  background: rgba(28, 34, 40, 0.86);
-  color: #e8edf1;
+  background: var(--mv-hover-bg);
+  color: var(--mv-hover-ink);
   font: 11px/1.35 system-ui, sans-serif;
   white-space: nowrap;
 }
 
 .rightclick-menu__color label {
   font-size: 11px;
-  color: #666;
+  color: var(--mv-interaction-muted);
 }
 
 /* Keyboard help center (toggled by '?' key) */
