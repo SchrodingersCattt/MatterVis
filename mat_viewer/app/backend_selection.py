@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from .shared import *
 from .normalizers import _normalize_selection
-from ..render.picking import normalize_target
+from ..render.picking import atom_instance_id, normalize_target
 from ..render.style.resolver import (
     merge_style_override,
     normalize_style_overrides,
@@ -21,6 +21,38 @@ def _selection_part(atom: dict[str, Any]) -> dict[str, Any]:
     if part not in (None, ""):
         entry["part"] = str(part)
     return entry
+
+
+def _selection_target(atom: dict[str, Any], display_index: int) -> dict[str, Any]:
+    """Return the semantic target for one displayed atom.
+
+    Coordinate picking must use the same exact identity as the Plotly
+    selection trace.  Labels alone are not enough when periodic replicas or
+    disorder copies share a label, so the target carries the stable instance
+    id plus the legacy display metadata used by the browser inspector.
+    """
+
+    value: dict[str, Any] = {
+        "kind": "atom",
+        "id": atom_instance_id(atom, display_index),
+        "label": str(atom.get("label") or ""),
+        "element": str(atom.get("elem") or ""),
+    }
+    source_index = atom.get("_source_index")
+    if source_index not in (None, ""):
+        try:
+            value["source_index"] = int(source_index)
+        except (TypeError, ValueError):
+            value["source_index"] = source_index
+    image_shift = atom.get("_image_shift", atom.get("_pbc_image"))
+    if image_shift not in (None, ""):
+        try:
+            value["image_shift"] = [int(item) for item in image_shift]
+        except (TypeError, ValueError):
+            value["image_shift"] = image_shift
+    # ``normalize_target`` keeps the public target contract stable and strips
+    # any accidental loader-only fields before the payload reaches JSON.
+    return normalize_target(value) or {"kind": "atom", "id": value["id"]}
 
 
 class _SelectionBackendMixin:
@@ -219,11 +251,54 @@ class _SelectionBackendMixin:
             return self.get_selection(scene_id)
         lo_x, hi_x = sorted((x0, x1))
         lo_y, hi_y = sorted((y0, y1))
-        if lo_x <= 0.0 and lo_y <= 0.0 and hi_x >= width and hi_y >= height:
-            return self.select_all(scene_id)
         state = self.get_state(scene_id)
         scene = self.scene_for_state(state)
         atoms = scene.get("draw_atoms") or []
+        if lo_x <= 0.0 and lo_y <= 0.0 and hi_x >= width and hi_y >= height:
+            # Keep the fast full-cell path, but include exact atom targets so
+            # this API has the same semantic contract as a small coordinate
+            # pick.  ``select_all`` intentionally remains label-only for its
+            # legacy keyboard/API callers.
+            parts = [_selection_part(atom) for atom in atoms]
+            picked = [part["label"] for part in parts if part["label"]]
+            targets = [_selection_target(atom, index) for index, atom in enumerate(atoms)]
+            selection = _normalize_selection(
+                {
+                    "atom_labels": picked,
+                    "order": picked,
+                    "parts": parts,
+                    "targets": targets,
+                    "active_target": targets[-1] if targets else None,
+                }
+            )
+            if additive:
+                current = self.get_selection(scene_id)
+                merged_labels = list(current.get("atom_labels") or [])
+                merged_parts = list(current.get("parts") or [])
+                for part in parts:
+                    label = part["label"]
+                    if label and label not in merged_labels:
+                        merged_labels.append(label)
+                        merged_parts.append(part)
+                by_key: dict[tuple[str, str], dict[str, Any]] = {}
+                for target in list(current.get("targets") or []) + targets:
+                    normalized = normalize_target(target)
+                    if normalized is not None:
+                        by_key[(normalized["kind"], normalized["id"])] = normalized
+                merged_targets = list(by_key.values())
+                selection = _normalize_selection(
+                    {
+                        "atom_labels": merged_labels,
+                        "order": merged_labels,
+                        "parts": merged_parts,
+                        "targets": merged_targets,
+                        "active_target": targets[-1] if targets else current.get("active_target"),
+                    }
+                )
+            if not commit:
+                return selection
+            self.commit_patch({"selection": selection}, scene_id=scene_id)
+            return self.get_selection(scene_id)
         if not atoms:
             return self.get_selection(scene_id)
         coords = np.asarray([atom.get("cart", [0.0, 0.0, 0.0]) for atom in atoms], dtype=float)
@@ -251,20 +326,27 @@ class _SelectionBackendMixin:
             return self.get_selection(scene_id)
         center_x = 0.5 * (lo_x + hi_x)
         center_y = 0.5 * (lo_y + hi_y)
-        hits: list[tuple[float, dict[str, Any]]] = []
-        for atom, sx, sy in zip(atoms, xy[:, 0], xy[:, 1]):
+        hits: list[tuple[float, int, dict[str, Any]]] = []
+        for index, (atom, sx, sy) in enumerate(zip(atoms, xy[:, 0], xy[:, 1])):
             if not (np.isfinite(sx) and np.isfinite(sy)):
                 continue
             if lo_x <= float(sx) <= hi_x and lo_y <= float(sy) <= hi_y:
                 dist = (float(sx) - center_x) ** 2 + (float(sy) - center_y) ** 2
-                hits.append((dist, atom))
+                hits.append((dist, index, atom))
         click = (hi_x - lo_x) <= 48.0 and (hi_y - lo_y) <= 48.0
         if click and hits:
             hits = [min(hits, key=lambda item: item[0])]
-        parts = [_selection_part(atom) for _dist, atom in hits]
+        parts = [_selection_part(atom) for _dist, _index, atom in hits]
         picked = [part["label"] for part in parts if part["label"]]
+        targets = [_selection_target(atom, index) for _dist, index, atom in hits]
         selection = _normalize_selection(
-            {"atom_labels": picked, "order": picked, "parts": parts}
+            {
+                "atom_labels": picked,
+                "order": picked,
+                "parts": parts,
+                "targets": targets,
+                "active_target": targets[-1] if targets else None,
+            }
         )
         if additive:
             current = self.get_selection(scene_id)
@@ -277,11 +359,19 @@ class _SelectionBackendMixin:
                     merged_labels.append(label)
                     merged_parts.append(part)
                     seen.add(label)
+            by_key: dict[tuple[str, str], dict[str, Any]] = {}
+            for target in list(current.get("targets") or []) + targets:
+                normalized = normalize_target(target)
+                if normalized is not None:
+                    by_key[(normalized["kind"], normalized["id"])] = normalized
+            merged_targets = list(by_key.values())
             selection = _normalize_selection(
                 {
                     "atom_labels": merged_labels,
                     "order": merged_labels,
                     "parts": merged_parts,
+                    "targets": merged_targets,
+                    "active_target": targets[-1] if targets else current.get("active_target"),
                 }
             )
         if not commit:
