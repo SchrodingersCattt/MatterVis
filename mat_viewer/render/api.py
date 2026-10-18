@@ -123,12 +123,29 @@ def _static_export_dict(
     if include_interaction_traces:
         return output
     traces = []
+    face_metadata_keys = frozenset(
+        {"face_ids", "subentity_ids", "face_ordinals", "vertex_face_ids", "face_ranges"}
+    )
     for trace in output.get("data") or []:
         meta = trace.get("meta") if isinstance(trace, dict) else None
         role = meta.get("mv_role") if isinstance(meta, dict) else None
         name = trace.get("name") if isinstance(trace, dict) else None
         if role in _STATIC_INTERACTION_ROLES or name in _STATIC_INTERACTION_NAMES:
             continue
+        # Face maps are browser hit-resolution metadata.  They are harmless
+        # in an interactive figure but needlessly bloat static JSON and can
+        # leak transient target IDs into publication artifacts.  Copy only
+        # the affected trace/meta mapping so saving never mutates the live
+        # Dash figure that may be reused by a later callback.
+        if isinstance(trace, dict) and isinstance(meta, dict):
+            if face_metadata_keys.intersection(meta):
+                cleaned = dict(trace)
+                cleaned_meta = dict(meta)
+                for key in face_metadata_keys:
+                    cleaned_meta.pop(key, None)
+                cleaned["meta"] = cleaned_meta
+                traces.append(cleaned)
+                continue
         traces.append(trace)
     output["data"] = traces
     return output

@@ -57,6 +57,123 @@ def _selection_target(atom: dict[str, Any], display_index: int) -> dict[str, Any
 
 
 class _SelectionBackendMixin:
+    def expand_selection_scope(
+        self,
+        target: Mapping[str, Any] | Any,
+        scope: str | None = None,
+        scene_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Expand one semantic target into an explicit target list.
+
+        The browser can safely persist the returned list instead of relying
+        on a future redraw to reinterpret a broad selector.  Atom scopes use
+        loader identity fields (source, symmetry operation, molecule and
+        disorder part); hidden/group-filtered atoms are excluded by the same
+        visibility decoration used by the renderer.  Non-atom targets remain
+        exact unless their renderer exposes an explicit family list.
+        """
+        normalized = normalize_target(target)
+        if normalized is None:
+            raise ValueError("target must contain a supported kind and id")
+        wanted_scope = str(scope or "instance").strip().lower()
+        allowed = {"instance", "source", "symmetry", "molecule", "part", "spec", "facet_family"}
+        if wanted_scope not in allowed:
+            raise ValueError(f"unsupported selection scope: {wanted_scope!r}")
+
+        expanded: list[dict[str, Any]] = []
+        kind = str(normalized.get("kind") or "")
+        if wanted_scope == "instance" or kind != "atom":
+            expanded = [normalized]
+        else:
+            state = self.get_state(scene_id)
+            scene = self.scene_for_state(state)
+            atoms = list(scene.get("draw_atoms") or [])
+            rows = list(enumerate(atoms))
+            groups = state.get("atom_groups") or []
+            if groups:
+                from ..style.atom_groups import tag_atoms_with_groups
+                from ..render.style.core import _atom_render_visible
+
+                tagged = tag_atoms_with_groups(atoms, list(groups))
+                rows = [
+                    (index, atom)
+                    for index, atom in enumerate(tagged)
+                    if _atom_render_visible(atom)
+                ]
+
+            def atom_source(atom: Mapping[str, Any]) -> Any:
+                return atom.get("_source_index", atom.get("source_index"))
+
+            def atom_image(atom: Mapping[str, Any]) -> Any:
+                return (
+                    atom.get("_image_shift")
+                    or atom.get("_pbc_image")
+                    or atom.get("_display_copy_id")
+                    or atom.get("image_shift")
+                )
+
+            def atom_symmetry(atom: Mapping[str, Any]) -> Any:
+                return atom.get("_symop_index", atom.get("symmetry_operation_index", 0))
+
+            reference = None
+            for index, atom in rows:
+                if atom_instance_id(atom, index) == normalized.get("id"):
+                    reference = atom
+                    break
+            if reference is None:
+                source = normalized.get("source_index")
+                image = normalized.get("image_shift")
+                for _index, atom in rows:
+                    if source not in (None, "") and str(atom_source(atom)) != str(source):
+                        continue
+                    if image not in (None, "", (), [], [0, 0, 0]) and str(atom_image(atom)) != str(image):
+                        continue
+                    reference = atom
+                    break
+            if reference is not None:
+                source = atom_source(reference)
+                symop = atom_symmetry(reference)
+                molecule = reference.get("_source_molecule_index", reference.get("source_molecule_index"))
+                if molecule in (None, ""):
+                    molecule = reference.get("_molecule_index", reference.get("molecule_index"))
+                part = reference.get("part") or reference.get("disorder_group") or reference.get("disorder_assembly") or ""
+                for index, atom in rows:
+                    match = (
+                        wanted_scope == "source" and str(atom_source(atom)) == str(source)
+                    ) or (
+                        wanted_scope == "symmetry"
+                        and str(atom_source(atom)) == str(source)
+                        and str(atom_symmetry(atom)) == str(symop)
+                    ) or (
+                        wanted_scope == "molecule"
+                        and str(atom.get("_source_molecule_index", atom.get("source_molecule_index", atom.get("_molecule_index", atom.get("molecule_index", ""))))) == str(molecule)
+                    ) or (
+                        wanted_scope == "part"
+                        and str(atom.get("part") or atom.get("disorder_group") or atom.get("disorder_assembly") or "") == str(part)
+                    )
+                    if match:
+                        value = _selection_target(atom, index)
+                        fragment_labels = scene.get("atom_fragment_labels") or []
+                        if index < len(fragment_labels) and fragment_labels[index] not in (None, ""):
+                            value["fragment_label"] = str(fragment_labels[index])
+                        expanded.append(value)
+            # A valid target that is hidden or no longer present has no
+            # broader visible scope. Return an empty explicit list instead of
+            # re-inserting the stale target into the persistent selection.
+            if not expanded:
+                expanded = []
+
+        # Commit the concrete list only after the expansion succeeds.  This
+        # keeps malformed/bare targets from clearing an existing selection.
+        selection = self.set_target_selection(expanded, scene_id=scene_id)
+        return {
+            "scope": wanted_scope,
+            "target": normalized,
+            "targets": expanded,
+            "count": len(expanded),
+            "selection": selection,
+        }
+
     def _reconcile_semantic_targets(self, state: dict[str, Any]) -> dict[str, Any]:
         """Drop selection/paint targets that no longer exist in a scene.
 
