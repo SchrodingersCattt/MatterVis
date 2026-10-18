@@ -526,6 +526,15 @@ def merge_style_override(
     result = normalize_style_overrides(overrides)
     fields = supported_style_fields(kind)
     current = dict(result.get(str(target_id)) or {})
+    # A target kind can be corrected after a stale persisted payload. Drop
+    # fields that no longer belong to the new kind before applying the patch;
+    # otherwise an atom converted from generic geometry would retain an
+    # ``edge_width`` that its renderer cannot paint.
+    current = {
+        key: value
+        for key, value in current.items()
+        if key == "kind" or key == "scope" or key in fields
+    }
     current["kind"] = str(kind).strip().lower()
     for key, value in patch.items():
         if key not in fields:
