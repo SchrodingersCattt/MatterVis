@@ -294,9 +294,13 @@ class _SelectionBackendMixin:
             kind = str(target.get("kind") or "").lower()
             entity_id = str(target.get("id") or "")
             # Polyhedron IDs include source/image provenance and are resolved
-            # by topology geometry after this scene pass. Keep them here so a
-            # display-only repaint does not discard a valid topology pick.
-            if kind in {"polyhedron", "molecule", "part"}:
+            # by topology geometry after this scene pass. Keep them while a
+            # topology layer is active so a deferred analysis can resolve a
+            # valid pick; disabling topology is authoritative and drops the
+            # stale target immediately.
+            if kind == "polyhedron" and state.get("topology_enabled"):
+                targets.append(target)
+            elif kind in {"molecule", "part"}:
                 targets.append(target)
             elif entity_id and entity_id in valid.get(kind, set()):
                 targets.append(target)
@@ -322,7 +326,9 @@ class _SelectionBackendMixin:
         overrides = normalize_style_overrides(state.get("style_overrides"))
         for target_id, override in list(overrides.items()):
             kind = str(override.get("kind") or "geometry").lower()
-            if kind in {"polyhedron", "molecule", "part"}:
+            if kind in {"molecule", "part"} or (
+                kind == "polyhedron" and state.get("topology_enabled")
+            ):
                 continue
             if target_id not in valid.get(kind, set()):
                 overrides.pop(target_id, None)
