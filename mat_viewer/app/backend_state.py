@@ -445,6 +445,12 @@ class _StateBackendMixin:
             preset=self.preset,
             transforms=transforms,
         )
+        # Keep state-owned morphology available to semantic target
+        # reconciliation and programmatic scene callers.  The style selector
+        # also applies this field before rendering, but reconciliation runs
+        # before that selector and would otherwise discard valid facet IDs.
+        if state.get("bfdh_morphology") is not None:
+            scene["bfdh_morphology"] = copy.deepcopy(state.get("bfdh_morphology"))
         scene_label = state.get("scene_label")
         if scene_label:
             scene["display_title"] = str(scene_label)
