@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 from ..math.geometry import cylinder_vertices_faces, validate_mesh
 from ..math.implicit import implicit_surface_mesh
+from .picking import pick_trace_metadata
 
 _DEFAULT_COLOR = "#7C5CBF"
 
@@ -481,6 +482,7 @@ def _trace_meta(
     *,
     faces: np.ndarray | None = None,
     vertex_count: int | None = None,
+    include_face_ids: bool = True,
 ) -> dict[str, Any]:
     raw = entity.get("meta")
     meta = dict(raw) if isinstance(raw, Mapping) else {}
@@ -491,36 +493,59 @@ def _trace_meta(
     # Mesh3d surfaces have no reliable per-face ``customdata`` event in all
     # Plotly versions.  Keep a stable face/subentity map in metadata so the
     # browser controller can resolve ``pointNumber`` without depending on the
-    # trace's incidental position in a figure.
-    face_ids = entity.get("face_ids") or entity.get("subentity_ids")
-    if isinstance(face_ids, (list, tuple)):
-        meta["face_ids"] = [str(value) for value in face_ids]
-        # Keep the mapping explicit for clients that expose a face ordinal
-        # separately from Plotly's pointNumber/pointIndex alias.  This is
-        # especially useful for BFDH, where many triangles share one facet
-        # identity and hidden/filtered faces must never shift later IDs.
-        ordinals = entity.get("face_ordinals")
-        if isinstance(ordinals, (list, tuple)) and len(ordinals) == len(face_ids):
-            meta["face_ordinals"] = [int(value) for value in ordinals]
-        # Plotly Mesh3d reports ``pointNumber`` as a vertex ordinal on
-        # versions that do not expose ``faceNumber``.  Keep a parallel
-        # per-vertex map so a hit on a triangle fan cannot index the
-        # per-face list with the wrong ordinal (BFDH emits three vertices
-        # per facet triangle).  Face-level IDs remain for newer events.
-        if faces is not None and vertex_count is not None and len(face_ids) == len(faces):
-            vertex_ids = [None] * int(vertex_count)
-            for face, face_id in zip(np.asarray(faces, dtype=int), face_ids):
-                for vertex in face.tolist():
-                    index = int(vertex)
-                    if 0 <= index < len(vertex_ids) and vertex_ids[index] is None:
-                        vertex_ids[index] = str(face_id)
-            meta["vertex_face_ids"] = [value or "" for value in vertex_ids]
+    # trace's incidental position in a figure.  Static exports do not need
+    # this interaction-only payload: omitting it materially reduces SVG/JSON
+    # size and avoids leaking browser target IDs into publication artifacts.
+    face_keys = ("face_ids", "subentity_ids", "face_ordinals", "vertex_face_ids")
+    if not include_face_ids:
+        for key in face_keys:
+            meta.pop(key, None)
+    else:
+        face_ids = entity.get("face_ids") or entity.get("subentity_ids")
+        if isinstance(face_ids, (list, tuple)):
+            meta["face_ids"] = [str(value) for value in face_ids]
+            # Keep the mapping explicit for clients that expose a face ordinal
+            # separately from Plotly's pointNumber/pointIndex alias.  This is
+            # especially useful for BFDH, where many triangles share one facet
+            # identity and hidden/filtered faces must never shift later IDs.
+            ordinals = entity.get("face_ordinals")
+            if isinstance(ordinals, (list, tuple)) and len(ordinals) == len(face_ids):
+                meta["face_ordinals"] = [int(value) for value in ordinals]
+            # Plotly Mesh3d reports ``pointNumber`` as a vertex ordinal on
+            # versions that do not expose ``faceNumber``.  Keep a parallel
+            # per-vertex map so a hit on a triangle fan cannot index the
+            # per-face list with the wrong ordinal (BFDH emits three vertices
+            # per facet triangle).  Face-level IDs remain for newer events.
+            if faces is not None and vertex_count is not None and len(face_ids) == len(faces):
+                vertex_ids = [None] * int(vertex_count)
+                for face, face_id in zip(np.asarray(faces, dtype=int), face_ids):
+                    for vertex in face.tolist():
+                        index = int(vertex)
+                        if 0 <= index < len(vertex_ids) and vertex_ids[index] is None:
+                            vertex_ids[index] = str(face_id)
+                meta["vertex_face_ids"] = [value or "" for value in vertex_ids]
+    # Keep the surface's semantic hit policy alongside face IDs.  Opaque
+    # meshes participate in depth occlusion; transparent meshes remain
+    # pickable but must not hide geometry behind them.  ``pick_trace_metadata``
+    # only emits JSON primitives, so this survives figure caching.
+    meta.update(
+        pick_trace_metadata(
+            role,
+            opacity=entity.get("opacity", 1.0),
+            pickable=meta.get("pickable", True),
+            occludes=meta.get("mv_pick_occludes"),
+            probe=meta.get("mv_pick_probe"),
+        )
+    )
     meta.setdefault("pickable", True)
     return meta
 
 
 def geometry_entity_traces(
-    scene: Mapping[str, Any], style: Mapping[str, Any] | None = None
+    scene: Mapping[str, Any],
+    style: Mapping[str, Any] | None = None,
+    *,
+    include_face_ids: bool = True,
 ) -> list[go.BaseTraceType]:
     """Build Plotly traces for ``scene["geometry_entities"]``.
 
@@ -585,6 +610,7 @@ def geometry_entity_traces(
                         "geometry_entity",
                         faces=faces,
                         vertex_count=len(vertices),
+                        include_face_ids=include_face_ids,
                     )
                 ),
             }
@@ -644,7 +670,11 @@ def geometry_entity_traces(
                             showlegend=False,
                             name=f"{name} edges",
                             meta=_json_safe(
-                                _trace_meta(entity, "geometry_entity_edge")
+                                _trace_meta(
+                                    entity,
+                                    "geometry_entity_edge",
+                                    include_face_ids=include_face_ids,
+                                )
                             ),
                         )
                     )

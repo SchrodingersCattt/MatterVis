@@ -601,6 +601,26 @@ class _IOBackendMixin:
                 self._render_revisions = {
                     str(scene_id): 0 for scene_id in self.scene_store.scenes
                 }
+                # A loaded preset can reuse scene IDs from an earlier
+                # server lifetime.  Reset delivery generations and camera
+                # clocks so an in-flight frame for the old scene cannot pass
+                # the revision checks and paint over the newly loaded state.
+                self._scene_generation_counter = 0
+                self._scene_generations = {}
+                self._camera_revisions = {}
+                self._last_update_kind_by_scene = {}
+                for scene_id in self.scene_store.order:
+                    key = str(scene_id)
+                    self._scene_generation_counter += 1
+                    self._scene_generations[key] = self._scene_generation_counter
+                    self._camera_revisions[key] = int(
+                        self.scene_state(key).get("camera_revision", 0) or 0
+                    )
+                with self._figure_broadcast_lock:
+                    # Keep the sequence monotonic for clients, but discard
+                    # envelopes whose scene payload belongs to the replaced
+                    # store.  Their IDs may be identical to the new scenes.
+                    self._figure_broadcasts.clear()
                 self.scene_store.save()
         for bundle in self.bundles.values():
             bundle.scene_cache.clear()

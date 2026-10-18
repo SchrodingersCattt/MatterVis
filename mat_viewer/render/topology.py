@@ -2,7 +2,7 @@ from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
 from .common import *
-from .picking import ensure_polyhedron_instance_ids, polyhedron_instance_id
+from .picking import ensure_polyhedron_instance_ids, pick_trace_metadata, polyhedron_instance_id
 from .meshes import *
 from .style import *
 from .serialize import _trace_to_json_safe_dict
@@ -86,7 +86,8 @@ def _world_sphere_marker_trace(centers, *, radius, color, opacity=0.9, spec_id: 
     for center in centers:
         vertices, triangles = _sphere_mesh(center, float(radius), lat_steps=8, lon_steps=12)
         _append_mesh(payload, vertices, triangles)
-    meta = {"spec_id": str(spec_id), "kind": "polyhedron"} if spec_id else None
+    meta = {"spec_id": str(spec_id), "kind": "polyhedron"} if spec_id else {}
+    meta.update(pick_trace_metadata("polyhedron", opacity=opacity))
     return go.Mesh3d(
         x=payload["x"],
         y=payload["y"],
@@ -118,7 +119,8 @@ def shell_atom_traces(shell_coords, distances, color="#7C5CBF", *, spec_id: str 
     for pos, r in zip(coords, radii):
         vertices, triangles = _sphere_mesh(pos, float(r), lat_steps=8, lon_steps=12)
         _append_mesh(payload, vertices, triangles)
-    meta = {"spec_id": str(spec_id), "kind": "polyhedron"} if spec_id else None
+    meta = {"spec_id": str(spec_id), "kind": "polyhedron"} if spec_id else {}
+    meta.update(pick_trace_metadata("polyhedron", opacity=0.9))
     return [
         go.Mesh3d(
             x=payload["x"],
@@ -143,6 +145,7 @@ def _merged_hull_mesh(
     *,
     flatshading: bool = True,
     spec_id: str | None = None,
+    include_face_ids: bool = True,
 ):
     """Pack any number of (shell_coords, opacity) overlays into the
     minimum number of Mesh3d traces -- one per distinct opacity value.
@@ -188,9 +191,20 @@ def _merged_hull_mesh(
         bin_payload["face_ranges"].append({"id": instance_id, "start": start, "end": start + len(simplices)})
     traces = []
     meta_base = {"spec_id": str(spec_id), "kind": "polyhedron"} if spec_id else {"kind": "polyhedron"}
+    meta_base.update(pick_trace_metadata("polyhedron", opacity=1.0))
     for opacity, payload in bins.items():
         if not payload["x"]:
             continue
+        mesh_meta = dict(meta_base)
+        if include_face_ids:
+            mesh_meta.update(
+                {
+                    "face_ids": payload.get("face_ids", []),
+                    "vertex_face_ids": payload.get("vertex_face_ids", []),
+                    "face_ranges": payload.get("face_ranges", []),
+                    **pick_trace_metadata("polyhedron", opacity=float(opacity), pickable=True),
+                }
+            )
         traces.append(
             go.Mesh3d(
                 x=payload["x"],
@@ -207,13 +221,7 @@ def _merged_hull_mesh(
                 hoverinfo="none",
                 showlegend=False,
                 name="coordination-hull",
-                meta={
-                    **meta_base,
-                    "face_ids": payload.get("face_ids", []),
-                    "vertex_face_ids": payload.get("vertex_face_ids", []),
-                    "face_ranges": payload.get("face_ranges", []),
-                    "pickable": True,
-                },
+                meta=mesh_meta,
             )
         )
     return traces
@@ -254,7 +262,8 @@ def _merged_hull_edges(
             zs.extend([float(p0[2]), float(p1[2]), float("nan")])
     if not xs:
         return []
-    meta = {"spec_id": str(spec_id), "kind": "polyhedron"} if spec_id else None
+    meta = {"spec_id": str(spec_id), "kind": "polyhedron"} if spec_id else {}
+    meta.update(pick_trace_metadata("polyhedron", opacity=opacity))
     trace = go.Scatter3d(
         x=xs,
         y=ys,
@@ -518,7 +527,12 @@ def apply_topology_style_overrides(
     return output
 
 
-def topology_background_traces(topology_data: dict | None, style: dict | None = None):
+def topology_background_traces(
+    topology_data: dict | None,
+    style: dict | None = None,
+    *,
+    include_face_ids: bool = True,
+):
     """Hull mesh + edges for every overlay, painted per-spec when
     ``topology_data["spec_results"]`` is set; otherwise falls back to the
     legacy single-colour path keyed on ``style["topology_hull_color"]``.
@@ -538,7 +552,11 @@ def topology_background_traces(topology_data: dict | None, style: dict | None = 
     fallback_color = str(style.get("topology_hull_color", "#7C5CBF"))
     viewport_ranges = _viewport_ranges_from_style(style)
     cache = topology_data.setdefault("_background_dict_cache", {})
-    cache_key = (_multi_spec_cache_key(topology_data, fallback_color), _viewport_cache_key(style))
+    cache_key = (
+        _multi_spec_cache_key(topology_data, fallback_color),
+        _viewport_cache_key(style),
+        include_face_ids,
+    )
     if cache_key in cache:
         return cache[cache_key]
     default_opacity = 0.55
@@ -583,7 +601,11 @@ def topology_background_traces(topology_data: dict | None, style: dict | None = 
                 overlays_by_style.setdefault(key, []).append((overlay, opacity))
             for (color, _opacity, edge_color, edge_alpha, edge_width_value), group in overlays_by_style.items():
                 traces.extend(_merged_hull_mesh(
-                    group, color=color, flatshading=flatshading, spec_id=spec_id,
+                    group,
+                    color=color,
+                    flatshading=flatshading,
+                    spec_id=spec_id,
+                    include_face_ids=include_face_ids,
                 ))
                 traces.extend(_merged_hull_edges(
                     [overlay for overlay, _ in group], color=edge_color,
@@ -599,7 +621,13 @@ def topology_background_traces(topology_data: dict | None, style: dict | None = 
         for extra in topology_data.get("extra_overlays") or []:
             if extra.get("shell_coords") and _overlay_within_viewport(extra, viewport_ranges):
                 overlays_with_opacity.append((extra, default_opacity))
-        traces.extend(_merged_hull_mesh(overlays_with_opacity, color=fallback_color))
+        traces.extend(
+            _merged_hull_mesh(
+                overlays_with_opacity,
+                color=fallback_color,
+                include_face_ids=include_face_ids,
+            )
+        )
         traces.extend(_merged_hull_edges([overlay for overlay, _ in overlays_with_opacity], color=fallback_color))
 
     cache[cache_key] = [_trace_to_json_safe_dict(tr) for tr in traces]

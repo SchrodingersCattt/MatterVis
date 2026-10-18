@@ -8,7 +8,12 @@ from .geometry import geometry_entity_traces, mesh_entity
 from .picking import facet_instance_id
 
 
-def _morphology_traces(scene: dict, style: dict) -> list[go.Trace]:
+def _morphology_traces(
+    scene: dict,
+    style: dict,
+    *,
+    include_face_ids: bool = True,
+) -> list[go.Trace]:
     """Build traces for BFDH morphology overlay."""
     morph = scene.get("bfdh_morphology")
     if not morph or not morph.get("enabled"):
@@ -90,6 +95,19 @@ def _morphology_traces(scene: dict, style: dict) -> list[go.Trace]:
     for (group_color, group_opacity), group in groups.items():
         if not group["vertices"]:
             continue
+        entity_meta = {
+            "internal": True,
+            "source": "bfdh_morphology",
+            "facet_count": len(facets),
+        }
+        if include_face_ids:
+            entity_meta.update(
+                {
+                    "facet_ids": group["face_ids"],
+                    "face_ordinals": group["face_ordinals"],
+                    "facet_millers": group["facet_millers"],
+                }
+            )
         entity = mesh_entity(
             group["vertices"],
             group["faces"],
@@ -102,17 +120,16 @@ def _morphology_traces(scene: dict, style: dict) -> list[go.Trace]:
             # This is an internal depth-tested entity, not a caller-supplied
             # scene geometry entity.  Keeping the provenance explicit prevents
             # flat/publication validation from treating BFDH as an API input.
-            meta={
-                "internal": True,
-                "source": "bfdh_morphology",
-                "facet_ids": group["face_ids"],
-                "face_ordinals": group["face_ordinals"],
-                "facet_millers": group["facet_millers"],
-                "facet_count": len(facets),
-            },
+            meta=entity_meta,
         )
-        entity["face_ids"] = group["face_ids"]
-        traces.extend(geometry_entity_traces({"geometry_entities": [entity]}))
+        if include_face_ids:
+            entity["face_ids"] = group["face_ids"]
+        traces.extend(
+            geometry_entity_traces(
+                {"geometry_entities": [entity]},
+                include_face_ids=include_face_ids,
+            )
+        )
 
     # Add labels
     label_x = []
@@ -131,25 +148,33 @@ def _morphology_traces(scene: dict, style: dict) -> list[go.Trace]:
         label_text.append(f"({h},{k},{ell})")
         
     if label_x:
-        labels = go.Scatter3d(
+        label_kwargs = dict(
             x=label_x,
             y=label_y,
             z=label_z,
             mode="text",
             text=label_text,
             textfont=dict(color=color, size=13),
-            customdata=[
+            name="Morphology Labels",
+        )
+        if include_face_ids:
+            label_kwargs["customdata"] = [
                 [
                     "facet",
-                    facet_instance_id(facet.get("miller", [0, 0, 0]), facet_index, morphology_id="bfdh-morphology"),
+                    facet_instance_id(
+                        facet.get("miller", [0, 0, 0]),
+                        facet_index,
+                        morphology_id="bfdh-morphology",
+                    ),
                     list(facet.get("miller", [0, 0, 0])),
                 ]
                 for facet_index, facet in enumerate(facets)
                 if facet_index in visible_facet_indices
-            ],
-            hovertemplate="Facet %{customdata[2]}<extra></extra>",
-            name="Morphology Labels"
-        )
+            ]
+            label_kwargs["hovertemplate"] = "Facet %{customdata[2]}<extra></extra>"
+        else:
+            label_kwargs["hoverinfo"] = "skip"
+        labels = go.Scatter3d(**label_kwargs)
         traces.append(labels)
 
     return traces

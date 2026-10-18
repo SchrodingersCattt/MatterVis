@@ -210,6 +210,32 @@ def test_geometry_entity_uses_mesh3d_depth_path_and_owns_viewport():
     assert ranges[2][0] < -5.0 and ranges[2][1] > 5.0
 
 
+def test_static_geometry_export_omits_face_target_metadata():
+    scene = _scene()
+    entity = mesh_entity(
+        [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+        [[0, 1, 2]],
+        name="picked-face",
+        entity_id="mesh-face",
+        meta={"face_ids": ["caller-face"]},
+    )
+    entity["face_ids"] = ["caller-face"]
+    scene["geometry_entities"] = [entity]
+    style = {
+        **DEFAULT_STYLE,
+        "display_mode": "cluster",
+        "show_axes": False,
+        "show_labels": False,
+        "show_unit_cell": False,
+    }
+    interactive = build_figure(scene, style, include_interaction_traces=True)
+    static = build_figure(scene, style, include_interaction_traces=False)
+    interactive_mesh = next(trace for trace in interactive.data if trace.name == "picked-face")
+    static_mesh = next(trace for trace in static.data if trace.name == "picked-face")
+    assert list(interactive_mesh.meta["face_ids"]) == ["caller-face"]
+    assert "face_ids" not in (static_mesh.meta or {})
+
+
 def test_geometry_entity_requires_real_mesh_material_for_depth():
     scene = _scene()
     scene["geometry_entities"] = [
@@ -474,6 +500,35 @@ def test_bfdh_hidden_facets_are_omitted_and_opacity_is_trace_scoped():
     assert list(meshes[0].meta["face_ids"]) == [faded_id]
     labels = next(trace for trace in traces if trace.name == "Morphology Labels")
     assert list(labels.customdata[0][1]) == list(faded_id)
+
+
+def test_static_morphology_export_omits_facet_target_metadata():
+    scene = _scene()
+    scene["bfdh_morphology"] = {
+        "enabled": True,
+        "facets": [
+            {
+                "miller": [1, 0, 0],
+                "triangles": [[[0, 0, 0], [1, 0, 0], [0, 1, 0]]],
+                "centroid": [0.3, 0.3, 0.0],
+            }
+        ],
+    }
+    style = {
+        **DEFAULT_STYLE,
+        "display_mode": "cluster",
+        "show_axes": False,
+        "show_labels": False,
+        "show_unit_cell": False,
+    }
+    interactive = build_figure(scene, style, include_interaction_traces=True)
+    static = build_figure(scene, style, include_interaction_traces=False)
+    interactive_mesh = next(trace for trace in interactive.data if trace.name == "Morphology")
+    static_mesh = next(trace for trace in static.data if trace.name == "Morphology")
+    assert interactive_mesh.meta.get("face_ids")
+    assert "face_ids" not in (static_mesh.meta or {})
+    static_labels = next(trace for trace in static.data if trace.name == "Morphology Labels")
+    assert static_labels.customdata is None
 
 
 def test_bfdh_morphology_remains_renderable_in_flat_material():

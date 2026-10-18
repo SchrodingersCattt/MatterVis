@@ -379,8 +379,24 @@ def build_row_figure(
         )
         trace_dicts.extend(_traces_to_dicts(_axis_traces(scene, style_norm)))
         trace_dicts.extend(_traces_to_dicts(_unit_cell_traces(scene, style_norm)))
-        trace_dicts.extend(_traces_to_dicts(geometry_entity_traces(scene)))
-        trace_dicts.extend(_traces_to_dicts(_morphology_traces(scene, style_norm)))
+        trace_dicts.extend(
+            _traces_to_dicts(
+                geometry_entity_traces(
+                    scene,
+                    style_norm,
+                    include_face_ids=include_interaction_traces,
+                )
+            )
+        )
+        trace_dicts.extend(
+            _traces_to_dicts(
+                _morphology_traces(
+                    scene,
+                    style_norm,
+                    include_face_ids=include_interaction_traces,
+                )
+            )
+        )
         if include_interaction_traces:
             trace_dicts.append(
                 _round_coord_arrays(
@@ -471,7 +487,13 @@ def build_figure(
     trace_dicts: list[dict] = []
     if topology_on:
         trace_dicts.extend(
-            _traces_to_dicts(topology_background_traces(topology_data, style))
+            _traces_to_dicts(
+                topology_background_traces(
+                    topology_data,
+                    style,
+                    include_face_ids=include_interaction_traces,
+                )
+            )
         )
     # Isosurface overlay: inserted before bonds/atoms so the molecular
     # skeleton renders on top of the translucent orbital lobes.
@@ -515,8 +537,24 @@ def build_figure(
     )
     trace_dicts.extend(_traces_to_dicts(_axis_traces(scene, style)))
     trace_dicts.extend(_traces_to_dicts(_unit_cell_traces(scene, style)))
-    trace_dicts.extend(_traces_to_dicts(geometry_entity_traces(scene, style)))
-    trace_dicts.extend(_traces_to_dicts(_morphology_traces(scene, style)))
+    trace_dicts.extend(
+        _traces_to_dicts(
+            geometry_entity_traces(
+                scene,
+                style,
+                include_face_ids=include_interaction_traces,
+            )
+        )
+    )
+    trace_dicts.extend(
+        _traces_to_dicts(
+            _morphology_traces(
+                scene,
+                style,
+                include_face_ids=include_interaction_traces,
+            )
+        )
+    )
     if topology_on:
         trace_dicts.extend(
             _traces_to_dicts(topology_foreground_traces(topology_data, style))

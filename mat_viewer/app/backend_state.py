@@ -281,6 +281,12 @@ class _StateBackendMixin:
             )
             working_state = self.normalize_state(patch, scene_id=target_scene_id)
             change_kind = classify_change(state_before, working_state)
+            # Structure/display changes can remove displayed instances while
+            # preserving the scene's persisted selection/style dictionaries.
+            # Reconcile exact IDs before committing the transition so stale
+            # browser targets cannot survive into a later redraw.
+            if change_kind == UpdateKind.GEOMETRY:
+                working_state = self._reconcile_semantic_targets(working_state)
             before_versions = state_versions(state_before)
             # Maintain independent clocks.  A display patch can reuse the
             # current geometry; a camera patch never invalidates either.

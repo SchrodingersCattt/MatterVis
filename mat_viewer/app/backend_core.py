@@ -193,6 +193,16 @@ class _CoreBackendMixin:
         )
         style.update(preset_style)
         style.update(entry_style)
+        # Presets persist exact target paint edits alongside ordinary style
+        # controls.  Promote that mapping into state defaults so callers that
+        # load a preset without a v2 scene list retain geometry/atom/bond
+        # overrides.  Invalid hand-edited entries are dropped at this
+        # boundary before any renderer sees them.
+        from ..render.style.resolver import normalize_style_overrides
+
+        preset_style_overrides = normalize_style_overrides(
+            style.get("style_overrides")
+        )
         # Default selected polyhedron centres: every non-halide species in
         # the structure. That generalises the old "B-site default" without
         # baking ABX nomenclature into the UI, and gives the multi-species
@@ -370,7 +380,7 @@ class _CoreBackendMixin:
             "selection": {"atom_labels": [], "active_label": None, "order": [], "targets": [], "active_target": None},
             # Canonical target-ID keyed paint overrides.  Each value stores
             # only explicitly edited fields; inherited style remains live.
-            "style_overrides": {},
+            "style_overrides": preset_style_overrides,
             "fast_rendering": bool(style.get("fast_rendering", False)),
             "camera": default_camera,
             "geometry_version": 0,
