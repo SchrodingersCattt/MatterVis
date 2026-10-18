@@ -206,7 +206,7 @@ def test_upload_flush_hook_replays_queued_hkust_frame():
     if node is None:
         pytest.skip("Node.js is needed to execute the frontend regression")
     source = MATTERVIS_JS.read_text(encoding="utf-8")
-    start = source.index("  function flushQueuedSceneFigure")
+    start = source.index("  function scheduleQueuedSceneFigureRetry")
     stop = source.index("  function flushPendingFigurePush", start)
     program = r"""
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
@@ -315,6 +315,54 @@ vm.runInContext(`
 `,sandbox);
 assert.equal(sandbox.window.remaining,false,'older parked frame was retained after newer direct frame');
 assert.equal(sandbox.window.cancelled,1,'parked-frame retry timer was not cancelled');
+""" % (start, stop)
+    result = subprocess.run(
+        [node, "-e", program, str(MATTERVIS_JS)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_queued_scene_frame_replays_after_stale_dash_repaint():
+    """Keep a parked frame long enough to defeat a delayed stale Dash paint."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    start = source.index("  function scheduleQueuedSceneFigureRetry")
+    stop = source.index("  function flushPendingFigurePush", start)
+    program = r"""
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const body=source.slice(%d,%d);
+const timers=[],pending=Object.create(null),gd={layout:{meta:{mattervis_render:{scene_id:'old',render_revision:0,display_version:0}}}};
+const sandbox={window:{},pending,gd,timers,setTimeout:(fn)=>{timers.push(fn);return timers.length;},clearTimeout:()=>{}};
+vm.createContext(sandbox);
+vm.runInContext(`
+  let applied=0;
+  function graphDiv(){return gd;}
+  function renderMetadataFromLayout(layout){return layout&&layout.meta&&layout.meta.mattervis_render||null;}
+  function currentSceneId(){return 'new';}
+  function figurePushIsCurrent(){return true;}
+  function applyFigurePush(){applied += 1;}
+  const pendingFigureRetryTimers=Object.create(null);
+  const pendingFigureByScene=pending;
+  ${body}
+  const figure={data:[{}],layout:{meta:{mattervis_render:{scene_id:'new',render_revision:1,display_version:1}}}};
+  pending.new={figure,figure_seq:10};
+  flushQueuedSceneFigure('new');
+  window.first=applied;
+  timers.shift()();
+  gd.layout=figure.layout;
+  while (timers.length) timers.shift()();
+  window.after=applied;
+  window.remaining=!!pending.new;
+`,sandbox);
+assert.equal(sandbox.window.first,1,'initial queued frame was not applied');
+assert.ok(sandbox.window.after >= 2,'stale Dash repaint did not trigger a replay');
+assert.equal(sandbox.window.remaining,false,'settled queued frame was not released');
 """ % (start, stop)
     result = subprocess.run(
         [node, "-e", program, str(MATTERVIS_JS)],
