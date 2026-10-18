@@ -689,9 +689,15 @@ class _CoreBackendMixin:
         before_state = dict(before)
         after_state = dict(after)
         scene = self.scene_store.get(scene_id)
-        before_state.update({"scene_id": str(scene_id), "scene_label": scene.label})
+        # ``before`` is captured before a rename mutates the store. Preserve
+        # that old label so a title change advances the render revision and
+        # the browser receives a fresh canvas figure.
+        before_state.setdefault("scene_id", str(scene_id))
+        before_state.setdefault("scene_label", scene.label)
         after_state.update({"scene_id": str(scene_id), "scene_label": scene.label})
-        if self._geometry_cache_key(before_state) != self._geometry_cache_key(after_state):
+        geometry_changed = self._geometry_cache_key(before_state) != self._geometry_cache_key(after_state)
+        display_changed = self._display_state_key(before_state) != self._display_state_key(after_state)
+        if geometry_changed or display_changed:
             key = str(scene_id)
             self._render_revisions[key] = self._render_revisions.get(key, 0) + 1
 

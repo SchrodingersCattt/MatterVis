@@ -35,6 +35,7 @@
   const latestFigureSeqByScene = Object.create(null);
   let sceneTabIntentId = null, sceneTabIntentAt = 0;
   let sceneTabIntentSource = null;
+  const pendingFigureRetryTimers = Object.create(null);
   let renderServerEpoch = null;
   const expectedRenderRevisionByScene = Object.create(null);
   const expectedCameraRevisionByScene = Object.create(null);
@@ -333,6 +334,20 @@
   // optimistic tab intent while Plotly is still displaying the previous
   // scene.  Upload completion uses this hook before Dash paints the new tab.
   window.MatterVisCurrentScene = function () { return currentSceneId(); };
+  window.__mattervisFigureDiagnostics = function () {
+    const gd = graphDiv();
+    const render = renderMetadataFromLayout(gd && gd.layout);
+    return {
+      currentSceneId: currentSceneId(),
+      pendingFigureByScene: Object.keys(pendingFigureByScene),
+      pendingFigureRetryTimers: Object.keys(pendingFigureRetryTimers),
+      render: render ? {
+        scene_id: render.scene_id || null,
+        render_revision: Number(render.render_revision || 0),
+        display_version: Number(render.display_version || 0),
+      } : null,
+    };
+  };
   function currentRenderRevision() {
     const m = fastViewMetadata();
     const sceneId = currentSceneId();
@@ -484,13 +499,92 @@
       console.warn("MatterVis frame delivery failed", error);
     });
   }
-  function flushQueuedSceneFigure() {
-    const sceneId = currentSceneId();
+  function scheduleQueuedSceneFigureRetry(sceneId, attempt) {
+    const key = String(sceneId || "");
+    if (!key || pendingFigureRetryTimers[key] || !pendingFigureByScene[key]) return;
+    attempt = Number(attempt || 0);
+    if (attempt >= 24) return;
+    pendingFigureRetryTimers[key] = setTimeout(function () {
+      delete pendingFigureRetryTimers[key];
+      flushQueuedSceneFigure(key, attempt + 1);
+    }, Math.min(250, 25 * (attempt + 1)));
+  }
+  function queuedSceneFigureMatchesCanvas(queued) {
+    if (typeof graphDiv !== "function") return true;
+    const gd = graphDiv();
+    if (!gd || !queued || !queued.figure) return true;
+    const expected = renderMetadataFromLayout(queued.figure.layout || {});
+    const shown = renderMetadataFromLayout(gd.layout || {});
+    // Early Plotly mounts and the small VM harness do not expose metadata.
+    // Once a live layout exists, require the complete render identity so a
+    // delayed Dash repaint cannot release the only parked frame too early.
+    if (!expected || !shown) return true;
+    return String(expected.scene_id || "") === String(shown.scene_id || "") &&
+      Number(expected.render_revision || 0) === Number(shown.render_revision || 0) &&
+      Number(expected.display_version || 0) === Number(shown.display_version || 0);
+  }
+  function scheduleQueuedSceneFigureSettle(sceneId, queued, attempt) {
+    const key = String(sceneId || "");
+    if (!key || pendingFigureByScene[key] !== queued || pendingFigureRetryTimers[key]) return;
+    attempt = Number(attempt || 0);
+    if (attempt >= 8) {
+      delete pendingFigureByScene[key];
+      return;
+    }
+    pendingFigureRetryTimers[key] = setTimeout(function () {
+      delete pendingFigureRetryTimers[key];
+      if (pendingFigureByScene[key] !== queued) return;
+      if (queuedSceneFigureMatchesCanvas(queued)) {
+        // Dash may repaint with its stale figure prop just after Plotly.react
+        // resolves. Require several stable observations before releasing the
+        // parked frame so that repaint gets a second replay if needed.
+        if (attempt >= 2) {
+          delete pendingFigureByScene[key];
+          return;
+        }
+        scheduleQueuedSceneFigureSettle(key, queued, attempt + 1);
+        return;
+      }
+      flushQueuedSceneFigure(key, attempt + 1);
+    }, attempt ? 100 : 250);
+  }
+  function clearQueuedSceneFigure(sceneId, sequence) {
+    const key = String(sceneId || "");
+    if (!key) return;
+    const queued = pendingFigureByScene[key];
+    if (!queued) return;
+    const queuedSeq = Number(queued.figure_seq || queued.seq || 0);
+    const directSeq = Number(sequence || 0);
+    // A direct frame supersedes only an equal/newer parked frame.  If either
+    // frame has no sequence, retain the parked one unless the direct frame is
+    // sequenced; an unknown frame must not accidentally discard a newer one.
+    if (!directSeq && queuedSeq) return;
+    if (directSeq && queuedSeq && queuedSeq > directSeq) return;
+    if (pendingFigureRetryTimers[key]) {
+      clearTimeout(pendingFigureRetryTimers[key]);
+      delete pendingFigureRetryTimers[key];
+    }
+    delete pendingFigureByScene[key];
+  }
+  function flushQueuedSceneFigure(targetSceneId, attempt) {
+    const sceneId = targetSceneId ? String(targetSceneId) : currentSceneId();
     if (!sceneId) return;
     const queued = pendingFigureByScene[String(sceneId)];
-    if (!queued || !figurePushIsCurrent(queued)) return;
-    delete pendingFigureByScene[String(sceneId)];
+    if (!queued) return;
+    if (!figurePushIsCurrent(queued)) {
+      // A completed frame may beat Dash's selected-tab paint by several
+      // turns. Keep the revision-0 frame parked by scene and retry the handoff
+      // briefly instead of evaluating its fence only once while the previous
+      // scene is still selected.
+      if (targetSceneId) scheduleQueuedSceneFigureRetry(sceneId, attempt);
+      return;
+    }
+    if (pendingFigureRetryTimers[String(sceneId)]) {
+      clearTimeout(pendingFigureRetryTimers[String(sceneId)]);
+      delete pendingFigureRetryTimers[String(sceneId)];
+    }
     applyFigurePush(queued.figure.data||[], queued.figure.layout||{});
+    scheduleQueuedSceneFigureSettle(sceneId, queued, 0);
   }
   // Dash applies ``scene-tabs.value`` and paints the selected tab in
   // separate turns.  A completed upload can therefore be queued by the
@@ -977,6 +1071,7 @@
         payload.isCurrent = function () { return isCurrentFigurePush(payload); };
         if (!previous || !previousSeq || (seq && seq >= previousSeq)) {
           pendingFigureByScene[sceneKey] = payload;
+          scheduleQueuedSceneFigureRetry(sceneKey, 0);
         }
       }
       function deliverFallbackPayload(payload) {
@@ -1039,9 +1134,11 @@
         if (p.scene_id && String(p.scene_id) !== String(currentSceneId() || "")) {
           p.isCurrent=function(){return isCurrentFigurePush(p);};
           pendingFigureByScene[String(p.scene_id)] = p;
+          scheduleQueuedSceneFigureRetry(String(p.scene_id), 0);
         }
         return;
       }
+      clearQueuedSceneFigure(p.scene_id, seq);
       if (interactionActive) { p.isCurrent=function(){return isCurrentFigurePush(p);}; pendingFigurePush=p; return; }
       if (sceneTabIntentId && p.scene_id && String(p.scene_id) === sceneTabIntentId) sceneTabIntentAt = 0;
       if (window.MatterVisViewUpdates && typeof window.MatterVisViewUpdates.submit === "function") {
