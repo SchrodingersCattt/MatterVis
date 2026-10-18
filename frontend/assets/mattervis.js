@@ -640,6 +640,47 @@
     let semanticClickGesture = null;
     let semanticClickAt = 0;
     let semanticClickPoint = null;
+    // Coordinate picking is asynchronous. Keep a gesture pending until its
+    // preview request settles so the capture-phase background clear cannot
+    // erase a Ctrl/Shift toggle first.
+    let pendingCoordinateGesture = null;
+    const gestureGraceMs = 1000;
+
+    function clearSemanticClickGesture(gestureId) {
+      if (semanticClickGesture !== gestureId) return;
+      semanticClickGesture = null;
+      semanticClickAt = 0;
+      semanticClickPoint = null;
+    }
+
+    function releaseSemanticClickGesture(gestureId) {
+      // A gl3d plotly_click may arrive while the pointer is still held. Keep
+      // ownership through pointerup/click, with a grace period for slower
+      // native gestures.
+      setTimeout(function () {
+        if (semanticClickGesture !== gestureId) return;
+        if (pointerDown && pointerDown.id === gestureId) {
+          releaseSemanticClickGesture(gestureId);
+          return;
+        }
+        if (pendingCoordinateGesture && pendingCoordinateGesture.id === gestureId) {
+          releaseSemanticClickGesture(gestureId);
+          return;
+        }
+        clearSemanticClickGesture(gestureId);
+      }, gestureGraceMs);
+    }
+
+    function finishCoordinateGesture(gestureId) {
+      if (pendingCoordinateGesture && pendingCoordinateGesture.id === gestureId) {
+        pendingCoordinateGesture = null;
+      }
+    }
+
+    function hasPendingCoordinateGesture() {
+      return !!(pendingCoordinateGesture
+        && Date.now() - pendingCoordinateGesture.at < gestureGraceMs * 2);
+    }
     try {
       inner.on("plotly_hover", function (ed) {
         if (ed && ed.points && ed.points.length) {
@@ -659,7 +700,7 @@
       inner.on("plotly_click", function (ed) {
         const native = ed && ed.event;
         plotlyClickObserved = true;
-        const recentPointer = lastPointerGesture && Date.now() - lastPointerGesture.at < 120
+        const recentPointer = lastPointerGesture && Date.now() - lastPointerGesture.at < gestureGraceMs
           ? lastPointerGesture.id : null;
         const gestureId = activeGestureId || recentPointer || ++gestureSequence;
         semanticClickGesture = gestureId;
@@ -668,16 +709,12 @@
           ? {x:native.clientX, y:native.clientY}
           : {x:lastClient.x, y:lastClient.y};
         setTimeout(function () { plotlyClickObserved = false; }, 0);
-        setTimeout(function () {
-          if (semanticClickGesture === gestureId) {
-            semanticClickGesture = null;
-            semanticClickAt = 0;
-            semanticClickPoint = null;
-          }
-        }, 120);
+        releaseSemanticClickGesture(gestureId);
         const target = ed && ed.points && ed.points.length ? targetFromPoint(ed.points[0]) : null;
         if (!target) { publishSemanticSelection(null, "clear"); return; }
-        const pointer = lastPointerGesture && lastPointerGesture.id === gestureId ? lastPointerGesture : null;
+        const pointer = lastPointerGesture && lastPointerGesture.id === gestureId
+          ? lastPointerGesture
+          : pointerDown && pointerDown.id === gestureId ? pointerDown : null;
         const ctrl = !!(native && (native.ctrlKey || native.metaKey)) || !!(pointer && (pointer.ctrlKey || pointer.metaKey));
         const shift = !!(native && native.shiftKey) || !!(pointer && pointer.shiftKey);
         publishSemanticSelection(target, ctrl ? "toggle" : (shift ? "add" : "replace"));
@@ -779,11 +816,11 @@
       if (e.target && e.target.closest && e.target.closest(".mv-canvas-toolbar, .modebar, .rightclick-menu")) return;
       const now = Date.now();
       if (!gestureId) {
-        const recentPointer = lastPointerGesture && now - lastPointerGesture.at < 120 &&
+        const recentPointer = lastPointerGesture && now - lastPointerGesture.at < gestureGraceMs &&
           Math.abs(lastPointerGesture.x - e.clientX) < 1 &&
           Math.abs(lastPointerGesture.y - e.clientY) < 1;
         const recentSemantic = semanticClickGesture && semanticClickPoint &&
-          now - semanticClickAt < 120 &&
+          now - semanticClickAt < gestureGraceMs &&
           Math.abs(semanticClickPoint.x - e.clientX) < 1 &&
           Math.abs(semanticClickPoint.y - e.clientY) < 1;
         gestureId = activeGestureId || (recentPointer ? lastPointerGesture.id : null) ||
@@ -795,10 +832,19 @@
       if (lastPrimaryPick && lastPrimaryPick.id === gestureId) return;
       lastPrimaryPick = {id:gestureId, at:now, x:e.clientX, y:e.clientY};
       const picked = pickRect(e.clientX, e.clientY, 14);
+      pendingCoordinateGesture = {
+        id: gestureId,
+        at: now,
+        ctrlKey: !!e.ctrlKey || !!e.metaKey,
+        shiftKey: !!e.shiftKey,
+      };
       const schedule = window.requestAnimationFrame || function (callback) { setTimeout(callback, 0); };
       schedule(function () {
         setTimeout(function () {
-        if (semanticClickGesture === gestureId) return;
+        if (semanticClickGesture === gestureId) {
+          finishCoordinateGesture(gestureId);
+          return;
+        }
         // Coordinate picking is a preview. Publish the resulting atom target
         // through the semantic store so it cannot overwrite a non-atom target
         // and Ctrl/Cmd uses the same toggle path as Plotly clicks.
@@ -808,19 +854,34 @@
           const atomTarget = semanticTargets.find(function (item) { return item && item.kind === "atom"; });
           if (!atomTarget) {
             publishSemanticSelection(null, "clear");
+            finishCoordinateGesture(gestureId);
             return;
           }
           const mode = e.ctrlKey || e.metaKey ? "toggle" : (e.shiftKey ? "add" : "replace");
           publishSemanticSelection(atomTarget, mode);
-        }).catch(function () {});
+          finishCoordinateGesture(gestureId);
+        }).catch(function () {
+          finishCoordinateGesture(gestureId);
+        });
         }, 50);
       });
     }
     container.addEventListener("pointerdown", function (e) {
       if (e.button === undefined || e.button === 0) {
         const id = ++gestureSequence;
+        if (semanticClickGesture !== null && semanticClickGesture !== id) {
+          clearSemanticClickGesture(semanticClickGesture);
+        }
+        plotlyClickObserved = false;
         activeGestureId = id;
-        pointerDown = {x:e.clientX, y:e.clientY, id:id};
+        pointerDown = {
+          x:e.clientX,
+          y:e.clientY,
+          id:id,
+          ctrlKey:!!e.ctrlKey,
+          metaKey:!!e.metaKey,
+          shiftKey:!!e.shiftKey,
+        };
       }
     }, {passive:true});
     container.addEventListener("pointerup", function (e) {
@@ -853,7 +914,10 @@
       setTimeout(function () {
         // A point click is delivered through Plotly's custom event rather
         // than the DOM event. Avoid clearing a fresh semantic pick.
-        if (plotlyClickObserved) { plotlyClickObserved = false; return; }
+        if (plotlyClickObserved || hasPendingCoordinateGesture()) {
+          plotlyClickObserved = false;
+          return;
+        }
         clearSelectionIfGraphBackground();
       }, 0);
     }, true);

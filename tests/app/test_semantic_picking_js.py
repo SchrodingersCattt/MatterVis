@@ -44,10 +44,18 @@ def test_semantic_plotly_click_owns_left_click_before_coordinate_fallback():
     assert "pointerup" in body
     assert "gestureSequence" in body
     assert "semanticClickGesture" in body
+    assert "pendingCoordinateGesture" in body
+    assert "gestureGraceMs = 1000" in body
+    assert "releaseSemanticClickGesture" in body
+    assert "finishCoordinateGesture" in body
+    assert "hasPendingCoordinateGesture" in body
     assert "postSelection(picked.rect, picked.viewport, false, false)" in body
     assert "requestAnimationFrame" in body
     assert "selection && selection.targets" in body
     assert "publishSemanticSelection(atomTarget, mode)" in body
     assert "setTimeout(function () {" in body
     assert "setTimeout(function () { plotlyClickObserved = false; }, 0);" in body
+    assert "if (plotlyClickObserved || hasPendingCoordinateGesture())" in body
+    assert "clearSemanticClickGesture(semanticClickGesture)" in body
+    assert "pointerDown && pointerDown.id === gestureId" in body
     assert plotly_click < body.index('container.addEventListener("contextmenu"')
