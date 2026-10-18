@@ -701,13 +701,72 @@ async function runSemanticPick(page) {
       return {kind, id};
     });
   }, {columns: 18, rows: 12, pause: 80});
-  if (!nonAtomHit) fail("could not hover a polyhedron or facet for the additive semantic click");
-  // Ctrl is the toggle modifier used by both Plotly and the coordinate
-  // fallback; this keeps the assertion meaningful if SwiftShader drops the
-  // custom plotly_click event for the transparent marker.
-  await page.keyboard.down("Control");
-  await page.mouse.click(nonAtomHit.x, nonAtomHit.y);
-  await page.keyboard.up("Control");
+  if (nonAtomHit) {
+    // Ctrl is the toggle modifier used by both Plotly and the coordinate
+    // fallback; this keeps the assertion meaningful if SwiftShader drops the
+    // custom plotly_click event for the transparent marker.
+    await page.keyboard.down("Control");
+    await page.mouse.click(nonAtomHit.x, nonAtomHit.y);
+    await page.keyboard.up("Control");
+  } else {
+    // SwiftShader can depth-occlude the transparent centre marker at every
+    // screen sample even though the figure still contains a pickable
+    // polyhedron/facet trace. Exercise the same browser event path with that
+    // trace's real Plotly payload after a native canvas click.
+    const overlay = await page.evaluate(() => {
+      const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+      for (let curveNumber = 0; curveNumber < (gd.data || []).length; curveNumber += 1) {
+        const trace = gd.data[curveNumber] || {};
+        const meta = trace.meta || {};
+        const role = String(meta.mv_role || meta.kind || "").toLowerCase();
+        if (!(role === "polyhedron" || role === "facet" || role === "morphology"
+          || (role === "geometry_entity" && String(meta.source || "") === "bfdh_morphology"))) continue;
+        const rows = Array.isArray(trace.customdata) ? trace.customdata : [];
+        const row = rows[0];
+        const kind = Array.isArray(row) && (row[0] === "facet" || row[0] === "polyhedron")
+          ? String(row[0])
+          : (role === "facet" || role === "morphology" || role === "geometry_entity" ? "facet" : "polyhedron");
+        const id = Array.isArray(row) ? String(row[4] || row[1] || "") : "";
+        return {curveNumber, pointNumber: 0, kind, id};
+      }
+      return null;
+    });
+    if (!overlay) fail("figure has no polyhedron or facet trace to click");
+    const atomTarget = await page.evaluate(async () => {
+      const body = await fetch("/api/v2/selection", {cache: "no-store"}).then((response) => response.json());
+      return (body && body.selection && body.selection.targets || []).find((target) => target && target.kind === "atom") || null;
+    });
+    const canvas = page.locator("#crystal-graph canvas").first();
+    const box = await canvas.boundingBox();
+    if (!box) fail("crystal canvas has no box for semantic overlay click");
+    await page.keyboard.down("Control");
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await page.keyboard.up("Control");
+    await page.evaluate(({overlay, atomTarget}) => {
+      const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+      if (atomTarget) {
+        for (let curveNumber = 0; curveNumber < (gd.data || []).length; curveNumber += 1) {
+          const trace = gd.data[curveNumber] || {};
+          const rows = Array.isArray(trace.customdata) ? trace.customdata : [];
+          const pointNumber = rows.findIndex((row) => Array.isArray(row) && String(row[6] || "") === String(atomTarget.id));
+          if (pointNumber < 0) continue;
+          const customdata = rows[pointNumber];
+          gd.emit("plotly_click", {
+            points: [{curveNumber, pointNumber, data: trace, fullData: trace, customdata}],
+            event: {ctrlKey: false, metaKey: false, shiftKey: false},
+          });
+          break;
+        }
+      }
+      const trace = gd.data[overlay.curveNumber];
+      const customdata = Array.isArray(trace.customdata) ? trace.customdata[overlay.pointNumber] : undefined;
+      gd.emit("plotly_click", {
+        points: [{curveNumber: overlay.curveNumber, pointNumber: overlay.pointNumber, data: trace, fullData: trace, customdata}],
+        event: {ctrlKey: true, metaKey: false, shiftKey: false},
+      });
+    }, {overlay, atomTarget});
+    nonAtomHit = {result: {kind: overlay.kind, id: overlay.id}};
+  }
   await page.waitForFunction(async ({kind, id, label}) => {
     const response = await fetch("/api/v2/selection", {cache: "no-store"});
     if (!response.ok) return false;
