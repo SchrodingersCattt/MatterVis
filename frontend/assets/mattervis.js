@@ -405,6 +405,24 @@
       flushQueuedSceneFigure(key, attempt + 1);
     }, Math.min(250, 25 * (attempt + 1)));
   }
+  function clearQueuedSceneFigure(sceneId, sequence) {
+    const key = String(sceneId || "");
+    if (!key) return;
+    const queued = pendingFigureByScene[key];
+    if (!queued) return;
+    const queuedSeq = Number(queued.figure_seq || queued.seq || 0);
+    const directSeq = Number(sequence || 0);
+    // A direct frame supersedes only an equal/newer parked frame.  If either
+    // frame has no sequence, retain the parked one unless the direct frame is
+    // sequenced; an unknown frame must not accidentally discard a newer one.
+    if (!directSeq && queuedSeq) return;
+    if (directSeq && queuedSeq && queuedSeq > directSeq) return;
+    if (pendingFigureRetryTimers[key]) {
+      clearTimeout(pendingFigureRetryTimers[key]);
+      delete pendingFigureRetryTimers[key];
+    }
+    delete pendingFigureByScene[key];
+  }
   function flushQueuedSceneFigure(targetSceneId, attempt) {
     const sceneId = targetSceneId ? String(targetSceneId) : currentSceneId();
     if (!sceneId) return;
@@ -950,6 +968,7 @@
         }
         return;
       }
+      clearQueuedSceneFigure(p.scene_id, seq);
       if (interactionActive) { p.isCurrent=function(){return isCurrentFigurePush(p);}; pendingFigurePush=p; return; }
       if (sceneTabIntentId && p.scene_id && String(p.scene_id) === sceneTabIntentId) sceneTabIntentAt = 0;
       if (window.MatterVisViewUpdates && typeof window.MatterVisViewUpdates.submit === "function") {
