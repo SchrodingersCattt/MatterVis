@@ -913,12 +913,24 @@ async function runSceneControls(page) {
     return [...document.querySelectorAll("#scene-tabs .scene-tab-text")]
       .some((node) => /copy/i.test(node.textContent || ""));
   }, null, {timeout: 30000});
-  await page.waitForFunction(() => {
-    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
-    const title = gd && gd.layout && gd.layout.title;
-    const text = title && (title.text || title);
-    return /copy/i.test(String(text || ""));
-  }, null, {timeout: 45000});
+  try {
+    await page.waitForFunction(() => {
+      const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+      const title = gd && gd.layout && gd.layout.title;
+      const text = title && (title.text || title);
+      return /copy/i.test(String(text || ""));
+    }, null, {timeout: 45000});
+  } catch (error) {
+    let diagnostics = null;
+    try {
+      diagnostics = await page.evaluate(() => (
+        typeof window.__mattervisFigureDiagnostics === "function"
+          ? window.__mattervisFigureDiagnostics()
+          : null
+      ));
+    } catch (_) {}
+    fail(`duplicate canvas title did not settle: ${JSON.stringify(diagnostics)} (${error.message})`);
+  }
   const duplicateView = await readView(page);
   if (!/copy/i.test(duplicateView.title || "")) {
     fail(`duplicate did not select/repaint the copy tab: ${JSON.stringify({before, duplicateView})}`);
