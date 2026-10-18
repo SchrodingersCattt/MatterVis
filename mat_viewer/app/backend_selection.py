@@ -163,6 +163,65 @@ class _SelectionBackendMixin:
             if not expanded:
                 expanded = []
 
+        # Morphology facets carry their Miller family in the semantic
+        # payload. Expand a family without relying on Plotly triangle
+        # ordinals, which are free to change when facets are regrouped by
+        # colour/opacity.
+        if kind == "facet" and wanted_scope == "facet_family":
+            state = self.get_state(scene_id)
+            scene = self.scene_for_state(state)
+            morphology = scene.get("bfdh_morphology") or {}
+            wanted_miller = normalized.get("miller")
+            expanded = []
+            for index, facet in enumerate(morphology.get("facets") or []):
+                miller = facet.get("miller", [0, 0, 0]) if isinstance(facet, Mapping) else [0, 0, 0]
+                if wanted_miller is not None and str(miller) != str(wanted_miller):
+                    continue
+                expanded.append({
+                    "kind": "facet",
+                    "id": facet_instance_id(miller, index, morphology_id="bfdh-morphology"),
+                    "parent_id": "morphology:bfdh-morphology",
+                    "miller": miller,
+                })
+            if not expanded:
+                expanded = [normalized]
+
+        # Polyhedron geometry is cached by the backend and may not exist yet
+        # when a user asks for a broad scope. If it is available, enumerate
+        # the visible overlays for the requested spec; otherwise preserve the
+        # exact target so a deferred topology build can resolve it later.
+        if kind == "polyhedron" and wanted_scope == "spec":
+            state = self.get_state(scene_id)
+            try:
+                geometry = self.topology_for_state(state, strict=False)
+            except Exception:
+                geometry = None
+            spec_id = str(normalized.get("spec_id") or "")
+            if not spec_id:
+                token = str(normalized.get("id") or "")
+                if "spec:" in token:
+                    spec_id = token.split("spec:", 1)[1].split("|", 1)[0]
+            values: list[dict[str, Any]] = []
+            for entry in (geometry or {}).get("spec_results") or []:
+                if spec_id and str(entry.get("spec_id") or "") != spec_id:
+                    continue
+                for overlay in entry.get("overlays") or []:
+                    if not overlay.get("visible", True):
+                        continue
+                    overlay_id = overlay.get("instance_id")
+                    if not overlay_id:
+                        continue
+                    values.append({
+                        "kind": "polyhedron",
+                        "id": str(overlay_id),
+                        "spec_id": str(entry.get("spec_id") or spec_id),
+                        "fragment_label": str(overlay.get("center_label") or ""),
+                        "source_index": overlay.get("center_source_index"),
+                        "image_shift": overlay.get("center_image_shift", overlay.get("center_image", "")),
+                    })
+            if values:
+                expanded = values
+
         # Commit the concrete list only after the expansion succeeds.  This
         # keeps malformed/bare targets from clearing an existing selection.
         selection = self.set_target_selection(expanded, scene_id=scene_id)
