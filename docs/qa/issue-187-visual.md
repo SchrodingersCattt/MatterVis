@@ -37,4 +37,3 @@ counter; `require_paint_only(report)` fails if the interaction recomputed
 topology. The report exposes samples, mean, nearest-rank p95, and max in
 milliseconds so CI can record a real threshold without hiding event-loop
 waits inside a callback timer.
-
