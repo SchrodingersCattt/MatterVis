@@ -80,6 +80,11 @@ def atom_instance_id(atom: Mapping[str, Any], display_index: int | None = None) 
         or atom.get("_boundary_image")
         or atom.get("_image_shift")
     )
+    symmetry = (
+        atom.get("_symop_index")
+        if atom.get("_symop_index") not in (None, "")
+        else atom.get("_symmetry_operation_index")
+    )
     disorder = (
         atom.get("_disorder_part")
         or atom.get("disorder_part")
@@ -88,7 +93,23 @@ def atom_instance_id(atom: Mapping[str, Any], display_index: int | None = None) 
         or atom.get("dg")
     )
     parts = [f"source:{_token(source)}"]
-    if image not in (None, "", (), [], [0, 0, 0]):
+    if symmetry not in (None, ""):
+        parts.append(f"symmetry:{_token(symmetry)}")
+    # ``atoms_under_symmetry`` historically encoded the operation ordinal in
+    # ``_image_shift=(op,0,0)``. Once explicit symmetry provenance is present,
+    # suppress that legacy token so IDs describe source/symmetry scope rather
+    # than pretending the operation is a periodic replica.
+    legacy_symmetry_image = False
+    if symmetry not in (None, ""):
+        try:
+            legacy_symmetry_image = tuple(int(value) for value in image) == (
+                int(symmetry),
+                0,
+                0,
+            )
+        except (TypeError, ValueError):
+            legacy_symmetry_image = False
+    if image not in (None, "", (), [], [0, 0, 0]) and not legacy_symmetry_image:
         parts.append(f"image:{_token(image)}")
     if disorder not in (None, "", "."):
         parts.append(f"disorder:{_token(disorder)}")
@@ -396,9 +417,10 @@ def _decode_custom_target(customdata: Any) -> dict[str, Any] | None:
         return None
     kind = _pick_kind(customdata[0])
     if kind == "atom":
+        atom_id = customdata[6] if len(customdata) > 6 else ""
         value: dict[str, Any] = {
             "kind": "atom",
-            "id": customdata[6] if len(customdata) > 6 else "",
+            "id": atom_id,
         }
         if len(customdata) > 2:
             value["label"] = customdata[2]
@@ -410,6 +432,20 @@ def _decode_custom_target(customdata: Any) -> dict[str, Any] | None:
             value["source_index"] = customdata[7]
         if len(customdata) > 8:
             value["image_shift"] = customdata[8]
+        # Older selection traces carried the source token only in the stable
+        # ID (``atom:source:42``).  Recover it here so browser hit adapters
+        # expose the same source/symmetry metadata regardless of trace
+        # revision; newer traces still win when an explicit field is present.
+        if value.get("source_index") in (None, "") and isinstance(atom_id, str):
+            marker = "|source:"
+            if marker in atom_id:
+                source = atom_id.split(marker, 1)[1].split("|", 1)[0]
+                if source:
+                    value["source_index"] = source
+            elif atom_id.startswith("atom:source:"):
+                source = atom_id[len("atom:source:") :].split("|", 1)[0]
+                if source:
+                    value["source_index"] = source
         return normalize_target(value)
     if kind == "bond":
         value = {

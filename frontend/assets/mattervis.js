@@ -1209,6 +1209,14 @@
           current = lastHovered;
         } else current = null;
       }
+      // A context menu can arrive without a fresh hover callback (for
+      // example after a fast pointer move). Do not reuse the previous target
+      // when the pointer is clearly elsewhere; the coordinate preview below
+      // resolves the atom at the actual context-menu location.
+      if (current && lastHoverPoint &&
+          Math.hypot(x - Number(lastHoverPoint.x || 0), y - Number(lastHoverPoint.y || 0)) > 64) {
+        current = null;
+      }
       if (current && hoverIsCurrent()) {
         e.preventDefault();
         pushTarget({kind:current.kind, payload:current, scene_id:sceneId, x:x, y:y, ts:Date.now()});

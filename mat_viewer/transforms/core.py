@@ -606,6 +606,13 @@ def atoms_under_symmetry(
             new_cart = frac_to_cart(new_frac, M_arr)
             shift_int = (int(op_idx), 0, 0)  # encode op id in image_shift slot
             new = _atom_copy(atom, image_shift=shift_int, new_label_suffix=f"<sym{op_idx}>")
+            # Keep symmetry provenance separate from periodic image identity.
+            # The historical ``_image_shift`` encoding remains for callers
+            # that inspect transform output, while semantic IDs and scoped
+            # selection can now distinguish a symmetry operation from a real
+            # PBC replica.
+            new["_symop_index"] = int(op_idx)
+            new["_symmetry_operation_index"] = int(op_idx)
             new["cart"] = new_cart.copy()
             new["frac"] = new_frac.copy()
             label_key = (str(atom.get("label") or ""), shift_int)
