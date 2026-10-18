@@ -613,6 +613,7 @@ def atoms_under_symmetry(
             # PBC replica.
             new["_symop_index"] = int(op_idx)
             new["_symmetry_operation_index"] = int(op_idx)
+            new["_symmetry_scope"] = True
             new["cart"] = new_cart.copy()
             new["frac"] = new_frac.copy()
             label_key = (str(atom.get("label") or ""), shift_int)

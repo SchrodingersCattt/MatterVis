@@ -93,14 +93,20 @@ def atom_instance_id(atom: Mapping[str, Any], display_index: int | None = None) 
         or atom.get("dg")
     )
     parts = [f"source:{_token(source)}"]
-    if symmetry not in (None, ""):
+    include_symmetry = bool(atom.get("_symmetry_scope"))
+    if not include_symmetry and symmetry not in (None, ""):
+        try:
+            include_symmetry = int(symmetry) != 0
+        except (TypeError, ValueError):
+            include_symmetry = True
+    if include_symmetry and symmetry not in (None, ""):
         parts.append(f"symmetry:{_token(symmetry)}")
     # ``atoms_under_symmetry`` historically encoded the operation ordinal in
     # ``_image_shift=(op,0,0)``. Once explicit symmetry provenance is present,
     # suppress that legacy token so IDs describe source/symmetry scope rather
     # than pretending the operation is a periodic replica.
     legacy_symmetry_image = False
-    if symmetry not in (None, ""):
+    if include_symmetry and symmetry not in (None, ""):
         try:
             legacy_symmetry_image = tuple(int(value) for value in image) == (
                 int(symmetry),
