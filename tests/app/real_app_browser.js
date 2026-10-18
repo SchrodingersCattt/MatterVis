@@ -642,12 +642,14 @@ async function runSemanticPick(page) {
   // SwiftShader does not consistently emit Plotly's gl3d click event for an
   // atom. Find a point through the coordinate hover endpoint and click it as
   // a real browser gesture.
-  const atomHit = await scanCanvas(page, async () => {
-    return page.evaluate(() => {
+  const atomHit = await scanCanvas(page, async (x, y) => {
+    return page.evaluate(({x: expectedX, y: expectedY}) => {
       const tip = document.getElementById("mv-atom-tip");
       const text = String((tip && tip.textContent) || "").trim();
-      return tip && !tip.hidden && text ? text : null;
-    });
+      if (!tip || tip.hidden || !text) return null;
+      const rect = tip.getBoundingClientRect();
+      return Math.abs(rect.left - expectedX - 14) < 24 && Math.abs(rect.top - expectedY - 16) < 24 ? text : null;
+    }, {x, y});
   });
   if (!atomHit) fail("could not hover an atom long enough to show #mv-atom-tip");
   const atomLabel = String(atomHit.result).split(" (")[0].trim();
@@ -679,9 +681,12 @@ async function runSemanticPick(page) {
     });
   }, {columns: 18, rows: 12, pause: 80});
   if (!nonAtomHit) fail("could not hover a polyhedron or facet for the additive semantic click");
-  await page.keyboard.down("Shift");
+  // Ctrl is the toggle modifier used by both Plotly and the coordinate
+  // fallback; this keeps the assertion meaningful if SwiftShader drops the
+  // custom plotly_click event for the transparent marker.
+  await page.keyboard.down("Control");
   await page.mouse.click(nonAtomHit.x, nonAtomHit.y);
-  await page.keyboard.up("Shift");
+  await page.keyboard.up("Control");
   await page.waitForFunction(async ({kind, id, label}) => {
     const response = await fetch("/api/v2/selection", {cache: "no-store"});
     if (!response.ok) return false;

@@ -622,6 +622,10 @@
       return;
     }
     let plotlyClickObserved = false;
+    let gestureSequence = 0;
+    let activeGestureId = null;
+    let lastPointerGesture = null;
+    let semanticClickGesture = null;
     try {
       inner.on("plotly_hover", function (ed) {
         if (ed && ed.points && ed.points.length) {
@@ -641,7 +645,14 @@
       inner.on("plotly_click", function (ed) {
         const native = ed && ed.event;
         plotlyClickObserved = true;
+        const recentPointer = lastPointerGesture && Date.now() - lastPointerGesture.at < 120
+          ? lastPointerGesture.id : null;
+        const gestureId = activeGestureId || recentPointer || ++gestureSequence;
+        semanticClickGesture = gestureId;
         setTimeout(function () { plotlyClickObserved = false; }, 0);
+        setTimeout(function () {
+          if (semanticClickGesture === gestureId) semanticClickGesture = null;
+        }, 120);
         const target = ed && ed.points && ed.points.length ? targetFromPoint(ed.points[0]) : null;
         if (!target) { publishSemanticSelection(null, "clear"); return; }
         const additive = !!(native && (native.shiftKey || native.ctrlKey || native.metaKey));
@@ -666,6 +677,7 @@
       tipSeq += 1;
       if (tipTimer) clearTimeout(tipTimer);
       hideAtomTip();
+      hoverInspector(null);
     }
     container.addEventListener("mouseleave", handlePointerLeave);
     container.addEventListener("pointerleave", handlePointerLeave);
@@ -733,6 +745,83 @@
         }).catch(function () {});
       }, 90);
     }
+    let pointerDown = null;
+    let lastPrimaryPick = null;
+    function primaryPick(e, gestureId) {
+      if ((e.button !== undefined && e.button !== 0) || e.shiftKey || e.altKey) return;
+      if (e.target && e.target.closest && e.target.closest(".mv-canvas-toolbar, .modebar, .rightclick-menu")) return;
+      const now = Date.now();
+      if (!gestureId) {
+        const recentPointer = lastPointerGesture && now - lastPointerGesture.at < 120 &&
+          Math.abs(lastPointerGesture.x - e.clientX) < 1 &&
+          Math.abs(lastPointerGesture.y - e.clientY) < 1;
+        gestureId = activeGestureId || (recentPointer ? lastPointerGesture.id : null) ||
+          semanticClickGesture || ++gestureSequence;
+      }
+      /* A native click follows pointerup for one gesture. Keep the id across
+       * both events and defer the coordinate fallback so Plotly's custom
+       * plotly_click handler can claim the gesture first. */
+      if (lastPrimaryPick && lastPrimaryPick.id === gestureId) return;
+      lastPrimaryPick = {id:gestureId, at:now, x:e.clientX, y:e.clientY};
+      const picked = pickRect(e.clientX, e.clientY, 14);
+      const additive = !!(e.ctrlKey || e.metaKey);
+      setTimeout(function () {
+        if (plotlyClickObserved || semanticClickGesture === gestureId) return;
+        // Coordinate picking is a preview. Publish the resulting atom target
+        // through the semantic store so it cannot overwrite a non-atom target
+        // and Ctrl/Cmd uses the same toggle path as Plotly clicks.
+        postSelection(picked.rect, picked.viewport, additive, false).then(function (body) {
+          const selection = body && body.selection;
+          const labels = selection && selection.atom_labels || [];
+          const parts = selection && selection.parts || [];
+          const semanticTargets = selection && selection.targets || [];
+          if (!labels.length) {
+            publishSemanticSelection(null, "clear");
+            return;
+          }
+          labels.forEach(function (label, index) {
+            const part = parts[index] || {};
+            const semantic = semanticTargets[index] || {};
+            const target = {
+              kind: String(semantic.kind || "atom"),
+              id: String(semantic.id || part.id || "atom:label:" + label),
+              label: String(label),
+              element: part.elem || "",
+              is_minor: !!part.is_minor,
+              part: part.part || "",
+            };
+            const mode = additive
+              ? (index === 0 && (e.ctrlKey || e.metaKey) ? "toggle" : "add")
+              : (index === 0 ? "replace" : "add");
+            publishSemanticSelection(target, mode);
+          });
+        }).catch(function () {});
+      }, 0);
+    }
+    container.addEventListener("pointerdown", function (e) {
+      if (e.button === undefined || e.button === 0) {
+        const id = ++gestureSequence;
+        activeGestureId = id;
+        pointerDown = {x:e.clientX, y:e.clientY, id:id};
+      }
+    }, {passive:true});
+    container.addEventListener("pointerup", function (e) {
+      if (!pointerDown) return;
+      const moved = Math.hypot(e.clientX - pointerDown.x, e.clientY - pointerDown.y);
+      const gesture = pointerDown;
+      lastPointerGesture = {id:gesture.id, at:Date.now(), x:e.clientX, y:e.clientY};
+      pointerDown = null;
+      if (moved <= 4) primaryPick(e, gesture.id);
+      setTimeout(function () {
+        if (activeGestureId === gesture.id) activeGestureId = null;
+      }, 0);
+    });
+    container.addEventListener("click", function (e) {
+      /* Synthetic click events do not always populate ``button``. Treat an
+       * omitted value as the normal primary click while still ignoring an
+       * explicit secondary/middle button. */
+      primaryPick(e);
+    });
     container.addEventListener("click", function (e) {
       if (e.defaultPrevented) return;
       setTimeout(function () {
