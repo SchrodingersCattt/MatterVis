@@ -219,7 +219,7 @@ assert.equal(calls.length,0,'older parked frame overwrote newer canvas revision'
 // A current parked frame is delivered once the selected-scene metadata moves
 // to the same scene/revision.
 timers=[]; expected={scene_id:'a',render_revision:1,server_started_at:'epoch'}; gd.layout=figure(0,'a').layout;
-send(frame(2,'b')); expected={scene_id:'b',render_revision:2,server_started_at:'epoch'}; drain();
+send(frame(4,'b')); expected={scene_id:'b',render_revision:4,server_started_at:'epoch'}; drain();
 await Promise.resolve();
 assert.equal(calls.length,1,'current parked frame was not delivered');
 })().catch(error=>{console.error(error);process.exitCode=1;});
