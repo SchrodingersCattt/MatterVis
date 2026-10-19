@@ -560,11 +560,11 @@
       Number(expected.render_revision || 0) === Number(shown.render_revision || 0) &&
       Number(expected.display_version || 0) === Number(shown.display_version || 0);
   }
-  function scheduleQueuedSceneFigureSettle(sceneId, queued, attempt) {
+  function scheduleQueuedSceneFigureSettle(sceneId, queued, settleAttempt) {
     const key = String(sceneId || "");
     if (!key || pendingFigureByScene[key] !== queued || pendingFigureRetryTimers[key]) return;
-    attempt = Number(attempt || 0);
-    if (attempt >= 8) {
+    settleAttempt = Number(settleAttempt || 0);
+    if (settleAttempt >= 8) {
       delete pendingFigureByScene[key];
       return;
     }
@@ -575,15 +575,25 @@
         // Dash may repaint with its stale figure prop just after Plotly.react
         // resolves. Require several stable observations before releasing the
         // parked frame so that repaint gets a second replay if needed.
-        if (attempt >= 2) {
+        if (settleAttempt >= 2) {
           delete pendingFigureByScene[key];
           return;
         }
-        scheduleQueuedSceneFigureSettle(key, queued, attempt + 1);
+        scheduleQueuedSceneFigureSettle(key, queued, settleAttempt + 1);
         return;
       }
-      flushQueuedSceneFigure(key, attempt + 1);
-    }, attempt ? 100 : 250);
+      // The first settle observation can see the stale Dash layout before
+      // Plotly.react's promise has updated the canvas. Reapply the same
+      // selected frame with the settle counter advancing independently from
+      // the tab handoff counter; this keeps the replay bounded and avoids
+      // resetting the counter on every stale observation.
+      if (typeof figurePushIsCurrent === "function" && !figurePushIsCurrent(queued)) {
+        scheduleQueuedSceneFigureRetry(key, Number(queued.handoffAttempts || 0));
+        return;
+      }
+      applyFigurePush(queued.figure.data||[], queued.figure.layout||{});
+      scheduleQueuedSceneFigureSettle(key, queued, settleAttempt + 1);
+    }, settleAttempt ? 100 : 250);
   }
   function clearQueuedSceneFigure(sceneId, sequence) {
     const key = String(sceneId || "");
