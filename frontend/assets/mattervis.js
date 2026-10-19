@@ -786,13 +786,43 @@
     }
     return payload;
   }
+  function clearSelectionOutline() {
+    const gd = graphDiv();
+    if (!gd || !Array.isArray(gd.data)) return;
+    const indices = [];
+    gd.data.forEach(function (trace, index) {
+      const meta = trace && trace.meta || {};
+      const role = String(meta.mv_role || meta.kind || "").toLowerCase();
+      const name = String(trace && trace.name || "").toLowerCase();
+      const x = Array.isArray(trace && trace.x) ? trace.x : [];
+      if ((role === "selection" || name === "selection-outline")
+          && trace.visible !== false && x.length > 0) {
+        indices.push(index);
+      }
+    });
+    if (!indices.length) return;
+    if (window.Plotly && typeof window.Plotly.restyle === "function") {
+      try {
+        window.Plotly.restyle(gd, {visible: false}, indices);
+        return;
+      } catch (_) {}
+    }
+    indices.forEach(function (index) {
+      if (gd.data[index]) gd.data[index].visible = false;
+    });
+  }
   function publishSemanticSelection(target, mode) {
     if (!target && mode !== "clear") return;
     const nextMode = mode || "replace";
     const sceneId = currentSceneId();
     const persistentTargets = persistentTargetsForScene(sceneId);
-    if (nextMode === "clear") persistentTargetsByScene[sceneSelectionKey(sceneId)] = [];
-    else if (nextMode === "add") {
+    if (nextMode === "clear") {
+      persistentTargetsByScene[sceneSelectionKey(sceneId)] = [];
+      // Hide the previous outline immediately. The server callback will
+      // publish the empty selection and subsequent figure refreshes remain
+      // authoritative, but a delayed frame must not leave stale ink visible.
+      clearSelectionOutline();
+    } else if (nextMode === "add") {
       const exists = persistentTargets.some(function(item){return item.kind===target.kind&&item.id===target.id;});
       if (!exists) persistentTargets.push(target);
     }
