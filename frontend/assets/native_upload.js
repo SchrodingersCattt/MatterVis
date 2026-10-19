@@ -14,6 +14,7 @@
     return;
   }
   window.__mattervisNativeUploadInstalled = true;
+  let installTimer = null;
 
   function byId(id) {
     return document.getElementById(id);
@@ -276,12 +277,26 @@
     }
   }
 
+  function scheduleInstall() {
+    if (installTimer !== null) {
+      return;
+    }
+    installTimer = window.setTimeout(function () {
+      installTimer = null;
+      install();
+    }, 250);
+  }
+
   function install() {
     const dropzone = byId("scene-cif-upload");
     const input = byId("scene-cif-upload-input");
     if (!dropzone || !input) {
-      window.setTimeout(install, 250);
+      scheduleInstall();
       return;
+    }
+    if (installTimer !== null) {
+      window.clearTimeout(installTimer);
+      installTimer = null;
     }
     // Dash may replace either node when a scene callback refreshes the left
     // panel. Keep the binding tied to the current input element instead of

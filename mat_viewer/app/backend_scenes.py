@@ -45,6 +45,16 @@ class _SceneBackendMixin:
             self.scene_store.scenes[scene.id] = scene
             restored.append(scene.id)
             self._render_revisions[str(scene.id)] = 0
+            # Restoring a persisted id creates a new in-memory scene
+            # generation.  Late frames from the pre-close instance must not
+            # become valid for the restored scene merely because the id is
+            # the same.
+            self._scene_generation_counter += 1
+            self._scene_generations[str(scene.id)] = self._scene_generation_counter
+            restored_state = self.scene_state(scene.id)
+            self._camera_revisions[str(scene.id)] = int(
+                restored_state.get("camera_revision", 0) or 0
+            )
 
         # Preserve any scenes created after the close by appending them after
         # the original order instead of dropping a newer upload or duplicate.

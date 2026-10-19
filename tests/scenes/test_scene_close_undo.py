@@ -15,6 +15,7 @@ def test_undo_restores_closed_scene_and_active_tab(tmp_path):
         original = backend.active_scene_id()
         duplicate = backend.duplicate_scene(original)["id"]
         assert backend.active_scene_id() == duplicate
+        generation_before_close = backend.scene_generation(duplicate)
 
         backend.delete_scene(duplicate)
         assert duplicate not in {item["id"] for item in backend.scene_options()}
@@ -26,6 +27,7 @@ def test_undo_restores_closed_scene_and_active_tab(tmp_path):
             original,
             duplicate,
         ]
+        assert backend.scene_generation(duplicate) > generation_before_close
     finally:
         backend.close()
 

@@ -535,8 +535,14 @@
   }
   function scheduleQueuedSceneFigureRetry(sceneId, attempt) {
     const key = String(sceneId || "");
-    if (!key || pendingFigureRetryTimers[key] || !pendingFigureByScene[key]) return;
+    const queued = key && pendingFigureByScene[key];
+    if (!key || pendingFigureRetryTimers[key] || !queued) return;
     attempt = Number(attempt || 0);
+    // Preserve the handoff budget when settle detects a stale tab paint and
+    // has to return to the selected-scene retry path.  Without this marker,
+    // the settle fallback restarted at zero and could schedule another full
+    // handoff window indefinitely.
+    queued.handoffAttempts = attempt;
     if (attempt >= 24) {
       delete pendingFigureByScene[key];
       return;
