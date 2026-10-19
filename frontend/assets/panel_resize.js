@@ -10,8 +10,9 @@
 
   let resizingScene = false;
   let lastGraphRect = "";
+  let resizeFrame = 0;
 
-  function resizeScene() {
+  function resizeSceneNow() {
     if (resizingScene) {
       return;
     }
@@ -41,6 +42,18 @@
     } finally {
       resizingScene = false;
     }
+  }
+
+  function resizeScene() {
+    // Resize immediately and once more on the next paint so flex layout and
+    // CSS transitions settle before Plotly recalculates the 3-D viewport.
+    if (resizingScene) return;
+    resizeSceneNow();
+    if (resizeFrame || !window.requestAnimationFrame) return;
+    resizeFrame = window.requestAnimationFrame(function () {
+      resizeFrame = 0;
+      resizeSceneNow();
+    });
   }
 
   function panelWidth(id) {

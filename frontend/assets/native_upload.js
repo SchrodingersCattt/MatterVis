@@ -283,47 +283,83 @@
       window.setTimeout(install, 250);
       return;
     }
-    if (dropzone.dataset.nativeUploadInstalled === "1") {
+    // Dash may replace either node when a scene callback refreshes the left
+    // panel. Keep the binding tied to the current input element instead of
+    // treating the first mounted dropzone as permanent. This is what makes
+    // clicking the upload surface work after switching tabs or uploading a
+    // second file.
+    if (dropzone.__mattervisUploadInput === input) {
       return;
     }
-    dropzone.dataset.nativeUploadInstalled = "1";
 
-    dropzone.addEventListener("click", function () {
-      if (dropzone.dataset.uploadBusy === "1") {
-        return;
-      }
-      input.click();
-    });
-    dropzone.addEventListener("keydown", function (event) {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        input.click();
-      }
-    });
+    if (dropzone.dataset.nativeUploadInstalled !== "1") {
+      dropzone.dataset.nativeUploadInstalled = "1";
+      dropzone.addEventListener("click", function () {
+        if (dropzone.dataset.uploadBusy === "1") {
+          return;
+        }
+        const currentInput = dropzone.__mattervisUploadInput;
+        if (currentInput && typeof currentInput.click === "function") {
+          currentInput.click();
+        }
+      });
+      dropzone.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          const currentInput = dropzone.__mattervisUploadInput;
+          if (currentInput && typeof currentInput.click === "function") {
+            currentInput.click();
+          }
+        }
+      });
+
+      ["dragenter", "dragover"].forEach(function (type) {
+        dropzone.addEventListener(type, function (event) {
+          event.preventDefault();
+          dropzone.style.background = "#EEF2FF";
+        });
+      });
+      ["dragleave", "drop"].forEach(function (type) {
+        dropzone.addEventListener(type, function (event) {
+          event.preventDefault();
+          dropzone.style.background = "";
+        });
+      });
+      dropzone.addEventListener("drop", function (event) {
+        const currentInput = dropzone.__mattervisUploadInput;
+        uploadFiles(event.dataTransfer && event.dataTransfer.files, dropzone, currentInput);
+      });
+    }
+
+    dropzone.__mattervisUploadInput = input;
     input.addEventListener("change", function () {
       uploadFiles(input.files, dropzone, input);
     });
+  }
 
-    ["dragenter", "dragover"].forEach(function (type) {
-      dropzone.addEventListener(type, function (event) {
-        event.preventDefault();
-        dropzone.style.background = "#EEF2FF";
-      });
+  function watchLayout() {
+    if (window.__mattervisNativeUploadObserver || !window.MutationObserver) {
+      return;
+    }
+    const root = document.body || document.documentElement;
+    if (!root) {
+      window.setTimeout(watchLayout, 250);
+      return;
+    }
+    const observer = new MutationObserver(function () {
+      install();
     });
-    ["dragleave", "drop"].forEach(function (type) {
-      dropzone.addEventListener(type, function (event) {
-        event.preventDefault();
-        dropzone.style.background = "";
-      });
-    });
-    dropzone.addEventListener("drop", function (event) {
-      uploadFiles(event.dataTransfer && event.dataTransfer.files, dropzone, input);
-    });
+    observer.observe(root, { childList: true, subtree: true });
+    window.__mattervisNativeUploadObserver = observer;
   }
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", install);
+    document.addEventListener("DOMContentLoaded", function () {
+      install();
+      watchLayout();
+    });
   } else {
     install();
+    watchLayout();
   }
 })();

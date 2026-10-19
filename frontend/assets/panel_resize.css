@@ -124,6 +124,23 @@
   padding: 2px 8px;
 }
 
+.scene-undo-close-btn {
+  background: #f8fafc;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  color: #475467;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+}
+
+.scene-undo-close-btn:hover {
+  background: #eef6ff;
+  border-color: #84adcf;
+  color: #175cd3;
+}
+
 .scene-batch-close-btn:hover {
   background: #fef3f2;
   border-color: #f97066;
@@ -465,14 +482,18 @@ body.panel-resizing * {
   flex-direction: column;
   overflow: hidden;
   transition: max-height 160ms ease, width 160ms ease;
-  width: 540px;
+  width: min(540px, calc(100% - 28px));
   max-width: calc(100% - 28px);
   pointer-events: auto;
 }
 
 .perf-log-panel--collapsed {
   max-height: 36px;
-  width: 160px;
+  /* Keep the collapsed control as a small pill. The previous fixed 160px
+     width covered a large fraction of the viewport on phones and narrow
+     split panes, making the graph look horizontally clipped. */
+  width: 128px;
+  max-width: calc(100% - 16px);
 }
 
 .perf-log-panel--expanded {
@@ -488,6 +509,7 @@ body.panel-resizing * {
   background: #11161d;
   border-bottom: 1px solid #2c3340;
   user-select: none;
+  min-width: 0;
 }
 
 .perf-log-toggle,
@@ -501,6 +523,13 @@ body.panel-resizing * {
   font-weight: 700;
   padding: 2px 8px;
   border-radius: 5px;
+  min-width: 0;
+}
+
+.perf-log-toggle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .perf-log-toggle:hover,
@@ -568,4 +597,16 @@ body.panel-resizing * {
   color: #a3afc4;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+@media (max-width: 755px) {
+  .perf-log-panel {
+    right: 8px;
+    bottom: 8px;
+    max-width: calc(100% - 16px);
+  }
+
+  .perf-log-panel--collapsed {
+    width: 118px;
+  }
 }

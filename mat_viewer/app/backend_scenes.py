@@ -1,10 +1,80 @@
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
+import copy
+
 from .shared import *
+from ..scenes.core import Scene
 
 
 class _SceneBackendMixin:
+    def _record_scene_close(
+        self,
+        removed: list[dict[str, Any]],
+        *,
+        order: list[str],
+        active_id: str | None,
+    ) -> None:
+        """Keep a bounded in-memory snapshot for the visible Undo action."""
+        if not removed:
+            return
+        stack = getattr(self, "_scene_close_undo", None)
+        if stack is None:
+            stack = self._scene_close_undo = []
+        stack.append(
+            {
+                "removed": copy.deepcopy(removed),
+                "order": list(order),
+                "active_id": active_id,
+            }
+        )
+        del stack[:-8]
+
+    def undo_scene_close(self) -> dict[str, Any]:
+        """Restore the most recently closed scene set, if one exists."""
+        stack = getattr(self, "_scene_close_undo", None) or []
+        if not stack:
+            return {"restored": [], "active_id": self.active_scene_id()}
+        snapshot = stack.pop()
+        restored: list[str] = []
+        for payload in snapshot.get("removed") or []:
+            scene_id = str(payload.get("id") or "")
+            if not scene_id or scene_id in self.scene_store.scenes:
+                continue
+            scene = Scene.from_dict(payload)
+            self.scene_store.scenes[scene.id] = scene
+            restored.append(scene.id)
+            self._render_revisions[str(scene.id)] = 0
+
+        # Preserve any scenes created after the close by appending them after
+        # the original order instead of dropping a newer upload or duplicate.
+        original_order = [
+            str(scene_id)
+            for scene_id in snapshot.get("order") or []
+            if str(scene_id) in self.scene_store.scenes
+        ]
+        trailing = [
+            str(scene_id)
+            for scene_id in self.scene_store.order
+            if str(scene_id) not in original_order
+        ]
+        self.scene_store.order = original_order + trailing
+        wanted_active = snapshot.get("active_id")
+        if wanted_active in self.scene_store.scenes:
+            self.scene_store.active_id = str(wanted_active)
+        elif self.scene_store.active_id not in self.scene_store.scenes:
+            self.scene_store.active_id = (
+                self.scene_store.order[0] if self.scene_store.order else None
+            )
+        if self.scene_store.active_id:
+            self.current_state = self.scene_state(self.scene_store.active_id)
+            self.pending_state = self._state_snapshot(
+                self.current_state, self.scene_store.active_id
+            )
+        self._bump_version()
+        self._request_scene_store_save()
+        return {"restored": restored, "active_id": self.scene_store.active_id}
+
     def scene_options(self) -> list[dict[str, Any]]:
         return self.scene_store.list()
 
@@ -199,7 +269,12 @@ class _SceneBackendMixin:
         return scene.to_dict()
 
     def delete_scene(self, scene_id: str) -> dict[str, Any]:
+        order_before = list(self.scene_store.order)
+        active_before = self.scene_store.active_id
         removed = self.scene_store.remove(scene_id, save=False)
+        self._record_scene_close(
+            [removed.to_dict()], order=order_before, active_id=active_before
+        )
         self._render_revisions.pop(str(scene_id), None)
         self._scene_generations.pop(str(scene_id), None)
         self._camera_revisions.pop(str(scene_id), None)
@@ -224,6 +299,8 @@ class _SceneBackendMixin:
         keep_id = str(keep_id)
         if keep_id not in self.scene_store.scenes:
             raise KeyError(f"Unknown scene id: {keep_id}")
+        order_before = list(self.scene_store.order)
+        active_before = self.scene_store.active_id
         removed: list[dict[str, Any]] = []
         for scene_id in [
             sid for sid in list(self.scene_store.scenes.keys()) if sid != keep_id
@@ -235,6 +312,9 @@ class _SceneBackendMixin:
         self.scene_store.active_id = keep_id
         self.current_state = self.scene_state(keep_id)
         self.pending_state = self._state_snapshot(self.current_state, keep_id)
+        self._record_scene_close(
+            removed, order=order_before, active_id=active_before
+        )
         if removed:
             self._bump_version()
             self._request_scene_store_save()

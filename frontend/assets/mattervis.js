@@ -617,8 +617,22 @@
       clearTimeout(pendingFigureRetryTimers[String(sceneId)]);
       delete pendingFigureRetryTimers[String(sceneId)];
     }
+    // A newer frame may already be visible while this parked frame was waiting
+    // for the selected tab. Never let the older frame repaint over it.
+    const gd = graphDiv();
+    const queuedRender = renderMetadataFromLayout(queued.figure.layout || {});
+    const shownRender = renderMetadataFromLayout(gd && gd.layout);
+    const sameSceneEpoch = queuedRender && shownRender
+      && String(queuedRender.scene_id || "") === String(shownRender.scene_id || "")
+      && (!queuedRender.server_started_at || !shownRender.server_started_at
+        || String(queuedRender.server_started_at) === String(shownRender.server_started_at));
+    if (sameSceneEpoch
+        && Number(shownRender.render_revision || 0) >= Number(queuedRender.render_revision || 0)) {
+      clearQueuedSceneFigure(sceneId, Number(queued.figure_seq || queued.seq || 0));
+      return;
+    }
     applyFigurePush(queued.figure.data||[], queued.figure.layout||{});
-    scheduleQueuedSceneFigureSettle(sceneId, queued, 0);
+    scheduleQueuedSceneFigureSettle(sceneId, queued, Number(attempt || 0));
   }
   // Dash applies ``scene-tabs.value`` and paints the selected tab in
   // separate turns.  A completed upload can therefore be queued by the
