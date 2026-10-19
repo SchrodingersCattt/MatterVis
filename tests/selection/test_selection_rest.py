@@ -198,3 +198,48 @@ def test_selection_scope_rejects_unknown_scope_and_malformed_target():
     assert response.status_code == 400
     response = client.post("/api/v2/selection/scope", json={"target": {}})
     assert response.status_code == 400
+
+
+def test_selection_scope_rejects_kind_mismatch_without_clearing_selection():
+    app = create_app()
+    app.server.config["TESTING"] = True
+    client = app.server.test_client()
+    scene = app.crystal_backend.scene_for_state(app.crystal_backend.get_state())
+    atom = scene["draw_atoms"][0]
+    target = {"kind": "atom", "id": atom_instance_id(atom, 0)}
+    client.post("/api/v2/selection/targets", json={"target": target})
+
+    response = client.post(
+        "/api/v2/selection/scope",
+        json={"target": target, "scope": "spec"},
+    )
+    assert response.status_code == 400
+    assert client.get("/api/v2/selection/targets").get_json()["selection"]["targets"] == [target]
+
+
+def test_geometry_selection_and_override_survive_unrelated_identity_patch():
+    app = create_app()
+    app.server.config["TESTING"] = True
+    client = app.server.test_client()
+    target = {"kind": "geometry", "id": "mesh-reconcile-test"}
+    client.post("/api/v2/selection/targets", json={"target": target})
+    response = client.patch(
+        "/api/v2/style_overrides",
+        json={"target_id": target["id"], "kind": target["kind"], "style": {"color": "#123456"}},
+    )
+    assert response.status_code == 200
+
+    app.crystal_backend.patch_state(
+        {
+            "atom_groups": [
+                {
+                    "id": "reconcile-noop",
+                    "selector": {"labels": ["__does-not-exist__"]},
+                    "visible": True,
+                }
+            ]
+        }
+    )
+    selection = client.get("/api/v2/selection/targets").get_json()["selection"]
+    assert selection["targets"] == [target]
+    assert client.get("/api/v2/style_overrides").get_json()["style_overrides"][target["id"]]["color"] == "#123456"
