@@ -622,9 +622,13 @@
     }
     // A newer frame may already be visible while this parked frame was waiting
     // for the selected tab. Never let the older frame repaint over it.
-    const gd = graphDiv();
-    const queuedRender = renderMetadataFromLayout(queued.figure.layout || {});
-    const shownRender = renderMetadataFromLayout(gd && gd.layout);
+    const gd = typeof graphDiv === "function" ? graphDiv() : null;
+    const queuedRender = typeof renderMetadataFromLayout === "function"
+      ? renderMetadataFromLayout(queued.figure.layout || {})
+      : null;
+    const shownRender = typeof renderMetadataFromLayout === "function"
+      ? renderMetadataFromLayout(gd && gd.layout)
+      : null;
     const sameSceneEpoch = queuedRender && shownRender
       && String(queuedRender.scene_id || "") === String(shownRender.scene_id || "")
       && (!queuedRender.server_started_at || !shownRender.server_started_at
