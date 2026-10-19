@@ -82,6 +82,25 @@ class _SelectionBackendMixin:
 
         expanded: list[dict[str, Any]] = []
         kind = str(normalized.get("kind") or "")
+        # A broad scope only has meaning for the target kinds whose identity
+        # metadata can be expanded.  Reject mismatches before mutating state;
+        # otherwise an atom + ``spec`` request falls through the atom matcher,
+        # produces an empty list, and silently clears the current selection.
+        allowed_scopes = {
+            "atom": {"instance", "source", "symmetry", "molecule", "part"},
+            "polyhedron": {"instance", "spec"},
+            "facet": {"instance", "facet_family"},
+            "morphology": {"instance"},
+            "bond": {"instance"},
+            "molecule": {"instance"},
+            "part": {"instance"},
+            "geometry": {"instance"},
+            "geometry_entity": {"instance"},
+        }
+        if wanted_scope not in allowed_scopes.get(kind, {"instance"}):
+            raise ValueError(
+                f"scope {wanted_scope!r} is not supported for target kind {kind!r}"
+            )
         if wanted_scope == "instance" or kind != "atom":
             expanded = [normalized]
         else:
@@ -262,17 +281,27 @@ class _SelectionBackendMixin:
                 bond_instance_id(bond, atoms, index)
                 for index, bond in enumerate(bonds)
             },
-            "geometry": set(),
-            "geometry_entity": set(),
             "facet": set(),
             "morphology": set(),
         }
-        for entity in scene.get("geometry_entities") or []:
-            if not isinstance(entity, dict) or entity.get("id") in (None, ""):
-                continue
-            entity_id = str(entity["id"])
-            valid["geometry"].add(entity_id)
-            valid["geometry_entity"].add(entity_id)
+        # ``scene_for_state`` does not materialise caller-owned geometry for
+        # every backend (for example when the mesh is supplied by a higher
+        # level renderer).  An absent list therefore means that geometry
+        # identity is unknown, not that the list is empty.  Only filter these
+        # targets when the scene explicitly supplies an authoritative list;
+        # otherwise unrelated display changes must preserve the selection and
+        # its style overrides.
+        geometry_entities = scene.get("geometry_entities")
+        geometry_id_sets_authoritative = geometry_entities is not None
+        if geometry_id_sets_authoritative:
+            valid["geometry"] = set()
+            valid["geometry_entity"] = set()
+            for entity in geometry_entities or []:
+                if not isinstance(entity, dict) or entity.get("id") in (None, ""):
+                    continue
+                entity_id = str(entity["id"])
+                valid["geometry"].add(entity_id)
+                valid["geometry_entity"].add(entity_id)
         morphology = scene.get("bfdh_morphology") or {}
         if isinstance(morphology, dict):
             for index, facet in enumerate(morphology.get("facets") or []):
@@ -302,6 +331,8 @@ class _SelectionBackendMixin:
                 targets.append(target)
             elif kind in {"molecule", "part"}:
                 targets.append(target)
+            elif kind in {"geometry", "geometry_entity"} and not geometry_id_sets_authoritative:
+                targets.append(target)
             elif entity_id and entity_id in valid.get(kind, set()):
                 targets.append(target)
         target_keys = {(item.get("kind"), item.get("id")) for item in targets}
@@ -328,6 +359,9 @@ class _SelectionBackendMixin:
             kind = str(override.get("kind") or "geometry").lower()
             if kind in {"molecule", "part"} or (
                 kind == "polyhedron" and state.get("topology_enabled")
+            ) or (
+                kind in {"geometry", "geometry_entity"}
+                and not geometry_id_sets_authoritative
             ):
                 continue
             if target_id not in valid.get(kind, set()):
