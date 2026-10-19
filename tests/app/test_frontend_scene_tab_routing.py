@@ -92,9 +92,39 @@ vm.runInContext(prefix+'window.testScene={selectedSceneId,noteSceneTabIntent,sce
 const api=sandbox.window.testScene;
 api.noteSceneTabIntent({closest:()=>({id:'scene-tab-label-new'})});
 assert.equal(api.selectedSceneId(),'new');
-api.selectedSceneId();
 sandbox.window.MatterVisSelectScene('uploaded');
 assert.equal(api.selectedSceneId(),'uploaded');
+"""
+    result = subprocess.run(
+        [node, "-e", program, str(MATTERVIS_JS)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_visible_scene_chip_wins_over_hidden_selected_wrapper():
+    """A stale hidden dcc.Tab must not fence frames for the visible chip."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    program = r"""
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const stop=source.indexOf('  // ── Right-click menu');
+const prefix=source.slice(0,stop);
+const hidden={id:'scene-tab-hidden'};
+const chip={id:JSON.stringify({scene_id:'scene-chip'})};
+const tabs={querySelector:(selector)=>selector.indexOf('.scene-tab-chip--selected')>=0?chip:hidden,dataset:{}};
+const sandbox={console,Date,JSON,Number,String,Object,Array,Promise,setTimeout:()=>{},clearTimeout:()=>{},
+  requestAnimationFrame:()=>{},MutationObserver:function(){this.observe=()=>{};},
+  window:{Plotly:null,WebSocket:null,location:{protocol:'http:',host:'localhost'},
+    dash_clientside:{set_props:()=>true}},
+  document:{getElementById:id=>id==='scene-tabs'?tabs:null,querySelectorAll:()=>[],addEventListener:()=>{}}};
+vm.createContext(sandbox);
+vm.runInContext(prefix+'window.testScene={selectedSceneId,sceneIdFromTabNode};})();',sandbox);
+assert.equal(sandbox.window.testScene.selectedSceneId(),'scene-chip');
 """
     result = subprocess.run(
         [node, "-e", program, str(MATTERVIS_JS)],

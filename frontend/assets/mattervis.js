@@ -210,9 +210,11 @@
   function selectedSceneTabId() {
     const root = document.getElementById("scene-tabs");
     if (!root || typeof root.querySelector !== "function") return null;
-    const selected = root.querySelector(
-      "[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active, .scene-tab-chip--selected .tab-select"
-    );
+    // The compact chip is the visible selector.  Hidden dcc.Tab wrappers can
+    // retain a stale selected class while Dash applies the chip change; query
+    // the chip first so scroll/routing follows the scene the user sees.
+    const selected = root.querySelector(".scene-tab-chip--selected .tab-select") ||
+      root.querySelector("[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active");
     if (!selected) return null;
     const node = sceneIdFromTabNode(selected)
       ? selected
@@ -294,9 +296,11 @@
     const root = document.getElementById("scene-tabs");
     const intentAge = sceneTabIntentId ? Date.now() - sceneTabIntentAt : Infinity;
     const intentLive = sceneTabIntentId && intentAge < 10000;
-    const selected = root && root.querySelector(
-      "[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active, .scene-tab-chip--selected .tab-select"
-    );
+    // Prefer the visible chip over stale hidden tab classes during a Dash
+    // handoff; otherwise a frame for the newly clicked scene is fenced
+    // against the previous tab until the next unrelated click.
+    const selected = root && (root.querySelector(".scene-tab-chip--selected .tab-select") ||
+      root.querySelector("[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active"));
     const node = selected
       ? (sceneIdFromTabNode(selected)
         ? selected
