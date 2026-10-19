@@ -136,6 +136,11 @@
     if (updateKind(update) === "camera" && !cameraIsCurrent(update, gd)) return false;
     var key = deliveryKey(update, gd);
     if (!delivered[key]) return true;
+    /* A parked frame can be replayed after Dash has repainted an older
+     * figure with the same scene/version key.  The replay marker is set only
+     * by the bounded scene-handoff queue and intentionally bypasses the
+     * delivered-key dedupe so the complete frame can restore the canvas. */
+    if (complete && update && update._mvForceReplay) return true;
     /* Switching away and back reuses the cached frame. The delivery key
      * is already known, but the canvas is still the other scene. */
     return !!(complete && scene && render.scene_id && String(scene) !== String(render.scene_id));
@@ -343,6 +348,11 @@
       var figureKey = deliveryKey(snapshot, gd);
       if (pending[figureKey]) return pending[figureKey];
       var layout = clone(snapshot.figure.layout || {});
+      if (snapshot._mvForceReplay) {
+        var replayMeta = layout.meta && typeof layout.meta === "object" ? layout.meta : {};
+        replayMeta = Object.assign({}, replayMeta, {mattervis_replay: true});
+        layout.meta = replayMeta;
+      }
       /* Live-camera preservation belongs to the frame gate, which keeps it
        * only for the same scene and interaction generation. Copying it here
        * would paint scene A's camera onto scene B before that gate runs. */

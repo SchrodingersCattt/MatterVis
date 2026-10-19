@@ -510,7 +510,8 @@
             const shown = renderMetadataFromLayout(gd.layout);
             const shownScene = shown && shown.scene_id ? String(shown.scene_id) : "";
             const incomingScene = render.scene_id ? String(render.scene_id) : "";
-            const alreadyShowing = gd.__mvDeliveredFrame===key && (!incomingScene || !shownScene || incomingScene===shownScene);
+            const replayFrame = !!(layout && layout.meta && layout.meta.mattervis_replay);
+            const alreadyShowing = !replayFrame && gd.__mvDeliveredFrame===key && (!incomingScene || !shownScene || incomingScene===shownScene);
             /* Do not leave the busy pill behind when a stale/duplicate frame
              * is rejected. Mark the request busy only after the frame gate
              * confirms that this Plotly call will actually run. */
@@ -684,6 +685,10 @@
       ? window.MatterVisViewUpdates.submit
       : null;
     if (submitter) {
+      // Dash can repaint an older complete figure after the first submit.
+      // Mark every bounded replay so the typed gate and Plotly render gate
+      // may reapply an equal-key frame instead of treating it as delivered.
+      queued._mvForceReplay = true;
       let submitted;
       try {
         // Re-enter the typed submitter on replay.  A parked frame may have
