@@ -440,7 +440,11 @@
       if (expectedState&&Number(render.camera_revision||0)<expectedState.cameraRevision) return false;
       if (sceneId&&expectedCameraRevisionByScene[sceneId]!==undefined && Number(render.camera_revision||0)<expectedCameraRevisionByScene[sceneId]) return false;
     }
-    if (sceneId&&expectedSceneGenerationByScene[sceneId]!==undefined && String(render.scene_generation||"")!==expectedSceneGenerationByScene[sceneId]) return false;
+    // A complete frame replacing another scene may carry its generation on
+    // the envelope while the figure layout's render metadata is from an
+    // older Dash prop. The typed submitter already fences the envelope;
+    // require generation equality only for same-scene patches/repaints.
+    if (!replacingScene && sceneId&&expectedSceneGenerationByScene[sceneId]!==undefined && String(render.scene_generation||"")!==expectedSceneGenerationByScene[sceneId]) return false;
     if (renderServerEpoch&&render.server_started_at&&renderServerEpoch!==String(render.server_started_at)) return false;
     return true;
   }
