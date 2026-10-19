@@ -941,18 +941,34 @@ async function canvasInk(page) {
 
 async function selectUnitCell(page) {
   const host = page.locator("#display-mode-selector");
-  const label = ((await host.innerText()) || "").replace(/\s+/g, " ");
-  const alreadySelected = /^\s*Unit cell\b/i.test(label);
-  if (!alreadySelected) {
-    await host.click();
-    await page.getByRole("option", { name: "Unit cell", exact: true }).click();
+  let changed = false;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const label = ((await host.innerText()) || "").replace(/\s+/g, " ");
+    const alreadySelected = /^\s*Unit cell\b/i.test(label);
+    if (!alreadySelected || attempt > 0) {
+      await host.click();
+      await page.getByRole("option", { name: "Unit cell", exact: true }).click();
+      changed = true;
+    }
+    await page.waitForFunction(() => {
+      const node = document.getElementById("display-mode-selector");
+      const text = ((node && node.innerText) || "").replace(/\s+/g, " ").trim();
+      return text === "Unit cell" || text.startsWith("Unit cell");
+    }, null, {timeout: 30000});
+    const serverReady = await page.waitForFunction(async () => {
+      const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+      const meta = gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
+      if (!meta || !meta.scene_id) return false;
+      try {
+        const state = await fetch("/api/v2/state?scene_id=" + encodeURIComponent(meta.scene_id), {cache: "no-store"}).then((response) => response.json());
+        return !!(state && state.display_mode === "unit_cell");
+      } catch (_) {
+        return false;
+      }
+    }, null, {timeout: 10000}).then(() => true).catch(() => false);
+    if (serverReady) return changed;
   }
-  await page.waitForFunction(() => {
-    const node = document.getElementById("display-mode-selector");
-    const text = ((node && node.innerText) || "").replace(/\s+/g, " ").trim();
-    return text === "Unit cell" || text.startsWith("Unit cell");
-  }, null, {timeout: 30000});
-  return !alreadySelected;
+  return changed;
 }
 
 async function figureRevision(page) {
