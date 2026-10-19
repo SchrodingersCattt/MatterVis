@@ -122,6 +122,100 @@ def atom_instance_id(atom: Mapping[str, Any], display_index: int | None = None) 
     return "atom:" + "|".join(parts)
 
 
+def legacy_atom_instance_id(
+    atom: Mapping[str, Any], display_index: int | None = None
+) -> str | None:
+    """Return the pre-symmetry-scope ID for a transformed atom, if any.
+
+    Older presets and selections encoded a symmetry operation as the
+    periodic-looking ``image:<op>,0,0`` suffix.  Current IDs carry an
+    explicit ``symmetry:<op>`` component.  Keep the alias narrowly tied to a
+    current ID that actually contains symmetry provenance so a real periodic
+    image is never rewritten as a symmetry copy.
+    """
+
+    current = atom_instance_id(atom, display_index)
+    if "|symmetry:" not in current:
+        return None
+    symmetry = (
+        atom.get("_symop_index")
+        if atom.get("_symop_index") not in (None, "")
+        else atom.get("_symmetry_operation_index")
+    )
+    image = (
+        atom.get("_display_copy_id")
+        or atom.get("_replica_id")
+        or atom.get("_pbc_image")
+        or atom.get("_image")
+        or atom.get("_boundary_image")
+        or atom.get("_image_shift")
+    )
+    if symmetry in (None, ""):
+        # Explicit IDs do not expose enough provenance to construct a safe
+        # alias. Leave them untouched rather than guessing an operation.
+        return None
+    if image in (None, "", (), [], [0, 0, 0]):
+        # The historical ID omitted a zero image token, so removing the
+        # explicit symmetry field is enough for the identity operation.
+        return current.replace(f"|symmetry:{_token(symmetry)}", "", 1)
+    try:
+        image_tuple = tuple(int(value) for value in image)
+        symmetry_image = (int(symmetry), 0, 0)
+    except (TypeError, ValueError):
+        return None
+    if image_tuple != symmetry_image:
+        return None
+    legacy = current.replace(f"|symmetry:{_token(symmetry)}", "", 1)
+    chunks = legacy.split("|")
+    image_chunk = f"image:{_token(image)}"
+    if image_chunk not in chunks:
+        insert_at = next(
+            (index for index, chunk in enumerate(chunks) if chunk.startswith("disorder:")),
+            len(chunks),
+        )
+        chunks.insert(insert_at, image_chunk)
+    return "|".join(chunks)
+
+
+def atom_instance_id_aliases(
+    atom: Mapping[str, Any], display_index: int | None = None
+) -> tuple[str, ...]:
+    """Return the current atom ID followed by any safe legacy alias."""
+
+    current = atom_instance_id(atom, display_index)
+    legacy = legacy_atom_instance_id(atom, display_index)
+    return (current,) if not legacy or legacy == current else (current, legacy)
+
+
+def legacy_atom_target_id(target_id: Any) -> str | None:
+    """Convert a current symmetry target ID to its pre-scope alias.
+
+    This parser is used when resolving an entity that only exposes its
+    canonical target ID (without the source atom metadata).
+    """
+
+    value = _text(target_id)
+    if not value.startswith("atom:") or "|symmetry:" not in value:
+        return None
+    chunks = value.split("|")
+    symmetry_index = next(
+        (index for index, chunk in enumerate(chunks) if chunk.startswith("symmetry:")),
+        -1,
+    )
+    if symmetry_index < 0:
+        return None
+    symmetry = chunks[symmetry_index].split(":", 1)[1]
+    chunks.pop(symmetry_index)
+    image_chunk = f"image:{symmetry},0,0"
+    if image_chunk not in chunks:
+        insert_at = next(
+            (index for index, chunk in enumerate(chunks) if chunk.startswith("disorder:")),
+            len(chunks),
+        )
+        chunks.insert(insert_at, image_chunk)
+    return "|".join(chunks)
+
+
 def bond_instance_id(
     bond: Mapping[str, Any],
     atoms: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...] | None = None,
@@ -682,6 +776,9 @@ hit_priority = rank_hit_candidates
 
 __all__ = [
     "atom_instance_id",
+    "legacy_atom_instance_id",
+    "atom_instance_id_aliases",
+    "legacy_atom_target_id",
     "bond_instance_id",
     "ensure_polyhedron_instance_ids",
     "facet_instance_id",
