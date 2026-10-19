@@ -12,6 +12,7 @@ def test_serialized_frame_gate_and_live_camera():
         pytest.skip("Node.js is needed to execute the frontend regression")
     source = Path(__file__).resolve().parents[2] / "frontend/assets/mattervis.js"
     program = r"""
+(async()=>{
 const fs=require('node:fs'), vm=require('node:vm'), assert=require('node:assert/strict');
 const source=fs.readFileSync(process.argv[1],'utf8');
 let expected={scene_id:'a',render_revision:1,server_started_at:'epoch'};
@@ -283,6 +284,7 @@ assert.ok(calls.length >= 2,'slow handoff did not replay after stale Dash repain
 const last=calls[calls.length-1].meta.mattervis_render;
 assert.equal(last.scene_id,'b');
 assert.equal(last.render_revision,2);
+})().catch(error=>{console.error(error);process.exitCode=1;});
 """
     result = subprocess.run([node, "-e", program, str(source)], capture_output=True,
                             text=True, timeout=15)
