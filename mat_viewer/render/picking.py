@@ -206,13 +206,21 @@ def legacy_atom_target_id(target_id: Any) -> str | None:
         return None
     symmetry = chunks[symmetry_index].split(":", 1)[1]
     chunks.pop(symmetry_index)
-    image_chunk = f"image:{symmetry},0,0"
-    if image_chunk not in chunks:
-        insert_at = next(
-            (index for index, chunk in enumerate(chunks) if chunk.startswith("disorder:")),
-            len(chunks),
-        )
-        chunks.insert(insert_at, image_chunk)
+    # The identity symmetry operation historically had no image suffix.
+    # Keep that zero-image form distinct from a real periodic copy and in
+    # sync with legacy_atom_instance_id above.
+    try:
+        zero_image = int(symmetry) == 0
+    except (TypeError, ValueError):
+        zero_image = False
+    if not zero_image:
+        image_chunk = f"image:{symmetry},0,0"
+        if image_chunk not in chunks:
+            insert_at = next(
+                (index for index, chunk in enumerate(chunks) if chunk.startswith("disorder:")),
+                len(chunks),
+            )
+            chunks.insert(insert_at, image_chunk)
     return "|".join(chunks)
 
 
