@@ -609,6 +609,59 @@ def _build_capabilities_parser(
     return parser
 
 
+def _build_skills_parser(
+    subparsers: argparse._SubParsersAction,
+) -> argparse.ArgumentParser:
+    """Build the read-only bundled Agent Skills viewer."""
+    parser = subparsers.add_parser(
+        "skills",
+        help="Discover and read bundled Agent Skills.",
+        description=(
+            "Read bundled Agent Skills progressively. Documents are never "
+            "executed and referenced pages are only expanded explicitly."
+        ),
+    )
+    commands = parser.add_subparsers(dest="skills_command")
+
+    list_parser = commands.add_parser("list", help="List bundled skills and descriptions.")
+    list_parser.add_argument("--json", action="store_true", dest="json_output")
+
+    show_parser = commands.add_parser("show", help="Print a skill entrypoint or resource.")
+    show_parser.add_argument("name", metavar="SKILL_NAME")
+    show_parser.add_argument("--file", default="SKILL.md", metavar="RELATIVE_PATH")
+    show_parser.add_argument("--all", action="store_true", dest="all_files",
+                             help="Expand reachable Markdown references in link order.")
+    show_parser.add_argument("--json", action="store_true", dest="json_output")
+
+    tree_parser = commands.add_parser("tree", help="Show linked skill resources without bodies.")
+    tree_parser.add_argument("name", metavar="SKILL_NAME")
+    tree_parser.add_argument("--json", action="store_true", dest="json_output")
+    return parser
+
+
+def _skills_main(args: argparse.Namespace) -> None:
+    from .skill_viewer import SkillError, emit_list, emit_show, emit_tree, get_skill
+
+    if args.skills_command is None:
+        # Keep ``mat-vis skills`` useful without inventing a default content dump.
+        print("Use one of: mat-vis skills list, show, tree", file=sys.stderr)
+        raise SystemExit(2)
+    try:
+        if args.skills_command == "list":
+            emit_list(as_json=args.json_output)
+        elif args.skills_command == "show":
+            emit_show(
+                get_skill(args.name),
+                args.file,
+                all_files=args.all_files,
+                as_json=args.json_output,
+            )
+        else:
+            emit_tree(get_skill(args.name), as_json=args.json_output)
+    except SkillError as exc:
+        _fail(str(exc), json_output=getattr(args, "json_output", False))
+
+
 def _json_safe(value):
     if isinstance(value, dict):
         return {str(key): _json_safe(item) for key, item in value.items()}
@@ -1226,6 +1279,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     _build_render_parser(subparsers)
     _build_inspect_parser(subparsers)
     _build_capabilities_parser(subparsers)
+    _build_skills_parser(subparsers)
     _build_serve_parser(subparsers)
     _build_tui_parser(subparsers)
 
@@ -1240,6 +1294,8 @@ def main(argv: Optional[list[str]] = None) -> None:
         _inspect_main(args)
     elif args.command == "capabilities":
         _capabilities_main(args)
+    elif args.command == "skills":
+        _skills_main(args)
     elif args.command == "serve":
         try:
             resolve_requirements("web").require()

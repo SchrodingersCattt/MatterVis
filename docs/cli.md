@@ -34,6 +34,13 @@ mat-vis render neb.extxyz -o neb.gif --fps 6 \
 
 # Interactive HTML
 mat-vis render structure.extxyz -o interactive.html --backend plotly --orthogonal
+
+# Discover the bundled Agent Skills without cloning the repository
+mat-vis skills list --json
+mat-vis skills show visualize-materials
+mat-vis skills show visualize-materials --file references/camera.md
+mat-vis skills tree visualize-materials
+mat-vis skills show visualize-materials --all
 ~~~
 
 ## Subcommands
@@ -42,12 +49,23 @@ mat-vis render structure.extxyz -o interactive.html --backend plotly --orthogona
 |---------|-------------|
 | inspect | Report bounded source and structure metadata as JSON |
 | capabilities | Resolve requested features to exact optional extras |
+| skills | Discover and read bundled Agent Skills progressively |
 | render | Render a structure, one trajectory frame, or a GIF/MP4 animation |
 | serve | Launch the interactive Dash browser viewer |
 | tui | Open a supported structure or trajectory frame in the terminal |
 
 `inspect`, `capabilities`, and `render --check` are the agent preflight surface.
 `--check` resolves requirements only and never creates the output.
+
+### skills — bundled Agent Skills
+
+The `skills` viewer is read-only and uses the installed skill resources, so it
+also works from a different current directory after installing a wheel. The
+default `show` command prints only the raw `SKILL.md` entrypoint. Use
+`--file` for one referenced resource, `tree` to inspect local links without
+reading their bodies, or `--all` to expand reachable Markdown in deterministic
+link order. Scripts and external links are never executed or expanded. Add
+`--json` to `list`, `show`, or `tree` for machine-readable output.
 
 ## tui — terminal and online agent sessions
 
