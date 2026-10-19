@@ -1452,6 +1452,12 @@
       let parsed = null;
       try { parsed = JSON.parse(select.id); } catch (_) { parsed = null; }
       if (parsed && parsed.scene_id && window.dash_clientside && dash_clientside.set_props) {
+        // The compact chip is the visible scene selector. Establish the
+        // optimistic intent before Dash paints scene-tabs.value so an
+        // arriving frame is routed to the new scene instead of the old canvas.
+        if (typeof window.MatterVisSelectScene === "function") {
+          window.MatterVisSelectScene(parsed.scene_id);
+        }
         const status = document.getElementById("upload-status");
         if (status) status.textContent = "";
         dash_clientside.set_props("scene-tabs", {value: parsed.scene_id});
