@@ -332,7 +332,7 @@ def test_failed_selected_scene_frame_is_parked_for_retry():
 
     assert "every failed fence" in handle_body
     assert "pendingFigureByScene[sceneKey] = p" in handle_body
-    assert "submitted === \"stale\"" in handle_body
+    assert "replayQueuedSceneFigure(sceneKey, p)" in handle_body
 
 
 def test_ws_figure_sequence_cursor_is_scene_scoped():

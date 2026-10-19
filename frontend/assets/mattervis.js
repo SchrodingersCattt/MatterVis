@@ -575,7 +575,10 @@
     // the settle fallback restarted at zero and could schedule another full
     // handoff window indefinitely.
     queued.handoffAttempts = attempt;
-    if (attempt >= 24) {
+    // Scene-tab callbacks can spend several seconds in a Dash turn while the
+    // old figure is still mounted. Keep the retry bounded, but long enough to
+    // bridge that handoff instead of dropping the only complete frame.
+    if (attempt >= 120) {
       delete pendingFigureByScene[key];
       return;
     }
@@ -613,7 +616,7 @@
         // Dash may repaint with its stale figure prop just after Plotly.react
         // resolves. Require several stable observations before releasing the
         // parked frame so that repaint gets a second replay if needed.
-        if (settleAttempt >= 2) {
+        if (settleAttempt >= 4) {
           delete pendingFigureByScene[key];
           return;
         }
@@ -709,11 +712,8 @@
       if (String(currentSceneId() || "") === String(sceneId)
           && window.MatterVisViewUpdates
           && typeof window.MatterVisViewUpdates.submit === "function") {
-        const submitted = window.MatterVisViewUpdates.submit(queued);
-        if (submitted !== "stale") {
-          clearQueuedSceneFigure(sceneId, Number(queued.figure_seq || queued.seq || 0));
-          return;
-        }
+        replayQueuedSceneFigure(sceneId, queued);
+        return;
       }
       // A completed frame may beat Dash's selected-tab paint by several
       // turns. Keep the revision-0 frame parked by scene and retry the handoff
@@ -1802,18 +1802,17 @@
       clearQueuedSceneFigure(p.scene_id, seq);
       if (interactionActive) { p.isCurrent=function(){return isCurrentFigurePush(p);}; pendingFigurePush=p; return; }
       if (sceneTabIntentId && p.scene_id && String(p.scene_id) === sceneTabIntentId) sceneTabIntentAt = 0;
-      if (window.MatterVisViewUpdates && typeof window.MatterVisViewUpdates.submit === "function") {
-        const submitted = window.MatterVisViewUpdates.submit(p);
-        // The typed submitter can still reject a complete frame after the
-        // websocket fence (the selected-scene metadata may lag by one Dash
-        // turn). Park that frame so the selection barrier can retry it instead
-        // of losing the only copy of the new scene's first paint.
-        if (submitted === "stale" && p.scene_id) {
-          const sceneKey = String(p.scene_id);
-          p.isCurrent=function(){return isCurrentFigurePush(p);};
-          pendingFigureByScene[sceneKey] = p;
-          scheduleQueuedSceneFigureRetry(sceneKey, 0);
-        }
+      // Keep a short settle guard even after a successful typed submit. Dash
+      // can repaint its stale figure prop immediately after Plotly.react
+      // resolves; retaining this frame lets the settle observer replay it
+      // through the same ordering fence instead of losing the canvas handoff.
+      if (p.scene_id) {
+        const sceneKey = String(p.scene_id);
+        p.isCurrent=function(){return isCurrentFigurePush(p);};
+        pendingFigureByScene[sceneKey] = p;
+        replayQueuedSceneFigure(sceneKey, p);
+      } else if (window.MatterVisViewUpdates && typeof window.MatterVisViewUpdates.submit === "function") {
+        window.MatterVisViewUpdates.submit(p);
       } else {
         applyFigurePush(p.figure.data||[], p.figure.layout||{});
       }
