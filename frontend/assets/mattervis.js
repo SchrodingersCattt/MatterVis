@@ -693,6 +693,11 @@
     lastHovered = null;
     lastHoverPoint = null;
     lastClient = {x:0, y:0};
+    // Plotly can retain a recycled payload on the graph node after a full
+    // frame replacement. Clear it with the browser-local cache so a later
+    // contextmenu cannot revive an object from the previous scene.
+    const gd = graphDiv();
+    if (gd) gd._hoverdata = null;
     const tip = document.getElementById("mv-atom-tip");
     if (tip) tip.hidden = true;
     const inspector = document.getElementById("mv-hover-inspector");
@@ -1191,7 +1196,10 @@
       const y = Number(e.clientY);
       let current = lastHovered;
       const cachedHover = lastHoverPoint;
-      const cachedHoverFresh = !cachedHover ||
+      // A missing cache is stale.  The graph node may still expose an old
+      // ``_hoverdata`` payload after Plotly recycled it, and accepting that
+      // payload when ``lastHoverPoint`` is null reopens a prior target.
+      const cachedHoverFresh = !!cachedHover &&
         (Date.now() - cachedHover.at <= 250 &&
          Math.hypot(x - Number(cachedHover.x || 0), y - Number(cachedHover.y || 0)) <= 64);
       // Plotly can retain a hover payload after the pointer moved away. Never
