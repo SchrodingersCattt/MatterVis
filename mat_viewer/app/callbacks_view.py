@@ -619,7 +619,18 @@ def register_view_callbacks(app, backend):
               var meta = gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
               var canvasId = meta && meta.scene_id ? String(meta.scene_id) : "";
               var gestureId = window.__mvGestureSceneId ? String(window.__mvGestureSceneId) : "";
+              // Dash may deliver relayoutData after Plotly has already
+              // painted the next scene and after the pointer gesture ended.
+              // Keep the scene that owned the last pointer gesture as a
+              // second fence so a late camera payload from scene A cannot be
+              // reinterpreted as a drag on scene B. A new pointerdown refreshes
+              // this marker for legitimate drags on B.
+              var lastGestureId = window.__mvLastGestureSceneId
+                ? String(window.__mvLastGestureSceneId) : "";
               if (gestureId && canvasId && gestureId !== canvasId) return window.dash_clientside.no_update;
+              if (!gestureId && lastGestureId && canvasId && lastGestureId !== canvasId) {
+                return window.dash_clientside.no_update;
+              }
               var sceneId = gestureId || canvasId;
               if (!sceneId) return window.dash_clientside.no_update;
               return {scene_id: sceneId, relayout: relayout, seq: Date.now()};

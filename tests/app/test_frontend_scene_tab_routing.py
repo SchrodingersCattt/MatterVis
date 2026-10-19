@@ -325,6 +325,34 @@ def test_deferred_ws_figure_keeps_and_revalidates_render_metadata():
     assert "figurePushIsCurrent(p)" in flush_body
 
 
+def test_failed_selected_scene_frame_is_parked_for_retry():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    handle_idx = source.index("function handleFigurePayload")
+    handle_body = source[handle_idx:source.index("function canUseWebSocket", handle_idx)]
+
+    assert "every failed fence" in handle_body
+    assert "pendingFigureByScene[sceneKey] = p" in handle_body
+    assert "submitted === \"stale\"" in handle_body
+
+
+def test_ws_figure_sequence_cursor_is_scene_scoped():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    handle_idx = source.index("function handleFigurePayload")
+    handle_body = source[handle_idx:source.index("function canUseWebSocket", handle_idx)]
+
+    assert "latestFigureSeqByScene[payloadScene]" in handle_body
+    assert "window.__mattervisFigureLastSeq = Math.max" in handle_body
+
+
+def test_http_figure_fallback_does_not_use_global_scene_cursor():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    poll_idx = source.index("function poll()")
+    poll_body = source[poll_idx:source.index("function stopHttpFallback", poll_idx)]
+
+    assert "var since = 0;" in poll_body
+    assert "per-scene cursors" in poll_body
+
+
 def test_upload_frame_is_queued_until_new_scene_tab_is_selected():
     source = MATTERVIS_JS.read_text(encoding="utf-8")
 

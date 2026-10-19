@@ -73,6 +73,37 @@ def test_state_poll_does_not_cross_contaminate_scene_controls(tmp_path, monkeypa
         backend.close()
 
 
+def test_state_poll_drops_older_same_scene_snapshot(tmp_path, monkeypatch):
+    """A queued pre-edit snapshot must not roll back the selected scene."""
+    backend = ViewerBackend(
+        preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path)
+    )
+    try:
+        scene_id = backend.active_scene_id()
+        backend.pop_pending_state()
+        backend.patch_state({"display_mode": "cluster"}, broadcast=True)
+        older = backend.peek_pending_state()
+        assert older is not None
+        backend.patch_state({"display_mode": "unit_cell"}, broadcast=False)
+        # Model a poll that captured the old queue entry before the newer
+        # browser edit committed.
+        backend.pending_state = older
+        assert backend.get_state(scene_id)["display_mode"] == "unit_cell"
+
+        registry = _CallbackRegistry()
+        callbacks_state.register_state_callbacks(registry, backend)
+        monkeypatch.setattr(
+            callbacks_state,
+            "callback_context",
+            SimpleNamespace(triggered=[{"prop_id": "agent-state-poll.n_intervals"}]),
+        )
+        result = registry.callbacks["sync_agent_state"](1, None, scene_id)
+        assert result[1] == "unit_cell"
+        assert result[-3]["display_mode"] == "unit_cell"
+    finally:
+        backend.close()
+
+
 def test_tab_switch_does_not_requeue_its_own_pending_state(tmp_path, monkeypatch):
     backend = ViewerBackend(
         preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path)

@@ -147,6 +147,25 @@ def test_sync_agent_state_poll_path_returns_no_update_for_camera_store() -> None
     )
 
 
+def test_camera_capture_drops_late_relayout_from_previous_scene() -> None:
+    """A delayed Plotly relayout must not be attributed to the new tab.
+
+    ``relayoutData`` has no scene id of its own.  The clientside bridge uses
+    the canvas metadata plus the scene that owned the last pointer gesture;
+    keeping that second marker prevents an event delivered after a tab switch
+    from persisting the old scene's camera on the newly painted scene.
+    """
+    callback_source = (
+        Path(__file__).resolve().parents[2] / "mat_viewer" / "app" / "callbacks_view.py"
+    ).read_text(encoding="utf-8")
+    assert "__mvLastGestureSceneId" in callback_source
+    assert "lastGestureId !== canvasId" in callback_source
+
+    mattervis = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "mattervis.js"
+    source = mattervis.read_text(encoding="utf-8")
+    assert "window.__mvLastGestureSceneId = sceneId" in source
+
+
 def test_broadcast_state_survives_following_ui_camera_write(backend: ViewerBackend) -> None:
     """A UI camera persist must not erase an already queued agent update."""
     backend.pop_pending_state()

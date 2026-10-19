@@ -648,6 +648,20 @@
     const queued = pendingFigureByScene[String(sceneId)];
     if (!queued) return;
     if (!figurePushIsCurrent(queued)) {
+      // Once the requested tab is actually selected, let the typed submitter
+      // make the final complete-frame decision. The fast handoff fence can
+      // still lag the selected scene's metadata by one Dash turn even though
+      // the frame is valid for this canvas; refusing to submit here strands
+      // the parked frame until the retry budget expires.
+      if (String(currentSceneId() || "") === String(sceneId)
+          && window.MatterVisViewUpdates
+          && typeof window.MatterVisViewUpdates.submit === "function") {
+        const submitted = window.MatterVisViewUpdates.submit(queued);
+        if (submitted !== "stale") {
+          clearQueuedSceneFigure(sceneId, Number(queued.figure_seq || queued.seq || 0));
+          return;
+        }
+      }
       // A completed frame may beat Dash's selected-tab paint by several
       // turns. Keep the revision-0 frame parked by scene and retry the handoff
       // briefly instead of evaluating its fence only once while the previous
@@ -1651,7 +1665,12 @@
       }
       function poll() {
         if (!window.__mattervisFigureFallbackActive) return;
-        var since = Number(window.__mattervisFigureLastSeq || 0);
+        // The journal sequence is global, but a global cursor can strand a
+        // scene whose newest frame has a lower sequence than another scene's
+        // frame already observed by this browser. Read the current journal
+        // head on every fallback poll and let the per-scene cursors in
+        // ``parkFallbackFigure``/``handleFigurePayload`` suppress duplicates.
+        var since = 0;
         window.fetch("/api/v2/view-updates?since=" + encodeURIComponent(since), {credentials:"same-origin"})
           .then(function(response){ return response.ok ? response.json() : null; })
           .then(function(body){
@@ -1674,8 +1693,19 @@
     function handleFigurePayload(p) {
       if (!p || typeof p !== "object") return;
       var seq = Number(p.figure_seq || p.seq || 0);
-      if (seq && seq <= Number(window.__mattervisFigureLastSeq || 0)) return;
-      if (seq) window.__mattervisFigureLastSeq = seq;
+      // Figure sequence numbers are global across scenes, while delivery
+      // fences are scene-scoped. A frame for scene B can legitimately have a
+      // lower sequence than the last frame received for scene A; comparing
+      // against only the global cursor drops B's first paint during a tab
+      // handoff. Keep the global value for the HTTP journal cursor, but use a
+      // per-scene cursor to decide whether this payload is a duplicate.
+      const payloadScene = p.scene_id ? String(p.scene_id) : "";
+      const sceneSeq = Number(payloadScene && latestFigureSeqByScene[payloadScene] || 0);
+      if (seq && seq <= sceneSeq) return;
+      if (seq) {
+        if (payloadScene) latestFigureSeqByScene[payloadScene] = seq;
+        window.__mattervisFigureLastSeq = Math.max(Number(window.__mattervisFigureLastSeq || 0), seq);
+      }
       if (p.state&&typeof p.state==="object") rememberExpectedRender(p.state, true);
       if (p.scene_id&&p.render_revision!==undefined) rememberExpectedRender(p, true);
       if (p.type === "view_update" || p.type === "render_error") {
@@ -1688,13 +1718,22 @@
       }
       if (!p.figure||isPendingFigure(p.figure)||!has3DScene(p.figure)) return;
       if (!isCurrentFigurePush(p)) {
-        // An upload can publish its frame before Dash applies the new
-        // scene-tabs.value. Keep the newest frame by scene and replay it
-        // once the selected tab reflects the server-selected scene.
-        if (p.scene_id && String(p.scene_id) !== String(currentSceneId() || "")) {
-          p.isCurrent=function(){return isCurrentFigurePush(p);};
-          pendingFigureByScene[String(p.scene_id)] = p;
-          scheduleQueuedSceneFigureRetry(String(p.scene_id), 0);
+        // A frame can fail the fence even when its scene already matches the
+        // optimistic tab intent (for example, the expected revision arrives
+        // one turn before the figure). Keep the newest frame by scene for
+        // every failed fence, then replay it through the same bounded handoff
+        // path. Restricting this to scene-id mismatches silently dropped the
+        // duplicate scene's first frame after an upload.
+        if (p.scene_id) {
+          const sceneKey = String(p.scene_id);
+          const previous = pendingFigureByScene[sceneKey];
+          const seqValue = Number(p.figure_seq || p.seq || 0);
+          const previousSeq = Number(previous && (previous.figure_seq || previous.seq) || 0);
+          if (!previous || !previousSeq || (seqValue && seqValue >= previousSeq)) {
+            p.isCurrent=function(){return isCurrentFigurePush(p);};
+            pendingFigureByScene[String(p.scene_id)] = p;
+            scheduleQueuedSceneFigureRetry(sceneKey, 0);
+          }
         }
         return;
       }
@@ -1702,7 +1741,17 @@
       if (interactionActive) { p.isCurrent=function(){return isCurrentFigurePush(p);}; pendingFigurePush=p; return; }
       if (sceneTabIntentId && p.scene_id && String(p.scene_id) === sceneTabIntentId) sceneTabIntentAt = 0;
       if (window.MatterVisViewUpdates && typeof window.MatterVisViewUpdates.submit === "function") {
-        window.MatterVisViewUpdates.submit(p);
+        const submitted = window.MatterVisViewUpdates.submit(p);
+        // The typed submitter can still reject a complete frame after the
+        // websocket fence (the selected-scene metadata may lag by one Dash
+        // turn). Park that frame so the selection barrier can retry it instead
+        // of losing the only copy of the new scene's first paint.
+        if (submitted === "stale" && p.scene_id) {
+          const sceneKey = String(p.scene_id);
+          p.isCurrent=function(){return isCurrentFigurePush(p);};
+          pendingFigureByScene[sceneKey] = p;
+          scheduleQueuedSceneFigureRetry(sceneKey, 0);
+        }
       } else {
         applyFigurePush(p.figure.data||[], p.figure.layout||{});
       }
@@ -1934,7 +1983,9 @@
   // ── Pointer/wheel interaction tracking ──────────────────────────
   document.addEventListener("pointerdown", function(e) {
     if (!inGraph(e.target)) return;
-    window.__mvGestureSceneId = canvasSceneId() || window.__mvGestureSceneId || "";
+    const sceneId = canvasSceneId() || window.__mvGestureSceneId || "";
+    window.__mvGestureSceneId = sceneId;
+    window.__mvLastGestureSceneId = sceneId;
     markActive();
   }, true);
   document.addEventListener("pointerup", function() {
