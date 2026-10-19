@@ -627,10 +627,20 @@ def apply_scene_style_overrides(
         return dict(scene)
     output = dict(scene)
     atoms = []
-    for index, value in enumerate(scene.get("draw_atoms") or []):
+    scene_atoms = list(scene.get("draw_atoms") or [])
+    canonical_atom_ids = {
+        atom_instance_id(atom, index) for index, atom in enumerate(scene_atoms)
+    }
+    for index, value in enumerate(scene_atoms):
         atom = dict(value)
+        current_id = atom_instance_id(atom, index)
         override = None
         for target_id in atom_instance_id_aliases(atom, index):
+            # A legacy symmetry alias may be the canonical ID of a real
+            # periodic atom in the same scene.  In that case it belongs to
+            # that atom and must never be used as a fallback for this one.
+            if target_id != current_id and target_id in canonical_atom_ids:
+                continue
             candidate = overrides.get(target_id)
             if isinstance(candidate, Mapping):
                 override = candidate
