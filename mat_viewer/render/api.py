@@ -31,8 +31,14 @@ class FigureResult:
         height: int = 700,
         dpi: int = 300,
         scale: int = 2,
+        include_interaction_traces: bool = False,
     ):
-        """Save the figure to a file (PNG, PDF, SVG, etc.)."""
+        """Save the figure to a file (PNG, PDF, SVG, etc.).
+
+        Browser-only pick/hover traces are omitted by default.  Set
+        ``include_interaction_traces=True`` only when producing a diagnostic
+        artifact that intentionally preserves those layers.
+        """
         if self._mpl is not None:
             # Resize matplotlib figure to match requested pixel dimensions
             self._mpl.set_size_inches(width / dpi, height / dpi)
@@ -43,7 +49,17 @@ class FigureResult:
             plt.close(self._mpl)
         elif self._plotly is not None:
             # Kaleido ≥1.0 expects a title mapping rather than ``None``.
-            fig_dict = self._plotly.to_dict()
+            # ``FigureResult.save`` is the static export boundary.  Plotly's
+            # invisible pick layers are useful in the browser but have no
+            # meaning in a PNG/SVG/PDF and can affect WebGL depth ordering
+            # (especially when a transparent marker lands in front of a
+            # surface).  Remove only interaction-only roles here so a direct
+            # ``render(...).save(...)`` call has the same deterministic output
+            # as the CLI's ``include_interaction_traces=False`` path.
+            fig_dict = _static_export_dict(
+                self._plotly.to_dict(),
+                include_interaction_traces=include_interaction_traces,
+            )
             layout = fig_dict.setdefault("layout", {})
             if layout.get("title") is None:
                 layout["title"] = {"text": ""}
@@ -70,6 +86,84 @@ class FigureResult:
     @property
     def mpl_figure(self):
         return self._mpl
+
+
+_STATIC_INTERACTION_ROLES = frozenset(
+    {
+        "atom_selection",
+        "bond_selection",
+        "polyhedron_selection",
+        "disorder_preview",
+        "selection",
+    }
+)
+_STATIC_INTERACTION_NAMES = frozenset(
+    {
+        "selection-outline",
+        "atom-selection",
+        "bond-selection",
+        "polyhedron-selection",
+        "disorder-preview-outline",
+    }
+)
+
+
+def _static_export_dict(
+    payload: dict, *, include_interaction_traces: bool = False
+) -> dict:
+    """Return a JSON-safe Plotly payload without browser-only pick traces.
+
+    This is intentionally a shallow, role-based filter.  Persistent
+    selection/hover feedback is transient view state and is omitted
+    alongside the transparent hit-test traces and disorder preview layer.
+    Keeping this at the save boundary also covers callers that build a figure
+    directly instead of going through the CLI helper.
+    """
+    output = dict(payload)
+    if include_interaction_traces:
+        return output
+    traces = []
+    face_metadata_keys = frozenset(
+        {
+            "face_id",
+            "face_ids",
+            "subentity_id",
+            "subentity_ids",
+            "facet_ids",
+            "facet_millers",
+            "face_ordinals",
+            "vertex_face_ids",
+            "face_ranges",
+        }
+    )
+    for trace in output.get("data") or []:
+        meta = trace.get("meta") if isinstance(trace, dict) else None
+        role = meta.get("mv_role") if isinstance(meta, dict) else None
+        name = trace.get("name") if isinstance(trace, dict) else None
+        if role in _STATIC_INTERACTION_ROLES or name in _STATIC_INTERACTION_NAMES:
+            continue
+        # Face maps are browser hit-resolution metadata.  They are harmless
+        # in an interactive figure but needlessly bloat static JSON and can
+        # leak transient target IDs into publication artifacts.  Copy only
+        # the affected trace/meta mapping so saving never mutates the live
+        # Dash figure that may be reused by a later callback.
+        if isinstance(trace, dict):
+            trace_face_keys = face_metadata_keys.intersection(trace)
+            meta_face_keys = face_metadata_keys.intersection(meta or {})
+            if trace_face_keys or meta_face_keys:
+                cleaned = dict(trace)
+                for key in trace_face_keys:
+                    cleaned.pop(key, None)
+                if isinstance(meta, dict):
+                    cleaned_meta = dict(meta)
+                    for key in meta_face_keys:
+                        cleaned_meta.pop(key, None)
+                    cleaned["meta"] = cleaned_meta
+                traces.append(cleaned)
+                continue
+        traces.append(trace)
+    output["data"] = traces
+    return output
 
 
 def render(

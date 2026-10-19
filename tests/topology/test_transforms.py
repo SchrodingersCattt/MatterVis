@@ -148,6 +148,29 @@ def test_atoms_under_symmetry_applies_each_op():
     np.testing.assert_allclose(inverted_cl[0]["cart"], [-1.0, 0.0, 0.0])
 
 
+def test_symmetry_provenance_is_separate_from_periodic_image_scope():
+    from mat_viewer.render.picking import atom_instance_id
+
+    atoms = _atoms_2()
+    out = atoms_under_symmetry(
+        atoms,
+        _M(),
+        seed_indices=[0],
+        sym_ops=[
+            ([[1, 0, 0], [0, 1, 0], [0, 0, 1]], [0.0, 0.0, 0.0]),
+            ([[-1, 0, 0], [0, -1, 0], [0, 0, -1]], [0.0, 0.0, 0.0]),
+        ],
+    )
+    by_op = {int(atom["_symop_index"]): atom for atom in out}
+    assert set(by_op) == {0, 1}
+    assert atom_instance_id(by_op[0]) == "atom:source:0|symmetry:0"
+    assert atom_instance_id(by_op[1]) == "atom:source:0|symmetry:1"
+
+    periodic = dict(atoms[0])
+    periodic["_image_shift"] = (1, 0, 0)
+    assert atom_instance_id(periodic) == "atom:source:0|image:1,0,0"
+
+
 # ---- selector resolution ----------------------------------------------
 
 

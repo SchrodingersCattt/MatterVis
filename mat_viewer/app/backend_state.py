@@ -281,6 +281,39 @@ class _StateBackendMixin:
             )
             working_state = self.normalize_state(patch, scene_id=target_scene_id)
             change_kind = classify_change(state_before, working_state)
+            # Structure/display changes can remove displayed instances while
+            # preserving the scene's persisted selection/style dictionaries.
+            # Reconcile exact IDs before committing the transition so stale
+            # browser targets cannot survive into a later redraw.
+            # ``classify_change`` deliberately treats selection as a complete
+            # frame because the browser needs a fresh outline.  That does not
+            # mean the selected targets became stale: filtering them on every
+            # click would discard caller-supplied geometry IDs that are not
+            # materialised in the current Python scene.  Reconcile only when
+            # an authoritative structure/display identity input changed.
+            identity_inputs = (
+                "structure",
+                "display_mode",
+                "display_options",
+                "atom_groups",
+                "bond_groups",
+                "transforms",
+                "disorder",
+                "disorder_resolve",
+                "disorder_replicas",
+                "polyhedron_specs",
+                "bfdh_morphology",
+                "topology_enabled",
+                "topology_species_keys",
+                "topology_site_index",
+                "cutoff",
+            )
+            identity_changed = any(
+                state_before.get(key) != working_state.get(key)
+                for key in identity_inputs
+            )
+            if change_kind == UpdateKind.GEOMETRY and identity_changed:
+                working_state = self._reconcile_semantic_targets(working_state)
             before_versions = state_versions(state_before)
             # Maintain independent clocks.  A display patch can reuse the
             # current geometry; a camera patch never invalidates either.
@@ -412,6 +445,12 @@ class _StateBackendMixin:
             preset=self.preset,
             transforms=transforms,
         )
+        # Keep state-owned morphology available to semantic target
+        # reconciliation and programmatic scene callers.  The style selector
+        # also applies this field before rendering, but reconciliation runs
+        # before that selector and would otherwise discard valid facet IDs.
+        if state.get("bfdh_morphology") is not None:
+            scene["bfdh_morphology"] = copy.deepcopy(state.get("bfdh_morphology"))
         scene_label = state.get("scene_label")
         if scene_label:
             scene["display_title"] = str(scene_label)

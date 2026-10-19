@@ -49,6 +49,23 @@ def register_selection_routes(v2, backend) -> dict:
     def selection_targets_get():
         return jsonify({"selection": backend.get_selection(scene_id=_scene_id_from_request())})
 
+    @v2.post("/selection/scope")
+    def selection_scope():
+        payload = request.get_json(force=True, silent=True) or {}
+        target = payload.get("target")
+        scope = payload.get("scope", "instance")
+        if not isinstance(target, dict):
+            return jsonify({"error": "target must be an object"}), 400
+        try:
+            result = backend.expand_selection_scope(
+                target,
+                scope,
+                scene_id=_scene_id_from_request(),
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(result)
+
     @v2.post("/selection/targets")
     def selection_targets_set():
         payload = request.get_json(force=True, silent=True) or {}
@@ -70,10 +87,16 @@ def register_selection_routes(v2, backend) -> dict:
         payload = request.get_json(force=True, silent=True) or {}
         scene_id = _scene_id_from_request()
         target_id = payload.get("target_id") or payload.get("id")
+        selected_targets = payload.get("targets")
         kind = payload.get("kind")
-        if not target_id:
+        if selected_targets is not None:
+            if not isinstance(selected_targets, list) or not selected_targets:
+                return jsonify({"error": "targets must be a non-empty list"}), 400
+            if not payload.get("reset") and not isinstance(payload.get("style") or payload.get("override"), dict):
+                return jsonify({"error": "style must be an object"}), 400
+        elif not target_id:
             return jsonify({"error": "target_id is required"}), 400
-        if not payload.get("reset") and not isinstance(kind, str):
+        if selected_targets is None and not payload.get("reset") and not isinstance(kind, str):
             return jsonify({"error": "kind is required for style overrides"}), 400
         if payload.get("reset"):
             field = payload.get("field")
@@ -81,21 +104,41 @@ def register_selection_routes(v2, backend) -> dict:
                 allowed_fields = {
                     "color", "edge_color", "opacity", "edge_opacity", "visible",
                     "radius", "thickness", "edge_width", "material", "representation",
-                    "flatshading",
+                    "flatshading", "property_color",
                 }
                 if str(field) not in allowed_fields:
                     return jsonify({"error": f"unsupported style field: {field!r}"}), 400
-            overrides = backend.reset_style_override(
-                str(target_id), scene_id=scene_id, field=field
-            )
+            if selected_targets is not None:
+                target_ids = []
+                for value in selected_targets:
+                    if isinstance(value, dict):
+                        value = value.get("id") or value.get("target_id")
+                    if value not in (None, ""):
+                        target_ids.append(str(value))
+                if not target_ids:
+                    return jsonify({"error": "targets must contain target IDs"}), 400
+                overrides = backend.get_state(scene_id=scene_id).get("style_overrides") or {}
+                for selected_id in target_ids:
+                    overrides = backend.reset_style_override(
+                        selected_id, scene_id=scene_id, field=field
+                    )
+            else:
+                overrides = backend.reset_style_override(
+                    str(target_id), scene_id=scene_id, field=field
+                )
         else:
             patch = payload.get("style") or payload.get("override") or {}
             if not isinstance(patch, dict):
                 return jsonify({"error": "style must be an object"}), 400
             try:
-                overrides = backend.set_style_override(
-                    str(target_id), str(kind), patch, scene_id=scene_id
-                )
+                if selected_targets is not None:
+                    overrides = backend.set_style_overrides(
+                        selected_targets, patch, scene_id=scene_id
+                    )
+                else:
+                    overrides = backend.set_style_override(
+                        str(target_id), str(kind), patch, scene_id=scene_id
+                    )
             except ValueError as exc:
                 return jsonify({"error": str(exc)}), 400
         return jsonify({"style_overrides": overrides})

@@ -112,3 +112,34 @@ def test_preset_v2_round_trips_multiple_scenes(backend: ViewerBackend) -> None:
     assert second["id"] in scene_ids
     assert loaded["state"]["scene_id"] in scene_ids
     assert backend.get_state(second["id"])["display_mode"] == "unit_cell"
+
+
+def test_preset_style_overrides_promote_into_fresh_defaults(backend: ViewerBackend) -> None:
+    """Target paint edits survive a preset load even without scene records."""
+    backend.patch_state(
+        {
+            "style_overrides": {
+                "mesh-test": {"kind": "geometry", "color": "#123456", "opacity": 0.4}
+            }
+        }
+    )
+    saved = backend.save_preset(path="style-overrides.json")
+
+    from mat_viewer.presets import load_preset
+
+    backend.preset = load_preset(saved["path"])
+    defaults = backend.default_state(backend.get_state()["structure"])
+    assert defaults["style_overrides"]["mesh-test"] == {
+        "kind": "geometry",
+        "color": "#123456",
+        "opacity": 0.4,
+    }
+
+
+def test_preset_reload_advances_scene_generation_for_stale_frame_rejection(
+    backend: ViewerBackend,
+) -> None:
+    backend.save_preset(path="generation.json")
+    before = backend.scene_generation()
+    backend.load_preset_from_path("generation.json")
+    assert backend.scene_generation() > before

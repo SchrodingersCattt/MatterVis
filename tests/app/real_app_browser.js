@@ -664,6 +664,47 @@ async function runSemanticPick(page) {
       && Array.isArray(targets) && targets.some((target) => target && target.kind === "atom");
   }, atomLabel, {timeout: 20000});
 
+  // Selection is a persistent visual cue, not just a server-side label
+  // update. The outline trace should contain geometry for the selected atom
+  // after the asynchronous figure refresh settles.
+  await page.waitForFunction((label) => {
+    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+    return Array.isArray(gd && gd.data) && gd.data.some((trace) => {
+      const meta = trace && trace.meta || {};
+      const role = String(meta.mv_role || meta.kind || "").toLowerCase();
+      const name = String(trace && trace.name || "").toLowerCase();
+      const x = Array.isArray(trace && trace.x) ? trace.x : [];
+      return (role === "selection" || name === "selection-outline")
+        && trace.visible !== false && x.length > 0;
+    });
+  }, atomLabel, {timeout: 20000});
+
+  // Esc clears both the local target cache and the persisted selection. This
+  // catches the race where a stale outline used to remain until the next
+  // figure update.
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(async () => {
+    const response = await fetch("/api/v2/selection", {cache: "no-store"});
+    if (!response.ok) return false;
+    const body = await response.json();
+    const selection = body && body.selection;
+    return Array.isArray(selection && selection.atom_labels)
+      && selection.atom_labels.length === 0
+      && Array.isArray(selection && selection.targets)
+      && selection.targets.length === 0;
+  }, null, {timeout: 20000});
+  await page.waitForFunction(() => {
+    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+    return !Array.isArray(gd && gd.data) || !gd.data.some((trace) => {
+      const meta = trace && trace.meta || {};
+      const role = String(meta.mv_role || meta.kind || "").toLowerCase();
+      const name = String(trace && trace.name || "").toLowerCase();
+      const x = Array.isArray(trace && trace.x) ? trace.x : [];
+      return (role === "selection" || name === "selection-outline")
+        && trace.visible !== false && x.length > 0;
+    });
+  }, null, {timeout: 20000});
+
   // The first graph frame can arrive before the semantic selection overlay
   // lands. Give that render a bounded chance to settle before scanning the
   // WebGL hover cache.
@@ -900,16 +941,34 @@ async function canvasInk(page) {
 
 async function selectUnitCell(page) {
   const host = page.locator("#display-mode-selector");
-  const label = ((await host.innerText()) || "").replace(/\s+/g, " ");
-  if (!/^\s*Unit cell\b/i.test(label)) {
-    await host.click();
-    await page.getByRole("option", { name: "Unit cell", exact: true }).click();
+  let changed = false;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const label = ((await host.innerText()) || "").replace(/\s+/g, " ");
+    const alreadySelected = /^\s*Unit cell\b/i.test(label);
+    if (!alreadySelected || attempt > 0) {
+      await host.click();
+      await page.getByRole("option", { name: "Unit cell", exact: true }).click();
+      changed = true;
+    }
+    await page.waitForFunction(() => {
+      const node = document.getElementById("display-mode-selector");
+      const text = ((node && node.innerText) || "").replace(/\s+/g, " ").trim();
+      return text === "Unit cell" || text.startsWith("Unit cell");
+    }, null, {timeout: 30000});
+    const serverReady = await page.waitForFunction(async () => {
+      const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+      const meta = gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
+      if (!meta || !meta.scene_id) return false;
+      try {
+        const state = await fetch("/api/v2/state?scene_id=" + encodeURIComponent(meta.scene_id), {cache: "no-store"}).then((response) => response.json());
+        return !!(state && state.display_mode === "unit_cell");
+      } catch (_) {
+        return false;
+      }
+    }, null, {timeout: 10000}).then(() => true).catch(() => false);
+    if (serverReady) return changed;
   }
-  await page.waitForFunction(() => {
-    const node = document.getElementById("display-mode-selector");
-    const text = ((node && node.innerText) || "").replace(/\s+/g, " ").trim();
-    return text === "Unit cell" || text.startsWith("Unit cell");
-  }, null, {timeout: 30000});
+  return changed;
 }
 
 async function figureRevision(page) {
@@ -1012,8 +1071,19 @@ async function leftDrag(page, box) {
 async function runOrthoDrag(page) {
   await clickTab(page, "DAP-4");
   const beforeUnitCell = await figureRevision(page);
-  await selectUnitCell(page);
-  await waitForUnitCellFigure(page, beforeUnitCell);
+  const unitCellChanged = await selectUnitCell(page);
+  // If DAP-4 already starts in Unit cell mode there is no new render revision
+  // to wait for; require the existing WebGL frame instead of timing out on 0 > 0.
+  if (unitCellChanged) {
+    await waitForUnitCellFigure(page, beforeUnitCell);
+  } else {
+    await page.waitForFunction(() => {
+      const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+      const meta = gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
+      const scene = gd && gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
+      return !!(meta && meta.scene_id && scene && scene.glplot && gd.data && gd.data.length);
+    }, null, {timeout: 30000});
+  }
   await ensureOrthographic(page);
   const rename = await page.locator("#scene-tab-rename-input").inputValue().catch(() => "");
   if (!rename.trim()) {

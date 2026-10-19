@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from mat_viewer.app import create_app
+from mat_viewer.render.picking import atom_instance_id
 
 
 def test_selection_rest_round_trip_and_promote():
@@ -85,6 +86,38 @@ def test_semantic_targets_and_style_overrides_round_trip():
     assert response.get_json()["style_overrides"] == {}
 
 
+def test_multi_target_style_patch_uses_common_field_intersection():
+    app = create_app()
+    app.server.config["TESTING"] = True
+    client = app.server.test_client()
+    targets = [
+        {"kind": "atom", "id": "atom-test"},
+        {"kind": "polyhedron", "id": "poly-test"},
+    ]
+    response = client.patch(
+        "/api/v2/style_overrides",
+        json={"targets": targets, "style": {"color": "#123456"}},
+    )
+    assert response.status_code == 200
+    overrides = response.get_json()["style_overrides"]
+    assert overrides["atom-test"]["color"] == "#123456"
+    assert overrides["poly-test"]["color"] == "#123456"
+
+    invalid = client.patch(
+        "/api/v2/style_overrides",
+        json={"targets": targets, "style": {"radius": 0.2}},
+    )
+    assert invalid.status_code == 400
+    assert "selection" in invalid.get_json()["error"]
+
+    reset = client.patch(
+        "/api/v2/style_overrides",
+        json={"targets": targets, "reset": True, "field": "color"},
+    )
+    assert reset.status_code == 200
+    assert reset.get_json()["style_overrides"] == {}
+
+
 def test_semantic_target_toggle_removes_target_without_reinserting_it():
     app = create_app()
     app.server.config["TESTING"] = True
@@ -114,3 +147,99 @@ def test_semantic_target_toggle_removes_target_without_reinserting_it():
     selection = response.get_json()["selection"]
     assert selection["targets"] == []
     assert selection["active_target"] is None
+
+
+def test_selection_scope_expands_atom_source_and_excludes_hidden_rows():
+    app = create_app()
+    app.server.config["TESTING"] = True
+    client = app.server.test_client()
+    backend = app.crystal_backend
+    scene = backend.scene_for_state(backend.get_state())
+    atoms = list(scene["draw_atoms"])
+    assert atoms
+    first = atoms[0]
+    target = {
+        "kind": "atom",
+        "id": atom_instance_id(first, 0),
+        "source_index": first.get("_source_index", first.get("source_index", 0)),
+    }
+    response = client.post("/api/v2/selection/scope", json={"target": target, "scope": "source"})
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["scope"] == "source"
+    assert body["count"] == len(body["targets"])
+    assert body["selection"]["targets"] == body["targets"]
+
+    hidden = str(first["label"])
+    backend.patch_state(
+        {
+            "atom_groups": [
+                {
+                    "id": "hide-scope-test",
+                    "selector": {"labels": [hidden]},
+                    "visible": False,
+                    "enabled": True,
+                }
+            ]
+        }
+    )
+    response = client.post("/api/v2/selection/scope", json={"target": target, "scope": "source"})
+    assert response.status_code == 200
+    labels = {item.get("label") for item in response.get_json()["targets"]}
+    assert hidden not in labels
+
+
+def test_selection_scope_rejects_unknown_scope_and_malformed_target():
+    app = create_app()
+    app.server.config["TESTING"] = True
+    client = app.server.test_client()
+    target = {"kind": "atom", "id": "atom:source:0"}
+    response = client.post("/api/v2/selection/scope", json={"target": target, "scope": "unknown"})
+    assert response.status_code == 400
+    response = client.post("/api/v2/selection/scope", json={"target": {}})
+    assert response.status_code == 400
+
+
+def test_selection_scope_rejects_kind_mismatch_without_clearing_selection():
+    app = create_app()
+    app.server.config["TESTING"] = True
+    client = app.server.test_client()
+    scene = app.crystal_backend.scene_for_state(app.crystal_backend.get_state())
+    atom = scene["draw_atoms"][0]
+    target = {"kind": "atom", "id": atom_instance_id(atom, 0)}
+    client.post("/api/v2/selection/targets", json={"target": target})
+
+    response = client.post(
+        "/api/v2/selection/scope",
+        json={"target": target, "scope": "spec"},
+    )
+    assert response.status_code == 400
+    assert client.get("/api/v2/selection/targets").get_json()["selection"]["targets"] == [target]
+
+
+def test_geometry_selection_and_override_survive_unrelated_identity_patch():
+    app = create_app()
+    app.server.config["TESTING"] = True
+    client = app.server.test_client()
+    target = {"kind": "geometry", "id": "mesh-reconcile-test"}
+    client.post("/api/v2/selection/targets", json={"target": target})
+    response = client.patch(
+        "/api/v2/style_overrides",
+        json={"target_id": target["id"], "kind": target["kind"], "style": {"color": "#123456"}},
+    )
+    assert response.status_code == 200
+
+    app.crystal_backend.patch_state(
+        {
+            "atom_groups": [
+                {
+                    "id": "reconcile-noop",
+                    "selector": {"labels": ["__does-not-exist__"]},
+                    "visible": True,
+                }
+            ]
+        }
+    )
+    selection = client.get("/api/v2/selection/targets").get_json()["selection"]
+    assert selection["targets"] == [target]
+    assert client.get("/api/v2/style_overrides").get_json()["style_overrides"][target["id"]]["color"] == "#123456"

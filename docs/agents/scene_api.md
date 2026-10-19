@@ -324,6 +324,28 @@ of the portable basic names `black`, `white`, `red`, `green`, `blue`, `gray`,
 normalised with the same rules, so a malformed legacy override is ignored
 without taking down a render callback.
 
+The endpoint also accepts `targets: [{"id": "...", "kind": "..."}, ...]`
+with one `style` object. The server computes the common supported fields and
+applies the patch to every target only when the full patch is valid; use
+`reset: true` with the same list to clear each target. `property_color` is a
+valid atom field and can be reset independently of `color`.
+
+Style resolution is field-wise. The resolver applies renderer defaults, then
+the selected theme, kind defaults, matching rules, parent/scope overrides, and
+the exact instance override; a child override therefore changes only the
+fields it supplies and cannot repaint a sibling. Generic geometry (`mesh`),
+coordination polyhedra, and BFDH facets have stable defaults even when a scene
+payload omits a paint field. `theme="dark"`/`"light"` may be supplied by
+library callers, or a mapping can provide exact theme colours.
+
+For a multi-selection, use
+`mat_viewer.render.style.resolver.style_fields_for_targets(...)` to obtain the
+intersection of fields supported by every selected kind. Applying a patch with
+`merge_style_overrides_for_targets(...)` rejects fields outside that
+intersection atomically. Atom `property_color` is independent from the solid
+`color` override, so removing that field restores the active continuous
+property map on the next scene rebuild.
+
 Anchored scientific arrows are supplied with `vector_overlays=` or
 `scene["vector_overlays"]`; see [vector overlays](vector_overlays_api.md).
 They are world-space Mesh3d content and therefore differ from corner compass
@@ -382,6 +404,20 @@ atom/bond/polyhedron picking markers and the empty disorder-preview overlay.
 Use this for Kaleido/publication exports. The default remains `True` for the
 interactive Dash viewer, where these traces provide hover and right-click hit
 targets.
+
+Mesh face target maps (`face_ids`, `face_ordinals`, and `vertex_face_ids`) are
+also interaction metadata. They are included when interaction traces are
+enabled so a browser hit can resolve a stable facet/polyhedron ID, and omitted
+from static figure payloads by default. Callers that assemble geometry traces
+directly can opt in with `geometry_entity_traces(..., include_face_ids=True)`.
+This keeps publication JSON/SVG payloads free of transient browser target
+state while preserving exact IDs for interactive picking.
+
+Atom instance IDs are scoped as `source` plus either a periodic `image` or an
+explicit `symmetry` operation. A symmetry transform therefore cannot collide
+with a real boundary replica that happens to use the same integer tuple. The
+source token remains stable when display order, hydrogen visibility, or scope
+changes reorder the manifested atom list.
 
 Picking markers explicitly disable their Plotly marker outlines. Relying on a
 transparent marker fill alone is unsafe because Plotly may resolve a white

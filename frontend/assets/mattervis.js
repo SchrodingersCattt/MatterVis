@@ -127,12 +127,19 @@
     return !!(p && typeof p.isCurrent === "function" && p.isCurrent());
   }
   function sceneIdFromTabNode(node) {
-    if (!node || !node.id || node.id.indexOf("scene-tab-") !== 0) return null;
+    if (!node || !node.id) return null;
+    // Compact scene chips use a JSON id on their select button, while
+    // dcc.Tab wrappers use the scene-tab-* convention.
+    if (node.id[0] === "{" || node.id[0] === "[") {
+      try {
+        const parsed = JSON.parse(node.id);
+        if (parsed && parsed.scene_id) return String(parsed.scene_id);
+      } catch (_) {}
+    }
+    if (node.id.indexOf("scene-tab-") !== 0) return null;
     if (node.id.indexOf("scene-tab-close-") === 0) return null;
     if (node.id === "scene-tabs" || node.id === "scene-tab-close-row") return null;
     // Labels are nested inside the dcc.Tab and carry their own stable id.
-    // Treating ``scene-tab-label-*`` as a scene named ``label-*`` made a
-    // normal click queue the correct frame under the wrong optimistic id.
     if (node.id.indexOf("scene-tab-label-") === 0) {
       return node.id.slice("scene-tab-label-".length);
     }
@@ -145,7 +152,9 @@
     sceneTabIntentId = sceneId;
     sceneTabIntentAt = Date.now();
     sceneTabIntentSource = "pointer";
-    lastHovered = null;
+    if (typeof window.MatterVisInvalidateSemanticHover === "function") {
+      window.MatterVisInvalidateSemanticHover();
+    }
     resyncScene(sceneId);
   }
   function resyncScene(sceneId, attempt) {
@@ -193,7 +202,7 @@
     const root = document.getElementById("scene-tabs");
     if (!root || typeof root.querySelector !== "function") return null;
     const selected = root.querySelector(
-      "[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active"
+      "[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active, .scene-tab-chip--selected .tab-select"
     );
     if (!selected) return null;
     const node = sceneIdFromTabNode(selected)
@@ -236,7 +245,7 @@
     if (!tab && hasExplicitSceneId) return false;
     if (!tab && typeof root.querySelector === "function") {
       const selected = root.querySelector(
-        "[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active"
+        "[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active, .scene-tab-chip--selected .tab-select"
       );
       tab = selected && (sceneIdFromTabNode(selected)
         ? selected
@@ -272,7 +281,7 @@
     const intentAge = sceneTabIntentId ? Date.now() - sceneTabIntentAt : Infinity;
     const intentLive = sceneTabIntentId && intentAge < 10000;
     const selected = root && root.querySelector(
-      "[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active"
+      "[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active, .scene-tab-chip--selected .tab-select"
     );
     const node = selected
       ? (sceneIdFromTabNode(selected)
@@ -452,6 +461,13 @@
           }
         }
         if (render&&!figureMetadataIsCurrent(render)) return Promise.resolve(args[0]);
+        if (name === "relayout" && layout &&
+            typeof window.MatterVisInvalidateSemanticHover === "function") {
+          const touchesCamera = layout["scene.camera"] ||
+            (layout.scene && layout.scene.camera) ||
+            Object.keys(layout).some(function (key) { return key.indexOf("scene.camera.") === 0; });
+          if (touchesCamera) window.MatterVisInvalidateSemanticHover();
+        }
         const gd=typeof args[0]==="string"?document.getElementById(args[0]):args[0];
         if (fullFigure&&render&&gd) {
           const receiver=this;
@@ -488,6 +504,13 @@
             if (objectFigure) args[1]=Object.assign({},args[1],{layout:next});
             else args[2]=next;
             return Promise.resolve(original.apply(receiver,args)).then(function(result) {
+              /* A Plotly figure replacement can leave the previous hover
+               * payload alive on the recycled graph node.  Clear semantic
+               * hover state after every complete frame so a right-click on
+               * the new scene cannot dispatch an object from the old one. */
+              if (typeof window.MatterVisInvalidateSemanticHover === "function") {
+                window.MatterVisInvalidateSemanticHover();
+              }
               const done = document.getElementById("mv-render-status");
               if (done && done.getAttribute("data-level") === "busy") {
                 done.hidden = true;
@@ -673,6 +696,24 @@
   // list leaked selections from the previous tab into the next tab because
   // the Dash store is only updated after the click callback returns.
   const persistentTargetsByScene = Object.create(null);
+  function invalidateSemanticHover() {
+    lastHovered = null;
+    lastHoverPoint = null;
+    lastClient = {x:0, y:0};
+    // Plotly can retain a recycled payload on the graph node after a full
+    // frame replacement. Clear it with the browser-local cache so a later
+    // contextmenu cannot revive an object from the previous scene.
+    const gd = graphDiv();
+    if (gd) gd._hoverdata = null;
+    const tip = document.getElementById("mv-atom-tip");
+    if (tip) tip.hidden = true;
+    const inspector = document.getElementById("mv-hover-inspector");
+    if (inspector) inspector.remove();
+  }
+  // Plotly's render gate calls this after a scene/tab replacement. Keeping it
+  // public also lets tab intent and camera controls invalidate the hover cache
+  // at their handoff boundaries without duplicating DOM cleanup.
+  window.MatterVisInvalidateSemanticHover = invalidateSemanticHover;
   function sceneSelectionKey(sceneId) {
     return sceneId === null || sceneId === undefined || sceneId === "" ? "__default__" : String(sceneId);
   }
@@ -731,13 +772,64 @@
     }
     return null;
   }
+  function targetFromSelectionResponse(body, sceneId) {
+    const selection = body && body.selection;
+    const targets = selection && Array.isArray(selection.targets) ? selection.targets : [];
+    const target = targets.find(function (item) {
+      return item && typeof item === "object" && item.kind && item.id;
+    });
+    if (!target) return null;
+    const payload = Object.assign({}, target);
+    if (payload.kind === "atom" && !payload.label && Array.isArray(selection.atom_labels)) {
+      payload.label = selection.atom_labels[0] || "";
+    }
+    if (payload.kind === "atom" && !payload.element && selection.parts && selection.parts[0]) {
+      payload.element = selection.parts[0].elem || "";
+      payload.is_minor = !!selection.parts[0].is_minor;
+      payload.part = selection.parts[0].part || "";
+    }
+    if (sceneId !== null && sceneId !== undefined && sceneId !== "") {
+      payload.scene_id = String(sceneId);
+    }
+    return payload;
+  }
+  function clearSelectionOutline() {
+    const gd = graphDiv();
+    if (!gd || !Array.isArray(gd.data)) return;
+    const indices = [];
+    gd.data.forEach(function (trace, index) {
+      const meta = trace && trace.meta || {};
+      const role = String(meta.mv_role || meta.kind || "").toLowerCase();
+      const name = String(trace && trace.name || "").toLowerCase();
+      const x = Array.isArray(trace && trace.x) ? trace.x : [];
+      if ((role === "selection" || name === "selection-outline")
+          && trace.visible !== false && x.length > 0) {
+        indices.push(index);
+      }
+    });
+    if (!indices.length) return;
+    if (window.Plotly && typeof window.Plotly.restyle === "function") {
+      try {
+        window.Plotly.restyle(gd, {visible: false}, indices);
+        return;
+      } catch (_) {}
+    }
+    indices.forEach(function (index) {
+      if (gd.data[index]) gd.data[index].visible = false;
+    });
+  }
   function publishSemanticSelection(target, mode) {
     if (!target && mode !== "clear") return;
     const nextMode = mode || "replace";
     const sceneId = currentSceneId();
     const persistentTargets = persistentTargetsForScene(sceneId);
-    if (nextMode === "clear") persistentTargetsByScene[sceneSelectionKey(sceneId)] = [];
-    else if (nextMode === "add") {
+    if (nextMode === "clear") {
+      persistentTargetsByScene[sceneSelectionKey(sceneId)] = [];
+      // Hide the previous outline immediately. The server callback will
+      // publish the empty selection and subsequent figure refreshes remain
+      // authoritative, but a delayed frame must not leave stale ink visible.
+      clearSelectionOutline();
+    } else if (nextMode === "add") {
       const exists = persistentTargets.some(function(item){return item.kind===target.kind&&item.id===target.id;});
       if (!exists) persistentTargets.push(target);
     }
@@ -936,7 +1028,8 @@
        * bounds offsets every click and makes the backend miss the projected
        * atom centre. */
       const viewportNode = inner || container;
-      const gr = viewportNode.getBoundingClientRect();
+      const liveViewport = container.querySelector(".js-plotly-plot") || viewportNode;
+      const gr = liveViewport.getBoundingClientRect();
       const x = clientX - gr.left;
       const y = clientY - gr.top;
       return {
@@ -1133,9 +1226,19 @@
     container.addEventListener("mousemove", function (e) { lastClient = {x:e.clientX, y:e.clientY}; }, {passive:true});
     container.addEventListener("contextmenu", function (e) {
       const sceneId = currentSceneId();
-      const x = lastClient.x || e.clientX;
-      const y = lastClient.y || e.clientY;
+      // ``contextmenu`` may be synthesized without a preceding mousemove.
+      // Always use its own coordinates for the fallback request; carrying a
+      // previous pointer position can resolve a completely different atom.
+      const x = Number(e.clientX);
+      const y = Number(e.clientY);
       let current = lastHovered;
+      const cachedHover = lastHoverPoint;
+      // A missing cache is stale.  The graph node may still expose an old
+      // ``_hoverdata`` payload after Plotly recycled it, and accepting that
+      // payload when ``lastHoverPoint`` is null reopens a prior target.
+      const cachedHoverFresh = !!cachedHover &&
+        (Date.now() - cachedHover.at <= 250 &&
+         Math.hypot(x - Number(cachedHover.x || 0), y - Number(cachedHover.y || 0)) <= 64);
       // Plotly can retain a hover payload after the pointer moved away. Never
       // use one older than a quarter second for a context-menu action.
       if (lastHoverPoint && Date.now() - lastHoverPoint.at > 250) current = null;
@@ -1147,13 +1250,21 @@
       const hoverdata = gd && gd._hoverdata;
       if (hoverdata && hoverdata.points && hoverdata.points.length) {
         const liveTarget = targetFromPoint(hoverdata.points[0]);
-        if (liveTarget) {
+        if (liveTarget && cachedHoverFresh) {
           // Stamp the cache-derived target so the scene/generation guard below
           // applies to the same object that is actually under the pointer.
           noteHover(liveTarget);
           lastHoverPoint = {x:x, y:y, at:Date.now()};
           current = lastHovered;
         } else current = null;
+      }
+      // A context menu can arrive without a fresh hover callback (for
+      // example after a fast pointer move). Do not reuse the previous target
+      // when the pointer is clearly elsewhere; the coordinate preview below
+      // resolves the atom at the actual context-menu location.
+      if (current && lastHoverPoint &&
+          Math.hypot(x - Number(lastHoverPoint.x || 0), y - Number(lastHoverPoint.y || 0)) > 64) {
+        current = null;
       }
       if (current && hoverIsCurrent()) {
         e.preventDefault();
@@ -1164,22 +1275,25 @@
       // a right-click fallback so an atom can still open the menu without a
       // preceding hover event.
       e.preventDefault();
-      const picked = pickRect(e.clientX, e.clientY, 14);
-      postSelection(picked.rect, picked.viewport, false).then(function (body) {
+      const picked = pickRect(x, y, 14);
+      // This is a preview only. Right-click opens a menu and must not replace
+      // the persistent selection before the user chooses a menu action.
+      postSelection(picked.rect, picked.viewport, false, false).then(function (body) {
+        const target = targetFromSelectionResponse(body, sceneId);
         const selection = body && body.selection;
         const labels = selection && selection.atom_labels || [];
         const parts = selection && selection.parts || [];
         const part = parts[0] || {};
-        const payload = labels.length ? {
+        const payload = target || (labels.length ? {
           kind: "atom",
           label: labels[0],
           is_minor: !!part.is_minor,
           part: part.part || "",
           scene_id: sceneId,
-        } : null;
-        pushTarget({kind: payload ? "atom" : "_global", payload: payload, scene_id: sceneId, x:e.clientX, y:e.clientY, ts:Date.now()});
+        } : null);
+        pushTarget({kind: payload ? payload.kind : "_global", payload: payload, scene_id: sceneId, x:x, y:y, ts:Date.now()});
       }).catch(function () {
-        pushTarget({kind:"_global", payload:null, scene_id:sceneId, x:e.clientX, y:e.clientY, ts:Date.now()});
+        pushTarget({kind:"_global", payload:null, scene_id:sceneId, x:x, y:y, ts:Date.now()});
       });
     });
     document.addEventListener("click", function (e) {
@@ -1227,7 +1341,18 @@
     }
     if (e.altKey) return;
     if (key==="?"||(e.shiftKey&&key==="/")) { e.preventDefault(); toggleHelp(); return; }
-    if (key==="Escape") { toggleHelp(false); pushAction("select_clear"); return; }
+    if (key==="Escape") {
+      toggleHelp(false);
+      // Clear the browser's per-scene target cache immediately. The Dash
+      // action callback persists the same clear, but waiting for that round
+      // trip leaves a stale outline visible for one render turn.
+      publishSemanticSelection(null, "clear");
+      if (typeof window.MatterVisInvalidateSemanticHover === "function") {
+        window.MatterVisInvalidateSemanticHover();
+      }
+      pushAction("select_clear");
+      return;
+    }
     const map = {r:"supercell_2x", R:"supercell_clear", g:"grow_bonds", G:"grow_radius", h:"hide", c:"colour_picker", p:"promote_to_group", a:"select_add", m:"select_fragment", e:"select_element", f:"selection_focus_camera"};
     const extra = {g:{hops:1}, G:{radius:4.0}};
     const action = map[key];
@@ -1240,6 +1365,7 @@
     const container = document.getElementById("crystal-graph");
     if (!container || container.dataset.boxSelectBound==="1") return;
     container.dataset.boxSelectBound = "1";
+    const viewportNode = container.querySelector(".js-plotly-plot") || container;
     let start=null, overlay=null;
     function ensureOverlay() {
       if (overlay) return overlay;
@@ -1257,24 +1383,45 @@
       el.style.width = Math.abs(e.clientX-start.clientX)+"px";
       el.style.height = Math.abs(e.clientY-start.clientY)+"px";
     }
-    container.addEventListener("mousedown", function (e) {
-      if (!e.shiftKey||e.button!==0) return;
+    function begin(e) {
+      if (start || !e.shiftKey || (e.button !== undefined && e.button !== 0)) return;
+      if (e.target && e.target.closest && e.target.closest(".mv-canvas-toolbar, .modebar")) return;
       start = {clientX:e.clientX, clientY:e.clientY};
+      start.additive = true;
+      start.pointerId = e.pointerId;
       updateOverlay(e);
       e.preventDefault(); e.stopPropagation();
-    }, true);
-    document.addEventListener("mousemove", function (e) { if (start) { updateOverlay(e); e.preventDefault(); } }, true);
-    document.addEventListener("mouseup", function (e) {
+    }
+    function move(e) {
       if (!start) return;
-      const gr = container.getBoundingClientRect();
+      updateOverlay(e);
+      e.preventDefault();
+    }
+    function finish(e, cancelled) {
+      if (!start) return;
+      const liveViewport = container.querySelector(".js-plotly-plot") || viewportNode;
+      const gr = liveViewport.getBoundingClientRect();
       const rect = [start.clientX-gr.left, start.clientY-gr.top, e.clientX-gr.left, e.clientY-gr.top];
       if (overlay) { overlay.remove(); overlay = null; }
+      const additive = !!start.additive;
       start = null;
-      if (Math.abs(rect[2]-rect[0])>=4 && Math.abs(rect[3]-rect[1])>=4) {
-        setDashStore("rightclick-target", {kind:"_global", action:"select_box", rect_pixels:rect, viewport_size:[gr.width,gr.height], additive:!!e.shiftKey, scene_id:currentSceneId(), ts:Date.now()});
+      if (!cancelled && Math.abs(rect[2]-rect[0])>=4 && Math.abs(rect[3]-rect[1])>=4) {
+        setDashStore("rightclick-target", {kind:"_global", action:"select_box", source:"shift-drag", rect_pixels:rect, viewport_size:[gr.width,gr.height], additive:additive, scene_id:currentSceneId(), ts:Date.now()});
       }
       e.preventDefault(); e.stopPropagation();
-    }, true);
+    }
+    container.addEventListener("mousedown", begin, true);
+    container.addEventListener("pointerdown", begin, true);
+    document.addEventListener("mousemove", move, true);
+    document.addEventListener("pointermove", move, true);
+    document.addEventListener("mouseup", function (e) { finish(e, false); }, true);
+    document.addEventListener("pointerup", function (e) { finish(e, false); }, true);
+    document.addEventListener("pointercancel", function (e) { finish(e, true); }, true);
+    window.addEventListener("blur", function () {
+      if (!start) return;
+      if (overlay) { overlay.remove(); overlay = null; }
+      start = null;
+    });
   }
 
   // ── Disorder hover (disorder_hover.js) ──────────────────────────
@@ -1305,6 +1452,12 @@
       let parsed = null;
       try { parsed = JSON.parse(select.id); } catch (_) { parsed = null; }
       if (parsed && parsed.scene_id && window.dash_clientside && dash_clientside.set_props) {
+        // The compact chip is the visible scene selector. Establish the
+        // optimistic intent before Dash paints scene-tabs.value so an
+        // arriving frame is routed to the new scene instead of the old canvas.
+        if (typeof window.MatterVisSelectScene === "function") {
+          window.MatterVisSelectScene(parsed.scene_id);
+        }
         const status = document.getElementById("upload-status");
         if (status) status.textContent = "";
         dash_clientside.set_props("scene-tabs", {value: parsed.scene_id});
