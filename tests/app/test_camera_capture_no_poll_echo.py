@@ -25,7 +25,11 @@ DO NOT REMOVE -- this guards a deeply confusing periodic-snapback bug.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
+import shutil
+import subprocess
+import textwrap
 
 import pytest
 
@@ -164,6 +168,55 @@ def test_camera_capture_drops_late_relayout_from_previous_scene() -> None:
     mattervis = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "mattervis.js"
     source = mattervis.read_text(encoding="utf-8")
     assert "window.__mvLastGestureSceneId = sceneId" in source
+
+
+def test_camera_capture_wheel_after_scene_switch_refreshes_scene_fence() -> None:
+    """A wheel-only gesture on the new tab must capture that tab's camera."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    callbacks = (
+        Path(__file__).resolve().parents[2] / "mat_viewer" / "app" / "callbacks_view.py"
+    ).read_text(encoding="utf-8")
+    start = callbacks.index('            """\n            function(relayout) {')
+    start = callbacks.index("function(relayout)", start)
+    end = callbacks.index('            """', start)
+    capture_callback = textwrap.dedent(callbacks[start:end]).strip()
+    source = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "mattervis.js"
+    program = f"""
+const fs=require('node:fs'), vm=require('node:vm'), assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const callbackSource={json.dumps(capture_callback)};
+const listeners={{}};
+function add(name, fn) {{ (listeners[name] ||= []).push(fn); }}
+function emit(name, event) {{ (listeners[name] || []).forEach(fn => fn(event)); }}
+function layout(scene) {{ return {{meta:{{mattervis_render:{{scene_id:scene,render_revision:1,server_started_at:'epoch'}}}}}}; }}
+const gd={{layout:layout('a'),_fullLayout:{{scene:{{camera:{{}}}}}}}};
+const graph={{querySelector:()=>gd,querySelectorAll:()=>[]}};
+const document={{readyState:'loading',addEventListener:add,querySelector:()=>gd,
+  querySelectorAll:()=>[],getElementById:id=>id==='crystal-graph'?graph:null,
+  body:{{prepend(){{}},appendChild(){{}}}},documentElement:{{}}}};
+function WebSocketMock() {{ this.addEventListener=()=>{{}}; }}
+const MutationObserver=function() {{}}; MutationObserver.prototype.observe=function(){{}}; MutationObserver.prototype.disconnect=function(){{}};
+const sandbox={{console,Promise,JSON,Number,Date,Object,Array,String,Math,setTimeout:()=>0,clearTimeout:()=>{{}},
+  MutationObserver,requestAnimationFrame:()=>0,document,WebSocket:WebSocketMock,
+  window:{{Plotly:{{react:()=>Promise.resolve(gd),newPlot:()=>Promise.resolve(gd),update:()=>Promise.resolve(gd),relayout:()=>Promise.resolve(gd),restyle:()=>Promise.resolve(gd)}},WebSocket:WebSocketMock,
+    location:{{protocol:'http:',host:'localhost'}},addEventListener(){{}},dash_clientside:{{no_update:{{__no_update:true}},set_props(){{}}}}}}}};
+vm.createContext(sandbox);
+vm.runInContext(source.slice(0,source.indexOf('/* Live compass overlay')),sandbox);
+gd.layout=layout('a');
+emit('pointerdown',{{target:{{closest:()=>graph}}}});
+emit('pointerup',{{}});
+gd.layout=layout('b');
+emit('wheel',{{target:{{closest:()=>graph}}}});
+assert.equal(sandbox.window.__mvLastGestureSceneId,'b','wheel did not refresh the scene fence');
+const capture=vm.runInNewContext('('+callbackSource+')',sandbox);
+const result=capture({{'scene.camera':{{eye:{{x:1}}}}}});
+assert.equal(result.scene_id,'b','wheel camera relayout was attributed to the old scene');
+"""
+    result = subprocess.run([node, "-e", program, str(source)], capture_output=True,
+                            text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
 
 
 def test_broadcast_state_survives_following_ui_camera_write(backend: ViewerBackend) -> None:

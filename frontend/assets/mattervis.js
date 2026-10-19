@@ -179,9 +179,18 @@
           }
           return;
         }
-        Promise.resolve(window.MatterVisViewUpdates.submit(latest)).catch(function (error) {
-          console.error("MatterVis scene resync failed", error);
-        });
+        // Feed resync frames through the same scene/sequence fence as the
+        // live transport.  A rapid tab switch can make the selected scene
+        // change between the fetch and submit; calling the typed submitter
+        // directly would drop that frame as "stale" with no retry, leaving
+        // the newly selected canvas on the previous scene.
+        if (typeof window.__mvHandleFigurePayload === "function") {
+          window.__mvHandleFigurePayload(latest);
+        } else {
+          Promise.resolve(window.MatterVisViewUpdates.submit(latest)).catch(function (error) {
+            console.error("MatterVis scene resync failed", error);
+          });
+        }
       }).catch(function () {
         if (attempt < 40) setTimeout(function () { resyncScene(sceneId, attempt + 1); }, 250);
       });
@@ -620,8 +629,7 @@
         scheduleQueuedSceneFigureRetry(key, Number(queued.handoffAttempts || 0));
         return;
       }
-      applyFigurePush(queued.figure.data||[], queued.figure.layout||{});
-      scheduleQueuedSceneFigureSettle(key, queued, settleAttempt + 1);
+      replayQueuedSceneFigure(key, queued, settleAttempt + 1);
     }, settleAttempt ? 100 : 250);
   }
   function clearQueuedSceneFigure(sceneId, sequence) {
@@ -641,6 +649,51 @@
       delete pendingFigureRetryTimers[key];
     }
     delete pendingFigureByScene[key];
+  }
+  function replayQueuedSceneFigure(sceneId, queued, nextSettleAttempt) {
+    const key = String(sceneId || "");
+    nextSettleAttempt = Number(nextSettleAttempt || 0);
+    const submitter = window.MatterVisViewUpdates &&
+      typeof window.MatterVisViewUpdates.submit === "function"
+      ? window.MatterVisViewUpdates.submit
+      : null;
+    if (submitter) {
+      let submitted;
+      try {
+        // Re-enter the typed submitter on replay.  A parked frame may have
+        // become stale while it waited for the tab handoff, so bypassing the
+        // submitter here would skip its scene-generation, version, epoch and
+        // delivered-key checks.
+        submitted = submitter(queued);
+      } catch (_) {
+        scheduleQueuedSceneFigureRetry(key, Number(queued.handoffAttempts || 0));
+        return;
+      }
+      if (submitted === "stale") {
+        scheduleQueuedSceneFigureRetry(key, Number(queued.handoffAttempts || 0));
+        return;
+      }
+      if (submitted && typeof submitted.then === "function") {
+        submitted.then(function (result) {
+          if (result === "stale") {
+            scheduleQueuedSceneFigureRetry(key, Number(queued.handoffAttempts || 0));
+            return;
+          }
+          scheduleQueuedSceneFigureSettle(key, queued, nextSettleAttempt);
+        }, function () {
+          scheduleQueuedSceneFigureRetry(key, Number(queued.handoffAttempts || 0));
+        });
+        return;
+      }
+      scheduleQueuedSceneFigureSettle(key, queued, nextSettleAttempt);
+      return;
+    }
+    const applied = applyFigurePush(queued.figure.data || [], queued.figure.layout || {});
+    if (applied && typeof applied.then === "function") {
+      applied.then(function () { scheduleQueuedSceneFigureSettle(key, queued, nextSettleAttempt); });
+    } else {
+      scheduleQueuedSceneFigureSettle(key, queued, nextSettleAttempt);
+    }
   }
   function flushQueuedSceneFigure(targetSceneId, attempt) {
     const sceneId = targetSceneId ? String(targetSceneId) : currentSceneId();
@@ -673,6 +726,18 @@
       clearTimeout(pendingFigureRetryTimers[String(sceneId)]);
       delete pendingFigureRetryTimers[String(sceneId)];
     }
+    // A newer frame for this scene may have arrived while the parked frame
+    // waited for the selected tab.  Keep the same per-scene sequence fence
+    // used by the transport path so an older parked frame cannot repaint over
+    // the newer one during replay.
+    const queuedSeq = Number(queued.figure_seq || queued.seq || 0);
+    const seenSeq = typeof latestFigureSeqByScene !== "undefined"
+      ? Number(latestFigureSeqByScene[String(sceneId)] || 0)
+      : 0;
+    if (queuedSeq && seenSeq && queuedSeq < seenSeq) {
+      clearQueuedSceneFigure(sceneId, queuedSeq);
+      return;
+    }
     // A newer frame may already be visible while this parked frame was waiting
     // for the selected tab. Never let the older frame repaint over it.
     const gd = typeof graphDiv === "function" ? graphDiv() : null;
@@ -691,10 +756,7 @@
       clearQueuedSceneFigure(sceneId, Number(queued.figure_seq || queued.seq || 0));
       return;
     }
-    applyFigurePush(queued.figure.data||[], queued.figure.layout||{});
-    // Handoff retries and settle retries have independent budgets. A slow
-    // tab switch must still get the full settle window after its first paint.
-    scheduleQueuedSceneFigureSettle(sceneId, queued, 0);
+    replayQueuedSceneFigure(sceneId, queued);
   }
   // Dash applies ``scene-tabs.value`` and paints the selected tab in
   // separate turns.  A completed upload can therefore be queued by the
@@ -1756,6 +1818,9 @@
         applyFigurePush(p.figure.data||[], p.figure.layout||{});
       }
     }
+    // Scene-tab resync lives in the outer module scope; expose the same
+    // transport fence so a fetch result cannot bypass per-scene sequencing.
+    window.__mvHandleFigurePayload = handleFigurePayload;
     function canUseWebSocket() {
       return window.MATTERVIS_WS_FIGURE !== false && !!window.WebSocket &&
         !window.__mattervisFigureWsDisabled;
@@ -1996,7 +2061,20 @@
     }, 1000);
   });
   document.addEventListener("pointercancel", function() { if (interactionActive) markInactiveSoon(); });
-  document.addEventListener("wheel", function(e) { if (inGraph(e.target)) { markActive(); markInactiveSoon(); } }, {passive:true, capture:true});
+  document.addEventListener("wheel", function(e) {
+    if (!inGraph(e.target)) return;
+    // Wheel zoom does not necessarily emit a pointerdown after a scene-tab
+    // switch. Refresh both gesture fences from the live canvas so a zoom on
+    // the newly selected scene is persisted instead of being mistaken for a
+    // delayed relayout from the previous scene.
+    const sceneId = canvasSceneId() || window.__mvGestureSceneId || "";
+    if (sceneId) {
+      window.__mvGestureSceneId = sceneId;
+      window.__mvLastGestureSceneId = sceneId;
+    }
+    markActive();
+    markInactiveSoon();
+  }, {passive:true, capture:true});
   window.addEventListener("blur", function() { if (interactionActive) { interactionActive = false; setInteraction(false); flushPendingFigurePush(); } });
 
   // ── Init ────────────────────────────────────────────────────────

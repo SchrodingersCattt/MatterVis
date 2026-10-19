@@ -291,3 +291,68 @@ assert.equal(last.render_revision,2);
     result = subprocess.run([node, "-e", program, str(source)], capture_output=True,
                             text=True, timeout=15)
     assert result.returncode == 0, result.stderr
+
+
+def test_ws_parked_replay_reenters_typed_submitter():
+    """A parked frame replay must use the typed submitter's ordering fence."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = Path(__file__).resolve().parents[2] / "frontend/assets/mattervis.js"
+    program = r"""
+const fs=require('node:fs'), vm=require('node:vm'), assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+let expected={scene_id:'a',render_revision:1,server_started_at:'epoch'};
+let timers=[], typedCalls=0, directCalls=0;
+function later(fn) { timers.push(fn); return timers.length; }
+function cancel(id) { if (id>0 && id<=timers.length) timers[id-1]=null; }
+function drainOne() { const fn=timers.shift(); if (fn) fn(); }
+function figure(rev, scene) {
+  return {data:[{type:'scatter3d',x:[rev],y:[0],z:[0]}],
+    layout:{scene:{},meta:{mattervis_render:{scene_id:scene,render_revision:rev,server_started_at:'epoch'}}}};
+}
+const gd={layout:figure(0,'a').layout};
+function react(target, data, layout) { directCalls += 1; target.layout=layout; return Promise.resolve(target); }
+let socket;
+function WebSocketMock() { socket=this; this.addEventListener=(name, fn)=>{this[name]=fn;}; }
+const typed={submit(update) {
+  typedCalls += 1;
+  assert.equal(update.figure.layout.meta.mattervis_render.scene_id,'b');
+  // Force one stale result so replay must retry through this same API.
+  return typedCalls === 1 ? 'stale' : Promise.resolve('figure');
+}};
+const document={readyState:'loading',addEventListener(){},documentElement:{},
+  getElementById(id){
+    if(id==='fast-view-metadata') return {get textContent(){return JSON.stringify(expected);}};
+    if(id==='crystal-graph') return {querySelector:()=>gd,querySelectorAll:()=>[]};
+    return null;
+  },querySelectorAll(){return []}};
+const MutationObserver=function(){}; MutationObserver.prototype.observe=function(){};
+const sandbox={console,Promise,JSON,Number,Date,Object,Array,String,Math,setTimeout:later,clearTimeout:cancel,
+  MutationObserver,requestAnimationFrame:()=>0,document,WebSocket:WebSocketMock,
+  window:{Plotly:{react,newPlot:react,update:react,relayout:react,restyle:react},WebSocket:WebSocketMock,
+    MatterVisViewUpdates:typed,location:{protocol:'http:',host:'localhost'},addEventListener(){}}};
+vm.createContext(sandbox);
+const end=source.indexOf('/* Live compass overlay');
+vm.runInContext(source.slice(0,end),sandbox);
+function send(p) { socket.message({data:JSON.stringify(p)}); }
+const frame=(rev,scene)=>Object.assign({scene_id:scene,render_revision:rev}, {figure:figure(rev,scene)});
+(async()=>{
+  send(frame(2,'b'));
+  // The frame is parked while scene A remains selected.
+  assert.equal(typedCalls,0);
+  expected={scene_id:'b',render_revision:2,server_started_at:'epoch'};
+  // At B's selection barrier the typed submitter reports stale once; the
+  // bounded retry must invoke it again instead of painting directly.
+  drainOne();
+  drainOne();
+  assert.ok(typedCalls>=1,'parked replay bypassed typed submitter');
+  while (timers.length && typedCalls<2) drainOne();
+  await Promise.resolve();
+  assert.ok(typedCalls>=2,'stale typed replay was not retried');
+  assert.equal(directCalls,0,'parked replay bypassed typed submitter with Plotly.react');
+})().catch(error=>{console.error(error);process.exitCode=1;});
+"""
+    result = subprocess.run([node, "-e", program, str(source)], capture_output=True,
+                            text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
