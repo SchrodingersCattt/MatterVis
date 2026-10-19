@@ -343,9 +343,12 @@ class _StateBackendMixin:
             if broadcast and str(target_scene_id or "") == str(active_scene_id or ""):
                 self.pending_state = copy.deepcopy(working_state)
             elif not broadcast and str(target_scene_id or "") == str(active_scene_id or ""):
-                # A UI-originated write is already authoritative in the browser;
-                # discard an older snapshot queued for the next state poll.
-                self.pending_state = None
+                # A UI-originated write is already authoritative in the browser.
+                # If an agent/REST update is already queued, keep it queued but
+                # refresh it with the latest camera/UI fields so the poll does
+                # not lose the earlier agent value.
+                if self.pending_state is not None:
+                    self.pending_state = copy.deepcopy(working_state)
             self._bump_version()
             state = copy.deepcopy(working_state)
             state["version"] = self.version
