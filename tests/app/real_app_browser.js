@@ -693,6 +693,17 @@ async function runSemanticPick(page) {
       && Array.isArray(selection && selection.targets)
       && selection.targets.length === 0;
   }, null, {timeout: 20000});
+  await page.waitForFunction(() => {
+    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+    return !Array.isArray(gd && gd.data) || !gd.data.some((trace) => {
+      const meta = trace && trace.meta || {};
+      const role = String(meta.mv_role || meta.kind || "").toLowerCase();
+      const name = String(trace && trace.name || "").toLowerCase();
+      const x = Array.isArray(trace && trace.x) ? trace.x : [];
+      return (role === "selection" || name === "selection-outline")
+        && trace.visible !== false && x.length > 0;
+    });
+  }, null, {timeout: 20000});
 
   // The first graph frame can arrive before the semantic selection overlay
   // lands. Give that render a bounded chance to settle before scanning the
