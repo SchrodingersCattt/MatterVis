@@ -3,7 +3,13 @@ from __future__ import annotations
 
 from .shared import *
 from .normalizers import _normalize_selection
-from ..render.picking import atom_instance_id, bond_instance_id, facet_instance_id, normalize_target
+from ..render.picking import (
+    atom_instance_id,
+    atom_instance_id_aliases,
+    bond_instance_id,
+    facet_instance_id,
+    normalize_target,
+)
 from ..render.style.resolver import (
     merge_style_override,
     merge_style_overrides_for_targets,
@@ -273,10 +279,16 @@ class _SelectionBackendMixin:
 
         atoms = list(scene.get("draw_atoms") or [])
         bonds = list(scene.get("bonds") or [])
+        atom_ids = {
+            atom_instance_id(atom, index) for index, atom in enumerate(atoms)
+        }
+        legacy_atom_ids: dict[str, str] = {}
+        for index, atom in enumerate(atoms):
+            aliases = atom_instance_id_aliases(atom, index)
+            for alias in aliases[1:]:
+                legacy_atom_ids[alias] = aliases[0]
         valid: dict[str, set[str]] = {
-            "atom": {
-                atom_instance_id(atom, index) for index, atom in enumerate(atoms)
-            },
+            "atom": atom_ids,
             "bond": {
                 bond_instance_id(bond, atoms, index)
                 for index, bond in enumerate(bonds)
@@ -322,6 +334,11 @@ class _SelectionBackendMixin:
         for target in selection.get("targets") or []:
             kind = str(target.get("kind") or "").lower()
             entity_id = str(target.get("id") or "")
+            canonical_id = legacy_atom_ids.get(entity_id, entity_id) if kind == "atom" else entity_id
+            if canonical_id != entity_id:
+                target = dict(target)
+                target["id"] = canonical_id
+                entity_id = canonical_id
             # Polyhedron IDs include source/image provenance and are resolved
             # by topology geometry after this scene pass. Keep them while a
             # topology layer is active so a deferred analysis can resolve a
@@ -355,6 +372,16 @@ class _SelectionBackendMixin:
         state["selection"] = selection
 
         overrides = normalize_style_overrides(state.get("style_overrides"))
+        # Migrate old symmetry IDs to their canonical form when the displayed
+        # atoms give us enough provenance.  Keep a canonical edit if both
+        # forms exist; otherwise move the legacy value so it remains live
+        # after subsequent state round-trips.
+        for legacy_id, canonical_id in legacy_atom_ids.items():
+            if legacy_id not in overrides:
+                continue
+            if canonical_id not in overrides:
+                overrides[canonical_id] = overrides[legacy_id]
+            overrides.pop(legacy_id, None)
         for target_id, override in list(overrides.items()):
             kind = str(override.get("kind") or "geometry").lower()
             if kind in {"molecule", "part"} or (
