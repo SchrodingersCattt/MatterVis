@@ -274,9 +274,11 @@ send(frame(2,'b'));
 for (let i=0;i<7;i++) one();
 expected={scene_id:'b',render_revision:2,server_started_at:'epoch'};
 one(); // first eligible handoff paints B and starts a fresh settle budget
+await Promise.resolve();
 // Dash repaints stale A after the handoff; settle must replay B.
 gd.layout=figure(0,'a').layout;
 drain();
+await Promise.resolve();
 assert.ok(calls.length >= 2,'slow handoff did not replay after stale Dash repaint');
 const last=calls[calls.length-1].meta.mattervis_render;
 assert.equal(last.scene_id,'b');
