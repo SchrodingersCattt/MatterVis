@@ -121,6 +121,32 @@ def test_geometry_render_ignores_invalid_override_opacity():
     assert traces[0].opacity == 0.4
 
 
+def test_legacy_symmetry_atom_override_alias_still_materializes():
+    from mat_viewer.render.picking import (
+        atom_instance_id,
+        legacy_atom_instance_id,
+    )
+
+    atom = {
+        "label": "C1<sym2>",
+        "elem": "C",
+        "cart": [0.0, 0.0, 0.0],
+        "_source_index": 3,
+        "_symop_index": 2,
+        "_symmetry_scope": True,
+        "_image_shift": [2, 0, 0],
+    }
+    current = atom_instance_id(atom, 0)
+    legacy = legacy_atom_instance_id(atom, 0)
+    assert current.endswith("|symmetry:2")
+    assert legacy == "atom:source:3|image:2,0,0"
+    scene = apply_scene_style_overrides(
+        {"draw_atoms": [atom], "bonds": []},
+        {"style_overrides": {legacy: {"kind": "atom", "color": "#ff0000"}}},
+    )
+    assert scene["draw_atoms"][0]["_render_color"] == "#ff0000"
+
+
 def test_scene_style_overrides_materialize_exact_atom_and_bond_targets():
     from mat_viewer.render.picking import atom_instance_id, bond_instance_id
 
