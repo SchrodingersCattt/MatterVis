@@ -242,3 +242,45 @@ def test_property_color_override_is_independent_from_solid_color():
     )
     assert scene["draw_atoms"][0]["_property_color"] == "#abcdef"
     assert "_render_color" not in scene["draw_atoms"][0]
+
+
+def test_legacy_symmetry_alias_does_not_shadow_canonical_periodic_atom():
+    from mat_viewer.render.picking import atom_instance_id, legacy_atom_instance_id
+
+    transformed = {
+        "label": "C1<sym2>",
+        "elem": "C",
+        "cart": [0.0, 0.0, 0.0],
+        "_source_index": 3,
+        "_symop_index": 2,
+        "_symmetry_scope": True,
+        "_image_shift": [2, 0, 0],
+    }
+    periodic = {
+        "label": "C1-image",
+        "elem": "C",
+        "cart": [1.0, 0.0, 0.0],
+        "_source_index": 3,
+        "_image_shift": [2, 0, 0],
+    }
+    assert atom_instance_id(periodic, 1) == legacy_atom_instance_id(transformed, 0)
+    scene = apply_scene_style_overrides(
+        {"draw_atoms": [transformed, periodic], "bonds": []},
+        {
+            "style_overrides": {
+                legacy_atom_instance_id(transformed, 0): {
+                    "kind": "atom",
+                    "color": "#ff0000",
+                }
+            }
+        },
+    )
+    assert "_render_color" not in scene["draw_atoms"][0]
+    assert scene["draw_atoms"][1]["_render_color"] == "#ff0000"
+
+
+def test_legacy_target_parser_omits_identity_zero_image():
+    from mat_viewer.render.picking import legacy_atom_target_id
+
+    assert legacy_atom_target_id("atom:source:3|symmetry:0") == "atom:source:3"
+    assert legacy_atom_target_id("atom:source:3|symmetry:2") == "atom:source:3|image:2,0,0"
