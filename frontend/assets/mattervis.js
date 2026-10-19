@@ -238,6 +238,11 @@
     }
     const pendingMatches = pendingSceneTabScrollId !== null &&
       String(current) === String(pendingSceneTabScrollId);
+    // A Dash tab can report its old selected class for several turns after
+    // the browser has already requested a new scene. Re-fetch that scene's
+    // newest frame at the DOM selection barrier so a frame rejected against
+    // the old canvas is not lost.
+    if (changed) resyncScene(String(current));
     if (schedule && String(current) !== lastScrolledSceneId &&
         (changed || pendingMatches)) {
       scheduleSceneTabScroll(current);
@@ -315,6 +320,12 @@
         sceneTabIntentSource = null;
         return sceneTabIntentId;
       }
+      // Preserve a pointer-selected tab's optimistic intent for the full
+      // handoff window. Rapid scene switches can leave Dash's selected class
+      // on the previous tab while the complete frame is already available;
+      // expiring this intent after 750 ms strands that frame on the old
+      // canvas. A newer pointer click replaces the intent immediately.
+      if (intentLive && sceneTabIntentSource === "pointer") return sceneTabIntentId;
       // Preserve a just-clicked tab's optimistic intent for the short window
       // before Dash applies its selected class. Older intents are stale when
       // a programmatic upload selection changes the value.
