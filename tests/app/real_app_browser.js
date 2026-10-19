@@ -942,7 +942,8 @@ async function canvasInk(page) {
 async function selectUnitCell(page) {
   const host = page.locator("#display-mode-selector");
   const label = ((await host.innerText()) || "").replace(/\s+/g, " ");
-  if (!/^\s*Unit cell\b/i.test(label)) {
+  const alreadySelected = /^\s*Unit cell\b/i.test(label);
+  if (!alreadySelected) {
     await host.click();
     await page.getByRole("option", { name: "Unit cell", exact: true }).click();
   }
@@ -951,6 +952,7 @@ async function selectUnitCell(page) {
     const text = ((node && node.innerText) || "").replace(/\s+/g, " ").trim();
     return text === "Unit cell" || text.startsWith("Unit cell");
   }, null, {timeout: 30000});
+  return !alreadySelected;
 }
 
 async function figureRevision(page) {
@@ -1053,8 +1055,19 @@ async function leftDrag(page, box) {
 async function runOrthoDrag(page) {
   await clickTab(page, "DAP-4");
   const beforeUnitCell = await figureRevision(page);
-  await selectUnitCell(page);
-  await waitForUnitCellFigure(page, beforeUnitCell);
+  const unitCellChanged = await selectUnitCell(page);
+  // If DAP-4 already starts in Unit cell mode there is no new render revision
+  // to wait for; require the existing WebGL frame instead of timing out on 0 > 0.
+  if (unitCellChanged) {
+    await waitForUnitCellFigure(page, beforeUnitCell);
+  } else {
+    await page.waitForFunction(() => {
+      const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+      const meta = gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
+      const scene = gd && gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
+      return !!(meta && meta.scene_id && scene && scene.glplot && gd.data && gd.data.length);
+    }, null, {timeout: 30000});
+  }
   await ensureOrthographic(page);
   const rename = await page.locator("#scene-tab-rename-input").inputValue().catch(() => "");
   if (!rename.trim()) {
