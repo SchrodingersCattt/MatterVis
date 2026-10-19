@@ -127,12 +127,19 @@
     return !!(p && typeof p.isCurrent === "function" && p.isCurrent());
   }
   function sceneIdFromTabNode(node) {
-    if (!node || !node.id || node.id.indexOf("scene-tab-") !== 0) return null;
+    if (!node || !node.id) return null;
+    // Compact scene chips use a JSON id on their select button, while
+    // dcc.Tab wrappers use the scene-tab-* convention.
+    if (node.id[0] === "{" || node.id[0] === "[") {
+      try {
+        const parsed = JSON.parse(node.id);
+        if (parsed && parsed.scene_id) return String(parsed.scene_id);
+      } catch (_) {}
+    }
+    if (node.id.indexOf("scene-tab-") !== 0) return null;
     if (node.id.indexOf("scene-tab-close-") === 0) return null;
     if (node.id === "scene-tabs" || node.id === "scene-tab-close-row") return null;
     // Labels are nested inside the dcc.Tab and carry their own stable id.
-    // Treating ``scene-tab-label-*`` as a scene named ``label-*`` made a
-    // normal click queue the correct frame under the wrong optimistic id.
     if (node.id.indexOf("scene-tab-label-") === 0) {
       return node.id.slice("scene-tab-label-".length);
     }
@@ -195,7 +202,7 @@
     const root = document.getElementById("scene-tabs");
     if (!root || typeof root.querySelector !== "function") return null;
     const selected = root.querySelector(
-      "[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active"
+      "[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active, .scene-tab-chip--selected .tab-select"
     );
     if (!selected) return null;
     const node = sceneIdFromTabNode(selected)
@@ -238,7 +245,7 @@
     if (!tab && hasExplicitSceneId) return false;
     if (!tab && typeof root.querySelector === "function") {
       const selected = root.querySelector(
-        "[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active"
+        "[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active, .scene-tab-chip--selected .tab-select"
       );
       tab = selected && (sceneIdFromTabNode(selected)
         ? selected
@@ -274,7 +281,7 @@
     const intentAge = sceneTabIntentId ? Date.now() - sceneTabIntentAt : Infinity;
     const intentLive = sceneTabIntentId && intentAge < 10000;
     const selected = root && root.querySelector(
-      "[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active"
+      "[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active, .scene-tab-chip--selected .tab-select"
     );
     const node = selected
       ? (sceneIdFromTabNode(selected)
