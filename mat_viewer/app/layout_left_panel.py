@@ -67,6 +67,13 @@ def build_left_panel(
                                 style={"marginRight": "6px"},
                             ),
                             html.Button(
+                                "Undo close",
+                                id="scene-undo-close-btn",
+                                n_clicks=0,
+                                title="Restore the most recently closed scene tab",
+                                className="scene-undo-close-btn",
+                            ),
+                            html.Button(
                                 ["+", html.Span(" Duplicate", className="scene-new-tab-hint")],
                                 id="scene-new-tab-btn",
                                 n_clicks=0,

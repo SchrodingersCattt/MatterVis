@@ -110,3 +110,184 @@ const plot=sandbox.window.Plotly;
     result = subprocess.run([node, "-e", program, str(source)], capture_output=True,
                             text=True, timeout=15)
     assert result.returncode == 0, result.stderr
+
+
+def test_parked_frames_are_bounded_and_newest_frame_wins():
+    """A lost pointer-up must not replay an obsolete parked frame forever."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = Path(__file__).resolve().parents[2] / "frontend/assets/mattervis.js"
+    program = r"""
+const fs=require('node:fs'), vm=require('node:vm'), assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+let expected={scene_id:'a',render_revision:1,server_started_at:'epoch'};
+let calls=[];
+function layout(rev) {
+  return {scene:{camera:{eye:{x:rev,y:1,z:2},center:{x:0,y:0,z:0},up:{x:0,y:0,z:1}},uirevision:'a__'+rev},
+    meta:{mattervis_render:{scene_id:'a',render_revision:rev,server_started_at:'epoch'}}};
+}
+const gd={layout:layout(0),_fullLayout:{scene:{camera:layout(0).scene.camera}}};
+function original(target,data,lay) { calls.push(lay); target.layout=lay; return Promise.resolve(target); }
+const sandbox={console,Promise,JSON,Number,Date,Object,Array,String,setTimeout,clearTimeout,
+  window:{Plotly:{react:original,newPlot:original}},
+  document:{getElementById:id=>id==='fast-view-metadata'?{get textContent(){return JSON.stringify(expected);}}:
+    id==='crystal-graph'?{querySelector:()=>gd}:null}};
+vm.createContext(sandbox);
+const end=source.indexOf('  // ── Right-click menu');
+vm.runInContext(source.slice(0,end)+
+  'window.testGate={start:markActive,stop:()=>{interactionActive=false;flushPendingFigurePush();}};})();',sandbox);
+const plot=sandbox.window.Plotly;
+(async()=>{
+  sandbox.window.testGate.start();
+  const old=plot.react(gd,[],layout(1));
+  expected={...expected,render_revision:2};
+  const newest=plot.react(gd,[],layout(2));
+  sandbox.window.testGate.stop();
+  await old; await newest;
+  assert.equal(calls.length,1,'older parked frame was replayed');
+  assert.equal(calls[0].meta.mattervis_render.render_revision,2,'newest frame did not win');
+
+  // Keep the interaction active and never send pointerup. The bounded replay
+  // loop must resolve without invoking Plotly with the parked frame.
+  expected={...expected,render_revision:3};
+  sandbox.window.testGate.start();
+  const parked=plot.react(gd,[],layout(3));
+  await parked;
+  assert.equal(calls.length,1,'parked frame painted after the retry cap');
+})().catch(error=>{console.error(error);process.exitCode=1;});
+"""
+    result = subprocess.run([node, "-e", program, str(source)], capture_output=True,
+                            text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+
+
+def test_ws_parked_scene_frames_carry_retry_count_and_drop_stale_frames():
+    """Scene handoff retries are bounded and cannot replay an older revision."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = Path(__file__).resolve().parents[2] / "frontend/assets/mattervis.js"
+    program = r"""
+const fs=require('node:fs'), vm=require('node:vm'), assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+let expected={scene_id:'a',render_revision:1,server_started_at:'epoch'};
+let timers=[], calls=[];
+function later(fn) { timers.push(fn); return timers.length; }
+function cancel(id) { if (id>0 && id<=timers.length) timers[id-1]=null; }
+function drain() { let fn; while (timers.length && (fn=timers.shift()) !== undefined) if (fn) fn(); }
+function figure(rev, scene) {
+  return {data:[{type:'scatter3d',x:[rev],y:[0],z:[0]}],layout:{scene:{},meta:{mattervis_render:{scene_id:scene,render_revision:rev,server_started_at:'epoch'}}}};
+}
+const gd={layout:figure(0,'a').layout};
+function react(target, data, layout) { calls.push(layout); target.layout=layout; return Promise.resolve(target); }
+let socket;
+function WebSocketMock() { socket=this; this.addEventListener=(name, fn)=>{this[name]=fn;}; }
+const document={readyState:'loading',addEventListener(){},addEventListener(){},
+  documentElement:{},
+  getElementById(id){
+    if(id==='fast-view-metadata') return {get textContent(){return JSON.stringify(expected);}};
+    if(id==='crystal-graph') return {querySelector:()=>gd};
+    return null;
+  },querySelectorAll(){return []}};
+const MutationObserver=function(){}; MutationObserver.prototype.observe=function(){};
+const sandbox={console,Promise,JSON,Number,Date,Object,Array,String,Math,setTimeout:later,clearTimeout:cancel,
+  MutationObserver,requestAnimationFrame:()=>0,document,WebSocket:WebSocketMock,
+  window:{Plotly:{react,newPlot:react,update:react,relayout:react,restyle:react},WebSocket:WebSocketMock,
+    location:{protocol:'http:',host:'localhost'},addEventListener(){}}};
+vm.createContext(sandbox);
+const end=source.indexOf('/* Live compass overlay');
+vm.runInContext(source.slice(0,end),sandbox);
+function send(p) { socket.message({data:JSON.stringify(p)}); }
+const frame=(rev,scene)=>Object.assign({scene_id:scene,render_revision:rev}, {figure:figure(rev,scene)});
+(async()=>{
+send(frame(2,'b'));
+// The selected scene is still A. Every replay must consume one attempt; the
+// frame is dropped at the cap instead of spinning forever.
+drain();
+assert.equal(calls.length,0,'non-selected frame painted during retry loop');
+assert.ok(timers.length<=1,'retry loop did not terminate at its cap');
+
+// A queued old revision is discarded as soon as the canvas reports a newer
+// revision for that scene, even if the tab handoff timer is still pending.
+timers=[]; expected={scene_id:'a',render_revision:1,server_started_at:'epoch'}; gd.layout=figure(0,'a').layout;
+send(frame(2,'b'));
+expected={scene_id:'b',render_revision:3,server_started_at:'epoch'}; gd.layout=figure(3,'b').layout;
+drain();
+assert.equal(calls.length,0,'older parked frame overwrote newer canvas revision');
+
+// A current parked frame is delivered once the selected-scene metadata moves
+// to the same scene/revision.
+timers=[]; expected={scene_id:'a',render_revision:1,server_started_at:'epoch'}; gd.layout=figure(0,'a').layout;
+send(frame(4,'b')); expected={scene_id:'b',render_revision:4,server_started_at:'epoch'}; drain();
+await Promise.resolve();
+assert.equal(calls.length,1,'current parked frame was not delivered');
+})().catch(error=>{console.error(error);process.exitCode=1;});
+"""
+    result = subprocess.run([node, "-e", program, str(source)], capture_output=True,
+                            text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+
+def test_ws_slow_handoff_gets_full_settle_budget():
+    """A handoff that uses seven retries still replays after a stale Dash paint."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = Path(__file__).resolve().parents[2] / "frontend/assets/mattervis.js"
+    program = r"""
+const fs=require('node:fs'), vm=require('node:vm'), assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+let expected={scene_id:'a',render_revision:0,server_started_at:'epoch'};
+let timers=[], calls=[];
+function later(fn) { timers.push(fn); return timers.length; }
+function cancel(id) { if (id>0 && id<=timers.length) timers[id-1]=null; }
+function one() { const fn=timers.shift(); if (fn) fn(); }
+function figure(rev, scene) {
+  return {data:[{type:'scatter3d',x:[rev],y:[0],z:[0]}],
+    layout:{scene:{},meta:{mattervis_render:{scene_id:scene,render_revision:rev,server_started_at:'epoch'}}}};
+}
+const gd={layout:figure(0,'a').layout,querySelectorAll:()=>[]};
+function react(target, data, layout) { calls.push(layout); target.layout=layout; return Promise.resolve(target); }
+let socket;
+function WebSocketMock() { socket=this; this.addEventListener=(name, fn)=>{this[name]=fn;}; }
+const document={readyState:'loading',addEventListener(){},
+  documentElement:{},
+  getElementById(id){
+    if(id==='fast-view-metadata') return {get textContent(){return JSON.stringify(expected);}};
+    if(id==='crystal-graph') return {querySelector:()=>gd,querySelectorAll:()=>[]};
+    return null;
+  },querySelectorAll(){return []}};
+const MutationObserver=function(){}; MutationObserver.prototype.observe=function(){};
+const sandbox={console,Promise,JSON,Number,Date,Object,Array,String,Math,setTimeout:later,clearTimeout:cancel,
+  MutationObserver,requestAnimationFrame:()=>0,document,WebSocket:WebSocketMock,
+  window:{Plotly:{react,newPlot:react,update:react,relayout:react,restyle:react},WebSocket:WebSocketMock,
+    location:{protocol:'http:',host:'localhost'},addEventListener(){}}};
+vm.createContext(sandbox);
+const end=source.indexOf('/* Live compass overlay');
+vm.runInContext(source.slice(0,end),sandbox);
+function send(p) { socket.message({data:JSON.stringify(p)}); }
+const frame=(rev,scene)=>Object.assign({scene_id:scene,render_revision:rev}, {figure:figure(rev,scene)});
+const tick=async()=>{ for (let k=0;k<20;k++) await Promise.resolve(); };
+async function drainAsync() {
+  let n=0;
+  while (timers.length && n++<200) { one(); await tick(); }
+}
+(async()=>{
+send(frame(2,'b'));
+// Let the scene handoff consume seven retries while A remains selected.
+for (let i=0;i<7;i++) { one(); await tick(); }
+expected={scene_id:'b',render_revision:2,server_started_at:'epoch'};
+one(); // first eligible handoff paints B and starts a fresh settle budget
+await tick();
+// Dash repaints stale A after the handoff; settle must replay B.
+gd.layout=figure(0,'a').layout;
+await drainAsync();
+assert.ok(calls.length >= 2,'slow handoff did not replay after stale Dash repaint');
+const last=calls[calls.length-1].meta.mattervis_render;
+assert.equal(last.scene_id,'b');
+assert.equal(last.render_revision,2);
+})().catch(error=>{console.error(error);process.exitCode=1;});
+"""
+    result = subprocess.run([node, "-e", program, str(source)], capture_output=True,
+                            text=True, timeout=15)
+    assert result.returncode == 0, result.stderr

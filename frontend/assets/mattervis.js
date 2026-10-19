@@ -558,9 +558,18 @@
   }
   function scheduleQueuedSceneFigureRetry(sceneId, attempt) {
     const key = String(sceneId || "");
-    if (!key || pendingFigureRetryTimers[key] || !pendingFigureByScene[key]) return;
+    const queued = key && pendingFigureByScene[key];
+    if (!key || pendingFigureRetryTimers[key] || !queued) return;
     attempt = Number(attempt || 0);
-    if (attempt >= 24) return;
+    // Preserve the handoff budget when settle detects a stale tab paint and
+    // has to return to the selected-scene retry path.  Without this marker,
+    // the settle fallback restarted at zero and could schedule another full
+    // handoff window indefinitely.
+    queued.handoffAttempts = attempt;
+    if (attempt >= 24) {
+      delete pendingFigureByScene[key];
+      return;
+    }
     pendingFigureRetryTimers[key] = setTimeout(function () {
       delete pendingFigureRetryTimers[key];
       flushQueuedSceneFigure(key, attempt + 1);
@@ -580,11 +589,11 @@
       Number(expected.render_revision || 0) === Number(shown.render_revision || 0) &&
       Number(expected.display_version || 0) === Number(shown.display_version || 0);
   }
-  function scheduleQueuedSceneFigureSettle(sceneId, queued, attempt) {
+  function scheduleQueuedSceneFigureSettle(sceneId, queued, settleAttempt) {
     const key = String(sceneId || "");
     if (!key || pendingFigureByScene[key] !== queued || pendingFigureRetryTimers[key]) return;
-    attempt = Number(attempt || 0);
-    if (attempt >= 8) {
+    settleAttempt = Number(settleAttempt || 0);
+    if (settleAttempt >= 8) {
       delete pendingFigureByScene[key];
       return;
     }
@@ -595,15 +604,25 @@
         // Dash may repaint with its stale figure prop just after Plotly.react
         // resolves. Require several stable observations before releasing the
         // parked frame so that repaint gets a second replay if needed.
-        if (attempt >= 2) {
+        if (settleAttempt >= 2) {
           delete pendingFigureByScene[key];
           return;
         }
-        scheduleQueuedSceneFigureSettle(key, queued, attempt + 1);
+        scheduleQueuedSceneFigureSettle(key, queued, settleAttempt + 1);
         return;
       }
-      flushQueuedSceneFigure(key, attempt + 1);
-    }, attempt ? 100 : 250);
+      // The first settle observation can see the stale Dash layout before
+      // Plotly.react's promise has updated the canvas. Reapply the same
+      // selected frame with the settle counter advancing independently from
+      // the tab handoff counter; this keeps the replay bounded and avoids
+      // resetting the counter on every stale observation.
+      if (typeof figurePushIsCurrent === "function" && !figurePushIsCurrent(queued)) {
+        scheduleQueuedSceneFigureRetry(key, Number(queued.handoffAttempts || 0));
+        return;
+      }
+      applyFigurePush(queued.figure.data||[], queued.figure.layout||{});
+      scheduleQueuedSceneFigureSettle(key, queued, settleAttempt + 1);
+    }, settleAttempt ? 100 : 250);
   }
   function clearQueuedSceneFigure(sceneId, sequence) {
     const key = String(sceneId || "");
@@ -633,14 +652,34 @@
       // turns. Keep the revision-0 frame parked by scene and retry the handoff
       // briefly instead of evaluating its fence only once while the previous
       // scene is still selected.
-      if (targetSceneId) scheduleQueuedSceneFigureRetry(sceneId, attempt);
+      scheduleQueuedSceneFigureRetry(sceneId, attempt);
       return;
     }
     if (pendingFigureRetryTimers[String(sceneId)]) {
       clearTimeout(pendingFigureRetryTimers[String(sceneId)]);
       delete pendingFigureRetryTimers[String(sceneId)];
     }
+    // A newer frame may already be visible while this parked frame was waiting
+    // for the selected tab. Never let the older frame repaint over it.
+    const gd = typeof graphDiv === "function" ? graphDiv() : null;
+    const queuedRender = typeof renderMetadataFromLayout === "function"
+      ? renderMetadataFromLayout(queued.figure.layout || {})
+      : null;
+    const shownRender = typeof renderMetadataFromLayout === "function"
+      ? renderMetadataFromLayout(gd && gd.layout)
+      : null;
+    const sameSceneEpoch = queuedRender && shownRender
+      && String(queuedRender.scene_id || "") === String(shownRender.scene_id || "")
+      && (!queuedRender.server_started_at || !shownRender.server_started_at
+        || String(queuedRender.server_started_at) === String(shownRender.server_started_at));
+    if (sameSceneEpoch
+        && Number(shownRender.render_revision || 0) >= Number(queuedRender.render_revision || 0)) {
+      clearQueuedSceneFigure(sceneId, Number(queued.figure_seq || queued.seq || 0));
+      return;
+    }
     applyFigurePush(queued.figure.data||[], queued.figure.layout||{});
+    // Handoff retries and settle retries have independent budgets. A slow
+    // tab switch must still get the full settle window after its first paint.
     scheduleQueuedSceneFigureSettle(sceneId, queued, 0);
   }
   // Dash applies ``scene-tabs.value`` and paints the selected tab in

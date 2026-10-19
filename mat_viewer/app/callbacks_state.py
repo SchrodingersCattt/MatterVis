@@ -193,13 +193,14 @@ def register_state_callbacks(app, backend):
         Input("scene-rename-btn", "n_clicks"),
         Input("scene-tab-close-active", "n_clicks"),
         Input("scene-close-others-btn", "n_clicks"),
+        Input("scene-undo-close-btn", "n_clicks"),
         Input({"type": "tab-close", "scene_id": ALL}, "n_clicks"),
         State("scene-tabs", "value"),
         State("scene-tab-rename-input", "value"),
         prevent_initial_call=True,
     )
     def dispatch_scene_tab_event(
-        _, __, ___, ____, close_clicks, active_scene_id, label
+        _, __, ___, ____, _____, close_clicks, active_scene_id, label
     ):
         triggered = getattr(callback_context, "triggered_id", None)
         if isinstance(triggered, dict):
@@ -208,7 +209,7 @@ def register_state_callbacks(app, backend):
             action = "close-row"
         else:
             action = str(triggered or "")
-        if not active_scene_id and action != "close-row":
+        if not active_scene_id and action not in {"close-row", "scene-undo-close-btn"}:
             return no_update, no_update
 
         message = no_update
@@ -259,6 +260,12 @@ def register_state_callbacks(app, backend):
                 )
                 n = len(result.get("removed") or [])
                 message = f"Closed {n} other scene{'s' if n != 1 else ''}."
+            elif action == "scene-undo-close-btn":
+                result = backend.undo_scene_close()
+                restored = result.get("restored") or []
+                if not restored:
+                    return no_update, "Nothing to undo."
+                message = f"Restored {len(restored)} closed scene{'s' if len(restored) != 1 else ''}."
             elif action == "close-row":
                 scene_id = (
                     triggered.get("scene_id") if isinstance(triggered, dict) else None

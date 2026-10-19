@@ -145,3 +145,15 @@ def test_sync_agent_state_poll_path_returns_no_update_for_camera_store() -> None
         "If you removed that line, the periodic-camera-snap-back bug "
         "is back. See file docstring."
     )
+
+
+def test_broadcast_state_survives_following_ui_camera_write(backend: ViewerBackend) -> None:
+    """A UI camera persist must not erase an already queued agent update."""
+    backend.pop_pending_state()
+    backend.patch_state({"atom_scale": 1.25}, broadcast=True)
+    backend.patch_state({"camera": CAMERA_B}, broadcast=False)
+
+    pending = backend.pop_pending_state()
+    assert pending is not None
+    assert pending["atom_scale"] == pytest.approx(1.25)
+    assert pending["camera"] == CAMERA_B

@@ -245,3 +245,33 @@ def test_web_property_catalog_state_controls_and_trace_batching(tmp_path: Path) 
     ]
     assert len(atom_traces) == 2
     assert sum("vertexcolor" in trace for trace in atom_traces) == 1
+
+
+def test_cli_property_options_survive_first_state_poll(tmp_path: Path) -> None:
+    """The startup poll must not replay the pre-CLI scene snapshot.
+
+    ``create_scene`` queues a state snapshot for the browser.  The factory
+    then applies ``--color-by``/``--colormap`` as a non-broadcast startup
+    patch.  Before the regression fix, that queued snapshot still had no
+    property spec, so the first ``agent-state-poll`` reset the controls to
+    their defaults.
+    """
+    path = tmp_path / "charges.extxyz"
+    _trajectory(path)
+    app = create_app(
+        preset_path=str(tmp_path / "preset.json"),
+        root_dir=str(tmp_path),
+        input_path=str(path),
+        atom_property_color={
+            "fields": ["array:charges"],
+            "colormap": "plasma",
+        },
+    )
+    backend = app.crystal_backend
+    state = backend.get_state()
+    pending = backend.pop_pending_state()
+
+    assert state["atom_property_color"]["colormap"] == "plasma"
+    assert pending is None or pending["atom_property_color"] == state[
+        "atom_property_color"
+    ]
