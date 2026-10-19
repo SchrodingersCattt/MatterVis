@@ -12,7 +12,12 @@ from collections.abc import Iterable, Mapping, Sequence
 from copy import deepcopy
 from typing import Any
 
-from ..picking import atom_instance_id, bond_instance_id
+from ..picking import (
+    atom_instance_id,
+    atom_instance_id_aliases,
+    bond_instance_id,
+    legacy_atom_target_id,
+)
 
 ENTITY_FIELDS: dict[str, frozenset[str]] = {
     # ``property_color`` is kept separate from ``color`` because a
@@ -474,6 +479,13 @@ def resolve_entity_style(
                 continue
             seen.add(candidate)
             local = overrides.get(candidate)
+            if local is None and _canonical_kind(kind) == "atom":
+                # Presets written before symmetry provenance was explicit used
+                # ``|image:<op>,0,0`` for symmetry copies.  Keep those paint
+                # edits effective when the entity now exposes ``|symmetry``.
+                legacy = legacy_atom_target_id(candidate)
+                if legacy:
+                    local = overrides.get(legacy)
             if not isinstance(local, Mapping):
                 continue
             style = local.get("style") if isinstance(local.get("style"), Mapping) else local
@@ -617,7 +629,12 @@ def apply_scene_style_overrides(
     atoms = []
     for index, value in enumerate(scene.get("draw_atoms") or []):
         atom = dict(value)
-        override = overrides.get(atom_instance_id(atom, index))
+        override = None
+        for target_id in atom_instance_id_aliases(atom, index):
+            candidate = overrides.get(target_id)
+            if isinstance(candidate, Mapping):
+                override = candidate
+                break
         if isinstance(override, Mapping) and _canonical_kind(override.get("kind", "atom")) == "atom":
             if "color" in override:
                 atom["_render_color"] = str(override["color"])
