@@ -427,14 +427,18 @@
     /* A background build for a scene the user did not select must not
      * replace the structure already on the canvas. */
     if (!sceneId && render.scene_id && canvasSceneId() && String(render.scene_id)!==canvasSceneId()) return false;
+    // Complete frames for a newly selected scene are fenced by the typed
+    // envelope (scene/revision/generation). Their embedded layout metadata
+    // can still be one Dash turn behind the envelope while the old canvas is
+    // being replaced, so do not reject that frame on the old revision.
+    const replacingScene = !!(render.scene_id && canvasSceneId() && String(render.scene_id) !== canvasSceneId());
     const expected=currentRenderRevision();
     const revision=Number(render.render_revision);
-    if (expected!==null&&(!Number.isFinite(revision)||revision<expected)) return false;
+    if (!replacingScene && expected!==null&&(!Number.isFinite(revision)||revision<expected)) return false;
     /* A complete frame for a different scene must paint even when that
      * scene's remembered camera revision is ahead of the cached figure.
      * Dropping it leaves the previous scene frozen on the canvas. Same-scene
      * frames still have to honor a newer Reset. */
-    const replacingScene = !!(render.scene_id && canvasSceneId() && String(render.scene_id) !== canvasSceneId());
     if (!replacingScene) {
       const expectedState=sceneId&&expectedRenderRevisionByScene[sceneId];
       if (expectedState&&Number(render.camera_revision||0)<expectedState.cameraRevision) return false;

@@ -112,6 +112,40 @@ const plot=sandbox.window.Plotly;
     assert result.returncode == 0, result.stderr
 
 
+def test_replacement_frame_uses_envelope_revision_over_stale_layout_metadata():
+    """A selected-scene frame must replace the old canvas even if Dash's layout stamp lags."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = Path(__file__).resolve().parents[2] / "frontend/assets/mattervis.js"
+    program = r"""
+const fs=require('node:fs'), vm=require('node:vm'), assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const expected={scene_id:'scene-b',render_revision:1,server_started_at:'epoch'};
+const layout=(scene,revision)=>({scene:{},meta:{mattervis_render:{scene_id:scene,render_revision:revision,server_started_at:'epoch'}}});
+const gd={layout:layout('scene-a',0),_fullLayout:{scene:{camera:{},_scene:{getCamera:()=>({})}}}};
+const calls=[];
+function react(target,data,lay) { calls.push(lay); target.layout=lay; return Promise.resolve(target); }
+const sandbox={console,Promise,JSON,Number,Date,Object,Array,String,setTimeout,clearTimeout,
+  window:{Plotly:{react,newPlot:react}},
+  document:{getElementById:id=>id==='fast-view-metadata'?{textContent:JSON.stringify(expected)}:
+    id==='crystal-graph'?{querySelector:()=>gd}:null}};
+vm.createContext(sandbox);
+const end=source.indexOf('  // ── Right-click menu');
+vm.runInContext(source.slice(0,end)+'})();',sandbox);
+(async()=>{
+  // The envelope says scene-b/revision 1; its embedded figure layout is one
+  // Dash turn behind (scene-b/revision 0). The replacement must still paint.
+  await sandbox.window.Plotly.react(gd,[],layout('scene-b',0));
+  assert.equal(calls.length,1,'replacement frame was rejected as stale');
+  assert.equal(calls[0].meta.mattervis_render.scene_id,'scene-b');
+})().catch(error=>{console.error(error);process.exitCode=1;});
+"""
+    result = subprocess.run([node, "-e", program, str(source)], capture_output=True,
+                            text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+
+
 def test_parked_frames_are_bounded_and_newest_frame_wins():
     """A lost pointer-up must not replay an obsolete parked frame forever."""
     node = shutil.which("node")
