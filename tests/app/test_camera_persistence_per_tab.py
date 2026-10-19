@@ -81,6 +81,34 @@ def test_drag_camera_stays_on_the_scene_that_produced_it(tmp_path):
         backend.close()
 
 
+def test_late_drag_after_reset_is_rejected_by_camera_revision(tmp_path):
+    backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    try:
+        scene_id = backend.active_scene_id()
+        before = backend.get_state(scene_id)
+        old_capture = {
+            "scene_id": scene_id,
+            "scene_generation": before["scene_generation"],
+            "camera_revision": before["camera_revision"],
+            "relayout": {"scene.camera": CAMERA_A},
+        }
+        backend.camera_action("reset", scene_id=scene_id, broadcast=False)
+        after_reset = backend.get_state(scene_id)
+        result = _persist_relayout_camera(
+            backend,
+            old_capture,
+            _camera_store_payload(scene_id, after_reset["camera"]),
+            now=10.0,
+            last_commit=0.0,
+            min_interval_s=0.25,
+        )
+        assert result is None
+        assert backend.get_state(scene_id)["camera"] == after_reset["camera"]
+        assert backend.get_state(scene_id)["camera_revision"] == after_reset["camera_revision"]
+    finally:
+        backend.close()
+
+
 def test_backend_figure_title_prefers_scene_label(tmp_path):
     backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
     scene_id = backend.active_scene_id()

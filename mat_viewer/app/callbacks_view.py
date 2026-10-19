@@ -619,6 +619,7 @@ def register_view_callbacks(app, backend):
               var meta = gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
               var canvasId = meta && meta.scene_id ? String(meta.scene_id) : "";
               var gestureId = window.__mvGestureSceneId ? String(window.__mvGestureSceneId) : "";
+              var gestureKind = window.__mvGestureKind ? String(window.__mvGestureKind) : "";
               // Dash may deliver relayoutData after Plotly has already
               // painted the next scene and after the pointer gesture ended.
               // Keep the scene that owned the last pointer gesture as a
@@ -627,13 +628,19 @@ def register_view_callbacks(app, backend):
               // this marker for legitimate drags on B.
               var lastGestureId = window.__mvLastGestureSceneId
                 ? String(window.__mvLastGestureSceneId) : "";
-              if (gestureId && canvasId && gestureId !== canvasId) return window.dash_clientside.no_update;
-              if (!gestureId && lastGestureId && canvasId && lastGestureId !== canvasId) {
+              if (gestureId && canvasId && gestureId !== canvasId && gestureKind !== "wheel") return window.dash_clientside.no_update;
+              if (!gestureId && lastGestureId && canvasId && lastGestureId !== canvasId && gestureKind !== "wheel") {
                 return window.dash_clientside.no_update;
               }
-              var sceneId = gestureId || canvasId;
+              var sceneId = (gestureKind === "wheel" && canvasId) ? canvasId : (gestureId || canvasId);
               if (!sceneId) return window.dash_clientside.no_update;
-              return {scene_id: sceneId, relayout: relayout, seq: Date.now()};
+              return {
+                scene_id: sceneId,
+                scene_generation: window.__mvGestureSceneGeneration,
+                camera_revision: window.__mvGestureCameraRevision,
+                relayout: relayout,
+                seq: Date.now(),
+              };
             }
             """,
             Output("camera-capture-store", "data"),

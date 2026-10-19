@@ -174,6 +174,22 @@ def _persist_relayout_camera(
         )
     )
     state_before = backend.get_state(scene_id)
+    # The browser stamps the scene generation and camera revision at gesture
+    # start. A delayed Dash callback from before Reset/Fit must not overwrite
+    # the newer camera state. Older clients may omit these fields, so retain
+    # compatibility while enforcing the fence whenever a stamp is present.
+    captured_generation = capture.get("scene_generation")
+    if captured_generation is not None and str(captured_generation) != str(
+        state_before.get("scene_generation", backend.scene_generation(scene_id))
+    ):
+        return None
+    captured_camera_revision = capture.get("camera_revision")
+    if captured_camera_revision is not None:
+        try:
+            if int(captured_camera_revision) != int(state_before.get("camera_revision", 0) or 0):
+                return None
+        except (TypeError, ValueError):
+            return None
     current_camera = _camera_from_store(camera_state, scene_id) or state_before.get("camera")
     camera = _camera_from_relayout_data(relayout, current_camera)
     if not camera or (isinstance(current_camera, dict) and camera == current_camera):

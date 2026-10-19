@@ -219,6 +219,51 @@ assert.equal(result.scene_id,'b','wheel camera relayout was attributed to the ol
     assert result.returncode == 0, result.stderr
 
 
+def test_camera_capture_wheel_fence_does_not_survive_scene_switch() -> None:
+    """A wheel stamp from A must not reject a later camera command on B."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    callbacks = (
+        Path(__file__).resolve().parents[2] / "mat_viewer" / "app" / "callbacks_view.py"
+    ).read_text(encoding="utf-8")
+    start = callbacks.index('            """\n            function(relayout) {')
+    start = callbacks.index("function(relayout)", start)
+    end = callbacks.index('            """', start)
+    capture_callback = textwrap.dedent(callbacks[start:end]).strip()
+    source = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "mattervis.js"
+    program = f"""
+const fs=require('node:fs'), vm=require('node:vm'), assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const callbackSource={json.dumps(capture_callback)};
+const listeners={{}};
+function add(name, fn) {{ (listeners[name] ||= []).push(fn); }}
+function emit(name, event) {{ (listeners[name] || []).forEach(fn => fn(event)); }}
+function layout(scene) {{ return {{meta:{{mattervis_render:{{scene_id:scene,render_revision:1,scene_generation:scene==='a'?1:2,camera_revision:0,server_started_at:'epoch'}}}}}}; }}
+const gd={{layout:layout('a'),_fullLayout:{{scene:{{camera:{{}}}}}}}};
+const graph={{querySelector:()=>gd,querySelectorAll:()=>[]}};
+const document={{readyState:'loading',addEventListener:add,querySelector:()=>gd,
+  querySelectorAll:()=>[],getElementById:id=>id==='crystal-graph'?graph:null,
+  body:{{prepend(){{}},appendChild(){{}}}},documentElement:{{}}}};
+function WebSocketMock() {{ this.addEventListener=()=>{{}}; }}
+const MutationObserver=function() {{}}; MutationObserver.prototype.observe=function(){{}}; MutationObserver.prototype.disconnect=function(){{}};
+const sandbox={{console,Promise,JSON,Number,Date,Object,Array,String,Math,setTimeout:()=>0,clearTimeout:()=>{{}},
+  MutationObserver,requestAnimationFrame:()=>0,document,WebSocket:WebSocketMock,
+  window:{{Plotly:{{react:()=>Promise.resolve(gd),newPlot:()=>Promise.resolve(gd),update:()=>Promise.resolve(gd),relayout:()=>Promise.resolve(gd),restyle:()=>Promise.resolve(gd)}},WebSocket:WebSocketMock,
+    location:{{protocol:'http:',host:'localhost'}},addEventListener(){{}},dash_clientside:{{no_update:{{__no_update:true}},set_props(){{}}}}}}}};
+vm.createContext(sandbox);
+vm.runInContext(source.slice(0,source.indexOf('/* Live compass overlay')),sandbox);
+emit('wheel',{{target:{{closest:()=>graph}}}});
+gd.layout=layout('b');
+const capture=vm.runInNewContext('('+callbackSource+')',sandbox);
+const result=capture({{'scene.camera':{{eye:{{x:99}}}}}});
+assert.equal(result.scene_id,'b','wheel fence from A survived the B scene switch');
+"""
+    result = subprocess.run([node, "-e", program, str(source)], capture_output=True,
+                            text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+
+
 def test_broadcast_state_survives_following_ui_camera_write(backend: ViewerBackend) -> None:
     """A UI camera persist must not erase an already queued agent update."""
     backend.pop_pending_state()
