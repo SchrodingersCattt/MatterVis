@@ -397,6 +397,13 @@
     const metadata = fastViewMetadata();
     return metadata&&metadata.scene_id ? String(metadata.scene_id) : null;
   }
+  function sceneFrameNeedsReplay(sceneId) {
+    const wanted = sceneId ? String(sceneId) : "";
+    if (!wanted) return false;
+    const selected = currentSceneId();
+    const shown = canvasSceneId();
+    return !!(selected && String(selected) === wanted && shown && String(shown) !== wanted);
+  }
   // The shared view submitter runs in a separate asset and needs the same
   // optimistic tab intent while Plotly is still displaying the previous
   // scene.  Upload completion uses this hook before Dash paints the new tab.
@@ -481,6 +488,20 @@
         else if (name==="update") layout=args[2];
         else if (name==="relayout") layout=args[1];
         const render=renderMetadataFromLayout(layout);
+        const target=typeof args[0]==="string"?document.getElementById(args[0]):args[0];
+        // Dash can replay an older figure prop without MatterVis render
+        // metadata while a selected-scene handoff is still in flight.  The
+        // metadata fence below cannot identify that payload, so it would
+        // overwrite the freshly submitted replacement frame with the previous
+        // scene.  Once a live canvas has a typed scene identity, keep an
+        // untyped full-frame call out when the selected scene has moved on.
+        if (fullFigure && target && !render) {
+          const shown = renderMetadataFromLayout(target.layout);
+          const selected = typeof currentSceneId === "function" ? currentSceneId() : null;
+          if (shown && shown.scene_id && selected && String(shown.scene_id) !== String(selected)) {
+            return Promise.resolve(target);
+          }
+        }
         if (name==="relayout" && layout) {
           const gd=typeof args[0]==="string"?document.getElementById(args[0]):args[0];
           const shown=renderMetadataFromLayout(gd && gd.layout);
@@ -500,7 +521,7 @@
             Object.keys(layout).some(function (key) { return key.indexOf("scene.camera.") === 0; });
           if (touchesCamera) window.MatterVisInvalidateSemanticHover();
         }
-        const gd=typeof args[0]==="string"?document.getElementById(args[0]):args[0];
+        const gd=target;
         if (fullFigure&&render&&gd) {
           const receiver=this;
           const revision=function(lay) {return lay&&lay.scene&&lay.scene.uirevision!==undefined?lay.scene.uirevision:lay&&lay.uirevision;};
@@ -1729,7 +1750,7 @@
          * A WS frame for scene A can advance the global cursor before the
          * selected scene B frame is polled; rejecting B on that cursor would
          * strand its newest frame and leave the old canvas visible forever. */
-        if (seq && seq <= Math.max(seenSeq, previousSeq)) return;
+        if (seq && seq <= Math.max(seenSeq, previousSeq) && !sceneFrameNeedsReplay(sceneKey)) return;
         if (seq) {
           latestFigureSeqByScene[sceneKey] = seq;
           window.__mattervisFigureLastSeq = Math.max(Number(window.__mattervisFigureLastSeq || 0), seq);
@@ -1795,7 +1816,7 @@
       // per-scene cursor to decide whether this payload is a duplicate.
       const payloadScene = p.scene_id ? String(p.scene_id) : "";
       const sceneSeq = Number(payloadScene && latestFigureSeqByScene[payloadScene] || 0);
-      if (seq && seq <= sceneSeq) return;
+      if (seq && seq <= sceneSeq && !sceneFrameNeedsReplay(payloadScene)) return;
       if (seq) {
         if (payloadScene) latestFigureSeqByScene[payloadScene] = seq;
         window.__mattervisFigureLastSeq = Math.max(Number(window.__mattervisFigureLastSeq || 0), seq);
