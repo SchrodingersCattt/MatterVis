@@ -12,7 +12,6 @@ def test_serialized_frame_gate_and_live_camera():
         pytest.skip("Node.js is needed to execute the frontend regression")
     source = Path(__file__).resolve().parents[2] / "frontend/assets/mattervis.js"
     program = r"""
-(async()=>{
 const fs=require('node:fs'), vm=require('node:vm'), assert=require('node:assert/strict');
 const source=fs.readFileSync(process.argv[1],'utf8');
 let expected={scene_id:'a',render_revision:1,server_started_at:'epoch'};
@@ -237,6 +236,7 @@ def test_ws_slow_handoff_gets_full_settle_budget():
         pytest.skip("Node.js is needed to execute the frontend regression")
     source = Path(__file__).resolve().parents[2] / "frontend/assets/mattervis.js"
     program = r"""
+(async()=>{
 const fs=require('node:fs'), vm=require('node:vm'), assert=require('node:assert/strict');
 const source=fs.readFileSync(process.argv[1],'utf8');
 let expected={scene_id:'a',render_revision:0,server_started_at:'epoch'};
