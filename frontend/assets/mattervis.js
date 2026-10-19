@@ -537,7 +537,10 @@
     const key = String(sceneId || "");
     if (!key || pendingFigureRetryTimers[key] || !pendingFigureByScene[key]) return;
     attempt = Number(attempt || 0);
-    if (attempt >= 24) return;
+    if (attempt >= 24) {
+      delete pendingFigureByScene[key];
+      return;
+    }
     pendingFigureRetryTimers[key] = setTimeout(function () {
       delete pendingFigureRetryTimers[key];
       flushQueuedSceneFigure(key, attempt + 1);
@@ -610,7 +613,7 @@
       // turns. Keep the revision-0 frame parked by scene and retry the handoff
       // briefly instead of evaluating its fence only once while the previous
       // scene is still selected.
-      if (targetSceneId) scheduleQueuedSceneFigureRetry(sceneId, attempt);
+      scheduleQueuedSceneFigureRetry(sceneId, attempt);
       return;
     }
     if (pendingFigureRetryTimers[String(sceneId)]) {
