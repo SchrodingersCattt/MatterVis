@@ -282,11 +282,22 @@ class _SelectionBackendMixin:
         atom_ids = {
             atom_instance_id(atom, index) for index, atom in enumerate(atoms)
         }
-        legacy_atom_ids: dict[str, str] = {}
+        # A legacy symmetry alias can be a valid canonical ID for a different
+        # atom (for example a real periodic image).  Do not reinterpret that
+        # canonical target as the transformed atom, and do not guess when two
+        # transformed atoms share the same old alias.
+        legacy_alias_targets: dict[str, set[str]] = {}
         for index, atom in enumerate(atoms):
             aliases = atom_instance_id_aliases(atom, index)
             for alias in aliases[1:]:
-                legacy_atom_ids[alias] = aliases[0]
+                if alias in atom_ids:
+                    continue
+                legacy_alias_targets.setdefault(alias, set()).add(aliases[0])
+        legacy_atom_ids = {
+            alias: next(iter(targets))
+            for alias, targets in legacy_alias_targets.items()
+            if len(targets) == 1
+        }
         valid: dict[str, set[str]] = {
             "atom": atom_ids,
             "bond": {
