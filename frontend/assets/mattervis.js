@@ -639,7 +639,9 @@
       return;
     }
     applyFigurePush(queued.figure.data||[], queued.figure.layout||{});
-    scheduleQueuedSceneFigureSettle(sceneId, queued, Number(attempt || 0));
+    // Handoff retries and settle retries have independent budgets. A slow
+    // tab switch must still get the full settle window after its first paint.
+    scheduleQueuedSceneFigureSettle(sceneId, queued, 0);
   }
   // Dash applies ``scene-tabs.value`` and paints the selected tab in
   // separate turns.  A completed upload can therefore be queued by the
