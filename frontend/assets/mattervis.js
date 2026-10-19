@@ -629,7 +629,11 @@
     const key = String(sceneId || "");
     if (!key || pendingFigureByScene[key] !== queued || pendingFigureRetryTimers[key]) return;
     settleAttempt = Number(settleAttempt || 0);
-    if (settleAttempt >= 8) {
+    // A busy Dash callback can repaint the previous figure several seconds
+    // after Plotly.react resolves (especially during rapid tab switching).
+    // Keep the selected frame parked long enough for that repaint to settle;
+    // the per-scene retry budget remains bounded.
+    if (settleAttempt >= 40) {
       delete pendingFigureByScene[key];
       return;
     }
@@ -640,7 +644,7 @@
         // Dash may repaint with its stale figure prop just after Plotly.react
         // resolves. Require several stable observations before releasing the
         // parked frame so that repaint gets a second replay if needed.
-        if (settleAttempt >= 4) {
+        if (settleAttempt >= 8) {
           delete pendingFigureByScene[key];
           return;
         }
