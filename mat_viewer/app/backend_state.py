@@ -257,6 +257,9 @@ class _StateBackendMixin:
         scene_id: Optional[str] = None,
         *,
         broadcast: bool = True,
+        expected_camera_revision: Any = None,
+        expected_scene_generation: Any = None,
+        _camera_fence: bool = False,
     ) -> dict[str, Any]:
         # ``broadcast`` controls whether ``pending_state`` is armed for
         # the next ``sync_agent_state`` poll. REST/WS callers want this
@@ -279,6 +282,25 @@ class _StateBackendMixin:
                 if target_scene_id
                 else copy.deepcopy(self.current_state)
             )
+            if _camera_fence:
+                # Compare inside the same lock that commits the camera. A
+                # Reset/Fit that landed after the caller's earlier read must
+                # not be overwritten by that stale drag.
+                current_generation = self.scene_generation(target_scene_id)
+                try:
+                    revision_ok = int(expected_camera_revision) == int(
+                        state_before.get("camera_revision", 0) or 0
+                    )
+                except (TypeError, ValueError):
+                    revision_ok = False
+                generation_ok = (
+                    expected_scene_generation is not None
+                    and str(expected_scene_generation) == str(current_generation)
+                )
+                if not revision_ok or not generation_ok:
+                    raise StaleCameraWrite(
+                        "camera write lost the scene generation or camera revision race"
+                    )
             working_state = self.normalize_state(patch, scene_id=target_scene_id)
             change_kind = classify_change(state_before, working_state)
             # Structure/display changes can remove displayed instances while

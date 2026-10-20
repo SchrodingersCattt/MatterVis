@@ -460,6 +460,19 @@ def register_state_callbacks(app, backend):
             and triggered != "native-upload-sync"
         ):
             return (no_update,) * n_outputs
+        # A UI edit can commit a newer scene state while an already queued
+        # snapshot is being consumed by this poll.  Do not let that older
+        # snapshot roll the controls back (the common case is Unit cell being
+        # replaced by the pre-edit Formula unit value).  The live state is
+        # authoritative once its version clocks have advanced.
+        if state and scene_id and str(state.get("scene_id") or "") == str(scene_id):
+            live_state = backend.get_state(scene_id)
+            version_keys = ("geometry_version", "display_version", "camera_version", "render_revision")
+            if any(
+                int(live_state.get(key, 0) or 0) > int(state.get(key, 0) or 0)
+                for key in version_keys
+            ):
+                state = live_state
         # Upload completion emits ``native-upload-sync`` from the browser.
         # Depending on callback ordering, ``pending_state`` may already have
         # been consumed by a near-simultaneous poll tick. Native-upload is a

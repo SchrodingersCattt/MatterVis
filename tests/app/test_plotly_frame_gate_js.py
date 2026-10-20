@@ -112,6 +112,40 @@ const plot=sandbox.window.Plotly;
     assert result.returncode == 0, result.stderr
 
 
+def test_replacement_frame_uses_envelope_revision_over_stale_layout_metadata():
+    """A selected-scene frame must replace the old canvas even if Dash's layout stamp lags."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = Path(__file__).resolve().parents[2] / "frontend/assets/mattervis.js"
+    program = r"""
+const fs=require('node:fs'), vm=require('node:vm'), assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const expected={scene_id:'scene-b',render_revision:1,server_started_at:'epoch'};
+const layout=(scene,revision)=>({scene:{},meta:{mattervis_render:{scene_id:scene,render_revision:revision,server_started_at:'epoch'}}});
+const gd={layout:layout('scene-a',0),_fullLayout:{scene:{camera:{},_scene:{getCamera:()=>({})}}}};
+const calls=[];
+function react(target,data,lay) { calls.push(lay); target.layout=lay; return Promise.resolve(target); }
+const sandbox={console,Promise,JSON,Number,Date,Object,Array,String,setTimeout,clearTimeout,
+  window:{Plotly:{react,newPlot:react}},
+  document:{getElementById:id=>id==='fast-view-metadata'?{textContent:JSON.stringify(expected)}:
+    id==='crystal-graph'?{querySelector:()=>gd}:null}};
+vm.createContext(sandbox);
+const end=source.indexOf('  // ── Right-click menu');
+vm.runInContext(source.slice(0,end)+'})();',sandbox);
+(async()=>{
+  // The envelope says scene-b/revision 1; its embedded figure layout is one
+  // Dash turn behind (scene-b/revision 0). The replacement must still paint.
+  await sandbox.window.Plotly.react(gd,[],layout('scene-b',0));
+  assert.equal(calls.length,1,'replacement frame was rejected as stale');
+  assert.equal(calls[0].meta.mattervis_render.scene_id,'scene-b');
+})().catch(error=>{console.error(error);process.exitCode=1;});
+"""
+    result = subprocess.run([node, "-e", program, str(source)], capture_output=True,
+                            text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+
+
 def test_parked_frames_are_bounded_and_newest_frame_wins():
     """A lost pointer-up must not replay an obsolete parked frame forever."""
     node = shutil.which("node")
@@ -287,6 +321,106 @@ const last=calls[calls.length-1].meta.mattervis_render;
 assert.equal(last.scene_id,'b');
 assert.equal(last.render_revision,2);
 })().catch(error=>{console.error(error);process.exitCode=1;});
+"""
+    result = subprocess.run([node, "-e", program, str(source)], capture_output=True,
+                            text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+
+
+def test_ws_parked_replay_reenters_typed_submitter():
+    """A parked frame replay must use the typed submitter's ordering fence."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = Path(__file__).resolve().parents[2] / "frontend/assets/mattervis.js"
+    program = r"""
+const fs=require('node:fs'), vm=require('node:vm'), assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+let expected={scene_id:'a',render_revision:1,server_started_at:'epoch'};
+let timers=[], typedCalls=0, directCalls=0;
+function later(fn) { timers.push(fn); return timers.length; }
+function cancel(id) { if (id>0 && id<=timers.length) timers[id-1]=null; }
+function drainOne() { const fn=timers.shift(); if (fn) fn(); }
+function figure(rev, scene) {
+  return {data:[{type:'scatter3d',x:[rev],y:[0],z:[0]}],
+    layout:{scene:{},meta:{mattervis_render:{scene_id:scene,render_revision:rev,server_started_at:'epoch'}}}};
+}
+const gd={layout:figure(0,'a').layout};
+function react(target, data, layout) { directCalls += 1; target.layout=layout; return Promise.resolve(target); }
+let socket;
+function WebSocketMock() { socket=this; this.addEventListener=(name, fn)=>{this[name]=fn;}; }
+const typed={submit(update) {
+  typedCalls += 1;
+  assert.equal(update.figure.layout.meta.mattervis_render.scene_id,'b');
+  // Force one stale result so replay must retry through this same API.
+  return typedCalls === 1 ? 'stale' : Promise.resolve('figure');
+}};
+const document={readyState:'loading',addEventListener(){},documentElement:{},
+  getElementById(id){
+    if(id==='fast-view-metadata') return {get textContent(){return JSON.stringify(expected);}};
+    if(id==='crystal-graph') return {querySelector:()=>gd,querySelectorAll:()=>[]};
+    return null;
+  },querySelectorAll(){return []}};
+const MutationObserver=function(){}; MutationObserver.prototype.observe=function(){};
+const sandbox={console,Promise,JSON,Number,Date,Object,Array,String,Math,setTimeout:later,clearTimeout:cancel,
+  MutationObserver,requestAnimationFrame:()=>0,document,WebSocket:WebSocketMock,
+  window:{Plotly:{react,newPlot:react,update:react,relayout:react,restyle:react},WebSocket:WebSocketMock,
+    MatterVisViewUpdates:typed,location:{protocol:'http:',host:'localhost'},addEventListener(){}}};
+vm.createContext(sandbox);
+const end=source.indexOf('/* Live compass overlay');
+vm.runInContext(source.slice(0,end),sandbox);
+function send(p) { socket.message({data:JSON.stringify(p)}); }
+const frame=(rev,scene)=>Object.assign({scene_id:scene,render_revision:rev}, {figure:figure(rev,scene)});
+(async()=>{
+  send(frame(2,'b'));
+  // The frame is parked while scene A remains selected.
+  assert.equal(typedCalls,0);
+  expected={scene_id:'b',render_revision:2,server_started_at:'epoch'};
+  // At B's selection barrier the typed submitter reports stale once; the
+  // bounded retry must invoke it again instead of painting directly.
+  drainOne();
+  drainOne();
+  assert.ok(typedCalls>=1,'parked replay bypassed typed submitter');
+  while (timers.length && typedCalls<2) drainOne();
+  await Promise.resolve();
+  assert.ok(typedCalls>=2,'stale typed replay was not retried');
+  assert.equal(directCalls,0,'parked replay bypassed typed submitter with Plotly.react');
+})().catch(error=>{console.error(error);process.exitCode=1;});
+"""
+    result = subprocess.run([node, "-e", program, str(source)], capture_output=True,
+                            text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+
+
+def test_same_scene_id_new_generation_is_not_dropped_as_an_older_frame():
+    """Undo can restore an id with a new generation and render revision zero."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = Path(__file__).resolve().parents[2] / "frontend/assets/mattervis.js"
+    program = r"""
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const start=source.indexOf('  function scheduleQueuedSceneFigureRetry');
+const stop=source.indexOf('  function flushPendingFigurePush',start);
+const body=source.slice(start,stop);
+const timers=[],pending=Object.create(null),gd={layout:{meta:{mattervis_render:{scene_id:'same',scene_generation:4,render_revision:8,display_version:8,server_started_at:'epoch'}}}};
+const sandbox={window:{MatterVisViewUpdates:{submit(frame){ sandbox.typedCalls += 1; return 'figure'; }}},pending,gd,timers,typedCalls:0,
+  setTimeout:(fn)=>{timers.push(fn);return timers.length;},clearTimeout:()=>{}};
+vm.createContext(sandbox);
+vm.runInContext(`
+  let current='same';
+  function graphDiv(){return gd;}
+  function renderMetadataFromLayout(layout){return layout&&layout.meta&&layout.meta.mattervis_render||null;}
+  function currentSceneId(){return current;}
+  function figurePushIsCurrent(frame){return frame.isCurrent();}
+  const pendingFigureRetryTimers=Object.create(null);
+  const pendingFigureByScene=pending;
+  ${body}
+  pending.same={figure:{data:[{}],layout:{meta:{mattervis_render:{scene_id:'same',scene_generation:8,render_revision:0,display_version:0,server_started_at:'epoch'}}}},figure_seq:20,isCurrent:()=>true};
+  flushQueuedSceneFigure('same');
+`,sandbox);
+assert.equal(sandbox.typedCalls,1,'new-generation same-id frame was dropped before typed submitter');
 """
     result = subprocess.run([node, "-e", program, str(source)], capture_output=True,
                             text=True, timeout=15)

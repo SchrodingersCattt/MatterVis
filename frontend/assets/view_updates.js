@@ -105,6 +105,15 @@
     }
     return "";
   }
+  function expectedScene(scene) {
+    if (!scene || typeof root.MatterVisExpectedRender !== "function") return null;
+    return root.MatterVisExpectedRender(scene);
+  }
+  function completeFrameMeta(update, versions) {
+    var figureMeta = update && update.figure && update.figure.layout && update.figure.layout.meta;
+    figureMeta = figureMeta && figureMeta.mattervis_render;
+    return Object.assign({}, figureMeta && typeof figureMeta === "object" ? figureMeta : {}, versions || {});
+  }
   function applicable(update, gd) {
     if (!update || !gd) return false;
     noteGraph(gd);
@@ -112,6 +121,8 @@
     var scene = update.scene_id;
     var render = currentMeta(gd);
     var complete = isCompleteFrame(update);
+    var v = meta(update);
+    var frame = complete ? completeFrameMeta(update, v) : v;
     /* A complete frame for the newly selected scene must paint while the
      * canvas still shows the previous scene. Patch updates still require
      * an exact rendered-scene match. */
@@ -123,8 +134,19 @@
       return false;
     }
     var sameScene = !scene || !render.scene_id || String(scene) === String(render.scene_id);
+    var expected = complete && scene ? expectedScene(String(scene)) : null;
+    if (expected) {
+      if (expected.scene_generation !== undefined && expected.scene_generation !== null &&
+          String(frame.scene_generation || "") !== String(expected.scene_generation)) return false;
+      var incomingRevision = Number(frame.render_revision || frame.geometry_version || frame.geometry || 0);
+      if (expected.render_revision !== null && expected.render_revision !== undefined &&
+          (!Number.isFinite(incomingRevision) || incomingRevision < Number(expected.render_revision))) return false;
+      var incomingCamera = Number(frame.camera_revision || frame.camera_version || 0);
+      if (expected.camera_revision !== null && expected.camera_revision !== undefined &&
+          incomingCamera < Number(expected.camera_revision)) return false;
+    }
     var seen = remembered(update, gd);
-    var v = meta(update), current = Math.max(Number(render.geometry_version || render.render_revision || 0), seen.geometry);
+    var current = Math.max(Number(render.geometry_version || render.render_revision || 0), seen.geometry);
     var geometry = Number(v.geometry_version || v.geometry || 0);
     if (sameScene && geometry && current && geometry < current) return false;
     var generation = v.scene_generation !== undefined ? String(v.scene_generation) : "";
@@ -136,6 +158,11 @@
     if (updateKind(update) === "camera" && !cameraIsCurrent(update, gd)) return false;
     var key = deliveryKey(update, gd);
     if (!delivered[key]) return true;
+    /* A parked frame can be replayed after Dash has repainted an older
+     * figure with the same scene/version key.  The replay marker is set only
+     * by the bounded scene-handoff queue and intentionally bypasses the
+     * delivered-key dedupe so the complete frame can restore the canvas. */
+    if (complete && update && update._mvForceReplay) return true;
     /* Switching away and back reuses the cached frame. The delivery key
      * is already known, but the canvas is still the other scene. */
     return !!(complete && scene && render.scene_id && String(scene) !== String(render.scene_id));
@@ -343,6 +370,26 @@
       var figureKey = deliveryKey(snapshot, gd);
       if (pending[figureKey]) return pending[figureKey];
       var layout = clone(snapshot.figure.layout || {});
+      /* The complete-frame envelope is authoritative while Dash may still
+       * carry one turn of stale metadata inside ``figure.layout``. Stamp the
+       * cloned layout before Plotly's render gate sees it so the gate can
+       * enforce the same generation/revision fence without accepting an old
+       * layout or rejecting a valid typed frame. */
+      var envelope = Object.assign({}, snapshot.state && typeof snapshot.state === "object" ? snapshot.state : {},
+        snapshot.versions && typeof snapshot.versions === "object" ? snapshot.versions : {}, snapshot);
+      var layoutMeta = layout.meta && typeof layout.meta === "object" ? layout.meta : {};
+      var renderMeta = layoutMeta.mattervis_render && typeof layoutMeta.mattervis_render === "object"
+        ? Object.assign({}, layoutMeta.mattervis_render) : {};
+      ["scene_id", "scene_generation", "render_revision", "camera_revision", "server_started_at"].forEach(function (key) {
+        if (envelope[key] !== undefined && envelope[key] !== null) renderMeta[key] = envelope[key];
+      });
+      layoutMeta.mattervis_render = renderMeta;
+      layout.meta = layoutMeta;
+      if (snapshot._mvForceReplay) {
+        var replayMeta = layout.meta && typeof layout.meta === "object" ? layout.meta : {};
+        replayMeta = Object.assign({}, replayMeta, {mattervis_replay: true});
+        layout.meta = replayMeta;
+      }
       /* Live-camera preservation belongs to the frame gate, which keeps it
        * only for the same scene and interaction generation. Copying it here
        * would paint scene A's camera onto scene B before that gate runs. */

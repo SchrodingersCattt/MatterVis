@@ -179,9 +179,18 @@
           }
           return;
         }
-        Promise.resolve(window.MatterVisViewUpdates.submit(latest)).catch(function (error) {
-          console.error("MatterVis scene resync failed", error);
-        });
+        // Feed resync frames through the same scene/sequence fence as the
+        // live transport.  A rapid tab switch can make the selected scene
+        // change between the fetch and submit; calling the typed submitter
+        // directly would drop that frame as "stale" with no retry, leaving
+        // the newly selected canvas on the previous scene.
+        if (typeof window.__mvHandleFigurePayload === "function") {
+          window.__mvHandleFigurePayload(latest);
+        } else {
+          Promise.resolve(window.MatterVisViewUpdates.submit(latest)).catch(function (error) {
+            console.error("MatterVis scene resync failed", error);
+          });
+        }
       }).catch(function () {
         if (attempt < 40) setTimeout(function () { resyncScene(sceneId, attempt + 1); }, 250);
       });
@@ -201,9 +210,11 @@
   function selectedSceneTabId() {
     const root = document.getElementById("scene-tabs");
     if (!root || typeof root.querySelector !== "function") return null;
-    const selected = root.querySelector(
-      "[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active, .scene-tab-chip--selected .tab-select"
-    );
+    // The compact chip is the visible selector.  Hidden dcc.Tab wrappers can
+    // retain a stale selected class while Dash applies the chip change; query
+    // the chip first so scroll/routing follows the scene the user sees.
+    const selected = root.querySelector(".scene-tab-chip--selected .tab-select") ||
+      root.querySelector("[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active");
     if (!selected) return null;
     const node = sceneIdFromTabNode(selected)
       ? selected
@@ -229,6 +240,11 @@
     }
     const pendingMatches = pendingSceneTabScrollId !== null &&
       String(current) === String(pendingSceneTabScrollId);
+    // A Dash tab can report its old selected class for several turns after
+    // the browser has already requested a new scene. Re-fetch that scene's
+    // newest frame at the DOM selection barrier so a frame rejected against
+    // the old canvas is not lost.
+    if (changed) resyncScene(String(current));
     if (schedule && String(current) !== lastScrolledSceneId &&
         (changed || pendingMatches)) {
       scheduleSceneTabScroll(current);
@@ -280,9 +296,11 @@
     const root = document.getElementById("scene-tabs");
     const intentAge = sceneTabIntentId ? Date.now() - sceneTabIntentAt : Infinity;
     const intentLive = sceneTabIntentId && intentAge < 10000;
-    const selected = root && root.querySelector(
-      "[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active, .scene-tab-chip--selected .tab-select"
-    );
+    // Prefer the visible chip over stale hidden tab classes during a Dash
+    // handoff; otherwise a frame for the newly clicked scene is fenced
+    // against the previous tab until the next unrelated click.
+    const selected = root && (root.querySelector(".scene-tab-chip--selected .tab-select") ||
+      root.querySelector("[aria-selected='true'], .tab--selected, .dash-tab--selected, .rc-tabs-tab-active"));
     const node = selected
       ? (sceneIdFromTabNode(selected)
         ? selected
@@ -306,6 +324,12 @@
         sceneTabIntentSource = null;
         return sceneTabIntentId;
       }
+      // Preserve a pointer-selected tab's optimistic intent for the full
+      // handoff window. Rapid scene switches can leave Dash's selected class
+      // on the previous tab while the complete frame is already available;
+      // expiring this intent after 750 ms strands that frame on the old
+      // canvas. A newer pointer click replaces the intent immediately.
+      if (intentLive && sceneTabIntentSource === "pointer") return sceneTabIntentId;
       // Preserve a just-clicked tab's optimistic intent for the short window
       // before Dash applies its selected class. Older intents are stale when
       // a programmatic upload selection changes the value.
@@ -356,6 +380,11 @@
     const generation=String(value.scene_generation||"");
     const priorGeneration=expectedSceneGenerationByScene[key];
     if (priorGeneration!==undefined && priorGeneration!==generation) {
+      const priorNumber=Number(priorGeneration), nextNumber=Number(generation);
+      /* Scene generations are monotonic within one server epoch. An older
+       * payload must never replace the expectation established by fast
+       * metadata for the same scene. */
+      if (!allowEpochChange || (Number.isFinite(priorNumber)&&Number.isFinite(nextNumber)&&nextNumber<priorNumber)) return;
       delete expectedRenderRevisionByScene[key];
       delete expectedCameraRevisionByScene[key];
       previous=null;
@@ -373,6 +402,26 @@
     const metadata = fastViewMetadata();
     return metadata&&metadata.scene_id ? String(metadata.scene_id) : null;
   }
+  function sceneFrameNeedsReplay(sceneId) {
+    const wanted = sceneId ? String(sceneId) : "";
+    if (!wanted) return false;
+    const selected = currentSceneId();
+    const shown = canvasSceneId();
+    return !!(selected && String(selected) === wanted && shown && String(shown) !== wanted);
+  }
+  window.MatterVisExpectedRender = function (sceneId) {
+    const key = sceneId === null || sceneId === undefined ? "" : String(sceneId);
+    if (!key) return null;
+    const generation = expectedSceneGenerationByScene[key];
+    const revision = expectedRenderRevisionByScene[key];
+    const camera = expectedCameraRevisionByScene[key];
+    if (generation === undefined && !revision && camera === undefined) return null;
+    return {
+      scene_generation: generation,
+      render_revision: revision ? revision.revision : null,
+      camera_revision: camera === undefined ? (revision ? revision.cameraRevision : null) : camera,
+    };
+  };
   // The shared view submitter runs in a separate asset and needs the same
   // optimistic tab intent while Plotly is still displaying the previous
   // scene.  Upload completion uses this hook before Dash paints the new tab.
@@ -418,20 +467,30 @@
     /* A background build for a scene the user did not select must not
      * replace the structure already on the canvas. */
     if (!sceneId && render.scene_id && canvasSceneId() && String(render.scene_id)!==canvasSceneId()) return false;
+    const replacingScene = !!(render.scene_id && canvasSceneId() && String(render.scene_id) !== canvasSceneId());
+    const targetScene = render.scene_id ? String(render.scene_id) : sceneId;
+    const targetExpected = targetScene && window.MatterVisExpectedRender
+      ? window.MatterVisExpectedRender(targetScene) : null;
     const expected=currentRenderRevision();
     const revision=Number(render.render_revision);
-    if (expected!==null&&(!Number.isFinite(revision)||revision<expected)) return false;
-    /* A complete frame for a different scene must paint even when that
-     * scene's remembered camera revision is ahead of the cached figure.
-     * Dropping it leaves the previous scene frozen on the canvas. Same-scene
-     * frames still have to honor a newer Reset. */
-    const replacingScene = !!(render.scene_id && canvasSceneId() && String(render.scene_id) !== canvasSceneId());
+    if (expected!==null && !replacingScene && (!Number.isFinite(revision)||revision<expected)) return false;
+    if (targetExpected) {
+      if (targetExpected.scene_generation !== undefined && targetExpected.scene_generation !== null &&
+          String(render.scene_generation||"") !== String(targetExpected.scene_generation)) return false;
+      const hasGeneration = render.scene_generation !== undefined && render.scene_generation !== null && render.scene_generation !== "";
+      if (targetExpected.render_revision !== null && targetExpected.render_revision !== undefined &&
+          (!replacingScene || hasGeneration) &&
+          (!Number.isFinite(revision) || revision < Number(targetExpected.render_revision))) return false;
+      if (targetExpected.camera_revision !== null && targetExpected.camera_revision !== undefined &&
+          (!replacingScene || hasGeneration) &&
+          Number(render.camera_revision||0) < Number(targetExpected.camera_revision)) return false;
+    }
     if (!replacingScene) {
       const expectedState=sceneId&&expectedRenderRevisionByScene[sceneId];
       if (expectedState&&Number(render.camera_revision||0)<expectedState.cameraRevision) return false;
       if (sceneId&&expectedCameraRevisionByScene[sceneId]!==undefined && Number(render.camera_revision||0)<expectedCameraRevisionByScene[sceneId]) return false;
+      if (sceneId&&expectedSceneGenerationByScene[sceneId]!==undefined && String(render.scene_generation||"")!==expectedSceneGenerationByScene[sceneId]) return false;
     }
-    if (sceneId&&expectedSceneGenerationByScene[sceneId]!==undefined && String(render.scene_generation||"")!==expectedSceneGenerationByScene[sceneId]) return false;
     if (renderServerEpoch&&render.server_started_at&&renderServerEpoch!==String(render.server_started_at)) return false;
     return true;
   }
@@ -449,11 +508,31 @@
         else if (name==="update") layout=args[2];
         else if (name==="relayout") layout=args[1];
         const render=renderMetadataFromLayout(layout);
+        const target=typeof args[0]==="string"?document.getElementById(args[0]):args[0];
+        // Dash can replay an older figure prop without MatterVis render
+        // metadata while a selected-scene handoff is still in flight.  The
+        // metadata fence below cannot identify that payload, so it would
+        // overwrite the freshly submitted replacement frame with the previous
+        // scene.  Once a live canvas has a typed scene identity, keep an
+        // untyped full-frame call out when the selected scene has moved on.
+        if (fullFigure && target && !render) {
+          const shown = renderMetadataFromLayout(target.layout);
+          const selected = typeof currentSceneId === "function" ? currentSceneId() : null;
+          if (shown && shown.scene_id && selected && String(shown.scene_id) !== String(selected)) {
+            return Promise.resolve(target);
+          }
+        }
         if (name==="relayout" && layout) {
           const gd=typeof args[0]==="string"?document.getElementById(args[0]):args[0];
           const shown=renderMetadataFromLayout(gd && gd.layout);
           const canvasId=shown && shown.scene_id ? String(shown.scene_id) : "";
-          const gestureId=window.__mvGestureSceneId ? String(window.__mvGestureSceneId) : "";
+          let gestureId=window.__mvGestureSceneId ? String(window.__mvGestureSceneId) : "";
+          const gestureKind=window.__mvGestureKind ? String(window.__mvGestureKind) : "";
+          if (gestureKind === "wheel" && gestureId && canvasId && gestureId !== canvasId) {
+            gestureId = "";
+            window.__mvGestureSceneId = "";
+            window.__mvLastGestureSceneId = "";
+          }
           const touchesCamera=layout["scene.camera"] || (layout.scene && layout.scene.camera) ||
             Object.keys(layout).some(function(key){return key.indexOf("scene.camera.")===0;});
           if (gestureId && canvasId && gestureId!==canvasId && touchesCamera && gd && gd.__mvSceneCamera && gd.__mvSceneCameraOwner===canvasId) {
@@ -468,7 +547,7 @@
             Object.keys(layout).some(function (key) { return key.indexOf("scene.camera.") === 0; });
           if (touchesCamera) window.MatterVisInvalidateSemanticHover();
         }
-        const gd=typeof args[0]==="string"?document.getElementById(args[0]):args[0];
+        const gd=target;
         if (fullFigure&&render&&gd) {
           const receiver=this;
           const revision=function(lay) {return lay&&lay.scene&&lay.scene.uirevision!==undefined?lay.scene.uirevision:lay&&lay.uirevision;};
@@ -478,7 +557,8 @@
             const shown = renderMetadataFromLayout(gd.layout);
             const shownScene = shown && shown.scene_id ? String(shown.scene_id) : "";
             const incomingScene = render.scene_id ? String(render.scene_id) : "";
-            const alreadyShowing = gd.__mvDeliveredFrame===key && (!incomingScene || !shownScene || incomingScene===shownScene);
+            const replayFrame = !!(layout && layout.meta && layout.meta.mattervis_replay);
+            const alreadyShowing = !replayFrame && gd.__mvDeliveredFrame===key && (!incomingScene || !shownScene || incomingScene===shownScene);
             /* Do not leave the busy pill behind when a stale/duplicate frame
              * is rejected. Mark the request busy only after the frame gate
              * confirms that this Plotly call will actually run. */
@@ -550,6 +630,9 @@
   }
   installPlotlyRenderGate();
   function setInteraction(active) { setDashStore("graph-interaction-store", {active:!!active, ts:Date.now()}); }
+  /* Compatibility fallback for the brief asset-load window before
+   * view_updates.js installs the typed submitter. Normal complete-frame
+   * delivery always reaches MatterVisViewUpdates first. */
   function applyFigurePush(data, layout) {
     var gd = graphDiv(); if (!gd||!window.Plotly) return Promise.resolve();
     return window.Plotly.react(gd, data||[], layout||{}).catch(function(error) {
@@ -566,7 +649,10 @@
     // the settle fallback restarted at zero and could schedule another full
     // handoff window indefinitely.
     queued.handoffAttempts = attempt;
-    if (attempt >= 24) {
+    // Scene-tab callbacks can spend several seconds in a Dash turn while the
+    // old figure is still mounted. Keep the retry bounded, but long enough to
+    // bridge that handoff instead of dropping the only complete frame.
+    if (attempt >= 120) {
       delete pendingFigureByScene[key];
       return;
     }
@@ -586,14 +672,22 @@
     // delayed Dash repaint cannot release the only parked frame too early.
     if (!expected || !shown) return true;
     return String(expected.scene_id || "") === String(shown.scene_id || "") &&
+      (!expected.scene_generation || !shown.scene_generation ||
+        String(expected.scene_generation) === String(shown.scene_generation)) &&
       Number(expected.render_revision || 0) === Number(shown.render_revision || 0) &&
-      Number(expected.display_version || 0) === Number(shown.display_version || 0);
+      Number(expected.display_version || 0) === Number(shown.display_version || 0) &&
+      (!expected.camera_revision || !shown.camera_revision ||
+        Number(shown.camera_revision) >= Number(expected.camera_revision));
   }
   function scheduleQueuedSceneFigureSettle(sceneId, queued, settleAttempt) {
     const key = String(sceneId || "");
     if (!key || pendingFigureByScene[key] !== queued || pendingFigureRetryTimers[key]) return;
     settleAttempt = Number(settleAttempt || 0);
-    if (settleAttempt >= 8) {
+    // A busy Dash callback can repaint the previous figure several seconds
+    // after Plotly.react resolves (especially during rapid tab switching).
+    // Keep the selected frame parked long enough for that repaint to settle;
+    // the per-scene retry budget remains bounded.
+    if (settleAttempt >= 40) {
       delete pendingFigureByScene[key];
       return;
     }
@@ -604,7 +698,7 @@
         // Dash may repaint with its stale figure prop just after Plotly.react
         // resolves. Require several stable observations before releasing the
         // parked frame so that repaint gets a second replay if needed.
-        if (settleAttempt >= 2) {
+        if (settleAttempt >= 8) {
           delete pendingFigureByScene[key];
           return;
         }
@@ -620,8 +714,7 @@
         scheduleQueuedSceneFigureRetry(key, Number(queued.handoffAttempts || 0));
         return;
       }
-      applyFigurePush(queued.figure.data||[], queued.figure.layout||{});
-      scheduleQueuedSceneFigureSettle(key, queued, settleAttempt + 1);
+      replayQueuedSceneFigure(key, queued, settleAttempt + 1);
     }, settleAttempt ? 100 : 250);
   }
   function clearQueuedSceneFigure(sceneId, sequence) {
@@ -642,12 +735,74 @@
     }
     delete pendingFigureByScene[key];
   }
+  function replayQueuedSceneFigure(sceneId, queued, nextSettleAttempt) {
+    const key = String(sceneId || "");
+    nextSettleAttempt = Number(nextSettleAttempt || 0);
+    const submitter = window.MatterVisViewUpdates &&
+      typeof window.MatterVisViewUpdates.submit === "function"
+      ? window.MatterVisViewUpdates.submit
+      : null;
+    if (submitter) {
+      // Dash can repaint an older complete figure after the first submit.
+      // Mark every bounded replay so the typed gate and Plotly render gate
+      // may reapply an equal-key frame instead of treating it as delivered.
+      queued._mvForceReplay = true;
+      let submitted;
+      try {
+        // Re-enter the typed submitter on replay.  A parked frame may have
+        // become stale while it waited for the tab handoff, so bypassing the
+        // submitter here would skip its scene-generation, version, epoch and
+        // delivered-key checks.
+        submitted = submitter(queued);
+      } catch (_) {
+        scheduleQueuedSceneFigureRetry(key, Number(queued.handoffAttempts || 0));
+        return;
+      }
+      if (submitted === "stale") {
+        scheduleQueuedSceneFigureRetry(key, Number(queued.handoffAttempts || 0));
+        return;
+      }
+      if (submitted && typeof submitted.then === "function") {
+        submitted.then(function (result) {
+          if (result === "stale") {
+            scheduleQueuedSceneFigureRetry(key, Number(queued.handoffAttempts || 0));
+            return;
+          }
+          scheduleQueuedSceneFigureSettle(key, queued, nextSettleAttempt);
+        }, function () {
+          scheduleQueuedSceneFigureRetry(key, Number(queued.handoffAttempts || 0));
+        });
+        return;
+      }
+      scheduleQueuedSceneFigureSettle(key, queued, nextSettleAttempt);
+      return;
+    }
+    /* The typed submitter is normally present; retain a bounded startup
+     * fallback while the separate asset is still loading. */
+    const applied = applyFigurePush(queued.figure.data || [], queued.figure.layout || {});
+    if (applied && typeof applied.then === "function") {
+      applied.then(function () { scheduleQueuedSceneFigureSettle(key, queued, nextSettleAttempt); });
+    } else {
+      scheduleQueuedSceneFigureSettle(key, queued, nextSettleAttempt);
+    }
+  }
   function flushQueuedSceneFigure(targetSceneId, attempt) {
     const sceneId = targetSceneId ? String(targetSceneId) : currentSceneId();
     if (!sceneId) return;
     const queued = pendingFigureByScene[String(sceneId)];
     if (!queued) return;
     if (!figurePushIsCurrent(queued)) {
+      // Once the requested tab is actually selected, let the typed submitter
+      // make the final complete-frame decision. The fast handoff fence can
+      // still lag the selected scene's metadata by one Dash turn even though
+      // the frame is valid for this canvas; refusing to submit here strands
+      // the parked frame until the retry budget expires.
+      if (String(currentSceneId() || "") === String(sceneId)
+          && window.MatterVisViewUpdates
+          && typeof window.MatterVisViewUpdates.submit === "function") {
+        replayQueuedSceneFigure(sceneId, queued);
+        return;
+      }
       // A completed frame may beat Dash's selected-tab paint by several
       // turns. Keep the revision-0 frame parked by scene and retry the handoff
       // briefly instead of evaluating its fence only once while the previous
@@ -658,6 +813,18 @@
     if (pendingFigureRetryTimers[String(sceneId)]) {
       clearTimeout(pendingFigureRetryTimers[String(sceneId)]);
       delete pendingFigureRetryTimers[String(sceneId)];
+    }
+    // A newer frame for this scene may have arrived while the parked frame
+    // waited for the selected tab.  Keep the same per-scene sequence fence
+    // used by the transport path so an older parked frame cannot repaint over
+    // the newer one during replay.
+    const queuedSeq = Number(queued.figure_seq || queued.seq || 0);
+    const seenSeq = typeof latestFigureSeqByScene !== "undefined"
+      ? Number(latestFigureSeqByScene[String(sceneId)] || 0)
+      : 0;
+    if (queuedSeq && seenSeq && queuedSeq < seenSeq) {
+      clearQueuedSceneFigure(sceneId, queuedSeq);
+      return;
     }
     // A newer frame may already be visible while this parked frame was waiting
     // for the selected tab. Never let the older frame repaint over it.
@@ -671,16 +838,17 @@
     const sameSceneEpoch = queuedRender && shownRender
       && String(queuedRender.scene_id || "") === String(shownRender.scene_id || "")
       && (!queuedRender.server_started_at || !shownRender.server_started_at
-        || String(queuedRender.server_started_at) === String(shownRender.server_started_at));
+        || String(queuedRender.server_started_at) === String(shownRender.server_started_at))
+      && (!queuedRender.scene_generation || !shownRender.scene_generation
+        || String(queuedRender.scene_generation) === String(shownRender.scene_generation));
     if (sameSceneEpoch
-        && Number(shownRender.render_revision || 0) >= Number(queuedRender.render_revision || 0)) {
+        && Number(shownRender.render_revision || 0) >= Number(queuedRender.render_revision || 0)
+        && (!queuedRender.camera_revision || !shownRender.camera_revision
+          || Number(shownRender.camera_revision) >= Number(queuedRender.camera_revision))) {
       clearQueuedSceneFigure(sceneId, Number(queued.figure_seq || queued.seq || 0));
       return;
     }
-    applyFigurePush(queued.figure.data||[], queued.figure.layout||{});
-    // Handoff retries and settle retries have independent budgets. A slow
-    // tab switch must still get the full settle window after its first paint.
-    scheduleQueuedSceneFigureSettle(sceneId, queued, 0);
+    replayQueuedSceneFigure(sceneId, queued);
   }
   // Dash applies ``scene-tabs.value`` and paints the selected tab in
   // separate turns.  A completed upload can therefore be queued by the
@@ -707,7 +875,29 @@
     if (!pendingFigurePush) return;
     var p = pendingFigurePush;
     pendingFigurePush = null;
-    if (figurePushIsCurrent(p)) applyFigurePush(p.figure.data||[], p.figure.layout||{});
+    if (!figurePushIsCurrent(p)) {
+      if (p.scene_id) {
+        const key=String(p.scene_id);
+        const previous=pendingFigureByScene[key];
+        const previousSeq=Number(previous && (previous.figure_seq || previous.seq) || 0);
+        const seq=Number(p.figure_seq || p.seq || 0);
+        if (!previous || !previousSeq || (seq && seq >= previousSeq)) {
+          pendingFigureByScene[key]=p;
+          scheduleQueuedSceneFigureRetry(key, 0);
+        }
+      }
+      return;
+    }
+    p._mvForceReplay = true;
+    if (p.scene_id) {
+      const key=String(p.scene_id);
+      pendingFigureByScene[key]=p;
+      replayQueuedSceneFigure(key,p);
+    } else if (window.MatterVisViewUpdates && typeof window.MatterVisViewUpdates.submit === "function") {
+      window.MatterVisViewUpdates.submit(p);
+    } else {
+      applyFigurePush(p.figure.data||[], p.figure.layout||{});
+    }
   }
   function markActive() {
     gestureGeneration += 1;
@@ -1621,9 +1811,12 @@
          * A WS frame for scene A can advance the global cursor before the
          * selected scene B frame is polled; rejecting B on that cursor would
          * strand its newest frame and leave the old canvas visible forever. */
-        if (seq && seq <= Math.max(seenSeq, previousSeq)) return;
+        const highWater = Math.max(seenSeq, previousSeq);
+        /* Handoff replay may repeat the current high-water frame after the
+         * canvas changes scenes. It must never admit an older sequence. */
+        if (seq && (seq < highWater || (seq === highWater && !sceneFrameNeedsReplay(sceneKey)))) return;
         if (seq) {
-          latestFigureSeqByScene[sceneKey] = seq;
+          latestFigureSeqByScene[sceneKey] = Math.max(seenSeq, seq);
           window.__mattervisFigureLastSeq = Math.max(Number(window.__mattervisFigureLastSeq || 0), seq);
         }
         if (payload.state && typeof payload.state === "object") rememberExpectedRender(payload.state, true);
@@ -1651,7 +1844,12 @@
       }
       function poll() {
         if (!window.__mattervisFigureFallbackActive) return;
-        var since = Number(window.__mattervisFigureLastSeq || 0);
+        // The journal sequence is global, but a global cursor can strand a
+        // scene whose newest frame has a lower sequence than another scene's
+        // frame already observed by this browser. Read the current journal
+        // head on every fallback poll and let the per-scene cursors in
+        // ``parkFallbackFigure``/``handleFigurePayload`` suppress duplicates.
+        var since = 0;
         window.fetch("/api/v2/view-updates?since=" + encodeURIComponent(since), {credentials:"same-origin"})
           .then(function(response){ return response.ok ? response.json() : null; })
           .then(function(body){
@@ -1674,8 +1872,21 @@
     function handleFigurePayload(p) {
       if (!p || typeof p !== "object") return;
       var seq = Number(p.figure_seq || p.seq || 0);
-      if (seq && seq <= Number(window.__mattervisFigureLastSeq || 0)) return;
-      if (seq) window.__mattervisFigureLastSeq = seq;
+      // Figure sequence numbers are global across scenes, while delivery
+      // fences are scene-scoped. A frame for scene B can legitimately have a
+      // lower sequence than the last frame received for scene A; comparing
+      // against only the global cursor drops B's first paint during a tab
+      // handoff. Keep the global value for the HTTP journal cursor, but use a
+      // per-scene cursor to decide whether this payload is a duplicate.
+      const payloadScene = p.scene_id ? String(p.scene_id) : "";
+      const sceneSeq = Number(payloadScene && latestFigureSeqByScene[payloadScene] || 0);
+      /* Only the equal high-water frame can be replayed for a handoff; older
+       * sequence numbers remain stale even while another scene is displayed. */
+      if (seq && (seq < sceneSeq || (seq === sceneSeq && !sceneFrameNeedsReplay(payloadScene)))) return;
+      if (seq) {
+        if (payloadScene) latestFigureSeqByScene[payloadScene] = Math.max(sceneSeq, seq);
+        window.__mattervisFigureLastSeq = Math.max(Number(window.__mattervisFigureLastSeq || 0), seq);
+      }
       if (p.state&&typeof p.state==="object") rememberExpectedRender(p.state, true);
       if (p.scene_id&&p.render_revision!==undefined) rememberExpectedRender(p, true);
       if (p.type === "view_update" || p.type === "render_error") {
@@ -1688,25 +1899,46 @@
       }
       if (!p.figure||isPendingFigure(p.figure)||!has3DScene(p.figure)) return;
       if (!isCurrentFigurePush(p)) {
-        // An upload can publish its frame before Dash applies the new
-        // scene-tabs.value. Keep the newest frame by scene and replay it
-        // once the selected tab reflects the server-selected scene.
-        if (p.scene_id && String(p.scene_id) !== String(currentSceneId() || "")) {
-          p.isCurrent=function(){return isCurrentFigurePush(p);};
-          pendingFigureByScene[String(p.scene_id)] = p;
-          scheduleQueuedSceneFigureRetry(String(p.scene_id), 0);
+        // A frame can fail the fence even when its scene already matches the
+        // optimistic tab intent (for example, the expected revision arrives
+        // one turn before the figure). Keep the newest frame by scene for
+        // every failed fence, then replay it through the same bounded handoff
+        // path. Restricting this to scene-id mismatches silently dropped the
+        // duplicate scene's first frame after an upload.
+        if (p.scene_id) {
+          const sceneKey = String(p.scene_id);
+          const previous = pendingFigureByScene[sceneKey];
+          const seqValue = Number(p.figure_seq || p.seq || 0);
+          const previousSeq = Number(previous && (previous.figure_seq || previous.seq) || 0);
+          if (!previous || !previousSeq || (seqValue && seqValue >= previousSeq)) {
+            p.isCurrent=function(){return isCurrentFigurePush(p);};
+            pendingFigureByScene[String(p.scene_id)] = p;
+            scheduleQueuedSceneFigureRetry(sceneKey, 0);
+          }
         }
         return;
       }
       clearQueuedSceneFigure(p.scene_id, seq);
       if (interactionActive) { p.isCurrent=function(){return isCurrentFigurePush(p);}; pendingFigurePush=p; return; }
       if (sceneTabIntentId && p.scene_id && String(p.scene_id) === sceneTabIntentId) sceneTabIntentAt = 0;
-      if (window.MatterVisViewUpdates && typeof window.MatterVisViewUpdates.submit === "function") {
+      // Keep a short settle guard even after a successful typed submit. Dash
+      // can repaint its stale figure prop immediately after Plotly.react
+      // resolves; retaining this frame lets the settle observer replay it
+      // through the same ordering fence instead of losing the canvas handoff.
+      if (p.scene_id) {
+        const sceneKey = String(p.scene_id);
+        p.isCurrent=function(){return isCurrentFigurePush(p);};
+        pendingFigureByScene[sceneKey] = p;
+        replayQueuedSceneFigure(sceneKey, p);
+      } else if (window.MatterVisViewUpdates && typeof window.MatterVisViewUpdates.submit === "function") {
         window.MatterVisViewUpdates.submit(p);
       } else {
         applyFigurePush(p.figure.data||[], p.figure.layout||{});
       }
     }
+    // Scene-tab resync lives in the outer module scope; expose the same
+    // transport fence so a fetch result cannot bypass per-scene sequencing.
+    window.__mvHandleFigurePayload = handleFigurePayload;
     function canUseWebSocket() {
       return window.MATTERVIS_WS_FIGURE !== false && !!window.WebSocket &&
         !window.__mattervisFigureWsDisabled;
@@ -1932,9 +2164,56 @@
   attachRebindObserver();
 
   // ── Pointer/wheel interaction tracking ──────────────────────────
+  function stampGestureScene(sceneId, kind) {
+    const id = sceneId ? String(sceneId) : "";
+    if (!id) return;
+    const gd = graphDiv();
+    const render = renderMetadataFromLayout(gd && gd.layout);
+    const generation = render && render.scene_generation !== undefined
+      ? render.scene_generation : null;
+    // view_camera.js scopes the transient revision to scene:generation.
+    // A full-scene Plotly.react reuses the graph div and does not clear it,
+    // so a revision left by scene A must not be stamped onto scene B.
+    const scope = id + ":" + (generation === null || generation === undefined ? "" : String(generation));
+    const liveScope = gd && gd.__mvCameraRevisionScope != null ? String(gd.__mvCameraRevisionScope) : "";
+    const liveRevision = Number(gd && gd.__mvCameraRevision);
+    const metadataRevision = render && render.camera_revision !== undefined
+      ? Number(render.camera_revision || 0) : null;
+    // A typed camera command advances the transient revision without rewriting
+    // figure metadata. A later full frame can carry a still newer revision in
+    // metadata while the transient number stays behind. Use the newer of the
+    // two when they name the same scene generation.
+    let revision = null;
+    if (liveScope === scope && Number.isFinite(liveRevision)) {
+      revision = Number.isFinite(metadataRevision)
+        ? Math.max(liveRevision, metadataRevision)
+        : liveRevision;
+      if (gd && revision !== liveRevision) gd.__mvCameraRevision = revision;
+    } else if (Number.isFinite(metadataRevision)) {
+      revision = metadataRevision;
+    }
+    window.__mvGestureSceneId = id;
+    window.__mvLastGestureSceneId = sceneId;
+    window.__mvGestureKind = kind || "pointer";
+    window.__mvGestureSceneGeneration = generation;
+    window.__mvGestureCameraRevision = revision;
+    if (kind === "wheel") {
+      const stamp = id + ":" + String(Date.now());
+      window.__mvWheelGestureStamp = stamp;
+      setTimeout(function () {
+        if (window.__mvWheelGestureStamp !== stamp || window.__mvGestureKind !== "wheel") return;
+        // The active wheel is over, but Dash may still be holding its
+        // relayout. Keep the scene, generation, and revision so that late
+        // payload cannot be retargeted at the next canvas with a null fence.
+        window.__mvGestureSceneId = "";
+        window.__mvGestureKind = "";
+      }, 500);
+    }
+  }
   document.addEventListener("pointerdown", function(e) {
     if (!inGraph(e.target)) return;
-    window.__mvGestureSceneId = canvasSceneId() || window.__mvGestureSceneId || "";
+    const sceneId = canvasSceneId() || window.__mvGestureSceneId || "";
+    stampGestureScene(sceneId, "pointer");
     markActive();
   }, true);
   document.addEventListener("pointerup", function() {
@@ -1945,7 +2224,17 @@
     }, 1000);
   });
   document.addEventListener("pointercancel", function() { if (interactionActive) markInactiveSoon(); });
-  document.addEventListener("wheel", function(e) { if (inGraph(e.target)) { markActive(); markInactiveSoon(); } }, {passive:true, capture:true});
+  document.addEventListener("wheel", function(e) {
+    if (!inGraph(e.target)) return;
+    // Wheel zoom does not necessarily emit a pointerdown after a scene-tab
+    // switch. Refresh both gesture fences from the live canvas so a zoom on
+    // the newly selected scene is persisted instead of being mistaken for a
+    // delayed relayout from the previous scene.
+    const sceneId = canvasSceneId() || window.__mvGestureSceneId || "";
+    stampGestureScene(sceneId, "wheel");
+    markActive();
+    markInactiveSoon();
+  }, {passive:true, capture:true});
   window.addEventListener("blur", function() { if (interactionActive) { interactionActive = false; setInteraction(false); flushPendingFigurePush(); } });
 
   // ── Init ────────────────────────────────────────────────────────

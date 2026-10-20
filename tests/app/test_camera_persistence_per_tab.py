@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 import pytest
 
 from mat_viewer.app import (
@@ -62,9 +64,15 @@ def test_drag_camera_stays_on_the_scene_that_produced_it(tmp_path):
             "center": {"x": 20.0, "y": 20.0, "z": 20.0},
             "up": {"x": 0.0, "y": 0.0, "z": 1.0},
         }
+        state_a = backend.get_state(scene_a)
         result = _persist_relayout_camera(
             backend,
-            {"scene_id": scene_a, "relayout": {"scene.camera": missed}},
+            {
+                "scene_id": scene_a,
+                "scene_generation": state_a["scene_generation"],
+                "camera_revision": state_a["camera_revision"],
+                "relayout": {"scene.camera": missed},
+            },
             _camera_store_payload(scene_b, before_b),
             now=10.0,
             last_commit=0.0,
@@ -77,6 +85,106 @@ def test_drag_camera_stays_on_the_scene_that_produced_it(tmp_path):
         assert stored["center"]["y"] != missed["center"]["y"]
         assert backend.get_state(scene_b).get("camera") == before_b
         assert backend.active_scene_id() == scene_b
+    finally:
+        backend.close()
+
+
+def test_late_drag_after_reset_is_rejected_by_camera_revision(tmp_path):
+    backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    try:
+        scene_id = backend.active_scene_id()
+        before = backend.get_state(scene_id)
+        old_capture = {
+            "scene_id": scene_id,
+            "scene_generation": before["scene_generation"],
+            "camera_revision": before["camera_revision"],
+            "relayout": {"scene.camera": CAMERA_A},
+        }
+        backend.camera_action("reset", scene_id=scene_id, broadcast=False)
+        after_reset = backend.get_state(scene_id)
+        result = _persist_relayout_camera(
+            backend,
+            old_capture,
+            _camera_store_payload(scene_id, after_reset["camera"]),
+            now=10.0,
+            last_commit=0.0,
+            min_interval_s=0.25,
+        )
+        assert result is None
+        assert backend.get_state(scene_id)["camera"] == after_reset["camera"]
+        assert backend.get_state(scene_id)["camera_revision"] == after_reset["camera_revision"]
+    finally:
+        backend.close()
+
+
+def test_unstamped_drag_is_not_stored(tmp_path):
+    backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    try:
+        scene_id = backend.active_scene_id()
+        before = backend.get_state(scene_id)
+        result = _persist_relayout_camera(
+            backend,
+            {
+                "scene_id": scene_id,
+                "scene_generation": None,
+                "camera_revision": None,
+                "relayout": {"scene.camera": CAMERA_A},
+            },
+            _camera_store_payload(scene_id, before.get("camera")),
+            now=10.0,
+            last_commit=0.0,
+            min_interval_s=0.25,
+        )
+        assert result is None
+        assert backend.get_state(scene_id)["camera"] == before.get("camera")
+        assert backend.get_state(scene_id)["camera_revision"] == before["camera_revision"]
+    finally:
+        backend.close()
+
+
+def test_reset_during_drag_framing_keeps_the_reset_camera(tmp_path):
+    backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    try:
+        scene_id = backend.active_scene_id()
+        before = backend.get_state(scene_id)
+        entered = threading.Barrier(2)
+        release = threading.Barrier(2)
+        original = backend.camera_that_frames
+
+        def blocked(*args, **kwargs):
+            entered.wait(timeout=5)
+            release.wait(timeout=5)
+            return original(*args, **kwargs)
+
+        backend.camera_that_frames = blocked
+        holder: dict = {}
+
+        def drag():
+            holder["result"] = _persist_relayout_camera(
+                backend,
+                {
+                    "scene_id": scene_id,
+                    "scene_generation": before["scene_generation"],
+                    "camera_revision": before["camera_revision"],
+                    "relayout": {"scene.camera": CAMERA_A},
+                },
+                _camera_store_payload(scene_id, before.get("camera")),
+                now=10.0,
+                last_commit=0.0,
+                min_interval_s=0.25,
+            )
+
+        worker = threading.Thread(target=drag)
+        worker.start()
+        entered.wait(timeout=5)
+        backend.camera_action("reset", scene_id=scene_id, broadcast=False)
+        after_reset = backend.get_state(scene_id)
+        release.wait(timeout=5)
+        worker.join(timeout=5)
+        assert not worker.is_alive()
+        assert holder["result"] is None
+        assert backend.get_state(scene_id)["camera"] == after_reset["camera"]
+        assert backend.get_state(scene_id)["camera_revision"] == after_reset["camera_revision"]
     finally:
         backend.close()
 

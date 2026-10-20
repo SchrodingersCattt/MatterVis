@@ -3,6 +3,14 @@ from __future__ import annotations
 
 from .shared import *
 
+class StaleCameraWrite(Exception):
+    """A drag camera lost the compare-and-set at the locked write."""
+
+
+# Sentinel for ``patch_state``: callers that omit the fence do not opt in.
+_CAMERA_FENCE_UNSET = object()
+
+
 def _camera_store_payload(scene_id: Optional[str], camera: Optional[dict[str, Any]]) -> dict[str, Any]:
     return {"scene_id": scene_id, "camera": copy.deepcopy(camera)}
 
@@ -174,6 +182,25 @@ def _persist_relayout_camera(
         )
     )
     state_before = backend.get_state(scene_id)
+    # The browser stamps the scene generation and camera revision at gesture
+    # start. A missing stamp is not an unrestricted write: a wheel timeout or
+    # a scene handoff used to clear both fields and then store the old camera
+    # on whatever canvas was mounted. Require both fences up front. The locked
+    # write below compares them again so Reset/Fit can still win the race.
+    captured_generation = capture.get("scene_generation")
+    captured_camera_revision = capture.get("camera_revision")
+    if captured_generation is None or captured_camera_revision is None:
+        return None
+    if str(captured_generation) != str(
+        state_before.get("scene_generation", backend.scene_generation(scene_id))
+    ):
+        return None
+    try:
+        captured_camera_revision = int(captured_camera_revision)
+    except (TypeError, ValueError):
+        return None
+    if captured_camera_revision != int(state_before.get("camera_revision", 0) or 0):
+        return None
     current_camera = _camera_from_store(camera_state, scene_id) or state_before.get("camera")
     camera = _camera_from_relayout_data(relayout, current_camera)
     if not camera or (isinstance(current_camera, dict) and camera == current_camera):
@@ -195,9 +222,17 @@ def _persist_relayout_camera(
     # not move the clock and a replacement moves it once.
     if replaced:
         payload["camera_revision"] = int(state_before.get("camera_revision", 0) or 0)
-    backend.apply_intent(
-        {"type": "set_camera", "scene_id": scene_id, "payload": payload}
+    committed = backend.apply_intent(
+        {
+            "type": "set_camera",
+            "scene_id": scene_id,
+            "payload": payload,
+            "expected_scene_generation": captured_generation,
+            "expected_camera_revision": captured_camera_revision,
+        }
     )
+    if committed.get("stale_camera"):
+        return None
     state = backend.get_state(scene_id)
     flat_ortep = state.get("material") == "flat" and state.get("style") == "ortep"
     view_update = None

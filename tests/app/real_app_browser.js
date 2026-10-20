@@ -230,6 +230,9 @@ async function nonblank(page) {
 
 async function postAction(page, body) {
   const result = await page.evaluate(async (payload) => {
+    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+    const meta = gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
+    if (!payload.scene_id && meta && meta.scene_id) payload.scene_id = String(meta.scene_id);
     const response = await fetch("/api/v2/camera/action", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
@@ -1038,14 +1041,20 @@ async function ensureOrthographic(page) {
   // The display-scope callback can still be answering when the new frame
   // paints. Its state snapshot resets the projection radio, so keep
   // applying orthographic until the GL camera, the radio, and the server
-  // agree and stay that way.
+  // agree and stay that way. A late capture from an earlier formula-unit
+  // frame can also put the server display back; re-select unit cell before
+  // the next projection attempt instead of treating that as a camera miss.
   let last = null;
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    if (!last || !last.server || last.server.display !== "unit_cell") {
+      await selectUnitCell(page);
+    }
     await postAction(page, {action: "projection", type: "orthographic"});
     const deadline = Date.now() + 8000;
     let stableSince = 0;
     while (Date.now() < deadline) {
       last = await projectionStatus(page);
+      if (last.server && last.server.display !== "unit_cell") break;
       const ready = last.view.ortho
         && last.view.radio === "orthographic"
         && last.server.projection === "orthographic"

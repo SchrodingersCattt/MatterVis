@@ -131,10 +131,16 @@ def test_restart_keeps_a_zoom_that_still_shows_the_atoms(tmp_path: Path):
 
 
 def _persist(backend: ViewerBackend, scene_id: str, camera: dict) -> dict:
+    state = backend.get_state(scene_id)
     return _persist_relayout_camera(
         backend,
-        {"scene_id": scene_id, "relayout": {"scene.camera": camera}},
-        _camera_store_payload(scene_id, backend.get_state(scene_id).get("camera")),
+        {
+            "scene_id": scene_id,
+            "scene_generation": state["scene_generation"],
+            "camera_revision": state["camera_revision"],
+            "relayout": {"scene.camera": camera},
+        },
+        _camera_store_payload(scene_id, state.get("camera")),
         now=10.0,
         last_commit=0.0,
         min_interval_s=0.25,

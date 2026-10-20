@@ -92,9 +92,39 @@ vm.runInContext(prefix+'window.testScene={selectedSceneId,noteSceneTabIntent,sce
 const api=sandbox.window.testScene;
 api.noteSceneTabIntent({closest:()=>({id:'scene-tab-label-new'})});
 assert.equal(api.selectedSceneId(),'new');
-api.selectedSceneId();
 sandbox.window.MatterVisSelectScene('uploaded');
 assert.equal(api.selectedSceneId(),'uploaded');
+"""
+    result = subprocess.run(
+        [node, "-e", program, str(MATTERVIS_JS)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_visible_scene_chip_wins_over_hidden_selected_wrapper():
+    """A stale hidden dcc.Tab must not fence frames for the visible chip."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    program = r"""
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const stop=source.indexOf('  // ── Right-click menu');
+const prefix=source.slice(0,stop);
+const hidden={id:'scene-tab-hidden'};
+const chip={id:JSON.stringify({scene_id:'scene-chip'})};
+const tabs={querySelector:(selector)=>selector.indexOf('.scene-tab-chip--selected')>=0?chip:hidden,dataset:{}};
+const sandbox={console,Date,JSON,Number,String,Object,Array,Promise,setTimeout:()=>{},clearTimeout:()=>{},
+  requestAnimationFrame:()=>{},MutationObserver:function(){this.observe=()=>{};},
+  window:{Plotly:null,WebSocket:null,location:{protocol:'http:',host:'localhost'},
+    dash_clientside:{set_props:()=>true}},
+  document:{getElementById:id=>id==='scene-tabs'?tabs:null,querySelectorAll:()=>[],addEventListener:()=>{}}};
+vm.createContext(sandbox);
+vm.runInContext(prefix+'window.testScene={selectedSceneId,sceneIdFromTabNode};})();',sandbox);
+assert.equal(sandbox.window.testScene.selectedSceneId(),'scene-chip');
 """
     result = subprocess.run(
         [node, "-e", program, str(MATTERVIS_JS)],
@@ -323,6 +353,34 @@ def test_deferred_ws_figure_keeps_and_revalidates_render_metadata():
     flush_idx = source.index("function flushPendingFigurePush")
     flush_body = source[flush_idx:source.index("function markActive", flush_idx)]
     assert "figurePushIsCurrent(p)" in flush_body
+
+
+def test_failed_selected_scene_frame_is_parked_for_retry():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    handle_idx = source.index("function handleFigurePayload")
+    handle_body = source[handle_idx:source.index("function canUseWebSocket", handle_idx)]
+
+    assert "every failed fence" in handle_body
+    assert "pendingFigureByScene[sceneKey] = p" in handle_body
+    assert "replayQueuedSceneFigure(sceneKey, p)" in handle_body
+
+
+def test_ws_figure_sequence_cursor_is_scene_scoped():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    handle_idx = source.index("function handleFigurePayload")
+    handle_body = source[handle_idx:source.index("function canUseWebSocket", handle_idx)]
+
+    assert "latestFigureSeqByScene[payloadScene]" in handle_body
+    assert "window.__mattervisFigureLastSeq = Math.max" in handle_body
+
+
+def test_http_figure_fallback_does_not_use_global_scene_cursor():
+    source = MATTERVIS_JS.read_text(encoding="utf-8")
+    poll_idx = source.index("function poll()")
+    poll_body = source[poll_idx:source.index("function stopHttpFallback", poll_idx)]
+
+    assert "var since = 0;" in poll_body
+    assert "per-scene cursors" in poll_body
 
 
 def test_upload_frame_is_queued_until_new_scene_tab_is_selected():

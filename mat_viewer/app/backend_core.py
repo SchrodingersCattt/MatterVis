@@ -857,9 +857,25 @@ class _CoreBackendMixin:
         elif intent_type in {"patch_state", "apply_transform"}:
             state, invalidations = self.apply_operation(operation, scene_id=scene_id)
         elif intent_type == "set_camera":
-            state, invalidations = self.apply_operation(
-                operation, scene_id=scene_id, broadcast=False
+            # Drag persistence opts into a locked generation/revision
+            # compare-and-set. Other set_camera callers leave the keys out.
+            fenced = (
+                "expected_camera_revision" in payload
+                or "expected_scene_generation" in payload
             )
+            try:
+                state, invalidations = self.apply_operation(
+                    operation,
+                    scene_id=scene_id,
+                    broadcast=False,
+                    expected_camera_revision=payload.get("expected_camera_revision"),
+                    expected_scene_generation=payload.get("expected_scene_generation"),
+                    _camera_fence=fenced,
+                )
+            except StaleCameraWrite:
+                details["stale_camera"] = True
+                invalidations = frozenset()
+                state = self.get_state(scene_id)
         elif intent_type == "set_active_scene":
             target = data.get("scene_id") or scene_id
             self.set_active_scene(str(target), broadcast=True)
