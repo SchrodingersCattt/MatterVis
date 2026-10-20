@@ -2177,10 +2177,21 @@
     const scope = id + ":" + (generation === null || generation === undefined ? "" : String(generation));
     const liveScope = gd && gd.__mvCameraRevisionScope != null ? String(gd.__mvCameraRevisionScope) : "";
     const liveRevision = Number(gd && gd.__mvCameraRevision);
-    const revision = liveScope === scope && Number.isFinite(liveRevision)
-      ? liveRevision
-      : (render && render.camera_revision !== undefined
-        ? Number(render.camera_revision || 0) : null);
+    const metadataRevision = render && render.camera_revision !== undefined
+      ? Number(render.camera_revision || 0) : null;
+    // A typed camera command advances the transient revision without rewriting
+    // figure metadata. A later full frame can carry a still newer revision in
+    // metadata while the transient number stays behind. Use the newer of the
+    // two when they name the same scene generation.
+    let revision = null;
+    if (liveScope === scope && Number.isFinite(liveRevision)) {
+      revision = Number.isFinite(metadataRevision)
+        ? Math.max(liveRevision, metadataRevision)
+        : liveRevision;
+      if (gd && revision !== liveRevision) gd.__mvCameraRevision = revision;
+    } else if (Number.isFinite(metadataRevision)) {
+      revision = metadataRevision;
+    }
     window.__mvGestureSceneId = id;
     window.__mvLastGestureSceneId = sceneId;
     window.__mvGestureKind = kind || "pointer";

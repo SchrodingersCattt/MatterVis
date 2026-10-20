@@ -322,6 +322,17 @@ const zoomed=capture({{'scene.camera':{{eye:{{x:2}}}}}});
 assert.equal(zoomed.scene_id,'b');
 assert.equal(zoomed.scene_generation,8);
 assert.equal(zoomed.camera_revision,0,'wheel reused scene A camera revision');
+gd.__mvCameraRevisionScope='a:7';
+gd.__mvCameraRevision=4;
+gd.layout=layout('a',7,5);
+emit('pointerdown',{{target:{{closest:()=>graph}}}});
+const refreshed=capture({{'scene.camera':{{eye:{{x:3}}}}}});
+assert.equal(refreshed.scene_id,'a');
+assert.equal(refreshed.scene_generation,7);
+assert.equal(refreshed.camera_revision,5,'stale transient revision beat the full frame');
+emit('wheel',{{target:{{closest:()=>graph}}}});
+const refreshedZoom=capture({{'scene.camera':{{eye:{{x:4}}}}}});
+assert.equal(refreshedZoom.camera_revision,5,'wheel kept the stale transient revision');
 """
     result = subprocess.run([node, "-e", program, str(source)], capture_output=True,
                             text=True, timeout=15)

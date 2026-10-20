@@ -629,13 +629,11 @@ def register_view_callbacks(app, backend):
               var lastGestureId = window.__mvLastGestureSceneId
                 ? String(window.__mvLastGestureSceneId) : "";
               if (gestureId && canvasId && gestureId !== canvasId && gestureKind !== "wheel") return window.dash_clientside.no_update;
+              // A wheel timeout clears the active gesture id and kind together
+              // but keeps the last scene fence. An empty kind still fails the
+              // wheel exception, so a late relayout cannot move onto the next
+              // canvas.
               if (!gestureId && lastGestureId && canvasId && lastGestureId !== canvasId && gestureKind !== "wheel") {
-                return window.dash_clientside.no_update;
-              }
-              // A wheel timeout clears the active gesture but keeps the last
-              // scene fence. Once that fence and the canvas disagree, drop
-              // the relayout instead of storing it on the new scene.
-              if (!gestureKind && lastGestureId && canvasId && lastGestureId !== canvasId) {
                 return window.dash_clientside.no_update;
               }
               var sceneId = (gestureKind === "wheel" && canvasId) ? canvasId : (gestureId || canvasId);
