@@ -48,6 +48,9 @@ class _ReducerBackendMixin:
         *,
         scene_id: Optional[str] = None,
         broadcast: bool = True,
+        expected_camera_revision: Any = None,
+        expected_scene_generation: Any = None,
+        _camera_fence: bool = False,
     ) -> tuple[dict[str, Any], frozenset[Invalidation]]:
         """Apply one typed operation through the compatibility backend.
 
@@ -116,7 +119,14 @@ class _ReducerBackendMixin:
             patch["topology_site_index"] = copy.deepcopy(
                 reduced.get("topology_site_index")
             )
-        state = self.patch_state(patch, scene_id=target_scene, broadcast=broadcast)
+        state = self.patch_state(
+            patch,
+            scene_id=target_scene,
+            broadcast=broadcast,
+            expected_camera_revision=expected_camera_revision,
+            expected_scene_generation=expected_scene_generation,
+            _camera_fence=_camera_fence,
+        )
         # Report facts for the state that was actually committed. The
         # compatibility normalizer can add transitions that the pure reducer
         # cannot know about (for example style aliases and display-mode

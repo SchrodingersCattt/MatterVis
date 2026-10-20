@@ -244,6 +244,12 @@ Notes for callers:
   `upload_complete`. The response is
   `{"ok": true, "version": N, "state": {...}}` plus action-specific
   details such as `scene` or `removed`.
+
+  A drag `set_camera` may also send `expected_scene_generation` and
+  `expected_camera_revision`. When either key is present, the write
+  compares both values inside the backend lock and leaves the camera
+  unchanged if Reset, Fit, Align, or a newer scene generation won the
+  race. Callers that omit both keys keep the previous unfenced write.
 - `GET /camera`
   Returns the current Plotly camera.
 - `POST /camera`

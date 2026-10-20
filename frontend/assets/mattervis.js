@@ -2169,26 +2169,33 @@
     if (!id) return;
     const gd = graphDiv();
     const render = renderMetadataFromLayout(gd && gd.layout);
-    const liveRevision = Number(gd && gd.__mvCameraRevision);
-    window.__mvGestureSceneId = id;
-    window.__mvLastGestureSceneId = sceneId;
-    window.__mvGestureKind = kind || "pointer";
-    window.__mvGestureSceneGeneration = render && render.scene_generation !== undefined
+    const generation = render && render.scene_generation !== undefined
       ? render.scene_generation : null;
-    window.__mvGestureCameraRevision = Number.isFinite(liveRevision)
+    // view_camera.js scopes the transient revision to scene:generation.
+    // A full-scene Plotly.react reuses the graph div and does not clear it,
+    // so a revision left by scene A must not be stamped onto scene B.
+    const scope = id + ":" + (generation === null || generation === undefined ? "" : String(generation));
+    const liveScope = gd && gd.__mvCameraRevisionScope != null ? String(gd.__mvCameraRevisionScope) : "";
+    const liveRevision = Number(gd && gd.__mvCameraRevision);
+    const revision = liveScope === scope && Number.isFinite(liveRevision)
       ? liveRevision
       : (render && render.camera_revision !== undefined
         ? Number(render.camera_revision || 0) : null);
+    window.__mvGestureSceneId = id;
+    window.__mvLastGestureSceneId = sceneId;
+    window.__mvGestureKind = kind || "pointer";
+    window.__mvGestureSceneGeneration = generation;
+    window.__mvGestureCameraRevision = revision;
     if (kind === "wheel") {
       const stamp = id + ":" + String(Date.now());
       window.__mvWheelGestureStamp = stamp;
       setTimeout(function () {
         if (window.__mvWheelGestureStamp !== stamp || window.__mvGestureKind !== "wheel") return;
+        // The active wheel is over, but Dash may still be holding its
+        // relayout. Keep the scene, generation, and revision so that late
+        // payload cannot be retargeted at the next canvas with a null fence.
         window.__mvGestureSceneId = "";
-        window.__mvLastGestureSceneId = "";
         window.__mvGestureKind = "";
-        window.__mvGestureSceneGeneration = null;
-        window.__mvGestureCameraRevision = null;
       }, 500);
     }
   }

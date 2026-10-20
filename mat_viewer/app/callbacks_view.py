@@ -632,6 +632,12 @@ def register_view_callbacks(app, backend):
               if (!gestureId && lastGestureId && canvasId && lastGestureId !== canvasId && gestureKind !== "wheel") {
                 return window.dash_clientside.no_update;
               }
+              // A wheel timeout clears the active gesture but keeps the last
+              // scene fence. Once that fence and the canvas disagree, drop
+              // the relayout instead of storing it on the new scene.
+              if (!gestureKind && lastGestureId && canvasId && lastGestureId !== canvasId) {
+                return window.dash_clientside.no_update;
+              }
               var sceneId = (gestureKind === "wheel" && canvasId) ? canvasId : (gestureId || canvasId);
               if (!sceneId) return window.dash_clientside.no_update;
               return {

@@ -209,7 +209,9 @@ emit('pointerdown',{{target:{{closest:()=>graph}}}});
 emit('pointerup',{{}});
 gd.layout=layout('b');
 // Reset/Fit may have advanced the authoritative camera clock through the
-// camera-only relayout path without rewriting figure metadata.
+// camera-only relayout path without rewriting figure metadata. The transient
+// revision is only authoritative for the scene:generation scope that wrote it.
+gd.__mvCameraRevisionScope='b:';
 gd.__mvCameraRevision=2;
 emit('wheel',{{target:{{closest:()=>graph}}}});
 assert.equal(sandbox.window.__mvLastGestureSceneId,'b','wheel did not refresh the scene fence');
@@ -262,6 +264,119 @@ gd.layout=layout('b');
 const capture=vm.runInNewContext('('+callbackSource+')',sandbox);
 const result=capture({{'scene.camera':{{eye:{{x:99}}}}}});
 assert.equal(result.scene_id,'b','wheel fence from A survived the B scene switch');
+"""
+    result = subprocess.run([node, "-e", program, str(source)], capture_output=True,
+                            text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+
+
+def test_camera_revision_stamp_is_scoped_to_the_live_scene() -> None:
+    """A camera revision left on the graph div must not stamp the next scene."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    callbacks = (
+        Path(__file__).resolve().parents[2] / "mat_viewer" / "app" / "callbacks_view.py"
+    ).read_text(encoding="utf-8")
+    start = callbacks.index('            """\n            function(relayout) {')
+    start = callbacks.index("function(relayout)", start)
+    end = callbacks.index('            """', start)
+    capture_callback = textwrap.dedent(callbacks[start:end]).strip()
+    source = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "mattervis.js"
+    program = f"""
+const fs=require('node:fs'), vm=require('node:vm'), assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const callbackSource={json.dumps(capture_callback)};
+const listeners={{}};
+function add(name, fn) {{ (listeners[name] ||= []).push(fn); }}
+function emit(name, event) {{ (listeners[name] || []).forEach(fn => fn(event)); }}
+function layout(scene, generation, revision) {{
+  return {{meta:{{mattervis_render:{{scene_id:scene,render_revision:1,scene_generation:generation,camera_revision:revision,server_started_at:'epoch'}}}}}};
+}}
+const gd={{layout:layout('a',7,1),_fullLayout:{{scene:{{camera:{{}}}}}}}};
+const graph={{querySelector:()=>gd,querySelectorAll:()=>[]}};
+const document={{readyState:'loading',addEventListener:add,querySelector:()=>gd,
+  querySelectorAll:()=>[],getElementById:id=>id==='crystal-graph'?graph:null,
+  body:{{prepend(){{}},appendChild(){{}}}},documentElement:{{}}}};
+function WebSocketMock() {{ this.addEventListener=()=>{{}}; }}
+const MutationObserver=function() {{}}; MutationObserver.prototype.observe=function(){{}}; MutationObserver.prototype.disconnect=function(){{}};
+const sandbox={{console,Promise,JSON,Number,Date,Object,Array,String,Math,setTimeout:()=>0,clearTimeout:()=>{{}},
+  MutationObserver,requestAnimationFrame:()=>0,document,WebSocket:WebSocketMock,
+  window:{{Plotly:{{react:()=>Promise.resolve(gd),newPlot:()=>Promise.resolve(gd),update:()=>Promise.resolve(gd),relayout:()=>Promise.resolve(gd),restyle:()=>Promise.resolve(gd)}},WebSocket:WebSocketMock,
+    location:{{protocol:'http:',host:'localhost'}},addEventListener(){{}},dash_clientside:{{no_update:{{__no_update:true}},set_props(){{}}}}}}}};
+vm.createContext(sandbox);
+vm.runInContext(source.slice(0,source.indexOf('/* Live compass overlay')),sandbox);
+gd.__mvCameraRevisionScope='a:7';
+gd.__mvCameraRevision=4;
+gd.layout=layout('b',8,0);
+emit('pointerdown',{{target:{{closest:()=>graph}}}});
+const capture=vm.runInNewContext('('+callbackSource+')',sandbox);
+const dragged=capture({{'scene.camera':{{eye:{{x:1}}}}}});
+assert.equal(dragged.scene_id,'b');
+assert.equal(dragged.scene_generation,8);
+assert.equal(dragged.camera_revision,0,'drag reused scene A camera revision');
+gd.__mvCameraRevisionScope='a:7';
+gd.__mvCameraRevision=4;
+emit('wheel',{{target:{{closest:()=>graph}}}});
+const zoomed=capture({{'scene.camera':{{eye:{{x:2}}}}}});
+assert.equal(zoomed.scene_id,'b');
+assert.equal(zoomed.scene_generation,8);
+assert.equal(zoomed.camera_revision,0,'wheel reused scene A camera revision');
+"""
+    result = subprocess.run([node, "-e", program, str(source)], capture_output=True,
+                            text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+
+
+def test_expired_wheel_relayout_is_not_retargeted_at_the_next_scene() -> None:
+    """A wheel timeout must keep the fence that stops a late relayout landing on B."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    callbacks = (
+        Path(__file__).resolve().parents[2] / "mat_viewer" / "app" / "callbacks_view.py"
+    ).read_text(encoding="utf-8")
+    start = callbacks.index('            """\n            function(relayout) {')
+    start = callbacks.index("function(relayout)", start)
+    end = callbacks.index('            """', start)
+    capture_callback = textwrap.dedent(callbacks[start:end]).strip()
+    source = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "mattervis.js"
+    program = f"""
+const fs=require('node:fs'), vm=require('node:vm'), assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const callbackSource={json.dumps(capture_callback)};
+const listeners={{}};
+const timers=[];
+function add(name, fn) {{ (listeners[name] ||= []).push(fn); }}
+function emit(name, event) {{ (listeners[name] || []).forEach(fn => fn(event)); }}
+function layout(scene) {{
+  return {{meta:{{mattervis_render:{{scene_id:scene,render_revision:1,scene_generation:scene==='a'?1:2,camera_revision:0,server_started_at:'epoch'}}}}}};
+}}
+const gd={{layout:layout('a'),_fullLayout:{{scene:{{camera:{{}}}}}}}};
+const graph={{querySelector:()=>gd,querySelectorAll:()=>[]}};
+const document={{readyState:'loading',addEventListener:add,querySelector:()=>gd,
+  querySelectorAll:()=>[],getElementById:id=>id==='crystal-graph'?graph:null,
+  body:{{prepend(){{}},appendChild(){{}}}},documentElement:{{}}}};
+function WebSocketMock() {{ this.addEventListener=()=>{{}}; }}
+const MutationObserver=function() {{}}; MutationObserver.prototype.observe=function(){{}}; MutationObserver.prototype.disconnect=function(){{}};
+const sandbox={{console,Promise,JSON,Number,Date,Object,Array,String,Math,setTimeout:(fn)=>{{timers.push(fn); return timers.length;}},clearTimeout:()=>{{}},
+  MutationObserver,requestAnimationFrame:()=>0,document,WebSocket:WebSocketMock,
+  window:{{Plotly:{{react:()=>Promise.resolve(gd),newPlot:()=>Promise.resolve(gd),update:()=>Promise.resolve(gd),relayout:()=>Promise.resolve(gd),restyle:()=>Promise.resolve(gd)}},WebSocket:WebSocketMock,
+    location:{{protocol:'http:',host:'localhost'}},addEventListener(){{}},dash_clientside:{{no_update:{{__no_update:true}},set_props(){{}}}}}}}};
+vm.createContext(sandbox);
+vm.runInContext(source.slice(0,source.indexOf('/* Live compass overlay')),sandbox);
+const queued=timers.length;
+emit('wheel',{{target:{{closest:()=>graph}}}});
+assert.equal(sandbox.window.__mvGestureSceneGeneration,1);
+assert.equal(sandbox.window.__mvGestureCameraRevision,0);
+timers.slice(queued).forEach((fn)=>{{ try {{ fn(); }} catch (error) {{}} }});
+gd.layout=layout('b');
+const capture=vm.runInNewContext('('+callbackSource+')',sandbox);
+const result=capture({{'scene.camera':{{eye:{{x:9}}}}}});
+assert.equal(result,sandbox.window.dash_clientside.no_update,'expired A wheel was stored on B');
+assert.equal(sandbox.window.__mvLastGestureSceneId,'a');
+assert.equal(sandbox.window.__mvGestureSceneGeneration,1);
+assert.equal(sandbox.window.__mvGestureCameraRevision,0);
 """
     result = subprocess.run([node, "-e", program, str(source)], capture_output=True,
                             text=True, timeout=15)
