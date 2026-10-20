@@ -63,11 +63,11 @@ test = [
 dev = ["matter-vis[all,test]", "build", "ruff"]
 
 [tool.setuptools.packages.find]
-include = ["mat_viewer*"]
+include = ["mat_viewer*", "skills*"]
 
 [tool.setuptools.package-data]
 mat_viewer = ["render/assets/*.js"]
-"mat_viewer._bundled_skills" = ["*/SKILL.md", "*/references/*.md", "*/scripts/*.py"]
+skills = ["*/SKILL.md", "*/references/*.md", "*/scripts/*.py"]
 
 [tool.setuptools_scm]
 write_to = "mat_viewer/_version.py"
