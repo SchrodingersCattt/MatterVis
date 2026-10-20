@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -10,6 +12,24 @@ from mat_viewer import skill_viewer
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_skills_list_does_not_import_numeric_or_render_stack() -> None:
+    script = """
+import sys
+from mat_viewer.cli import main
+main(["skills", "list"])
+loaded = [name for name in ("numpy", "ase", "mat_viewer.render") if name in sys.modules]
+if loaded:
+    raise SystemExit("skills imported " + ", ".join(loaded))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
 
 
 def test_skills_list_json_is_stable(capsys: pytest.CaptureFixture[str]) -> None:

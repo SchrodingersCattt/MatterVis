@@ -60,7 +60,8 @@ mat-vis skills show visualize-materials --all
 ### skills — bundled Agent Skills
 
 The `skills` viewer is read-only and uses the installed skill resources, so it
-also works from a different current directory after installing a wheel. The
+also works from a different current directory after installing a wheel. It does
+not import the renderer or optional numeric dependencies. The
 default `show` command prints only the raw `SKILL.md` entrypoint. Use
 `--file` for one referenced resource, `tree` to inspect local links without
 reading their bodies, or `--all` to expand reachable Markdown in deterministic

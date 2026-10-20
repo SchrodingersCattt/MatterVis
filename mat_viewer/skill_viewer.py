@@ -6,6 +6,7 @@ it without importing a renderer, web frontend, TUI, or optional dependency.
 
 from __future__ import annotations
 
+import argparse
 from dataclasses import dataclass
 import json
 import posixpath
@@ -278,6 +279,62 @@ def emit_show(skill: Skill, relative: str, *, all_files: bool, as_json: bool) ->
         sys.stdout.write(content)
 
 
+def main(argv: list[str] | None = None) -> None:
+    """Run ``mat-vis skills`` without importing a renderer or numeric stack."""
+    parser = argparse.ArgumentParser(
+        prog="mat-vis skills",
+        description=(
+            "Read bundled Agent Skills progressively. Documents are never "
+            "executed and referenced pages are only expanded explicitly."
+        ),
+    )
+    commands = parser.add_subparsers(dest="skills_command")
+
+    list_parser = commands.add_parser("list", help="List bundled skills and descriptions.")
+    list_parser.add_argument("--json", action="store_true", dest="json_output")
+
+    show_parser = commands.add_parser("show", help="Print a skill entrypoint or resource.")
+    show_parser.add_argument("name", metavar="SKILL_NAME")
+    show_parser.add_argument("--file", default="SKILL.md", metavar="RELATIVE_PATH")
+    show_parser.add_argument(
+        "--all",
+        action="store_true",
+        dest="all_files",
+        help="Expand reachable Markdown references in link order.",
+    )
+    show_parser.add_argument("--json", action="store_true", dest="json_output")
+
+    tree_parser = commands.add_parser("tree", help="Show linked skill resources without bodies.")
+    tree_parser.add_argument("name", metavar="SKILL_NAME")
+    tree_parser.add_argument("--json", action="store_true", dest="json_output")
+
+    args = parser.parse_args(argv)
+    if args.skills_command is None:
+        print("Use one of: mat-vis skills list, show, tree", file=sys.stderr)
+        raise SystemExit(2)
+    try:
+        if args.skills_command == "list":
+            emit_list(as_json=args.json_output)
+        elif args.skills_command == "show":
+            emit_show(
+                get_skill(args.name),
+                args.file,
+                all_files=args.all_files,
+                as_json=args.json_output,
+            )
+        else:
+            emit_tree(get_skill(args.name), as_json=args.json_output)
+    except SkillError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        if getattr(args, "json_output", False):
+            print(json_payload({
+                "schema": "mattervis.error/v1",
+                "ok": False,
+                "error": str(exc),
+            }))
+        raise SystemExit(2) from exc
+
+
 def emit_tree(skill: Skill, *, as_json: bool) -> None:
     rows = tree(skill)
     if as_json:
@@ -300,4 +357,5 @@ __all__ = [
     "emit_tree",
     "get_skill",
     "list_skills",
+    "main",
 ]
