@@ -390,3 +390,38 @@ const frame=(rev,scene)=>Object.assign({scene_id:scene,render_revision:rev}, {fi
     result = subprocess.run([node, "-e", program, str(source)], capture_output=True,
                             text=True, timeout=15)
     assert result.returncode == 0, result.stderr
+
+
+def test_same_scene_id_new_generation_is_not_dropped_as_an_older_frame():
+    """Undo can restore an id with a new generation and render revision zero."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = Path(__file__).resolve().parents[2] / "frontend/assets/mattervis.js"
+    program = r"""
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const start=source.indexOf('  function scheduleQueuedSceneFigureRetry');
+const stop=source.indexOf('  function flushPendingFigurePush',start);
+const body=source.slice(start,stop);
+const timers=[],pending=Object.create(null),gd={layout:{meta:{mattervis_render:{scene_id:'same',scene_generation:4,render_revision:8,display_version:8,server_started_at:'epoch'}}}};
+const sandbox={window:{MatterVisViewUpdates:{submit(frame){ sandbox.typedCalls += 1; return 'figure'; }}},pending,gd,timers,typedCalls:0,
+  setTimeout:(fn)=>{timers.push(fn);return timers.length;},clearTimeout:()=>{}};
+vm.createContext(sandbox);
+vm.runInContext(`
+  let current='same';
+  function graphDiv(){return gd;}
+  function renderMetadataFromLayout(layout){return layout&&layout.meta&&layout.meta.mattervis_render||null;}
+  function currentSceneId(){return current;}
+  function figurePushIsCurrent(frame){return frame.isCurrent();}
+  const pendingFigureRetryTimers=Object.create(null);
+  const pendingFigureByScene=pending;
+  ${body}
+  pending.same={figure:{data:[{}],layout:{meta:{mattervis_render:{scene_id:'same',scene_generation:8,render_revision:0,display_version:0,server_started_at:'epoch'}}}},figure_seq:20,isCurrent:()=>true};
+  flushQueuedSceneFigure('same');
+`,sandbox);
+assert.equal(sandbox.typedCalls,1,'new-generation same-id frame was dropped before typed submitter');
+"""
+    result = subprocess.run([node, "-e", program, str(source)], capture_output=True,
+                            text=True, timeout=15)
+    assert result.returncode == 0, result.stderr

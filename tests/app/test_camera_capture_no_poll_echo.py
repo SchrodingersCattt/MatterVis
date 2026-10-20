@@ -208,11 +208,15 @@ gd.layout=layout('a');
 emit('pointerdown',{{target:{{closest:()=>graph}}}});
 emit('pointerup',{{}});
 gd.layout=layout('b');
+// Reset/Fit may have advanced the authoritative camera clock through the
+// camera-only relayout path without rewriting figure metadata.
+gd.__mvCameraRevision=2;
 emit('wheel',{{target:{{closest:()=>graph}}}});
 assert.equal(sandbox.window.__mvLastGestureSceneId,'b','wheel did not refresh the scene fence');
 const capture=vm.runInNewContext('('+callbackSource+')',sandbox);
 const result=capture({{'scene.camera':{{eye:{{x:1}}}}}});
 assert.equal(result.scene_id,'b','wheel camera relayout was attributed to the old scene');
+assert.equal(result.camera_revision,2,'wheel stamped the stale canvas camera revision');
 """
     result = subprocess.run([node, "-e", program, str(source)], capture_output=True,
                             text=True, timeout=15)

@@ -672,8 +672,12 @@
     // delayed Dash repaint cannot release the only parked frame too early.
     if (!expected || !shown) return true;
     return String(expected.scene_id || "") === String(shown.scene_id || "") &&
+      (!expected.scene_generation || !shown.scene_generation ||
+        String(expected.scene_generation) === String(shown.scene_generation)) &&
       Number(expected.render_revision || 0) === Number(shown.render_revision || 0) &&
-      Number(expected.display_version || 0) === Number(shown.display_version || 0);
+      Number(expected.display_version || 0) === Number(shown.display_version || 0) &&
+      (!expected.camera_revision || !shown.camera_revision ||
+        Number(shown.camera_revision) >= Number(expected.camera_revision));
   }
   function scheduleQueuedSceneFigureSettle(sceneId, queued, settleAttempt) {
     const key = String(sceneId || "");
@@ -834,9 +838,13 @@
     const sameSceneEpoch = queuedRender && shownRender
       && String(queuedRender.scene_id || "") === String(shownRender.scene_id || "")
       && (!queuedRender.server_started_at || !shownRender.server_started_at
-        || String(queuedRender.server_started_at) === String(shownRender.server_started_at));
+        || String(queuedRender.server_started_at) === String(shownRender.server_started_at))
+      && (!queuedRender.scene_generation || !shownRender.scene_generation
+        || String(queuedRender.scene_generation) === String(shownRender.scene_generation));
     if (sameSceneEpoch
-        && Number(shownRender.render_revision || 0) >= Number(queuedRender.render_revision || 0)) {
+        && Number(shownRender.render_revision || 0) >= Number(queuedRender.render_revision || 0)
+        && (!queuedRender.camera_revision || !shownRender.camera_revision
+          || Number(shownRender.camera_revision) >= Number(queuedRender.camera_revision))) {
       clearQueuedSceneFigure(sceneId, Number(queued.figure_seq || queued.seq || 0));
       return;
     }
@@ -2161,13 +2169,16 @@
     if (!id) return;
     const gd = graphDiv();
     const render = renderMetadataFromLayout(gd && gd.layout);
+    const liveRevision = Number(gd && gd.__mvCameraRevision);
     window.__mvGestureSceneId = id;
     window.__mvLastGestureSceneId = sceneId;
     window.__mvGestureKind = kind || "pointer";
     window.__mvGestureSceneGeneration = render && render.scene_generation !== undefined
       ? render.scene_generation : null;
-    window.__mvGestureCameraRevision = render && render.camera_revision !== undefined
-      ? Number(render.camera_revision || 0) : null;
+    window.__mvGestureCameraRevision = Number.isFinite(liveRevision)
+      ? liveRevision
+      : (render && render.camera_revision !== undefined
+        ? Number(render.camera_revision || 0) : null);
     if (kind === "wheel") {
       const stamp = id + ":" + String(Date.now());
       window.__mvWheelGestureStamp = stamp;
