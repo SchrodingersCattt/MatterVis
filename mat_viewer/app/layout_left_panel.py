@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .shared import dcc, html
-from .display_controls import display_option_hint, display_option_items
+from .display_controls import display_option_hint, display_option_items, visible_display_options
 from .camera_helpers import _structure_summary
 from .editor_tables import _atom_groups_table_rows, _bond_groups_table_rows
 from .style_helpers import (
@@ -199,11 +199,10 @@ def build_left_panel(
             dcc.Checklist(
                 id="display-options",
                 options=display_option_items(first_state["display_mode"], first_state["display_options"]),
-                value=[
-                    opt
-                    for opt in first_state["display_options"]
-                    if opt != "monochrome"
-                ],
+                value=visible_display_options(
+                    first_state["display_mode"], first_state["display_options"]
+                ),
+                className="display-options",
             ),
             html.Button(
                 "Restore display defaults",
@@ -369,7 +368,7 @@ def build_left_panel(
                 max=1.8,
                 step=0.02,
                 value=float(first_state["atom_scale"]),
-                marks={0.5: "0.5", 1.0: "1.0", 1.5: "1.5", 1.8: "1.8"},
+                marks={0.5: "0.5", 1.0: "1", 1.8: "1.8"},
                 tooltip={"placement": "bottom", "always_visible": False},
                 updatemode="mouseup",
             ),
@@ -380,7 +379,7 @@ def build_left_panel(
                 max=0.40,
                 step=0.01,
                 value=float(first_state["bond_radius"]),
-                marks={0.05: "0.05", 0.20: "0.20", 0.40: "0.40"},
+                marks={0.05: "0.05", 0.20: "0.2", 0.40: "0.4"},
                 tooltip={"placement": "bottom", "always_visible": False},
                 updatemode="mouseup",
             ),
@@ -697,9 +696,9 @@ def build_left_panel(
             "flex": "0 0 auto",
             "padding": "16px",
             "borderRight": "1px solid #DDDDDD",
-            "fontFamily": "Arial, sans-serif",
             "overflowX": "hidden",
             "overflowY": "auto",
-            "height": "100vh",
+            "height": "100%",
+            "minHeight": 0,
         },
     )

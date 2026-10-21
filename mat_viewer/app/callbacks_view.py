@@ -748,19 +748,24 @@ def register_view_callbacks(app, backend):
         Output("perf-log-body", "children"),
         Output("perf-log-cursor", "data"),
         Input("perf-log-poll", "n_intervals"),
+        Input("perf-log-level", "value"),
         State("perf-log-cursor", "data"),
     )
-    def refresh_perf_log(_, cursor):
+    def refresh_perf_log(_, level, cursor):
         cursor = cursor or {"seq": 0, "events": []}
+        level = level or "info"
         new_events = perf_log.recent(limit=200, since_seq=int(cursor.get("seq", 0)))
-        if not new_events and cursor.get("events"):
+        triggered = callback_context.triggered_id
+        # A level change must repaint even when the ring buffer is quiet.
+        # A poll with nothing new keeps the current grouped view.
+        if triggered != "perf-log-level" and not new_events and cursor.get("events"):
             return no_update, no_update
         merged = list(cursor.get("events") or []) + new_events
         # Keep only the latest 80 entries on screen so the DOM stays
         # cheap; the full ring buffer is still available via
         # ``GET /api/v1/perf``.
         merged = merged[-80:]
-        rows = [_perf_log_row(entry) for entry in reversed(merged)]
+        rows = render_perf_log(list(reversed(merged)), minimum_level=level)
         latest = merged[-1]["seq"] if merged else int(cursor.get("seq", 0))
         return rows, {"seq": latest, "events": merged}
 
@@ -989,3 +994,7 @@ def register_view_callbacks(app, backend):
         if not n_intervals:
             return no_update, no_update, no_update
         return "", _status_class("idle"), True
+
+    from .panel_status import register_workbench_status
+
+    register_workbench_status(app, backend)

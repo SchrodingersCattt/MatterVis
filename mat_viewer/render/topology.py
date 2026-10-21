@@ -754,30 +754,55 @@ def topology_foreground_traces(topology_data: dict | None, style: dict | None = 
 
 
 def topology_histogram_figure(topology_data: dict | None) -> go.Figure:
+    """Neighbour-distance bars for the analysis pane.
+
+    The section heading and an HTML caption already name the chart. An
+    in-figure title collides with those headings and with the axis titles
+    once the graph is squeezed into the sidebar, so this figure has no title.
+    An empty shell is an annotation on hidden axes rather than a blank plot.
+    """
     fig = go.Figure()
     distances = (topology_data or {}).get("all_distances", [])
     shell = set((topology_data or {}).get("distances", []))
+    font = dict(family="Inter, Arial, sans-serif", size=12, color="#172b4d")
     if distances:
         colors = ["#7C5CBF" if dist in shell else "#C9C9E8" for dist in distances]
-        fig.add_trace(go.Bar(x=list(range(1, len(distances) + 1)), y=distances, marker_color=colors))
+        fig.add_trace(
+            go.Bar(
+                x=list(range(1, len(distances) + 1)),
+                y=distances,
+                marker_color=colors,
+                hovertemplate="Rank %{x}<br>%{y:.3f} Å<extra></extra>",
+            )
+        )
+        fig.update_layout(
+            margin=dict(l=52, r=12, t=8, b=44),
+            xaxis=dict(title=dict(text="Neighbor rank", standoff=6), automargin=True),
+            yaxis=dict(title=dict(text="Distance (Å)", standoff=6), automargin=True),
+        )
     else:
         fig.add_annotation(
-            text="No shell distances yet. Choose a fragment to analyse.",
+            text="No shell distances yet.<br>Choose a fragment to analyse.",
             xref="paper",
             yref="paper",
             x=0.5,
             y=0.5,
             showarrow=False,
-            font=dict(size=12, color="#667085"),
+            font=dict(size=13, color="#667085"),
+        )
+        fig.update_layout(
+            margin=dict(l=8, r=8, t=8, b=8),
+            xaxis=dict(visible=False),
+            yaxis=dict(visible=False),
         )
     fig.update_layout(
-        margin=dict(l=48, r=16, t=48, b=40),
+        autosize=True,
+        height=220,
         paper_bgcolor="white",
         plot_bgcolor="white",
-        xaxis_title="Neighbor rank",
-        yaxis_title="Distance (Å)",
         showlegend=False,
-        title=dict(text="Distance histogram", x=0.02, xanchor="left"),
+        title=dict(text=""),
+        font=font,
     )
     return fig
 

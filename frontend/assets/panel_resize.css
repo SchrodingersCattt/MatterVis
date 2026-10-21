@@ -249,9 +249,17 @@
 }
 
 .analysis-panel {
-  font-family: Arial, Helvetica, sans-serif;
-  color: #1f2937;
+  font-family: inherit;
+  color: var(--mv-ink, #1f2937);
   transition: width 160ms ease, min-width 160ms ease, padding 160ms ease;
+  overflow: visible;
+}
+
+.analysis-panel-body,
+.analysis-tab-content {
+  max-width: 100%;
+  min-width: 0;
+  overflow: visible;
 }
 
 .analysis-panel-header {
@@ -316,15 +324,18 @@
 
 .analysis-section {
   border-top: 1px solid #e4e7ec;
-  padding-top: 12px;
+  margin-top: 8px;
+  padding-top: 14px;
 }
 
 .analysis-section-title {
   color: #344054;
+  font-family: inherit;
   font-size: 14px;
   font-weight: 700;
+  letter-spacing: 0.01em;
   line-height: 1.25;
-  margin-bottom: 10px;
+  margin: 0 0 8px;
 }
 
 .analysis-label {
@@ -338,9 +349,35 @@
 
 .analysis-control {
   color: #1f2937;
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: inherit;
   font-size: 13px;
   margin-bottom: 8px;
+  max-width: 100%;
+}
+
+.analysis-caption {
+  color: #344054;
+  font-size: 12px;
+  font-weight: 700;
+  margin: 2px 0 4px;
+}
+
+.analysis-inline-fields {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.analysis-number-input,
+.operation-number-input {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 5.5rem;
+  width: 5.5rem;
 }
 
 .analysis-help {
@@ -355,18 +392,69 @@
 }
 
 .analysis-results {
-  max-height: 220px;
-  overflow: auto;
   background: #ffffff;
   border: 1px solid #e4e7ec;
   border-radius: 8px;
   color: #1f2937;
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: inherit;
   font-size: 13px;
   line-height: 1.45;
-  margin: 0;
+  margin: 0 0 12px;
+  max-height: none;
+  overflow: visible;
   padding: 10px 12px;
   white-space: pre-wrap;
+}
+
+#left-panel .analysis-results,
+#left-panel pre.analysis-results {
+  font-family: inherit;
+}
+
+.atom-list {
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.atom-list-title {
+  margin-top: 4px;
+}
+
+.atom-list-row,
+.atom-list-more,
+.atom-list-empty {
+  align-items: baseline;
+  display: grid;
+  font-size: 12px;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.6fr) 3rem;
+  padding: 5px 10px;
+}
+
+.atom-list-row:nth-child(odd) {
+  background: #f8fafc;
+}
+
+.atom-list-label {
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.atom-list-element,
+.atom-list-occ,
+.atom-list-more,
+.atom-list-empty {
+  color: #667085;
+}
+
+.atom-list-more,
+.atom-list-empty {
+  display: block;
+  grid-template-columns: none;
 }
 
 .operation-section {
@@ -412,10 +500,10 @@
   border-radius: 6px;
   box-sizing: border-box;
   color: #1f2937;
-  font-family: Arial, Helvetica, sans-serif;
-  font-size: 12px;
-  padding: 5px 6px;
-  width: 74px;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 5px 8px;
+  width: 5.5rem;
 }
 
 .operation-button {
@@ -424,7 +512,7 @@
   border-radius: 7px;
   color: #24324a;
   cursor: pointer;
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: inherit;
   font-size: 13px;
   font-weight: 700;
   padding: 7px 10px;
@@ -480,6 +568,18 @@
   margin-top: 3px;
 }
 
+#polyhedra-rows-container > div > div,
+#transforms-rows-container > div > div {
+  flex-wrap: wrap;
+}
+
+#analysis-panel-content .Select,
+#operation-panel-content .Select,
+#analysis-panel-content input,
+#operation-panel-content input {
+  max-width: 100%;
+}
+
 body.panel-resizing,
 body.panel-resizing * {
   cursor: col-resize !important;
@@ -491,7 +591,7 @@ body.panel-resizing * {
 .perf-log-panel {
   position: absolute;
   right: 14px;
-  bottom: 14px;
+  bottom: 42px;
   z-index: 9000;
   background: rgba(20, 24, 31, 0.94);
   color: #e6edf3;
@@ -584,9 +684,47 @@ body.panel-resizing * {
   font-style: italic;
 }
 
+.perf-log-levels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 6px 8px 2px;
+}
+
+.perf-log-panel--collapsed .perf-log-levels {
+  display: none;
+}
+
+.perf-log-level {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.perf-log-level--debug { color: #6b7686; }
+.perf-log-level--info { color: #9ecbff; }
+.perf-log-level--warn { color: #f0c674; }
+.perf-log-level--error { color: #ff8a8a; }
+
+.perf-log-group {
+  border-bottom: 1px solid rgba(108, 122, 139, 0.28);
+}
+
+.perf-log-group-summary {
+  cursor: pointer;
+  display: block;
+  font-weight: 700;
+  padding: 4px 4px 5px;
+}
+
+.perf-log-group-body {
+  padding: 0 0 4px 8px;
+}
+
 .perf-log-row {
   display: grid;
-  grid-template-columns: 92px 1fr 80px 1fr;
+  grid-template-columns: 46px 78px minmax(0, 1.3fr) 68px minmax(0, 1fr);
   gap: 6px;
   padding: 2px 4px;
   border-bottom: 1px dashed rgba(108, 122, 139, 0.18);
@@ -625,7 +763,7 @@ body.panel-resizing * {
 @media (max-width: 755px) {
   .perf-log-panel {
     right: 8px;
-    bottom: 8px;
+    bottom: 40px;
     max-width: calc(100% - 16px);
     /* Keep the pill above the compact drawer (8000) and its toggle (8100).
        The open Tools drawer covers the corner this pill occupies. */
