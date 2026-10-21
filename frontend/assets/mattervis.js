@@ -496,6 +496,82 @@
   }
   function installPlotlyRenderGate() {
     if (!window.Plotly) { setTimeout(installPlotlyRenderGate,25); return; }
+    function relayoutTouchesCamera(update) {
+      if (!update || typeof update !== "object") return false;
+      if (update["scene.camera"] || (update.scene && update.scene.camera)) return true;
+      return Object.keys(update).some(function (key) { return key.indexOf("scene.camera.") === 0; });
+    }
+    function isSizeOnlyRelayout(update) {
+      if (!update || typeof update !== "object" || Array.isArray(update)) return false;
+      const keys = Object.keys(update);
+      if (!keys.length) return false;
+      return keys.every(function (key) {
+        return key === "width" || key === "height" || key === "autosize";
+      });
+    }
+    function axisClose(left, right) {
+      function num(value, index, name) {
+        if (!value) return NaN;
+        if (value[name] !== undefined && value[name] !== null) return Number(value[name]);
+        return Number(value[index]);
+      }
+      return ["x", "y", "z"].every(function (name, index) {
+        const a = num(left, index, name);
+        const b = num(right, index, name);
+        return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= 0.05;
+      });
+    }
+    function camerasClose(left, right) {
+      if (!left || !right) return false;
+      if (!axisClose(left.eye, right.eye) || !axisClose(left.center, right.center) || !axisClose(left.up, right.up)) return false;
+      const leftProjection = left.projection && (left.projection.type || left.projection);
+      const rightProjection = right.projection && (right.projection.type || right.projection);
+      return !leftProjection || !rightProjection || String(leftProjection) === String(rightProjection);
+    }
+    function cameraOnlyPatch(camera) {
+      if (!camera || !camera.eye || !camera.center || !camera.up) return null;
+      function vec(value) {
+        function num(index, name) {
+          if (value[name] !== undefined && value[name] !== null) return Number(value[name]);
+          return Number(value[index]);
+        }
+        return {x: num(0, "x"), y: num(1, "y"), z: num(2, "z")};
+      }
+      const eye = vec(camera.eye);
+      const center = vec(camera.center);
+      const up = vec(camera.up);
+      const finite = [eye, center, up].every(function (item) {
+        return [item.x, item.y, item.z].every(Number.isFinite);
+      });
+      if (!finite) return null;
+      const patch = {
+        "scene.camera.eye": eye,
+        "scene.camera.center": center,
+        "scene.camera.up": up,
+      };
+      const projection = camera.projection && (camera.projection.type || camera.projection);
+      if (projection) patch["scene.camera.projection.type"] = String(projection);
+      return patch;
+    }
+    /* A width/height relayout is a full gl3d replot: it emits plotly_relayout
+     * and calls setViewport. Dash keeps only the latest relayoutData, so that
+     * size event can hide the offscreen camera payload and the replot can
+     * paint the pre-refit camera again. Drop the size event, then put back a
+     * camera command the replot moved. */
+    function restoreCommandedCamera(gd, before, commandAtStart) {
+      const latest = gd && gd.__mvLatestCamera;
+      if (!latest || !latest.snapshot || !window.Plotly || typeof window.Plotly.relayout !== "function") {
+        return Promise.resolve();
+      }
+      const after = window.mattervisCurrentCamera ? window.mattervisCurrentCamera(gd) : null;
+      if (camerasClose(after, latest.snapshot)) return Promise.resolve();
+      const commandArrived = latest !== commandAtStart;
+      const commandWasLive = camerasClose(before, latest.snapshot);
+      if (!commandArrived && !commandWasLive) return Promise.resolve();
+      const patch = cameraOnlyPatch(latest.snapshot);
+      if (!patch) return Promise.resolve();
+      return Promise.resolve(window.Plotly.relayout(gd, patch)).catch(function () {});
+    }
     function wrap(name) {
       const original=window.Plotly[name];
       if (typeof original!=="function"||original.__mattervisRenderGate) return;
@@ -615,6 +691,33 @@
           // Both Dash signatures and WS pass here. Retry after failures;
           // neither receipt nor a rejected react is a delivered frame.
           return enqueueRender(gd, deliver);
+        }
+        if (name === "relayout" && isSizeOnlyRelayout(layout) && target && typeof target.emit === "function") {
+          const sizeTarget = target;
+          const before = window.mattervisCurrentCamera ? window.mattervisCurrentCamera(sizeTarget) : null;
+          const commandAtStart = sizeTarget.__mvLatestCamera || null;
+          const emit = sizeTarget.emit;
+          sizeTarget.emit = function (eventName, data) {
+            if (eventName === "plotly_relayout" && !relayoutTouchesCamera(data)) return sizeTarget;
+            return emit.apply(this, arguments);
+          };
+          const restoreEmit = function () {
+            if (sizeTarget.emit !== emit) sizeTarget.emit = emit;
+          };
+          let pending;
+          try {
+            pending = original.apply(this, args);
+          } catch (err) {
+            restoreEmit();
+            throw err;
+          }
+          return Promise.resolve(pending).then(function (result) {
+            restoreEmit();
+            return restoreCommandedCamera(sizeTarget, before, commandAtStart).then(function () { return result; });
+          }, function (err) {
+            restoreEmit();
+            throw err;
+          });
         }
         return original.apply(this,args);
       };

@@ -70,6 +70,7 @@ def test_panel_width_tracks_the_layout_viewport() -> None:
 def test_canvas_refit_uses_the_center_panel_box() -> None:
     script = (ASSETS / "panel_resize.js").read_text(encoding="utf-8")
     camera = (ASSETS / "view_camera.js").read_text(encoding="utf-8")
+    gate = (ASSETS / "mattervis.js").read_text(encoding="utf-8")
 
     assert "function canvasHostSize()" in script
     assert 'document.getElementById("center-panel")' in script
@@ -77,6 +78,11 @@ def test_canvas_refit_uses_the_center_panel_box() -> None:
     assert "height: size.height" in script
     assert "MatterVisPanelResize" in camera
     assert 'observer.observe(host)' in camera
+    # A size relayout must not replace Dash's camera relayoutData, and the
+    # gl3d replot must not leave a commanded camera behind.
+    assert "function isSizeOnlyRelayout(" in gate
+    assert "function restoreCommandedCamera(" in gate
+    assert 'eventName === "plotly_relayout" && !relayoutTouchesCamera(data)' in gate
 
 
 @pytest.mark.browser

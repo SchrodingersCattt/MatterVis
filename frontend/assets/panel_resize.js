@@ -18,6 +18,8 @@
   let resizingScene = false;
   let lastGraphRect = "";
   let resizeFrame = 0;
+  let resizeAgain = false;
+  let refitAfterResize = false;
 
   function graphNode() {
     const graph = document.getElementById("crystal-graph");
@@ -36,8 +38,27 @@
     return {width: width, height: height};
   }
 
+  function finishSceneResize() {
+    resizingScene = false;
+    redrawCompass();
+    if (refitAfterResize) {
+      refitAfterResize = false;
+      resizeAgain = false;
+      updateCompactLayout();
+      fitPanels();
+      return;
+    }
+    if (resizeAgain) {
+      resizeAgain = false;
+      resizeSceneNow();
+    }
+  }
+
   function resizeSceneNow() {
-    if (resizingScene) return;
+    if (resizingScene) {
+      resizeAgain = true;
+      return;
+    }
     const plot = graphNode();
     const size = canvasHostSize();
     if (!plot || !size || !window.Plotly || typeof window.Plotly.relayout !== "function") {
@@ -61,6 +82,7 @@
     }
     lastGraphRect = key;
     resizingScene = true;
+    resizeAgain = false;
     try {
       plot.style.width = "100%";
       plot.style.height = "100%";
@@ -69,14 +91,12 @@
         height: size.height,
       });
       if (pending && typeof pending.then === "function") {
-        pending.then(redrawCompass, redrawCompass);
+        pending.then(finishSceneResize, finishSceneResize);
       } else {
-        redrawCompass();
+        finishSceneResize();
       }
     } catch (err) {
-      redrawCompass();
-    } finally {
-      resizingScene = false;
+      finishSceneResize();
     }
   }
 
@@ -89,7 +109,12 @@
   function resizeScene() {
     // Resize immediately and once more on the next paint so flex layout and
     // CSS transitions settle before Plotly recalculates the 3-D viewport.
-    if (resizingScene) return;
+    // A width/height relayout is a full gl3d replot, so a second call waits
+    // until that promise settles instead of clearing Plotly's queue.
+    if (resizingScene) {
+      resizeAgain = true;
+      return;
+    }
     resizeSceneNow();
     if (resizeFrame || !window.requestAnimationFrame) return;
     resizeFrame = window.requestAnimationFrame(function () {
@@ -383,10 +408,12 @@
       updateCompactLayout();
       fitPanels();
       function onViewportResize() {
-        if (!resizingScene) {
-          updateCompactLayout();
-          fitPanels();
+        if (resizingScene) {
+          refitAfterResize = true;
+          return;
         }
+        updateCompactLayout();
+        fitPanels();
       }
       window.addEventListener("resize", onViewportResize);
       if (window.visualViewport && window.visualViewport.addEventListener) {
