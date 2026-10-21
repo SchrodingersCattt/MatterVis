@@ -312,8 +312,18 @@
     gd.__mvCanvasRefit = true;
     function refit() {
       if (!gd.isConnected) return;
-      if (root.Plotly && root.Plotly.Plots && typeof root.Plotly.Plots.resize === "function") {
-        try { root.Plotly.Plots.resize(gd); } catch (_) {}
+      // Plots.resize no-ops after the first autosize stores width and height.
+      // panel_resize measures the center panel and relayouts to that box.
+      if (root.MatterVisPanelResize && typeof root.MatterVisPanelResize.resizeScene === "function") {
+        root.MatterVisPanelResize.resizeScene();
+      } else if (root.Plotly && typeof root.Plotly.relayout === "function") {
+        var host = doc.getElementById("center-panel") || gd.parentElement || gd;
+        var rect = host.getBoundingClientRect();
+        var width = Math.round(rect.width);
+        var height = Math.round(rect.height);
+        if (width > 1 && height > 1) {
+          try { root.Plotly.relayout(gd, {width: width, height: height}); } catch (_) {}
+        }
       }
       restoreCanonicalViewport(gd);
     }
@@ -322,7 +332,8 @@
         if (resizeTimer) root.clearTimeout(resizeTimer);
         resizeTimer = root.setTimeout(refit, 80);
       });
-      observer.observe(gd);
+      var host = doc.getElementById("center-panel") || gd;
+      observer.observe(host);
     }
     var viewport = root.visualViewport;
     if (viewport && viewport.addEventListener) {

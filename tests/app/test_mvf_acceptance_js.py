@@ -226,9 +226,9 @@ const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:a
 const source = fs.readFileSync(process.argv[1], 'utf8');
 const listeners = {};
 function node(id) {
-  return {id, dataset:{}, style:{}, children:[], classList:{add(){}, remove(){}, toggle(){}, contains(){return false;}}, appendChild(child){this.children.push(child);}, getBoundingClientRect(){return this.rect;}, setAttribute(){}, getAttribute(){return null;}, addEventListener(type, fn){listeners[id+':'+type]=fn;}, querySelector:(sel)=> sel==='.js-plotly-plot'?plot:null, classListContains:false};
+  return {id, dataset:{}, style:{}, children:[], classList:{add(){}, remove(){}, toggle(){}, contains(){return false;}}, appendChild(child){this.children.push(child);}, getBoundingClientRect(){return this.rect;}, get clientWidth(){return Math.round((this.rect && this.rect.width) || 0);}, get clientHeight(){return Math.round((this.rect && this.rect.height) || 0);}, setAttribute(){}, getAttribute(){return null;}, addEventListener(type, fn){listeners[id+':'+type]=fn;}, querySelector:(sel)=> sel==='.js-plotly-plot'?plot:null, classListContains:false};
 }
-const plot = {on(){}, classList:{contains:()=>false}};
+const plot = {on(){}, style:{}, classList:{contains:()=>false}};
 const graph = node('crystal-graph');
 graph.rect = {width:800, height:600, left:200, right:1000, top:0, bottom:600};
 const left = node('left-panel');
@@ -244,12 +244,13 @@ const sandbox = {console, window:{
   addEventListener(type, fn){ listeners['window:'+type]=fn; if (type==='resize') windowResizes += 0; },
   removeEventListener(){},
   dispatchEvent(event){ if (event && event.type==='resize') windowResizes += 1; },
-  Plotly:{Plots:{resize(){ resizes += 1; }}},
+  Plotly:{Plots:{resize(){ resizes += 1; }}, relayout(){ resizes += 1; }},
   document:{
     readyState:'complete',
     body:{dataset:{}, classList:{add(){}, remove(){}}, appendChild(){}},
     documentElement:{},
     getElementById:(id)=>ids[id]||null,
+    querySelector:()=>null,
     querySelectorAll:()=>[{}],
     addEventListener(){},
     createElement:()=>({className:'', type:'', id:'', dataset:{}, style:{}, setAttribute(){}, addEventListener(){}, appendChild(){}}),

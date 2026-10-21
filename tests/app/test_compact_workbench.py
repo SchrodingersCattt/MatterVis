@@ -18,6 +18,8 @@ def test_compact_layout_uses_overlay_toggles_and_breakpoint() -> None:
     assert "translateX(-105%)" in css
     assert "translateX(105%)" in css
     assert "compact-panel-open ~ .compact-panel-toggle--left" in css
+    assert "top: 12px" in css
+    assert ".workbench-brand" in css
 
 
 def test_perf_log_collapses_to_a_narrow_mobile_safe_pill() -> None:
@@ -26,6 +28,7 @@ def test_perf_log_collapses_to_a_narrow_mobile_safe_pill() -> None:
     assert "width: 128px" in css
     assert "width: 118px" in css
     assert "max-width: calc(100% - 16px)" in css
+    assert "z-index: 9000" in css
     assert "@media (max-width: 755px)" in css
 
 
@@ -35,3 +38,7 @@ def test_panel_resize_repaints_plotly_after_flex_layout_settles() -> None:
     assert "function resizeSceneNow()" in script
     assert "window.requestAnimationFrame" in script
     assert "resizeSceneNow();" in script
+    assert "canvasHostSize" in script
+    assert "Plotly.relayout" in script
+    assert "DEFAULT_FRACTION" in script
+    assert "visualViewport" in script
