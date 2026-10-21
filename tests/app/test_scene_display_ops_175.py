@@ -90,6 +90,9 @@ class _Registry:
 
         return register
 
+    def clientside_callback(self, *args, **kwargs):
+        return None
+
 
 def _manage(backend, monkeypatch, **overrides):
     registry = _Registry()

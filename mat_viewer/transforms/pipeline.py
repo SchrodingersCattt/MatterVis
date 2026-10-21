@@ -80,6 +80,12 @@ def _wrap_repeat_home(
             float(folded[2]),
         )
         copied["_image_shift"] = (0, 0, 0)
+        # The fragment shortcut bonds co-moving unwrapped copies. Folding
+        # each centre into the home cell breaks that rigid copy, so those
+        # pairs would span the cell. Canonical image lookup still places
+        # the bond on the neighbouring replica.
+        copied.pop("_source_molecule_index", None)
+        copied.pop("_cell_spanning_component", None)
         for flag in (
             "_is_boundary_replica",
             "_is_fragment_boundary_replica",
