@@ -34,6 +34,13 @@ mat-vis render neb.extxyz -o neb.gif --fps 6 \
 
 # Interactive HTML
 mat-vis render structure.extxyz -o interactive.html --backend plotly --orthogonal
+
+# Discover the bundled Agent Skills without cloning the repository
+mat-vis skills list --json
+mat-vis skills show visualize-materials
+mat-vis skills show visualize-materials --file references/camera.md
+mat-vis skills tree visualize-materials
+mat-vis skills show visualize-materials --all
 ~~~
 
 ## Subcommands
@@ -42,12 +49,34 @@ mat-vis render structure.extxyz -o interactive.html --backend plotly --orthogona
 |---------|-------------|
 | inspect | Report bounded source and structure metadata as JSON |
 | capabilities | Resolve requested features to exact optional extras |
+| skills | Discover and read bundled Agent Skills progressively |
 | render | Render a structure, one trajectory frame, or a GIF/MP4 animation |
 | serve | Launch the interactive Dash browser viewer |
 | tui | Open a supported structure or trajectory frame in the terminal |
 
 `inspect`, `capabilities`, and `render --check` are the agent preflight surface.
 `--check` resolves requirements only and never creates the output.
+
+### skills — bundled Agent Skills
+
+The `skills` viewer is read-only and uses the installed skill resources, so it
+also works from a different current directory after installing a wheel. It does
+not import the renderer or optional numeric dependencies. The
+default `show` command prints only the raw `SKILL.md` entrypoint. Use
+`--file` for one referenced resource, `tree` to inspect local links without
+reading their bodies, or `--all` to expand reachable Markdown in deterministic
+link order. Scripts and external links are never executed or expanded. Links
+inside fenced or inline code are examples, not resources. A closing fence must
+be at least as long as its opener, so a shorter fence shown inside the example
+stays inside the block. Four-space indented code blocks, and inline spans whose
+backtick runs differ in length, are still ordinary text. A link to a directory
+is a non-document target. If a default `show` document links to a missing file,
+the document is still printed, each broken link is reported on stderr, and the
+process exits with status 2. `tree` and `show --all` stop before printing a
+partial resource graph. Add `--json` to `list`, `show`, or `tree` for
+machine-readable output. Failures that reject the command, including an unknown
+skill, write `Error: ...` to stderr and, with `--json`, a
+`mattervis.error/v1` object (`schema`, `ok: false`, `error`) to stdout.
 
 ## tui — terminal and online agent sessions
 

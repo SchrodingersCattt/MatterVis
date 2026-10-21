@@ -10,8 +10,6 @@ __all__ = [
     "resolve_requirements",
 ]
 
-from .properties import AtomPropertyColorSpec
-
 try:
     from ._version import version as __version__
 except ImportError:
@@ -59,3 +57,16 @@ def resolve_requirements(*args, **kwargs):
     from .capabilities import resolve_requirements as _resolve_requirements
 
     return _resolve_requirements(*args, **kwargs)
+
+
+def __getattr__(name: str):
+    """Load scientific types only when a caller asks for them.
+
+    Importing the package must stay light enough for ``mat-vis skills`` to
+    run without numpy, ASE, or a renderer.
+    """
+    if name == "AtomPropertyColorSpec":
+        from .properties import AtomPropertyColorSpec
+
+        return AtomPropertyColorSpec
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -33,6 +33,8 @@ ALLOWED_TOP_LEVEL_PY = {
     "cache_keys.py",
     "capabilities.py",
     "cli.py",
+    "cli_lazy.py",
+    "skill_viewer.py",
 }
 
 

@@ -4,6 +4,7 @@ Subcommands
 -----------
 inspect       Report bounded structure metadata.
 capabilities  Resolve optional dependencies and installation hints.
+skills        Read bundled Agent Skills without loading a renderer.
 render        Generate publication-quality figures and animations.
 serve         Launch the interactive Dash browser viewer.
 tui           Launch or print the terminal viewer.
@@ -36,35 +37,15 @@ from .capabilities import (
     requirements_for_tui,
     resolve_requirements,
 )
-from .structure.inspect import (
-    file_sha256 as _file_sha256,
-    inspect_payload as _inspect_payload,
-    is_nonperiodic_structure as _is_nonperiodic_structure,
-)
-from .render.cli_controls import (
-    add_bond_policy_arguments, bond_thresholds_from_args,
-    _add_render_control_arguments,
-    _animation_time_from_args,
-    _frame_annotation_from_args,
-    _camera_request,
-    _is_animation_output,
-    _render_ortep_mode,
-    _render_shading,
-    _style_groups,
-    _validate_render_options,
-)
-from .render.fast_cli import (
-    add_batch_render_arguments,
-    render_batch_if_selected,
-)
-from .render.overlay.io import load_overlay_file as _load_overlay_file
-from .properties.cli import add_atom_property_arguments as _add_atom_property_arguments, atom_property_spec as _atom_property_spec
+from .cli_lazy import bind_deferred_cli_symbols
+
+bind_deferred_cli_symbols(globals())
+
 
 def _build_render_parser(
     subparsers: argparse._SubParsersAction,
 ) -> argparse.ArgumentParser:
     """Build the existing render surface plus explicit agent controls."""
-
     from .render.cli import _build_render_parser as build_legacy_parser
 
     parser = build_legacy_parser(subparsers)
@@ -1217,6 +1198,12 @@ def _agent_render_main(args: argparse.Namespace) -> None:
 
 def main(argv: Optional[list[str]] = None) -> None:
     """MatterVis CLI entry point."""
+    raw = list(sys.argv[1:] if argv is None else argv)
+    if raw[:1] == ["skills"]:
+        from .skill_viewer import main as skills_main
+
+        skills_main(raw[1:])
+        return
     parser = argparse.ArgumentParser(
         prog="mat-vis",
         description="MatterVis: publication-quality crystal structure visualization.",
@@ -1226,6 +1213,10 @@ def main(argv: Optional[list[str]] = None) -> None:
     _build_render_parser(subparsers)
     _build_inspect_parser(subparsers)
     _build_capabilities_parser(subparsers)
+    subparsers.add_parser(
+        "skills",
+        help="Discover and read bundled Agent Skills.",
+    )
     _build_serve_parser(subparsers)
     _build_tui_parser(subparsers)
 
