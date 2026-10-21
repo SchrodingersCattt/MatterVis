@@ -542,6 +542,13 @@ The full list (authoritative; the diagram only groups them):
 - `crystal-graph`
 - `topology-histogram`
 - `topology-results`
+- `atom-list`: short sample of the displayed atoms in the Analysis pane
+- `mv-status-bar`, `mv-status-structure`, `mv-status-scope`,
+  `mv-status-counts`, `mv-status-busy`: canvas status bar and the
+  working/rendering indicator. Counts follow the scene drawn for the
+  current display mode and transforms.
+- `perf-log-level`: server-log level filter (`debug` shows all,
+  `info` hides fast callbacks, `warn` and `error` are stricter)
 - `save-preset-btn`
 - `export-btn`
 - `export-cif-btn` and `cif-download`

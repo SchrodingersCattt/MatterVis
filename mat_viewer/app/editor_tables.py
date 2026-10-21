@@ -7,14 +7,17 @@ from .normalizers import *
 def _perf_log_row(entry: dict[str, Any]) -> Any:
     """Render one perf-log event as a Dash row.
 
-    Layout: ``[hh:mm:ss.mmm] [label] [duration ms] [info kv pairs]``
+    Layout: ``[level] [hh:mm:ss.mmm] [label] [duration ms] [info kv pairs]``
     The duration cell is coloured green / amber / red based on
     ``_PERF_FAST_MS`` / ``_PERF_SLOW_MS`` so slow events pop out
     visually.
     """
+    from .perf_log_view import perf_event_level
+
     iso = entry.get("iso", "")
     clock = iso.split("T", 1)[1] if "T" in iso else iso
     label = entry.get("label", "")
+    level = perf_event_level(entry)
     ms = entry.get("ms")
     if ms is None:
         ms_text = ""
@@ -39,6 +42,7 @@ def _perf_log_row(entry: dict[str, Any]) -> Any:
     info_text = " ".join(info_pairs)
     return html.Div(
         [
+            html.Span(level, className=f"perf-log-level perf-log-level--{level}"),
             html.Span(clock, className="perf-log-clock"),
             html.Span(label, className="perf-log-label"),
             html.Span(ms_text, className=ms_class),
@@ -46,6 +50,49 @@ def _perf_log_row(entry: dict[str, Any]) -> Any:
         ],
         className="perf-log-row",
     )
+
+
+def render_perf_log(entries: list[dict[str, Any]] | None, *, minimum_level: str = "info") -> list[Any]:
+    """Draw the server log with a level filter and collapsed repeats.
+
+    Consecutive events that share a label become one closed ``<details>``
+    group. Single events stay as rows. ``minimum_level`` drops quieter
+    events from the pane; the ring buffer itself is unchanged.
+    """
+    from .perf_log_view import group_perf_log_entries
+
+    groups = group_perf_log_entries(entries, minimum_level=minimum_level)
+    if not groups:
+        return [
+            html.Div(
+                "No events at this level. Choose All to include fast callbacks.",
+                className="perf-log-empty",
+            )
+        ]
+    nodes: list[Any] = []
+    for group in groups:
+        events = group["entries"]
+        if len(events) == 1:
+            nodes.append(_perf_log_row(events[0]))
+            continue
+        level = group["level"]
+        nodes.append(
+            html.Details(
+                [
+                    html.Summary(
+                        f"{group['label']}  ×{len(events)}",
+                        className=f"perf-log-group-summary perf-log-level--{level}",
+                    ),
+                    html.Div(
+                        [_perf_log_row(event) for event in events],
+                        className="perf-log-group-body",
+                    ),
+                ],
+                className="perf-log-group",
+                open=False,
+            )
+        )
+    return nodes
 
 
 def _polyhedra_table_rows(

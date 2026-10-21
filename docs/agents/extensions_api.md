@@ -68,6 +68,14 @@ between tabs. Selected and pressed ARIA states follow the active tab. Clicking
 the active tab leaves it open. Selection is browser-page-local and resets to
 Display on refresh; it is not persisted in scenes, presets, or browser storage.
 
+The Analysis pane shows a distance histogram (resized when the pane
+becomes visible), plain-text shell results, and a short atom list. The
+canvas has a status bar (`mv-status-bar`) for the structure label, scope,
+and atom/bond counts, plus a working indicator for user-driven updates.
+The server log (`perf-log-panel`) filters by level and collapses
+consecutive repeats. Measurement tools (distance, angle, dihedral) stay
+on the terminal viewer.
+
 Existing `analysis-panel-toggle` and `operation-panel-toggle` IDs are retained;
 `display-panel-toggle` is added. The legacy `right-panel` ID now identifies the
 analysis/operations container **inside** `left-panel`, not a root column.

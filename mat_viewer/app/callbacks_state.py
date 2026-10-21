@@ -11,8 +11,25 @@ from .rightclick import *
 from .status_helpers import status_banner_payload
 from ..cache_keys import fragment_options_cache_key
 from .backend import ViewerBackend
-from .display_controls import display_option_hint, display_option_items
+from .display_controls import (
+    display_option_hint,
+    display_option_items,
+    reconcile_display_options,
+    visible_display_options,
+)
 from ..properties import web_colormap_options
+
+
+def checklist_after_reconcile(mode, reconciled, incoming):
+    """Checklist value after display options are reconciled.
+
+    Returns ``no_update`` when the control already shows that value, so
+    restoring a stored Cell boundary does not echo another ``capture_state``.
+    """
+    visible = visible_display_options(mode, reconciled)
+    if list(visible) == list(incoming or []):
+        return no_update
+    return visible
 
 
 def register_state_callbacks(app, backend):
@@ -22,11 +39,20 @@ def register_state_callbacks(app, backend):
     filled_controls_scene = {"id": str(backend.active_scene_id() or "")}
 
     @app.callback(
-        Output("display-options", "options"), Output("display-options-hint", "children"),
-        Input("display-mode-selector", "value"), Input("display-options", "value"),
+        Output("display-options", "options"),
+        Output("display-options-hint", "children"),
+        # Same writer pattern as ``sync_agent_state`` (both allow_duplicate).
+        # Mixing a primary writer with a duplicate writer silently drops
+        # user events on this checklist in Dash 2.18.
+        Output("display-options", "value", allow_duplicate=True),
+        Input("display-mode-selector", "value"),
+        Input("display-options", "value"),
+        prevent_initial_call=True,
     )
     def update_display_availability(mode, selected):
-        return display_option_items(mode, selected), display_option_hint(mode)
+        visible = visible_display_options(mode, selected)
+        value_out = no_update if list(visible) == list(selected or []) else visible
+        return display_option_items(mode, selected), display_option_hint(mode), value_out
 
     def scene_control_outputs(state: dict[str, Any]) -> tuple[Any, ...]:
         scene_id = state.get("scene_id") or backend.active_scene_id()
@@ -47,7 +73,7 @@ def register_state_callbacks(app, backend):
         return (
             state.get("scene_label") or state["structure"],
             state["display_mode"],
-            state["display_options"],
+            visible_display_options(state.get("display_mode"), state.get("display_options")),
             state["atom_scale"],
             state["bond_radius"],
             state["minor_opacity"],
@@ -361,7 +387,7 @@ def register_state_callbacks(app, backend):
     @app.callback(
         Output("scene-tab-rename-input", "value"),
         Output("display-mode-selector", "value"),
-        Output("display-options", "value"),
+        Output("display-options", "value", allow_duplicate=True),
         Output("atom-scale-slider", "value"),
         Output("bond-radius-slider", "value"),
         Output("minor-opacity-slider", "value"),
@@ -515,6 +541,7 @@ def register_state_callbacks(app, backend):
 
     @app.callback(
         Output("agent-state-store", "data", allow_duplicate=True),
+        Output("display-options", "value", allow_duplicate=True),
         Input("scene-tabs", "value"),
         Input("display-mode-selector", "value"),
         Input("display-options", "value"),
@@ -576,28 +603,38 @@ def register_state_callbacks(app, backend):
         # never persist the previous scene's control values into the newly
         # selected scene.
         if "scene-tabs" in triggered_props:
-            return no_update
+            return no_update, no_update
         if scene_id and scene_id not in backend.scene_store.scenes:
-            return no_update
+            return no_update, no_update
         filled = filled_controls_scene["id"]
         if filled and scene_id and str(scene_id) != str(filled):
-            return no_update
+            return no_update, no_update
         if scene_id:
             backend.set_active_scene(scene_id, broadcast=False)
         prev = backend.get_state(scene_id)
+        incoming_options = list(display_options or [])
+        display_options = reconcile_display_options(
+            display_mode,
+            display_options,
+            prev.get("display_mode"),
+            prev.get("display_options"),
+        )
+        checklist_out = checklist_after_reconcile(
+            display_mode, display_options, incoming_options
+        )
         display_changed = display_mode != prev.get("display_mode")
         property_spec = None
         if property_fields:
             if property_range_mode == "manual":
                 if property_range_min is None or property_range_max is None:
-                    return no_update
+                    return no_update, no_update
                 try:
                     lower = float(property_range_min)
                     upper = float(property_range_max)
                 except (TypeError, ValueError):
-                    return no_update
+                    return no_update, no_update
                 if not np.isfinite((lower, upper)).all() or lower >= upper:
-                    return no_update
+                    return no_update, no_update
                 value_range = [lower, upper]
             else:
                 value_range = None
@@ -647,7 +684,7 @@ def register_state_callbacks(app, backend):
         # capture_state -> agent-state-store`` would otherwise double up
         # every figure render, doubling the 1.4 MB-per-frame cost.
         if all(prev.get(k) == v for k, v in patch.items() if k != "scene_id"):
-            return no_update
+            return no_update, checklist_out
         backend.apply_intent(
             {"type": "set_style", "scene_id": scene_id, "payload": patch}
         )
@@ -668,9 +705,9 @@ def register_state_callbacks(app, backend):
             },
         )
         state = backend.get_state(scene_id)
-        # Capture only publishes the authoritative state. Geometry scheduling
-        # and stale-result handling remain in the worker.
-        return state
+        # Capture publishes the authoritative state and the checklist value
+        # that belongs with it. Geometry scheduling stays in the worker.
+        return state, checklist_out
 
     # ------------------------------------------------------------------
     # Phase 3 UI: Named-polyhedra table.

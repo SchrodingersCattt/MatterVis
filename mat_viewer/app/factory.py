@@ -18,6 +18,7 @@ from .callbacks_view import register_view_callbacks
 from .backend import ViewerBackend
 from .layout_left_panel import build_left_panel
 from .layout_workbench import assemble_workbench
+from .panel_status import canvas_status_bar, render_atom_list, status_bar_parts
 from .rightclick import _closed_rightclick_items
 from ..extensions import ExtensionContext, _ExtensionHost
 from .build_info import asset_url_token, install_index_identity
@@ -305,6 +306,7 @@ def _create_app(
         disorder_resolve = first_state.get("disorder_resolve") or {}
         first_figure, first_topology = backend.figure_for_state(first_state)
         first_scene = backend.scene_for_state(first_state)
+        status_label, status_scope, status_counts = status_bar_parts(first_state, first_scene)
         property_catalog = backend.atom_properties(first_state)
         property_spec = first_state.get("atom_property_color") or {}
         property_range = property_spec.get("value_range")
@@ -501,7 +503,8 @@ def _create_app(
                             ],
                             className="mv-canvas-toolbar",
                         ),
-                        html.Div(id="mv-render-status", className="mv-render-status")
+                        html.Div(id="mv-render-status", className="mv-render-status"),
+                        canvas_status_bar(status_label, status_scope, status_counts),
                     ],
                     id="center-panel",
                     style={
@@ -547,24 +550,38 @@ def _create_app(
                                                     "fragment here without changing what is drawn.",
                                                     className="analysis-help",
                                                 ),
+                                                html.Div(
+                                                    "Distance histogram",
+                                                    className="analysis-caption",
+                                                ),
                                                 dcc.Graph(
                                                     id="topology-histogram",
                                                     figure=topology_histogram_figure(
                                                         first_topology
                                                     ),
                                                     className="analysis-graph",
-                                                    style={"height": "260px"},
+                                                    style={"height": "220px"},
                                                     config={
                                                         "displayModeBar": False,
                                                         "displaylogo": False,
+                                                        "responsive": True,
                                                     },
                                                 ),
-                                                html.Pre(
+                                                html.Div(
                                                     id="topology-results",
                                                     children=topology_results_markdown(
                                                         first_topology
                                                     ),
                                                     className="analysis-results",
+                                                ),
+                                                html.Div(
+                                                    "Atoms",
+                                                    className="analysis-section-title atom-list-title",
+                                                ),
+                                                html.Div(
+                                                    id="atom-list",
+                                                    className="atom-list",
+                                                    children=render_atom_list(first_scene),
                                                 ),
                                             ],
                                             className="analysis-section",
@@ -663,10 +680,8 @@ def _create_app(
                                                     [
                                                         html.Label(
                                                             "Max Index",
-                                                            style={
-                                                                "fontSize": "11px",
-                                                                "marginRight": "4px",
-                                                            },
+                                                            htmlFor="bfdh-max-index",
+                                                            className="analysis-label operation-inline-label",
                                                         ),
                                                         dcc.Input(
                                                             id="bfdh-max-index",
@@ -675,18 +690,12 @@ def _create_app(
                                                             max=5,
                                                             step=1,
                                                             value=2,
-                                                            style={
-                                                                "width": "40px",
-                                                                "fontSize": "11px",
-                                                                "marginRight": "12px",
-                                                            },
+                                                            className="analysis-number-input",
                                                         ),
                                                         html.Label(
                                                             "Top N",
-                                                            style={
-                                                                "fontSize": "11px",
-                                                                "marginRight": "4px",
-                                                            },
+                                                            htmlFor="bfdh-top-n",
+                                                            className="analysis-label operation-inline-label",
                                                         ),
                                                         dcc.Input(
                                                             id="bfdh-top-n",
@@ -695,28 +704,16 @@ def _create_app(
                                                             max=50,
                                                             step=1,
                                                             value=10,
-                                                            style={
-                                                                "width": "40px",
-                                                                "fontSize": "11px",
-                                                                "marginRight": "12px",
-                                                            },
+                                                            className="analysis-number-input",
                                                         ),
                                                         html.Button(
                                                             "Run BFDH",
                                                             id="bfdh-run-btn",
                                                             n_clicks=0,
-                                                            style={
-                                                                "fontSize": "12px",
-                                                                "padding": "2px 8px",
-                                                                "cursor": "pointer",
-                                                            },
+                                                            className="operation-button",
                                                         ),
                                                     ],
-                                                    style={
-                                                        "display": "flex",
-                                                        "alignItems": "center",
-                                                        "marginTop": "8px",
-                                                    },
+                                                    className="analysis-inline-fields",
                                                 ),
                                                 dcc.Loading(
                                                     id="bfdh-loading",
@@ -761,12 +758,8 @@ def _create_app(
                                                             max=5.0,
                                                             step=0.1,
                                                             value=1.0,
-                                                            marks={
-                                                                0.5: "0.5x",
-                                                                1: "1x",
-                                                                2: "2x",
-                                                                5: "5x",
-                                                            },
+                                                            marks={1: "1×", 5: "5×"},
+                                                            tooltip={"placement": "bottom", "always_visible": False},
                                                         ),
                                                     ],
                                                     style={"marginTop": "8px"},
@@ -786,11 +779,8 @@ def _create_app(
                                                             max=1.0,
                                                             step=0.1,
                                                             value=0.8,
-                                                            marks={
-                                                                0.1: "0.1",
-                                                                0.5: "0.5",
-                                                                1.0: "1.0",
-                                                            },
+                                                            marks={0.1: "0.1", 1.0: "1"},
+                                                            tooltip={"placement": "bottom", "always_visible": False},
                                                         ),
                                                     ],
                                                     style={"marginTop": "8px"},
@@ -864,11 +854,11 @@ def _create_app(
                                                             ],
                                                             value="repeat",
                                                             clearable=False,
+                                                            className="analysis-control transforms-kind-select",
                                                             style={
-                                                                "width": "140px",
-                                                                "fontSize": "12px",
-                                                                "display": "inline-block",
-                                                                "marginRight": "4px",
+                                                                "flex": "1 1 180px",
+                                                                "minWidth": "180px",
+                                                                "fontSize": "13px",
                                                             },
                                                         ),
                                                         html.Button(
@@ -884,12 +874,7 @@ def _create_app(
                                                             title="Append a new transform of the selected kind. Default params = a sane no-op.",
                                                         ),
                                                     ],
-                                                    style={
-                                                        "display": "flex",
-                                                        "alignItems": "center",
-                                                        "gap": "4px",
-                                                        "marginTop": "6px",
-                                                    },
+                                                    className="analysis-inline-fields",
                                                 ),
                                                 html.Div(
                                                     [
@@ -942,7 +927,7 @@ def _create_app(
                                                             title="Drop every transform (back to the raw scene).",
                                                         ),
                                                     ],
-                                                    style={"marginTop": "6px"},
+                                                    className="analysis-inline-fields",
                                                 ),
                                                 html.Div(
                                                     id="transforms-rows-container",
@@ -1004,6 +989,20 @@ def _create_app(
                                 ),
                             ],
                             className="perf-log-header",
+                        ),
+                        dcc.RadioItems(
+                            id="perf-log-level",
+                            options=[
+                                {"label": "All", "value": "debug"},
+                                {"label": "Info", "value": "info"},
+                                {"label": "Warn", "value": "warn"},
+                                {"label": "Error", "value": "error"},
+                            ],
+                            value="info",
+                            inline=True,
+                            className="perf-log-levels",
+                            inputStyle={"marginRight": "4px"},
+                            labelStyle={"marginRight": "10px"},
                         ),
                         html.Div(
                             id="perf-log-body",
