@@ -615,6 +615,7 @@
         }
         if (name==="relayout" && layout) {
           const gd=typeof args[0]==="string"?document.getElementById(args[0]):args[0];
+          refreshSettledGestureStamp(gd, layout);
           const shown=renderMetadataFromLayout(gd && gd.layout);
           const canvasId=shown && shown.scene_id ? String(shown.scene_id) : "";
           let gestureId=window.__mvGestureSceneId ? String(window.__mvGestureSceneId) : "";
@@ -2277,6 +2278,33 @@
   attachRebindObserver();
 
   // ── Pointer/wheel interaction tracking ──────────────────────────
+  /* A pointer-up relayout must keep the revision from gesture start so
+   * Reset can still win. A later camera relayout is not that drag: read
+   * the live canvas clock or the server rejects it and the offscreen
+   * view sticks. */
+  function refreshSettledGestureStamp(gd, layout) {
+    if (!layout || !gd) return;
+    const touches = layout["scene.camera"] || (layout.scene && layout.scene.camera) ||
+      Object.keys(layout).some(function (key) { return key.indexOf("scene.camera.") === 0; });
+    if (!touches) return;
+    const kind = window.__mvGestureKind ? String(window.__mvGestureKind) : "";
+    if (kind === "wheel") return;
+    const ended = Number(window.__mvGestureEndedAt || 0);
+    const age = ended ? (Date.now() - ended) : 0;
+    if (window.__mvGestureSceneId && age < 450) return;
+    const render = renderMetadataFromLayout(gd.layout);
+    if (!render) return;
+    if (render.scene_generation !== undefined && render.scene_generation !== null) {
+      window.__mvGestureSceneGeneration = render.scene_generation;
+    }
+    const live = Number(gd.__mvCameraRevision);
+    const metaRev = Number(render.camera_revision);
+    let revision = null;
+    if (Number.isFinite(live) && Number.isFinite(metaRev)) revision = Math.max(live, metaRev);
+    else if (Number.isFinite(live)) revision = live;
+    else if (Number.isFinite(metaRev)) revision = metaRev;
+    if (revision !== null) window.__mvGestureCameraRevision = revision;
+  }
   function stampGestureScene(sceneId, kind) {
     const id = sceneId ? String(sceneId) : "";
     if (!id) return;
@@ -2325,18 +2353,23 @@
   }
   document.addEventListener("pointerdown", function(e) {
     if (!inGraph(e.target)) return;
+    window.__mvGestureEndedAt = 0;
     const sceneId = canvasSceneId() || window.__mvGestureSceneId || "";
     stampGestureScene(sceneId, "pointer");
     markActive();
   }, true);
   document.addEventListener("pointerup", function() {
+    window.__mvGestureEndedAt = Date.now();
     if (interactionActive) markInactiveSoon();
     const stamped = window.__mvGestureSceneId || "";
     setTimeout(function() {
       if ((window.__mvGestureSceneId || "") === stamped) window.__mvGestureSceneId = "";
     }, 1000);
   });
-  document.addEventListener("pointercancel", function() { if (interactionActive) markInactiveSoon(); });
+  document.addEventListener("pointercancel", function() {
+    window.__mvGestureEndedAt = Date.now();
+    if (interactionActive) markInactiveSoon();
+  });
   document.addEventListener("wheel", function(e) {
     if (!inGraph(e.target)) return;
     // Wheel zoom does not necessarily emit a pointerdown after a scene-tab
