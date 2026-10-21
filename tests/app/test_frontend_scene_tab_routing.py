@@ -166,12 +166,24 @@ def test_fallback_parked_frames_keep_revision_and_sequence_fences():
     assert "previousSeq" in park_body
 
 
-def test_tab_switch_clears_global_upload_status():
+def test_tab_switch_names_the_loaded_scene():
+    """A scene change replaces the global status with that tab's label.
+
+    Upload progress stays put. The status writer lives in ``noteLoadedScene``;
+    the tab click and the selection observer both call it.
+    """
     source = MATTERVIS_JS.read_text(encoding="utf-8")
+    note = source.index("function noteLoadedScene")
+    note_body = source[note:source.index("function syncSceneTabSelection", note)]
+    assert 'document.getElementById("upload-status")' in note_body
+    assert 'status.textContent = "Loaded: " + label' in note_body
+    assert "/^Uploading\\b/" in note_body
     start = source.index("function bindSceneTabIntent")
     body = source[start:source.index("// ── WS figure fast lane", start)]
-    assert 'document.getElementById("upload-status")' in body
-    assert 'status.textContent = ""' in body
+    assert "noteLoadedScene(clickedSceneId, clickedNode)" in body
+    sync = source.index("function syncSceneTabSelection")
+    sync_body = source[sync:source.index("function scrollSceneTabIntoView", sync)]
+    assert "noteLoadedScene(String(current))" in sync_body
 
 
 def test_scene_tab_tooltip_is_applied_to_actual_tab_node():
