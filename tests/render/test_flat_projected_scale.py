@@ -98,3 +98,60 @@ def test_flat_atom_and_bond_sizes_use_fixed_visual_scale_across_viewports():
     assert wide_atom["marker"]["size"][0] / wide_bond["line"]["width"] == pytest.approx(
         close_atom["marker"]["size"][0] / close_bond["line"]["width"]
     )
+
+
+def _mesh_bond_extent(figure) -> float:
+    best = 0.0
+    found = False
+    for trace in figure.data:
+        meta = trace.meta if isinstance(trace.meta, dict) else {}
+        if getattr(trace, "type", None) != "mesh3d" or meta.get("mv_role") != "bond":
+            continue
+        found = True
+        assert trace.flatshading is True
+        for y, z in zip(trace.y, trace.z):
+            best = max(best, (float(y) ** 2 + float(z) ** 2) ** 0.5)
+    assert found, "flat ball-and-stick bonds were still screen-space lines"
+    return best
+
+
+def test_flat_ball_stick_bond_radius_is_world_space_and_mesh_can_return():
+    scene = _scene(5.0)
+    thin = build_figure(scene, {**_style(), "bond_radius": 0.08})
+    thick = build_figure(scene, {**_style(), "bond_radius": 0.24})
+    assert any(trace.type == "scatter3d" for trace in thin.data)
+    assert _mesh_bond_extent(thick) > _mesh_bond_extent(thin) * 2
+
+    restored = build_figure(scene, {**_style(), "material": "mesh", "bond_radius": 0.15})
+    atoms = [
+        trace
+        for trace in restored.data
+        if trace.type == "mesh3d"
+        and isinstance(trace.meta, dict)
+        and trace.meta.get("mv_role") == "atom"
+    ]
+    assert atoms
+    assert all(trace.flatshading is False for trace in atoms)
+
+
+def test_scatter_bond_width_follows_per_bond_radius_scale():
+    scene = _scene(5.0)
+    scene["bonds"].append(
+        {
+            "i": 0,
+            "j": 0,
+            "start": [0.0, 0.0, 0.0],
+            "end": [0.0, 0.8, 0.0],
+            "color_i": "#112233",
+            "color_j": "#112233",
+            "is_minor": False,
+            "is_disordered": False,
+            "occ": 1.0,
+            "_render_radius_scale": 2.0,
+        }
+    )
+    widths = sorted(
+        float(trace["line"]["width"]) for trace in _bond_scatter_traces(scene, _style())
+    )
+    assert len(widths) >= 2
+    assert widths[-1] == pytest.approx(widths[0] * 2.0)

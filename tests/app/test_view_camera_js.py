@@ -305,3 +305,52 @@ vm.createContext(sandbox);vm.runInContext(source,sandbox);
 """
     result = subprocess.run([node, "-e", program, str(source)], capture_output=True, text=True, timeout=15, check=False)
     assert result.returncode == 0, result.stderr
+
+
+def test_perspective_wheel_zoom_stays_outside_the_model_box():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "view_camera.js"
+    program = r"""
+const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+const listeners = [];
+const canvas = {};
+const gd = {
+  isConnected: true,
+  _fullLayout: {
+    scene: {
+      aspectratio: {x: 1, y: 1, z: 1},
+      _scene: {glplot: {canvas}, camera: {eye: [0.2, 0.2, 0.2], center: [0, 0, 0], up: [0, 0, 1], _ortho: false}},
+    },
+  },
+};
+const calls = [];
+const sandbox = {
+  Promise, Object, Array, JSON, Number, String, Date, Math, setTimeout, clearTimeout,
+  window: {Plotly: {relayout: (_gd, patch) => { calls.push(patch); return Promise.resolve(); }}},
+  document: {addEventListener: (type, fn) => listeners.push({type, fn})},
+};
+vm.createContext(sandbox);
+vm.runInContext(source, sandbox);
+sandbox.window.MatterVisViewCamera.installWheelZoom(gd);
+const wheel = listeners.find(item => item.type === 'wheel').fn;
+wheel({
+  target: canvas,
+  deltaY: -800,
+  deltaX: 0,
+  preventDefault() {},
+  stopImmediatePropagation() {},
+});
+assert.equal(calls.length, 1);
+const eye = calls[0]['scene.camera.eye'];
+const dist = Math.hypot(eye.x, eye.y, eye.z);
+const limit = sandbox.window.MatterVisViewCamera.minimumPerspectiveEyeDistance(
+  eye, {x: 0, y: 0, z: 0}, {x: 1, y: 1, z: 1},
+);
+assert.ok(dist + 1e-6 >= limit, 'eye ' + dist + ' entered the near plane, limit ' + limit);
+assert.ok(dist > 0.5, 'max zoom still uses the old 0.35 eye floor inside the cube');
+"""
+    result = subprocess.run([node, "-e", program, str(source)], capture_output=True, text=True, timeout=15, check=False)
+    assert result.returncode == 0, result.stderr

@@ -121,11 +121,23 @@ def test_render_dispatch_combo_builds_figure(
         "figure -- the dispatcher dropped both atoms and bonds."
     )
     if material == "flat":
-        assert any(trace.type == "scatter3d" for trace in fig.data), (
-            f"flat-material build for {render_style!r} must include "
-            "scatter3d traces; mesh-only output indicates the dispatch "
-            "table picked the wrong material path."
+        # Solid flat sticks are world-space cylinders so bond radius is
+        # visible. Atom markers stay scatter3d, except stick style which
+        # has no atoms. Dashed disorder keeps scatter lines for the dash.
+        solid_flat_sticks = (
+            render_style == "stick" and disorder != "dashed_bonds"
         )
+        if solid_flat_sticks:
+            assert any(trace.type == "mesh3d" for trace in fig.data), (
+                "flat stick bonds must be mesh cylinders so bond radius "
+                "is a world-space thickness"
+            )
+        else:
+            assert any(trace.type == "scatter3d" for trace in fig.data), (
+                f"flat-material build for {render_style!r} must include "
+                "scatter3d traces; mesh-only output indicates the dispatch "
+                "table picked the wrong material path."
+            )
     else:
         assert any(trace.type == "mesh3d" for trace in fig.data), (
             f"mesh-material build for {render_style!r} must include "

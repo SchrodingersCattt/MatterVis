@@ -918,6 +918,10 @@ def figure_axis_layout(
         else:
             aspect_kwargs = {"aspectmode": "data"}
 
+    # ``visible: false`` is what gl-plot3d honors (it skips ticks, axis
+    # lines, grid and the zero line). The extra flags cover a layout that
+    # is inspected before that merge, so a single tick cannot survive at
+    # the bottom of the canvas.
     hidden_axis = {
         "visible": False,
         "showgrid": False,
@@ -925,6 +929,9 @@ def figure_axis_layout(
         "showspikes": False,
         "showticklabels": False,
         "ticks": "",
+        "zeroline": False,
+        "zerolinewidth": 0,
+        "title": {"text": ""},
     }
     return {
         "xaxis": {**hidden_axis, "range": xr},

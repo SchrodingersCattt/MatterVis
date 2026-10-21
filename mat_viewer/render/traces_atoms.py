@@ -222,7 +222,7 @@ def _bond_segments(scene: dict, style: dict, *, with_scales: bool = False):
                     yield color, is_minor, seg_start, seg_end
 
 
-def _bond_mesh_traces(scene: dict, style: dict):
+def _bond_mesh_traces(scene: dict, style: dict, *, flatshading: bool = False):
     """Build the bond Mesh3d traces, bucketed by ``(color, is_minor,
     radius_bin, opacity_bin)`` so per-bond ``_render_radius_scale`` /
     ``_render_opacity_scale`` (set by ``tag_bonds_with_groups``)
@@ -301,7 +301,7 @@ def _bond_mesh_traces(scene: dict, style: dict):
             "opacity": payload["opacity"],
             "hoverinfo": "skip",
             "showlegend": False,
-            "flatshading": False,
+            "flatshading": bool(flatshading),
             "meta": _latency_meta(
                 "bond", is_minor=is_minor, opacity_group=opacity_group
             ),
@@ -469,15 +469,33 @@ def _contrast_safe_scatter_bond_color(color: str, style: dict) -> str:
     return "#6B7280" if background_luminance >= 0.5 else "#D1D5DB"
 
 
+def _fast_bond_traces(scene: dict, style: dict):
+    """Fast-path bonds that still follow ball-and-stick radius.
+
+    Scatter3d ``line.width`` is a screen-space hint. WebGL often draws
+    those strokes at one thickness, so Flat shading looked like it ignored
+    the bond-radius slider and the ball-and-stick cylinders. Solid flat
+    bonds use the same world-space cylinders as the mesh path, with flat
+    shading. Dashed disorder stays on scatter lines (a cylinder has no
+    dash), and the explicit non-flat fast path stays on scatter lines.
+    """
+    if (
+        str(style.get("material", "mesh")) == "flat"
+        and str(style.get("disorder", "opacity")) != "dashed_bonds"
+    ):
+        return _bond_mesh_traces(scene, style, flatshading=True)
+    return _bond_scatter_traces(scene, style)
+
+
 def _bond_scatter_traces(scene: dict, style: dict):
-    groups: Dict[Tuple[str, bool, str | None, str, str], dict] = {}
+    groups: Dict[Tuple[str, bool, str | None, str, str, str], dict] = {}
     for (
         color,
         is_minor,
         is_disordered,
         start,
         end,
-        _radius_scale,
+        radius_scale,
         opacity_scale,
         opacity_group,
         bond_occ,
@@ -497,11 +515,13 @@ def _bond_scatter_traces(scene: dict, style: dict):
             continue
         opacity_bin = f"{eff_opacity:.2f}"
         occ_bin = f"{bond_occ:.2f}"
+        radius_bin = f"{float(radius_scale):.2f}"
         groups.setdefault(
-            (color, is_minor, opacity_group, opacity_bin, occ_bin),
+            (color, is_minor, opacity_group, opacity_bin, occ_bin, radius_bin),
             {
                 "segments": [],
                 "opacity_scale": opacity_scale,
+                "radius_scale": float(radius_scale),
                 "occ": bond_occ,
                 "opacity": eff_opacity,
             },
@@ -516,9 +536,10 @@ def _bond_scatter_traces(scene: dict, style: dict):
         * visual_scale
         * float(style.get("scatter_bond_scale", 1.0)),
     )
-    for (color, is_minor, opacity_group, _opc_bin, _occ_bin), payload in groups.items():
+    for (color, is_minor, opacity_group, _opc_bin, _occ_bin, _radius_bin), payload in groups.items():
         segments = payload["segments"]
         bond_occ = float(payload.get("occ", 1.0))
+        width = base_width * float(payload.get("radius_scale", 1.0))
         xs, ys, zs = [], [], []
         for start, end in segments:
             xs.extend([float(start[0]), float(end[0]), None])
@@ -533,7 +554,7 @@ def _bond_scatter_traces(scene: dict, style: dict):
             "mode": "lines",
             "line": {
                 "color": color,
-                "width": base_width,
+                "width": width,
                 "dash": (
                     "dash"
                     if is_minor

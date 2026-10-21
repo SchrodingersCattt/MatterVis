@@ -11,7 +11,7 @@
         if (svg) while (svg.firstChild) svg.removeChild(svg.firstChild);
         return true;
       }
-      if (root.MatterVisCompass && gd) root.MatterVisCompass.redraw(gd, null, false);
+      if (root.MatterVisCompass && gd) root.MatterVisCompass.redraw(gd, null, true);
       return true;
     },
     redraw: function () {
