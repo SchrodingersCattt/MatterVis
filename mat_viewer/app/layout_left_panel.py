@@ -16,6 +16,13 @@ from .style_helpers import (
 from ..properties import web_colormap_options
 from ..capabilities import resolve_requirements
 
+# Dash 4 turns a tab strip into a vertical stack below an 800px window.
+# Scene chips stay one horizontal scroller at every width; 0 disables that
+# breakpoint on Dash versions that have the prop.
+_SCENE_TAB_EXTRAS: dict[str, Any] = {}
+if "mobile_breakpoint" in dcc.Tabs().available_properties:
+    _SCENE_TAB_EXTRAS["mobile_breakpoint"] = 0
+
 
 def build_left_panel(
     *,
@@ -95,6 +102,7 @@ def build_left_panel(
                         or backend.active_scene_id(),
                         children=backend.scene_tabs(),
                         parent_className="scene-tabs",
+                        **_SCENE_TAB_EXTRAS,
                     ),
                     # Kept as an empty compatibility target for older Dash
                     # callbacks; close controls now live inside each tab label.
@@ -295,7 +303,7 @@ def build_left_panel(
                         ],
                         value=first_state.get("material", "mesh"),
                         clearable=False,
-                        style={"flex": "1", "minWidth": "140px"},
+                        className="mv-style-dropdown",
                     ),
                     dcc.Dropdown(
                         id="style-selector",
@@ -308,7 +316,7 @@ def build_left_panel(
                         ],
                         value=first_state.get("style", "ball_stick"),
                         clearable=False,
-                        style={"flex": "1", "minWidth": "140px"},
+                        className="mv-style-dropdown",
                     ),
                     dcc.Dropdown(
                         id="disorder-selector",
@@ -333,7 +341,7 @@ def build_left_panel(
                         ],
                         value=first_state.get("disorder", "opacity"),
                         clearable=False,
-                        style={"flex": "1"},
+                        className="mv-style-dropdown",
                     ),
                 ],
                 style={
@@ -686,7 +694,6 @@ def build_left_panel(
         style={
             "width": "380px",
             "minWidth": "0",
-            "maxWidth": "640px",
             "flex": "0 0 auto",
             "padding": "16px",
             "borderRight": "1px solid #DDDDDD",

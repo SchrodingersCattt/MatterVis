@@ -39,6 +39,8 @@
     display: block;
     max-width: min(88vw, 340px);
     min-width: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
     position: absolute;
     top: 0;
     transition: transform 160ms ease;
@@ -93,8 +95,29 @@
 
   /* Keep the open-panel control inside the panel header instead of covering
      the MatterVis brand or the Chat heading. */
+  /* Sit the open control in the brand row. top: 46px landed on the
+     Scenes actions (Duplicate) once the drawer was open. */
   #viewer-root.compact-layout > #left-panel.compact-panel-open ~ .compact-panel-toggle--left {
-    left: calc(min(88vw, 340px) - 70px);
+    left: calc(min(88vw, 340px) - 74px);
+    top: 12px;
+  }
+
+  #viewer-root.compact-layout > #left-panel.compact-panel-open .workbench-brand {
+    box-sizing: border-box;
+    min-height: 32px;
+    padding-right: 78px;
+  }
+
+  #viewer-root.compact-layout #left-panel .scene-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  #viewer-root.compact-layout #left-panel .scene-actions {
+    flex: 1 1 140px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 
   #viewer-root.compact-layout > #mv-extension-panels.compact-panel-open ~ .compact-panel-toggle--right {

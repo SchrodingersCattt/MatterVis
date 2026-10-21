@@ -10,7 +10,7 @@
   /* Interaction cues stay neutral and compact in both browser themes. */
   --mv-hover-tip-bg: rgba(23, 43, 77, 0.94);
   --mv-hover-tip-ink: #ffffff;
-  --mv-scene-tab-min-width: 160px;
+  --mv-scene-tab-max-width: 220px;
 }
 
 :root[data-mattervis-theme="dark"] {
@@ -87,6 +87,51 @@
   border-radius: 9px;
   box-shadow: 0 1px 2px rgba(23, 43, 77, 0.04);
   overflow: hidden;
+  position: relative;
+}
+
+#left-panel .scene-tab-scroll {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--mv-line);
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(23, 43, 77, 0.12);
+  color: var(--mv-ink);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 16px;
+  height: 22px;
+  justify-content: center;
+  line-height: 1;
+  min-height: 22px;
+  padding: 0;
+  position: absolute;
+  top: 8px;
+  width: 22px;
+  z-index: 2;
+}
+
+#left-panel .scene-tab-scroll[hidden] {
+  display: none;
+}
+
+#left-panel .scene-tab-scroll--prev {
+  left: 4px;
+}
+
+#left-panel .scene-tab-scroll--next {
+  right: 4px;
+}
+
+/* Dash 4 puts the component id on `.tab-container` and the outer shell at
+   `#scene-tabs-parent`. Dash 2 put the id on the outer node. The strip is a
+   horizontal scroller in both shapes: a fixed 160px flex basis becomes the
+   tab height when Dash stacks the strip vertically. */
+#scene-tabs-parent.tab-parent {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  width: 100%;
 }
 
 #scene-tabs {
@@ -94,28 +139,52 @@
   min-width: 0;
 }
 
+#scene-tabs.tab-container,
 #scene-tabs .tab-container {
+  align-items: stretch;
   display: flex;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  max-width: 100%;
   min-width: 0;
   overflow-x: auto;
+  overflow-y: hidden;
   overscroll-behavior-inline: contain;
   scroll-padding-inline: 8px;
+  scrollbar-color: #b7c3d0 transparent;
   scrollbar-width: thin;
+  width: 100%;
 }
 
-#scene-tabs .tab {
+#scene-tabs.tab-container::-webkit-scrollbar,
+#scene-tabs .tab-container::-webkit-scrollbar {
+  height: 8px;
+}
+
+#scene-tabs.tab-container::-webkit-scrollbar-thumb,
+#scene-tabs .tab-container::-webkit-scrollbar-thumb {
+  background: #b7c3d0;
+  border-radius: 4px;
+}
+
+#scene-tabs > .tab,
+#scene-tabs .tab-container > .tab {
   align-items: center;
   box-sizing: border-box;
   color: var(--mv-muted);
   display: flex;
-  flex: 0 0 var(--mv-scene-tab-min-width) !important;
+  flex: 0 0 auto !important;
   font-size: 12px;
-  min-width: var(--mv-scene-tab-min-width) !important;
+  height: auto !important;
+  max-width: var(--mv-scene-tab-max-width);
+  min-height: 36px;
+  min-width: 0 !important;
   overflow: hidden;
-  padding: 10px 12px;
+  padding: 8px 10px !important;
   scroll-margin-inline: 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
+  width: auto !important;
 }
 
 #scene-tabs .tab[title] {
@@ -128,11 +197,11 @@
   gap: 6px;
   max-width: 100%;
   min-width: 0;
-  width: 100%;
+  width: auto;
 }
 
 #scene-tabs .scene-tab-text {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -165,15 +234,44 @@
   gap: 8px;
 }
 
-.mv-style-row > div {
-  flex: 1 1 160px;
-  min-width: 160px;
+.mv-style-row > * {
+  flex: 1 1 12rem;
+  max-width: 100%;
+  min-width: min(100%, 12rem);
 }
 
 #left-panel .Select-value-label,
-#left-panel .Select-placeholder {
+#left-panel .Select-placeholder,
+#left-panel .dash-dropdown-value,
+#left-panel .dash-dropdown-placeholder {
+  display: block;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Dash 4 sizes the closed value in an `auto` grid column beside a `1fr`
+   icon. The value then collapses to a single glyph ("3…", "B…", "O…").
+   Give the label the flexible track and keep the icon on the trailing edge. */
+#left-panel .dash-dropdown {
+  max-width: 100%;
+  min-width: 0;
+  width: 100%;
+}
+
+#left-panel .dash-dropdown-trigger.dash-dropdown-grid-container {
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  width: 100%;
+}
+
+#left-panel .dash-dropdown-trigger.dash-dropdown-grid-container:has(> :nth-child(3)) {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+#left-panel .dash-dropdown-trigger.dash-dropdown-grid-container:has(> :nth-child(4)) {
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
 }
 
 #left-panel .Select-menu-outer {

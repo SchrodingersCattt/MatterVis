@@ -3,6 +3,14 @@
   const PANEL_MIN = 300;
   const PANEL_MAX = 640;
   const COMPACT_BREAKPOINT = 756;
+  // Share of the layout viewport. Browser zoom-out grows CSS pixels; a
+  // fixed 380px column would stay a thin strip beside the canvas.
+  const DEFAULT_FRACTION = {
+    "left-panel": 0.26,
+    "mv-extension-panels": 0.22,
+  };
+  const PANEL_FRACTION_CAP = 0.42;
+  const panelFraction = {};
 
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
@@ -12,35 +20,70 @@
   let lastGraphRect = "";
   let resizeFrame = 0;
 
-  function resizeSceneNow() {
-    if (resizingScene) {
-      return;
-    }
+  function graphNode() {
     const graph = document.getElementById("crystal-graph");
-    if (!graph) {
+    if (!graph) return null;
+    return graph.classList.contains("js-plotly-plot")
+      ? graph
+      : graph.querySelector(".js-plotly-plot");
+  }
+
+  function canvasHostSize() {
+    const host = document.getElementById("center-panel") || document.getElementById("crystal-graph");
+    if (!host) return null;
+    const width = Math.round(host.clientWidth);
+    const height = Math.round(host.clientHeight);
+    if (width < 2 || height < 2) return null;
+    return {width: width, height: height};
+  }
+
+  function resizeSceneNow() {
+    if (resizingScene) return;
+    const plot = graphNode();
+    const size = canvasHostSize();
+    if (!plot || !size || !window.Plotly || typeof window.Plotly.relayout !== "function") {
       return;
     }
-    const rect = graph.getBoundingClientRect();
-    const key = Math.round(rect.width) + "x" + Math.round(rect.height);
-    if (key === lastGraphRect) {
+    // Plots.resize returns immediately once layout.width and layout.height
+    // are both set, which the first autosize does. Measuring the graph
+    // itself then keeps that stale box: clipped when the panel shrinks,
+    // parked in the top-left when browser zoom enlarges the CSS viewport.
+    const dpr = Math.round((window.devicePixelRatio || 1) * 100);
+    const key = size.width + "x" + size.height + "@" + dpr;
+    if (key === lastGraphRect) return;
+    const full = plot._fullLayout || {};
+    if (
+      Math.abs((full.width || 0) - size.width) < 2 &&
+      Math.abs((full.height || 0) - size.height) < 2 &&
+      lastGraphRect.endsWith("@" + dpr)
+    ) {
+      lastGraphRect = key;
       return;
     }
     lastGraphRect = key;
     resizingScene = true;
     try {
-      if (window.Plotly) {
-        const plot = graph.classList.contains("js-plotly-plot")
-          ? graph
-          : graph.querySelector(".js-plotly-plot");
-        if (plot && typeof plot.on === "function" && window.Plotly.Plots && typeof window.Plotly.Plots.resize === "function") {
-          window.Plotly.Plots.resize(plot);
-        }
+      plot.style.width = "100%";
+      plot.style.height = "100%";
+      const pending = window.Plotly.relayout(plot, {
+        width: size.width,
+        height: size.height,
+      });
+      if (pending && typeof pending.then === "function") {
+        pending.then(redrawCompass, redrawCompass);
+      } else {
+        redrawCompass();
       }
-      if (window.MatterVisCompass && typeof window.MatterVisCompass.redraw === "function") {
-        window.MatterVisCompass.redraw();
-      }
+    } catch (err) {
+      redrawCompass();
     } finally {
       resizingScene = false;
+    }
+  }
+
+  function redrawCompass() {
+    if (window.MatterVisCompass && typeof window.MatterVisCompass.redraw === "function") {
+      window.MatterVisCompass.redraw();
     }
   }
 
@@ -113,18 +156,80 @@
     return compact;
   }
 
+  function chosenFraction(panelId) {
+    if (panelFraction[panelId] != null) return panelFraction[panelId];
+    return DEFAULT_FRACTION[panelId] || 0.22;
+  }
+
+  function rememberFraction(panelId, width, rootWidth) {
+    if (!(rootWidth > 0)) return;
+    panelFraction[panelId] = clamp(width / rootWidth, 0.12, PANEL_FRACTION_CAP);
+  }
+
   function maxPanelWidth(panelId) {
     const root = document.getElementById("viewer-root");
     if (!root) {
       return PANEL_MAX;
     }
+    const rootWidth = root.getBoundingClientRect().width;
     const otherId = panelId === "left-panel" ? "mv-extension-panels" : "left-panel";
     const splitters = document.querySelectorAll("#viewer-root > .panel-splitter").length * 8;
-    const available = root.getBoundingClientRect().width - panelWidth(otherId) - SCENE_MIN - splitters;
+    const available = rootWidth - panelWidth(otherId) - SCENE_MIN - splitters;
+    const ratioCap = rootWidth * PANEL_FRACTION_CAP;
     if (available < PANEL_MIN) {
       return Math.max(160, available);
     }
-    return Math.min(PANEL_MAX, available);
+    return Math.max(160, Math.min(ratioCap, available));
+  }
+
+  function assignPanelWidth(panel, width) {
+    panel.style.width = Math.round(width) + "px";
+    panel.style.maxWidth = "none";
+    panel.style.flex = "0 0 auto";
+  }
+
+  function sceneTabStrip() {
+    return document.getElementById("scene-tabs");
+  }
+
+  function syncTabScrollers() {
+    const strip = sceneTabStrip();
+    const prev = document.getElementById("scene-tab-scroll-prev");
+    const next = document.getElementById("scene-tab-scroll-next");
+    if (!strip || !prev || !next) return;
+    const overflow = strip.scrollWidth > strip.clientWidth + 4;
+    const maxScroll = strip.scrollWidth - strip.clientWidth;
+    prev.hidden = !overflow || strip.scrollLeft <= 1;
+    next.hidden = !overflow || strip.scrollLeft >= maxScroll - 1;
+  }
+
+  function ensureTabScrollers() {
+    const card = document.querySelector(".scene-tabs-card");
+    const strip = sceneTabStrip();
+    if (!card || !strip) return;
+    function makeButton(id, label, direction) {
+      let button = document.getElementById(id);
+      if (button) return button;
+      button = document.createElement("button");
+      button.type = "button";
+      button.id = id;
+      button.className = "scene-tab-scroll scene-tab-scroll--" + direction;
+      button.textContent = label;
+      button.setAttribute("aria-label", direction === "prev" ? "Scroll scenes left" : "Scroll scenes right");
+      button.addEventListener("click", function () {
+        const amount = Math.max(120, strip.clientWidth * 0.7);
+        strip.scrollBy({left: direction === "prev" ? -amount : amount});
+      });
+      card.appendChild(button);
+      return button;
+    }
+    makeButton("scene-tab-scroll-prev", "‹", "prev");
+    makeButton("scene-tab-scroll-next", "›", "next");
+    if (strip.dataset.scrollBound !== "1") {
+      strip.dataset.scrollBound = "1";
+      strip.addEventListener("scroll", syncTabScrollers);
+    }
+    syncTabScrollers();
   }
 
   function fitPanels() {
@@ -138,25 +243,27 @@
     // compact toggle buttons. Keeping their inline desktop widths here would
     // reserve flex space and bring back the clipping this mode avoids.
     if (updateCompactLayout()) {
+      ensureTabScrollers();
       resizeScene();
       return;
     }
+    const rootWidth = root.getBoundingClientRect().width;
     const splitters = document.querySelectorAll("#viewer-root > .panel-splitter").length * 8;
-    const budget = root.getBoundingClientRect().width - SCENE_MIN - splitters;
-    let leftWidth = left.getBoundingClientRect().width;
-    let rightWidth = right ? right.getBoundingClientRect().width : 0;
+    const budget = rootWidth - SCENE_MIN - splitters;
+    let leftWidth = rootWidth * chosenFraction("left-panel");
+    let rightWidth = right ? rootWidth * chosenFraction("mv-extension-panels") : 0;
     const used = leftWidth + rightWidth;
     if (used > budget && used > 0) {
       const scale = Math.max(budget, 160) / used;
       leftWidth *= scale;
       rightWidth *= scale;
+    } else if (!right && leftWidth < PANEL_MIN && budget >= PANEL_MIN) {
+      leftWidth = PANEL_MIN;
     }
-    left.style.width = clamp(leftWidth, 160, PANEL_MAX) + "px";
-    left.style.flex = "0 0 auto";
-    if (right) {
-      right.style.width = clamp(rightWidth, 160, PANEL_MAX) + "px";
-      right.style.flex = "0 0 auto";
-    }
+    const cap = Math.max(budget, 160);
+    assignPanelWidth(left, clamp(leftWidth, 160, cap));
+    if (right) assignPanelWidth(right, clamp(rightWidth, 160, cap));
+    ensureTabScrollers();
     resizeScene();
   }
 
@@ -184,8 +291,9 @@
         }
         const limit = maxPanelWidth(panelId);
         const floor = Math.min(PANEL_MIN, limit);
-        panel.style.width = clamp(width, floor, limit) + "px";
-        panel.style.flex = "0 0 auto";
+        const next = clamp(width, floor, limit);
+        assignPanelWidth(panel, next);
+        rememberFraction(panelId, next, rootRect.width);
         if (!frame) {
           frame = window.requestAnimationFrame(function () {
             frame = 0;
@@ -262,14 +370,19 @@
       document.body.dataset.panelsFitted = "1";
       updateCompactLayout();
       fitPanels();
-      window.addEventListener("resize", function () {
+      function onViewportResize() {
         if (!resizingScene) {
           updateCompactLayout();
           fitPanels();
         }
-      });
+      }
+      window.addEventListener("resize", onViewportResize);
+      if (window.visualViewport && window.visualViewport.addEventListener) {
+        window.visualViewport.addEventListener("resize", onViewportResize);
+      }
     }
     updateCompactLayout();
+    ensureTabScrollers();
     bindPanelTab("display-panel-toggle", "display");
     bindPanelTab("analysis-panel-toggle", "analysis");
     bindPanelTab("operation-panel-toggle", "operation");
@@ -306,4 +419,9 @@
     panelObserver.observe(root, { childList: true, subtree: true });
   }
   attachPanelObserver();
+
+  window.MatterVisPanelResize = {
+    fitPanels: fitPanels,
+    resizeScene: resizeScene,
+  };
 })();
