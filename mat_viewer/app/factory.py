@@ -947,8 +947,8 @@ def _create_app(
                                                 html.Div(
                                                     id="transforms-rows-container",
                                                     children=_transforms_table_rows(
-                                                        first_state.get("transforms")
-                                                        or []
+                                                        first_state.get("transforms") or [],
+                                                        scene_id=first_state.get("scene_id"),
                                                     ),
                                                     style={"marginTop": "6px"},
                                                 ),

@@ -60,10 +60,19 @@ def test_display_option_invalidations_distinguish_geometry_tokens():
     hydrogens, hydrogen_invalidations = reduce_state(
         before, SetDisplayOptions(["labels", "hydrogens"])
     )
+    wrapped, wrap_invalidations = reduce_state(
+        before, SetDisplayOptions(["labels", "wrap_into_cell"])
+    )
 
     assert labels["display_options"] == ["labels", "axes"]
     assert labels_invalidations == frozenset({Invalidation.FIGURE_BODY})
     assert hydrogen_invalidations >= {
+        Invalidation.SCENE_GEOMETRY,
+        Invalidation.TOPOLOGY_GEOMETRY,
+        Invalidation.CAMERA_LAYOUT,
+    }
+    assert wrapped["display_options"] == ["labels", "wrap_into_cell"]
+    assert wrap_invalidations >= {
         Invalidation.SCENE_GEOMETRY,
         Invalidation.TOPOLOGY_GEOMETRY,
         Invalidation.CAMERA_LAYOUT,

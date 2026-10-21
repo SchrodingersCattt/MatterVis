@@ -403,7 +403,7 @@ def _invalidation_set(kind: str, before: Mapping[str, Any], after: Mapping[str, 
         return frozenset({Invalidation.SCENE_GEOMETRY, Invalidation.TOPOLOGY_GEOMETRY, Invalidation.FIGURE_BODY, Invalidation.SIDE_PANEL, Invalidation.CAMERA_LAYOUT})
     if kind == OperationKind.SET_DISPLAY_OPTIONS.value:
         changed = set(before.get("display_options") or []) ^ set(after.get("display_options") or [])
-        if "hydrogens" in changed:
+        if "hydrogens" in changed or "wrap_into_cell" in changed:
             return frozenset({Invalidation.SCENE_GEOMETRY, Invalidation.TOPOLOGY_GEOMETRY, Invalidation.FIGURE_BODY, Invalidation.SIDE_PANEL, Invalidation.CAMERA_LAYOUT})
         if "minor_only" in changed:
             return frozenset({Invalidation.FIGURE_BODY, Invalidation.CAMERA_LAYOUT})
@@ -444,7 +444,7 @@ def _invalidation_set(kind: str, before: Mapping[str, Any], after: Mapping[str, 
         invalidations.update({Invalidation.TRANSFORM_GEOMETRY, Invalidation.TOPOLOGY_GEOMETRY, Invalidation.FIGURE_BODY, Invalidation.SIDE_PANEL, Invalidation.CAMERA_LAYOUT})
     if "display_options" in changed_keys:
         changed = set(before.get("display_options") or []) ^ set(after.get("display_options") or [])
-        if "hydrogens" in changed:
+        if "hydrogens" in changed or "wrap_into_cell" in changed:
             invalidations.update({Invalidation.SCENE_GEOMETRY, Invalidation.TOPOLOGY_GEOMETRY, Invalidation.FIGURE_BODY, Invalidation.SIDE_PANEL, Invalidation.CAMERA_LAYOUT})
         elif "minor_only" in changed or "unit_cell_box" in changed:
             invalidations.update({Invalidation.FIGURE_BODY, Invalidation.CAMERA_LAYOUT})

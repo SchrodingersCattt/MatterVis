@@ -161,26 +161,26 @@ def register_operations_callbacks(app, backend):
         Input("transforms-clear-repeat", "n_clicks"),
         Input("transforms-clear-btn", "n_clicks"),
         Input("scene-tabs", "value"),
-        Input({"type": "trf-row-enabled", "transform_id": ALL}, "value"),
-        Input({"type": "trf-row-delete", "transform_id": ALL}, "n_clicks"),
-        Input({"type": "trf-row-up", "transform_id": ALL}, "n_clicks"),
-        Input({"type": "trf-row-down", "transform_id": ALL}, "n_clicks"),
-        Input({"type": "trf-param-a", "transform_id": ALL}, "value"),
-        Input({"type": "trf-param-b", "transform_id": ALL}, "value"),
-        Input({"type": "trf-param-c", "transform_id": ALL}, "value"),
-        Input({"type": "trf-param-seeds", "transform_id": ALL}, "value"),
-        Input({"type": "trf-param-radius", "transform_id": ALL}, "value"),
-        Input({"type": "trf-param-hops", "transform_id": ALL}, "value"),
-        Input({"type": "trf-param-maxhops", "transform_id": ALL}, "value"),
-        Input({"type": "trf-param-cutoff", "transform_id": ALL}, "value"),
-        Input({"type": "trf-param-ops", "transform_id": ALL}, "value"),
-        Input({"type": "trf-param-miller-0", "transform_id": ALL}, "value"),
-        Input({"type": "trf-param-miller-1", "transform_id": ALL}, "value"),
-        Input({"type": "trf-param-miller-2", "transform_id": ALL}, "value"),
-        Input({"type": "trf-param-layers", "transform_id": ALL}, "value"),
-        Input({"type": "trf-param-vacuum", "transform_id": ALL}, "value"),
+        Input({"type": "trf-row-enabled", "scene_id": ALL, "transform_id": ALL}, "value"),
+        Input({"type": "trf-row-delete", "scene_id": ALL, "transform_id": ALL}, "n_clicks"),
+        Input({"type": "trf-row-up", "scene_id": ALL, "transform_id": ALL}, "n_clicks"),
+        Input({"type": "trf-row-down", "scene_id": ALL, "transform_id": ALL}, "n_clicks"),
+        Input({"type": "trf-param-a", "scene_id": ALL, "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-b", "scene_id": ALL, "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-c", "scene_id": ALL, "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-seeds", "scene_id": ALL, "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-radius", "scene_id": ALL, "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-hops", "scene_id": ALL, "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-maxhops", "scene_id": ALL, "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-cutoff", "scene_id": ALL, "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-ops", "scene_id": ALL, "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-miller-0", "scene_id": ALL, "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-miller-1", "scene_id": ALL, "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-miller-2", "scene_id": ALL, "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-layers", "scene_id": ALL, "transform_id": ALL}, "value"),
+        Input({"type": "trf-param-vacuum", "scene_id": ALL, "transform_id": ALL}, "value"),
         State("transforms-kind-select", "value"),
-        State({"type": "trf-row-enabled", "transform_id": ALL}, "id"),
+        State({"type": "trf-row-enabled", "scene_id": ALL, "transform_id": ALL}, "id"),
         prevent_initial_call=True,
     )
     def manage_transforms(
@@ -219,7 +219,22 @@ def register_operations_callbacks(app, backend):
         )
 
         def _rebuild():
-            return _transforms_table_rows(backend.list_transforms(scene_id=scene_id))
+            return _transforms_table_rows(
+                backend.list_transforms(scene_id=scene_id),
+                scene_id=scene_id,
+            )
+
+        def _rows_belong_to_scene(row_ids) -> bool:
+            current_ids = [item["id"] for item in backend.list_transforms(scene_id=scene_id)]
+            incoming = []
+            for item in row_ids or []:
+                if not isinstance(item, dict):
+                    return False
+                row_scene = item.get("scene_id")
+                if row_scene is not None and str(row_scene) != str(scene_id):
+                    return False
+                incoming.append(item.get("transform_id"))
+            return incoming == current_ids
 
         def _framed_state():
             try:
@@ -228,8 +243,16 @@ def register_operations_callbacks(app, backend):
                 pass
             return backend.get_state()
 
-        if triggered == "scene-tabs":
+        triggered_props = [
+            str(item.get("prop_id") or "").split(".")[0]
+            for item in (getattr(callback_context, "triggered", None) or [])
+        ]
+        if triggered == "scene-tabs" or "scene-tabs" in triggered_props:
             return _rebuild(), no_update
+        if isinstance(triggered, dict):
+            row_scene = triggered.get("scene_id")
+            if row_scene is not None and str(row_scene) != str(scene_id):
+                return no_update, no_update
 
         # Quick presets ------------------------------------------------
         if triggered == "transforms-preset-2x" or triggered == "transforms-preset-3x":
@@ -317,7 +340,7 @@ def register_operations_callbacks(app, backend):
             triggered.get("type") == "trf-row-enabled"
             or triggered.get("type", "").startswith("trf-param-")
         ):
-            if not enabled_ids:
+            if not enabled_ids or not _rows_belong_to_scene(enabled_ids):
                 return no_update, no_update
             existing = {t["id"]: t for t in backend.list_transforms(scene_id=scene_id)}
             try:

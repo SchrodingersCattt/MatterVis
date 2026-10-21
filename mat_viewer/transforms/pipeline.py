@@ -47,6 +47,57 @@ def _atoms_for_repeat(atoms: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return list(home) if home else list(atoms)
 
 
+def _wrap_repeat_home(
+    atoms: Sequence[Dict[str, Any]],
+    M: np.ndarray,
+) -> List[Dict[str, Any]]:
+    """Fold home-cell centres into ``[0, 1)`` before lattice replication.
+
+    Unit-cell display can leave a molecule unwrapped across a face. Bond
+    image identity is ``frac - _wrapped_frac``, so an unwrapped centre is
+    already one cell away from its crystallographic source. Replication
+    then adds a second shift and draws a cell-length bond. The copies are
+    new dicts; the loaded source atoms are not modified.
+    """
+    from molcrys_kit.utils.geometry import frac_to_cart
+
+    matrix = np.asarray(M, dtype=float)
+    wrapped_atoms: List[Dict[str, Any]] = []
+    for atom in atoms:
+        source_frac = atom.get("_wrapped_frac", atom.get("frac"))
+        frac = np.asarray(source_frac, dtype=float)
+        if frac.shape != (3,) or not np.all(np.isfinite(frac)):
+            wrapped_atoms.append(dict(atom))
+            continue
+        folded = np.mod(frac, 1.0)
+        folded[np.isclose(folded, 1.0, rtol=0.0, atol=1e-9)] = 0.0
+        copied = dict(atom)
+        copied["frac"] = folded
+        copied["cart"] = frac_to_cart(folded, matrix)
+        copied["_wrapped_frac"] = (
+            float(folded[0]),
+            float(folded[1]),
+            float(folded[2]),
+        )
+        copied["_image_shift"] = (0, 0, 0)
+        # The fragment shortcut bonds co-moving unwrapped copies. Folding
+        # each centre into the home cell breaks that rigid copy, so those
+        # pairs would span the cell. Canonical image lookup still places
+        # the bond on the neighbouring replica.
+        copied.pop("_source_molecule_index", None)
+        copied.pop("_cell_spanning_component", None)
+        for flag in (
+            "_is_boundary_replica",
+            "_is_fragment_boundary_replica",
+            "_is_bonded_image_replica",
+            "_is_framework_context_replica",
+            "_strict_unit_cell",
+        ):
+            copied.pop(flag, None)
+        wrapped_atoms.append(copied)
+    return wrapped_atoms
+
+
 def apply_one_transform(
     scene: Dict[str, Any],
     transform: Dict[str, Any],
@@ -71,7 +122,11 @@ def apply_one_transform(
         if (na, nb, nc) == (1, 1, 1):
             return scene
         new_atoms = replicate_atoms(
-            _atoms_for_repeat(atoms), M, na=na, nb=nb, nc=nc
+            _wrap_repeat_home(_atoms_for_repeat(atoms), M),
+            M,
+            na=na,
+            nb=nb,
+            nc=nc,
         )
         return rebuild_scene_with_atoms(scene, new_atoms, style=style)
 

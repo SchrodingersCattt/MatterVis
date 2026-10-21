@@ -65,6 +65,7 @@ The same routing as a quick table:
 | Recolour, hide, restyle, thin out, or fade chemical bonds by selector from API or CLI | [`bond_groups_api.md`](bond_groups_api.md) |
 | Draw styled, depth-tested display-only bond hints without changing chemical connectivity | [`scene_api.md#display-only-bond-annotations`](scene_api.md#display-only-bond-annotations) |
 | Repeat a unit cell, grow by radius / bonds, complete fragments / polyhedra, or generate a slab | [`transforms_api.md`](transforms_api.md) |
+| Wrap displayed unit-cell atoms into the home cell without changing source coordinates | [`scene_api.md`](scene_api.md) |
 | Audit which backend-neutral render controls are available from the CLI | [`cli-api-parity.md`](cli-api-parity.md) |
 | Use the optional native offscreen GPU PNG backend | [`gpu_backend.md`](gpu_backend.md) |
 | Read or override global MatterVis defaults | [`config_api.md`](config_api.md) |

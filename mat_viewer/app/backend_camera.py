@@ -137,6 +137,71 @@ def _camera_components_finite(camera: dict[str, Any]) -> bool:
     return True
 
 
+def _displayed_cell_corners(scene: dict) -> list:
+    """Corners of the cell box the unit-cell trace actually draws."""
+    matrix = scene.get("M")
+    if matrix is None:
+        return []
+    lattice = np.asarray(matrix, dtype=float)
+    if lattice.ndim != 2 or lattice.shape[0] < 3 or lattice.shape[1] != 3:
+        return []
+    na = nb = nc = 1
+    for step in scene.get("_transform_lineage") or ():
+        if not isinstance(step, dict) or step.get("kind") != "repeat":
+            continue
+        params = step.get("params") or {}
+        try:
+            na *= max(1, int(params.get("a") or 1))
+            nb *= max(1, int(params.get("b") or 1))
+            nc *= max(1, int(params.get("c") or 1))
+        except (TypeError, ValueError):
+            continue
+    a = np.asarray(lattice[0], dtype=float) * na
+    b = np.asarray(lattice[1], dtype=float) * nb
+    c = np.asarray(lattice[2], dtype=float) * nc
+    origin = np.zeros(3, dtype=float)
+    return [origin, a, b, c, a + b, a + c, b + c, a + b + c]
+
+
+def _unit_cell_box_is_clipped(camera, scene: dict, style: dict) -> bool:
+    """True when a checked unit-cell box has a corner outside the frustum.
+
+    ``camera_shows_scene`` only requires atom centres to span the view, so
+    a formula-unit zoom can pass while the cell outline is off screen.
+    """
+    if style.get("display_mode") != "unit_cell" or not style.get("show_unit_cell"):
+        return False
+    if not isinstance(camera, dict):
+        return False
+    corners = _displayed_cell_corners(scene)
+    if len(corners) < 8:
+        return False
+    from ..render.screen_projection import camera_frames_points
+    from ..render.viewport_spec import resolve_viewport
+
+    probe = dict(style)
+    probe["camera"] = copy.deepcopy(camera)
+    try:
+        viewport = resolve_viewport(scene, probe)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return False
+    projection = probe.get("projection")
+    for corner in corners:
+        try:
+            visible = camera_frames_points(
+                camera,
+                [np.asarray(corner, dtype=float)],
+                ranges=viewport.ranges,
+                aspectratio=viewport.aspectratio,
+                projection=projection,
+            )
+        except (TypeError, ValueError, ZeroDivisionError):
+            return False
+        if not visible:
+            return True
+    return False
+
+
 class _CameraBackendMixin:
     def figure_for_state(
         self,
@@ -626,6 +691,10 @@ class _CameraBackendMixin:
             fitted, replaced = self.camera_that_frames(
                 state, camera, scene=scene, style=style
             )
+            if not replaced and _unit_cell_box_is_clipped(camera, scene, style):
+                fitted = self.default_camera(state)
+                if camera != fitted and not _unit_cell_box_is_clipped(fitted, scene, style):
+                    replaced = True
         except (KeyError, ValueError, OSError, TypeError):
             return state
         if not replaced:

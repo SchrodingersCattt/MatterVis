@@ -61,6 +61,8 @@ def _preview_mesh_for_indices(scene: dict[str, Any], style: dict[str, Any], raw_
 def _replica_rows(replicas: list[dict[str, Any]], *, status: str = "ok") -> list[Any]:
     if status == "error":
         return [html.Div("Resolve disorder failed. See server log for details.", className="disorder-empty disorder-empty--error")]
+    if status == "idle":
+        return [html.Div("Run Resolve to list ordered disorder replicas.", className="disorder-empty")]
     if not replicas:
         return [html.Div("No SHELX-style disorder replicas found.", className="disorder-empty")]
 
@@ -115,6 +117,10 @@ function(replicaId, store) {
 
 
 def register_disorder_callbacks(app, backend):
+    # Resolve inputs are one set of widgets. They are filled for the scene
+    # named here; a tab change must not persist the previous scene's
+    # method/count/seed into the newly selected scene.
+    disorder_controls_scene = {"id": str(backend.active_scene_id() or "")}
     @app.callback(
         Output("disorder-replicas-store", "data", allow_duplicate=True),
         Output("disorder-replicas-list", "children", allow_duplicate=True),
@@ -218,14 +224,27 @@ def register_disorder_callbacks(app, backend):
         Input("disorder-resolve-count", "value"),
         Input("disorder-resolve-seed", "value"),
         State("scene-tabs", "value"),
+        State("disorder-replicas-store", "data"),
         prevent_initial_call=True,
     )
-    def persist_resolve_inputs(method, count, seed, scene_id):
+    def persist_resolve_inputs(method, count, seed, scene_id, store):
         # Persists the resolve inputs to backend state for reload/REST, but
         # outputs to a dummy sink (NOT ``agent-state-store``) so changing
         # the mode / count / seed never rebuilds the Plotly figure.
         scene_id = scene_id or backend.active_scene_id()
         if scene_id and scene_id not in backend.scene_store.scenes:
+            return no_update
+        bound = disorder_controls_scene["id"]
+        if bound and scene_id and str(scene_id) != str(bound):
+            return no_update
+        # The replica store is stamped with the scene whose rows are on
+        # screen. A tab change can update ``scene-tabs`` before the method
+        # widgets; do not persist that stale method onto the new scene.
+        if (
+            isinstance(store, dict)
+            and store.get("scene_id")
+            and str(store.get("scene_id")) != str(scene_id)
+        ):
             return no_update
         method = str(method or "enumerate")
         count = _coerce_count(count)
@@ -240,26 +259,46 @@ def register_disorder_callbacks(app, backend):
     @app.callback(
         Output("disorder-replicas-store", "data", allow_duplicate=True),
         Output("disorder-replicas-list", "children", allow_duplicate=True),
+        Output("disorder-resolve-method", "value", allow_duplicate=True),
+        Output("disorder-resolve-count", "value", allow_duplicate=True),
+        Output("disorder-resolve-seed", "value", allow_duplicate=True),
         Input("scene-tabs", "value"),
         State("disorder-replicas-store", "data"),
         prevent_initial_call=True,
     )
     def clear_disorder_rows_on_scene_change(scene_id, store):
-        """Resolve results live in one global list, not on the scene tab.
+        """Show the selected scene's resolve results, not the previous tab's.
 
-        Leaving them mounted showed the previous structure's enumerations
-        after a tab change.
+        The list widget is global. Switching tabs used to blank it and
+        leave the method/count/seed inputs on the scene that was left.
         """
-        if not isinstance(store, dict):
-            return no_update, no_update
-        stored = str(store.get("scene_id") or "")
-        if not stored or stored == str(scene_id or ""):
-            return no_update, no_update
-        return {
-            "scene_id": scene_id,
-            "status": "cleared",
-            "replicas": [],
-        }, []
+        if not scene_id or scene_id not in backend.scene_store.scenes:
+            return (no_update,) * 5
+        disorder_controls_scene["id"] = str(scene_id)
+        state = backend.get_state(scene_id)
+        resolve = state.get("disorder_resolve") or {}
+        replicas = list(state.get("disorder_replicas") or [])
+        if isinstance(store, dict) and str(store.get("scene_id") or "") == str(scene_id):
+            # Same scene: keep browser-only preview meshes already on the rows.
+            return (no_update,) * 5
+        status = "ok" if replicas else "idle"
+        method = str(resolve.get("method") or "enumerate")
+        count = _coerce_count(resolve.get("count"))
+        seed = resolve.get("seed")
+        return (
+            {
+                "scene_id": scene_id,
+                "status": status,
+                "method": method,
+                "count": count,
+                "seed": seed,
+                "replicas": replicas,
+            },
+            _replica_rows(replicas, status=status),
+            method,
+            count,
+            seed,
+        )
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

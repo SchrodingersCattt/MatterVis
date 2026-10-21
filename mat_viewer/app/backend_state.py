@@ -467,12 +467,22 @@ class _StateBackendMixin:
         scene_builder = getattr(
             _backend_core_module, "build_bundle_scene", build_bundle_scene
         )
+        display_mode = state.get("display_mode", "formula_unit")
+        # ``wrap_into_cell`` is display-only. Both flags stay at their
+        # historical defaults unless the token is on in unit-cell scope,
+        # so a strict cell does not also sprout bonded images outside it.
+        wrap_into_cell = (
+            display_mode == "unit_cell"
+            and "wrap_into_cell" in set(state.get("display_options") or [])
+        )
         scene = scene_builder(
             bundle,
-            display_mode=state.get("display_mode", "formula_unit"),
+            display_mode=display_mode,
             show_hydrogen=self.show_hydrogen_for_state(state),
             preset=self.preset,
             transforms=transforms,
+            include_boundary_replicas=not wrap_into_cell,
+            include_cross_boundary_bond_endpoints=not wrap_into_cell,
         )
         # Keep state-owned morphology available to semantic target
         # reconciliation and programmatic scene callers.  The style selector

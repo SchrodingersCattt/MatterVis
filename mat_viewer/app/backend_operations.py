@@ -186,13 +186,29 @@ class _OperationsBackendMixin:
                     "validate the result before using it as a surface model."
                 )
         if transform["kind"] == "repeat":
-            scene = self.scene_for_state(state)
-            atom_count = len(scene.get("draw_atoms") or [])
+            # ``transforms`` is already the post-replace list, so a 3×3×3
+            # preset that replaces 2×2×2 is counted from the home cell.
+            # Counting the expanded draw list rejects a legal replacement
+            # (DAP-4 2× is 2688 atoms; 2688×27 exceeds the cap).
+            estimate_state = dict(state)
+            estimate_state["transforms"] = list(transforms)
+            scene = self.scene_for_state(estimate_state)
+            home_count = 0
+            for atom in scene.get("draw_atoms") or []:
+                if (
+                    atom.get("_is_boundary_replica")
+                    or atom.get("_is_framework_context_replica")
+                    or atom.get("_is_bonded_image_replica")
+                ):
+                    continue
+                home_count += 1
+            if home_count == 0:
+                home_count = len(scene.get("draw_atoms") or [])
             repeat_atoms = (
-                atom_count
-                * int(transform["params"].get("a", 1))
-                * int(transform["params"].get("b", 1))
-                * int(transform["params"].get("c", 1))
+                home_count
+                * int(transform["params"].get("a", 1) or 1)
+                * int(transform["params"].get("b", 1) or 1)
+                * int(transform["params"].get("c", 1) or 1)
             )
             if repeat_atoms > MAX_ATOMS_AFTER_TRANSFORM:
                 raise ValueError(

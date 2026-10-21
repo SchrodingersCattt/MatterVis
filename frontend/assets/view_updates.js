@@ -190,6 +190,7 @@
     var options = hasOptions ? payload.display_options : [];
     var labels = option === "labels" ? payload.enabled : options.indexOf("labels") >= 0;
     var axes = option === "axes" ? payload.enabled : options.indexOf("axes") >= 0;
+    var cellBoundary = hasOptions ? options.indexOf("unit_cell_box") >= 0 : null;
     var touchesLabels = option === "labels" || hasOptions;
     var visibilityIndices = [], visibilityValues = [], opacityIndices = [], opacityValues = [];
     (gd.data || []).forEach(function (trace, index) {
@@ -197,6 +198,10 @@
       if (r === "labels" && updateKind !== "overlay" && touchesLabels) {
         visibilityIndices.push(index);
         visibilityValues.push(!!labels);
+      }
+      if (r === "unit_cell" && hasOptions && updateKind !== "overlay") {
+        visibilityIndices.push(index);
+        visibilityValues.push(!!cellBoundary);
       }
       if ((r === "polyhedron" || (trace.meta && trace.meta.kind === "polyhedron")) && trace.meta && trace.meta.spec_id && Array.isArray(payload.polyhedron_specs)) {
         payload.polyhedron_specs.forEach(function (spec) {

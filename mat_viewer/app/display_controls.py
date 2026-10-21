@@ -10,8 +10,12 @@ def display_option_items(mode, selected=()):
         {"label": "Hydrogens", "value": "hydrogens"},
         {"label": "Cell boundary", "value": "unit_cell_box",
          "disabled": mode != "unit_cell" and "unit_cell_box" not in selected},
+        {"label": "Wrap into cell", "value": "wrap_into_cell",
+         "disabled": mode != "unit_cell" and "wrap_into_cell" not in selected},
     ]
 
 
 def display_option_hint(mode):
-    return "" if mode == "unit_cell" else "Cell boundary is available in Unit cell scope."
+    if mode == "unit_cell":
+        return ""
+    return "Cell boundary and wrap into cell are available in Unit cell scope."

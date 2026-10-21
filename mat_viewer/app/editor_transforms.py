@@ -51,7 +51,21 @@ def _seed_text_to_selector(text: Any) -> dict[str, Any]:
     return {"elements": values} if values else {}
 
 
-def _transform_param_widgets(transform: dict[str, Any]) -> list[Any]:
+def _widget_id(kind: str, transform_id: str, scene_id: str | None) -> dict[str, str]:
+    """Pattern id scoped to one scene.
+
+    Duplicate scenes copy transform ids. Without the scene key, a stale
+    pattern callback after Clear all or a tab switch writes the previous
+    rows back onto the active scene.
+    """
+    return {
+        "type": kind,
+        "scene_id": str(scene_id or ""),
+        "transform_id": str(transform_id),
+    }
+
+
+def _transform_param_widgets(transform: dict[str, Any], scene_id: str | None = None) -> list[Any]:
     """Build the per-kind parameter widgets for one transform row.
 
     All widgets carry ``{type: "trf-param-<field>", transform_id: ...}``
@@ -62,6 +76,9 @@ def _transform_param_widgets(transform: dict[str, Any]) -> list[Any]:
     from dash import dcc, html
 
     transform_id = transform["id"]
+
+    def wid(kind: str) -> dict[str, str]:
+        return _widget_id(kind, transform_id, scene_id)
     kind = transform.get("kind") or "repeat"
     params = transform.get("params") or {}
     children: list[Any] = []
@@ -72,7 +89,7 @@ def _transform_param_widgets(transform: dict[str, Any]) -> list[Any]:
             )
             children.append(
                 dcc.Input(
-                    id={"type": f"trf-param-{axis}", "transform_id": transform_id},
+                    id=wid(f"trf-param-{axis}"),
                     type="number",
                     min=1,
                     step=1,
@@ -87,7 +104,7 @@ def _transform_param_widgets(transform: dict[str, Any]) -> list[Any]:
         )
         children.append(
             dcc.Input(
-                id={"type": "trf-param-seeds", "transform_id": transform_id},
+                id=wid("trf-param-seeds"),
                 type="text",
                 value=_seed_selector_to_text(params.get("seeds")),
                 placeholder="elem:Pb  /  label:Pb1  /  all",
@@ -99,7 +116,7 @@ def _transform_param_widgets(transform: dict[str, Any]) -> list[Any]:
             children.extend([
                 html.Span("\u00c5", style={"fontSize": "11px", "color": "#666", "margin": "0 2px 0 6px"}),
                 dcc.Input(
-                    id={"type": "trf-param-radius", "transform_id": transform_id},
+                    id=wid("trf-param-radius"),
                     type="number",
                     min=0.0,
                     step=0.1,
@@ -112,7 +129,7 @@ def _transform_param_widgets(transform: dict[str, Any]) -> list[Any]:
             children.extend([
                 html.Span("hops", style={"fontSize": "11px", "color": "#666", "margin": "0 2px 0 6px"}),
                 dcc.Input(
-                    id={"type": "trf-param-hops", "transform_id": transform_id},
+                    id=wid("trf-param-hops"),
                     type="number",
                     min=0,
                     step=1,
@@ -125,7 +142,7 @@ def _transform_param_widgets(transform: dict[str, Any]) -> list[Any]:
             children.extend([
                 html.Span("max hops", style={"fontSize": "11px", "color": "#666", "margin": "0 2px 0 6px"}),
                 dcc.Input(
-                    id={"type": "trf-param-maxhops", "transform_id": transform_id},
+                    id=wid("trf-param-maxhops"),
                     type="number",
                     min=1,
                     step=1,
@@ -138,7 +155,7 @@ def _transform_param_widgets(transform: dict[str, Any]) -> list[Any]:
             children.extend([
                 html.Span("cutoff \u00c5", style={"fontSize": "11px", "color": "#666", "margin": "0 2px 0 6px"}),
                 dcc.Input(
-                    id={"type": "trf-param-cutoff", "transform_id": transform_id},
+                    id=wid("trf-param-cutoff"),
                     type="number",
                     min=0.0,
                     step=0.1,
@@ -153,7 +170,7 @@ def _transform_param_widgets(transform: dict[str, Any]) -> list[Any]:
             ops_json = _json.dumps(params.get("ops") or [])
             children.append(
                 dcc.Textarea(
-                    id={"type": "trf-param-ops", "transform_id": transform_id},
+                    id=wid("trf-param-ops"),
                     value=ops_json,
                     placeholder='[[[[r11,r12,r13],[r21,r22,r23],[r31,r32,r33]],[tx,ty,tz]], ...]',
                     style={"width": "100%", "minHeight": "40px", "fontSize": "11px", "fontFamily": "monospace", "marginTop": "4px"},
@@ -167,7 +184,7 @@ def _transform_param_widgets(transform: dict[str, Any]) -> list[Any]:
             )
             children.append(
                 dcc.Input(
-                    id={"type": f"trf-param-miller-{i}", "transform_id": transform_id},
+                    id=wid(f"trf-param-miller-{i}"),
                     type="number",
                     step=1,
                     value=int(miller[i] if i < len(miller) else 0),
@@ -178,7 +195,7 @@ def _transform_param_widgets(transform: dict[str, Any]) -> list[Any]:
         children.extend([
             html.Span("layers", style={"fontSize": "11px", "color": "#666", "margin": "0 2px 0 6px"}),
             dcc.Input(
-                id={"type": "trf-param-layers", "transform_id": transform_id},
+                id=wid("trf-param-layers"),
                 type="number",
                 min=1,
                 step=1,
@@ -188,7 +205,7 @@ def _transform_param_widgets(transform: dict[str, Any]) -> list[Any]:
             ),
             html.Span("vacuum \u00c5", style={"fontSize": "11px", "color": "#666", "margin": "0 2px 0 6px"}),
             dcc.Input(
-                id={"type": "trf-param-vacuum", "transform_id": transform_id},
+                id=wid("trf-param-vacuum"),
                 type="number",
                 min=0.0,
                 step=0.5,
@@ -200,7 +217,7 @@ def _transform_param_widgets(transform: dict[str, Any]) -> list[Any]:
     return children
 
 
-def _transforms_table_rows(transforms: list[dict[str, Any]]):
+def _transforms_table_rows(transforms: list[dict[str, Any]], scene_id: str | None = None):
     """One row per transform spec. Each row carries the kind label,
     enabled/delete controls, and a kind-specific parameter line."""
     from dash import dcc, html
@@ -235,14 +252,14 @@ def _transforms_table_rows(transforms: list[dict[str, Any]]):
                                 },
                             ),
                             dcc.Checklist(
-                                id={"type": "trf-row-enabled", "transform_id": transform["id"]},
+                                id=_widget_id("trf-row-enabled", transform["id"], scene_id),
                                 options=[{"label": "", "value": "yes"}],
                                 value=["yes"] if transform.get("enabled", True) else [],
                                 style={"display": "inline-block", "marginLeft": "4px"},
                             ),
                             html.Button(
                                 "\u25b2",
-                                id={"type": "trf-row-up", "transform_id": transform["id"]},
+                                id=_widget_id("trf-row-up", transform["id"], scene_id),
                                 n_clicks=0,
                                 disabled=index == 0,
                                 style={
@@ -260,7 +277,7 @@ def _transforms_table_rows(transforms: list[dict[str, Any]]):
                             ),
                             html.Button(
                                 "\u25bc",
-                                id={"type": "trf-row-down", "transform_id": transform["id"]},
+                                id=_widget_id("trf-row-down", transform["id"], scene_id),
                                 n_clicks=0,
                                 disabled=index >= len(transforms) - 1,
                                 style={
@@ -278,7 +295,7 @@ def _transforms_table_rows(transforms: list[dict[str, Any]]):
                             ),
                             html.Button(
                                 "\u00d7",
-                                id={"type": "trf-row-delete", "transform_id": transform["id"]},
+                                id=_widget_id("trf-row-delete", transform["id"], scene_id),
                                 n_clicks=0,
                                 style={
                                     "background": "transparent",
@@ -296,7 +313,7 @@ def _transforms_table_rows(transforms: list[dict[str, Any]]):
                         style={"display": "flex", "alignItems": "center"},
                     ),
                     html.Div(
-                        _transform_param_widgets(transform),
+                        _transform_param_widgets(transform, scene_id),
                         style={
                             "display": "flex",
                             "alignItems": "center",

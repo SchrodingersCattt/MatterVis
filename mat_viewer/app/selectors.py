@@ -32,12 +32,17 @@ DISPLAY_OPTION_TOKENS = frozenset(
         "axes",
         "minor_only",
         "minor_wireframe",
+        # Display-only fold of unit-cell centres into [0, 1). Source
+        # coordinates are unchanged; see scene_api.md.
+        "wrap_into_cell",
         # Kept for old REST clients; normalize_state migrates it to a group.
         "monochrome",
     }
 )
-GEOMETRY_DISPLAY_OPTIONS = frozenset({"hydrogens"})
-VIEWPORT_DISPLAY_OPTIONS = frozenset({"hydrogens", "unit_cell_box", "minor_only"})
+GEOMETRY_DISPLAY_OPTIONS = frozenset({"hydrogens", "wrap_into_cell"})
+VIEWPORT_DISPLAY_OPTIONS = frozenset(
+    {"hydrogens", "unit_cell_box", "minor_only", "wrap_into_cell"}
+)
 # Only labels and axes can be changed by the trace-only browser patch.  The
 # minor-wireframe token is still presentation-only for cache purposes, but it
 # changes line traces and therefore requires the normal render path.
@@ -300,8 +305,8 @@ def scene_geometry_cache_key(state: Mapping[str, Any] | None) -> tuple[Any, ...]
     """Key for the untransformed scene cache.
 
     Labels, axes, colours, camera and other presentation fields are absent by
-    construction.  Hydrogen visibility is the only display option that
-    changes atom/bond identity in the base scene.
+    construction.  Hydrogen visibility and the unit-cell wrap token change
+    atom/bond identity in the base scene.
     """
 
     state = state or {}
@@ -309,6 +314,7 @@ def scene_geometry_cache_key(state: Mapping[str, Any] | None) -> tuple[Any, ...]
         state.get("structure"),
         state.get("display_mode", "formula_unit"),
         show_hydrogen(state),
+        has_display_option(state, "wrap_into_cell"),
     )
 
 
