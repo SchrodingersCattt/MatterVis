@@ -40,7 +40,11 @@ def test_scene_tabs_scroll_instead_of_stacking() -> None:
     assert "overflow-x: auto" in css
     assert "height: auto !important" in css
     assert "scene-tab-scroll" in css
-    assert "ensureTabScrollers" in (ASSETS / "panel_resize.js").read_text(encoding="utf-8")
+    assert "scroll-padding-inline: 28px" in css
+    script = (ASSETS / "panel_resize.js").read_text(encoding="utf-8")
+    assert "ensureTabScrollers" in script
+    assert "function liveTabScroller()" in script
+    assert "const scroller = liveTabScroller();" in script
     assert "--mv-scene-tab-min-width" not in css
     assert "flex: 0 0 var(--mv-scene-tab-min-width)" not in css
 

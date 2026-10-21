@@ -109,6 +109,12 @@ const PAGE = `<!doctype html>
   <div id="center-panel" style="position:relative;flex:1 1 auto;min-width:0;min-height:0;height:100vh;overflow:hidden">
     <div id="crystal-graph" style="width:100%;height:100%"></div>
   </div>
+  <div id="perf-log-panel" class="perf-log-panel perf-log-panel--collapsed">
+    <div class="perf-log-header">
+      <button id="perf-log-toggle" class="perf-log-toggle" type="button">Server log ▾</button>
+      <button id="perf-log-clear" class="perf-log-clear" type="button">Clear</button>
+    </div>
+  </div>
 </div>
 </body></html>`;
 
@@ -487,6 +493,30 @@ function labelChecks(sample) {
     const moved = await page.evaluate(() => document.getElementById("scene-tabs").scrollLeft);
     if (moved < 40) failures.push(`next arrow did not scroll the strip (${moved})`);
     await page.evaluate(() => {
+      const current = document.getElementById("scene-tabs");
+      let staleScrolls = 0;
+      const original = current.scrollBy.bind(current);
+      current.scrollBy = function () {
+        staleScrolls += 1;
+        return original.apply(current, arguments);
+      };
+      window.__staleTabScrolls = () => staleScrolls;
+      const replacement = current.cloneNode(true);
+      replacement.scrollLeft = 0;
+      current.replaceWith(replacement);
+    });
+    await page.click("#scene-tab-scroll-next");
+    const replaced = await page.evaluate(() => ({
+      live: document.getElementById("scene-tabs").scrollLeft,
+      stale: window.__staleTabScrolls(),
+    }));
+    if (replaced.live < 40) {
+      failures.push(`replaced scene strip did not scroll (${replaced.live})`);
+    }
+    if (replaced.stale) {
+      failures.push(`next arrow scrolled the detached strip (${replaced.stale})`);
+    }
+    await page.evaluate(() => {
       const strip = document.getElementById("scene-tabs");
       strip.scrollLeft = strip.scrollWidth;
     });
@@ -558,6 +588,35 @@ function labelChecks(sample) {
       failures.push("tab strip runs past the drawer");
     }
     failures.push(...labelChecks(narrow).map((item) => "375 " + item));
+    const logPill = await page.evaluate(() => {
+      const node = document.getElementById("perf-log-panel");
+      const box = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      const hit = document.elementFromPoint(
+        Math.min(box.right - 4, box.left + box.width / 2),
+        box.top + box.height / 2,
+      );
+      return {
+        left: box.left, top: box.top, right: box.right, bottom: box.bottom,
+        width: box.width, height: box.height,
+        z: style.zIndex,
+        text: (node.querySelector(".perf-log-toggle") || {}).textContent || "",
+        shown: style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity) > 0,
+        hit: !!(hit && node.contains(hit)),
+        hitId: hit && hit.id,
+      };
+    });
+    report["375-open"].logPill = logPill;
+    if (!logPill.shown) failures.push("log pill is hidden at 375px");
+    if (logPill.width < 80 || logPill.height < 20) {
+      failures.push(`log pill is ${Math.round(logPill.width)}×${Math.round(logPill.height)}`);
+    }
+    if (logPill.left < 0 || logPill.top < 0 || logPill.right > narrow.innerWidth + 1 || logPill.bottom > 700 + 1) {
+      failures.push(`log pill sits outside the 375px viewport (${Math.round(logPill.left)},${Math.round(logPill.top)} ${Math.round(logPill.right)},${Math.round(logPill.bottom)})`);
+    }
+    if (!logPill.hit) failures.push(`log pill is covered (${logPill.hitId || "nothing"})`);
+    if (!logPill.text.includes("Server log")) failures.push(`log pill label is "${logPill.text}"`);
+    if (overlaps(logPill, narrow.tools)) failures.push("log pill overlaps the Tools button");
 
     fs.writeFileSync(path.join(shotDir, "report.json"), JSON.stringify(report, null, 2));
     if (failures.length) {

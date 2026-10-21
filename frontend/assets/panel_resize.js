@@ -1,7 +1,6 @@
 (function () {
   const SCENE_MIN = 420;
   const PANEL_MIN = 300;
-  const PANEL_MAX = 640;
   const COMPACT_BREAKPOINT = 756;
   // Share of the layout viewport. Browser zoom-out grows CSS pixels; a
   // fixed 380px column would stay a thin strip beside the canvas.
@@ -168,9 +167,7 @@
 
   function maxPanelWidth(panelId) {
     const root = document.getElementById("viewer-root");
-    if (!root) {
-      return PANEL_MAX;
-    }
+    if (!root) return PANEL_MIN;
     const rootWidth = root.getBoundingClientRect().width;
     const otherId = panelId === "left-panel" ? "mv-extension-panels" : "left-panel";
     const splitters = document.querySelectorAll("#viewer-root > .panel-splitter").length * 8;
@@ -188,12 +185,20 @@
     panel.style.flex = "0 0 auto";
   }
 
-  function sceneTabStrip() {
-    return document.getElementById("scene-tabs");
+  // Dash replaces #scene-tabs when scenes change. The scrollable node is
+  // that element when it is the tab container (Dash 4); Dash 2 put the id
+  // on the outer shell and overflow lives on the inner .tab-container.
+  function liveTabScroller() {
+    const strip = document.getElementById("scene-tabs");
+    if (!strip) return null;
+    if (strip.classList.contains("tab-container")) return strip;
+    return strip.querySelector(".tab-container") || strip;
   }
 
+  let boundTabScroller = null;
+
   function syncTabScrollers() {
-    const strip = sceneTabStrip();
+    const strip = liveTabScroller();
     const prev = document.getElementById("scene-tab-scroll-prev");
     const next = document.getElementById("scene-tab-scroll-next");
     if (!strip || !prev || !next) return;
@@ -203,32 +208,39 @@
     next.hidden = !overflow || strip.scrollLeft >= maxScroll - 1;
   }
 
+  function bindTabScroller(strip) {
+    if (!strip || strip === boundTabScroller) return;
+    if (boundTabScroller) boundTabScroller.removeEventListener("scroll", syncTabScrollers);
+    boundTabScroller = strip;
+    strip.addEventListener("scroll", syncTabScrollers);
+  }
+
   function ensureTabScrollers() {
     const card = document.querySelector(".scene-tabs-card");
-    const strip = sceneTabStrip();
+    const strip = liveTabScroller();
     if (!card || !strip) return;
     function makeButton(id, label, direction) {
       let button = document.getElementById(id);
-      if (button) return button;
-      button = document.createElement("button");
-      button.type = "button";
-      button.id = id;
-      button.className = "scene-tab-scroll scene-tab-scroll--" + direction;
-      button.textContent = label;
-      button.setAttribute("aria-label", direction === "prev" ? "Scroll scenes left" : "Scroll scenes right");
-      button.addEventListener("click", function () {
-        const amount = Math.max(120, strip.clientWidth * 0.7);
-        strip.scrollBy({left: direction === "prev" ? -amount : amount});
-      });
-      card.appendChild(button);
+      if (!button) {
+        button = document.createElement("button");
+        button.type = "button";
+        button.id = id;
+        button.className = "scene-tab-scroll scene-tab-scroll--" + direction;
+        button.textContent = label;
+        button.setAttribute("aria-label", direction === "prev" ? "Scroll scenes left" : "Scroll scenes right");
+        button.addEventListener("click", function () {
+          const scroller = liveTabScroller();
+          if (!scroller) return;
+          const amount = Math.max(120, scroller.clientWidth * 0.7);
+          scroller.scrollBy({left: direction === "prev" ? -amount : amount});
+        });
+      }
+      if (button.parentElement !== card) card.appendChild(button);
       return button;
     }
     makeButton("scene-tab-scroll-prev", "‹", "prev");
     makeButton("scene-tab-scroll-next", "›", "next");
-    if (strip.dataset.scrollBound !== "1") {
-      strip.dataset.scrollBound = "1";
-      strip.addEventListener("scroll", syncTabScrollers);
-    }
+    bindTabScroller(strip);
     syncTabScrollers();
   }
 

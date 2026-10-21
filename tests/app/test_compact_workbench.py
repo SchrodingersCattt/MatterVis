@@ -28,6 +28,7 @@ def test_perf_log_collapses_to_a_narrow_mobile_safe_pill() -> None:
     assert "width: 128px" in css
     assert "width: 118px" in css
     assert "max-width: calc(100% - 16px)" in css
+    assert "z-index: 9000" in css
     assert "@media (max-width: 755px)" in css
 
 

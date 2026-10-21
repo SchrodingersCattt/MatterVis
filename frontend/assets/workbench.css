@@ -123,6 +123,20 @@
   right: 4px;
 }
 
+:root[data-mattervis-theme="dark"] #left-panel .scene-tab-scroll {
+  background: rgba(17, 22, 29, 0.94);
+  border-color: #3a4658;
+  color: var(--mv-hover-tip-ink);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-mattervis-theme="light"]) #left-panel .scene-tab-scroll {
+    background: rgba(17, 22, 29, 0.94);
+    border-color: #3a4658;
+    color: var(--mv-hover-tip-ink);
+  }
+}
+
 /* Dash 4 puts the component id on `.tab-container` and the outer shell at
    `#scene-tabs-parent`. Dash 2 put the id on the outer node. The strip is a
    horizontal scroller in both shapes: a fixed 160px flex basis becomes the
@@ -150,7 +164,7 @@
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-inline: contain;
-  scroll-padding-inline: 8px;
+  scroll-padding-inline: 28px;
   scrollbar-color: #b7c3d0 transparent;
   scrollbar-width: thin;
   width: 100%;

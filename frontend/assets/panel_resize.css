@@ -627,6 +627,9 @@ body.panel-resizing * {
     right: 8px;
     bottom: 8px;
     max-width: calc(100% - 16px);
+    /* Keep the pill above the compact drawer (8000) and its toggle (8100).
+       The open Tools drawer covers the corner this pill occupies. */
+    z-index: 9000;
   }
 
   .perf-log-panel--collapsed {
