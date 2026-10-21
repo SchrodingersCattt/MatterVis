@@ -37,65 +37,15 @@ from .capabilities import (
     requirements_for_tui,
     resolve_requirements,
 )
+from .cli_lazy import bind_deferred_cli_symbols
 
-_COMMANDS_READY = False
+bind_deferred_cli_symbols(globals())
 
-
-def _load_command_modules() -> None:
-    """Import renderer and structure helpers after a command needs them.
-
-    ``skills`` returns before this runs. Importing ``mat_viewer.cli`` itself
-    must not pull in numpy, ASE, or ``mat_viewer.render``.
-    """
-    global _COMMANDS_READY
-    global _file_sha256, _loaded_inspect_payload, _is_nonperiodic_structure
-    global add_bond_policy_arguments, bond_thresholds_from_args, _add_render_control_arguments
-    global _animation_time_from_args, _frame_annotation_from_args, _camera_request
-    global _is_animation_output, _render_ortep_mode, _render_shading, _style_groups
-    global _validate_render_options, add_batch_render_arguments, render_batch_if_selected
-    global _load_overlay_file, _add_atom_property_arguments, _atom_property_spec
-    if _COMMANDS_READY:
-        return
-    from .properties.cli import (
-        add_atom_property_arguments as _add_atom_property_arguments,
-        atom_property_spec as _atom_property_spec,
-    )
-    from .render.cli_controls import (
-        _add_render_control_arguments,
-        _animation_time_from_args,
-        _camera_request,
-        _frame_annotation_from_args,
-        _is_animation_output,
-        _render_ortep_mode,
-        _render_shading,
-        _style_groups,
-        _validate_render_options,
-        add_bond_policy_arguments,
-        bond_thresholds_from_args,
-    )
-    from .render.fast_cli import (
-        add_batch_render_arguments,
-        render_batch_if_selected,
-    )
-    from .render.overlay.io import load_overlay_file as _load_overlay_file
-    from .structure.inspect import (
-        file_sha256 as _file_sha256,
-        inspect_payload as _loaded_inspect_payload,
-        is_nonperiodic_structure as _is_nonperiodic_structure,
-    )
-
-    _COMMANDS_READY = True
-
-
-def _inspect_payload(structure):
-    _load_command_modules()
-    return _loaded_inspect_payload(structure)
 
 def _build_render_parser(
     subparsers: argparse._SubParsersAction,
 ) -> argparse.ArgumentParser:
     """Build the existing render surface plus explicit agent controls."""
-    _load_command_modules()
     from .render.cli import _build_render_parser as build_legacy_parser
 
     parser = build_legacy_parser(subparsers)
@@ -190,7 +140,6 @@ def _build_render_parser(
 def _build_serve_parser(
     subparsers: argparse._SubParsersAction,
 ) -> argparse.ArgumentParser:
-    _load_command_modules()
     p = subparsers.add_parser(
         "serve",
         help="Launch the interactive Dash browser viewer.",
@@ -243,7 +192,6 @@ def _filter_crystal(crystal, keep_atom_set):
 def _build_tui_parser(
     subparsers: argparse._SubParsersAction,
 ) -> argparse.ArgumentParser:
-    _load_command_modules()
     p = subparsers.add_parser(
         "tui",
         help="Terminal-based crystal structure viewer.",
@@ -427,7 +375,6 @@ def _build_tui_parser(
 
 def _tui_main(args: argparse.Namespace) -> None:
     """Execute the tui subcommand."""
-    _load_command_modules()
     filepath = args.FILE
     if not Path(filepath).exists():
         print(f"Error: file not found: {filepath}", file=sys.stderr)
@@ -598,7 +545,6 @@ def _apply_display_filter(crystal, mode: str):
 def _build_inspect_parser(
     subparsers: argparse._SubParsersAction,
 ) -> argparse.ArgumentParser:
-    _load_command_modules()
     parser = subparsers.add_parser(
         "inspect",
         help="Inspect a structure without rendering it.",
@@ -748,7 +694,6 @@ def _render_requirements(args: argparse.Namespace) -> tuple[str, ...]:
 
 
 def _render_check_payload(args: argparse.Namespace) -> dict:
-    _load_command_modules()
     _validate_render_options(args)
     property_spec = _atom_property_spec(args)
     resolution = resolve_requirements(_render_requirements(args))
@@ -877,7 +822,6 @@ def _camera_spec(
     display: str,
     topology_data=None,
 ):
-    _load_command_modules()
     import numpy as np
 
     from .agent_topology import topology_fit_points
@@ -1019,7 +963,6 @@ def _camera_spec(
 
 
 def _render_result_payload(result, structure, args: argparse.Namespace, camera) -> dict:
-    _load_command_modules()
     output = Path(args.output).expanduser().resolve()
     result_payload = {
         name: _json_safe(getattr(result, name))
@@ -1065,7 +1008,6 @@ def _render_result_payload(result, structure, args: argparse.Namespace, camera) 
 
 
 def _display_mode(structure, args: argparse.Namespace) -> str:
-    _load_command_modules()
     if args.view != "auto":
         return args.view
     if _is_nonperiodic_structure(structure):
@@ -1074,7 +1016,6 @@ def _display_mode(structure, args: argparse.Namespace) -> str:
 
 
 def _effective_show_cell(structure, args: argparse.Namespace) -> bool:
-    _load_command_modules()
     requested = getattr(args, "show_unit_cell", None)
     if requested is not None:
         return bool(requested)
@@ -1104,7 +1045,6 @@ def _animation_indices(args: argparse.Namespace) -> list[int]:
 
 
 def _agent_render_main(args: argparse.Namespace) -> None:
-    _load_command_modules()
     try:
         check_payload = _render_check_payload(args)
     except (ValueError, OSError) as exc:
@@ -1264,7 +1204,6 @@ def main(argv: Optional[list[str]] = None) -> None:
 
         skills_main(raw[1:])
         return
-    _load_command_modules()
     parser = argparse.ArgumentParser(
         prog="mat-vis",
         description="MatterVis: publication-quality crystal structure visualization.",
@@ -1292,10 +1231,6 @@ def main(argv: Optional[list[str]] = None) -> None:
         _inspect_main(args)
     elif args.command == "capabilities":
         _capabilities_main(args)
-    elif args.command == "skills":
-        from .skill_viewer import main as skills_main
-
-        skills_main(None)
     elif args.command == "serve":
         try:
             resolve_requirements("web").require()

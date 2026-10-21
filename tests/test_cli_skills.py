@@ -114,3 +114,77 @@ def test_skill_tree_rejects_broken_links(
     monkeypatch.setattr(skill_viewer, "_skills_root", lambda: root)
     with pytest.raises(skill_viewer.SkillError, match="resource not found"):
         skill_viewer.tree(skill_viewer.get_skill("demo"))
+
+
+def _install_demo_skill(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, text: str) -> None:
+    root = tmp_path / "skills"
+    skill_root = root / "demo"
+    (skill_root / "references").mkdir(parents=True)
+    (skill_root / "SKILL.md").write_text(text, encoding="utf-8")
+    monkeypatch.setattr(skill_viewer, "_skills_root", lambda: root)
+
+
+def test_show_prints_broken_links_and_exits_nonzero(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    text = "hello\n[missing](references/nope.md)\n"
+    _install_demo_skill(monkeypatch, tmp_path, text)
+    with pytest.raises(SystemExit) as exc_info:
+        main(["skills", "show", "demo"])
+    assert exc_info.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == text
+    assert "Error:" in captured.err
+    assert "resource not found" in captured.err
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["skills", "show", "demo", "--json"])
+    assert exc_info.value.code == 2
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["schema"] == "mattervis.skills.show/v1"
+    assert payload["content"] == text
+    assert "Error:" in captured.err
+
+
+def test_show_ignores_code_spans_and_directory_links(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    text = (
+        "hello\n"
+        "```\n[label](path/to/your-file.md)\n```\n"
+        "`[inline](missing.md)`\n"
+        "[refs](references/)\n"
+        "[page](references/page.md)\n"
+    )
+    _install_demo_skill(monkeypatch, tmp_path, text)
+    (tmp_path / "skills" / "demo" / "references" / "page.md").write_text("# Page\n", encoding="utf-8")
+    main(["skills", "show", "demo"])
+    assert capsys.readouterr().out == text
+
+    main(["skills", "tree", "demo", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    links = payload["resources"][0]["links"]
+    assert [link["target"] for link in links] == ["references", "references/page.md"]
+    assert links[0]["kind"] == "directory"
+    assert [resource["path"] for resource in payload["resources"]] == [
+        "SKILL.md",
+        "references/page.md",
+    ]
+
+    main(["skills", "show", "demo", "--all"])
+    expanded = capsys.readouterr().out
+    assert "path/to/your-file.md" in expanded
+    assert "# Page" in expanded
+
+
+def test_skills_error_json_contract(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["skills", "show", "nope", "--json"])
+    assert exc_info.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.err.startswith("Error:")
+    payload = json.loads(captured.out)
+    assert payload["schema"] == "mattervis.error/v1"
+    assert payload["ok"] is False
+    assert isinstance(payload["error"], str) and payload["error"]

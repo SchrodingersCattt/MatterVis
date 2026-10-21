@@ -16,7 +16,7 @@ KNOWN_OVERSIZE_DURING_SPLIT = {
     "app/backend_core.py": 1518,
     "app/factory.py": 1116,
     "loader/core.py": 1224,
-    "cli.py": 1320,
+    "cli.py": 1264,
     "ortep/core.py": 1146,
     # Existing CLI parser is just over the hard cap while its argument
     # groups are being split into the dedicated controls module.
@@ -33,6 +33,7 @@ ALLOWED_TOP_LEVEL_PY = {
     "cache_keys.py",
     "capabilities.py",
     "cli.py",
+    "cli_lazy.py",
     "skill_viewer.py",
 }
 

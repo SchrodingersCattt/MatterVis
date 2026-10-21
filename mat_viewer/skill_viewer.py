@@ -32,6 +32,7 @@ class Skill:
 _LINK_RE = re.compile(
     r"\[[^\]]*\]\(\s*(?:<([^>]+)>|([^\s)]+))"
 )
+_INLINE_CODE_RE = re.compile(r"`+[^`\n]*`+")
 _SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 _BUNDLED_SKILL_NAMES = frozenset({"inspect-structure-tui", "visualize-materials"})
 
@@ -137,7 +138,8 @@ def _normalise_relative(raw: str, *, label: str = "resource") -> str:
     return "/".join(parts)
 
 
-def _resource(skill: Skill, relative: str):
+def _candidate(skill: Skill, relative: str):
+    """Return the normalised path and its resource, rejecting escapes."""
     relative = _normalise_relative(relative)
     candidate = skill.root.joinpath(*relative.split("/"))
     if isinstance(skill.root, Path) or isinstance(candidate, Path):
@@ -147,7 +149,22 @@ def _resource(skill: Skill, relative: str):
             candidate_path.relative_to(root_path)
         except (OSError, RuntimeError, ValueError) as exc:
             raise SkillError(f"resource path escapes the selected skill: {relative!r}") from exc
+    return candidate, relative
+
+
+def _resolve_link(skill: Skill, relative: str):
+    """Classify a local link as a file or a non-document directory."""
+    candidate, relative = _candidate(skill, relative)
+    if candidate.is_dir() and not candidate.is_file():
+        return candidate, relative, "directory"
     if not candidate.is_file():
+        raise SkillError(f"resource not found in skill {skill.name!r}: {relative}")
+    return candidate, relative, "file"
+
+
+def _resource(skill: Skill, relative: str):
+    candidate, relative, kind = _resolve_link(skill, relative)
+    if kind != "file":
         raise SkillError(f"resource not found in skill {skill.name!r}: {relative}")
     return candidate, relative
 
@@ -172,9 +189,44 @@ def _local_target(source: str, raw_target: str) -> tuple[str, str | None] | None
     return _normalise_relative(joined, label="linked resource"), fragment if separator else None
 
 
+def _fence_marker(line: str) -> str | None:
+    stripped = line.lstrip(" ")
+    if len(line) - len(stripped) > 3:
+        return None
+    if stripped.startswith("```"):
+        return "`"
+    if stripped.startswith("~~~"):
+        return "~"
+    return None
+
+
+def _mask_inline_code(line: str) -> str:
+    return _INLINE_CODE_RE.sub(lambda match: " " * len(match.group(0)), line)
+
+
+def _mask_unlinked_code(text: str) -> str:
+    """Blank fenced blocks and inline code so example links are not resources."""
+    lines = text.splitlines(keepends=True)
+    masked: list[str] = []
+    fence: str | None = None
+    for line in lines:
+        marker = _fence_marker(line)
+        if fence is None:
+            if marker is not None:
+                fence = marker
+                masked.append(" " * len(line))
+                continue
+            masked.append(_mask_inline_code(line))
+            continue
+        masked.append(" " * len(line))
+        if marker == fence:
+            fence = None
+    return "".join(masked)
+
+
 def _links(source: str, text: str) -> list[tuple[str, str, str | None]]:
     result: list[tuple[str, str, str | None]] = []
-    for match in _LINK_RE.finditer(text):
+    for match in _LINK_RE.finditer(_mask_unlinked_code(text)):
         raw = match.group(1) or match.group(2) or ""
         target = _local_target(source, raw)
         if target is not None:
@@ -201,8 +253,11 @@ def tree(skill: Skill) -> list[dict[str, Any]]:
         if not relative.lower().endswith(".md"):
             return
         for raw, target, fragment in _links(relative, text):
-            _resource(skill, target)
-            links.append({"target": target, "fragment": fragment, "raw": raw, "kind": _kind(target)})
+            _resolved, target, kind = _resolve_link(skill, target)
+            link_kind = "directory" if kind == "directory" else _kind(target)
+            links.append({"target": target, "fragment": fragment, "raw": raw, "kind": link_kind})
+            if kind != "file":
+                continue
             if target.lower().endswith(".md"):
                 visit(target)
             elif target not in visited:
@@ -227,20 +282,25 @@ def all_documents(skill: Skill, start: str = "SKILL.md") -> list[dict[str, str]]
         links = _links(relative, text) if relative.lower().endswith(".md") else []
         documents.append({"path": relative, "content": text})
         for _raw, target, _fragment in links:
-            _resource(skill, target)
-            if target.lower().endswith(".md"):
+            _resolved, target, kind = _resolve_link(skill, target)
+            if kind == "file" and target.lower().endswith(".md"):
                 visit(target)
 
     visit(start)
     return documents
 
 
-def _validate_document_links(skill: Skill, relative: str, content: str) -> None:
-    """Validate local links without reading or expanding their targets."""
+def _document_link_errors(skill: Skill, relative: str, content: str) -> list[str]:
+    """Return broken file links. Directory targets are non-documents, not errors."""
     if not relative.lower().endswith(".md"):
-        return
+        return []
+    errors: list[str] = []
     for _raw, target, _fragment in _links(relative, content):
-        _resource(skill, target)
+        try:
+            _resolve_link(skill, target)
+        except SkillError as exc:
+            errors.append(str(exc))
+    return errors
 
 
 def json_payload(value: Any) -> str:
@@ -272,11 +332,15 @@ def emit_show(skill: Skill, relative: str, *, all_files: bool, as_json: bool) ->
             sys.stdout.write(document["content"])
         return
     content = _read(skill, relative)
-    _validate_document_links(skill, relative, content)
+    errors = _document_link_errors(skill, relative, content)
     if as_json:
         print(json_payload({"schema": "mattervis.skills.show/v1", "skill": skill.name, "path": relative, "content": content}))
     else:
         sys.stdout.write(content)
+    if errors:
+        for error in errors:
+            print(f"Error: {error}", file=sys.stderr)
+        raise SystemExit(2)
 
 
 def main(argv: list[str] | None = None) -> None:

@@ -219,10 +219,19 @@ jobs:
         shell: python
         run: |
           import glob
+          from pathlib import Path
           import zipfile
 
           wheel, = glob.glob("dist/*.whl")
           with zipfile.ZipFile(wheel) as archive:
-              names = archive.namelist()
-          assert any(name.startswith("mat_viewer/") for name in names), names
+              names = set(archive.namelist())
+          assert any(name.startswith("mat_viewer/") for name in names), sorted(names)[:20]
           assert not any(name.startswith("crystal_viewer/") for name in names), names
+          missing = []
+          for path in Path("skills").rglob("*"):
+              if path.is_dir() and not path.is_symlink():
+                  continue
+              packaged = "mat_viewer/_bundled_skills/" + path.relative_to("skills").as_posix()
+              if packaged not in names:
+                  missing.append(packaged)
+          assert not missing, missing

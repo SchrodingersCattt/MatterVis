@@ -65,8 +65,15 @@ not import the renderer or optional numeric dependencies. The
 default `show` command prints only the raw `SKILL.md` entrypoint. Use
 `--file` for one referenced resource, `tree` to inspect local links without
 reading their bodies, or `--all` to expand reachable Markdown in deterministic
-link order. Scripts and external links are never executed or expanded. Add
-`--json` to `list`, `show`, or `tree` for machine-readable output.
+link order. Scripts and external links are never executed or expanded. Links
+inside fenced or inline code are examples, not resources. A link to a directory
+is a non-document target. If a default `show` document links to a missing file,
+the document is still printed, each broken link is reported on stderr, and the
+process exits with status 2. `tree` and `show --all` stop before printing a
+partial resource graph. Add `--json` to `list`, `show`, or `tree` for
+machine-readable output. Failures that reject the command, including an unknown
+skill, write `Error: ...` to stderr and, with `--json`, a
+`mattervis.error/v1` object (`schema`, `ok: false`, `error`) to stdout.
 
 ## tui — terminal and online agent sessions
 
