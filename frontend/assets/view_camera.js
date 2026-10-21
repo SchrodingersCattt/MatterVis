@@ -231,6 +231,26 @@
     if (value[name] !== undefined && value[name] !== null) return Number(value[name]);
     return Number(value[index] || 0);
   }
+  /* Plotly's perspective near plane is 0.01 in the normalized model box
+   * (each axis spans [-aspect/2, aspect/2]). An eye closer than the front
+   * face of that box slices atoms. Keep a small face margin so a sphere
+   * on the front of the data range stays beyond the near plane.
+   * Matches mat_viewer.render.screen_projection.PLOTLY_NEAR. */
+  var PLOTLY_NEAR = 0.01;
+  var PERSPECTIVE_ZOOM_FACE_MARGIN = 0.08;
+  function minimumPerspectiveEyeDistance(eye, center, aspect) {
+    var ax = Number(aspect && aspect.x) || 1;
+    var ay = Number(aspect && aspect.y) || 1;
+    var az = Number(aspect && aspect.z) || 1;
+    var dx = axisComponent(eye, 0, "x") - axisComponent(center, 0, "x");
+    var dy = axisComponent(eye, 1, "y") - axisComponent(center, 1, "y");
+    var dz = axisComponent(eye, 2, "z") - axisComponent(center, 2, "z");
+    var dist = Math.hypot(dx, dy, dz);
+    var front;
+    if (!(dist > 0)) front = 0.5 * Math.max(ax, ay, az);
+    else front = 0.5 * (ax * Math.abs(dx) + ay * Math.abs(dy) + az * Math.abs(dz)) / dist;
+    return front + PLOTLY_NEAR + PERSPECTIVE_ZOOM_FACE_MARGIN;
+  }
   function installWheelZoom(gd) {
     /* Plotly's orthographic wheel handler multiplies the scene aspect
      * ratio instead of the camera distance. That zoom survives Reset and
@@ -266,7 +286,9 @@
       ];
       var dist = Math.hypot(next[0], next[1], next[2]);
       if (!(dist > 0)) return;
-      if (dist < 0.35) { var near = 0.35 / dist; next = next.map(function (v) { return v * near; }); }
+      var aspect = graph._fullLayout && graph._fullLayout.scene && graph._fullLayout.scene.aspectratio;
+      var minDist = minimumPerspectiveEyeDistance(next, controller.center || [0, 0, 0], aspect);
+      if (dist < minDist) { var nearScale = minDist / dist; next = next.map(function (v) { return v * nearScale; }); }
       /* Perspective zoom-out used to stop at eye length 8, which clipped a
        * supercell before the whole cell fit. Orthographic size does not
        * follow eye length; the cap only bounds the perspective dolly. */
@@ -613,6 +635,7 @@
     visibleGeometry: visibleGeometry,
     resetQueue: resetQueue,
     installWheelZoom: installWheelZoom,
+    minimumPerspectiveEyeDistance: minimumPerspectiveEyeDistance,
     installCanvasRefit: installCanvasRefit,
     installContextLoss: installContextLoss,
     reportStatus: reportStatus,

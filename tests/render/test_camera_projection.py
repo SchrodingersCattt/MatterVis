@@ -369,16 +369,22 @@ def test_compass_overlay_js_uses_svg_layer_not_plotly_relayout_for_drag():
         "operates on the SVG layer; the dragPollTick reads the live "
         "camera and calls this every frame."
     )
+    assert "function displayedSceneCamera" in src, (
+        "compass_overlay.js must read the displayed WebGL camera via "
+        "getCamera() before layout.scene.camera. A display rebuild keeps "
+        "the GL camera through uirevision while the layout eye is the "
+        "previous frame, which snapped the triad backwards."
+    )
     assert "layoutSceneCamera" in src, (
-        "compass_overlay.js must prefer the committed layout camera for "
-        "normal redraws after Dash figure updates; internal gl cameras are "
-        "only authoritative during active drags."
+        "compass_overlay.js must still fall back to the committed layout "
+        "camera when the GL scene cannot report one yet."
     )
     assert "preferLiveCamera" in src, (
-        "compass_overlay.js must keep live internal-camera reads behind an "
-        "explicit drag-path flag, otherwise scope/polyhedra rebuilds can "
-        "redraw the compass from a stale internal camera."
+        "compass_overlay.js keeps the preferLiveCamera argument for drag "
+        "and wheel callers. The displayed GL camera still wins when "
+        "getCamera() answers, including when that flag is false."
     )
+    assert "The displayed GL camera wins" in src
     assert "cameraFromRelayout" in src, (
         "compass_overlay.js must consume camera payloads from Plotly relayout "
         "events when they are provided."
@@ -440,7 +446,7 @@ def test_compass_overlay_js_uses_svg_layer_not_plotly_relayout_for_drag():
         "mouseup; a drag can end outside the graph div if the user "
         "releases the button in the page margin."
     )
-    assert "const finalCamera = liveSceneCamera(gd);" in src
+    assert "const finalCamera = displayedSceneCamera(gd) || liveSceneCamera(gd);" in src
     assert "redrawCompass(gd, finalCamera, true);" in src, (
         "wheel/drag poll shutdown must finish from the live WebGL camera; "
         "layout.scene.camera may still be stale after wheel zoom and would "

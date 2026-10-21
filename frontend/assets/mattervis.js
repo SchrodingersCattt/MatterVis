@@ -2449,13 +2449,58 @@
     return el;
   }
 
+  /* The WebGL canvas is inset inside the graph div (title margin, scene
+   * domain). Paper fractions of the whole graph therefore sit in the
+   * margin and the triad looks detached from the 3D view. Anchor to the
+   * canvas rectangle when Plotly has created it. */
+  function sceneCanvasRect(gd) {
+    const scene = gd && gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
+    const canvas = scene && scene.glplot && scene.glplot.canvas;
+    if (!canvas || typeof canvas.getBoundingClientRect !== "function") return null;
+    const rect = canvas.getBoundingClientRect();
+    if (!rect || !(rect.width > 2) || !(rect.height > 2)) return null;
+    return rect;
+  }
+
+  /* a/b/c labels sit on the projected tips. Similar projections (a nearly
+   * on top of b) used to overlap the glyphs. Push pairs apart in pixel
+   * space without moving the arrow shafts. */
+  function separateLabelPoints(points, minDist) {
+    const min = Math.max(12, Number(minDist) || 0);
+    for (let pass = 0; pass < 8; pass++) {
+      let moved = false;
+      for (let i = 0; i < points.length; i++) {
+        for (let j = i + 1; j < points.length; j++) {
+          let dx = points[j].x - points[i].x;
+          let dy = points[j].y - points[i].y;
+          let dist = Math.hypot(dx, dy);
+          if (dist >= min) continue;
+          if (dist < 1e-4) {
+            const angle = (j + 1) * (Math.PI / 3);
+            dx = Math.cos(angle);
+            dy = Math.sin(angle);
+            dist = 1;
+          }
+          const push = (min - dist) / 2 + 0.25;
+          const ux = dx / dist;
+          const uy = dy / dist;
+          points[i].x -= ux * push;
+          points[i].y -= uy * push;
+          points[j].x += ux * push;
+          points[j].y += uy * push;
+          moved = true;
+        }
+      }
+      if (!moved) break;
+    }
+  }
+
   /* Render compass into the SVG layer.
    *
-   * Coordinate convention: SVG coordinates here are pixel coords
-   * relative to the GRAPH DIV (which is itself positioned inside the
-   * wrapper). We compute the graph div's bounding box vs the wrapper
-   * to translate. Y increases downward in pixel space, so the screen-up
-   * vector contributes a negative dy.
+   * Coordinate convention: SVG coordinates here are pixel coords relative
+   * to the wrapper. The paper anchor is mapped onto the WebGL canvas, not
+   * the outer graph div. Y increases downward in pixel space, so the
+   * screen-up vector contributes a negative dy.
    */
   function drawCompassSvg(svg, ctx, projections) {
     const root = graphRoot();
@@ -2463,10 +2508,12 @@
     if (!root || !gd) return;
     const rRect = root.getBoundingClientRect();
     const gRect = gd.getBoundingClientRect();
-    const offsetX = gRect.left - rRect.left;
-    const offsetY = gRect.top - rRect.top;
-    const figW = gRect.width || 1024;
-    const figH = gRect.height || 720;
+    const canvasRect = sceneCanvasRect(gd);
+    const space = canvasRect || gRect;
+    const offsetX = space.left - rRect.left;
+    const offsetY = space.top - rRect.top;
+    const figW = space.width || gRect.width || 1024;
+    const figH = space.height || gRect.height || 720;
 
     /* Set viewBox to wrapper pixel space so our pixel coords map 1:1. */
     svg.setAttribute("viewBox", "0 0 " + Math.max(1, rRect.width) + " " + Math.max(1, rRect.height));
@@ -2529,17 +2576,7 @@
 
     clearSvg(svg);
 
-    /* Shared dot anchor circle so the three arrows look like a triad
-       (Python compass does this implicitly via shared anchor). Drawn
-       once, regardless of arrow vs dot mode. */
-    svg.appendChild(svgEl("circle", {
-      cx: String(anchorPx),
-      cy: String(anchorPy),
-      r: "1.4",
-      fill: "#2F2F2F",
-      "fill-opacity": "0.75",
-    }));
-
+    const labelPoints = [];
     for (let i = 0; i < labels.length && i < 3; i++) {
       const label = labels[i];
       const color = colors[i] || colors[0] || "#2F2F2F";
@@ -2555,20 +2592,12 @@
           r: String(dotRadius),
           fill: color,
         }));
-        const labelPx = anchorPx + (dotRadius + labelOffset);
-        const labelPy = anchorPy - (dotRadius + labelOffset);
-        const text = svgEl("text", {
-          x: String(labelPx),
-          y: String(labelPy),
-          fill: color,
-          "font-size": String(fontSize),
-          "font-family": "sans-serif",
-          "font-style": italic ? "italic" : "normal",
-          "text-anchor": "start",
-          "dominant-baseline": "alphabetic",
+        labelPoints.push({
+          x: anchorPx + (dotRadius + labelOffset),
+          y: anchorPy - (dotRadius + labelOffset),
+          label: label,
+          color: color,
         });
-        text.textContent = label;
-        svg.appendChild(text);
         continue;
       }
 
@@ -2598,50 +2627,60 @@
       const uy = -dyPx / lenPx; // SVG-down adjusted
       const arrowLen = 5 + arrowhead;
       const arrowWidth = 3 + arrowhead * 0.5;
-      const baseX = tipX - ux * arrowLen;
-      const baseY = tipY - uy * arrowLen;
-      const perpX = -uy;
-      const perpY = ux;
-      const ax1 = baseX + perpX * arrowWidth;
-      const ay1 = baseY + perpY * arrowWidth;
-      const ax2 = baseX - perpX * arrowWidth;
-      const ay2 = baseY - perpY * arrowWidth;
-      svg.appendChild(svgEl("polygon", {
-        points: tipX + "," + tipY + " " + ax1 + "," + ay1 + " " + ax2 + "," + ay2,
-        fill: color,
-      }));
+      /* A head longer than the shaft grows backwards through the anchor
+         and reads as a stray tick, especially on a short projected axis. */
+      if (lenPx > arrowLen + 1) {
+        const baseX = tipX - ux * arrowLen;
+        const baseY = tipY - uy * arrowLen;
+        const perpX = -uy;
+        const perpY = ux;
+        const ax1 = baseX + perpX * arrowWidth;
+        const ay1 = baseY + perpY * arrowWidth;
+        const ax2 = baseX - perpX * arrowWidth;
+        const ay2 = baseY - perpY * arrowWidth;
+        svg.appendChild(svgEl("polygon", {
+          points: tipX + "," + tipY + " " + ax1 + "," + ay1 + " " + ax2 + "," + ay2,
+          fill: color,
+        }));
+      }
 
       /* Label sits past the tip along the projection direction. */
-      const labelPx = tipX + ux * labelOffset;
-      const labelPy = tipY + uy * labelOffset;
+      labelPoints.push({
+        x: tipX + ux * labelOffset,
+        y: tipY + uy * labelOffset,
+        label: label,
+        color: color,
+      });
+    }
+    separateLabelPoints(labelPoints, fontSize * 1.25);
+    for (let i = 0; i < labelPoints.length; i++) {
+      const point = labelPoints[i];
       const text = svgEl("text", {
-        x: String(labelPx),
-        y: String(labelPy),
-        fill: color,
+        x: String(point.x),
+        y: String(point.y),
+        fill: point.color,
         "font-size": String(fontSize),
         "font-family": "sans-serif",
         "font-style": italic ? "italic" : "normal",
         "text-anchor": "middle",
         "dominant-baseline": "central",
       });
-      text.textContent = label;
+      text.textContent = point.label;
       svg.appendChild(text);
     }
   }
 
   /* Camera-acquisition helpers ported from the previous version.
    * Documentation of WHY ``intScene.getCamera()`` is the live source
-   * of truth lives below the function for searchability. */
-  function liveSceneCamera(gd) {
-    /* Plotly v3 source (src/plots/gl3d/scene.js):
-     *   proto.getCamera = function() {
-     *     scene.camera.view.recalcMatrix(scene.camera.view.lastT());
-     *     return getLayoutCamera(scene.camera);
-     *   };
-     * Reading this is the only way to get the matrix-after-recalc
-     * camera during a rotation drag; ``layout.scene.camera`` only
-     * commits on mouseup.
-     */
+   * of truth lives below the function for searchability.
+   *
+   * ``displayedSceneCamera`` returns only the camera the WebGL scene is
+   * actually showing. ``layout.scene.camera`` and a ``plotly_relayout``
+   * payload can be the previous frame (plotly/plotly.js#6359) or the
+   * server eye from before a drag, while ``uirevision`` keeps the GL
+   * camera. The compass must follow the displayed camera or a Display
+   * click / short drag snaps it backwards. */
+  function displayedSceneCamera(gd) {
     if (!gd) return null;
     const full = gd._fullLayout || null;
     const sceneFull = full ? full.scene : null;
@@ -2669,6 +2708,23 @@
         }
       } catch (err) { /* fall through */ }
     }
+    return null;
+  }
+
+  function liveSceneCamera(gd) {
+    /* Plotly v3 source (src/plots/gl3d/scene.js):
+     *   proto.getCamera = function() {
+     *     scene.camera.view.recalcMatrix(scene.camera.view.lastT());
+     *     return getLayoutCamera(scene.camera);
+     *   };
+     * Reading this is the only way to get the matrix-after-recalc
+     * camera during a rotation drag; ``layout.scene.camera`` only
+     * commits on mouseup.
+     */
+    const displayed = displayedSceneCamera(gd);
+    if (displayed) return displayed;
+    if (!gd) return null;
+    const sceneFull = gd._fullLayout && gd._fullLayout.scene ? gd._fullLayout.scene : null;
     if (sceneFull && sceneFull.camera && sceneFull.camera.eye) return sceneFull.camera;
     if (gd.layout && gd.layout.scene && gd.layout.scene.camera) return gd.layout.scene.camera;
     return null;
@@ -2702,23 +2758,24 @@
       if (svg) clearSvg(svg);
       return;
     }
+    /* The displayed GL camera wins whenever getCamera() can answer.
+       ``preferLiveCamera`` is retained for drag/wheel callers. A false
+       flag used to prefer ``layout.scene.camera``, which is what made
+       the triad jump back to the previous orientation after a Display
+       control or a drag that had not yet committed. Layout and the
+       relayout payload are fallbacks only while the GL scene is absent. */
+    void preferLiveCamera;
     const dragActive = dragPollActive || !!dragArm;
-    const preferLive = !!preferLiveCamera || dragActive;
-    let camera = eventCamera || null;
-    let cameraSource = camera ? "event" : null;
-    if (!camera && preferLive) {
-      camera = liveSceneCamera(gd);
-      cameraSource = camera ? "live" : null;
-    }
-    if (!camera && !preferLive) {
-      camera = layoutSceneCamera(gd);
-      cameraSource = camera ? "layout" : null;
-    }
-    if (!camera && !preferLive) {
-      camera = liveSceneCamera(gd);
-      cameraSource = camera ? "live" : null;
-    }
-    if (!camera && preferLive) {
+    const displayed = displayedSceneCamera(gd);
+    let camera = null;
+    let cameraSource = null;
+    if (hasCompleteCamera(displayed)) {
+      camera = displayed;
+      cameraSource = "live";
+    } else if (hasCompleteCamera(eventCamera)) {
+      camera = eventCamera;
+      cameraSource = "event";
+    } else {
       camera = layoutSceneCamera(gd);
       cameraSource = camera ? "layout" : null;
     }
@@ -2744,7 +2801,12 @@
   let scheduledCamera = null;
   function scheduleRedraw(gd, camera) {
     scheduledGd = gd;
-    scheduledCamera = camera;
+    /* A mutation observer redraw passes a null camera. Do not let that
+       clobber a relayout payload that is already waiting for this frame
+       when the GL scene cannot yet report a displayed camera. */
+    if (hasCompleteCamera(camera) || !hasCompleteCamera(scheduledCamera)) {
+      scheduledCamera = camera || null;
+    }
     if (scheduled !== null) return;
     scheduled = (window.requestAnimationFrame || window.setTimeout)(function () {
       const g = scheduledGd;
@@ -2842,17 +2904,20 @@
     dragArm = null;
   }
   function stopDragPoll(gd) {
-    if (!dragPollActive) return;
+    const wasPolling = dragPollActive;
+    const armed = !!dragArm;
     dragPollActive = false;
     if (dragPollRaf !== null) {
       if (window.cancelAnimationFrame) window.cancelAnimationFrame(dragPollRaf);
       else window.clearTimeout(dragPollRaf);
       dragPollRaf = null;
     }
-    /* Wheel zoom does not reliably commit layout.scene.camera before this
-       debounce fires. Finish from the live WebGL camera so the compass does
-       not snap back to the pre-wheel layout camera. */
-    const finalCamera = liveSceneCamera(gd);
+    /* A pointer-down that never crossed the poll threshold still rotates
+       the GL camera. Wheel zoom also commits layout.scene.camera late.
+       Finish from the displayed camera so the compass does not stay on
+       the pre-gesture orientation. */
+    if (!wasPolling && !armed) return;
+    const finalCamera = displayedSceneCamera(gd) || liveSceneCamera(gd);
     redrawCompass(gd, finalCamera, true);
   }
   let wheelStopTimer = null;
@@ -2928,8 +2993,8 @@
        disarm if the user releases outside the graph div. */
     const onMouseDown = function (event) { armDragPoll(event); };
     const onMouseMove = function (event) { maybeStartDragPollFromMove(gd, event); };
-    const onMouseUp = function () { clearDragArm(); stopDragPoll(gd); };
-    const onPointerCancel = function () { clearDragArm(); stopDragPoll(gd); };
+    const onMouseUp = function () { stopDragPoll(gd); clearDragArm(); };
+    const onPointerCancel = function () { stopDragPoll(gd); clearDragArm(); };
     const onWheel = function () { pulseDragPollOnWheel(gd); };
     if (gd.addEventListener) {
       gd.addEventListener("mousedown", onMouseDown);

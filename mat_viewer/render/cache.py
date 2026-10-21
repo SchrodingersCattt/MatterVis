@@ -283,7 +283,7 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
                     else _bond_mesh_traces(scene, style)
                 )
             elif use_fast:
-                bond_traces = _bond_scatter_traces(scene, style)
+                bond_traces = _fast_bond_traces(scene, style)
             else:
                 bond_traces = _bond_mesh_traces(scene, style)
             minor_outline = _minor_outline_traces(scene, style)
@@ -374,7 +374,7 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
         bond_traces = (
             []
             if style.get("style") == "ball"
-            else _bond_scatter_traces(scene, style)
+            else _fast_bond_traces(scene, style)
         )
     else:
         atom_traces = (

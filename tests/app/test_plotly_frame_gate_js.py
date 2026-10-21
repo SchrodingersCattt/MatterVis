@@ -37,7 +37,7 @@ vm.createContext(sandbox);
 const end=source.indexOf('  // ── Right-click menu');
 vm.runInContext(source.slice(0,end)+
   'window.testGate={markActive,stop:()=>{interactionActive=false;flushPendingFigurePush();}};})();',sandbox);
-const start=source.indexOf('  function liveSceneCamera(');
+const start=source.indexOf('  function displayedSceneCamera(');
 const stop=source.indexOf('  function redrawCompass(',start);
 vm.runInContext(source.slice(start,stop),sandbox);
 const plot=sandbox.window.Plotly;

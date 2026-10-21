@@ -59,6 +59,13 @@ def test_layout_consumes_resolved_viewport_without_rederiving_ranges() -> None:
     assert layout["zaxis"]["range"] == viewport.z_range
     assert layout["aspectmode"] == viewport.aspectmode
     assert layout["aspectratio"] == viewport.aspectratio
+    for axis_name in ("xaxis", "yaxis", "zaxis"):
+        axis = layout[axis_name]
+        assert axis["visible"] is False
+        assert axis["showticklabels"] is False
+        assert axis["ticks"] == ""
+        assert axis["zeroline"] is False
+        assert axis["zerolinewidth"] == 0
 
 
 def test_viewport_signature_changes_when_ranges_change() -> None:
