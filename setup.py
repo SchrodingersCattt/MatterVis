@@ -3,9 +3,9 @@
 The copy lands in the build directory after the normal package build. It does
 not write into the source tree, so an interrupted build cannot leave a partial
 ``mat_viewer/_bundled_skills`` that the source checkout would prefer over
-``skills/``. Symlinks are preserved rather than followed: a link that points
-outside a skill stays a link and is rejected when the resource is read, the
-same as a source checkout.
+``skills/``. Wheels cannot store symlinks: ``bdist_wheel`` would follow one and
+package the target's bytes. The copy therefore refuses any symlink in a skill
+directory instead of turning an outside path into an installed file.
 """
 
 from pathlib import Path
@@ -15,25 +15,41 @@ from setuptools import setup
 from setuptools.command.build_py import build_py
 
 
+def _reject_skill_symlinks(source: Path) -> None:
+    """Fail the build when a skill contains a symlink.
+
+    ``bdist_wheel`` stores the target's bytes, so an outside link would become
+    a normal file that ``show --file`` could serve.
+    """
+    if source.is_symlink():
+        raise RuntimeError(f"refusing to bundle skill symlink: {source}")
+    for path in source.rglob("*"):
+        if path.is_symlink():
+            raise RuntimeError(f"refusing to bundle skill symlink: {path}")
+
+
 def copy_bundled_skills(source_root: Path, destination: Path) -> list[Path]:
     """Copy each canonical skill directory into ``destination``.
 
-    Skill roots that are themselves symlinks are skipped. Nested symlinks are
-    copied as symlinks. Returns the file and symlink paths that were written.
+    Returns the file paths that were written. A symlink skill root, or any
+    symlink inside a skill, raises ``RuntimeError`` before the copy starts.
     """
     written: list[Path] = []
     if not source_root.is_dir():
         return written
+    skills = [
+        source
+        for source in sorted(source_root.iterdir(), key=lambda item: item.name)
+        if source.is_dir() and (source / "SKILL.md").is_file()
+    ]
+    for source in skills:
+        _reject_skill_symlinks(source)
     destination.mkdir(parents=True, exist_ok=True)
-    for source in sorted(source_root.iterdir(), key=lambda item: item.name):
-        if source.is_symlink() or not source.is_dir():
-            continue
-        if not (source / "SKILL.md").is_file():
-            continue
+    for source in skills:
         target = destination / source.name
-        copytree(source, target, dirs_exist_ok=True, symlinks=True)
+        copytree(source, target, dirs_exist_ok=True)
         for path in sorted(target.rglob("*")):
-            if path.is_symlink() or path.is_file():
+            if path.is_file() and not path.is_symlink():
                 written.append(path)
     _prune_bytecode(destination)
     return written

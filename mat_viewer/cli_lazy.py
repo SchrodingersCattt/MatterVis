@@ -8,7 +8,9 @@ can stay within its line cap.
 
 from __future__ import annotations
 
+from functools import update_wrapper
 from importlib import import_module
+import inspect
 from typing import Any
 
 
@@ -35,20 +37,47 @@ _BINDINGS: dict[str, tuple[str, str]] = {
 }
 
 
+_TARGET_METADATA = frozenset({
+    "__annotations__",
+    "__doc__",
+    "__name__",
+    "__qualname__",
+})
+
+
 class _Deferred:
-    """Call a module attribute, importing that module on first use."""
+    """Call a module attribute, importing that module on first use.
+
+    Reading ``__name__``, ``__doc__`` or the signature resolves the target and
+    then reports that function. Importing this module does not.
+    """
 
     def __init__(self, module: str, name: str) -> None:
         self._module = module
         self._name = name
         self._fn: Any = None
 
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+    def _resolve(self) -> Any:
         function = self._fn
         if function is None:
             function = getattr(import_module(self._module, __package__), self._name)
             self._fn = function
-        return function(*args, **kwargs)
+            update_wrapper(self, function)
+        return function
+
+    def __getattribute__(self, name: str) -> Any:
+        if name in _TARGET_METADATA or name == "__signature__":
+            function = object.__getattribute__(self, "_resolve")()
+            if name == "__signature__":
+                return inspect.signature(function)
+            return getattr(function, name)
+        return object.__getattribute__(self, name)
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return self._resolve()(*args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._resolve(), name)
 
 
 def bind_deferred_cli_symbols(namespace: dict[str, Any]) -> None:

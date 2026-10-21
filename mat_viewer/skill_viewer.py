@@ -189,15 +189,31 @@ def _local_target(source: str, raw_target: str) -> tuple[str, str | None] | None
     return _normalise_relative(joined, label="linked resource"), fragment if separator else None
 
 
-def _fence_marker(line: str) -> str | None:
+def _opening_fence(line: str) -> tuple[str, int] | None:
+    """Return the fence character and length for an opening fence."""
     stripped = line.lstrip(" ")
     if len(line) - len(stripped) > 3:
         return None
-    if stripped.startswith("```"):
-        return "`"
-    if stripped.startswith("~~~"):
-        return "~"
-    return None
+    raw = stripped.rstrip("\r\n")
+    if not raw or raw[0] not in "`~":
+        return None
+    char = raw[0]
+    length = len(raw) - len(raw.lstrip(char))
+    if length < 3:
+        return None
+    info = raw[length:]
+    if char == "`" and "`" in info:
+        return None
+    return char, length
+
+
+def _closing_fence(line: str, char: str, length: int) -> bool:
+    """A closing fence is the same character, at least as long as the opener."""
+    stripped = line.lstrip(" ")
+    if len(line) - len(stripped) > 3:
+        return False
+    raw = stripped.rstrip("\r\n").rstrip(" \t")
+    return len(raw) >= length and raw == char * len(raw)
 
 
 def _mask_inline_code(line: str) -> str:
@@ -208,18 +224,18 @@ def _mask_unlinked_code(text: str) -> str:
     """Blank fenced blocks and inline code so example links are not resources."""
     lines = text.splitlines(keepends=True)
     masked: list[str] = []
-    fence: str | None = None
+    fence: tuple[str, int] | None = None
     for line in lines:
-        marker = _fence_marker(line)
         if fence is None:
-            if marker is not None:
-                fence = marker
+            opener = _opening_fence(line)
+            if opener is not None:
+                fence = opener
                 masked.append(" " * len(line))
                 continue
             masked.append(_mask_inline_code(line))
             continue
         masked.append(" " * len(line))
-        if marker == fence:
+        if _closing_fence(line, fence[0], fence[1]):
             fence = None
     return "".join(masked)
 

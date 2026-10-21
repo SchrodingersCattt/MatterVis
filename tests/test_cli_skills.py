@@ -178,6 +178,26 @@ def test_show_ignores_code_spans_and_directory_links(
     assert "# Page" in expanded
 
 
+def test_longer_opening_fence_masks_the_inner_example() -> None:
+    text = "````md\n```\n[a](x.md)\n```\n````\n"
+    assert skill_viewer._links("SKILL.md", text) == []
+    followed = text + "[real](references/page.md)\n"
+    assert [target for _raw, target, _fragment in skill_viewer._links("SKILL.md", followed)] == [
+        "references/page.md"
+    ]
+
+
+def test_deferred_cli_symbols_expose_target_metadata() -> None:
+    import inspect
+
+    from mat_viewer.cli import _inspect_payload
+    from mat_viewer.structure.inspect import inspect_payload
+
+    assert _inspect_payload.__name__ == inspect_payload.__name__
+    assert _inspect_payload.__doc__ == inspect_payload.__doc__
+    assert inspect.signature(_inspect_payload) == inspect.signature(inspect_payload)
+
+
 def test_skills_error_json_contract(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as exc_info:
         main(["skills", "show", "nope", "--json"])

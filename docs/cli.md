@@ -66,7 +66,10 @@ default `show` command prints only the raw `SKILL.md` entrypoint. Use
 `--file` for one referenced resource, `tree` to inspect local links without
 reading their bodies, or `--all` to expand reachable Markdown in deterministic
 link order. Scripts and external links are never executed or expanded. Links
-inside fenced or inline code are examples, not resources. A link to a directory
+inside fenced or inline code are examples, not resources. A closing fence must
+be at least as long as its opener, so a shorter fence shown inside the example
+stays inside the block. Four-space indented code blocks, and inline spans whose
+backtick runs differ in length, are still ordinary text. A link to a directory
 is a non-document target. If a default `show` document links to a missing file,
 the document is still printed, each broken link is reported on stderr, and the
 process exits with status 2. `tree` and `show --all` stop before printing a
