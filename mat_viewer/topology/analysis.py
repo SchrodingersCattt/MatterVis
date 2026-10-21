@@ -28,12 +28,40 @@ from molcrys_kit.structures.polyhedra import (
 from ..config import current_config, element_color
 from ..structure import molcrys_bridge
 
+# Dropdown and persisted rows may still carry the historical "(auto)" token.
+# It is not a ligand formula. MolCrysKit rejects it, and MatterVis does not
+# invent a shell from the other species in the cell.
+_AUTO_LIGAND_TOKENS = {"auto", "(auto)", "__auto__"}
+EXPLICIT_LIGAND_MESSAGE = (
+    "Choose an explicit ligand species. MolCrysKit polyhedra require an "
+    "explicit ligand_species; MatterVis no longer derives ligand shells locally."
+)
+
+
+def explicit_ligand_species(value: Any) -> str | None:
+    """Return a ligand formula, or None when the value is missing or ``(auto)``."""
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            resolved = explicit_ligand_species(item)
+            if resolved:
+                return resolved
+        return None
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text.lower() in _AUTO_LIGAND_TOKENS:
+        return None
+    return text
+
+
 __all__ = [
     "DEFAULT_CENTROID_OFFSET_FRAC",
+    "EXPLICIT_LIGAND_MESSAGE",
     "_hull_encloses_center",
     "atom_overlay",
     "display_atom_centers_for_spec",
     "analyze_topology",
+    "explicit_ligand_species",
     "classify_fragments",
     "classify_shell",
     "compute_angular_signature",
@@ -164,11 +192,8 @@ def _mck_polyhedron_record(
     hard_cutoff: float | None = None,
     fallback_max: int | None = None,
 ) -> dict[str, Any] | None:
-    if not ligand_species:
-        raise ValueError(
-            "MolCrysKit polyhedra require an explicit ligand_species; "
-            "MatterVis no longer derives ligand shells locally."
-        )
+    if explicit_ligand_species(ligand_species) is None:
+        raise ValueError(EXPLICIT_LIGAND_MESSAGE)
     ligand_formula = next((str(item) for item in ligand_species if item), None)
     if level == "atom":
         central_symbol = str(center_species or "").strip()

@@ -14,14 +14,29 @@ from dash import ALL, Input, Output, State, callback_context, html, no_update
 
 from .. import perf_log
 from ..topology import DEFAULT_CENTROID_OFFSET_FRAC
+from ..topology.analysis import EXPLICIT_LIGAND_MESSAGE, explicit_ligand_species
 from .backend_analysis import (
     _coerce_bfdh_max_index,
     _coerce_bfdh_top_n,
 )
 from .editor_tables import _polyhedra_table_rows
-from .normalizers import _AUTO_LIGAND_VALUE
 from .shared import _POLY_SHELL_MODE_ENCLOSURE, _POLY_SHELL_MODE_GAP
 from .status_helpers import surface_callback_error
+
+
+def default_polyhedron_ligand(species_options, center_species: str) -> str | None:
+    """Choose the ligand stored on a newly added polyhedron row.
+
+    MolCrysKit needs a real ligand formula. ``(auto)`` is not one, and
+    guessing a shell locally was removed on purpose, so the default row
+    uses another displayed species when the structure has one.
+    """
+    center = str(center_species or "")
+    for option in species_options or []:
+        value = str(option.get("value") or "")
+        if value and value != center:
+            return value
+    return None
 
 
 def _build_polyhedron_specs(
@@ -43,9 +58,8 @@ def _build_polyhedron_specs(
     for index, id_dict in enumerate(color_ids):
         spec_id = id_dict.get("spec_id")
         base = existing.get(spec_id, {})
-        ligand_value = ligands[index] if index < len(ligands) else _AUTO_LIGAND_VALUE
-        if ligand_value == _AUTO_LIGAND_VALUE:
-            ligand_value = None
+        raw_ligand = ligands[index] if index < len(ligands) else None
+        ligand_value = explicit_ligand_species(raw_ligand)
         new_specs.append(
             {
                 "id": spec_id,
@@ -146,10 +160,10 @@ def register_analysis_callbacks(app, backend):
             if not species_options:
                 return _rebuild(), no_update
             center_species = str(species_options[0]["value"])
-            ligand_species = next(
-                (str(option["value"]) for option in species_options if str(option["value"]) != center_species),
-                None,
-            )
+            ligand_species = default_polyhedron_ligand(species_options, center_species)
+            if not ligand_species:
+                _surface_error("Add polyhedron", ValueError(EXPLICIT_LIGAND_MESSAGE))
+                return _rebuild(), no_update
             try:
                 backend.add_polyhedron_spec(
                     center_species=center_species,
@@ -287,10 +301,17 @@ def register_analysis_callbacks(app, backend):
                 ])
             )
 
-        return html.Table(
+        table = html.Table(
             rows,
             style={"width": "100%", "borderCollapse": "collapse", "marginTop": "4px"}
         )
+        warnings = [
+            html.Div(str(warning), style={"color": "#A00", "marginTop": "4px"})
+            for warning in (result.get("warnings") or [])
+        ]
+        if warnings:
+            return html.Div(warnings + [table])
+        return table
 
     @app.callback(
         Output("bfdh-morphology-enabled", "value"),

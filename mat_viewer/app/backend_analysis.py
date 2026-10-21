@@ -16,6 +16,8 @@ analysis surface that calls into it.
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
+from contextlib import contextmanager
+
 from .shared import *
 from .normalizers import *
 from .rightclick import _normalize_polyhedron_specs, _normalize_polyhedron_spec
@@ -25,6 +27,119 @@ from ..topology.analysis import _MAX_REGISTERED_CN
 
 BFDH_DEFAULT_MAX_INDEX = 2
 BFDH_DEFAULT_TOP_N = 10
+
+
+@contextmanager
+def _bfdh_symmetry_errors():
+    """Run BFDH symmetry on spglib's current error API.
+
+    spglib still defaults to deprecated error handling and warns inside the
+    symmetry helpers pymatgen uses to group Miller families. ``Warning`` is
+    an ``Exception``, and this project's pytest config turns warnings into
+    errors, so MolCrysKit's ``except Exception`` fallback treats that warning
+    as a symmetry failure. The ranking then keeps every signed low-index
+    plane as its own family with multiplicity 1. Opt into direct errors for
+    the duration of the MolCrysKit call and restore the previous flag.
+    """
+    try:
+        import spglib.error as spglib_error
+    except ImportError:
+        yield
+        return
+    previous = spglib_error.OLD_ERROR_HANDLING
+    spglib_error.OLD_ERROR_HANDLING = False
+    try:
+        yield
+    finally:
+        spglib_error.OLD_ERROR_HANDLING = previous
+
+
+def _closed_bfdh_mesh(crystal, facets) -> list[dict[str, Any]]:
+    """Return a closed convex BFDH mesh centered at the Cartesian origin.
+
+    Face distances come from MolCrysKit ``ImplicitShape.bfdh``: they follow
+    the growth-rate proxy ``1 / d_hkl``, and both signs of every symmetry
+    equivalent are included. The stored vertices are scaled so the largest
+    bounding-box span equals the longest cell edge. The renderer multiplies
+    by the morphology scale and then translates onto the unit-cell centre.
+
+    ``facets`` must be the ranked families already shown in the hkl table so
+    the solid uses the same Top N set.
+    """
+    import numpy as np
+    from molcrys_kit.operations.implicit_shape import ImplicitShape
+    from scipy.spatial import ConvexHull, QhullError
+
+    lattice = np.asarray(getattr(crystal, "lattice", None), dtype=float)
+    if lattice.shape != (3, 3) or not np.all(np.isfinite(lattice)):
+        raise ValueError("BFDH morphology needs a finite 3x3 lattice.")
+    max_dimension = float(np.max(np.linalg.norm(lattice, axis=1)))
+    if not np.isfinite(max_dimension) or max_dimension <= 0.0:
+        raise ValueError("BFDH morphology lattice has no positive cell edge.")
+    miller_indices = [
+        tuple(int(value) for value in facet.miller_index) for facet in facets
+    ]
+    with _bfdh_symmetry_errors():
+        shape = ImplicitShape.bfdh(
+            crystal,
+            max_dimension,
+            miller_indices=miller_indices,
+        )
+    vertices = np.asarray(shape.parameters.get("vertices_A"), dtype=float)
+    if vertices.ndim != 2 or vertices.shape != (vertices.shape[0], 3) or len(vertices) < 4:
+        raise ValueError("BFDH half-space intersection did not return a 3-D vertex set.")
+    if not np.all(np.isfinite(vertices)):
+        raise ValueError("BFDH half-space intersection returned non-finite vertices.")
+    try:
+        hull = ConvexHull(vertices)
+    except QhullError as exc:
+        raise ValueError(
+            "BFDH half-space vertices do not form a closed 3-D polyhedron."
+        ) from exc
+    if not np.isfinite(hull.volume) or float(hull.volume) <= 0.0:
+        raise ValueError("BFDH morphology mesh is degenerate.")
+
+    planes: list[tuple[np.ndarray, float, list[int]]] = []
+    for plane in shape.parameters.get("planes") or []:
+        normal = np.asarray(plane.get("normal_cartesian"), dtype=float)
+        distance = float(plane.get("distance_A"))
+        miller = [int(value) for value in plane.get("miller_index") or (0, 0, 0)]
+        if normal.shape != (3,) or not np.all(np.isfinite(normal)):
+            continue
+        planes.append((normal, distance, miller))
+
+    grouped: dict[tuple[int, int, int], dict[str, list]] = {}
+    for simplex in hull.simplices:
+        triangle = vertices[np.asarray(simplex, dtype=int)]
+        centroid = triangle.mean(axis=0)
+        best_index = None
+        best_error = float("inf")
+        for index, (normal, distance, _miller) in enumerate(planes):
+            error = abs(float(np.dot(normal, centroid)) - distance)
+            if error < best_error:
+                best_error = error
+                best_index = index
+        if best_index is None:
+            continue
+        miller_key = tuple(planes[best_index][2])
+        bucket = grouped.setdefault(miller_key, {"triangles": [], "centroids": []})
+        bucket["triangles"].append(triangle.tolist())
+        bucket["centroids"].append(centroid)
+
+    mesh = []
+    for miller, bucket in grouped.items():
+        centroids = np.asarray(bucket["centroids"], dtype=float)
+        mesh.append(
+            {
+                "miller": list(miller),
+                "triangles": bucket["triangles"],
+                "centroid": centroids.mean(axis=0).tolist(),
+            }
+        )
+    mesh.sort(key=lambda item: tuple(item["miller"]))
+    if not mesh:
+        raise ValueError("BFDH morphology mesh has no labelled faces.")
+    return mesh
 
 
 def _coerce_bfdh_max_index(value: Any) -> int:
@@ -371,50 +486,37 @@ class _AnalysisBackendMixin:
 
         try:
             from molcrys_kit.analysis import enumerate_bfdh_facets
-            from pymatgen.core.lattice import Lattice
-            from pymatgen.analysis.wulff import WulffShape
-            import numpy as np
 
-            facets = enumerate_bfdh_facets(crystal, max_index=max_index, top_n=top_n)
-            
-            wulff_facets = []
+            # include_equivalents / include_negative fill the table's
+            # multiplicity. The mesh is a separate MolCrysKit half-space
+            # intersection of those families; pymatgen's WulffShape with
+            # energy=d_hkl keeps only the smallest-d family and labels every
+            # symmetry copy with the representative index.
+            with _bfdh_symmetry_errors():
+                facets = enumerate_bfdh_facets(
+                    crystal,
+                    max_index=max_index,
+                    top_n=top_n,
+                    include_equivalents=True,
+                    include_negative=True,
+                )
+            warnings: list[str] = []
+            wulff_facets: list[dict[str, Any]] = []
             if facets:
                 try:
-                    lattice = Lattice(crystal.lattice)
-                    miller_list = [f.miller_index for f in facets]
-                    # Use d_hkl directly as "energy". In Wulff construction,
-                    # face distance from centre = 1/energy. With energy=d_hkl
-                    # the output vertices are in Angstrom scale, and the face
-                    # ranking is identical to energy=1/d_hkl (same visible
-                    # set, only the coordinate scale differs).
-                    e_surf_list = [f.d_hkl for f in facets]
-                    
-                    wulff = WulffShape(lattice, miller_list, e_surf_list)
-                    
-                    for facet in wulff.facets:
-                        triangles = []
-                        all_pts = []
-                        for tri in facet.points:
-                            tri_pts = [v.tolist() for v in tri]
-                            triangles.append(tri_pts)
-                            all_pts.extend(tri_pts)
-                        
-                        if all_pts:
-                            centroid = np.mean(all_pts, axis=0).tolist()
-                            wulff_facets.append({
-                                "miller": facet.miller,
-                                "triangles": triangles,
-                                "centroid": centroid
-                            })
-                except Exception:
-                    # WulffShape might fail if facets don't enclose a 3D volume
-                    pass
+                    wulff_facets = _closed_bfdh_mesh(crystal, facets)
+                except ValueError as exc:
+                    warnings.append(str(exc))
+                if not wulff_facets and not warnings:
+                    warnings.append(
+                        "BFDH ranking succeeded, but the morphology mesh is empty."
+                    )
 
             return {
                 "facets": [f.as_dict() for f in facets],
                 "wulff_facets": wulff_facets,
                 "status": "ok",
-                "warnings": [],
+                "warnings": warnings,
             }
         except Exception as exc:
             return {

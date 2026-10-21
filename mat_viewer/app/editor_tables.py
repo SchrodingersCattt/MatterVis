@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .shared import *
 from .normalizers import *
+from ..topology.analysis import EXPLICIT_LIGAND_MESSAGE, explicit_ligand_species
 
 def _perf_log_row(entry: dict[str, Any]) -> Any:
     """Render one perf-log event as a Dash row.
@@ -111,14 +112,14 @@ def _polyhedra_table_rows(
     if not specs:
         return [
             html.Div(
-                "No named polyhedra. Click \u201cAdd\u201d to register one (centre + optional ligand).",
+                "No named polyhedra. Click \u201cAdd\u201d to register one (centre + explicit ligand).",
                 className="polyhedra-empty",
                 style={"fontSize": "12px", "color": "#777", "margin": "6px 0"},
             )
         ]
-    ligand_options = [{"label": "(auto)", "value": _AUTO_LIGAND_VALUE}] + list(species_options)
     rows = []
     for spec in specs:
+        ligand_value = explicit_ligand_species(spec.get("ligand_species"))
         shell_mode = (
             _POLY_SHELL_MODE_ENCLOSURE
             if spec.get("enforce_enclosure", True)
@@ -156,8 +157,9 @@ def _polyhedra_table_rows(
                             html.Span("->", style={"color": "#888", "fontSize": "12px"}),
                             dcc.Dropdown(
                                 id={"type": "poly-row-ligand", "spec_id": spec["id"]},
-                                options=ligand_options,
-                                value=str(spec.get("ligand_species") or _AUTO_LIGAND_VALUE),
+                                options=species_options,
+                                value=ligand_value,
+                                placeholder="Choose ligand",
                                 clearable=False,
                                 style={"flex": "1", "minWidth": "70px", "fontSize": "12px"},
                             ),
@@ -188,6 +190,21 @@ def _polyhedra_table_rows(
                             "alignItems": "center",
                             "gap": "4px",
                         },
+                    ),
+                    *(
+                        [
+                            html.Div(
+                                EXPLICIT_LIGAND_MESSAGE,
+                                className="polyhedron-ligand-required",
+                                style={
+                                    "fontSize": "10px",
+                                    "color": "#A00",
+                                    "margin": "2px 0 4px",
+                                },
+                            )
+                        ]
+                        if ligand_value is None
+                        else []
                     ),
                     html.Details(
                         [

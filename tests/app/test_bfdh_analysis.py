@@ -86,12 +86,19 @@ def test_run_bfdh_analysis_defaults_zero_top_n_to_ten(backend_empty, monkeypatch
     bundle = backend_empty.get_bundle(backend_empty.get_state()["structure"])
     bundle.crystal = object()
 
-    def fake_enumerate(crystal, *, max_index, top_n):
-        calls.append((crystal, max_index, top_n))
+    def fake_enumerate(crystal, *, max_index, top_n, **kwargs):
+        calls.append((crystal, max_index, top_n, kwargs))
         return []
 
     monkeypatch.setattr(molcrys_kit.analysis, "enumerate_bfdh_facets", fake_enumerate)
     result = backend_empty.run_bfdh_analysis(max_index=1, top_n=0)
 
     assert result["status"] == "ok"
-    assert calls == [(bundle.crystal, 1, 10)]
+    assert calls == [
+        (
+            bundle.crystal,
+            1,
+            10,
+            {"include_equivalents": True, "include_negative": True},
+        )
+    ]
