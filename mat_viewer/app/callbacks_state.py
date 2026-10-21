@@ -20,6 +20,18 @@ from .display_controls import (
 from ..properties import web_colormap_options
 
 
+def checklist_after_reconcile(mode, reconciled, incoming):
+    """Checklist value after display options are reconciled.
+
+    Returns ``no_update`` when the control already shows that value, so
+    restoring a stored Cell boundary does not echo another ``capture_state``.
+    """
+    visible = visible_display_options(mode, reconciled)
+    if list(visible) == list(incoming or []):
+        return no_update
+    return visible
+
+
 def register_state_callbacks(app, backend):
     # Widgets are filled for one scene at a time. A tab change updates
     # ``scene-tabs`` before those widgets, and a capture that runs in
@@ -529,6 +541,7 @@ def register_state_callbacks(app, backend):
 
     @app.callback(
         Output("agent-state-store", "data", allow_duplicate=True),
+        Output("display-options", "value", allow_duplicate=True),
         Input("scene-tabs", "value"),
         Input("display-mode-selector", "value"),
         Input("display-options", "value"),
@@ -590,34 +603,38 @@ def register_state_callbacks(app, backend):
         # never persist the previous scene's control values into the newly
         # selected scene.
         if "scene-tabs" in triggered_props:
-            return no_update
+            return no_update, no_update
         if scene_id and scene_id not in backend.scene_store.scenes:
-            return no_update
+            return no_update, no_update
         filled = filled_controls_scene["id"]
         if filled and scene_id and str(scene_id) != str(filled):
-            return no_update
+            return no_update, no_update
         if scene_id:
             backend.set_active_scene(scene_id, broadcast=False)
         prev = backend.get_state(scene_id)
+        incoming_options = list(display_options or [])
         display_options = reconcile_display_options(
             display_mode,
             display_options,
             prev.get("display_mode"),
             prev.get("display_options"),
         )
+        checklist_out = checklist_after_reconcile(
+            display_mode, display_options, incoming_options
+        )
         display_changed = display_mode != prev.get("display_mode")
         property_spec = None
         if property_fields:
             if property_range_mode == "manual":
                 if property_range_min is None or property_range_max is None:
-                    return no_update
+                    return no_update, no_update
                 try:
                     lower = float(property_range_min)
                     upper = float(property_range_max)
                 except (TypeError, ValueError):
-                    return no_update
+                    return no_update, no_update
                 if not np.isfinite((lower, upper)).all() or lower >= upper:
-                    return no_update
+                    return no_update, no_update
                 value_range = [lower, upper]
             else:
                 value_range = None
@@ -667,7 +684,7 @@ def register_state_callbacks(app, backend):
         # capture_state -> agent-state-store`` would otherwise double up
         # every figure render, doubling the 1.4 MB-per-frame cost.
         if all(prev.get(k) == v for k, v in patch.items() if k != "scene_id"):
-            return no_update
+            return no_update, checklist_out
         backend.apply_intent(
             {"type": "set_style", "scene_id": scene_id, "payload": patch}
         )
@@ -688,9 +705,9 @@ def register_state_callbacks(app, backend):
             },
         )
         state = backend.get_state(scene_id)
-        # Capture only publishes the authoritative state. Geometry scheduling
-        # and stale-result handling remain in the worker.
-        return state
+        # Capture publishes the authoritative state and the checklist value
+        # that belongs with it. Geometry scheduling stays in the worker.
+        return state, checklist_out
 
     # ------------------------------------------------------------------
     # Phase 3 UI: Named-polyhedra table.

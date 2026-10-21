@@ -33,27 +33,32 @@
     }
   }
 
+  var rootObserver = null;
+
   function watch() {
     var pane = document.getElementById("analysis-panel-content");
     if (!pane || pane.dataset.histogramBound === "1") return;
     pane.dataset.histogramBound = "1";
     if (!pane.classList.contains("analysis-tab-content--hidden")) scheduleResize();
-    if (typeof MutationObserver !== "function") return;
-    new MutationObserver(function () {
-      if (!pane.classList.contains("analysis-tab-content--hidden")) scheduleResize();
-    }).observe(pane, { attributes: true, attributeFilter: ["class"] });
+    if (typeof MutationObserver === "function") {
+      new MutationObserver(function () {
+        if (!pane.classList.contains("analysis-tab-content--hidden")) scheduleResize();
+      }).observe(pane, { attributes: true, attributeFilter: ["class"] });
+    }
+    if (rootObserver) {
+      rootObserver.disconnect();
+      rootObserver = null;
+    }
   }
 
-  function init() {
-    watch();
+  if (typeof MutationObserver === "function") {
+    rootObserver = new MutationObserver(function () { watch(); });
+    rootObserver.observe(document.documentElement, { childList: true, subtree: true });
   }
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
+    document.addEventListener("DOMContentLoaded", watch);
   } else {
-    init();
+    watch();
   }
-
-  var rootObserver = new MutationObserver(function () { watch(); });
-  rootObserver.observe(document.documentElement, { childList: true, subtree: true });
 })();

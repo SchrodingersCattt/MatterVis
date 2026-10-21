@@ -1,3 +1,8 @@
+from types import SimpleNamespace
+
+from dash import no_update
+
+from mat_viewer.app import ViewerBackend, callbacks_state
 from mat_viewer.app.display_controls import (
     display_option_hint,
     display_option_items,
@@ -86,3 +91,92 @@ def test_unchecking_cell_boundary_in_unit_cell_clears_it():
     )
     assert "unit_cell_box" not in cleared
     assert "wrap_into_cell" not in cleared
+
+
+class _CallbackRegistry:
+    def __init__(self):
+        self.callbacks = {}
+
+    def callback(self, *args, **kwargs):
+        def register(fn):
+            self.callbacks[fn.__name__] = fn
+            return fn
+
+        return register
+
+
+def test_cell_boundary_checkbox_returns_when_scope_returns(tmp_path, monkeypatch):
+    """Unit cell (box on) → Formula unit (unchecked, preference kept) → Unit cell (checked)."""
+    backend = ViewerBackend(
+        preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path)
+    )
+    try:
+        backend.patch_state(
+            {
+                "display_mode": "unit_cell",
+                "display_options": ["labels", "unit_cell_box", "wrap_into_cell"],
+            },
+            broadcast=False,
+        )
+        registry = _CallbackRegistry()
+        callbacks_state.register_state_callbacks(registry, backend)
+
+        def capture(mode, options):
+            monkeypatch.setattr(
+                callbacks_state,
+                "callback_context",
+                SimpleNamespace(triggered=[{"prop_id": "display-mode-selector.value"}]),
+            )
+            state = backend.get_state()
+            return registry.callbacks["capture_state"](
+                state["scene_id"],
+                mode,
+                options,
+                state["atom_scale"],
+                state["bond_radius"],
+                state["minor_opacity"],
+                state["material"],
+                state["style"],
+                state["disorder"],
+                state["ortep_mode"],
+                state["axis_scale"],
+                state["topology_site_index"],
+                ["enabled"] if state.get("topology_enabled") else [],
+                [],
+                "auto",
+                None,
+                "viridis",
+                "auto",
+                None,
+                None,
+                None,
+                "#BDBDBD",
+                [],
+            )
+
+        items, _hint, visible = registry.callbacks["update_display_availability"](
+            "formula_unit", ["labels", "unit_cell_box", "wrap_into_cell"]
+        )
+        by_value = {item["value"]: item for item in items}
+        assert by_value["unit_cell_box"]["disabled"]
+        assert by_value["wrap_into_cell"]["disabled"]
+        assert visible == ["labels"]
+        _stored, checklist = capture("formula_unit", visible)
+        stored = backend.get_state()
+        assert stored["display_mode"] == "formula_unit"
+        assert "unit_cell_box" in stored["display_options"]
+        assert "wrap_into_cell" in stored["display_options"]
+        assert checklist is no_update
+
+        _items, _hint, still_hidden = registry.callbacks["update_display_availability"](
+            "unit_cell", ["labels"]
+        )
+        assert still_hidden is no_update
+        _stored, checklist = capture("unit_cell", ["labels"])
+        stored = backend.get_state()
+        assert stored["display_mode"] == "unit_cell"
+        assert "unit_cell_box" in stored["display_options"]
+        assert "wrap_into_cell" in stored["display_options"]
+        assert checklist == ["labels", "unit_cell_box", "wrap_into_cell"]
+    finally:
+        backend.close()

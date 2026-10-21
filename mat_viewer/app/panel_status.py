@@ -113,10 +113,11 @@ def canvas_status_bar(structure: str, scope: str, counts: str):
 
 
 def register_workbench_status(app, backend) -> None:
-    """Publish the status bar and atom list from the loaded bundle scene.
+    """Publish the status bar and atom list for the scene that is drawn.
 
-    Counts come from the scene already built for the figure. This callback
-    does not assemble geometry.
+    Counts come from ``scene_for_state``, which follows the current display
+    mode and transforms. ``bundle.scene`` is the formula-unit scene from
+    load and is shared across callers, so it is not a status source.
     """
     from dash import Input, Output
 
@@ -132,7 +133,7 @@ def register_workbench_status(app, backend) -> None:
         scene_id = agent_state.get("scene_id") if isinstance(agent_state, dict) else None
         try:
             state = backend.get_state(scene_id)
-            scene = backend.get_bundle(state["structure"]).scene
+            scene = backend.scene_for_state(state)
         except (KeyError, TypeError, ValueError, AttributeError):
             return "No structure", "", "", render_atom_list(None)
         label, mode, counts = status_bar_parts(state, scene)

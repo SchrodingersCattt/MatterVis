@@ -58,6 +58,8 @@
     }
   }
 
+  var rootObserver = null;
+
   function watchRenderPill() {
     var pill = document.getElementById("mv-render-status");
     if (!pill || pill.dataset.statusBound === "1" || typeof MutationObserver !== "function") return;
@@ -69,6 +71,10 @@
       characterData: true,
       subtree: true,
     });
+    if (rootObserver) {
+      rootObserver.disconnect();
+      rootObserver = null;
+    }
   }
 
   function noteUserRequest(bodyText) {
@@ -103,16 +109,14 @@
     window.fetch = wrapped;
   }
 
-  function init() {
-    watchRenderPill();
+  if (typeof MutationObserver === "function") {
+    rootObserver = new MutationObserver(function () { watchRenderPill(); });
+    rootObserver.observe(document.documentElement, { childList: true, subtree: true });
   }
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
+    document.addEventListener("DOMContentLoaded", watchRenderPill);
   } else {
-    init();
+    watchRenderPill();
   }
-
-  var observer = new MutationObserver(function () { watchRenderPill(); });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
 })();

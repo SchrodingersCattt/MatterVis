@@ -1,14 +1,16 @@
 """Regression coverage for analysis/operations polish, the status bar, and the server log."""
 
+import json
 from pathlib import Path
 
 from _layout_helpers import find_component, layout_ids, walk_layout
 from dash import html
 
-from mat_viewer.app import create_app
+from mat_viewer.app import ViewerBackend, create_app
 from mat_viewer.app.editor_tables import render_perf_log
 from mat_viewer.app.panel_status import (
     atom_list_model,
+    register_workbench_status,
     render_atom_list,
     status_bar_parts,
 )
@@ -148,3 +150,72 @@ def test_panel_assets_define_status_loading_and_log_grouping():
     assert "mv-status-busy" in status
     assert "topology-histogram" in analysis
     assert "analysis-tab-content--hidden" in analysis
+    assert "rootObserver.disconnect()" in status
+    assert "rootObserver.disconnect()" in analysis
+    assert "calc(28px + 12px)" in workbench
+    assert "calc(28px + 12px)" in panels
+
+
+def _listed_atom_total(nodes) -> int:
+    rows = 0
+    for node in walk_layout(html.Div(nodes)):
+        class_name = str(getattr(node, "className", "") or "")
+        if "atom-list-row" in class_name:
+            rows += 1
+        children = getattr(node, "children", None)
+        if isinstance(children, str) and children.startswith("Showing "):
+            return int(children.split(" of ", 1)[1].split(" ", 1)[0])
+    return rows
+
+
+def test_status_counts_follow_the_drawn_display_mode(tmp_path):
+    """Formula unit and unit cell of one structure must not share bundle.scene."""
+    local = tmp_path / ".local"
+    local.mkdir()
+    cif = Path(__file__).parents[2] / "scripts" / "data" / "DAP-4.cif"
+    (local / "catalog.local.json").write_text(
+        json.dumps(
+            {"structures": {"DAP-4": {"cif_path": str(cif.resolve()), "title": "DAP-4"}}}
+        ),
+        encoding="utf-8",
+    )
+    backend = ViewerBackend(
+        preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path)
+    )
+    try:
+        registry = _CallbackRegistry()
+        register_workbench_status(registry, backend)
+        refresh = registry.callbacks["refresh_workbench_status"]
+
+        backend.patch_state({"display_mode": "formula_unit"}, broadcast=False)
+        primed = backend.scene_for_state(backend.get_state())
+        formula_atoms = len(primed.get("draw_atoms") or [])
+        bundle_scene = backend.get_bundle(backend.get_state()["structure"]).scene
+        assert len(bundle_scene.get("draw_atoms") or []) == formula_atoms
+
+        backend.patch_state({"display_mode": "unit_cell"}, broadcast=False)
+        _label, scope, counts, atoms = refresh(backend.get_state(), "")
+        assert scope == "Unit cell"
+        cell_atoms = int(str(counts).split(" ", 1)[0])
+        assert cell_atoms != formula_atoms
+        assert _listed_atom_total(atoms) == cell_atoms
+
+        backend.patch_state({"display_mode": "formula_unit"}, broadcast=False)
+        _label, scope, counts, atoms = refresh(backend.get_state(), "")
+        assert scope == "Formula unit"
+        assert int(str(counts).split(" ", 1)[0]) == formula_atoms
+        assert _listed_atom_total(atoms) == formula_atoms
+    finally:
+        backend.close()
+
+
+class _CallbackRegistry:
+    def __init__(self):
+        self.callbacks = {}
+
+    def callback(self, *args, **kwargs):
+        def register(fn):
+            self.callbacks[fn.__name__] = fn
+            return fn
+
+        return register

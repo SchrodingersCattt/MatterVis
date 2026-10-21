@@ -591,7 +591,8 @@ body.panel-resizing * {
 .perf-log-panel {
   position: absolute;
   right: 14px;
-  bottom: 42px;
+  /* Clear the 28px status bar by 12px. */
+  bottom: calc(28px + 12px);
   z-index: 9000;
   background: rgba(20, 24, 31, 0.94);
   color: #e6edf3;
@@ -763,7 +764,7 @@ body.panel-resizing * {
 @media (max-width: 755px) {
   .perf-log-panel {
     right: 8px;
-    bottom: 40px;
+    bottom: calc(28px + 12px);
     max-width: calc(100% - 16px);
     /* Keep the pill above the compact drawer (8000) and its toggle (8100).
        The open Tools drawer covers the corner this pill occupies. */
