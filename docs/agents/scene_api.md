@@ -100,6 +100,11 @@ Parses a CIF and returns a scene dict consumable by
   image is emitted. Cross-boundary bonds whose in-cell endpoints would create
   a long line are omitted rather than drawn outside the cell. The default is
   `True` to preserve the interactive whole-fragment convention.
+  The viewer Display token `wrap_into_cell` (enabled in Unit cell scope) is
+  that strict cell for the active scene: it passes
+  `include_boundary_replicas=False` and
+  `include_cross_boundary_bond_endpoints=False`. It is display-only. Source
+  fractional coordinates on the loaded bundle stay unchanged.
 - `asymmetric_unit` — only the asymmetric unit is drawn.
 - `cluster` — **free molecular cluster mode**. Every parsed atom is
   drawn unchanged; no formula-unit selection or periodic image

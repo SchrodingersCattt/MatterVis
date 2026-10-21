@@ -172,6 +172,13 @@ def classify_change(
         return UpdateKind.DISPLAY
     if before is None:
         return UpdateKind.FULL
+    # A tab change can share geometry with the scene it replaces (duplicate
+    # structure, same scope). Classifying that as DISPLAY leaves the previous
+    # figure on the canvas while the checkbox already shows the new scene.
+    if str(before.get("scene_id") or "") != str(after.get("scene_id") or ""):
+        if geometry_state_key(before) != geometry_state_key(after):
+            return UpdateKind.GEOMETRY
+        return UpdateKind.FULL
     if state_versions(before).camera != state_versions(after).camera or before.get("camera") != after.get("camera"):
         # A camera-only change is cheap; a camera changed alongside geometry
         # still belongs to the geometry transaction.

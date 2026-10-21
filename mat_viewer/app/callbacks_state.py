@@ -16,6 +16,11 @@ from ..properties import web_colormap_options
 
 
 def register_state_callbacks(app, backend):
+    # Widgets are filled for one scene at a time. A tab change updates
+    # ``scene-tabs`` before those widgets, and a capture that runs in
+    # between would write the previous scene's scope into the new one.
+    filled_controls_scene = {"id": str(backend.active_scene_id() or "")}
+
     @app.callback(
         Output("display-options", "options"), Output("display-options-hint", "children"),
         Input("display-mode-selector", "value"), Input("display-options", "value"),
@@ -412,6 +417,7 @@ def register_state_callbacks(app, backend):
             if not scene_id or scene_id not in backend.scene_store.scenes:
                 return (no_update,) * n_outputs
             state = backend.restore_display_defaults(scene_id=scene_id, broadcast=True)
+            filled_controls_scene["id"] = str(state.get("scene_id") or scene_id)
             return (*scene_control_outputs(state), no_update)
         if triggered == "scene-tabs":
             if not scene_id or scene_id not in backend.scene_store.scenes:
@@ -421,7 +427,16 @@ def register_state_callbacks(app, backend):
             # replay the same scene into the controls and race the figure
             # update store while the tab switch is still settling.
             backend.set_active_scene(scene_id, broadcast=False)
+            # A stored formula-unit camera can still "show" a few unit-cell
+            # atoms while the cell box sits outside the frustum. Refit only
+            # when that box is actually clipped so an intentional zoom that
+            # still frames the cell is kept.
+            try:
+                backend.refit_scene_camera(scene_id, force=False)
+            except (KeyError, ValueError, OSError, TypeError):
+                pass
             state = backend.get_state(scene_id)
+            filled_controls_scene["id"] = str(state.get("scene_id") or scene_id)
             # The confirmed state drives the view-update submitter. Do not
             # bypass the cache owner's live camera/uirevision refresh here.
             seq = getattr(sync_agent_state, "_switch_seq", 0) + 1
@@ -482,6 +497,7 @@ def register_state_callbacks(app, backend):
             state = backend.get_state()
         if not state:
             return (no_update,) * n_outputs
+        filled_controls_scene["id"] = str(state.get("scene_id") or "")
         # Defence-in-depth against the camera-snap-back bug: even when
         # the poll path legitimately picks up an externally-driven
         # state change (REST agent, WebSocket, scene CRUD), do NOT push
@@ -563,6 +579,9 @@ def register_state_callbacks(app, backend):
             return no_update
         if scene_id and scene_id not in backend.scene_store.scenes:
             return no_update
+        filled = filled_controls_scene["id"]
+        if filled and scene_id and str(scene_id) != str(filled):
+            return no_update
         if scene_id:
             backend.set_active_scene(scene_id, broadcast=False)
         prev = backend.get_state(scene_id)
@@ -632,6 +651,14 @@ def register_state_callbacks(app, backend):
         backend.apply_intent(
             {"type": "set_style", "scene_id": scene_id, "payload": patch}
         )
+        if display_changed:
+            # Scope changes install the structure default. The previous
+            # look-at belongs to a different frustum; leaving it in place
+            # clips DAP-4 and hides a checked cell boundary.
+            try:
+                backend.refit_scene_camera(scene_id, force=True)
+            except (KeyError, ValueError, OSError, TypeError):
+                pass
         perf_log.record(
             "callback:capture_state",
             kind="cb",

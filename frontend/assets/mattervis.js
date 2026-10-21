@@ -225,6 +225,18 @@
   // example, a tooltip/class update) cannot repeatedly scroll the active tab.
   // A null selection is transient while Dash swaps tab nodes; retain the last
   // known scene so that clearing and restoring the same selection is a no-op.
+  function noteLoadedScene(sceneId, node) {
+    const status = document.getElementById("upload-status");
+    if (!status) return;
+    const current = String(status.textContent || "").trim();
+    if (/^Uploading\b/.test(current)) return;
+    const tab = node || sceneTabNodeForId(sceneId);
+    const label = tab ? String(tab.textContent || "").replace(/\s+/g, " ").trim() : "";
+    if (!label) return;
+    status.textContent = "Loaded: " + label;
+    status.style.color = "#047857";
+    status.className = "";
+  }
   let observedSceneTabId = null;
   let pendingSceneTabScrollId = null;
   let lastScrolledSceneId = null;
@@ -244,7 +256,10 @@
     // the browser has already requested a new scene. Re-fetch that scene's
     // newest frame at the DOM selection barrier so a frame rejected against
     // the old canvas is not lost.
-    if (changed) resyncScene(String(current));
+    if (changed) {
+      resyncScene(String(current));
+      noteLoadedScene(String(current));
+    }
     if (schedule && String(current) !== lastScrolledSceneId &&
         (changed || pendingMatches)) {
       scheduleSceneTabScroll(current);
@@ -1790,8 +1805,7 @@
         if (typeof window.MatterVisSelectScene === "function") {
           window.MatterVisSelectScene(parsed.scene_id);
         }
-        const status = document.getElementById("upload-status");
-        if (status) status.textContent = "";
+        noteLoadedScene(parsed.scene_id, select);
         dash_clientside.set_props("scene-tabs", {value: parsed.scene_id});
       }
       return;
@@ -1845,13 +1859,9 @@
         setTimeout(flushQueuedSceneFigure, delay);
       });
       // Upload progress is global UI chrome. Once the user deliberately
-      // changes scenes, the previous upload result must not look like a
-      // status for the newly selected structure.
-      const status = document.getElementById("upload-status");
-      if (status && /^(Loaded|Uploaded):/.test((status.textContent || "").trim())) {
-        status.textContent = "";
-        status.className = "";
-      }
+      // changes scenes, replace it with the selected structure's label so
+      // a previous "Loaded:" line does not describe the new tab.
+      if (clickedSceneId) noteLoadedScene(clickedSceneId, clickedNode);
     }, true);
     // Dash changes the selected class/aria-selected attribute after the click
     // callback. Observe those changes so keyboard navigation and programmatic

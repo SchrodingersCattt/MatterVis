@@ -78,9 +78,15 @@ matching against the canonical names).
 
 Repeat copies the home-cell atoms only. Unit-cell display already
 draws boundary replicas on the faces of that cell; copying those
-replicas again would stack atoms and drop their bonds. The unit-cell
-box is drawn around the supercell (`Na·a`, `Nb·b`, `Nc·c`) so the
-repeated atoms stay inside the outline.
+replicas again would stack atoms and drop their bonds. Before tiling,
+those home-cell centres are folded into `[0, 1)`. Unwrapped display
+coordinates disagree with canonical bond image shifts and otherwise
+draw cell-length bonds. The fold is display-only; the loaded source
+structure is unchanged. The unit-cell box is drawn around the supercell
+(`Na·a`, `Nb·b`, `Nc·c`) so the repeated atoms stay inside the outline.
+Replacing an active repeat (the 2×2×2 and 3×3×3 presets) estimates the
+atom count from the home cell left after the previous repeat is removed,
+not from the already expanded scene.
 
 #### `grow_radius`
 
