@@ -239,6 +239,7 @@ def test_controller_display_transitions_are_absolute() -> None:
         "show_cell": False,
         "show_minor": True,
         "mono": True,
+        "show_axes": False,
     }
 
 

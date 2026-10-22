@@ -50,6 +50,7 @@ class TerminalDisplayState:
     show_cell: bool
     show_minor: bool
     mono: bool
+    show_axes: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -59,6 +60,7 @@ class TerminalDisplayState:
             "show_cell": self.show_cell,
             "show_minor": self.show_minor,
             "mono": self.mono,
+            "show_axes": self.show_axes,
         }
 
 

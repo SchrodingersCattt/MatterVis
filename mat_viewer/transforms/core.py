@@ -326,8 +326,9 @@ def atoms_within_radius(
             if shift == (0, 0, 0) and not include_seeds and idx in seed_indices:
                 continue
             atom = atoms[int(idx)]
-            label = str(atom.get("label") or "")
-            key = (label, shift)
+            # Symmetry copies share a site label; key on the copy identity.
+            identity = str(atom.get("_raw_instance_id") or atom.get("label") or idx)
+            key = (identity, shift)
             if key in seen:
                 continue
             new = _atom_copy(atom, image_shift=shift)

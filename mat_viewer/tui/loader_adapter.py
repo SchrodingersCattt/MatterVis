@@ -26,8 +26,20 @@ def load_for_tui(
     frame: int = 0,
     bond_scale: float | None = None,
     bond_thresholds: dict[tuple[str, str], float] | dict[str, float] | None = None,
+    repeat: int | tuple[int, int, int] | None = None,
+    grow_radius: float | None = None,
+    grow_seeds: dict | None = None,
+    transforms: list[dict] | None = None,
 ) -> CrystalIR:
-    """Load any supported atomistic input through the canonical structure IO."""
+    """Load any supported atomistic input through the canonical structure IO.
+
+    ``repeat`` (``n`` or ``(na, nb, nc)``) builds a supercell and
+    ``grow_radius`` adds every periodic image atom within that many
+    Angstroms of ``grow_seeds`` (default: all displayed atoms), so
+    neighbouring molecules across cell faces are on screen. Both are
+    shorthands for :mod:`mat_viewer.transforms` specs, applied before any
+    explicit ``transforms`` in the order repeat, grow, explicit.
+    """
     resolve_requirements(requirements_for_tui(path, input_format)).require()
 
     from ..loader import load_structure_input
@@ -47,7 +59,47 @@ def load_for_tui(
         input_format=structure.input_format,
         display_mode=display_mode,
         frame_index=selected.index,
+        transforms=_transform_specs(repeat, grow_radius, grow_seeds, transforms),
     )
+
+
+def _transform_specs(repeat, grow_radius, grow_seeds, transforms) -> list[dict]:
+    """Expand loader shorthands into canonical transform-spec dicts."""
+    specs: list[dict] = []
+    if repeat is not None:
+        counts = (repeat,) * 3 if isinstance(repeat, int) else tuple(repeat)
+        if len(counts) != 3 or any(int(count) < 1 for count in counts):
+            raise ValueError("repeat must be a positive int or three positive ints")
+        specs.append({"kind": "repeat", "params": dict(zip("abc", map(int, counts)))})
+    if grow_radius is not None:
+        if float(grow_radius) <= 0.0:
+            raise ValueError("grow_radius must be positive")
+        seeds = dict(grow_seeds) if grow_seeds else {"all": True}
+        specs.append(
+            {"kind": "grow_radius", "params": {"seeds": seeds, "radius": float(grow_radius)}}
+        )
+    specs.extend(dict(spec) for spec in transforms or ())
+    return specs
+
+
+def _transform_label(transforms: list[dict] | None) -> str:
+    """Short title tag for load-time supercell and neighbour-shell specs."""
+    parts: list[str] = []
+    for spec in transforms or ():
+        kind = str(spec.get("kind") or "transform")
+        params = spec.get("params") or {}
+        if kind == "repeat":
+            parts.append(
+                f"repeat {params.get('a')}x{params.get('b')}x{params.get('c')}"
+            )
+        elif kind == "grow_radius":
+            radius = params.get("radius")
+            parts.append(
+                f"grow {radius:g} A" if isinstance(radius, (int, float)) else "grow"
+            )
+        else:
+            parts.append(kind)
+    return ", ".join(parts)
 
 
 def _load_bundle(
@@ -57,6 +109,7 @@ def _load_bundle(
     input_format: str,
     display_mode: str,
     frame_index: int,
+    transforms: list[dict] | None = None,
 ) -> CrystalIR:
     """Adapt one canonical LoadedCrystal frame to the compact terminal IR."""
     from ..loader import build_bundle_scene
@@ -71,6 +124,7 @@ def _load_bundle(
         display_mode=resolved_display_mode,
         show_hydrogen=True,
         preset={},
+        transforms=transforms or None,
         include_boundary_replicas=include_boundary_replicas,
     )
     canonical_composition = _element_counts_from_raw(bundle.raw_atoms)
@@ -130,6 +184,9 @@ def _load_bundle(
         }
         ir = filter_crystal(ir, source_indices, collapse_source_images=True)
 
+    transform_label = _transform_label(transforms)
+    if transform_label:
+        ir.metadata["transform_label"] = transform_label
     cube = getattr(bundle, "cube_data", None)
     if cube is not None:
         ir.metadata["cube_data"] = cube

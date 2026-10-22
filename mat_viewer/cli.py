@@ -178,7 +178,7 @@ def _build_serve_parser(
 _TUI_FORMATS = ("ascii", "structured")
 _TUI_PROJECTIONS = ("orthographic", "perspective")
 _TUI_VIEWS = ("auto", "a", "b", "c", "diagonal", "ab", "ac", "bc")
-_TUI_LABELS = ("auto", "element", "label", "molecule", "dot")
+_TUI_LABELS = ("auto", "element", "label", "molecule", "dot", "label_sym")
 _TUI_DISPLAYS = ("auto", "formula_unit", "unit_cell", "asymmetric_unit")
 _TUI_LEVELS = ("auto", "atom", "molecule")
 
@@ -300,7 +300,8 @@ def _build_tui_parser(
         choices=_TUI_LABELS,
         default="auto",
         help="Atom label mode (default: auto). 'element'=Fe/O, 'label'=Fe1/O2, "
-        "'molecule'=Fe1⁰/O2¹ (with mol index), 'dot'=● colored.",
+        "'molecule'=Fe1⁰/O2¹ (with mol index), 'dot'=● colored. "
+        "'label_sym'=O1#2[1,0,0] (symmetry op and lattice shift of each copy).",
     )
     p.add_argument(
         "--display",
@@ -401,6 +402,8 @@ def _tui_main(args: argparse.Namespace) -> None:
         type_map=args.type_map,
         frame=args.frame,
         bond_scale=args.bond_scale, bond_thresholds=bond_thresholds_from_args(args),
+        repeat=getattr(args, "repeat", None),
+        grow_radius=getattr(args, "grow_radius", None),
     )
 
     keep_atom_set = {
@@ -468,6 +471,7 @@ def _tui_main(args: argparse.Namespace) -> None:
             show_cell=not args.no_cell,
             label_mode=label_mode,
             show_minor=args.show_minor,
+            show_axes=bool(getattr(args, "axes", False)),
             initial_level=initial_level,
         )
         app.run()
