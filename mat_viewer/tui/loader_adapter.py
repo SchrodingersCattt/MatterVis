@@ -82,6 +82,26 @@ def _transform_specs(repeat, grow_radius, grow_seeds, transforms) -> list[dict]:
     return specs
 
 
+def _transform_label(transforms: list[dict] | None) -> str:
+    """Short title tag for load-time supercell and neighbour-shell specs."""
+    parts: list[str] = []
+    for spec in transforms or ():
+        kind = str(spec.get("kind") or "transform")
+        params = spec.get("params") or {}
+        if kind == "repeat":
+            parts.append(
+                f"repeat {params.get('a')}x{params.get('b')}x{params.get('c')}"
+            )
+        elif kind == "grow_radius":
+            radius = params.get("radius")
+            parts.append(
+                f"grow {radius:g} A" if isinstance(radius, (int, float)) else "grow"
+            )
+        else:
+            parts.append(kind)
+    return ", ".join(parts)
+
+
 def _load_bundle(
     bundle,
     *,
@@ -164,6 +184,9 @@ def _load_bundle(
         }
         ir = filter_crystal(ir, source_indices, collapse_source_images=True)
 
+    transform_label = _transform_label(transforms)
+    if transform_label:
+        ir.metadata["transform_label"] = transform_label
     cube = getattr(bundle, "cube_data", None)
     if cube is not None:
         ir.metadata["cube_data"] = cube

@@ -471,6 +471,7 @@ def _tui_main(args: argparse.Namespace) -> None:
             show_cell=not args.no_cell,
             label_mode=label_mode,
             show_minor=args.show_minor,
+            show_axes=bool(getattr(args, "axes", False)),
             initial_level=initial_level,
         )
         app.run()

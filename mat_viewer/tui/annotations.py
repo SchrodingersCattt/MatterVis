@@ -25,7 +25,8 @@ LABEL_MODE_HELP = {
     "molecule": "site label plus displayed molecule index",
     "dot": "marker only, no text",
     "label_sym": "site label plus copy suffix: #k = symmetry operation k "
-    "(identity omitted), [i,j,k] = lattice shift from the home-cell copy",
+    "(1-based input order; the first listed operation, index 0, is omitted "
+    "even when it is not x,y,z), [i,j,k] = lattice shift from the home-cell copy",
 }
 
 # Common caller spellings mapped onto a canonical mode before validation.
@@ -99,11 +100,17 @@ def axes_footer_text(crystal, camera, viewport: Viewport, width: int) -> str:
 
 
 def overlay_axes_footer(frame, crystal, camera, viewport, width, height) -> str:
-    """Replace the bottom row of ``frame`` with the axis/scale footer."""
-    lines = frame.split("\n")
-    lines += [""] * max(height - len(lines), 0)
-    lines[height - 1] = axes_footer_text(crystal, camera, viewport, width)
-    return "\n".join(lines[:height])
+    """Keep the scene in the rows above a reserved axis/scale footer.
+
+    The scene is drawn into ``height - 1`` rows. This appends the footer
+    instead of painting over the last content row.
+    """
+    footer = axes_footer_text(crystal, camera, viewport, width)
+    if height <= 1:
+        return footer
+    body = frame.split("\n")[: height - 1]
+    body += [""] * max(height - 1 - len(body), 0)
+    return "\n".join([*body, footer])
 
 
 __all__ = [

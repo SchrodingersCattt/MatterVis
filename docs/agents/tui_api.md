@@ -121,7 +121,7 @@ an opaque source token that may be nonnumeric or namespaced, whereas
 | `align(axis)` | Look along crystallographic `a`, `b`, `c`, `a*`, `b*`, or `c*`; uses real/reciprocal lattice directions. |
 | `pan(dx=..., dy=...)`, `zoom(factor=...)` | Move/crop the stable terminal viewport. |
 | `fit(target="all"\|"focus")` | Explicitly refit; orbit and display toggles do not refit. |
-| `set_display(...)` | Partial absolute update for `display_level`, `label_mode` (`auto`, `label`, `element`, `molecule`, `dot`, `label_sym`; alias `none` = `dot`), `show_cell`, `show_bonds`, `show_minor`, `mono`, and `show_axes` (bottom-row a/b/c triad and scale bar). |
+| `set_display(...)` | Partial absolute update for `display_level`, `label_mode` (`auto`, `label`, `element`, `molecule`, `dot`, `label_sym`; alias `none` = `dot`; `label_sym` omits the first listed symmetry operation, index 0, even when that operation is not `x,y,z`), `show_cell`, `show_bonds`, `show_minor`, `mono`, and `show_axes` (scene fitted above an a/b/c triad and scale bar). |
 | `set_selection_mode(active)` | Enter or leave atom selection while retaining the current stable atom identity. |
 | `select_atom(reference)`, `select_next(step=...)` | Select by exact reference or traverse visible atoms in stable atom-id order. |
 | `select_direction(dx=..., dy=...)`, `select_screen(row=..., col=...)` | Select from the retained projection hit map; no chemistry is inferred from screen distance. |
@@ -231,8 +231,9 @@ site is ordered or major.
   neighbors, `Enter` pins, and `Esc` clears only the atom selection.
 - Clicking the canvas selects the nearest projected atom.
 - `u` zooms out; `o` zooms in. Existing `+/-` and `[/]` aliases remain.
-- `p`, `c`, `b`, `t`, `m`, `n`, `Shift+L`, `r`: projection, cell, bonds,
-  labels, monochrome, minor disorder, display level, and reset.
+- `p`, `c`, `b`, `t`, `m`, `n`, `Shift+A`, `Shift+L`, `r`: projection, cell,
+  bonds, labels, monochrome, minor disorder, axes footer, display level, and
+  reset. `a` stays roll; the axes toggle is uppercase so it does not take that key.
 - `x`: quit. `Ctrl+Q` is intentionally not used because it conflicts with
   common terminal/editor shortcuts.
 

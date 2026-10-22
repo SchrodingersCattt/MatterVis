@@ -41,9 +41,18 @@ def build_terminal_title(
         display_level=display.display_level,
     )
     count_parts: list[str] = []
-    if summary["expanded_atom_count"] is not None:
-        count_parts.append(f"{summary['expanded_atom_count']} expanded")
-    count_parts.append(f"{summary['display_atom_count']} displayed")
+    transform = str(crystal.metadata.get("transform_label") or "")
+    if transform:
+        # Lead with the atoms actually on screen. The source-cell count stays
+        # available, but it is no longer the number a supercell title quotes.
+        count_parts.append(f"{summary['display_atom_count']} displayed")
+        source_count = summary["expanded_atom_count"]
+        if source_count not in (None, summary["display_atom_count"]):
+            count_parts.append(f"{source_count} in cell")
+    else:
+        if summary["expanded_atom_count"] is not None:
+            count_parts.append(f"{summary['expanded_atom_count']} expanded")
+        count_parts.append(f"{summary['display_atom_count']} displayed")
     if summary["visible_atom_count"] != summary["display_atom_count"]:
         count_parts.append(f"{summary['visible_atom_count']} visible")
     zoom = f" ×{camera.zoom:.1f}" if camera.zoom != 1.0 else ""
@@ -55,9 +64,12 @@ def build_terminal_title(
         else:
             molecule_count = sum(len(indices) for indices in crystal.species_map.values())
             level = f" [molecule:{resolve_molecule_detail(molecule_count=molecule_count, width=width, height=height)}]"
+    mode = summary["display_mode"]
+    if transform:
+        mode = f"{mode} {transform}"
     return (
         f"{terminal_text(summary['canonical_formula'])} {'/'.join(count_parts)} "
-        f"[{terminal_text(summary['display_mode'])}] | "
+        f"[{terminal_text(mode)}] | "
         f"az={camera.azimuth:.0f}° el={camera.elevation:.0f}°{roll} | "
         f"{camera.projection[:5]} | {resolved_label}{zoom}{level}"
     )

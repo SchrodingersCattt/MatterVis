@@ -307,6 +307,11 @@ def compose_frame(
             height = height or 40
     width = max(width, 1)
     height = max(height, 1)
+    full_height = height
+    reserve_axes = bool(show_axes and crystal.lattice is not None and height > 1)
+    if reserve_axes:
+        # The footer is its own row. Fit the scene into the rows above it.
+        height = height - 1
     if charset not in {"unicode", "ascii7"}:
         raise ValueError("charset must be 'unicode' or 'ascii7'")
     display_level = resolve_display_level(
@@ -357,8 +362,11 @@ def compose_frame(
     canvas = BrailleCanvas(width, height)
 
     def _finish(frame: str) -> str:
-        plain = not show_axes or crystal.lattice is None
-        return frame if plain else overlay_axes_footer(frame, crystal, camera, viewport, width, height)
+        if not reserve_axes:
+            return frame
+        return overlay_axes_footer(
+            frame, crystal, camera, viewport, width, full_height
+        )
 
     # ── Layer 1: Cell edges (dashed braille) ────────────────────────────
     if show_cell and cell_verts_2d is not None:

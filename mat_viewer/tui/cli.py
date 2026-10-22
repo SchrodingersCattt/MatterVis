@@ -29,7 +29,7 @@ def add_session_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--axes", action="store_true",
-        help="Reserve the bottom row for an a/b/c direction triad and a scale bar.",
+        help="Fit the scene above a bottom row with an a/b/c triad and a scale bar.",
     )
 
 

@@ -64,6 +64,17 @@ class CrystalCanvas(Static):
             self.app.select_screen_atom(row=offset.y, col=offset.x)
         event.stop()
 
+    def on_resize(self, event) -> None:
+        """Redraw when the canvas itself changes size.
+
+        A warning banner or inspector can shrink this widget without changing
+        the screen size, so the app-level resize handler never runs. The axis
+        footer would otherwise stay on a row that has scrolled out of view.
+        """
+        sync = getattr(self.app, "_queue_viewport_sync", None)
+        if sync is not None:
+            sync()
+
 
 # ── Main App ────────────────────────────────────────────────────────────────
 
@@ -144,6 +155,7 @@ class CrystalTUI(App):
         Binding("t", "toggle_label", "Label", show=True),
         Binding("m", "toggle_mono", "Mono", show=True),
         Binding("n", "toggle_minor", "Minor", show=True),
+        Binding("A", "toggle_axes", "Axes", show=True),
         Binding("L", "cycle_level", "Level", show=True),
         Binding("r", "reset_view", "Reset", show=True),
         Binding("u", "zoom_out", "Zoom out", show=True),
@@ -163,6 +175,7 @@ class CrystalTUI(App):
         show_cell: bool = True,
         label_mode: str = "auto",
         show_minor: bool = False,
+        show_axes: bool = False,
         compact: bool = False,
         initial_level: str = AUTO_DISPLAY_LEVEL,
         extensions=(),
@@ -182,6 +195,7 @@ class CrystalTUI(App):
                 show_cell=show_cell,
                 label_mode=label_mode if not compact else "dot",
                 show_minor=show_minor,
+                show_axes=show_axes,
                 display_level=(
                     initial_level
                     if initial_level in (*DISPLAY_LEVELS, AUTO_DISPLAY_LEVEL)
@@ -197,6 +211,7 @@ class CrystalTUI(App):
         self.extension_context._publish(source_path=crystal.source_path or None)
         self._extension_panels = None
         self._mounted_extensions = []
+        self._viewport_sync_queued = False
 
     def close_extensions(self) -> None:
         """Release plugin resources once; does not unload bindings or widgets."""
@@ -247,6 +262,10 @@ class CrystalTUI(App):
     @property
     def _show_minor(self) -> bool:
         return self.controller.state.display.show_minor
+
+    @property
+    def _show_axes(self) -> bool:
+        return self.controller.state.display.show_axes
 
     @property
     def _display_level(self) -> str:
@@ -441,6 +460,34 @@ class CrystalTUI(App):
         self.sub_title = observation.title
         self._update_warning_bar(observation)
         self._update_inspector()
+        self._queue_viewport_sync()
+
+    def _queue_viewport_sync(self) -> None:
+        """Redraw once the layout has settled if the canvas size changed."""
+        if self._viewport_sync_queued or not self.is_running:
+            return
+        self._viewport_sync_queued = True
+        self.call_after_refresh(self._sync_viewport_to_canvas)
+
+    def _sync_viewport_to_canvas(self) -> None:
+        """Match the rendered frame to the canvas after banners mount."""
+        self._viewport_sync_queued = False
+        if not self.is_running:
+            return
+        from textual.css.query import NoMatches
+
+        try:
+            canvas = self.query_one("#canvas", CrystalCanvas)
+        except NoMatches:
+            return
+        size = canvas.size
+        if size.width <= 1 or size.height <= 1:
+            return
+        if (size.width, size.height) == (self.controller.width, self.controller.height):
+            return
+        self._apply_observation(
+            self.controller.resize_viewport(size.width, size.height)
+        )
 
     def _update_layout(self) -> None:
         """Switch inspector placement without changing the rendered structure."""
@@ -649,6 +696,12 @@ class CrystalTUI(App):
     def action_toggle_minor(self) -> None:
         self._apply_observation(
             self.controller.set_display(show_minor=not self._show_minor)
+        )
+
+    def action_toggle_axes(self) -> None:
+        """Toggle the reserved a/b/c triad and scale-bar row."""
+        self._apply_observation(
+            self.controller.set_display(show_axes=not self._show_axes)
         )
 
     def action_cycle_level(self) -> None:

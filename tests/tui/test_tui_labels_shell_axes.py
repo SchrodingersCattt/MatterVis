@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from mat_viewer.tui.compositor import LABEL_MODES, normalize_label_mode
+from mat_viewer.math.camera import Camera, project_points
+from mat_viewer.tui.app import CrystalTUI
+from mat_viewer.tui.compositor import LABEL_MODES, compose_frame, normalize_label_mode
 from mat_viewer.tui.crystal_ir import AtomIR, BondIR, CrystalIR, Lattice
 from mat_viewer.tui.loader_adapter import _transform_specs, load_for_tui
 from mat_viewer.tui.session import TerminalAction, TerminalSession
@@ -90,6 +93,63 @@ def test_axis_footer_reports_lattice_directions_and_scale_bar() -> None:
     assert "c:out" in footer or "c:in" in footer
     assert footer.rstrip().endswith(" A")
     assert "axes" not in _session(label_mode="label").observe().observation.frame
+
+
+def test_axes_footer_reserves_a_row_instead_of_covering_the_scene() -> None:
+    crystal = _crystal()
+    camera = Camera.from_view_name("c", crystal)
+    points, depth = project_points(camera, crystal.cart_coords)
+    plain = compose_frame(
+        crystal, camera, points, depth,
+        width=60, height=14, mono=True, label_mode="label_sym", show_cell=False,
+    )
+    framed = compose_frame(
+        crystal, camera, points, depth,
+        width=60, height=14, mono=True, label_mode="label_sym", show_cell=False,
+        show_axes=True,
+    )
+    lines = framed.split("\n")
+
+    assert len(lines) == 14
+    assert lines[-1].startswith("axes a:")
+    assert "O1#2" in "\n".join(lines[:-1])
+    assert "O1#2" in plain
+
+
+def test_repeat_title_quotes_the_displayed_supercell() -> None:
+    crystal = load_for_tui(str(COD_CIF), repeat=(2, 1, 1))
+    title = TerminalSession(
+        crystal, width=100, height=16, charset="ascii7", display_level="atom"
+    ).observe().observation.title
+
+    assert crystal.metadata["transform_label"] == "repeat 2x1x1"
+    assert f"{crystal.n_atoms} displayed" in title
+    assert "repeat 2x1x1" in title
+    assert "in cell" in title
+    assert title.index(f"{crystal.n_atoms} displayed") < title.index("in cell")
+
+
+def test_interactive_axes_stay_visible_after_the_warning_banner_mounts() -> None:
+    async def exercise() -> None:
+        app = CrystalTUI(_crystal(), mono=True, label_mode="dot", show_axes=True)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            warning = app.query_one("#chemistry-warning")
+            canvas = app.query_one("#canvas")
+            assert warning.display is True
+            assert "CHEMISTRY NOT AVAILABLE" in str(warning.render())
+            lines = canvas.frame_text.split("\n")
+            assert lines[-1].startswith("axes ")
+            assert len(lines) == canvas.size.height
+            assert app.controller.height == canvas.size.height
+
+            await pilot.press("A")
+            await pilot.pause()
+            assert app.controller.state.display.show_axes is False
+            assert not canvas.frame_text.split("\n")[-1].startswith("axes")
+
+    asyncio.run(exercise())
 
 
 def test_transform_shorthands_expand_to_canonical_specs() -> None:
