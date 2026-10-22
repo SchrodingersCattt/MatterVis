@@ -658,6 +658,17 @@ def _scene_ranges(scene: dict, style: dict, topology_data: dict | None = None):
         if overlay_bounds is None or _overlay_near_cell(geometry_arr):
             extras.extend(geometry_arr)
 
+    # BFDH habits are often larger than the cell (the scale slider is a
+    # multiplier on a cell-sized solid). Leaving them out of the axis range
+    # clips the closed polyhedron down to a sliver at the viewport edge.
+    from .morphology import morphology_world_points
+
+    morph_points = morphology_world_points(scene, style)
+    if len(morph_points) and (
+        overlay_bounds is None or _overlay_near_cell(morph_points)
+    ):
+        extras.extend(morph_points)
+
     if extras:
         extras_arr = np.array(extras, dtype=float)
         extras_min = extras_arr.min(axis=0)

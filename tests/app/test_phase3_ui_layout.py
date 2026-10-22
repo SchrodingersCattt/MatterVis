@@ -178,7 +178,7 @@ def test_atom_groups_table_rows_render_pattern_matched_inputs():
     )
 
 
-def test_polyhedra_ligand_dropdown_offers_auto():
+def test_polyhedra_ligand_dropdown_requires_explicit_ligand():
     spec = {
         "id": "x",
         "name": "x",
@@ -187,15 +187,25 @@ def test_polyhedra_ligand_dropdown_offers_auto():
         "ligand_species": None,
         "enabled": True,
     }
-    rows = _polyhedra_table_rows([spec], [{"label": "ClO4 ×4", "value": "ClO4"}])
-    auto_seen = False
+    species = [
+        {"label": "ClO4 ×4", "value": "ClO4"},
+        {"label": "N ×2", "value": "N"},
+    ]
+    rows = _polyhedra_table_rows([spec], species)
+    messages = []
     for row in rows:
         for node in _walk(row):
             options = getattr(node, "options", None)
-            if not options:
-                continue
-            for opt in options:
-                if isinstance(opt, dict) and opt.get("value") == _AUTO_LIGAND_VALUE:
-                    auto_seen = True
-                    break
-    assert auto_seen, "ligand dropdown must offer an (auto) option"
+            if options:
+                values = [
+                    opt.get("value")
+                    for opt in options
+                    if isinstance(opt, dict)
+                ]
+                assert _AUTO_LIGAND_VALUE not in values
+                assert "(auto)" not in values
+            class_name = getattr(node, "className", "") or ""
+            if class_name == "polyhedron-ligand-required":
+                messages.append(node.children)
+    assert messages, "a row without a ligand must explain that one is required"
+    assert any("explicit ligand" in str(message) for message in messages)

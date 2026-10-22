@@ -8,6 +8,58 @@ from .geometry import geometry_entity_traces, mesh_entity
 from .picking import facet_instance_id
 
 
+def _morphology_center(scene: dict) -> np.ndarray:
+    """Cartesian centre of the unit cell, where the BFDH solid is placed.
+
+    Mesh vertices are stored around the origin so the scale slider grows the
+    habit about this point instead of about the lattice origin.
+    """
+    matrix = scene.get("M")
+    if matrix is None:
+        return np.zeros(3)
+    try:
+        lattice = np.asarray(matrix, dtype=float)
+    except (TypeError, ValueError):
+        return np.zeros(3)
+    if lattice.shape != (3, 3) or not np.all(np.isfinite(lattice)):
+        return np.zeros(3)
+    return (lattice[0] + lattice[1] + lattice[2]) / 2.0
+
+
+def morphology_world_points(scene: dict, style: dict | None = None) -> np.ndarray:
+    """World-frame vertices of the visible BFDH mesh, matching the traces."""
+    morph = scene.get("bfdh_morphology")
+    if not isinstance(morph, dict) or not morph.get("enabled"):
+        return np.zeros((0, 3))
+    style = style or {}
+    from .style.resolver import normalize_style_overrides
+
+    overrides = normalize_style_overrides(style.get("style_overrides"))
+    parent_override = overrides.get("bfdh-morphology") or overrides.get(
+        "morphology:bfdh-morphology"
+    )
+    if isinstance(parent_override, dict) and parent_override.get("visible") is False:
+        return np.zeros((0, 3))
+    try:
+        scale = float(morph.get("scale", 1.0))
+    except (TypeError, ValueError):
+        scale = 1.0
+    center = _morphology_center(scene)
+    points: list[np.ndarray] = []
+    for facet in morph.get("facets") or []:
+        for tri in facet.get("triangles") or []:
+            try:
+                arr = np.asarray(tri, dtype=float)
+            except (TypeError, ValueError):
+                continue
+            if arr.shape != (3, 3) or not np.all(np.isfinite(arr)):
+                continue
+            points.append(arr * scale + center)
+    if not points:
+        return np.zeros((0, 3))
+    return np.concatenate(points, axis=0)
+
+
 def _morphology_traces(
     scene: dict,
     style: dict,
@@ -35,13 +87,9 @@ def _morphology_traces(
         color = str(parent_override.get("color", color))
         opacity = parent_override.get("opacity", opacity)
 
-    # Center the morphology at the center of the unit cell
-    center_offset = np.zeros(3)
-    if scene.get("M") is not None:
-        a = np.array(scene["M"][0], dtype=float)
-        b = np.array(scene["M"][1], dtype=float)
-        c = np.array(scene["M"][2], dtype=float)
-        center_offset = (a + b + c) / 2.0
+    # Center the morphology at the center of the unit cell. Vertices are
+    # stored about the origin, so scaling stays centred on the structure.
+    center_offset = _morphology_center(scene)
 
     traces = []
 

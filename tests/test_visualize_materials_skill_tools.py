@@ -12,7 +12,8 @@ from mat_viewer.capabilities import (
     CAPABILITY_REGISTRY,
     MOLCRYSKIT_INSTALL,
     MOLCRYSKIT_MINIMUM,
-    MOLCRYSKIT_SOURCE_MINIMUM,
+    MOLCRYSKIT_REQUIREMENT,
+    MOLCRYSKIT_UPPER,
     install_command,
     resolve_requirements,
 )
@@ -154,14 +155,17 @@ def test_released_molcryskit_minimum_is_consistent() -> None:
         for dependency in data["project"]["dependencies"]
         if _dependency_name(dependency) == "molcrys-kit"
     )
-    assert molcryskit == f"molcrys-kit>={MOLCRYSKIT_SOURCE_MINIMUM}"
+    assert molcryskit == MOLCRYSKIT_REQUIREMENT
     assert "git+" not in molcryskit
 
     for workflow in ("ci.yml", "release.yml"):
         text = (ROOT / ".github" / "workflows" / workflow).read_text(encoding="utf-8")
         assert f'MOLCRYSKIT_MINIMUM: "{MOLCRYSKIT_MINIMUM}"' in text
+        assert f'MOLCRYSKIT_UPPER: "{MOLCRYSKIT_UPPER}"' in text
         assert "molcrys-kit==${MOLCRYSKIT_MINIMUM}" in text
         assert 'python -m pip install -e ".[all,test]"' in text
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert 'molcrys-kit>=${MOLCRYSKIT_MINIMUM},<${MOLCRYSKIT_UPPER}' in ci
 
     development = (SKILL / "references" / "capabilities-and-install.md").read_text(
         encoding="utf-8"

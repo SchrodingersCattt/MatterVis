@@ -14,7 +14,7 @@ from typing import Any, Iterable, Mapping
 
 from .capabilities import (
     MOLCRYSKIT_INSTALL,
-    MOLCRYSKIT_MINIMUM,
+    MOLCRYSKIT_REQUIREMENT,
     MissingCapabilityError,
     capabilities,
     molcryskit_contract_missing,
@@ -135,7 +135,7 @@ def require_molcryskit_contract() -> None:
         raise RuntimeError(
             "The installed MolCrysKit lacks the renderer-ready public contract "
             f"({', '.join(missing)}). MatterVis requires "
-            f"molcrys-kit>={MOLCRYSKIT_MINIMUM}; "
+            f"{MOLCRYSKIT_REQUIREMENT}; "
             f"upgrade MolCrysKit before rendering with: {MOLCRYSKIT_INSTALL}."
         )
 

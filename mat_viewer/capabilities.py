@@ -19,10 +19,13 @@ RESOLUTION_SCHEMA = "mattervis.requirements/v1"
 DIST_NAME = "matter-vis"
 GPU_INSTALL = 'python -m pip install "matter-vis[gpu]"'
 MOLCRYSKIT_MINIMUM = "0.7.0"
-MOLCRYSKIT_SOURCE_MINIMUM = "0.6.2.dev17"
-MOLCRYSKIT_INSTALL = (
-    f'python -m pip install "molcrys-kit>={MOLCRYSKIT_MINIMUM}"'
-)
+# Exclusive upper bound of the range exercised in CI. 0.7.1 changes crystal
+# and CIF completion (NaCl's unit-cell draw set drops from 16 atoms to 4),
+# so it is outside the contract this checkout tests.
+MOLCRYSKIT_UPPER = "0.7.1"
+MOLCRYSKIT_REQUIREMENT = f"molcrys-kit>={MOLCRYSKIT_MINIMUM},<{MOLCRYSKIT_UPPER}"
+MOLCRYSKIT_SOURCE_MINIMUM = MOLCRYSKIT_MINIMUM
+MOLCRYSKIT_INSTALL = f'python -m pip install "{MOLCRYSKIT_REQUIREMENT}"'
 # Backward-compatible names retained for callers of the pre-0.7 helpers.
 MOLCRYSKIT_CONTRACT_SHA = "2a0ca454839f7fc8350ebe4b9ff5689b4b4ce335"
 MOLCRYSKIT_DEVELOPMENT_INSTALL = MOLCRYSKIT_INSTALL
@@ -578,6 +581,8 @@ __all__ = [
     "CAPABILITY_REGISTRY",
     "GPU_INSTALL",
     "MOLCRYSKIT_MINIMUM",
+    "MOLCRYSKIT_UPPER",
+    "MOLCRYSKIT_REQUIREMENT",
     "MOLCRYSKIT_SOURCE_MINIMUM",
     "MOLCRYSKIT_INSTALL",
     "MOLCRYSKIT_CONTRACT_SHA",

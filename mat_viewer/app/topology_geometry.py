@@ -11,6 +11,7 @@ from ..topology import (
     display_atom_centers_for_spec as _display_atom_centers_for_spec,
     extract_atom_coordination_shells,
 )
+from ..topology.analysis import EXPLICIT_LIGAND_MESSAGE, explicit_ligand_species
 from ..cache_keys import topology_geometry_cache_key
 from ..render.picking import polyhedron_instance_id
 
@@ -146,6 +147,31 @@ def _dedupe_disorder_center_fragments(
     return representatives
 
 
+def _empty_primary(display_fragment: dict[str, Any] | None) -> dict[str, Any]:
+    """Analysis payload used when no explicit ligand is available.
+
+    The anchor spec can still be drawn once a ligand is chosen. Until then
+    the geometry path must not call MolCrysKit with a missing ligand.
+    """
+    center = [0.0, 0.0, 0.0]
+    if display_fragment and display_fragment.get("center") is not None:
+        center = [float(value) for value in display_fragment["center"]]
+    return {
+        "center_coords": list(center),
+        "center_label": display_fragment.get("label") if display_fragment else None,
+        "center_type": display_fragment.get("type") if display_fragment else None,
+        "shell_coords": [],
+        "distances": [],
+        "hull": None,
+        "source_center_coords": list(center),
+        "source_shell_coords": [],
+        "source_hull": None,
+        "shape": {},
+        "coordination_number": 0,
+        "shell": [],
+    }
+
+
 def _overlay_drawable_hull_size(overlay: dict[str, Any]) -> int:
     shell = overlay.get("shell_coords") or []
     hull = overlay.get("hull") or {}
@@ -273,7 +299,7 @@ def compute_topology_geometry(
             0,
         )
     analysis_spec = effective_specs[analysis_spec_index]
-    analysis_ligand = analysis_spec.get("ligand_species") or None
+    analysis_ligand = explicit_ligand_species(analysis_spec.get("ligand_species"))
     analysis_enforce_enclosure = bool(analysis_spec.get("enforce_enclosure", True))
     analysis_centroid_offset_frac = float(
         analysis_spec.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC)
@@ -283,29 +309,35 @@ def compute_topology_geometry(
     analysis_hard_cutoff = analysis_spec.get("hard_cutoff")
     analysis_fallback_max = analysis_spec.get("fallback_max")
 
-    primary = analyze_topology(
-        bundle,
-        center_index=int(topology_fragment["index"]),
-        cutoff=cutoff,
-        display_center=display_fragment.get("center") if display_fragment else None,
-        display_label=display_fragment.get("label") if display_fragment else None,
-        display_type=display_fragment.get("type") if display_fragment else None,
-        ligand_species=[analysis_ligand] if analysis_ligand else None,
-        center_species=analysis_spec.get("center_species"),
-        enforce_enclosure=analysis_enforce_enclosure,
-        centroid_offset_frac=analysis_centroid_offset_frac,
-        level=analysis_level,
-        center_kind=analysis_center_kind,
-        hard_cutoff=analysis_hard_cutoff,
-        fallback_max=analysis_fallback_max,
-    )
+    # A null or "(auto)" ligand is persisted state, not a MolCrysKit query.
+    # Skipping the call keeps the render worker from surfacing ValueError
+    # while the user still has to pick a real ligand.
+    if analysis_ligand:
+        primary = analyze_topology(
+            bundle,
+            center_index=int(topology_fragment["index"]),
+            cutoff=cutoff,
+            display_center=display_fragment.get("center") if display_fragment else None,
+            display_label=display_fragment.get("label") if display_fragment else None,
+            display_type=display_fragment.get("type") if display_fragment else None,
+            ligand_species=[analysis_ligand],
+            center_species=analysis_spec.get("center_species"),
+            enforce_enclosure=analysis_enforce_enclosure,
+            centroid_offset_frac=analysis_centroid_offset_frac,
+            level=analysis_level,
+            center_kind=analysis_center_kind,
+            hard_cutoff=analysis_hard_cutoff,
+            fallback_max=analysis_fallback_max,
+        )
+    else:
+        primary = _empty_primary(display_fragment)
 
     spec_results: list[dict[str, Any]] = []
     legacy_extras: list[dict[str, Any]] = []
     warnings: list[str] = []
     for index, spec in enumerate(effective_specs):
         center_species = spec["center_species"]
-        ligand = spec.get("ligand_species") or None
+        ligand = explicit_ligand_species(spec.get("ligand_species"))
         ligand_arg = [ligand] if ligand else None
         enforce_enclosure = bool(spec.get("enforce_enclosure", True))
         centroid_offset_frac = float(spec.get("centroid_offset_frac", DEFAULT_CENTROID_OFFSET_FRAC))
@@ -313,6 +345,26 @@ def compute_topology_geometry(
         spec_center_kind = str(spec.get("center_kind") or "centroid")
         spec_hard_cutoff = spec.get("hard_cutoff")
         spec_fallback_max = spec.get("fallback_max")
+        if ligand is None:
+            warnings.append(
+                f"{spec.get('name') or center_species}: {EXPLICIT_LIGAND_MESSAGE}"
+            )
+            spec_results.append(
+                {
+                    "spec_id": spec["id"],
+                    "name": spec["name"],
+                    "center_species": center_species,
+                    "ligand_species": None,
+                    "enforce_enclosure": enforce_enclosure,
+                    "centroid_offset_frac": centroid_offset_frac,
+                    "level": spec_level,
+                    "center_kind": spec_center_kind,
+                    "hard_cutoff": spec_hard_cutoff,
+                    "fallback_max": spec_fallback_max,
+                    "overlays": [],
+                }
+            )
+            continue
         overlays: list[dict[str, Any]] = []
         if spec_level == "atom" and ligand:
             atom_centers = _display_atom_centers_for_spec(bundle, scene, spec)

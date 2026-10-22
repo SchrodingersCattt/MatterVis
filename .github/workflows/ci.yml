@@ -16,11 +16,18 @@ concurrency:
 
 env:
   MOLCRYSKIT_MINIMUM: "0.7.0"
+  MOLCRYSKIT_UPPER: "0.7.1"
 
 jobs:
   fast-tests:
-    name: Fast tests (Python 3.12)
+    name: Fast tests (Python 3.12, molcrys-kit ${{ matrix.molcryskit }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # minimum is the lower pin; latest is whatever a fresh install
+        # resolves inside >=MOLCRYSKIT_MINIMUM,<MOLCRYSKIT_UPPER.
+        molcryskit: ["minimum", "latest"]
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -33,11 +40,54 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install minimum chemistry dependency and all test dependencies
+      - name: Install pinned chemistry dependency and all test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "molcrys-kit==${MOLCRYSKIT_MINIMUM}"
           python -m pip install -e ".[all,test]"
+          if [ "${{ matrix.molcryskit }}" = "latest" ]; then
+            python -m pip install "molcrys-kit>=${MOLCRYSKIT_MINIMUM},<${MOLCRYSKIT_UPPER}"
+          else
+            python -m pip install "molcrys-kit==${MOLCRYSKIT_MINIMUM}"
+          fi
+          python - << 'PY'
+          import os
+          from importlib.metadata import version
+
+          def parse_version(raw: str) -> tuple[int, int, int]:
+              parts: list[int] = []
+              for piece in raw.split("."):
+                  digits = ""
+                  for char in piece:
+                      if char.isdigit():
+                          digits += char
+                      else:
+                          break
+                  if not digits:
+                      break
+                  parts.append(int(digits))
+              while len(parts) < 3:
+                  parts.append(0)
+              return tuple(parts[:3])
+
+          raw = version("molcrys-kit")
+          got = parse_version(raw)
+          minimum = parse_version(os.environ["MOLCRYSKIT_MINIMUM"])
+          upper = parse_version(os.environ["MOLCRYSKIT_UPPER"])
+          if not (minimum <= got < upper):
+              raise SystemExit(
+                  f"molcrys-kit {raw} is outside "
+                  f">={os.environ['MOLCRYSKIT_MINIMUM']},"
+                  f"<{os.environ['MOLCRYSKIT_UPPER']}"
+              )
+          expect = os.environ.get("MOLCRYSKIT_EXPECT", "")
+          if expect == "minimum" and got != minimum:
+              raise SystemExit(
+                  f"minimum job resolved molcrys-kit {raw}, expected {os.environ['MOLCRYSKIT_MINIMUM']}"
+              )
+          print(f"molcrys-kit {raw} ({expect or 'unspecified'})")
+          PY
+        env:
+          MOLCRYSKIT_EXPECT: ${{ matrix.molcryskit }}
 
       - name: Run fast tests
         run: |
@@ -51,7 +101,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pytest-fast-python-3.12
+          name: pytest-fast-python-3.12-${{ matrix.molcryskit }}
           path: |
             pytest-fast.log
             pytest-fast.xml
@@ -78,8 +128,8 @@ jobs:
       - name: Install minimum chemistry dependency and all test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "molcrys-kit==${MOLCRYSKIT_MINIMUM}"
           python -m pip install -e ".[all,test]"
+          python -m pip install "molcrys-kit==${MOLCRYSKIT_MINIMUM}"
 
       - name: Run tests
         run: |
@@ -117,8 +167,8 @@ jobs:
       - name: Install minimum chemistry dependency and base MatterVis only
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "molcrys-kit==${MOLCRYSKIT_MINIMUM}"
           python -m pip install .
+          python -m pip install "molcrys-kit==${MOLCRYSKIT_MINIMUM}"
           python -m pip check
 
       - name: Verify browser-free CIF to PNG, PDF, and SVG
@@ -152,8 +202,8 @@ jobs:
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "molcrys-kit==${MOLCRYSKIT_MINIMUM}"
           python -m pip install -e ".[all,test]"
+          python -m pip install "molcrys-kit==${MOLCRYSKIT_MINIMUM}"
           npm install --no-save playwright-core
 
       - name: Run orthographic, perspective, and reset browser regression
@@ -179,8 +229,8 @@ jobs:
       - name: Install benchmark dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "molcrys-kit==${MOLCRYSKIT_MINIMUM}"
           python -m pip install -e ".[all,test]"
+          python -m pip install "molcrys-kit==${MOLCRYSKIT_MINIMUM}"
 
       - name: Run stable benchmark smoke subset
         run: |
