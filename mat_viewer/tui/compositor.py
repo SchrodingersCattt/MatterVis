@@ -18,6 +18,9 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+# Label vocabulary lives in .annotations; LABEL_MODES etc. are re-exported for callers.
+from .annotations import LABEL_MODE_ALIASES, LABEL_MODE_HELP, LABEL_MODES  # noqa: F401
+from .annotations import copy_aware_label, normalize_label_mode, overlay_axes_footer  # noqa: F401
 from .braille import BrailleCanvas
 from .projection import (
     Viewport,
@@ -38,10 +41,6 @@ if TYPE_CHECKING:
 
 
 # ── Label modes ─────────────────────────────────────────────────────────────
-
-# Label vocabulary lives in .annotations; re-exported here for existing callers.
-from .annotations import LABEL_MODE_ALIASES, LABEL_MODE_HELP, LABEL_MODES  # noqa: F401
-from .annotations import copy_aware_label, normalize_label_mode, overlay_axes_footer  # noqa: F401
 
 _SUPERSCRIPTS = "⁰¹²³⁴⁵⁶⁷⁸⁹"
 
