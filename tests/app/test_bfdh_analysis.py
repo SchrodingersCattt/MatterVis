@@ -102,3 +102,35 @@ def test_run_bfdh_analysis_defaults_zero_top_n_to_ten(backend_empty, monkeypatch
             {"include_equivalents": True, "include_negative": True},
         )
     ]
+
+
+def test_mesh_build_error_keeps_hkl_table(backend_empty, monkeypatch):
+    """A non-ValueError from the mesh builder drops the mesh, not the hkl table."""
+    import molcrys_kit.analysis
+
+    from mat_viewer.app import backend_analysis
+
+    bundle = backend_empty.get_bundle(backend_empty.get_state()["structure"])
+    bundle.crystal = object()
+    ranked = {"miller_index": [1, 0, 0], "d_hkl": 5.462, "multiplicity": 6}
+
+    class _Facet:
+        def as_dict(self):
+            return dict(ranked)
+
+    def fake_enumerate(crystal, *, max_index, top_n, **kwargs):
+        return [_Facet()]
+
+    def explode(crystal, facets):
+        raise RuntimeError("mesh builder exploded")
+
+    monkeypatch.setattr(molcrys_kit.analysis, "enumerate_bfdh_facets", fake_enumerate)
+    monkeypatch.setattr(backend_analysis, "_closed_bfdh_mesh", explode)
+
+    result = backend_empty.run_bfdh_analysis(max_index=2, top_n=10)
+
+    assert result["status"] == "ok"
+    assert result["facets"] == [ranked]
+    assert result["wulff_facets"] == []
+    assert "mesh builder exploded" in result["warnings"]
+    assert not any(item.startswith("BFDH analysis failed") for item in result["warnings"])

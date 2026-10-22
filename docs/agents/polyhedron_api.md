@@ -19,7 +19,7 @@ Every spec is a flat dict with these fields:
 | `id` | string | Stable identifier; auto-generated if not provided. |
 | `name` | string | Display label for the row. Defaults to `center_species`. |
 | `center_species` | string | **Required.** Stoichiometric formula key from `species_options(structure)` (`"N"`, `"ClO4"`, `"C6N2"`, ...). |
-| `ligand_species` | string \| null | Explicit ligand formula for MolCrysKit molecule-level packing polyhedra. `null` persists but is not rendered. The Analysis panel does not offer `(auto)`; a row without a ligand is skipped with a message to choose one. MatterVis does not derive ligand shells locally. |
+| `ligand_species` | string \| null | Explicit ligand formula for MolCrysKit molecule-level packing polyhedra. `null` persists but is not rendered. The Analysis panel does not offer `(auto)`. A null, blank, or stored `(auto)` ligand skips the MolCrysKit call and asks for an explicit ligand; a list that also names a real formula forwards only that formula. MatterVis does not derive ligand shells locally. |
 | `color` | string | Hull / shell colour; six-digit hex (`#RRGGBB`). Auto-assigned from a colour-blind-friendly palette when omitted. |
 | `enabled` | bool | `false` rows persist but are skipped at render time. |
 | `enforce_enclosure` | bool | Packing-shell mode. `true` (default) keeps MolCrysKit's gap+enclosure expansion; `false` stops at the distance-gap shell. |

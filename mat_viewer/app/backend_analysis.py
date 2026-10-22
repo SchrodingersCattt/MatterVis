@@ -503,9 +503,12 @@ class _AnalysisBackendMixin:
             warnings: list[str] = []
             wulff_facets: list[dict[str, Any]] = []
             if facets:
+                # Ranking and the closed mesh are separate. A mesh-build
+                # failure (including non-ValueError) drops only the mesh so
+                # the hkl table from enumerate_bfdh_facets still renders.
                 try:
                     wulff_facets = _closed_bfdh_mesh(crystal, facets)
-                except ValueError as exc:
+                except Exception as exc:
                     warnings.append(str(exc))
                 if not wulff_facets and not warnings:
                     warnings.append(

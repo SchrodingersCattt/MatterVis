@@ -54,6 +54,27 @@ def explicit_ligand_species(value: Any) -> str | None:
     return text
 
 
+def _query_ligand_species(ligand_species: Any) -> tuple[str, ...] | None:
+    """Drop blank and ``(auto)`` tokens. A string is one formula, not characters."""
+    if ligand_species is None:
+        return None
+    items = (ligand_species,) if isinstance(ligand_species, str) else ligand_species
+    resolved: list[str] = []
+    for item in items:
+        formula = explicit_ligand_species(item)
+        if formula and formula not in resolved:
+            resolved.append(formula)
+    return tuple(resolved) or None
+
+
+def _ligand_formula_for_molcryskit(ligand_species: Any) -> str:
+    """Ligand formula for MolCrysKit, or the explicit-ligand error when there is none."""
+    formula = explicit_ligand_species(ligand_species)
+    if not formula:
+        raise ValueError(EXPLICIT_LIGAND_MESSAGE)
+    return formula
+
+
 __all__ = [
     "DEFAULT_CENTROID_OFFSET_FRAC",
     "EXPLICIT_LIGAND_MESSAGE",
@@ -192,9 +213,7 @@ def _mck_polyhedron_record(
     hard_cutoff: float | None = None,
     fallback_max: int | None = None,
 ) -> dict[str, Any] | None:
-    if explicit_ligand_species(ligand_species) is None:
-        raise ValueError(EXPLICIT_LIGAND_MESSAGE)
-    ligand_formula = next((str(item) for item in ligand_species if item), None)
+    ligand_formula = _ligand_formula_for_molcryskit(ligand_species)
     if level == "atom":
         central_symbol = str(center_species or "").strip()
         if not central_symbol:
@@ -307,6 +326,7 @@ def extract_atom_coordination_shells(
     fallback_max: int | None = None,
 ) -> dict[int, dict[str, Any]]:
     """Return atom-level shells keyed by raw crystallographic atom index."""
+    ligand_formula = _ligand_formula_for_molcryskit(ligand_species)
     crystal = molcrys_bridge.molecular_crystal_from_bundle(bundle)
     public_module = sys.modules.get("mat_viewer.topology")
     find_polyhedra_impl = getattr(public_module, "find_polyhedra", find_polyhedra)
@@ -322,7 +342,7 @@ def extract_atom_coordination_shells(
     records = find_polyhedra_impl(
         crystal,
         str(center_species),
-        str(ligand_species),
+        ligand_formula,
         level="atom",
         enforce_enclosure=bool(enforce_enclosure),
         centroid_offset_frac=float(centroid_offset_frac),
@@ -607,9 +627,7 @@ def extract_coordination_shell(
     hard_cutoff: float | None = None,
     fallback_max: int | None = None,
 ) -> dict[str, Any]:
-    ligand_tuple = (
-        tuple(str(item) for item in ligand_species) if ligand_species else None
-    )
+    ligand_tuple = _query_ligand_species(ligand_species)
     static = _extract_coordination_shell_static(
         bundle,
         int(center_index),
@@ -893,9 +911,7 @@ def analyze_topology(
     slots. PBC image enumeration is delegated to MolCrysKit's
     ``find_polyhedra(level="molecule")`` implementation.
     """
-    ligand_tuple = (
-        tuple(str(item) for item in ligand_species) if ligand_species else None
-    )
+    ligand_tuple = _query_ligand_species(ligand_species)
     level = str(level or "molecule")
     center_kind = str(center_kind or "centroid")
     hard_cap = float(hard_cutoff) if hard_cutoff is not None else None

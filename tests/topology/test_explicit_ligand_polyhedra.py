@@ -1,14 +1,20 @@
 """Polyhedron rows need an explicit ligand; ``(auto)`` must not reach MolCrysKit."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from mat_viewer.app import WORKSPACE_DIR, ViewerBackend
 from mat_viewer.app.callbacks_analysis import default_polyhedron_ligand
 from mat_viewer.presets import default_preset_path
-from mat_viewer.topology.analysis import EXPLICIT_LIGAND_MESSAGE, explicit_ligand_species
+from mat_viewer.topology import analysis
+from mat_viewer.topology.analysis import (
+    EXPLICIT_LIGAND_MESSAGE,
+    explicit_ligand_species,
+)
 
 
 @pytest.fixture
@@ -101,3 +107,119 @@ def test_default_add_path_uses_explicit_ligand_and_renders(backend):
         (overlay.get("hull") or {}).get("simplices")
         for overlay in entry["overlays"]
     )
+
+
+def _forbid_molcryskit(monkeypatch) -> list:
+    calls: list = []
+
+    def _fake_find_polyhedra(*args, **_kwargs):
+        calls.append(args)
+        return []
+
+    monkeypatch.setattr(
+        "mat_viewer.topology.analysis.find_polyhedra", _fake_find_polyhedra
+    )
+    monkeypatch.setattr(
+        "mat_viewer.structure.molcrys_bridge.molecular_crystal_from_bundle",
+        lambda bundle: object(),
+    )
+    return calls
+
+
+def _center_bundle() -> SimpleNamespace:
+    return SimpleNamespace(
+        fragment_table=[
+            {
+                "index": 0,
+                "center": [0.0, 0.0, 0.0],
+                "formula": "Ca",
+                "label": "Ca1",
+                "type": "molecule",
+                "source_molecule_index": 0,
+            }
+        ],
+        topology_fragment_table=None,
+    )
+
+
+@pytest.mark.parametrize(
+    "ligand",
+    ["(auto)", "", "  ", None, ["(auto)"], ("(auto)", ""), ["", "(auto)"]],
+)
+def test_auto_or_empty_ligand_skips_molcryskit(monkeypatch, ligand):
+    calls = _forbid_molcryskit(monkeypatch)
+    bundle = _center_bundle()
+    fragment = bundle.fragment_table[0]
+
+    with pytest.raises(ValueError, match=re.escape(EXPLICIT_LIGAND_MESSAGE)):
+        analysis._mck_polyhedron_record(
+            bundle,
+            fragment,
+            8.0,
+            ligand_species=ligand,
+            level="atom",
+            center_species="Ca",
+        )
+    with pytest.raises(ValueError, match=re.escape(EXPLICIT_LIGAND_MESSAGE)):
+        analysis.extract_atom_coordination_shells(
+            bundle,
+            4.0,
+            center_species="Ca",
+            ligand_species=ligand if ligand is not None else "",
+        )
+    with pytest.raises(ValueError, match=re.escape(EXPLICIT_LIGAND_MESSAGE)):
+        analysis.extract_coordination_shell(
+            bundle,
+            0,
+            ligand_species=ligand,
+            level="atom",
+            center_species="Ca",
+        )
+    with pytest.raises(ValueError, match=re.escape(EXPLICIT_LIGAND_MESSAGE)):
+        analysis.analyze_topology(
+            bundle,
+            0,
+            ligand_species=ligand,
+            level="atom",
+            center_species="Ca",
+        )
+
+    assert calls == []
+
+
+def test_leading_auto_token_forwards_only_the_real_ligand(monkeypatch):
+    calls = _forbid_molcryskit(monkeypatch)
+    bundle = _center_bundle()
+
+    analysis._mck_polyhedron_record(
+        bundle,
+        bundle.fragment_table[0],
+        8.0,
+        ligand_species=("(auto)", "", "F"),
+        level="atom",
+        center_species="Ca",
+    )
+    analysis.extract_atom_coordination_shells(
+        bundle,
+        4.0,
+        center_species="Ca",
+        ligand_species=["(auto)", "O"],
+    )
+    analysis.extract_coordination_shell(
+        bundle,
+        0,
+        ligand_species=["(auto)", "Cl"],
+        level="atom",
+        center_species="Ca",
+    )
+    analysis.analyze_topology(
+        bundle,
+        0,
+        ligand_species=["(auto)", "Br"],
+        level="atom",
+        center_species="Ca",
+    )
+
+    forwarded = [call[2] for call in calls]
+    assert forwarded == ["F", "O", "Cl", "Br"]
+    assert "(auto)" not in forwarded
