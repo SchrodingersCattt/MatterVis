@@ -19,6 +19,18 @@ def add_session_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Keep one stateful session on stdin/stdout using newline-delimited JSON.",
     )
+    parser.add_argument(
+        "--repeat", type=int, nargs=3, metavar=("NA", "NB", "NC"), default=None,
+        help="Show an NA x NB x NC supercell instead of one unit cell.",
+    )
+    parser.add_argument(
+        "--grow-radius", type=float, default=None, metavar="ANGSTROM",
+        help="Add periodic images of atoms within this distance of the cell contents.",
+    )
+    parser.add_argument(
+        "--axes", action="store_true",
+        help="Reserve the bottom row for an a/b/c direction triad and a scale bar.",
+    )
 
 
 def run_session(args: argparse.Namespace, crystal, camera, *, label_mode: str) -> bool:
@@ -39,6 +51,7 @@ def run_session(args: argparse.Namespace, crystal, camera, *, label_mode: str) -
         label_mode=label_mode,
         show_minor=args.show_minor,
         display_level=getattr(args, "level", "auto"),
+        show_axes=getattr(args, "axes", False),
     )
     run_jsonl_session(session)
     return True
@@ -72,6 +85,7 @@ def compose_static_frame(
         show_minor=args.show_minor,
         display_level=display_level,
         zoom=camera.viewport_zoom,
+        show_axes=getattr(args, "axes", False),
     )
 
 

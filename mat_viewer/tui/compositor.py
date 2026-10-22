@@ -39,7 +39,9 @@ if TYPE_CHECKING:
 
 # ── Label modes ─────────────────────────────────────────────────────────────
 
-LABEL_MODES = ("auto", "label", "element", "molecule", "dot")
+# Label vocabulary lives in .annotations; re-exported here for existing callers.
+from .annotations import LABEL_MODE_ALIASES, LABEL_MODE_HELP, LABEL_MODES  # noqa: F401
+from .annotations import copy_aware_label, normalize_label_mode, overlay_axes_footer  # noqa: F401
 
 _SUPERSCRIPTS = "⁰¹²³⁴⁵⁶⁷⁸⁹"
 
@@ -67,6 +69,8 @@ def _atom_label_text(atom, label_mode: str, charset: str = "unicode") -> str:
         return atom.element
     elif label_mode == "label":
         return formatter(atom.display_label)
+    elif label_mode == "label_sym":
+        return formatter(copy_aware_label(atom))
     elif label_mode == "molecule":
         base = formatter(atom.display_label)
         if atom.molecule_index >= 0:
@@ -283,6 +287,7 @@ def compose_frame(
     viewport: Viewport | None = None,
     selected_display_index: int | None = None,
     charset: str = "unicode",
+    show_axes: bool = False,
 ) -> str:
     """Render crystal in ORTEP style with label relaxation.
 
@@ -290,6 +295,8 @@ def compose_frame(
     ----------
     display_level : str
         Visualization level: "atom" (default) or "molecule".
+    show_axes : bool
+        Reserve the bottom row for a lattice-axis triad and a scale bar.
     """
     if width is None or height is None:
         try:
@@ -350,6 +357,10 @@ def compose_frame(
         )
     canvas = BrailleCanvas(width, height)
 
+    def _finish(frame: str) -> str:
+        plain = not show_axes or crystal.lattice is None
+        return frame if plain else overlay_axes_footer(frame, crystal, camera, viewport, width, height)
+
     # ── Layer 1: Cell edges (dashed braille) ────────────────────────────
     if show_cell and cell_verts_2d is not None:
         for i, j in crystal.lattice.cell_edges():
@@ -360,7 +371,7 @@ def compose_frame(
     # ── Dispatch to display-level-specific rendering ───────────────────
     if display_level == "molecule":
         if structure_is_framework_like(crystal, show_minor=show_minor):
-            return compose_framework_frame(
+            return _finish(compose_framework_frame(
                 crystal,
                 camera,
                 pts_2d,
@@ -374,8 +385,8 @@ def compose_frame(
                 show_minor,
                 selected_display_index,
                 charset,
-            )
-        return _compose_molecule_frame(
+            ))
+        return _finish(_compose_molecule_frame(
             crystal,
             camera,
             pts_2d,
@@ -388,7 +399,7 @@ def compose_frame(
             show_minor,
             selected_display_index,
             charset,
-        )
+        ))
     # ── Depth tier computation ───────────────────────────────────────
     depth_min = float(depth.min()) if len(depth) > 0 else 0.0
     depth_max = float(depth.max()) if len(depth) > 0 else 1.0
@@ -628,7 +639,7 @@ def compose_frame(
 
     while output_lines and not output_lines[-1]:
         output_lines.pop()
-    return "\n".join(output_lines)
+    return _finish("\n".join(output_lines))
 
 
 # ── Color-run helpers ───────────────────────────────────────────────────────

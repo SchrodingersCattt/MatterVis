@@ -28,6 +28,10 @@ payload = observation.as_dict()
   `CrystalIR`.
 - `TerminalViewController.from_file(path, display_mode="auto", ...)` loads via
   the canonical terminal loader.
+- `load_for_tui(path, repeat=(na, nb, nc), grow_radius=R, grow_seeds=selector,
+  transforms=[...])` (also accepted by `TerminalSession.from_file`) applies
+  supercell / neighbour-shell transforms at load time. `label_mode="label_sym"`
+  then tells copies apart as `O1#k[i,j,k]` (symmetry operation, lattice shift).
 - `state` returns a detached `TerminalViewState`; each successful active
   view-state mutation increments its monotonic `revision` exactly once.
   Snapshot-registry operations (`save_view`, `list_views`) do not alter active
@@ -117,7 +121,7 @@ an opaque source token that may be nonnumeric or namespaced, whereas
 | `align(axis)` | Look along crystallographic `a`, `b`, `c`, `a*`, `b*`, or `c*`; uses real/reciprocal lattice directions. |
 | `pan(dx=..., dy=...)`, `zoom(factor=...)` | Move/crop the stable terminal viewport. |
 | `fit(target="all"\|"focus")` | Explicitly refit; orbit and display toggles do not refit. |
-| `set_display(...)` | Partial absolute update for `display_level`, `label_mode`, `show_cell`, `show_bonds`, `show_minor`, and `mono`. |
+| `set_display(...)` | Partial absolute update for `display_level`, `label_mode` (`auto`, `label`, `element`, `molecule`, `dot`, `label_sym`; alias `none` = `dot`), `show_cell`, `show_bonds`, `show_minor`, `mono`, and `show_axes` (bottom-row a/b/c triad and scale bar). |
 | `set_selection_mode(active)` | Enter or leave atom selection while retaining the current stable atom identity. |
 | `select_atom(reference)`, `select_next(step=...)` | Select by exact reference or traverse visible atoms in stable atom-id order. |
 | `select_direction(dx=..., dy=...)`, `select_screen(row=..., col=...)` | Select from the retained projection hit map; no chemistry is inferred from screen distance. |

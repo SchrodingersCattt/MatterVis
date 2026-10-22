@@ -109,6 +109,10 @@ class TerminalSession:
         input_format: str | None = None,
         type_map: list[str] | None = None,
         frame: int = 0,
+        repeat: int | tuple[int, int, int] | None = None,
+        grow_radius: float | None = None,
+        grow_seeds: Mapping[str, Any] | None = None,
+        transforms: list[dict[str, Any]] | None = None,
         **controller_options: Any,
     ) -> "TerminalSession":
         from .loader_adapter import load_for_tui
@@ -119,6 +123,10 @@ class TerminalSession:
             input_format=input_format,
             type_map=type_map,
             frame=frame,
+            repeat=repeat,
+            grow_radius=grow_radius,
+            grow_seeds=grow_seeds,
+            transforms=transforms,
         )
         return cls(crystal, **controller_options)
 
@@ -164,6 +172,7 @@ class TerminalSession:
                     "show_bonds",
                     "show_cell",
                     "show_minor",
+                    "show_axes",
                 },
             ),
             "select": (self._select, {"atom_id", "pinned"}),
@@ -224,6 +233,7 @@ class TerminalSession:
             viewport=viewport,
             selected_display_index=observation.state.selection.display_index,
             charset=self.charset,
+            show_axes=display.show_axes,
         )
         raw_lines = frame.splitlines()
         if len(raw_lines) > height or any(len(line) > width for line in raw_lines):

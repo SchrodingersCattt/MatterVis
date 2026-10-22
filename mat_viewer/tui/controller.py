@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 
 from ..math.camera import Camera, ProjectionMode, project_points
-from .compositor import DISPLAY_LEVELS, LABEL_MODES, compose_frame, resolve_display_level, structure_is_framework_like
+from .compositor import DISPLAY_LEVELS, compose_frame, normalize_label_mode, resolve_display_level, structure_is_framework_like
 from .chemistry_inspector import chemistry_warnings, format_atom_inspector
 from .inspection import (
     inspect_atoms,
@@ -91,13 +91,15 @@ class TerminalViewController:
         label_mode: str = "auto",
         show_minor: bool = False,
         display_level: str = "auto",
+        show_axes: bool = False,
     ) -> None:
         self.crystal = crystal
+        self._show_axes = bool(show_axes)
         self._width, self._height = self._validate_dimensions(width, height)
         self._mono = bool(mono)
         self._show_bonds = bool(show_bonds)
         self._show_cell = bool(show_cell)
-        self._label_mode = self._validate_label_mode(label_mode)
+        self._label_mode = normalize_label_mode(label_mode)
         self._show_minor = bool(show_minor)
         self._display_level = resolve_display_level(
             display_level, atom_count=len(crystal.atoms),
@@ -169,6 +171,7 @@ class TerminalViewController:
             show_cell=self._show_cell,
             show_minor=self._show_minor,
             mono=self._mono,
+            show_axes=self._show_axes,
         )
         viewport_state = TerminalViewportState(
             width=self._width,
@@ -210,6 +213,7 @@ class TerminalViewController:
             display_level=self._display_level,
             viewport=self._fit_viewport,
             selected_display_index=self._selection.display_index,
+            show_axes=self._show_axes,
         )
         title = build_terminal_title(
             self.crystal,
@@ -478,6 +482,7 @@ class TerminalViewController:
         show_cell: bool | None = None,
         show_minor: bool | None = None,
         mono: bool | None = None,
+        show_axes: bool | None = None,
     ) -> TerminalObservation:
         """Apply absolute render choices without changing source structure data."""
         # Validate every field before changing any controller state.
@@ -489,7 +494,7 @@ class TerminalViewController:
         candidate_label_mode = (
             self._label_mode
             if label_mode is None
-            else self._validate_label_mode(label_mode)
+            else normalize_label_mode(label_mode)
         )
         candidate_show_bonds = (
             self._show_bonds if show_bonds is None else bool(show_bonds)
@@ -506,6 +511,7 @@ class TerminalViewController:
         self._show_cell = candidate_show_cell
         self._show_minor = candidate_show_minor
         self._mono = candidate_mono
+        self._show_axes = self._show_axes if show_axes is None else bool(show_axes)
         return self._changed()
 
     def fit(self, *, target: str = "all") -> TerminalObservation:
@@ -621,6 +627,7 @@ class TerminalViewController:
         self._label_mode = display.label_mode
         self._show_minor = display.show_minor
         self._display_level = display.display_level
+        self._show_axes = display.show_axes
         self._focus = focus
         self._selection = selection
         self._fit_viewport = self._copy_viewport(viewport)
@@ -963,12 +970,6 @@ class TerminalViewController:
     def _validate_finite(name: str, *values: float) -> None:
         if not all(np.isfinite(value) for value in values):
             raise ValueError(f"{name} values must be finite")
-
-    @staticmethod
-    def _validate_label_mode(label_mode: str) -> str:
-        if label_mode not in LABEL_MODES:
-            raise ValueError(f"label_mode must be one of {LABEL_MODES}")
-        return label_mode
 
     @staticmethod
     def _validate_display_level(display_level: str) -> str:
