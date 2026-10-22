@@ -104,6 +104,8 @@ const PAGE = `<!doctype html>
         </span>
       </button>
     </div>
+    <div style="height:100vh"></div>
+    <button id="drawer-last-control" type="button" style="display:block;width:100%">Last control</button>
   </div>
   <div id="left-splitter" class="panel-splitter"></div>
   <div id="center-panel" style="position:relative;flex:1 1 auto;min-width:0;min-height:0;height:100vh;overflow:hidden">
@@ -607,10 +609,15 @@ function labelChecks(sample) {
     async function setToolsOpen(open) {
       const isOpen = await page.evaluate(() =>
         document.getElementById("left-panel").classList.contains("compact-panel-open"));
-      if (isOpen !== open) {
-        await page.click("#compact-toggle-left-panel");
-        await page.waitForTimeout(200);
-      }
+      if (isOpen === open) return;
+      await page.click("#compact-toggle-left-panel");
+      // The drawer slides for 160ms. Wait until its transformed box is
+      // parked open (left edge on the viewport) or closed (fully off-screen).
+      await page.waitForFunction((wantOpen) => {
+        const box = document.getElementById("left-panel").getBoundingClientRect();
+        if (wantOpen) return box.left > -1 && box.left < 2;
+        return box.right <= 1;
+      }, open, {timeout: 2000});
     }
 
     function assertLogPill(label, pill, viewportWidth) {
@@ -690,6 +697,41 @@ function labelChecks(sample) {
       failures.push(...labelChecks(open).map((item) => `${width} ${item}`));
       assertLogPill(openLabel, openPill, width);
       if (overlaps(openPill, open.tools)) failures.push(`${width}-open log pill overlaps the Tools button`);
+      if (width === 375) {
+        const tail = await page.evaluate(() => {
+          const drawer = document.getElementById("left-panel");
+          drawer.scrollTop = drawer.scrollHeight;
+          const control = document.getElementById("drawer-last-control");
+          const pill = document.getElementById("perf-log-panel");
+          const box = control.getBoundingClientRect();
+          const pillBox = pill.getBoundingClientRect();
+          const x = Math.min(box.right - 2, Math.max(box.left + 2, pillBox.left + pillBox.width / 2));
+          const y = box.top + box.height / 2;
+          const hit = document.elementFromPoint(x, y);
+          const scrolled = drawer.scrollTop;
+          drawer.scrollTop = 0;
+          return {
+            scrolled,
+            control: {
+              left: box.left, top: box.top, right: box.right, bottom: box.bottom,
+              width: box.width, height: box.height,
+            },
+            pill: {
+              left: pillBox.left, top: pillBox.top, right: pillBox.right, bottom: pillBox.bottom,
+              width: pillBox.width, height: pillBox.height,
+            },
+            hit: hit && (hit.id || hit.className || hit.tagName),
+            onControl: !!(hit && (hit === control || control.contains(hit))),
+          };
+        });
+        report[openLabel].lastControl = tail;
+        if (tail.scrolled < 40) {
+          failures.push(`375 drawer did not scroll to its last control (${tail.scrolled})`);
+        }
+        if (overlaps(tail.control, tail.pill) || !tail.onControl) {
+          failures.push(`375 drawer last control is covered by the log pill (${tail.hit || "nothing"})`);
+        }
+      }
       await setToolsOpen(false);
     }
 

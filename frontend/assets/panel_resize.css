@@ -51,6 +51,10 @@
   #viewer-root.compact-layout > #left-panel {
     left: 0;
     transform: translateX(-105%);
+    /* The collapsed log pill is bottom: calc(28px + 12px) and max-height
+       36px, and it paints above this drawer. Keep that strip empty so the
+       last Tools control can scroll clear of the pill. */
+    padding-bottom: calc(28px + 12px + 36px) !important;
   }
 
   #viewer-root.compact-layout > #mv-extension-panels {
