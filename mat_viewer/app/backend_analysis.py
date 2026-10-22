@@ -16,6 +16,7 @@ analysis surface that calls into it.
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
+import logging
 from contextlib import contextmanager
 
 from .shared import *
@@ -27,6 +28,8 @@ from ..topology.analysis import _MAX_REGISTERED_CN
 
 BFDH_DEFAULT_MAX_INDEX = 2
 BFDH_DEFAULT_TOP_N = 10
+
+logger = logging.getLogger(__name__)
 
 
 @contextmanager
@@ -509,7 +512,10 @@ class _AnalysisBackendMixin:
                 try:
                     wulff_facets = _closed_bfdh_mesh(crystal, facets)
                 except Exception as exc:
-                    warnings.append(str(exc))
+                    logger.exception("BFDH morphology mesh build failed")
+                    warnings.append(
+                        f"BFDH mesh unavailable: {type(exc).__name__}: {exc}"
+                    )
                 if not wulff_facets and not warnings:
                     warnings.append(
                         "BFDH ranking succeeded, but the morphology mesh is empty."

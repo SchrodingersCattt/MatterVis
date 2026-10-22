@@ -104,8 +104,13 @@ def test_run_bfdh_analysis_defaults_zero_top_n_to_ten(backend_empty, monkeypatch
     ]
 
 
-def test_mesh_build_error_keeps_hkl_table(backend_empty, monkeypatch):
-    """A non-ValueError from the mesh builder drops the mesh, not the hkl table."""
+def test_mesh_build_error_keeps_hkl_table(backend_empty, monkeypatch, caplog):
+    """A mesh-build failure drops the mesh, not the hkl table.
+
+    The warning names the exception type so an empty message is not blank.
+    """
+    import logging
+
     import molcrys_kit.analysis
 
     from mat_viewer.app import backend_analysis
@@ -121,16 +126,29 @@ def test_mesh_build_error_keeps_hkl_table(backend_empty, monkeypatch):
     def fake_enumerate(crystal, *, max_index, top_n, **kwargs):
         return [_Facet()]
 
-    def explode(crystal, facets):
-        raise RuntimeError("mesh builder exploded")
-
     monkeypatch.setattr(molcrys_kit.analysis, "enumerate_bfdh_facets", fake_enumerate)
-    monkeypatch.setattr(backend_analysis, "_closed_bfdh_mesh", explode)
+    cases = (
+        (
+            RuntimeError("mesh builder exploded"),
+            "BFDH mesh unavailable: RuntimeError: mesh builder exploded",
+        ),
+        (RuntimeError(), "BFDH mesh unavailable: RuntimeError: "),
+    )
+    for error, warning in cases:
+        def explode(crystal, facets, error=error):
+            raise error
 
-    result = backend_empty.run_bfdh_analysis(max_index=2, top_n=10)
+        monkeypatch.setattr(backend_analysis, "_closed_bfdh_mesh", explode)
+        caplog.clear()
+        with caplog.at_level(logging.ERROR, logger="mat_viewer.app.backend_analysis"):
+            result = backend_empty.run_bfdh_analysis(max_index=2, top_n=10)
 
-    assert result["status"] == "ok"
-    assert result["facets"] == [ranked]
-    assert result["wulff_facets"] == []
-    assert "mesh builder exploded" in result["warnings"]
-    assert not any(item.startswith("BFDH analysis failed") for item in result["warnings"])
+        assert result["status"] == "ok"
+        assert result["facets"] == [ranked]
+        assert result["wulff_facets"] == []
+        assert result["warnings"] == [warning]
+        assert not any(item.startswith("BFDH analysis failed") for item in result["warnings"])
+        assert any(
+            record.exc_info and record.exc_info[1].__class__ is type(error)
+            for record in caplog.records
+        )
