@@ -95,6 +95,7 @@ class AtomIR:
     disorder_group: int = 0  # Normalized numeric CIF/render group (0 = ordered)
     disorder: str = "."  # Lossless source token; may be nonnumeric or namespaced
     is_minor: bool = False  # Minor disorder image (should be dimmed/hidden)
+    is_boundary_replica: bool = False  # Periodic copy added across a cell face
 
     @property
     def display_label(self) -> str:
@@ -226,6 +227,7 @@ def filter_crystal(
                 disorder_group=atom.disorder_group,
                 disorder=atom.disorder,
                 is_minor=atom.is_minor,
+                is_boundary_replica=atom.is_boundary_replica,
             )
         )
 

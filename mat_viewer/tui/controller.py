@@ -8,8 +8,23 @@ from typing import Any
 import numpy as np
 
 from ..math.camera import Camera, ProjectionMode, project_points
-from .compositor import DISPLAY_LEVELS, compose_frame, normalize_label_mode, resolve_display_level, structure_is_framework_like
 from .chemistry_inspector import chemistry_warnings, format_atom_inspector
+from .compositor import (
+    compose_frame,
+    resolve_display_level,
+    structure_is_framework_like,
+)
+from .controller_validate import (
+    copy_camera,
+    copy_viewport,
+    validate_dimensions,
+    validate_display_level,
+    validate_finite,
+    validate_label_mode,
+    validate_projection,
+    validate_snapshot_name,
+    with_zoom,
+)
 from .inspection import (
     inspect_atoms,
     inspect_local_geometries,
@@ -90,17 +105,21 @@ class TerminalViewController:
         show_cell: bool = True,
         label_mode: str = "auto",
         show_minor: bool = False,
+        show_hydrogen: bool = False,
+        show_boundary: bool = False,
         display_level: str = "auto",
         show_axes: bool = False,
     ) -> None:
         self.crystal = crystal
         self._show_axes = bool(show_axes)
-        self._width, self._height = self._validate_dimensions(width, height)
+        self._width, self._height = validate_dimensions(width, height)
         self._mono = bool(mono)
         self._show_bonds = bool(show_bonds)
         self._show_cell = bool(show_cell)
-        self._label_mode = normalize_label_mode(label_mode)
+        self._label_mode = validate_label_mode(label_mode)
         self._show_minor = bool(show_minor)
+        self._show_hydrogen = bool(show_hydrogen)
+        self._show_boundary = bool(show_boundary)
         self._display_level = resolve_display_level(
             display_level, atom_count=len(crystal.atoms),
             molecule_count=sum(map(len, crystal.species_map.values())),
@@ -108,12 +127,12 @@ class TerminalViewController:
         )
         default_camera = camera is None
         self.camera = replace(
-            self._copy_camera(camera or Camera.from_view_name("auto", crystal)),
+            copy_camera(camera or Camera.from_view_name("auto", crystal)),
             perspective_near_is_larger=True,
         )
         if default_camera:
             self.camera = replace(self.camera, target=self._all_view_center())
-        self._initial_camera = self._copy_camera(self.camera)
+        self._initial_camera = copy_camera(self.camera)
         self._focus = TerminalFocusState()
         self._selection = TerminalSelectionState()
         self._snapshots: dict[
@@ -172,6 +191,8 @@ class TerminalViewController:
             show_minor=self._show_minor,
             mono=self._mono,
             show_axes=self._show_axes,
+            show_hydrogen=self._show_hydrogen,
+            show_boundary=self._show_boundary,
         )
         viewport_state = TerminalViewportState(
             width=self._width,
@@ -207,6 +228,8 @@ class TerminalViewController:
             show_bonds=self._show_bonds,
             show_cell=self._show_cell,
             show_minor=self._show_minor,
+            show_hydrogen=self._show_hydrogen,
+            show_boundary=self._show_boundary,
             zoom=self.camera.viewport_zoom,
             pan_x=self.camera.pan_x,
             pan_y=self.camera.pan_y,
@@ -254,16 +277,16 @@ class TerminalViewController:
             )
         if projection is not None:
             candidate = replace(
-                candidate, projection=self._validate_projection(projection)
+                candidate, projection=validate_projection(projection)
             )
         if zoom is not None:
-            candidate = self._with_zoom(candidate, zoom)
+            candidate = with_zoom(candidate, zoom)
         if pan_x is not None or pan_y is not None:
             values = (
                 pan_x if pan_x is not None else candidate.pan_x,
                 pan_y if pan_y is not None else candidate.pan_y,
             )
-            self._validate_finite("pan", *values)
+            validate_finite("pan", *values)
             candidate = replace(
                 candidate, pan_x=float(values[0]), pan_y=float(values[1])
             )
@@ -287,6 +310,8 @@ class TerminalViewController:
             depth,
             self._effective_viewport(),
             show_minor=self._show_minor,
+            show_hydrogen=self._show_hydrogen,
+            show_boundary=self._show_boundary,
         )
 
     def set_selection_mode(self, active: bool) -> TerminalObservation:
@@ -461,13 +486,13 @@ class TerminalViewController:
 
     def pan(self, *, dx: float = 0.0, dy: float = 0.0) -> TerminalObservation:
         """Pan the stable terminal viewport in screen-space data units."""
-        self._validate_finite("pan", dx, dy)
+        validate_finite("pan", dx, dy)
         self.camera = self.camera.pan(dx=float(dx), dy=float(dy))
         return self._changed()
 
     def zoom(self, *, factor: float) -> TerminalObservation:
         """Multiply viewport zoom within the existing interactive bounds."""
-        self._validate_finite("zoom factor", factor)
+        validate_finite("zoom factor", factor)
         if factor <= 0:
             raise ValueError("zoom factor must be greater than zero")
         self.camera = self.camera.zoom(float(factor))
@@ -481,6 +506,8 @@ class TerminalViewController:
         show_bonds: bool | None = None,
         show_cell: bool | None = None,
         show_minor: bool | None = None,
+        show_hydrogen: bool | None = None,
+        show_boundary: bool | None = None,
         mono: bool | None = None,
         show_axes: bool | None = None,
     ) -> TerminalObservation:
@@ -489,12 +516,12 @@ class TerminalViewController:
         candidate_display_level = (
             self._display_level
             if display_level is None
-            else self._validate_display_level(display_level)
+            else validate_display_level(display_level)
         )
         candidate_label_mode = (
             self._label_mode
             if label_mode is None
-            else normalize_label_mode(label_mode)
+            else validate_label_mode(label_mode)
         )
         candidate_show_bonds = (
             self._show_bonds if show_bonds is None else bool(show_bonds)
@@ -503,15 +530,35 @@ class TerminalViewController:
         candidate_show_minor = (
             self._show_minor if show_minor is None else bool(show_minor)
         )
+        candidate_show_hydrogen = (
+            self._show_hydrogen if show_hydrogen is None else bool(show_hydrogen)
+        )
+        candidate_show_boundary = (
+            self._show_boundary if show_boundary is None else bool(show_boundary)
+        )
         candidate_mono = self._mono if mono is None else bool(mono)
+        fit_changed = (
+            candidate_show_hydrogen != self._show_hydrogen
+            or candidate_show_boundary != self._show_boundary
+        )
 
         self._display_level = candidate_display_level
         self._label_mode = candidate_label_mode
         self._show_bonds = candidate_show_bonds
         self._show_cell = candidate_show_cell
         self._show_minor = candidate_show_minor
+        self._show_hydrogen = candidate_show_hydrogen
+        self._show_boundary = candidate_show_boundary
         self._mono = candidate_mono
         self._show_axes = self._show_axes if show_axes is None else bool(show_axes)
+        if fit_changed and self._focus.kind is None:
+            self.camera = replace(
+                self.camera,
+                target=self._all_view_center(),
+                pan_x=0.0,
+                pan_y=0.0,
+            )
+            self._fit_viewport = self._fit_all_viewport()
         return self._changed()
 
     def fit(self, *, target: str = "all") -> TerminalObservation:
@@ -600,13 +647,13 @@ class TerminalViewController:
 
     def save_view(self, name: str, *, overwrite: bool = False) -> TerminalViewSnapshot:
         """Save detached camera, display, focus, and fit state under ``name``."""
-        name = self._validate_snapshot_name(name)
+        name = validate_snapshot_name(name)
         if name in self._snapshots and not overwrite:
             raise ValueError(f"snapshot already exists: {name}")
         display = self.state.display
-        viewport = self._copy_viewport(self._fit_viewport)
+        viewport = copy_viewport(self._fit_viewport)
         self._snapshots[name] = (
-            self._copy_camera(self.camera),
+            copy_camera(self.camera),
             display,
             self._focus,
             self._selection,
@@ -620,17 +667,19 @@ class TerminalViewController:
             camera, display, focus, selection, viewport = self._snapshots[name]
         except KeyError as exc:
             raise ValueError(f"unknown snapshot: {name}") from exc
-        self.camera = self._copy_camera(camera)
+        self.camera = copy_camera(camera)
         self._mono = display.mono
         self._show_bonds = display.show_bonds
         self._show_cell = display.show_cell
         self._label_mode = display.label_mode
         self._show_minor = display.show_minor
+        self._show_hydrogen = display.show_hydrogen
+        self._show_boundary = display.show_boundary
         self._display_level = display.display_level
         self._show_axes = display.show_axes
         self._focus = focus
         self._selection = selection
-        self._fit_viewport = self._copy_viewport(viewport)
+        self._fit_viewport = copy_viewport(viewport)
         return self._changed()
 
     def list_views(self) -> tuple[TerminalViewSnapshot, ...]:
@@ -725,13 +774,13 @@ class TerminalViewController:
 
     def resize(self, width: int, height: int) -> TerminalObservation:
         """Set terminal dimensions and explicitly refit for the new aspect ratio."""
-        self._width, self._height = self._validate_dimensions(width, height)
+        self._width, self._height = validate_dimensions(width, height)
         self._fit_viewport = self._fit_all_viewport()
         return self._changed()
 
     def resize_viewport(self, width: int, height: int) -> TerminalObservation:
         """Resize the existing stable frame without changing its fitted bounds."""
-        self._width, self._height = self._validate_dimensions(width, height)
+        self._width, self._height = validate_dimensions(width, height)
         self._fit_viewport = viewport_from_bounds(
             self._fit_viewport.x_min,
             self._fit_viewport.x_max,
@@ -744,7 +793,7 @@ class TerminalViewController:
 
     def reset_view(self) -> TerminalObservation:
         """Restore the supplied startup camera and all-view framing only."""
-        self.camera = self._copy_camera(self._initial_camera)
+        self.camera = copy_camera(self._initial_camera)
         self._focus = TerminalFocusState()
         self._fit_viewport = self._fit_all_viewport()
         return self._changed()
@@ -805,11 +854,16 @@ class TerminalViewController:
         coords = [
             atom.cart
             for atom in self.crystal.atoms
-            if self._show_minor or not atom.is_minor
+            if self._atom_in_fit(atom)
         ]
-        if self._show_cell and self.crystal.lattice is not None:
-            coords.extend(self.crystal.lattice.cell_vertices())
         return np.asarray(coords, dtype=float) if coords else np.empty((0, 3))
+
+    def _atom_in_fit(self, atom) -> bool:
+        """Atoms that define the fitted sphere. The cell is drawn separately."""
+        hidden_minor = not self._show_minor and atom.is_minor
+        hidden_hydrogen = not self._show_hydrogen and atom.element == "H"
+        hidden_boundary = not self._show_boundary and atom.is_boundary_replica
+        return not (hidden_minor or hidden_hydrogen or hidden_boundary)
 
     def _all_view_center(self) -> np.ndarray:
         coords = self._all_view_coords()
@@ -933,66 +987,5 @@ class TerminalViewController:
             atom.display_copy_id,
             index,
         )
-
-    @staticmethod
-    def _copy_camera(camera: Camera) -> Camera:
-        basis = None if camera.basis is None else camera.basis.copy()
-        return replace(camera, target=camera.target.copy(), basis=basis)
-
-    @staticmethod
-    def _copy_viewport(viewport: Viewport) -> Viewport:
-        return Viewport(
-            x_min=float(viewport.x_min),
-            x_max=float(viewport.x_max),
-            y_min=float(viewport.y_min),
-            y_max=float(viewport.y_max),
-            scale=float(viewport.scale),
-            width=int(viewport.width),
-            height=int(viewport.height),
-        )
-
-    @staticmethod
-    def _validate_snapshot_name(name: str) -> str:
-        if not isinstance(name, str) or not name.strip():
-            raise ValueError("snapshot name must be a non-empty string")
-        return name.strip()
-
-    @staticmethod
-    def _validate_dimensions(width: int, height: int) -> tuple[int, int]:
-        if isinstance(width, bool) or isinstance(height, bool):
-            raise TypeError("viewport dimensions must be integers")
-        width, height = int(width), int(height)
-        if width <= 0 or height <= 0:
-            raise ValueError("viewport dimensions must be greater than zero")
-        return width, height
-
-    @staticmethod
-    def _validate_finite(name: str, *values: float) -> None:
-        if not all(np.isfinite(value) for value in values):
-            raise ValueError(f"{name} values must be finite")
-
-    @staticmethod
-    def _validate_display_level(display_level: str) -> str:
-        if display_level not in DISPLAY_LEVELS:
-            raise ValueError(f"display_level must be one of {DISPLAY_LEVELS}")
-        return display_level
-
-    @staticmethod
-    def _validate_projection(projection: str | ProjectionMode) -> ProjectionMode:
-        if isinstance(projection, ProjectionMode):
-            return projection
-        try:
-            return ProjectionMode(str(projection))
-        except ValueError as exc:
-            raise ValueError(
-                "projection must be 'orthographic' or 'perspective'"
-            ) from exc
-
-    @staticmethod
-    def _with_zoom(camera: Camera, zoom: float) -> Camera:
-        if not np.isfinite(zoom) or zoom <= 0:
-            raise ValueError("zoom must be greater than zero")
-        return replace(camera, viewport_zoom=float(np.clip(zoom, 0.5, 20.0)))
-
 
 __all__ = ["TerminalViewController"]

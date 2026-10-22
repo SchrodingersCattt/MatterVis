@@ -51,6 +51,8 @@ class TerminalDisplayState:
     show_minor: bool
     mono: bool
     show_axes: bool = False
+    show_hydrogen: bool = False
+    show_boundary: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -61,6 +63,8 @@ class TerminalDisplayState:
             "show_minor": self.show_minor,
             "mono": self.mono,
             "show_axes": self.show_axes,
+            "show_hydrogen": self.show_hydrogen,
+            "show_boundary": self.show_boundary,
         }
 
 

@@ -15,6 +15,9 @@ if TYPE_CHECKING:
 
 # Terminal character cells are approximately twice as tall as they are wide.
 CHAR_ASPECT = 2.0
+# Fractional margin around the fitted bounds. Small enough that the
+# structure still occupies most of the limiting screen axis.
+FIT_PADDING = 0.06
 
 
 @dataclass
@@ -65,6 +68,8 @@ def build_atom_hit_map(
     viewport: Viewport,
     *,
     show_minor: bool,
+    show_hydrogen: bool = True,
+    show_boundary: bool = True,
 ) -> tuple[ProjectedAtomHit, ...]:
     """Retain visible atom screen positions for selection and mouse hits.
 
@@ -76,6 +81,10 @@ def build_atom_hit_map(
     for index in range(count):
         atom = crystal.atoms[index]
         if not show_minor and atom.is_minor:
+            continue
+        if not show_hydrogen and atom.element == "H":
+            continue
+        if not show_boundary and getattr(atom, "is_boundary_replica", False):
             continue
         row, col = viewport.to_grid(float(pts_2d[index][0]), float(pts_2d[index][1]))
         if not viewport.in_bounds_grid(row, col):
@@ -119,7 +128,7 @@ def _compute_viewport(
 
     x_range = max(x_max - x_min, 0.01)
     y_range = max(y_max - y_min, 0.01)
-    pad = 0.12
+    pad = FIT_PADDING
     x_min -= x_range * pad
     x_max += x_range * pad
     y_min -= y_range * pad

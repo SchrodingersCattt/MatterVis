@@ -298,6 +298,7 @@ def _crystal_ir_from_scene(
                 disorder_group=dg,
                 disorder=str(atom.get("_disorder_token", ".") or "."),
                 is_minor=bool(atom.get("is_minor", False)),
+                is_boundary_replica=bool(atom.get("_is_boundary_replica", False)),
             )
         )
 

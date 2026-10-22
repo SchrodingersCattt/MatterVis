@@ -8,6 +8,18 @@ import argparse
 def add_session_arguments(parser: argparse.ArgumentParser) -> None:
     """Add machine-readable terminal rendering and session options."""
     parser.add_argument(
+        "--hydrogen",
+        action="store_true",
+        default=False,
+        help="Draw hydrogen atoms. Hidden by default so heavy atoms stay readable.",
+    )
+    parser.add_argument(
+        "--boundary",
+        action="store_true",
+        default=False,
+        help="Draw periodic boundary replicas. Hidden by default.",
+    )
+    parser.add_argument(
         "--charset",
         choices=("unicode", "ascii7"),
         default="unicode",
@@ -50,6 +62,8 @@ def run_session(args: argparse.Namespace, crystal, camera, *, label_mode: str) -
         show_cell=not args.no_cell,
         label_mode=label_mode,
         show_minor=args.show_minor,
+        show_hydrogen=bool(getattr(args, "hydrogen", False)),
+        show_boundary=bool(getattr(args, "boundary", False)),
         display_level=getattr(args, "level", "auto"),
         show_axes=getattr(args, "axes", False),
     )
@@ -83,6 +97,8 @@ def compose_static_frame(
         show_bonds=not args.no_bonds,
         show_cell=not args.no_cell,
         show_minor=args.show_minor,
+        show_hydrogen=bool(getattr(args, "hydrogen", False)),
+        show_boundary=bool(getattr(args, "boundary", False)),
         display_level=display_level,
         zoom=camera.viewport_zoom,
         show_axes=getattr(args, "axes", False),

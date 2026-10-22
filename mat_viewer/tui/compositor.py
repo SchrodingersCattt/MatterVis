@@ -1,19 +1,13 @@
-"""ORTEP-style terminal renderer with label relaxation and leader lines.
+"""Terminal frame assembly.
 
-Design:
-- Uniform scale preserving aspect ratio (cubic → visually square)
-- Atom circles (braille) with centered labels
-- Label relaxation: if labels collide, push apart with leader lines
-- Bonds drawn circle-edge to circle-edge
-- Partial-occupancy: dashed circle + '*' suffix
-- Zoom = viewport crop (not camera distance)
-- Clipping for atoms outside viewport
+Atom level is the readable glyph picture in :mod:`.glyph_frame`: element
+symbols, solid bonds, ``:`` cell edges, and a per-cell depth buffer.
+Molecule and framework overviews still use the braille canvas.
 """
 
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -28,7 +22,7 @@ from .projection import (
     viewport_from_bounds,
 )
 from ..utils.colors import element_ansi_color
-from .renderer import DEFAULT_COLOR, BOND_COLOR, CELL_COLOR
+from .renderer import DEFAULT_COLOR, CELL_COLOR
 from .text import ascii7_text, terminal_text
 from .framework import (
     compose_framework_frame,
@@ -117,56 +111,8 @@ def resolve_molecule_detail(
     return "hull"
 
 
-# ── Atom radius for circles ────────────────────────────────────────────────
-
-# Base radius per depth tier: front / mid / back
-_RADIUS_BASE = (5, 4, 3)
-_RADIUS_H = (3, 2, 1)
-
-# Depth tier constants
-_TIER_FRONT = 0
-_TIER_MID = 1
-_TIER_BACK = 2
-
-# Dimmed color for back-tier braille geometry
+# Dimmed color for molecule-overview braille hints behind hull edges.
 _BACK_TIER_COLOR = 236  # dark grey (ANSI 256)
-_MID_TIER_COLOR = 244  # medium grey
-
-
-def _atom_radius(
-    element: str,
-    depth_tier: int = _TIER_MID,
-    detail_scale: float = 1.0,
-) -> int:
-    """Depth-dependent atom circle radius (subpixels)."""
-    if element == "H":
-        base = _RADIUS_H[depth_tier]
-    else:
-        base = _RADIUS_BASE[depth_tier]
-    return max(1, int(round(base * detail_scale)))
-
-
-def _depth_tier(depth_val: float, depth_min: float, depth_max: float) -> int:
-    """Classify depth into 3 tiers: front(0), mid(1), back(2)."""
-    d_range = depth_max - depth_min
-    if d_range < 1e-6:
-        return _TIER_MID  # flat → all same tier
-    # depth array: larger = closer to camera
-    norm = (depth_val - depth_min) / d_range  # 0=far, 1=close
-    if norm >= 0.67:
-        return _TIER_FRONT
-    elif norm >= 0.33:
-        return _TIER_MID
-    return _TIER_BACK
-
-
-def _tier_color(element_color: int, tier: int) -> int:
-    """Map an element color + depth tier to the rendered ANSI color."""
-    if tier == _TIER_FRONT:
-        return element_color
-    elif tier == _TIER_MID:
-        return element_color  # same hue, will be rendered without bold
-    return _BACK_TIER_COLOR  # back tier: grey
 
 
 # ── Display levels ──────────────────────────────────────────────────────────
@@ -215,54 +161,6 @@ def resolve_display_level_for_crystal(
     )
 
 
-# ── Label relaxation ────────────────────────────────────────────────────────
-
-# Offsets to try when label doesn't fit at ideal pos (row_offset, col_offset)
-_OFFSETS = [
-    (0, 0),  # ideal: centered at atom
-    (0, 1),
-    (0, -1),
-    (-1, 0),
-    (1, 0),
-    (-1, 1),
-    (-1, -1),
-    (1, 1),
-    (1, -1),
-    (0, 2),
-    (0, -2),
-    (-2, 0),
-    (2, 0),
-    (-1, 2),
-    (-1, -2),
-    (1, 2),
-    (1, -2),
-]
-
-
-@dataclass
-class _AtomDraw:
-    """Internal atom drawing state."""
-
-    idx: int
-    x2d: float  # projected x
-    y2d: float  # projected y
-    row: int  # grid row (ideal)
-    col: int  # grid col (ideal, label center)
-    px_x: int  # subpixel x
-    px_y: int  # subpixel y
-    radius: int  # subpixel circle radius
-    text: str  # label text
-    color: int  # ANSI 256 color
-    depth: float
-    is_partial: bool  # occ < 1
-    selected: bool = False
-    depth_tier: int = _TIER_MID  # 0=front, 1=mid, 2=back
-    # Placed label position (after relaxation)
-    placed_row: int = -1
-    placed_col: int = -1
-    needs_leader: bool = False
-
-
 # ── Main compositor ─────────────────────────────────────────────────────────
 
 
@@ -279,6 +177,8 @@ def compose_frame(
     show_bonds: bool = True,
     show_cell: bool = True,
     show_minor: bool = True,
+    show_hydrogen: bool = False,
+    show_boundary: bool = False,
     zoom: float = 1.0,
     pan_x: float = 0.0,
     pan_y: float = 0.0,
@@ -296,6 +196,9 @@ def compose_frame(
         Visualization level: "atom" (default) or "molecule".
     show_axes : bool
         Reserve the bottom row for a lattice-axis triad and a scale bar.
+    show_hydrogen, show_boundary : bool
+        Atom-level drawing omits hydrogen and periodic boundary replicas
+        unless these are set. Molecule overviews keep the braille picture.
     """
     if width is None or height is None:
         try:
@@ -326,10 +229,6 @@ def compose_frame(
         height=height,
         zoom=zoom,
     )
-    detail_scale = {
-        "dot": 0.45,
-        "element": 0.7,
-    }.get(resolved_label_mode, 1.0)
 
     # ── Viewport ────────────────────────────────────────────────────────
     extra_pts: list[np.ndarray] = []
@@ -339,11 +238,26 @@ def compose_frame(
 
         verts = crystal.lattice.cell_vertices()
         cell_verts_2d, _ = _proj(camera, verts)
-        extra_pts.append(cell_verts_2d)
+        # The cell is drawn, but it does not expand the fit. Visible atoms
+        # are what should fill the canvas.
+
+    fit_pts = pts_2d
+    if viewport is None and display_level != "molecule" and len(pts_2d) > 0:
+        # Static / one-shot fit must match the atom-level visibility rule.
+        fit_mask = [
+            (show_minor or not atom.is_minor)
+            and (show_hydrogen or atom.element != "H")
+            and (show_boundary or not atom.is_boundary_replica)
+            for atom in crystal.atoms[: len(pts_2d)]
+        ]
+        if any(fit_mask):
+            fit_pts = pts_2d[np.asarray(fit_mask, dtype=bool)]
+        else:
+            fit_pts = np.empty((0, 2), dtype=float)
 
     if viewport is None:
         viewport = _compute_viewport(
-            pts_2d, extra_pts, width, height, zoom, pan_x, pan_y
+            fit_pts, extra_pts, width, height, zoom, pan_x, pan_y
         )
     else:
         viewport = viewport_from_bounds(
@@ -357,6 +271,30 @@ def compose_frame(
             pan_x=pan_x,
             pan_y=pan_y,
         )
+    if display_level != "molecule":
+        from .glyph_frame import render_glyph_frame
+
+        return finish_axes(
+            render_glyph_frame(
+                crystal,
+                camera,
+                pts_2d,
+                depth,
+                viewport,
+                width=width,
+                height=height,
+                mono=mono,
+                charset=charset,
+                label_mode=resolved_label_mode,
+                show_bonds=show_bonds,
+                show_cell=show_cell,
+                show_minor=show_minor,
+                show_hydrogen=show_hydrogen,
+                show_boundary=show_boundary,
+                selected_display_index=selected_display_index,
+            ),
+            viewport,
+        )
     canvas = BrailleCanvas(width, height)
 
     # ── Layer 1: Cell edges (dashed braille) ────────────────────────────
@@ -367,9 +305,9 @@ def compose_frame(
             canvas.draw_dashed_line(sx, sy, ex, ey, dash=5, gap=3, color=CELL_COLOR)
 
     # ── Dispatch to display-level-specific rendering ───────────────────
-    if display_level == "molecule":
-        if structure_is_framework_like(crystal, show_minor=show_minor):
-            return finish_axes(compose_framework_frame(
+    if structure_is_framework_like(crystal, show_minor=show_minor):
+        return finish_axes(
+            compose_framework_frame(
                 crystal,
                 camera,
                 pts_2d,
@@ -383,8 +321,11 @@ def compose_frame(
                 show_minor,
                 selected_display_index,
                 charset,
-            ), viewport)
-        return finish_axes(_compose_molecule_frame(
+            ),
+            viewport,
+        )
+    return finish_axes(
+        _compose_molecule_frame(
             crystal,
             camera,
             pts_2d,
@@ -397,247 +338,10 @@ def compose_frame(
             show_minor,
             selected_display_index,
             charset,
-        ), viewport)
-    # ── Depth tier computation ───────────────────────────────────────
-    depth_min = float(depth.min()) if len(depth) > 0 else 0.0
-    depth_max = float(depth.max()) if len(depth) > 0 else 1.0
+        ),
+        viewport,
+    )
 
-    # ── Prepare atoms ───────────────────────────────────────────────────
-    atoms_draw: list[_AtomDraw] = []
-    if len(pts_2d) > 0:
-        for idx in range(min(len(crystal.atoms), len(pts_2d))):
-            atom = crystal.atoms[idx]
-            if not show_minor and atom.is_minor:
-                continue
-            x2d, y2d = float(pts_2d[idx][0]), float(pts_2d[idx][1])
-            row, col = viewport.to_grid(x2d, y2d)
-            px_x, px_y = viewport.to_px(x2d, y2d)
-            tier = _depth_tier(float(depth[idx]), depth_min, depth_max)
-            radius = _atom_radius(atom.element, tier, detail_scale)
-
-            text = _atom_label_text(atom, resolved_label_mode, charset)
-            is_partial = atom.occupancy < 0.99
-            if is_partial and resolved_label_mode != "dot":
-                text += "*"
-            selected = idx == selected_display_index
-            if selected:
-                text = f"[{text}]"
-
-            color = element_ansi_color(atom.element, default=DEFAULT_COLOR)
-
-            atoms_draw.append(
-                _AtomDraw(
-                    idx=idx,
-                    x2d=x2d,
-                    y2d=y2d,
-                    row=row,
-                    col=col,
-                    px_x=px_x,
-                    px_y=px_y,
-                    radius=radius,
-                    text=text,
-                    color=color,
-                    depth=float(depth[idx]),
-                    is_partial=is_partial,
-                    selected=selected,
-                    depth_tier=tier,
-                )
-            )
-
-    # Sort back-to-front for drawing (far first)
-    atoms_draw.sort(key=lambda a: a.depth)
-
-    # ── Layer 1.5: Density blobs (behind bonds/atoms, stippled fill) ────
-    _draw_density_blobs(canvas, viewport, camera, crystal)
-
-    # ── Layer 2: Bonds (circle-edge to circle-edge) ─────────────────────
-    if show_bonds and crystal.bonds:
-        from ..math.camera import project_points as _proj
-
-        pos_map = {a.idx: a for a in atoms_draw}
-        for bond in crystal.bonds:
-            a1 = pos_map.get(bond.i)
-            a2 = pos_map.get(bond.j)
-            if a1 is None or a2 is None:
-                continue
-            if bond.start is not None and bond.end is not None:
-                endpoints_2d, _ = _proj(
-                    camera,
-                    np.asarray([bond.start, bond.end], dtype=float),
-                )
-                start_px = viewport.to_px(*endpoints_2d[0])
-                end_px = viewport.to_px(*endpoints_2d[1])
-            else:
-                start_px = (a1.px_x, a1.px_y)
-                end_px = (a2.px_x, a2.px_y)
-            dx = end_px[0] - start_px[0]
-            dy = end_px[1] - start_px[1]
-            length = (dx * dx + dy * dy) ** 0.5
-            if length < 2:
-                continue
-            ux, uy = dx / length, dy / length
-            # Shorten to circle edges
-            sx = int(start_px[0] + ux * (a1.radius + 1))
-            sy = int(start_px[1] + uy * (a1.radius + 1))
-            ex = int(end_px[0] - ux * (a2.radius + 1))
-            ey = int(end_px[1] - uy * (a2.radius + 1))
-            gap = ((ex - sx) ** 2 + (ey - sy) ** 2) ** 0.5
-            if gap < 2:
-                continue
-            # Depth-aware bond styling
-            bond_tier = max(a1.depth_tier, a2.depth_tier)
-            bond_color = BOND_COLOR if bond_tier <= _TIER_MID else _BACK_TIER_COLOR
-            if a1.is_partial or a2.is_partial:
-                canvas.draw_dashed_line(sx, sy, ex, ey, dash=2, gap=2, color=bond_color)
-            elif bond_tier == _TIER_BACK:
-                canvas.draw_dashed_line(sx, sy, ex, ey, dash=3, gap=2, color=bond_color)
-            else:
-                canvas.draw_line(sx, sy, ex, ey, color=bond_color)
-
-    # ── Layer 3: Atom circles (depth-colored) ───────────────────────────
-    for a in atoms_draw:
-        circle_color = _tier_color(a.color, a.depth_tier)
-        if a.is_partial:
-            _draw_dashed_circle(canvas, a.px_x, a.px_y, a.radius, color=circle_color)
-        else:
-            _draw_circle(canvas, a.px_x, a.px_y, a.radius, color=circle_color)
-
-    # ── Layer 4: Label relaxation ───────────────────────────────────────
-    # Sort front-to-back for label priority (closest gets first pick)
-    label_order = sorted(atoms_draw, key=lambda a: (not a.selected, -a.depth))
-
-    # Grid tracks occupied cells
-    occupied: set[tuple[int, int]] = set()
-
-    for a in label_order:
-        if len(a.text) > width:
-            a.text = a.text[:width]
-        lw = len(a.text)
-        placed = False
-
-        for dr, dc in _OFFSETS:
-            r = a.row + dr
-            c = a.col - lw // 2 + dc
-            # Clamp to bounds
-            if r < 0 or r >= height:
-                continue
-            c = max(0, min(width - lw, c))
-
-            # Check all cells
-            conflict = False
-            for j in range(lw):
-                if (r, c + j) in occupied:
-                    conflict = True
-                    break
-            if conflict:
-                continue
-
-            # Place it
-            for j in range(lw):
-                occupied.add((r, c + j))
-            a.placed_row = r
-            a.placed_col = c
-            # Need leader if offset > 1 char from ideal
-            if abs(r - a.row) > 1 or abs((c + lw // 2) - a.col) > 1:
-                a.needs_leader = True
-            placed = True
-            break
-
-        if not placed:
-            # Could not place — try to at least mark with "dot" at atom pos
-            a.placed_row = -1
-            a.placed_col = -1
-
-    # ── Layer 5: Leader lines (braille, from label edge → atom center) ──
-    for a in atoms_draw:
-        if not a.needs_leader or a.placed_row < 0:
-            continue
-        # Leader from center of placed label to atom subpixel position
-        lw = len(a.text)
-        label_center_col = a.placed_col + lw // 2
-        label_center_row = a.placed_row
-        # Convert label center to subpixel
-        lx = label_center_col * 2 + 1
-        ly = label_center_row * 4 + 2
-        leader_color = _tier_color(
-            a.color,
-            _TIER_FRONT if a.selected else a.depth_tier,
-        )
-        canvas.draw_dashed_line(
-            lx, ly, a.px_x, a.px_y, dash=1, gap=1, color=leader_color
-        )
-
-    # ── Build output (color-aware) ─────────────────────────────────────
-    colored_rows = canvas.render_colored(charset=charset)
-
-    # Index placed labels by row — include depth_tier for label styling
-    label_map: dict[int, list[tuple[int, str, int, bool, int, bool]]] = {}
-    for a in atoms_draw:
-        if a.placed_row >= 0:
-            label_map.setdefault(a.placed_row, []).append(
-                (a.placed_col, a.text, a.color, a.is_partial, a.depth_tier, a.selected)
-            )
-
-    output_lines: list[str] = []
-    for row_idx in range(height):
-        row_data = colored_rows[row_idx] if row_idx < len(colored_rows) else []
-        row_labels = label_map.get(row_idx)
-
-        if not row_labels:
-            # No labels — emit braille with per-cell color runs
-            if mono:
-                line = "".join(ch for ch, _ in row_data).rstrip()
-                output_lines.append(line)
-            else:
-                output_lines.append(_build_colored_braille_line(row_data))
-        else:
-            row_labels.sort(key=lambda x: x[0])
-            parts: list[str] = []
-            col = 0
-            li = 0
-            braille_run: list[tuple[str, int]] = []
-
-            def _flush_braille_colored():
-                nonlocal braille_run
-                if braille_run:
-                    if mono:
-                        parts.append("".join(ch for ch, _ in braille_run))
-                    else:
-                        parts.append(_color_run_to_ansi(braille_run))
-                    braille_run = []
-
-            while col < width:
-                if li < len(row_labels) and row_labels[li][0] == col:
-                    _flush_braille_colored()
-                    lcol, ltext, lcolor, is_partial, ltier, selected = row_labels[li]
-                    if mono:
-                        parts.append(ltext)
-                    else:
-                        # Depth-aware label styling
-                        if selected:
-                            parts.append(f"\033[1;7;38;5;{lcolor}m{ltext}\033[0m")
-                        elif is_partial:
-                            parts.append(f"\033[2;38;5;{lcolor}m{ltext}\033[0m")
-                        elif ltier == _TIER_FRONT:
-                            parts.append(f"\033[1;38;5;{lcolor}m{ltext}\033[0m")
-                        elif ltier == _TIER_MID:
-                            parts.append(f"\033[38;5;{lcolor}m{ltext}\033[0m")
-                        else:  # back
-                            parts.append(f"\033[2;38;5;{lcolor}m{ltext}\033[0m")
-                    col += len(ltext)
-                    li += 1
-                else:
-                    if col < len(row_data):
-                        braille_run.append(row_data[col])
-                    else:
-                        braille_run.append((" ", 0))
-                    col += 1
-            _flush_braille_colored()
-            output_lines.append("".join(parts).rstrip())
-
-    while output_lines and not output_lines[-1]:
-        output_lines.pop()
-    return finish_axes("\n".join(output_lines), viewport)
 
 
 # ── Color-run helpers ───────────────────────────────────────────────────────
@@ -681,71 +385,8 @@ def _color_run_to_ansi(cells: list[tuple[str, int]]) -> str:
     return "".join(parts)
 
 
-# ── Density blob drawing ────────────────────────────────────────────────────
-
-# ANSI 256 colors for orbital lobes
-_BLOB_POS_COLOR = 208  # orange (positive lobe)
-_BLOB_NEG_COLOR = 33  # blue (negative lobe)
-
-
-def _draw_density_blobs(
-    canvas: "BrailleCanvas",
-    viewport: "Viewport",
-    camera: "Camera",
-    crystal: "CrystalIR",
-) -> None:
-    """Draw stippled density blobs for cube isosurface lobes.
-
-    Uses a sparse dot pattern to simulate translucency — structural
-    geometry drawn on top will overwrite the dots, keeping atoms/bonds
-    legible through the orbital cloud.
-    """
-    blobs = crystal.metadata.get("density_blobs")
-    if not blobs:
-        return
-
-    from ..math.camera import project_points as _proj
-
-    centers = np.array([b["center"] for b in blobs], dtype=float)
-    pts_2d, blob_depth = _proj(camera, centers)
-
-    for i, blob in enumerate(blobs):
-        x2d, y2d = float(pts_2d[i][0]), float(pts_2d[i][1])
-        px_x, px_y = viewport.to_px(x2d, y2d)
-        # Convert world-space radius to subpixel radius
-        screen_r = max(2, int(blob["radius"] * viewport.scale * 2))
-        # Cap radius to avoid flooding the canvas
-        screen_r = min(screen_r, min(canvas.px_width, canvas.px_height) // 3)
-
-        color = _BLOB_POS_COLOR if blob.get("sign", 1) > 0 else _BLOB_NEG_COLOR
-        density = 0.25  # sparse fill for translucency effect
-
-        _draw_stippled_disk(canvas, px_x, px_y, screen_r, color=color, density=density)
-
-
-def _draw_stippled_disk(
-    canvas: "BrailleCanvas",
-    cx: int,
-    cy: int,
-    radius: int,
-    *,
-    color: int = 0,
-    density: float = 0.3,
-) -> None:
-    """Draw a filled disk with deterministic stipple pattern.
-
-    Uses a simple hash to decide which pixels to set, giving a repeatable
-    translucent appearance without importing random.
-    """
-    r2 = radius * radius
-    for dy in range(-radius, radius + 1):
-        for dx in range(-radius, radius + 1):
-            if dx * dx + dy * dy > r2:
-                continue
-            # Deterministic stipple: hash of position
-            h = ((dx * 7919 + dy * 104729) & 0xFFFF) / 65535.0
-            if h < density:
-                canvas.set_pixel(cx + dx, cy + dy, color=color)
+# Cube density lobes are not drawn on the glyph atom-level picture. Metadata
+# may still carry density_blobs for a later braille or glyph overlay.
 
 
 # ── Circle drawing ──────────────────────────────────────────────────────────
@@ -759,20 +400,6 @@ def _draw_circle(
     while x <= y:
         for px, py in _oct(cx, cy, x, y):
             canvas.set_pixel(px, py, color=color)
-        x, y, d = _step(x, y, d)
-
-
-def _draw_dashed_circle(
-    canvas: BrailleCanvas, cx: int, cy: int, r: int, *, color: int = 0
-) -> None:
-    """Dashed circle for partial-occupancy atoms."""
-    x, y, d = 0, r, 1 - r
-    count = 0
-    while x <= y:
-        if (count % 5) < 3:
-            for px, py in _oct(cx, cy, x, y):
-                canvas.set_pixel(px, py, color=color)
-        count += 1
         x, y, d = _step(x, y, d)
 
 
