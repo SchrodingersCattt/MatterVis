@@ -99,6 +99,26 @@ def axes_footer_text(crystal, camera, viewport: Viewport, width: int) -> str:
     return text[:width]
 
 
+def axes_scene_height(height: int, *, show_axes: bool, has_lattice: bool) -> int:
+    """Canvas rows left after reserving the axis/scale footer."""
+    if show_axes and has_lattice and height > 1:
+        return height - 1
+    return height
+
+
+def bind_axes_footer(crystal, camera, width: int, full_height: int, scene_height: int):
+    """Return a finisher that appends the footer when a row was reserved."""
+
+    def finish(frame: str, viewport) -> str:
+        if scene_height == full_height:
+            return frame
+        return overlay_axes_footer(
+            frame, crystal, camera, viewport, width, full_height
+        )
+
+    return finish
+
+
 def overlay_axes_footer(frame, crystal, camera, viewport, width, height) -> str:
     """Keep the scene in the rows above a reserved axis/scale footer.
 
@@ -118,6 +138,8 @@ __all__ = [
     "LABEL_MODE_ALIASES",
     "LABEL_MODE_HELP",
     "axes_footer_text",
+    "axes_scene_height",
+    "bind_axes_footer",
     "copy_aware_label",
     "normalize_label_mode",
     "overlay_axes_footer",

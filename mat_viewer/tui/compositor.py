@@ -20,7 +20,7 @@ import numpy as np
 
 # Label vocabulary lives in .annotations; LABEL_MODES etc. are re-exported for callers.
 from .annotations import LABEL_MODE_ALIASES, LABEL_MODE_HELP, LABEL_MODES  # noqa: F401
-from .annotations import copy_aware_label, normalize_label_mode, overlay_axes_footer  # noqa: F401
+from .annotations import axes_scene_height, bind_axes_footer, copy_aware_label, normalize_label_mode  # noqa: F401
 from .braille import BrailleCanvas
 from .projection import (
     Viewport,
@@ -308,10 +308,8 @@ def compose_frame(
     width = max(width, 1)
     height = max(height, 1)
     full_height = height
-    reserve_axes = bool(show_axes and crystal.lattice is not None and height > 1)
-    if reserve_axes:
-        # The footer is its own row. Fit the scene into the rows above it.
-        height = height - 1
+    height = axes_scene_height(height, show_axes=show_axes, has_lattice=crystal.lattice is not None)
+    finish_axes = bind_axes_footer(crystal, camera, width, full_height, height)
     if charset not in {"unicode", "ascii7"}:
         raise ValueError("charset must be 'unicode' or 'ascii7'")
     display_level = resolve_display_level(
@@ -361,13 +359,6 @@ def compose_frame(
         )
     canvas = BrailleCanvas(width, height)
 
-    def _finish(frame: str) -> str:
-        if not reserve_axes:
-            return frame
-        return overlay_axes_footer(
-            frame, crystal, camera, viewport, width, full_height
-        )
-
     # ── Layer 1: Cell edges (dashed braille) ────────────────────────────
     if show_cell and cell_verts_2d is not None:
         for i, j in crystal.lattice.cell_edges():
@@ -378,7 +369,7 @@ def compose_frame(
     # ── Dispatch to display-level-specific rendering ───────────────────
     if display_level == "molecule":
         if structure_is_framework_like(crystal, show_minor=show_minor):
-            return _finish(compose_framework_frame(
+            return finish_axes(compose_framework_frame(
                 crystal,
                 camera,
                 pts_2d,
@@ -392,8 +383,8 @@ def compose_frame(
                 show_minor,
                 selected_display_index,
                 charset,
-            ))
-        return _finish(_compose_molecule_frame(
+            ), viewport)
+        return finish_axes(_compose_molecule_frame(
             crystal,
             camera,
             pts_2d,
@@ -406,7 +397,7 @@ def compose_frame(
             show_minor,
             selected_display_index,
             charset,
-        ))
+        ), viewport)
     # ── Depth tier computation ───────────────────────────────────────
     depth_min = float(depth.min()) if len(depth) > 0 else 0.0
     depth_max = float(depth.max()) if len(depth) > 0 else 1.0
@@ -646,7 +637,7 @@ def compose_frame(
 
     while output_lines and not output_lines[-1]:
         output_lines.pop()
-    return _finish("\n".join(output_lines))
+    return finish_axes("\n".join(output_lines), viewport)
 
 
 # ── Color-run helpers ───────────────────────────────────────────────────────
