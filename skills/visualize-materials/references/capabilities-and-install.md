@@ -7,7 +7,7 @@ authoritative; do not maintain a second dependency guess in an agent script.
 If the `mat-vis` command itself is missing, install the supported releases once:
 
 ```bash
-python -m pip install "molcrys-kit==0.7.1" "matter-vis==0.0.5"
+python -m pip install "molcrys-kit==0.8.0" "matter-vis==0.0.6"
 ```
 
 ## Resolve on demand
@@ -68,11 +68,11 @@ switch backend or representation silently.
 
 ## Development checkout
 
-MatterVis requires MolCrysKit `>=0.7.0,<0.7.1`. Install it before this checkout
+MatterVis requires MolCrysKit `>=0.8.0,<0.9.0`. Install it before this checkout
 with:
 
 ```bash
-python -m pip install "molcrys-kit>=0.7.0,<0.7.1"
+python -m pip install "molcrys-kit>=0.8.0,<0.9.0"
 ```
 
 Then install this checkout.
