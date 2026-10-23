@@ -5,7 +5,13 @@ import pytest
 from mat_viewer.structure.cif_parse import parse_asu
 
 
-def test_parse_asu_expands_space_group_when_symops_missing(tmp_path):
+def test_parse_asu_rejects_incomplete_non_p1_symops(tmp_path):
+    """molcrys-kit>=0.8.0 refuses identity-only loops on non-P1 declarations.
+
+    Silent auto-expansion was removed from the structure reader so incomplete
+    CIFs cannot materialize with the wrong multiplicity. MatterVis surfaces
+    that ValueError through ``parse_asu`` / ``load_cif``.
+    """
     cif = tmp_path / "srtio3_minimal.cif"
     cif.write_text(
         """data_srtio3
@@ -31,9 +37,5 @@ O1 O 0.5 0.5 0 1
         encoding="utf-8",
     )
 
-    with pytest.warns((UserWarning, DeprecationWarning)) as caught:
-        atoms, _cell, _M = parse_asu(str(cif))
-    assert any("auto-expanded to 48 operations" in str(item.message) for item in caught)
-
-    assert len(atoms) == 5
-    assert [atom["elem"] for atom in atoms].count("O") == 3
+    with pytest.raises(ValueError, match="incomplete non-P1"):
+        parse_asu(str(cif))
