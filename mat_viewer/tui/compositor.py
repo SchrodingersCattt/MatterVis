@@ -99,6 +99,23 @@ def resolve_label_mode(
     return "label"
 
 
+def atom_is_drawn(
+    atom,
+    *,
+    show_minor: bool,
+    show_hydrogen: bool,
+    show_boundary: bool,
+) -> bool:
+    """Whether an atom participates in atom-level fit, draw, and auto labels."""
+    if not show_minor and atom.is_minor:
+        return False
+    if not show_hydrogen and atom.element == "H":
+        return False
+    if not show_boundary and atom.is_boundary_replica:
+        return False
+    return True
+
+
 def resolve_molecule_detail(
     *,
     molecule_count: int,
@@ -260,7 +277,14 @@ def compose_frame(
         molecule_count=sum(len(indices) for indices in crystal.species_map.values()),
         framework_like=structure_is_framework_like(crystal, show_minor=show_minor),
     )
-    visible_atom_count = sum(show_minor or not atom.is_minor for atom in crystal.atoms)
+    drawn_kwargs = {
+        "show_minor": show_minor,
+        "show_hydrogen": show_hydrogen,
+        "show_boundary": show_boundary,
+    }
+    visible_atom_count = sum(
+        atom_is_drawn(atom, **drawn_kwargs) for atom in crystal.atoms
+    )
     resolved_label_mode = resolve_label_mode(
         label_mode,
         atom_count=visible_atom_count,
@@ -284,9 +308,7 @@ def compose_frame(
     if viewport is None and display_level != "molecule" and len(pts_2d) > 0:
         # Static / one-shot fit must match the atom-level visibility rule.
         fit_mask = [
-            (show_minor or not atom.is_minor)
-            and (show_hydrogen or atom.element != "H")
-            and (show_boundary or not atom.is_boundary_replica)
+            atom_is_drawn(atom, **drawn_kwargs)
             for atom in crystal.atoms[: len(pts_2d)]
         ]
         if any(fit_mask):

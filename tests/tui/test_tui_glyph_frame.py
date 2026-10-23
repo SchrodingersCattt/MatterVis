@@ -255,3 +255,25 @@ def test_element_and_dot_modes_mark_the_selected_atom() -> None:
         charset="ascii7",
     )
     assert "[*]" in dotted
+
+
+def test_auto_label_mode_ignores_hidden_hydrogen_density() -> None:
+    """Hidden H must not push auto labels to dots when only heavies are drawn."""
+    heavies = [
+        _atom("C", (0.0, 0.0, 0.0), 0),
+        _atom("N", (1.5, 0.0, 0.0), 1),
+        _atom("O", (3.0, 0.0, 0.0), 2),
+    ]
+    hydrogens = [_atom("H", (i * 0.1, 4.0, 0.0), 3 + i) for i in range(200)]
+    crystal = CrystalIR(atoms=[*heavies, *hydrogens])
+    frame = _frame(
+        crystal,
+        width=80,
+        height=24,
+        show_cell=False,
+        show_bonds=False,
+        label_mode="auto",
+    )
+    assert "●" not in frame
+    assert "C" in frame and "N" in frame and "O" in frame
+    assert "H" not in frame
