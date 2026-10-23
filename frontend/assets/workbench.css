@@ -33,9 +33,17 @@
 }
 
 #center-panel {
-  isolation: isolate;
   position: relative;
   background: #ffffff;
+}
+
+/* Plotly hover layers and the modebar stay inside the canvas. The server-log
+   pill is a sibling of #crystal-graph: assemble_workbench appends it to
+   #center-panel. Isolating the whole panel made a stacking context at
+   z-index:auto, so the pill's z-index:9000 could not rise above the compact
+   Tools drawer (z-index:8000) where the two boxes overlap. */
+#center-panel > #crystal-graph {
+  isolation: isolate;
 }
 
 #left-panel,

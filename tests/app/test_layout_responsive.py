@@ -49,6 +49,21 @@ def test_scene_tabs_scroll_instead_of_stacking() -> None:
     assert "flex: 0 0 var(--mv-scene-tab-min-width)" not in css
 
 
+def test_log_pill_stacks_above_the_compact_drawer() -> None:
+    """The pill lives in #center-panel, so that panel must not isolate it."""
+    css = (ASSETS / "workbench.css").read_text(encoding="utf-8")
+    center = css.split("#center-panel {", 1)[1].split("}", 1)[0]
+    graph = css.split("#center-panel > #crystal-graph {", 1)[1].split("}", 1)[0]
+    panel = (ASSETS / "panel_resize.css").read_text(encoding="utf-8")
+
+    assert "isolation" not in center
+    assert "isolation: isolate" in graph
+    assert "z-index: 9000" in panel
+    assert "bottom: calc(28px + 12px)" in panel
+    assert "width: 128px" in panel
+    assert "width: 118px" in panel
+
+
 def test_dropdown_labels_keep_the_flexible_track() -> None:
     css = (ASSETS / "workbench.css").read_text(encoding="utf-8")
 

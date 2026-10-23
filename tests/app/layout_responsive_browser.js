@@ -104,15 +104,17 @@ const PAGE = `<!doctype html>
         </span>
       </button>
     </div>
+    <div style="height:100vh"></div>
+    <button id="drawer-last-control" type="button" style="display:block;width:100%">Last control</button>
   </div>
   <div id="left-splitter" class="panel-splitter"></div>
   <div id="center-panel" style="position:relative;flex:1 1 auto;min-width:0;min-height:0;height:100vh;overflow:hidden">
     <div id="crystal-graph" style="width:100%;height:100%"></div>
-  </div>
-  <div id="perf-log-panel" class="perf-log-panel perf-log-panel--collapsed">
-    <div class="perf-log-header">
-      <button id="perf-log-toggle" class="perf-log-toggle" type="button">Server log ▾</button>
-      <button id="perf-log-clear" class="perf-log-clear" type="button">Clear</button>
+    <div id="perf-log-panel" class="perf-log-panel perf-log-panel--collapsed">
+      <div class="perf-log-header">
+        <button id="perf-log-toggle" class="perf-log-toggle" type="button">Server log ▾</button>
+        <button id="perf-log-clear" class="perf-log-clear" type="button">Clear</button>
+      </div>
     </div>
   </div>
 </div>
@@ -483,6 +485,10 @@ function labelChecks(sample) {
     if (desktop.panelRatio < 0.2 || desktop.panelRatio > 0.45) {
       failures.push(`1280 panel ratio ${desktop.panelRatio.toFixed(3)}`);
     }
+    const desktopPillWidth = await page.evaluate(() => getComputedStyle(document.getElementById("perf-log-panel")).width);
+    if (desktopPillWidth !== "128px") {
+      failures.push(`desktop collapsed log pill is ${desktopPillWidth}`);
+    }
     const arrows = await page.evaluate(() => ({
       prevHidden: document.getElementById("scene-tab-scroll-prev").hidden,
       nextHidden: document.getElementById("scene-tab-scroll-next").hidden,
@@ -557,66 +563,177 @@ function labelChecks(sample) {
     await zoom("zoom-33", 3840, 2400, 0.33);
     await client.send("Emulation.clearDeviceMetricsOverride");
 
-    await page.setViewportSize({width: 375, height: 700});
-    await settle("375");
-    await page.click("#compact-toggle-left-panel");
-    await page.waitForTimeout(200);
-    const narrow = await readLayout(page);
-    report["375-open"] = {
-      innerWidth: narrow.innerWidth,
-      compact: narrow.compact,
-      tools: narrow.tools,
-      duplicate: narrow.duplicate,
-      strip: narrow.strip,
-      tabHeights: narrow.tabs.map((tab) => Math.round(tab.height)),
-    };
-    await page.screenshot({path: path.join(shotDir, "layout-375-tools.png")});
-    if (!narrow.compact) failures.push("375px did not open the compact layout");
-    if (overlaps(narrow.tools, narrow.duplicate)) failures.push("Tools button overlaps Duplicate");
-    if (overlaps(narrow.tools, narrow.closeOthers)) failures.push("Tools button overlaps Close others");
-    if (overlaps(narrow.tools, narrow.undo)) failures.push("Tools button overlaps Undo close");
-    if (overlaps(narrow.closeOthers, narrow.undo) || overlaps(narrow.undo, narrow.duplicate) || overlaps(narrow.closeOthers, narrow.duplicate)) {
-      failures.push("scene header buttons overlap each other");
+    async function readLogPill() {
+      return page.evaluate(() => {
+        const panel = document.getElementById("perf-log-panel");
+        const toggle = document.getElementById("perf-log-toggle");
+        const panelBox = panel.getBoundingClientRect();
+        const box = toggle.getBoundingClientRect();
+        const style = getComputedStyle(panel);
+        const x = box.left + box.width / 2;
+        const y = box.top + box.height / 2;
+        const hit = document.elementFromPoint(x, y);
+        const brand = document.querySelector(".workbench-brand");
+        const range = document.createRange();
+        range.selectNodeContents(brand);
+        const brandBox = range.getBoundingClientRect();
+        return {
+          parent: panel.parentElement && panel.parentElement.id,
+          left: panelBox.left,
+          top: panelBox.top,
+          right: panelBox.right,
+          bottom: panelBox.bottom,
+          width: panelBox.width,
+          height: panelBox.height,
+          toggle: {
+            left: box.left, top: box.top, right: box.right, bottom: box.bottom,
+            width: box.width, height: box.height,
+          },
+          cssWidth: style.width,
+          cssBottom: style.bottom,
+          z: style.zIndex,
+          centerIsolation: getComputedStyle(document.getElementById("center-panel")).isolation,
+          graphIsolation: getComputedStyle(document.getElementById("crystal-graph")).isolation,
+          text: toggle.textContent || "",
+          shown: style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity) > 0,
+          hit: !!(hit && (hit === toggle || toggle.contains(hit))),
+          hitId: hit && (hit.id || hit.className || hit.tagName),
+          brand: {
+            left: brandBox.left, top: brandBox.top, right: brandBox.right, bottom: brandBox.bottom,
+            width: brandBox.width, height: brandBox.height,
+          },
+        };
+      });
     }
-    failures.push(...tabChecks(narrow).map((item) => "375 " + item));
-    narrow.tabs.forEach((tab) => {
-      if (tab.bottom && tab.bottom > narrow.left.bottom + 1 && tab.top < narrow.left.bottom) {
-        failures.push(`${tab.name} runs past the drawer`);
+
+    async function setToolsOpen(open) {
+      const isOpen = await page.evaluate(() =>
+        document.getElementById("left-panel").classList.contains("compact-panel-open"));
+      if (isOpen === open) return;
+      await page.click("#compact-toggle-left-panel");
+      // The drawer slides for 160ms. Wait until its transformed box is
+      // parked open (left edge on the viewport) or closed (fully off-screen).
+      await page.waitForFunction((wantOpen) => {
+        const box = document.getElementById("left-panel").getBoundingClientRect();
+        if (wantOpen) return box.left > -1 && box.left < 2;
+        return box.right <= 1;
+      }, open, {timeout: 2000});
+    }
+
+    function assertLogPill(label, pill, viewportWidth) {
+      report[label].logPill = pill;
+      if (pill.parent !== "center-panel") {
+        failures.push(`${label} log pill parent is ${pill.parent}`);
       }
-    });
-    if (narrow.strip.rect.right > narrow.left.right + 2) {
-      failures.push("tab strip runs past the drawer");
+      if (pill.centerIsolation !== "auto") {
+        failures.push(`${label} center-panel isolation is ${pill.centerIsolation}`);
+      }
+      if (pill.graphIsolation !== "isolate") {
+        failures.push(`${label} crystal-graph isolation is ${pill.graphIsolation}`);
+      }
+      if (!pill.shown) failures.push(`${label} log pill is hidden`);
+      if (pill.cssWidth !== "118px") failures.push(`${label} log pill width is ${pill.cssWidth}`);
+      if (pill.cssBottom !== "40px") failures.push(`${label} log pill bottom is ${pill.cssBottom}`);
+      if (pill.z !== "9000") failures.push(`${label} log pill z-index is ${pill.z}`);
+      if (pill.width < 80 || pill.height < 20) {
+        failures.push(`${label} log pill is ${Math.round(pill.width)}×${Math.round(pill.height)}`);
+      }
+      const toggle = pill.toggle;
+      if (toggle.left < 0 || toggle.top < 0 || toggle.right > viewportWidth + 1 || toggle.bottom > 700 + 1) {
+        failures.push(`${label} log toggle sits outside the viewport (${Math.round(toggle.left)},${Math.round(toggle.top)} ${Math.round(toggle.right)},${Math.round(toggle.bottom)})`);
+      }
+      if (!pill.hit) failures.push(`${label} log toggle is covered (${pill.hitId || "nothing"})`);
+      if (!pill.text.includes("Server log")) failures.push(`${label} log pill label is "${pill.text}"`);
     }
-    failures.push(...labelChecks(narrow).map((item) => "375 " + item));
-    const logPill = await page.evaluate(() => {
-      const node = document.getElementById("perf-log-panel");
-      const box = node.getBoundingClientRect();
-      const style = getComputedStyle(node);
-      const hit = document.elementFromPoint(
-        Math.min(box.right - 4, box.left + box.width / 2),
-        box.top + box.height / 2,
+
+    for (const width of [375, 600, 755]) {
+      await page.setViewportSize({width, height: 700});
+      await settle(String(width));
+      // Width transitions for 160ms; read the settled 118px pill, not an in-between value.
+      await page.waitForFunction(
+        () => getComputedStyle(document.getElementById("perf-log-panel")).width === "118px",
+        null,
+        {timeout: 2000},
       );
-      return {
-        left: box.left, top: box.top, right: box.right, bottom: box.bottom,
-        width: box.width, height: box.height,
-        z: style.zIndex,
-        text: (node.querySelector(".perf-log-toggle") || {}).textContent || "",
-        shown: style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity) > 0,
-        hit: !!(hit && node.contains(hit)),
-        hitId: hit && hit.id,
+      await setToolsOpen(false);
+      const closed = await readLayout(page);
+      const closedPill = await readLogPill();
+      const closedLabel = `${width}-closed`;
+      report[closedLabel] = {innerWidth: closed.innerWidth, compact: closed.compact, tools: closed.tools};
+      if (!closed.compact) failures.push(`${width}px did not open the compact layout`);
+      assertLogPill(closedLabel, closedPill, width);
+      if (overlaps(closedPill, closed.tools)) failures.push(`${width}-closed log pill overlaps the Tools button`);
+
+      await setToolsOpen(true);
+      const open = await readLayout(page);
+      const openPill = await readLogPill();
+      const openLabel = `${width}-open`;
+      report[openLabel] = {
+        innerWidth: open.innerWidth,
+        compact: open.compact,
+        tools: open.tools,
+        duplicate: open.duplicate,
+        brand: openPill.brand,
+        strip: open.strip,
+        tabHeights: open.tabs.map((tab) => Math.round(tab.height)),
       };
-    });
-    report["375-open"].logPill = logPill;
-    if (!logPill.shown) failures.push("log pill is hidden at 375px");
-    if (logPill.width < 80 || logPill.height < 20) {
-      failures.push(`log pill is ${Math.round(logPill.width)}×${Math.round(logPill.height)}`);
+      await page.screenshot({path: path.join(shotDir, `layout-${width}-tools.png`)});
+      if (overlaps(open.tools, openPill.brand)) failures.push(`${width} Tools button overlaps the title`);
+      if (overlaps(open.tools, open.duplicate)) failures.push(`${width} Tools button overlaps Duplicate`);
+      if (overlaps(open.tools, open.closeOthers)) failures.push(`${width} Tools button overlaps Close others`);
+      if (overlaps(open.tools, open.undo)) failures.push(`${width} Tools button overlaps Undo close`);
+      if (overlaps(open.closeOthers, open.undo) || overlaps(open.undo, open.duplicate) || overlaps(open.closeOthers, open.duplicate)) {
+        failures.push(`${width} scene header buttons overlap each other`);
+      }
+      failures.push(...tabChecks(open).map((item) => `${width} ${item}`));
+      open.tabs.forEach((tab) => {
+        if (tab.bottom && tab.bottom > open.left.bottom + 1 && tab.top < open.left.bottom) {
+          failures.push(`${width} ${tab.name} runs past the drawer`);
+        }
+      });
+      if (open.strip.rect.right > open.left.right + 2) {
+        failures.push(`${width} tab strip runs past the drawer`);
+      }
+      failures.push(...labelChecks(open).map((item) => `${width} ${item}`));
+      assertLogPill(openLabel, openPill, width);
+      if (overlaps(openPill, open.tools)) failures.push(`${width}-open log pill overlaps the Tools button`);
+      if (width === 375) {
+        const tail = await page.evaluate(() => {
+          const drawer = document.getElementById("left-panel");
+          drawer.scrollTop = drawer.scrollHeight;
+          const control = document.getElementById("drawer-last-control");
+          const pill = document.getElementById("perf-log-panel");
+          const box = control.getBoundingClientRect();
+          const pillBox = pill.getBoundingClientRect();
+          const x = Math.min(box.right - 2, Math.max(box.left + 2, pillBox.left + pillBox.width / 2));
+          const y = box.top + box.height / 2;
+          const hit = document.elementFromPoint(x, y);
+          const scrolled = drawer.scrollTop;
+          drawer.scrollTop = 0;
+          return {
+            scrolled,
+            control: {
+              left: box.left, top: box.top, right: box.right, bottom: box.bottom,
+              width: box.width, height: box.height,
+            },
+            pill: {
+              left: pillBox.left, top: pillBox.top, right: pillBox.right, bottom: pillBox.bottom,
+              width: pillBox.width, height: pillBox.height,
+            },
+            hit: hit && (hit.id || hit.className || hit.tagName),
+            onControl: !!(hit && (hit === control || control.contains(hit))),
+          };
+        });
+        report[openLabel].lastControl = tail;
+        if (tail.scrolled < 40) {
+          failures.push(`375 drawer did not scroll to its last control (${tail.scrolled})`);
+        }
+        if (overlaps(tail.control, tail.pill) || !tail.onControl) {
+          failures.push(`375 drawer last control is covered by the log pill (${tail.hit || "nothing"})`);
+        }
+      }
+      await setToolsOpen(false);
     }
-    if (logPill.left < 0 || logPill.top < 0 || logPill.right > narrow.innerWidth + 1 || logPill.bottom > 700 + 1) {
-      failures.push(`log pill sits outside the 375px viewport (${Math.round(logPill.left)},${Math.round(logPill.top)} ${Math.round(logPill.right)},${Math.round(logPill.bottom)})`);
-    }
-    if (!logPill.hit) failures.push(`log pill is covered (${logPill.hitId || "nothing"})`);
-    if (!logPill.text.includes("Server log")) failures.push(`log pill label is "${logPill.text}"`);
-    if (overlaps(logPill, narrow.tools)) failures.push("log pill overlaps the Tools button");
 
     fs.writeFileSync(path.join(shotDir, "report.json"), JSON.stringify(report, null, 2));
     if (failures.length) {

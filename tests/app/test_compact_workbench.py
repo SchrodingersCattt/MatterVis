@@ -20,6 +20,7 @@ def test_compact_layout_uses_overlay_toggles_and_breakpoint() -> None:
     assert "compact-panel-open ~ .compact-panel-toggle--left" in css
     assert "top: 12px" in css
     assert ".workbench-brand" in css
+    assert "padding-bottom: calc(28px + 12px + 36px)" in css
 
 
 def test_perf_log_collapses_to_a_narrow_mobile_safe_pill() -> None:
