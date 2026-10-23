@@ -117,7 +117,8 @@ def test_nacl_keeps_mck_contact_but_hides_ionic_sticks():
         show_hydrogen=True,
         preset={},
     )
-    assert len(unit_cell["draw_atoms"]) == 16
+    # mck 0.8.0: spanning 1-D contact graph -> framework replicas (4), not corner expansion (16)
+    assert len(unit_cell["draw_atoms"]) == 4
     assert unit_cell["bonds"] == []
     assert unit_cell["suppressed_ionic_bond_count"] > 0
 

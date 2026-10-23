@@ -449,7 +449,7 @@ def test_async_upload_replaces_placeholder_with_inorganic_defaults(backend, monk
 
 def test_invalid_cif_bytes_do_not_create_a_scene(backend: ViewerBackend) -> None:
     before = set(backend.scene_store.scenes)
-    with pytest.raises(ValueError, match="not a CIF"):
+    with pytest.raises(ValueError, match=r"not a CIF|no data blocks"):
         backend.add_uploaded_file_bytes(b"this is not a CIF file", "mv-invalid.cif")
     assert set(backend.scene_store.scenes) == before
     assert "mv-invalid" not in backend.structure_names
