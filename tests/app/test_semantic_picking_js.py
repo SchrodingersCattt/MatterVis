@@ -26,3 +26,15 @@ def test_hover_and_context_menu_have_no_server_coordinate_fallback():
     assert "__mvSemanticBound" in controller
     assert "pointercancel" in controller
     assert "gesture.scene!==currentSceneId()" in controller
+
+
+def test_appearance_undo_rejects_obsolete_target_revision():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node required for appearance contracts")
+    result = subprocess.run(
+        [node, str(ROOT / "tests/app/appearance_undo_contract.js"),
+         str(ROOT / "frontend/assets/selection_appearance.js")],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr

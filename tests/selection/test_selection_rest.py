@@ -311,3 +311,31 @@ def test_target_revision_rejects_stale_style_but_survives_cosmetic_selection():
         assert not backend.get_state().get("style_overrides")
     finally:
         backend.close()
+
+
+def test_facet_family_scope_normalizes_miller_and_accepts_minimal_targets(monkeypatch):
+    from mat_viewer.render.picking import facet_instance_id
+
+    app = create_app()
+    backend = app.crystal_backend
+    try:
+        facets = [{"miller": (1, 0, 0)}, {"miller": [1, 0, 0]},
+                  {"miller": [-1, 0, 0]}, {"miller": [0, 1, 0]}]
+        monkeypatch.setattr(backend, "scene_for_state", lambda state: {"bfdh_morphology": {"facets": facets}})
+        target = {"kind": "facet", "id": facet_instance_id([1, 0, 0], 0)}
+        before = backend.get_selection()
+        client = app.server.test_client()
+        for payload in ({**target, "miller": [1, 0, 0]}, target):
+            response = client.post("/api/v2/selection/scope", json={
+                "target": payload, "scope": "facet_family", "commit": False,
+            })
+            assert response.status_code == 200
+            assert [row["id"] for row in response.get_json()["targets"]] == [
+                facet_instance_id([1, 0, 0], index) for index in (0, 1)
+            ]
+            assert backend.get_selection() == before
+        # An unparseable identity must never expand to the whole morphology.
+        result = backend.expand_selection_scope({"kind": "facet", "id": "unknown"}, "facet_family", commit=False)
+        assert result["targets"] == [{"kind": "facet", "id": "unknown"}]
+    finally:
+        backend.close()

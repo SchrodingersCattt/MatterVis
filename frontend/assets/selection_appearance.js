@@ -20,15 +20,15 @@
       const snapshot=old.items.map(row=>({target:row.target,style:row.overrides}));
       await request('style_overrides',Object.assign({targets,target_revision:old.target_revision},reset?{reset:true,field:reset===true?undefined:reset}:{style:patch}),'PATCH');
       if(sceneId!==id) return;
-      history.push({sceneId:id,snapshot});if(history.length>30) history.shift();
+      history.push({sceneId:id,snapshot,target_revision:old.target_revision});if(history.length>30) history.shift();
       await load(targets);
     });
   }
   async function undo(){
     const record=history.pop();if(!record || record.sceneId!==sceneId) return;
     const id=sceneId;
-    await request('style_overrides',{targets:record.snapshot.map(r=>r.target),reset:true},'PATCH');
-    for(const row of record.snapshot){if(sceneId!==id) return;if(Object.keys(row.style).length) await request('style_overrides',{targets:[row.target],style:row.style},'PATCH');}
+    await request('style_overrides',{targets:record.snapshot.map(r=>r.target),target_revision:record.target_revision,reset:true},'PATCH');
+    for(const row of record.snapshot){if(sceneId!==id) return;if(Object.keys(row.style).length) await request('style_overrides',{targets:[row.target],target_revision:record.target_revision,style:row.style},'PATCH');}
     await load(editing);
   }
   async function load(targets){
@@ -48,7 +48,7 @@
       const t=selected[0];
       ((t.metadata||{}).parents||[]).forEach(p=>options.push(['parent:'+p.id,'Containing '+p.kind+' · '+(p.label||p.id)]));
       if(t.kind==='facet') options.push(['parent:morphology:bfdh-morphology','Whole morphology']);
-      if(t.kind==='atom') options.push(['source','All source copies'],['symmetry','Same symmetry operation'],['molecule','Containing molecule instances'],['part','Same disorder part']);
+      if(t.kind==='atom') options.push(['source','All source copies'],['symmetry','Same source and symmetry operation'],['molecule','Containing molecule instances'],['part','Same disorder part']);
       if(t.kind==='polyhedron') options.push(['spec','All instances of this spec']);
       if(t.kind==='facet') options.push(['facet_family','Same Miller index']);
     }
@@ -94,6 +94,7 @@
       panel.appendChild(row);panel.appendChild(node('small',labels[field]+': '+(local?'local override':'inherited')+(value===null?' · mixed':'')));
     });
     if(report.property_coloring) panel.appendChild(node('p','A local Color overrides the property map. Inherit Color restores current property colors.'));
+    panel.appendChild(node('p','Changes save automatically after a short pause. Apply saves immediately; Undo restores the previous saved edit.'));
     const apply=node('button','Apply');apply.onclick=()=>{clearTimeout(previewTimer);if(Object.keys(draft).length) change(draft);};
     const undoButton=node('button','Undo');undoButton.disabled=!history.some(r=>r.sceneId===sceneId);undoButton.onclick=()=>serialize(undo);
     const resetAll=node('button','Reset all local overrides');resetAll.onclick=()=>change({},true);

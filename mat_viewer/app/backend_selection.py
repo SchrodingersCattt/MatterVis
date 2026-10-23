@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from ..render.picking import (
     atom_instance_id,
     atom_instance_id_aliases,
@@ -197,10 +199,17 @@ class _SelectionBackendMixin:
             scene = self.scene_for_state(state)
             morphology = scene.get("bfdh_morphology") or {}
             wanted_miller = normalized.get("miller")
+            # Reuse the renderer's canonical token for list/tuple metadata.
+            # Minimal API targets carry the same token in their facet ID.
+            if wanted_miller is not None:
+                wanted_token = facet_instance_id(wanted_miller, 0).rsplit(":", 2)[1]
+            else:
+                identity = str(normalized["id"]).rsplit(":", 2)
+                wanted_token = identity[1] if len(identity) == 3 and identity[0].startswith("facet:") else None
             expanded = []
             for index, facet in enumerate(morphology.get("facets") or []):
                 miller = facet.get("miller", [0, 0, 0]) if isinstance(facet, Mapping) else [0, 0, 0]
-                if wanted_miller is not None and str(miller) != str(wanted_miller):
+                if wanted_token is None or facet_instance_id(miller, 0).rsplit(":", 2)[1] != wanted_token:
                     continue
                 expanded.append({
                     "kind": "facet",

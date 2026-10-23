@@ -121,7 +121,8 @@ A viewport click opens **Selection / Appearance**. Its default scope is the
 selected visible instances. Color, opacity, visibility, atom radius/material/
 representation and surface edge controls are offered according to the shared
 capability intersection. A mixed atom/surface selection cannot edit atom radius.
-Changing an input previews a sparse saved edit; **Apply**, **Undo**, each field's
+Changing an input automatically saves a sparse edit after a 300 ms pause and
+adds an Undo entry. **Apply** saves immediately. **Undo**, each field's
 inherit button and **Reset all local overrides** use the same override API.
 
 The scope menu can edit a containing molecule/disorder part, all source copies,
@@ -158,7 +159,9 @@ also accepts `commit: false` for read-only scope previews.
 
 A style PATCH may include `target_revision` from the inspector report. A changed
 structure/display identity returns HTTP 409 and asks the caller to pick again.
-Cosmetic selection changes do not invalidate this revision. Structure changes
+Undo sends the revision captured with the original edit, so it cannot restore
+obsolete targets after geometry changes. Cosmetic selection changes do not
+invalidate this revision. Structure changes
 clear old source-ordinal edits, even if the new structure also has an atom with
 source index zero. Removed target IDs are reported by the appearance endpoint
 and `GET /style_overrides` rather than reassigned to another object.
