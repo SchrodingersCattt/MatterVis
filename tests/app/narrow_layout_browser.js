@@ -66,7 +66,7 @@ async function checkSceneStrip(page, width) {
 
   // Use the arrows a user sees, rather than assigning scrollLeft or forcing
   // clicks on clipped tabs. Reach both ends and check the end labels fit.
-  for (const direction of ["prev", "next"]) {
+  for (const direction of ["next", "prev"]) {
     const arrow = page.locator(`#scene-tab-scroll-${direction}`);
     for (let step = 0; step < 20; step++) {
       // Scroll events update arrow visibility after the position changes.

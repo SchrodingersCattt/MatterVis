@@ -62,6 +62,7 @@ def test_log_pill_stacks_above_the_compact_drawer() -> None:
     assert "bottom: calc(28px + 12px)" in panel
     assert "width: 128px" in panel
     assert "width: 118px" in panel
+    assert ".perf-log-panel--collapsed .perf-log-clear" in panel
 
 
 def test_dropdown_labels_keep_the_flexible_track() -> None:
