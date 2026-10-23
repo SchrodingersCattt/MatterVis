@@ -155,6 +155,8 @@ class CrystalTUI(App):
         Binding("t", "toggle_label", "Label", show=True),
         Binding("m", "toggle_mono", "Mono", show=True),
         Binding("n", "toggle_minor", "Minor", show=True),
+        Binding("h", "toggle_hydrogen", "H", show=True),
+        Binding("B", "toggle_boundary", "PBC", show=True),
         Binding("A", "toggle_axes", "Axes", show=True),
         Binding("L", "cycle_level", "Level", show=True),
         Binding("r", "reset_view", "Reset", show=True),
@@ -176,6 +178,8 @@ class CrystalTUI(App):
         label_mode: str = "auto",
         show_minor: bool = False,
         show_axes: bool = False,
+        show_hydrogen: bool = False,
+        show_boundary: bool = False,
         compact: bool = False,
         initial_level: str = AUTO_DISPLAY_LEVEL,
         extensions=(),
@@ -196,6 +200,8 @@ class CrystalTUI(App):
                 label_mode=label_mode if not compact else "dot",
                 show_minor=show_minor,
                 show_axes=show_axes,
+                show_hydrogen=show_hydrogen,
+                show_boundary=show_boundary,
                 display_level=(
                     initial_level
                     if initial_level in (*DISPLAY_LEVELS, AUTO_DISPLAY_LEVEL)
@@ -703,6 +709,16 @@ class CrystalTUI(App):
         self._apply_observation(
             self.controller.set_display(show_axes=not self._show_axes)
         )
+
+    def action_toggle_hydrogen(self) -> None:
+        """Show or hide hydrogen atoms in the atom-level picture."""
+        shown = self.controller.state.display.show_hydrogen
+        self._apply_observation(self.controller.set_display(show_hydrogen=not shown))
+
+    def action_toggle_boundary(self) -> None:
+        """Show or hide periodic boundary replicas."""
+        shown = self.controller.state.display.show_boundary
+        self._apply_observation(self.controller.set_display(show_boundary=not shown))
 
     def action_cycle_level(self) -> None:
         """Cycle display level: atom → molecule."""

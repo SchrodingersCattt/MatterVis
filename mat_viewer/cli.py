@@ -472,6 +472,8 @@ def _tui_main(args: argparse.Namespace) -> None:
             label_mode=label_mode,
             show_minor=args.show_minor,
             show_axes=bool(getattr(args, "axes", False)),
+            show_hydrogen=bool(getattr(args, "hydrogen", False)),
+            show_boundary=bool(getattr(args, "boundary", False)),
             initial_level=initial_level,
         )
         app.run()

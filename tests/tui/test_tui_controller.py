@@ -240,6 +240,8 @@ def test_controller_display_transitions_are_absolute() -> None:
         "show_minor": True,
         "mono": True,
         "show_axes": False,
+        "show_hydrogen": False,
+        "show_boundary": False,
     }
 
 

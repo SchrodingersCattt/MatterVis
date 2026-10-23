@@ -472,11 +472,14 @@ Important options:
 - --width and --height bound static output exactly.
 
 Interactive controls: q/e and w/z orbit, a/d roll, arrows or i/j/k/l pan, u/o
-zoom, b/c/t/m/n/Shift+A toggle bonds/cell/labels/monochrome/minor disorder/axes,
-Shift+L switches atom and molecule levels, r resets the view, and x quits.
-`--axes` turns the triad on at startup in static, session, and interactive
-modes; Shift+A toggles it afterwards. The scene is fitted into the rows above
-that footer. Press s for
+zoom, b/c/t/m/n/h/Shift+B/Shift+A toggle bonds/cell/labels/monochrome/minor
+disorder/hydrogen/periodic boundary replicas/axes, Shift+L switches atom and
+molecule levels, r resets the view, and x quits. Hydrogen and boundary
+replicas are hidden unless `--hydrogen` or `--boundary` is set. `--axes`
+turns the triad on at startup in static, session, and interactive modes;
+Shift+A toggles it afterwards. The scene is fitted into the rows above that
+footer. Atom level draws element symbols, solid bonds, and `:` cell edges,
+and drops labels that would overlap. Press s for
 Select mode. There, arrows choose projected neighbors, Tab traverses stable
 atom IDs, `[`/`]` traverse supplied chemical bonds, Enter pins, Esc clears, and a
 mouse click uses the retained hit map. Press : for deterministic commands such

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .compositor import (
+    atom_is_drawn,
     resolve_display_level,
     resolve_label_mode,
     resolve_molecule_detail,
@@ -27,7 +28,15 @@ def build_terminal_title(
     resolved_label = (
         resolve_label_mode(
             display.label_mode,
-            atom_count=sum(display.show_minor or not atom.is_minor for atom in crystal.atoms),
+            atom_count=sum(
+                atom_is_drawn(
+                    atom,
+                    show_minor=display.show_minor,
+                    show_hydrogen=display.show_hydrogen,
+                    show_boundary=display.show_boundary,
+                )
+                for atom in crystal.atoms
+            ),
             width=width,
             height=height,
             zoom=camera.zoom,
