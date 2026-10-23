@@ -27,6 +27,9 @@ if TYPE_CHECKING:
     from .projection import Viewport
 
 MAX_CANVAS_LABEL_COLUMNS = 8
+# Copy-aware labels carry a symmetry index and optional lattice shift; they
+# need more columns than a site label alone or the #210 modes become silent.
+MAX_COPY_LABEL_COLUMNS = 16
 _BOND_RGB = (148, 148, 148)
 _CELL_RGB = (90, 140, 190)
 _LABEL_RGB = (230, 230, 230)
@@ -233,7 +236,12 @@ def _draw_labels(
             charset,
             selected=index == selected_display_index,
         )
-        if text is None or len(text) > MAX_CANVAS_LABEL_COLUMNS:
+        limit = (
+            MAX_COPY_LABEL_COLUMNS
+            if label_mode == "label_sym"
+            else MAX_CANVAS_LABEL_COLUMNS
+        )
+        if text is None or len(text) > limit:
             continue
         if not grid.owns(index):
             continue

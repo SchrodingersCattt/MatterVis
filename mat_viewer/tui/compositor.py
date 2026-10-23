@@ -22,6 +22,7 @@ from .projection import (
     viewport_from_bounds,
 )
 from ..utils.colors import element_ansi_color
+from .renderer import BOND_COLOR as BOND_COLOR  # noqa: F401  # framework overview
 from .renderer import DEFAULT_COLOR, CELL_COLOR
 from .text import ascii7_text, terminal_text
 from .framework import (
@@ -111,8 +112,46 @@ def resolve_molecule_detail(
     return "hull"
 
 
-# Dimmed color for molecule-overview braille hints behind hull edges.
+# Depth-tier helpers remain for the braille molecule / framework overviews.
+_RADIUS_BASE = (5, 4, 3)
+_RADIUS_H = (3, 2, 1)
+_TIER_FRONT = 0
+_TIER_MID = 1
+_TIER_BACK = 2
 _BACK_TIER_COLOR = 236  # dark grey (ANSI 256)
+
+
+def _atom_radius(
+    element: str,
+    depth_tier: int = _TIER_MID,
+    detail_scale: float = 1.0,
+) -> int:
+    """Depth-dependent atom circle radius (subpixels)."""
+    if element == "H":
+        base = _RADIUS_H[depth_tier]
+    else:
+        base = _RADIUS_BASE[depth_tier]
+    return max(1, int(round(base * detail_scale)))
+
+
+def _depth_tier(depth_val: float, depth_min: float, depth_max: float) -> int:
+    """Classify depth into 3 tiers: front(0), mid(1), back(2)."""
+    d_range = depth_max - depth_min
+    if d_range < 1e-6:
+        return _TIER_MID
+    norm = (depth_val - depth_min) / d_range
+    if norm >= 0.67:
+        return _TIER_FRONT
+    if norm >= 0.33:
+        return _TIER_MID
+    return _TIER_BACK
+
+
+def _tier_color(element_color: int, tier: int) -> int:
+    """Map an element color + depth tier to the rendered ANSI color."""
+    if tier in {_TIER_FRONT, _TIER_MID}:
+        return element_color
+    return _BACK_TIER_COLOR
 
 
 # ── Display levels ──────────────────────────────────────────────────────────
