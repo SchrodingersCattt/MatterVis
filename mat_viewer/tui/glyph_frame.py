@@ -258,11 +258,9 @@ def _draw_atoms(
             kind="atom",
             anchor=index,
             style="dim"
-            if adjacent
+            if adjacent or band == 2
             else "bold"
             if grid.slice_distance is not None or band == 0
-            else "dim"
-            if band == 2
             else "normal",
         )
 

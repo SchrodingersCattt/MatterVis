@@ -3,6 +3,7 @@
 import asyncio
 import io
 import json
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -12,7 +13,7 @@ from mat_viewer.tui.app import CrystalTUI
 from mat_viewer.tui.compositor import compose_frame
 from mat_viewer.tui.controller import TerminalViewController
 from mat_viewer.tui.crystal_ir import AtomIR, CrystalIR, Lattice
-from mat_viewer.tui.glyph_frame import _Grid
+from mat_viewer.tui.glyph_frame import _draw_atoms, _Grid
 from mat_viewer.tui.projection import _compute_viewport
 from mat_viewer.tui.session import TerminalAction, TerminalSession, run_jsonl_session
 
@@ -62,6 +63,29 @@ def test_depth_bands_survive_plain_text_and_ansi(charset, markers) -> None:
         )
         if not mono:
             assert "\033[1;" in frame and "\033[2;" in frame
+
+
+def test_slice_highlight_does_not_override_back_band_dim_style() -> None:
+    crystal = _crystal()
+    grid = _Grid(8, 4, mono=False)
+    grid.depth_range = (-1.0, 1.0)
+    grid.slice_distance = np.array([0, 0, 0])
+    viewport = SimpleNamespace(to_grid=lambda x, y: (int(y), int(x)))
+
+    _draw_atoms(
+        grid,
+        crystal,
+        np.array([[2.0, 1.0], [4.0, 1.0], [6.0, 1.0]]),
+        np.array([-1.0, 0.0, 1.0]),
+        viewport,
+        [0, 1, 2],
+        label_mode="element",
+        charset="ascii7",
+        selected_display_index=None,
+    )
+
+    assert grid.styles[1][2] == "dim"  # back-band atom remains visually recessed
+    assert grid.styles[1][4] == "bold"  # middle-band slice stays highlighted
 
 
 def test_occlusion_drops_whole_tokens_and_their_labels() -> None:

@@ -123,11 +123,9 @@ def render_molecule_frame(
             kind="atom",
             anchor=group,
             style="dim"
-            if adjacent
+            if adjacent or band == 2
             else "bold"
             if slice_distance is not None or band == 0
-            else "dim"
-            if band == 2
             else "normal",
         ):
             placed.append((group, row, col))

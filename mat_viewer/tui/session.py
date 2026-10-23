@@ -162,12 +162,8 @@ class TerminalSession:
             self._require_arguments(name, arguments, {"frames", "yaw_deg"})
             frames = arguments.get("frames", 3)
             yaw = arguments.get("yaw_deg", 10.0)
-            from .controller_validate import validate_finite
-            from .depth import MAX_PARALLAX_FRAMES
-            if isinstance(frames, bool) or not isinstance(frames, int) or not 1 <= frames <= MAX_PARALLAX_FRAMES:
-                raise ValueError(f"frames must be an integer from 1 to {MAX_PARALLAX_FRAMES}")
-            validate_finite("orbit", yaw)
-            return tuple(self._wrap(self.controller.orbit(yaw_deg=yaw)) for _ in range(frames))
+            observations = self.controller.rotation_sequence(frames=frames, yaw_deg=yaw)
+            return tuple(self._wrap(observation) for observation in observations)
 
         dispatch = {
             "set_slice": (self.controller.set_slice, {"axis", "index", "width"}),
