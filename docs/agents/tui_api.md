@@ -36,6 +36,8 @@ payload = observation.as_dict()
   view-state mutation increments its monotonic `revision` exactly once.
   Snapshot-registry operations (`save_view`, `list_views`) do not alter active
   view state and therefore do not increment it.
+- `render_frame(charset="unicode"|"ascii7")` returns the current picture, including
+  rotation ghosts, through the same renderer used by Textual and sessions.
 - `observe()` returns `TerminalObservation` with schema
   `mattervis.tui.observation/v2`. `as_dict()` is JSON-safe.
 
@@ -70,7 +72,7 @@ selected = session.execute(
 
 Supported session actions are `observe`, `reset`, `orbit`, `align`, `pan`,
 `zoom`, `fit`, `set_display`, `select`, `focus`, `clear_selection`,
-`clear_focus`, and `close`. `select` and `focus` use exact stable `atom_id`
+`clear_focus`, `set_slice`, `step_slice`, `rotation_sequence`, and `close`. `select` and `focus` use exact stable `atom_id`
 values. `reset` reconstructs the initial controller, including camera,
 selection, focus, and display state.
 
@@ -102,10 +104,12 @@ printable-ASCII renderer. This is distinct from `mono`, which only disables
 ANSI colours. Atom level draws element symbols, solid bond characters, and
 `:` cell edges into a per-cell depth buffer. Cube density lobes are not
 drawn on that glyph picture yet; loaders may still attach
-`metadata["density_blobs"]` for a later overlay. Molecule and framework
-overviews stay on the Unicode/Braille canvas. The ASCII-7 glyph mapping is a
-deterministic perceptual approximation of each 2×4 subpixel mask, not a
-reversible encoding of Unicode Braille.
+`metadata["density_blobs"]` for a later overlay. Molecule silhouettes and framework skeletons use the same depth grid.
+Dense packing uses centroid tokens; sparse views and selected molecules keep
+opaque hull silhouettes. Every visible molecule has a short `M<display-molecule-index>` token; singleton
+ions keep their element symbol. Formula annotations fill free cells only.
+Molecular hulls are opaque silhouettes at mean molecular depth; use atom level
+for individual-atom occlusion and connectivity.
 
 ASE/extXYZ inputs preserve scalar `site_id`, `occupancy`, and opaque
 `disorder` arrays. Source `site_id` takes precedence over generated stable
@@ -124,8 +128,8 @@ an opaque source token that may be nonnumeric or namespaced, whereas
 | `orbit(yaw_deg=..., pitch_deg=..., roll_deg=...)` | World-up turntable motion: yaw is about Cartesian `+Z`; pitch is about current screen-right; roll is about view axis. |
 | `align(axis)` | Look along crystallographic `a`, `b`, `c`, `a*`, `b*`, or `c*`; uses real/reciprocal lattice directions. |
 | `pan(dx=..., dy=...)`, `zoom(factor=...)` | Move/crop the stable terminal viewport. |
-| `fit(target="all"\|"focus")` | Explicitly refit; orbit and display toggles do not refit. |
-| `set_display(...)` | Partial absolute update for `display_level`, `label_mode` (`auto`, `label`, `element`, `molecule`, `dot`, `label_sym`; alias `none` = `dot`; `label_sym` omits the first listed symmetry operation, index 0, even when that operation is not `x,y,z`), `show_cell`, `show_bonds`, `show_minor`, `show_hydrogen` (default off), `show_boundary` (periodic replicas, default off), `mono`, and `show_axes` (scene fitted above an a/b/c triad and scale bar). |
+| `fit(target="all"\|"focus")` | Explicitly refit visible atoms or the current focus. Unfocused orbit refits automatically unless parallax is enabled. |
+| `set_display(...)` | Partial absolute update for `display_level`, `label_mode` (`auto`, `label`, `element`, `molecule`, `dot`, `label_sym`; alias `none` = `dot`; `label_sym` omits the first listed symmetry operation, index 0, even when that operation is not `x,y,z`), `show_cell`, `show_bonds`, `show_minor`, `show_hydrogen` (default off), `show_boundary` (periodic replicas, default off), `mono`, `show_depth` (default on), `parallax` (experimental, default off), and `show_axes` (default on: scene fitted above an a/b/c triad and scale bar). |
 | `set_selection_mode(active)` | Enter or leave atom selection while retaining the current stable atom identity. |
 | `select_atom(reference)`, `select_next(step=...)` | Select by exact reference or traverse visible atoms in stable atom-id order. |
 | `select_direction(dx=..., dy=...)`, `select_screen(row=..., col=...)` | Select from the retained projection hit map; no chemistry is inferred from screen distance. |
@@ -134,12 +138,42 @@ an opaque source token that may be nonnumeric or namespaced, whereas
 | `focus_local(reference, bond_depth=1)` | Fit one exact displayed atom and its manifested bond neighborhood. |
 | `reset_view()` | Restore startup camera and all-view framing while preserving display settings. |
 
-The controller fits visible atoms at construction, explicit `fit`, resize, and
-reset. Cell vertices are not part of that fit. It keeps fit bounds fixed while
-rotating, panning, changing label mode, or toggling cell, bond, or minor
-visibility. Showing or hiding hydrogen or periodic boundary replicas refits
-the all-view when no focus is set. This prevents the previous auto-fit
-“breathing”.
+The controller fits the visible projected atom bounds at construction, orbit,
+explicit `fit`, resize, and reset. It respects terminal cell aspect and centres
+the picture. Cell vertices do not enlarge that fit. Pan and zoom retain their
+user settings; style changes preserve fit bounds. Visibility and level changes
+refit when no focus is set. Parallax keeps fit bounds fixed while orbiting so
+that relative motion can be compared at a constant scale.
+
+Depth bands appear in the picture itself: `C1¹` is front, `C1²` middle, `C1³`
+back; ASCII-7 uses `C1^1`, `C1^2`, `C1^3`. Colour output also uses bold/normal/dim.
+An occluded token is omitted whole, including its label. Back bonds are dashed,
+front bonds solid; the farther bond has a gap around a crossing. Cell edges use
+`:` independently of bond depth. `show_depth=False` hides suffixes and band
+styling/dashing while preserving occlusion. Long site/copy labels remain in the
+selection inspector rather than covering neighbouring atoms.
+
+`set_slice(axis="depth"|"a"|"b"|"c"|"off", index=0, width=1.0)` highlights a
+half-open layer `[index*width, (index+1)*width)`. Depth uses Angstrom along the
+current viewing direction with world origin zero; a/b/c use the IR fractional
+coordinates (for example `axis="c", width=0.25`). Adjacent layers are dimmed and
+parenthesized in plain text; more distant layers are hidden. `step_slice(step=1)`
+changes the index; from off it starts at the median depth layer. Slice state is
+included in observations and saved views. This only filters the picture.
+
+Enable `set_display(parallax=True)` to show faint `·` (`.` in ASCII-7) markers
+from the previous orbit behind the current picture. Ghosts occupy empty cells
+and never obscure current geometry. They are transient camera history, retained
+by saved views but excluded from the semantic state fingerprint; use the screen
+hash to identify a rendered ghost picture. The feature remains off by default.
+
+`rotation_sequence(frames=3, yaw_deg=10)` performs 1–12 successive rotations and
+returns a tuple of observations. JSONL accepts the same action and returns an
+`observations` array of fixed-size, separately hashed frames in one response:
+
+```json
+{"action":"rotation_sequence","arguments":{"frames":3,"yaw_deg":10}}
+```
 
 ## Focus and saved views
 

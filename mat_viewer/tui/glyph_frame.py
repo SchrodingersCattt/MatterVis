@@ -1,7 +1,6 @@
 """Readable terminal picture: element symbols, solid bonds, depth occlusion.
 
-The braille compositor remains the molecule and framework overview. Atom
-level uses this grid so a person or an agent can recover which element is
+Atom and molecule views share this grid so a person or an agent can recover which element is
 where. Each cell keeps the closest depth written into it; a farther atom
 or bond is not drawn there.
 
@@ -20,6 +19,14 @@ import numpy as np
 from ..config import element_color
 from ..utils.colors import ansi256_from_hex
 from .annotations import copy_aware_label
+from .depth import (
+    BOND_DASH_LENGTH,
+    BOND_DASH_PERIOD,
+    CROSSING_GAP,
+    DEPTH_EPSILON,
+    depth_band,
+    depth_marker,
+)
 from .text import ascii7_text, terminal_text
 
 if TYPE_CHECKING:
@@ -65,6 +72,10 @@ def render_glyph_frame(
     show_hydrogen: bool,
     show_boundary: bool,
     selected_display_index: int | None,
+    show_depth: bool = True,
+    slice_distance: np.ndarray | None = None,
+    visible_indices: list[int] | None = None,
+    ghost_points: np.ndarray | None = None,
 ) -> str:
     """Draw one atom-level frame into ``width`` by ``height`` character cells."""
     grid = _Grid(width, height, mono=mono)
@@ -76,10 +87,23 @@ def render_glyph_frame(
         show_hydrogen=show_hydrogen,
         show_boundary=show_boundary,
     )
+    if visible_indices is not None:
+        allowed = set(visible_indices)
+        visible = [index for index in visible if index in allowed]
+    if slice_distance is not None:
+        visible = [index for index in visible if slice_distance[index] <= 1]
+    grid.depth_range = (
+        (min(float(depth[i]) for i in visible), max(float(depth[i]) for i in visible))
+        if visible
+        else (0.0, 0.0)
+    )
+    grid.show_depth = show_depth
+    grid.slice_distance = slice_distance
     if show_cell and crystal.lattice is not None:
         _draw_cell(grid, crystal, camera, viewport)
     if show_bonds:
         _draw_bonds(grid, crystal, camera, pts_2d, depth, viewport, visible)
+    grid.resolve_strokes()
     _draw_atoms(
         grid,
         crystal,
@@ -91,18 +115,24 @@ def render_glyph_frame(
         charset=charset,
         selected_display_index=selected_display_index,
     )
-    _draw_labels(
-        grid,
-        crystal,
-        pts_2d,
-        viewport,
-        visible,
-        depth,
-        label_mode=label_mode,
-        charset=charset,
-        selected_display_index=selected_display_index,
-    )
+    if ghost_points is not None:
+        _draw_ghosts(grid, ghost_points[visible], viewport, charset)
     return grid.to_string()
+
+
+def _draw_ghosts(grid, points, viewport, charset) -> None:
+    for point in points:
+        row, col = viewport.to_grid(*point)
+        if grid.in_bounds(row, col) and not grid.kind[row][col]:
+            grid.place(
+                row,
+                col,
+                "." if charset == "ascii7" else "·",
+                -1e30,
+                rgb=_BOND_RGB,
+                kind="ghost",
+                style="dim",
+            )
 
 
 def _visible_indices(
@@ -180,6 +210,10 @@ def _draw_bonds(grid, crystal, camera, pts_2d, depth, viewport, visible) -> None
             rgb=_BOND_RGB,
             kind="bond",
             owners=(bond.i, bond.j),
+            style="dim"
+            if grid.slice_distance is not None
+            and (grid.slice_distance[bond.i] or grid.slice_distance[bond.j])
+            else "normal",
         )
 
 
@@ -195,12 +229,25 @@ def _draw_atoms(
     charset: str,
     selected_display_index: int | None,
 ) -> None:
-    # Farther atoms first so a closer symbol can cover them completely.
-    order = sorted(visible, key=lambda index: float(depth[index]))
+    # Whole tokens are accepted front-to-back: an occluded Cl must not leave
+    # a stray 'l', and a hidden atom must not receive a detached label.
+    order = sorted(visible, key=lambda index: (-float(depth[index]), -index))
     for index in order:
         atom = crystal.atoms[index]
         row, col = viewport.to_grid(float(pts_2d[index][0]), float(pts_2d[index][1]))
-        text = _marker(atom, label_mode, charset, selected=index == selected_display_index)
+        text = _marker(
+            atom, label_mode, charset, selected=index == selected_display_index
+        )
+        band = depth_band(float(depth[index]), *grid.depth_range)
+        if grid.show_depth:
+            text += depth_marker(band, charset)
+        else:
+            band = 1
+        adjacent = grid.slice_distance is not None and grid.slice_distance[index] == 1
+        if adjacent:
+            text = "(" + text + ")"
+        if not grid.in_bounds(row, col):
+            continue
         row, col, text = grid.fit_text(row, col, text)
         grid.place(
             row,
@@ -210,45 +257,14 @@ def _draw_atoms(
             rgb=_element_rgb(atom.element),
             kind="atom",
             anchor=index,
+            style="dim"
+            if adjacent
+            else "bold"
+            if grid.slice_distance is not None or band == 0
+            else "dim"
+            if band == 2
+            else "normal",
         )
-
-
-def _draw_labels(
-    grid,
-    crystal,
-    pts_2d,
-    viewport,
-    visible,
-    depth,
-    *,
-    label_mode: str,
-    charset: str,
-    selected_display_index: int | None,
-) -> None:
-    if label_mode in {"dot", "element"}:
-        return
-    order = sorted(visible, key=lambda index: -float(depth[index]))
-    for index in order:
-        atom = crystal.atoms[index]
-        text = _label_text(
-            atom,
-            label_mode,
-            charset,
-            selected=index == selected_display_index,
-        )
-        limit = (
-            MAX_COPY_LABEL_COLUMNS
-            if label_mode == "label_sym"
-            else MAX_CANVAS_LABEL_COLUMNS
-        )
-        if text is None or len(text) > limit:
-            continue
-        if not grid.owns(index):
-            continue
-        row, col = viewport.to_grid(float(pts_2d[index][0]), float(pts_2d[index][1]))
-        for d_row, d_col in ((0, 0), *_LABEL_OFFSETS):
-            if grid.place_in_gaps(row + d_row, col + d_col - (len(text) // 2), text, anchor=index):
-                break
 
 
 def _marker(atom, label_mode: str, charset: str, *, selected: bool) -> str:
@@ -256,9 +272,21 @@ def _marker(atom, label_mode: str, charset: str, *, selected: bool) -> str:
         text = "*" if charset == "ascii7" else "●"
     else:
         text = atom.element
-        if atom.occupancy < 0.99:
+        label = _label_text(atom, label_mode, charset, selected=False)
+        limit = (
+            MAX_COPY_LABEL_COLUMNS
+            if label_mode == "label_sym"
+            else MAX_CANVAS_LABEL_COLUMNS
+        )
+        if label and len(label) <= limit:
+            text = label
+        if atom.occupancy < 0.99 and not text.endswith("*"):
             text += "*"
     if selected:
+        if label_mode not in {"element", "dot"}:
+            label = _label_text(atom, label_mode, charset, selected=False)
+            if label and len(label) <= MAX_COPY_LABEL_COLUMNS:
+                text = label
         text = f"[{text}]"
     return text
 
@@ -327,6 +355,22 @@ class _Grid:
         self.anchor = [[None] * width for _ in range(height)]
         self.bond_owners = [[None] * width for _ in range(height)]
         self._owned_anchors: set[int] = set()
+        self.styles = [["normal"] * width for _ in range(height)]
+        self.depth_range = (0.0, 0.0)
+        self.show_depth = True
+        self.slice_distance = None
+        self._strokes: list[
+            tuple[
+                list[tuple[int, int, float]],
+                str | None,
+                tuple[int, int, int],
+                tuple[int, int] | None,
+                str,
+            ]
+        ] = []
+
+    def in_bounds(self, row: int, col: int) -> bool:
+        return 0 <= row < self.height and 0 <= col < self.width
 
     def place(
         self,
@@ -338,13 +382,18 @@ class _Grid:
         rgb: tuple[int, int, int],
         kind: str,
         anchor: int | None = None,
+        style: str = "normal",
     ) -> bool:
-        """Write ``text`` only when every cell is empty or farther away."""
+        """Place a whole token; atom tokens are submitted front-to-back."""
         cells = self._span(row, col, text)
         if cells is None:
             return False
         for r, c in cells:
             existing = self.kind[r][c]
+            if existing == "surface" and self.depth[r][c] > depth + DEPTH_EPSILON:
+                return False
+            if existing == "atom" and self.anchor[r][c] != anchor:
+                return False
             # Cell edges are a guide. Atoms cover them, and they also cover a
             # bond that only ties the same depth at the atom centre.
             if existing in {"atom", "label"} and self.depth[r][c] > depth:
@@ -364,6 +413,7 @@ class _Grid:
             self.kind[r][c] = kind
             self.anchor[r][c] = anchor
             self.bond_owners[r][c] = None
+            self.styles[r][c] = style
         if anchor is not None:
             self._owned_anchors.add(anchor)
         return True
@@ -381,19 +431,25 @@ class _Grid:
         return anchor in self._owned_anchors
 
     def place_in_gaps(self, row: int, col: int, text: str, *, anchor: int) -> bool:
-        """Place a label on gaps, cell edges, or this atom's own marker."""
+        """Place a label in a gap, with a column separating adjacent tokens."""
         cells = self._span(row, col, text)
         if cells is None:
             return False
         for r, c in cells:
-            if self.anchor[r][c] == anchor:
-                continue
             if self.kind[r][c] in {"atom", "bond", "label"}:
+                return False
+        for c in (col - 1, col + len(text)):
+            if self.in_bounds(row, c) and self.kind[row][c] in {
+                "atom",
+                "bond",
+                "label",
+            }:
                 return False
         for offset, (r, c) in enumerate(cells):
             self.chars[r][c] = text[offset]
             self.kind[r][c] = "label"
             self.rgb[r][c] = _LABEL_RGB
+            self.anchor[r][c] = anchor
         return True
 
     def stroke(
@@ -409,21 +465,40 @@ class _Grid:
         rgb: tuple[int, int, int],
         kind: str,
         owners: tuple[int, int] | None = None,
+        style: str = "normal",
     ) -> None:
         clipped = _clip_to_grid(row0, col0, row1, col1, self.height, self.width)
         if clipped is None:
             return
         points = list(_line_cells(*clipped))
-        last = max(len(points) - 1, 1)
+        # Interpolate on the original segment, not its clipped endpoints.
+        dr, dc = row1 - row0, col1 - col0
+        denominator = max(dr * dr + dc * dc, 1)
+        samples = [
+            (
+                row,
+                col,
+                depth0
+                + (depth1 - depth0)
+                * min(
+                    1.0, max(0.0, ((row - row0) * dr + (col - col0) * dc) / denominator)
+                ),
+            )
+            for row, col in points
+        ]
+        if kind == "bond":
+            self._strokes.append((samples, text, rgb, owners, style))
+            return
         prev_row, prev_col = points[0]
-        for step, (row, col) in enumerate(points):
+        for step, (row, col, sampled) in enumerate(samples):
             if not (0 <= row < self.height and 0 <= col < self.width):
                 continue
-            sampled = depth0 + (depth1 - depth0) * (step / last)
             if self.depth[row][col] >= sampled:
                 prev_row, prev_col = row, col
                 continue
-            glyph = text if text is not None else _bond_char(row - prev_row, col - prev_col)
+            glyph = (
+                text if text is not None else _bond_char(row - prev_row, col - prev_col)
+            )
             if text is None and step == 0 and len(points) > 1:
                 # First cell has no previous step; aim at the next cell.
                 next_row, next_col = points[1]
@@ -435,6 +510,83 @@ class _Grid:
             self.anchor[row][col] = None
             self.bond_owners[row][col] = owners if kind == "bond" else None
             prev_row, prev_col = row, col
+
+    def resolve_strokes(self) -> None:
+        """Break the farther line on both sides of a crossing, in any order."""
+        by_cell: dict[tuple[int, int], list[tuple[int, int, float]]] = {}
+        for line, (samples, *_rest) in enumerate(self._strokes):
+            for step, (row, col, depth) in enumerate(samples):
+                by_cell.setdefault((2 * row, 2 * col), []).append((line, step, depth))
+                if step:
+                    r0, c0, d0 = samples[step - 1]
+                    # Opposite diagonals may cross between four cells without
+                    # sharing a raster cell. Index those half-cell crossings too.
+                    if abs(row - r0) == 1 and abs(col - c0) == 1:
+                        by_cell.setdefault((row + r0, col + c0), []).append(
+                            (line, step - 1, (depth + d0) / 2)
+                        )
+        gaps: set[tuple[int, int]] = set()
+        for candidates in by_cell.values():
+            if len(candidates) < 2:
+                continue
+            for line, step, depth in candidates:
+                owners = self._strokes[line][3]
+                for other, _, nearer in candidates:
+                    other_owners = self._strokes[other][3]
+                    if other == line or nearer <= depth + DEPTH_EPSILON:
+                        continue
+                    if owners and other_owners and set(owners) & set(other_owners):
+                        continue
+                    a, b = self._strokes[line][0], self._strokes[other][0]
+                    if len(a) < 2 or len(b) < 2:
+                        continue
+                    # Collinear overlapping edges use ordinary depth testing.
+                    ar, ac = a[-1][0] - a[0][0], a[-1][1] - a[0][1]
+                    br, bc = b[-1][0] - b[0][0], b[-1][1] - b[0][1]
+                    if ar * bc == ac * br:
+                        continue
+                    gaps.update(
+                        (line, k)
+                        for k in range(step - CROSSING_GAP, step + CROSSING_GAP + 1)
+                    )
+        for line, (samples, text, rgb, owners, style) in enumerate(self._strokes):
+            for step, (row, col, depth) in enumerate(samples):
+                if (line, step) in gaps:
+                    continue
+                band = depth_band(depth, *self.depth_range)
+                if (
+                    self.show_depth
+                    and band == 2
+                    and step % BOND_DASH_PERIOD >= BOND_DASH_LENGTH
+                ):
+                    continue
+                if not self.show_depth:
+                    band = 1
+                own_surface = (
+                    self.kind[row][col] == "surface"
+                    and owners
+                    and self.anchor[row][col] in owners
+                )
+                if (
+                    not own_surface
+                    and self.kind[row][col] != "cell"
+                    and self.depth[row][col] >= depth
+                ):
+                    continue
+                previous = samples[max(0, step - 1)]
+                following = samples[min(len(samples) - 1, step + 1)]
+                glyph = text or _bond_char(
+                    following[0] - previous[0], following[1] - previous[1]
+                )
+                self.chars[row][col] = glyph
+                self.depth[row][col] = depth
+                self.rgb[row][col] = rgb
+                self.kind[row][col] = "bond"
+                self.bond_owners[row][col] = owners
+                self.styles[row][col] = (
+                    "dim" if style == "dim" or band == 2 else "normal"
+                )
+        self._strokes.clear()
 
     def _span(self, row: int, col: int, text: str) -> list[tuple[int, int]] | None:
         if not text or row < 0 or row >= self.height:
@@ -459,25 +611,30 @@ class _Grid:
                 column += 1
                 continue
             rgb = self.rgb[row][column]
+            style = self.styles[row][column]
             run = [self.chars[row][column]]
             column += 1
             while (
                 column < self.width
                 and self.kind[row][column]
                 and self.rgb[row][column] == rgb
+                and self.styles[row][column] == style
             ):
                 run.append(self.chars[row][column])
                 column += 1
-            parts.append(_paint("".join(run), rgb, self.color_mode))
+            parts.append(_paint("".join(run), rgb, self.color_mode, style))
         return "".join(parts)
 
 
-def _paint(text: str, rgb: tuple[int, int, int], color_mode: str) -> str:
+def _paint(
+    text: str, rgb: tuple[int, int, int], color_mode: str, style: str = "normal"
+) -> str:
+    emphasis = "1;" if style == "bold" else "2;" if style == "dim" else ""
     if color_mode == "truecolor":
         red, green, blue = rgb
-        return f"\033[38;2;{red};{green};{blue}m{text}\033[0m"
+        return f"\033[{emphasis}38;2;{red};{green};{blue}m{text}\033[0m"
     hex_color = "#{:02x}{:02x}{:02x}".format(*rgb)
-    return f"\033[38;5;{ansi256_from_hex(hex_color)}m{text}\033[0m"
+    return f"\033[{emphasis}38;5;{ansi256_from_hex(hex_color)}m{text}\033[0m"
 
 
 def _clip_to_grid(row0, col0, row1, col1, height: int, width: int):

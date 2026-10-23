@@ -50,9 +50,14 @@ class TerminalDisplayState:
     show_cell: bool
     show_minor: bool
     mono: bool
-    show_axes: bool = False
+    show_axes: bool = True
     show_hydrogen: bool = False
     show_boundary: bool = False
+    show_depth: bool = True
+    parallax: bool = False
+    slice_axis: str = "off"
+    slice_index: int = 0
+    slice_width: float = 1.0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -65,6 +70,11 @@ class TerminalDisplayState:
             "show_axes": self.show_axes,
             "show_hydrogen": self.show_hydrogen,
             "show_boundary": self.show_boundary,
+            "show_depth": self.show_depth,
+            "parallax": self.parallax,
+            "slice_axis": self.slice_axis,
+            "slice_index": self.slice_index,
+            "slice_width": self.slice_width,
         }
 
 

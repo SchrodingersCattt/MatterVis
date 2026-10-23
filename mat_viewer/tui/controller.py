@@ -10,10 +10,10 @@ import numpy as np
 from ..math.camera import Camera, ProjectionMode, project_points
 from .chemistry_inspector import chemistry_warnings, format_atom_inspector
 from .compositor import (
-    compose_frame,
     resolve_display_level,
     structure_is_framework_like,
 )
+from .controller_depth import DepthControls
 from .controller_validate import (
     copy_camera,
     copy_viewport,
@@ -25,6 +25,7 @@ from .controller_validate import (
     validate_snapshot_name,
     with_zoom,
 )
+from .depth import slice_distances, validate_slice
 from .inspection import (
     inspect_atoms,
     inspect_local_geometries,
@@ -56,7 +57,7 @@ from .state import (
 )
 
 
-class TerminalViewController:
+class TerminalViewController(DepthControls):
     """Control one manifested :class:`CrystalIR` without changing its chemistry.
 
     The controller owns only terminal view state. It never rebuilds bonds,
@@ -68,6 +69,9 @@ class TerminalViewController:
         "observe",
         "set_camera",
         "orbit",
+        "rotation_sequence",
+        "set_slice",
+        "step_slice",
         "align",
         "fit",
         "pan",
@@ -108,8 +112,17 @@ class TerminalViewController:
         show_hydrogen: bool = False,
         show_boundary: bool = False,
         display_level: str = "auto",
-        show_axes: bool = False,
+        show_axes: bool = True,
+        show_depth: bool = True,
+        parallax: bool = False,
+        slice_axis: str = "off",
+        slice_index: int = 0,
+        slice_width: float = 1.0,
     ) -> None:
+        validate_slice(crystal, slice_axis, slice_index, slice_width)
+        self._slice_axis, self._slice_index, self._slice_width = slice_axis, slice_index, slice_width
+        self._show_depth, self._parallax = bool(show_depth), bool(parallax)
+        self._ghost_camera: Camera | None = None
         self.crystal = crystal
         self._show_axes = bool(show_axes)
         self._width, self._height = validate_dimensions(width, height)
@@ -146,6 +159,7 @@ class TerminalViewController:
             ],
         ] = {}
         self._revision = 0
+        self._snapshot_ghosts: dict[str, Camera | None] = {}
         self._fit_viewport = self._fit_all_viewport()
 
     @classmethod
@@ -193,6 +207,11 @@ class TerminalViewController:
             show_axes=self._show_axes,
             show_hydrogen=self._show_hydrogen,
             show_boundary=self._show_boundary,
+            show_depth=self._show_depth,
+            parallax=self._parallax,
+            slice_axis=self._slice_axis,
+            slice_index=self._slice_index,
+            slice_width=self._slice_width,
         )
         viewport_state = TerminalViewportState(
             width=self._width,
@@ -215,29 +234,7 @@ class TerminalViewController:
     def observe(self) -> TerminalObservation:
         """Render and describe the exact current terminal view without mutation."""
         state = self.state
-        pts_2d, depth = project_points(self.camera, self.crystal.cart_coords)
-        frame = compose_frame(
-            self.crystal,
-            self.camera,
-            pts_2d,
-            depth,
-            width=self._width,
-            height=self._height,
-            mono=self._mono,
-            label_mode=self._label_mode,
-            show_bonds=self._show_bonds,
-            show_cell=self._show_cell,
-            show_minor=self._show_minor,
-            show_hydrogen=self._show_hydrogen,
-            show_boundary=self._show_boundary,
-            zoom=self.camera.viewport_zoom,
-            pan_x=self.camera.pan_x,
-            pan_y=self.camera.pan_y,
-            display_level=self._display_level,
-            viewport=self._fit_viewport,
-            selected_display_index=self._selection.display_index,
-            show_axes=self._show_axes,
-        )
+        frame = self.render_frame()
         title = build_terminal_title(
             self.crystal,
             state.camera,
@@ -297,14 +294,15 @@ class TerminalViewController:
                 raise ValueError("target must be a finite three-dimensional vector")
             candidate = replace(candidate, target=target_array)
         self.camera = candidate
-        if target_changed:
+        self._ghost_camera = None
+        if target_changed or (any(value is not None for value in (azimuth, elevation, roll, projection)) and self._focus.kind is None):
             self._fit_viewport = self._fit_all_viewport()
         return self._changed()
 
     def atom_hit_map(self) -> tuple[ProjectedAtomHit, ...]:
         """Return visible atom positions from the exact current projection."""
         points, depth = project_points(self.camera, self.crystal.cart_coords)
-        return build_atom_hit_map(
+        hits = build_atom_hit_map(
             self.crystal,
             points,
             depth,
@@ -313,6 +311,8 @@ class TerminalViewController:
             show_hydrogen=self._show_hydrogen,
             show_boundary=self._show_boundary,
         )
+        distances = slice_distances(self.crystal, self.camera, self._slice_axis, self._slice_index, self._slice_width)
+        return tuple(hit for hit in hits if distances[hit.display_index] <= 1)
 
     def set_selection_mode(self, active: bool) -> TerminalObservation:
         """Enter or leave screen-selection mode without losing the atom."""
@@ -470,11 +470,15 @@ class TerminalViewController:
         self, *, yaw_deg: float = 0.0, pitch_deg: float = 0.0, roll_deg: float = 0.0
     ) -> TerminalObservation:
         """Orbit around a fixed world +Z up-axis and return the rendered view."""
+        validate_finite("orbit", yaw_deg, pitch_deg, roll_deg)
+        self._ghost_camera = copy_camera(self.camera) if self._parallax else None
         self.camera = self.camera.orbit_turntable(
             yaw_deg=float(yaw_deg),
             pitch_deg=float(pitch_deg),
             roll_deg=float(roll_deg),
         )
+        if self._focus.kind is None and not self._parallax:
+            self._fit_viewport = self._fit_all_viewport()
         return self._changed()
 
     def align(self, axis: str) -> TerminalObservation:
@@ -482,6 +486,9 @@ class TerminalViewController:
         if self.crystal.lattice is None:
             raise ValueError("align requires a crystal lattice")
         self.camera = self.camera.align_lattice_axis(self.crystal.lattice.matrix, axis)
+        self._ghost_camera = None
+        if self._focus.kind is None:
+            self._fit_viewport = self._fit_all_viewport()
         return self._changed()
 
     def pan(self, *, dx: float = 0.0, dy: float = 0.0) -> TerminalObservation:
@@ -510,6 +517,8 @@ class TerminalViewController:
         show_boundary: bool | None = None,
         mono: bool | None = None,
         show_axes: bool | None = None,
+        show_depth: bool | None = None,
+        parallax: bool | None = None,
     ) -> TerminalObservation:
         """Apply absolute render choices without changing source structure data."""
         # Validate every field before changing any controller state.
@@ -540,8 +549,13 @@ class TerminalViewController:
         fit_changed = (
             candidate_show_hydrogen != self._show_hydrogen
             or candidate_show_boundary != self._show_boundary
+            or candidate_show_minor != self._show_minor
+            or candidate_display_level != self._display_level
         )
 
+        self._show_depth = self._show_depth if show_depth is None else bool(show_depth)
+        self._parallax = self._parallax if parallax is None else bool(parallax)
+        self._ghost_camera = None
         self._display_level = candidate_display_level
         self._label_mode = candidate_label_mode
         self._show_bonds = candidate_show_bonds
@@ -659,6 +673,7 @@ class TerminalViewController:
             self._selection,
             viewport,
         )
+        self._snapshot_ghosts[name] = copy_camera(self._ghost_camera) if self._ghost_camera is not None else None
         return TerminalViewSnapshot(name=name, state=self.state)
 
     def restore_view(self, name: str) -> TerminalObservation:
@@ -677,6 +692,10 @@ class TerminalViewController:
         self._show_boundary = display.show_boundary
         self._display_level = display.display_level
         self._show_axes = display.show_axes
+        self._show_depth, self._parallax = display.show_depth, display.parallax
+        self._slice_axis, self._slice_index, self._slice_width = display.slice_axis, display.slice_index, display.slice_width
+        ghost = self._snapshot_ghosts[name]
+        self._ghost_camera = copy_camera(ghost) if ghost is not None else None
         self._focus = focus
         self._selection = selection
         self._fit_viewport = copy_viewport(viewport)
@@ -803,12 +822,7 @@ class TerminalViewController:
         if len(coords) == 0:
             return _compute_viewport(np.empty((0, 2)), [], self._width, self._height)
 
-        # A 3D sphere centered on the camera target projects to a bounded
-        # square for every orbit orientation. Unlike a frozen current 2D
-        # projection, it cannot crop a long structure after rotating side-on.
-        radius = float(np.linalg.norm(coords - self.camera.target, axis=1).max())
-        extent = self._projected_sphere_extent(radius)
-        points = np.array([[-extent, -extent], [extent, extent]], dtype=float)
+        points, _ = project_points(self.camera, coords)
         return _compute_viewport(points, [], self._width, self._height)
 
     def _effective_viewport(self) -> Viewport:
@@ -859,23 +873,15 @@ class TerminalViewController:
         return np.asarray(coords, dtype=float) if coords else np.empty((0, 3))
 
     def _atom_in_fit(self, atom) -> bool:
-        """Atoms that define the fitted sphere. The cell is drawn separately."""
+        """Atoms that define the fitted projection. The cell is drawn separately."""
         hidden_minor = not self._show_minor and atom.is_minor
-        hidden_hydrogen = not self._show_hydrogen and atom.element == "H"
+        hidden_hydrogen = self._display_level == "atom" and not self._show_hydrogen and atom.element == "H"
         hidden_boundary = not self._show_boundary and atom.is_boundary_replica
         return not (hidden_minor or hidden_hydrogen or hidden_boundary)
 
     def _all_view_center(self) -> np.ndarray:
         coords = self._all_view_coords()
         return coords.mean(axis=0) if len(coords) else np.zeros(3)
-
-    def _projected_sphere_extent(self, radius: float) -> float:
-        radius = max(float(radius), 0.005)
-        if self.camera.projection == ProjectionMode.ORTHOGRAPHIC:
-            return radius / max(float(self.camera.distance), 1e-9)
-        near_distance = max(float(self.camera.distance) - radius, 0.01)
-        fov_scale = np.tan(np.radians(self.camera.fov_deg / 2.0))
-        return radius / max(near_distance * fov_scale, 1e-9)
 
     def _fit_indices_viewport(self, indices: tuple[int, ...]) -> Viewport:
         coords = np.asarray(

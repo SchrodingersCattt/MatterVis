@@ -2,7 +2,7 @@
 
 Atom level is the readable glyph picture in :mod:`.glyph_frame`: element
 symbols, solid bonds, ``:`` cell edges, and a per-cell depth buffer.
-Molecule and framework overviews still use the braille canvas.
+Molecules use opaque silhouettes and short IDs on the same depth grid.
 """
 
 from __future__ import annotations
@@ -21,12 +21,11 @@ from .projection import (
     _compute_viewport,
     viewport_from_bounds,
 )
-from ..utils.colors import element_ansi_color
+from ..utils.colors import element_ansi_color  # noqa: F401  # framework compatibility
 from .renderer import BOND_COLOR as BOND_COLOR  # noqa: F401  # framework overview
-from .renderer import DEFAULT_COLOR, CELL_COLOR
+from .renderer import DEFAULT_COLOR, CELL_COLOR  # noqa: F401
 from .text import ascii7_text, terminal_text
 from .framework import (
-    compose_framework_frame,
     structure_is_framework_like,
 )
 
@@ -92,8 +91,6 @@ def resolve_label_mode(
     _ = zoom  # Zoom currently changes framing, not automatic label policy.
     visible_cells = max(width * height, 1)
     density = atom_count / visible_cells
-    if density >= 0.08 or atom_count > 160:
-        return "dot"
     if density >= 0.02 or atom_count > 32:
         return "element"
     return "label"
@@ -242,7 +239,12 @@ def compose_frame(
     viewport: Viewport | None = None,
     selected_display_index: int | None = None,
     charset: str = "unicode",
-    show_axes: bool = False,
+    show_axes: bool = True,
+    show_depth: bool = True,
+    slice_axis: str = "off",
+    slice_index: int = 0,
+    slice_width: float = 1.0,
+    ghost_points: np.ndarray | None = None,
 ) -> str:
     """Render crystal in ORTEP style with label relaxation.
 
@@ -268,7 +270,11 @@ def compose_frame(
     height = max(height, 1)
     full_height = height
     height = axes_scene_height(height, show_axes=show_axes, has_lattice=crystal.lattice is not None)
-    finish_axes = bind_axes_footer(crystal, camera, width, full_height, height)
+    finish_axes = bind_axes_footer(crystal, camera, width, full_height, height, show_depth=show_depth)
+    from .depth import slice_distances, validate_slice
+
+    validate_slice(crystal, slice_axis, slice_index, slice_width)
+    distances = slice_distances(crystal, camera, slice_axis, slice_index, slice_width) if slice_axis != "off" else None
     if charset not in {"unicode", "ascii7"}:
         raise ValueError("charset must be 'unicode' or 'ascii7'")
     display_level = resolve_display_level(
@@ -295,20 +301,11 @@ def compose_frame(
 
     # ── Viewport ────────────────────────────────────────────────────────
     extra_pts: list[np.ndarray] = []
-    cell_verts_2d = None
-    if show_cell and crystal.lattice is not None:
-        from ..math.camera import project_points as _proj
-
-        verts = crystal.lattice.cell_vertices()
-        cell_verts_2d, _ = _proj(camera, verts)
-        # The cell is drawn, but it does not expand the fit. Visible atoms
-        # are what should fill the canvas.
-
     fit_pts = pts_2d
-    if viewport is None and display_level != "molecule" and len(pts_2d) > 0:
+    if viewport is None and len(pts_2d) > 0:
         # Static / one-shot fit must match the atom-level visibility rule.
         fit_mask = [
-            atom_is_drawn(atom, **drawn_kwargs)
+            atom_is_drawn(atom, **{**drawn_kwargs, "show_hydrogen": True if display_level == "molecule" else show_hydrogen})
             for atom in crystal.atoms[: len(pts_2d)]
         ]
         if any(fit_mask):
@@ -353,57 +350,23 @@ def compose_frame(
                 show_hydrogen=show_hydrogen,
                 show_boundary=show_boundary,
                 selected_display_index=selected_display_index,
+                show_depth=show_depth,
+                slice_distance=distances,
+                ghost_points=ghost_points,
             ),
             viewport,
         )
-    canvas = BrailleCanvas(width, height)
+    from .molecule_frame import render_molecule_frame, render_network_frame
 
-    # ── Layer 1: Cell edges (dashed braille) ────────────────────────────
-    if show_cell and cell_verts_2d is not None:
-        for i, j in crystal.lattice.cell_edges():
-            sx, sy = viewport.to_px(cell_verts_2d[i][0], cell_verts_2d[i][1])
-            ex, ey = viewport.to_px(cell_verts_2d[j][0], cell_verts_2d[j][1])
-            canvas.draw_dashed_line(sx, sy, ex, ey, dash=5, gap=3, color=CELL_COLOR)
-
-    # ── Dispatch to display-level-specific rendering ───────────────────
-    if structure_is_framework_like(crystal, show_minor=show_minor):
-        return finish_axes(
-            compose_framework_frame(
-                crystal,
-                camera,
-                pts_2d,
-                depth,
-                viewport,
-                canvas,
-                width,
-                height,
-                mono,
-                show_bonds,
-                show_minor,
-                selected_display_index,
-                charset,
-            ),
-            viewport,
-        )
+    draw = render_network_frame if structure_is_framework_like(crystal, show_minor=show_minor) else render_molecule_frame
     return finish_axes(
-        _compose_molecule_frame(
-            crystal,
-            camera,
-            pts_2d,
-            depth,
-            viewport,
-            canvas,
-            width,
-            height,
-            mono,
-            show_minor,
-            selected_display_index,
-            charset,
-        ),
+        draw(crystal, camera, pts_2d, depth, viewport, width=width, height=height,
+             mono=mono, show_cell=show_cell, show_minor=show_minor,
+             show_boundary=show_boundary, selected_display_index=selected_display_index,
+             charset=charset, show_depth=show_depth, slice_distance=distances,
+             ghost_points=ghost_points, show_bonds=show_bonds),
         viewport,
     )
-
-
 
 # ── Color-run helpers ───────────────────────────────────────────────────────
 
@@ -481,206 +444,3 @@ def _step(x, y, d):
     if d < 0:
         return x + 1, y, d + 2 * x + 3
     return x + 1, y - 1, d + 2 * (x - y) + 5
-
-
-# ── Molecule-level rendering ────────────────────────────────────────────────
-
-# Qualitative palette for molecule species (ANSI 256 high-contrast hues)
-MOLECULE_COLORS = (
-    39,  # deep sky blue
-    208,  # orange
-    120,  # bright green
-    201,  # magenta/pink
-    226,  # yellow
-    87,  # cyan
-    160,  # dark red
-    99,  # purple
-    48,  # sea green
-    214,  # amber
-    63,  # slate blue
-    190,  # lime
-)
-
-
-def _compose_molecule_frame(
-    crystal: "CrystalIR",
-    camera: "Camera",
-    pts_2d: np.ndarray,
-    depth: np.ndarray,
-    viewport: "Viewport",
-    canvas: "BrailleCanvas",
-    width: int,
-    height: int,
-    mono: bool,
-    show_minor: bool,
-    selected_display_index: int | None,
-    charset: str,
-) -> str:
-    """Render molecule-level view: convex hull outlines + formula labels."""
-    from ._hull2d import convex_hull_2d
-
-    # Build molecule → color mapping via species_map
-    mol_color_map: dict[int, int] = {}
-    color_idx = 0
-    for species_key, mol_indices in crystal.species_map.items():
-        c = MOLECULE_COLORS[color_idx % len(MOLECULE_COLORS)]
-        for mi in mol_indices:
-            mol_color_map[mi] = c
-        color_idx += 1
-
-    # Group atoms by molecule_index
-    mol_groups: dict[int, list[int]] = {}  # mol_idx → [atom_indices]
-    for idx, atom in enumerate(crystal.atoms):
-        if atom.molecule_index >= 0:
-            if not show_minor and atom.is_minor:
-                continue
-            mol_groups.setdefault(atom.molecule_index, []).append(idx)
-    molecule_detail = resolve_molecule_detail(
-        molecule_count=len(mol_groups),
-        width=width,
-        height=height,
-    )
-
-    # Reverse species_map for labeling: mol_idx → species formula
-    mol_formula: dict[int, str] = {}
-    for species_key, mol_indices in crystal.species_map.items():
-        for mi in mol_indices:
-            mol_formula[mi] = species_key
-
-    # Sort molecules by average depth (back-to-front)
-    mol_depths: list[tuple[int, float]] = []
-    for mol_idx, atom_indices in mol_groups.items():
-        avg_d = sum(float(depth[i]) for i in atom_indices) / len(atom_indices)
-        mol_depths.append((mol_idx, avg_d))
-    mol_depths.sort(key=lambda x: x[1])  # far first
-
-    # Draw each molecule outline
-    label_candidates: dict[str, list[tuple[float, int, int, int]]] = {}
-    for mol_idx, molecule_depth in mol_depths:
-        atom_indices = mol_groups[mol_idx]
-        if len(atom_indices) < 2:
-            continue
-
-        color = mol_color_map.get(
-            mol_idx, MOLECULE_COLORS[mol_idx % len(MOLECULE_COLORS)]
-        )
-
-        # Get 2D projected coordinates for this molecule's atoms
-        mol_pts = [(float(pts_2d[i][0]), float(pts_2d[i][1])) for i in atom_indices]
-
-        # Centroid for label placement
-        cx = sum(x for x, y in mol_pts) / len(mol_pts)
-        cy = sum(y for x, y in mol_pts) / len(mol_pts)
-        if molecule_detail == "centroid":
-            px_x, px_y = viewport.to_px(cx, cy)
-            _draw_circle(canvas, px_x, px_y, 2, color=color)
-        else:
-            # Draw individual atom hints and a projected molecular hull.
-            for x, y in mol_pts:
-                px_x, px_y = viewport.to_px(x, y)
-                canvas.set_pixel(px_x, px_y, color=_BACK_TIER_COLOR)
-            if len(mol_pts) < 3:
-                p0 = viewport.to_px(*mol_pts[0])
-                p1 = viewport.to_px(*mol_pts[1])
-                canvas.draw_line(p0[0], p0[1], p1[0], p1[1], color=color)
-            else:
-                hull_indices = convex_hull_2d(mol_pts)
-                if len(hull_indices) >= 3:
-                    for k in range(len(hull_indices)):
-                        i0 = hull_indices[k]
-                        i1 = hull_indices[(k + 1) % len(hull_indices)]
-                        p0 = viewport.to_px(*mol_pts[i0])
-                        p1 = viewport.to_px(*mol_pts[i1])
-                        canvas.draw_line(p0[0], p0[1], p1[0], p1[1], color=color)
-
-        row, col = viewport.to_grid(cx, cy)
-        formula = mol_formula.get(mol_idx, f"M{mol_idx}")
-        if charset == "ascii7":
-            formula = ascii7_text(formula)
-        label_candidates.setdefault(formula, []).append(
-            (molecule_depth, row, col, color)
-        )
-
-    # One label per species is enough to identify the full unit-cell packing;
-    # choose the front-most instance so text does not cover every replica.
-    labels_to_place: list[tuple[int, int, str, int]] = []
-    for formula, candidates in label_candidates.items():
-        _, row, col, color = max(candidates, key=lambda item: item[0])
-        labels_to_place.append((row, col, _display_species_name(formula), color))
-
-    # Molecule-level views still expose the exact selected atom.  The marker
-    # is intentionally textual so it survives monochrome terminals.
-    if selected_display_index is not None and 0 <= selected_display_index < len(
-        crystal.atoms
-    ):
-        atom = crystal.atoms[selected_display_index]
-        if show_minor or not atom.is_minor:
-            row, col = viewport.to_grid(*pts_2d[selected_display_index])
-            labels_to_place.append(
-                (
-                    row,
-                    col,
-                    f"[{(ascii7_text if charset == 'ascii7' else terminal_text)(atom.display_label)}]",
-                    element_ansi_color(atom.element, default=DEFAULT_COLOR),
-                )
-            )
-
-    # Build output with labels
-    colored_rows = canvas.render_colored(charset=charset)
-    output_lines: list[str] = []
-
-    # Index labels by row
-    lbl_map: dict[int, list[tuple[int, str, int]]] = {}
-    for row, col, text, color in labels_to_place:
-        if 0 <= row < height:
-            text = text[:width]
-            start = max(0, min(width - len(text), col - len(text) // 2))
-            lbl_map.setdefault(row, []).append((start, text, color))
-
-    for row_idx in range(height):
-        row_data = colored_rows[row_idx] if row_idx < len(colored_rows) else []
-        row_labels = lbl_map.get(row_idx)
-
-        if not row_labels:
-            if mono:
-                output_lines.append("".join(ch for ch, _ in row_data).rstrip())
-            else:
-                output_lines.append(_build_colored_braille_line(row_data))
-        else:
-            row_labels.sort(key=lambda x: x[0])
-            parts: list[str] = []
-            col = 0
-            li = 0
-            braille_run: list[tuple[str, int]] = []
-
-            def _flush():
-                nonlocal braille_run
-                if braille_run:
-                    if mono:
-                        parts.append("".join(ch for ch, _ in braille_run))
-                    else:
-                        parts.append(_color_run_to_ansi(braille_run))
-                    braille_run = []
-
-            while col < width:
-                if li < len(row_labels) and row_labels[li][0] == col:
-                    _flush()
-                    lcol, ltext, lcolor = row_labels[li]
-                    if mono:
-                        parts.append(ltext)
-                    else:
-                        parts.append(f"\033[1;38;5;{lcolor}m{ltext}\033[0m")
-                    col += len(ltext)
-                    li += 1
-                else:
-                    if col < len(row_data):
-                        braille_run.append(row_data[col])
-                    else:
-                        braille_run.append((" ", 0))
-                    col += 1
-            _flush()
-            output_lines.append("".join(parts).rstrip())
-
-    while output_lines and not output_lines[-1]:
-        output_lines.pop()
-    return "\n".join(output_lines)

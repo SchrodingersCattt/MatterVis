@@ -92,7 +92,8 @@ def test_axis_footer_reports_lattice_directions_and_scale_bar() -> None:
     assert footer.startswith("axes a:")
     assert "c:out" in footer or "c:in" in footer
     assert footer.rstrip().endswith(" A")
-    assert "axes" not in _session(label_mode="label").observe().observation.frame
+    assert "axes" in _session(label_mode="label").observe().observation.frame
+    assert "axes" not in _session(label_mode="label", show_axes=False).observe().observation.frame
 
 
 def test_axes_footer_reserves_a_row_instead_of_covering_the_scene() -> None:

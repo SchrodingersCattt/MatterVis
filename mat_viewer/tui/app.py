@@ -157,6 +157,10 @@ class CrystalTUI(App):
         Binding("n", "toggle_minor", "Minor", show=True),
         Binding("h", "toggle_hydrogen", "H", show=True),
         Binding("B", "toggle_boundary", "PBC", show=True),
+        Binding("g", "toggle_parallax", "Ghost", show=True),
+        Binding("f", "toggle_slice", "Slice", show=True),
+        Binding("comma", "previous_slice", "Layer-", show=False),
+        Binding("full_stop", "next_slice", "Layer+", show=False),
         Binding("A", "toggle_axes", "Axes", show=True),
         Binding("L", "cycle_level", "Level", show=True),
         Binding("r", "reset_view", "Reset", show=True),
@@ -177,7 +181,12 @@ class CrystalTUI(App):
         show_cell: bool = True,
         label_mode: str = "auto",
         show_minor: bool = False,
-        show_axes: bool = False,
+        show_axes: bool = True,
+        show_depth: bool = True,
+        parallax: bool = False,
+        slice_axis: str = "off",
+        slice_index: int = 0,
+        slice_width: float = 1.0,
         show_hydrogen: bool = False,
         show_boundary: bool = False,
         compact: bool = False,
@@ -200,6 +209,11 @@ class CrystalTUI(App):
                 label_mode=label_mode if not compact else "dot",
                 show_minor=show_minor,
                 show_axes=show_axes,
+                show_depth=show_depth,
+                parallax=parallax,
+                slice_axis=slice_axis,
+                slice_index=slice_index,
+                slice_width=slice_width,
                 show_hydrogen=show_hydrogen,
                 show_boundary=show_boundary,
                 display_level=(
@@ -575,9 +589,20 @@ class CrystalTUI(App):
             return (
                 "select A | next atom | inspect [A] | stereo [A] | name [A] | why [A] | "
                 "focus A [depth] | distance A B [direct|mic] | "
-                "angle A B C [direct|mic] | dihedral A B C D [direct|mic_chain] | clear",
+                "angle A B C [direct|mic] | dihedral A B C D [direct|mic_chain] | "
+                "slice off|depth|a|b|c [index] [width] | parallax on|off | clear",
                 None,
             )
+        if name == "slice":
+            if not 1 <= len(args) <= 3:
+                raise ValueError("slice requires axis [index] [width]")
+            observation = self.controller.set_slice(axis=args[0], index=int(args[1]) if len(args) > 1 else 0,
+                                                    width=float(args[2]) if len(args) > 2 else 1.0)
+            return f"slice {args[0]}", observation
+        if name == "parallax":
+            if args not in (["on"], ["off"]):
+                raise ValueError("parallax requires on or off")
+            return f"parallax {args[0]}", self.controller.set_display(parallax=args == ["on"])
         if name == "select":
             if len(args) != 1:
                 raise ValueError("select requires exactly one atom label")
@@ -742,3 +767,25 @@ class CrystalTUI(App):
 
     def action_zoom_in(self) -> None:
         self._apply_observation(self.controller.zoom(factor=ZOOM_FACTOR))
+
+    def action_toggle_parallax(self) -> None:
+        self._apply_observation(self.controller.set_display(parallax=not self.controller.state.display.parallax))
+
+    def action_toggle_slice(self) -> None:
+        import numpy as np
+
+        from .depth import layer_indices
+        display = self.controller.state.display
+        if display.slice_axis == "off":
+            layers = layer_indices(self.crystal, self.camera, "depth", display.slice_width)
+            index = int(np.median(layers)) if len(layers) else 0
+            observation = self.controller.set_slice(axis="depth", index=index, width=display.slice_width)
+        else:
+            observation = self.controller.set_slice()
+        self._apply_observation(observation)
+
+    def action_previous_slice(self) -> None:
+        self._apply_observation(self.controller.step_slice(step=-1))
+
+    def action_next_slice(self) -> None:
+        self._apply_observation(self.controller.step_slice(step=1))

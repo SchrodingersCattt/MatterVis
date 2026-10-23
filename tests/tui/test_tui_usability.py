@@ -126,9 +126,10 @@ def test_auto_large_single_fragment_uses_network_overview() -> None:
         mono=True,
         show_cell=False,
         display_level="auto",
-        selected_display_index=0,
+        selected_display_index=int(np.argmax(depth)),
     )
-    assert "[Zn1]" in frame
+    selected_label = crystal.atoms[int(np.argmax(depth))].display_label
+    assert f"[{selected_label}]" in frame
 
 
 def test_canonical_cif_display_modes_and_bonds(tui_crystal_factory) -> None:
@@ -204,7 +205,7 @@ def test_viewport_zoom_works_in_both_directions() -> None:
 def test_adaptive_labels_make_crowded_views_readable() -> None:
     assert resolve_label_mode(
         "auto", atom_count=336, width=80, height=24, zoom=1.0
-    ) == "dot"
+    ) == "element"
     assert resolve_label_mode(
         "auto", atom_count=42, width=80, height=24, zoom=1.0
     ) == "element"
@@ -213,7 +214,7 @@ def test_adaptive_labels_make_crowded_views_readable() -> None:
     ) == "label"
 
 
-def test_unit_cell_molecule_view_labels_each_species_once(tui_crystal_factory) -> None:
+def test_unit_cell_molecule_view_labels_multiple_visible_instances(tui_crystal_factory) -> None:
     crystal = tui_crystal_factory(DAP4)
     camera = Camera.from_view_name("diagonal", crystal)
     points, depth = project_points(camera, crystal.cart_coords)
@@ -227,9 +228,10 @@ def test_unit_cell_molecule_view_labels_each_species_once(tui_crystal_factory) -
         mono=True,
         display_level="molecule",
     )
-    assert frame.count("C6H14N2") == 1
-    assert frame.count("ClO4") == 1
-    assert frame.count("H4N") == 1
+    assert frame.count("C6H14N2") >= 1
+    assert frame.count("ClO4") > 1
+    assert frame.count("H4N") >= 1
+    assert "M" in frame and any(marker in frame for marker in "¹²³")
     assert resolve_molecule_detail(
         molecule_count=sum(len(v) for v in crystal.species_map.values()),
         width=100,
@@ -342,6 +344,7 @@ def test_textual_u_o_zoom_aliases_and_orbit_keep_stable_fit() -> None:
             await pilot.press("u")
             await pilot.pause()
             assert app.camera.viewport_zoom == pytest.approx(initial_zoom)
+            await pilot.press("g")
             await pilot.press("e", "w")
             await pilot.pause()
             current = app.controller.state.viewport
