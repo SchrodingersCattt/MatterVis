@@ -18,11 +18,10 @@ CAPABILITIES_SCHEMA = "mattervis.capabilities/v1"
 RESOLUTION_SCHEMA = "mattervis.requirements/v1"
 DIST_NAME = "matter-vis"
 GPU_INSTALL = 'python -m pip install "matter-vis[gpu]"'
-MOLCRYSKIT_MINIMUM = "0.7.0"
-# Exclusive upper bound of the range exercised in CI. 0.7.1 changes crystal
-# and CIF completion (NaCl's unit-cell draw set drops from 16 atoms to 4),
-# so it is outside the contract this checkout tests.
-MOLCRYSKIT_UPPER = "0.7.1"
+MOLCRYSKIT_MINIMUM = "0.8.0"
+# Exclusive upper bound of the range exercised in CI (matches pyproject /
+# workflow pins: molcrys-kit>=0.8.0,<0.9.0).
+MOLCRYSKIT_UPPER = "0.9.0"
 MOLCRYSKIT_REQUIREMENT = f"molcrys-kit>={MOLCRYSKIT_MINIMUM},<{MOLCRYSKIT_UPPER}"
 MOLCRYSKIT_SOURCE_MINIMUM = MOLCRYSKIT_MINIMUM
 MOLCRYSKIT_INSTALL = f'python -m pip install "{MOLCRYSKIT_REQUIREMENT}"'
