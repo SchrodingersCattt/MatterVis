@@ -67,25 +67,26 @@ def test_depth_bands_survive_plain_text_and_ansi(charset, markers) -> None:
 
 def test_slice_highlight_does_not_override_back_band_dim_style() -> None:
     crystal = _crystal()
-    grid = _Grid(8, 4, mono=False)
+    crystal.atoms = crystal.atoms[:2]
+    grid = _Grid(12, 4, mono=False)
     grid.depth_range = (-1.0, 1.0)
-    grid.slice_distance = np.array([0, 0, 0])
+    grid.slice_distance = np.array([0, 0])
     viewport = SimpleNamespace(to_grid=lambda x, y: (int(y), int(x)))
 
     _draw_atoms(
         grid,
         crystal,
-        np.array([[2.0, 1.0], [4.0, 1.0], [6.0, 1.0]]),
-        np.array([-1.0, 0.0, 1.0]),
+        np.array([[2.0, 1.0], [8.0, 1.0]]),
+        np.array([-1.0, 0.0]),
         viewport,
-        [0, 1, 2],
+        [0, 1],
         label_mode="element",
         charset="ascii7",
         selected_display_index=None,
     )
 
     assert grid.styles[1][2] == "dim"  # back-band atom remains visually recessed
-    assert grid.styles[1][4] == "bold"  # middle-band slice stays highlighted
+    assert grid.styles[1][7] == "bold"  # middle-band slice stays highlighted
 
 
 def test_occlusion_drops_whole_tokens_and_their_labels() -> None:

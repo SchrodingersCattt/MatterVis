@@ -6,6 +6,8 @@ Kept separate from atom selection and chemistry inspection to bound module size.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import numpy as np
 
 from ..math.camera import project_points
@@ -58,6 +60,12 @@ class DepthControls:
         self, *, frames: int = 3, yaw_deg: float = 10.0
     ) -> tuple[TerminalObservation, ...]:
         """Return a bounded sequence of successive orbits for parallax comparison."""
+        return tuple(self.rotation_sequence_iter(frames=frames, yaw_deg=yaw_deg))
+
+    def rotation_sequence_iter(
+        self, *, frames: int = 3, yaw_deg: float = 10.0
+    ) -> Iterator[TerminalObservation]:
+        """Yield successive orbit observations while each state is still current."""
         if (
             isinstance(frames, bool)
             or not isinstance(frames, int)
@@ -67,7 +75,8 @@ class DepthControls:
                 f"frames must be an integer from 1 to {MAX_PARALLAX_FRAMES}"
             )
         validate_finite("orbit", yaw_deg)
-        return tuple(self.orbit(yaw_deg=yaw_deg) for _ in range(frames))
+        for _ in range(frames):
+            yield self.orbit(yaw_deg=yaw_deg)
 
     def set_slice(
         self, *, axis: str = "off", index: int = 0, width: float = 1.0

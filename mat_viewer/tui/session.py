@@ -162,8 +162,12 @@ class TerminalSession:
             self._require_arguments(name, arguments, {"frames", "yaw_deg"})
             frames = arguments.get("frames", 3)
             yaw = arguments.get("yaw_deg", 10.0)
-            observations = self.controller.rotation_sequence(frames=frames, yaw_deg=yaw)
-            return tuple(self._wrap(observation) for observation in observations)
+            return tuple(
+                self._wrap(observation)
+                for observation in self.controller.rotation_sequence_iter(
+                    frames=frames, yaw_deg=yaw
+                )
+            )
 
         dispatch = {
             "set_slice": (self.controller.set_slice, {"axis", "index", "width"}),
