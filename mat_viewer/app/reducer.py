@@ -108,7 +108,7 @@ LEGACY_STYLE_FIELDS = frozenset(
         "color", "color_light", "isosurface",
         "topology_hull_color", "topology_species_keys", "polyhedron_specs",
         "atom_groups", "bond_groups", "atom_property_color", "transforms",
-        "selection", "style_overrides", "disorder_resolve", "disorder_replicas", "bfdh_morphology",
+        "selection", "style_overrides", "entity_defaults", "disorder_resolve", "disorder_replicas", "bfdh_morphology",
         "bfdh_morphology_color", "cutoff",
     }
 )

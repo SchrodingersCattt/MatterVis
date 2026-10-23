@@ -3,14 +3,15 @@ from __future__ import annotations
 import copy
 from typing import Any, Optional
 
-from .shared import *
-from .normalizers import *
-from .camera_helpers import *
-from .style_helpers import *
-from .reducer import LEGACY_STYLE_STATE_FIELDS
-from .selectors import show_hydrogen, viewport_signature
-from .rightclick import _normalize_polyhedron_specs
 from ..config import current_config
+from .camera_helpers import *
+from .normalizers import *
+from .normalizers import _normalize_selection
+from .reducer import LEGACY_STYLE_STATE_FIELDS
+from .rightclick import _normalize_polyhedron_specs
+from .selectors import show_hydrogen, viewport_signature
+from .shared import *
+from .style_helpers import *
 from .view_updates import UpdateKind, classify_change, make_update, state_versions
 
 
@@ -61,6 +62,11 @@ class _StateBackendMixin:
         for key in LEGACY_STYLE_STATE_FIELDS:
             if key in patch:
                 state[key] = copy.deepcopy(patch[key])
+        if "geometry_entities" in patch:
+            entities = patch["geometry_entities"]
+            if entities is not None and (not isinstance(entities, list) or any(not isinstance(item, dict) for item in entities)):
+                raise ValueError("geometry_entities must be a list of mesh entities")
+            state["geometry_entities"] = copy.deepcopy(entities or [])
         if "display_mode" in patch and patch["display_mode"] is not None:
             state["display_mode"] = str(patch["display_mode"])
             if "topology_site_index" not in patch:
@@ -315,6 +321,7 @@ class _StateBackendMixin:
             # an authoritative structure/display identity input changed.
             identity_inputs = (
                 "structure",
+                "geometry_entities",
                 "display_mode",
                 "display_options",
                 "atom_groups",
@@ -335,6 +342,15 @@ class _StateBackendMixin:
                 for key in identity_inputs
             )
             if change_kind == UpdateKind.GEOMETRY and identity_changed:
+                working_state["target_revision"] = int(state_before.get("target_revision", 0)) + 1
+                # Source ordinals belong to their structure. An atom:source:0
+                # in a different upload must never inherit the old atom's paint.
+                if state_before.get("structure") != working_state.get("structure"):
+                    previous = working_state.get("style_overrides") or {}
+                    removed = [key for key, value in previous.items() if value.get("kind") not in {"geometry", "geometry_entity"}]
+                    working_state["style_overrides"] = {key: value for key, value in previous.items() if key not in removed}
+                    working_state["selection"] = _normalize_selection({})
+                    working_state["style_override_warnings"] = removed
                 working_state = self._reconcile_semantic_targets(working_state)
             before_versions = state_versions(state_before)
             # Maintain independent clocks.  A display patch can reuse the
@@ -484,6 +500,9 @@ class _StateBackendMixin:
             include_boundary_replicas=not wrap_into_cell,
             include_cross_boundary_bond_endpoints=not wrap_into_cell,
         )
+        if "geometry_entities" in state:
+            scene = dict(scene)
+            scene["geometry_entities"] = copy.deepcopy(state["geometry_entities"])
         # Keep state-owned morphology available to semantic target
         # reconciliation and programmatic scene callers.  The style selector
         # also applies this field before rendering, but reconciliation runs
@@ -710,6 +729,7 @@ class _StateBackendMixin:
             or {"atom_labels": [], "active_label": None, "order": [], "targets": [], "active_target": None}
         )
         style["style_overrides"] = copy.deepcopy(state.get("style_overrides") or {})
+        style["_target_revision"] = int(state.get("target_revision", 0))
         style["selection_highlight"] = current_config().colors.get(
             "selection_highlight", "#74808C"
         )

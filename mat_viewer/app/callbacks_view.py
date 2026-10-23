@@ -149,19 +149,8 @@ def register_view_callbacks(app, backend):
         if not isinstance(selection, dict) or not isinstance(selection.get("targets"), list):
             return no_update
         scene_id = str(selection.get("scene_id") or active_scene_id or backend.active_scene_id())
-        mode = str(selection.get("mode") or "replace")
-        if mode == "clear":
-            backend.clear_target_selection(scene_id=scene_id)
-        else:
-            # The browser store carries the complete post-click target list.
-            # Applying ``toggle`` to that whole list would toggle every
-            # already-selected item a second time, so treat it as the
-            # authoritative snapshot and replace the server list.  This is
-            # especially important for Ctrl/Cmd clicks that remove one item.
-            backend.set_target_selection(
-                selection.get("targets") or [],
-                scene_id=scene_id,
-            )
+        if not backend._commit_selection_event(selection, scene_id):
+            return no_update
         return backend.get_state(scene_id)
 
     @app.callback(

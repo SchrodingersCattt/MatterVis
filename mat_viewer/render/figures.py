@@ -359,7 +359,7 @@ def build_row_figure(
             from .style.atom_groups import hidden_atom_label_set, tag_atoms_with_groups
 
             tagged_row = tag_atoms_with_groups(scene["draw_atoms"], atom_groups_row)
-            hidden_labels_row = hidden_atom_label_set(tagged_row)
+            scene["draw_atoms"] = apply_scene_style_overrides({**scene, "draw_atoms": tagged_row}, style_norm)["draw_atoms"]
 
         trace_dicts: list[dict] = []
         if scene.get("vector_overlays"):
@@ -477,7 +477,13 @@ def build_figure(
         from .style.atom_groups import hidden_atom_label_set, tag_atoms_with_groups
 
         tagged = tag_atoms_with_groups(scene["draw_atoms"], atom_groups)
-        hidden_labels = hidden_atom_label_set(tagged)
+        tagged = apply_scene_style_overrides({**scene, "draw_atoms": tagged}, style)["draw_atoms"]
+        scene["draw_atoms"] = tagged
+
+    if style.get("bond_groups"):
+        from ..style.bond_groups import tag_bonds_with_groups
+        scene["bonds"] = tag_bonds_with_groups(scene.get("bonds") or [], style["bond_groups"], atoms=scene["draw_atoms"])
+        scene = apply_scene_style_overrides(scene, style)
 
     # Build a flat list of trace dicts (skipping per-trace Plotly validation
     # by passing dicts straight to ``go.Figure``) instead of repeated
@@ -519,7 +525,7 @@ def build_figure(
         selected_labels=set(selection_state.get("atom_labels") or []),
         selected_targets=selected_targets,
     )
-    if selection_trace is not None:
+    if selection_trace is not None and (include_interaction_traces or style.get("show_selection", False)):
         trace_dicts.extend(_traces_to_dicts([selection_trace]))
     if include_interaction_traces:
         trace_dicts.extend(
@@ -615,7 +621,7 @@ def build_figure(
 
     ui_revision = style.get("uirevision", str(scene.get("name", "scene")))
     compass_ctx = compass_clientside_context(scene, style, viewport=viewport)
-    layout_meta = {}
+    layout_meta = {"mv_selection": list((style.get("selection") or {}).get("targets") or []), "target_revision": style.get("_target_revision", 0)} if include_interaction_traces else {}
     if compass_ctx:
         if compass_ctx.get("enabled"):
             layout_meta["compass"] = compass_ctx

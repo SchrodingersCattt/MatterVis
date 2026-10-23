@@ -88,7 +88,7 @@ STORED_STATE_KEYS = frozenset(
         "cell_overlays",
         "vector_overlays",
         "selection",
-        "style_overrides",
+        "style_overrides", "entity_defaults", "geometry_entities",
         "bfdh_morphology",
         "bfdh_morphology_color",
         # This is an explicit user setting.  ``derived_state`` also exposes
@@ -342,6 +342,7 @@ def geometry_state_fields(state: Mapping[str, Any] | None) -> dict[str, Any]:
         key: state.get(key)
         for key in (
             "structure",
+            "geometry_entities",
             "display_mode",
             "transforms",
             "disorder",

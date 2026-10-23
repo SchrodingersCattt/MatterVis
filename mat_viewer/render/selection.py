@@ -6,6 +6,7 @@ from .meshes import _append_mesh, _sphere_mesh
 from .style import *
 from .picking import (
     atom_instance_id,
+    atom_parent_targets,
     bond_instance_id,
     ensure_polyhedron_instance_ids,
     polyhedron_instance_id,
@@ -92,8 +93,8 @@ def selection_outline_trace(
     remain supported for legacy box-selection payloads.
     """
     selection = style.get("selection") if isinstance(style.get("selection"), dict) else {}
-    parts = list(selection.get("parts") or [])
-    selected = set(selected_labels or selection.get("atom_labels") or [])
+    parts = [] if selected_targets else list(selection.get("parts") or [])
+    selected = set() if selected_targets else set(selected_labels or selection.get("atom_labels") or [])
     targets = set(selected_targets or [])
     if not selected and not parts and not targets:
         return None
@@ -174,6 +175,7 @@ def disorder_preview_outline_trace(
 
 def _atom_selection_trace(scene: dict, style: dict, hidden_labels: set | None = None):
     xs, ys, zs, sizes, labels, customdata = [], [], [], [], [], []
+    radii, parents, opacities = [], [], []
     hidden_labels = hidden_labels or set()
     fragment_labels = scene.get("atom_fragment_labels") or []
     for idx, atom in enumerate(scene["draw_atoms"]):
@@ -184,11 +186,18 @@ def _atom_selection_trace(scene: dict, style: dict, hidden_labels: set | None = 
             continue
         if not _atom_render_visible(atom):
             continue
+        if (atom.get("_render_style") or style.get("style")) == "stick":
+            continue
+        if style.get("show_minor_only") and not atom.get("is_minor"):
+            continue
         xs.append(float(atom["cart"][0]))
         ys.append(float(atom["cart"][1]))
         zs.append(float(atom["cart"][2]))
         sizes.append(max(6.0, 48.0 * atom["atom_radius"] * float(style["atom_scale"])))
         labels.append(atom["label"])
+        radii.append(float(atom["atom_radius"]) * float(style["atom_scale"]))
+        parents.append(atom_parent_targets(atom, fragment_labels[idx] if idx < len(fragment_labels) else None))
+        opacities.append(_atom_effective_opacity(atom, style))
         # Phase 4: customdata schema is now ``[kind, idx, label, elem,
         # is_minor, fragment_label]`` so the right-click handler can
         # demux on ``kind`` (atom / bond / polyhedron) without having
@@ -220,16 +229,16 @@ def _atom_selection_trace(scene: dict, style: dict, hidden_labels: set | None = 
         mode="markers",
         marker={
             "size": sizes,
-            # gl3d drops fragments whose alpha is ~0, so hover and click
-            # never see this trace. A faint marker still reads as invisible
-            # and stays in the pick buffer.
-            "color": "rgba(255,255,255,0.2)",
-            "opacity": 0.2,
+            # Browser-local analytic picking consumes the trace metadata.
+            # These probes must not wash out the chemical base colours.
+            "color": "rgba(0,0,0,0)",
+            "opacity": 0.0,
             "line": {"width": 0, "color": "rgba(0,0,0,0)"},
         },
         customdata=customdata,
         hovertemplate="%{customdata[2]} (%{customdata[3]})<extra></extra>",
         showlegend=False,
+        meta={"mv_radii": radii, "mv_parents": parents, "mv_opacities": opacities},
         name="atom-selection",
     ), "atom_selection")
 
@@ -315,8 +324,11 @@ def _bond_selection_trace(scene: dict, style: dict) -> "go.Scatter3d | None":
         return None
     n = len(atoms)
     xs, ys, zs, customdata, hover = [], [], [], [], []
+    segments, bond_radii = [], []
+    if {(a.get("_render_style") or style.get("style")) for a in atoms} == {"ball"}:
+        return None
     for bond_index, bond in enumerate(bonds):
-        if not bool(bond.get("_render_visible", True)):
+        if not bool(bond.get("_render_visible", True)) or float(bond.get("_render_opacity_scale", 1)) <= 0 or float(bond.get("_render_radius_scale", 1)) <= 0:
             continue
         i = int(bond.get("i", -1))
         j = int(bond.get("j", -1))
@@ -327,6 +339,8 @@ def _bond_selection_trace(scene: dict, style: dict) -> "go.Scatter3d | None":
         start = np.asarray(bond["start"], dtype=float)
         end = np.asarray(bond["end"], dtype=float)
         mid = (start + end) / 2.0
+        segments.append([start.tolist(), end.tolist()])
+        bond_radii.append(float(style.get("bond_radius", .15)) * float(bond.get("_render_radius_scale", 1)))
         label_i = str(atoms[i].get("label") or "")
         label_j = str(atoms[j].get("label") or "")
         elem_i = str(atoms[i].get("elem") or "")
@@ -361,6 +375,7 @@ def _bond_selection_trace(scene: dict, style: dict) -> "go.Scatter3d | None":
         hovertext=hover,
         hovertemplate="%{hovertext}<extra></extra>",
         showlegend=False,
+        meta={"mv_segments": segments, "mv_bond_radii": bond_radii},
         name="bond-selection",
     ), "bond_selection")
 

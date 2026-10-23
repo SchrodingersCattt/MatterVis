@@ -7,6 +7,7 @@ from .traces_atoms import *
 from .traces_overlays import _minor_outline_traces
 from .serialize import _round_coord_arrays
 from ..style.bond_groups import bond_groups_cache_key
+from .style.resolver import apply_scene_style_overrides
 
 
 def _hashable_selector(selector: dict | None) -> tuple:
@@ -178,6 +179,8 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
         _atom_groups_cache_key(atom_groups),
         bond_groups_cache_key(bond_groups),
         _style_overrides_cache_key(style.get("style_overrides")),
+        repr(style.get("entity_defaults")),
+        repr((style.get("element_colors"), style.get("element_colors_light"))),
         _property_key,
     )
     if key in cache:
@@ -209,7 +212,7 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
     # don't fragment the bond render across partitions.
     scene_material = str(style.get("material", "mesh"))
     scene_style = str(style.get("style", "ball_stick"))
-    if atom_groups:
+    if atom_groups or style.get("style_overrides") or style.get("entity_defaults"):
         from ..style.atom_groups import (
             partition_atoms_by_render_pipeline,
             tag_atoms_with_groups,
@@ -217,12 +220,15 @@ def _cached_atom_bond_meshes(scene: dict, style: dict, *, use_fast: bool):
 
         fragment_labels = scene.get("atom_fragment_labels") or None
         tagged_atoms = tag_atoms_with_groups(
-            scene["draw_atoms"],
-            atom_groups,
-            scene_material=scene_material,
-            scene_style=scene_style,
+            scene["draw_atoms"], atom_groups,
+            scene_material=scene_material, scene_style=scene_style,
             fragment_labels=fragment_labels,
-        )
+        ) if atom_groups else scene["draw_atoms"]
+        resolved_scene = apply_scene_style_overrides({**scene, "draw_atoms": tagged_atoms}, style)
+        tagged_atoms = resolved_scene["draw_atoms"]
+        if original_bonds is None:
+            original_bonds = scene["bonds"]
+        scene["bonds"] = resolved_scene["bonds"]
         # Mutate the scene so ``_bond_segments`` (called below) sees
         # the per-atom ``_render_visible`` / ``_render_color`` flags.
         # We carefully restore the original list afterwards so cache

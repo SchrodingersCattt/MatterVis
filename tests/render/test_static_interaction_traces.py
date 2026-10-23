@@ -190,6 +190,7 @@ def test_light_and_dark_figure_payloads_keep_explicit_background_and_selection(
             "show_hydrogen": True,
             "background": background,
             "selection_highlight": selection,
+            "show_selection": True,
             "selection": {"atom_labels": ["C1"], "targets": []},
         },
     )

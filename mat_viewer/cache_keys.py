@@ -22,6 +22,8 @@ _VOLATILE_STATE_FIELDS = {
     "server_started_at",
     "render_revision",
     "geometry_version",
+    "target_revision",
+    "style_override_warnings",
     "display_version",
     "camera_version",
     "camera_revision",

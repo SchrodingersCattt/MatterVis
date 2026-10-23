@@ -251,6 +251,7 @@ class _CameraBackendMixin:
         if cached_entry is not None:
             cached_fig_dict, cached_topology = cached_entry
             fig = _figure_from_cached_dict(cached_fig_dict)
+            fig.update_layout(meta={**(fig.layout.meta or {}), "target_revision": int(state.get("target_revision", 0))})
             # The cached figure was built with whatever camera was
             # current at the time. The corner axis-key compass is a
             # paper-coord overlay whose arrows are pre-projected from

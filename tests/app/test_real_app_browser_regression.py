@@ -94,6 +94,8 @@ def _run(mattervis_url, mode: str, structure: str = "", upload: str = "", timeou
         if isinstance(out, bytes):
             out = out.decode("utf-8", "replace")
         pytest.fail((err or out or "browser regression timed out")[-4000:])
+    if result.stdout:
+        print(result.stdout)
     if result.returncode != 0:
         pytest.fail((result.stderr or result.stdout or "browser regression failed")[-4000:])
 
@@ -243,3 +245,8 @@ def test_persisted_store_survives_restart_and_reconnect(tmp_path):
             backend = getattr(viewer, "crystal_backend", None)
             if backend is not None:
                 backend.close()
+
+
+@pytest.mark.timeout(180)
+def test_visible_mesh_and_bfdh_faces_share_native_picking(mattervis_url):
+    _run(mattervis_url, "surface-pick", structure="DAP-4")

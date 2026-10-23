@@ -271,12 +271,12 @@ def _annotate_trace(
 ):
     if trace is not None:
         trace.update(
-            meta=_latency_meta(
+            meta={**(dict(trace.meta) if isinstance(trace.meta, dict) else {}), **_latency_meta(
                 role,
                 is_minor=is_minor,
                 opacity_group=opacity_group,
                 opacity_scale=opacity_scale,
-            )
+            )}
         )
     return trace
 

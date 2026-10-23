@@ -5,7 +5,6 @@ import math
 
 from .shared import *
 from ..render.style.resolver import normalize_style_overrides
-from ..render.style.resolver import normalize_style_overrides
 
 _HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 

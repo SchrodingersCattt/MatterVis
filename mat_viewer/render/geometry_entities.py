@@ -573,7 +573,7 @@ def geometry_entity_traces(
         raise ValueError('scene["geometry_entities"] must be a list of mesh entities')
 
     import plotly.graph_objects as go
-    from .style.resolver import normalize_style_overrides
+    from .style.resolver import normalize_style_overrides, resolve_entity_style
 
     traces: list[go.BaseTraceType] = []
     raw_overrides = (style or {}).get("style_overrides") if isinstance(style, Mapping) else None
@@ -583,13 +583,14 @@ def geometry_entity_traces(
             raise ValueError(f"geometry_entities[{entity_index}] must be a mapping")
         entity = dict(raw_entity)
         target_id = str(entity.get("id") or "")
-        override = overrides.get(target_id) if isinstance(overrides, Mapping) else None
-        if isinstance(override, Mapping):
-            # Geometry-specific controls are validated by the shared resolver
-            # at the state boundary; ignore unknown fields defensively here.
-            for key in ("color", "opacity", "visible", "flatshading", "edge_color", "edge_width", "edge_opacity"):
-                if key in override:
-                    entity[key] = override[key]
+        effective = resolve_entity_style(
+            {"kind": "geometry", "id": target_id},
+            kind_defaults=(style or {}).get("entity_defaults"),
+            rules=[{"selector": {"all": True}, "style": entity}], overrides=overrides,
+        )
+        entity.update(effective)
+        if "edge_width" in (overrides.get(target_id) or {}):
+            entity["show_edges"] = float(entity["edge_width"]) > 0
         if not bool(entity.get("visible", True)):
             continue
         try:

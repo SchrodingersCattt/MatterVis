@@ -78,7 +78,7 @@ def _morphology_traces(
     scale = morph.get("scale", 1.0)
     opacity = morph.get("opacity", 0.8)
     color = str(style.get("bfdh_morphology_color") or "#4f7cff")
-    from .style.resolver import normalize_style_overrides
+    from .style.resolver import normalize_style_overrides, resolve_entity_style
     overrides = normalize_style_overrides(style.get("style_overrides"))
     parent_override = overrides.get("bfdh-morphology") or overrides.get("morphology:bfdh-morphology")
     if isinstance(parent_override, dict):
@@ -100,12 +100,20 @@ def _morphology_traces(
     # ``rgba(0,0,0,0)`` face could therefore fall back to opaque black.  A
     # hidden facet is omitted entirely and an opacity override becomes the
     # trace opacity, which is deterministic in both WebGL and static export.
-    groups: dict[tuple[str, float], dict[str, list]] = {}
+    groups: dict[tuple, dict[str, list]] = {}
     visible_facet_indices: set[int] = set()
     for facet_index, facet in enumerate(facets):
         miller = facet.get("miller", [0, 0, 0])
         facet_id = facet_instance_id(miller, facet_index, morphology_id="bfdh-morphology")
-        facet_override = overrides.get(facet_id) if isinstance(overrides, dict) else None
+        facet_override = resolve_entity_style(
+            {"kind": "facet", "id": facet_id, "parent_id": "morphology:bfdh-morphology"},
+            kind_defaults={"facet": {"edge_width": 0, **((style.get("entity_defaults") or {}).get("facet") or {})}},
+            rules=[{"selector": {"all": True}, "style": {"color": color, "opacity": opacity}}],
+            overrides=overrides,
+        )
+        # Accept the historic bare parent ID as well.
+        if parent_override:
+            facet_override = {**parent_override, **facet_override}
         if isinstance(facet_override, dict) and facet_override.get("visible") is False:
             continue
         facet_color = str(
@@ -125,7 +133,10 @@ def _morphology_traces(
         if facet_opacity <= 1.0e-12:
             continue
         group = groups.setdefault(
-            (facet_color, round(facet_opacity, 6)),
+            (facet_color, round(facet_opacity, 6),
+             facet_override.get("edge_color", facet_color),
+             float(facet_override.get("edge_width", 0)),
+             float(facet_override.get("edge_opacity", 1))),
             {"vertices": [], "faces": [], "face_ids": [], "face_ordinals": [], "facet_millers": []},
         )
         for tri in facet.get("triangles", []):
@@ -140,7 +151,7 @@ def _morphology_traces(
             )
             visible_facet_indices.add(facet_index)
 
-    for (group_color, group_opacity), group in groups.items():
+    for (group_color, group_opacity, edge_color, edge_width, edge_opacity), group in groups.items():
         if not group["vertices"]:
             continue
         entity_meta = {
@@ -164,6 +175,8 @@ def _morphology_traces(
             color=group_color,
             opacity=group_opacity,
             flatshading=True,
+            show_edges=edge_width > 0, edge_color=edge_color,
+            edge_width=edge_width, edge_opacity=edge_opacity,
             lighting=dict(ambient=0.75, diffuse=0.9, specular=0.2, roughness=0.25),
             # This is an internal depth-tested entity, not a caller-supplied
             # scene geometry entity.  Keeping the provenance explicit prevents

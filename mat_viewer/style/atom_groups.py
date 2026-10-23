@@ -189,6 +189,7 @@ def tag_atoms_with_groups(
         decorated["_render_color"] = None
         decorated["_render_color_light"] = None
         decorated["_render_visible"] = True
+        decorated["_render_visibility_group_id"] = None
         decorated["_render_opacity_scale"] = 1.0
         decorated["_render_opacity_group_id"] = None
         decorated["_render_material"] = None
@@ -222,6 +223,7 @@ def tag_atoms_with_groups(
                 decorated["_render_color_light"] = color_light
             if "visible" in group:
                 decorated["_render_visible"] = bool(group["visible"])
+                decorated["_render_visibility_group_id"] = str(group.get("id") or "")
             opacity = group.get("opacity")
             if opacity is not None:
                 # Replace (not multiply) so the last matching group's
