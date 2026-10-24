@@ -9,6 +9,7 @@ import re
 from copy import deepcopy
 from threading import RLock
 
+from .catalog import CatalogEntry, StructureCatalog  # noqa: F401
 from .revisions import (  # noqa: F401
     RevisionBinding,
     RevisionEvent,

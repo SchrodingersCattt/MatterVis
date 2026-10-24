@@ -12,6 +12,20 @@ visualization. Its lightweight core renders PNG/PDF/SVG on the CPU; Plotly,
 Dash/Web APIs, Textual, Cube isosurfaces, and animation encoders are optional
 frontends.
 
+## Scenes and scientific revisions
+
+A **Scene is an interactive view slot**: camera, Display and selection.
+A **scientific revision is an immutable structure plus operation/provenance and
+checks**, owned by the workflow. Closing a Scene does not delete scientific
+evidence; opening a Scene does not create a new scientific revision. Undo
+restores a view, not its historical revision binding.
+
+Workflows may opt into the small in-memory
+[Structure Catalog API](docs/agents/extensions_api.md#optional-structure-catalog)
+to retain inputs and derived snapshots independently of open Scenes. It adds no
+panel or canvas and no automatic persistence. Existing external revision stores
+can use the revision/write APIs directly without adopting the catalog.
+
 ## Key Features
 
 - **ASCII-first chemistry TUI** — A non-visual model can rotate the projected structure, select stable atom IDs, traverse bonds, and read MolCrysKit names, line notation, CIP descriptors, crystal enantiomer composition, warnings, and evidence without treating JSON as the primary observation
