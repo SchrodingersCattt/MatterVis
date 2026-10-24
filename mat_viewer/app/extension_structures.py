@@ -99,13 +99,28 @@ class WebStructureHost:
             backend.replace_scene_state_with_defaults(
                 handle.scene_id, structure=bundle.name
             )
-            if camera is not None:
-                backend.patch_state({"camera": camera}, scene_id=handle.scene_id)
-            # A reload is a new source target even if its geometry is equal.
             scene = backend.scene_store.get(handle.scene_id)
-            scene.state_patch["target_revision"] = (
-                int(before.get("target_revision", 0)) + 1
+            if camera is not None:
+                scene.camera = camera
+                scene.state_patch["camera"] = deepcopy(camera)
+            # The browser rejects frames with older independent clocks. A
+            # source replacement must never reset them to loader defaults.
+            camera_revision = (
+                max(
+                    int(before.get("camera_revision", 0) or 0),
+                    int(before.get("camera_version", 0) or 0),
+                    backend._camera_revisions.get(handle.scene_id, 0),
+                )
+                + 1
             )
+            scene.state_patch.update(
+                geometry_version=int(before.get("geometry_version", 0) or 0) + 1,
+                display_version=int(before.get("display_version", 0) or 0) + 1,
+                camera_version=camera_revision,
+                camera_revision=camera_revision,
+                target_revision=int(before.get("target_revision", 0) or 0) + 1,
+            )
+            backend._camera_revisions[handle.scene_id] = camera_revision
             if backend.active_scene_id() == handle.scene_id:
                 backend.current_state = backend.scene_state(handle.scene_id)
                 backend.pending_state = backend._state_snapshot(

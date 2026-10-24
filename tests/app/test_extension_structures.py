@@ -229,3 +229,24 @@ def test_shutdown_during_parse_rejects_commit_and_removes_candidate(app, monkeyp
         pending.result(30)
     assert backend.scene_options() == before
     assert all(not path.exists() for path in candidates)
+
+
+def test_reload_keeps_frame_clocks_monotonic_after_camera_commands(app):
+    api, backend = app.extension_context.structures, app.crystal_backend
+    scene_id = api.register(CIF).result(30)
+    for _ in range(3):
+        backend.patch_state({"camera_revision": 8}, scene_id=scene_id)
+        backend.patch_state({"atom_scale": 0.7}, scene_id=scene_id)
+    before = backend.get_state(scene_id)
+    api.reload(scene_id, CIF).result(30)
+    after = backend.get_state(scene_id)
+    for key in (
+        "camera_revision",
+        "camera_version",
+        "geometry_version",
+        "display_version",
+        "render_revision",
+    ):
+        assert after[key] > before[key], key
+    assert not backend._figure_revision_matches_current(scene_id, before)
+    assert backend._figure_revision_matches_current(scene_id, after)
