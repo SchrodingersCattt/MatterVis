@@ -55,7 +55,7 @@ class _CoreBackendMixin:
         )
         self.server_started_at = time.time()
         self.catalog = get_default_catalog(root_dir=self.root_dir)
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         # Upload requests reserve their digest/name before the background
         # parser starts.  Keeping these maps on the backend makes concurrent
         # multipart requests idempotent and gives the browser a durable way to
@@ -803,8 +803,10 @@ class _CoreBackendMixin:
         if not getattr(self, "scene_store", None):
             return
         try:
-            if self.scene_store.is_dirty():
-                self.scene_store.save()
+            # Persist only completed native/extension scene transactions.
+            with self._lock:
+                if self.scene_store.is_dirty():
+                    self.scene_store.save()
         except OSError as exc:  # pragma: no cover - disk-full / read-only mount
             print(f"[mat_viewer] could not persist scene store: {exc}", file=sys.stderr)
 
