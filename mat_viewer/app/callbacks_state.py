@@ -20,6 +20,13 @@ from .display_controls import (
 from ..properties import web_colormap_options
 
 
+def _scene_controls_stamp(state):
+    return json.dumps({
+        "scene_id": str(state.get("scene_id") or ""),
+        "camera_revision": int(state.get("camera_revision", 0) or 0),
+    }, sort_keys=True)
+
+
 def checklist_after_reconcile(mode, reconciled, incoming):
     """Checklist value after display options are reconciled.
 
@@ -96,6 +103,7 @@ def register_state_callbacks(app, backend):
             property_payload.get("center"),
             str(property_payload.get("nan_color", "#BDBDBD"))[:7],
             ["show"] if property_payload.get("show_colorbar", True) else [],
+            _scene_controls_stamp(state),
             state,
             _camera_store_payload(scene_id, state.get("camera")),
         )
@@ -410,6 +418,7 @@ def register_state_callbacks(app, backend):
         Output("property-center-input", "value"),
         Output("property-nan-color-input", "value"),
         Output("property-colorbar-toggle", "value"),
+        Output("scene-controls-scene", "children"),
         Output("agent-state-store", "data"),
         Output("camera-state-store", "data"),
         Output("scene-switch-seq", "data"),
@@ -417,28 +426,32 @@ def register_state_callbacks(app, backend):
         Input("native-upload-sync", "data"),
         Input("display-defaults-btn", "n_clicks"),
         Input("scene-tabs", "value"),
+        State("scene-controls-scene", "children"),
         prevent_initial_call=True,
     )
     def sync_agent_state(_n_intervals, _native_upload_sync, *args):
         # Keep the callback callable with the historical three-argument
         # signature for direct integrations/tests while Dash supplies the
-        # optional Restore Defaults click value as a fourth argument.
+        # optional Restore Defaults click and browser control acknowledgement.
+        controls_scene_id = None
         if len(args) == 1:
             _display_defaults_clicks = None
             scene_id = args[0]
         elif len(args) == 2:
             _display_defaults_clicks, scene_id = args
+        elif len(args) == 3:
+            _display_defaults_clicks, scene_id, controls_scene_id = args
         else:
             raise TypeError(
                 "sync_agent_state expects (interval, upload, scene_id) or "
-                "(interval, upload, defaults_clicks, scene_id)"
+                "(interval, upload, defaults_clicks, scene_id[, controls_scene_id])"
             )
         triggered = (
             callback_context.triggered[0]["prop_id"].split(".")[0]
             if callback_context.triggered
             else None
         )
-        n_outputs = 28
+        n_outputs = 29
         if triggered == "display-defaults-btn":
             if not scene_id or scene_id not in backend.scene_store.scenes:
                 return (no_update,) * n_outputs
@@ -476,6 +489,18 @@ def register_state_callbacks(app, backend):
             # disorder banner and lets its figure win the tab switch race.
             backend.pop_pending_state()
             state = backend.get_state()
+        elif (
+            controls_scene_id is not None
+            and scene_id in backend.scene_store.scenes
+            and controls_scene_id != _scene_controls_stamp(backend.get_state(scene_id))
+        ):
+            # Dash can supersede a slow tab response with a newer poll that
+            # returns no_update. The canvas may already show the new scene
+            # while its controls stay on the old one indefinitely. Re-emit
+            # the selected scene until the browser acknowledges the same
+            # control transaction, including a new camera command on the same
+            # scene. A server-side "filled" flag is not an acknowledgement.
+            state = backend.get_state(scene_id)
         else:
             peeked = backend.peek_pending_state()
             # Each page follows its own selected scene. A pending payload for

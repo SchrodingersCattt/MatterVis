@@ -26,6 +26,50 @@ class _CallbackRegistry:
         return register
 
 
+def test_poll_repairs_a_tab_response_the_browser_did_not_apply(tmp_path, monkeypatch):
+    """An overlapping poll must not strand the previous scene's controls."""
+    backend = ViewerBackend(
+        preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path)
+    )
+    try:
+        first_id = backend.active_scene_id()
+        second = backend.create_scene(
+            structure=backend.get_state()["structure"], label="Second scene"
+        )["id"]
+        backend.pop_pending_state()
+        registry = _CallbackRegistry()
+        callbacks_state.register_state_callbacks(registry, backend)
+        monkeypatch.setattr(callbacks_state, "callback_context", SimpleNamespace(
+            triggered=[{"prop_id": "scene-tabs.value"}]
+        ))
+        sync = registry.callbacks["sync_agent_state"]
+        old_stamp = callbacks_state._scene_controls_stamp(backend.get_state(first_id))
+        discarded = sync(None, None, None, second, old_stamp)
+        second_stamp = callbacks_state._scene_controls_stamp(backend.get_state(second))
+        assert discarded[-4] == second_stamp
+        assert backend.pending_state is None
+
+        # Model Dash superseding that response: the server filled its state,
+        # but the browser still acknowledges the old scene's controls.
+        monkeypatch.setattr(callbacks_state, "callback_context", SimpleNamespace(
+            triggered=[{"prop_id": "agent-state-poll.n_intervals"}]
+        ))
+        repaired = sync(1, None, None, second, old_stamp)
+        assert repaired[0] == "Second scene"
+        assert repaired[-4] == second_stamp
+        assert repaired[-3]["scene_id"] == second
+        assert repaired[-2] is no_update  # polling must not echo the camera
+        assert all(value is no_update for value in sync(2, None, None, second, second_stamp))
+
+        backend.camera_action("reset", scene_id=second, broadcast=False)
+        camera_repaired = sync(3, None, None, second, second_stamp)
+        assert camera_repaired[-3]["camera_revision"] > repaired[-3]["camera_revision"]
+        assert camera_repaired[-4] != second_stamp
+        assert camera_repaired[-2] is no_update
+    finally:
+        backend.close()
+
+
 def test_state_poll_does_not_cross_contaminate_scene_controls(tmp_path, monkeypatch):
     """A stale pending snapshot may not overwrite the selected scene.
 

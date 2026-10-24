@@ -434,7 +434,11 @@ class _StateBackendMixin:
                 self.broadcast_view_update(
                     make_update(
                         state,
-                        before=state_before,
+                        # The transaction already classified this change.
+                        # Reclassifying against the wire snapshot sees added
+                        # envelope fields (e.g. scene_generation) as display
+                        # changes and can publish a camera payload as DISPLAY.
+                        operation=change_kind.value,
                         payload=update_payload,
                         reason="state-confirmed",
                     ),

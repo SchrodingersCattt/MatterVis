@@ -12,6 +12,10 @@ it does not synchronously call `figure_for_state`. Tab switches follow the same
 owner instead of directly reconstructing and broadcasting cached dictionaries.
 The existing state poll supplies the no-WebSocket fallback. Server checks cover
 both render and camera revisions, including when work finishes after Reset.
+Patch broadcasts retain the transaction's confirmed update kind. Do not
+reclassify a stored state against its wire snapshot: the added envelope
+metadata can turn a camera command into a display update, which the browser
+will never apply to the WebGL camera.
 
 `mattervis.js` gates both full-figure Plotly signatures, serializes their
 promises per graph, and records an identity only after successful completion.
@@ -22,6 +26,33 @@ Camera-only updates use dotted `scene.camera.*` relayout keys, acknowledge
 only after the internal projection still matches, and abandon a Plotly promise
 that never settles so a later Reset can run on a fresh queue. A redraw of the
 same scene does not drop that latest camera command; a different scene does.
+Postcondition recovery runs after releasing the camera's FIFO task, because
+`Plotly.react` recovery joins that same queue. Awaiting it inside the relayout
+task deadlocks both projection recovery and subsequent complete frames.
+
+Sidebar updates acknowledge their scene and camera revision through
+`scene-controls-scene` in the same Dash response as the controls. A newer poll can supersede a slow tab
+response; while the browser still acknowledges the previous scene, polling
+re-emits the selected scene's controls even without a pending state. A camera
+command on the same scene also needs this acknowledgement so the projection
+radio cannot remain on the previous value after a superseded poll. A
+server-side "filled controls" flag alone cannot confirm browser delivery.
+
+Partial camera captures merge against the revision-fenced backend camera,
+not the Dash camera store, which may still predate a projection command.
+The relayout decoder must preserve both dotted projection forms as well as
+eye/center/up; otherwise capturing a successful orthographic relayout can
+write perspective back into the scene without advancing the camera clock.
+Offscreen-drag refits also enter the view-update journal so a superseded Dash
+callback response cannot lose the replacement camera; ordinary drag captures
+still do not arm a poll echo.
+
+The real-app browser gate waits for the selected scene's controls and the
+unit-cell figure revision before sending one orthographic command. Server
+observations use `browser_wait.js`, which awaits each `page.evaluate` result.
+Do not pass async predicates to Playwright's `waitForFunction`: its polling
+checks the immediate return value, so even a Promise resolving to `false`
+passes. Reposting projection commands or rerunning the job hides this race.
 
 Axes still uses a complete validated worker frame on a cache miss. No browser
 geometry base is assumed: in particular, toggling Axes/Labels after Hydrogens

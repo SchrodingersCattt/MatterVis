@@ -201,7 +201,10 @@ def _persist_relayout_camera(
         return None
     if captured_camera_revision != int(state_before.get("camera_revision", 0) or 0):
         return None
-    current_camera = _camera_from_store(camera_state, scene_id) or state_before.get("camera")
+    # The revision fence above names the live server camera. The Dash store
+    # may still contain the camera from before a projection command; using
+    # it as the base of a partial relayout silently restores that projection.
+    current_camera = state_before.get("camera") or _camera_from_store(camera_state, scene_id)
     camera = _camera_from_relayout_data(relayout, current_camera)
     if not camera or (isinstance(current_camera, dict) and camera == current_camera):
         return None
@@ -239,12 +242,12 @@ def _persist_relayout_camera(
     if replaced:
         from .view_updates import make_update
 
-        view_update = make_update(
+        view_update = backend.broadcast_view_update(make_update(
             state,
             operation="camera",
             payload={"camera": copy.deepcopy(state.get("camera")), "command": "refit"},
             reason="camera-refit",
-        ).to_dict()
+        ), state=state)
     return {
         "scene_id": str(scene_id),
         "camera_store": _camera_store_payload(scene_id, state.get("camera")),
@@ -298,6 +301,14 @@ def _camera_from_relayout_data(
             key = f"scene.camera.{group}.{axis}"
             if key in relayout_data:
                 ensure_group(group)[axis] = float(relayout_data[key])
+    projection = relayout_data.get("scene.camera.projection")
+    if isinstance(projection, dict) and projection.get("type"):
+        base["projection"] = copy.deepcopy(projection)
+        changed = True
+    projection_type = relayout_data.get("scene.camera.projection.type")
+    if projection_type:
+        base["projection"] = {"type": str(projection_type)}
+        changed = True
     return base if changed else None
 
 

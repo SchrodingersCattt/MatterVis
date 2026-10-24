@@ -4,6 +4,9 @@
  */
 const fs = require("node:fs");
 const zlib = require("node:zlib");
+// waitForFunction treats an async predicate's Promise as truthy even when
+// it eventually resolves false. Await server observations in Node instead.
+const waitForServerState = require("./browser_wait");
 const { chromium } = require(process.argv[2]);
 const chrome = process.argv[3];
 const base = process.argv[4];
@@ -943,34 +946,35 @@ async function canvasInk(page) {
 }
 
 async function selectUnitCell(page) {
+  // A painted tab can precede its sidebar callback. Wait for that scene's
+  // controls before reading the dropdown or clicking a value from the old tab.
+  await waitForServerState(page, async () => {
+    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+    const meta = gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
+    if (!meta || !meta.scene_id) return false;
+    const state = await fetch("/api/v2/state?scene_id=" + encodeURIComponent(meta.scene_id), {cache: "no-store"}).then((response) => response.json());
+    const host = document.getElementById("display-mode-selector");
+    const controls = document.getElementById("scene-controls-scene");
+    const acknowledged = controls && controls.textContent ? JSON.parse(controls.textContent) : {};
+    const label = ((host && host.innerText) || "").replace(/\s+/g, " ").trim();
+    return acknowledged.scene_id === meta.scene_id
+      && !!label && label.startsWith("Unit cell") === (state.display_mode === "unit_cell");
+  }, null, {timeout: 30000});
   const host = page.locator("#display-mode-selector");
-  let changed = false;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const label = ((await host.innerText()) || "").replace(/\s+/g, " ");
-    const alreadySelected = /^\s*Unit cell\b/i.test(label);
-    if (!alreadySelected || attempt > 0) {
-      await host.click();
-      await page.getByRole("option", { name: "Unit cell", exact: true }).click();
-      changed = true;
-    }
-    await page.waitForFunction(() => {
-      const node = document.getElementById("display-mode-selector");
-      const text = ((node && node.innerText) || "").replace(/\s+/g, " ").trim();
-      return text === "Unit cell" || text.startsWith("Unit cell");
-    }, null, {timeout: 30000});
-    const serverReady = await page.waitForFunction(async () => {
-      const gd = document.querySelector("#crystal-graph .js-plotly-plot");
-      const meta = gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
-      if (!meta || !meta.scene_id) return false;
-      try {
-        const state = await fetch("/api/v2/state?scene_id=" + encodeURIComponent(meta.scene_id), {cache: "no-store"}).then((response) => response.json());
-        return !!(state && state.display_mode === "unit_cell");
-      } catch (_) {
-        return false;
-      }
-    }, null, {timeout: 10000}).then(() => true).catch(() => false);
-    if (serverReady) return changed;
+  const label = ((await host.innerText()) || "").replace(/\s+/g, " ").trim();
+  const changed = !label.startsWith("Unit cell");
+  if (changed) {
+    await host.click();
+    await page.getByRole("option", { name: "Unit cell", exact: true }).click();
   }
+  await waitForServerState(page, async () => {
+    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+    const meta = gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
+    if (!meta || !meta.scene_id) return false;
+    const state = await fetch("/api/v2/state?scene_id=" + encodeURIComponent(meta.scene_id), {cache: "no-store"}).then((response) => response.json());
+    const host = document.getElementById("display-mode-selector");
+    return state.display_mode === "unit_cell" && /^\s*Unit cell\b/.test((host && host.innerText) || "");
+  }, null, {timeout: 30000});
   return changed;
 }
 
@@ -1032,38 +1036,35 @@ async function projectionStatus(page) {
     const meta = gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
     const id = meta && meta.scene_id ? meta.scene_id : "";
     const state = await fetch("/api/v2/state?scene_id=" + encodeURIComponent(id), {cache: "no-store"}).then((response) => response.json());
-    return {projection: state && state.projection, display: state && state.display_mode};
+    return {
+      projection: state && state.projection, display: state && state.display_mode,
+      render: state && state.render_revision, camera: state && state.camera_revision,
+      shown: meta,
+      cameraDiag: window.__mv_camera_diag,
+      viewDiag: window.__mv_view_diag,
+      status: window.__mvRenderStatus,
+      queue: gd && gd.__mvRenderQueueState && {
+        running: gd.__mvRenderQueueState.running,
+        pending: gd.__mvRenderQueueState.items.length,
+      },
+    };
   });
   return {view, server};
 }
 
 async function ensureOrthographic(page) {
-  // The display-scope callback can still be answering when the new frame
-  // paints. Its state snapshot resets the projection radio, so keep
-  // applying orthographic until the GL camera, the radio, and the server
-  // agree and stay that way. A late capture from an earlier formula-unit
-  // frame can also put the server display back; re-select unit cell before
-  // the next projection attempt instead of treating that as a camera miss.
+  // Issue one command after the unit-cell frame fence. Reposting can hide a
+  // dropped camera delivery and used to race the display callback itself.
+  await postAction(page, {action: "projection", type: "orthographic"});
+  const deadline = Date.now() + 30000;
   let last = null;
-  for (let attempt = 0; attempt < 6; attempt += 1) {
-    if (!last || !last.server || last.server.display !== "unit_cell") {
-      await selectUnitCell(page);
-    }
-    await postAction(page, {action: "projection", type: "orthographic"});
-    const deadline = Date.now() + 8000;
-    let stableSince = 0;
-    while (Date.now() < deadline) {
-      last = await projectionStatus(page);
-      if (last.server && last.server.display !== "unit_cell") break;
-      const ready = last.view.ortho
+  while (Date.now() < deadline) {
+    last = await projectionStatus(page);
+    if (last.view.ortho
         && last.view.radio === "orthographic"
         && last.server.projection === "orthographic"
-        && last.server.display === "unit_cell";
-      if (!ready) stableSince = 0;
-      else if (!stableSince) stableSince = Date.now();
-      else if (Date.now() - stableSince >= 1500) return last;
-      await page.waitForTimeout(200);
-    }
+        && last.server.display === "unit_cell") return last;
+    await page.waitForTimeout(200);
   }
   fail(`orthographic camera did not arrive ${JSON.stringify(last)}`);
 }
@@ -1083,16 +1084,7 @@ async function runOrthoDrag(page) {
   const unitCellChanged = await selectUnitCell(page);
   // If DAP-4 already starts in Unit cell mode there is no new render revision
   // to wait for; require the existing WebGL frame instead of timing out on 0 > 0.
-  if (unitCellChanged) {
-    await waitForUnitCellFigure(page, beforeUnitCell);
-  } else {
-    await page.waitForFunction(() => {
-      const gd = document.querySelector("#crystal-graph .js-plotly-plot");
-      const meta = gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
-      const scene = gd && gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
-      return !!(meta && meta.scene_id && scene && scene.glplot && gd.data && gd.data.length);
-    }, null, {timeout: 30000});
-  }
+  await waitForUnitCellFigure(page, unitCellChanged ? beforeUnitCell : -1);
   await ensureOrthographic(page);
   const rename = await page.locator("#scene-tab-rename-input").inputValue().catch(() => "");
   if (!rename.trim()) {
@@ -1138,7 +1130,7 @@ async function runOrthoDrag(page) {
       return [x, y, z].every(Number.isFinite) && Math.hypot(x, y, z) < 0.5;
     }, null, {timeout: 45000});
   } catch (error) {
-    fail(`offscreen orthographic drag was not refit ${JSON.stringify(await readView(page))} (${error.message})`);
+    fail(`offscreen orthographic drag was not refit ${JSON.stringify(await projectionStatus(page))} (${error.message})`);
   }
   const recoveredInk = await canvasInk(page);
   const recovered = await readView(page);

@@ -182,6 +182,52 @@ vm.createContext(sandbox); vm.runInContext(source, sandbox);
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.parametrize("reject_relayout", [False, True])
+def test_camera_recovery_does_not_wait_behind_its_own_render_task(reject_relayout):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    assets = Path(__file__).resolve().parents[2] / "frontend" / "assets"
+    program = r"""
+const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
+const gate = fs.readFileSync(process.argv[1], 'utf8');
+const source = fs.readFileSync(process.argv[2], 'utf8');
+const camera = type => ({eye:{x:1,y:1,z:1}, center:{x:0,y:0,z:0}, up:{x:0,y:0,z:1}, projection:{type}});
+let live = camera('perspective');
+const gd = {layout:{scene:{camera:live}, meta:{mattervis_render:{scene_id:'a',scene_generation:1}}},
+  data:[{type:'scatter3d',x:[0],y:[0],z:[0]}], _fullLayout:{scene:{_scene:{getCamera:()=>live}}}};
+const sandbox = {Promise,Object,Array,JSON,Number,String,Date,setTimeout,clearTimeout,
+  window:{}, document:{getElementById:id=>id==='crystal-graph'?{querySelector:()=>gd}:null}};
+vm.createContext(sandbox);
+// Use the production coordinator, including its non-reentrant FIFO.
+vm.runInContext('const MAX_RENDER_QUEUE=32;'+gate.slice(gate.indexOf('  function enqueueRender('),
+  gate.indexOf('  function figurePushIsCurrent(')), sandbox);
+sandbox.window.Plotly = {
+  relayout: () => process.argv[3] === 'True' ? Promise.reject(new Error('relayout failed')) : Promise.resolve(),
+  react: (_gd, data, layout) => sandbox.window.MatterVisRenderQueue.enqueue(gd, () => {
+    live = layout.scene.camera; gd.layout = layout;
+  }),
+};
+vm.runInContext(source, sandbox);
+(async () => {
+  let timer;
+  try {
+    await Promise.race([
+      sandbox.window.MatterVisViewCamera.applyAsync(camera('orthographic'), {scene_id:'a',scene_generation:1}),
+      new Promise((_, reject) => { timer=setTimeout(()=>reject(new Error('camera recovery deadlocked')), 500); }),
+    ]);
+    assert.equal(live.projection.type, 'orthographic');
+  } finally { clearTimeout(timer); }
+})().catch(error=>{console.error(error);process.exitCode=1;});
+"""
+    result = subprocess.run(
+        [node, "-e", program, str(assets / "mattervis.js"),
+         str(assets / "view_camera.js"), str(reject_relayout)],
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def test_newer_camera_revision_bypasses_never_settling_older_command():
     node = shutil.which("node")
     if node is None:

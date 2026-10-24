@@ -22,5 +22,11 @@ is checked against `camera_version`. Complete figures carry the same fields in
 `view_updates.js`; no callback writes a competing full figure for a camera or
 overlay action.
 
+Camera broadcasts keep the update kind confirmed by the state transaction;
+adding wire metadata must not reclassify them as display patches. Partial
+browser camera captures merge with the backend camera at the captured
+revision, including dotted projection updates, so a stale Dash store cannot
+restore the previous projection.
+
 For local baseline measurements, `window.__mv_view_diag` reports submissions,
 full frames, local patches, camera updates, and stale drops.
