@@ -679,6 +679,9 @@ body.panel-resizing * {
   scrollbar-color: #3a4150 #1a1f27;
 }
 
+/* Reserve the compact pill for its full label. Clear remains available in
+   the expanded header; keeping both buttons here truncates it to "Serv…". */
+.perf-log-panel--collapsed .perf-log-clear,
 .perf-log-panel--collapsed .perf-log-body {
   display: none;
 }

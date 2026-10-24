@@ -117,6 +117,12 @@ def test_duplicate_and_rename_scene_controls_update_canvas(mattervis_url):
 
 
 @pytest.mark.timeout(180)
+def test_narrow_layout_keeps_tools_tabs_and_log_usable(mattervis_url):
+    """Check item (19) against real Dash components, not just a CSS fixture."""
+    _run(mattervis_url, "narrow-layout")
+
+
+@pytest.mark.timeout(180)
 def test_fit_align_orbit_and_pan_keep_a_visible_projection(mattervis_url):
     _run(mattervis_url, "gestures", structure="ionic_nacl")
 

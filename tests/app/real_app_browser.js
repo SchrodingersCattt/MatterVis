@@ -1281,6 +1281,7 @@ async function runSceneControls(page) {
   else if (mode === "nacl-frame") await runNaclFrame(page);
   else if (mode === "semantic-pick") await runSemanticPick(page);
   else if (mode === "ortho-drag") await runOrthoDrag(page);
+  else if (mode === "narrow-layout") await require("./narrow_layout_browser")(page, clickTab);
   else fail("unknown mode " + mode);
   if (problems.length) fail(problems.slice(0, 8).join("\n"));
   await browser.close();
