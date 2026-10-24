@@ -232,8 +232,8 @@ storage and start no write worker. Optional frontend imports stay in adapters.
 The new source key and incremented `target_revision` are the integration seam
 for selection guards in #216; this branch does not import or modify that PR.
 The revision helper below invalidates mappings on `closed`; Undo never
-resurrects a scientific binding. #219 can consume this API without introducing
-another canvas.
+resurrects a scientific binding. The optional catalog below consumes this API
+without introducing another canvas.
 
 ## Revision to scene bindings (v1)
 
@@ -313,7 +313,102 @@ all old bindings for that scene generation. Close drops them; native Undo can
 restore the scene ID but cannot restore its scientific binding. Shutdown clears
 the helper and rejects further access. Native source identity is checked even
 if another host path changes content without a writer event. This is a
-presentation mapping, **not a scientific version catalog**: callers/#219 own
+presentation mapping, **not a scientific version catalog**: workflows own
 immutable structures, lineage, operations, checks, persistence and catalog UI.
 No source history is reconstructed from Scene state. Do not block frontend
 callbacks on these futures; use the same worker/async pattern as structure writes.
+
+## Optional Structure Catalog
+
+**Scene = interactive view slot** (camera, Display, selection).
+**Scientific revision = immutable structure + operation/provenance + checks**,
+owned by the workflow. Closing a Scene leaves scientific evidence intact;
+opening one does not create a scientific revision. Keep these concepts labeled
+separately in downstream interfaces. Scene Undo does not resurrect a revision
+binding or reconstruct scientific history.
+
+`StructureCatalog(context.revisions)` is an explicitly opt-in, in-memory helper,
+exported with frozen `CatalogEntry` from `mat_viewer.extensions`. Nothing is
+attached to the context automatically; no UI, extra canvas, worker, disk archive,
+or global registry is created. Each workflow owns its catalog and ID namespace.
+If you already have an external immutable revision store, keep using it with
+`context.revisions` directly; this helper is not required and does not replace
+chemistry operations, checks, storage, or a workflow engine.
+
+- `add(id, source, *, label, format=None, parent=None, operation=None,
+  provenance=None, checks=None) -> CatalogEntry` captures nonempty CIF bytes
+  immediately from a path or bytes (`format="cif"` required for bytes). It does
+  not parse or open a Scene. It never edits the original file. Later edits or
+  deletion of that file cannot change the snapshot. The entry contains `id`,
+  `label`, `source` (immutable bytes), `parent`, `operation`, `provenance`, and
+  `checks`. Metadata mappings accept finite JSON-shaped values, detached into
+  read-only mappings and tuples recursively. Checks are caller-supplied evidence,
+  not checks performed by MatterVis. Unsupported values raise `TypeError`.
+- IDs must be `RevisionId`; labels and optional operation names must be nonempty.
+  Duplicate IDs and unknown/self parents raise `ValueError`. Parents must already
+  exist in the same catalog, so insertion cannot create lineage cycles. There is
+  no implicit deduplication by content: assigning scientific identity is the
+  workflow's responsibility. Failed additions leave the catalog unchanged.
+- `entries()` returns an insertion-ordered tuple; `get(id)` returns the immutable
+  entry or raises `KeyError`. There is no entry update/delete operation.
+- `open(id) -> Future[RevisionBinding]` reuses a live binding or registers the
+  owned snapshot through the public revision API. It does **not** focus. Repeated
+  opens reuse the scientific ID and live Scene. A dropped mapping can be reopened
+  under the same ID without another catalog entry. Concurrent pending opens are
+  rejected, not coalesced; await the first future before opening again.
+- `focus(id, *, target=None) -> Future[None]` focuses an already open revision.
+  Web requires the initiating page's `extension-browser-target` token. Completion
+  and delivery guards are exactly those of `context.revisions.focus`.
+- `reload(id, scene_id_or_handle) -> Future[RevisionBinding]` displays an unbound
+  catalog revision in an existing slot, dropping its previous display bindings.
+  Already bound/pending IDs are rejected; use focus for an already open entry.
+  A failed parse/commit leaves catalog evidence intact and follows the native
+  writer's rollback contract. Synchronous validation errors and asynchronous
+  future failures both need handling. No failure automatically retries a write.
+
+A failed revision lookup does **not** prove its ID is free: source identity drift
+without a native writer event leaves a stale but reserved binding. `open` lets
+public registration enforce reservation and reports `RevisionUnavailable` for
+reserved/pending IDs, without retry or a replacement ID. Await pending work, or
+explicitly close/reload the stale Scene via the native/public writer before
+reopening. Do not inspect private revision maps. Reserve catalog IDs for this
+workflow: binding the same IDs to unrelated sources elsewhere violates workflow
+ownership and cannot be detected by the catalog.
+
+Catalog entries and their source bytes live as long as the caller retains the
+catalog/entries, including after host shutdown. Native temporary display copies
+have the writer's separate shutdown lifetime. There is no automatic persistence,
+recovery, eviction, or deletion of evidence. To survive process exit, the workflow
+must explicitly archive its snapshots and metadata externally; to release memory,
+it releases its references. Host shutdown prevents further presentation writes.
+Large/durable datasets should remain in a workflow-owned external revision store.
+
+A small worker-side workflow (use from an extension's registered worker, never
+block a frontend callback on `.result()`):
+
+```python
+from mat_viewer.extensions import RevisionId, StructureCatalog
+
+# Once per workflow/host; retain this object rather than rebuilding on each click.
+catalog = StructureCatalog(context.revisions)
+original = catalog.add(
+    RevisionId("example.workflow", "input-1"), "input.cif", label="Input",
+    provenance={"import": "input.cif"},
+)
+# Your operation owns computation and checks and writes a DIFFERENT output file.
+result = catalog.add(
+    RevisionId("example.workflow", "relaxed-1"), "relaxed.cif", label="Relaxed",
+    parent=original.id, operation="relax",
+    provenance={"parameters": {"steps": 100}}, checks={"converged": True},
+)
+print([(entry.id, entry.label, entry.parent) for entry in catalog.entries()])
+first = catalog.open(original.id).result()
+catalog.reload(result.id, first.scene).result()
+# Backtrack to the same scientific input, even after replacement or Scene close:
+catalog.open(original.id).result()
+catalog.focus(original.id, target=browser_target).result()  # omit target in TUI
+```
+
+The example's tokens and metadata come from the workflow; opening/focusing does
+not generate them. Subscribe to `context.revisions` for optional UI highlights,
+using its page filtering and observation-only callback contract.
