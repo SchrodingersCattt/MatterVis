@@ -240,6 +240,7 @@ def _create_app(
                     dcc.Store(id="native-upload-sync", data={"seq": 0}),
                     dcc.Store(id="scene-event-store", data={"seq": 0}),
                     dcc.Store(id="extension-browser-target", data=structure_host.new_target()),
+                    dcc.Store(id="extension-scene-observed"),
                     dcc.Store(id="scene-switch-seq", data={"seq": 0, "scene_id": None}),
                     dcc.Store(
                         id="graph-interaction-store", data={"active": False, "ts": 0}
@@ -332,6 +333,7 @@ def _create_app(
                 dcc.Store(id="native-upload-sync", data={"seq": 0}),
                 dcc.Store(id="scene-event-store", data={"seq": 0}),
                 dcc.Store(id="extension-browser-target", data=structure_host.new_target()),
+                dcc.Store(id="extension-scene-observed"),
                 dcc.Store(id="scene-switch-seq", data={"seq": 0, "scene_id": None}),
                 dcc.Store(
                     id="graph-interaction-store", data={"active": False, "ts": 0}

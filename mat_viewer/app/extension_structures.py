@@ -9,7 +9,7 @@ from copy import deepcopy
 from pathlib import Path
 from uuid import uuid4
 
-from ..extensions.structures import SceneHandle, StructureWriter
+from ..extensions.structures import SceneEvent, SceneHandle, StructureWriter
 
 
 class WebStructureHost:
@@ -21,7 +21,7 @@ class WebStructureHost:
         self.writer.subscribe(self._changed)
 
     def _changed(self, event):
-        if event.kind != "focused":
+        if event.kind not in ("focused", "activated"):
             self.serial += 1
 
     def execute(self, action):
@@ -35,6 +35,10 @@ class WebStructureHost:
             if scene_id not in self.backend.scene_store.scenes:
                 raise KeyError(scene_id)
             return SceneHandle(scene_id, self.backend._scene_generations[scene_id])
+
+    def source_id(self, scene_id):
+        with self.backend._lock:
+            return self.backend.scene_store.get(scene_id).structure_name
 
     def _check(self, handle):
         if self.handle(handle.scene_id) != handle:
@@ -171,8 +175,23 @@ class WebStructureHost:
         self._check(handle)
         if not isinstance(target, str) or target not in self.targets:
             raise ValueError("Web focus requires a live extension-browser-target token")
+        self.targets[target]["guard"] = None
         self.targets[target]["focus"] = handle
         self.targets[target]["epoch"] += 1
+
+    def guard_focus(self, target, guard):
+        self.targets[target]["guard"] = guard
+
+    def activated(self, scene_id, target):
+        with self.backend._lock:
+            if target not in self.targets or scene_id not in self.backend.scene_store.scenes:
+                return
+            entry = self.targets[target]
+            identity = (self.handle(scene_id), self.source_id(scene_id))
+            if entry.get("active") == identity:
+                return
+            entry["active"] = identity
+            self.writer.emit(SceneEvent("activated", *identity, target=target))
 
     def new_target(self):
         with self.backend._lock:
@@ -193,6 +212,8 @@ class WebStructureHost:
             if handle is not None:
                 try:
                     self._check(handle)
+                    if entry.get("guard") is not None:
+                        entry["guard"]()
                 except KeyError:
                     handle = None
             if not changed and handle is None:
@@ -216,7 +237,14 @@ class WebStructureHost:
 
     def is_current_event(self, event):
         entry = self.targets.get(event.get("target"))
-        return entry is not None and entry["epoch"] == event.get("epoch")
+        if entry is None or entry["epoch"] != event.get("epoch"):
+            return False
+        if event.get("extension_focus") and entry.get("guard") is not None:
+            try:
+                entry["guard"]()
+            except KeyError:
+                return False
+        return True
 
     def register_callbacks(self, app):
         from dash import Input, Output, State, no_update
@@ -229,6 +257,15 @@ class WebStructureHost:
         )
         def extension_focus_poll(_tick, target):
             return self.poll(target) or no_update
+
+        @app.callback(
+            Output("extension-scene-observed", "data"),
+            Input("scene-tabs", "value"),
+            State("extension-browser-target", "data"),
+        )
+        def extension_scene_activated(scene_id, target):
+            self.activated(scene_id, target)
+            return no_update
 
 
 def create_extension_context(backend):
@@ -251,4 +288,6 @@ def create_extension_context(backend):
     backend._extension_structures = host
     context = ExtensionContext("web", backend, snapshot_reader=snapshot)
     context.structures = host.writer
+    from ..extensions.revisions import RevisionScenes
+    context.revisions = RevisionScenes(host.writer)
     return context, host

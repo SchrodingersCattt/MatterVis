@@ -65,6 +65,9 @@ class TerminalScenes:
             raise KeyError(scene_id)
         return SceneHandle(scene_id, 1)
 
+    def source_id(self, scene_id):
+        return self.source_ids[scene_id]
+
     def _check(self, handle):
         if self.handle(handle.scene_id) != handle:
             raise KeyError("stale scene generation")
@@ -109,7 +112,7 @@ class TerminalScenes:
         self.source_ids[scene_id] = Path(crystal.source_path).stem
         try:
             if scene_id == self.active_id:
-                self._activate(scene_id)
+                self._activate(scene_id, notify=False)
             self._sync_selector()
         except BaseException:
             if old_controller is None:
@@ -127,7 +130,8 @@ class TerminalScenes:
             raise
         return self.handle(scene_id)
 
-    def _activate(self, scene_id):
+    def _activate(self, scene_id, *, notify=True):
+        changed = scene_id != self.active_id
         self.active_id = scene_id
         self.app.controller = self.controllers[scene_id]
         self.app.crystal = self.app.controller.crystal
@@ -136,6 +140,8 @@ class TerminalScenes:
         self._publish()
         self._sync_selector()
         self.app._apply_observation(self.app._resize_and_observe())
+        if notify and changed:
+            self.writer.emit(SceneEvent("activated", self.handle(scene_id), self.source_id(scene_id)))
 
     def focus(self, handle, target):
         if target is not None:

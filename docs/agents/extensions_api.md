@@ -194,8 +194,8 @@ writer.focus(handle, target=browser_target).result()
   Native Web Undo may restore the same ID with a new generation. All pending
   writes revalidate at commit, so neither close nor Undo revives old commands.
 - `subscribe(callback) -> unsubscribe` delivers frozen `SceneEvent` values:
-  `kind` (`registered`, `reloaded`, `focused`, `closed`), `scene` (handle),
-  optional `source_id` (on writes), schema `mattervis.scene-event/v1`.
+  `kind` (`registered`, `reloaded`, `focused`, `closed`, `activated`), `scene`
+  (handle), optional `source_id` and page-routing `target`, schema `mattervis.scene-event/v1`.
   Events follow successful commits; close events include the removed generation.
   Subscribers run on the committing host thread, must be short, and must not
   wait on another write. Exceptions are logged without undoing the commit.
@@ -231,6 +231,88 @@ storage and start no write worker. Optional frontend imports stay in adapters.
 
 The new source key and incremented `target_revision` are the integration seam
 for selection guards in #216; this branch does not import or modify that PR.
-Downstream #218 should invalidate mappings on `closed` and never infer that
-Undo resurrects a scientific binding. #219 can consume this same API without
-introducing another canvas.
+The revision helper below invalidates mappings on `closed`; Undo never
+resurrects a scientific binding. #219 can consume this API without introducing
+another canvas.
+
+## Revision to scene bindings (v1)
+
+`context.revisions` is a host-scoped `RevisionScenes` helper (schema
+`mattervis.revisions/v1`). `RevisionId(namespace, token)` uses a namespaced
+extension/workflow ID such as `example.workflow` and a nonempty opaque,
+case-sensitive token. The helper never interprets tokens as paths, versions,
+sequence numbers or scientific content. Types are exported from
+`mat_viewer.extensions`.
+
+```python
+from mat_viewer.extensions import RevisionId, RevisionUnavailable
+
+# After the operation has successfully produced its immutable source:
+revisions = context.revisions
+r1 = RevisionId("example.workflow", "opaque-result-id-1")
+binding = revisions.register(r1, "result-1.cif", label="Result 1").result()
+# Sibling mode preserves r1 for backtracking:
+r2 = RevisionId("example.workflow", "opaque-result-id-2")
+sibling = revisions.register(r2, "result-2.cif").result()
+revisions.focus(r1, target=browser_target).result()  # omit target for TUI
+# Replacement mode deliberately drops r1's display binding:
+r3 = RevisionId("example.workflow", "opaque-result-id-3")
+replacement = revisions.reload(r3, binding.scene, "result-3.cif").result()
+try:
+    revisions.focus(r1, target=browser_target)
+except RevisionUnavailable:
+    pass  # Show "scene mapping dropped"; do not focus the overwritten scene.
+```
+
+- `register(revision, source, *, format=None, label=None)` and
+  `reload(revision, scene_id | SceneHandle, source, *, format=None)` return
+  `Future[RevisionBinding]`. The frozen binding has `revision`, `scene`
+  (generation-pinned `SceneHandle`) and `source_id` (the unique committed source).
+  They reuse the native writer's input ownership, parsing, rollback and host
+  execution boundary. Bind occurs inside the successful commit boundary, before
+  the future resolves, rather than in a later caller callback. Failed/cancelled
+  writes do not record bindings; failed reload preserves the previous binding.
+  A concurrently pending or already bound revision is rejected. After a binding
+  is dropped, explicitly loading the caller's historical source may bind that
+  revision again; it is never restored implicitly.
+- `bind(revision, receipt: SceneEvent) -> Future[RevisionBinding]` supports a
+  write already performed through `context.structures`. Capture its successful
+  `registered`/`reloaded` event and pass that receipt. The helper checks both
+  generation and source identity on the host thread. A delayed receipt from
+  before reload/close/Undo is rejected; a bare scene ID is not a receipt.
+- `lookup(revision) -> RevisionBinding` returns a detached immutable binding or
+  raises `RevisionUnavailable` (a `KeyError`). It is a snapshot, not a lease.
+  `focus/select(revision, *, target=None) -> Future[None]` validates again when
+  queued focus executes. Web validates once more at poll/tab dispatch, so a
+  pending historical focus cannot select newer overwritten content. Web future
+  completion still means queued, not browser acknowledgment. Both synchronous
+  lookup failures and asynchronous focus failures must be handled.
+- `subscribe(callback) -> unsubscribe` emits frozen `RevisionEvent` objects:
+  `kind` is `bound`, `dropped`, or `activated`; `bindings` is a tuple,
+  `scene` and `target` identify the scene/page when applicable, and `reason`
+  explains drops (`reloaded`, `closed`, `shutdown`). Native tab/controller
+  changes emit `activated`, including an empty tuple for unmapped scenes to
+  clear a workflow highlight. Binding a newly written revision to an already
+  observed active scene also updates that target's highlight. Subscribers must
+  filter Web events by their initiating page token. Events are observations:
+  update the highlight, **do not call focus in response**. Repeated native
+  activation is deduplicated, and request `focused` events are not echoed as
+  revision activation. Callbacks run on the host thread and must not block;
+  subscriber exceptions are logged. There is no replay or durable event log.
+
+`SceneEvent` additionally supports `kind="activated"`, `source_id` and an
+optional `target`. Web observes each page's actual `scene-tabs.value`; a queued
+focus alone does not claim browser activation. TUI emits on native controller
+switches. The page token routes observations and focus; it is **not** an
+authentication boundary. Mappings and scenes are shared by the app, with no
+module-global registry or cross-app state.
+
+Every successful reload (including direct `context.structures.reload`) drops
+all old bindings for that scene generation. Close drops them; native Undo can
+restore the scene ID but cannot restore its scientific binding. Shutdown clears
+the helper and rejects further access. Native source identity is checked even
+if another host path changes content without a writer event. This is a
+presentation mapping, **not a scientific version catalog**: callers/#219 own
+immutable structures, lineage, operations, checks, persistence and catalog UI.
+No source history is reconstructed from Scene state. Do not block frontend
+callbacks on these futures; use the same worker/async pattern as structure writes.

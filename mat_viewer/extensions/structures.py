@@ -27,10 +27,11 @@ class SceneHandle:
 
 @dataclass(frozen=True)
 class SceneEvent:
-    kind: Literal["registered", "reloaded", "focused", "closed"]
+    kind: Literal["registered", "reloaded", "focused", "closed", "activated"]
     scene: SceneHandle
     source_id: str | None = None
     schema: str = "mattervis.scene-event/v1"
+    target: str | None = None
 
 
 class StructureHost(Protocol):
@@ -110,7 +111,7 @@ class StructureWriter:
     ) -> Future[str]:
         return self._write(self._handle(scene_id), source, format, None)
 
-    def _write(self, handle, source, format, label):
+    def _write(self, handle, source, format, label, *, committed=None):
         if label is not None and (not isinstance(label, str) or not label.strip()):
             raise ValueError("label must be nonempty text")
         if not isinstance(source, (str, Path, bytes)):
@@ -136,24 +137,31 @@ class StructureWriter:
             path.chmod(0o400)
 
             def work():
+                published = False
                 try:
                     prepared = self.host.prepare(path, name)
 
                     def commit():
+                        nonlocal published
                         with self._lock:
                             if self._closed:
                                 raise RuntimeError("structure host is closed")
                             result = self.host.commit(prepared, handle, label)
-                            self.emit(
-                                SceneEvent(
-                                    "reloaded" if handle else "registered", result, name
-                                )
+                            published = True
+                            event = SceneEvent(
+                                "reloaded" if handle else "registered", result, name
                             )
+                            self.emit(event)
+                            if committed is not None:
+                                return committed(event)
                             return result.scene_id
 
                     return self.host.execute(commit)
                 except BaseException:
-                    path.unlink(missing_ok=True)
+                    # A post-commit binding failure must not delete a source
+                    # already owned by a live scene (or its native Undo entry).
+                    if not published:
+                        path.unlink(missing_ok=True)
                     raise
 
             future = self._pool.submit(work)
@@ -174,7 +182,9 @@ class StructureWriter:
     def focus(
         self, scene_id: str | SceneHandle, *, target: str | None = None
     ) -> Future[None]:
-        handle = self._handle(scene_id)
+        return self._focus(self._handle(scene_id), target=target)
+
+    def _focus(self, handle, *, target=None, guard=None):
         with self._lock:
             if self._closed:
                 raise RuntimeError("structure host is closed")
@@ -184,8 +194,12 @@ class StructureWriter:
                     with self._lock:
                         if self._closed:
                             raise RuntimeError("structure host is closed")
+                        if guard is not None:
+                            guard()
                         self.host.focus(handle, target)
-                        self.emit(SceneEvent("focused", handle))
+                        if guard is not None and hasattr(self.host, "guard_focus"):
+                            self.host.guard_focus(target, guard)
+                        self.emit(SceneEvent("focused", handle, target=target))
 
                 return self.host.execute(commit)
 

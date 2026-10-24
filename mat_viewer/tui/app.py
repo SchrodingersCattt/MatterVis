@@ -216,6 +216,8 @@ class CrystalTUI(App):
         from .scenes import TerminalScenes
         self.scenes = TerminalScenes(self)
         self.extension_context.structures = self.scenes.writer
+        from ..extensions.revisions import RevisionScenes
+        self.extension_context.revisions = RevisionScenes(self.scenes.writer)
         extension_host.context = self.extension_context
         self.extension_context._publish(source_path=crystal.source_path or None)
         self._extension_panels = None

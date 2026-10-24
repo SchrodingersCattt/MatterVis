@@ -9,6 +9,13 @@ import re
 from copy import deepcopy
 from threading import RLock
 
+from .revisions import (  # noqa: F401
+    RevisionBinding,
+    RevisionEvent,
+    RevisionId,
+    RevisionScenes,
+    RevisionUnavailable,
+)
 from .structures import SceneEvent, SceneHandle, StructureWriter  # noqa: F401
 
 
@@ -45,6 +52,7 @@ class ExtensionContext:
         self.frontend = frontend
         self.viewer = viewer
         self.structures: StructureWriter | None = None
+        self.revisions: RevisionScenes | None = None
         self._reader = snapshot_reader
         self._lock = RLock()
         self._snapshot = {
@@ -88,6 +96,8 @@ class _ExtensionHost:
             if self._closed:
                 return
             self._closed = True
+        if self.context is not None and self.context.revisions is not None:
+            self.context.revisions.close()
         if self.context is not None and self.context.structures is not None:
             self.context.structures.close()
         for extension in reversed(self.extensions):
