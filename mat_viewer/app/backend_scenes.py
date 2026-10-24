@@ -2,9 +2,27 @@ from __future__ import annotations
 # ruff: noqa: F401,F403,F405
 
 import copy
+from functools import wraps
 
 from .shared import *
 from ..scenes.core import Scene
+
+
+def _scene_transaction(method):
+    """Serialize native lifecycle changes with extension commits."""
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        with self._lock:
+            before = dict(self._scene_generations)
+            result = method(self, *args, **kwargs)
+            host = getattr(self, "_extension_structures", None)
+            if host is not None:
+                from ..extensions.structures import SceneEvent, SceneHandle
+                for scene_id, generation in before.items():
+                    if scene_id not in self._scene_generations:
+                        host.writer.emit(SceneEvent("closed", SceneHandle(scene_id, generation)))
+            return result
+    return wrapped
 
 
 class _SceneBackendMixin:
@@ -30,6 +48,7 @@ class _SceneBackendMixin:
         )
         del stack[:-8]
 
+    @_scene_transaction
     def undo_scene_close(self) -> dict[str, Any]:
         """Restore the most recently closed scene set, if one exists."""
         stack = getattr(self, "_scene_close_undo", None) or []
@@ -166,6 +185,7 @@ class _SceneBackendMixin:
         defaults = self.default_state(scene.structure_name)
         return scene.state(defaults)
 
+    @_scene_transaction
     def replace_scene_state_with_defaults(
         self,
         scene_id: str,
@@ -202,6 +222,7 @@ class _SceneBackendMixin:
     def active_scene_id(self) -> Optional[str]:
         return self.scene_store.active_id
 
+    @_scene_transaction
     def create_scene(
         self,
         *,
@@ -247,6 +268,7 @@ class _SceneBackendMixin:
         self._request_scene_store_save()
         return payload
 
+    @_scene_transaction
     def update_scene(self, scene_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         scene = self.scene_store.get(scene_id)
         state_before = self.scene_state(scene_id)
@@ -278,6 +300,7 @@ class _SceneBackendMixin:
         self._request_scene_store_save()
         return scene.to_dict()
 
+    @_scene_transaction
     def delete_scene(self, scene_id: str) -> dict[str, Any]:
         order_before = list(self.scene_store.order)
         active_before = self.scene_store.active_id
@@ -297,6 +320,7 @@ class _SceneBackendMixin:
         self._request_scene_store_save()
         return removed.to_dict()
 
+    @_scene_transaction
     def delete_other_scenes(self, keep_id: str) -> dict[str, Any]:
         """Close every scene except ``keep_id``.
 
@@ -330,6 +354,7 @@ class _SceneBackendMixin:
             self._request_scene_store_save()
         return {"kept": self.scene_store.get(keep_id).to_dict(), "removed": removed}
 
+    @_scene_transaction
     def duplicate_scene(
         self, scene_id: str, label: Optional[str] = None
     ) -> dict[str, Any]:
@@ -347,12 +372,14 @@ class _SceneBackendMixin:
         self._request_scene_store_save()
         return scene.to_dict()
 
+    @_scene_transaction
     def reorder_scenes(self, order: Iterable[str]) -> list[str]:
         order = self.scene_store.reorder(order, save=False)
         self._bump_version()
         self._request_scene_store_save()
         return order
 
+    @_scene_transaction
     def set_active_scene(
         self, scene_id: str, *, broadcast: bool = True
     ) -> dict[str, Any]:

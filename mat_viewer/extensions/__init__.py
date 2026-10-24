@@ -4,10 +4,12 @@ UI hooks run on the host frontend thread. Workers may read ``snapshot()``;
 they must not access UI methods or live source objects through ``viewer``.
 """
 
-from copy import deepcopy
 import logging
 import re
+from copy import deepcopy
 from threading import RLock
+
+from .structures import SceneEvent, SceneHandle, StructureWriter  # noqa: F401
 
 
 class Extension:
@@ -42,6 +44,7 @@ class ExtensionContext:
             raise ValueError("frontend must be 'web' or 'tui'")
         self.frontend = frontend
         self.viewer = viewer
+        self.structures: StructureWriter | None = None
         self._reader = snapshot_reader
         self._lock = RLock()
         self._snapshot = {
@@ -85,6 +88,8 @@ class _ExtensionHost:
             if self._closed:
                 return
             self._closed = True
+        if self.context is not None and self.context.structures is not None:
+            self.context.structures.close()
         for extension in reversed(self.extensions):
             try:
                 extension.close()

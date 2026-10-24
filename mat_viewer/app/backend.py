@@ -50,6 +50,9 @@ class ViewerBackend(
                 return
             self._closed = True
 
+        extension_host = getattr(self, "_extension_structures", None)
+        if extension_host is not None:
+            extension_host.writer.close()
         self._persist_stop.set()
         self._persist_event.set()
         if threading.current_thread() is not self._persist_thread:

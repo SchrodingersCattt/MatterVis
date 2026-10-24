@@ -99,9 +99,10 @@ The context adds no chemistry mutation API and no source-object serialization.
 | Key | Web | TUI |
 |---|---|---|
 | `frontend` | `"web"` | `"tui"` |
-| `structure_id` | Current backend state's `structure` | `None` (IR has no stable structure ID) |
+| `structure_id` | Current backend state's `structure` | Opaque owned source key |
 | `source_path` | `None` (not in locked backend state) | Current IR's `source_path`, or `None` |
-| `scene_id` | Current backend state's `scene_id`, or `None` | `None` |
+| `scene_id` | Current backend state's `scene_id`, or `None` | Stable native scene ID |
+| `scene_generation` | Host scene generation (changes on Undo) | `1` (closed IDs are never reused) |
 | `view_revision` | Actual backend `render_revision` | Last UI-applied observation revision, initially `None` |
 | `selection` | Backend state's selection, or `None` | Last UI-applied selection dict, initially `None` |
 
@@ -112,8 +113,7 @@ reads never inspect mutable widgets/controllers. A title is not a stable ID;
 unknown identities, paths and revisions are intentionally `None`. Revision
 semantics are frontend-specific, not a new chemistry version counter.
 
-Live source/viewer references stay in-process. Only detached snapshots are
-safe to read directly from worker threads. Run all host UI method calls on the
+Live source/viewer references stay in-process. Detached snapshots and the `structures` service are safe to use from workers. Run all host UI method calls on the
 frontend execution thread: Textual's event loop (use `app.call_from_thread`
 from workers), or Dash's framework-managed callbacks/creation path. Dash does
 not have a single global UI thread; do not mutate layouts from workers or
@@ -156,3 +156,81 @@ return value; a plugin retains its bound context on its instance if needed.
   viewer-contained diagnostics and unchanged extension mounting.
 - `tests/tui/test_tui_extensions.py`: async `run_test` composition/lifecycle,
   worker snapshots, plugin input, duplicate rejection and build-failure cleanup.
+
+## Native structure writes (v1)
+
+`context.structures` is a `StructureWriter` with schema
+`mattervis.structures/v1`, available on both native hosts. Its public types
+`SceneHandle` and `SceneEvent` are exported from `mat_viewer.extensions`.
+
+```python
+# From a worker (never block a frontend callback on .result()):
+writer = context.structures
+scene_id = writer.register("result.cif", label="Optimized").result()
+handle = writer.handle(scene_id)  # scene_id + generation
+writer.reload(handle, cif_bytes, format="cif").result()
+# TUI:
+writer.focus(handle).result()
+# Web: capture State("extension-browser-target", "data") in the initiating
+# browser callback, then carry that exact token into its worker:
+writer.focus(handle, target=browser_target).result()
+```
+
+- `register(source: str | Path | bytes, *, format=None, label=None) -> Future[str]`
+  creates a scene without changing the current browser/terminal focus.
+- `reload(scene_id: str | SceneHandle, source, *, format=None) -> Future[str]`
+  replaces one native source, returning the same scene ID. Each successful
+  write receives a unique internal source/bundle key; duplicate sibling scenes
+  keep their old bundle. Scientific reload resets selections, transforms,
+  topology controls and per-source styles. Camera is preserved only when cell,
+  displayed coordinates and elements are identical and no Web transform or
+  display-mode change is being reset; otherwise it refits.
+- `focus(scene_id: str | SceneHandle, *, target=None) -> Future[None]`, also
+  spelled `select`, switches a **scene**, not an atom selection. Web completion
+  means the focus request was queued for the specified page, not acknowledged
+  by its browser. TUI completion means the native canvas/controller switched.
+- `handle(scene_id) -> SceneHandle` pins the current generation. String IDs are
+  resolved when the call is submitted; handles remain stale after close/Undo.
+  Native Web Undo may restore the same ID with a new generation. All pending
+  writes revalidate at commit, so neither close nor Undo revives old commands.
+- `subscribe(callback) -> unsubscribe` delivers frozen `SceneEvent` values:
+  `kind` (`registered`, `reloaded`, `focused`, `closed`), `scene` (handle),
+  optional `source_id` (on writes), schema `mattervis.scene-event/v1`.
+  Events follow successful commits; close events include the removed generation.
+  Subscribers run on the committing host thread, must be short, and must not
+  wait on another write. Exceptions are logged without undoing the commit.
+  This is a lifecycle seam, not revision history or a replayable event log.
+
+V1 deliberately accepts only CIF. Bytes require `format="cif"`; paths infer
+`.cif` or accept that explicit format. Empty input, invalid labels, unsupported
+formats and unknown scene IDs are rejected. Submission validation raises
+synchronously; parse/commit failures are delivered through the future. Path
+bytes are copied before submission returns, so editing or deleting the caller's
+file cannot affect a queued write. Candidates are parsed before host mutation;
+failed candidates leave the old scene intact and their files are removed.
+Successful private files remain host-owned until shutdown, including through
+close/Undo; callers must not edit them. These are in-process sources and are not
+restored across app restarts. Shutdown rejects new writes and outstanding
+commits, then removes files after the worker drains.
+
+Web scenes are shared at **app** scope. The random `extension-browser-target`
+store value is a per-page routing token, not a login/session authorization
+boundary. Pass the initiating page's token explicitly; missing/unknown tokens
+fail. No broadcast focus fallback exists. Registration/reload sends a scene
+refresh event to each page while preserving its selected scene. Focus requests
+coalesce per target and pass through the existing single tab DOM dispatcher;
+a closed generation is discarded at delivery. No callback or layout is added
+or replaced after serving starts.
+
+CIF preparation uses the service's serial worker. Web commit and native scene
+lifecycle mutations share the backend lock; Dash has no global UI thread. TUI
+requires a mounted app and schedules commits through `call_from_thread` on the
+Textual loop. Its `TerminalScenes` host owns real native controllers and a scene
+selector, retaining the existing canvas. Unused services allocate no source
+storage and start no write worker. Optional frontend imports stay in adapters.
+
+The new source key and incremented `target_revision` are the integration seam
+for selection guards in #216; this branch does not import or modify that PR.
+Downstream #218 should invalidate mappings on `closed` and never infer that
+Undo resurrects a scientific binding. #219 can consume this same API without
+introducing another canvas.

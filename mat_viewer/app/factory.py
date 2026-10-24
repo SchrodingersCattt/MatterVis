@@ -20,7 +20,8 @@ from .layout_left_panel import build_left_panel
 from .layout_workbench import assemble_workbench
 from .panel_status import canvas_status_bar, render_atom_list, status_bar_parts
 from .rightclick import _closed_rightclick_items
-from ..extensions import ExtensionContext, _ExtensionHost
+from ..extensions import _ExtensionHost
+from .extension_structures import create_extension_context
 from .build_info import asset_url_token, install_index_identity
 
 
@@ -84,18 +85,7 @@ def _create_app(
 ) -> Dash:
     backend = ViewerBackend(preset_path=preset_path, names=names, root_dir=root_dir)
 
-    def extension_snapshot():
-        state = backend.get_state()
-        return {
-            "frontend": "web", "structure_id": state.get("structure"),
-            "source_path": None, "scene_id": state.get("scene_id"),
-            "view_revision": state.get("render_revision"),
-            "selection": state.get("selection"),
-        }
-
-    extension_host.context = ExtensionContext(
-        "web", backend, snapshot_reader=extension_snapshot
-    )
+    extension_host.context, structure_host = create_extension_context(backend)
     for cif_path in cif_paths or []:
         bundle = build_loaded_crystal(
             name=os.path.splitext(os.path.basename(cif_path))[0],
@@ -249,6 +239,7 @@ def _create_app(
                     ),
                     dcc.Store(id="native-upload-sync", data={"seq": 0}),
                     dcc.Store(id="scene-event-store", data={"seq": 0}),
+                    dcc.Store(id="extension-browser-target", data=structure_host.new_target()),
                     dcc.Store(id="scene-switch-seq", data={"seq": 0, "scene_id": None}),
                     dcc.Store(
                         id="graph-interaction-store", data={"active": False, "ts": 0}
@@ -340,6 +331,7 @@ def _create_app(
                 ),
                 dcc.Store(id="native-upload-sync", data={"seq": 0}),
                 dcc.Store(id="scene-event-store", data={"seq": 0}),
+                dcc.Store(id="extension-browser-target", data=structure_host.new_target()),
                 dcc.Store(id="scene-switch-seq", data={"seq": 0, "scene_id": None}),
                 dcc.Store(
                     id="graph-interaction-store", data={"active": False, "ts": 0}
@@ -1032,6 +1024,7 @@ def _create_app(
 
     app.layout = _serve_layout
 
+    structure_host.register_callbacks(app)
     register_state_callbacks(app, backend)
     register_editor_callbacks(app, backend)
     register_analysis_callbacks(app, backend)

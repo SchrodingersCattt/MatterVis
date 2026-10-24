@@ -218,7 +218,7 @@ def register_state_callbacks(app, backend):
         return opts_out, value_out
 
     @app.callback(
-        Output("scene-event-store", "data"),
+        Output("scene-event-store", "data", allow_duplicate=True),
         Output("status", "children"),
         Input("scene-new-tab-btn", "n_clicks"),
         Input("scene-rename-btn", "n_clicks"),
@@ -331,10 +331,11 @@ def register_state_callbacks(app, backend):
         Output("scene-tabs", "value"),
         Input("scene-event-store", "data"),
         Input("native-upload-sync", "data"),
+        State("scene-tabs", "value"),
         prevent_initial_call=True,
     )
     def manage_scene_tabs_dom(
-        _scene_event, _native_upload_sync
+        _scene_event, _native_upload_sync, browser_scene=None
     ):
         """Single writer for the scene-tab DOM.
 
@@ -356,6 +357,22 @@ def register_state_callbacks(app, backend):
         explicit scene event or native upload, so one callback owns the DOM
         without an older poll response able to overwrite it.
         """
+        from dash.exceptions import MissingCallbackContextException
+        try:
+            native_upload = callback_context.triggered_id == "native-upload-sync"
+        except MissingCallbackContextException:
+            native_upload = False  # Direct host regression invocation.
+        if not native_upload and isinstance(_scene_event, dict) and _scene_event.get("extension_event"):
+            with backend._lock:
+                if not backend._extension_structures.is_current_event(_scene_event):
+                    return no_update, no_update, no_update
+                wanted = _scene_event.get("extension_focus")
+                if wanted and backend._scene_generations.get(wanted) == _scene_event.get("generation"):
+                    active = wanted
+                else:
+                    active = browser_scene if browser_scene in backend.scene_store.scenes else backend.active_scene_id()
+                return backend.scene_tabs(), [], active or no_update
+
         options = backend.scene_options()
         if not options:
             return no_update, no_update, no_update

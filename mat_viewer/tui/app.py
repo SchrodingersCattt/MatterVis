@@ -227,6 +227,9 @@ class CrystalTUI(App):
             raise
         self._extension_host = extension_host
         self.extension_context = ExtensionContext("tui", self)
+        from .scenes import TerminalScenes
+        self.scenes = TerminalScenes(self)
+        self.extension_context.structures = self.scenes.writer
         extension_host.context = self.extension_context
         self.extension_context._publish(source_path=crystal.source_path or None)
         self._extension_panels = None
@@ -294,6 +297,7 @@ class CrystalTUI(App):
     def compose(self) -> ComposeResult:
         panels = self._build_extension_panels()
         yield Header()
+        yield self.scenes.selector()
         yield Static("", id="chemistry-warning", markup=False)
         with Container(id="body"):
             yield CrystalCanvas(id="canvas")
