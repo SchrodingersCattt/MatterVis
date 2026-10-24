@@ -13,7 +13,7 @@ from .callbacks_editors import register_editor_callbacks
 from .callbacks_analysis import register_analysis_callbacks
 from .callbacks_operations import register_operations_callbacks
 from .callbacks_disorder import register_disorder_callbacks
-from .callbacks_state import register_state_callbacks
+from .callbacks_state import register_state_callbacks, _scene_controls_stamp
 from .callbacks_view import register_view_callbacks
 from .backend import ViewerBackend
 from .layout_left_panel import build_left_panel
@@ -199,10 +199,8 @@ def _create_app(
         # startup snapshot. Each call re-derives the scene tabs
         # value, slider defaults and dcc.Store payloads from the
         # live backend so the page comes back exactly where the
-        # user left it. The agent-state-poll Interval below is
-        # still the steady-state sync path; this just removes the
-        # 5 s "default screen" window between page reload and the
-        # first poll tick.
+        # user left it. The agent-state poll remains the steady-state sync
+        # path; this removes the default-screen window after a reload.
         try:
             return _serve_layout_inner()
         except Exception:
@@ -223,6 +221,7 @@ def _create_app(
             return html.Div(
                 [
                     dcc.Store(id="agent-state-store", data=first_state),
+                    html.Div(id="scene-controls-scene", children=_scene_controls_stamp(first_state), hidden=True),
                     dcc.Store(
                         id="camera-state-store",
                         data=_camera_store_payload(
@@ -308,6 +307,7 @@ def _create_app(
         return assemble_workbench(html.Div(
             [
                 dcc.Store(id="agent-state-store", data=first_state),
+                html.Div(id="scene-controls-scene", children=_scene_controls_stamp(first_state), hidden=True),
                 dcc.Store(
                     id="camera-state-store",
                     data=_camera_store_payload(

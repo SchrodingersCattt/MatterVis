@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from mat_viewer.app import ViewerBackend, _camera_store_payload, _persist_relayout_camera
 from mat_viewer.render.screen_projection import camera_frames_points
 from mat_viewer.render.viewport import _plotly_camera_from_scene
@@ -147,6 +149,61 @@ def _persist(backend: ViewerBackend, scene_id: str, camera: dict) -> dict:
     )
 
 
+@pytest.mark.parametrize("action", ["projection", "reset"])
+def test_camera_command_journal_keeps_the_confirmed_update_kind(tmp_path: Path, action: str):
+    backend = _backend(tmp_path)
+    try:
+        scene_id = backend.active_scene_id()
+        before = backend.get_state(scene_id)
+        cursor = backend.latest_figure_seq()
+        camera = backend.camera_action(action, scene_id=scene_id, type="orthographic")
+        events = backend.figure_broadcasts_since(cursor)
+        assert len(events) == 1
+        event = events[0]
+        assert event["update_kind"] == "camera"
+        assert event["payload"]["camera"] == camera
+        assert event["camera_version"] > before["camera_version"]
+        assert event["geometry_version"] == before["geometry_version"]
+    finally:
+        backend.close()
+
+
+@pytest.mark.parametrize("include_projection", [False, True])
+def test_partial_capture_after_projection_ignores_stale_camera_store(
+    tmp_path: Path, include_projection: bool
+):
+    backend = _backend(tmp_path)
+    try:
+        scene_id = backend.active_scene_id()
+        old_camera = _camera_store_payload(scene_id, backend.get_camera(scene_id))
+        backend.set_projection("orthographic", scene_id=scene_id, broadcast=False)
+        before = backend.get_state(scene_id)
+        relayout = {"scene.camera.eye": FRAMED_ZOOM["eye"]}
+        if include_projection:
+            relayout["scene.camera.projection.type"] = "orthographic"
+        result = _persist_relayout_camera(
+            backend,
+            {
+                "scene_id": scene_id,
+                "scene_generation": before["scene_generation"],
+                "camera_revision": before["camera_revision"],
+                "relayout": relayout,
+            },
+            old_camera,
+            now=10.0,
+            last_commit=0.0,
+            min_interval_s=0.25,
+        )
+        assert result is not None
+        after = backend.get_state(scene_id)
+        assert after["projection"] == "orthographic"
+        assert after["camera"]["projection"] == {"type": "orthographic"}
+        assert after["camera_revision"] == before["camera_revision"]
+        assert _shows_atoms(backend, scene_id)
+    finally:
+        backend.close()
+
+
 def test_orthographic_unit_cell_drag_that_misses_is_refit(tmp_path: Path):
     backend = _backend(tmp_path)
     try:
@@ -168,12 +225,48 @@ def test_orthographic_unit_cell_drag_that_misses_is_refit(tmp_path: Path):
         assert result["refit"] is True
         assert result["view_update"]["payload"]["command"] == "refit"
         assert result["view_update"]["update_kind"] == "camera"
+        updates = backend.figure_broadcasts_since(0)
+        assert updates[-1]["reason"] == "camera-refit"
+        assert updates[-1]["payload"]["camera"] == result["view_update"]["payload"]["camera"]
         state = backend.get_state(scene_id)
         assert state["projection"] == "orthographic"
         assert state["camera"]["projection"]["type"] == "orthographic"
         assert state["camera"]["center"]["x"] != missed["center"]["x"]
         assert int(state["camera_revision"]) == int(before["camera_revision"]) + 1
         assert _shows_atoms(backend, scene_id)
+    finally:
+        backend.close()
+
+
+def test_refit_advances_camera_clock_when_default_is_already_stored(tmp_path: Path):
+    backend = _backend(tmp_path)
+    try:
+        scene_id = backend.active_scene_id()
+        backend.set_projection("orthographic", scene_id=scene_id, broadcast=False)
+        backend.refit_scene_camera(scene_id, force=True)
+        before = backend.get_state(scene_id)
+        missed = {
+            "eye": {"x": 0.0, "y": 0.0, "z": 50.0},
+            "center": {"x": 20.0, "y": 20.0, "z": 20.0},
+            "up": {"x": 0.0, "y": 0.0, "z": 1.0},
+            "projection": {"type": "orthographic"},
+        }
+
+        result = _persist(backend, scene_id, missed)
+
+        assert result is not None
+        assert result["refit"] is True
+        after = backend.get_state(scene_id)
+        assert after["camera"] == before["camera"]
+        # The browser moved away from this stored default. A new delivery
+        # revision is needed even though the persisted camera is unchanged.
+        assert after["camera_revision"] == before["camera_revision"] + 1
+        assert after["camera_version"] == before["camera_version"] + 1
+        update = result["view_update"]
+        assert update["update_kind"] == "camera"
+        assert update["payload"]["command"] == "refit"
+        assert update["camera_version"] == after["camera_version"]
+        assert backend.figure_broadcasts_since(0)[-1] == update
     finally:
         backend.close()
 

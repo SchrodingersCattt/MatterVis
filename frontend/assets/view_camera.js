@@ -58,20 +58,23 @@
     var latest = gd.__mvLatestCamera;
     if (!latest || latest.replayed || !latest.patch) return;
     latest.replayed = true;
-    enqueue(gd, function () {
-      if (queueEpoch(gd) !== epoch) throw new Error("stale camera command");
-      if (postcondition(gd, latest.snapshot)) return gd;
-      return Promise.resolve(root.Plotly.relayout(gd, clone(latest.patch))).then(function () {
-        if (postcondition(gd, latest.snapshot)) return gd;
-        return recover(gd, latest.snapshot).then(function () {
-          if (!postcondition(gd, latest.snapshot)) throw new Error("camera postcondition failed");
-        });
-      }, function () {
-        return recover(gd, latest.snapshot).then(function () {
-          if (!postcondition(gd, latest.snapshot)) throw new Error("camera postcondition failed");
-        });
+    var current = function () { return queueEpoch(gd) === epoch && gd.__mvLatestCamera === latest; };
+    // Recovery joins the render FIFO through Plotly.react. Run it after the
+    // replay task releases the FIFO, and stop if another camera superseded it.
+    var finish = function () {
+      if (!current() || postcondition(gd, latest.snapshot)) return gd;
+      return recover(gd, latest.snapshot).then(function () {
+        if (!current()) return gd;
+        if (!postcondition(gd, latest.snapshot)) throw new Error("camera postcondition failed");
       });
-    }, {group: "camera"});
+    };
+    enqueue(gd, function () {
+      if (!current()) return gd;
+      if (postcondition(gd, latest.snapshot)) return gd;
+      return Promise.resolve(root.Plotly.relayout(gd, clone(latest.patch)));
+    }, {isCurrent: current, group: "camera"}).then(finish, finish).catch(function () {
+      if (current()) reportStatus("error", "The camera update could not be restored.");
+    });
   }
   function enqueue(gd, task, options) {
     options = options || {};
@@ -582,9 +585,10 @@
     var current = function () { return contextCurrent(gd, options); };
     if (!current()) return Promise.reject(new Error("stale camera command"));
     gd.__mvLatestCamera = {snapshot: snapshot, patch: patch, replayed: false};
+    var appliedEpoch;
     var run = function () {
       if (!current()) { diag("staleDrops"); throw new Error("stale camera command"); }
-      var epoch = queueEpoch(gd);
+      appliedEpoch = queueEpoch(gd);
       var queueToken = gd.__mvRenderQueueState;
       /* Bound only the Plotly call. Time spent waiting behind an earlier
        * command must not expire Reset before it starts, and a timeout from a
@@ -593,7 +597,6 @@
       var attempt = withTimeout(Promise.resolve(root.Plotly.relayout(gd, clone(patch))), timeoutMs(), function () {
         if (gd.__mvRenderQueueState === queueToken) resetQueue(gd, "camera relayout timeout");
       });
-      var check = {requireEye: restoresViewport(options), restoreViewport: restoresViewport(options)};
       return attempt.then(function () {
         /* A drag relayout can resolve after Reset already replaced the queue.
          * Re-apply the newest command so the late Plotly write cannot stick. */
@@ -602,25 +605,30 @@
           var restore = latest && latest.patch ? Promise.resolve(root.Plotly.relayout(gd, clone(latest.patch))) : Promise.resolve();
           return restore.then(function () { diag("staleDrops"); throw new Error("stale camera command"); });
         }
-        return settledCurrent(gd, snapshot, epoch, current, options);
-      }, function (error) {
-        if (error && /timeout/.test(String(error && error.message || error))) throw error;
-        if (queueEpoch(gd) !== epoch || !current()) { diag("staleDrops"); throw new Error("stale camera command"); }
-        diag("postconditionFailures");
-        reportStatus("error", "Camera relayout failed. Restoring the current view.");
-        return recover(gd, snapshot).then(function () {
-          if (queueEpoch(gd) !== epoch || !current()) throw new Error("stale camera command");
-          if (!postcondition(gd, snapshot, check)) {
-            reportStatus("error", "Camera relayout failed and the view could not be restored.");
-            throw error;
-          }
-          reportStatus("recovered", "Restored the current camera view.");
-          gd.__mvCameraResets = 0;
-        });
       });
     };
     diag("attempts");
-    return enqueue(gd, run, {isCurrent: current, group: "camera"}).then(function () { return true; }).catch(function (error) { diag("failures"); throw error; });
+    // Recovery uses Plotly.react, which joins the same render FIFO. Release
+    // the relayout task before checking/recovering so it cannot wait for a
+    // full-frame task queued behind itself.
+    return enqueue(gd, run, {isCurrent: current, group: "camera"}).then(function () {
+      return settledCurrent(gd, snapshot, appliedEpoch, current, options);
+    }, function (error) {
+      if (error && /timeout/.test(String(error && error.message || error))) throw error;
+      if (queueEpoch(gd) !== appliedEpoch || !current()) { diag("staleDrops"); throw new Error("stale camera command"); }
+      var check = {requireEye: restoresViewport(options), restoreViewport: restoresViewport(options)};
+      diag("postconditionFailures");
+      reportStatus("error", "Camera relayout failed. Restoring the current view.");
+      return recover(gd, snapshot).then(function () {
+        if (queueEpoch(gd) !== appliedEpoch || !current()) throw new Error("stale camera command");
+        if (!postcondition(gd, snapshot, check)) {
+          reportStatus("error", "Camera relayout failed and the view could not be restored.");
+          throw error;
+        }
+        reportStatus("recovered", "Restored the current camera view.");
+        gd.__mvCameraResets = 0;
+      });
+    }).then(function () { return true; }).catch(function (error) { diag("failures"); throw error; });
   }
   function apply(camera, options) {
     options = options || {};
