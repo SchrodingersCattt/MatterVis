@@ -231,6 +231,29 @@ def test_shutdown_during_parse_rejects_commit_and_removes_candidate(app, monkeyp
     assert all(not path.exists() for path in candidates)
 
 
+def test_cancelled_queued_write_removes_owned_candidate(app, monkeypatch):
+    api, backend = app.extension_context.structures, app.crystal_backend
+    entered, release = Event(), Event()
+    prepare = api.host.prepare
+
+    def delayed(*args):
+        entered.set()
+        assert release.wait(20)
+        return prepare(*args)
+
+    monkeypatch.setattr(api.host, "prepare", delayed)
+    first = api.register(CIF)
+    assert entered.wait(5)
+    second = api.register(CIF)
+    candidates = list(Path(api._storage.name).iterdir())
+    assert len(candidates) == 2
+    assert second.cancel()
+    release.set()
+    assert first.result(30)
+    # The cancellation callback runs synchronously as part of Future.cancel.
+    assert len(list(Path(api._storage.name).iterdir())) == 1
+
+
 def test_reload_keeps_frame_clocks_monotonic_after_camera_commands(app):
     api, backend = app.extension_context.structures, app.crystal_backend
     scene_id = api.register(CIF).result(30)

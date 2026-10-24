@@ -156,7 +156,20 @@ class StructureWriter:
                     path.unlink(missing_ok=True)
                     raise
 
-            return self._pool.submit(work)
+            future = self._pool.submit(work)
+
+            # A queued Future can be cancelled before its worker starts, in
+            # which case ``work`` never gets a chance to remove its owned
+            # candidate.  Treat cancellation like any other failed
+            # candidate and eagerly remove the temporary source.  Running
+            # futures cannot be cancelled, so successful writes remain
+            # retained until host shutdown as documented.
+            def cleanup_cancelled(done: Future[str]) -> None:
+                if done.cancelled():
+                    path.unlink(missing_ok=True)
+
+            future.add_done_callback(cleanup_cancelled)
+            return future
 
     def focus(
         self, scene_id: str | SceneHandle, *, target: str | None = None
