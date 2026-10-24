@@ -40,6 +40,7 @@ def test_native_scenes_register_focus_reload_and_close(
             assert app.query_one("#native-scenes", Select).display
             await asyncio.wrap_future(api.focus(scene_id))
             assert app.controller is app.scenes.controllers[scene_id]
+            assert app.crystal.title == "New"
             assert app.extension_context.snapshot()["scene_id"] == scene_id
             app.controller.select_atom(0)
             await asyncio.wrap_future(

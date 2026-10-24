@@ -93,6 +93,7 @@ class TerminalScenes:
                 == [a.element for a in crystal.atoms]
             ):
                 camera = replace(old.camera)
+        crystal.title = self.labels[handle.scene_id] if handle else (label or crystal.title)
         controller = TerminalViewController(crystal, camera=camera)
         scene_id = handle.scene_id if handle else "scene_" + uuid4().hex
         # Construct and render the replacement before publishing any identity.
