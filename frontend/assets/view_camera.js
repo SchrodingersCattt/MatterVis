@@ -58,20 +58,23 @@
     var latest = gd.__mvLatestCamera;
     if (!latest || latest.replayed || !latest.patch) return;
     latest.replayed = true;
-    enqueue(gd, function () {
-      if (queueEpoch(gd) !== epoch) throw new Error("stale camera command");
-      if (postcondition(gd, latest.snapshot)) return gd;
-      return Promise.resolve(root.Plotly.relayout(gd, clone(latest.patch))).then(function () {
-        if (postcondition(gd, latest.snapshot)) return gd;
-        return recover(gd, latest.snapshot).then(function () {
-          if (!postcondition(gd, latest.snapshot)) throw new Error("camera postcondition failed");
-        });
-      }, function () {
-        return recover(gd, latest.snapshot).then(function () {
-          if (!postcondition(gd, latest.snapshot)) throw new Error("camera postcondition failed");
-        });
+    var current = function () { return queueEpoch(gd) === epoch && gd.__mvLatestCamera === latest; };
+    // Recovery joins the render FIFO through Plotly.react. Run it after the
+    // replay task releases the FIFO, and stop if another camera superseded it.
+    var finish = function () {
+      if (!current() || postcondition(gd, latest.snapshot)) return gd;
+      return recover(gd, latest.snapshot).then(function () {
+        if (!current()) return gd;
+        if (!postcondition(gd, latest.snapshot)) throw new Error("camera postcondition failed");
       });
-    }, {group: "camera"});
+    };
+    enqueue(gd, function () {
+      if (!current()) return gd;
+      if (postcondition(gd, latest.snapshot)) return gd;
+      return Promise.resolve(root.Plotly.relayout(gd, clone(latest.patch)));
+    }, {isCurrent: current, group: "camera"}).then(finish, finish).catch(function () {
+      if (current()) reportStatus("error", "The camera update could not be restored.");
+    });
   }
   function enqueue(gd, task, options) {
     options = options || {};

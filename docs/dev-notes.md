@@ -29,6 +29,9 @@ same scene does not drop that latest camera command; a different scene does.
 Postcondition recovery runs after releasing the camera's FIFO task, because
 `Plotly.react` recovery joins that same queue. Awaiting it inside the relayout
 task deadlocks both projection recovery and subsequent complete frames.
+Timeout replay follows the same rule and checks both the queue epoch and
+latest camera identity before recovery, so superseded replay cannot restore
+an older camera.
 
 Sidebar updates acknowledge their scene and camera revision through
 `scene-controls-scene` in the same Dash response as the controls. A newer poll can supersede a slow tab
