@@ -293,8 +293,9 @@ except RevisionUnavailable:
   explains drops (`reloaded`, `closed`, `shutdown`). Native tab/controller
   changes emit `activated`, including an empty tuple for unmapped scenes to
   clear a workflow highlight. Binding a newly written revision to an already
-  observed active scene also updates that target's highlight. Subscribers must
-  filter Web events by their initiating page token. Events are observations:
+  observed active scene also updates that target's highlight. Filter Web
+  `activated` events by the initiating page token; `bound`/`dropped` events
+  are host-wide and have no page target. Events are observations:
   update the highlight, **do not call focus in response**. Repeated native
   activation is deduplicated, and request `focused` events are not echoed as
   revision activation. Callbacks run on the host thread and must not block;
