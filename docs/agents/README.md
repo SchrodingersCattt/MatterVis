@@ -46,6 +46,7 @@ The same routing as a quick table:
 | Download the active loaded source structure as CIF | [`dash_service.md#rest-endpoints`](dash_service.md) |
 | Detect a running server whose code is older than the files on disk | [`dash_service.md`](dash_service.md) |
 | Register, reload and focus native Web/TUI scenes from extension workers | [`extensions_api.md#native-structure-writes-v1`](extensions_api.md#native-structure-writes-v1) |
+| Bind workflow revisions to native scenes and follow active-revision events | [`extensions_api.md#revision-to-scene-bindings-v1`](extensions_api.md#revision-to-scene-bindings-v1) |
 | Attach optional in-process panels to the existing Web or TUI viewer | [`extensions_api.md`](extensions_api.md) |
 | Use the Web sidebar's Display / Analysis / Operations tabs and optional right-side extension panel | [`extensions_api.md#web-tool-placement`](extensions_api.md#web-tool-placement) |
 | Control a local terminal view, select stable atom IDs, or run a stateful Python/JSONL agent session | [`tui_api.md`](tui_api.md) |
