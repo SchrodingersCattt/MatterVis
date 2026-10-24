@@ -141,6 +141,13 @@ class WebStructureHost:
                 setattr(backend, name, values)
             backend.bundles.pop(bundle.name, None)
             backend.structure_names.remove(bundle.name)
+            # ``replace_scene_state_with_defaults`` and ``create_scene`` mark
+            # the scene store dirty and wake its persistence worker.  A
+            # failed candidate must not leave a previously persisted,
+            # partially-mutated scene on disk if that worker happened to save
+            # before we reached this rollback.  Re-mark the restored snapshot
+            # dirty so the corrected state is flushed as well.
+            backend._request_scene_store_save()
             raise
 
     @staticmethod
