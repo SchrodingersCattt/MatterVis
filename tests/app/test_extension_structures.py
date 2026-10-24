@@ -208,6 +208,21 @@ def test_later_focus_supersedes_already_polled_event(app):
     assert dispatcher(app)(api.host.poll(target), None, a)[2] == b
 
 
+def test_refresh_poll_does_not_invalidate_late_focus_event(app):
+    api, backend = app.extension_context.structures, app.crystal_backend
+    scene_id = api.register(CIF).result(30)
+    target = api.host.new_target()
+    api.focus(scene_id, target=target).result(30)
+    focus_event = api.host.poll(target)
+    # A registration between the focus poll and its DOM dispatch emits a
+    # refresh event for the same target. The late focus must still apply.
+    api.register(CIF).result(30)
+    refresh_event = api.host.poll(target)
+    assert refresh_event is not None
+    assert dispatcher(app)(refresh_event, None, None)[2] is not None
+    assert dispatcher(app)(focus_event, None, None)[2] == scene_id
+
+
 def test_shutdown_during_parse_rejects_commit_and_removes_candidate(app, monkeypatch):
     api, backend = app.extension_context.structures, app.crystal_backend
     before = backend.scene_options()

@@ -197,7 +197,14 @@ class WebStructureHost:
                     handle = None
             if not changed and handle is None:
                 return None
-            entry["epoch"] += 1
+            # Epochs order focus requests, not the independent scene-refresh
+            # notifications. A refresh can be polled between a focus poll
+            # and its DOM dispatch; bumping the same epoch for that refresh
+            # would make the still-valid focus event look stale. A subsequent
+            # focus still advances the epoch and correctly supersedes older
+            # focus events.
+            if handle is not None:
+                entry["epoch"] += 1
             return {
                 "extension_event": True,
                 "target": target,
