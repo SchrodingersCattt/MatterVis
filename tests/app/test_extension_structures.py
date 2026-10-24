@@ -51,6 +51,11 @@ def test_register_reload_owns_sources_and_isolates_siblings(app, tmp_path):
         scene_id=scene_id,
     )
     before_callbacks = dict(app.callback_map)
+    # A repeat changes displayed identity, so patch_state consumes revision 1
+    # on its own. Reload replaces the source and must advance past that value;
+    # resetting to 1 would let a client still holding the pre-reload revision
+    # write against the new source.
+    assert backend.get_state(scene_id)["target_revision"] == 1
     assert api.reload(scene_id, CIF.read_bytes(), format="cif").result(30) == scene_id
     assert backend.scene_store.get(scene_id).structure_name != original
     assert backend.scene_store.get(sibling).structure_name == original
@@ -58,7 +63,7 @@ def test_register_reload_owns_sources_and_isolates_siblings(app, tmp_path):
     state = backend.get_state(scene_id)
     assert not state["selection"].get("targets")
     assert not state.get("transforms")
-    assert state["target_revision"] == 1
+    assert state["target_revision"] == 2
     assert app.callback_map == before_callbacks
     assert [e.kind for e in events] == ["registered", "reloaded"]
 
