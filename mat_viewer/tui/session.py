@@ -12,10 +12,7 @@ import json
 import sys
 from typing import Any, IO, Mapping
 
-from ..math.camera import project_points
-from .compositor import compose_frame
 from .controller import TerminalViewController
-from .projection import viewport_from_bounds
 from .state import TerminalObservation
 
 SESSION_SCHEMA = "mattervis.tui.session/v1"
@@ -77,6 +74,9 @@ class TerminalSession:
         "observe",
         "reset",
         "orbit",
+        "rotation_sequence",
+        "set_slice",
+        "step_slice",
         "align",
         "pan",
         "zoom",
@@ -141,7 +141,7 @@ class TerminalSession:
         )
         return self.observe()
 
-    def execute(self, action: TerminalAction) -> SessionObservation | None:
+    def execute(self, action: TerminalAction) -> SessionObservation | tuple[SessionObservation, ...] | None:
         self._require_open()
         if not isinstance(action, TerminalAction):
             raise TypeError("action must be a TerminalAction")
@@ -158,7 +158,20 @@ class TerminalSession:
             self.close()
             return None
 
+        if name == "rotation_sequence":
+            self._require_arguments(name, arguments, {"frames", "yaw_deg"})
+            frames = arguments.get("frames", 3)
+            yaw = arguments.get("yaw_deg", 10.0)
+            return tuple(
+                self._wrap(observation)
+                for observation in self.controller.rotation_sequence_iter(
+                    frames=frames, yaw_deg=yaw
+                )
+            )
+
         dispatch = {
+            "set_slice": (self.controller.set_slice, {"axis", "index", "width"}),
+            "step_slice": (self.controller.step_slice, {"step"}),
             "orbit": (self.controller.orbit, {"yaw_deg", "pitch_deg", "roll_deg"}),
             "align": (self.controller.align, {"axis"}),
             "pan": (self.controller.pan, {"dx", "dy"}),
@@ -175,6 +188,8 @@ class TerminalSession:
                     "show_axes",
                     "show_hydrogen",
                     "show_boundary",
+                    "show_depth",
+                    "parallax",
                 },
             ),
             "select": (self._select, {"atom_id", "pinned"}),
@@ -203,42 +218,7 @@ class TerminalSession:
     def _wrap(self, observation: TerminalObservation) -> SessionObservation:
         width = observation.state.viewport.width
         height = observation.state.viewport.height
-        points, depth = project_points(self.controller.camera, self.crystal.cart_coords)
-        display = observation.state.display
-        viewport_state = observation.state.viewport
-        viewport = viewport_from_bounds(
-            viewport_state.x_min,
-            viewport_state.x_max,
-            viewport_state.y_min,
-            viewport_state.y_max,
-            width,
-            height,
-        )
-        # Sessions re-render from semantic state because both machine charsets
-        # must be fixed-width and ANSI-free, unlike the interactive TUI frame.
-        frame = compose_frame(
-            self.crystal,
-            self.controller.camera,
-            points,
-            depth,
-            width=width,
-            height=height,
-            mono=True,
-            label_mode=display.label_mode,
-            show_bonds=display.show_bonds,
-            show_cell=display.show_cell,
-            show_minor=display.show_minor,
-            show_hydrogen=display.show_hydrogen,
-            show_boundary=display.show_boundary,
-            zoom=1.0,
-            pan_x=0.0,
-            pan_y=0.0,
-            display_level=display.display_level,
-            viewport=viewport,
-            selected_display_index=observation.state.selection.display_index,
-            charset=self.charset,
-            show_axes=display.show_axes,
-        )
+        frame = self.controller.render_frame(charset=self.charset)
         raw_lines = frame.splitlines()
         if len(raw_lines) > height or any(len(line) > width for line in raw_lines):
             raise ValueError("rendered frame exceeds the configured viewport")
@@ -296,7 +276,9 @@ def run_jsonl_session(
                 "ok": True,
                 "closed": observation is None,
             }
-            if observation is not None:
+            if isinstance(observation, tuple):
+                payload["observations"] = [item.as_dict() for item in observation]
+            elif observation is not None:
                 payload["observation"] = observation.as_dict()
         except Exception as exc:
             payload = {

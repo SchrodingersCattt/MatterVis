@@ -34,15 +34,23 @@ class Viewport:
 
     def to_grid(self, x: float, y: float) -> tuple[int, int]:
         """Map data coordinates to a top-origin ``(row, column)`` cell."""
-        col = int((x - self.x_min) * self.scale)
-        row = int((self.y_max - y) * self.scale / CHAR_ASPECT)
+        col = int((x - self.x_min) * self.scale + self._offset_x)
+        row = int((self.y_max - y) * self.scale / CHAR_ASPECT + self._offset_y)
         return row, col
 
     def to_px(self, x: float, y: float) -> tuple[int, int]:
         """Map data coordinates to Braille subpixels."""
-        px_x = int((x - self.x_min) * self.scale * 2)
-        px_y = int((self.y_max - y) * self.scale / CHAR_ASPECT * 4)
+        px_x = int(((x - self.x_min) * self.scale + self._offset_x) * 2)
+        px_y = int(((self.y_max - y) * self.scale / CHAR_ASPECT + self._offset_y) * 4)
         return px_x, px_y
+
+    @property
+    def _offset_x(self) -> float:
+        return max(0.0, (self.width - 1 - (self.x_max - self.x_min) * self.scale) / 2)
+
+    @property
+    def _offset_y(self) -> float:
+        return max(0.0, (self.height - 1 - (self.y_max - self.y_min) * self.scale / CHAR_ASPECT) / 2)
 
     def in_bounds_grid(self, row: int, col: int) -> bool:
         return 0 <= row < self.height and 0 <= col < self.width

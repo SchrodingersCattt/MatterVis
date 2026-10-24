@@ -439,7 +439,7 @@ def _tui_main(args: argparse.Namespace) -> None:
     # Apply --zoom
     cam = _replace(cam, viewport_zoom=args.zoom)
 
-    from .tui.cli import run_session
+    from .tui.cli import interactive_depth_options, run_session
 
     if run_session(args, crystal, cam, label_mode=label_mode):
         return
@@ -471,7 +471,8 @@ def _tui_main(args: argparse.Namespace) -> None:
             show_cell=not args.no_cell,
             label_mode=label_mode,
             show_minor=args.show_minor,
-            show_axes=bool(getattr(args, "axes", False)),
+            show_axes=bool(getattr(args, "axes", True)),
+            **interactive_depth_options(args),
             show_hydrogen=bool(getattr(args, "hydrogen", False)),
             show_boundary=bool(getattr(args, "boundary", False)),
             initial_level=initial_level,

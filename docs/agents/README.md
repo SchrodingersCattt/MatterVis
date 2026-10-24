@@ -48,7 +48,7 @@ The same routing as a quick table:
 | Attach optional in-process panels to the existing Web or TUI viewer | [`extensions_api.md`](extensions_api.md) |
 | Use the Web sidebar's Display / Analysis / Operations tabs and optional right-side extension panel | [`extensions_api.md#web-tool-placement`](extensions_api.md#web-tool-placement) |
 | Control a local terminal view, select stable atom IDs, or run a stateful Python/JSONL agent session | [`tui_api.md`](tui_api.md) |
-| Read an atom-level terminal picture (element symbols, occlusion, hidden H and boundary copies) | [`tui_api.md`](tui_api.md) |
+| Read terminal pictures with element symbols, molecule silhouettes, text depth bands, crossing-bond gaps, layer slicing, and optional rotation parallax | [`tui_api.md`](tui_api.md) |
 | Render CIF, Cube, VASP, XYZ, ASE trajectory, or LAMMPS files from the CLI | [`../cli.md`](../cli.md) |
 | Label trajectory frames with physical simulation time while keeping playback FPS independent | [`../cli.md`](../cli.md#frames-and-animations) |
 | Build or compose a canonical structure scene from Python | [`scene_api.md`](scene_api.md) |

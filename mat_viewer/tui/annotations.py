@@ -63,7 +63,7 @@ _COMPASS = ("E", "NE", "N", "NW", "W", "SW", "S", "SE")
 _SCALE_BAR_LENGTHS = (1.0, 2.0, 5.0, 10.0, 20.0, 50.0)
 
 
-def axes_footer_text(crystal, camera, viewport: Viewport, width: int) -> str:
+def axes_footer_text(crystal, camera, viewport: Viewport, width: int, *, show_depth: bool = False) -> str:
     """Describe screen directions of a, b, c and a length scale in one line.
 
     Each lattice vector is reported as a compass direction on screen
@@ -87,13 +87,13 @@ def axes_footer_text(crystal, camera, viewport: Viewport, width: int) -> str:
     ends, _ = _proj(camera, np.vstack([target, target + rotation[0]]))
     columns_per_angstrom = abs(float(ends[1][0] - ends[0][0])) * viewport.scale
     text = "axes " + " ".join(parts)
-    fitting = [
-        length
-        for length in _SCALE_BAR_LENGTHS
-        if 4 <= length * columns_per_angstrom <= max(width // 3, 4)
-    ]
-    if fitting:
-        length = fitting[-1]
+    legend = "  depth 1:front 2:mid 3:back"
+    if show_depth and len(text) + len(legend) + 20 <= width:
+        text += legend
+    available = max(4, min(width // 3, width - len(text) - 14))
+    if columns_per_angstrom > 0:
+        exponent = math.floor(math.log10(available / columns_per_angstrom))
+        length = max(v * 10 ** exponent for v in (1, 2, 5) if v * 10 ** exponent <= available / columns_per_angstrom)
         bar = "|" + "-" * max(round(length * columns_per_angstrom) - 2, 0) + "|"
         text += f"  {bar} {length:g} A"
     return text[:width]
@@ -106,26 +106,26 @@ def axes_scene_height(height: int, *, show_axes: bool, has_lattice: bool) -> int
     return height
 
 
-def bind_axes_footer(crystal, camera, width: int, full_height: int, scene_height: int):
+def bind_axes_footer(crystal, camera, width: int, full_height: int, scene_height: int, *, show_depth: bool = False):
     """Return a finisher that appends the footer when a row was reserved."""
 
     def finish(frame: str, viewport) -> str:
         if scene_height == full_height:
             return frame
         return overlay_axes_footer(
-            frame, crystal, camera, viewport, width, full_height
+            frame, crystal, camera, viewport, width, full_height, show_depth=show_depth
         )
 
     return finish
 
 
-def overlay_axes_footer(frame, crystal, camera, viewport, width, height) -> str:
+def overlay_axes_footer(frame, crystal, camera, viewport, width, height, *, show_depth: bool = False) -> str:
     """Keep the scene in the rows above a reserved axis/scale footer.
 
     The scene is drawn into ``height - 1`` rows. This appends the footer
     instead of painting over the last content row.
     """
-    footer = axes_footer_text(crystal, camera, viewport, width)
+    footer = axes_footer_text(crystal, camera, viewport, width, show_depth=show_depth)
     if height <= 1:
         return footer
     body = frame.split("\n")[: height - 1]

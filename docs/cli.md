@@ -564,3 +564,25 @@ or source identifier before rendering; `cluster` does not crop a periodic cell.
 
 Use a Unicode-capable font already available in the execution environment.
 MatterVis does not install operating-system packages automatically.
+
+### Terminal depth and layers
+
+`mat-vis tui INPUT` shows depth bands (`¹` front, `²` middle, `³` back;
+ASCII-7: `^1`, `^2`, `^3`) and a persistent rotating a/b/c compass and scale
+bar. `--no-depth` hides band suffixes and styling; `--no-axes` hides the compass.
+Back bonds are dashed; crossing bonds have a gap in the farther line.
+`h` toggles hydrogen, `Shift+B` toggles periodic boundary copies, and `Shift+A`
+toggles the compass. Dense automatic atom labels retain element symbols.
+
+`--parallax` or `g` enables experimental previous-rotation ghost markers.
+`f` toggles depth slicing around the median layer; `,` / `.` step down/up.
+Use `:slice c 2 0.25` for lattice layers, `:slice depth 3 1.0` for a depth
+layer, and `:slice off` to restore the full picture. Adjacent layers are dim
+and parenthesized; other layers are hidden. The CLI equivalents are
+`--slice-axis c --slice-index 2 --slice-width 0.25`. Width is in fractional
+coordinates for a/b/c and Angstrom for camera depth.
+
+Agent JSONL sessions accept `set_slice`, `step_slice`, and
+`rotation_sequence` (1–12 frames, default three 10-degree yaw steps); the latter
+returns an `observations` array so each picture can be compared independently.
+See [the TUI API](agents/tui_api.md) for the state and response contracts.

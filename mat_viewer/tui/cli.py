@@ -39,10 +39,26 @@ def add_session_arguments(parser: argparse.ArgumentParser) -> None:
         "--grow-radius", type=float, default=None, metavar="ANGSTROM",
         help="Add periodic images of atoms within this distance of the cell contents.",
     )
+    parser.add_argument("--parallax", action="store_true", help="Experimental previous-rotation ghost (off by default).")
+    parser.add_argument("--no-depth", action="store_true", help="Hide textual depth-band suffixes.")
+    parser.add_argument("--slice-axis", choices=("off", "depth", "a", "b", "c"), default="off")
+    parser.add_argument("--slice-index", type=int, default=0)
+    parser.add_argument("--slice-width", type=float, default=1.0, help="Layer width in Angstrom (depth) or fractional coordinates (a/b/c).")
     parser.add_argument(
-        "--axes", action="store_true",
+        "--axes", action=argparse.BooleanOptionalAction, default=True,
         help="Fit the scene above a bottom row with an a/b/c triad and a scale bar.",
     )
+
+
+def interactive_depth_options(args: argparse.Namespace) -> dict:
+    """Depth options accepted by both the Textual app and semantic controller."""
+    return {
+        "show_depth": not getattr(args, "no_depth", False),
+        "parallax": getattr(args, "parallax", False),
+        "slice_axis": getattr(args, "slice_axis", "off"),
+        "slice_index": getattr(args, "slice_index", 0),
+        "slice_width": getattr(args, "slice_width", 1.0),
+    }
 
 
 def run_session(args: argparse.Namespace, crystal, camera, *, label_mode: str) -> bool:
@@ -65,7 +81,12 @@ def run_session(args: argparse.Namespace, crystal, camera, *, label_mode: str) -
         show_hydrogen=bool(getattr(args, "hydrogen", False)),
         show_boundary=bool(getattr(args, "boundary", False)),
         display_level=getattr(args, "level", "auto"),
-        show_axes=getattr(args, "axes", False),
+        parallax=getattr(args, "parallax", False),
+        show_axes=getattr(args, "axes", True),
+        show_depth=not getattr(args, "no_depth", False),
+        slice_axis=getattr(args, "slice_axis", "off"),
+        slice_index=getattr(args, "slice_index", 0),
+        slice_width=getattr(args, "slice_width", 1.0),
     )
     run_jsonl_session(session)
     return True
@@ -101,7 +122,11 @@ def compose_static_frame(
         show_boundary=bool(getattr(args, "boundary", False)),
         display_level=display_level,
         zoom=camera.viewport_zoom,
-        show_axes=getattr(args, "axes", False),
+        show_axes=getattr(args, "axes", True),
+        show_depth=not getattr(args, "no_depth", False),
+        slice_axis=getattr(args, "slice_axis", "off"),
+        slice_index=getattr(args, "slice_index", 0),
+        slice_width=getattr(args, "slice_width", 1.0),
     )
 
 

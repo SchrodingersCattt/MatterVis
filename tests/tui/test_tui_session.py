@@ -81,7 +81,7 @@ def test_ascii7_observation_is_fixed_size_and_hashed() -> None:
     screen = "\n".join(observation.screen_lines).encode("ascii")
     assert observation.screen_hash == sha256(screen).hexdigest()
     assert set("".join(observation.screen_lines)) <= set(
-        " -|/\\+.*#[]ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789:_"
+        " -|/\\+.*#[]ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789:_^()"
     )
 
 

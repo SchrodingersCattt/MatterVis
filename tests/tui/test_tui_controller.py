@@ -144,7 +144,7 @@ def test_selection_mode_pin_and_clear_are_explicit_state_transitions() -> None:
     assert "[C1]" not in cleared.frame
 
 
-def test_controller_orbit_keeps_explicit_fit_bounds_stable() -> None:
+def test_controller_orbit_refits_and_display_styles_keep_bounds_stable() -> None:
     controller = TerminalViewController(_crystal(), width=40, height=12, mono=True)
     before = controller.state.viewport
 
@@ -153,8 +153,8 @@ def test_controller_orbit_keeps_explicit_fit_bounds_stable() -> None:
     controller.set_display(show_cell=False, show_bonds=False, label_mode="dot")
     after_display = controller.state.viewport
 
-    assert after_orbit == before
-    assert after_display == before
+    assert after_orbit != before
+    assert after_display == after_orbit
 
 
 def test_rotation_invariant_all_fit_keeps_elongated_structure_visible() -> None:
@@ -179,7 +179,7 @@ def test_rotation_invariant_all_fit_keeps_elongated_structure_visible() -> None:
         assert np.all(points[:, 1] <= viewport.y_max)
 
 
-def test_controller_fit_is_rotation_invariant_and_resize_updates_scale() -> None:
+def test_controller_fit_follows_projection_and_resize_updates_scale() -> None:
     controller = TerminalViewController(_crystal(), width=40, height=12, mono=True)
     initial = controller.state.viewport
 
@@ -189,7 +189,7 @@ def test_controller_fit_is_rotation_invariant_and_resize_updates_scale() -> None
     controller.resize(80, 24)
     resized = controller.state.viewport
 
-    assert fitted == initial
+    assert fitted != initial
     assert resized.width == 80
     assert resized.height == 24
     assert resized != fitted
@@ -239,7 +239,12 @@ def test_controller_display_transitions_are_absolute() -> None:
         "show_cell": False,
         "show_minor": True,
         "mono": True,
-        "show_axes": False,
+        "show_axes": True,
+        "show_depth": True,
+        "parallax": False,
+        "slice_axis": "off",
+        "slice_index": 0,
+        "slice_width": 1.0,
         "show_hydrogen": False,
         "show_boundary": False,
     }
