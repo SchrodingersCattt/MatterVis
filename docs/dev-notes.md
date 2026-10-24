@@ -49,6 +49,9 @@ write perspective back into the scene without advancing the camera clock.
 Offscreen-drag refits also enter the view-update journal so a superseded Dash
 callback response cannot lose the replacement camera; ordinary drag captures
 still do not arm a poll echo.
+Refits explicitly request the next camera revision even when the fitted
+camera equals the saved camera; reusing the previous revision lets delivery
+deduplication discard the repair while the browser remains offscreen.
 
 The real-app browser gate waits for the selected scene's controls and the
 unit-cell figure revision before sending one orthographic command. Server

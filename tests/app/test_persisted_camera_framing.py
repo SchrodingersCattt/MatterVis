@@ -238,6 +238,39 @@ def test_orthographic_unit_cell_drag_that_misses_is_refit(tmp_path: Path):
         backend.close()
 
 
+def test_refit_advances_camera_clock_when_default_is_already_stored(tmp_path: Path):
+    backend = _backend(tmp_path)
+    try:
+        scene_id = backend.active_scene_id()
+        backend.set_projection("orthographic", scene_id=scene_id, broadcast=False)
+        backend.refit_scene_camera(scene_id, force=True)
+        before = backend.get_state(scene_id)
+        missed = {
+            "eye": {"x": 0.0, "y": 0.0, "z": 50.0},
+            "center": {"x": 20.0, "y": 20.0, "z": 20.0},
+            "up": {"x": 0.0, "y": 0.0, "z": 1.0},
+            "projection": {"type": "orthographic"},
+        }
+
+        result = _persist(backend, scene_id, missed)
+
+        assert result is not None
+        assert result["refit"] is True
+        after = backend.get_state(scene_id)
+        assert after["camera"] == before["camera"]
+        # The browser moved away from this stored default. A new delivery
+        # revision is needed even though the persisted camera is unchanged.
+        assert after["camera_revision"] == before["camera_revision"] + 1
+        assert after["camera_version"] == before["camera_version"] + 1
+        update = result["view_update"]
+        assert update["update_kind"] == "camera"
+        assert update["payload"]["command"] == "refit"
+        assert update["camera_version"] == after["camera_version"]
+        assert backend.figure_broadcasts_since(0)[-1] == update
+    finally:
+        backend.close()
+
+
 def test_drag_that_still_frames_is_stored_unchanged(tmp_path: Path):
     backend = _backend(tmp_path)
     try:

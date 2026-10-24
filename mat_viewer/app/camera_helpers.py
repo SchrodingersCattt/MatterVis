@@ -220,11 +220,13 @@ def _persist_relayout_camera(
     except (KeyError, ValueError, OSError, TypeError):
         replaced = False
     payload: dict[str, Any] = {"camera": camera}
-    # The current revision is enough. ``patch_state`` adds one when the
-    # patch carries ``camera_revision``, so a drag that still frames does
-    # not move the clock and a replacement moves it once.
+    # A refit is a new camera delivery even when the fitted default equals
+    # the stored camera: the browser has moved away from it. Request the next
+    # revision explicitly so that unchanged persisted values cannot reuse a
+    # delivered key. Ordinary drags keep the clock; patch_state will not
+    # increment this requested revision twice.
     if replaced:
-        payload["camera_revision"] = int(state_before.get("camera_revision", 0) or 0)
+        payload["camera_revision"] = int(state_before.get("camera_revision", 0) or 0) + 1
     committed = backend.apply_intent(
         {
             "type": "set_camera",
