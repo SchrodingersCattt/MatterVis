@@ -61,6 +61,7 @@ def register_selection_routes(v2, backend) -> dict:
                 target,
                 scope,
                 scene_id=_scene_id_from_request(),
+                commit=bool(payload.get("commit", True)),
             )
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
@@ -77,10 +78,21 @@ def register_selection_routes(v2, backend) -> dict:
         )
         return jsonify({"selection": selection})
 
+    @v2.post("/selection/appearance")
+    def selection_appearance():
+        payload = request.get_json(force=True, silent=True) or {}
+        targets = payload.get("targets")
+        if not isinstance(targets, list):
+            return jsonify({"error": "targets must be a list"}), 400
+        try:
+            return jsonify(backend.inspect_appearance(targets, _scene_id_from_request()))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
     @v2.get("/style_overrides")
     def style_overrides_get():
         state = backend.get_state(scene_id=_scene_id_from_request())
-        return jsonify({"style_overrides": state.get("style_overrides") or {}})
+        return jsonify({"style_overrides": state.get("style_overrides") or {}, "discarded_targets": state.get("style_override_warnings") or []})
 
     @v2.patch("/style_overrides")
     def style_overrides_patch():
@@ -89,6 +101,9 @@ def register_selection_routes(v2, backend) -> dict:
         target_id = payload.get("target_id") or payload.get("id")
         selected_targets = payload.get("targets")
         kind = payload.get("kind")
+        expected = payload.get("target_revision")
+        if expected is not None and str(expected) != str(backend.get_state(scene_id).get("target_revision", 0)):
+            return jsonify({"error": "The displayed geometry changed. Select the object again."}), 409
         if selected_targets is not None:
             if not isinstance(selected_targets, list) or not selected_targets:
                 return jsonify({"error": "targets must be a non-empty list"}), 400

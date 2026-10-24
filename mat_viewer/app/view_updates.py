@@ -111,6 +111,9 @@ def display_state_key(state: Mapping[str, Any] | None) -> str:
 # strongest of these requirements.
 _COMPLETE_FRAME_FIELDS = (
     "atom_scale",
+    "background",
+    "element_colors",
+    "element_colors_light",
     "bond_radius",
     "material",
     "style",
@@ -123,6 +126,8 @@ _COMPLETE_FRAME_FIELDS = (
     "fast_rendering",
     "vector_overlays",
     "selection",
+    "style_overrides",
+    "entity_defaults",
     "cell_overlays",
     "overlay_overrides",
 )

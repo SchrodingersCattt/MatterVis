@@ -1,0 +1,12 @@
+.mv-focus-canvas { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:5; }
+.mv-appearance { position:absolute; right:12px; bottom:30px; width:290px; max-height:65%; overflow:auto; z-index:30; padding:12px; border:1px solid var(--border-color,#a5abb2); border-radius:8px; background:var(--mv-panel,#fff); color:var(--mv-ink,#26313b); box-shadow:0 3px 15px #0002; font:12px/1.45 system-ui; }
+.mv-appearance h3 { font-size:13px; margin:0 0 5px; }
+.mv-appearance p { margin:4px 0 8px; overflow-wrap:anywhere; }
+.mv-appearance label { display:grid; grid-template-columns:95px 1fr auto; align-items:center; gap:6px; margin:7px 0; }
+.mv-appearance input,.mv-appearance select { width:100%; min-width:0; color:inherit; background:inherit; border:1px solid #8793a166; border-radius:3px; }
+.mv-appearance button { cursor:pointer; padding:3px 6px; color:inherit; background:transparent; border:1px solid #8793a166; border-radius:4px; }
+.mv-appearance small { color:#6c7b8b; }
+.mv-appearance .mv-appearance-error { color:#b54435; }
+.mv-appearance[hidden] { display:none; }
+
+#crystal-graph .hoverlayer { display:none; }

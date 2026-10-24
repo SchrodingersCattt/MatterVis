@@ -1,21 +1,28 @@
 from __future__ import annotations
-# ruff: noqa: F401,F403,F405
 
-from .shared import *
-from .normalizers import _normalize_selection
+from collections.abc import Mapping
+
 from ..render.picking import (
     atom_instance_id,
     atom_instance_id_aliases,
+    atom_parent_targets,
     bond_instance_id,
     facet_instance_id,
     normalize_target,
 )
 from ..render.style.resolver import (
+    apply_scene_style_overrides,
     merge_style_override,
     merge_style_overrides_for_targets,
     normalize_style_overrides,
+    style_fields_for_targets,
+    supported_style_fields,
     validate_style_override_patch,
 )
+from .normalizers import _normalize_selection
+
+# ruff: noqa: F401,F403,F405
+from .shared import *
 
 
 def _selection_part(atom: dict[str, Any]) -> dict[str, Any]:
@@ -68,6 +75,7 @@ class _SelectionBackendMixin:
         target: Mapping[str, Any] | Any,
         scope: str | None = None,
         scene_id: Optional[str] = None,
+        *, commit: bool = True,
     ) -> dict[str, Any]:
         """Expand one semantic target into an explicit target list.
 
@@ -116,8 +124,8 @@ class _SelectionBackendMixin:
             rows = list(enumerate(atoms))
             groups = state.get("atom_groups") or []
             if groups:
-                from ..style.atom_groups import tag_atoms_with_groups
                 from ..render.style.core import _atom_render_visible
+                from ..style.atom_groups import tag_atoms_with_groups
 
                 tagged = tag_atoms_with_groups(atoms, list(groups))
                 rows = [
@@ -125,6 +133,10 @@ class _SelectionBackendMixin:
                     for index, atom in enumerate(tagged)
                     if _atom_render_visible(atom)
                 ]
+
+            from ..render.style.core import _atom_render_visible
+            painted = apply_scene_style_overrides({**scene, "draw_atoms": [a for _, a in rows]}, self.style_for_state(state, scene))
+            rows = [(original[0], atom) for original, atom in zip(rows, painted["draw_atoms"]) if _atom_render_visible(atom)]
 
             def atom_source(atom: Mapping[str, Any]) -> Any:
                 return atom.get("_source_index", atom.get("source_index"))
@@ -145,16 +157,6 @@ class _SelectionBackendMixin:
                 if atom_instance_id(atom, index) == normalized.get("id"):
                     reference = atom
                     break
-            if reference is None:
-                source = normalized.get("source_index")
-                image = normalized.get("image_shift")
-                for _index, atom in rows:
-                    if source not in (None, "") and str(atom_source(atom)) != str(source):
-                        continue
-                    if image not in (None, "", (), [], [0, 0, 0]) and str(atom_image(atom)) != str(image):
-                        continue
-                    reference = atom
-                    break
             if reference is not None:
                 source = atom_source(reference)
                 symop = atom_symmetry(reference)
@@ -164,16 +166,16 @@ class _SelectionBackendMixin:
                 part = reference.get("part") or reference.get("disorder_group") or reference.get("disorder_assembly") or ""
                 for index, atom in rows:
                     match = (
-                        wanted_scope == "source" and str(atom_source(atom)) == str(source)
+                        wanted_scope == "source" and source is not None and str(atom_source(atom)) == str(source)
                     ) or (
-                        wanted_scope == "symmetry"
+                        wanted_scope == "symmetry" and source is not None
                         and str(atom_source(atom)) == str(source)
                         and str(atom_symmetry(atom)) == str(symop)
                     ) or (
-                        wanted_scope == "molecule"
+                        wanted_scope == "molecule" and molecule is not None
                         and str(atom.get("_source_molecule_index", atom.get("source_molecule_index", atom.get("_molecule_index", atom.get("molecule_index", ""))))) == str(molecule)
                     ) or (
-                        wanted_scope == "part"
+                        wanted_scope == "part" and bool(part)
                         and str(atom.get("part") or atom.get("disorder_group") or atom.get("disorder_assembly") or "") == str(part)
                     )
                     if match:
@@ -197,10 +199,17 @@ class _SelectionBackendMixin:
             scene = self.scene_for_state(state)
             morphology = scene.get("bfdh_morphology") or {}
             wanted_miller = normalized.get("miller")
+            # Reuse the renderer's canonical token for list/tuple metadata.
+            # Minimal API targets carry the same token in their facet ID.
+            if wanted_miller is not None:
+                wanted_token = facet_instance_id(wanted_miller, 0).rsplit(":", 2)[1]
+            else:
+                identity = str(normalized["id"]).rsplit(":", 2)
+                wanted_token = identity[1] if len(identity) == 3 and identity[0].startswith("facet:") else None
             expanded = []
             for index, facet in enumerate(morphology.get("facets") or []):
                 miller = facet.get("miller", [0, 0, 0]) if isinstance(facet, Mapping) else [0, 0, 0]
-                if wanted_miller is not None and str(miller) != str(wanted_miller):
+                if wanted_token is None or facet_instance_id(miller, 0).rsplit(":", 2)[1] != wanted_token:
                     continue
                 expanded.append({
                     "kind": "facet",
@@ -249,7 +258,7 @@ class _SelectionBackendMixin:
 
         # Commit the concrete list only after the expansion succeeds.  This
         # keeps malformed/bare targets from clearing an existing selection.
-        selection = self.set_target_selection(expanded, scene_id=scene_id)
+        selection = self.set_target_selection(expanded, scene_id=scene_id) if commit else self.get_selection(scene_id)
         return {
             "scope": wanted_scope,
             "target": normalized,
@@ -293,9 +302,14 @@ class _SelectionBackendMixin:
                 bond_instance_id(bond, atoms, index)
                 for index, bond in enumerate(bonds)
             },
+            "molecule": set(), "part": set(),
             "facet": set(),
             "morphology": set(),
         }
+        fragments = scene.get("atom_fragment_labels") or []
+        for index, atom in enumerate(atoms):
+            for parent in atom_parent_targets(atom, fragments[index] if index < len(fragments) else None):
+                valid[parent["kind"]].add(parent["id"])
         # ``scene_for_state`` does not materialise caller-owned geometry for
         # every backend (for example when the mesh is supplied by a higher
         # level renderer).  An absent list therefore means that geometry
@@ -327,7 +341,7 @@ class _SelectionBackendMixin:
                     )
                 )
             if morphology.get("enabled"):
-                valid["morphology"].add("bfdh-morphology")
+                valid["morphology"].update({"bfdh-morphology", "morphology:bfdh-morphology"})
 
         selection = _normalize_selection(state.get("selection"))
         targets = []
@@ -345,8 +359,6 @@ class _SelectionBackendMixin:
             # valid pick; disabling topology is authoritative and drops the
             # stale target immediately.
             if kind == "polyhedron" and state.get("topology_enabled"):
-                targets.append(target)
-            elif kind in {"molecule", "part"}:
                 targets.append(target)
             elif kind in {"geometry", "geometry_entity"} and not geometry_id_sets_authoritative:
                 targets.append(target)
@@ -382,9 +394,10 @@ class _SelectionBackendMixin:
             if canonical_id not in overrides:
                 overrides[canonical_id] = overrides[legacy_id]
             overrides.pop(legacy_id, None)
+        removed_overrides = []
         for target_id, override in list(overrides.items()):
             kind = str(override.get("kind") or "geometry").lower()
-            if kind in {"molecule", "part"} or (
+            if (
                 kind == "polyhedron" and state.get("topology_enabled")
             ) or (
                 kind in {"geometry", "geometry_entity"}
@@ -393,8 +406,90 @@ class _SelectionBackendMixin:
                 continue
             if target_id not in valid.get(kind, set()):
                 overrides.pop(target_id, None)
+                removed_overrides.append(target_id)
+        if removed_overrides:
+            state["style_override_warnings"] = list(dict.fromkeys([*(state.get("style_override_warnings") or []), *removed_overrides]))
         state["style_overrides"] = overrides
         return state
+
+    def inspect_appearance(self, targets, scene_id=None):
+        """Return effective paint and capabilities without altering selection."""
+        from ..render.style.core import (
+            _atom_effective_opacity,
+            _atom_render_color,
+            _atom_render_visible,
+        )
+        from ..render.style.resolver import resolve_entity_style
+        from ..style.atom_groups import tag_atoms_with_groups
+        state = self.get_state(scene_id)
+        scene = self.scene_for_state(state)
+        style = self.style_for_state(state, scene)
+        atoms = tag_atoms_with_groups(
+            scene.get("draw_atoms") or [], state.get("atom_groups") or [],
+            fragment_labels=scene.get("atom_fragment_labels"),
+        ) if state.get("atom_groups") else scene.get("draw_atoms") or []
+        painted = apply_scene_style_overrides({**scene, "draw_atoms": atoms}, style)
+        by_id = {atom_instance_id(atom, i): atom for i, atom in enumerate(painted["draw_atoms"])}
+        overrides = normalize_style_overrides(state.get("style_overrides"))
+        rows = []
+        for raw in targets:
+            target = normalize_target(raw)
+            if target is None:
+                raise ValueError("target must contain a supported kind and id")
+            effective = resolve_entity_style(target, kind_defaults=state.get("entity_defaults"), overrides=overrides)
+            kind = target["kind"]
+            base = {}
+            if kind in {"geometry", "geometry_entity"}:
+                base = next((item for item in scene.get("geometry_entities") or [] if str(item.get("id")) == target["id"]), {})
+            elif kind in {"facet", "morphology"}:
+                morph = scene.get("bfdh_morphology") or state.get("bfdh_morphology") or {}
+                base = {"color": style.get("bfdh_morphology_color", "#4f7cff"), "opacity": morph.get("opacity", 0.8)}
+            elif kind == "polyhedron":
+                spec = next((item for item in state.get("polyhedron_specs") or [] if item.get("id") == target.get("spec_id")), {})
+                base = {k: v for k, v in spec.items() if k in supported_style_fields(kind)}
+            if base:
+                effective = resolve_entity_style(target, kind_defaults=state.get("entity_defaults"),
+                    rules=[{"selector": {"all": True}, "style": base}], overrides=overrides)
+            atom = by_id.get(target["id"]) if kind == "atom" else None
+            if atom is not None:
+                effective.update({
+                    "color": atom.get("_render_color") or atom.get("_property_color") or _atom_render_color(atom, style),
+                    "opacity": _atom_effective_opacity(atom, style),
+                    "visible": _atom_render_visible(atom), "radius": atom.get("atom_radius"),
+                    "material": atom.get("_render_material") or style.get("material"),
+                    "representation": atom.get("_render_style") or style.get("style"),
+                })
+            affected_count = 1
+            if kind in {"molecule", "part"}:
+                fragments = scene.get("atom_fragment_labels") or []
+                affected_count = sum(
+                    any(parent["id"] == target["id"] for parent in atom_parent_targets(atom, fragments[index] if index < len(fragments) else None))
+                    for index, atom in enumerate(painted["draw_atoms"])
+                )
+            elif kind == "morphology":
+                affected_count = len((scene.get("bfdh_morphology") or {}).get("facets") or [])
+            rows.append({"target": target, "effective": effective, "affected_count": affected_count,
+                         "overrides": {k: v for k, v in (overrides.get(target["id"]) or {}).items() if k != "kind"},
+                         "supported_fields": sorted(supported_style_fields(target["kind"]))})
+        return {"items": rows, "supported_fields": sorted(style_fields_for_targets(targets)),
+                "target_revision": state.get("target_revision", 0),
+                "discarded_targets": state.get("style_override_warnings") or [],
+                "property_coloring": bool(style.get("atom_property_color"))}
+
+    def _commit_selection_event(self, selection, scene_id):
+        """Commit the browser's complete set, rejecting obsolete geometry.
+
+        Toggle/additive intent has already been applied locally. Replaying
+        it against the whole snapshot would toggle existing targets twice.
+        """
+        expected = selection.get("target_revision")
+        if expected is not None and str(expected) != str(self.get_state(scene_id).get("target_revision", 0)):
+            return False
+        if selection.get("mode") == "clear":
+            self.clear_target_selection(scene_id=scene_id)
+        else:
+            self.set_target_selection(selection.get("targets") or [], scene_id=scene_id)
+        return True
 
     def get_selection(self, scene_id: Optional[str] = None) -> dict[str, Any]:
         return copy.deepcopy(_normalize_selection(self.get_state(scene_id).get("selection")))
@@ -471,8 +566,15 @@ class _SelectionBackendMixin:
     ) -> dict[str, dict[str, Any]]:
         validate_style_override_patch(kind, patch)
         state = self.get_state(scene_id)
+        target = {"id": str(target_id), "kind": str(kind)}
+        inherited = self.inspect_appearance([target], scene_id)["items"][0]
+        local = inherited["overrides"]
+        patch = {key: value for key, value in patch.items() if key in local or value != inherited["effective"].get(key)}
+        if not patch:
+            return copy.deepcopy(state.get("style_overrides") or {})
         overrides = merge_style_override(state.get("style_overrides"), str(target_id), str(kind), patch)
-        self.patch_state({"style_overrides": overrides}, scene_id=scene_id)
+        if overrides != (state.get("style_overrides") or {}):
+            self.patch_state({"style_overrides": overrides}, scene_id=scene_id)
         return copy.deepcopy(self.get_state(scene_id).get("style_overrides") or {})
 
     def set_style_overrides(
@@ -489,10 +591,19 @@ class _SelectionBackendMixin:
         """
 
         state = self.get_state(scene_id)
+        targets = list(targets)
         overrides = merge_style_overrides_for_targets(
             state.get("style_overrides"), targets, patch
         )
-        self.patch_state({"style_overrides": overrides}, scene_id=scene_id)
+        for row in self.inspect_appearance(targets, scene_id)["items"]:
+            target_id = row["target"]["id"]
+            for field, value in patch.items():
+                if field not in row["overrides"] and value == row["effective"].get(field):
+                    overrides.get(target_id, {}).pop(field, None)
+            if set(overrides.get(target_id) or {}) <= {"kind"}:
+                overrides.pop(target_id, None)
+        if overrides != (state.get("style_overrides") or {}):
+            self.patch_state({"style_overrides": overrides}, scene_id=scene_id)
         return copy.deepcopy(self.get_state(scene_id).get("style_overrides") or {})
 
     def reset_style_override(
@@ -511,7 +622,8 @@ class _SelectionBackendMixin:
                 overrides.pop(key, None)
         else:
             overrides.pop(key, None)
-        self.patch_state({"style_overrides": overrides}, scene_id=scene_id)
+        if overrides != (state.get("style_overrides") or {}):
+            self.patch_state({"style_overrides": overrides}, scene_id=scene_id)
         return copy.deepcopy(self.get_state(scene_id).get("style_overrides") or {})
 
     def add_to_selection(self, atom_labels: Iterable[Any], scene_id: Optional[str] = None) -> dict[str, Any]:
@@ -624,8 +736,8 @@ class _SelectionBackendMixin:
         atom_rows = list(enumerate(atoms))
         atom_groups = state.get("atom_groups") or []
         if atom_groups:
-            from ..style.atom_groups import tag_atoms_with_groups
             from ..render.style.core import _atom_render_visible
+            from ..style.atom_groups import tag_atoms_with_groups
 
             tagged = tag_atoms_with_groups(atoms, list(atom_groups))
             atom_rows = [
@@ -634,6 +746,10 @@ class _SelectionBackendMixin:
                 if _atom_render_visible(atom)
             ]
             atoms = [atom for _index, atom in atom_rows]
+        from ..render.style.core import _atom_render_visible
+        painted = apply_scene_style_overrides({**scene, "draw_atoms": [a for _, a in atom_rows]}, self.style_for_state(state, scene))
+        atom_rows = [(original[0], atom) for original, atom in zip(atom_rows, painted["draw_atoms"]) if _atom_render_visible(atom)]
+        atoms = [atom for _, atom in atom_rows]
         if lo_x <= 0.0 and lo_y <= 0.0 and hi_x >= width and hi_y >= height:
             # Keep the fast full-cell path, but include exact atom targets so
             # this API has the same semantic contract as a small coordinate

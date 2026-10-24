@@ -15,6 +15,7 @@ from typing import Any
 from ..picking import (
     atom_instance_id,
     atom_instance_id_aliases,
+    atom_parent_targets,
     bond_instance_id,
     legacy_atom_target_id,
 )
@@ -35,11 +36,11 @@ ENTITY_FIELDS: dict[str, frozenset[str]] = {
             "representation",
         }
     ),
-    "bond": frozenset({"color", "opacity", "visible", "radius", "thickness", "material"}),
+    "bond": frozenset({"color", "opacity", "visible", "radius", "thickness"}),
     "polyhedron": frozenset({"color", "opacity", "visible", "edge_color", "edge_opacity", "edge_width", "flatshading"}),
     "facet": frozenset({"color", "opacity", "visible", "edge_color", "edge_opacity", "edge_width"}),
-    "geometry": frozenset({"color", "opacity", "visible", "edge_color", "edge_opacity", "edge_width", "flatshading", "material"}),
-    "geometry_entity": frozenset({"color", "opacity", "visible", "edge_color", "edge_opacity", "edge_width", "flatshading", "material"}),
+    "geometry": frozenset({"color", "opacity", "visible", "edge_color", "edge_opacity", "edge_width", "flatshading"}),
+    "geometry_entity": frozenset({"color", "opacity", "visible", "edge_color", "edge_opacity", "edge_width", "flatshading"}),
     "molecule": frozenset({"color", "opacity", "visible"}),
     "part": frozenset({"color", "opacity", "visible"}),
     "morphology": frozenset({"color", "opacity", "visible", "edge_color", "edge_opacity", "edge_width"}),
@@ -117,7 +118,7 @@ _OPACITY_FIELDS = frozenset({"opacity", "edge_opacity"})
 _NON_NEGATIVE_FIELDS = frozenset({"radius", "thickness", "edge_width"})
 _MATERIAL_VALUES = frozenset({"mesh", "flat"})
 _REPRESENTATION_VALUES = frozenset(
-    {"ball", "ball_stick", "space_filling", "stick", "ortep", "wireframe"}
+    {"ball", "ball_stick", "stick", "ortep", "wireframe"}
 )
 _BASIC_RENDER_COLORS = frozenset(
     {
@@ -488,6 +489,8 @@ def resolve_entity_style(
                     local = overrides.get(legacy)
             if not isinstance(local, Mapping):
                 continue
+            if candidate == target_id and _canonical_kind(local.get("kind", kind)) != _canonical_kind(kind):
+                continue
             style = local.get("style") if isinstance(local.get("style"), Mapping) else local
             out.update(_filtered(style, kind))
     return out
@@ -623,19 +626,45 @@ def apply_scene_style_overrides(
 
     raw = style.get("style_overrides") if isinstance(style, Mapping) else None
     overrides = normalize_style_overrides(raw)
-    if not overrides:
+    defaults = (style or {}).get("entity_defaults") or {}
+    palettes = []
+    for field in ("element_colors", "element_colors_light"):
+        values = (style or {}).get(field)
+        palettes.append({str(key): value for key, value in values.items() if _is_render_color(value)} if isinstance(values, Mapping) else {})
+    if any(palettes):
+        # Reuse the scene palette primitive on copies; source atoms/bonds and
+        # cached scene records must remain untouched by appearance edits.
+        from ...scene.style import apply_element_colors
+        scene = {**scene, "draw_atoms": [dict(a) for a in scene.get("draw_atoms") or []],
+                 "bonds": [dict(b) for b in scene.get("bonds") or []]}
+        apply_element_colors(scene, palettes[0], palettes[1])
+    if not overrides and not defaults:
         return dict(scene)
     output = dict(scene)
     atoms = []
+    fragments = scene.get("atom_fragment_labels") or []
     for index, value in enumerate(scene.get("draw_atoms") or []):
         atom = dict(value)
-        override = None
+        # Parent edits are lower priority than exact child fields. Keep the
+        # sparse patch; inheriting a colour must not snapshot an old palette.
+        override = _filtered(_mapping_for_kind(defaults, "atom"), "atom")
+        for key, field in {"color": "_render_color", "opacity": "_render_opacity_scale", "visible": "_render_visible", "material": "_render_material", "representation": "_render_style"}.items():
+            explicit = field in atom and atom[field] is not None
+            if key == "opacity":
+                explicit = atom.get("_render_opacity_group_id") is not None
+            elif key == "visible":
+                explicit = atom.get("_render_visibility_group_id") is not None or atom.get("_render_visible") is False
+            if explicit:
+                override.pop(key, None)
+        parents = atom_parent_targets(atom, fragments[index] if index < len(fragments) else None)
+        for parent in parents:
+            override.update(overrides.get(parent["id"]) or {})
         for target_id in atom_instance_id_aliases(atom, index):
             candidate = overrides.get(target_id)
-            if isinstance(candidate, Mapping):
-                override = candidate
+            if isinstance(candidate, Mapping) and _canonical_kind(candidate.get("kind", "atom")) == "atom":
+                override.update(candidate)
                 break
-        if isinstance(override, Mapping) and _canonical_kind(override.get("kind", "atom")) == "atom":
+        if override:
             if "color" in override:
                 atom["_render_color"] = str(override["color"])
                 atom["_render_color_light"] = str(override["color"])
@@ -646,7 +675,12 @@ def apply_scene_style_overrides(
                 # continuous map's original value.
                 atom["_property_color"] = str(override["property_color"])
                 atom["_property_color_override"] = True
+            if "material" in override:
+                atom["_render_material"] = override["material"]
+            if "representation" in override:
+                atom["_render_style"] = override["representation"]
             if "opacity" in override:
+                atom["_render_opacity_group_id"] = atom_instance_id(atom, index)
                 try:
                     atom["_render_opacity_scale"] = max(0.0, min(1.0, float(override["opacity"])))
                 except (TypeError, ValueError):
@@ -656,8 +690,10 @@ def apply_scene_style_overrides(
             if "radius" in override:
                 try:
                     radius = float(override["radius"])
-                    if radius > 0:
+                    if radius >= 0:
                         atom["atom_radius"] = radius
+                        if radius == 0:
+                            atom["_render_visible"] = False
                 except (TypeError, ValueError):
                     pass
         atoms.append(atom)
@@ -672,7 +708,17 @@ def apply_scene_style_overrides(
     bonds = []
     for index, value in enumerate(scene.get("bonds") or []):
         bond = dict(value)
-        override = overrides.get(bond_instance_id(bond, atoms, index))
+        override = _filtered(_mapping_for_kind(defaults, "bond"), "bond")
+        if bond.get("_render_color"):
+            override.pop("color", None)
+        if bond.get("_render_opacity_group_id") is not None:
+            override.pop("opacity", None)
+        if bond.get("_render_visibility_group_id") is not None or bond.get("_render_visible") is False:
+            override.pop("visible", None)
+        if bond.get("_render_radius_scale", 1) != 1:
+            override.pop("radius", None)
+            override.pop("thickness", None)
+        override.update(overrides.get(bond_instance_id(bond, atoms, index)) or {})
         if isinstance(override, Mapping) and _canonical_kind(override.get("kind", "bond")) == "bond":
             if "color" in override:
                 bond["_render_color"] = str(override["color"])

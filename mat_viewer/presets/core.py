@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Mapping
 import json
 import os
 from typing import Any, Dict, Iterable, Optional
@@ -179,7 +180,7 @@ def _json_safe(value: Any) -> Any:
         return value.tolist()
     if isinstance(value, (np.integer, np.floating)):
         return value.item()
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         return {key: _json_safe(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_json_safe(item) for item in value]

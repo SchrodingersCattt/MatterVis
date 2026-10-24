@@ -1039,24 +1039,43 @@
   function inGraph(target) { return !!(target && target.closest && target.closest("#crystal-graph")); }
 
   // ── Right-click menu (right_click_menu.js) ─────────────────────
-  let lastHovered = null, lastHoverPoint = null, lastClient = {x:0,y:0};
+  let lastHovered = null, lastClient = {x:0,y:0};
   // Keep additive/toggle picks isolated per scene.  A single browser-global
   // list leaked selections from the previous tab into the next tab because
   // the Dash store is only updated after the click callback returns.
   const persistentTargetsByScene = Object.create(null);
+  const pendingSelectionKeysByScene = Object.create(null);
+  function selectionKey(targets) {return (targets||[]).map(t=>t.kind+":"+t.id).sort().join("\n");}
+  function synchronizeSelection(targets, persist) {
+    const sceneId=currentSceneId(),key=sceneSelectionKey(sceneId);
+    persistentTargetsByScene[key]=(targets||[]).slice();
+    window.dispatchEvent(new CustomEvent("mattervis-selection",{detail:{sceneId:sceneId,targets:(targets||[]).slice()}}));
+    if(persist) {
+      pendingSelectionKeysByScene[key]=selectionKey(targets);
+      setDashStore("scene-selection-store",{scene_id:sceneId,targets:targets,mode:"replace",ts:Date.now()});
+    }
+  }
   function invalidateSemanticHover() {
     lastHovered = null;
-    lastHoverPoint = null;
     lastClient = {x:0, y:0};
     // Plotly can retain a recycled payload on the graph node after a full
     // frame replacement. Clear it with the browser-local cache so a later
     // contextmenu cannot revive an object from the previous scene.
     const gd = graphDiv();
-    if (gd) gd._hoverdata = null;
+    if (gd) {
+      gd._hoverdata = null;
+      const canvas = gd.querySelector && gd.querySelector(".mv-focus-canvas");
+      if (canvas) canvas.remove();
+      if (window.MatterVisScenePicking) window.MatterVisScenePicking.invalidate(gd);
+    }
     const tip = document.getElementById("mv-atom-tip");
     if (tip) tip.hidden = true;
     const inspector = document.getElementById("mv-hover-inspector");
     if (inspector) inspector.remove();
+    requestAnimationFrame(function(){
+      const live=graphDiv();
+      if(live && window.MatterVisScenePicking) window.MatterVisScenePicking.paint(live,persistentTargetsForScene(currentSceneId()),null);
+    });
   }
   // Plotly's render gate calls this after a scene/tab replacement. Keeping it
   // public also lets tab intent and camera controls invalidate the hover cache
@@ -1108,8 +1127,9 @@
     }
     if (role === "polyhedron" || meta.spec_id) {
       const subentity = faceIdAt(meta, point);
-      const id = subentity || meta.instance_id || ("polyhedron:"+String(meta.spec_id||"unknown"));
-      return {kind:"polyhedron", id:String(id), spec_id:meta.spec_id||null, subentity_id:subentity};
+      const id = subentity || meta.instance_id;
+      if (!id) return null;
+      return Object.assign({kind:"polyhedron", id:String(id), spec_id:meta.spec_id||null, subentity_id:subentity}, (meta.instance_targets||{})[id]||{});
     }
     if (role === "facet" || role === "morphology") {
       const facetIds = Array.isArray(meta.facet_ids) ? meta.facet_ids : [];
@@ -1119,27 +1139,6 @@
       return {kind:"facet", id:String(id), parent_id:"morphology:bfdh-morphology"};
     }
     return null;
-  }
-  function targetFromSelectionResponse(body, sceneId) {
-    const selection = body && body.selection;
-    const targets = selection && Array.isArray(selection.targets) ? selection.targets : [];
-    const target = targets.find(function (item) {
-      return item && typeof item === "object" && item.kind && item.id;
-    });
-    if (!target) return null;
-    const payload = Object.assign({}, target);
-    if (payload.kind === "atom" && !payload.label && Array.isArray(selection.atom_labels)) {
-      payload.label = selection.atom_labels[0] || "";
-    }
-    if (payload.kind === "atom" && !payload.element && selection.parts && selection.parts[0]) {
-      payload.element = selection.parts[0].elem || "";
-      payload.is_minor = !!selection.parts[0].is_minor;
-      payload.part = selection.parts[0].part || "";
-    }
-    if (sceneId !== null && sceneId !== undefined && sceneId !== "") {
-      payload.scene_id = String(sceneId);
-    }
-    return payload;
   }
   function clearSelectionOutline() {
     const gd = graphDiv();
@@ -1185,8 +1184,21 @@
       const found = persistentTargets.findIndex(function(item){return item.kind===target.kind&&item.id===target.id;});
       if (found >= 0) persistentTargets.splice(found, 1); else persistentTargets.push(target);
     } else persistentTargetsByScene[sceneSelectionKey(sceneId)] = [target];
-    setDashStore("scene-selection-store", {scene_id:sceneId, targets:persistentTargetsForScene(sceneId).slice(), mode:nextMode, ts:Date.now()});
+    const targets = persistentTargetsForScene(sceneId).slice();
+    const gd = graphDiv();
+    if (gd && window.MatterVisScenePicking) window.MatterVisScenePicking.paint(gd, targets, lastHovered);
+    pendingSelectionKeysByScene[sceneSelectionKey(sceneId)]=selectionKey(targets);
+    window.dispatchEvent(new CustomEvent("mattervis-selection", {detail:{sceneId:sceneId,targets:targets}}));
+    const meta=gd && gd.layout && gd.layout.meta || {};
+    setDashStore("scene-selection-store", {scene_id:sceneId, targets:targets, mode:nextMode, target_revision:meta.target_revision, ts:Date.now()});
   }
+  window.MatterVisSemantic = {
+    targetFromPoint: targetFromPoint,
+    select: publishSemanticSelection,
+    selected: function () { return persistentTargetsForScene(currentSceneId()).slice(); },
+    sceneId: currentSceneId,
+    graph: graphDiv,
+  };
   function hoverIsCurrent() {
     if (!lastHovered) return false;
     const scene = currentSceneId();
@@ -1205,6 +1217,8 @@
     });
   }
   function pushTarget(payload) {
+    const gd=graphDiv(),meta=gd && gd.layout && gd.layout.meta || {};
+    payload=Object.assign({target_revision:meta.target_revision},payload);
     if (setDashStore("rightclick-target", payload)) return;
     const input = document.getElementById("rightclick-target-fallback");
     if (input) { input.value = JSON.stringify(payload); input.dispatchEvent(new Event("input",{bubbles:true})); }
@@ -1233,429 +1247,122 @@
     }
     const label = target.label || target.fragment_label || target.spec_id ||
       target.geometry_id || target.id || "";
-    inspector.textContent = String(target.kind || "target") + (label ? " · " + label : "");
+    inspector.textContent = String(target.kind || "target") + (label ? " · " + label : "") +
+      (target.element ? " ("+target.element+")" : "") +
+      (target.part ? " · part "+target.part : "") +
+      (target.miller ? " · ("+target.miller.join(",")+")" : "") +
+      (target.image_shift ? " · image "+target.image_shift : "");
     const x = event && event.clientX !== undefined ? event.clientX : (event && event.x) || lastClient.x;
     const y = event && event.clientY !== undefined ? event.clientY : (event && event.y) || lastClient.y;
     inspector.style.left = (Number(x) + 10) + "px";
     inspector.style.top = (Number(y) + 10) + "px";
   }
-  function clearSelectionIfGraphBackground() {
-    const gd = graphDiv();
-    const hoverdata = gd && gd._hoverdata;
-    // Plotly gl3d does not consistently emit plotly_click for an empty
-    // canvas pixel. Its hover cache is updated on pointer movement, so a
-    // deferred click fallback can distinguish a background click from a
-    // point click and clear the semantic selection reliably.
-    if (!hoverdata || !Array.isArray(hoverdata.points) || !hoverdata.points.length) {
-      const sceneId = currentSceneId();
-      if (persistentTargetsForScene(sceneId).length) publishSemanticSelection(null, "clear");
-    }
-  }
   function bindRightClick() {
     const container = document.getElementById("crystal-graph");
-    if (!container || container.dataset.rcmBound === "1") return;
-    const inner = container.querySelector(".js-plotly-plot");
-    if (!inner || typeof inner.on !== "function") { requestAnimationFrame(bindRightClick); return; }
-    container.dataset.rcmBound = "1";
-    if (typeof inner.on !== "function") {
-      container.dataset.rcmBound = "0";
-      return;
+    const inner = container && container.querySelector(".js-plotly-plot");
+    if (!container || !inner || !window.MatterVisScenePicking) return;
+    function paint() {
+      const gd=graphDiv();
+      if (!gd) return;
+      clearSelectionOutline();
+      window.MatterVisScenePicking.paint(gd,persistentTargetsForScene(currentSceneId()),lastHovered);
     }
-    let plotlyClickObserved = false;
-    let gestureSequence = 0;
-    let activeGestureId = null;
-    let lastPointerGesture = null;
-    let semanticClickGesture = null;
-    let semanticClickAt = 0;
-    let semanticClickPoint = null;
-    // Coordinate picking is asynchronous. Keep a gesture pending until its
-    // preview request settles so the capture-phase background clear cannot
-    // erase a Ctrl/Shift toggle first.
-    let pendingCoordinateGesture = null;
-    const gestureGraceMs = 1000;
-
-    function clearSemanticClickGesture(gestureId) {
-      if (semanticClickGesture !== gestureId) return;
-      semanticClickGesture = null;
-      semanticClickAt = 0;
-      semanticClickPoint = null;
-    }
-
-    function releaseSemanticClickGesture(gestureId) {
-      // A gl3d plotly_click may arrive while the pointer is still held. Keep
-      // ownership through pointerup/click, with a grace period for slower
-      // native gestures.
-      setTimeout(function () {
-        if (semanticClickGesture !== gestureId) return;
-        if (pointerDown && pointerDown.id === gestureId) {
-          releaseSemanticClickGesture(gestureId);
-          return;
-        }
-        if (pendingCoordinateGesture && pendingCoordinateGesture.id === gestureId) {
-          releaseSemanticClickGesture(gestureId);
-          return;
-        }
-        clearSemanticClickGesture(gestureId);
-      }, gestureGraceMs);
-    }
-
-    function finishCoordinateGesture(gestureId) {
-      if (pendingCoordinateGesture && pendingCoordinateGesture.id === gestureId) {
-        pendingCoordinateGesture = null;
-      }
-    }
-
-    function hasPendingCoordinateGesture() {
-      return !!(pendingCoordinateGesture
-        && Date.now() - pendingCoordinateGesture.at < gestureGraceMs * 2);
-    }
-    try {
-      inner.on("plotly_hover", function (ed) {
-        if (ed && ed.points && ed.points.length) {
-          lastHovered = targetFromPoint(ed.points[0]);
-          if (lastHovered) {
-            noteHover(lastHovered);
-            lastHoverPoint = {x:lastClient.x, y:lastClient.y, at:Date.now()};
+    // A Dash remount may replace only the inner graph. Rebind its lifecycle
+    // listener while retaining exactly one container pointer controller.
+    if (!inner.__mvSemanticBound && typeof inner.on === "function") {
+      inner.__mvSemanticBound=true;
+      inner.on("plotly_afterplot",function(){
+        window.MatterVisScenePicking.invalidate(inner);
+        const meta=(inner.layout||{}).meta||{};
+        const authoritative=meta.mv_selection;
+        const key=sceneSelectionKey(currentSceneId());
+        if(Array.isArray(authoritative)) {
+          const pending=pendingSelectionKeysByScene[key];
+          if(pending===undefined || pending===selectionKey(authoritative)) {
+            delete pendingSelectionKeysByScene[key];
+            if(selectionKey(authoritative)!==selectionKey(persistentTargetsForScene(currentSceneId()))) synchronizeSelection(authoritative,false);
           }
-          hoverInspector(lastHovered, lastClient);
         }
+        lastHovered=null;hoverInspector(null);paint();
       });
-      inner.on("plotly_unhover", function () {
-        lastHovered = null;
-        lastHoverPoint = null;
-        hoverInspector(null);
-      });
-      inner.on("plotly_click", function (ed) {
-        const native = ed && ed.event;
-        plotlyClickObserved = true;
-        const recentPointer = lastPointerGesture && Date.now() - lastPointerGesture.at < gestureGraceMs
-          ? lastPointerGesture.id : null;
-        const gestureId = activeGestureId || recentPointer || ++gestureSequence;
-        semanticClickGesture = gestureId;
-        semanticClickAt = Date.now();
-        semanticClickPoint = native && native.clientX !== undefined
-          ? {x:native.clientX, y:native.clientY}
-          : {x:lastClient.x, y:lastClient.y};
-        setTimeout(function () { plotlyClickObserved = false; }, 0);
-        releaseSemanticClickGesture(gestureId);
-        const target = ed && ed.points && ed.points.length ? targetFromPoint(ed.points[0]) : null;
-        if (!target) { publishSemanticSelection(null, "clear"); return; }
-        const pointer = lastPointerGesture && lastPointerGesture.id === gestureId
-          ? lastPointerGesture
-          : pointerDown && pointerDown.id === gestureId ? pointerDown : null;
-        const ctrl = !!(native && (native.ctrlKey || native.metaKey)) || !!(pointer && (pointer.ctrlKey || pointer.metaKey));
-        const shift = !!(native && native.shiftKey) || !!(pointer && pointer.shiftKey);
-        publishSemanticSelection(target, ctrl ? "toggle" : (shift ? "add" : "replace"));
-      });
-    } catch (_) {
-      container.dataset.rcmBound = "0";
-      return;
+      inner.on("plotly_relayout",function(){invalidateSemanticHover();paint();});
     }
-    function handlePointerMove(e) {
-      lastClient = {x:e.clientX, y:e.clientY};
-      if (e.target && e.target.closest && e.target.closest(".mv-canvas-toolbar, .modebar")) return;
-      queueHover(e.clientX, e.clientY);
+    if (container.dataset.rcmBound === "1") return;
+    container.dataset.rcmBound="1";
+    let down=null,secondary=null,pendingContext=false,frame=null,lastCycle=null,cycle=0,ignoreClick=false;
+    function ignored(e) {return e.target && e.target.closest && e.target.closest(".mv-canvas-toolbar,.modebar,.rightclick-menu,.mv-appearance");}
+    function resolve(e,cycling) {
+      const gd=graphDiv();
+      const hits=gd ? window.MatterVisScenePicking.hits(gd,e.clientX,e.clientY) || [] : [];
+      if (!lastCycle || Math.hypot(e.clientX-lastCycle.x,e.clientY-lastCycle.y)>4) cycle=0;
+      else if (cycling && hits.length) cycle=(cycle+1)%hits.length;
+      lastCycle={x:e.clientX,y:e.clientY};
+      return hits[cycle%Math.max(1,hits.length)] || null;
     }
-    /* Plotly emits native mouse events for real input, while automation and
-     * assistive clients often dispatch PointerEvents directly. Keep semantic
-     * hover sampling on both event families so the inspector and context menu
-     * stay in sync with mesh3d depth picking. */
-    container.addEventListener("mousemove", handlePointerMove, {passive:true});
-    container.addEventListener("pointermove", handlePointerMove, {passive:true});
-    function handlePointerLeave() {
-      tipSeq += 1;
-      if (tipTimer) clearTimeout(tipTimer);
-      hideAtomTip();
-      hoverInspector(null);
-    }
-    container.addEventListener("mouseleave", handlePointerLeave);
-    container.addEventListener("pointerleave", handlePointerLeave);
-    function pickRect(clientX, clientY, pad) {
-      /* Selection coordinates are defined in the Plotly viewport.  The
-       * outer crystal-graph also contains toolbars/overlays, so using its
-       * bounds offsets every click and makes the backend miss the projected
-       * atom centre. */
-      const viewportNode = inner || container;
-      const liveViewport = container.querySelector(".js-plotly-plot") || viewportNode;
-      const gr = liveViewport.getBoundingClientRect();
-      const x = clientX - gr.left;
-      const y = clientY - gr.top;
-      return {
-        rect: [x - pad, y - pad, x + pad, y + pad],
-        viewport: [gr.width, gr.height],
-      };
-    }
-    function postSelection(rect, viewport, additive, commit) {
-      return fetch("/api/v2/selection/by_box", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          rect_pixels: rect,
-          viewport_size: viewport,
-          scene_id: currentSceneId(),
-          additive: !!additive,
-          commit: commit !== false,
-        }),
-      }).then(function (response) { return response.json(); });
-    }
-    let tipSeq = 0;
-    let tipTimer = null;
-    function atomTip() {
-      let tip = document.getElementById("mv-atom-tip");
-      if (tip) return tip;
-      tip = document.createElement("div");
-      tip.id = "mv-atom-tip";
-      tip.hidden = true;
-      document.body.appendChild(tip);
-      return tip;
-    }
-    function hideAtomTip() {
-      const tip = document.getElementById("mv-atom-tip");
-      if (tip) tip.hidden = true;
-    }
-    function showAtomTip(clientX, clientY, selection) {
-      const tip = atomTip();
-      const part = (selection && selection.parts && selection.parts[0]) || {};
-      const label = (selection && selection.atom_labels && selection.atom_labels[0]) || "";
-      if (!label) { tip.hidden = true; return; }
-      const disorder = part.part ? " · " + part.part : (part.is_minor ? " · minor" : "");
-      tip.textContent = label + (part.elem ? " (" + part.elem + ")" : "") + disorder;
-      tip.style.left = (clientX + 14) + "px";
-      tip.style.top = (clientY + 16) + "px";
-      tip.hidden = false;
-      // The atom tip is the authoritative hover label for coordinate hits;
-      // remove a semantic inspector that may have been painted first.
-      hoverInspector(null);
-    }
-    function queueHover(clientX, clientY) {
-      const seq = ++tipSeq;
-      if (tipTimer) clearTimeout(tipTimer);
-      tipTimer = setTimeout(function () {
-        const picked = pickRect(clientX, clientY, 14);
-        postSelection(picked.rect, picked.viewport, false, false).then(function (body) {
-          if (seq !== tipSeq) return;
-          showAtomTip(clientX, clientY, body && body.selection);
-        }).catch(function () {});
-      }, 90);
-    }
-    let pointerDown = null;
-    let lastPrimaryPick = null;
-    function primaryPick(e, gestureId) {
-      if ((e.button !== undefined && e.button !== 0) || e.altKey) return;
-      if (e.target && e.target.closest && e.target.closest(".mv-canvas-toolbar, .modebar, .rightclick-menu")) return;
-      const now = Date.now();
-      if (!gestureId) {
-        const recentPointer = lastPointerGesture && now - lastPointerGesture.at < gestureGraceMs &&
-          Math.abs(lastPointerGesture.x - e.clientX) < 1 &&
-          Math.abs(lastPointerGesture.y - e.clientY) < 1;
-        const recentSemantic = semanticClickGesture && semanticClickPoint &&
-          now - semanticClickAt < gestureGraceMs &&
-          Math.abs(semanticClickPoint.x - e.clientX) < 1 &&
-          Math.abs(semanticClickPoint.y - e.clientY) < 1;
-        gestureId = activeGestureId || (recentPointer ? lastPointerGesture.id : null) ||
-          (recentSemantic ? semanticClickGesture : null) || ++gestureSequence;
+    container.addEventListener("pointermove",function(e){
+      if(ignored(e)) return;
+      lastClient={x:e.clientX,y:e.clientY};
+      if(e.buttons){
+        if(down && Math.hypot(e.clientX-down.x,e.clientY-down.y)>4) down.moved=true;
+        if(secondary && Math.hypot(e.clientX-secondary.x,e.clientY-secondary.y)>4) secondary.moved=true;
+        invalidateSemanticHover();return;
       }
-      /* A native click follows pointerup for one gesture. Keep the id across
-       * both events and defer the coordinate fallback so Plotly's custom
-       * plotly_click handler can claim the gesture first. */
-      if (lastPrimaryPick && lastPrimaryPick.id === gestureId) return;
-      lastPrimaryPick = {id:gestureId, at:now, x:e.clientX, y:e.clientY};
-      const picked = pickRect(e.clientX, e.clientY, 14);
-      pendingCoordinateGesture = {
-        id: gestureId,
-        at: now,
-        ctrlKey: !!e.ctrlKey || !!e.metaKey,
-        shiftKey: !!e.shiftKey,
-      };
-      const schedule = window.requestAnimationFrame || function (callback) { setTimeout(callback, 0); };
-      schedule(function () {
-        setTimeout(function () {
-        if (semanticClickGesture === gestureId) {
-          finishCoordinateGesture(gestureId);
-          return;
-        }
-        // Coordinate picking is a preview. Publish the resulting atom target
-        // through the semantic store so it cannot overwrite a non-atom target
-        // and Ctrl/Cmd uses the same toggle path as Plotly clicks.
-        postSelection(picked.rect, picked.viewport, false, false).then(function (body) {
-          // A newer pointer gesture owns the selection now. Do not let a
-          // slower preview response from an older click overwrite it.
-          if (gestureSequence !== gestureId) {
-            finishCoordinateGesture(gestureId);
-            return;
-          }
-          const selection = body && body.selection;
-          const semanticTargets = selection && selection.targets || [];
-          const atomTarget = semanticTargets.find(function (item) { return item && item.kind === "atom"; });
-          if (!atomTarget) {
-            publishSemanticSelection(null, "clear");
-            finishCoordinateGesture(gestureId);
-            return;
-          }
-          const mode = e.ctrlKey || e.metaKey ? "toggle" : (e.shiftKey ? "add" : "replace");
-          publishSemanticSelection(atomTarget, mode);
-          finishCoordinateGesture(gestureId);
-        }).catch(function () {
-          finishCoordinateGesture(gestureId);
-        });
-        }, 50);
+      if(frame) cancelAnimationFrame(frame);
+      const scene=currentSceneId(),gd=graphDiv(),generation=gd && gd.__mvGraphGeneration;
+      frame=requestAnimationFrame(function(){
+        frame=null;
+        if(scene!==currentSceneId() || gd!==graphDiv() || generation!==gd.__mvGraphGeneration) return;
+        const target=resolve(e,false);noteHover(target);
+        hoverInspector(target,e);paint();
       });
-    }
-    container.addEventListener("pointerdown", function (e) {
-      if (e.button === undefined || e.button === 0) {
-        const id = ++gestureSequence;
-        if (semanticClickGesture !== null && semanticClickGesture !== id) {
-          clearSemanticClickGesture(semanticClickGesture);
-        }
-        plotlyClickObserved = false;
-        activeGestureId = id;
-        pointerDown = {
-          x:e.clientX,
-          y:e.clientY,
-          id:id,
-          ctrlKey:!!e.ctrlKey,
-          metaKey:!!e.metaKey,
-          shiftKey:!!e.shiftKey,
-        };
-      }
-    }, {passive:true});
-    container.addEventListener("pointerup", function (e) {
-      if (!pointerDown) return;
-      const moved = Math.hypot(e.clientX - pointerDown.x, e.clientY - pointerDown.y);
-      const gesture = pointerDown;
-      lastPointerGesture = {
-        id:gesture.id,
-        at:Date.now(),
-        x:e.clientX,
-        y:e.clientY,
-        moved:moved > 4,
-        ctrlKey:!!e.ctrlKey,
-        metaKey:!!e.metaKey,
-        shiftKey:!!e.shiftKey,
-      };
-      pointerDown = null;
-      if (moved <= 4) primaryPick(e, gesture.id);
-      setTimeout(function () {
-        if (activeGestureId === gesture.id) activeGestureId = null;
-      }, 0);
+    },{passive:true});
+    container.addEventListener("pointerleave",function(){
+      if(frame) cancelAnimationFrame(frame);frame=null;
+      invalidateSemanticHover();paint();
     });
-    container.addEventListener("click", function (e) {
-      /* Synthetic click events do not always populate ``button``. Treat an
-       * omitted value as the normal primary click while still ignoring an
-       * explicit secondary/middle button. */
-      const recentPointer = lastPointerGesture
-        && Date.now() - lastPointerGesture.at < gestureGraceMs
-        && Math.abs(lastPointerGesture.x - e.clientX) < 1
-        && Math.abs(lastPointerGesture.y - e.clientY) < 1
-        ? lastPointerGesture : null;
-      if (recentPointer && recentPointer.moved) return;
-      primaryPick(e);
+    container.addEventListener("pointerdown",function(e){
+      if(ignored(e)) return;
+      if(e.button===2){secondary={x:e.clientX,y:e.clientY,scene:currentSceneId(),moved:false};pendingContext=false;return;}
+      secondary=null;pendingContext=false;
+      if(e.button!==0) return;
+      down={x:e.clientX,y:e.clientY,scene:currentSceneId(),gd:graphDiv(),moved:false};
+    },{passive:true});
+    function select(e){
+      const target=resolve(e,!!e.altKey);
+      publishSemanticSelection(target,target ? (e.ctrlKey||e.metaKey ? "toggle" : e.shiftKey ? "add" : "replace") : "clear");
+    }
+    container.addEventListener("pointerup",function(e){
+      if(secondary){const gesture=secondary;secondary=null;if(pendingContext && !gesture.moved && gesture.scene===currentSceneId()) openContext(e);pendingContext=false;return;}
+      if(!down) return;
+      const gesture=down;down=null;ignoreClick=true;
+      setTimeout(function(){ignoreClick=false;},0);
+      if(ignored(e) || gesture.moved || Math.hypot(e.clientX-gesture.x,e.clientY-gesture.y)>4 ||
+          gesture.scene!==currentSceneId() || gesture.gd!==graphDiv()) return;
+      select(e);
     });
-    container.addEventListener("click", function (e) {
-      if (e.defaultPrevented) return;
-      setTimeout(function () {
-        // A point click is delivered through Plotly's custom event rather
-        // than the DOM event. Avoid clearing a fresh semantic pick.
-        const recentPointer = lastPointerGesture
-          && Date.now() - lastPointerGesture.at < gestureGraceMs
-          && Math.abs(lastPointerGesture.x - e.clientX) < 1
-          && Math.abs(lastPointerGesture.y - e.clientY) < 1
-          ? lastPointerGesture : null;
-        const modifier = !!(e.ctrlKey || e.metaKey || e.shiftKey)
-          || !!(recentPointer && (recentPointer.ctrlKey || recentPointer.metaKey || recentPointer.shiftKey));
-        if (plotlyClickObserved || hasPendingCoordinateGesture() || modifier
-          || !!(recentPointer && recentPointer.moved)) {
-          plotlyClickObserved = false;
-          return;
-        }
-        clearSelectionIfGraphBackground();
-      }, 0);
-    }, true);
-    container.addEventListener("mousemove", function (e) { lastClient = {x:e.clientX, y:e.clientY}; }, {passive:true});
-    container.addEventListener("contextmenu", function (e) {
-      const sceneId = currentSceneId();
-      // ``contextmenu`` may be synthesized without a preceding mousemove.
-      // Always use its own coordinates for the fallback request; carrying a
-      // previous pointer position can resolve a completely different atom.
-      const x = Number(e.clientX);
-      const y = Number(e.clientY);
-      let current = lastHovered;
-      const cachedHover = lastHoverPoint;
-      // A missing cache is stale.  The graph node may still expose an old
-      // ``_hoverdata`` payload after Plotly recycled it, and accepting that
-      // payload when ``lastHoverPoint`` is null reopens a prior target.
-      const cachedHoverFresh = !!cachedHover &&
-        (Date.now() - cachedHover.at <= 250 &&
-         Math.hypot(x - Number(cachedHover.x || 0), y - Number(cachedHover.y || 0)) <= 64);
-      // Plotly can retain a hover payload after the pointer moved away. Never
-      // use one older than a quarter second for a context-menu action.
-      if (lastHoverPoint && Date.now() - lastHoverPoint.at > 250) current = null;
-      // The graph's hover cache describes the pointer location more reliably
-      // than the browser event ordering around contextmenu. Prefer it when it
-      // contains a semantic point, even if lastHovered came from an earlier
-      // Plotly hover callback.
-      const gd = graphDiv();
-      const hoverdata = gd && gd._hoverdata;
-      if (hoverdata && hoverdata.points && hoverdata.points.length) {
-        const liveTarget = targetFromPoint(hoverdata.points[0]);
-        if (liveTarget && cachedHoverFresh) {
-          // Stamp the cache-derived target so the scene/generation guard below
-          // applies to the same object that is actually under the pointer.
-          noteHover(liveTarget);
-          lastHoverPoint = {x:x, y:y, at:Date.now()};
-          current = lastHovered;
-        } else current = null;
-      }
-      // A context menu can arrive without a fresh hover callback (for
-      // example after a fast pointer move). Do not reuse the previous target
-      // when the pointer is clearly elsewhere; the coordinate preview below
-      // resolves the atom at the actual context-menu location.
-      if (current && lastHoverPoint &&
-          Math.hypot(x - Number(lastHoverPoint.x || 0), y - Number(lastHoverPoint.y || 0)) > 64) {
-        current = null;
-      }
-      if (current && hoverIsCurrent()) {
-        e.preventDefault();
-        pushTarget({kind:current.kind, payload:current, scene_id:sceneId, x:x, y:y, ts:Date.now()});
-        return;
-      }
-      // With no usable Plotly hover payload, retain the coordinate picker as
-      // a right-click fallback so an atom can still open the menu without a
-      // preceding hover event.
+    container.addEventListener("pointercancel",function(){down=null;secondary=null;pendingContext=false;invalidateSemanticHover();paint();});
+    container.addEventListener("click",function(e){
+      // Keyboard/assistive synthetic clicks have no pointerup. Ordinary
+      // mouse clicks have already been handled by the pointer controller.
+      if(!ignoreClick && e.detail===0 && !ignored(e)) select(e);
+    });
+    function openContext(e) {
+      const target=resolve(e,!!e.altKey);
+      pushTarget({kind:target?target.kind:"_global",payload:target,scene_id:currentSceneId(),x:e.clientX,y:e.clientY,ts:Date.now()});
+      if(target) publishSemanticSelection(target,"replace");
+    }
+    container.addEventListener("contextmenu",function(e){
+      if(ignored(e)) return;
       e.preventDefault();
-      const picked = pickRect(x, y, 14);
-      // This is a preview only. Right-click opens a menu and must not replace
-      // the persistent selection before the user chooses a menu action.
-      postSelection(picked.rect, picked.viewport, false, false).then(function (body) {
-        const target = targetFromSelectionResponse(body, sceneId);
-        const selection = body && body.selection;
-        const labels = selection && selection.atom_labels || [];
-        const parts = selection && selection.parts || [];
-        const part = parts[0] || {};
-        const payload = target || (labels.length ? {
-          kind: "atom",
-          label: labels[0],
-          is_minor: !!part.is_minor,
-          part: part.part || "",
-          scene_id: sceneId,
-        } : null);
-        pushTarget({kind: payload ? payload.kind : "_global", payload: payload, scene_id: sceneId, x:x, y:y, ts:Date.now()});
-      }).catch(function () {
-        pushTarget({kind:"_global", payload:null, scene_id:sceneId, x:x, y:y, ts:Date.now()});
-      });
+      // Chromium may fire contextmenu on right-button down. Wait for release
+      // so a pan cannot publish an accidental pick or open a menu mid-drag.
+      if(secondary){pendingContext=true;return;}
+      openContext(e);
     });
-    document.addEventListener("click", function (e) {
-      const menu = document.getElementById("rightclick-menu");
-      if (!menu || menu.classList.contains("rightclick-menu--hidden")) return;
-      if (menu.contains(e.target)) return;
-      pushTarget({kind:"_close", ts:Date.now()});
-    }, true);
-    document.addEventListener("keydown", function (e) {
-      if (e.key !== "Escape") return;
-      const menu = document.getElementById("rightclick-menu");
-      if (!menu || menu.classList.contains("rightclick-menu--hidden")) return;
-      pushTarget({kind:"_close", ts:Date.now()});
-    });
+    document.addEventListener("click",function(e){
+      const menu=document.getElementById("rightclick-menu");
+      if(menu && !menu.classList.contains("rightclick-menu--hidden") && !menu.contains(e.target)) pushTarget({kind:"_close",ts:Date.now()});
+    },true);
   }
 
   // ── Keyboard shortcuts (keyboard_shortcuts.js) ──────────────────
@@ -1719,7 +1426,7 @@
       if (overlay) return overlay;
       overlay = document.createElement("div");
       overlay.className = "mv-box-select";
-      overlay.style.cssText = "position:fixed;border:1px solid #FFD24A;background:rgba(255,210,74,0.18);pointer-events:none;z-index:9999";
+      overlay.style.cssText = "position:fixed;border:1px solid #74808c;background:rgba(116,128,140,0.12);pointer-events:none;z-index:9999";
       document.body.appendChild(overlay);
       return overlay;
     }
@@ -1733,7 +1440,7 @@
     }
     function begin(e) {
       if (start || !e.shiftKey || (e.button !== undefined && e.button !== 0)) return;
-      if (e.target && e.target.closest && e.target.closest(".mv-canvas-toolbar, .modebar")) return;
+      if (e.target && e.target.closest && e.target.closest(".mv-canvas-toolbar, .modebar, .mv-appearance")) return;
       start = {clientX:e.clientX, clientY:e.clientY};
       start.additive = true;
       start.pointerId = e.pointerId;
@@ -1754,7 +1461,22 @@
       const additive = !!start.additive;
       start = null;
       if (!cancelled && Math.abs(rect[2]-rect[0])>=4 && Math.abs(rect[3]-rect[1])>=4) {
-        setDashStore("rightclick-target", {kind:"_global", action:"select_box", source:"shift-drag", rect_pixels:rect, viewport_size:[gr.width,gr.height], additive:additive, scene_id:currentSceneId(), ts:Date.now()});
+        const api=window.MatterVisScenePicking,gd=graphDiv(),index=api&&gd&&api.index(gd);
+        if(index) {
+          const loX=Math.min(rect[0],rect[2])+gr.left,hiX=Math.max(rect[0],rect[2])+gr.left;
+          const loY=Math.min(rect[1],rect[3])+gr.top,hiY=Math.max(rect[1],rect[3])+gr.top;
+          const targets=additive ? persistentTargetsForScene(currentSceneId()).slice() : [];
+          const ids=new Set(targets.map(t=>t.kind+":"+t.id));
+          index.primitives.forEach(p=>{
+            if(p.type!=="atom" || p.p[0]<loX || p.p[0]>hiX || p.p[1]<loY || p.p[1]>hiY) return;
+            const key=p.target.kind+":"+p.target.id;if(!ids.has(key)){targets.push(p.target);ids.add(key);}
+          });
+          synchronizeSelection(targets,true);api.paint(gd,targets,null);
+        }
+      } else if(!cancelled) {
+        const gd=graphDiv(),api=window.MatterVisScenePicking;
+        const targets=api&&gd&&api.hits(gd,e.clientX,e.clientY);
+        if(targets&&targets[0]) publishSemanticSelection(targets[0],"add");
       }
       e.preventDefault(); e.stopPropagation();
     }

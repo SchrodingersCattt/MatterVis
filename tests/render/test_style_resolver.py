@@ -80,7 +80,6 @@ def test_style_override_normalization_drops_illegal_colors_and_style_values():
     assert normalized["mesh-1"] == {
         "kind": "geometry",
         "edge_color": "#abc",
-        "material": "mesh",
         "flatshading": False,
     }
     # Bare hexadecimal strings and arbitrary CSS values are not accepted

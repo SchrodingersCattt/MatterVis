@@ -92,6 +92,8 @@ def atom_instance_id(atom: Mapping[str, Any], display_index: int | None = None) 
         or atom.get("disorder_group")
         or atom.get("dg")
     )
+    if not disorder and atom.get("part") not in (None, "", ".", 0, "0"):
+        disorder = atom["part"]
     parts = [f"source:{_token(source)}"]
     include_symmetry = bool(atom.get("_symmetry_scope"))
     if not include_symmetry and symmetry not in (None, ""):
@@ -120,6 +122,29 @@ def atom_instance_id(atom: Mapping[str, Any], display_index: int | None = None) 
     if disorder not in (None, "", "."):
         parts.append(f"disorder:{_token(disorder)}")
     return "atom:" + "|".join(parts)
+
+
+def atom_parent_targets(atom: Mapping[str, Any], fragment_label: Any = None) -> list[dict[str, Any]]:
+    """Use loader molecule membership, preserving image/symmetry/disorder scope.
+
+    No connectivity is inferred here. A missing molecule/fragment means no
+    selectable parent, rather than one accidental scene-wide anonymous group.
+    """
+    molecule = atom.get("_source_molecule_index")
+    if molecule is None:
+        molecule = atom.get("_molecule_index", fragment_label)
+    if molecule in (None, ""):
+        return []
+    provenance = atom_instance_id(atom).split("|", 1)
+    suffix = "|" + provenance[1] if len(provenance) > 1 else ""
+    # Disorder belongs to the part, not the containing molecule.
+    suffix = "|".join(token for token in suffix.split("|") if not token.startswith("disorder:"))
+    molecule_id = f"molecule:{_token(molecule)}{suffix}"
+    result = [{"kind": "molecule", "id": molecule_id, "label": str(fragment_label or molecule)}]
+    part = atom.get("part") or atom.get("disorder_group") or atom.get("disorder_assembly")
+    if part not in (None, "", "."):
+        result.append({"kind": "part", "id": f"{molecule_id}|part:{_token(part)}", "parent_id": molecule_id, "label": str(part)})
+    return result
 
 
 def legacy_atom_instance_id(
@@ -363,7 +388,7 @@ def normalize_target(raw: Any) -> dict[str, Any] | None:
     )
     # Keep useful identity fields at the top level for old right-click code and
     # human-readable inspectors while treating ``id`` as the canonical key.
-    for key in ("label", "element", "fragment_label", "spec_id", "miller", "source_index", "image_shift"):
+    for key in ("label", "element", "fragment_label", "spec_id", "miller", "source_index", "image_shift", "part", "disorder_group", "is_minor"):
         if key in raw:
             value[key] = raw[key]
     return value

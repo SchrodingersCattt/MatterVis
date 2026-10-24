@@ -114,3 +114,104 @@ occluder themselves. Thin bonds use a smaller pick tolerance than atoms and
 faces so a broad marker cannot steal a click at an atom centre. The policy is
 backend-neutral and can be reused by browser fixtures or a future native
 renderer without depending on Plotly internals.
+
+## Selection / Appearance inspector
+
+A viewport click opens **Selection / Appearance**. Its default scope is the
+selected visible instances. Color, opacity, visibility, atom radius/material/
+representation and surface edge controls are offered according to the shared
+capability intersection. A mixed atom/surface selection cannot edit atom radius.
+Changing an input automatically saves a sparse edit after a 300 ms pause and
+adds an Undo entry. **Apply** saves immediately. **Undo**, each field's
+inherit button and **Reset all local overrides** use the same override API.
+
+The scope menu can edit a containing molecule/disorder part, all source copies,
+those copies under the same symmetry operation, one polyhedron spec, facets with
+the same signed Miller index, or the whole morphology. **Select edited target** promotes a parent scope into the persistent selection;
+**Back to picked child** returns to the original pick. Scope expansion is a
+read-only preview until an appearance edit is applied. It enumerates concrete
+IDs and shows the affected count. A source scope does not silently become the
+default for later instance edits.
+
+`Alt`-click cycles the depth-valid targets at the pixel. Opaque objects cut off
+objects behind them; translucent surfaces allow cycling to objects underneath.
+Ties use kind priority and canonical identity, independent of trace order.
+Shift-drag selects the visible atom centres in the rectangle using the same
+live camera as individual picks. Orbit/pan gestures and cancelled pointers do
+not produce clicks.
+
+### API examples
+
+```python
+# Python: sparse intent, independent of transient selection.
+backend.set_style_override(atom_id, "atom", {"color": "#aa6688", "opacity": 0.6})
+backend.reset_style_override(atom_id, field="color")  # latest inherited color
+backend.set_style_overrides(targets, {"opacity": 0.5})  # validates intersection
+report = backend.inspect_appearance(targets)
+preview = backend.expand_selection_scope(targets[0], "source", commit=False)
+```
+
+`POST /api/v2/selection/appearance` accepts `{"targets": [...]}` and returns
+`items` (target, effective fields, explicit overrides, affected count and
+supported fields), the common `supported_fields`, `target_revision`, and
+`discarded_targets`. It does not mutate selection. `POST /selection/scope`
+also accepts `commit: false` for read-only scope previews.
+
+A style PATCH may include `target_revision` from the inspector report. A changed
+structure/display identity returns HTTP 409 and asks the caller to pick again.
+Undo sends the revision captured with the original edit, so it cannot restore
+obsolete targets after geometry changes. Cosmetic selection changes do not
+invalidate this revision. Structure changes
+clear old source-ordinal edits, even if the new structure also has an atom with
+source index zero. Removed target IDs are reported by the appearance endpoint
+and `GET /style_overrides` rather than reassigned to another object.
+
+### One per-property inheritance contract
+
+| Layer | Atom / bond | Surfaces |
+|---|---|---|
+| Palette and renderer defaults | Element/property colors and scene material | Existing geometry, topology and BFDH defaults |
+| `entity_defaults` | Optional per-kind sparse defaults | Optional per-kind sparse defaults |
+| Ordered rules | `atom_groups` / `bond_groups`, later matching fields win | Explicit geometry fields, polyhedron spec/instance paint, BFDH scene palette |
+| Declared parent overrides | Molecule, then disorder part | Whole morphology, then facet |
+| Exact target override | Exact displayed atom or bond ID | Polyhedron instance, facet ID or caller geometry ID |
+| Interaction emphasis | Browser-local neutral contour | Browser-local neutral edges/contour |
+
+Fields inherit independently. An explicit solid color takes priority over a
+continuous property color map on that target; resetting Color restores the
+current property map/group/palette, without restoring an old snapshot. A child
+color override can coexist with inherited part opacity. No-op edits neither
+create a color snapshot nor schedule an extra state update.
+
+`entity_defaults` is per-scene Display intent, for example
+`{"atom":{"opacity":0.8},"geometry":{"edge_width":1.5}}`. The existing global
+palette/style controls and explicit group/spec fields retain their established
+contracts. Unsupported fields are rejected on mutation and removed from
+malformed persisted overrides. In particular generic Plotly meshes and bonds
+do not expose a per-object `material` switch; atoms support `mesh`/`flat` and
+the existing `ball`, `ball_stick`, `stick`, `ortep`, `wireframe` representations.
+
+Caller mesh entities can also be persisted as `geometry_entities` through
+`POST /api/v2/state`, using the same mesh payload as the Python geometry API.
+They remain Display data. Styling, selection and serialization do not edit
+coordinates, connectivity, source molecules or topology results.
+
+### Rendering and exports
+
+The browser projects visible atom radii, complete bond segments and mesh
+triangles into a screen grid using Plotly's current model/view/projection
+matrices. Triangle ownership remains intact in batched polyhedra and BFDH
+facets. Hover performs no REST/Dash request and never restyles base materials.
+A single pointer-transparent canvas carries the temporary neutral contours.
+Graph replacement, scene switches and camera changes invalidate this index.
+
+Saved overrides are honored by `build_figure(scene, style)` and the Plotly
+`render(scene, style).save(...)` / existing CLI preset route. Static exports
+omit picking traces, triangle ownership maps and selection metadata. Direct
+`build_figure(..., include_interaction_traces=False, style={..., "show_selection":
+True})` can explicitly request a diagnostic selection outline; the save API's
+`include_interaction_traces=True` remains the diagnostic escape hatch.
+
+Paint edits use the existing asynchronous frame/trace pipeline and cached
+coordination geometry. They do not run topology in pointer callbacks or replace
+camera ownership. Representation edits may rebuild atom render partitions.

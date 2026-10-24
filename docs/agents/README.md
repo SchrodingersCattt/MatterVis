@@ -71,6 +71,7 @@ The same routing as a quick table:
 | Use the optional native offscreen GPU PNG backend | [`gpu_backend.md`](gpu_backend.md) |
 | Read or override global MatterVis defaults | [`config_api.md`](config_api.md) |
 | Select atoms/fragments in the live viewer and promote a selection to a group | [`selection_api.md`](selection_api.md) |
+| Pick visible atoms, bonds, polyhedron/mesh faces and BFDH facets; edit selected appearance with per-property inheritance | [`selection_api.md`](selection_api.md) |
 
 ## Repo ownership for agents
 

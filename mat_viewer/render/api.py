@@ -134,6 +134,7 @@ def _static_export_dict(
             "face_ordinals",
             "vertex_face_ids",
             "face_ranges",
+            "instance_targets",
         }
     )
     for trace in output.get("data") or []:
@@ -163,6 +164,9 @@ def _static_export_dict(
                 continue
         traces.append(trace)
     output["data"] = traces
+    layout = output.get("layout")
+    if isinstance(layout, dict) and isinstance(layout.get("meta"), dict) and "mv_selection" in layout["meta"]:
+        output["layout"] = {**layout, "meta": {key: value for key, value in layout["meta"].items() if key != "mv_selection"}}
     return output
 
 

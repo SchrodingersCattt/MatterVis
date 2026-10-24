@@ -41,6 +41,9 @@ def _dispatch_rightclick_action(
         origin = payload.get("scene_id")
     if origin and scene_id and str(origin) != str(scene_id):
         return
+    expected = target.get("target_revision") if isinstance(target, dict) else None
+    if expected is not None and str(expected) != str(backend.get_state(scene_id).get("target_revision", 0)):
+        return
     if action in ("supercell_2x", "supercell_clear"):
         n = 2 if action == "supercell_2x" else 1
         if n == 1:
@@ -95,6 +98,22 @@ def _dispatch_rightclick_action(
         # ``R`` were handled above; everything else needs a target.
         return
 
+    # Canonical picks operate on the same exact identity as the inspector.
+    # Label-only callers below retain their documented legacy group scope.
+    from ..render.picking import normalize_target
+    semantic = normalize_target(payload)
+    if semantic and action in {"hide", "set_color"}:
+        patch = {"visible": False} if action == "hide" else {"color": color}
+        if action == "hide" or color:
+            backend.set_style_override(semantic["id"], semantic["kind"], patch, scene_id=scene_id)
+        return
+    if semantic and action in {"select", "select_add", "select_toggle", "select_remove"}:
+        if action == "select_remove":
+            current = backend.get_selection(scene_id).get("targets") or []
+            backend.set_target_selection([t for t in current if (t["kind"],t["id"]) != (semantic["kind"],semantic["id"])], scene_id=scene_id)
+        else:
+            backend.set_target_selection([semantic], scene_id=scene_id, additive=action=="select_add", toggle=action=="select_toggle")
+        return
     if action in {"select", "select_add", "select_toggle", "select_remove"}:
         label = payload.get("label")
         if not label:

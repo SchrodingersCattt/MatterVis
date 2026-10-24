@@ -639,232 +639,86 @@ async function scanCanvas(page, callback, options) {
 }
 
 async function runSemanticPick(page) {
-  await clickTab(page, structure || "ionic_nacl");
   await graphReady(page);
-
-  // SwiftShader does not consistently emit Plotly's gl3d click event for an
-  // atom. Find a point through the coordinate hover endpoint and click it as
-  // a real browser gesture.
-  const atomHit = await scanCanvas(page, async (x, y) => {
-    return page.evaluate(({x: expectedX, y: expectedY}) => {
-      const tip = document.getElementById("mv-atom-tip");
-      const text = String((tip && tip.textContent) || "").trim();
-      if (!tip || tip.hidden || !text) return null;
-      const rect = tip.getBoundingClientRect();
-      return Math.abs(rect.left - expectedX - 14) < 24 && Math.abs(rect.top - expectedY - 16) < 24 ? text : null;
-    }, {x, y});
-  });
-  if (!atomHit) fail("could not hover an atom long enough to show #mv-atom-tip");
-  const atomLabel = String(atomHit.result).split(" (")[0].trim();
-  await page.mouse.click(atomHit.x, atomHit.y);
-  await page.waitForFunction(async (label) => {
-    const response = await fetch("/api/v2/selection", {cache: "no-store"});
-    if (!response.ok) return false;
-    const body = await response.json();
-    const labels = body && body.selection && body.selection.atom_labels;
-    const targets = body && body.selection && body.selection.targets;
-    return Array.isArray(labels) && labels.includes(label)
-      && Array.isArray(targets) && targets.some((target) => target && target.kind === "atom");
-  }, atomLabel, {timeout: 20000});
-
-  // Selection is a persistent visual cue, not just a server-side label
-  // update. The outline trace should contain geometry for the selected atom
-  // after the asynchronous figure refresh settles.
-  await page.waitForFunction((label) => {
-    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
-    return Array.isArray(gd && gd.data) && gd.data.some((trace) => {
-      const meta = trace && trace.meta || {};
-      const role = String(meta.mv_role || meta.kind || "").toLowerCase();
-      const name = String(trace && trace.name || "").toLowerCase();
-      const x = Array.isArray(trace && trace.x) ? trace.x : [];
-      return (role === "selection" || name === "selection-outline")
-        && trace.visible !== false && x.length > 0;
-    });
-  }, atomLabel, {timeout: 20000});
-
-  // Esc clears both the local target cache and the persisted selection. This
-  // catches the race where a stale outline used to remain until the next
-  // figure update.
-  await page.keyboard.press("Escape");
-  await page.waitForFunction(async () => {
-    const response = await fetch("/api/v2/selection", {cache: "no-store"});
-    if (!response.ok) return false;
-    const body = await response.json();
-    const selection = body && body.selection;
-    return Array.isArray(selection && selection.atom_labels)
-      && selection.atom_labels.length === 0
-      && Array.isArray(selection && selection.targets)
-      && selection.targets.length === 0;
-  }, null, {timeout: 20000});
-  await page.waitForFunction(() => {
-    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
-    return !Array.isArray(gd && gd.data) || !gd.data.some((trace) => {
-      const meta = trace && trace.meta || {};
-      const role = String(meta.mv_role || meta.kind || "").toLowerCase();
-      const name = String(trace && trace.name || "").toLowerCase();
-      const x = Array.isArray(trace && trace.x) ? trace.x : [];
-      return (role === "selection" || name === "selection-outline")
-        && trace.visible !== false && x.length > 0;
-    });
-  }, null, {timeout: 20000});
-
-  // The first graph frame can arrive before the semantic selection overlay
-  // lands. Give that render a bounded chance to settle before scanning the
-  // WebGL hover cache.
-  try {
-    await page.waitForFunction(() => {
-      const gd = document.querySelector("#crystal-graph .js-plotly-plot");
-      return Array.isArray(gd && gd.data) && gd.data.some((trace) => {
-        const meta = trace && trace.meta || {};
-        const role = String(meta.mv_role || meta.kind || "").toLowerCase();
-        const rows = Array.isArray(trace && trace.customdata) ? trace.customdata : [];
-        return role === "polyhedron" || role === "facet" || role === "morphology"
-          || role === "bond_selection"
-          || (role === "geometry_entity" && String(meta.source || "") === "bfdh_morphology")
-          || rows.some((row) => Array.isArray(row)
-            && (row[0] === "polyhedron" || row[0] === "facet" || row[0] === "bond"));
-      });
-    }, {timeout: 20000});
-  } catch (_) {
-    // Keep the diagnostic below: a missing semantic trace is a real regression
-    // even after the async render grace period.
-  }
-
-  // Prefer a real hover on any non-atom semantic trace (polyhedron, facet, or
-  // bond), and read Plotly's hover cache after each move so this remains a
-  // native click.
-  let nonAtomHit = await scanCanvas(page, async () => {
-    return page.evaluate(() => {
-      const gd = document.querySelector("#crystal-graph .js-plotly-plot");
-      const points = gd && gd._hoverdata && gd._hoverdata.points;
-      if (!Array.isArray(points)) return null;
-      const point = points.find((item) => {
-        const cd = item && item.customdata;
-        const trace = item && (item.data || item.fullData || {});
-        const meta = trace && trace.meta;
-        const role = String((meta && (meta.mv_role || meta.kind)) || "").toLowerCase();
-        return (Array.isArray(cd) && (cd[0] === "polyhedron" || cd[0] === "facet" || cd[0] === "bond"))
-          || role === "polyhedron"
-          || role === "facet"
-          || role === "morphology"
-          || role === "bond_selection"
-          || (role === "geometry_entity" && String((meta && meta.source) || "") === "bfdh_morphology");
-      });
-      if (!point) return null;
-      const cd = point.customdata;
-      const trace = point.data || point.fullData || {};
-      const meta = trace.meta || {};
-      const role = String(meta.mv_role || meta.kind || "").toLowerCase();
-      if (Array.isArray(cd) && (cd[0] === "polyhedron" || cd[0] === "facet")) {
-        return {kind: String(cd[0]), id: String(cd[4] || cd[1] || "")};
-      }
-      if (Array.isArray(cd) && cd[0] === "bond") {
-        return {kind: "bond", id: String(cd[4] || cd[1] || "")};
-      }
-      const ordinal = Number(point.faceNumber !== undefined ? point.faceNumber
-        : point.faceIndex !== undefined ? point.faceIndex
-        : point.pointNumber !== undefined ? point.pointNumber : point.pointIndex);
-      const ids = Array.isArray(meta.face_ids) ? meta.face_ids : [];
-      const id = Number.isInteger(ordinal) && ordinal >= 0 && ordinal < ids.length
-        ? String(ids[ordinal]) : "";
-      const kind = role === "bond_selection" ? "bond"
-        : role === "geometry_entity" && String(meta.source || "") === "bfdh_morphology"
-        ? "facet" : (role === "facet" || role === "morphology" ? "facet" : "polyhedron");
-      return {kind, id};
-    });
-  }, {columns: 18, rows: 12, pause: 80});
-  if (nonAtomHit) {
-    // Ctrl is the toggle modifier used by both Plotly and the coordinate
-    // fallback; this keeps the assertion meaningful if SwiftShader drops the
-    // custom plotly_click event for the transparent marker.
-    await page.keyboard.down("Control");
-    await page.mouse.click(nonAtomHit.x, nonAtomHit.y);
-    await page.keyboard.up("Control");
-  } else {
-    // SwiftShader can depth-occlude transparent semantic markers at every
-    // screen sample even though the figure still contains a pickable bond or
-    // overlay trace. Exercise the same browser event path with that trace's
-    // real Plotly payload after a native canvas click.
-    const overlay = await page.evaluate(() => {
-      const gd = document.querySelector("#crystal-graph .js-plotly-plot");
-      for (let curveNumber = 0; curveNumber < (gd.data || []).length; curveNumber += 1) {
-        const trace = gd.data[curveNumber] || {};
-        const meta = trace.meta || {};
-        const role = String(meta.mv_role || meta.kind || "").toLowerCase();
-        const rows = Array.isArray(trace.customdata) ? trace.customdata : [];
-        const rowIndex = rows.findIndex((row) => Array.isArray(row)
-          && (row[0] === "bond" || row[0] === "facet" || row[0] === "polyhedron"));
-        const row = rowIndex >= 0 ? rows[rowIndex] : null;
-        const isBond = Array.isArray(row) && row[0] === "bond";
-        if (!(isBond || role === "polyhedron" || role === "facet" || role === "morphology"
-          || (role === "geometry_entity" && String(meta.source || "") === "bfdh_morphology"))) continue;
-        const kind = isBond ? "bond"
-          : Array.isArray(row) && (row[0] === "facet" || row[0] === "polyhedron")
-          ? String(row[0])
-          : (role === "facet" || role === "morphology" || role === "geometry_entity" ? "facet" : "polyhedron");
-        const id = Array.isArray(row) ? String(row[4] || row[1] || "") : "";
-        return {curveNumber, pointNumber: rowIndex >= 0 ? rowIndex : 0, kind, id};
+  if (structure) await clickTab(page, structure);
+  await page.waitForFunction(()=>window.MatterVisScenePicking && window.MatterVisSemantic);
+  // Native pointer coordinates come from the actual rendered camera. No
+  // synthetic plotly_click event can rescue a broken event path here.
+  async function targetPixel(kind, exclude) {
+    return page.evaluate(({kind,exclude})=>{
+      const api=window.MatterVisScenePicking,gd=window.MatterVisSemantic.graph(),idx=api.index(gd);
+      if(!idx) return null;
+      for(const p of idx.primitives) {
+        if(!p.target || p.target.kind!==kind || p.target.id===exclude) continue;
+        const q=p.p || (p.type==='bond' ? [(p.a[0]+p.b[0])/2,(p.a[1]+p.b[1])/2] : [(p.a[0]+p.b[0]+p.c[0])/3,(p.a[1]+p.b[1]+p.c[1])/3]);
+        const hit=api.hits(gd,q[0],q[1]);
+        if(hit && hit[0] && hit[0].id===p.target.id) return {x:q[0],y:q[1],target:p.target};
       }
       return null;
-    });
-    if (!overlay) fail("figure has no non-atom semantic trace to click");
-    const atomTarget = await page.evaluate(async () => {
-      const body = await fetch("/api/v2/selection", {cache: "no-store"}).then((response) => response.json());
-      return (body && body.selection && body.selection.targets || []).find((target) => target && target.kind === "atom") || null;
-    });
-    const canvas = page.locator("#crystal-graph canvas").first();
-    const box = await canvas.boundingBox();
-    if (!box) fail("crystal canvas has no box for semantic overlay click");
-    const clientX = box.x + box.width / 2;
-    const clientY = box.y + box.height / 2;
-    // Publish the atom replacement before opening the additive gesture. Then
-    // keep Control held across pointerdown -> semantic overlay click -> up so
-    // the browser path exercises the same gesture ownership as a user click.
-    if (atomTarget) {
-      await page.evaluate((atomTarget) => {
-        const gd = document.querySelector("#crystal-graph .js-plotly-plot");
-        for (let curveNumber = 0; curveNumber < (gd.data || []).length; curveNumber += 1) {
-          const trace = gd.data[curveNumber] || {};
-          const rows = Array.isArray(trace.customdata) ? trace.customdata : [];
-          const pointNumber = rows.findIndex((row) => Array.isArray(row) && String(row[6] || "") === String(atomTarget.id));
-          if (pointNumber < 0) continue;
-          const customdata = rows[pointNumber];
-          gd.emit("plotly_click", {
-            points: [{curveNumber, pointNumber, data: trace, fullData: trace, customdata}],
-            event: {ctrlKey: false, metaKey: false, shiftKey: false, clientX: 0, clientY: 0},
-          });
-          break;
-        }
-      }, atomTarget);
-    }
-    await page.keyboard.down("Control");
-    await page.mouse.move(clientX, clientY);
-    await page.mouse.down();
-    await page.evaluate(({overlay, clientX, clientY}) => {
-      const gd = document.querySelector("#crystal-graph .js-plotly-plot");
-      const trace = gd.data[overlay.curveNumber];
-      const customdata = Array.isArray(trace.customdata) ? trace.customdata[overlay.pointNumber] : undefined;
-      gd.emit("plotly_click", {
-        points: [{curveNumber: overlay.curveNumber, pointNumber: overlay.pointNumber, data: trace, fullData: trace, customdata}],
-        event: {ctrlKey: true, metaKey: false, shiftKey: false, clientX, clientY},
-      });
-    }, {overlay, clientX, clientY});
-    await page.waitForTimeout(150);
-    await page.mouse.up();
-    await page.keyboard.up("Control");
-    nonAtomHit = {result: {kind: overlay.kind, id: overlay.id}};
+    },{kind,exclude});
   }
-  await page.waitForFunction(async ({kind, id, label}) => {
-    const response = await fetch("/api/v2/selection", {cache: "no-store"});
-    if (!response.ok) return false;
-    const body = await response.json();
-    const selection = body && body.selection;
-    const labels = selection && selection.atom_labels;
-    const targets = selection && selection.targets;
-    return Array.isArray(labels) && labels.includes(label)
-      && Array.isArray(targets)
-      && targets.some((target) => target && target.kind === kind && (!id || String(target.id) === id));
-  }, {kind: nonAtomHit.result.kind, id: nonAtomHit.result.id, label: atomLabel}, {timeout: 20000});
+  async function selected(ids) {
+    await page.waitForFunction(async ids=>{
+      const bridge=window.MatterVisSemantic;
+      const r=await fetch('/api/v2/selection?scene_id='+encodeURIComponent(bridge.sceneId())).then(r=>r.json());
+      const targets=r.selection.targets||[];
+      return ids.length===targets.length && ids.every(id=>targets.some(t=>t.id===id));
+    },ids,{timeout:20000});
+  }
+  const atom=await targetPixel('atom');if(!atom) fail('no visible local atom pick');
+  let hoverRequests=0;
+  const observer=request=>{if(/selection\/by_box/.test(request.url())) hoverRequests++;};page.on('request',observer);
+  await page.mouse.move(atom.x,atom.y);
+  await page.waitForSelector('#mv-hover-inspector');
+  await page.waitForFunction(label=>document.getElementById('mv-hover-inspector')?.textContent.includes(label),atom.target.label);
+  await page.mouse.click(atom.x,atom.y);await selected([atom.target.id]);
+  await page.waitForSelector('#mv-selection-appearance:not([hidden])');
+  await page.waitForFunction(()=>{const c=document.querySelector('.mv-focus-canvas');return c && c.getContext('2d').getImageData(0,0,c.width,c.height).data.some((v,i)=>i%4===3 && v>0);});
+  const second=await targetPixel('atom',atom.target.id);if(!second) fail('no second atom');
+  await page.keyboard.down('Control');await page.mouse.click(second.x,second.y);await page.keyboard.up('Control');await selected([atom.target.id,second.target.id]);
+  await page.keyboard.down('Control');await page.mouse.click(second.x,second.y);await page.keyboard.up('Control');await selected([atom.target.id]);
+  await page.keyboard.press('Escape');await selected([]);
+  // Right click with cleared hover and no pointermove must use click position.
+  await page.evaluate(()=>window.MatterVisInvalidateSemanticHover());
+  await page.evaluate(hit=>document.getElementById('crystal-graph').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:hit.x,clientY:hit.y,button:2})),atom);
+  await selected([atom.target.id]);
+  await page.keyboard.press('Escape');await selected([]);
+  // Drag ends far enough away to be an orbit, never a selection gesture.
+  await page.mouse.move(atom.x,atom.y);await page.mouse.down();await page.mouse.move(atom.x+70,atom.y+30,{steps:8});await page.mouse.up();await page.waitForTimeout(500);await selected([]);
+  await page.mouse.move(atom.x,atom.y);await page.mouse.down({button:'right'});await page.mouse.move(atom.x+70,atom.y+30,{steps:8});await page.mouse.up({button:'right'});await page.waitForTimeout(400);await selected([]);
+  const afterOrbit=await targetPixel('atom');if(!afterOrbit) fail('picking lost after orbit');
+  await page.mouse.click(afterOrbit.x,afterOrbit.y);await selected([afterOrbit.target.id]);
+  const inspector=page.locator('#mv-selection-appearance');
+  await inspector.getByLabel('Color',{exact:true}).fill('#aa6688');
+  await inspector.getByRole('button',{name:'Apply',exact:true}).click();
+  await page.waitForFunction(async target=>{const r=await fetch('/api/v2/style_overrides?scene_id='+encodeURIComponent(window.MatterVisSemantic.sceneId())).then(r=>r.json());return r.style_overrides[target.id]?.color==='#aa6688';},afterOrbit.target);
+  // A saved exact color survives deselection and a live element-palette edit.
+  await page.keyboard.press('Escape');await selected([]);
+  const inherited=await page.evaluate(async target=>{
+    const bridge=window.MatterVisSemantic,id=bridge.sceneId(),gd=bridge.graph();
+    const rows=gd.data.flatMap(t=>t.customdata||[]),sibling=rows.find(row=>Array.isArray(row)&&row[0]==='atom'&&row[3]===target.element&&row[6]!==target.id);
+    await fetch('/api/v2/state',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scene_id:id,element_colors:{[target.element]:'#8299ac'}})});
+    return sibling ? {kind:'atom',id:sibling[6]} : null;
+  },afterOrbit.target);
+  if(!inherited) fail('palette fixture needs a same-element sibling');
+  await page.waitForFunction(async targets=>{
+    const r=await fetch('/api/v2/selection/appearance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scene_id:window.MatterVisSemantic.sceneId(),targets})}).then(r=>r.json());
+    return r.items[0].effective.color==='#aa6688' && r.items[1].effective.color==='#8299ac';
+  },[afterOrbit.target,inherited]);
+  const exactPoint=await page.evaluate(target=>{const idx=window.MatterVisScenePicking.index(window.MatterVisSemantic.graph()),p=idx.primitives.find(p=>p.target?.id===target.id);return {x:p.p[0],y:p.p[1]};},afterOrbit.target);
+  await page.mouse.click(exactPoint.x,exactPoint.y);await selected([afterOrbit.target.id]);
+  await page.waitForFunction(()=>document.querySelector('[aria-label="Inherit Color"]')?.disabled===false);
+  await inspector.getByRole('button',{name:'Inherit Color',exact:true}).click();
+  await page.waitForFunction(async target=>{const r=await fetch('/api/v2/style_overrides?scene_id='+encodeURIComponent(window.MatterVisSemantic.sceneId())).then(r=>r.json());return !r.style_overrides[target.id]?.color;},afterOrbit.target);
+  await page.waitForFunction(async target=>{const body=await fetch('/api/v2/selection/appearance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scene_id:window.MatterVisSemantic.sceneId(),targets:[target]})}).then(r=>r.json());return body.items[0].effective.color==='#8299ac';},afterOrbit.target);
+  const bond=await targetPixel('bond');if(!bond) fail('no visible bond segment '+JSON.stringify(await page.evaluate(()=>{const g=window.MatterVisSemantic.graph(),idx=window.MatterVisScenePicking.index(g);return {counts:idx.primitives.reduce((a,p)=>(a[p.type]=(a[p.type]||0)+1,a),{}),traces:g._fullData.filter(t=>(t.meta||{}).mv_role==='bond_selection').map(t=>({meta:t.meta,cd:t.customdata?.[0]}))};})));
+  await page.keyboard.down('Control');await page.mouse.click(bond.x,bond.y);await page.keyboard.up('Control');await selected([afterOrbit.target.id,bond.target.id]);
+  // Rapid motion stays local, keeps at most one overlay and no stale tooltip.
+  for(let n=0;n<15;n++) await page.mouse.move(n%2?bond.x:afterOrbit.x,n%2?bond.y:afterOrbit.y);
+  if(process.env.MATTERVIS_VISUAL_OUTPUT) await page.locator('#crystal-graph').screenshot({path:process.env.MATTERVIS_VISUAL_OUTPUT+'/molecule-light.png'});
+  if(hoverRequests) fail('hover issued '+hoverRequests+' coordinate requests');
+  page.off('request',observer);
+  if(await page.locator('.mv-focus-canvas').count()!==1) fail('focus overlays leaked');
 }
 
 // A blank orthographic canvas is the page background. DAP-4's unit cell
@@ -1247,6 +1101,95 @@ async function runSceneControls(page) {
   if (!afterEmpty.title.includes(renamed)) fail(`empty rename changed canvas title: ${afterEmpty.title}`);
 }
 
+async function runSurfacePick(page) {
+  await graphReady(page);
+  if(structure) await clickTab(page,structure);
+  const original=await page.evaluate(()=>fetch('/api/v2/state?scene_id='+encodeURIComponent(window.MatterVisSemantic.sceneId())).then(r=>r.json()));
+  try {
+  const entities=[
+    {id:'surface-left',name:'Left mesh',vertices:[[-6,-6,0],[-1,-6,0],[-1,-1,0],[-6,-1,0]],faces:[[0,1,2],[0,2,3]],color:'#927d9e',opacity:1},
+    {id:'surface-right',name:'Right mesh',vertices:[[1,-6,0],[6,-6,0],[6,-1,0],[1,-1,0]],faces:[[0,1,2],[0,2,3]],color:'#75949a',opacity:.6}
+  ];
+  await page.evaluate(async entities=>{
+    const id=window.MatterVisSemantic.sceneId();
+    const response=await fetch('/api/v2/state',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scene_id:id,geometry_entities:entities,
+      atom_groups:[{id:'hide-atoms',selector:{all:true},visible:false}],
+      bfdh_morphology:{enabled:true,scale:2,opacity:.7,facets:[
+        {miller:[1,0,0],centroid:[-1,0,0],triangles:[[[-3,0,0],[0,0,0],[-3,3,0]]]},
+        {miller:[0,1,0],centroid:[1,0,0],triangles:[[[1,0,0],[4,0,0],[4,3,0]]]}
+      ]}})});
+    if(!response.ok) throw Error(await response.text());
+  },entities);
+  await page.waitForFunction(()=>window.MatterVisSemantic.graph().data.some(t=>t.meta?.geometry_id==='surface-left'),null,{timeout:30000});
+  await page.waitForTimeout(800);
+  const snapshots=[];
+  async function pixel(kind,id){return page.evaluate(({kind,id})=>{
+    const api=window.MatterVisScenePicking,g=window.MatterVisSemantic.graph(),idx=api.index(g);
+    for(const p of idx.primitives){if(p.type!=='triangle'||p.target?.kind!==kind||(id&&p.target.id!==id)) continue;
+      const x=(p.a[0]+p.b[0]+p.c[0])/3,y=(p.a[1]+p.b[1]+p.c[1])/3;
+      const h=api.hits(g,x,y);if(h?.[0]?.id===p.target.id) return {x,y,target:p.target};
+    }return null;
+  },{kind,id});}
+  for(const id of ['surface-left','surface-right']){
+    const hit=await pixel('geometry',id);if(!hit) fail('surface face not pickable: '+id);
+    await page.evaluate(hit=>document.getElementById('crystal-graph').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:hit.x,clientY:hit.y,button:2})),hit);
+    await page.waitForFunction(id=>window.MatterVisSemantic.selected()[0]?.id===id,id,{timeout:3000}).catch(async error=>{fail(error.message+JSON.stringify(await page.evaluate(({x,y})=>({debug:document.getElementById('crystal-graph').__mvContextDebug,bound:document.getElementById('crystal-graph').dataset.rcmBound,selected:window.MatterVisSemantic.selected(),hits:window.MatterVisScenePicking.hits(window.MatterVisSemantic.graph(),x,y)}),hit)));});
+    await page.waitForTimeout(400);
+    snapshots.push(hit.target);
+  }
+  const facet=await pixel('facet');if(!facet) fail('BFDH face not pickable');
+  if(!Array.isArray(facet.target.miller)) fail('facet lost Miller metadata');
+  await page.mouse.click(facet.x,facet.y);
+  await page.waitForFunction(id=>window.MatterVisSemantic.selected()[0]?.id===id,facet.target.id);
+  await page.keyboard.press('Escape');
+  // Camera projection changes retain the semantic mesh identity and local hit index.
+  await page.waitForFunction(async()=>{const g=window.MatterVisSemantic.graph(),state=await fetch('/api/v2/state?scene_id='+encodeURIComponent(window.MatterVisSemantic.sceneId())).then(r=>r.json());return !state.selection.targets.length && Number(g.layout.meta.mattervis_render?.render_revision||0)>=Number(state.render_revision||0);});
+  await page.evaluate(async()=>{const id=window.MatterVisSemantic.sceneId(),state=await fetch('/api/v2/state?scene_id='+encodeURIComponent(id)).then(r=>r.json());await fetch('/api/v2/state',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scene_id:id,projection:'orthographic',camera_revision:Number(state.camera_revision||0)+1,camera:{eye:{x:1.25,y:1.25,z:1.25},up:{x:0,y:0,z:1},center:{x:0,y:0,z:0},projection:{type:'orthographic'}}})});});
+  await page.locator('#view-projection input[value=orthographic]').check();
+  // Drive the same camera owner used by delivered view updates; this gate
+  // verifies picking after the projection transition, independently of HTTP polling.
+  await page.evaluate(()=>window.MatterVisViewCamera.applyAsync({eye:{x:1.25,y:1.25,z:1.25},up:{x:0,y:0,z:1},center:{x:0,y:0,z:0},projection:{type:'orthographic'}},{scene_id:window.MatterVisSemantic.sceneId()}));
+  await page.waitForFunction(()=>window.MatterVisSemantic.graph()._fullLayout.scene._scene.camera._ortho,null,{timeout:5000}).catch(async error=>fail(error.message+JSON.stringify(await projectionStatus(page))));
+  await page.waitForTimeout(300);
+  const ortho=await pixel('geometry','surface-left');if(!ortho) fail('orthographic mesh face not pickable '+JSON.stringify(await page.evaluate(()=>{const g=window.MatterVisSemantic.graph(),idx=window.MatterVisScenePicking.index(g);return {camera:g.layout.scene.camera,traces:g.data.map(t=>t.meta?.geometry_id),primitives:idx.primitives.slice(0,3),rect:idx.rect};})));
+  await page.mouse.click(ortho.x,ortho.y);
+  if(process.env.MATTERVIS_VISUAL_OUTPUT){
+    await page.waitForTimeout(600);
+    await page.locator('#crystal-graph').screenshot({path:process.env.MATTERVIS_VISUAL_OUTPUT+'/surfaces-light.png'});
+    await page.evaluate(async()=>{await fetch('/api/v2/state',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scene_id:window.MatterVisSemantic.sceneId(),background:'#202833'})});});
+    await page.waitForFunction(()=>window.MatterVisSemantic.graph().layout.paper_bgcolor==='#202833');
+    await page.mouse.move(ortho.x,ortho.y);
+    await page.locator('#crystal-graph').screenshot({path:process.env.MATTERVIS_VISUAL_OUTPUT+'/surfaces-dark.png'});
+  }
+  // Measure actual camera-aware queries and overlay painting, with the live
+  // Plotly data and no server operation in the timed section.
+  const timing=await page.evaluate(()=>{
+    const g=window.MatterVisSemantic.graph(),api=window.MatterVisScenePicking,idx=api.index(g),r=idx.rect,times=[];
+    for(let i=0;i<150;i++) {const x=r.left+r.width*(i%15)/15,y=r.top+r.height*Math.floor(i/15)/10,t=performance.now();const hit=api.hits(g,x,y);api.paint(g,window.MatterVisSemantic.selected(),hit[0]);times.push(performance.now()-t);}
+    times.sort((a,b)=>a-b);return {median_ms:times[75],p95_ms:times[142],traces:g.data.length,primitives:idx.primitives.length,estimated_index_bytes:JSON.stringify(idx.primitives).length,browser:navigator.userAgent};
+  });
+  console.log('surface-picking measurement '+JSON.stringify(timing));
+  const dense=await page.evaluate(async()=>{
+    const gd=window.MatterVisSemantic.graph(),n=5000,x=[],y=[],z=[],cd=[];
+    for(let i=0;i<n;i++){x.push((i%25-12)*.8);y.push((Math.floor(i/25)%20-10)*.8);z.push((Math.floor(i/500)-5)*.8);cd.push(['atom',i,'C'+i,'C',0,'benchmark','atom:benchmark:'+i,i,'','','']);}
+    const mesh={type:'mesh3d',x:[],y:[],z:[],i:[],j:[],k:[],color:'#a69bb2',opacity:.4,meta:{kind:'polyhedron',face_ids:[],spec_id:'benchmark'}};
+    for(let t=0;t<40;t++){
+      const c=[(t%8-4)*2.8,(Math.floor(t/8)-2)*2.8,0],base=mesh.x.length;
+      [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]].forEach(p=>{mesh.x.push(c[0]+p[0]);mesh.y.push(c[1]+p[1]);mesh.z.push(c[2]+p[2]);});
+      [[0,2,4],[2,1,4],[1,3,4],[3,0,4],[2,0,5],[1,2,5],[3,1,5],[0,3,5]].forEach(p=>{mesh.i.push(base+p[0]);mesh.j.push(base+p[1]);mesh.k.push(base+p[2]);mesh.meta.face_ids.push('polyhedron:benchmark:'+t);});
+    }
+    await Plotly.addTraces(gd,[{type:'scatter3d',mode:'markers',x,y,z,customdata:cd,marker:{size:3,color:'#8d959e'},meta:{mv_role:'atom_selection',mv_radii:Array(n).fill(.15)}},mesh]);
+    const api=window.MatterVisScenePicking,start=performance.now();api.invalidate(gd);const idx=api.index(gd),build=performance.now()-start,r=idx.rect,times=[];
+    for(let i=0;i<150;i++){const primitive=idx.primitives[(i*37)%idx.primitives.length],point=primitive.p||[(primitive.a[0]+primitive.b[0]+primitive.c[0])/3,(primitive.a[1]+primitive.b[1]+primitive.c[1])/3],t=performance.now(),hits=api.hits(gd,point[0],point[1]);api.paint(gd,[],hits[0]);times.push(performance.now()-t);}
+    times.sort((a,b)=>a-b);
+    return {atoms:n,polyhedra:40,index_build_ms:build,median_ms:times[75],p95_ms:times[142],traces:gd.data.length,primitives:idx.primitives.length,estimated_index_bytes:JSON.stringify(idx.primitives).length};
+  });
+  console.log('dense-picking measurement '+JSON.stringify(dense));
+  } finally { await page.evaluate(async state=>{await fetch('/api/v2/state',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...state,geometry_entities:state.geometry_entities||[],bfdh_morphology:state.bfdh_morphology||{enabled:false},atom_groups:state.atom_groups||[]})});},original); }
+}
+
+
+let activeBrowser;
 (async () => {
   log("launch " + mode);
   const browser = await chromium.launch({
@@ -1254,6 +1197,7 @@ async function runSceneControls(page) {
     executablePath: chrome,
     args: ["--no-sandbox", "--disable-dev-shm-usage", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--enable-webgl"],
   });
+  activeBrowser = browser;
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
   const problems = [];
   page.on("console", (msg) => {
@@ -1279,13 +1223,15 @@ async function runSceneControls(page) {
   else if (mode === "leak") await runLeak(page);
   else if (mode === "restart") await runRestart(page);
   else if (mode === "nacl-frame") await runNaclFrame(page);
+  else if (mode === "surface-pick") await runSurfacePick(page);
   else if (mode === "semantic-pick") await runSemanticPick(page);
   else if (mode === "ortho-drag") await runOrthoDrag(page);
   else if (mode === "narrow-layout") await require("./narrow_layout_browser")(page, clickTab);
   else fail("unknown mode " + mode);
   if (problems.length) fail(problems.slice(0, 8).join("\n"));
   await browser.close();
-})().catch((error) => {
+})().catch(async (error) => {
+  if (activeBrowser) await activeBrowser.close();
   console.error(error);
   process.exit(1);
 });

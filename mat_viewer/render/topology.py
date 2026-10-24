@@ -170,7 +170,7 @@ def _merged_hull_mesh(
             round(float(opacity), 4),
             {
                 "x": [], "y": [], "z": [], "i": [], "j": [], "k": [],
-                "face_ids": [], "vertex_face_ids": [], "face_ranges": [],
+                "face_ids": [], "vertex_face_ids": [], "face_ranges": [], "instance_targets": {},
             },
         )
         base = len(bin_payload["x"])
@@ -181,6 +181,12 @@ def _merged_hull_mesh(
         bin_payload["j"].extend((simplices[:, 1] + base).tolist())
         bin_payload["k"].extend((simplices[:, 2] + base).tolist())
         instance_id = polyhedron_instance_id(spec_id, overlay, len(bin_payload["face_ranges"]))
+        bin_payload["instance_targets"][instance_id] = {
+            "kind": "polyhedron", "id": instance_id, "spec_id": spec_id,
+            "label": str(overlay.get("center_label") or ""),
+            "source_index": overlay.get("center_source_index"),
+            "image_shift": overlay.get("center_image_shift", overlay.get("center_image", "")),
+        }
         start = len(bin_payload["face_ids"])
         bin_payload["face_ids"].extend([instance_id] * len(simplices))
         # Mesh3d click payloads commonly expose a vertex ``pointNumber``
@@ -202,6 +208,7 @@ def _merged_hull_mesh(
                     "face_ids": payload.get("face_ids", []),
                     "vertex_face_ids": payload.get("vertex_face_ids", []),
                     "face_ranges": payload.get("face_ranges", []),
+                    "instance_targets": payload.get("instance_targets", {}),
                     **pick_trace_metadata("polyhedron", opacity=float(opacity), pickable=True),
                 }
             )
@@ -462,6 +469,8 @@ def apply_topology_style_overrides(
     ensure_polyhedron_instance_ids(topology_data)
     raw = (style or {}).get("style_overrides") if isinstance(style, dict) else None
     raw = normalize_style_overrides(raw)
+    from .style.resolver import resolve_entity_style
+    defaults = (style or {}).get("entity_defaults") or {}
     # Atom/bond/geometry overrides do not touch topology paint.  Keep the
     # original wrapper (and its warm painter caches) for those updates.
     polyhedron_overrides = {
@@ -469,7 +478,7 @@ def apply_topology_style_overrides(
         for key, value in raw.items()
         if isinstance(value, dict) and str(value.get("kind", "geometry")) == "polyhedron"
     }
-    if not polyhedron_overrides:
+    if not polyhedron_overrides and not defaults:
         return topology_data
 
     # A style PATCH can trigger a full figure rebuild while the effective
@@ -478,7 +487,7 @@ def apply_topology_style_overrides(
     # trace caches alive instead of throwing them away on every frame.
     try:
         import json
-        override_key = json.dumps(polyhedron_overrides, sort_keys=True, separators=(",", ":"), default=str)
+        override_key = json.dumps([polyhedron_overrides, defaults], sort_keys=True, separators=(",", ":"), default=str)
     except Exception:  # pragma: no cover - defensive for unusual mappings
         override_key = repr(sorted(polyhedron_overrides.items(), key=lambda item: str(item[0])))
     wrapper_cache = topology_data.setdefault("_style_override_wrapper_cache", {})
@@ -503,11 +512,12 @@ def apply_topology_style_overrides(
             overlay = dict(value_overlay)
             target_id = polyhedron_instance_id(spec_id, overlay, ordinal)
             overlay.setdefault("instance_id", target_id)
-            override = raw.get(target_id)
-            if isinstance(override, dict) and str(override.get("kind", "polyhedron")) == "polyhedron":
-                for key in ("color", "opacity", "visible", "edge_color", "edge_opacity", "edge_width", "flatshading"):
-                    if key in override:
-                        overlay[key] = override[key]
+            effective = resolve_entity_style(
+                {"kind": "polyhedron", "id": target_id}, kind_defaults=defaults,
+                rules=[{"selector": {"all": True}, "style": {**entry, **overlay}}],
+                overrides=raw,
+            )
+            overlay.update(effective)
             overlays.append(overlay)
             # Keep the ordinal in lockstep with _polyhedron_selection_trace:
             # non-drawable overlays never receive a browser pick marker and

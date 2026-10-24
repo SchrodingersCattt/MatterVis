@@ -195,6 +195,7 @@ def tag_bonds_with_groups(
         decorated = dict(bond)
         decorated["_render_color"] = None
         decorated["_render_visible"] = True
+        decorated["_render_visibility_group_id"] = None
         decorated["_render_opacity_scale"] = 1.0
         decorated["_render_opacity_group_id"] = None
         decorated["_render_radius_scale"] = 1.0
@@ -210,6 +211,7 @@ def tag_bonds_with_groups(
                 decorated["_render_color"] = color
             if "visible" in group:
                 decorated["_render_visible"] = bool(group["visible"])
+                decorated["_render_visibility_group_id"] = str(group.get("id") or "")
             opacity = group.get("opacity")
             if opacity is not None:
                 decorated["_render_opacity_scale"] = max(0.0, min(1.0, float(opacity)))
