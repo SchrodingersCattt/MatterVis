@@ -43,6 +43,42 @@ module.exports = async function projectionRadio(page, clickTab, waitForServerSta
     observations.push({token, status: delivered.status(), response: body.response || {}});
     return body.response || {};
   }
+  async function holdStoreResponse(state, token) {
+    let captured, release, fulfilled, capturedRequest;
+    const held = new Promise(resolve => { captured = resolve; });
+    const gate = new Promise(resolve => { release = resolve; });
+    const delivered = new Promise(resolve => { fulfilled = resolve; });
+    const handler = async route => {
+      const request = route.request();
+      if (capturedRequest || !isSync(request) || !request.postDataJSON().inputs.some(input =>
+        input.id === 'agent-state-store' && input.value
+        && input.value.projection_radio_test === token)) {
+        await route.continue();
+        return;
+      }
+      capturedRequest = request;
+      const response = await route.fetch();
+      captured();
+      await gate;
+      await route.fulfill({response});
+      fulfilled();
+    };
+    await page.route('**/_dash-update-component*', handler);
+    await page.evaluate(value => window.dash_clientside.set_props('agent-state-store', {
+      data: value,
+    }), {...state, projection_radio_test: token});
+    await Promise.race([held, page.waitForTimeout(20000).then(() => {
+      throw new Error('did not capture delayed projection radio callback: ' + token);
+    })]);
+    return async () => {
+      const response = page.waitForResponse(response => response.request() === capturedRequest);
+      release();
+      await delivered;
+      await response;
+      await page.unroute('**/_dash-update-component*', handler);
+      await page.waitForTimeout(300);
+    };
+  }
   try {
     await page.evaluate(async ({states, expected}) => {
       for (let index = 0; index < states.length; index += 1) {
@@ -74,56 +110,34 @@ module.exports = async function projectionRadio(page, clickTab, waitForServerSta
     }
     await waitRadio(sceneB, 'perspective');
 
+    // Hold a same-scene read from before a native click. Polling is paused so
+    // a later poll cannot mask delivery of that older response.
+    await page.evaluate(() => window.dash_clientside.set_props('agent-state-poll', {disabled: true}));
+    const releaseBeforeClick = await holdStoreResponse({...sceneB, projection: 'perspective'},
+      'delayed-before-native-click');
+    try {
+      await page.locator("#view-projection input[value='orthographic']").check();
+      await waitRadio(sceneB, 'orthographic');
+      await releaseBeforeClick();
+      await waitRadio(sceneB, 'orthographic');
+    } finally {
+      await page.evaluate(() => window.dash_clientside.set_props('agent-state-poll', {disabled: false}));
+    }
+    await page.locator("#view-projection input[value='perspective']").check();
+    await waitRadio(sceneB, 'perspective');
+
     await clickTab(page, 'DAP-4');
     await waitRadio(sceneA, 'orthographic');
-    let captured;
-    const held = new Promise(resolve => { captured = resolve; });
-    let fulfilled;
-    const delivered = new Promise(resolve => { fulfilled = resolve; });
-    let release;
-    const gate = new Promise(resolve => { release = resolve; });
-    const handler = async route => {
-      const request = route.request();
-      if (!isSync(request) || !request.postDataJSON().inputs.some(input =>
-        input.id === 'agent-state-store' && input.value
-        && input.value.projection_radio_test === 'delayed-old-scene')) {
-        await route.continue();
-        return;
-      }
-      const response = await route.fetch();
-      captured();
-      await gate;
-      await route.fulfill({response});
-      fulfilled();
-    };
-    await page.route('**/_dash-update-component*', handler);
-    try {
-      await page.evaluate(state => window.dash_clientside.set_props('agent-state-store', {
-        data: {...state, projection_radio_test: 'delayed-old-scene'},
-      }), {...sceneA, projection: 'orthographic'});
-      await Promise.race([held, page.waitForTimeout(20000).then(() => {
-        throw new Error('did not capture delayed projection radio callback');
-      })]);
-      await clickTab(page, 'ionic_nacl');
-      await waitRadio(sceneB, 'perspective');
-      const oldResponse = page.waitForResponse(response => isSync(response.request())
-        && response.request().postDataJSON().inputs.some(input =>
-          input.id === 'agent-state-store' && input.value
-          && input.value.projection_radio_test === 'delayed-old-scene'));
-      release();
-      await delivered;
-      await oldResponse;
-      await page.unroute('**/_dash-update-component*', handler);
-      await page.waitForTimeout(300);
-      await waitRadio(sceneB, 'perspective');
-      const projectionA = await page.evaluate(async id =>
-        (await fetch('/api/v2/state?scene_id=' + encodeURIComponent(id))
-          .then(response => response.json())).projection, sceneA.scene_id);
-      if (projectionA !== 'orthographic') throw new Error('scene switch rewrote the old scene projection');
-    } finally {
-      release();
-      await page.unroute('**/_dash-update-component*', handler);
-    }
+    const releaseOldScene = await holdStoreResponse({...sceneA, projection: 'orthographic'},
+      'delayed-old-scene');
+    await clickTab(page, 'ionic_nacl');
+    await waitRadio(sceneB, 'perspective');
+    await releaseOldScene();
+    await waitRadio(sceneB, 'perspective');
+    const projectionA = await page.evaluate(async id =>
+      (await fetch('/api/v2/state?scene_id=' + encodeURIComponent(id))
+        .then(response => response.json())).projection, sceneA.scene_id);
+    if (projectionA !== 'orthographic') throw new Error('scene switch rewrote the old scene projection');
     console.log('projection-radio observations ' + JSON.stringify(observations));
     if (errors.length) throw new Error('projection radio page errors: ' + errors.join('; '));
   } finally {

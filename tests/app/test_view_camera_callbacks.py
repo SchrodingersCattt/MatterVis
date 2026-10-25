@@ -90,7 +90,12 @@ def test_projection_radio_follows_the_selected_tab(tmp_path: Path, monkeypatch):
         )["id"]
         backend.set_projection("orthographic", scene_id=scene_a, broadcast=False)
         backend.set_projection("perspective", scene_id=scene_b, broadcast=False)
-        sync = _callback(app, "sync_view_projection_from_state")
+        callback = _callback(app, "sync_view_projection_from_state")
+
+        def sync(state, scene_tab):
+            result = callback(state, scene_tab)
+            assert all(value is no_update for value in result[:3])
+            return result[3]
         stale = {"scene_id": scene_a, "projection": "orthographic"}
 
         monkeypatch.setattr(
@@ -140,6 +145,16 @@ def test_projection_radio_follows_the_selected_tab(tmp_path: Path, monkeypatch):
             assert sync(payload, None) is no_update
             assert sync(payload, "deleted-scene") is no_update
         assert sync({"projection": "perspective"}, scene_b) is no_update
+
+        monkeypatch.setattr(callbacks_view, "callback_context", SimpleNamespace(
+            triggered=[{"prop_id": "view-projection.value"}],
+        ))
+        camera, update, metadata, radio = callback(old_state, scene_b, "perspective")
+        assert camera["scene_id"] == scene_b
+        assert update["payload"]["camera"]["projection"]["type"] == "perspective"
+        assert metadata is not no_update
+        assert radio is no_update
+        assert backend.get_state(scene_b)["projection"] == "perspective"
     finally:
         app.close_extensions()
         app.crystal_backend.close()
