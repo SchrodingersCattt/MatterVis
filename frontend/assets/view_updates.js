@@ -324,6 +324,7 @@
         scene_id: snapshot.scene_id,
         scene_generation: meta(snapshot).scene_generation,
         camera_version: revision,
+        server_started_at: snapshot.server_started_at,
         command: String(camera.command || snapshot.reason || ""),
         graph_generation: Number(gd.__mvGraphGeneration || 0),
         isCurrent: function () {

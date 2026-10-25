@@ -1120,6 +1120,13 @@ async function runSceneControls(page) {
           title: String(title && (title.text || title) || ""),
           rename: (document.getElementById("scene-tab-rename-input") || {}).value || "",
           banner: (document.getElementById("status-banner") || {}).textContent || "",
+          render: gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render,
+          cameraClock: gd && {scope: gd.__mvCameraRevisionScope, epoch: gd.__mvCameraRevisionEpoch, revision: gd.__mvCameraRevision},
+          expected: gd && window.MatterVisExpectedRender && window.MatterVisExpectedRender(gd.layout?.meta?.mattervis_render?.scene_id),
+          frames: window.__mattervisFigureDiagnostics && window.__mattervisFigureDiagnostics(),
+          updates: window.__mv_view_diag,
+          camera: window.__mv_camera_diag,
+          renderStatus: window.__mvRenderStatus,
         };
       });
     } catch (_) {}
