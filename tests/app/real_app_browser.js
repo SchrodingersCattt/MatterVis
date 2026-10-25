@@ -1274,6 +1274,7 @@ let activeBrowser;
   else if (mode === "mixed-projection" || mode === "mixed-projection-http") await require("./projection_mixed_browser")(page, clickTab, waitForServerState);
   else if (mode === "projection-radio") await require("./projection_radio_browser")(page, clickTab, waitForServerState);
   else if (mode === "narrow-layout") await require("./narrow_layout_browser")(page, clickTab);
+  else if (mode === "formula-unit-transforms") await require("./transform_formula_unit_browser")(page, clickTab, waitForServerState);
   else fail("unknown mode " + mode);
   if (problems.length) fail(problems.slice(0, 8).join("\n"));
   await browser.close();

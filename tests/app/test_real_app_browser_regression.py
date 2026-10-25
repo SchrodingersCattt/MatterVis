@@ -151,6 +151,11 @@ def test_narrow_layout_keeps_tools_tabs_and_log_usable(mattervis_url):
 
 
 @pytest.mark.timeout(180)
+def test_transform_buttons_keep_formula_unit_and_show_warning(fresh_mattervis_url):
+    _run(fresh_mattervis_url, "formula-unit-transforms", timeout=160)
+
+
+@pytest.mark.timeout(180)
 def test_fit_align_orbit_and_pan_keep_a_visible_projection(mattervis_url):
     _run(mattervis_url, "gestures", structure="ionic_nacl")
 
