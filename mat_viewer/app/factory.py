@@ -13,7 +13,7 @@ from .callbacks_editors import register_editor_callbacks
 from .callbacks_analysis import register_analysis_callbacks
 from .callbacks_operations import register_operations_callbacks
 from .callbacks_disorder import register_disorder_callbacks
-from .callbacks_state import register_state_callbacks, _scene_controls_stamp
+from .callbacks_state import interaction_fence_children, register_state_callbacks, _scene_controls_stamp
 from .callbacks_view import register_view_callbacks
 from .backend import ViewerBackend
 from .layout_left_panel import build_left_panel
@@ -241,9 +241,7 @@ def _create_app(
                     dcc.Store(id="extension-browser-target", data=structure_host.new_target()),
                     dcc.Store(id="extension-scene-observed"),
                     dcc.Store(id="scene-switch-seq", data={"seq": 0, "scene_id": None}),
-                    dcc.Store(id="ui-interaction-epoch", data=0),
-                    dcc.Store(id="ui-client-id", data=None),
-                    html.Div(id="ui-interaction-sink", style={"display": "none"}),
+                    *interaction_fence_children(),
                     dcc.Store(
                         id="graph-interaction-store", data={"active": False, "ts": 0}
                     ),
@@ -340,9 +338,7 @@ def _create_app(
                 dcc.Store(id="extension-browser-target", data=structure_host.new_target()),
                 dcc.Store(id="extension-scene-observed"),
                 dcc.Store(id="scene-switch-seq", data={"seq": 0, "scene_id": None}),
-                dcc.Store(id="ui-interaction-epoch", data=0),
-                dcc.Store(id="ui-client-id", data=None),
-                html.Div(id="ui-interaction-sink", style={"display": "none"}),
+                *interaction_fence_children(),
                 dcc.Store(
                     id="graph-interaction-store", data={"active": False, "ts": 0}
                 ),

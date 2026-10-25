@@ -85,6 +85,19 @@ def checklist_after_reconcile(mode, reconciled, incoming):
     return visible
 
 
+def interaction_fence_children():
+    """Hidden stores for one browser's poll fence.
+
+    The epoch and client id travel with sidebar captures. The sink is the
+    acknowledgement output; it is not shown.
+    """
+    return (
+        dcc.Store(id="ui-interaction-epoch", data=0),
+        dcc.Store(id="ui-client-id", data=None),
+        html.Div(id="ui-interaction-sink", style={"display": "none"}),
+    )
+
+
 def register_state_callbacks(app, backend):
     # Widgets are filled for one scene at a time. A tab change updates
     # ``scene-tabs`` before those widgets, and a capture that runs in
