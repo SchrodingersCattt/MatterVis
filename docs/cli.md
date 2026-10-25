@@ -111,7 +111,23 @@ bytes.
 
 `--charset unicode|ascii7` is available for both static and JSONL output.
 `ascii7` selects printable ASCII geometry and implies monochrome output;
-`unicode` preserves the default Braille renderer. JSONL sessions support
+`unicode` preserves the default Braille renderer. `ascii7` frames are
+printable 7-bit ASCII without ANSI escapes. The static status line above a
+non-interactive frame can still contain a degree sign; it is not part of the
+frame or of a JSONL observation. The Unicode profile may contain
+Braille and superscripts; JSONL sessions stay monochrome, while interactive
+and static colour Unicode can still contain ANSI from the built-in compositor.
+
+`--renderer ID` and `--renderer-config FILE` select one frame backend for both
+static output and `--session-format jsonl`. The default is `mattervis.native-v1`,
+and omitting the flags leaves the picture and default JSONL traces unchanged.
+A missing id, incompatible API, bad pin, or malformed frame exits with an
+error and does not draw the native picture instead. Renderer choice is not a
+JSONL action. `--observation-profile model` applies only to JSONL observations
+and strips chemistry warnings, formulas, and the source title. See
+[the renderer contract](agents/tui_renderer_api.md).
+
+JSONL sessions support
 `observe`, `reset`, `orbit`, `align`, `pan`, `zoom`, `fit`, `set_display`,
 `select`, `focus`, `clear_selection`, `clear_focus`, and `close`.
 

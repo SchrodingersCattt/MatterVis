@@ -1,0 +1,24 @@
+
+
+
+
+
+
+
+
+
+
+
+                                      [38;5;131mO1²[0m
+
+
+
+
+
+
+
+
+
+
+
+axes a:out b:E c:N  depth 1:front 2:mid 3:back  |-------| 0.002 A
