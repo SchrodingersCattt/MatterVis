@@ -1,6 +1,7 @@
 """Validate dispatch dependencies, not just a successful /_dash-layout GET."""
 from __future__ import annotations
 
+import copy
 import json
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -94,8 +95,42 @@ def test_polyhedra_gate_controls_editor_not_toggle(app):
     assert {"polyhedra-add-btn", "polyhedra-rows-container"} <= layout_ids(controls)
     assert "topology-toggle" not in layout_ids(controls)
     gate = _callback(app, "gate_polyhedra_controls")
-    assert gate([]) == {"display": "none"}
+    assert gate([]) == {}
     assert gate(["enabled"]) == {}
+
+
+@pytest.mark.parametrize("overlay_enabled", [False, True])
+@pytest.mark.parametrize("status", ["ok", "no_results", "error"])
+def test_analysis_is_independent_of_overlay_without_mutating_state(
+    app, monkeypatch, overlay_enabled, status,
+):
+    backend = app.crystal_backend
+    backend.patch_state({"topology_enabled": overlay_enabled}, broadcast=False)
+    before = copy.deepcopy(backend.get_state())
+    calls = []
+
+    def fake_topology(state, *args, **kwargs):
+        calls.append(bool(state.get("topology_enabled")))
+        if status == "error":
+            raise ValueError("controlled analysis failure")
+        if status == "no_results":
+            return None
+        return {"spec_results": [], "warnings": []}
+
+    monkeypatch.setattr(backend, "_effective_polyhedron_specs", lambda state: [{"id": "p1", "enabled": False}])
+    monkeypatch.setattr(backend, "topology_for_state", fake_topology)
+    result = backend.run_analysis()
+    assert result["status"] == status
+    assert result["spec_count"] == 1
+    assert calls == [True]
+    assert backend.get_state() == before
+
+    monkeypatch.setattr(backend, "_effective_polyhedron_specs", lambda state: [])
+    empty = backend.run_analysis()
+    assert empty["status"] == "no_specs"
+    assert empty["spec_count"] == 0
+    assert calls == [True]
+    assert backend.get_state() == before
 
 
 @pytest.mark.parametrize("trigger,value,action", [

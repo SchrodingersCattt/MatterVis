@@ -821,8 +821,8 @@ def topology_results_markdown(topology_data: dict | None) -> str:
     if not topology_data:
         return (
             "Topology analysis inactive.\n"
-            "Either no fragment of the requested type exists in this structure, "
-            "or the topology overlay is disabled."
+            "Add a polyhedron spec with an explicit ligand and a centre "
+            "present in this structure."
         )
     shape = topology_data.get("shape") or {}
     planarity = topology_data.get("planarity", {})

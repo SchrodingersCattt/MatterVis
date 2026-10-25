@@ -19,6 +19,7 @@ deliverable for the polyhedron-specs Phase 1 work.
 """
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,40 @@ def backend(tmp_path: Path) -> ViewerBackend:
 
 
 # ---- topology_for_state shape --------------------------------------------
+
+
+@pytest.mark.parametrize("row_enabled", [False, True])
+@pytest.mark.parametrize("async_topology", [False, True])
+def test_figure_keeps_analysis_results_when_overlay_is_off(
+    backend: ViewerBackend, row_enabled, async_topology,
+):
+    backend.add_polyhedron_spec(
+        center_species="N", ligand_species="ClO4", enabled=row_enabled,
+    )
+    before = copy.deepcopy(backend.get_state())
+    assert before["topology_enabled"] is False
+    if async_topology:
+        # A completed explicit analysis must be reusable by the asynchronous
+        # figure path, including when the scene's drawing switch is off.
+        assert backend.run_analysis()["status"] == "ok"
+
+    figure, topology = backend.figure_for_state(before, async_topology=async_topology)
+
+    assert topology is not None
+    assert topology["coordination_number"] == 6
+    assert not any((trace.meta or {}).get("kind") == "polyhedron" for trace in figure.data)
+    cached_figure, cached_topology = backend.figure_for_state(before)
+    assert cached_topology is topology
+    assert not any((trace.meta or {}).get("kind") == "polyhedron" for trace in cached_figure.data)
+    assert backend.get_state() == before
+
+    on_state = {**before, "topology_enabled": True}
+    on_figure, on_topology = backend.figure_for_state(on_state)
+    assert on_topology["coordination_number"] == 6
+    traces = [trace for trace in on_figure.data if (trace.meta or {}).get("kind") == "polyhedron"]
+    assert traces
+    assert all(trace.visible is row_enabled for trace in traces)
+    assert backend.get_state() == before
 
 
 def test_topology_for_state_emits_spec_results_per_enabled_spec(backend: ViewerBackend):

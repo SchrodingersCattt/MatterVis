@@ -330,9 +330,13 @@ class _CameraBackendMixin:
             scene_id=scene_id,
             n_specs=len((state.get("polyhedron_specs") or [])),
         ):
+            # Analysis results belong to the side panel even when drawing is
+            # off. Only figure assembly receives the scene's overlay switch;
+            # keep the analysis override local to this worker invocation.
+            analysis_state = {**state, "topology_enabled": True}
             topology_pending = False
             if async_topology:
-                context = self._topology_context(state, click_data=click_data, scene=scene)
+                context = self._topology_context(analysis_state, click_data=click_data, scene=scene)
                 if context is None:
                     topology_data = None
                 else:
@@ -355,7 +359,7 @@ class _CameraBackendMixin:
                             analysis_spec_id=context["analysis_spec_id"],
                         )
             else:
-                topology_data = self.topology_for_state(state, click_data=click_data)
+                topology_data = self.topology_for_state(analysis_state, click_data=click_data)
         with perf_log.time_block(
             "build_figure",
             kind="event",

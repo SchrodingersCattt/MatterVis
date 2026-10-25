@@ -207,7 +207,7 @@
         payload.polyhedron_specs.forEach(function (spec) {
           if (String(spec.id) === String(trace.meta.spec_id)) {
             visibilityIndices.push(index);
-            visibilityValues.push(spec.enabled !== false);
+            visibilityValues.push(payload.topology_enabled !== false && spec.enabled !== false);
           }
         });
       }
