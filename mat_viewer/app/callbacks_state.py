@@ -20,11 +20,146 @@ from .display_controls import (
 from ..properties import web_colormap_options
 
 
+# Clocks that move when a server edit is committed. A poll may publish
+# that edit. The same clocks staying put means the browser is ahead of
+# the server (an in-flight control edit) and must not be overwritten.
+_STATE_VERSION_KEYS = (
+    "geometry_version",
+    "display_version",
+    "camera_version",
+    "render_revision",
+)
+
+# Editable sidebar values, in the order ``sync_agent_state`` reads them.
+# Indices match ``scene_control_outputs`` (the rename box is handled
+# separately and is not in this list).
+_POLL_CLIENT_CONTROL_INDEX = (
+    1,  # display-mode-selector
+    2,  # display-options
+    3,  # atom-scale-slider
+    4,  # bond-radius-slider
+    5,  # minor-opacity-slider
+    6,  # material-selector
+    7,  # style-selector
+    8,  # disorder-selector
+    9,  # ortep-mode-selector
+    10,  # axis-scale-slider
+    11,  # topology-site-index
+    12,  # topology-toggle
+    14,  # property-field-selector value
+    15,  # property-reduction-selector
+    16,  # property-component-input
+    18,  # property-colormap-input value
+    19,  # property-range-mode
+    20,  # property-range-min
+    21,  # property-range-max
+    22,  # property-center-input
+    23,  # property-nan-color-input
+    24,  # property-colorbar-toggle
+)
+
+# A single Dash request can carry the poll interval and a tab click.
+# The tab is the user's scene intent; the poll must not win that batch.
+_SYNC_TRIGGER_PRIORITY = (
+    "scene-tabs",
+    "native-upload-sync",
+    "display-defaults-btn",
+    "agent-state-poll",
+)
+
+
 def _scene_controls_stamp(state):
-    return json.dumps({
+    payload = {
         "scene_id": str(state.get("scene_id") or ""),
         "camera_revision": int(state.get("camera_revision", 0) or 0),
-    }, sort_keys=True)
+    }
+    for key in _STATE_VERSION_KEYS:
+        payload[key] = int(state.get(key, 0) or 0)
+    return json.dumps(payload, sort_keys=True)
+
+
+def _parse_controls_stamp(stamp):
+    if not isinstance(stamp, str) or not stamp:
+        return None
+    try:
+        parsed = json.loads(stamp)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _preferred_sync_trigger(triggered) -> str | None:
+    """Pick the sync branch when several inputs fire in one request."""
+    names = []
+    for item in triggered or []:
+        prop_id = item.get("prop_id") if isinstance(item, dict) else None
+        if not prop_id:
+            continue
+        names.append(str(prop_id).split(".", 1)[0])
+    for name in _SYNC_TRIGGER_PRIORITY:
+        if name in names:
+            return name
+    return names[0] if names else None
+
+
+def _stamp_scene_or_camera_differs(stamp, state) -> bool:
+    """True when the browser has not acknowledged this scene or camera command.
+
+    Display and geometry clocks also live in the stamp so a poll can tell
+    an external edit from an in-flight keystroke. Those clocks must not by
+    themselves force a full control rewrite.
+    """
+    parsed = _parse_controls_stamp(stamp)
+    if parsed is None:
+        return stamp is not None and stamp != _scene_controls_stamp(state)
+    scene_matches = str(parsed.get("scene_id") or "") == str(state.get("scene_id") or "")
+    try:
+        acknowledged = int(parsed.get("camera_revision", 0) or 0)
+        current = int(state.get("camera_revision", 0) or 0)
+    except (TypeError, ValueError):
+        return True
+    return not (scene_matches and acknowledged == current)
+
+
+def _stamp_scene_matches(stamp, scene_id) -> bool:
+    parsed = _parse_controls_stamp(stamp)
+    if parsed is None or "scene_id" not in parsed:
+        return False
+    return str(parsed.get("scene_id") or "") == str(scene_id or "")
+
+
+def _acknowledged_versions_cover(stamp, state) -> bool:
+    """True when the browser ack is not older than ``state``.
+
+    A legacy stamp that only names the scene and camera has no version
+    clocks. Treat that as "write the controls" so an external edit still
+    lands. Once the stamp carries clocks, an equal-or-newer ack means the
+    server has not moved and differing controls are in-flight edits.
+    """
+    parsed = _parse_controls_stamp(stamp)
+    if parsed is None or not any(key in parsed for key in _STATE_VERSION_KEYS):
+        return False
+    try:
+        return not any(
+            int(state.get(key, 0) or 0) > int(parsed.get(key, 0) or 0)
+            for key in _STATE_VERSION_KEYS
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def _control_values_match(client, server) -> bool:
+    if isinstance(client, (list, tuple)) or isinstance(server, (list, tuple)):
+        return list(client or []) == list(server or [])
+    return client == server
+
+
+def _preserve_inflight_controls(outputs, client_controls) -> None:
+    for index, client in zip(_POLL_CLIENT_CONTROL_INDEX, client_controls):
+        if index >= len(outputs):
+            break
+        if not _control_values_match(client, outputs[index]):
+            outputs[index] = no_update
 
 
 def _drop_acknowledged_pending(backend, state) -> None:
@@ -36,12 +171,6 @@ def _drop_acknowledged_pending(backend, state) -> None:
     replace text the user has started typing. A snapshot that moved past the
     state being delivered (a rename that landed mid-switch) stays queued.
     """
-    version_keys = (
-        "geometry_version",
-        "display_version",
-        "camera_version",
-        "render_revision",
-    )
     with backend._lock:
         pending = backend.pending_state
         if not isinstance(pending, dict):
@@ -50,7 +179,7 @@ def _drop_acknowledged_pending(backend, state) -> None:
             return
         if any(
             int(pending.get(key, 0) or 0) > int(state.get(key, 0) or 0)
-            for key in version_keys
+            for key in _STATE_VERSION_KEYS
         ):
             return
         backend.pending_state = None
@@ -474,15 +603,38 @@ def register_state_callbacks(app, backend):
         Input("scene-tabs", "value"),
         State("scene-controls-scene", "children"),
         State("scene-tab-rename-input", "value"),
+        State("display-mode-selector", "value"),
+        State("display-options", "value"),
+        State("atom-scale-slider", "value"),
+        State("bond-radius-slider", "value"),
+        State("minor-opacity-slider", "value"),
+        State("material-selector", "value"),
+        State("style-selector", "value"),
+        State("disorder-selector", "value"),
+        State("ortep-mode-selector", "value"),
+        State("axis-scale-slider", "value"),
+        State("topology-site-index", "value"),
+        State("topology-toggle", "value"),
+        State("property-field-selector", "value"),
+        State("property-reduction-selector", "value"),
+        State("property-component-input", "value"),
+        State("property-colormap-input", "value"),
+        State("property-range-mode", "value"),
+        State("property-range-min", "value"),
+        State("property-range-max", "value"),
+        State("property-center-input", "value"),
+        State("property-nan-color-input", "value"),
+        State("property-colorbar-toggle", "value"),
         prevent_initial_call=True,
     )
     def sync_agent_state(_n_intervals, _native_upload_sync, *args):
         # Keep the callback callable with the historical signatures for
         # direct integrations/tests while Dash supplies the optional Restore
-        # Defaults click, the browser control acknowledgement, and the
-        # rename box contents.
+        # Defaults click, the browser control acknowledgement, the rename
+        # box, and the current sidebar values.
         controls_scene_id = None
         rename_value = None
+        client_controls: tuple[Any, ...] = ()
         if len(args) == 1:
             _display_defaults_clicks = None
             scene_id = args[0]
@@ -490,19 +642,21 @@ def register_state_callbacks(app, backend):
             _display_defaults_clicks, scene_id = args
         elif len(args) == 3:
             _display_defaults_clicks, scene_id, controls_scene_id = args
-        elif len(args) == 4:
-            _display_defaults_clicks, scene_id, controls_scene_id, rename_value = args
+        elif len(args) >= 4:
+            (
+                _display_defaults_clicks,
+                scene_id,
+                controls_scene_id,
+                rename_value,
+                *client_controls,
+            ) = args
         else:
             raise TypeError(
                 "sync_agent_state expects (interval, upload, scene_id) or "
                 "(interval, upload, defaults_clicks, scene_id"
-                "[, controls_scene_id[, rename_value]])"
+                "[, controls_scene_id[, rename_value[, *client_controls]]])"
             )
-        triggered = (
-            callback_context.triggered[0]["prop_id"].split(".")[0]
-            if callback_context.triggered
-            else None
-        )
+        triggered = _preferred_sync_trigger(getattr(callback_context, "triggered", None))
         n_outputs = 29
         if triggered == "display-defaults-btn":
             if not scene_id or scene_id not in backend.scene_store.scenes:
@@ -548,7 +702,9 @@ def register_state_callbacks(app, backend):
         elif (
             controls_scene_id is not None
             and scene_id in backend.scene_store.scenes
-            and controls_scene_id != _scene_controls_stamp(backend.get_state(scene_id))
+            and _stamp_scene_or_camera_differs(
+                controls_scene_id, backend.get_state(scene_id)
+            )
         ):
             # Dash can supersede a slow tab response with a newer poll that
             # returns no_update. The canvas may already show the new scene
@@ -589,10 +745,9 @@ def register_state_callbacks(app, backend):
         # authoritative once its version clocks have advanced.
         if state and scene_id and str(state.get("scene_id") or "") == str(scene_id):
             live_state = backend.get_state(scene_id)
-            version_keys = ("geometry_version", "display_version", "camera_version", "render_revision")
             if any(
                 int(live_state.get(key, 0) or 0) > int(state.get(key, 0) or 0)
-                for key in version_keys
+                for key in _STATE_VERSION_KEYS
             ):
                 state = live_state
         # Upload completion emits ``native-upload-sync`` from the browser.
@@ -618,14 +773,35 @@ def register_state_callbacks(app, backend):
         # camera change to the browser.
         outputs = list(scene_control_outputs(state))
         # The rename box is not an Input of this callback, so Dash will not
-        # tell us about keystrokes until some other callback reads it. Writing
-        # the label again when the box already shows it replaces those
-        # keystrokes (duplicate's queued snapshot, or a stamp repair that
-        # repeats the same name). A box that still shows another label is
-        # updated, which is how a dropped tab response gets repaired.
+        # tell us about keystrokes until some other callback reads it.
+        # On a poll for the scene the browser already acknowledged, any text
+        # in the box is an edit in progress — including characters added on
+        # top of the server label. A stamp whose scene does not match is a
+        # dropped tab response and still rewrites the label below.
         server_label = outputs[0]
-        if rename_value is not None and str(rename_value) == str(server_label):
+        acknowledged_scene = _stamp_scene_matches(
+            controls_scene_id, state.get("scene_id") or scene_id
+        )
+        if (
+            triggered == "agent-state-poll"
+            and acknowledged_scene
+            and rename_value is not None
+        ) or (
+            rename_value is not None and str(rename_value) == str(server_label)
+        ):
             outputs[0] = no_update
+        # Same-scene poll whose version clocks have not moved past the
+        # browser ack: keep sidebar values the user has changed and the
+        # server has not stored yet. A REST/WS edit advances those clocks
+        # and still writes. Scene and camera stamp repair stays a full write.
+        if (
+            triggered == "agent-state-poll"
+            and client_controls
+            and acknowledged_scene
+            and not _stamp_scene_or_camera_differs(controls_scene_id, state)
+            and _acknowledged_versions_cover(controls_scene_id, state)
+        ):
+            _preserve_inflight_controls(outputs, client_controls)
         outputs[-1] = no_update  # camera-state-store slot
         return (*outputs, no_update)  # scene-switch-seq unchanged
 
