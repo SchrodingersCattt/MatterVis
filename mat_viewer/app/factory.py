@@ -307,7 +307,9 @@ def _create_app(
         return assemble_workbench(html.Div(
             [
                 dcc.Store(id="agent-state-store", data=first_state),
-                html.Div(id="scene-controls-scene", children=_scene_controls_stamp(first_state), hidden=True),
+                html.Div(id="scene-controls-scene", children=_scene_controls_stamp(
+                    first_state, visible_range=property_visible_range
+                ), hidden=True),
                 dcc.Store(
                     id="camera-state-store",
                     data=_camera_store_payload(
