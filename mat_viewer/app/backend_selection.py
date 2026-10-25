@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 
 from ..render.picking import (
@@ -23,6 +24,25 @@ from .normalizers import _normalize_selection
 
 # ruff: noqa: F401,F403,F405
 from .shared import *
+
+
+def _finite_gesture_ts(value: Any) -> float | None:
+    """Accept a browser gesture clock. Booleans are ints and are not clocks."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    if not math.isfinite(number):
+        return None
+    return number
+
+
+def _selection_target_identity(selection: Any) -> tuple[tuple[str, str], ...]:
+    raw_targets = selection.get("targets") if isinstance(selection, Mapping) else None
+    targets = []
+    for item in raw_targets or []:
+        if isinstance(item, Mapping) and item.get("kind") and item.get("id"):
+            targets.append((str(item.get("kind")), str(item.get("id"))))
+    return tuple(sorted(targets))
 
 
 def _selection_part(atom: dict[str, Any]) -> dict[str, Any]:
@@ -476,20 +496,62 @@ class _SelectionBackendMixin:
                 "discarded_targets": state.get("style_override_warnings") or [],
                 "property_coloring": bool(style.get("atom_property_color"))}
 
+    def _remember_selection_gesture(self, scene_id, selection, ts: float) -> None:
+        """Record the newest accepted browser gesture for one target set."""
+        scene_key = str(scene_id or "")
+        latest = getattr(self, "_selection_gesture_ts", None)
+        if latest is None:
+            self._selection_gesture_ts = {}
+            latest = self._selection_gesture_ts
+        latest[scene_key] = ts
+        keyed = getattr(self, "_selection_gesture_by_targets", None)
+        if keyed is None:
+            self._selection_gesture_by_targets = {}
+            keyed = self._selection_gesture_by_targets
+        keyed[(scene_key, _selection_target_identity(selection))] = ts
+
+    def _selection_gesture_ts_for_state(self, state) -> float:
+        """Return the gesture time stamped onto the selection in ``state``.
+
+        The clock travels with that target set, not with whatever gesture
+        arrived while an older frame was still being drawn.
+        """
+        keyed = getattr(self, "_selection_gesture_by_targets", None) or {}
+        if not isinstance(state, Mapping):
+            return 0.0
+        scene_key = str(state.get("scene_id") or "")
+        if not scene_key:
+            store = getattr(self, "scene_store", None)
+            scene_key = str(getattr(store, "active_id", "") or "")
+        ts = keyed.get((scene_key, _selection_target_identity(state.get("selection"))))
+        return float(ts or 0.0)
+
     def _commit_selection_event(self, selection, scene_id):
-        """Commit the browser's complete set, rejecting obsolete geometry.
+        """Commit one browser selection snapshot.
 
         Toggle/additive intent has already been applied locally. Replaying
         it against the whole snapshot would toggle existing targets twice.
+        A numeric ``ts`` orders browser gestures so an older gesture does
+        not overwrite a newer one. Payloads without ``ts`` still commit.
         """
-        expected = selection.get("target_revision")
-        if expected is not None and str(expected) != str(self.get_state(scene_id).get("target_revision", 0)):
-            return False
-        if selection.get("mode") == "clear":
-            self.clear_target_selection(scene_id=scene_id)
-        else:
-            self.set_target_selection(selection.get("targets") or [], scene_id=scene_id)
-        return True
+        with self._lock:
+            expected = selection.get("target_revision")
+            if expected is not None and str(expected) != str(self.get_state(scene_id).get("target_revision", 0)):
+                return False
+            gesture_ts = _finite_gesture_ts(selection.get("ts"))
+            scene_key = str(scene_id or "")
+            latest = getattr(self, "_selection_gesture_ts", None) or {}
+            if gesture_ts is not None:
+                previous = latest.get(scene_key)
+                if previous is not None and gesture_ts < previous:
+                    return False
+            if selection.get("mode") == "clear":
+                committed = self.clear_target_selection(scene_id=scene_id)
+            else:
+                committed = self.set_target_selection(selection.get("targets") or [], scene_id=scene_id)
+            if gesture_ts is not None:
+                self._remember_selection_gesture(scene_id, committed, gesture_ts)
+            return True
 
     def get_selection(self, scene_id: Optional[str] = None) -> dict[str, Any]:
         return copy.deepcopy(_normalize_selection(self.get_state(scene_id).get("selection")))

@@ -13,12 +13,13 @@ class Element {
   find(predicate) { if (predicate(this)) return this; for (const child of this.children) { const match = child.find?.(predicate); if (match) return match; } }
 }
 const graph = new Element('div'), listeners = {}, requests = [];
+let intervalFn = null;
 let revision = 7, overrides = {color:'#112233'}, rejectStale = false;
 const target = {kind:'geometry', id:'mesh'};
 const context = {
   window:{addEventListener:(name, fn)=>listeners[name]=fn},
   document:{createElement:tag=>new Element(tag),createTextNode:text=>({textContent:text}),getElementById:()=>graph},
-  setInterval:()=>{},setTimeout:()=>{},clearTimeout:()=>{},
+  setInterval:(fn)=>{intervalFn=fn; return 1;},setTimeout:()=>{},clearTimeout:()=>{},
   fetch:async (path, options)=>{
     const body = JSON.parse(options.body);
     requests.push({path,body});
@@ -49,5 +50,20 @@ async function edit() {
   assert.equal(requests.length,before+1,'stale reset must stop restoration');
   assert.equal(overrides.color,'#abcdef');
   assert.equal(graph.find(el=>el.attrs?.role==='status').textContent,'stale target revision');
+  assert.equal(typeof intervalFn, 'function');
+  const panelNode = graph.children[0];
+  context.window.MatterVisSemantic = {sceneId:()=>'scene', selected:()=>[]};
+  const quiet = requests.length;
+  intervalFn();
+  await settle();
+  assert.equal(requests.length, quiet, 'an empty bridge must not reload the panel');
+  panelNode.hidden = true;
+  context.window.MatterVisSemantic = {sceneId:()=>'scene', selected:()=>[target]};
+  intervalFn();
+  await settle();
+  assert(requests.length > quiet, 'a hidden panel reloads the bridge selection');
+  const inherit = graph.find(el=>el.attrs?.['aria-label']==='Inherit Color');
+  assert(inherit, 'Inherit Color is rendered for the reloaded pick');
+  assert.equal(inherit.disabled, false);
   console.log('appearance undo revision contracts passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

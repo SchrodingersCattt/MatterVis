@@ -110,13 +110,26 @@
     if(!selected.length){serial++;editing=[];if(panel) panel.hidden=true;return;}
     load(selected).catch(error);
   });
-  // Scene handoffs do not share draft inputs or undo history.
+  // Scene handoffs do not share draft inputs or undo history. The same
+  // scene can also hide this panel while the bridge still holds a pick
+  // (a discarded appearance response, or a frame that never re-fired the
+  // selection event). Reload that pick. An empty bridge is a user clear.
   setInterval(()=>{
     const bridge=root.MatterVisSemantic;if(!bridge) return;
-    const live=bridge.sceneId();if(live===sceneId) return;
-    serial++;clearTimeout(previewTimer);sceneId=live;history=[];selected=bridge.selected();
-    if(panel) panel.hidden=true;
-    if(selected.length) load(selected).catch(error);
+    const live=bridge.sceneId();
+    const bridgeSelected=(bridge.selected()||[]).slice();
+    if(live!==sceneId){
+      serial++;clearTimeout(previewTimer);sceneId=live;history=[];selected=bridgeSelected;
+      if(panel) panel.hidden=true;
+      if(selected.length) load(selected).catch(error);
+      return;
+    }
+    if(!bridgeSelected.length) return;
+    const hidden=!panel || panel.hidden;
+    if(hidden || targetsKey(bridgeSelected)!==targetsKey(selected)){
+      selected=bridgeSelected;
+      load(selected).catch(error);
+    }
   },300);
   root.MatterVisAppearance={refresh:()=>load(editing),targets:()=>editing.slice(),selectionKey:targetsKey};
 })(window);
