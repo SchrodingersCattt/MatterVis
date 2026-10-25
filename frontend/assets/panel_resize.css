@@ -579,8 +579,10 @@
 
 #analysis-panel-content .Select,
 #operation-panel-content .Select,
+#display-panel-content .Select,
 #analysis-panel-content input,
-#operation-panel-content input {
+#operation-panel-content input,
+#display-panel-content input {
   max-width: 100%;
 }
 

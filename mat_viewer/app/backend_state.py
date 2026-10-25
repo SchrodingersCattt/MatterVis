@@ -4,7 +4,9 @@ import copy
 from typing import Any, Optional
 
 from ..config import current_config
+from ..presets import deep_merge
 from .camera_helpers import *
+from .camera_helpers import _plotly_camera
 from .normalizers import *
 from .normalizers import _normalize_selection
 from .reducer import LEGACY_STYLE_STATE_FIELDS
@@ -215,7 +217,20 @@ class _StateBackendMixin:
         # explicit camera commands below change the camera clock; resetting it
         # here made Labels/Hydrogens/scene-range changes snap the viewport.
         if "camera" in patch and patch["camera"] is not None:
-            state["camera"] = patch["camera"]
+            camera_patch = patch["camera"]
+            camera = state.get("camera")
+            if isinstance(camera_patch, dict) and isinstance(camera, dict):
+                if "position" in camera_patch or "focal_point" in camera_patch:
+                    # A legacy position/focal camera replaces the Plotly
+                    # representation; mixing both makes ``eye`` win.
+                    camera = {}
+                elif ("position" in camera or "focal_point" in camera) and any(
+                    isinstance(camera_patch.get(key), dict) for key in ("eye", "center", "up")
+                ):
+                    camera = _plotly_camera(camera) or {}
+                state["camera"] = deep_merge(camera, camera_patch)
+            else:
+                state["camera"] = copy.deepcopy(camera_patch)
         # ``camera_revision`` is the uirevision-bump counter written by
         # ``camera_action`` / ``align_camera``. ``normalize_state``
         # whitelists keys, so without an explicit pass-through the
@@ -229,12 +244,16 @@ class _StateBackendMixin:
         # Phase 4 (view tools): top-level ``projection`` is a v2 state
         # key that mirrors ``camera.projection.type``. Accept either
         # spelling so AI callers don't have to dig into the camera
-        # dict; ``set_projection`` keeps the two in sync.
+        # dict. Copy the coerced type onto an existing camera here.
+        # ``set_projection`` also refits; calling it from ``patch_state``
+        # would recurse and move the eye.
+        projection_specified = False
         if "projection" in patch and patch["projection"] is not None:
             state["projection"] = _coerce_projection(
                 patch["projection"],
                 fallback=str(state.get("projection", "perspective")),
             )
+            projection_specified = True
         elif isinstance(patch.get("camera"), dict):
             cam_proj = patch["camera"].get("projection")
             if isinstance(cam_proj, dict) and "type" in cam_proj:
@@ -242,6 +261,11 @@ class _StateBackendMixin:
                     cam_proj["type"],
                     fallback=str(state.get("projection", "perspective")),
                 )
+                projection_specified = True
+        if projection_specified and isinstance(state.get("camera"), dict):
+            camera = dict(state["camera"])
+            camera["projection"] = {"type": state["projection"]}
+            state["camera"] = camera
         return state
 
     def get_state(self, scene_id: Optional[str] = None) -> dict[str, Any]:
@@ -278,6 +302,7 @@ class _StateBackendMixin:
         # last ``relayoutData`` left it. The same logic applies to any
         # other UI-originated patch where the browser is already
         # authoritative for the field being changed.
+        rebuild_projection_image = False
         with self._lock:
             target_scene_id = (
                 scene_id or (patch or {}).get("scene_id") or self.scene_store.active_id
@@ -309,6 +334,7 @@ class _StateBackendMixin:
                     )
             working_state = self.normalize_state(patch, scene_id=target_scene_id)
             change_kind = classify_change(state_before, working_state)
+            projection_changed = state_before.get("projection") != working_state.get("projection")
             # Structure/display changes can remove displayed instances while
             # preserving the scene's persisted selection/style dictionaries.
             # Reconcile exact IDs before committing the transition so stale
@@ -370,21 +396,23 @@ class _StateBackendMixin:
                 UpdateKind.ANALYSIS,
             }:
                 display_version += 1
-            elif change_kind == UpdateKind.CAMERA:
+            if change_kind == UpdateKind.CAMERA or projection_changed:
                 # Browser drag persistence changes the camera value without
                 # invalidating a command revision. Explicit camera commands
                 # carry a revision/projection marker.  A caller that supplies
                 # a revision has already selected the next monotonic value;
                 # do not increment it a second time here.  This matters for
                 # orbit/pan/zoom, which write the camera and revision in one
-                # atomic patch.
+                # atomic patch. A projection change also advances this clock
+                # when a simultaneous display/geometry edit takes precedence
+                # in the delivery classification.
                 if "camera_revision" in (patch or {}):
                     try:
                         requested = int(working_state.get("camera_revision", 0) or 0)
                     except (TypeError, ValueError):
                         requested = 0
                     camera_version = max(before_versions.camera + 1, requested)
-                elif "projection" in (patch or {}):
+                elif "projection" in (patch or {}) or projection_changed:
                     camera_version += 1
             working_state["geometry_version"] = geometry_version
             working_state["display_version"] = display_version
@@ -460,7 +488,31 @@ class _StateBackendMixin:
                     ),
                     state=state,
                 )
-            return state
+                if change_kind != UpdateKind.CAMERA and projection_changed:
+                    # Display/overlay/analysis delivery never applies a
+                    # camera. Publish both owners of a mixed transaction
+                    # with the same committed scene and version fences.
+                    projection_camera = copy.deepcopy(state.get("camera"))
+                    if projection_camera is None:
+                        projection_camera = {"projection": {"type": state["projection"]}}
+                    self.broadcast_view_update(
+                        make_update(
+                            state,
+                            operation="camera",
+                            payload={"camera": projection_camera},
+                            reason="state-confirmed",
+                        ),
+                        state=state,
+                    )
+                    rebuild_projection_image = state.get("material") == "flat" and state.get("style") == "ortep"
+        # Flat ORTEP rasterizes the camera basis. Queue its combined image
+        # after releasing the backend lock; worker completion takes the locks
+        # in the other order. Ordinary Plotly patches keep the fast path.
+        if rebuild_projection_image:
+            worker = getattr(self, "_render_worker", None)
+            if worker is not None:
+                worker.request_figure_build(state, force=True)
+        return state
 
     def pop_pending_state(self) -> Optional[dict[str, Any]]:
         with self._lock:
