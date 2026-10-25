@@ -258,3 +258,30 @@ def test_capture_does_not_acknowledge_an_undelivered_camera_command(
     assert response[-3]["camera_revision"] > old_revision
     assert response[-4] != captured[2]
     assert response[-2] is no_update
+
+
+def test_capture_does_not_acknowledge_a_server_edit_after_its_commit(
+    scene_sync, monkeypatch
+):
+    backend, scene_id, callbacks, browser = scene_sync
+    stamp, label, controls = browser
+    controls = list(controls)
+    controls[9] = 0.2
+    apply_intent = backend.apply_intent
+
+    def commit_then_server_edit(payload):
+        result = apply_intent(payload)
+        backend.patch_state({"axis_scale": 0.24}, broadcast=True)
+        return result
+
+    monkeypatch.setattr(backend, "apply_intent", commit_then_server_edit)
+    _trigger(monkeypatch, "axis-scale-slider.value")
+    captured = callbacks["capture_state"](scene_id, *controls, stamp)
+    assert backend.get_state(scene_id)["axis_scale"] == 0.24
+
+    # The browser's .2 capture response did not apply the later .24 server
+    # edit to its slider. That later value still needs a sync response.
+    browser = captured[2], label, controls
+    for _ in range(2):
+        response = _poll(callbacks["sync_agent_state"], scene_id, browser, monkeypatch)
+        assert response[10] == 0.24

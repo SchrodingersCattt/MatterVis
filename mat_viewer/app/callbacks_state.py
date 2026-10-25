@@ -990,9 +990,9 @@ def register_state_callbacks(app, backend):
         # every figure render, doubling the 1.4 MB-per-frame cost.
         if all(prev.get(k) == v for k, v in patch.items() if k != "scene_id"):
             return no_update, checklist_out, no_update
-        backend.apply_intent(
+        captured_state = backend.apply_intent(
             {"type": "set_style", "scene_id": scene_id, "payload": patch}
-        )
+        )["state"]
         if display_changed:
             # Scope changes install the structure default. The previous
             # look-at belongs to a different frustum; leaving it in place
@@ -1015,10 +1015,13 @@ def register_state_callbacks(app, backend):
         # This response confirms the browser's captured controls too. Without
         # advancing the ack, a subsequent poll mistakes the committed value
         # for an external edit and can replace the user's next draft.
+        # A server edit can land after the capture committed. Acknowledge
+        # only the captured transaction, so that newer edit still gets a
+        # control delivery even if the render state below already sees it.
         values = _scene_control_values(
-            state, visible_range=(property_range_min, property_range_max)
+            captured_state, visible_range=(property_range_min, property_range_max)
         )
-        stamp = _parse_controls_stamp(_scene_controls_stamp(state, values))
+        stamp = _parse_controls_stamp(_scene_controls_stamp(captured_state, values))
         previous = _parse_controls_stamp(controls_scene_id) or {}
         # Capture delivers sidebar values, but it does not fill the rename
         # box or deliver a camera command. Retain their browser ack so an
