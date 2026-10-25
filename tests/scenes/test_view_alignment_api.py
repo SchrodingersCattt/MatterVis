@@ -59,11 +59,16 @@ def test_camera_action_projection_round_trips(tmp_path: Path):
     state = client.get("/api/v2/state").get_json()
     assert state["projection"] == "orthographic"
 
-    # Switch back via top-level state PATCH path.
+    # Switch back via top-level state PATCH path. The nested camera
+    # projection follows, and the eye from the orthographic camera stays.
     resp2 = client.post("/api/v2/state", json={"projection": "perspective"})
     assert resp2.status_code == 200
     state2 = client.get("/api/v2/state").get_json()
     assert state2["projection"] == "perspective"
+    assert state2["camera"]["projection"] == {"type": "perspective"}
+    assert state2["camera"]["eye"] == cam["eye"]
+    assert state2["camera"]["center"] == cam["center"]
+    assert state2["camera"]["up"] == cam["up"]
 
 
 def test_camera_action_align_then_projection_keeps_both(tmp_path: Path):
