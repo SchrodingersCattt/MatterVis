@@ -105,6 +105,20 @@ const plot=sandbox.window.Plotly;
   reset.meta.mattervis_render.camera_revision=1;
   await plot.react(gd,{data:[],layout:reset});
   assert.equal(calls[9].scene.camera.eye.x,1);
+
+  // Same uirevision keeps the dragged eye, but a commanded projection wins
+  // over a live GL camera that has not flipped yet.
+  const orthoLive=camera(9);
+  orthoLive.projection={type:'perspective'};
+  live=orthoLive;
+  expected={...expected,render_revision:6,scene_id:'b'};
+  const orthoFrame=layout(6,'b__1','b');
+  orthoFrame.scene.camera=camera(4);
+  orthoFrame.scene.camera.projection={type:'orthographic'};
+  orthoFrame.meta.mattervis_render.camera_revision=1;
+  await plot.react(gd,[],orthoFrame);
+  assert.equal(calls.at(-1).scene.camera.eye.x,9,'drag eye was replaced');
+  assert.equal(calls.at(-1).scene.camera.projection.type,'orthographic','commanded projection was dropped');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 """
     result = subprocess.run([node, "-e", program, str(source)], capture_output=True,

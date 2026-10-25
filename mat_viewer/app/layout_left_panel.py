@@ -165,6 +165,16 @@ def build_left_panel(
                     ),
                 ],
             ),
+            # Status is shared by Display, Analysis, and Operations callbacks.
+            # Keep it before upload-status, where workbench assembly ends the
+            # common controls, so a warning survives tool-pane switches.
+            html.Div(
+                id="status-banner",
+                children=f"Preset: {preset_path}",
+                className=_status_class("idle"),
+                role="status",
+            ),
+            html.Div(id="status", style={"display": "none"}),
             html.Div(
                 id="upload-status",
                 style={
@@ -682,12 +692,6 @@ def build_left_panel(
                     "marginTop": "4px",
                 },
             ),
-            html.Div(
-                id="status-banner",
-                children=f"Preset: {preset_path}",
-                className=_status_class("idle"),
-            ),
-            html.Div(id="status", style={"display": "none"}),
         ],
         id="left-panel",
         style={

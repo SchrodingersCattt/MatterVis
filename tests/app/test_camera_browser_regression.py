@@ -130,8 +130,8 @@ function nonBackground(buffer) {
   }
   return count;
 }
+let browser;
 (async () => {
-  let browser;
   try {
     browser = await chromium.launch({headless:true, executablePath:chromiumPath,
       args:['--no-sandbox','--disable-dev-shm-usage','--use-angle=swiftshader','--enable-unsafe-swiftshader','--enable-webgl']});
@@ -191,8 +191,86 @@ function nonBackground(buffer) {
   if (samples.some(sample => sample.result !== 'camera' || !sample.visible || sample.projection !== sample.requested || sample.layoutType !== sample.requested || sample.pixels === 0)) {
     throw new Error('Plotly WebGL camera/geometry postcondition failed: ' + JSON.stringify(samples));
   }
+  // Exercise the production full-frame gate with the actual GL camera too.
+  const fs = require('node:fs'), path = require('node:path');
+  const gate = fs.readFileSync(path.join(path.dirname(cameraPath), 'mattervis.js'), 'utf8');
+  const end = gate.indexOf('  // ── Right-click menu');
+  const refreshStart = gate.indexOf('  function refreshSettledGestureStamp(');
+  const refreshEnd = gate.indexOf('  function stampGestureScene(', refreshStart);
+  const cameraStart = gate.indexOf('  function displayedSceneCamera(');
+  const cameraEnd = gate.indexOf('  function redrawCompass(', cameraStart);
+  await page.evaluate(() => {
+    const gd = document.querySelector('.js-plotly-plot');
+    const meta = {scene_id:'browser', scene_generation:1, render_revision:1, geometry_version:1, display_version:1, camera_revision:4, server_started_at:'epoch'};
+    gd.layout.meta = {mattervis_render:meta};
+    const node = document.createElement('div');
+    node.id = 'fast-view-metadata'; node.textContent = JSON.stringify(meta); document.body.appendChild(node);
+    const react = Plotly.react;
+    Plotly.react = function (...args) {
+      if (window.holdNextReact) {
+        window.holdNextReact = false;
+        return new Promise((resolve, reject) => {
+          window.releaseReact = () => Promise.resolve(react.apply(this, args)).then(resolve, reject);
+        });
+      }
+      return react.apply(this, args);
+    };
+  });
+  await page.addScriptTag({content:gate.slice(0,end) + gate.slice(refreshStart,refreshEnd) + '})();' + gate.slice(cameraStart,cameraEnd)});
+  const frameSamples = await page.evaluate(async () => {
+    const gd = document.querySelector('.js-plotly-plot');
+    const copy = value => JSON.parse(JSON.stringify(value));
+    const camera = {eye:{x:1.5,y:1.5,z:1.5},center:{x:0,y:0,z:0},up:{x:0,y:0,z:1},projection:{type:'orthographic'}};
+    const stale = copy(gd.layout);
+    stale.scene.camera = copy(camera); stale.scene.camera.projection.type = 'perspective';
+    const result = await MatterVisViewUpdates.submit({type:'view_update', update_kind:'camera',scene_id:'browser',scene_generation:1,
+      geometry_version:1,display_version:1,camera_version:5,payload:{camera}});
+    if (result !== 'camera') throw new Error('camera command was rejected: ' + result);
+    const draggedEye = {x:2,y:1,z:1.5};
+    await Plotly.relayout(gd, {'scene.camera.eye':draggedEye});
+    await Plotly.react(gd, gd.data, stale);
+    const afterStale = copy(gd._fullLayout.scene._scene.getCamera());
+    const current = copy(gd.layout);
+    current.meta.mattervis_render.render_revision = 2;
+    current.meta.mattervis_render.camera_revision = 5;
+    current.scene.camera = copy(camera); current.scene.camera.projection.type = 'perspective';
+    await Plotly.react(gd, {data:gd.data,layout:current});
+    return {afterStale, draggedEye};
+  });
+  await page.waitForFunction(() => document.querySelector('.js-plotly-plot')._fullLayout.scene._scene.getCamera().projection.type === 'perspective');
+  const afterFrame = await page.evaluate(() => window.mattervisCurrentCamera(document.querySelector('.js-plotly-plot')));
+  for (const sample of [frameSamples.afterStale, afterFrame]) {
+    if (['x','y','z'].some(axis => Math.abs(sample.eye[axis] - frameSamples.draggedEye[axis]) > 0.05)) {
+      throw new Error('Full frame replaced dragged GL eye: ' + JSON.stringify({frameSamples,afterFrame}));
+    }
+  }
+  if (frameSamples.afterStale.projection.type !== 'orthographic') {
+    throw new Error('Stale full frame undid newer GL projection: ' + JSON.stringify(frameSamples));
+  }
+  const afterLateFrame = await page.evaluate(async () => {
+    const gd = document.querySelector('.js-plotly-plot');
+    const layout = JSON.parse(JSON.stringify(gd.layout));
+    layout.meta.mattervis_render.render_revision = 3;
+    window.holdNextReact = true;
+    const running = Plotly.react(gd, gd.data, layout);
+    for (let i = 0; i < 40 && !window.releaseReact; i++) await Promise.resolve();
+    if (!window.releaseReact) throw new Error('held full frame never started');
+    const camera = {eye:{x:1.5,y:1.5,z:1.5},center:{x:0,y:0,z:0},up:{x:0,y:0,z:1},projection:{type:'orthographic'}};
+    const result = await MatterVisViewUpdates.submit({type:'view_update',update_kind:'camera',scene_id:'browser',scene_generation:1,
+      geometry_version:1,display_version:1,camera_version:6,payload:{camera}});
+    if (result !== 'camera') throw new Error('newer camera command was rejected: ' + result);
+    await window.releaseReact();
+    await running;
+    return gd._fullLayout.scene._scene.getCamera();
+  });
+  if (afterLateFrame.projection.type !== 'orthographic' ||
+      ['x','y','z'].some(axis => Math.abs(afterLateFrame.eye[axis] - 1.5) > 0.05)) {
+    throw new Error('Late GL frame undid newer camera: ' + JSON.stringify(afterLateFrame));
+  }
+  const screenshot = await page.screenshot(process.env.MATTERVIS_CAMERA_SCREENSHOT ? {path:process.env.MATTERVIS_CAMERA_SCREENSHOT} : {});
+  if (nonBackground(screenshot) === 0) throw new Error('Full-frame projection left a blank canvas');
   await browser.close();
-})().catch(error => { console.error(error); process.exitCode = process.exitCode || 1; });
+})().catch(async error => { console.error(error); if (browser) await browser.close(); process.exitCode = process.exitCode || 1; });
 """
     result = subprocess.run(
         [node, "-e", program, playwright, str(bundle), str(camera_source), str(updates_source), chromium],
