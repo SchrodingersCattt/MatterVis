@@ -36,3 +36,57 @@ def test_narrow_cap_cannot_be_skipped_by_large_request():
     camera = Camera(elevation=0, azimuth=0)
     result = camera.orbit_turntable(pitch_deg=177, max_pitch_deg=89.99)
     assert result.elevation == pytest.approx(89.99, abs=1e-7)
+
+
+@pytest.mark.parametrize("pitch", [-180, 180])
+@pytest.mark.parametrize("elevation", [0, 89.99999])
+def test_nearly_polar_limit_preserves_first_crossing(elevation, pitch):
+    limit = 89.9999999
+    camera = Camera(elevation=elevation, azimuth=0)
+    result = camera.orbit_turntable(pitch_deg=pitch, max_pitch_deg=limit)
+    assert np.linalg.norm(result.view_direction[:2]) == pytest.approx(
+        np.cos(np.radians(limit)), rel=1e-6, abs=1e-14,
+    )
+    assert result.view_direction[0] > 0
+    assert result.view_direction[2] == pytest.approx(np.sign(pitch))
+
+
+@pytest.mark.parametrize("pitch", [-30, 30])
+def test_small_positive_pitch_limit_is_not_ignored(pitch):
+    limit = 1e-11
+    result = Camera(elevation=0, azimuth=0).orbit_turntable(
+        pitch_deg=pitch, max_pitch_deg=limit,
+    )
+    assert result.elevation == pytest.approx(np.sign(pitch) * limit, rel=1e-6, abs=1e-14)
+
+
+@pytest.mark.parametrize("pitch", [-180, 180])
+@pytest.mark.parametrize("elevation,limit", [(0, 10), (30, 60)])
+def test_pitch_arc_tangent_to_limit_completes(elevation, limit, pitch):
+    roll = np.degrees(np.arcsin(
+        np.cos(np.radians(limit)) / np.cos(np.radians(elevation)),
+    ))
+    camera = Camera(elevation=elevation, azimuth=0, roll=roll)
+    result = camera.orbit_turntable(pitch_deg=pitch, max_pitch_deg=limit)
+    assert result.view_direction == pytest.approx(-camera.view_direction)
+
+
+@pytest.mark.parametrize("azimuth", [30, 90, 180, 270])
+@pytest.mark.parametrize("elevation", [-90, 90])
+@pytest.mark.parametrize("pitch", [-30, 30])
+def test_exact_poles_escape_at_any_azimuth(azimuth, elevation, pitch):
+    result = Camera(azimuth=azimuth, elevation=elevation).orbit_turntable(pitch_deg=pitch)
+    assert result.elevation == pytest.approx(np.sign(elevation) * 60)
+
+
+def test_repeated_outward_pitch_stays_at_rolled_boundary():
+    limit = 44.294019911530256
+    camera = Camera(
+        azimuth=67.61836623869777,
+        elevation=15.626775877604842,
+        roll=24.95419986980707,
+    )
+    clipped = camera.orbit_turntable(pitch_deg=180, max_pitch_deg=limit)
+    repeated = clipped.orbit_turntable(pitch_deg=30, max_pitch_deg=limit)
+    assert repeated.view_direction == pytest.approx(clipped.view_direction)
+    assert repeated.elevation == pytest.approx(limit)

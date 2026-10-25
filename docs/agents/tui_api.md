@@ -80,7 +80,8 @@ An exact polar view (elevation +90 or -90 degrees) can leave the pole with
 either sign of pitch. Pitch clips at the first outward crossing of the
 configured polar limit; it does not clip an inward escape merely because the
 starting view is already beyond that limit. Normal views cannot cross a pole,
-even with a very large pitch request.
+even with a very large pitch request or a limit close to 90 degrees. An arc
+that only touches the configured limit may continue without clipping.
 
 Each `SessionObservation` contains exactly `width × height` padded
 `screen_lines`, a SHA-256 of those rendered bytes, and a deterministic state

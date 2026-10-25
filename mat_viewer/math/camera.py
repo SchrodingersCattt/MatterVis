@@ -374,35 +374,43 @@ def _clamp_turntable_pitch(
     # retaining the first-pole semantics for ordinary interactions.
     total = min(abs(float(requested_deg)), 180.0)
 
-    # Rodrigues' formula gives z(t) = offset + cosine*cos(t) + sine*sin(t).
-    # Find boundary crossings analytically: sampling can mistake the initial
-    # forbidden cap for an outward crossing, or skip a narrow cap entirely.
+    # Screen-right is perpendicular to forward, so Rodrigues' formula gives
+    # z(t) = cosine*cos(t) + sine*sin(t). Find crossings analytically rather
+    # than sampling, which can skip a cap or freeze an initial polar view.
     unit_axis = np.asarray(axis, dtype=float) / np.linalg.norm(axis)
-    offset = float(np.dot(unit_axis, forward) * unit_axis[2])
-    cosine = float(forward[2] - offset)
+    cosine = float(forward[2])
     sine = float(np.cross(unit_axis, forward)[2]) * direction
-    limit = float(np.sin(np.radians(max_pitch_deg)))
-    tolerance = 1e-12
-    if abs(float(forward[2])) >= limit - tolerance and float(forward[2]) * sine > tolerance:
-        return 0.0
-    amplitude = float(np.hypot(cosine, sine))
-    if amplitude < tolerance:
+    limit_angle = float(np.radians(max_pitch_deg))
+    limit = float(np.sin(limit_angle))
+    cap_radius = float(np.cos(limit_angle))
+    axis_z = abs(float(unit_axis[2]))
+    if axis_z >= cap_radius:
+        # The great circle stays inside the band, including exact tangency.
         return direction * total
-    phase = float(np.arctan2(sine, cosine))
+
+    elevation = float(np.arctan2(abs(cosine), np.linalg.norm(forward[:2])))
+    boundary_tolerance = np.finfo(float).eps * np.pi
+    # Rebuilding the basis can move a clipped view a few ulps inside the
+    # boundary; an outward request must still stop there.
+    # At a pole the tiny cosine(pi/2) residual must not choose an outward
+    # direction: both signs of pitch lead inward from that maximum.
+    if (
+        limit_angle - boundary_tolerance <= elevation < np.pi / 2.0
+        and np.copysign(1.0, cosine) * sine > 0.0
+    ):
+        return 0.0
+
+    # At a crossing, |z'(t)|² = cos(limit)² - axis_z². This form retains
+    # narrow caps even when sin(limit) rounds to one. Form sin/cos of the
+    # outward root directly to avoid subtracting nearly equal phase angles.
+    derivative = float(np.sqrt((cap_radius - axis_z) * (cap_radius + axis_z)))
+    root_sine = sine * limit - cosine * derivative
+    root_cosine = cosine * limit + sine * derivative
     stop = float(np.radians(total))
-    for boundary in (-limit, limit):
-        ratio = (boundary - offset) / amplitude
-        if abs(ratio) > 1.0:
-            continue
-        angle = float(np.arccos(np.clip(ratio, -1.0, 1.0)))
-        for root in (phase - angle, phase + angle):
-            root = float(root % (2.0 * np.pi))
-            if tolerance < root <= stop:
-                derivative = -cosine * np.sin(root) + sine * np.cos(root)
-                # Only leaving the legal band is clamped. An initial polar
-                # view may enter it from either side without being frozen.
-                if boundary * derivative > tolerance:
-                    stop = root
+    for sign in (-1.0, 1.0):
+        root = float(np.arctan2(sign * root_sine, sign * root_cosine) % (2.0 * np.pi))
+        if 0.0 <= root <= stop:
+            stop = root
     return direction * float(np.degrees(stop))
 
 
