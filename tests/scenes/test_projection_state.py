@@ -154,3 +154,81 @@ def test_projection_with_display_patch_advances_camera_clock(
             expected_scene_generation=before["scene_generation"],
             _camera_fence=True,
         )
+
+
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize(("display_key", "kind"), [("minor_opacity", "display"), ("axis_scale", "overlay")])
+def test_mixed_projection_and_display_delivers_the_camera(viewer, nested, display_key, kind):
+    backend = viewer.crystal_backend
+    before = backend.get_state()
+    cursor = backend.latest_figure_seq()
+    patch = {display_key: before[display_key] + 0.1}
+    if nested:
+        patch["camera"] = {"projection": {"type": "orthographic"}}
+    else:
+        patch["projection"] = "orthographic"
+    client = viewer.server.test_client()
+
+    response = client.post("/api/v2/state", json=patch)
+
+    assert response.status_code == 200
+    state = response.get_json()
+    updates = client.get(f"/api/v2/view-updates?since={cursor}").get_json()["updates"]
+    assert [update["update_kind"] for update in updates] == [kind, "camera"]
+    assert updates[0]["payload"][display_key] == state[display_key]
+    assert updates[1]["payload"]["camera"] == state["camera"]
+    for update in updates:
+        assert update["scene_id"] == state["scene_id"]
+        assert update["scene_generation"] == state["scene_generation"]
+        assert update["geometry_version"] == state["geometry_version"]
+        assert update["display_version"] == state["display_version"]
+        assert update["camera_version"] == state["camera_version"]
+    assert state["geometry_version"] == before["geometry_version"]
+    assert state["display_version"] == before["display_version"] + 1
+    assert state["camera_revision"] == before["camera_revision"] + 1
+
+
+def test_plain_opacity_patch_does_not_broadcast_an_extra_camera(viewer):
+    backend = viewer.crystal_backend
+    before = backend.get_state()
+    cursor = backend.latest_figure_seq()
+
+    state = backend.patch_state({"minor_opacity": before["minor_opacity"] + 0.1})
+
+    updates = backend.figure_broadcasts_since(cursor)
+    assert [update["update_kind"] for update in updates] == ["display"]
+    assert state["camera_revision"] == before["camera_revision"]
+
+
+def test_mixed_geometry_projection_keeps_the_complete_frame_owner(viewer, monkeypatch):
+    backend = viewer.crystal_backend
+    before = backend.get_state()
+    cursor = backend.latest_figure_seq()
+    requested = []
+    monkeypatch.setattr(backend._render_worker, "request_figure_build", lambda *args, **kwargs: requested.append(args))
+
+    backend.patch_state({"projection": "orthographic", "atom_scale": before["atom_scale"] + 0.1})
+
+    assert backend.figure_broadcasts_since(cursor) == []
+    assert requested == []
+
+
+def test_mixed_projection_without_saved_camera_delivers_projection_only(empty_viewer):
+    backend = empty_viewer.crystal_backend
+    backend.update_scene(backend.active_scene_id(), {"camera": None})
+    before = backend.get_state()
+    cursor = backend.latest_figure_seq()
+
+    response = empty_viewer.server.test_client().post(
+        "/api/v2/state", json={"projection": "orthographic", "minor_opacity": before["minor_opacity"] + 0.1}
+    )
+
+    assert response.status_code == 200
+    state = response.get_json()
+    assert state["camera"] is None
+    updates = backend.figure_broadcasts_since(cursor)
+    assert [update["update_kind"] for update in updates] == ["display", "camera"]
+    assert updates[1]["payload"]["camera"] == {"projection": {"type": "orthographic"}}
+    assert state["geometry_version"] == before["geometry_version"]
+    assert state["display_version"] == before["display_version"] + 1
+    assert state["camera_revision"] == before["camera_revision"] + 1
