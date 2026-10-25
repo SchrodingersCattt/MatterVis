@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from dash import no_update
 
-from mat_viewer.app import create_app
+from mat_viewer.app import callbacks_view, create_app
 from mat_viewer.app.dash_impl import _camera_figure_patch
 from mat_viewer.loader import build_loaded_crystal
 from mat_viewer.presets import DEFAULT_STYLE
@@ -67,6 +69,66 @@ def test_projection_buttons_submit_camera_update_message(tmp_path: Path):
     outputs = _outputs(callbacks[0])
     assert ("view-update-store", "data") in outputs
     assert ("fast-view-metadata", "children") in outputs
+
+
+def _callback(app, name):
+    return next(
+        spec["callback"].__wrapped__
+        for spec in app.callback_map.values()
+        if spec.get("callback") and spec["callback"].__name__ == name
+    )
+
+
+def test_projection_radio_follows_the_selected_tab(tmp_path: Path, monkeypatch):
+    app = create_app(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
+    try:
+        backend = app.crystal_backend
+        scene_a = backend.active_scene_id()
+        scene_b = backend.create_scene(
+            structure=backend.get_state()["structure"],
+            label="Second",
+        )["id"]
+        backend.set_projection("orthographic", scene_id=scene_a, broadcast=False)
+        backend.set_projection("perspective", scene_id=scene_b, broadcast=False)
+        sync = _callback(app, "sync_view_projection_from_state")
+        stale = {"scene_id": scene_a, "projection": "orthographic"}
+
+        monkeypatch.setattr(
+            callbacks_view,
+            "callback_context",
+            SimpleNamespace(
+                triggered_id="scene-tabs",
+                triggered=[{"prop_id": "scene-tabs.value"}],
+            ),
+        )
+        assert sync(stale, scene_b) == "perspective"
+
+        monkeypatch.setattr(
+            callbacks_view,
+            "callback_context",
+            SimpleNamespace(
+                triggered_id="agent-state-store",
+                triggered=[
+                    {"prop_id": "agent-state-store.data"},
+                    {"prop_id": "scene-tabs.value"},
+                ],
+            ),
+        )
+        assert sync(stale, scene_b) == "perspective"
+
+        monkeypatch.setattr(
+            callbacks_view,
+            "callback_context",
+            SimpleNamespace(
+                triggered_id="agent-state-store",
+                triggered=[{"prop_id": "agent-state-store.data"}],
+            ),
+        )
+        assert sync(stale, scene_b) is no_update
+        assert sync({"scene_id": scene_b, "projection": "orthographic"}, scene_b) == "perspective"
+    finally:
+        app.close_extensions()
+        app.crystal_backend.close()
 
 
 def test_camera_capture_also_notifies_flat_ortep_render_path(tmp_path: Path):

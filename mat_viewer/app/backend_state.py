@@ -229,12 +229,16 @@ class _StateBackendMixin:
         # Phase 4 (view tools): top-level ``projection`` is a v2 state
         # key that mirrors ``camera.projection.type``. Accept either
         # spelling so AI callers don't have to dig into the camera
-        # dict; ``set_projection`` keeps the two in sync.
+        # dict. Copy the coerced type onto an existing camera here.
+        # ``set_projection`` also refits; calling it from ``patch_state``
+        # would recurse and move the eye.
+        projection_specified = False
         if "projection" in patch and patch["projection"] is not None:
             state["projection"] = _coerce_projection(
                 patch["projection"],
                 fallback=str(state.get("projection", "perspective")),
             )
+            projection_specified = True
         elif isinstance(patch.get("camera"), dict):
             cam_proj = patch["camera"].get("projection")
             if isinstance(cam_proj, dict) and "type" in cam_proj:
@@ -242,6 +246,11 @@ class _StateBackendMixin:
                     cam_proj["type"],
                     fallback=str(state.get("projection", "perspective")),
                 )
+                projection_specified = True
+        if projection_specified and isinstance(state.get("camera"), dict):
+            camera = dict(state["camera"])
+            camera["projection"] = {"type": state["projection"]}
+            state["camera"] = camera
         return state
 
     def get_state(self, scene_id: Optional[str] = None) -> dict[str, Any]:
