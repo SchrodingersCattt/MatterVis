@@ -52,21 +52,27 @@ def test_nearly_polar_limit_preserves_first_crossing(elevation, pitch):
 
 
 @pytest.mark.parametrize("pitch", [-30, 30])
-def test_small_positive_pitch_limit_is_not_ignored(pitch):
+@pytest.mark.parametrize("roll", [0, 89.999999])
+def test_small_positive_pitch_limit_is_not_ignored(roll, pitch):
     limit = 1e-11
-    result = Camera(elevation=0, azimuth=0).orbit_turntable(
+    result = Camera(elevation=0, azimuth=0, roll=roll).orbit_turntable(
         pitch_deg=pitch, max_pitch_deg=limit,
     )
     assert result.elevation == pytest.approx(np.sign(pitch) * limit, rel=1e-6, abs=1e-14)
 
 
 @pytest.mark.parametrize("pitch", [-180, 180])
-@pytest.mark.parametrize("elevation,limit", [(0, 10), (30, 60)])
-def test_pitch_arc_tangent_to_limit_completes(elevation, limit, pitch):
+@pytest.mark.parametrize("elevation,azimuth,limit", [
+    (0, 0, 10), (30, 0, 60), (5, 75, 20),
+    (-31.051174325430566, 41.74360572442629, 84.4734641689313),
+    (-1.1673527608898961, -76.77603032718554, 1.4578832157192867),
+    (0.19717342466915833, -27.50373870163881, 0.4422667228223486),
+])
+def test_pitch_arc_tangent_to_limit_completes(elevation, azimuth, limit, pitch):
     roll = np.degrees(np.arcsin(
         np.cos(np.radians(limit)) / np.cos(np.radians(elevation)),
     ))
-    camera = Camera(elevation=elevation, azimuth=0, roll=roll)
+    camera = Camera(elevation=elevation, azimuth=azimuth, roll=roll)
     result = camera.orbit_turntable(pitch_deg=pitch, max_pitch_deg=limit)
     assert result.view_direction == pytest.approx(-camera.view_direction)
 

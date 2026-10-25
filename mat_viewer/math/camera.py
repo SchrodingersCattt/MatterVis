@@ -384,12 +384,25 @@ def _clamp_turntable_pitch(
     limit = float(np.sin(limit_angle))
     cap_radius = float(np.cos(limit_angle))
     axis_z = abs(float(unit_axis[2]))
-    # Basis re-orthogonalisation can move exact tangency one ulp below the
-    # cap radius. Keep that boundary inclusive without an absolute tolerance
-    # that would erase narrow caps near 90 degrees.
-    if axis_z >= np.nextafter(cap_radius, 0.0):
-        # The great circle stays inside the band, including exact tangency.
+    amplitude = float(np.hypot(cosine, sine))
+    # Compare the complementary angles so basis roundoff stays inclusive at
+    # tangency. Scale the allowance with the polar gap: an absolute angular
+    # tolerance would erase sufficiently narrow caps near 90 degrees.
+    cap_colatitude = float(np.arctan2(cap_radius, limit))
+    arc_colatitude = float(np.arctan2(axis_z, amplitude))
+    orientation_roundoff = 32.0 * np.finfo(float).eps * cap_colatitude
+    if arc_colatitude >= cap_colatitude - orientation_roundoff:
         return direction * total
+    if limit <= cap_radius:
+        # Near zero, cos(limit) rounds to one even for arcs that leave the
+        # band. Use the measured amplitude instead.
+        if amplitude <= limit:
+            return direction * total
+        crossing_squared = (amplitude - limit) * (amplitude + limit)
+    else:
+        if axis_z >= cap_radius:
+            return direction * total
+        crossing_squared = (cap_radius - axis_z) * (cap_radius + axis_z)
 
     elevation = float(np.arctan2(abs(cosine), np.linalg.norm(forward[:2])))
     boundary_tolerance = np.finfo(float).eps * np.pi
@@ -403,10 +416,12 @@ def _clamp_turntable_pitch(
     ):
         return 0.0
 
-    # At a crossing, |z'(t)|² = cos(limit)² - axis_z². This form retains
-    # narrow caps even when sin(limit) rounds to one. Form sin/cos of the
-    # outward root directly to avoid subtracting nearly equal phase angles.
-    derivative = float(np.sqrt((cap_radius - axis_z) * (cap_radius + axis_z)))
+    # At a crossing, |z'(t)|² = amplitude² - sin(limit)²
+    #                           = cos(limit)² - axis_z².
+    # Use the smaller boundary component above to retain precision near
+    # either endpoint. Form sin/cos of the outward root directly to avoid
+    # subtracting nearly equal phase angles.
+    derivative = float(np.sqrt(crossing_squared))
     root_sine = sine * limit - cosine * derivative
     root_cosine = cosine * limit + sine * derivative
     stop = float(np.radians(total))
