@@ -17,7 +17,7 @@ module.exports = async function projectionRadio(page, clickTab, waitForServerSta
   const isSync = request => {
     if (new URL(request.url()).pathname !== '/_dash-update-component') return false;
     const payload = request.postDataJSON();
-    return String(payload.output).startsWith('view-projection.value@')
+    return String(payload.output).includes('view-projection.value@')
       && payload.inputs.some(input => input.id === 'agent-state-store')
       && payload.inputs.some(input => input.id === 'scene-tabs');
   };
