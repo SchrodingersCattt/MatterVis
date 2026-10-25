@@ -12,7 +12,7 @@ from dash import ALL, Input, Output, State, callback_context, no_update
 
 from .. import perf_log
 from .editor_transforms import _seed_text_to_selector, _transforms_table_rows
-from .status_helpers import surface_callback_error
+from .status_helpers import emit_legacy_status, surface_callback_error
 
 
 def _parse_symmetry_ops(value: Any) -> list[Any]:
@@ -149,6 +149,21 @@ def _build_transforms(
     return new_transforms
 
 
+def _surface_formula_unit_warning(response: Any) -> None:
+    """Show the backend's formula-unit trim warning on the status banner.
+
+    The hidden ``status`` child is the existing writer. ``mirror_legacy_status``
+    copies it onto the visible banner with ``allow_duplicate``.
+    """
+    warnings = response.get("warnings") if isinstance(response, dict) else None
+    for warning in warnings or []:
+        text = str(warning)
+        if "formula_unit" not in text:
+            continue
+        emit_legacy_status(f"Warning: {text}")
+        return
+
+
 def register_operations_callbacks(app, backend):
     _surface_error = surface_callback_error
 
@@ -258,13 +273,15 @@ def register_operations_callbacks(app, backend):
         if triggered == "transforms-preset-2x" or triggered == "transforms-preset-3x":
             n = 2 if triggered == "transforms-preset-2x" else 3
             try:
-                backend.add_transform(
+                created = backend.add_transform(
                     "repeat",
                     {"a": n, "b": n, "c": n},
                     name=f"Repeat {n}x{n}x{n}",
                     scene_id=scene_id,
                     replace_repeat=True,
+                    auto_promote=False,
                 )
+                _surface_formula_unit_warning(created)
             except Exception as exc:
                 _surface_error(f"Repeat {n}x{n}x{n}", exc)
                 return _rebuild(), no_update
@@ -301,11 +318,13 @@ def register_operations_callbacks(app, backend):
                 "slab": {"miller": [0, 0, 1], "layers": 3, "vacuum": 10.0},
             }
             try:
-                backend.add_transform(
+                created = backend.add_transform(
                     kind=kind,
                     params=defaults_by_kind.get(kind, {}),
                     scene_id=scene_id,
+                    auto_promote=False,
                 )
+                _surface_formula_unit_warning(created)
             except Exception as exc:
                 _surface_error(f"Add {kind} transform", exc)
                 return _rebuild(), no_update

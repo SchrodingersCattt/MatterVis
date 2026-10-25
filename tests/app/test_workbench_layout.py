@@ -1,6 +1,7 @@
 """Workbench placement must preserve native controls and callback dependencies."""
 
 import json
+from pathlib import Path
 
 import pytest
 from dash import Input, Output, dcc, html
@@ -74,7 +75,14 @@ def test_native_workbench_tree_and_dependencies(tmp_path, monkeypatch, with_exte
                 by_id["display-panel-content"]
             )
             assert "topology-site-index" in layout_ids(by_id["analysis-panel-content"])
-            assert "transforms-add-btn" in layout_ids(by_id["operation-panel-content"])
+            display_ids = layout_ids(by_id["display-panel-content"])
+            operation_ids = layout_ids(by_id["operation-panel-content"])
+            assert "transforms-add-btn" in display_ids
+            assert "transforms-kind-select" in display_ids
+            assert "transforms-rows-container" in display_ids
+            assert "display-transforms-section" in display_ids
+            assert "transforms-add-btn" not in operation_ids
+            assert {"disorder-resolve-btn", "export-cif-btn"} <= operation_ids
             assert ("workbench-probe" in ids) is with_extension
             assert not app.config.suppress_callback_exceptions
             for callback in app.callback_map.values():
@@ -113,3 +121,41 @@ def test_assembly_moves_existing_components_without_replacing_them():
     assert result is root
     for cid, component in original.items():
         assert find_component(result, cid) is component
+
+
+def test_assembly_moves_display_transforms_into_the_display_pane():
+    section = html.Section(
+        html.Button(id="transforms-add-btn"), id="display-transforms-section",
+    )
+    operations = html.Div(
+        [
+            html.Button(id="disorder-resolve-btn"),
+            html.Button(id="export-cif-btn"),
+            section,
+        ],
+        id="operation-panel-content",
+    )
+    root = html.Div([
+        html.Div([html.Div(id="upload-status"), html.Button(id="display-control")],
+                 id="left-panel"),
+        html.Div([html.Div(id="crystal-graph")], id="center-panel"),
+        html.Div([operations], id="right-panel"),
+        html.Div(id="perf-log-panel"),
+    ])
+    assemble_workbench(root)
+    display = find_component(root, "display-panel-content")
+    assert find_component(display, "display-transforms-section") is section
+    assert "transforms-add-btn" not in layout_ids(
+        find_component(root, "operation-panel-content")
+    )
+    assert {"disorder-resolve-btn", "export-cif-btn"} <= layout_ids(
+        find_component(root, "operation-panel-content")
+    )
+
+
+def test_display_panel_inputs_share_the_operation_width_cap():
+    css = (
+        Path(__file__).resolve().parents[2] / "frontend" / "assets" / "panel_resize.css"
+    ).read_text(encoding="utf-8")
+    assert "#display-panel-content .Select" in css
+    assert "#display-panel-content input" in css
