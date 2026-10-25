@@ -365,7 +365,7 @@ def _clamp_turntable_pitch(
     requested_deg: float,
     max_pitch_deg: float,
 ) -> float:
-    """Stop pitch at the first world-up pole boundary along its arc."""
+    """Stop at the first outward cap crossing, allowing escape from a pole."""
     if abs(requested_deg) < 1e-12:
         return 0.0
     direction = float(np.copysign(1.0, requested_deg))
@@ -374,32 +374,62 @@ def _clamp_turntable_pitch(
     # retaining the first-pole semantics for ordinary interactions.
     total = min(abs(float(requested_deg)), 180.0)
 
-    def elevation_at(magnitude: float) -> float:
-        candidate = rotate_vector(forward, axis, direction * magnitude)
-        return abs(float(np.degrees(np.arcsin(np.clip(candidate[2], -1.0, 1.0)))))
-
-    low = 0.0
-    high: float | None = None
-    # Search a fixed number of intervals so a 180° request cannot tunnel
-    # through the first pole and return to low elevation on the far side.
-    for step in range(1, 65):
-        candidate = total * step / 64.0
-        if elevation_at(candidate) > max_pitch_deg:
-            high = candidate
-            break
-        low = candidate
-    if high is None:
+    # Screen-right is perpendicular to forward, so Rodrigues' formula gives
+    # z(t) = cosine*cos(t) + sine*sin(t). Find crossings analytically rather
+    # than sampling, which can skip a cap or freeze an initial polar view.
+    unit_axis = np.asarray(axis, dtype=float) / np.linalg.norm(axis)
+    cosine = float(forward[2])
+    sine = float(np.cross(unit_axis, forward)[2]) * direction
+    limit_angle = float(np.radians(max_pitch_deg))
+    limit = float(np.sin(limit_angle))
+    cap_radius = float(np.cos(limit_angle))
+    axis_z = abs(float(unit_axis[2]))
+    amplitude = float(np.hypot(cosine, sine))
+    # Compare the complementary angles so basis roundoff stays inclusive at
+    # tangency. Scale the allowance with the polar gap: an absolute angular
+    # tolerance would erase sufficiently narrow caps near 90 degrees.
+    cap_colatitude = float(np.arctan2(cap_radius, limit))
+    arc_colatitude = float(np.arctan2(axis_z, amplitude))
+    orientation_roundoff = 32.0 * np.finfo(float).eps * cap_colatitude
+    if arc_colatitude >= cap_colatitude - orientation_roundoff:
         return direction * total
+    if limit <= cap_radius:
+        # Near zero, cos(limit) rounds to one even for arcs that leave the
+        # band. Use the measured amplitude instead.
+        if amplitude <= limit:
+            return direction * total
+        crossing_squared = (amplitude - limit) * (amplitude + limit)
+    else:
+        if axis_z >= cap_radius:
+            return direction * total
+        crossing_squared = (cap_radius - axis_z) * (cap_radius + axis_z)
 
-    # A fixed number of bisection iterations avoids work proportional to the
-    # original user input while resolving the first pole precisely.
-    for _ in range(48):
-        middle = (low + high) / 2.0
-        if elevation_at(middle) <= max_pitch_deg:
-            low = middle
-        else:
-            high = middle
-    return direction * low
+    elevation = float(np.arctan2(abs(cosine), np.linalg.norm(forward[:2])))
+    boundary_tolerance = np.finfo(float).eps * np.pi
+    # Rebuilding the basis can move a clipped view a few ulps inside the
+    # boundary; an outward request must still stop there.
+    # At a pole the tiny cosine(pi/2) residual must not choose an outward
+    # direction: both signs of pitch lead inward from that maximum.
+    if (
+        limit_angle - boundary_tolerance <= elevation < np.pi / 2.0
+        and np.copysign(1.0, cosine) * sine > 0.0
+    ):
+        return 0.0
+
+    # At a crossing, |z'(t)|² = amplitude² - sin(limit)²
+    #                           = cos(limit)² - axis_z².
+    # Use the smaller boundary component above to retain precision near
+    # either endpoint. Form sin/cos of the outward root directly to avoid
+    # subtracting nearly equal phase angles.
+    derivative = float(np.sqrt(crossing_squared))
+    root_sine = sine * limit - cosine * derivative
+    root_cosine = cosine * limit + sine * derivative
+    stop = float(np.radians(total))
+    for sign in (-1.0, 1.0):
+        root = float(np.arctan2(sign * root_sine, sign * root_cosine) % (2.0 * np.pi))
+        if 0.0 <= root <= stop:
+            stop = root
+    return direction * float(np.degrees(stop))
 
 
 def project_segments(
