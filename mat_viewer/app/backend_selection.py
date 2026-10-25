@@ -27,22 +27,20 @@ from .shared import *
 
 
 def _finite_gesture_ts(value: Any) -> float | None:
-    """Accept a browser gesture clock. Booleans are ints and are not clocks."""
+    # bool is an int subclass and is not a gesture clock.
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     number = float(value)
-    if not math.isfinite(number):
-        return None
-    return number
+    return number if math.isfinite(number) else None
 
 
 def _selection_target_identity(selection: Any) -> tuple[tuple[str, str], ...]:
-    raw_targets = selection.get("targets") if isinstance(selection, Mapping) else None
-    targets = []
-    for item in raw_targets or []:
-        if isinstance(item, Mapping) and item.get("kind") and item.get("id"):
-            targets.append((str(item.get("kind")), str(item.get("id"))))
-    return tuple(sorted(targets))
+    raw = selection.get("targets") if isinstance(selection, Mapping) else ()
+    return tuple(sorted(
+        (str(item.get("kind")), str(item.get("id")))
+        for item in raw or ()
+        if isinstance(item, Mapping) and item.get("kind") and item.get("id")
+    ))
 
 
 def _selection_part(atom: dict[str, Any]) -> dict[str, Any]:
@@ -497,42 +495,31 @@ class _SelectionBackendMixin:
                 "property_coloring": bool(style.get("atom_property_color"))}
 
     def _remember_selection_gesture(self, scene_id, selection, ts: float) -> None:
-        """Record the newest accepted browser gesture for one target set."""
         scene_key = str(scene_id or "")
-        latest = getattr(self, "_selection_gesture_ts", None)
-        if latest is None:
-            self._selection_gesture_ts = {}
-            latest = self._selection_gesture_ts
+        latest = self.__dict__.setdefault("_selection_gesture_ts", {})
+        keyed = self.__dict__.setdefault("_selection_gesture_by_targets", {})
         latest[scene_key] = ts
-        keyed = getattr(self, "_selection_gesture_by_targets", None)
-        if keyed is None:
-            self._selection_gesture_by_targets = {}
-            keyed = self._selection_gesture_by_targets
         keyed[(scene_key, _selection_target_identity(selection))] = ts
 
     def _selection_gesture_ts_for_state(self, state) -> float:
-        """Return the gesture time stamped onto the selection in ``state``.
-
-        The clock travels with that target set, not with whatever gesture
-        arrived while an older frame was still being drawn.
-        """
+        # The clock belongs to the selection in this frame, not to a gesture
+        # that arrived while an older frame was still being drawn.
         keyed = getattr(self, "_selection_gesture_by_targets", None) or {}
         if not isinstance(state, Mapping):
             return 0.0
         scene_key = str(state.get("scene_id") or "")
         if not scene_key:
-            store = getattr(self, "scene_store", None)
-            scene_key = str(getattr(store, "active_id", "") or "")
+            scene_key = str(getattr(getattr(self, "scene_store", None), "active_id", "") or "")
         ts = keyed.get((scene_key, _selection_target_identity(state.get("selection"))))
         return float(ts or 0.0)
 
     def _commit_selection_event(self, selection, scene_id):
-        """Commit one browser selection snapshot.
+        """Commit the browser's complete set, rejecting obsolete geometry.
 
         Toggle/additive intent has already been applied locally. Replaying
         it against the whole snapshot would toggle existing targets twice.
-        A numeric ``ts`` orders browser gestures so an older gesture does
-        not overwrite a newer one. Payloads without ``ts`` still commit.
+        A numeric ``ts`` keeps an older gesture from overwriting a newer one.
+        Payloads without ``ts`` still commit.
         """
         with self._lock:
             expected = selection.get("target_revision")
