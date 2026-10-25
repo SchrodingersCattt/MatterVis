@@ -55,10 +55,14 @@ flowchart LR
 
 `GET /api/v2/state` returns `polyhedron_specs: [...]` alongside the
 existing `topology_*` keys. Fresh scenes start with
-`topology_enabled=false`, so no polyhedron overlay is computed until the
-caller opts in. Empty `polyhedron_specs` means "render no named
-polyhedra"; MatterVis no longer synthesises auto-ligand rows from
-`topology_species_keys`. Non-empty explicit rows drive the overlay.
+`topology_enabled=false`, so the polyhedron overlay is not drawn until
+the caller opts in. Row color, visibility, and centre/ligand fields stay
+editable while the overlay is off, and `run_analysis` still computes
+when specs exist. The overlay flag only controls drawing. Empty
+`polyhedron_specs` means "render no named polyhedra"; MatterVis no
+longer synthesises auto-ligand rows from `topology_species_keys`.
+Non-empty explicit rows drive the overlay. A row's `enabled` flag
+decides whether that spec is drawn once the overlay is on.
 
 `POST /api/v2/state` honours `polyhedron_specs` directly (full
 replacement semantics). Use the dedicated CRUD endpoints below when

@@ -384,8 +384,8 @@ class _AnalysisBackendMixin:
     ) -> dict[str, Any]:
         """Run polyhedron analysis synchronously and return the results.
 
-        Wraps ``topology_for_state_sync`` so callers (UI, REST) get a
-        single call that includes status/warning metadata. Returns:
+        Computes from the registered specs even when the polyhedron overlay
+        is off. The overlay flag only controls drawing. Returns:
 
         ``{"geometry": ..., "status": "ok"|"no_specs"|"no_results",
           "warnings": [...], "spec_count": int}``
@@ -403,17 +403,10 @@ class _AnalysisBackendMixin:
                 "spec_count": 0,
             }
 
-        if not state.get("topology_enabled", False):
-            return {
-                "geometry": None,
-                "status": "disabled",
-                "warnings": ["Topology is disabled for this scene. "
-                             "Check 'Show polyhedra overlay' to enable."],
-                "spec_count": len(effective_specs),
-            }
-
+        analysis_state = dict(state)
+        analysis_state["topology_enabled"] = True
         try:
-            geometry = self.topology_for_state_sync(state)
+            geometry = self.topology_for_state(analysis_state)
         except Exception as exc:
             return {
                 "geometry": None,

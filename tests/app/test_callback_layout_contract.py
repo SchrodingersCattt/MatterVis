@@ -94,8 +94,28 @@ def test_polyhedra_gate_controls_editor_not_toggle(app):
     assert {"polyhedra-add-btn", "polyhedra-rows-container"} <= layout_ids(controls)
     assert "topology-toggle" not in layout_ids(controls)
     gate = _callback(app, "gate_polyhedra_controls")
-    assert gate([]) == {"display": "none"}
+    assert gate([]) == {}
     assert gate(["enabled"]) == {}
+
+
+def test_analysis_runs_while_the_polyhedron_overlay_is_off(app, monkeypatch):
+    backend = app.crystal_backend
+    backend.patch_state({"topology_enabled": False}, broadcast=False)
+    calls = []
+
+    def fake_topology(state, *args, **kwargs):
+        calls.append(bool(state.get("topology_enabled")))
+        return {"spec_results": [], "warnings": []}
+
+    monkeypatch.setattr(backend, "_effective_polyhedron_specs", lambda state: [{"id": "p1", "enabled": True}])
+    monkeypatch.setattr(backend, "topology_for_state", fake_topology)
+    result = backend.run_analysis()
+    assert result["status"] == "ok"
+    assert calls == [True]
+    assert backend.get_state()["topology_enabled"] is False
+
+    monkeypatch.setattr(backend, "_effective_polyhedron_specs", lambda state: [])
+    assert backend.run_analysis()["status"] == "no_specs"
 
 
 @pytest.mark.parametrize("trigger,value,action", [

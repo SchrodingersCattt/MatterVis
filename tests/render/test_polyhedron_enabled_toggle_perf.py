@@ -191,7 +191,7 @@ def test_dash_polyhedron_visibility_patch_flips_existing_figure_traces(tmp_path)
     }
 
 
-def test_dash_polyhedron_visibility_patch_hides_all_when_overlay_disabled(tmp_path):
+def test_dash_polyhedron_visibility_patch_follows_row_enabled_when_overlay_is_off(tmp_path):
     from mat_viewer.app.style_helpers import _polyhedron_visibility_patch_for_figure
 
     fig = {
@@ -204,7 +204,7 @@ def test_dash_polyhedron_visibility_patch_hides_all_when_overlay_disabled(tmp_pa
         "topology_enabled": False,
         "polyhedron_specs": [
             {"id": "p1", "enabled": True},
-            {"id": "p2", "enabled": True},
+            {"id": "p2", "enabled": False},
         ],
     }
 
@@ -212,9 +212,10 @@ def test_dash_polyhedron_visibility_patch_hides_all_when_overlay_disabled(tmp_pa
     ops = patch.to_plotly_json()["operations"]
 
     assert {tuple(op["location"]): op["params"]["value"] for op in ops} == {
-        ("data", 0, "visible"): False,
+        ("data", 0, "visible"): True,
         ("data", 1, "visible"): False,
     }
+    assert [spec["enabled"] for spec in state["polyhedron_specs"]] == [True, False]
 
 
 def _backend_with_dap4(tmp_path):
