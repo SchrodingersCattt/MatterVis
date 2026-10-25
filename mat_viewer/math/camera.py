@@ -384,7 +384,10 @@ def _clamp_turntable_pitch(
     limit = float(np.sin(limit_angle))
     cap_radius = float(np.cos(limit_angle))
     axis_z = abs(float(unit_axis[2]))
-    if axis_z >= cap_radius:
+    # Basis re-orthogonalisation can move exact tangency one ulp below the
+    # cap radius. Keep that boundary inclusive without an absolute tolerance
+    # that would erase narrow caps near 90 degrees.
+    if axis_z >= np.nextafter(cap_radius, 0.0):
         # The great circle stays inside the band, including exact tangency.
         return direction * total
 
