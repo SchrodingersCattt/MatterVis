@@ -330,7 +330,7 @@ Notes for callers:
 - `POST /topology`
   JSON body: `{"structure": "SY", "center_index": 0, "cutoff": 10.0}`.
   `center_index` is the fragment-table `index` returned by
-  `GET /scene/{name}`. The call normally uses the scene's enabled
+  `GET /scene/{name}`. The call normally uses the scene's registered
   `polyhedron_specs`; for one-shot scripts you may include
   `center_species` and `ligand_species` in the body to run an
   ephemeral spec without first mutating `/polyhedra`. Add
@@ -340,8 +340,9 @@ Notes for callers:
   Responses include `analysis_level`; labels are echoed as
   `packing_shell_label` on molecule-level calls and
   `coordination_polyhedron_label` on atom-level calls. Invalid
-  `center_index` / `cutoff` values return `400`. Missing scene
-  preconditions such as `topology_enabled=false` or no enabled specs
+  `center_index` / `cutoff` values return `400`. Analysis runs even when
+  the overlay is off or a row is disabled, without changing those drawing
+  settings. Missing scene preconditions such as no registered specs
   return `409` with a recovery hint rather than `null`.
 - `GET /polyhedra` / `POST /polyhedra` / `PATCH /polyhedra/{id}` /
   `DELETE /polyhedra/{id}` / `POST /polyhedra/reorder`

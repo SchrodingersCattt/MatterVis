@@ -63,6 +63,7 @@ def register_view_callbacks(app, backend):
             "display_options": list(state.get("display_options") or []),
             "axis_scale": state.get("axis_scale"),
             "minor_opacity": state.get("minor_opacity"),
+            "topology_enabled": bool(state.get("topology_enabled", False)),
             "polyhedron_specs": copy.deepcopy(state.get("polyhedron_specs") or []),
             "label_mode": state.get("label_mode"),
         }

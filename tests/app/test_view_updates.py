@@ -74,6 +74,17 @@ def test_polyhedron_enabled_is_part_of_display_identity():
     assert classify_change(before, after) is UpdateKind.DISPLAY
 
 
+def test_polyhedron_overlay_toggle_requires_a_complete_frame():
+    # An off figure has no topology traces. Enabling must assemble them;
+    # row visibility alone can keep using the existing trace geometry.
+    before = _state(topology_enabled=False, polyhedron_specs=[{"id": "p", "enabled": True}])
+    on = _with(before, topology_enabled=True)
+    assert classify_change(before, on) is UpdateKind.GEOMETRY
+    assert classify_change(on, before) is UpdateKind.GEOMETRY
+    row_off = _with(before, polyhedron_specs=[{"id": "p", "enabled": False}])
+    assert classify_change(before, row_off) is UpdateKind.DISPLAY
+
+
 def test_same_geometry_scene_switch_requests_a_complete_frame():
     before = _state()
     after = _state(scene_id="scene-b", display_version=5)

@@ -109,15 +109,15 @@ def _fast_style_patch_for_figure(
 def _polyhedron_enabled_lookup(state: Optional[dict[str, Any]]) -> dict[str, bool]:
     """Return ``{spec_id: enabled}`` for the current named-polyhedra rows.
 
-    Kept in ``style_helpers`` so both the backend cache-hit path and the
-    Dash-side figure patch path use the same interpretation of a row checkbox.
+    A row's ``enabled`` flag decides whether that spec is drawn. The scene
+    overlay switch (``topology_enabled``) hides the whole layer at figure
+    assembly and is not folded into these checkboxes.
     """
     out: dict[str, bool] = {}
-    topology_enabled = bool((state or {}).get("topology_enabled", True))
     for spec in (state or {}).get("polyhedron_specs") or []:
         if not isinstance(spec, dict) or not spec.get("id"):
             continue
-        out[str(spec["id"])] = topology_enabled and bool(spec.get("enabled", True))
+        out[str(spec["id"])] = bool(spec.get("enabled", True))
     return out
 
 
@@ -172,7 +172,14 @@ def _minor_opacity_control_style(disorder: Optional[str]) -> dict[str, Any]:
 
 
 def _polyhedra_controls_style(enabled: bool) -> dict[str, Any]:
-    return {} if enabled else {"display": "none"}
+    """Keep the polyhedron editor mounted when the overlay is off.
+
+    ``enabled`` is the overlay checkbox passed by the view callback.
+    Color, row visibility, and centre/ligand fields stay editable either
+    way; only drawing consults the overlay switch.
+    """
+    del enabled
+    return {}
 
 
 def _status_class(level: str = "info") -> str:

@@ -219,6 +219,49 @@ vm.runInContext(preview, sandbox);
     )
 
 
+def test_polyhedron_row_updates_respect_the_global_overlay_gate():
+    _node(
+        r"""
+const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+const gd = {layout:{meta:{mattervis_render:{scene_id:'scene-a'}}}, data:[
+  {meta:{kind:'polyhedron', spec_id:'enabled'}, visible:true},
+  {meta:{kind:'polyhedron', spec_id:'disabled'}, visible:false},
+  {meta:{mv_role:'atom'}, visible:true},
+]};
+const sandbox = {console, Promise, Number, String, Object, Array, JSON, window:{
+  MatterVisViewCamera:{graph:()=>gd},
+  Plotly:{restyle:(_gd, patch, indices)=>{
+    indices.forEach((index, offset)=>{ gd.data[index].visible = patch.visible[offset]; });
+    return Promise.resolve();
+  }},
+}};
+vm.createContext(sandbox);
+vm.runInContext(source, sandbox);
+(async () => {
+  const specs = [{id:'enabled', enabled:true}, {id:'disabled', enabled:false}];
+  const apply = async (topology, revision) => {
+    assert.equal(await sandbox.window.MatterVisViewUpdates.submit({
+      type:'view_update', update_kind:'display', scene_id:'scene-a',
+      geometry_version:1, display_version:revision,
+      payload:{topology_enabled:topology, polyhedron_specs:specs},
+    }), 'display');
+  };
+  await apply(false, 1);
+  assert.deepEqual(gd.data.map(t=>t.visible), [false,false,true]);
+  specs[1].enabled = true;
+  await apply(false, 2);
+  assert.deepEqual(gd.data.map(t=>t.visible), [false,false,true]);
+  specs[1].enabled = false;
+  await apply(true, 3);
+  assert.deepEqual(gd.data.map(t=>t.visible), [true,false,true]);
+  assert.deepEqual(specs.map(s=>s.enabled), [true,false]);
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+""",
+        ASSETS / "view_updates.js",
+    )
+
+
 def test_splitter_drag_resizes_only_when_the_graph_rect_changes():
     _node(
         r"""
