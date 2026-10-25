@@ -254,3 +254,84 @@ def test_capture_state_ignores_batched_tab_refresh_values(tmp_path, monkeypatch)
     finally:
         backend.close()
 
+
+def test_tab_switch_drops_the_snapshot_it_already_delivers(tmp_path, monkeypatch):
+    """Duplicate's queued snapshot must not survive the tab fill.
+
+    The tab callback returns that scene's controls. A later poll of the same
+    snapshot writes the label into the rename box again and replaces a name
+    the user has started typing.
+    """
+    backend = ViewerBackend(
+        preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path)
+    )
+    try:
+        first_id = backend.active_scene_id()
+        second_id = backend.create_scene(
+            structure=backend.get_state()["structure"], label="Second scene"
+        )["id"]
+        assert backend.pending_state["scene_id"] == second_id
+        registry = _CallbackRegistry()
+        callbacks_state.register_state_callbacks(registry, backend)
+        monkeypatch.setattr(
+            callbacks_state,
+            "callback_context",
+            SimpleNamespace(triggered=[{"prop_id": "scene-tabs.value"}]),
+        )
+        old_stamp = callbacks_state._scene_controls_stamp(backend.get_state(first_id))
+        result = registry.callbacks["sync_agent_state"](
+            None, None, None, second_id, old_stamp
+        )
+        assert result[0] == "Second scene"
+        assert backend.pending_state is None
+
+        # A newer snapshot than the one just delivered stays queued so the
+        # poll can still publish it.
+        renamed = backend.get_state(second_id)
+        renamed["display_version"] = int(renamed.get("display_version", 0) or 0) + 1
+        renamed["scene_label"] = "Renamed during switch"
+        backend.pending_state = renamed
+        monkeypatch.setattr(
+            callbacks_state,
+            "callback_context",
+            SimpleNamespace(triggered=[{"prop_id": "scene-tabs.value"}]),
+        )
+        # Delivering the pre-rename state must not discard the newer queue.
+        backend.scene_store.get(second_id).label = "Second scene"
+        stale = backend.get_state(second_id)
+        callbacks_state._drop_acknowledged_pending(backend, stale)
+        assert backend.pending_state["scene_label"] == "Renamed during switch"
+    finally:
+        backend.close()
+
+
+def test_poll_does_not_retype_a_label_the_rename_box_already_shows(tmp_path, monkeypatch):
+    """Repeating the current label must not overwrite an in-progress rename."""
+    backend = ViewerBackend(
+        preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path)
+    )
+    try:
+        scene_id = backend.active_scene_id()
+        label = backend.get_state(scene_id)["scene_label"]
+        backend.pop_pending_state()
+        backend.patch_state({"axis_scale": 1.5}, broadcast=True)
+        stamp = callbacks_state._scene_controls_stamp(backend.get_state(scene_id))
+        registry = _CallbackRegistry()
+        callbacks_state.register_state_callbacks(registry, backend)
+        monkeypatch.setattr(
+            callbacks_state,
+            "callback_context",
+            SimpleNamespace(triggered=[{"prop_id": "agent-state-poll.n_intervals"}]),
+        )
+        sync = registry.callbacks["sync_agent_state"]
+        kept = sync(1, None, None, scene_id, stamp, label)
+        assert kept[0] is no_update
+        assert kept[-3]["axis_scale"] == 1.5
+        assert kept[-2] is no_update
+
+        backend.patch_state({"axis_scale": 1.25}, broadcast=True)
+        repaired = sync(2, None, None, scene_id, stamp, "previous label")
+        assert repaired[0] == label
+    finally:
+        backend.close()
+
