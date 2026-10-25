@@ -1,19 +1,9 @@
-"""Operation backend: disorder resolve, display transforms, structural operations.
+"""Operation backend: disorder resolve and display transforms.
 
-Follows the ``mck operate`` CLI pattern from MolCrysKit: operations
-that modify what the user sees. Two sub-flavours:
-
-1. **Display transforms** — repeat, grow, slab, etc. Mutate the rendered
-   scene dict without touching the source crystal.  Reversible; toggle
-   'enabled' and the view snaps back to the base scene.
-
-2. **Structural operations** — delegate to ``molcrys_kit.operations.*``
-   to produce a new ``LoadedCrystal`` bundle + scene tab.  These are
-   the "real" crystal mutations (cf. ``mck operate supercell``) and
-   create persistent output that survives a page reload.
-
-Also owns disorder-resolution, which was the original occupant of this
-mixin.
+Display transforms (repeat, grow, slab, and the other render-only
+kinds) mutate the rendered scene without touching the source crystal.
+Toggle ``enabled`` and the view snaps back to the base scene. Disorder
+resolution lists ordered replicas of the loaded structure.
 """
 from __future__ import annotations
 # ruff: noqa: F401,F403,F405
@@ -24,29 +14,8 @@ from ..operations.disorder import resolve_disorder as _resolve_disorder_replicas
 from ..transforms import MAX_ATOMS_AFTER_TRANSFORM
 
 
-# Structural operation kinds that *will* delegate to molcrys_kit.operations.
-# Currently these are stubs; the display-transform equivalents (repeat,
-# slab) cover the interactive exploration path.  The full structural path
-# (which creates new LoadedCrystal bundles from molcrys_kit output) needs
-# a ``build_loaded_crystal_from_crystal`` bridge in the loader layer.
-_STRUCTURAL_OP_KINDS: dict[str, str] = {
-    "supercell": "molcrys_kit.operations.supercell.generate_supercell",
-    "slab": "molcrys_kit.operations.surface.generate_topological_slab",
-    "add_h": "molcrys_kit.operations.add_h.add_hydrogens",
-    "desolvate": "molcrys_kit.operations.desolvate.desolvate",
-}
-
-# Display transforms that have a structural equivalent.
-# Used to guide users: "Repeat 2×2×2 is a display transform; for a
-# structural supercell use the Operation panel."
-_DISPLAY_TO_STRUCTURAL_HINT: dict[str, str] = {
-    "repeat": "supercell",
-    "slab": "slab",
-}
-
-
 class _OperationsBackendMixin:
-    """Disorder resolve, transform CRUD, and structural operations."""
+    """Disorder resolve and display-transform CRUD."""
 
     def validate_transform(
         self,
@@ -215,16 +184,6 @@ class _OperationsBackendMixin:
                     f"repeat transform would produce {repeat_atoms} atoms, "
                     f"exceeds MAX_ATOMS_AFTER_TRANSFORM={MAX_ATOMS_AFTER_TRANSFORM}"
                 )
-        # Hint: structural equivalent exists
-        structural_hint = _DISPLAY_TO_STRUCTURAL_HINT.get(kind)
-        if structural_hint:
-            hint_msg = (
-                f"'{kind}' is a display transform. For a structural "
-                f"'{structural_hint}' that creates a new scene tab, "
-                "use the Operation → Structural section."
-            )
-            if hint_msg not in warnings:
-                warnings.append(hint_msg)
         transforms.append(transform)
         patch = {"transforms": transforms}
         if promoted_from:
@@ -290,45 +249,6 @@ class _OperationsBackendMixin:
         ordered = [index_by_id[transform_id] for transform_id in wanted]
         self.patch_state({"transforms": ordered}, scene_id=scene_id)
         return ordered
-
-    # ------------------------------------------------------------------
-    # Structural operations (stub — delegates to molcrys_kit eventually)
-    # ------------------------------------------------------------------
-
-    def structural_operation_kinds(self) -> list[dict[str, Any]]:
-        """Return the list of supported structural operation kinds with
-        descriptions. The display-transform equivalents handle interactive
-        exploration; these are the "produce a new scene tab" versions."""
-        return [
-            {
-                "kind": "supercell",
-                "label": "Supercell",
-                "description": "Generate a structural supercell via molcrys_kit (new scene tab).",
-                "status": "planned",
-                "display_equivalent": "repeat",
-            },
-            {
-                "kind": "slab",
-                "label": "Slab",
-                "description": "Cut a surface slab via molcrys_kit (new scene tab).",
-                "status": "planned",
-                "display_equivalent": "slab",
-            },
-            {
-                "kind": "add_h",
-                "label": "Add hydrogens",
-                "description": "Add missing hydrogen atoms via molcrys_kit.",
-                "status": "planned",
-                "display_equivalent": None,
-            },
-            {
-                "kind": "desolvate",
-                "label": "Desolvate",
-                "description": "Remove solvent molecules via molcrys_kit.",
-                "status": "planned",
-                "display_equivalent": None,
-            },
-        ]
 
 
 __all__ = ["_OperationsBackendMixin"]
