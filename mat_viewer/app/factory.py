@@ -932,6 +932,7 @@ def _create_app(
                                                     style={"marginTop": "6px"},
                                                 ),
                                             ],
+                                            id="display-transforms-section",
                                             className="analysis-section operation-section",
                                         ),
                                     ],
