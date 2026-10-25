@@ -1262,6 +1262,7 @@ let activeBrowser;
   else if (mode === "semantic-pick") await runSemanticPick(page);
   else if (mode === "ortho-drag") await runOrthoDrag(page);
   else if (mode === "narrow-layout") await require("./narrow_layout_browser")(page, clickTab);
+  else if (mode === "formula-unit-transforms") await require("./transform_formula_unit_browser")(page, clickTab, waitForServerState);
   else fail("unknown mode " + mode);
   if (problems.length) fail(problems.slice(0, 8).join("\n"));
   await browser.close();
