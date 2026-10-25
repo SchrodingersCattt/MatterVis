@@ -16,7 +16,11 @@ failure and call the native compositor as a fallback.
 Default sessions omit renderer provenance so `state_fingerprint` and the
 JSONL object stay on the historical contract. `replay_manifest()` is the
 explicit replay record. `observation_profile="model"` is opt-in and does not
-change the fingerprint inputs.
+change the fingerprint inputs. Do not round viewport values before hashing:
+that would change default fingerprints. Picture bytes are the byte-identity
+contract across CPython versions. Episode JSONL compares those bytes exactly
+and treats viewport floats as tolerant, because one ULP of `y_min`/`y_max`
+changes the fingerprint without changing the frame.
 
 The native molecule overview still reads manifested species labels from
 `CrystalIR`. That is trusted built-in presentation, not a field on the public

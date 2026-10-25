@@ -10,6 +10,7 @@ from __future__ import annotations
 from hashlib import sha256
 from io import StringIO
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -227,7 +228,15 @@ def _episode_stdout() -> str:
 
 def write_goldens() -> None:
     GOLDEN.mkdir(parents=True, exist_ok=True)
-    index = {"description": "Built-in compositor frames frozen for mattervis.native-v1.", "cases": {}}
+    index = {
+        "description": (
+            "Built-in compositor frames frozen for mattervis.native-v1. "
+            "Picture files are exact bytes. The episode JSONL is a structural "
+            "reference: viewport floats and state_fingerprint are not a "
+            "cross-CPython byte contract."
+        ),
+        "cases": {},
+    }
     for name, crystal, kwargs in _frame_specs():
         text = _picture(crystal, **kwargs)
         (GOLDEN / f"{name}.txt").write_text(text, encoding="utf-8")
@@ -319,6 +328,48 @@ def test_frozen_native_frames_match_dispatch(name, crystal, kwargs) -> None:
     assert sha256(text.encode("utf-8")).hexdigest() == json.loads((GOLDEN / "index.json").read_text())["cases"][name]["sha256"]
 
 
+def _assert_episode_matches_golden(actual: str, golden: str) -> None:
+    """Compare one JSONL episode without requiring cross-CPython byte equality.
+
+    Picture text and ``frame.sha256`` stay exact. Viewport and camera floats
+    may differ by a few ULPs, which also changes ``state_fingerprint``. That
+    fingerprint is still checked within a single run by the caller.
+    """
+    actual_rows = [json.loads(line) for line in actual.splitlines() if line]
+    golden_rows = [json.loads(line) for line in golden.splitlines() if line]
+    assert len(actual_rows) == len(golden_rows)
+    for index, (got, expected) in enumerate(zip(actual_rows, golden_rows)):
+        _assert_json_close(got, expected, path=f"$[{index}]")
+
+
+def _assert_json_close(got, expected, path: str) -> None:
+    if isinstance(expected, bool) or isinstance(got, bool):
+        assert isinstance(got, bool) and isinstance(expected, bool) and got is expected, path
+        return
+    if isinstance(expected, float) or isinstance(got, float):
+        assert isinstance(got, (int, float)) and isinstance(expected, (int, float)), path
+        assert math.isclose(got, expected, rel_tol=1e-12, abs_tol=1e-15), (
+            f"{path}: {got!r} != {expected!r}"
+        )
+        return
+    if isinstance(expected, dict):
+        assert isinstance(got, dict), path
+        assert set(got) == set(expected), path
+        for key, item in expected.items():
+            if key == "state_fingerprint":
+                assert isinstance(got[key], str) and len(got[key]) == 64, path
+                assert isinstance(item, str) and len(item) == 64, path
+                continue
+            _assert_json_close(got[key], item, f"{path}.{key}")
+        return
+    if isinstance(expected, list):
+        assert isinstance(got, list) and len(got) == len(expected), path
+        for index, item in enumerate(expected):
+            _assert_json_close(got[index], item, f"{path}[{index}]")
+        return
+    assert got == expected, path
+
+
 def test_frozen_water_and_episode() -> None:
     water = load_for_tui(str(WATER))
     for name, kwargs in (
@@ -328,7 +379,8 @@ def test_frozen_water_and_episode() -> None:
         text = _picture(water, **kwargs)
         assert text == (GOLDEN / f"{name}.txt").read_text(encoding="utf-8")
     episode = _episode_stdout()
-    assert episode == (GOLDEN / "episode_ascii7_80x24.jsonl").read_text(encoding="utf-8")
+    golden = (GOLDEN / "episode_ascii7_80x24.jsonl").read_text(encoding="utf-8")
+    _assert_episode_matches_golden(episode, golden)
     rows = [json.loads(line) for line in episode.splitlines() if line]
     assert [row["ok"] for row in rows] == [True, True, True, True, True]
     initial = rows[0]["observation"]
@@ -343,6 +395,29 @@ def test_frozen_water_and_episode() -> None:
     assert "renderer" not in initial
     assert "observation_profile" not in initial
     assert set(initial) == LEGACY_KEYS
+
+
+def test_episode_golden_tolerates_viewport_ulp_not_picture_bytes() -> None:
+    golden = (GOLDEN / "episode_ascii7_80x24.jsonl").read_text(encoding="utf-8")
+    rows = [json.loads(line) for line in golden.splitlines() if line]
+    viewport = rows[0]["observation"]["viewport"]
+    viewport["y_min"] = math.nextafter(viewport["y_min"], math.inf)
+    viewport["y_max"] = math.nextafter(viewport["y_max"], -math.inf)
+    rows[0]["observation"]["state_fingerprint"] = "ab" * 32
+    nudged = "".join(json.dumps(row) + "\n" for row in rows)
+    _assert_episode_matches_golden(nudged, golden)
+
+    shifted = json.loads(nudged.splitlines()[0])
+    shifted["observation"]["viewport"]["y_min"] += 1e-4
+    broken_viewport = json.dumps(shifted) + "\n" + "\n".join(nudged.splitlines()[1:]) + "\n"
+    with pytest.raises(AssertionError):
+        _assert_episode_matches_golden(broken_viewport, golden)
+
+    picture = json.loads(nudged.splitlines()[0])
+    picture["observation"]["frame"]["text"] = picture["observation"]["frame"]["text"] + " "
+    broken_picture = json.dumps(picture) + "\n" + "\n".join(nudged.splitlines()[1:]) + "\n"
+    with pytest.raises(AssertionError):
+        _assert_episode_matches_golden(broken_picture, golden)
 
 
 def test_active_path_matches_compose_frame_after_orbit() -> None:

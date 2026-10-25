@@ -91,6 +91,9 @@ fingerprint over camera, display, focus, selection, viewport, and charset. The
 fingerprint excludes coordinates, structure metadata, monotonic revision,
 renderer identity, and source path; use the screen hash or an external content
 identifier when the caller must bind an observation to a particular structure.
+Picture bytes are the cross-interpreter byte-identity contract. Viewport
+floats inside the fingerprint can differ by one unit in the last place across
+CPython builds, so the fingerprint value is compared within one process.
 `TerminalSession(..., renderer="example.marks-v1", renderer_config=path,
 observation_profile="legacy"|"model")` freezes the renderer for the episode.
 It is not a `set_display` argument. The default profile and the default

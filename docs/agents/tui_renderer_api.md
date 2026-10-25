@@ -12,7 +12,12 @@ orbit, reset, viewport, or saved-view meanings.
 The built-in id is `mattervis.native-v1`. With no renderer selected, static
 `mat-vis tui` output and default JSONL sessions stay on that adapter.
 `state_fingerprint` does not include renderer identity. Default observation
-objects do not grow a `renderer` field.
+objects do not grow a `renderer` field. Picture bytes are the cross-interpreter
+byte-identity contract for the default native backend. The fingerprint hashes
+viewport floats as produced by that process. Those floats can differ by one
+unit in the last place across CPython builds, so a full JSONL trace is not
+required to be byte-identical across interpreters. Within one process the
+fingerprint stays stable: reset restores it, and a camera change replaces it.
 
 ## Request and result
 

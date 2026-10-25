@@ -37,7 +37,7 @@
       "sha256": "27f1ccd1dc14db7c08bbb8b57f8e37e7b0996ae82b16d88cae1520713cb85cf4"
     }
   },
-  "description": "Built-in compositor frames frozen for mattervis.native-v1.",
+  "description": "Built-in compositor frames frozen for mattervis.native-v1. Picture files are exact bytes. The episode JSONL is a structural reference: viewport floats and state_fingerprint are not a cross-CPython byte contract.",
   "episode": {
     "file": "episode_ascii7_80x24.jsonl",
     "sha256": "0e37d8f0adb1a0365a60544c7b99525d21ef0fceddf4fee98a72d18ad809408b"
