@@ -475,3 +475,50 @@ assert.ok(dist > 0.5, 'max zoom still uses the old 0.35 eye floor inside the cub
 """
     result = subprocess.run([node, "-e", program, str(source)], capture_output=True, text=True, timeout=15, check=False)
     assert result.returncode == 0, result.stderr
+
+
+def test_orthographic_postcondition_waits_for_a_late_gl_flip():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "view_camera.js"
+    program = r"""
+const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+let ortho = false, reactCalls = 0;
+const gd = {
+  layout: {scene: {camera: {projection: {type: 'perspective'}}}},
+  data: [],
+  _fullLayout: {scene: {_scene: {getCamera() {
+    const type = ortho ? 'orthographic' : 'perspective';
+    return {eye:{x:1,y:1,z:1}, center:{x:0,y:0,z:0}, up:{x:0,y:0,z:1}, projection:{type}};
+  }}}},
+};
+const sandbox = {
+  Promise, Object, Array, JSON, Number, String, Date, setTimeout, clearTimeout,
+  window: {Plotly: {
+    relayout: () => {
+      setTimeout(() => { ortho = true; }, 40);
+      return Promise.resolve();
+    },
+    react: () => { reactCalls += 1; return Promise.resolve(); },
+  }},
+  document: {getElementById: id => id === 'crystal-graph' ? {querySelector: () => gd} : null},
+};
+vm.createContext(sandbox);
+vm.runInContext(source, sandbox);
+(async () => {
+  const camera = {eye:{x:1,y:1,z:1}, center:{x:0,y:0,z:0}, up:{x:0,y:0,z:1}, projection:{type:'orthographic'}};
+  assert.equal(await sandbox.window.MatterVisViewCamera.applyAsync(camera, {scene_id:'a', scene_generation:1}), true);
+  assert.equal(ortho, true, 'settled before the GL projection flipped');
+  assert.equal(reactCalls, 0, 'a late flip was treated as a failed camera update');
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    result = subprocess.run(
+        [node, "-e", program, str(source)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr

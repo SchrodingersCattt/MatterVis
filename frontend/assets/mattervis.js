@@ -671,7 +671,20 @@
             let next=layout;
             if (layout.scene&&previous&&previous.scene_id===render.scene_id&&previous.server_started_at===render.server_started_at&&revision(gd.layout)===revision(layout)) {
               const camera=window.mattervisCurrentCamera&&window.mattervisCurrentCamera(gd);
-              if (camera) next=Object.assign({},layout,{scene:Object.assign({},layout.scene,{camera:JSON.parse(JSON.stringify(camera))})});
+              if (camera) {
+                const liveCamera=JSON.parse(JSON.stringify(camera));
+                /* The live GL camera is often still the previous projection
+                 * when an orthographic frame arrives under the same
+                 * uirevision. Keep the commanded projection; the eye stays
+                 * live so a drag is not snapped back. */
+                const commanded=layout.scene.camera&&layout.scene.camera.projection;
+                const commandedType=commanded&&(commanded.type||commanded);
+                const liveType=liveCamera.projection&&(liveCamera.projection.type||liveCamera.projection);
+                if (commandedType&&String(commandedType)!==String(liveType||"")) {
+                  liveCamera.projection=typeof commanded==="string"?{type:commanded}:JSON.parse(JSON.stringify(commanded));
+                }
+                next=Object.assign({},layout,{scene:Object.assign({},layout.scene,{camera:liveCamera})});
+              }
             }
             if (objectFigure) args[1]=Object.assign({},args[1],{layout:next});
             else args[2]=next;

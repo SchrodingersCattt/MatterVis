@@ -450,21 +450,80 @@
     }
     return true;
   }
+  /* Software WebGL can resolve a projection relayout before ``_ortho`` flips.
+   * A mismatch that is only the internal projection is worth a few frames.
+   * Any other postcondition failure still recovers immediately. */
+  var PROJECTION_SETTLE_ATTEMPTS = 3;
+  function projectionMismatchOnly(gd, camera, options) {
+    var expected = projectionType(camera);
+    var internal = internalProjection(gd);
+    if (!expected || !internal || internal === expected) return false;
+    if (postcondition(gd, camera, options)) return false;
+    var matched = clone(camera);
+    matched.projection = {type: internal};
+    return postcondition(gd, matched, options);
+  }
+  function whenProjectionSettles(gd, camera, options) {
+    function attempt(remaining) {
+      if (postcondition(gd, camera, options)) return Promise.resolve(true);
+      if (remaining <= 0 || !projectionMismatchOnly(gd, camera, options)) return Promise.resolve(false);
+      return new Promise(function (resolve) {
+        var settled = false;
+        var timer = null;
+        function finish() {
+          if (settled) return;
+          settled = true;
+          if (timer) clearTimeout(timer);
+          if (gd && gd.removeListener) { try { gd.removeListener("plotly_afterplot", onPlot); } catch (_) {} }
+          resolve();
+        }
+        function onPlot() { finish(); }
+        timer = setTimeout(finish, 32);
+        if (gd && typeof gd.once === "function") {
+          try { gd.once("plotly_afterplot", onPlot); } catch (_) {}
+        } else if (gd && typeof gd.on === "function") {
+          try { gd.on("plotly_afterplot", onPlot); } catch (_) {}
+        }
+      }).then(function () { return attempt(remaining - 1); });
+    }
+    return attempt(PROJECTION_SETTLE_ATTEMPTS);
+  }
   function settledCurrent(gd, snapshot, epoch, current, options) {
     var check = {requireEye: restoresViewport(options), restoreViewport: restoresViewport(options)};
     if (queueEpoch(gd) !== epoch || !current()) { diag("staleDrops"); throw new Error("stale camera command"); }
-    if (!postcondition(gd, snapshot, check)) {
+    function accept() {
+      reportStatus("ok", "");
+      gd.__mvCameraResets = 0;
+    }
+    function failOrRecover() {
       diag("postconditionFailures");
       reportStatus("error", "The camera update did not match the view. Restoring it.");
       return recover(gd, snapshot).then(function () {
         if (queueEpoch(gd) !== epoch || !current()) throw new Error("stale camera command");
-        if (!postcondition(gd, snapshot, check)) { diag("postconditionFailures"); reportStatus("error", "The camera update could not be restored."); throw new Error("camera postcondition failed"); }
-        reportStatus("recovered", "Restored the current camera view.");
-        gd.__mvCameraResets = 0;
+        return whenProjectionSettles(gd, snapshot, check).then(function (ok) {
+          if (queueEpoch(gd) !== epoch || !current()) throw new Error("stale camera command");
+          if (!ok && !postcondition(gd, snapshot, check)) {
+            diag("postconditionFailures");
+            reportStatus("error", "The camera update could not be restored.");
+            throw new Error("camera postcondition failed");
+          }
+          reportStatus("recovered", "Restored the current camera view.");
+          gd.__mvCameraResets = 0;
+        });
       });
     }
-    reportStatus("ok", "");
-    gd.__mvCameraResets = 0;
+    if (postcondition(gd, snapshot, check)) {
+      accept();
+      return;
+    }
+    return whenProjectionSettles(gd, snapshot, check).then(function (ok) {
+      if (queueEpoch(gd) !== epoch || !current()) { diag("staleDrops"); throw new Error("stale camera command"); }
+      if (ok) {
+        accept();
+        return;
+      }
+      return failOrRecover();
+    });
   }
   function deferGraphCamera(camera, options) {
     options = options || {};
