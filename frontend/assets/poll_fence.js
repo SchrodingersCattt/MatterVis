@@ -222,17 +222,24 @@ own sync and must still apply.
       var url = typeof input === "string" ? input : (input && input.url) || "";
       var bodyText = init && typeof init.body === "string" ? init.body : "";
       var tracked = null;
+      var userWrite = false;
       var userWriteEpoch = 0;
       if (String(url).indexOf("_dash-update-component") !== -1) {
         var live = liveFence();
         tracked = requestFence(bodyText, live);
         if (!tracked && isUserWrite(bodyText)) {
+          userWrite = true;
           userWriteEpoch = Number(live.epoch || 0);
           root.__mvUserWrites = Number(root.__mvUserWrites || 0) + 1;
         }
       }
       var pending = originalFetch.apply(this, arguments);
-      if (userWriteEpoch && pending && typeof pending.then === "function") {
+      // Epoch 0 is the real first generation. A truthiness check would
+      // count that callback and never release it, and every later edit
+      // would leave the fence shut. State polls are what copy a server
+      // projection onto the radio and refresh the controls stamp, so a
+      // stuck fence drops those payloads for the rest of the page.
+      if (userWrite && pending && typeof pending.then === "function") {
         var startedEpoch = userWriteEpoch;
         pending = pending.then(function (response) {
           finishUserWrite(startedEpoch);
@@ -241,7 +248,7 @@ own sync and must still apply.
           finishUserWrite(startedEpoch);
           throw error;
         });
-      } else if (userWriteEpoch) {
+      } else if (userWrite) {
         finishUserWrite(userWriteEpoch);
       }
       if (!tracked || !pending || typeof pending.then !== "function") return pending;

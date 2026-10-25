@@ -366,6 +366,102 @@ setTimeout(function () {
     assert completed.returncode == 0, completed.stderr + completed.stdout
 
 
+def test_poll_fence_epoch_zero_write_releases_later_polls():
+    """The first Dash callback runs at generation 0.
+
+    Counting it without a matching release left every later edit's fence
+    shut, so state polls stopped updating the projection radio and the
+    controls stamp.
+    """
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+
+    script = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "poll_fence.js"
+    program = r"""
+const fs = require("node:fs");
+const vm = require("node:vm");
+const assert = require("node:assert/strict");
+const document = {addEventListener() {}, readyState: "complete"};
+const payload = {
+  multi: true,
+  response: {"agent-state-store": {data: {scene_id: "scene-a", axis_scale: 1}}},
+};
+const sandbox = {
+  console, JSON, Math, Number, Object, String, Boolean, Array, Promise,
+  document,
+  setTimeout() {},
+  setInterval() { return 0; },
+  clearInterval() {},
+  Headers: function () { this.delete = function () {}; },
+  Response: function (body) { this.body = body; },
+  __mvUiEpoch: 0,
+  __mvSelectedSceneId: "scene-a",
+  __mvUnackedEpoch: 0,
+  __mvUserWrites: 0,
+};
+sandbox.window = sandbox;
+sandbox.fetch = function () {
+  return Promise.resolve({
+    status: 200,
+    statusText: "OK",
+    headers: {},
+    clone() { return this; },
+    json() { return Promise.resolve(JSON.parse(JSON.stringify(payload))); },
+    body: JSON.stringify(payload),
+  });
+};
+vm.createContext(sandbox);
+vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), sandbox);
+const pollBody = JSON.stringify({
+  output: [
+    {id: "scene-tab-rename-input", property: "value"},
+    {id: "agent-state-store", property: "data"},
+  ],
+  changedPropIds: ["agent-state-poll.n_intervals"],
+});
+const identityBody = JSON.stringify({
+  output: "ui-interaction-sink.children",
+  changedPropIds: ["ui-interaction-epoch.data"],
+});
+const editBody = JSON.stringify({
+  output: "agent-state-store.data",
+  changedPropIds: ["view-projection.value"],
+});
+sandbox.fetch("/_dash-update-component", {body: identityBody}).then(function () {
+  assert.equal(sandbox.__mvUserWrites, 0);
+  sandbox.__mvUiEpoch = 1;
+  sandbox.__mvUnackedEpoch = 1;
+  return sandbox.fetch("/_dash-update-component", {body: pollBody});
+}).then(function (response) {
+  assert.equal(JSON.stringify(JSON.parse(response.body).response), "{}");
+  return sandbox.fetch("/_dash-update-component", {body: editBody});
+}).then(function () {
+  assert.equal(sandbox.__mvUserWrites, 0);
+  assert.equal(sandbox.__mvUnackedEpoch, 0);
+  return sandbox.fetch("/_dash-update-component", {body: pollBody});
+}).then(function (response) {
+  const kept = JSON.parse(response.body);
+  assert.equal(kept.response["agent-state-store"].data.axis_scale, 1);
+  process.exit(0);
+}).catch(function (error) {
+  console.error(error);
+  process.exit(1);
+});
+setTimeout(function () {
+  console.error("epoch 0 write did not release the poll fence");
+  process.exit(1);
+}, 1000);
+"""
+    completed = subprocess.run(
+        ["node", "-e", program, str(script)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr + completed.stdout
+
+
 def test_poll_fence_tab_click_bumps_before_the_response():
     node = shutil.which("node")
     if node is None:
