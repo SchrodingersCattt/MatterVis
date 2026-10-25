@@ -241,6 +241,9 @@ def _create_app(
                     dcc.Store(id="extension-browser-target", data=structure_host.new_target()),
                     dcc.Store(id="extension-scene-observed"),
                     dcc.Store(id="scene-switch-seq", data={"seq": 0, "scene_id": None}),
+                    dcc.Store(id="ui-interaction-epoch", data=0),
+                    dcc.Store(id="ui-client-id", data=None),
+                    html.Div(id="ui-interaction-sink", style={"display": "none"}),
                     dcc.Store(
                         id="graph-interaction-store", data={"active": False, "ts": 0}
                     ),
@@ -337,6 +340,9 @@ def _create_app(
                 dcc.Store(id="extension-browser-target", data=structure_host.new_target()),
                 dcc.Store(id="extension-scene-observed"),
                 dcc.Store(id="scene-switch-seq", data={"seq": 0, "scene_id": None}),
+                dcc.Store(id="ui-interaction-epoch", data=0),
+                dcc.Store(id="ui-client-id", data=None),
+                html.Div(id="ui-interaction-sink", style={"display": "none"}),
                 dcc.Store(
                     id="graph-interaction-store", data={"active": False, "ts": 0}
                 ),

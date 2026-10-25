@@ -28,6 +28,11 @@ from .scene_controls import (
     _stamp_label_matches,
     _stamp_scene_matches,
     _stamp_scene_or_camera_differs,
+    claim_browser_scene,
+    claim_poll_publish,
+    note_interaction_epoch,
+    poll_request_is_stale,
+    split_poll_fence,
 )
 
 
@@ -52,6 +57,20 @@ def _drop_acknowledged_pending(backend, state) -> None:
         ):
             return
         backend.pending_state = None
+
+
+def _restore_pending_if_absent(backend, state) -> None:
+    """Put a snapshot back when a stale poll had already taken it.
+
+    A tab switch or a newer edit can land after the poll passed its first
+    check and popped the queue. A snapshot that arrived in that window
+    stays; only an empty queue is filled.
+    """
+    if not isinstance(state, dict):
+        return
+    with backend._lock:
+        if backend.pending_state is None:
+            backend.pending_state = state
 
 
 def checklist_after_reconcile(mode, reconciled, incoming):
@@ -472,16 +491,22 @@ def register_state_callbacks(app, backend):
         State("property-center-input", "value"),
         State("property-nan-color-input", "value"),
         State("property-colorbar-toggle", "value"),
+        State("ui-interaction-epoch", "data"),
+        State("ui-client-id", "data"),
         prevent_initial_call=True,
     )
     def sync_agent_state(_n_intervals, _native_upload_sync, *args):
         # Keep the callback callable with the historical signatures for
         # direct integrations/tests while Dash supplies the optional Restore
         # Defaults click, the browser control acknowledgement, the rename
-        # box, and the current sidebar values.
+        # box, the current sidebar values, and the per-browser interaction
+        # fence (epoch + client id) after those sidebar values.
         controls_scene_id = None
         rename_value = None
         client_controls: tuple[Any, ...] = ()
+        interaction_epoch = None
+        client_id = None
+        fence_supplied = False
         if len(args) == 1:
             _display_defaults_clicks = None
             scene_id = args[0]
@@ -497,6 +522,12 @@ def register_state_callbacks(app, backend):
                 rename_value,
                 *client_controls,
             ) = args
+            (
+                client_controls,
+                interaction_epoch,
+                client_id,
+                fence_supplied,
+            ) = split_poll_fence(client_controls)
         else:
             raise TypeError(
                 "sync_agent_state expects (interval, upload, scene_id) or "
@@ -505,6 +536,12 @@ def register_state_callbacks(app, backend):
             )
         triggered = _preferred_sync_trigger(getattr(callback_context, "triggered", None))
         n_outputs = 29
+        if triggered == "agent-state-poll" and poll_request_is_stale(
+            client_id, scene_id, interaction_epoch, supplied=fence_supplied
+        ):
+            # The browser already selected another scene or edited. Do not
+            # consume a snapshot that a later, current poll still needs.
+            return (no_update,) * n_outputs
         if triggered == "display-defaults-btn":
             if not scene_id or scene_id not in backend.scene_store.scenes:
                 return (no_update,) * n_outputs
@@ -514,6 +551,11 @@ def register_state_callbacks(app, backend):
         if triggered == "scene-tabs":
             if not scene_id or scene_id not in backend.scene_store.scenes:
                 return (no_update,) * n_outputs
+            # Record the selected scene before the refit. A poll already in
+            # flight for the previous scene must not publish over this one.
+            claim_browser_scene(
+                client_id, scene_id, filled_controls_scene, interaction_epoch
+            )
             # The tab value is already the browser's confirmed scene intent.
             # Do not arm a new ``pending_state`` here, and drop a snapshot
             # this response already delivers. A later poll would otherwise
@@ -531,7 +573,6 @@ def register_state_callbacks(app, backend):
             # The browser acknowledges this response by returning its stamp.
             # A discarded response is replayed from live state on the poll.
             _drop_acknowledged_pending(backend, state)
-            filled_controls_scene["id"] = str(state.get("scene_id") or scene_id)
             # The confirmed state drives the view-update submitter. Do not
             # bypass the cache owner's live camera/uirevision refresh here.
             seq = getattr(sync_agent_state, "_switch_seq", 0) + 1
@@ -577,6 +618,10 @@ def register_state_callbacks(app, backend):
                 and str(peeked.get("scene_id")) != str(scene_id)
             ):
                 return (no_update,) * n_outputs
+            if triggered == "agent-state-poll" and poll_request_is_stale(
+                client_id, scene_id, interaction_epoch, supplied=fence_supplied
+            ):
+                return (no_update,) * n_outputs
             state = backend.pop_pending_state()
         # A poll can race a tab switch or an upload.  ``pending_state`` is
         # tagged with the scene that produced it; never apply that snapshot
@@ -611,7 +656,29 @@ def register_state_callbacks(app, backend):
             state = backend.get_state()
         if not state:
             return (no_update,) * n_outputs
-        filled_controls_scene["id"] = str(state.get("scene_id") or "")
+        if triggered == "native-upload-sync":
+            claim_browser_scene(
+                client_id,
+                state.get("scene_id"),
+                filled_controls_scene,
+                interaction_epoch,
+            )
+        elif triggered == "agent-state-poll":
+            # Re-check under the same lock the tab callback uses. A switch
+            # that landed while this poll was reading state must not point
+            # the next sidebar capture at the scene the browser just left,
+            # and must not write that scene's controls or agent-state-store.
+            if not claim_poll_publish(
+                client_id,
+                state.get("scene_id") or scene_id,
+                interaction_epoch,
+                filled_controls_scene,
+                supplied=fence_supplied,
+            ):
+                _restore_pending_if_absent(backend, state)
+                return (no_update,) * n_outputs
+        else:
+            filled_controls_scene["id"] = str(state.get("scene_id") or "")
         # Defence-in-depth against the camera-snap-back bug: even when
         # the poll path legitimately picks up an externally-driven
         # state change (REST agent, WebSocket, scene CRUD), do NOT push
@@ -655,6 +722,23 @@ def register_state_callbacks(app, backend):
         return (*outputs, no_update)  # scene-switch-seq unchanged
 
     @app.callback(
+        Output("ui-interaction-sink", "children"),
+        Input("ui-interaction-epoch", "data"),
+        State("ui-client-id", "data"),
+        prevent_initial_call=True,
+    )
+    def remember_interaction_epoch(epoch, browser_id):
+        """Record an edit generation that has not reached ``capture_state`` yet.
+
+        Sliders, transform rows, and polyhedron fields bump the epoch in the
+        browser before their commit callback runs. A poll already on the
+        server has to see that generation or it will write the previous
+        ``agent-state-store`` over the edit.
+        """
+        note_interaction_epoch(browser_id, epoch)
+        return no_update
+
+    @app.callback(
         Output("agent-state-store", "data", allow_duplicate=True),
         Output("display-options", "value", allow_duplicate=True),
         Output("scene-controls-scene", "children", allow_duplicate=True),
@@ -682,6 +766,8 @@ def register_state_callbacks(app, backend):
         Input("property-nan-color-input", "value"),
         Input("property-colorbar-toggle", "value"),
         State("scene-controls-scene", "children"),
+        State("ui-interaction-epoch", "data"),
+        State("ui-client-id", "data"),
         prevent_initial_call=True,
     )
     def capture_state(
@@ -709,7 +795,14 @@ def register_state_callbacks(app, backend):
         property_nan_color,
         property_colorbar,
         controls_scene_id=None,
+        interaction_epoch=None,
+        client_id=None,
     ):
+        # A keystroke can still be uncommitted when a poll that started
+        # earlier finishes. Recording the generation here lets that poll
+        # drop its write instead of putting the previous sidebar, groups,
+        # or transforms back into ``agent-state-store``.
+        note_interaction_epoch(client_id, interaction_epoch)
         triggered_props = [
             item.get("prop_id", "").split(".")[0]
             for item in callback_context.triggered
