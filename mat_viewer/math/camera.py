@@ -365,7 +365,7 @@ def _clamp_turntable_pitch(
     requested_deg: float,
     max_pitch_deg: float,
 ) -> float:
-    """Stop pitch at the first world-up pole boundary along its arc."""
+    """Stop at the first outward cap crossing, allowing escape from a pole."""
     if abs(requested_deg) < 1e-12:
         return 0.0
     direction = float(np.copysign(1.0, requested_deg))
@@ -374,32 +374,36 @@ def _clamp_turntable_pitch(
     # retaining the first-pole semantics for ordinary interactions.
     total = min(abs(float(requested_deg)), 180.0)
 
-    def elevation_at(magnitude: float) -> float:
-        candidate = rotate_vector(forward, axis, direction * magnitude)
-        return abs(float(np.degrees(np.arcsin(np.clip(candidate[2], -1.0, 1.0)))))
-
-    low = 0.0
-    high: float | None = None
-    # Search a fixed number of intervals so a 180° request cannot tunnel
-    # through the first pole and return to low elevation on the far side.
-    for step in range(1, 65):
-        candidate = total * step / 64.0
-        if elevation_at(candidate) > max_pitch_deg:
-            high = candidate
-            break
-        low = candidate
-    if high is None:
+    # Rodrigues' formula gives z(t) = offset + cosine*cos(t) + sine*sin(t).
+    # Find boundary crossings analytically: sampling can mistake the initial
+    # forbidden cap for an outward crossing, or skip a narrow cap entirely.
+    unit_axis = np.asarray(axis, dtype=float) / np.linalg.norm(axis)
+    offset = float(np.dot(unit_axis, forward) * unit_axis[2])
+    cosine = float(forward[2] - offset)
+    sine = float(np.cross(unit_axis, forward)[2]) * direction
+    limit = float(np.sin(np.radians(max_pitch_deg)))
+    tolerance = 1e-12
+    if abs(float(forward[2])) >= limit - tolerance and float(forward[2]) * sine > tolerance:
+        return 0.0
+    amplitude = float(np.hypot(cosine, sine))
+    if amplitude < tolerance:
         return direction * total
-
-    # A fixed number of bisection iterations avoids work proportional to the
-    # original user input while resolving the first pole precisely.
-    for _ in range(48):
-        middle = (low + high) / 2.0
-        if elevation_at(middle) <= max_pitch_deg:
-            low = middle
-        else:
-            high = middle
-    return direction * low
+    phase = float(np.arctan2(sine, cosine))
+    stop = float(np.radians(total))
+    for boundary in (-limit, limit):
+        ratio = (boundary - offset) / amplitude
+        if abs(ratio) > 1.0:
+            continue
+        angle = float(np.arccos(np.clip(ratio, -1.0, 1.0)))
+        for root in (phase - angle, phase + angle):
+            root = float(root % (2.0 * np.pi))
+            if tolerance < root <= stop:
+                derivative = -cosine * np.sin(root) + sine * np.cos(root)
+                # Only leaving the legal band is clamped. An initial polar
+                # view may enter it from either side without being frozen.
+                if boundary * derivative > tolerance:
+                    stop = root
+    return direction * float(np.degrees(stop))
 
 
 def project_segments(
