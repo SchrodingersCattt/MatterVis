@@ -192,6 +192,9 @@ class CrystalTUI(App):
         compact: bool = False,
         initial_level: str = AUTO_DISPLAY_LEVEL,
         extensions=(),
+        renderer=None,
+        renderer_options=None,
+        bond_policy: str = "manifested",
     ):
         extension_host = _ExtensionHost(extensions)
         super().__init__()
@@ -221,6 +224,14 @@ class CrystalTUI(App):
                     if initial_level in (*DISPLAY_LEVELS, AUTO_DISPLAY_LEVEL)
                     else "atom"
                 ),
+            )
+            from .render_backend import bind_controller_renderer
+
+            bind_controller_renderer(
+                self.controller,
+                renderer=renderer,
+                renderer_options=renderer_options,
+                bond_policy=bond_policy,
             )
         except BaseException:
             extension_host.close()

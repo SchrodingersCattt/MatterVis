@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 
 
 def add_session_arguments(parser: argparse.ArgumentParser) -> None:
@@ -48,25 +49,83 @@ def add_session_arguments(parser: argparse.ArgumentParser) -> None:
         "--axes", action=argparse.BooleanOptionalAction, default=True,
         help="Fit the scene above a bottom row with an a/b/c triad and a scale bar.",
     )
+    parser.add_argument(
+        "--renderer",
+        default=None,
+        help=(
+            "Terminal frame renderer id. Default mattervis.native-v1 keeps "
+            "today's picture. A missing or incompatible id fails closed."
+        ),
+    )
+    parser.add_argument(
+        "--renderer-config",
+        default=None,
+        metavar="FILE",
+        help=(
+            "JSON renderer config (mattervis.tui.renderer_config/v1): options, "
+            "bond policy, and optional package/digest pins."
+        ),
+    )
+    parser.add_argument(
+        "--observation-profile",
+        choices=("legacy", "model"),
+        default="legacy",
+        help=(
+            "JSONL observation profile. legacy is unchanged. model drops "
+            "chemistry warnings, formulas, and the source title."
+        ),
+    )
+
+
+def prepare_tui_renderer(args: argparse.Namespace):
+    """Resolve ``--renderer`` once. A bad selection exits before drawing.
+
+    The binding is cached on the CLI namespace so static, JSONL, and
+    interactive startup share one episode choice.
+    """
+    cached = getattr(args, "_mattervis_renderer_binding", None)
+    if cached is not None:
+        return cached
+    from .render_backend import RendererContractError, renderer_binding_from_cli
+
+    try:
+        binding = renderer_binding_from_cli(args)
+    except RendererContractError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(2)
+    args._mattervis_renderer_binding = binding
+    return binding
 
 
 def interactive_depth_options(args: argparse.Namespace) -> dict:
     """Depth options accepted by both the Textual app and semantic controller."""
+    binding = prepare_tui_renderer(args)
     return {
         "show_depth": not getattr(args, "no_depth", False),
         "parallax": getattr(args, "parallax", False),
         "slice_axis": getattr(args, "slice_axis", "off"),
         "slice_index": getattr(args, "slice_index", 0),
         "slice_width": getattr(args, "slice_width", 1.0),
+        "renderer": binding.backend,
+        "renderer_options": binding.options,
+        "bond_policy": binding.bond_policy,
     }
 
 
-def run_session(args: argparse.Namespace, crystal, camera, *, label_mode: str) -> bool:
+def run_session(
+    args: argparse.Namespace,
+    crystal,
+    camera,
+    *,
+    label_mode: str,
+    binding=None,
+) -> bool:
     """Run the requested machine session and report whether it handled the CLI."""
     if args.session_format != "jsonl":
         return False
     from .session import TerminalSession, run_jsonl_session
 
+    resolved = binding if binding is not None else prepare_tui_renderer(args)
     session = TerminalSession(
         crystal,
         camera=camera,
@@ -87,6 +146,7 @@ def run_session(args: argparse.Namespace, crystal, camera, *, label_mode: str) -
         slice_axis=getattr(args, "slice_axis", "off"),
         slice_index=getattr(args, "slice_index", 0),
         slice_width=getattr(args, "slice_width", 1.0),
+        binding=resolved,
     )
     run_jsonl_session(session)
     return True
@@ -101,11 +161,13 @@ def compose_static_frame(
     *,
     label_mode: str,
     display_level: str = "auto",
+    binding=None,
 ) -> str:
     """Render static output with the same charset choices as agent sessions."""
-    from .compositor import compose_frame
+    from .render_backend import render_picture
 
-    return compose_frame(
+    resolved = binding if binding is not None else prepare_tui_renderer(args)
+    return render_picture(
         crystal,
         camera,
         points,
@@ -127,10 +189,15 @@ def compose_static_frame(
         slice_axis=getattr(args, "slice_axis", "off"),
         slice_index=getattr(args, "slice_index", 0),
         slice_width=getattr(args, "slice_width", 1.0),
-    )
+        backend=resolved.backend,
+        backend_options=resolved.options,
+        bond_policy=resolved.bond_policy,
+    ).text
 
 
-def render_static_output(args, crystal, camera, points, depth, *, label_mode: str) -> str:
+def render_static_output(
+    args, crystal, camera, points, depth, *, label_mode: str, binding=None
+) -> str:
     """Render one bounded static CLI response, including its short header."""
     if args.format == "structured":
         from .serializer import serialize_crystal
@@ -152,6 +219,7 @@ def render_static_output(args, crystal, camera, points, depth, *, label_mode: st
         depth,
         label_mode=label_mode,
         display_level=display_level,
+        binding=binding,
     )
     from .observation import build_static_header
 

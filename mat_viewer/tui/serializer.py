@@ -270,18 +270,18 @@ def serialize_crystal(
 
     # ── ASCII art ───────────────────────────────────────────────────────
     if include_art and len(pts_2d) > 0:
-        from .compositor import compose_frame
+        from .render_backend import render_picture
         from ..math.camera import project_points
 
         _, depth = project_points(camera, crystal.cart_coords)
-        art = compose_frame(
+        art = render_picture(
             crystal, camera, pts_2d, depth,
             width=art_width, height=art_height,
             mono=True, label_mode="auto",
             show_bonds=True, show_cell=True,
             show_minor=show_minor,
             display_level=resolved_level,
-        )
+        ).text
         lines.append("  art: |")
         for art_line in art.split("\n"):
             lines.append(f"    {art_line}")

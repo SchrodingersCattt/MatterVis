@@ -1,0 +1,45 @@
+{
+  "cases": {
+    "atom_ascii7_100x36_nodepth": {
+      "file": "atom_ascii7_100x36_nodepth.txt",
+      "sha256": "b17dea198f3c98a9912bb4157e85935a776e52cc51f776ef2c204e768c9fe087"
+    },
+    "atom_ascii7_80x24_depth": {
+      "file": "atom_ascii7_80x24_depth.txt",
+      "sha256": "be4df68ee444bbcc08dbf8aefda9afafd0d4793ccbac8b924656aab06aa068d3"
+    },
+    "atom_unicode_100x36_nodepth": {
+      "file": "atom_unicode_100x36_nodepth.txt",
+      "sha256": "6c7a19d7cb08f3304b0bb0fbe35c000956f3b6dd70a9cb1d7023f26d309f8471"
+    },
+    "atom_unicode_80x24_depth": {
+      "file": "atom_unicode_80x24_depth.txt",
+      "sha256": "9bbab7b1d9cd2a4e02e1eb6adbf655fa821636532212b67ba4cfd8e4ce9e9349"
+    },
+    "boundary_ascii7_80x24": {
+      "file": "boundary_ascii7_80x24.txt",
+      "sha256": "9481ddfe4bf303ba586ac1f6563f3f2b7e268884b5133a84e57d0052ac5149b2"
+    },
+    "framework_ascii7_100x36": {
+      "file": "framework_ascii7_100x36.txt",
+      "sha256": "ae16d6f98193c1b12ed600361fb98695d4f1b973b35f3093485c04517ddc54bd"
+    },
+    "molecule_ascii7_80x24": {
+      "file": "molecule_ascii7_80x24.txt",
+      "sha256": "e272f6292cdbcb30d6d68a69b66df187fe5090fe09796978c82534649746c836"
+    },
+    "water_atom_unicode_80x24": {
+      "file": "water_atom_unicode_80x24.txt",
+      "sha256": "1ba9457cf0fe1d68a542e862a42d4dfc502e72e2d0f519a51cc0ec1523bc02a0"
+    },
+    "water_molecule_ascii7_100x36": {
+      "file": "water_molecule_ascii7_100x36.txt",
+      "sha256": "27f1ccd1dc14db7c08bbb8b57f8e37e7b0996ae82b16d88cae1520713cb85cf4"
+    }
+  },
+  "description": "Built-in compositor frames frozen for mattervis.native-v1. Picture files are exact bytes. The episode JSONL is a structural reference: viewport floats and state_fingerprint are not a cross-CPython byte contract.",
+  "episode": {
+    "file": "episode_ascii7_80x24.jsonl",
+    "sha256": "0e37d8f0adb1a0365a60544c7b99525d21ef0fceddf4fee98a72d18ad809408b"
+  }
+}

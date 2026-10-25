@@ -382,6 +382,7 @@ def _tui_main(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     from .math.camera import Camera, ProjectionMode, project_points
+    from .tui.cli import prepare_tui_renderer
     from .tui.loader_adapter import load_for_tui
 
     if args.zoom <= 0:
@@ -394,6 +395,7 @@ def _tui_main(args: argparse.Namespace) -> None:
         print("Error: --height must be greater than zero.", file=sys.stderr)
         sys.exit(2)
 
+    prepare_tui_renderer(args)
     display_mode = args.display
     crystal = load_for_tui(
         filepath,

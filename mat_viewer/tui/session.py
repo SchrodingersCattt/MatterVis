@@ -13,6 +13,12 @@ import sys
 from typing import Any, IO, Mapping
 
 from .controller import TerminalViewController
+from .observation_profile import sanitize_model_observation
+from .render_backend import (
+    RendererBinding,
+    bind_controller_renderer,
+    resolve_renderer_binding,
+)
 from .state import TerminalObservation
 
 SESSION_SCHEMA = "mattervis.tui.session/v1"
@@ -48,6 +54,8 @@ class SessionObservation:
     screen_hash: str
     state_fingerprint: str
     schema: str = SESSION_SCHEMA
+    observation_profile: str = "legacy"
+    renderer_provenance: Mapping[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         payload = self.observation.as_dict()
@@ -64,6 +72,10 @@ class SessionObservation:
                 "state_fingerprint": self.state_fingerprint,
             }
         )
+        if self.observation_profile == "model":
+            payload = sanitize_model_observation(payload)
+        if self.renderer_provenance is not None:
+            payload["renderer"] = dict(self.renderer_provenance)
         return payload
 
 
@@ -89,16 +101,48 @@ class TerminalSession:
         "close",
     )
 
-    def __init__(self, crystal, **controller_options: Any) -> None:
+    def __init__(
+        self,
+        crystal,
+        *,
+        renderer: Any = None,
+        renderer_options: Mapping[str, Any] | None = None,
+        renderer_config: Any = None,
+        renderer_search_path: Any = None,
+        bond_policy: str | None = None,
+        observation_profile: str = "legacy",
+        binding: RendererBinding | None = None,
+        **controller_options: Any,
+    ) -> None:
         self.crystal = crystal
+        if binding is not None:
+            self._binding = binding
+        else:
+            self._binding = resolve_renderer_binding(
+                renderer,
+                renderer_options=renderer_options,
+                renderer_config=renderer_config,
+                renderer_search_path=renderer_search_path,
+                bond_policy=bond_policy,
+                observation_profile=observation_profile,
+            )
         self._controller_options = dict(controller_options)
         self.charset = self._controller_options.pop("charset", "unicode")
         if self.charset not in {"unicode", "ascii7"}:
             raise ValueError("charset must be 'unicode' or 'ascii7'")
         # Machine observations never contain terminal-dependent ANSI escapes.
+        # Renderer identity is episode configuration, not a set_display action.
         self._controller_options["mono"] = True
         self._closed = False
-        self.controller = TerminalViewController(crystal, **self._controller_options)
+        self.controller = self._new_controller()
+
+    def replay_manifest(self) -> dict[str, Any]:
+        """Episode renderer identity. Omitted from default observations."""
+        payload = self._binding.replay_dict()
+        payload["charset"] = self.charset
+        payload["width"] = self.controller.width
+        payload["height"] = self.controller.height
+        return payload
 
     @classmethod
     def from_file(
@@ -134,11 +178,19 @@ class TerminalSession:
         self._require_open()
         return self._wrap(self.controller.observe())
 
+    def _new_controller(self) -> TerminalViewController:
+        controller = TerminalViewController(self.crystal, **self._controller_options)
+        bind_controller_renderer(
+            controller,
+            renderer=self._binding.backend,
+            renderer_options=self._binding.options,
+            bond_policy=self._binding.bond_policy,
+        )
+        return controller
+
     def reset(self) -> SessionObservation:
         self._require_open()
-        self.controller = TerminalViewController(
-            self.crystal, **self._controller_options
-        )
+        self.controller = self._new_controller()
         return self.observe()
 
     def execute(self, action: TerminalAction) -> SessionObservation | tuple[SessionObservation, ...] | None:
@@ -238,11 +290,21 @@ class TerminalSession:
             ensure_ascii=True,
             allow_nan=False,
         ).encode("ascii")
+        provenance = None
+        if self._binding.emit_provenance:
+            rendered = getattr(self.controller, "_last_rendered", None)
+            provenance = self._binding.replay_dict()
+            if rendered is not None:
+                provenance["input_digest"] = rendered.input_digest
+                provenance["view_digest"] = rendered.view_digest
+                provenance["content_sha256"] = rendered.content_sha256
         return SessionObservation(
             observation=observation,
             screen_lines=lines,
             screen_hash=sha256(screen).hexdigest(),
             state_fingerprint=sha256(state_material).hexdigest(),
+            observation_profile=self._binding.observation_profile,
+            renderer_provenance=provenance,
         )
 
     def _require_open(self) -> None:

@@ -11,9 +11,9 @@ from collections.abc import Iterator
 import numpy as np
 
 from ..math.camera import project_points
-from .compositor import compose_frame
 from .controller_validate import validate_finite
 from .depth import MAX_PARALLAX_FRAMES, layer_indices, validate_slice
+from .render_backend import render_picture
 from .state import TerminalObservation
 
 
@@ -21,9 +21,20 @@ class DepthControls:
     """Depth rendering, layer stepping, and bounded rotation sequences."""
 
     def render_frame(self, *, charset: str = "unicode") -> str:
-        """Render the current picture, including transient rotation ghosts."""
+        """Render the current picture, including transient rotation ghosts.
+
+        Static CLI frames and this active path share :func:`render_picture`.
+        The default backend delegates to the existing compositor.
+        """
         pts_2d, depth = project_points(self.camera, self.crystal.cart_coords)
-        return compose_frame(
+        ghost_points = (
+            project_points(self._ghost_camera, self.crystal.cart_coords)[0]
+            if self._parallax and self._ghost_camera is not None
+            else None
+        )
+        focus = getattr(self, "_focus", None)
+        selection = getattr(self, "_selection", None)
+        rendered = render_picture(
             self.crystal,
             self.camera,
             pts_2d,
@@ -42,19 +53,28 @@ class DepthControls:
             pan_y=self.camera.pan_y,
             display_level=self._display_level,
             viewport=self._fit_viewport,
-            selected_display_index=self._selection.display_index,
+            selected_display_index=(
+                None if selection is None else selection.display_index
+            ),
+            selected_display_copy_id=(
+                None if selection is None else selection.display_copy_id
+            ),
+            focus_copy_ids=(
+                () if focus is None else tuple(focus.framed_copy_ids)
+            ),
             show_axes=self._show_axes,
             charset=charset,
             show_depth=self._show_depth,
             slice_axis=self._slice_axis,
             slice_index=self._slice_index,
             slice_width=self._slice_width,
-            ghost_points=(
-                project_points(self._ghost_camera, self.crystal.cart_coords)[0]
-                if self._parallax and self._ghost_camera is not None
-                else None
-            ),
+            ghost_points=ghost_points,
+            backend=getattr(self, "_renderer", None),
+            backend_options=getattr(self, "_renderer_options", None),
+            bond_policy=getattr(self, "_bond_policy", "manifested"),
         )
+        self._last_rendered = rendered
+        return rendered.text
 
     def rotation_sequence(
         self, *, frames: int = 3, yaw_deg: float = 10.0

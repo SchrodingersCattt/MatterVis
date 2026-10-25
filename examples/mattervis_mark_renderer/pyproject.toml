@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mattervis-mark-renderer"
+version = "0.1.0"
+description = "Example MatterVis TUI renderer with a distinct ASCII depth policy"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["matter-vis"]
+
+[project.entry-points."mattervis.tui.renderers"]
+"example.marks-v1" = "mattervis_mark_renderer:create_renderer"
+
+[tool.setuptools.packages.find]
+where = ["src"]

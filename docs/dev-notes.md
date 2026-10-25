@@ -4,6 +4,29 @@ This file holds implementation-level details that were previously in
 AGENTS.md. They are important for developers working on specific
 modules but are too granular for the top-level developer contract.
 
+## TUI renderer dispatch
+
+`render_picture` is the only production path from `compose_static_frame` and
+`DepthControls.render_frame` to a backend. `compose_frame` stays the native
+implementation. The native adapter reads the host crystal through a context
+variable set only around `NativeRenderer.render`. External backends receive
+`RenderRequest` and must not be handed `CrystalIR`. Do not catch a backend
+failure and call the native compositor as a fallback.
+
+Default sessions omit renderer provenance so `state_fingerprint` and the
+JSONL object stay on the historical contract. `replay_manifest()` is the
+explicit replay record. `observation_profile="model"` is opt-in and does not
+change the fingerprint inputs. Do not round viewport values before hashing:
+that would change default fingerprints. Picture bytes are the byte-identity
+contract across CPython versions. Episode JSONL compares those bytes exactly
+and treats viewport floats as tolerant, because one ULP of `y_min`/`y_max`
+changes the fingerprint without changing the frame.
+
+The native molecule overview still reads manifested species labels from
+`CrystalIR`. That is trusted built-in presentation, not a field on the public
+request. An external renderer cannot see those labels unless they are already
+encoded in approved display text such as site labels.
+
 ## Interactive figure scheduling and delivery
 
 `capture_state` publishes state only. `update_view` schedules the ordinary

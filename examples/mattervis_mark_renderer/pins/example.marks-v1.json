@@ -1,0 +1,10 @@
+{
+  "schema": "mattervis.tui.renderer_config/v1",
+  "backend_id": "example.marks-v1",
+  "api_version": "mattervis.tui.render/v1",
+  "bond_policy": "manifested",
+  "require_package_version": "0.1.0",
+  "options": {
+    "example.marks-v1.marker": "#"
+  }
+}

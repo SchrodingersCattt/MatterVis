@@ -37,7 +37,9 @@ payload = observation.as_dict()
   Snapshot-registry operations (`save_view`, `list_views`) do not alter active
   view state and therefore do not increment it.
 - `render_frame(charset="unicode"|"ascii7")` returns the current picture, including
-  rotation ghosts, through the same renderer used by Textual and sessions.
+  rotation ghosts, through the same renderer dispatch used by static CLI output
+  and sessions. The default backend is `mattervis.native-v1`. See
+  [`tui_renderer_api.md`](tui_renderer_api.md).
 - `observe()` returns `TerminalObservation` with schema
   `mattervis.tui.observation/v2`. `as_dict()` is JSON-safe.
 
@@ -86,9 +88,20 @@ that only touches the configured limit may continue without clipping.
 Each `SessionObservation` contains exactly `width × height` padded
 `screen_lines`, a SHA-256 of those rendered bytes, and a deterministic state
 fingerprint over camera, display, focus, selection, viewport, and charset. The
-fingerprint excludes coordinates, structure metadata, monotonic revision, and
-source path; use the screen hash or an external content identifier when the
-caller must bind an observation to a particular structure.
+fingerprint excludes coordinates, structure metadata, monotonic revision,
+renderer identity, and source path; use the screen hash or an external content
+identifier when the caller must bind an observation to a particular structure.
+Picture bytes are the cross-interpreter byte-identity contract. Viewport
+floats inside the fingerprint can differ by one unit in the last place across
+CPython builds, so the fingerprint value is compared within one process.
+`TerminalSession(..., renderer="example.marks-v1", renderer_config=path,
+observation_profile="legacy"|"model")` freezes the renderer for the episode.
+It is not a `set_display` argument. The default profile and the default
+renderer leave JSONL observations and `state_fingerprint` unchanged.
+`replay_manifest()` is the host-owned renderer identity and is not part of
+that fingerprint. `observation_profile="model"` drops chemistry warnings,
+formulas, and the source title from the emitted observation. Details and the
+external-plugin contract are in [`tui_renderer_api.md`](tui_renderer_api.md).
 
 For subprocess callers, `mat-vis tui INPUT --session-format jsonl` reads one
 `mattervis.tui.action/v1` object per stdin line and writes one

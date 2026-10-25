@@ -12,6 +12,23 @@ from __future__ import annotations
 from dataclasses import replace
 
 from .controller import TerminalViewController
+from .render_backend import (
+    NATIVE_BACKEND_ID,
+    RENDER_API_VERSION,
+    RENDERER_ENTRY_GROUP,
+    RendererBinding,
+    RendererContractError,
+    list_renderers,
+    render_picture,
+    resolve_renderer_binding,
+)
+from .render_contract import (
+    REQUEST_SCHEMA,
+    BackendFrame,
+    RenderedFrame,
+    RendererBackend,
+    RenderRequest,
+)
 from .session import (
     ACTION_SCHEMA,
     SESSION_SCHEMA,
@@ -32,20 +49,33 @@ from .state import (
 )
 
 __all__ = [
-    "OBSERVATION_SCHEMA",
     "ACTION_SCHEMA",
+    "NATIVE_BACKEND_ID",
+    "OBSERVATION_SCHEMA",
+    "RENDERER_ENTRY_GROUP",
+    "RENDER_API_VERSION",
+    "REQUEST_SCHEMA",
     "SESSION_SCHEMA",
+    "BackendFrame",
+    "RenderRequest",
+    "RenderedFrame",
+    "RendererBackend",
+    "RendererBinding",
+    "RendererContractError",
     "SessionObservation",
     "TerminalAction",
-    "TerminalSession",
     "TerminalCameraState",
     "TerminalDisplayState",
     "TerminalFocusState",
     "TerminalObservation",
+    "TerminalSession",
     "TerminalViewController",
-    "TerminalViewportState",
     "TerminalViewSnapshot",
     "TerminalViewState",
+    "TerminalViewportState",
+    "list_renderers",
+    "render_picture",
+    "resolve_renderer_binding",
     "run_jsonl_session",
     "run_tui",
 ]
@@ -101,7 +131,6 @@ def run_tui(
 
     if not interactive:
         from .serializer import serialize_crystal
-        from .compositor import compose_frame
         pts_2d, depth = project_points(cam, crystal.cart_coords)
 
         if format == "structured":
@@ -112,12 +141,12 @@ def run_tui(
                 show_minor=show_minor,
             ))
         else:
-            frame = compose_frame(
+            frame = render_picture(
                 crystal, cam, pts_2d, depth,
                 width=width, height=height, mono=mono,
                 show_minor=show_minor,
                 display_level=level,
-            )
+            ).text
             from .observation import build_static_header
 
             print(build_static_header(

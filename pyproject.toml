@@ -32,6 +32,9 @@ dependencies = [
 [project.scripts]
 mat-vis = "mat_viewer.cli:main"
 
+[project.entry-points."mattervis.tui.renderers"]
+"mattervis.native-v1" = "mat_viewer.tui.render_backend:create_native_renderer"
+
 [project.optional-dependencies]
 plotly = ["plotly"]
 plotly-export = ["plotly", "kaleido"]
