@@ -69,8 +69,10 @@
 }
 
 .scene-header {
-  align-items: center;
+  align-items: flex-start;
   display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
   justify-content: space-between;
   margin-bottom: 8px;
 }
@@ -86,7 +88,11 @@
 .scene-actions {
   align-items: center;
   display: flex;
+  flex: 1 1 10rem;
+  flex-wrap: wrap;
   gap: 6px;
+  justify-content: flex-end;
+  min-width: 0;
 }
 
 .scene-tabs-card {
@@ -200,7 +206,7 @@
   height: auto !important;
   max-width: var(--mv-scene-tab-max-width);
   min-height: 36px;
-  min-width: 0 !important;
+  min-width: 4.5rem !important;
   overflow: hidden;
   padding: 8px 10px !important;
   scroll-margin-inline: 8px;
@@ -406,14 +412,22 @@ html, body {
 .scene-rename-row {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin: 10px 0 14px;
 }
 
 .scene-rename-row .dash-input,
-.scene-rename-row input {
-  flex: 1 1 auto;
+.scene-rename-row input,
+#scene-tab-rename-input {
+  flex: 1 1 8rem;
+  max-width: 100%;
   min-width: 0;
+  width: auto !important;
+}
+
+.scene-rename-row button {
+  flex: 0 0 auto;
 }
 
 .structure-summary-card {
