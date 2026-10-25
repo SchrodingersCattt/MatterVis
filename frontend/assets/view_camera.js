@@ -423,6 +423,15 @@
     layout.scene = Object.assign({}, layout.scene || {});
     var requested = clone(camera);
     layout.scene.camera = Object.assign({}, layout.scene.camera || {}, requested);
+    // Recovery must paint the requested camera rather than reuse the live
+    // camera that failed validation under the previous uirevision.
+    layout.scene.uirevision = String(layout.scene.uirevision || layout.uirevision || "scene") + "#recover" + String(Date.now());
+    var render = layout.meta && layout.meta.mattervis_render;
+    var scope = render && String(render.scene_id || "") + ":" + String(render.scene_generation === undefined ? "" : render.scene_generation);
+    if (render && scope === gd.__mvCameraRevisionScope &&
+        String(render.server_started_at || "") === gd.__mvCameraRevisionEpoch && Number.isFinite(Number(gd.__mvCameraRevision))) {
+      render.camera_revision = Number(gd.__mvCameraRevision);
+    }
     var canonical = gd.__mvCanonicalViewport;
     if (canonical) {
       if (canonical.aspectmode) layout.scene.aspectmode = canonical.aspectmode;
@@ -434,6 +443,7 @@
     options = options || {};
     if (typeof options.isCurrent === "function" && !options.isCurrent()) return false;
     var meta = gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
+    if (meta && options.server_started_at && meta.server_started_at && String(meta.server_started_at) !== String(options.server_started_at)) return false;
     if (meta && options.scene_id && meta.scene_id && String(meta.scene_id) !== String(options.scene_id)) return false;
     if (meta && options.scene_generation !== undefined && meta.scene_generation !== undefined && String(meta.scene_generation) !== String(options.scene_generation)) return false;
     /* A same-scene redraw bumps graph generation. That must not drop the
@@ -446,7 +456,10 @@
     if (options.camera_version !== undefined && options.camera_version !== null) {
       var requested = Number(options.camera_version);
       var current = Number(gd && gd.__mvCameraRevision);
-      if (Number.isFinite(requested) && Number.isFinite(current) && requested < current) return false;
+      var scope = String(options.scene_id || "") + ":" + String(options.scene_generation === undefined ? "" : options.scene_generation);
+      var epoch = String(options.server_started_at === undefined ? meta && meta.server_started_at || "" : options.server_started_at || "");
+      if (gd.__mvCameraRevisionScope === scope && gd.__mvCameraRevisionEpoch === epoch &&
+          Number.isFinite(requested) && Number.isFinite(current) && requested < current) return false;
     }
     return true;
   }
@@ -623,9 +636,14 @@
       patch["scene.uirevision"] = String(previousUi || "scene") + "#reset" + String(options.camera_version || Date.now());
     }
     if (!Object.keys(patch).length) return Promise.reject(new Error("invalid camera payload"));
+    var render = gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
+    if (options.server_started_at === undefined) options.server_started_at = render && render.server_started_at || "";
+    var revisionEpoch = String(options.server_started_at || "");
     var revisionScope = String(options.scene_id || "") + ":" + String(options.scene_generation === undefined ? "" : options.scene_generation);
-    if (gd.__mvCameraRevisionScope !== revisionScope) {
+    if (!contextCurrent(gd, options)) return Promise.reject(new Error("stale camera command"));
+    if (gd.__mvCameraRevisionScope !== revisionScope || gd.__mvCameraRevisionEpoch !== revisionEpoch) {
       gd.__mvCameraRevisionScope = revisionScope;
+      gd.__mvCameraRevisionEpoch = revisionEpoch;
       gd.__mvCameraRevision = NaN;
     }
     var previousRevision = Number(gd.__mvCameraRevision);
@@ -643,7 +661,7 @@
     if (options.graph_generation === undefined) options.graph_generation = submittedGeneration;
     var current = function () { return contextCurrent(gd, options); };
     if (!current()) return Promise.reject(new Error("stale camera command"));
-    gd.__mvLatestCamera = {snapshot: snapshot, patch: patch, replayed: false};
+    gd.__mvLatestCamera = {snapshot: snapshot, patch: patch, replayed: false, command: String(options.command || "")};
     var appliedEpoch;
     var run = function () {
       if (!current()) { diag("staleDrops"); throw new Error("stale camera command"); }

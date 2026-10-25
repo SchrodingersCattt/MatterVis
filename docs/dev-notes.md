@@ -33,6 +33,16 @@ Timeout replay follows the same rule and checks both the queue epoch and
 latest camera identity before recovery, so superseded replay cannot restore
 an older camera.
 
+The frame gate also checks the camera-only delivery clock while Dash metadata
+lags. That clock is scoped to the scene generation and server epoch. A full
+frame already inside Plotly can finish after a newer camera command abandoned
+its queue; replay that command through the bounded camera path after the frame
+releases the FIFO. Live eye preservation requires the same scene generation.
+Recovery frames carry the current camera revision and a fresh `uirevision` so
+the gate cannot reject the repair or replace its camera with the failed live
+eye. Projection-only postcondition mismatches wait for up to three afterplot
+events or short delays before attempting recovery.
+
 Sidebar updates acknowledge their scene and camera revision through
 `scene-controls-scene` in the same Dash response as the controls. A newer poll can supersede a slow tab
 response; while the browser still acknowledges the previous scene, polling
