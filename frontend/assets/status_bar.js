@@ -84,11 +84,11 @@
     }
     setBusy(true, "Working…");
     return function release() {
-      window.setTimeout(syncFromRenderPill, 40);
-      window.setTimeout(function () {
-        var node = busyNode();
-        if (node && node.getAttribute("data-hold") !== "render") node.classList.add("is-hidden");
-      }, 450);
+      syncFromRenderPill();
+      var node = busyNode();
+      if (!node || node.getAttribute("data-hold") === "render") return;
+      node.removeAttribute("data-hold");
+      node.classList.add("is-hidden");
     };
   }
 
