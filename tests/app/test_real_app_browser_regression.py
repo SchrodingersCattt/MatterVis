@@ -137,8 +137,8 @@ def test_narrow_layout_keeps_tools_tabs_and_log_usable(mattervis_url):
 
 
 @pytest.mark.timeout(180)
-def test_transform_buttons_keep_formula_unit_and_show_warning(mattervis_url):
-    _run(mattervis_url, "formula-unit-transforms", timeout=160)
+def test_transform_buttons_keep_formula_unit_and_show_warning(fresh_mattervis_url):
+    _run(fresh_mattervis_url, "formula-unit-transforms", timeout=160)
 
 
 @pytest.mark.timeout(180)
