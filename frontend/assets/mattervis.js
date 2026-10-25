@@ -475,7 +475,15 @@
     const render = renderMetadataFromLayout(gd && gd.layout);
     return render && render.scene_id ? String(render.scene_id) : "";
   }
-  function figureMetadataIsCurrent(render) {
+  function frameCameraIsStale(render, gd) {
+    const epoch = gd && gd.__mvCameraRevisionEpoch;
+    const sameEpoch = !epoch || !render.server_started_at || String(epoch) === String(render.server_started_at);
+    const scope = String(render.scene_id || "") + ":" +
+      String(render.scene_generation === undefined ? "" : render.scene_generation);
+    return !!(sameEpoch && gd && gd.__mvCameraRevisionScope === scope &&
+      Number(render.camera_revision || 0) < Number(gd.__mvCameraRevision));
+  }
+  function figureMetadataIsCurrent(render, gd) {
     if (!render) return true;
     const sceneId=currentSceneId();
     if (sceneId&&render.scene_id&&String(render.scene_id)!==sceneId) return false;
@@ -507,6 +515,9 @@
       if (sceneId&&expectedSceneGenerationByScene[sceneId]!==undefined && String(render.scene_generation||"")!==expectedSceneGenerationByScene[sceneId]) return false;
     }
     if (renderServerEpoch&&render.server_started_at&&renderServerEpoch!==String(render.server_started_at)) return false;
+    /* Camera-only delivery can precede the next Dash metadata paint. Check
+     * its scoped clock again when a queued full frame actually executes. */
+    if (frameCameraIsStale(render, gd)) return false;
     return true;
   }
   function installPlotlyRenderGate() {
@@ -631,7 +642,7 @@
             return Promise.resolve(original.call(this, gd, {"scene.camera": JSON.parse(JSON.stringify(gd.__mvSceneCamera))}));
           }
         }
-        if (render&&!figureMetadataIsCurrent(render)) return Promise.resolve(args[0]);
+        if (render&&!figureMetadataIsCurrent(render,target)) return Promise.resolve(args[0]);
         if (name === "relayout" && layout &&
             typeof window.MatterVisInvalidateSemanticHover === "function") {
           const touchesCamera = layout["scene.camera"] ||
@@ -644,6 +655,7 @@
           const receiver=this;
           const revision=function(lay) {return lay&&lay.scene&&lay.scene.uirevision!==undefined?lay.scene.uirevision:lay&&lay.uirevision;};
           const key=JSON.stringify([render.server_started_at,render.scene_id,render.render_revision,render.camera_revision||0,revision(layout)]);
+          let frameApplied=false;
             const deliver=function() {
             if (interactionActive) return interactionSettled.then(deliver);
             const shown = renderMetadataFromLayout(gd.layout);
@@ -654,7 +666,7 @@
             /* Do not leave the busy pill behind when a stale/duplicate frame
              * is rejected. Mark the request busy only after the frame gate
              * confirms that this Plotly call will actually run. */
-            if (!figureMetadataIsCurrent(render)||alreadyShowing) return gd;
+            if (!figureMetadataIsCurrent(render,gd)||alreadyShowing) return gd;
             const statusNode = document.getElementById("mv-render-status");
             if (statusNode) {
               statusNode.hidden = false;
@@ -669,13 +681,27 @@
             }
             const previous=renderMetadataFromLayout(gd.layout);
             let next=layout;
-            if (layout.scene&&previous&&previous.scene_id===render.scene_id&&previous.server_started_at===render.server_started_at&&revision(gd.layout)===revision(layout)) {
+            if (layout.scene&&previous&&previous.scene_id===render.scene_id&&previous.server_started_at===render.server_started_at&&String(previous.scene_generation||"")===String(render.scene_generation||"")&&revision(gd.layout)===revision(layout)) {
               const camera=window.mattervisCurrentCamera&&window.mattervisCurrentCamera(gd);
-              if (camera) next=Object.assign({},layout,{scene:Object.assign({},layout.scene,{camera:JSON.parse(JSON.stringify(camera))})});
+              if (camera) {
+                const liveCamera=JSON.parse(JSON.stringify(camera));
+                /* The live GL camera is often still the previous projection
+                 * when an orthographic frame arrives under the same
+                 * uirevision. Keep the commanded projection; the eye stays
+                 * live so a drag is not snapped back. */
+                const commanded=layout.scene.camera&&layout.scene.camera.projection;
+                const commandedType=commanded&&(commanded.type||commanded);
+                const liveType=liveCamera.projection&&(liveCamera.projection.type||liveCamera.projection);
+                if (commandedType&&String(commandedType)!==String(liveType||"")) {
+                  liveCamera.projection=typeof commanded==="string"?{type:commanded}:JSON.parse(JSON.stringify(commanded));
+                }
+                next=Object.assign({},layout,{scene:Object.assign({},layout.scene,{camera:liveCamera})});
+              }
             }
             if (objectFigure) args[1]=Object.assign({},args[1],{layout:next});
             else args[2]=next;
             return Promise.resolve(original.apply(receiver,args)).then(function(result) {
+              frameApplied=true;
               /* A Plotly figure replacement can leave the previous hover
                * payload alive on the recycled graph node.  Clear semantic
                * hover state after every complete frame so a right-click on
@@ -706,7 +732,25 @@
           };
           // Both Dash signatures and WS pass here. Retry after failures;
           // neither receipt nor a rejected react is a delivered frame.
-          return enqueueRender(gd, deliver);
+          return enqueueRender(gd, deliver).then(function (result) {
+            /* An already-running react cannot be cancelled when a newer
+             * camera abandons its queue. Restore that command after the
+             * frame releases the FIFO, through the bounded camera path. */
+            const latest = gd.__mvLatestCamera;
+            const camera = window.MatterVisViewCamera;
+            if (!frameApplied || !frameCameraIsStale(render, gd) || !latest || !camera ||
+                typeof camera.applyAsync !== "function") return result;
+            return camera.applyAsync(latest.snapshot, {
+              scene_id: render.scene_id,
+              scene_generation: render.scene_generation,
+              camera_version: Number(gd.__mvCameraRevision),
+              server_started_at: gd.__mvCameraRevisionEpoch,
+              command: latest.command,
+            }).then(function () { return result; }, function (error) {
+              if (/stale/.test(String(error && error.message || error))) return result;
+              throw error;
+            });
+          });
         }
         if (name === "relayout" && isSizeOnlyRelayout(layout) && target && typeof target.emit === "function") {
           const sizeTarget = target;

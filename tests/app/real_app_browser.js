@@ -1120,6 +1120,13 @@ async function runSceneControls(page) {
           title: String(title && (title.text || title) || ""),
           rename: (document.getElementById("scene-tab-rename-input") || {}).value || "",
           banner: (document.getElementById("status-banner") || {}).textContent || "",
+          render: gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render,
+          cameraClock: gd && {scope: gd.__mvCameraRevisionScope, epoch: gd.__mvCameraRevisionEpoch, revision: gd.__mvCameraRevision},
+          expected: gd && window.MatterVisExpectedRender && window.MatterVisExpectedRender(gd.layout?.meta?.mattervis_render?.scene_id),
+          frames: window.__mattervisFigureDiagnostics && window.__mattervisFigureDiagnostics(),
+          updates: window.__mv_view_diag,
+          camera: window.__mv_camera_diag,
+          renderStatus: window.__mvRenderStatus,
         };
       });
     } catch (_) {}
@@ -1234,6 +1241,9 @@ let activeBrowser;
   });
   activeBrowser = browser;
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+  if (mode === "mixed-projection-http") {
+    await page.addInitScript(() => { window.MATTERVIS_WS_FIGURE = false; });
+  }
   const problems = [];
   page.on("console", (msg) => {
     const text = msg.text();
@@ -1261,6 +1271,8 @@ let activeBrowser;
   else if (mode === "surface-pick") await runSurfacePick(page);
   else if (mode === "semantic-pick") await runSemanticPick(page);
   else if (mode === "ortho-drag") await runOrthoDrag(page);
+  else if (mode === "mixed-projection" || mode === "mixed-projection-http") await require("./projection_mixed_browser")(page, clickTab, waitForServerState);
+  else if (mode === "projection-radio") await require("./projection_radio_browser")(page, clickTab, waitForServerState);
   else if (mode === "narrow-layout") await require("./narrow_layout_browser")(page, clickTab);
   else if (mode === "formula-unit-transforms") await require("./transform_formula_unit_browser")(page, clickTab, waitForServerState);
   else fail("unknown mode " + mode);

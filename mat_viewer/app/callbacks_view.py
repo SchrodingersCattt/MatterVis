@@ -12,6 +12,7 @@ from .editor_transforms import *
 from .rightclick import *
 from ..cache_keys import topology_side_panel_cache_key
 from .view_updates import UpdateKind, classify_change, make_update
+from .projection_controls import selected_scene_projection, triggered_component_ids
 from .backend import ViewerBackend
 
 
@@ -536,47 +537,37 @@ def register_view_callbacks(app, backend):
         )
 
     @app.callback(
-        Output("view-projection", "value", allow_duplicate=True),
-        Input("agent-state-store", "data"),
-        prevent_initial_call=True,
-    )
-    def sync_view_projection_from_state(state):
-        # Mirror the live scene projection onto the radio. The store
-        # payload can be a scene switch that was already in flight when
-        # the user picked Orthographic; writing that older value back
-        # would undo the click.
-        if not isinstance(state, dict):
-            return no_update
-        scene_id = state.get("scene_id")
-        live = state
-        if scene_id and scene_id in backend.scene_store.scenes:
-            live = backend.get_state(scene_id)
-        return _coerce_projection(live.get("projection") or "perspective")
-
-    @app.callback(
         Output("camera-state-store", "data", allow_duplicate=True),
         Output("view-update-store", "data", allow_duplicate=True),
         Output("fast-view-metadata", "children", allow_duplicate=True),
+        Output("view-projection", "value", allow_duplicate=True),
+        Input("agent-state-store", "data"),
+        Input("scene-tabs", "value"),
         Input("view-projection", "value"),
-        State("scene-tabs", "value"),
         prevent_initial_call=True,
     )
-    def apply_view_projection(projection, scene_id):
-        if not projection:
-            return no_update, no_update, no_update
-        scene_id = scene_id or backend.active_scene_id()
-        if scene_id and scene_id not in backend.scene_store.scenes:
-            return no_update, no_update, no_update
+    def sync_view_projection_from_state(state, scene_tab, projection=None):
+        # One callback owns radio reads and writes, so a user click supersedes
+        # an older in-flight state response without a cross-callback cycle.
+        triggered_ids = triggered_component_ids(callback_context)
+        if "scene-tabs" in triggered_ids or "view-projection" not in triggered_ids:
+            radio = selected_scene_projection(
+                backend, state, scene_tab, tab_changed="scene-tabs" in triggered_ids
+            )
+            return no_update, no_update, no_update, radio
+        if not projection or not scene_tab or scene_tab not in backend.scene_store.scenes:
+            return (no_update,) * 4
+        scene_id = scene_tab
         # Skip the redraw if the user clicked the radio that was
         # already selected -- avoids ratcheting the figure JSON cache
         # for a no-op.
         current = backend.get_state(scene_id).get("projection", "perspective")
         if str(projection) == str(current):
-            return no_update, no_update, no_update
+            return (no_update,) * 4
         try:
             camera = backend.set_projection(projection, scene_id=scene_id, broadcast=False)
         except Exception:  # pragma: no cover
-            return no_update, no_update, no_update
+            return (no_update,) * 4
         state = backend.get_state(scene_id)
         camera_payload = _camera_store_payload(scene_id, camera)
         update = make_update(
@@ -589,6 +580,7 @@ def register_view_callbacks(app, backend):
             camera_payload,
             update,
             _fast_view_metadata(backend, state, camera_payload),
+            no_update,
         )
 
     if hasattr(app, "clientside_callback"):
