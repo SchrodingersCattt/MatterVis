@@ -24,5 +24,15 @@ def test_workbench_styles_define_scene_hierarchy_and_focus_tokens() -> None:
     assert "scroll-padding-inline: 28px" in css
     assert "flex-direction: row !important" in css
     assert "flex: 0 0 auto !important" in css
+    assert "min-width: 4.5rem !important" in css
+    assert ".scene-header" in css
+    assert "flex-wrap: wrap" in css
+    header = css.split(".scene-header {", 1)[1].split("}", 1)[0]
+    actions = css.split(".scene-actions {", 1)[1].split("}", 1)[0]
+    rename = css.split(".scene-rename-row {", 1)[1].split("}", 1)[0]
+    assert "flex-wrap: wrap" in header
+    assert "flex-wrap: wrap" in actions
+    assert "flex-wrap: wrap" in rename
+    assert "width: auto !important" in css
     assert "minmax(0, 1fr) auto" in css
     assert "outline: 2px solid var(--mv-accent)" in css
