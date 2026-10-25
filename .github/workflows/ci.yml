@@ -209,7 +209,7 @@ jobs:
       - name: Run orthographic, perspective, and reset browser regression
         env:
           MATTERVIS_REQUIRE_BROWSER: "1"
-        run: python -m pytest tests/app/test_camera_browser_regression.py tests/app/test_real_app_browser_regression.py tests/app/test_layout_responsive.py -q --tb=short
+        run: python -m pytest tests/app/test_camera_browser_regression.py tests/app/test_real_app_browser_regression.py tests/app/test_layout_responsive.py tests/app/test_status_bar_browser.py -q --tb=short
 
   benchmark-smoke:
     name: Benchmark manifest smoke
