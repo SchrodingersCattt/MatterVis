@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 
 
 def add_session_arguments(parser: argparse.ArgumentParser) -> None:
@@ -76,14 +77,38 @@ def add_session_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def prepare_tui_renderer(args: argparse.Namespace):
+    """Resolve ``--renderer`` once. A bad selection exits before drawing.
+
+    The binding is cached on the CLI namespace so static, JSONL, and
+    interactive startup share one episode choice.
+    """
+    cached = getattr(args, "_mattervis_renderer_binding", None)
+    if cached is not None:
+        return cached
+    from .render_backend import RendererContractError, renderer_binding_from_cli
+
+    try:
+        binding = renderer_binding_from_cli(args)
+    except RendererContractError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(2)
+    args._mattervis_renderer_binding = binding
+    return binding
+
+
 def interactive_depth_options(args: argparse.Namespace) -> dict:
     """Depth options accepted by both the Textual app and semantic controller."""
+    binding = prepare_tui_renderer(args)
     return {
         "show_depth": not getattr(args, "no_depth", False),
         "parallax": getattr(args, "parallax", False),
         "slice_axis": getattr(args, "slice_axis", "off"),
         "slice_index": getattr(args, "slice_index", 0),
         "slice_width": getattr(args, "slice_width", 1.0),
+        "renderer": binding.backend,
+        "renderer_options": binding.options,
+        "bond_policy": binding.bond_policy,
     }
 
 
@@ -98,10 +123,9 @@ def run_session(
     """Run the requested machine session and report whether it handled the CLI."""
     if args.session_format != "jsonl":
         return False
-    from .render_backend import renderer_binding_from_cli
     from .session import TerminalSession, run_jsonl_session
 
-    resolved = binding if binding is not None else renderer_binding_from_cli(args)
+    resolved = binding if binding is not None else prepare_tui_renderer(args)
     session = TerminalSession(
         crystal,
         camera=camera,
@@ -140,9 +164,9 @@ def compose_static_frame(
     binding=None,
 ) -> str:
     """Render static output with the same charset choices as agent sessions."""
-    from .render_backend import render_picture, renderer_binding_from_cli
+    from .render_backend import render_picture
 
-    resolved = binding if binding is not None else renderer_binding_from_cli(args)
+    resolved = binding if binding is not None else prepare_tui_renderer(args)
     return render_picture(
         crystal,
         camera,

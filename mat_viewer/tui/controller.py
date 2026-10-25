@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any, Mapping
+from typing import Any
 
 import numpy as np
 
@@ -38,7 +38,6 @@ from .inspection import (
     resolve_molecule_reference,
 )
 from .observation import build_observation_scope, build_terminal_title
-from .render_contract import validate_bond_policy
 from .projection import (
     ProjectedAtomHit,
     Viewport,
@@ -119,15 +118,8 @@ class TerminalViewController(DepthControls):
         slice_axis: str = "off",
         slice_index: int = 0,
         slice_width: float = 1.0,
-        renderer: Any = None,
-        renderer_options: Mapping[str, Any] | None = None,
-        bond_policy: str = "manifested",
     ) -> None:
         validate_slice(crystal, slice_axis, slice_index, slice_width)
-        self._renderer = renderer
-        self._renderer_options = renderer_options
-        self._bond_policy = validate_bond_policy(bond_policy)
-        self._last_rendered = None
         self._slice_axis, self._slice_index, self._slice_width = slice_axis, slice_index, slice_width
         self._show_depth, self._parallax = bool(show_depth), bool(parallax)
         self._ghost_camera: Camera | None = None
@@ -190,11 +182,6 @@ class TerminalViewController(DepthControls):
     @property
     def height(self) -> int:
         return self._height
-
-    @property
-    def last_rendered(self):
-        """Host frame record from the most recent ``render_frame`` call."""
-        return getattr(self, "_last_rendered", None)
 
     @property
     def state(self) -> TerminalViewState:

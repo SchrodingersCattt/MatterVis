@@ -224,6 +224,11 @@ class CrystalTUI(App):
                     if initial_level in (*DISPLAY_LEVELS, AUTO_DISPLAY_LEVEL)
                     else "atom"
                 ),
+            )
+            from .render_backend import bind_controller_renderer
+
+            bind_controller_renderer(
+                self.controller,
                 renderer=renderer,
                 renderer_options=renderer_options,
                 bond_policy=bond_policy,

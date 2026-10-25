@@ -687,6 +687,20 @@ def render_picture(
     return _host_frame(text, request, active, strict=True, diagnostics=diagnostics)
 
 
+def bind_controller_renderer(
+    controller: Any,
+    *,
+    renderer: Any,
+    renderer_options: Mapping[str, Any] | None,
+    bond_policy: str,
+) -> None:
+    """Attach one episode renderer without growing the controller signature."""
+    controller._renderer = renderer
+    controller._renderer_options = renderer_options
+    controller._bond_policy = validate_bond_policy(bond_policy)
+    controller._last_rendered = None
+
+
 def renderer_binding_from_cli(args: Any) -> RendererBinding:
     """Resolve ``--renderer`` / ``--renderer-config`` from a CLI namespace."""
     return resolve_renderer_binding(
@@ -703,6 +717,7 @@ __all__ = [
     "NativeRenderer",
     "RendererBinding",
     "RendererContractError",
+    "bind_controller_renderer",
     "create_native_renderer",
     "list_renderers",
     "load_renderer_config",

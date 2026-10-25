@@ -382,6 +382,7 @@ def _tui_main(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     from .math.camera import Camera, ProjectionMode, project_points
+    from .tui.cli import prepare_tui_renderer
     from .tui.loader_adapter import load_for_tui
 
     if args.zoom <= 0:
@@ -394,14 +395,7 @@ def _tui_main(args: argparse.Namespace) -> None:
         print("Error: --height must be greater than zero.", file=sys.stderr)
         sys.exit(2)
 
-    from .tui.render_backend import RendererContractError, renderer_binding_from_cli
-
-    try:
-        binding = renderer_binding_from_cli(args)
-    except RendererContractError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        sys.exit(2)
-
+    prepare_tui_renderer(args)
     display_mode = args.display
     crystal = load_for_tui(
         filepath,
@@ -449,7 +443,7 @@ def _tui_main(args: argparse.Namespace) -> None:
 
     from .tui.cli import interactive_depth_options, run_session
 
-    if run_session(args, crystal, cam, label_mode=label_mode, binding=binding):
+    if run_session(args, crystal, cam, label_mode=label_mode):
         return
 
     if not args.interaction:
@@ -458,13 +452,7 @@ def _tui_main(args: argparse.Namespace) -> None:
         from .tui.cli import render_static_output
 
         output = render_static_output(
-            args,
-            crystal,
-            cam,
-            pts_2d,
-            depth,
-            label_mode=label_mode,
-            binding=binding,
+            args, crystal, cam, pts_2d, depth, label_mode=label_mode
         )
         print(output)
     else:
@@ -490,9 +478,6 @@ def _tui_main(args: argparse.Namespace) -> None:
             show_hydrogen=bool(getattr(args, "hydrogen", False)),
             show_boundary=bool(getattr(args, "boundary", False)),
             initial_level=initial_level,
-            renderer=binding.backend,
-            renderer_options=binding.options,
-            bond_policy=binding.bond_policy,
         )
         app.run()
 

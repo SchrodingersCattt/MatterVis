@@ -14,7 +14,11 @@ from typing import Any, IO, Mapping
 
 from .controller import TerminalViewController
 from .observation_profile import sanitize_model_observation
-from .render_backend import RendererBinding, resolve_renderer_binding
+from .render_backend import (
+    RendererBinding,
+    bind_controller_renderer,
+    resolve_renderer_binding,
+)
 from .state import TerminalObservation
 
 SESSION_SCHEMA = "mattervis.tui.session/v1"
@@ -129,11 +133,8 @@ class TerminalSession:
         # Machine observations never contain terminal-dependent ANSI escapes.
         # Renderer identity is episode configuration, not a set_display action.
         self._controller_options["mono"] = True
-        self._controller_options["renderer"] = self._binding.backend
-        self._controller_options["renderer_options"] = self._binding.options
-        self._controller_options["bond_policy"] = self._binding.bond_policy
         self._closed = False
-        self.controller = TerminalViewController(crystal, **self._controller_options)
+        self.controller = self._new_controller()
 
     def replay_manifest(self) -> dict[str, Any]:
         """Episode renderer identity. Omitted from default observations."""
@@ -177,11 +178,19 @@ class TerminalSession:
         self._require_open()
         return self._wrap(self.controller.observe())
 
+    def _new_controller(self) -> TerminalViewController:
+        controller = TerminalViewController(self.crystal, **self._controller_options)
+        bind_controller_renderer(
+            controller,
+            renderer=self._binding.backend,
+            renderer_options=self._binding.options,
+            bond_policy=self._binding.bond_policy,
+        )
+        return controller
+
     def reset(self) -> SessionObservation:
         self._require_open()
-        self.controller = TerminalViewController(
-            self.crystal, **self._controller_options
-        )
+        self.controller = self._new_controller()
         return self.observe()
 
     def execute(self, action: TerminalAction) -> SessionObservation | tuple[SessionObservation, ...] | None:
@@ -283,7 +292,7 @@ class TerminalSession:
         ).encode("ascii")
         provenance = None
         if self._binding.emit_provenance:
-            rendered = self.controller.last_rendered
+            rendered = getattr(self.controller, "_last_rendered", None)
             provenance = self._binding.replay_dict()
             if rendered is not None:
                 provenance["input_digest"] = rendered.input_digest
