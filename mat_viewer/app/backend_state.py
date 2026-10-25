@@ -4,7 +4,9 @@ import copy
 from typing import Any, Optional
 
 from ..config import current_config
+from ..presets import deep_merge
 from .camera_helpers import *
+from .camera_helpers import _plotly_camera
 from .normalizers import *
 from .normalizers import _normalize_selection
 from .reducer import LEGACY_STYLE_STATE_FIELDS
@@ -215,7 +217,20 @@ class _StateBackendMixin:
         # explicit camera commands below change the camera clock; resetting it
         # here made Labels/Hydrogens/scene-range changes snap the viewport.
         if "camera" in patch and patch["camera"] is not None:
-            state["camera"] = patch["camera"]
+            camera_patch = patch["camera"]
+            camera = state.get("camera")
+            if isinstance(camera_patch, dict) and isinstance(camera, dict):
+                if "position" in camera_patch or "focal_point" in camera_patch:
+                    # A legacy position/focal camera replaces the Plotly
+                    # representation; mixing both makes ``eye`` win.
+                    camera = {}
+                elif ("position" in camera or "focal_point" in camera) and any(
+                    isinstance(camera_patch.get(key), dict) for key in ("eye", "center", "up")
+                ):
+                    camera = _plotly_camera(camera) or {}
+                state["camera"] = deep_merge(camera, camera_patch)
+            else:
+                state["camera"] = copy.deepcopy(camera_patch)
         # ``camera_revision`` is the uirevision-bump counter written by
         # ``camera_action`` / ``align_camera``. ``normalize_state``
         # whitelists keys, so without an explicit pass-through the
@@ -379,21 +394,23 @@ class _StateBackendMixin:
                 UpdateKind.ANALYSIS,
             }:
                 display_version += 1
-            elif change_kind == UpdateKind.CAMERA:
+            if change_kind == UpdateKind.CAMERA or state_before.get("projection") != working_state.get("projection"):
                 # Browser drag persistence changes the camera value without
                 # invalidating a command revision. Explicit camera commands
                 # carry a revision/projection marker.  A caller that supplies
                 # a revision has already selected the next monotonic value;
                 # do not increment it a second time here.  This matters for
                 # orbit/pan/zoom, which write the camera and revision in one
-                # atomic patch.
+                # atomic patch. A projection change also advances this clock
+                # when a simultaneous display/geometry edit takes precedence
+                # in the delivery classification.
                 if "camera_revision" in (patch or {}):
                     try:
                         requested = int(working_state.get("camera_revision", 0) or 0)
                     except (TypeError, ValueError):
                         requested = 0
                     camera_version = max(before_versions.camera + 1, requested)
-                elif "projection" in (patch or {}):
+                elif "projection" in (patch or {}) or state_before.get("projection") != working_state.get("projection"):
                     camera_version += 1
             working_state["geometry_version"] = geometry_version
             working_state["display_version"] = display_version

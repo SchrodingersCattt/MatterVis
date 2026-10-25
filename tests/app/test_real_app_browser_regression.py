@@ -268,3 +268,8 @@ def test_persisted_store_survives_restart_and_reconnect(tmp_path):
 @pytest.mark.timeout(180)
 def test_visible_mesh_and_bfdh_faces_share_native_picking(fresh_mattervis_url):
     _run(fresh_mattervis_url, "surface-pick", structure="DAP-4")
+
+
+@pytest.mark.timeout(180)
+def test_projection_radio_follows_scene_and_rejects_stale_store(mattervis_url):
+    _run(mattervis_url, "projection-radio")

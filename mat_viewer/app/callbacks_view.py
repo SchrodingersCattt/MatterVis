@@ -545,28 +545,21 @@ def register_view_callbacks(app, backend):
         # One radio follows the active scene. A tab change reads that
         # scene. A store payload for a different scene must not paint
         # scene A's projection onto the radio while scene B is selected.
-        triggered_ids = []
-        for item in getattr(callback_context, "triggered", None) or []:
-            prop_id = item.get("prop_id") if isinstance(item, dict) else None
-            if prop_id:
-                triggered_ids.append(str(prop_id).split(".")[0])
+        triggered_ids = {
+            str(item["prop_id"]).split(".")[0]
+            for item in getattr(callback_context, "triggered", None) or []
+            if isinstance(item, dict) and item.get("prop_id")
+        }
         if not triggered_ids:
-            triggered = getattr(callback_context, "triggered_id", None)
-            if isinstance(triggered, str):
-                triggered_ids = [triggered]
-        if "scene-tabs" in triggered_ids:
-            if not scene_tab or scene_tab not in backend.scene_store.scenes:
-                return no_update
-            live = backend.get_state(scene_tab)
-            return _coerce_projection(live.get("projection") or "perspective")
-        if not isinstance(state, dict):
+            triggered_ids = {getattr(callback_context, "triggered_id", None)}
+        if not scene_tab or scene_tab not in backend.scene_store.scenes:
             return no_update
-        scene_id = state.get("scene_id")
-        if scene_id and scene_tab and str(scene_id) != str(scene_tab):
+        if "scene-tabs" not in triggered_ids and (
+            not isinstance(state, dict) or str(state.get("scene_id") or "") != str(scene_tab)
+        ):
             return no_update
-        live = state
-        if scene_id and scene_id in backend.scene_store.scenes:
-            live = backend.get_state(scene_id)
+        # Read the live revision even when an older store belongs to this tab.
+        live = backend.get_state(scene_tab)
         return _coerce_projection(live.get("projection") or "perspective")
 
     @app.callback(

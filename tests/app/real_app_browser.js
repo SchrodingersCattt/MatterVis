@@ -1261,6 +1261,7 @@ let activeBrowser;
   else if (mode === "surface-pick") await runSurfacePick(page);
   else if (mode === "semantic-pick") await runSemanticPick(page);
   else if (mode === "ortho-drag") await runOrthoDrag(page);
+  else if (mode === "projection-radio") await require("./projection_radio_browser")(page, clickTab, waitForServerState);
   else if (mode === "narrow-layout") await require("./narrow_layout_browser")(page, clickTab);
   else fail("unknown mode " + mode);
   if (problems.length) fail(problems.slice(0, 8).join("\n"));

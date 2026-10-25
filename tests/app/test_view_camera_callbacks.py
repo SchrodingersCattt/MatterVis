@@ -126,6 +126,20 @@ def test_projection_radio_follows_the_selected_tab(tmp_path: Path, monkeypatch):
         )
         assert sync(stale, scene_b) is no_update
         assert sync({"scene_id": scene_b, "projection": "orthographic"}, scene_b) == "perspective"
+
+        # A same-scene snapshot may predate a newer camera command. Its
+        # projection and revision cannot roll the radio back either.
+        old_state = backend.get_state(scene_b)
+        backend.set_projection("orthographic", scene_id=scene_b, broadcast=False)
+        assert backend.get_state(scene_b)["camera_revision"] > old_state["camera_revision"]
+        assert sync(old_state, scene_b) == "orthographic"
+
+        # Untagged or deleted scenes cannot supply a radio value for the
+        # selected scene, even if their projection happens to be valid.
+        for payload in (None, {}, {"projection": "perspective"}, stale):
+            assert sync(payload, None) is no_update
+            assert sync(payload, "deleted-scene") is no_update
+        assert sync({"projection": "perspective"}, scene_b) is no_update
     finally:
         app.close_extensions()
         app.crystal_backend.close()
