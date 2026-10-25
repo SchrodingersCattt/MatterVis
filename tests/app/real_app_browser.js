@@ -1026,6 +1026,27 @@ async function runSwitch(page) {
   }
 }
 
+async function commitSceneRename(page, label) {
+  // Duplicate paints the canvas title before Dash fills the rename box, and
+  // a poll that repeats the current label can land between fill() and click().
+  // Set the value and click in one turn so the callback snapshots this label.
+  await page.evaluate((next) => {
+    const button = document.getElementById("scene-rename-btn");
+    if (!button) return;
+    if (window.dash_clientside && typeof window.dash_clientside.set_props === "function") {
+      window.dash_clientside.set_props("scene-tab-rename-input", {value: next});
+    }
+    const input = document.getElementById("scene-tab-rename-input");
+    if (input) {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+      setter.call(input, next);
+      input.dispatchEvent(new Event("input", {bubbles: true}));
+      input.dispatchEvent(new Event("change", {bubbles: true}));
+    }
+    button.click();
+  }, label);
+}
+
 async function runSceneControls(page) {
   // Exercise the high-risk scene-tab path end to end: duplicate must create
   // and select a new tab, rename must repaint the canvas title, and an empty
@@ -1069,23 +1090,45 @@ async function runSceneControls(page) {
     fail(`duplicate did not select/repaint the copy tab: ${JSON.stringify({before, duplicateView})}`);
   }
 
-  const renamed = `QA scene ${Date.now()}`;
+  // The canvas title can arrive over the figure channel before Dash fills
+  // the copy's controls. Type only once the rename box holds that label;
+  // an earlier keystroke is replaced by the tab-switch response.
   const renameInput = page.locator("#scene-tab-rename-input");
-  await renameInput.fill(renamed);
-  await page.locator("#scene-rename-btn").click();
-  await page.waitForFunction((name) => {
-    const labels = [...document.querySelectorAll("#scene-tabs .scene-tab-text")]
-      .map((node) => node.textContent || "");
-    const title = document.querySelector("#crystal-graph .js-plotly-plot");
-    const text = title && title.layout && title.layout.title && (title.layout.title.text || title.layout.title);
-    return labels.some((label) => label.includes(name))
-      && String(text || "").includes(name);
-  }, renamed, {timeout: 45000});
+  await page.waitForFunction(() => {
+    const node = document.getElementById("scene-tab-rename-input");
+    return !!node && /copy/i.test(node.value || "");
+  }, null, {timeout: 30000});
+  const renamed = `QA scene ${Date.now()}`;
+  await commitSceneRename(page, renamed);
+  try {
+    await page.waitForFunction((name) => {
+      const labels = [...document.querySelectorAll("#scene-tabs .scene-tab-text")]
+        .map((node) => node.textContent || "");
+      const title = document.querySelector("#crystal-graph .js-plotly-plot");
+      const text = title && title.layout && title.layout.title && (title.layout.title.text || title.layout.title);
+      return labels.some((label) => label.includes(name))
+        && String(text || "").includes(name);
+    }, renamed, {timeout: 45000});
+  } catch (error) {
+    let diagnostics = null;
+    try {
+      diagnostics = await page.evaluate(() => {
+        const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+        const title = gd && gd.layout && gd.layout.title;
+        return {
+          labels: [...document.querySelectorAll("#scene-tabs .scene-tab-text")].map((node) => node.textContent || ""),
+          title: String(title && (title.text || title) || ""),
+          rename: (document.getElementById("scene-tab-rename-input") || {}).value || "",
+          banner: (document.getElementById("status-banner") || {}).textContent || "",
+        };
+      });
+    } catch (_) {}
+    fail(`rename did not settle: ${JSON.stringify(diagnostics)} (${error.message})`);
+  }
   const afterRename = await readView(page);
   if (!afterRename.title.includes(renamed)) fail(`canvas title did not follow rename: ${afterRename.title}`);
 
-  await renameInput.fill("   ");
-  await page.locator("#scene-rename-btn").click();
+  await commitSceneRename(page, "   ");
   await page.waitForFunction(() => /scene action failed:.*cannot be empty/i.test(
     document.getElementById("status-banner")?.textContent || ""
   ), null, {timeout: 30000});

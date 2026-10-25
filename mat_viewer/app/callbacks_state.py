@@ -27,6 +27,35 @@ def _scene_controls_stamp(state):
     }, sort_keys=True)
 
 
+def _drop_acknowledged_pending(backend, state) -> None:
+    """Drop a queued snapshot the tab callback is already delivering.
+
+    Duplicate arms ``pending_state`` and then selects the new tab. This
+    callback writes that scene's controls, including the rename box. Leaving
+    the snapshot queued makes the next poll write the same label again and
+    replace text the user has started typing. A snapshot that moved past the
+    state being delivered (a rename that landed mid-switch) stays queued.
+    """
+    version_keys = (
+        "geometry_version",
+        "display_version",
+        "camera_version",
+        "render_revision",
+    )
+    with backend._lock:
+        pending = backend.pending_state
+        if not isinstance(pending, dict):
+            return
+        if str(pending.get("scene_id") or "") != str(state.get("scene_id") or ""):
+            return
+        if any(
+            int(pending.get(key, 0) or 0) > int(state.get(key, 0) or 0)
+            for key in version_keys
+        ):
+            return
+        backend.pending_state = None
+
+
 def checklist_after_reconcile(mode, reconciled, incoming):
     """Checklist value after display options are reconciled.
 
@@ -444,13 +473,16 @@ def register_state_callbacks(app, backend):
         Input("display-defaults-btn", "n_clicks"),
         Input("scene-tabs", "value"),
         State("scene-controls-scene", "children"),
+        State("scene-tab-rename-input", "value"),
         prevent_initial_call=True,
     )
     def sync_agent_state(_n_intervals, _native_upload_sync, *args):
-        # Keep the callback callable with the historical three-argument
-        # signature for direct integrations/tests while Dash supplies the
-        # optional Restore Defaults click and browser control acknowledgement.
+        # Keep the callback callable with the historical signatures for
+        # direct integrations/tests while Dash supplies the optional Restore
+        # Defaults click, the browser control acknowledgement, and the
+        # rename box contents.
         controls_scene_id = None
+        rename_value = None
         if len(args) == 1:
             _display_defaults_clicks = None
             scene_id = args[0]
@@ -458,10 +490,13 @@ def register_state_callbacks(app, backend):
             _display_defaults_clicks, scene_id = args
         elif len(args) == 3:
             _display_defaults_clicks, scene_id, controls_scene_id = args
+        elif len(args) == 4:
+            _display_defaults_clicks, scene_id, controls_scene_id, rename_value = args
         else:
             raise TypeError(
                 "sync_agent_state expects (interval, upload, scene_id) or "
-                "(interval, upload, defaults_clicks, scene_id[, controls_scene_id])"
+                "(interval, upload, defaults_clicks, scene_id"
+                "[, controls_scene_id[, rename_value]])"
             )
         triggered = (
             callback_context.triggered[0]["prop_id"].split(".")[0]
@@ -479,9 +514,9 @@ def register_state_callbacks(app, backend):
             if not scene_id or scene_id not in backend.scene_store.scenes:
                 return (no_update,) * n_outputs
             # The tab value is already the browser's confirmed scene intent.
-            # Do not arm ``pending_state`` here: a subsequent poll would
-            # replay the same scene into the controls and race the figure
-            # update store while the tab switch is still settling.
+            # Do not arm a new ``pending_state`` here, and drop a snapshot
+            # this response already delivers. A later poll would otherwise
+            # write that same label into the rename box again.
             backend.set_active_scene(scene_id, broadcast=False)
             # A stored formula-unit camera can still "show" a few unit-cell
             # atoms while the cell box sits outside the frustum. Refit only
@@ -492,6 +527,10 @@ def register_state_callbacks(app, backend):
             except (KeyError, ValueError, OSError, TypeError):
                 pass
             state = backend.get_state(scene_id)
+            # The tab response is the acknowledgement for this scene. A
+            # duplicate snapshot queued before the switch must not be polled
+            # back into the rename box.
+            _drop_acknowledged_pending(backend, state)
             filled_controls_scene["id"] = str(state.get("scene_id") or scene_id)
             # The confirmed state drives the view-update submitter. Do not
             # bypass the cache owner's live camera/uirevision refresh here.
@@ -578,6 +617,15 @@ def register_state_callbacks(app, backend):
         # use the dedicated ``/api/v2/camera`` endpoint to push a
         # camera change to the browser.
         outputs = list(scene_control_outputs(state))
+        # The rename box is not an Input of this callback, so Dash will not
+        # tell us about keystrokes until some other callback reads it. Writing
+        # the label again when the box already shows it replaces those
+        # keystrokes (duplicate's queued snapshot, or a stamp repair that
+        # repeats the same name). A box that still shows another label is
+        # updated, which is how a dropped tab response gets repaired.
+        server_label = outputs[0]
+        if rename_value is not None and str(rename_value) == str(server_label):
+            outputs[0] = no_update
         outputs[-1] = no_update  # camera-state-store slot
         return (*outputs, no_update)  # scene-switch-seq unchanged
 
