@@ -43,8 +43,7 @@ def _port() -> int:
         return int(sock.getsockname()[1])
 
 
-@pytest.fixture(scope="module")
-def mattervis_url(tmp_path_factory):
+def _mattervis_server(tmp_path_factory):
     node = shutil.which("node")
     chrome = _chrome()
     playwright = _playwright_module(node) if node else None
@@ -72,6 +71,19 @@ def mattervis_url(tmp_path_factory):
         backend = getattr(app, "crystal_backend", None)
         if backend is not None:
             backend.close()
+
+
+@pytest.fixture(scope="module")
+def mattervis_url(tmp_path_factory):
+    yield from _mattervis_server(tmp_path_factory)
+
+
+@pytest.fixture
+def fresh_mattervis_url(tmp_path_factory):
+    # The surface fixture assumes the default DAP-4 view. Earlier drag tests
+    # persist a different camera in the shared module server and can put the
+    # test meshes off-screen, despite starting a fresh browser context.
+    yield from _mattervis_server(tmp_path_factory)
 
 
 def _run(mattervis_url, mode: str, structure: str = "", upload: str = "", timeout: int = 160) -> None:
@@ -254,5 +266,5 @@ def test_persisted_store_survives_restart_and_reconnect(tmp_path):
 
 
 @pytest.mark.timeout(180)
-def test_visible_mesh_and_bfdh_faces_share_native_picking(mattervis_url):
-    _run(mattervis_url, "surface-pick", structure="DAP-4")
+def test_visible_mesh_and_bfdh_faces_share_native_picking(fresh_mattervis_url):
+    _run(fresh_mattervis_url, "surface-pick", structure="DAP-4")
