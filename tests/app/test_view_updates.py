@@ -134,3 +134,13 @@ def test_update_serialization_copies_nested_payload_and_scene_generation():
     assert serialized["payload"]["camera"]["eye"]["x"] == 1.0
     assert serialized["payload"]["items"][0]["id"] == "a"
 
+
+def test_update_delivery_identity_defaults_to_kind_and_preserves_explicit_ids():
+    state = _state()
+    camera = make_update(state, operation="camera").to_dict()
+    display = make_update(state, operation="display").to_dict()
+    custom = make_update(state, operation="camera", payload={"operation_id": "caller-command"}).to_dict()
+    assert camera["operation_id"] == "camera"
+    assert display["operation_id"] == "display"
+    assert custom["operation_id"] == "caller-command"
+

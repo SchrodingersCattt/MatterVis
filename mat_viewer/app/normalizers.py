@@ -690,7 +690,6 @@ _TRANSFORM_KIND_NAMES = {
     "grow_bonds": "Grow by bonds",
     "complete_fragment": "Complete fragments",
     "complete_polyhedron": "Complete polyhedra",
-    "by_symmetry": "Apply symmetry",
     "slab": "Slab",
 }
 

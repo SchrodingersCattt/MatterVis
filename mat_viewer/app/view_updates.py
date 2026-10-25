@@ -59,6 +59,7 @@ class ViewUpdate:
             "type": "view_update",
             "update_kind": kind,
             "kind": kind,
+            "operation_id": kind,
             "scene_id": self.scene_id,
             "scene_generation": self.scene_generation,
             "reason": self.reason,

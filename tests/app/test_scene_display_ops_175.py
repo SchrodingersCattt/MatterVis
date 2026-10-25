@@ -289,7 +289,7 @@ def test_scope_capture_does_not_write_another_scene(tmp_path: Path, monkeypatch)
             "#BDBDBD",
             ["show"],
         )
-        assert result == (no_update, no_update)
+        assert result == (no_update, no_update, no_update)
         assert backend.get_state(second)["display_mode"] == "formula_unit"
         assert first != second
     finally:

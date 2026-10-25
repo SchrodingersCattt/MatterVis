@@ -206,8 +206,16 @@ Notes for callers:
   `bond_groups_api.md`),
   `projection` (`"perspective"` / `"orthographic"`; mirrors the
   Plotly camera's `projection.type`. Setting it via `POST /state`
-  has the same effect as `POST /camera/action {"action":
-  "projection", "type": ...}`),
+  updates an existing camera without refitting or changing its eye,
+  center, or up. A partial Plotly `camera` dictionary merges into the
+  saved camera, including individual vector components; legacy
+  position/focal cameras replace the saved representation. A nested
+  `camera.projection.type` also updates the top-level projection and
+  advances the camera command revision when the projection changes.
+  If both spellings are supplied, a non-null top-level `projection`
+  wins; invalid values retain the current projection. Use
+  `POST /camera/action {"action": "projection", "type": ...}`
+  for the projection command that also refits a camera missing the scene),
   `atom_property_color` (nullable public property-color spec; see
   `atom_property_coloring.md`), `fast_rendering`, `camera`, `cutoff`.
   `material` is `mesh` or
