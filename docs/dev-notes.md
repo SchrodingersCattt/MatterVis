@@ -42,6 +42,8 @@ Recovery frames carry the current camera revision and a fresh `uirevision` so
 the gate cannot reject the repair or replace its camera with the failed live
 eye. Projection-only postcondition mismatches wait for up to three afterplot
 events or short delays before attempting recovery.
+The recovery `react` also has the camera timeout; a hung repair abandons only
+its own queue, without replaying itself, so following commands can proceed.
 
 Sidebar updates acknowledge their scene and camera revision through
 `scene-controls-scene` in the same Dash response as the controls. A newer poll can supersede a slow tab

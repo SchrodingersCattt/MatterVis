@@ -277,3 +277,25 @@ def test_rejected_reset_relayout_recovers_its_eye_through_the_real_frame_gate():
   await within(h.root.MatterVisRenderQueue.enqueue(h.gd, () => { laterTaskRan = true; }));
   assert.equal(laterTaskRan, true, 'reset recovery blocked later render work');
 """)
+
+
+def test_hung_recovery_times_out_and_releases_following_camera_and_frame_work():
+    _run_node(r"""
+  const h = harness();
+  h.root.MATTERVIS_CAMERA_TIMEOUT_MS = 20;
+  h.rejectNextRelayout();
+  h.holdNextFrame();
+  const failed = h.command(2, 'orthographic', 4, 'reset');
+  failed.catch(() => {});
+  await spinUntil(h.frameStarted);
+  await assert.rejects(within(failed), /camera.*timeout/);
+  assert.equal(h.gd.__mvCameraQueueRecovery.reason, 'camera recovery timeout');
+  assert.equal(h.relayouts.length, 1, 'recovery timeout replayed the failed camera');
+  assert.equal(await within(h.command(3, 'perspective', 5)), 'camera');
+  assert.equal(h.live().eye.x, 5, 'hung recovery blocked the following camera');
+  await within(h.submitFrame(h.frame({render_revision: 2, geometry_version: 2,
+    camera_revision: 3, camera_version: 3}, camera('perspective', 6))));
+  assert.equal(h.frames.length, 2, 'hung recovery blocked the following full frame');
+  assert.equal(h.live().eye.x, 6);
+  assert.equal(h.live().projection.type, 'perspective');
+""")

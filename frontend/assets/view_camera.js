@@ -437,7 +437,11 @@
       if (canonical.aspectmode) layout.scene.aspectmode = canonical.aspectmode;
       if (canonical.aspectratio) layout.scene.aspectratio = clone(canonical.aspectratio);
     }
-    return Promise.resolve(root.Plotly.react(gd, clone(gd.data), layout));
+    var recovery = Promise.resolve(root.Plotly.react(gd, clone(gd.data), layout));
+    var queueToken = gd.__mvRenderQueueState;
+    return withTimeout(recovery, timeoutMs(), function () {
+      if (gd.__mvRenderQueueState === queueToken) resetQueue(gd, "camera recovery timeout");
+    });
   }
   function contextCurrent(gd, options) {
     options = options || {};
