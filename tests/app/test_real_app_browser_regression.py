@@ -61,6 +61,20 @@ def _mattervis_server(tmp_path_factory):
             str(ROOT / "benchmarks/structures/ionic_nacl.cif"),
         ],
     )
+    @app.server.get("/_test/render-status")
+    def render_status():
+        # Read-only browser-test fence: a startup worker must not accidentally
+        # repair a mixed patch whose lightweight delivery omitted the camera.
+        backend = app.crystal_backend
+        worker = backend._render_worker
+        with worker._lock:
+            pending = {"render": len(worker._pending_render), "topology": len(worker._pending)}
+        return {
+            "pending": pending,
+            "pending_state": backend.peek_pending_state() is not None,
+            "cursor": backend.figure_journal_seq(),
+        }
+
     server = make_server("127.0.0.1", _port(), app.server, threaded=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -134,6 +148,11 @@ def test_duplicate_and_rename_scene_controls_update_canvas(mattervis_url):
 def test_narrow_layout_keeps_tools_tabs_and_log_usable(mattervis_url):
     """Check item (19) against real Dash components, not just a CSS fixture."""
     _run(mattervis_url, "narrow-layout")
+
+
+@pytest.mark.timeout(180)
+def test_transform_buttons_keep_formula_unit_and_show_warning(fresh_mattervis_url):
+    _run(fresh_mattervis_url, "formula-unit-transforms", timeout=160)
 
 
 @pytest.mark.timeout(180)
@@ -268,3 +287,15 @@ def test_persisted_store_survives_restart_and_reconnect(tmp_path):
 @pytest.mark.timeout(180)
 def test_visible_mesh_and_bfdh_faces_share_native_picking(fresh_mattervis_url):
     _run(fresh_mattervis_url, "surface-pick", structure="DAP-4")
+
+
+@pytest.mark.timeout(180)
+def test_projection_radio_follows_scene_and_rejects_stale_store(mattervis_url):
+    _run(mattervis_url, "projection-radio")
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.parametrize("transport", ["websocket", "http"])
+def test_mixed_projection_and_opacity_update_reaches_the_canvas(fresh_mattervis_url, transport):
+    mode = "mixed-projection-http" if transport == "http" else "mixed-projection"
+    _run(fresh_mattervis_url, mode)

@@ -207,6 +207,82 @@ def test_operation_callback_surfaces_invalid_json_and_keeps_rows(tmp_path: Path,
         backend.close(wait=False)
 
 
+def test_dash_add_keeps_formula_unit_and_warns(tmp_path: Path, monkeypatch):
+    """The add and preset buttons must not silently leave formula unit."""
+    from mat_viewer.app import callbacks_operations, shared
+
+    app = __import__("mat_viewer.app", fromlist=["create_app"]).create_app(
+        preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path)
+    )
+    backend = app.crystal_backend
+    try:
+        assert backend.get_state()["display_mode"] == "formula_unit"
+        captured: list[tuple[str, dict]] = []
+
+        class _StatusContext:
+            triggered_id: ClassVar[str] = "transforms-add-btn"
+            triggered: ClassVar[list[dict[str, str]]] = [
+                {"prop_id": "transforms-add-btn.n_clicks"}
+            ]
+
+            @staticmethod
+            def set_props(component_id, props):
+                captured.append((component_id, dict(props)))
+
+        monkeypatch.setattr(shared, "callback_context", _StatusContext)
+        monkeypatch.setattr(callbacks_operations, "callback_context", _StatusContext)
+        callback = next(
+            value["callback"]
+            for key, value in app.callback_map.items()
+            if "transforms-rows-container" in key
+        )
+        manage_transforms = getattr(callback, "__wrapped__", callback)
+        kwargs = {
+            "add_clicks": 1,
+            "preset_2x_clicks": None,
+            "preset_3x_clicks": None,
+            "clear_repeat_clicks": None,
+            "clear_all_clicks": None,
+            "active_scene_id": backend.active_scene_id(),
+            "enableds": [],
+            "deletes": [],
+            "ups": [],
+            "downs": [],
+            "param_a": [],
+            "param_b": [],
+            "param_c": [],
+            "param_seeds": [],
+            "param_radius": [],
+            "param_hops": [],
+            "param_maxhops": [],
+            "param_cutoff": [],
+            "param_ops": [],
+            "param_miller0": [],
+            "param_miller1": [],
+            "param_miller2": [],
+            "param_layers": [],
+            "param_vacuum": [],
+            "kind_select": "repeat",
+            "enabled_ids": [],
+        }
+        added = manage_transforms(**kwargs)
+        assert backend.get_state()["display_mode"] == "formula_unit"
+        assert added[1]["display_mode"] == "formula_unit"
+        assert captured[-1][0] == "status"
+        assert "formula_unit will trim" in captured[-1][1]["children"]
+        assert "unit_cell" in captured[-1][1]["children"]
+
+        _StatusContext.triggered_id = "transforms-preset-2x"
+        _StatusContext.triggered = [{"prop_id": "transforms-preset-2x.n_clicks"}]
+        preset = manage_transforms(**kwargs)
+        assert backend.get_state()["display_mode"] == "formula_unit"
+        assert preset[1]["display_mode"] == "formula_unit"
+        assert "formula_unit will trim" in captured[-1][1]["children"]
+    finally:
+        app.close_extensions()
+        backend.close(wait=False)
+
+
 def test_repeat_preset_replaces_active_repeat(tmp_path: Path):
     backend = ViewerBackend(
         preset_path=default_preset_path(), root_dir=str(tmp_path)

@@ -161,7 +161,7 @@ def test_cell_boundary_checkbox_returns_when_scope_returns(tmp_path, monkeypatch
         assert by_value["unit_cell_box"]["disabled"]
         assert by_value["wrap_into_cell"]["disabled"]
         assert visible == ["labels"]
-        _stored, checklist = capture("formula_unit", visible)
+        _stored, checklist, _stamp = capture("formula_unit", visible)
         stored = backend.get_state()
         assert stored["display_mode"] == "formula_unit"
         assert "unit_cell_box" in stored["display_options"]
@@ -172,7 +172,7 @@ def test_cell_boundary_checkbox_returns_when_scope_returns(tmp_path, monkeypatch
             "unit_cell", ["labels"]
         )
         assert still_hidden is no_update
-        _stored, checklist = capture("unit_cell", ["labels"])
+        _stored, checklist, _stamp = capture("unit_cell", ["labels"])
         stored = backend.get_state()
         assert stored["display_mode"] == "unit_cell"
         assert "unit_cell_box" in stored["display_options"]

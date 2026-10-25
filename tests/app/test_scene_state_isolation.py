@@ -250,7 +250,7 @@ def test_capture_state_ignores_batched_tab_refresh_values(tmp_path, monkeypatch)
             "#BDBDBD",
             ["show"],
         )
-        assert result == (no_update, no_update)
+        assert result == (no_update, no_update, no_update)
     finally:
         backend.close()
 
@@ -329,9 +329,104 @@ def test_poll_does_not_retype_a_label_the_rename_box_already_shows(tmp_path, mon
         assert kept[-3]["axis_scale"] == 1.5
         assert kept[-2] is no_update
 
+        # Text that is not the server label is still an edit. A same-scene
+        # poll must not replace it. Repair of a dropped tab response is the
+        # scene-stamp mismatch path, covered separately.
         backend.patch_state({"axis_scale": 1.25}, broadcast=True)
-        repaired = sync(2, None, None, scene_id, stamp, "previous label")
-        assert repaired[0] == label
+        edited = sync(2, None, None, scene_id, stamp, label + " draft")
+        assert edited[0] is no_update
+        assert edited[10] == 1.25
+    finally:
+        backend.close()
+
+
+def test_poll_repairs_rename_when_the_stamp_scene_differs(tmp_path, monkeypatch):
+    """A dropped tab response still rewrites a rename box from another scene."""
+    backend = ViewerBackend(
+        preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path)
+    )
+    try:
+        first = backend.get_state()
+        first_label = first["scene_label"]
+        old_stamp = callbacks_state._scene_controls_stamp(first)
+        second_id = backend.create_scene(
+            structure=first["structure"], label="Second scene"
+        )["id"]
+        backend.pop_pending_state()
+        registry = _CallbackRegistry()
+        callbacks_state.register_state_callbacks(registry, backend)
+        monkeypatch.setattr(
+            callbacks_state,
+            "callback_context",
+            SimpleNamespace(triggered=[{"prop_id": "agent-state-poll.n_intervals"}]),
+        )
+        repaired = registry.callbacks["sync_agent_state"](
+            1, None, None, second_id, old_stamp, first_label
+        )
+        assert repaired[0] == "Second scene"
+    finally:
+        backend.close()
+
+
+def test_batched_poll_and_tab_switch_follows_the_tab(tmp_path, monkeypatch):
+    """The tab click wins when Dash delivers it in the same request as a poll."""
+    backend = ViewerBackend(
+        preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path)
+    )
+    try:
+        first_id = backend.active_scene_id()
+        second_id = backend.create_scene(
+            structure=backend.get_state()["structure"], label="Second scene"
+        )["id"]
+        backend.set_active_scene(first_id, broadcast=False)
+        registry = _CallbackRegistry()
+        callbacks_state.register_state_callbacks(registry, backend)
+        monkeypatch.setattr(
+            callbacks_state,
+            "callback_context",
+            SimpleNamespace(
+                triggered=[
+                    {"prop_id": "agent-state-poll.n_intervals"},
+                    {"prop_id": "scene-tabs.value"},
+                ]
+            ),
+        )
+        result = registry.callbacks["sync_agent_state"](1, None, None, second_id)
+        assert backend.active_scene_id() == second_id
+        assert result[-1]["scene_id"] == second_id
+        assert result[-3]["scene_id"] == second_id
+    finally:
+        backend.close()
+
+
+def test_poll_keeps_an_inflight_control_until_the_server_moves(tmp_path, monkeypatch):
+    """A poll echo must not roll back a control the server has not stored."""
+    backend = ViewerBackend(
+        preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path)
+    )
+    try:
+        scene_id = backend.active_scene_id()
+        backend.pop_pending_state()
+        backend.patch_state({"axis_scale": 1.4}, broadcast=True)
+        stamp = callbacks_state._scene_controls_stamp(backend.get_state(scene_id))
+        server_mode = backend.get_state(scene_id)["display_mode"]
+        registry = _CallbackRegistry()
+        callbacks_state.register_state_callbacks(registry, backend)
+        monkeypatch.setattr(
+            callbacks_state,
+            "callback_context",
+            SimpleNamespace(triggered=[{"prop_id": "agent-state-poll.n_intervals"}]),
+        )
+        sync = registry.callbacks["sync_agent_state"]
+        kept = sync(1, None, None, scene_id, stamp, None, "cluster")
+        assert kept[1] is no_update
+        assert kept[-3]["display_mode"] == server_mode
+        assert kept[-3]["axis_scale"] == 1.4
+
+        older_stamp = callbacks_state._scene_controls_stamp(backend.get_state(scene_id))
+        backend.patch_state({"display_mode": "unit_cell"}, broadcast=True)
+        published = sync(2, None, None, scene_id, older_stamp, None, "cluster")
+        assert published[1] == "unit_cell"
     finally:
         backend.close()
 

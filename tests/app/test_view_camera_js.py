@@ -475,3 +475,139 @@ assert.ok(dist > 0.5, 'max zoom still uses the old 0.35 eye floor inside the cub
 """
     result = subprocess.run([node, "-e", program, str(source)], capture_output=True, text=True, timeout=15, check=False)
     assert result.returncode == 0, result.stderr
+
+
+def test_orthographic_postcondition_waits_for_a_late_gl_flip():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "view_camera.js"
+    program = r"""
+const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+let ortho = false, reactCalls = 0;
+const gd = {
+  layout: {scene: {camera: {projection: {type: 'perspective'}}}},
+  data: [],
+  _fullLayout: {scene: {_scene: {getCamera() {
+    const type = ortho ? 'orthographic' : 'perspective';
+    return {eye:{x:1,y:1,z:1}, center:{x:0,y:0,z:0}, up:{x:0,y:0,z:1}, projection:{type}};
+  }}}},
+};
+const sandbox = {
+  Promise, Object, Array, JSON, Number, String, Date, setTimeout, clearTimeout,
+  window: {Plotly: {
+    relayout: () => {
+      setTimeout(() => { ortho = true; }, 40);
+      return Promise.resolve();
+    },
+    react: () => { reactCalls += 1; return Promise.resolve(); },
+  }},
+  document: {getElementById: id => id === 'crystal-graph' ? {querySelector: () => gd} : null},
+};
+vm.createContext(sandbox);
+vm.runInContext(source, sandbox);
+(async () => {
+  const camera = {eye:{x:1,y:1,z:1}, center:{x:0,y:0,z:0}, up:{x:0,y:0,z:1}, projection:{type:'orthographic'}};
+  assert.equal(await sandbox.window.MatterVisViewCamera.applyAsync(camera, {scene_id:'a', scene_generation:1}), true);
+  assert.equal(ortho, true, 'settled before the GL projection flipped');
+  assert.equal(reactCalls, 0, 'a late flip was treated as a failed camera update');
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    result = subprocess.run(
+        [node, "-e", program, str(source)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("outcome", ["afterplot", "mismatch", "generation", "revision"])
+def test_projection_settle_cleanup_and_supersession(outcome):
+    """Settling releases the FIFO and cannot recover a superseded camera."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    assets = Path(__file__).resolve().parents[2] / "frontend" / "assets"
+    program = r"""
+const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
+const EventEmitter = require('node:events');
+const gate = fs.readFileSync(process.argv[1], 'utf8');
+const source = fs.readFileSync(process.argv[2], 'utf8');
+const outcome = process.argv[3];
+const camera = type => ({eye:{x:1,y:1,z:1}, center:{x:0,y:0,z:0}, up:{x:0,y:0,z:1}, projection:{type}});
+let live = camera('perspective'), recoveries = 0, finished = false;
+let reachedWait;
+const waiting = new Promise(resolve => { reachedWait = resolve; });
+const gd = new EventEmitter();
+Object.assign(gd, {
+  layout: {scene:{camera:live}, meta:{mattervis_render:{scene_id:'a',scene_generation:1}}},
+  data: [{type:'scatter3d',x:[1],y:[2],z:[3]}],
+  _fullLayout: {scene:{_scene:{getCamera:()=>live}}},
+});
+gd.once = function (event, listener) {
+  const result = EventEmitter.prototype.once.call(this, event, listener);
+  if (event === 'plotly_afterplot') reachedWait();
+  return result;
+};
+const sandbox = {Promise,Object,Array,JSON,Number,String,Date,setTimeout,clearTimeout,
+  window:{}, document:{getElementById:id=>id==='crystal-graph'?{querySelector:()=>gd}:null}};
+vm.createContext(sandbox);
+// Use the production FIFO so recovery must release its relayout task first.
+vm.runInContext('const MAX_RENDER_QUEUE=32;'+gate.slice(gate.indexOf('  function enqueueRender('),
+  gate.indexOf('  function figurePushIsCurrent(')), sandbox);
+sandbox.window.Plotly = {
+  relayout: () => Promise.resolve(),
+  react: (_gd, data, layout) => sandbox.window.MatterVisRenderQueue.enqueue(gd, () => {
+    recoveries += 1;
+    // A permanent mismatch must terminate after one unsuccessful recovery.
+    if (outcome !== 'mismatch') live = layout.scene.camera;
+  }),
+};
+vm.runInContext(source, sandbox);
+async function check() {
+  const apply = sandbox.window.MatterVisViewCamera.applyAsync;
+  const first = apply(camera('orthographic'), {scene_id:'a',scene_generation:1,camera_version:1});
+  first.then(() => { finished = true; }, () => { finished = true; });
+  await waiting;
+  assert.equal(gd.listenerCount('plotly_afterplot'), 1, 'camera never reached its settle wait');
+  // Work submitted during settle must run before the first camera settles.
+  await sandbox.window.MatterVisRenderQueue.enqueue(gd, () => {
+    assert.equal(finished, false, 'camera completed before the FIFO progress check');
+  });
+  if (outcome === 'afterplot') {
+    live = camera('orthographic');
+    gd.emit('plotly_afterplot');
+    assert.equal(await first, true);
+  } else if (outcome === 'mismatch') {
+    await assert.rejects(first, /camera postcondition failed/);
+  } else if (outcome === 'generation') {
+    gd.layout.meta.mattervis_render.scene_generation = 2;
+    await assert.rejects(first, /stale camera command/);
+  } else {
+    assert.equal(await apply(camera('perspective'), {
+      scene_id:'a',scene_generation:1,camera_version:2,
+    }), true);
+    await assert.rejects(first, /stale camera command/);
+    assert.equal(live.projection.type, 'perspective', 'old recovery replaced the newer camera');
+  }
+  assert.equal(recoveries, outcome === 'mismatch' ? 1 : 0);
+  assert.equal(gd.listenerCount('plotly_afterplot'), 0, 'settle listener leaked');
+}
+let timer;
+Promise.race([
+  check(),
+  new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('projection settle deadlocked')), 3000); }),
+]).catch(error => { console.error(error); process.exitCode = 1; }).finally(() => clearTimeout(timer));
+"""
+    result = subprocess.run(
+        [node, "-e", program, str(assets / "mattervis.js"),
+         str(assets / "view_camera.js"), outcome],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr

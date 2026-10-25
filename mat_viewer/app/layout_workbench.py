@@ -7,6 +7,21 @@ remains a nested tool container, not an independently sized root column.
 from dash import html
 
 
+def _detach_by_id(node, target):
+    """Remove and return the descendant whose ``id`` is ``target``."""
+    children = getattr(node, "children", None)
+    if not isinstance(children, list):
+        return None
+    for index, child in enumerate(children):
+        if getattr(child, "id", None) == target:
+            del children[index]
+            return child
+        found = _detach_by_id(child, target)
+        if found is not None:
+            return found
+    return None
+
+
 def assemble_workbench(root):
     """Place common scene tools, mounted tool panes, and viewer diagnostics."""
     panels = {
@@ -43,11 +58,15 @@ def assemble_workbench(root):
         className="workbench-tabs", role="tablist",
         **{"aria-label": "Structure tools"},
     )
+    display_children = list(children[common_end:])
+    transforms = _detach_by_id(tools, "display-transforms-section")
+    if transforms is not None:
+        display_children.append(transforms)
     sidebar.children = [
         html.Div(children[:common_end], className="workbench-common"),
         tabs,
         html.Div(
-            children[common_end:], id="display-panel-content",
+            display_children, id="display-panel-content",
             className="analysis-tab-content", role="tabpanel",
             **{"aria-labelledby": "display-panel-toggle"},
         ),

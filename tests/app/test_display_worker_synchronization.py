@@ -67,7 +67,7 @@ def capture(backend, monkeypatch, options, *, trigger="display-options", **chang
     state = backend.get_state()
     state.update(changes)
     queued_before = len(backend._render_worker._finalize_pool.jobs)
-    emitted, _checklist = registry.callbacks["capture_state"](
+    emitted, _checklist, _stamp = registry.callbacks["capture_state"](
         state["scene_id"], state["display_mode"], options,
         state["atom_scale"], state["bond_radius"], state["minor_opacity"],
         state["material"], state["style"], state["disorder"], state["ortep_mode"],
@@ -186,6 +186,49 @@ def test_update_view_queues_flat_ortep_camera_rebuild(backend):
 
     assert update(state, None, None) == (no_update,) * 4
     assert backend._render_worker._finalize_pool.jobs
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_mixed_flat_ortep_projection_queues_one_image_outside_backend_lock(backend, monkeypatch, nested):
+    backend.patch_state({"material": "flat", "style": "ortep"}, broadcast=False)
+    before = backend.get_state()
+    worker = backend._render_worker
+    requested = []
+    built = []
+    original_request = worker.request_figure_build
+
+    def request(state, *, force=False):
+        assert not backend._lock._is_owned()
+        requested.append((deepcopy(state), force))
+        return original_request(state, force=force)
+
+    def build(state, **kwargs):
+        built.append(deepcopy(state))
+        figure, topology = fake_figure(backend, state)
+        figure.to_plotly_json()["layout"]["images"] = [{"source": "data:image/png;base64,AA=="}]
+        return figure, topology
+
+    monkeypatch.setattr(worker, "request_figure_build", request)
+    monkeypatch.setattr(backend, "figure_for_state", build)
+    patch = {"minor_opacity": before["minor_opacity"] + 0.1}
+    patch.update({"camera": {"projection": {"type": "orthographic"}}} if nested else {"projection": "orthographic"})
+
+    state = backend.patch_state(patch)
+
+    assert requested == [(state, True)]
+    assert not built
+    assert len(worker._finalize_pool.jobs) == 1
+    registry = CallbackRegistry()
+    callbacks_view.register_view_callbacks(registry, backend)
+    from dash import no_update
+
+    assert registry.callbacks["update_view"](state, None, None) == (no_update,) * 4
+    assert len(worker._finalize_pool.jobs) == 1
+    worker._finalize_pool.run_next()
+    assert built == [state]
+    event = backend.latest_figure_broadcast(state["scene_id"])
+    assert event["state"]["projection"] == "orthographic"
+    assert event["state"]["minor_opacity"] == state["minor_opacity"]
 
 
 def test_camera_reset_invalidates_inflight_worker_frame(backend, monkeypatch):
