@@ -1241,6 +1241,9 @@ let activeBrowser;
   });
   activeBrowser = browser;
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+  if (mode === "mixed-projection-http") {
+    await page.addInitScript(() => { window.MATTERVIS_WS_FIGURE = false; });
+  }
   const problems = [];
   page.on("console", (msg) => {
     const text = msg.text();
@@ -1268,6 +1271,8 @@ let activeBrowser;
   else if (mode === "surface-pick") await runSurfacePick(page);
   else if (mode === "semantic-pick") await runSemanticPick(page);
   else if (mode === "ortho-drag") await runOrthoDrag(page);
+  else if (mode === "mixed-projection" || mode === "mixed-projection-http") await require("./projection_mixed_browser")(page, clickTab, waitForServerState);
+  else if (mode === "projection-radio") await require("./projection_radio_browser")(page, clickTab, waitForServerState);
   else if (mode === "narrow-layout") await require("./narrow_layout_browser")(page, clickTab);
   else fail("unknown mode " + mode);
   if (problems.length) fail(problems.slice(0, 8).join("\n"));
