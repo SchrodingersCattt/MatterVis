@@ -68,10 +68,51 @@ _SYNC_TRIGGER_PRIORITY = (
 )
 
 
-def _scene_controls_stamp(state):
+def _scene_control_values(state, *, property_options=(), visible_range=None):
+    """Present editable values consistently in the layout and its browser ack."""
+    property_payload = state.get("atom_property_color") or {}
+    property_range = property_payload.get("value_range")
+    if visible_range is None:
+        visible_range = property_range
+    active_colormap = property_payload.get("colormap", "viridis")
+    return (
+        state.get("scene_label") or state["structure"],
+        state["display_mode"],
+        visible_display_options(state.get("display_mode"), state.get("display_options")),
+        state["atom_scale"],
+        state["bond_radius"],
+        state["minor_opacity"],
+        state.get("material", "mesh"),
+        state.get("style", "ball_stick"),
+        state.get("disorder", "opacity"),
+        state.get("ortep_mode", "ortep_axes"),
+        state["axis_scale"],
+        state["topology_site_index"],
+        ["enabled"] if state.get("topology_enabled", False) else [],
+        property_options,
+        list(property_payload.get("fields") or []),
+        property_payload.get("reduction", "auto"),
+        property_payload.get("component"),
+        web_colormap_options(active_colormap),
+        active_colormap,
+        "manual" if property_range is not None else "auto",
+        None if visible_range is None else visible_range[0],
+        None if visible_range is None else visible_range[1],
+        property_payload.get("center"),
+        str(property_payload.get("nan_color", "#BDBDBD"))[:7],
+        ["show"] if property_payload.get("show_colorbar", True) else [],
+    )
+
+
+def _scene_controls_stamp(state, values=None, *, visible_range=None):
+    values = values if values is not None else _scene_control_values(
+        state, visible_range=visible_range
+    )
     payload = {
         "scene_id": str(state.get("scene_id") or ""),
+        "scene_label": values[0],
         "camera_revision": int(state.get("camera_revision", 0) or 0),
+        "controls": [values[index] for index in _POLL_CLIENT_CONTROL_INDEX],
     }
     for key in _STATE_VERSION_KEYS:
         payload[key] = int(state.get(key, 0) or 0)
@@ -128,6 +169,13 @@ def _stamp_scene_matches(stamp, scene_id) -> bool:
     return str(parsed.get("scene_id") or "") == str(scene_id or "")
 
 
+def _stamp_label_matches(stamp, state) -> bool:
+    parsed = _parse_controls_stamp(stamp)
+    return parsed is not None and parsed.get("scene_label") == (
+        state.get("scene_label") or state.get("structure")
+    )
+
+
 def _acknowledged_versions_cover(stamp, state) -> bool:
     """True when the browser ack is not older than ``state``.
 
@@ -154,11 +202,19 @@ def _control_values_match(client, server) -> bool:
     return client == server
 
 
-def _preserve_inflight_controls(outputs, client_controls) -> None:
-    for index, client in zip(_POLL_CLIENT_CONTROL_INDEX, client_controls):
+def _preserve_inflight_controls(outputs, client_controls, stamp, state) -> None:
+    parsed = _parse_controls_stamp(stamp) or {}
+    acknowledged = parsed.get("controls")
+    covered = _acknowledged_versions_cover(stamp, state)
+    for offset, (index, client) in enumerate(zip(_POLL_CLIENT_CONTROL_INDEX, client_controls)):
         if index >= len(outputs):
             break
-        if not _control_values_match(client, outputs[index]):
+        unchanged = covered or (
+            isinstance(acknowledged, list)
+            and offset < len(acknowledged)
+            and _control_values_match(acknowledged[offset], outputs[index])
+        )
+        if unchanged and not _control_values_match(client, outputs[index]):
             outputs[index] = no_update
 
 
@@ -234,34 +290,12 @@ def register_state_callbacks(app, backend):
             {"label": item["field"], "value": item["field"]}
             for item in backend.atom_properties(state)["fields"]
         ]
-        active_colormap = property_payload.get("colormap", "viridis")
+        values = _scene_control_values(
+            state, property_options=property_options, visible_range=visible_range
+        )
         return (
-            state.get("scene_label") or state["structure"],
-            state["display_mode"],
-            visible_display_options(state.get("display_mode"), state.get("display_options")),
-            state["atom_scale"],
-            state["bond_radius"],
-            state["minor_opacity"],
-            state.get("material", "mesh"),
-            state.get("style", "ball_stick"),
-            state.get("disorder", "opacity"),
-            state.get("ortep_mode", "ortep_axes"),
-            state["axis_scale"],
-            state["topology_site_index"],
-            ["enabled"] if state.get("topology_enabled", False) else [],
-            property_options,
-            list(property_payload.get("fields") or []),
-            property_payload.get("reduction", "auto"),
-            property_payload.get("component"),
-            web_colormap_options(active_colormap),
-            active_colormap,
-            "manual" if property_range is not None else "auto",
-            None if visible_range is None else visible_range[0],
-            None if visible_range is None else visible_range[1],
-            property_payload.get("center"),
-            str(property_payload.get("nan_color", "#BDBDBD"))[:7],
-            ["show"] if property_payload.get("show_colorbar", True) else [],
-            _scene_controls_stamp(state),
+            *values,
+            _scene_controls_stamp(state, values),
             state,
             _camera_store_payload(scene_id, state.get("camera")),
         )
@@ -593,7 +627,7 @@ def register_state_callbacks(app, backend):
         Output("property-center-input", "value"),
         Output("property-nan-color-input", "value"),
         Output("property-colorbar-toggle", "value"),
-        Output("scene-controls-scene", "children"),
+        Output("scene-controls-scene", "children", allow_duplicate=True),
         Output("agent-state-store", "data"),
         Output("camera-state-store", "data"),
         Output("scene-switch-seq", "data"),
@@ -681,9 +715,8 @@ def register_state_callbacks(app, backend):
             except (KeyError, ValueError, OSError, TypeError):
                 pass
             state = backend.get_state(scene_id)
-            # The tab response is the acknowledgement for this scene. A
-            # duplicate snapshot queued before the switch must not be polled
-            # back into the rename box.
+            # The browser acknowledges this response by returning its stamp.
+            # A discarded response is replayed from live state on the poll.
             _drop_acknowledged_pending(backend, state)
             filled_controls_scene["id"] = str(state.get("scene_id") or scene_id)
             # The confirmed state drives the view-update submitter. Do not
@@ -691,6 +724,9 @@ def register_state_callbacks(app, backend):
             seq = getattr(sync_agent_state, "_switch_seq", 0) + 1
             sync_agent_state._switch_seq = seq
             return (*scene_control_outputs(state), {"seq": seq, "scene_id": scene_id})
+        selected_state = (
+            backend.get_state(scene_id) if scene_id in backend.scene_store.scenes else None
+        )
         if triggered == "native-upload-sync":
             # Upload completion is an explicit synchronization barrier. Drain
             # any worker snapshot and read the server's active scene after the
@@ -701,18 +737,21 @@ def register_state_callbacks(app, backend):
             state = backend.get_state()
         elif (
             controls_scene_id is not None
-            and scene_id in backend.scene_store.scenes
-            and _stamp_scene_or_camera_differs(
-                controls_scene_id, backend.get_state(scene_id)
+            and selected_state is not None
+            and (
+                _stamp_scene_or_camera_differs(controls_scene_id, selected_state)
+                or not _acknowledged_versions_cover(controls_scene_id, selected_state)
+                or not _stamp_label_matches(controls_scene_id, selected_state)
             )
         ):
             # Dash can supersede a slow tab response with a newer poll that
             # returns no_update. The canvas may already show the new scene
             # while its controls stay on the old one indefinitely. Re-emit
             # the selected scene until the browser acknowledges the same
-            # control transaction, including a new camera command on the same
-            # scene. A server-side "filled" flag is not an acknowledgement.
-            state = backend.get_state(scene_id)
+            # control transaction, including newer same-scene edits whose
+            # queued snapshot was already consumed by a discarded response.
+            # A server-side "filled" flag is not an acknowledgement.
+            state = selected_state
         else:
             peeked = backend.peek_pending_state()
             # Each page follows its own selected scene. A pending payload for
@@ -774,10 +813,9 @@ def register_state_callbacks(app, backend):
         outputs = list(scene_control_outputs(state))
         # The rename box is not an Input of this callback, so Dash will not
         # tell us about keystrokes until some other callback reads it.
-        # On a poll for the scene the browser already acknowledged, any text
-        # in the box is an edit in progress — including characters added on
-        # top of the server label. A stamp whose scene does not match is a
-        # dropped tab response and still rewrites the label below.
+        # An acknowledged label that is still current leaves typed text
+        # alone, even when another control changed. A newer server label
+        # must be delivered until the browser acknowledges that label too.
         server_label = outputs[0]
         acknowledged_scene = _stamp_scene_matches(
             controls_scene_id, state.get("scene_id") or scene_id
@@ -785,29 +823,28 @@ def register_state_callbacks(app, backend):
         if (
             triggered == "agent-state-poll"
             and acknowledged_scene
+            and _stamp_label_matches(controls_scene_id, state)
             and rename_value is not None
         ) or (
             rename_value is not None and str(rename_value) == str(server_label)
         ):
             outputs[0] = no_update
-        # Same-scene poll whose version clocks have not moved past the
-        # browser ack: keep sidebar values the user has changed and the
-        # server has not stored yet. A REST/WS edit advances those clocks
-        # and still writes. Scene and camera stamp repair stays a full write.
+        # Compare each field with the values actually acknowledged by the
+        # browser. An unrelated server edit or camera command can advance
+        # clocks while this field still contains an unfinished browser edit.
         if (
             triggered == "agent-state-poll"
             and client_controls
             and acknowledged_scene
-            and not _stamp_scene_or_camera_differs(controls_scene_id, state)
-            and _acknowledged_versions_cover(controls_scene_id, state)
         ):
-            _preserve_inflight_controls(outputs, client_controls)
+            _preserve_inflight_controls(outputs, client_controls, controls_scene_id, state)
         outputs[-1] = no_update  # camera-state-store slot
         return (*outputs, no_update)  # scene-switch-seq unchanged
 
     @app.callback(
         Output("agent-state-store", "data", allow_duplicate=True),
         Output("display-options", "value", allow_duplicate=True),
+        Output("scene-controls-scene", "children", allow_duplicate=True),
         Input("scene-tabs", "value"),
         Input("display-mode-selector", "value"),
         Input("display-options", "value"),
@@ -831,6 +868,7 @@ def register_state_callbacks(app, backend):
         Input("property-center-input", "value"),
         Input("property-nan-color-input", "value"),
         Input("property-colorbar-toggle", "value"),
+        State("scene-controls-scene", "children"),
         prevent_initial_call=True,
     )
     def capture_state(
@@ -857,6 +895,7 @@ def register_state_callbacks(app, backend):
         property_center,
         property_nan_color,
         property_colorbar,
+        controls_scene_id=None,
     ):
         triggered_props = [
             item.get("prop_id", "").split(".")[0]
@@ -869,12 +908,12 @@ def register_state_callbacks(app, backend):
         # never persist the previous scene's control values into the newly
         # selected scene.
         if "scene-tabs" in triggered_props:
-            return no_update, no_update
+            return no_update, no_update, no_update
         if scene_id and scene_id not in backend.scene_store.scenes:
-            return no_update, no_update
+            return no_update, no_update, no_update
         filled = filled_controls_scene["id"]
         if filled and scene_id and str(scene_id) != str(filled):
-            return no_update, no_update
+            return no_update, no_update, no_update
         if scene_id:
             backend.set_active_scene(scene_id, broadcast=False)
         prev = backend.get_state(scene_id)
@@ -893,14 +932,14 @@ def register_state_callbacks(app, backend):
         if property_fields:
             if property_range_mode == "manual":
                 if property_range_min is None or property_range_max is None:
-                    return no_update, no_update
+                    return no_update, no_update, no_update
                 try:
                     lower = float(property_range_min)
                     upper = float(property_range_max)
                 except (TypeError, ValueError):
-                    return no_update, no_update
+                    return no_update, no_update, no_update
                 if not np.isfinite((lower, upper)).all() or lower >= upper:
-                    return no_update, no_update
+                    return no_update, no_update, no_update
                 value_range = [lower, upper]
             else:
                 value_range = None
@@ -950,7 +989,7 @@ def register_state_callbacks(app, backend):
         # capture_state -> agent-state-store`` would otherwise double up
         # every figure render, doubling the 1.4 MB-per-frame cost.
         if all(prev.get(k) == v for k, v in patch.items() if k != "scene_id"):
-            return no_update, checklist_out
+            return no_update, checklist_out, no_update
         backend.apply_intent(
             {"type": "set_style", "scene_id": scene_id, "payload": patch}
         )
@@ -973,7 +1012,20 @@ def register_state_callbacks(app, backend):
         state = backend.get_state(scene_id)
         # Capture publishes the authoritative state and the checklist value
         # that belongs with it. Geometry scheduling stays in the worker.
-        return state, checklist_out
+        # This response confirms the browser's captured controls too. Without
+        # advancing the ack, a subsequent poll mistakes the committed value
+        # for an external edit and can replace the user's next draft.
+        values = _scene_control_values(
+            state, visible_range=(property_range_min, property_range_max)
+        )
+        stamp = _parse_controls_stamp(_scene_controls_stamp(state, values))
+        previous = _parse_controls_stamp(controls_scene_id) or {}
+        # Capture delivers sidebar values, but it does not fill the rename
+        # box or deliver a camera command. Retain their browser ack so an
+        # external rename/reset racing this edit is still repaired by poll.
+        stamp["scene_label"] = previous.get("scene_label")
+        stamp["camera_revision"] = previous.get("camera_revision", 0)
+        return state, checklist_out, json.dumps(stamp, sort_keys=True)
 
     # ------------------------------------------------------------------
     # Phase 3 UI: Named-polyhedra table.

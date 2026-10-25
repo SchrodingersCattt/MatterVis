@@ -67,7 +67,7 @@ def capture(backend, monkeypatch, options, *, trigger="display-options", **chang
     state = backend.get_state()
     state.update(changes)
     queued_before = len(backend._render_worker._finalize_pool.jobs)
-    emitted, _checklist = registry.callbacks["capture_state"](
+    emitted, _checklist, _stamp = registry.callbacks["capture_state"](
         state["scene_id"], state["display_mode"], options,
         state["atom_scale"], state["bond_radius"], state["minor_opacity"],
         state["material"], state["style"], state["disorder"], state["ortep_mode"],

@@ -250,7 +250,7 @@ def test_capture_state_ignores_batched_tab_refresh_values(tmp_path, monkeypatch)
             "#BDBDBD",
             ["show"],
         )
-        assert result == (no_update, no_update)
+        assert result == (no_update, no_update, no_update)
     finally:
         backend.close()
 
