@@ -58,7 +58,9 @@ existing `topology_*` keys. Fresh scenes start with
 `topology_enabled=false`, so the polyhedron overlay is not drawn until
 the caller opts in. Row color, visibility, and centre/ligand fields stay
 editable while the overlay is off, and `run_analysis` still computes
-when specs exist. The overlay flag only controls drawing. Empty
+when specs exist. The Analysis panel and `POST /api/v2/topology` also
+use registered specs independently of the overlay and row drawing flags.
+The overlay flag only controls drawing. Empty
 `polyhedron_specs` means "render no named polyhedra"; MatterVis no
 longer synthesises auto-ligand rows from `topology_species_keys`.
 Non-empty explicit rows drive the overlay. A row's `enabled` flag

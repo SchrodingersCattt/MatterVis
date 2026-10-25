@@ -617,6 +617,10 @@ class _TopologyBackendMixin:
         level = str(level or "molecule")
         if level not in {"molecule", "atom"}:
             raise ApiError("level must be 'molecule' or 'atom'", status_code=400)
+        # Explicit analysis is independent of the drawing switch. get_state
+        # returns a request-local snapshot, so this never enables the overlay
+        # or changes the registered rows on the scene.
+        state["topology_enabled"] = True
         if level == "atom":
             display_fragment = self._display_fragment(scene, center_index)
             topology_fragment = self.map_display_fragment_to_topology(self.get_bundle(structure), display_fragment)
@@ -642,7 +646,6 @@ class _TopologyBackendMixin:
             if not center_species:
                 fragment = self._display_fragment(scene, center_index)
                 center_species = (fragment or {}).get("formula") or (fragment or {}).get("species")
-            state["topology_enabled"] = True
             state["polyhedron_specs"] = _normalize_polyhedron_specs(
                 [
                     {

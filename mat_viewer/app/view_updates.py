@@ -130,6 +130,7 @@ _COMPLETE_FRAME_FIELDS = (
     "entity_defaults",
     "cell_overlays",
     "overlay_overrides",
+    "topology_enabled",
 )
 
 
