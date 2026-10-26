@@ -130,9 +130,10 @@ def test_ball_unit_cell_has_symmetric_boundary_images_only(tmp_path: Path) -> No
     keys = _draw_keys(scene)
 
     assert scene["display_mode"] == "unit_cell"
-    assert scene["is_ionic_solid"] is True
+    assert scene["connectivity_regime"] == "extended"
     assert scene["is_inorganic_solid"] is True
-    assert scene["bonds"] == []
+    assert scene["bonds"]
+    assert {bond["role"] for bond in scene["bonds"]} == {"coordination"}
     assert scene["framework_context_replica_count"] == 0
     assert scene["bonded_image_replica_count"] == 0
     assert not any(
@@ -183,6 +184,9 @@ def test_ball_unit_cell_has_symmetric_boundary_images_only(tmp_path: Path) -> No
         )
     ]
     assert sorted(rendered) == sorted(keys)
+    assert not any(
+        primitive.metadata.get("kind") == "bond" for primitive in plan.primitives
+    )
 
 
 def test_ball_unit_cell_without_replicas_stays_on_wrapped_sites(tmp_path: Path) -> None:
@@ -221,8 +225,14 @@ def test_ball_unit_cell_without_replicas_stays_on_wrapped_sites(tmp_path: Path) 
         keys = _draw_keys(scene)
         assert len(scene["draw_atoms"]) == 8
         assert scene["bonded_image_replica_count"] == 0
-        assert scene["bonds"] == []
         _assert_inside_closed_cell(keys)
+        matrix = np.asarray(scene["M"], dtype=float)
+        inverse = np.linalg.inv(matrix)
+        for bond in scene["bonds"]:
+            for endpoint in (bond["start"], bond["end"]):
+                frac = np.asarray(endpoint, dtype=float) @ inverse
+                assert np.all(frac >= -1e-6)
+                assert np.all(frac <= 1.0 + 1e-6)
         assert sorted(keys) == sorted(expected)
 
 
@@ -234,7 +244,6 @@ def test_ionic_formula_unit_centres_stay_in_the_home_cell(tmp_path: Path) -> Non
         mode="formula_unit",
     )
     keys = _draw_keys(scene)
-    assert scene["bonds"] == []
     assert keys
     _assert_inside_closed_cell(keys)
     assert all(

@@ -66,20 +66,17 @@ def _require_molcryskit():
             KEY_U_CART,
         )
     except ImportError as exc:
-        from ..capabilities import (
-            MOLCRYSKIT_INSTALL,
-            MOLCRYSKIT_MINIMUM,
-        )
+        from ..capabilities import MOLCRYSKIT_DEVELOPMENT_INSTALL
 
         raise ImportError(
             "MolCrysKit is a base MatterVis dependency and is required for "
-            f"formula_unit display (molcrys-kit>={MOLCRYSKIT_MINIMUM}). "
-            f"Install or upgrade it with: {MOLCRYSKIT_INSTALL}."
+            "formula_unit display, BondRecord.role, and "
+            "get_connectivity_report(). Install the pinned source with: "
+            f"{MOLCRYSKIT_DEVELOPMENT_INSTALL}."
         ) from exc
 
     from ..capabilities import (
-        MOLCRYSKIT_INSTALL,
-        MOLCRYSKIT_MINIMUM,
+        MOLCRYSKIT_DEVELOPMENT_INSTALL,
         molcryskit_contract_missing,
     )
 
@@ -89,8 +86,10 @@ def _require_molcryskit():
             "The installed molcrys-kit does not provide MatterVis's required "
             "public structure contracts: "
             + ", ".join(missing)
-            + f". MatterVis requires molcrys-kit>={MOLCRYSKIT_MINIMUM}. "
-            "Install or upgrade it with: " + MOLCRYSKIT_INSTALL + "."
+            + ". This checkout needs BondRecord.role and "
+            "get_connectivity_report(). Install the pinned source with: "
+            + MOLCRYSKIT_DEVELOPMENT_INSTALL
+            + "."
         )
 
     return {
@@ -333,6 +332,8 @@ class CrystalAnalysis:
         formula_unit_selection=None,
         ring_records=None,
         chemistry=None,
+        connectivity_regime=None,
+        connectivity_rank=None,
     ):
         self.crystal = crystal
         self.mol_indices = mol_indices
@@ -362,6 +363,11 @@ class CrystalAnalysis:
         # to raw/global source indices before any display copies are created.
         self.ring_records: list[dict] = list(ring_records or [])
         self.chemistry: CrystalChemistryRecords | None = chemistry
+        # Crystal-level signals from ``MolecularCrystal.get_connectivity_report``.
+        # ``None`` means the crystal object did not expose the report (a test
+        # double, or a MolCrysKit build from before that API).
+        self.connectivity_regime = connectivity_regime
+        self.connectivity_rank = connectivity_rank
 
 
 def require_structure_contract(
@@ -706,6 +712,36 @@ def chemistry_records(crystal) -> CrystalChemistryRecords | None:
     return _chemistry_records(crystal, _require_molcryskit())
 
 
+def _bond_role(record) -> str:
+    """Return the renderer-facing role stored on a MolCrysKit bond record.
+
+    Neighbor-list edges from current MolCrysKit are ``covalent`` or
+    ``coordination``. Records built before that field, and test doubles,
+    stay on the covalent default BondRecord uses.
+    """
+    role = getattr(record, "role", None)
+    if role in {"covalent", "coordination"}:
+        return str(role)
+    return "covalent"
+
+
+def _connectivity_fields(crystal) -> tuple[str | None, int | None]:
+    """Read regime and rank when the crystal exposes the public report."""
+    getter = getattr(crystal, "get_connectivity_report", None)
+    if not callable(getter):
+        return None, None
+    report = getter()
+    regime = getattr(report, "regime", None)
+    rank = getattr(report, "max_rank", None)
+    if regime not in {"molecular", "extended"}:
+        return None, None
+    try:
+        rank_value = int(rank)
+    except (TypeError, ValueError):
+        return str(regime), None
+    return str(regime), rank_value
+
+
 def _enum_text(value) -> str:
     return str(getattr(value, "value", value))
 
@@ -784,9 +820,11 @@ def analyze_crystal(crystal, *, include_chemistry: bool = False) -> CrystalAnaly
             ),
             "vector": list(record.vector_A),
             "distance": float(record.distance_A),
+            "role": _bond_role(record),
         }
         for record in contract_bonds
     ]
+    connectivity_regime, connectivity_rank = _connectivity_fields(crystal)
 
     ring_records: list[dict] = []
     local_geometries = mk["LocalGeometryCache"](crystal)
@@ -852,6 +890,8 @@ def analyze_crystal(crystal, *, include_chemistry: bool = False) -> CrystalAnaly
         formula_unit_selection=analyzer.select_formula_unit(),
         ring_records=ring_records,
         chemistry=_chemistry_records(crystal, mk) if include_chemistry else None,
+        connectivity_regime=connectivity_regime,
+        connectivity_rank=connectivity_rank,
     )
 
 

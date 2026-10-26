@@ -84,9 +84,12 @@ Parses a CIF and returns a scene dict consumable by
   Per-species counts come from MolCrysKit's
   `StoichiometryAnalyzer.get_simplest_unit()` (unit-cell species counts
   divided by their GCD), not MatterVis-local hard-coded heuristics.
-  Extended ionic and inorganic solids do not keep that molecular unwrap:
+  An extended connectivity regime (`MolecularCrystal.get_connectivity_report()`,
+  rank 1–3, coordination edges included) does not keep that molecular unwrap:
   displayed formula-unit centres are folded into the home cell so a cell
-  overlay does not show a one-sided exterior halo.
+  overlay does not show a one-sided exterior halo. A molecular regime keeps
+  the formula-unit unwrap. Scenes saved before the report existed still use
+  the inorganic composition fallback.
 - `unit_cell` — every atom of the conventional cell, with PBC bond
   imaging. When MolCrysKit canonical bond records are available, every
   manifested boundary-fragment image receives the corresponding canonical
@@ -97,13 +100,23 @@ Parses a CIF and returns a scene dict consumable by
   triggers an image, the complete molecule is translated. Image shifts are
   unioned per member; face signals from different members are never combined
   into an unsupported diagonal image.
-  Extended ionic and inorganic solids use a different unit-cell contract.
+  An extended connectivity regime uses a lattice unit-cell contract.
   Each crystallographic site is wrapped into the home cell and, when
   boundary replicas are on, copied to the symmetric face, edge, and corner
   images at 0 and 1. Molecular formula-unit unwrap and spanning-bond
-  context images (the rocksalt shell at fractional `-0.5`) are not drawn.
+  context images (the shell at fractional `-0.5`) are not drawn.
   With boundary replicas off, the same lattices stay on the wrapped sites
   and do not grow a bonded-image shell outside the cell.
+  Stick-capable styles (`ball_stick`, `stick`, `wireframe`, `ortep`) draw
+  every MolCrysKit neighbor-list edge whose manifested length matches
+  `BondRecord.distance`. `role` is `"covalent"` or `"coordination"` and is
+  copied onto `scene["bonds"]`; MatterVis does not reclassify elements to
+  decide which contacts are sticks. A half-cell contact keeps the displayed
+  centres instead of an ambiguous minimum-image end outside the cell.
+  `scene["connectivity_regime"]` is `"molecular"` or `"extended"`, and
+  `scene["connectivity_rank"]` is the report's `max_rank`. Ball and
+  space-filling styles do not stroke the bond list. Coordination endpoints
+  in ball-and-stick use a sphere at least twice the bond-cylinder radius.
   Library callers that need a strict publication cell can pass
   `include_boundary_replicas=False` to `build_scene_from_atoms` or
   `build_bundle_scene`. Atom centres are wrapped into `[0, 1)` and no adjacent

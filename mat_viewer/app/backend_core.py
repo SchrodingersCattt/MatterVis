@@ -224,24 +224,22 @@ class _CoreBackendMixin:
             default_species = [species_present[0]["formula"]]
         else:
             default_species = []
-        # Ionic and extended inorganic cells (NaCl, CsCl, CaF2, rutile, and
-        # perovskites) are lattice views rather than isolated molecules.  The
-        # chemistry profile is conservative about carbon-containing frameworks
-        # so MOFs and molecular salts keep their existing defaults.
-        # Scene metadata is normally stamped by the loader. Recompute the
-        # conservative inorganic profile from canonical raw atoms when a
-        # legacy/cache scene predates those fields; otherwise such structures
-        # silently fall back to the molecular formula-unit presentation.
+        # Extended crystals (MolCrysKit connectivity rank 1–3, including
+        # coordination edges) are lattice views. Molecular crystals keep
+        # formula-unit ball-and-stick. Scenes saved before the connectivity
+        # report still use the inorganic composition profile, and an explicit
+        # legacy ``is_ionic_solid`` flag, so a cache restore does not fall
+        # back to a molecular presentation.
         raw_profile = (
             inorganic_solid_profile(bundle.raw_atoms)
             if "is_inorganic_solid" not in scene
             else {}
         )
-        ionic = bool(scene.get("is_ionic_solid", False))
         inorganic = bool(
             scene.get("is_inorganic_solid", False)
             or raw_profile.get("is_inorganic_solid", False)
         )
+        regime = scene.get("connectivity_regime")
         inorganic_cations = list(
             scene.get("inorganic_cation_elements")
             or raw_profile.get("inorganic_cation_elements", ())
@@ -250,7 +248,12 @@ class _CoreBackendMixin:
             scene.get("inorganic_anion_elements")
             or raw_profile.get("inorganic_anion_elements", ())
         )
-        lattice_default = ionic or inorganic
+        if regime == "extended":
+            lattice_default = True
+        elif regime == "molecular":
+            lattice_default = False
+        else:
+            lattice_default = bool(scene.get("is_ionic_solid", False)) or inorganic
         default_display_mode = style.get(
             "display_mode", scene.get("display_mode", "formula_unit")
         )

@@ -10,9 +10,9 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 CI
 
 from mat_viewer.capabilities import (
     CAPABILITY_REGISTRY,
-    MOLCRYSKIT_INSTALL,
+    MOLCRYSKIT_DEVELOPMENT_REQUIREMENT,
     MOLCRYSKIT_MINIMUM,
-    MOLCRYSKIT_REQUIREMENT,
+    MOLCRYSKIT_SOURCE_COMMIT,
     MOLCRYSKIT_UPPER,
     install_command,
     resolve_requirements,
@@ -23,7 +23,8 @@ SKILL = ROOT / "skills" / "visualize-materials"
 
 
 def _dependency_name(requirement: str) -> str:
-    return re.split(r"[<>=!~;\[]", requirement, maxsplit=1)[0].strip().lower()
+    head = re.split(r"\s*@\s*|[<>=!~;\[]", requirement, maxsplit=1)[0]
+    return head.strip().lower()
 
 
 def test_pyproject_extras_match_the_capability_registry() -> None:
@@ -155,19 +156,23 @@ def test_released_molcryskit_minimum_is_consistent() -> None:
         for dependency in data["project"]["dependencies"]
         if _dependency_name(dependency) == "molcrys-kit"
     )
-    assert molcryskit == MOLCRYSKIT_REQUIREMENT
-    assert "git+" not in molcryskit
+    assert molcryskit == MOLCRYSKIT_DEVELOPMENT_REQUIREMENT
+    assert MOLCRYSKIT_SOURCE_COMMIT in molcryskit
+    assert "git+" in molcryskit
 
     for workflow in ("ci.yml", "release.yml"):
         text = (ROOT / ".github" / "workflows" / workflow).read_text(encoding="utf-8")
         assert f'MOLCRYSKIT_MINIMUM: "{MOLCRYSKIT_MINIMUM}"' in text
         assert f'MOLCRYSKIT_UPPER: "{MOLCRYSKIT_UPPER}"' in text
-        assert "molcrys-kit==${MOLCRYSKIT_MINIMUM}" in text
-        assert 'python -m pip install -e ".[all,test]"' in text
+        assert "molcrys-kit==${MOLCRYSKIT_MINIMUM}" not in text
+        assert "BondRecord.role" in text
+        assert "get_connectivity_report" in text
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    assert 'molcrys-kit>=${MOLCRYSKIT_MINIMUM},<${MOLCRYSKIT_UPPER}' in ci
+    assert 'python -m pip install -e ".[all,test]"' in ci
+    assert "molcrys-kit>=" not in ci
 
     development = (SKILL / "references" / "capabilities-and-install.md").read_text(
         encoding="utf-8"
     )
-    assert MOLCRYSKIT_INSTALL in development
+    assert MOLCRYSKIT_SOURCE_COMMIT in development
+    assert "do not put a Git URL into generated runtime requirements" in development

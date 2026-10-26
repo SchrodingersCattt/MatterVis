@@ -48,6 +48,7 @@ def _display_atom_radii(atoms: list[dict], style: Mapping[str, object]) -> np.nd
     for atom in atoms:
         raw = max(float(atom.get("atom_radius", 0.18)), 0.05)
         element = str(atom.get("elem") or atom.get("symbol") or "C")
+        representation = str(style.get("style", "ball")).lower().replace("-", "_")
         values.append(
             atom_visual_radius(
                 raw,
@@ -55,6 +56,11 @@ def _display_atom_radii(atoms: list[dict], style: Mapping[str, object]) -> np.nd
                 representation="ball",
                 atom_scale=atom_scale,
                 style=style,
+                bond_radius=style.get("bond_radius"),
+                coordination=(
+                    representation == "ball_stick"
+                    and bool(atom.get("_coordination_site"))
+                ),
             )
         )
     return np.asarray(values, dtype=float)

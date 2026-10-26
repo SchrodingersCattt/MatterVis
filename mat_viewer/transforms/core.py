@@ -702,7 +702,6 @@ def rebuild_scene_with_atoms(
     from ..legacy import crystal_scene as legacy_scene
     from ..scene import scene_ops
     from ..scene.core import _canonical_display_bond_pairs
-    from ..structure.bonds import ionic_coordinate_source_pairs
 
     ops = scene_ops()
     style = style or dict(base_scene.get("style", {}))
@@ -737,10 +736,6 @@ def rebuild_scene_with_atoms(
         contract_sites,
         contract_bonds,
     )
-    ionic_source_pairs = ionic_coordinate_source_pairs(
-        contract_sources,
-        contract_bonds,
-    )
 
     draw_atoms = [dict(atom) for atom in new_atoms]
     if draw_atoms:
@@ -755,7 +750,7 @@ def rebuild_scene_with_atoms(
             atom.setdefault("color_light", ops.elem_color_light(atom["elem"]))
             atom.setdefault("atom_radius", float(ops.atom_r(atom["elem"])))
 
-    bond_pairs, _contract_stats = _canonical_display_bond_pairs(
+    bond_pairs, _contract_stats, pair_metadata = _canonical_display_bond_pairs(
         draw_atoms,
         contract_sources,
         contract_bonds,
@@ -764,16 +759,9 @@ def rebuild_scene_with_atoms(
     for i, j in bond_pairs:
         ai = draw_atoms[int(i)]
         aj = draw_atoms[int(j)]
-        source_pair = tuple(
-            sorted(
-                (
-                    int(ai.get("_source_index", -1)),
-                    int(aj.get("_source_index", -1)),
-                )
-            )
-        )
-        if source_pair in ionic_source_pairs:
-            continue
+        meta = pair_metadata.get((int(i), int(j)), {})
+        role = str(meta.get("role") or "covalent")
+        record_distance = meta.get("distance")
         start = np.asarray(ai["cart"], dtype=float)
         end = np.asarray(aj["cart"], dtype=float)
         bonds.append(
@@ -782,6 +770,8 @@ def rebuild_scene_with_atoms(
                 "j": int(j),
                 "start": start.copy(),
                 "end": end.copy(),
+                "role": role,
+                "distance": record_distance,
                 "color_i": ai["color"],
                 "color_j": aj["color"],
                 "alpha_i": ai["disorder_alpha"],
@@ -791,6 +781,14 @@ def rebuild_scene_with_atoms(
                 "depth_t": float((ai["_depth_t"] + aj["_depth_t"]) / 2.0),
             }
         )
+    coordination_sites = {
+        index
+        for bond in bonds
+        if bond.get("role") == "coordination"
+        for index in (int(bond["i"]), int(bond["j"]))
+    }
+    for index, atom in enumerate(draw_atoms):
+        atom["_coordination_site"] = index in coordination_sites
 
     fragment_table, atom_fragment_labels = _fragment_table_from_current_bonds(draw_atoms, bonds)
 
@@ -823,11 +821,6 @@ def rebuild_scene_with_atoms(
     out["_canonical_source_atoms"] = copy.deepcopy(contract_sources)
     out["_canonical_site_records"] = copy.deepcopy(contract_sites)
     out["_canonical_bond_records"] = copy.deepcopy(contract_bonds)
-    out["is_ionic_solid"] = bool(ionic_source_pairs)
-    out["ionic_coordinate_source_pairs"] = [
-        list(pair) for pair in sorted(ionic_source_pairs)
-    ]
-    out["suppressed_ionic_bond_count"] = len(ionic_source_pairs)
     return out
 
 

@@ -63,7 +63,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[all,test]"
-          python -m pip install "molcrys-kit==${MOLCRYSKIT_MINIMUM}"
+          python - << 'PY'
+          from molcrys_kit.structures import BondRecord
+          from molcrys_kit.structures.crystal import MolecularCrystal
+          if "role" not in getattr(BondRecord, "__dataclass_fields__", {}):
+              raise SystemExit("installed molcrys-kit is missing BondRecord.role")
+          report = getattr(MolecularCrystal, "get_connectivity_report", None)
+          if not callable(report):
+              raise SystemExit(
+                  "installed molcrys-kit is missing "
+                  "MolecularCrystal.get_connectivity_report"
+              )
+          PY
 
       - name: Run tests
         run: |
