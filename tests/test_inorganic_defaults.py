@@ -10,10 +10,7 @@ from mat_viewer.app import ViewerBackend
 from mat_viewer.loader import build_bundle_scene, build_empty_bundle
 from mat_viewer.loader.bundle_builder import build_loaded_crystal_from_atoms
 from mat_viewer.presets import default_preset_path
-from mat_viewer.structure.bonds import (
-    inorganic_solid_profile,
-    ionic_coordinate_source_pairs,
-)
+from mat_viewer.structure.bonds import inorganic_solid_profile
 from mat_viewer.structure.cif_parse import load_cif
 from mat_viewer.topology.analysis import _MAX_REGISTERED_CN
 
@@ -78,15 +75,6 @@ def test_representative_inorganic_defaults_stay_on_full_cell(
         backend.close()
 
 
-def test_ionic_contact_filter_only_matches_binary_metal_halides():
-    atoms = [{"elem": "Cs"}, {"elem": "Cl"}]
-    records = [{"left": 0, "right": 1}]
-    assert ionic_coordinate_source_pairs(atoms, records) == {(0, 1)}
-
-    covalent = [{"elem": "C"}, {"elem": "Cl"}]
-    assert ionic_coordinate_source_pairs(covalent, records) == set()
-
-
 def test_extended_inorganic_profile_covers_oxide_lattices_without_mof_false_positive():
     rutile = [{"elem": "Ti"}, {"elem": "O"}]
     perovskite = [{"elem": "Ca"}, {"elem": "Ti"}, {"elem": "O"}]
@@ -97,7 +85,7 @@ def test_extended_inorganic_profile_covers_oxide_lattices_without_mof_false_posi
     assert inorganic_solid_profile(hkust)["is_inorganic_solid"] is False
 
 
-def test_nacl_keeps_mck_contact_but_hides_ionic_sticks():
+def test_nacl_unit_cell_keeps_centres_inside_and_coordination_sticks():
     parsed = load_cif("benchmarks/structures/ionic_nacl.cif")
     bundle = build_loaded_crystal_from_atoms(
         name="ionic-nacl",
@@ -107,9 +95,11 @@ def test_nacl_keeps_mck_contact_but_hides_ionic_sticks():
         M=parsed.matrix,
         source="upload",
     )
-    assert bundle.scene["is_ionic_solid"] is True
+    assert bundle.scene["connectivity_regime"] == "extended"
     assert bundle.scene["_canonical_bond_records"]
-    assert bundle.scene["bonds"] == []
+    assert {record["role"] for record in bundle.scene["_canonical_bond_records"]} == {
+        "coordination"
+    }
 
     unit_cell = build_bundle_scene(
         bundle,
@@ -122,8 +112,8 @@ def test_nacl_keeps_mck_contact_but_hides_ionic_sticks():
     # the old spanning-bond shell (4 atoms, including Cl at -0.5) does not.
     assert len(unit_cell["draw_atoms"]) == 12
     assert unit_cell["framework_context_replica_count"] == 0
-    assert unit_cell["bonds"] == []
-    assert unit_cell["suppressed_ionic_bond_count"] > 0
+    assert unit_cell["bonds"]
+    assert {bond["role"] for bond in unit_cell["bonds"]} == {"coordination"}
     for atom in unit_cell["draw_atoms"]:
         frac = atom["frac"]
         assert all(-1e-8 <= float(component) <= 1.0 + 1e-8 for component in frac)

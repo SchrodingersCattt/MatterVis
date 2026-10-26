@@ -97,6 +97,12 @@ def register_state_routes(v2, backend) -> dict:
         if getattr(bundle, "_upload_pending", False):
             meta["status"] = "pending"
             meta["job_id"] = getattr(bundle, "_upload_job_id", None)
+        # The scene this upload owns. Callers must select this id. The
+        # process-wide active scene can already belong to another browser
+        # by the time the response is read.
+        scene_id = backend.upload_scene_id(bundle)
+        if scene_id:
+            meta["scene_id"] = scene_id
         return jsonify(meta)
 
     @v2.get("/upload/<job_id>")

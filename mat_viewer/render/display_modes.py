@@ -135,10 +135,11 @@ def selected_atoms_for_mode(
     - ``"asymmetric_unit"`` — only the asymmetric unit
     - ``"cluster"`` — every parsed atom, no PBC processing
 
-    ``lattice_site_display`` is set for extended ionic and inorganic
-    solids. Those views use wrapped crystallographic sites. Unit-cell
-    replicas are the symmetric 0/1 face, edge, and corner images of each
-    site. Formula-unit centres are folded into the home cell instead of
+    ``lattice_site_display`` is set for an extended connectivity regime
+    (and, when that report is absent, for an inorganic composition).
+    Those views use wrapped crystallographic sites. Unit-cell replicas
+    are the symmetric 0/1 face, edge, and corner images of each site.
+    Formula-unit centres are folded into the home cell instead of
     keeping a molecular unwrap that sits outside the box.
     """
     from .boundary_replicas import expand_boundary_replicas

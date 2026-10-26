@@ -12,6 +12,16 @@ from .radius import atom_visual_radius
 _FLAT_ATOM_MIN_PIXEL_SIZE = 3.0
 
 
+def _coordination_ball_stick(atom: dict, style: dict) -> bool:
+    """True when this atom's ball-and-stick sphere must clear the cylinder.
+
+    The flag is stamped from MolCrysKit ``BondRecord.role`` at scene build.
+    Ball and space-filling styles do not use it.
+    """
+    representation = str(style.get("style", "")).lower().replace("-", "_")
+    return representation == "ball_stick" and bool(atom.get("_coordination_site"))
+
+
 def _flat_atom_marker_size(
     atom_radius: float, style: dict, visual_scale: float | None = None
 ) -> float:
@@ -390,6 +400,8 @@ def _atom_mesh_traces(scene: dict, style: dict):
             representation="ball",
             atom_scale=float(style["atom_scale"]),
             style=style,
+            bond_radius=style.get("bond_radius"),
+            coordination=_coordination_ball_stick(atom, style),
         )
         groups[key]["centers"].append(atom["cart"])
         groups[key]["radii"].append(radius)
@@ -638,6 +650,8 @@ def _atom_scatter_traces(scene: dict, style: dict):
             representation="ball",
             atom_scale=float(style["atom_scale"]),
             style=style,
+            bond_radius=style.get("bond_radius"),
+            coordination=_coordination_ball_stick(atom, style),
         )
         base_size = _flat_atom_marker_size(
             marker_radius,
@@ -821,6 +835,8 @@ def _wireframe_atom_traces(scene: dict, style: dict):
             representation="ball",
             atom_scale=float(style["atom_scale"]),
             style=style,
+            bond_radius=style.get("bond_radius"),
+            coordination=_coordination_ball_stick(atom, style),
         )
         is_minor = bool(atom.get("is_minor", False))
         key = (_atom_render_color(atom, style, light=is_minor), is_minor)

@@ -1281,11 +1281,11 @@ def _atom_radius(
         atom_scale=atom_scale,
         bond_radius=bond_radius,
         min_atom_radius=min_atom_radius,
+        coordination=str(representation).lower().replace("-", "_") == "ball_stick" and bool(_value(atom, "_coordination_site", default=False)),
     )
     if representation in {"space_filling", "ball"}:
         return max(rendered, 0.2)
     return max(rendered, 0.16)
-
 
 def _displacement_matrix(atom: Any) -> np.ndarray | None:
     value = _value(atom, "u_cart_A2", "u_cart", "Ucart", "U", "uij_cart", default=None)

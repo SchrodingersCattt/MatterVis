@@ -206,6 +206,40 @@ def test_upload_sync_reads_server_active_scene_after_stale_tab(tmp_path, monkeyp
         backend.close()
 
 
+def test_upload_sync_keeps_its_scene_when_another_browser_is_active(tmp_path, monkeypatch):
+    """An upload names its own scene and must not follow the other browser."""
+    backend = ViewerBackend(
+        preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path)
+    )
+    try:
+        uploaded_id = backend.active_scene_id()
+        other = backend.create_scene(
+            structure=backend.get_state()["structure"], label="Other browser"
+        )
+        other_id = other["id"]
+        backend.set_active_scene(other_id, broadcast=True)
+        assert backend.peek_pending_state()["scene_id"] == other_id
+
+        registry = _CallbackRegistry()
+        callbacks_state.register_state_callbacks(registry, backend)
+        monkeypatch.setattr(
+            callbacks_state,
+            "callback_context",
+            SimpleNamespace(
+                triggered=[{"prop_id": "native-upload-sync.data"}]
+            ),
+        )
+        result = registry.callbacks["sync_agent_state"](
+            1, {"seq": 1, "scene_id": uploaded_id}, other_id
+        )
+
+        assert result[-3]["scene_id"] == uploaded_id
+        assert backend.peek_pending_state()["scene_id"] == other_id
+        assert backend.active_scene_id() == other_id
+    finally:
+        backend.close()
+
+
 def test_capture_state_ignores_batched_tab_refresh_values(tmp_path, monkeypatch):
     """A tab event batched with control refreshes must not write stale controls."""
     backend = ViewerBackend(

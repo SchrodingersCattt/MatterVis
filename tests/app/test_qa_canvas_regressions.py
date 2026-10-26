@@ -260,6 +260,38 @@ def _home_atoms(atoms: list) -> list:
     ]
 
 
+def _supercell_edge_count(records: list, counts: tuple[int, int, int]) -> int:
+    """How many sticks a repeat lifts from canonical neighbor-list edges.
+
+    A record ``(left, right, S)`` is drawn once for every left image inside
+    the repeat whose partner image is also inside. The reverse record is the
+    same stick. Intra-home bonds alone under-count edges whose other end
+    sat on a boundary replica of the single cell.
+    """
+    seen: set[tuple] = set()
+    total = 0
+    for record in records:
+        left = int(record["left"])
+        right = int(record["right"])
+        shift = tuple(int(value) for value in record["right_image_shift"])
+        if left > right or (left == right and shift > tuple(-value for value in shift)):
+            left, right = right, left
+            shift = tuple(-value for value in shift)
+        key = (left, right, shift)
+        if key in seen:
+            continue
+        seen.add(key)
+        copies = 1
+        for size, delta in zip(counts, shift):
+            room = size - abs(delta)
+            if room <= 0:
+                copies = 0
+                break
+            copies *= room
+        total += copies
+    return total
+
+
 def test_repeat_counts_differ_and_clear_removes_them(tmp_path: Path):
     backend = _backend(tmp_path)
     try:
@@ -268,15 +300,7 @@ def test_repeat_counts_differ_and_clear_removes_them(tmp_path: Path):
         base_scene = backend.scene_for_state(backend.get_state(scene_id))
         base_atoms = list(base_scene.get("draw_atoms") or [])
         home = _home_atoms(base_atoms)
-        home_ids = {id(atom) for atom in home}
-        home_index = {
-            index for index, atom in enumerate(base_atoms) if id(atom) in home_ids
-        }
-        home_bonds = [
-            bond
-            for bond in (base_scene.get("bonds") or [])
-            if bond["i"] in home_index and bond["j"] in home_index
-        ]
+        records = list(base_scene.get("_canonical_bond_records") or [])
         backend.add_transform("repeat", {"a": 2, "b": 2, "c": 2}, scene_id=scene_id)
         two_scene = backend.scene_for_state(backend.get_state(scene_id))
         two_atoms = list(two_scene.get("draw_atoms") or [])
@@ -288,15 +312,17 @@ def test_repeat_counts_differ_and_clear_removes_them(tmp_path: Path):
         ]
         assert len(two_atoms) == len(home) * 8
         assert len(set(identities)) == len(identities)
-        assert len(two_scene.get("bonds") or []) == len(home_bonds) * 8
+        assert len(two_scene.get("bonds") or []) == _supercell_edge_count(records, (2, 2, 2))
         fig, _ = backend.figure_for_state(backend.get_state(scene_id))
         box = next(trace for trace in fig.data if getattr(trace, "name", "") == "unit-cell-box")
         # The outline is the supercell, not the home cell the repeats grew out of.
         assert max(box.x) > float(np_max_cell(base_scene)) * 1.5
         backend.commit_patch({"transforms": []}, scene_id=scene_id, broadcast=False)
         backend.add_transform("repeat", {"a": 3, "b": 3, "c": 3}, scene_id=scene_id)
-        three = len(backend.scene_for_state(backend.get_state(scene_id)).get("draw_atoms") or [])
+        three_scene = backend.scene_for_state(backend.get_state(scene_id))
+        three = len(three_scene.get("draw_atoms") or [])
         assert three == len(home) * 27
+        assert len(three_scene.get("bonds") or []) == _supercell_edge_count(records, (3, 3, 3))
         assert len(two_atoms) != three
         backend.commit_patch({"transforms": []}, scene_id=scene_id, broadcast=False)
         cleared = backend.scene_for_state(backend.get_state(scene_id))

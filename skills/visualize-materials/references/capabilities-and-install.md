@@ -68,13 +68,10 @@ switch backend or representation silently.
 
 ## Development checkout
 
-MatterVis requires MolCrysKit `>=0.8.0,<0.9.0`. Install it before this checkout
-with:
-
-```bash
-python -m pip install "molcrys-kit>=0.8.0,<0.9.0"
-```
-
-Then install this checkout.
+This checkout declares MolCrysKit in `pyproject.toml`. The pin is commit
+`9bf0ffb0fb321d1084dbc444250b5f186af3c873`, which exposes `BondRecord.role`
+and `get_connectivity_report()`. PyPI `0.8.0` does not. Install the
+checkout with `pip install -e .` and do not force `molcrys-kit==0.8.0` over
+that pin.
 Released users should follow the resolver's ordinary `matter-vis[...]` command;
 do not put a Git URL into generated runtime requirements.

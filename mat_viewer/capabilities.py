@@ -19,15 +19,27 @@ RESOLUTION_SCHEMA = "mattervis.requirements/v1"
 DIST_NAME = "matter-vis"
 GPU_INSTALL = 'python -m pip install "matter-vis[gpu]"'
 MOLCRYSKIT_MINIMUM = "0.8.0"
-# Exclusive upper bound of the range exercised in CI (matches pyproject /
-# workflow pins: molcrys-kit>=0.8.0,<0.9.0).
+# Exclusive upper bound of the numeric window CI still checks. The
+# development pin below is a git commit, not a pretend PyPI release:
+# PyPI 0.8.0 has neither BondRecord.role nor get_connectivity_report.
 MOLCRYSKIT_UPPER = "0.9.0"
 MOLCRYSKIT_REQUIREMENT = f"molcrys-kit>={MOLCRYSKIT_MINIMUM},<{MOLCRYSKIT_UPPER}"
 MOLCRYSKIT_SOURCE_MINIMUM = MOLCRYSKIT_MINIMUM
+# Public resolver hint. Agents must not copy a git URL into generated
+# runtime requirements; released installs stay on this range once the
+# role/regime API is published.
 MOLCRYSKIT_INSTALL = f'python -m pip install "{MOLCRYSKIT_REQUIREMENT}"'
+# Squash of MolCrysKit PR 197. pyproject.toml must name this same commit.
+MOLCRYSKIT_SOURCE_COMMIT = "9bf0ffb0fb321d1084dbc444250b5f186af3c873"
+MOLCRYSKIT_DEVELOPMENT_REQUIREMENT = (
+    "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@"
+    f"{MOLCRYSKIT_SOURCE_COMMIT}"
+)
 # Backward-compatible names retained for callers of the pre-0.7 helpers.
 MOLCRYSKIT_CONTRACT_SHA = "2a0ca454839f7fc8350ebe4b9ff5689b4b4ce335"
-MOLCRYSKIT_DEVELOPMENT_INSTALL = MOLCRYSKIT_INSTALL
+MOLCRYSKIT_DEVELOPMENT_INSTALL = (
+    f'python -m pip install "{MOLCRYSKIT_DEVELOPMENT_REQUIREMENT}"'
+)
 
 _MOLCRYSKIT_RECORD_FIELDS: Mapping[str, tuple[str, ...]] = {
     "SiteRecord": (
@@ -59,6 +71,7 @@ _MOLCRYSKIT_RECORD_FIELDS: Mapping[str, tuple[str, ...]] = {
         "right_image_shift",
         "vector_A",
         "distance_A",
+        "role",
     ),
     "FormulaUnitMember": (
         "species_id",
@@ -107,7 +120,11 @@ def molcryskit_contract_missing() -> tuple[str, ...]:
         return ("public structure-contract imports",)
     missing = [
         f"MolecularCrystal.{method}"
-        for method in ("get_site_records", "get_bond_records")
+        for method in (
+            "get_site_records",
+            "get_bond_records",
+            "get_connectivity_report",
+        )
         if not callable(getattr(MolecularCrystal, method, None))
     ]
     if not callable(getattr(StoichiometryAnalyzer, "select_formula_unit", None)):
@@ -264,9 +281,11 @@ CAPABILITY_REGISTRY: Mapping[str, CapabilitySpec] = {
         packages=("numpy", "ase", "matplotlib", "pillow", "molcrys-kit"),
         imports=("numpy", "ase", "matplotlib", "PIL", "molcrys_kit"),
         note=(
-            "Requires the renderer-ready MolCrysKit public contracts from "
-            f"molcrys-kit>={MOLCRYSKIT_MINIMUM}. Upgrade with: "
-            f"{MOLCRYSKIT_INSTALL}."
+            "Requires BondRecord.role and "
+            "MolecularCrystal.get_connectivity_report(). "
+            f"The published window is {MOLCRYSKIT_REQUIREMENT} once that "
+            "API is on PyPI. This checkout pins the commit in pyproject.toml; "
+            "PyPI 0.8.0 does not provide those fields."
         ),
     ),
     "gpu": CapabilitySpec(
@@ -584,6 +603,8 @@ __all__ = [
     "MOLCRYSKIT_REQUIREMENT",
     "MOLCRYSKIT_SOURCE_MINIMUM",
     "MOLCRYSKIT_INSTALL",
+    "MOLCRYSKIT_SOURCE_COMMIT",
+    "MOLCRYSKIT_DEVELOPMENT_REQUIREMENT",
     "MOLCRYSKIT_CONTRACT_SHA",
     "MOLCRYSKIT_DEVELOPMENT_INSTALL",
     "CapabilitySpec",

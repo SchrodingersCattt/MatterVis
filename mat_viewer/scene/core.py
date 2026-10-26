@@ -13,7 +13,6 @@ from .. import perf_log
 from ..structure.bonds import (
     bonds_conflict,
     inorganic_solid_profile,
-    ionic_coordinate_source_pairs,
 )
 from ..structure.cif_parse import load_cif, parse_asu
 from ..structure import molcrys_bridge
@@ -76,12 +75,14 @@ __all__ = [
 ]
 
 from .periodic import (
-    _bond_endpoints,
     _canonical_display_bond_pairs,
     _manifest_spanning_bond_context,
     _manifest_strict_bonded_images,
     _periodic_component_ranks,
     _prune_unconnected_spanning_replicas,
+    manifested_bond_endpoints,
+    rendered_bond_keeps_record,
+    stamp_coordination_sites,
     scene_ops,
     source_image_identity,
 )
@@ -169,16 +170,13 @@ def build_scene_from_atoms(
                     copied.setdefault(key, copy.deepcopy(source[key]))
             canonical_unwrapped_atoms.append(copied)
     canonical_records = [dict(record) for record in molcrys_analysis.bond_records]
-    # MolCrysKit's signed graph intentionally includes metal--halide
-    # coordination contacts so topology/polyhedron analysis can reuse the
-    # same periodic graph.  They are not covalent sticks in a binary ionic
-    # solid (NaCl/CsCl); retain the canonical records but suppress those
-    # contacts from the visible ball-and-stick bond list.
-    ionic_source_pairs = ionic_coordinate_source_pairs(
-        source_atoms,
-        canonical_records,
-    )
     inorganic_profile = inorganic_solid_profile(source_atoms)
+    # Lattice versus molecule is MolCrysKit's connectivity regime (rank of
+    # the signed bond graph, including coordination edges). Element
+    # whitelists do not choose the display. Scenes without a report keep
+    # the inorganic-composition fallback used before that API existed.
+    connectivity_regime = getattr(molcrys_analysis, "connectivity_regime", None)
+    connectivity_rank = getattr(molcrys_analysis, "connectivity_rank", None)
     periodic_ranks = _periodic_component_ranks(
         len(source_atoms),
         canonical_records,
@@ -249,14 +247,19 @@ def build_scene_from_atoms(
                 )
         formula_unit_atoms = canonical_formula_atoms
 
-    # Extended ionic / inorganic solids are lattices, not molecules. A
-    # formula-unit unwrap and a spanning-bond shell both park rocksalt
+    # An extended connectivity regime is a lattice, not a molecule. A
+    # formula-unit unwrap and a spanning-bond shell both park framework
     # sites at fractional coordinates such as -0.5, which draws a
-    # one-sided halo outside the conventional cell.
-    lattice_site_display = display_mode in {"formula_unit", "unit_cell"} and (
-        bool(ionic_source_pairs)
-        or bool(inorganic_profile.get("is_inorganic_solid"))
-    )
+    # one-sided halo outside the conventional cell. Wrapped
+    # crystallographic sites stay inside [0, 1].
+    if connectivity_regime == "extended":
+        lattice_site_display = display_mode in {"formula_unit", "unit_cell"}
+    elif connectivity_regime == "molecular":
+        lattice_site_display = False
+    else:
+        lattice_site_display = display_mode in {"formula_unit", "unit_cell"} and bool(
+            inorganic_profile.get("is_inorganic_solid")
+        )
     sel_atoms = selected_atoms_for_mode(
         ops,
         source_atoms,
@@ -334,7 +337,7 @@ def build_scene_from_atoms(
     telemetry_enabled = os.environ.get("MATTERVIS_SCENE_PERF_EVENTS") == "1"
     bond_started = time.perf_counter() if telemetry_enabled else None
     canonical_stats: dict[str, int] = {}
-    bond_pairs, canonical_stats = _canonical_display_bond_pairs(
+    bond_pairs, canonical_stats, pair_metadata = _canonical_display_bond_pairs(
         draw_atoms,
         source_atoms,
         canonical_records,
@@ -342,33 +345,29 @@ def build_scene_from_atoms(
     bonds = []
     conflict_drops = 0
     render_length_drops = 0
-    ionic_bond_drops = 0
     for i, j in bond_pairs:
         ai = draw_atoms[i]
         aj = draw_atoms[j]
-        source_pair = tuple(
-            sorted(
-                (
-                    int(ai.get("_source_index", -1)),
-                    int(aj.get("_source_index", -1)),
-                )
-            )
-        )
-        if source_pair in ionic_source_pairs:
-            if telemetry_enabled:
-                ionic_bond_drops += 1
-            continue
         if bonds_conflict(ai, aj):
             if telemetry_enabled:
                 conflict_drops += 1
             continue
-        start, end = _bond_endpoints(ai, aj, cell, display_mode=display_mode)
-        # Skip bonds whose rendered length far exceeds a covalent bond —
-        # these are cross-cell PBC bonds where one atom sits near one face
-        # and the other near the opposite face. The bond is real but its
-        # visual representation would span the entire cell as a long line.
-        rendered_len = float(np.linalg.norm(end - start))
-        if rendered_len > 3.5:
+        meta = pair_metadata.get((i, j), {})
+        role = str(meta.get("role") or "covalent")
+        record_distance = meta.get("distance")
+        # Covalent and coordination edges are both stick-eligible. The
+        # role is MolCrysKit's; ball and space-filling renderers simply
+        # do not stroke the scene bond list. Endpoints stay on the
+        # manifested image whose length matches the record, so a
+        # half-cell contact is not flipped outside the cell.
+        start, end = manifested_bond_endpoints(
+            ai,
+            aj,
+            cell,
+            display_mode,
+            record_distance,
+        )
+        if not rendered_bond_keeps_record(start, end, record_distance):
             if telemetry_enabled:
                 render_length_drops += 1
             continue
@@ -378,6 +377,8 @@ def build_scene_from_atoms(
                 "j": j,
                 "start": start.copy(),
                 "end": end.copy(),
+                "role": role,
+                "distance": record_distance,
                 "color_i": ai["color"],
                 "color_j": aj["color"],
                 "alpha_i": ai["disorder_alpha"],
@@ -392,6 +393,7 @@ def build_scene_from_atoms(
                 "depth_t": float((ai["_depth_t"] + aj["_depth_t"]) / 2.0),
             }
         )
+    stamp_coordination_sites(draw_atoms, bonds, canonical_records)
     if os.environ.get("MATTERVIS_SCENE_PERF_EVENTS") == "1":
         perf_log.record(
             "scene:bonds",
@@ -406,7 +408,6 @@ def build_scene_from_atoms(
                 "rendered_bonds": len(bonds),
                 "conflict_drops": conflict_drops,
                 "render_length_drops": render_length_drops,
-                "ionic_bond_drops": ionic_bond_drops,
                 "duration_ms": (time.perf_counter() - bond_started) * 1000.0,
                 **canonical_stats,
             },
@@ -454,28 +455,9 @@ def build_scene_from_atoms(
         "bonded_image_replica_count": bonded_image_replica_count,
         "framework_context_replica_count": framework_context_replica_count,
         "bond_scale": bond_scale,
-        "is_ionic_solid": bool(ionic_source_pairs),
+        "connectivity_regime": connectivity_regime,
+        "connectivity_rank": connectivity_rank,
         **inorganic_profile,
-        "ionic_cation_elements": sorted(
-            {
-                str(source_atoms[index].get("elem"))
-                for pair in ionic_source_pairs
-                for index in pair
-                if str(source_atoms[index].get("elem")) not in {"F", "Cl", "Br", "I"}
-            }
-        ),
-        "ionic_anion_elements": sorted(
-            {
-                str(source_atoms[index].get("elem"))
-                for pair in ionic_source_pairs
-                for index in pair
-                if str(source_atoms[index].get("elem")) in {"F", "Cl", "Br", "I"}
-            }
-        ),
-        "ionic_coordinate_source_pairs": [
-            list(pair) for pair in sorted(ionic_source_pairs)
-        ],
-        "suppressed_ionic_bond_count": len(ionic_source_pairs),
         "bond_thresholds": copy.deepcopy(bond_thresholds),
         "projected_axes": projected_axes,
         "axis_labels": axis_labels,

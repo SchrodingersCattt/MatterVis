@@ -20,14 +20,8 @@ env:
 
 jobs:
   fast-tests:
-    name: Fast tests (Python 3.12, molcrys-kit ${{ matrix.molcryskit }})
+    name: Fast tests (Python 3.12, pinned molcrys-kit)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # minimum is the lower pin; latest is whatever a fresh install
-        # resolves inside >=MOLCRYSKIT_MINIMUM,<MOLCRYSKIT_UPPER.
-        molcryskit: ["minimum", "latest"]
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -44,14 +38,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[all,test]"
-          if [ "${{ matrix.molcryskit }}" = "latest" ]; then
-            python -m pip install "molcrys-kit>=${MOLCRYSKIT_MINIMUM},<${MOLCRYSKIT_UPPER}"
-          else
-            python -m pip install "molcrys-kit==${MOLCRYSKIT_MINIMUM}"
-          fi
           python - << 'PY'
           import os
           from importlib.metadata import version
+          from molcrys_kit.structures import BondRecord
+          from molcrys_kit.structures.crystal import MolecularCrystal
 
           def parse_version(raw: str) -> tuple[int, int, int]:
               parts: list[int] = []
@@ -79,15 +70,16 @@ jobs:
                   f">={os.environ['MOLCRYSKIT_MINIMUM']},"
                   f"<{os.environ['MOLCRYSKIT_UPPER']}"
               )
-          expect = os.environ.get("MOLCRYSKIT_EXPECT", "")
-          if expect == "minimum" and got != minimum:
+          if "role" not in getattr(BondRecord, "__dataclass_fields__", {}):
+              raise SystemExit("installed molcrys-kit is missing BondRecord.role")
+          report = getattr(MolecularCrystal, "get_connectivity_report", None)
+          if not callable(report):
               raise SystemExit(
-                  f"minimum job resolved molcrys-kit {raw}, expected {os.environ['MOLCRYSKIT_MINIMUM']}"
+                  "installed molcrys-kit is missing "
+                  "MolecularCrystal.get_connectivity_report"
               )
-          print(f"molcrys-kit {raw} ({expect or 'unspecified'})")
+          print(f"molcrys-kit {raw} (BondRecord.role, get_connectivity_report)")
           PY
-        env:
-          MOLCRYSKIT_EXPECT: ${{ matrix.molcryskit }}
 
       - name: Run fast tests
         run: |
@@ -101,7 +93,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pytest-fast-python-3.12-${{ matrix.molcryskit }}
+          name: pytest-fast-python-3.12
           path: |
             pytest-fast.log
             pytest-fast.xml
@@ -129,7 +121,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[all,test]"
-          python -m pip install "molcrys-kit==${MOLCRYSKIT_MINIMUM}"
+          python - << 'PY'
+          from molcrys_kit.structures import BondRecord
+          from molcrys_kit.structures.crystal import MolecularCrystal
+          if "role" not in getattr(BondRecord, "__dataclass_fields__", {}):
+              raise SystemExit("installed molcrys-kit is missing BondRecord.role")
+          report = getattr(MolecularCrystal, "get_connectivity_report", None)
+          if not callable(report):
+              raise SystemExit(
+                  "installed molcrys-kit is missing "
+                  "MolecularCrystal.get_connectivity_report"
+              )
+          PY
 
       - name: Run tests
         run: |
@@ -168,7 +171,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install .
-          python -m pip install "molcrys-kit==${MOLCRYSKIT_MINIMUM}"
+          python - << 'PY'
+          from molcrys_kit.structures import BondRecord
+          from molcrys_kit.structures.crystal import MolecularCrystal
+          if "role" not in getattr(BondRecord, "__dataclass_fields__", {}):
+              raise SystemExit("installed molcrys-kit is missing BondRecord.role")
+          report = getattr(MolecularCrystal, "get_connectivity_report", None)
+          if not callable(report):
+              raise SystemExit(
+                  "installed molcrys-kit is missing "
+                  "MolecularCrystal.get_connectivity_report"
+              )
+          PY
           python -m pip check
 
       - name: Verify browser-free CIF to PNG, PDF, and SVG
@@ -203,7 +217,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[all,test]"
-          python -m pip install "molcrys-kit==${MOLCRYSKIT_MINIMUM}"
+          python - << 'PY'
+          from molcrys_kit.structures import BondRecord
+          from molcrys_kit.structures.crystal import MolecularCrystal
+          if "role" not in getattr(BondRecord, "__dataclass_fields__", {}):
+              raise SystemExit("installed molcrys-kit is missing BondRecord.role")
+          report = getattr(MolecularCrystal, "get_connectivity_report", None)
+          if not callable(report):
+              raise SystemExit(
+                  "installed molcrys-kit is missing "
+                  "MolecularCrystal.get_connectivity_report"
+              )
+          PY
           npm install --no-save playwright-core
 
       - name: Run orthographic, perspective, and reset browser regression
@@ -230,7 +255,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[all,test]"
-          python -m pip install "molcrys-kit==${MOLCRYSKIT_MINIMUM}"
+          python - << 'PY'
+          from molcrys_kit.structures import BondRecord
+          from molcrys_kit.structures.crystal import MolecularCrystal
+          if "role" not in getattr(BondRecord, "__dataclass_fields__", {}):
+              raise SystemExit("installed molcrys-kit is missing BondRecord.role")
+          report = getattr(MolecularCrystal, "get_connectivity_report", None)
+          if not callable(report):
+              raise SystemExit(
+                  "installed molcrys-kit is missing "
+                  "MolecularCrystal.get_connectivity_report"
+              )
+          PY
 
       - name: Run stable benchmark smoke subset
         run: |

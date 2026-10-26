@@ -317,10 +317,12 @@ Notes for callers:
   that tab, otherwise a fresh scene tab is materialised. Either path
   bumps the state version, so a WebSocket subscriber or `GET /state`
   poller will see `structure` equal the uploaded name immediately
-  after the response. The response keeps legacy `atom_count` and also
-  exposes `parsed_atom_count`, `displayed_atom_count`, and
-  `asu_atom_count` so clients can distinguish CIF parsing from the
-  current display slice.
+  after the response. The response includes `scene_id` for the tab
+  that owns this upload. Select that id. The process-wide active scene
+  can already belong to another browser. The response keeps legacy
+  `atom_count` and also exposes `parsed_atom_count`,
+  `displayed_atom_count`, and `asu_atom_count` so clients can
+  distinguish CIF parsing from the current display slice.
 - `GET /structures`
   Lists the loaded catalog and uploaded structures.
 - `GET /scene/{name}`
