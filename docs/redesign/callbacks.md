@@ -33,6 +33,12 @@ the full reducer migration:
   calls `set_props("scene-tabs", ...)`.
 - `sync_agent_state` still updates control props on tab switches and agent
   polls, but it no longer writes the tab DOM.
+- A state poll whose browser has switched scenes, or whose interaction
+  generation is older than an edit already noted for that browser, does
+  not write controls or `agent-state-store`. The browser also drops a
+  poll response that arrives after a tab switch or while that edit's
+  callback is still unacknowledged. The next poll carries the new
+  generation. Part of #228.
 
 This is not the final operation reducer, but it establishes the invariant that
 the visible scene list has one writer and one source of truth.

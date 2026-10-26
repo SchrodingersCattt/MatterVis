@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import threading
 
 from dash import no_update
 
@@ -189,6 +190,109 @@ def _control_values_match(client, server) -> bool:
     if isinstance(client, (list, tuple)) or isinstance(server, (list, tuple)):
         return list(client or []) == list(server or [])
     return client == server
+
+
+# Sidebar values Dash appends before the interaction fence. A direct test
+# call stops at the sidebar; the browser also sends the epoch and client id.
+_POLL_FENCE_EXTRA = 2
+
+# Per browser, not per process. Two pages can sit on different scenes;
+# one page's tab switch must not silence the other's poll.
+_fence_lock = threading.Lock()
+_browser_scenes: dict[str, str] = {}
+_browser_epochs: dict[str, int] = {}
+
+
+def split_poll_fence(client_controls):
+    """Split ``(sidebar..., epoch, client_id)`` from a historical sidebar tuple.
+
+    The fence is present only when every sidebar state was sent and the two
+    trailing states follow it. Shorter direct calls keep the previous contract.
+    """
+    controls = tuple(client_controls or ())
+    if len(controls) != len(_POLL_CLIENT_CONTROL_INDEX) + _POLL_FENCE_EXTRA:
+        return controls, None, None, False
+    *sidebar, epoch, client_id = controls
+    return tuple(sidebar), epoch, client_id, True
+
+
+def note_interaction_epoch(client_id, epoch) -> None:
+    """Remember the newest interaction generation for one browser."""
+    if not client_id or epoch is None:
+        return
+    try:
+        observed = int(epoch)
+    except (TypeError, ValueError):
+        return
+    with _fence_lock:
+        key = str(client_id)
+        if observed > _browser_epochs.get(key, 0):
+            _browser_epochs[key] = observed
+
+
+def claim_browser_scene(client_id, scene_id, filled: dict, epoch=None) -> None:
+    """Record the scene a browser just selected and point capture at it.
+
+    The scene note and the filled-scene guard move together. A poll that
+    still names the previous scene cannot publish between those two writes.
+    """
+    delivered = str(scene_id or "")
+    with _fence_lock:
+        if client_id and delivered:
+            _browser_scenes[str(client_id)] = delivered
+        if epoch is not None and client_id:
+            try:
+                observed = int(epoch)
+            except (TypeError, ValueError):
+                observed = None
+            if (
+                observed is not None
+                and observed > _browser_epochs.get(str(client_id), 0)
+            ):
+                _browser_epochs[str(client_id)] = observed
+        filled["id"] = delivered
+
+
+def poll_request_is_stale(client_id, scene_id, epoch, *, supplied: bool) -> bool:
+    """Read-only check used before a poll consumes a queued snapshot."""
+    if not supplied or not client_id:
+        return False
+    with _fence_lock:
+        return _poll_is_stale_locked(str(client_id), scene_id, epoch)
+
+
+def claim_poll_publish(
+    client_id, scene_id, epoch, filled: dict, *, supplied: bool
+) -> bool:
+    """Publish a poll only for the scene and generation that sent it.
+
+    Unfenced callers (direct tests and the first paint) keep the historical
+    write. A fenced poll whose browser has since switched scenes or edited
+    returns without moving the filled-scene guard.
+    """
+    delivered = str(scene_id or "")
+    with _fence_lock:
+        if supplied and client_id:
+            key = str(client_id)
+            if _poll_is_stale_locked(key, scene_id, epoch):
+                return False
+            try:
+                _browser_epochs[key] = int(0 if epoch is None else epoch)
+            except (TypeError, ValueError):
+                return False
+        filled["id"] = delivered
+        return True
+
+
+def _poll_is_stale_locked(client_id: str, scene_id, epoch) -> bool:
+    recorded_scene = _browser_scenes.get(client_id)
+    if recorded_scene is not None and recorded_scene != str(scene_id or ""):
+        return True
+    try:
+        observed = int(0 if epoch is None else epoch)
+    except (TypeError, ValueError):
+        return True
+    return observed < _browser_epochs.get(client_id, 0)
 
 
 def _preserve_inflight_controls(outputs, client_controls, stamp, state) -> None:
