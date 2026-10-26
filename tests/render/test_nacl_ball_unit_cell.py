@@ -132,7 +132,8 @@ def test_ball_unit_cell_has_symmetric_boundary_images_only(tmp_path: Path) -> No
     assert scene["display_mode"] == "unit_cell"
     assert scene["is_ionic_solid"] is True
     assert scene["is_inorganic_solid"] is True
-    assert scene["bonds"] == []
+    assert scene["suppressed_ionic_bond_count"] == 0
+    assert scene["bonds"]
     assert scene["framework_context_replica_count"] == 0
     assert scene["bonded_image_replica_count"] == 0
     assert not any(
@@ -160,6 +161,9 @@ def test_ball_unit_cell_has_symmetric_boundary_images_only(tmp_path: Path) -> No
             show_labels=False,
             shading="flat",
         ),
+    )
+    assert all(
+        (primitive.metadata or {}).get("kind") != "bond" for primitive in plan.primitives
     )
     matrix = np.asarray(loaded.frames[0].bundle.M, dtype=float)
     centres = [
@@ -221,7 +225,8 @@ def test_ball_unit_cell_without_replicas_stays_on_wrapped_sites(tmp_path: Path) 
         keys = _draw_keys(scene)
         assert len(scene["draw_atoms"]) == 8
         assert scene["bonded_image_replica_count"] == 0
-        assert scene["bonds"] == []
+        assert scene["bonds"]
+        assert scene["suppressed_ionic_bond_count"] == 0
         _assert_inside_closed_cell(keys)
         assert sorted(keys) == sorted(expected)
 
@@ -234,7 +239,7 @@ def test_ionic_formula_unit_centres_stay_in_the_home_cell(tmp_path: Path) -> Non
         mode="formula_unit",
     )
     keys = _draw_keys(scene)
-    assert scene["bonds"] == []
+    assert scene["suppressed_ionic_bond_count"] == 0
     assert keys
     _assert_inside_closed_cell(keys)
     assert all(

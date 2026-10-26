@@ -9,6 +9,7 @@ from molcrys_kit.utils.geometry import frac_to_cart
 
 from ..structure.bonds import bonds_conflict
 from ..structure.cif_parse import parse_asu
+from ..style.disorder import bond_is_disordered, bond_is_minor
 from ..structure.formula_unit import select_formula_unit
 from ..structure.geometry import _nearest_pbc_cart, view_rotation
 from ..style.disorder import disorder_alpha, is_minor
@@ -34,6 +35,9 @@ def scene_ops():
 # Lengths that agree within this tolerance keep the manifested Cartesian
 # site; a longer stored segment still snaps to the minimum image.
 _BOND_ENDPOINT_TIE_TOLERANCE_A = 1e-6
+# Cross-cell segments longer than a nearest-neighbor contact are not drawn.
+# The same cutoff drops wrapped pairs whose stored carts span the cell.
+MAX_RENDERED_BOND_LENGTH_A = 3.5
 
 
 def _bond_endpoints(ai, aj, cell, display_mode: str):
@@ -60,6 +64,114 @@ def _bond_endpoints(ai, aj, cell, display_mode: str):
     if direct_len <= minimum_image_len + _BOND_ENDPOINT_TIE_TOLERANCE_A:
         return start, direct
     return start, minimum_image
+
+
+def _lattice_site_image_bonds(
+    draw_atoms: list[dict[str, Any]],
+    source_atoms: list[dict[str, Any]],
+    canonical_bond_records: list[dict[str, Any]],
+    M: Any,
+) -> list[dict[str, Any]]:
+    """Sticks from in-cell sites to first neighbors that have no sphere.
+
+    Lattice-site display keeps every centre in the closed cell and only
+    copies the symmetric 0/1 boundary images. A rocksalt corner still has
+    three neighbors outside that set. The stick ends on the image
+    coordinate and takes its far colour from the wrapped partner, so each
+    home site keeps six octahedral arms without a one-sided atom shell.
+    """
+    instances: dict[tuple[int, tuple[int, int, int]], int] = {}
+    partner_index: dict[int, int] = {}
+    for draw_index, atom in enumerate(draw_atoms):
+        identity = source_image_identity(atom, source_atoms, draw_index)
+        if identity is None:
+            continue
+        instances.setdefault(identity, draw_index)
+        source, shift = identity
+        if source not in partner_index or shift == (0, 0, 0):
+            partner_index[source] = instances[identity]
+
+    neighbors: dict[int, list[tuple[int, tuple[int, int, int]]]] = {}
+    for record in canonical_bond_records:
+        try:
+            left = int(record["left"])
+            right = int(record["right"])
+            relation = tuple(int(value) for value in record["right_image_shift"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if len(relation) != 3:
+            continue
+        neighbors.setdefault(left, []).append((right, relation))
+        neighbors.setdefault(right, []).append(
+            (left, tuple(-value for value in relation))
+        )
+
+    M_arr = np.asarray(M, dtype=float)
+    bonds: list[dict[str, Any]] = []
+    seen: set[tuple[tuple[float, ...], tuple[float, ...]]] = set()
+    for draw_index, atom in enumerate(draw_atoms):
+        identity = source_image_identity(atom, source_atoms, draw_index)
+        if identity is None:
+            continue
+        source, image = identity
+        start = np.asarray(atom["cart"], dtype=float)
+        for target, shift in neighbors.get(source, ()):
+            target_image = tuple(image[axis] + shift[axis] for axis in range(3))
+            if (target, target_image) in instances:
+                continue
+            partner = partner_index.get(target)
+            if partner is None or not 0 <= target < len(source_atoms):
+                continue
+            base = np.asarray(
+                source_atoms[target].get(
+                    "_wrapped_frac", source_atoms[target].get("frac")
+                ),
+                dtype=float,
+            )
+            if base.shape != (3,) or not np.all(np.isfinite(base)):
+                continue
+            wrapped = np.mod(base, 1.0)
+            wrapped[np.isclose(wrapped, 1.0, rtol=0.0, atol=1e-9)] = 0.0
+            end = np.asarray(
+                frac_to_cart(wrapped + np.asarray(target_image, dtype=float), M_arr),
+                dtype=float,
+            )
+            if float(np.linalg.norm(end - start)) > MAX_RENDERED_BOND_LENGTH_A:
+                continue
+            key = tuple(
+                sorted(
+                    (
+                        tuple(np.round(start, 5)),
+                        tuple(np.round(end, 5)),
+                    )
+                )
+            )
+            if key in seen or key[0] == key[1]:
+                continue
+            seen.add(key)
+            other = draw_atoms[partner]
+            bonds.append(
+                {
+                    "i": draw_index,
+                    "j": partner,
+                    "start": start.copy(),
+                    "end": end.copy(),
+                    "color_i": atom["color"],
+                    "color_j": other["color"],
+                    "alpha_i": atom["disorder_alpha"],
+                    "alpha_j": other["disorder_alpha"],
+                    "is_minor": bond_is_minor(atom, other),
+                    "is_disordered": bond_is_disordered(atom, other),
+                    "disorder_resolved": bool(
+                        atom.get("disorder_resolved", False)
+                        and other.get("disorder_resolved", False)
+                    ),
+                    "occ": min(float(atom.get("occ", 1.0)), float(other.get("occ", 1.0))),
+                    "depth_t": float((atom["_depth_t"] + other["_depth_t"]) / 2.0),
+                }
+            )
+    return bonds
+
 
 _SOURCE_IMAGE_TOL = 1e-5
 
@@ -228,7 +340,7 @@ def _manifest_strict_bonded_images(
                         np.asarray(candidate["cart"]) - np.asarray(source_atom["cart"])
                     )
                 )
-                > 3.5
+                > MAX_RENDERED_BOND_LENGTH_A
             ):
                 continue
             _add_image(target, shift)

@@ -76,8 +76,10 @@ __all__ = [
 ]
 
 from .periodic import (
+    MAX_RENDERED_BOND_LENGTH_A,
     _bond_endpoints,
     _canonical_display_bond_pairs,
+    _lattice_site_image_bonds,
     _manifest_spanning_bond_context,
     _manifest_strict_bonded_images,
     _periodic_component_ranks,
@@ -356,7 +358,7 @@ def build_scene_from_atoms(
         # and the other near the opposite face. The bond is real but its
         # visual representation would span the entire cell as a long line.
         rendered_len = float(np.linalg.norm(end - start))
-        if rendered_len > 3.5:
+        if rendered_len > MAX_RENDERED_BOND_LENGTH_A:
             if telemetry_enabled:
                 render_length_drops += 1
             continue
@@ -379,6 +381,17 @@ def build_scene_from_atoms(
                 "occ": min(float(ai.get("occ", 1.0)), float(aj.get("occ", 1.0))),
                 "depth_t": float((ai["_depth_t"] + aj["_depth_t"]) / 2.0),
             }
+        )
+    if lattice_site_display and display_mode == "unit_cell":
+        # Spheres stay on the wrapped sites. Sticks to neighbors outside
+        # the closed cell still complete each octahedron.
+        bonds.extend(
+            _lattice_site_image_bonds(
+                draw_atoms,
+                source_atoms,
+                canonical_records,
+                M,
+            )
         )
     if os.environ.get("MATTERVIS_SCENE_PERF_EVENTS") == "1":
         perf_log.record(

@@ -1,8 +1,14 @@
-"""Rock-salt ball-and-stick must show a complete octahedral coordination net."""
+"""Rock-salt ball-and-stick must show a complete octahedral coordination net.
+
+Atom centres stay on the wrapped crystallographic sites and their symmetric
+0/1 boundary images. Sticks to neighbors outside that set end at the image
+coordinate, on every symmetry-equivalent face.
+"""
 
 from __future__ import annotations
 
 import argparse
+from itertools import permutations
 from pathlib import Path
 
 import numpy as np
@@ -42,19 +48,43 @@ def _home_atoms(scene: dict) -> list[tuple[int, dict]]:
 
 
 def _neighbor_vectors(scene: dict, index: int) -> list[np.ndarray]:
+    """Incident sticks by geometry.
+
+    An image stick borrows its far colour from the wrapped partner, so the
+    partner index is not the geometric end.
+    """
+    origin = np.asarray(scene["draw_atoms"][index]["cart"], dtype=float)
     vectors = []
     for bond in scene["bonds"]:
-        if bond["i"] == index:
-            vectors.append(np.asarray(bond["end"] - bond["start"], dtype=float))
-        elif bond["j"] == index:
-            vectors.append(np.asarray(bond["start"] - bond["end"], dtype=float))
+        start = np.asarray(bond["start"], dtype=float)
+        end = np.asarray(bond["end"], dtype=float)
+        if np.allclose(start, origin, atol=1e-3):
+            vectors.append(end - start)
+        elif np.allclose(end, origin, atol=1e-3):
+            vectors.append(start - end)
     return vectors
+
+
+def _frac_key(frac) -> tuple[float, float, float]:
+    rounded = np.round(np.asarray(frac, dtype=float), 5)
+    rounded[np.abs(rounded) < 1e-8] = 0.0
+    return tuple(float(value) for value in rounded)
+
+
+def _assert_inversion_and_cubic(points: list[tuple[float, float, float]]) -> None:
+    present = set(points)
+    for frac in points:
+        inverted = _frac_key(tuple(1.0 - value for value in frac))
+        assert inverted in present
+        for order in permutations(range(3)):
+            assert _frac_key(tuple(frac[axis] for axis in order)) in present
 
 
 def test_rocksalt_ball_stick_has_octahedral_coordination(tmp_path: Path) -> None:
     poscar = tmp_path / "POSCAR_NaCl"
     _write_rocksalt(poscar)
-    bundle = _loaded(poscar).frames[0].bundle
+    loaded = _loaded(poscar)
+    bundle = loaded.frames[0].bundle
     scene = build_bundle_scene(
         bundle,
         display_mode="unit_cell",
@@ -64,11 +94,27 @@ def test_rocksalt_ball_stick_has_octahedral_coordination(tmp_path: Path) -> None
 
     assert scene["is_ionic_solid"] is True
     assert scene["suppressed_ionic_bond_count"] == 0
+    assert scene["framework_context_replica_count"] == 0
+    assert scene["bonded_image_replica_count"] == 0
     homes = _home_atoms(scene)
     assert len(homes) == 8
     assert sorted(atom["elem"] for _, atom in homes) == ["Cl", "Cl", "Cl", "Cl", "Na", "Na", "Na", "Na"]
+    assert not any(
+        atom.get("_is_framework_context_replica") or atom.get("_is_bonded_image_replica")
+        for atom in scene["draw_atoms"]
+    )
+
+    matrix = np.asarray(bundle.M, dtype=float)
+    inverse = np.linalg.inv(matrix)
+    centre_fracs = [
+        _frac_key(np.asarray(atom["frac"], dtype=float)) for atom in scene["draw_atoms"]
+    ]
+    for frac in centre_fracs:
+        assert all(-1e-8 <= component <= 1.0 + 1e-8 for component in frac)
+    _assert_inversion_and_cubic(centre_fracs)
 
     axis_counts = [0, 0, 0]
+    endpoint_fracs = []
     for bond in scene["bonds"]:
         vector = np.asarray(bond["end"] - bond["start"], dtype=float)
         assert float(np.linalg.norm(vector)) == pytest.approx(_HALF, abs=1e-3)
@@ -76,7 +122,10 @@ def test_rocksalt_ball_stick_has_octahedral_coordination(tmp_path: Path) -> None
         off_axis = [axis for axis in range(3) if axis != dominant]
         assert np.all(np.abs(vector[off_axis]) < 1e-3)
         axis_counts[dominant] += 1
+        endpoint_fracs.append(_frac_key(np.asarray(bond["start"], dtype=float) @ inverse))
+        endpoint_fracs.append(_frac_key(np.asarray(bond["end"], dtype=float) @ inverse))
     assert axis_counts[0] == axis_counts[1] == axis_counts[2] > 0
+    _assert_inversion_and_cubic(endpoint_fracs)
 
     octahedron = []
     for sign in (-1.0, 1.0):
@@ -89,15 +138,6 @@ def test_rocksalt_ball_stick_has_octahedral_coordination(tmp_path: Path) -> None
         assert len(vectors) == 6
         for expected in octahedron:
             assert any(np.allclose(vector, expected, atol=1e-3) for vector in vectors)
-        image_partners = 0
-        for bond in scene["bonds"]:
-            if index not in (bond["i"], bond["j"]):
-                continue
-            other = bond["j"] if bond["i"] == index else bond["i"]
-            partner = scene["draw_atoms"][other]
-            if partner.get("_is_framework_context_replica"):
-                image_partners += 1
-        assert image_partners == 3
 
 
 def test_ionic_ball_stick_spheres_are_larger_than_sticks(tmp_path: Path) -> None:

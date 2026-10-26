@@ -268,14 +268,19 @@ def test_repeat_counts_differ_and_clear_removes_them(tmp_path: Path):
         base_scene = backend.scene_for_state(backend.get_state(scene_id))
         base_atoms = list(base_scene.get("draw_atoms") or [])
         home = _home_atoms(base_atoms)
-        home_ids = {id(atom) for atom in home}
-        home_index = {
-            index for index, atom in enumerate(base_atoms) if id(atom) in home_ids
-        }
+        import numpy as np
+
+        home_carts = [np.asarray(atom["cart"], dtype=float) for atom in home]
+
+        def _on_home(point) -> bool:
+            return any(np.allclose(point, cart, atol=1e-3) for cart in home_carts)
+
+        # Image sticks borrow the wrapped partner index, so count a home
+        # contact only when both geometric ends sit on home centres.
         home_bonds = [
             bond
             for bond in (base_scene.get("bonds") or [])
-            if bond["i"] in home_index and bond["j"] in home_index
+            if _on_home(bond["start"]) and _on_home(bond["end"])
         ]
         backend.add_transform("repeat", {"a": 2, "b": 2, "c": 2}, scene_id=scene_id)
         two_scene = backend.scene_for_state(backend.get_state(scene_id))
@@ -294,8 +299,6 @@ def test_repeat_counts_differ_and_clear_removes_them(tmp_path: Path):
         repeated_bonds = list(two_scene.get("bonds") or [])
         assert len(home_bonds) == 1
         assert len(repeated_bonds) == 4 * 3
-        import numpy as np
-
         for bond in repeated_bonds:
             pair = {two_atoms[bond["i"]]["elem"], two_atoms[bond["j"]]["elem"]}
             assert pair == {"Na", "Cl"}
