@@ -449,11 +449,25 @@
       init();
     });
   }
+  function mutationElement(node) {
+    if (!node) return null;
+    return node.nodeType === 1 ? node : node.parentElement;
+  }
+  function panelMutationIsStatusChrome(mutation) {
+    const el = mutationElement(mutation && mutation.target);
+    return !!(el && el.closest && el.closest("#mv-status-bar, #mv-render-status, #mv-status-busy"));
+  }
   function attachPanelObserver() {
     const root = document.getElementById("viewer-root") || document.body;
     if (!root || (panelObserver && panelObserver.__root === root)) return;
     if (panelObserver) panelObserver.disconnect();
-    panelObserver = new MutationObserver(schedulePanelInit);
+    // Status-bar and render-pill updates are absolute overlays. Refitting
+    // the canvas on those child-list changes loops Plotly relayout through
+    // the figure settle path.
+    panelObserver = new MutationObserver(function (mutations) {
+      if (mutations.every(panelMutationIsStatusChrome)) return;
+      schedulePanelInit();
+    });
     panelObserver.__root = root;
     panelObserver.observe(root, { childList: true, subtree: true });
   }

@@ -3,6 +3,7 @@
    polls must not flash the indicator. */
 (function () {
   var POLLS = ["agent-state-poll.", "perf-log-poll.", "status-dismiss-timer."];
+  var pendingRequests = 0;
 
   function busyNode() {
     return document.getElementById("mv-status-busy");
@@ -17,7 +18,7 @@
       if (text && message) text.textContent = message;
       return;
     }
-    if (node.getAttribute("data-hold") === "render") return;
+    if (pendingRequests || node.getAttribute("data-hold") === "render") return;
     node.classList.add("is-hidden");
   }
 
@@ -54,7 +55,7 @@
     }
     if (node.getAttribute("data-hold") === "render") {
       node.removeAttribute("data-hold");
-      node.classList.add("is-hidden");
+      setBusy(pendingRequests > 0, "Working…");
     }
   }
 
@@ -82,13 +83,12 @@
     if (bodyText.indexOf("_dash-update-component") === -1 && bodyText.indexOf("changedPropIds") === -1) {
       return null;
     }
+    pendingRequests += 1;
     setBusy(true, "Working…");
     return function release() {
-      window.setTimeout(syncFromRenderPill, 40);
-      window.setTimeout(function () {
-        var node = busyNode();
-        if (node && node.getAttribute("data-hold") !== "render") node.classList.add("is-hidden");
-      }, 450);
+      pendingRequests -= 1;
+      syncFromRenderPill();
+      setBusy(false);
     };
   }
 
@@ -101,7 +101,13 @@
       if (String(url).indexOf("_dash-update-component") !== -1) {
         release = noteUserRequest(bodyText);
       }
-      var pending = originalFetch.apply(this, arguments);
+      var pending;
+      try {
+        pending = originalFetch.apply(this, arguments);
+      } catch (error) {
+        if (release) release();
+        throw error;
+      }
       if (!release || !pending || typeof pending.finally !== "function") return pending;
       return pending.finally(release);
     };

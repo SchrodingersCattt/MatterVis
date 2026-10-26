@@ -59,6 +59,9 @@ All endpoints live under `/api/v2` and accept optional `scene_id`.
   the exact target under the pointer. `Esc` clears the set and closes the
   context menu. Clicking empty scene space follows the same clear rule for
   every target kind.
+- A browser gesture carries a numeric `ts`. An older gesture does not
+  overwrite a newer one for the same scene. Callers that omit `ts` still
+  commit, which is how REST selection edits behave.
 - Right-click resolves the target at the pointer coordinate even when Plotly
   did not emit a preceding hover event. Left-click, right-click, hover, and
   the inspector use the same normalized target payload and scene/revision

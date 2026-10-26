@@ -1089,14 +1089,21 @@
   // the Dash store is only updated after the click callback returns.
   const persistentTargetsByScene = Object.create(null);
   const pendingSelectionKeysByScene = Object.create(null);
+  const selectionGestureTsByScene = Object.create(null);
   function selectionKey(targets) {return (targets||[]).map(t=>t.kind+":"+t.id).sort().join("\n");}
+  function noteSelectionGesture(sceneId, ts) {
+    const stamp = Number(ts);
+    if (Number.isFinite(stamp) && stamp > 0) selectionGestureTsByScene[sceneSelectionKey(sceneId)] = stamp;
+  }
   function synchronizeSelection(targets, persist) {
     const sceneId=currentSceneId(),key=sceneSelectionKey(sceneId);
     persistentTargetsByScene[key]=(targets||[]).slice();
     window.dispatchEvent(new CustomEvent("mattervis-selection",{detail:{sceneId:sceneId,targets:(targets||[]).slice()}}));
     if(persist) {
+      const ts = Date.now();
       pendingSelectionKeysByScene[key]=selectionKey(targets);
-      setDashStore("scene-selection-store",{scene_id:sceneId,targets:targets,mode:"replace",ts:Date.now()});
+      noteSelectionGesture(sceneId, ts);
+      setDashStore("scene-selection-store",{scene_id:sceneId,targets:targets,mode:"replace",ts:ts});
     }
   }
   function invalidateSemanticHover() {
@@ -1231,10 +1238,12 @@
     const targets = persistentTargetsForScene(sceneId).slice();
     const gd = graphDiv();
     if (gd && window.MatterVisScenePicking) window.MatterVisScenePicking.paint(gd, targets, lastHovered);
+    const ts = Date.now();
     pendingSelectionKeysByScene[sceneSelectionKey(sceneId)]=selectionKey(targets);
+    noteSelectionGesture(sceneId, ts);
     window.dispatchEvent(new CustomEvent("mattervis-selection", {detail:{sceneId:sceneId,targets:targets}}));
     const meta=gd && gd.layout && gd.layout.meta || {};
-    setDashStore("scene-selection-store", {scene_id:sceneId, targets:targets, mode:nextMode, target_revision:meta.target_revision, ts:Date.now()});
+    setDashStore("scene-selection-store", {scene_id:sceneId, targets:targets, mode:nextMode, target_revision:meta.target_revision, ts:ts});
   }
   window.MatterVisSemantic = {
     targetFromPoint: targetFromPoint,
@@ -1322,9 +1331,19 @@
         const key=sceneSelectionKey(currentSceneId());
         if(Array.isArray(authoritative)) {
           const pending=pendingSelectionKeysByScene[key];
-          if(pending===undefined || pending===selectionKey(authoritative)) {
+          const authoritativeKey=selectionKey(authoritative);
+          const clientKey=selectionKey(persistentTargetsForScene(currentSceneId()));
+          const frameTs=Number(meta.selection_gesture_ts);
+          const clientTs=Number(selectionGestureTsByScene[key]||0);
+          const frameKnown=Number.isFinite(frameTs) && frameTs>0;
+          // A frame built before this gesture must not replace it. Matching
+          // pending keys still confirm the pick. Adopting records the frame
+          // clock rather than a new local timestamp.
+          const stale=clientTs>0 && (!frameKnown || frameTs<clientTs) && authoritativeKey!==clientKey;
+          if(!stale && (pending===undefined || pending===authoritativeKey)) {
             delete pendingSelectionKeysByScene[key];
-            if(selectionKey(authoritative)!==selectionKey(persistentTargetsForScene(currentSceneId()))) synchronizeSelection(authoritative,false);
+            if(authoritativeKey!==clientKey) synchronizeSelection(authoritative,false);
+            if(frameKnown && frameTs>=clientTs) noteSelectionGesture(currentSceneId(), frameTs);
           }
         }
         lastHovered=null;hoverInspector(null);paint();
@@ -1369,11 +1388,29 @@
       if(e.button===2){secondary={x:e.clientX,y:e.clientY,scene:currentSceneId(),moved:false};pendingContext=false;return;}
       secondary=null;pendingContext=false;
       if(e.button!==0) return;
-      down={x:e.clientX,y:e.clientY,scene:currentSceneId(),gd:graphDiv(),moved:false};
+      down={x:e.clientX,y:e.clientY,scene:currentSceneId(),moved:false};
     },{passive:true});
     function select(e){
-      const target=resolve(e,!!e.altKey);
-      publishSemanticSelection(target,target ? (e.ctrlKey||e.metaKey ? "toggle" : e.shiftKey ? "add" : "replace") : "clear");
+      const mode=e.ctrlKey||e.metaKey?"toggle":e.shiftKey?"add":"replace";
+      function apply(target){
+        publishSemanticSelection(target,target?mode:"clear");
+      }
+      function attempt(allowRetry){
+        const gd=graphDiv();
+        const indexed=gd && window.MatterVisScenePicking && window.MatterVisScenePicking.index
+          ? window.MatterVisScenePicking.index(gd) : null;
+        const target=resolve(e,!!e.altKey);
+        if(target){apply(target);return;}
+        // A rebuild can replace the plot before its pick index exists. An
+        // empty hit on a ready index still clears; an unready index does not.
+        const unready=!indexed || !indexed.primitives || !indexed.primitives.length;
+        if(unready && allowRetry){
+          requestAnimationFrame(function(){attempt(false);});
+          return;
+        }
+        if(!unready) apply(null);
+      }
+      attempt(true);
     }
     container.addEventListener("pointerup",function(e){
       if(secondary){const gesture=secondary;secondary=null;if(pendingContext && !gesture.moved && gesture.scene===currentSceneId()) openContext(e);pendingContext=false;return;}
@@ -1381,7 +1418,9 @@
       const gesture=down;down=null;ignoreClick=true;
       setTimeout(function(){ignoreClick=false;},0);
       if(ignored(e) || gesture.moved || Math.hypot(e.clientX-gesture.x,e.clientY-gesture.y)>4 ||
-          gesture.scene!==currentSceneId() || gesture.gd!==graphDiv()) return;
+          gesture.scene!==currentSceneId()) return;
+      // The plot node can be replaced between pointerdown and pointerup.
+      // The scene is unchanged, so the click still belongs to this gesture.
       select(e);
     });
     container.addEventListener("pointercancel",function(){down=null;secondary=null;pendingContext=false;invalidateSemanticHover();paint();});

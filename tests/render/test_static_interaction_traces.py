@@ -48,6 +48,41 @@ def test_interaction_markers_have_no_default_white_outline() -> None:
         assert trace["marker"]["line"]["color"] == "rgba(0,0,0,0)"
 
 
+def test_interaction_figure_stamps_selection_gesture_ts() -> None:
+    scene = _scene()
+    style = scene_style(scene, {"show_hydrogen": True})
+    style["_selection_gesture_ts"] = 200
+    style["selection"] = {"targets": [{"kind": "atom", "id": "atom:1"}]}
+    interactive = build_figure(scene, style, include_interaction_traces=True)
+    static = build_figure(scene, style, include_interaction_traces=False)
+    interactive_meta = interactive.to_plotly_json()["layout"]["meta"]
+    static_meta = static.to_plotly_json()["layout"].get("meta") or {}
+    assert interactive_meta["selection_gesture_ts"] == 200
+    assert interactive_meta["mv_selection"] == [{"kind": "atom", "id": "atom:1"}]
+    assert "selection_gesture_ts" not in static_meta
+
+
+def test_static_export_drops_selection_gesture_clock() -> None:
+    from mat_viewer.render.api import _static_export_dict
+
+    payload = {
+        "data": [],
+        "layout": {
+            "meta": {
+                "mv_selection": [],
+                "selection_gesture_ts": 5,
+                "compass": {"enabled": False},
+            }
+        },
+    }
+    exported = _static_export_dict(payload)
+    meta = exported["layout"]["meta"]
+    assert "selection_gesture_ts" not in meta
+    assert "mv_selection" not in meta
+    assert meta["compass"]["enabled"] is False
+    assert payload["layout"]["meta"]["selection_gesture_ts"] == 5
+
+
 def test_static_figure_omits_interaction_only_traces() -> None:
     scene = _scene()
     style = scene_style(scene, {"show_hydrogen": True})

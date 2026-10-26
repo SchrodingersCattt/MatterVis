@@ -26,6 +26,11 @@ def test_hover_and_context_menu_have_no_server_coordinate_fallback():
     assert "__mvSemanticBound" in controller
     assert "pointercancel" in controller
     assert "gesture.scene!==currentSceneId()" in controller
+    pointerup = controller[controller.index('addEventListener("pointerup"'):controller.index('addEventListener("pointercancel"')]
+    assert "gesture.scene!==currentSceneId()" in pointerup
+    assert "gesture.gd" not in pointerup
+    assert "selection_gesture_ts" in controller
+    assert "selectionGestureTsByScene" in controller
 
 
 def test_appearance_undo_rejects_obsolete_target_revision():

@@ -165,8 +165,11 @@ def _static_export_dict(
         traces.append(trace)
     output["data"] = traces
     layout = output.get("layout")
-    if isinstance(layout, dict) and isinstance(layout.get("meta"), dict) and "mv_selection" in layout["meta"]:
-        output["layout"] = {**layout, "meta": {key: value for key, value in layout["meta"].items() if key != "mv_selection"}}
+    # ``mv_selection`` and ``selection_gesture_ts`` are browser frame hints.
+    # Static payloads keep the rest of layout meta and drop both.
+    browser_meta = {"mv_selection", "selection_gesture_ts"}
+    if isinstance(layout, dict) and isinstance(layout.get("meta"), dict) and browser_meta.intersection(layout["meta"]):
+        output["layout"] = {**layout, "meta": {key: value for key, value in layout["meta"].items() if key not in browser_meta}}
     return output
 
 

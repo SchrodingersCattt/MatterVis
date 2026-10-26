@@ -621,7 +621,11 @@ def build_figure(
 
     ui_revision = style.get("uirevision", str(scene.get("name", "scene")))
     compass_ctx = compass_clientside_context(scene, style, viewport=viewport)
-    layout_meta = {"mv_selection": list((style.get("selection") or {}).get("targets") or []), "target_revision": style.get("_target_revision", 0)} if include_interaction_traces else {}
+    layout_meta = {
+        "mv_selection": list((style.get("selection") or {}).get("targets") or []),
+        "target_revision": style.get("_target_revision", 0),
+        "selection_gesture_ts": style.get("_selection_gesture_ts", 0),
+    } if include_interaction_traces else {}
     if compass_ctx:
         if compass_ctx.get("enabled"):
             layout_meta["compass"] = compass_ctx

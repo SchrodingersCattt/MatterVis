@@ -787,6 +787,7 @@ class _StateBackendMixin:
         )
         style["style_overrides"] = copy.deepcopy(state.get("style_overrides") or {})
         style["_target_revision"] = int(state.get("target_revision", 0))
+        style["_selection_gesture_ts"] = self._selection_gesture_ts_for_state(state)
         style["selection_highlight"] = current_config().colors.get(
             "selection_highlight", "#74808C"
         )

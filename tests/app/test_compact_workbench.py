@@ -43,3 +43,5 @@ def test_panel_resize_repaints_plotly_after_flex_layout_settles() -> None:
     assert "Plotly.relayout" in script
     assert "DEFAULT_FRACTION" in script
     assert "visualViewport" in script
+    assert 'closest("#mv-status-bar, #mv-render-status, #mv-status-busy")' in script
+    assert "panelMutationIsStatusChrome" in script
