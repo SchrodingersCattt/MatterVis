@@ -288,7 +288,21 @@ def test_repeat_counts_differ_and_clear_removes_them(tmp_path: Path):
         ]
         assert len(two_atoms) == len(home) * 8
         assert len(set(identities)) == len(identities)
-        assert len(two_scene.get("bonds") or []) == len(home_bonds) * 8
+        # This CIF is a one-dimensional Na–Cl contact.  Four chains in a
+        # 2×2×2 repeat each keep two in-cell contacts plus the junction
+        # between the repeated cells.
+        repeated_bonds = list(two_scene.get("bonds") or [])
+        assert len(home_bonds) == 1
+        assert len(repeated_bonds) == 4 * 3
+        import numpy as np
+
+        for bond in repeated_bonds:
+            pair = {two_atoms[bond["i"]]["elem"], two_atoms[bond["j"]]["elem"]}
+            assert pair == {"Na", "Cl"}
+            length = float(
+                np.linalg.norm(np.asarray(bond["end"]) - np.asarray(bond["start"]))
+            )
+            assert length == pytest.approx(2.82, abs=1e-2)
         fig, _ = backend.figure_for_state(backend.get_state(scene_id))
         box = next(trace for trace in fig.data if getattr(trace, "name", "") == "unit-cell-box")
         # The outline is the supercell, not the home cell the repeats grew out of.

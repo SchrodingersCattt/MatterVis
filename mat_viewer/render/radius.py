@@ -13,6 +13,8 @@ from typing import Any
 
 import numpy as np
 
+from ..config import DEFAULT_STYLE
+
 HYDROGEN_RADIUS_BOND_FACTOR = 1.5
 # Thin coordination stroke for an ionic lattice ball-and-stick figure when the
 # caller left the bond radius at the molecular default.  The viewer state
@@ -24,6 +26,28 @@ MOLECULAR_BALL_STICK_RADIUS_SCALE = 0.46
 # Ionic coordination spheres must read as balls on sticks, including elements
 # whose display radius would otherwise sit inside the cylinder.
 IONIC_BALL_STICK_ATOM_TO_BOND_RATIO = 1.5
+
+
+def coordination_stick_radius(
+    bond_radius: float,
+    *,
+    representation: str,
+    ionic_solid: bool,
+) -> float:
+    """Return the cylinder radius for one representation.
+
+    Binary ionic ball-and-stick uses the viewer lattice stroke when the
+    caller left the molecular default in place.  An explicit radius is kept.
+    """
+    radius = float(bond_radius)
+    mode = str(representation).lower().replace("-", "_")
+    if (
+        ionic_solid
+        and mode == "ball_stick"
+        and radius == float(DEFAULT_STYLE["bond_radius"])
+    ):
+        return float(INORGANIC_DEFAULT_BOND_RADIUS)
+    return radius
 
 
 def hydrogen_radius_floor(
@@ -137,6 +161,7 @@ def clamp_displacement_radius(
 __all__ = [
     "HYDROGEN_RADIUS_BOND_FACTOR",
     "INORGANIC_DEFAULT_BOND_RADIUS",
+    "coordination_stick_radius",
     "IONIC_BALL_STICK_ATOM_TO_BOND_RATIO",
     "MOLECULAR_BALL_STICK_RADIUS_SCALE",
     "atom_visual_radius",

@@ -113,11 +113,7 @@ def _build_render_parser(
         "--style",
         choices=_STYLES,
         default=None,
-        help=(
-            "Atom/bond rendering style. Omitted: ball_stick for molecules and "
-            "covalent networks; ball for ionic and inorganic lattices. Explicit "
-            "ball_stick on an ionic solid draws lattice coordination sticks."
-        ),
+        help="Omitted: ball_stick, or ball for ionic and inorganic lattices.",
     )
     p.add_argument(
         "--shading",

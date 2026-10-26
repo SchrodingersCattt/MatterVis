@@ -16,12 +16,14 @@ KNOWN_OVERSIZE_DURING_SPLIT = {
     "app/backend_core.py": 1518,
     "app/factory.py": 1116,
     "loader/core.py": 1224,
-    "cli.py": 1264,
+    # Omitted ``--style`` is resolved before batch selection.
+    "cli.py": 1268,
     "ortep/core.py": 1146,
     # Existing CLI parser is just over the hard cap while its argument
     # groups are being split into the dedicated controls module.
     "render/cli.py": 1050,
-    "render/planning.py": 1348,
+    # Ionic ball-and-stick passes the lattice stick radius into atom radii.
+    "render/planning.py": 1358,
     "structure/loader/core.py": 1050,
 }
 ALLOWED_TOP_LEVEL_PY = {

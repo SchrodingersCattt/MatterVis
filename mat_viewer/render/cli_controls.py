@@ -29,6 +29,40 @@ def add_bond_policy_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def resolve_omitted_render_style(args: argparse.Namespace) -> str:
+    """Pick the viewer-aligned style when ``--style`` was omitted.
+
+    Ionic and extended inorganic lattices default to space-filling balls.
+    Molecules and covalent networks stay on ball-and-stick.  An explicit
+    ``--style`` never reaches this function.
+    """
+    import sys
+    from contextlib import redirect_stdout
+
+    from ..agent import load_structure
+    from ..structure.bonds import prefers_lattice_ball_default
+
+    context = (
+        redirect_stdout(sys.stderr)
+        if getattr(args, "json_output", False)
+        else redirect_stdout(sys.stdout)
+    )
+    with context:
+        probe = load_structure(
+            args.input,
+            input_format=args.input_format,
+            type_map=args.type_map,
+            frame=args.frame if args.frame is not None else 0,
+            bond_scale=args.bond_scale,
+            bond_thresholds=bond_thresholds_from_args(args),
+        )
+    bundle = probe.frames[0].bundle
+    scene = getattr(bundle, "scene", {}) or {}
+    if prefers_lattice_ball_default(scene, getattr(bundle, "raw_atoms", None)):
+        return "ball"
+    return "ball_stick"
+
+
 def bond_thresholds_from_args(args: argparse.Namespace) -> dict[tuple[str, str], float]:
     from ..structure.bonds import parse_bond_threshold_spec
 

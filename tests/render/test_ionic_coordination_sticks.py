@@ -11,11 +11,8 @@ from ase.build import bulk
 from ase.io import write
 
 from mat_viewer.agent import prepare_render
-from mat_viewer.cli import (
-    _build_render_parser,
-    _display_mode,
-    _resolve_omitted_render_style,
-)
+from mat_viewer.cli import _build_render_parser, _display_mode
+from mat_viewer.render.cli_controls import resolve_omitted_render_style
 from mat_viewer.loader import build_bundle_scene
 from mat_viewer.loader.structure_input import load_structure_input
 from mat_viewer.structure.bonds import prefers_lattice_ball_default
@@ -172,7 +169,7 @@ def test_omitted_style_uses_ball_and_unit_cell_for_rocksalt(tmp_path: Path) -> N
         show_unit_cell=None,
     )
     structure = _loaded(poscar)
-    assert _resolve_omitted_render_style(args) == "ball"
+    assert resolve_omitted_render_style(args) == "ball"
     assert _display_mode(structure, args) == "unit_cell"
 
 
