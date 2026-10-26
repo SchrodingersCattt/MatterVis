@@ -104,6 +104,40 @@ def rendered_bond_keeps_record(start, end, record_distance) -> bool:
     return _length_matches_record(length, record_distance)
 
 
+def stamp_coordination_sites(
+    draw_atoms: list[dict[str, Any]],
+    bonds: list[dict[str, Any]],
+    canonical_bond_records: list[dict[str, Any]] | None,
+) -> None:
+    """Mark display atoms that belong to a MolCrysKit coordination edge.
+
+    A boundary copy can have no stick of its own when its neighbour image
+    is outside the view. The source atom's role still decides the sphere,
+    so every image of a coordination site stays larger than the cylinder.
+    """
+    endpoints = {
+        index
+        for bond in bonds
+        if bond.get("role") == "coordination"
+        for index in (int(bond["i"]), int(bond["j"]))
+    }
+    sources: set[int] = set()
+    for record in canonical_bond_records or []:
+        if str(record.get("role") or "") != "coordination":
+            continue
+        for key in ("left", "right"):
+            try:
+                sources.add(int(record[key]))
+            except (KeyError, TypeError, ValueError):
+                continue
+    for index, atom in enumerate(draw_atoms):
+        try:
+            source = int(atom.get("_source_index", index))
+        except (TypeError, ValueError):
+            source = index
+        atom["_coordination_site"] = index in endpoints or source in sources
+
+
 def _display_pair_fields(record: dict[str, Any]) -> dict[str, Any]:
     """Role and distance carried from one canonical record onto a display pair."""
     role = record.get("role")

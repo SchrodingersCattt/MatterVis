@@ -702,6 +702,7 @@ def rebuild_scene_with_atoms(
     from ..legacy import crystal_scene as legacy_scene
     from ..scene import scene_ops
     from ..scene.core import _canonical_display_bond_pairs
+    from ..scene.periodic import stamp_coordination_sites
 
     ops = scene_ops()
     style = style or dict(base_scene.get("style", {}))
@@ -781,14 +782,7 @@ def rebuild_scene_with_atoms(
                 "depth_t": float((ai["_depth_t"] + aj["_depth_t"]) / 2.0),
             }
         )
-    coordination_sites = {
-        index
-        for bond in bonds
-        if bond.get("role") == "coordination"
-        for index in (int(bond["i"]), int(bond["j"]))
-    }
-    for index, atom in enumerate(draw_atoms):
-        atom["_coordination_site"] = index in coordination_sites
+    stamp_coordination_sites(draw_atoms, bonds, contract_bonds)
 
     fragment_table, atom_fragment_labels = _fragment_table_from_current_bonds(draw_atoms, bonds)
 

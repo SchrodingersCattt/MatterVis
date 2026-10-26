@@ -33,6 +33,8 @@ from .chemistry_records import (
     LineNotationRecord,
     NamingRecord,
 )
+from .connectivity import bond_role as _bond_role
+from .connectivity import connectivity_fields as _connectivity_fields
 from .ring_geometry import (
     RING_MCB_EDGE_LIMIT,
     RING_MCB_NODE_LIMIT,
@@ -710,36 +712,6 @@ def _chemistry_records(crystal, mk) -> CrystalChemistryRecords | None:
 def chemistry_records(crystal) -> CrystalChemistryRecords | None:
     """Project MCK chemistry records only when a chemistry consumer asks."""
     return _chemistry_records(crystal, _require_molcryskit())
-
-
-def _bond_role(record) -> str:
-    """Return the renderer-facing role stored on a MolCrysKit bond record.
-
-    Neighbor-list edges from current MolCrysKit are ``covalent`` or
-    ``coordination``. Records built before that field, and test doubles,
-    stay on the covalent default BondRecord uses.
-    """
-    role = getattr(record, "role", None)
-    if role in {"covalent", "coordination"}:
-        return str(role)
-    return "covalent"
-
-
-def _connectivity_fields(crystal) -> tuple[str | None, int | None]:
-    """Read regime and rank when the crystal exposes the public report."""
-    getter = getattr(crystal, "get_connectivity_report", None)
-    if not callable(getter):
-        return None, None
-    report = getter()
-    regime = getattr(report, "regime", None)
-    rank = getattr(report, "max_rank", None)
-    if regime not in {"molecular", "extended"}:
-        return None, None
-    try:
-        rank_value = int(rank)
-    except (TypeError, ValueError):
-        return str(regime), None
-    return str(regime), rank_value
 
 
 def _enum_text(value) -> str:

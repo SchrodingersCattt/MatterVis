@@ -82,6 +82,7 @@ from .periodic import (
     _prune_unconnected_spanning_replicas,
     manifested_bond_endpoints,
     rendered_bond_keeps_record,
+    stamp_coordination_sites,
     scene_ops,
     source_image_identity,
 )
@@ -392,14 +393,7 @@ def build_scene_from_atoms(
                 "depth_t": float((ai["_depth_t"] + aj["_depth_t"]) / 2.0),
             }
         )
-    coordination_sites = {
-        index
-        for bond in bonds
-        if bond.get("role") == "coordination"
-        for index in (int(bond["i"]), int(bond["j"]))
-    }
-    for index, atom in enumerate(draw_atoms):
-        atom["_coordination_site"] = index in coordination_sites
+    stamp_coordination_sites(draw_atoms, bonds, canonical_records)
     if os.environ.get("MATTERVIS_SCENE_PERF_EVENTS") == "1":
         perf_log.record(
             "scene:bonds",
