@@ -249,6 +249,14 @@ def build_scene_from_atoms(
                 )
         formula_unit_atoms = canonical_formula_atoms
 
+    # Extended ionic / inorganic solids are lattices, not molecules. A
+    # formula-unit unwrap and a spanning-bond shell both park rocksalt
+    # sites at fractional coordinates such as -0.5, which draws a
+    # one-sided halo outside the conventional cell.
+    lattice_site_display = display_mode in {"formula_unit", "unit_cell"} and (
+        bool(ionic_source_pairs)
+        or bool(inorganic_profile.get("is_inorganic_solid"))
+    )
     sel_atoms = selected_atoms_for_mode(
         ops,
         source_atoms,
@@ -258,6 +266,7 @@ def build_scene_from_atoms(
         formula_unit_atoms=formula_unit_atoms,
         unwrapped_atoms=canonical_unwrapped_atoms,
         include_boundary_replicas=include_boundary_replicas,
+        lattice_site_display=lattice_site_display,
     )
     draw_atoms = [dict(atom) for atom in sel_atoms if show_h or atom["elem"] != "H"]
     if not include_minor:
@@ -267,14 +276,26 @@ def build_scene_from_atoms(
     strict_cell = display_mode == "unit_cell" and not include_boundary_replicas
     bonded_image_replica_count = 0
     framework_context_replica_count = 0
-    if strict_cell and image_records and include_cross_boundary_bond_endpoints:
+    # Lattice sites already carry their symmetric boundary images. Adding
+    # signed coordination endpoints here rebuilds the exterior halo
+    # (strict-cell NaCl grows to the full neighbour shell outside [0, 1]).
+    if (
+        not lattice_site_display
+        and strict_cell
+        and image_records
+        and include_cross_boundary_bond_endpoints
+    ):
         bonded_image_replica_count = _manifest_strict_bonded_images(
             draw_atoms,
             source_atoms,
             M,
             image_records,
         )
-    elif display_mode == "unit_cell" and include_boundary_replicas:
+    elif (
+        not lattice_site_display
+        and display_mode == "unit_cell"
+        and include_boundary_replicas
+    ):
         framework_context_replica_count = _manifest_spanning_bond_context(
             draw_atoms,
             source_atoms,
