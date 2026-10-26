@@ -10,8 +10,10 @@ mat-vis render INPUT -o OUTPUT.png --backend cpu --json \
   --polyhedron '{"center":"Al","ligand":"O","level":"atom"}'
 ```
 
-Use `ball_stick` when discrete covalent components must retain bonds. Keep the
-default center-element hue; do not name a color unless the user requested one.
+Use `ball_stick` when discrete covalent components must retain bonds. On an
+ionic lattice, omit `--style` for the `ball` default; explicit `ball_stick`
+draws first-neighbor coordination sticks. Keep the default center-element hue;
+do not name a color unless the user requested one.
 Omit `cutoff` for the natural shell. A supplied cutoff is a hard radial cap;
 `fallback_max` limits coordination count.
 

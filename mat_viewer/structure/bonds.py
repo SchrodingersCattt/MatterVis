@@ -28,27 +28,24 @@ def bonds_conflict(ai, aj):
 
 _MAX_CANDIDATE_CUTOFF = 12.0
 
-# A binary alkali/metal halide is represented by a coordination graph in
-# MolCrysKit so that the same graph can drive periodic shells and polyhedra.
-# Those contacts are not covalent bonds, however, and drawing every contact
-# as a stick makes a NaCl/CsCl unit cell look like a molecule.  Keep this
-# small chemistry predicate here with the bond policy so scene assembly and
-# transform rebuilds apply the same rule.  It deliberately requires a
-# *binary* composition; metal-halide bonds in a ligand complex (or in a
-# covalent polyhalide) stay visible.
+# A binary alkali/alkaline-earth halide is a coordination graph in MolCrysKit
+# so the same graph can drive periodic shells and polyhedra.  Those contacts
+# are not molecular covalent bonds.  Ball-and-stick still draws them, as the
+# complete first-neighbor lattice network, when the caller asks for sticks.
+# Keep this small chemistry predicate here with the bond policy so scene
+# assembly and transform rebuilds classify the same solids.  It deliberately
+# requires a *binary* composition; metal-halide bonds in a ligand complex (or
+# in a covalent polyhalide) stay on the ordinary covalent path.
 _IONIC_HALIDES = frozenset({"F", "Cl", "Br", "I"})
-# Restrict the display-only suppression to salts whose cation is normally
-# presented as an ionic lattice site.  Transition-metal halides and Pb--Cl
-# coordination graphs can be molecular/coordination compounds; hiding those
-# sticks would discard useful structural information.
+# Binary salts of these cations keep lattice coordination sticks.  Transition-
+# metal halides and Pb--Cl graphs can be molecular compounds, so they stay on
+# the ordinary covalent path.
 _IONIC_CATIONS = frozenset(
     {
         "Li", "Na", "K", "Rb", "Cs", "Fr",
         "Be", "Mg", "Ca", "Sr", "Ba", "Ra",
     }
 )
-
-
 def inorganic_solid_profile(atoms) -> dict[str, object]:
     """Classify the compact inorganic-solid defaults from source atoms.
 
@@ -98,11 +95,12 @@ def ionic_coordinate_source_pairs(atoms, bond_records) -> set[tuple[int, int]]:
 
     MolCrysKit intentionally includes metal--halide contacts in its signed
     ``BondRecord`` graph because the graph is also the input to packing-shell
-    analysis.  MatterVis's ball-and-stick view should not render those
-    contacts as covalent rods for a binary ionic solid.  The returned set is
-    empty for mixed ligand structures, non-binary compositions, or records
-    containing any non metal--halide edge, so covalent/coordination examples
-    keep their normal sticks.
+    analysis.  For a binary ionic solid those contacts are the lattice
+    coordination network: ball-and-stick draws the full first-neighbor set,
+    including periodic images, instead of hiding it or treating it as a
+    molecular covalent graph.  The returned set is empty for mixed ligand
+    structures, non-binary compositions, or records containing any non
+    metal--halide edge, so covalent examples keep their normal sticks.
     """
     if not atoms or not bond_records:
         return set()
@@ -135,6 +133,22 @@ def ionic_coordinate_source_pairs(atoms, bond_records) -> set[tuple[int, int]]:
             return set()
         pairs.add(tuple(sorted((left, right))))
     return pairs
+
+
+def prefers_lattice_ball_default(scene=None, atoms=None) -> bool:
+    """Return whether an omitted render style should follow the lattice default.
+
+    Ionic solids and extended inorganic lattices (rutile, perovskites) use
+    space-filling balls on the unit cell, matching the viewer.  Carbon-
+    containing frameworks and molecules stay on molecular ball-and-stick.
+    Scene flags win when the loader has already classified the structure.
+    """
+    payload = scene if isinstance(scene, Mapping) else {}
+    if "is_ionic_solid" in payload or "is_inorganic_solid" in payload:
+        return bool(payload.get("is_ionic_solid") or payload.get("is_inorganic_solid"))
+    if atoms is None:
+        return False
+    return bool(inorganic_solid_profile(atoms).get("is_inorganic_solid"))
 
 
 def validate_bond_scale(value: float) -> float:

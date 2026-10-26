@@ -6,6 +6,7 @@ from collections import OrderedDict
 
 from ..cache_keys import figure_state_cache_key
 from ..config import current_config
+from ..render.radius import INORGANIC_DEFAULT_BOND_RADIUS
 from ..structure.bonds import inorganic_solid_profile
 from ..topology.analysis import _MAX_REGISTERED_CN
 from .camera_helpers import *
@@ -33,10 +34,6 @@ from .wire import json_safe_wire
 # comfortably covers typical tab-switch + display-mode + slider
 # patterns without unbounded memory growth.
 FIGURE_CACHE_MAX = 16
-# Ionic and extended inorganic lattices are read more clearly with a thin
-# coordination stroke.  Keep the value in state construction so callers can
-# still override it through a preset or an explicit state patch.
-INORGANIC_DEFAULT_BOND_RADIUS = 0.12
 
 
 class _CoreBackendMixin:

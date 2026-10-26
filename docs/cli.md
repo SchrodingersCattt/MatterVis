@@ -298,7 +298,7 @@ substitutes one frame backend for another.
 | Flag | Default | Description |
 |------|---------|-------------|
 | --view MODE | auto | Periodic input uses unit_cell; nonperiodic or synthetic-cell input uses cluster |
-| --style STYLE | ball_stick | ball_stick, ball, space_filling, stick, ortep, or wireframe |
+| --style STYLE | auto | Omitted: `ball_stick` for molecules and covalent networks; `ball` plus the unit cell for ionic and inorganic lattices. Explicit `ball_stick` on an ionic solid draws the first-neighbor coordination network. |
 | --shading MODE | smooth | smooth or flat mesh shading |
 | --backend BACKEND | cpu | cpu (3D), matplotlib (projected 2D), plotly, or explicit native GPU PNG; never selected by fallback |
 | --orthogonal | yes | Orthographic projection |

@@ -8,6 +8,7 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
+from ..config import DEFAULT_STYLE
 from ..config import atom_radius as configured_atom_radius
 from ..config import element_color as configured_element_color
 from .bond_annotations import bond_annotation_primitives
@@ -41,7 +42,12 @@ from .mesh_overlays import isosurface_primitives as _isosurface_primitives
 from .mesh_overlays import polyhedron_primitives as _polyhedron_primitives
 from .property_planning import prepare_render_property, property_color_for_atom, reserve_property_colorbar, resolve_render_property_context
 from ..style.disorder import bond_effective_opacity
-from .radius import atom_visual_radius, clamp_displacement_radius, hydrogen_radius_floor
+from .radius import (
+    INORGANIC_DEFAULT_BOND_RADIUS,
+    atom_visual_radius,
+    clamp_displacement_radius,
+    hydrogen_radius_floor,
+)
 
 
 def prepare_render(
@@ -126,6 +132,17 @@ def prepare_render(
         else np.asarray([1.0, 1.0, 0.8])
     )
 
+    lattice_coordination = bool(scene.get("is_ionic_solid"))
+    stick_radius = float(render_spec.bond_radius)
+    if (
+        lattice_coordination
+        and default_representation == "ball_stick"
+        and stick_radius == float(DEFAULT_STYLE["bond_radius"])
+    ):
+        # The molecular stick is thick relative to an ionic display radius.
+        # Use the same thin coordination stroke as the viewer lattice default
+        # unless the caller set a different bond radius.
+        stick_radius = float(INORGANIC_DEFAULT_BOND_RADIUS)
     for index, atom in enumerate(atoms):
         element = (
             str(_value(atom, "symbol", "elem", "element", default="C"))
@@ -251,8 +268,9 @@ def prepare_render(
                         atom,
                         representation="ball_stick",
                         atom_scale=render_spec.atom_scale,
-                        bond_radius=render_spec.bond_radius,
+                        bond_radius=stick_radius,
                         min_atom_radius=render_spec.min_atom_radius,
+                        lattice_coordination=lattice_coordination,
                     )
                 )
                 displacement = np.eye(3) * (placeholder_radius / 1.54) ** 2
@@ -297,8 +315,9 @@ def prepare_render(
                     atom,
                     representation=representation,
                     atom_scale=render_spec.atom_scale,
-                    bond_radius=render_spec.bond_radius,
+                    bond_radius=stick_radius,
                     min_atom_radius=render_spec.min_atom_radius,
+                    lattice_coordination=lattice_coordination,
                 )
             )
             primitives.append(
@@ -448,7 +467,7 @@ def prepare_render(
                 atom_i=atoms[first_index],
                 atom_j=atoms[second_index],
             )
-            radius = render_spec.bond_radius * float(
+            radius = stick_radius * float(
                 _value(bond, "_render_radius_scale", default=1.0)
             )
             override_color = _value(bond, "_render_color", default=None)
@@ -1272,6 +1291,7 @@ def _atom_radius(
     atom_scale: float = 1.0,
     bond_radius: float | None = None,
     min_atom_radius: float | None = None,
+    lattice_coordination: bool = False,
 ) -> float:
     value = float(_value(atom, "atom_radius", "radius", default=0.5))
     rendered = atom_visual_radius(
@@ -1281,6 +1301,7 @@ def _atom_radius(
         atom_scale=atom_scale,
         bond_radius=bond_radius,
         min_atom_radius=min_atom_radius,
+        lattice_coordination=lattice_coordination,
     )
     if representation in {"space_filling", "ball"}:
         return max(rendered, 0.2)

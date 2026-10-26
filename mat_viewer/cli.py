@@ -1016,6 +1016,38 @@ def _render_result_payload(result, structure, args: argparse.Namespace, camera) 
     }
 
 
+def _resolve_omitted_render_style(args: argparse.Namespace) -> str:
+    """Pick the viewer-aligned style when ``--style`` was omitted.
+
+    Ionic and extended inorganic lattices default to space-filling balls.
+    Molecules and covalent networks stay on ball-and-stick.  An explicit
+    ``--style`` never reaches this function.
+    """
+    from .agent import load_structure
+    from .render.cli_controls import bond_thresholds_from_args
+    from .structure.bonds import prefers_lattice_ball_default
+
+    context = (
+        redirect_stdout(sys.stderr)
+        if args.json_output
+        else redirect_stdout(sys.stdout)
+    )
+    with context:
+        probe = load_structure(
+            args.input,
+            input_format=args.input_format,
+            type_map=args.type_map,
+            frame=args.frame if args.frame is not None else 0,
+            bond_scale=args.bond_scale,
+            bond_thresholds=bond_thresholds_from_args(args),
+        )
+    bundle = probe.frames[0].bundle
+    scene = getattr(bundle, "scene", {}) or {}
+    if prefers_lattice_ball_default(scene, getattr(bundle, "raw_atoms", None)):
+        return "ball"
+    return "ball_stick"
+
+
 def _display_mode(structure, args: argparse.Namespace) -> str:
     if args.view != "auto":
         return args.view
@@ -1070,6 +1102,12 @@ def _agent_render_main(args: argparse.Namespace) -> None:
             + requirements["install"],
             json_output=args.json_output,
         )
+
+    if args.style is None:
+        try:
+            args.style = _resolve_omitted_render_style(args)
+        except Exception as exc:
+            _fail(str(exc), json_output=args.json_output)
 
     try:
         fast_result = render_batch_if_selected(

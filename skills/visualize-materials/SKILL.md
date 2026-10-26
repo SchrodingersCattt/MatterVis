@@ -44,8 +44,8 @@ see [installation](./references/installation.md). Read [input formats](./referen
 
 ## Execution boundary
 
-- Molecules and covalent networks default to `ball_stick`; use `ball` for dense
-  ionic or coordination structures only when bonds are not evidence.
+- Omit `--style` on ionic/inorganic lattices for `ball` and a unit cell. Explicit
+  `ball_stick` there draws coordination sticks; molecules stay `ball_stick`.
 - If rendering starts later or is delegated, that agent loads this skill before
   choosing a command; parent summaries and guessed flags are not a substitute.
 - Render directly; do not run a separate analysis or installation preflight.

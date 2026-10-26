@@ -14,6 +14,16 @@ from typing import Any
 import numpy as np
 
 HYDROGEN_RADIUS_BOND_FACTOR = 1.5
+# Thin coordination stroke for an ionic lattice ball-and-stick figure when the
+# caller left the bond radius at the molecular default.  The viewer state
+# builder uses the same value for inorganic lattice defaults.
+INORGANIC_DEFAULT_BOND_RADIUS = 0.12
+# Molecular ball-and-stick compacts spheres so the stick stays readable.
+# Binary ionic lattices skip this factor and stay at the ball-style radius.
+MOLECULAR_BALL_STICK_RADIUS_SCALE = 0.46
+# Ionic coordination spheres must read as balls on sticks, including elements
+# whose display radius would otherwise sit inside the cylinder.
+IONIC_BALL_STICK_ATOM_TO_BOND_RATIO = 1.5
 
 
 def hydrogen_radius_floor(
@@ -53,19 +63,35 @@ def atom_visual_radius(
     style: Mapping[str, Any] | None = None,
     bond_radius: float | None = None,
     min_atom_radius: float | None = None,
+    lattice_coordination: bool = False,
 ) -> float:
     """Return one backend-neutral rendered atom radius.
 
     Non-hydrogen caller radii are preserved.  H/D receives the display floor
-    after the representation's compact ball-stick scale is applied.
+    after the representation's compact ball-stick scale is applied.  A binary
+    ionic lattice drawn as ball-and-stick uses the ball radius, then a floor
+    above the stick, so coordination spheres are not swallowed.
     """
     value = float(atom_radius)
     scale = float(atom_scale)
     if value < 0.0 or scale <= 0.0:
         raise ValueError("atom_radius and atom_scale must be positive")
     mode = str(representation).lower().replace("-", "_")
-    base = value if mode in {"ball", "space_filling"} else value * 0.46
+    use_ball_radius = mode in {"ball", "space_filling"} or (
+        lattice_coordination and mode == "ball_stick"
+    )
+    base = value if use_ball_radius else value * MOLECULAR_BALL_STICK_RADIUS_SCALE
     rendered = base * scale
+    if (
+        lattice_coordination
+        and mode == "ball_stick"
+        and bond_radius is not None
+        and float(bond_radius) > 0.0
+    ):
+        rendered = max(
+            rendered,
+            IONIC_BALL_STICK_ATOM_TO_BOND_RATIO * float(bond_radius),
+        )
     if str(element).strip().capitalize() in {"H", "D"}:
         rendered = max(
             rendered,
@@ -110,6 +136,9 @@ def clamp_displacement_radius(
 
 __all__ = [
     "HYDROGEN_RADIUS_BOND_FACTOR",
+    "INORGANIC_DEFAULT_BOND_RADIUS",
+    "IONIC_BALL_STICK_ATOM_TO_BOND_RATIO",
+    "MOLECULAR_BALL_STICK_RADIUS_SCALE",
     "atom_visual_radius",
     "clamp_displacement_radius",
     "hydrogen_radius_floor",

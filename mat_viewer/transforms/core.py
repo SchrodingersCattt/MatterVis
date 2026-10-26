@@ -764,16 +764,6 @@ def rebuild_scene_with_atoms(
     for i, j in bond_pairs:
         ai = draw_atoms[int(i)]
         aj = draw_atoms[int(j)]
-        source_pair = tuple(
-            sorted(
-                (
-                    int(ai.get("_source_index", -1)),
-                    int(aj.get("_source_index", -1)),
-                )
-            )
-        )
-        if source_pair in ionic_source_pairs:
-            continue
         start = np.asarray(ai["cart"], dtype=float)
         end = np.asarray(aj["cart"], dtype=float)
         bonds.append(
@@ -827,7 +817,7 @@ def rebuild_scene_with_atoms(
     out["ionic_coordinate_source_pairs"] = [
         list(pair) for pair in sorted(ionic_source_pairs)
     ]
-    out["suppressed_ionic_bond_count"] = len(ionic_source_pairs)
+    out["suppressed_ionic_bond_count"] = 0
     return out
 
 

@@ -97,7 +97,7 @@ def test_extended_inorganic_profile_covers_oxide_lattices_without_mof_false_posi
     assert inorganic_solid_profile(hkust)["is_inorganic_solid"] is False
 
 
-def test_nacl_keeps_mck_contact_but_hides_ionic_sticks():
+def test_nacl_keeps_mck_contacts_as_visible_coordination_sticks():
     parsed = load_cif("benchmarks/structures/ionic_nacl.cif")
     bundle = build_loaded_crystal_from_atoms(
         name="ionic-nacl",
@@ -109,7 +109,8 @@ def test_nacl_keeps_mck_contact_but_hides_ionic_sticks():
     )
     assert bundle.scene["is_ionic_solid"] is True
     assert bundle.scene["_canonical_bond_records"]
-    assert bundle.scene["bonds"] == []
+    assert bundle.scene["bonds"]
+    assert bundle.scene["suppressed_ionic_bond_count"] == 0
 
     unit_cell = build_bundle_scene(
         bundle,
@@ -118,15 +119,19 @@ def test_nacl_keeps_mck_contact_but_hides_ionic_sticks():
         preset={},
     )
     # Origin Na is a corner site (8 images) and Cl at (0.5, 0, 0) is an
-    # edge site (4 images). Symmetric 0/1 copies stay inside the cell;
-    # the old spanning-bond shell (4 atoms, including Cl at -0.5) does not.
+    # edge site (4 images). Symmetric 0/1 copies stay inside the cell.
+    # The contact graph stays visible; ball rendering does not stroke it.
     assert len(unit_cell["draw_atoms"]) == 12
     assert unit_cell["framework_context_replica_count"] == 0
-    assert unit_cell["bonds"] == []
-    assert unit_cell["suppressed_ionic_bond_count"] > 0
-    for atom in unit_cell["draw_atoms"]:
+    assert unit_cell["suppressed_ionic_bond_count"] == 0
+    atoms = unit_cell["draw_atoms"]
+    for atom in atoms:
         frac = atom["frac"]
         assert all(-1e-8 <= float(component) <= 1.0 + 1e-8 for component in frac)
+    assert unit_cell["bonds"]
+    for bond in unit_cell["bonds"]:
+        pair = {atoms[bond["i"]]["elem"], atoms[bond["j"]]["elem"]}
+        assert pair == {"Na", "Cl"}
 
 
 def test_binary_ionic_default_state_uses_cell_and_atom_coordination(tmp_path: Path):

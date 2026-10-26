@@ -169,11 +169,11 @@ def build_scene_from_atoms(
                     copied.setdefault(key, copy.deepcopy(source[key]))
             canonical_unwrapped_atoms.append(copied)
     canonical_records = [dict(record) for record in molcrys_analysis.bond_records]
-    # MolCrysKit's signed graph intentionally includes metal--halide
-    # coordination contacts so topology/polyhedron analysis can reuse the
-    # same periodic graph.  They are not covalent sticks in a binary ionic
-    # solid (NaCl/CsCl); retain the canonical records but suppress those
-    # contacts from the visible ball-and-stick bond list.
+    # MolCrysKit's signed graph includes metal--halide coordination contacts
+    # so topology and polyhedra can reuse it.  For a binary ionic solid those
+    # contacts are the lattice ball-and-stick network: keep every lifted
+    # image in the visible bond list.  Ball and space-filling renderers do
+    # not stroke scene bonds, so the unit-cell ball default stays stick-free.
     ionic_source_pairs = ionic_coordinate_source_pairs(
         source_atoms,
         canonical_records,
@@ -346,18 +346,6 @@ def build_scene_from_atoms(
     for i, j in bond_pairs:
         ai = draw_atoms[i]
         aj = draw_atoms[j]
-        source_pair = tuple(
-            sorted(
-                (
-                    int(ai.get("_source_index", -1)),
-                    int(aj.get("_source_index", -1)),
-                )
-            )
-        )
-        if source_pair in ionic_source_pairs:
-            if telemetry_enabled:
-                ionic_bond_drops += 1
-            continue
         if bonds_conflict(ai, aj):
             if telemetry_enabled:
                 conflict_drops += 1
@@ -475,7 +463,9 @@ def build_scene_from_atoms(
         "ionic_coordinate_source_pairs": [
             list(pair) for pair in sorted(ionic_source_pairs)
         ],
-        "suppressed_ionic_bond_count": len(ionic_source_pairs),
+        # Contacts stay in ``bonds``.  The count remains for callers that
+        # used to observe suppression; it is zero while the sticks are visible.
+        "suppressed_ionic_bond_count": 0,
         "bond_thresholds": copy.deepcopy(bond_thresholds),
         "projected_axes": projected_axes,
         "axis_labels": axis_labels,

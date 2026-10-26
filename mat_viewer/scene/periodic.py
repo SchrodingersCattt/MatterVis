@@ -30,25 +30,36 @@ def scene_ops():
         compute_label_positions=_compute_label_positions,
     )
 
+# Half-cell rocksalt neighbours are equidistant from the opposite image.
+# Lengths that agree within this tolerance keep the manifested Cartesian
+# site; a longer stored segment still snaps to the minimum image.
+_BOND_ENDPOINT_TIE_TOLERANCE_A = 1e-6
+
+
 def _bond_endpoints(ai, aj, cell, display_mode: str):
+    """Return the Cartesian segment for one displayed bond.
+
+    Canonical lifting already chose the two display atoms.  Their stored
+    coordinates are the contact when that segment is a minimum-image length.
+    ASE's minimum-image rounding maps an exact half-cell vector onto the
+    opposite image, so a rocksalt octahedron would otherwise draw one arm
+    twice and drop its partner.  A wrapped pair whose stored carts span the
+    cell (for example fractional x of -0.1 and 0.6) is still lifted to the
+    minimum image; that shorter segment is what the long-render filter keeps.
+    Unwrapped molecules and cluster selections keep their stored carts.
+    """
     start = np.array(ai["cart"], dtype=float)
-    if ai.get("_strict_unit_cell") or aj.get("_strict_unit_cell"):
-        # Strict unit-cell views wrap atom centres into the home cell.  The
-        # source connectivity can still describe a bond whose nearest image
-        # crosses a cell face (for example, source coordinates at -0.1 and
-        # 0.6 fractional x).  Connecting the wrapped centres directly would
-        # draw a spurious cell-spanning segment and the scene builder would
-        # drop it at the long-render threshold.  Lift the endpoint to the
-        # minimum-image position while keeping both displayed atoms in the
-        # home cell.
-        return start, np.array(_nearest_pbc_cart(start, aj["cart"], cell), dtype=float)
+    direct = np.array(aj["cart"], dtype=float)
     if display_mode in ("formula_unit", "cluster") or (
         ai.get("_unwrapped") and aj.get("_unwrapped")
     ):
-        end = np.array(aj["cart"], dtype=float)
-    else:
-        end = np.array(_nearest_pbc_cart(ai["cart"], aj["cart"], cell), dtype=float)
-    return start, end
+        return start, direct
+    minimum_image = np.array(_nearest_pbc_cart(start, aj["cart"], cell), dtype=float)
+    direct_len = float(np.linalg.norm(direct - start))
+    minimum_image_len = float(np.linalg.norm(minimum_image - start))
+    if direct_len <= minimum_image_len + _BOND_ENDPOINT_TIE_TOLERANCE_A:
+        return start, direct
+    return start, minimum_image
 
 _SOURCE_IMAGE_TOL = 1e-5
 

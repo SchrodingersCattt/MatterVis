@@ -15,8 +15,11 @@ nonperiodic/synthetic-cell object with no cell. Its automatic camera faces the
 largest lattice face. Do not add a camera direction, replication, or cell
 override unless the requested evidence needs one.
 
-Use `--style ball_stick` for molecules and covalent networks. Use `--style ball`
-for a dense ionic/coordination structure when bonds are not part of the evidence.
+Omit `--style` for an ionic or inorganic lattice: the CLI uses `ball` and a
+unit cell. Pass `--style ball_stick` only when the figure should show the
+first-neighbor coordination network (lattice sticks, not molecular covalent
+sticks). Molecules and covalent networks use `--style ball_stick`. Use
+`--style ball` for a dense ionic structure when bonds are not evidence.
 LAMMPS numeric types require the provenance-backed full `--type-map`; never
 guess elements from type numbers or a model filename.
 

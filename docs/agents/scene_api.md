@@ -115,6 +115,12 @@ Parses a CIF and returns a scene dict consumable by
   `include_boundary_replicas=False` and
   `include_cross_boundary_bond_endpoints=False`. It is display-only. Source
   fractional coordinates on the loaded bundle stay unchanged.
+  Binary alkali and alkaline-earth halide contacts stay in `scene["bonds"]`.
+  An explicit ball-and-stick style draws that complete first-neighbor
+  coordination network, including the periodic images required for the
+  lattice symmetry. Ball and space-filling renderers do not stroke those
+  contacts. When `--style` is omitted, an ionic or inorganic lattice uses
+  `ball` and `unit_cell`, the same default as the viewer.
 - `asymmetric_unit` — only the asymmetric unit is drawn.
 - `cluster` — **free molecular cluster mode**. Every parsed atom is
   drawn unchanged; no formula-unit selection or periodic image
