@@ -423,6 +423,13 @@ def register_state_callbacks(app, backend):
             return no_update, no_update, no_update
 
         active_id = backend.active_scene_id() or options[0]["id"]
+        # The upload response names the scene this browser just created.
+        # ``active_scene_id()`` is process-wide and may already be the other
+        # browser's tab by the time this callback runs.
+        if native_upload and isinstance(_native_upload_sync, dict):
+            wanted = str(_native_upload_sync.get("scene_id") or "")
+            if wanted and wanted in backend.scene_store.scenes:
+                active_id = wanted
         # Explicit event paths (CRUD / upload) own the active id and are the
         # only paths allowed to rebuild the tab subtree.
         return backend.scene_tabs(), [], active_id
@@ -595,13 +602,28 @@ def register_state_callbacks(app, backend):
             backend.get_state(scene_id) if scene_id in backend.scene_store.scenes else None
         )
         if triggered == "native-upload-sync":
-            # Upload completion is an explicit synchronization barrier. Drain
-            # any worker snapshot and read the server's active scene after the
-            # bundle/default-state transaction has committed. Using the
+            # Upload completion is an explicit synchronization barrier. The
+            # browser names the scene its own upload created. Falling back
+            # to the process-wide active scene preserves the single-browser
+            # path, where that active scene is the upload. Using the
             # browser's previous tab value here briefly paints the old
             # disorder banner and lets its figure win the tab switch race.
-            backend.pop_pending_state()
-            state = backend.get_state()
+            uploaded_scene = ""
+            if isinstance(_native_upload_sync, dict):
+                uploaded_scene = str(_native_upload_sync.get("scene_id") or "")
+            if uploaded_scene and uploaded_scene in backend.scene_store.scenes:
+                peeked = backend.peek_pending_state()
+                peeked_scene = (
+                    str(peeked.get("scene_id") or "") if isinstance(peeked, dict) else ""
+                )
+                # A snapshot for a different scene belongs to the other
+                # browser and must stay queued for its next poll.
+                if peeked_scene in {"", uploaded_scene}:
+                    backend.pop_pending_state()
+                state = backend.get_state(uploaded_scene)
+            else:
+                backend.pop_pending_state()
+                state = backend.get_state()
         elif (
             controls_scene_id is not None
             and selected_state is not None

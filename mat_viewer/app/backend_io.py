@@ -35,6 +35,26 @@ class _IOBackendMixin:
                     payload[field] = str(value)
             return payload
 
+    def upload_scene_id(self, bundle: Any) -> str | None:
+        """Return the scene tab that owns ``bundle``.
+
+        Re-uploads and placeholder jobs both have a scene before the HTTP
+        response returns. The browser selects this id. Reading
+        ``active_scene_id()`` instead follows whichever client wrote the
+        process-wide active scene last.
+        """
+        noted = getattr(bundle, "_upload_scene_id", None)
+        if noted:
+            return str(noted)
+        name = getattr(bundle, "name", None)
+        if not name:
+            return None
+        with self._lock:
+            for scene_id, scene in self.scene_store.scenes.items():
+                if scene.structure_name == name:
+                    return str(scene_id)
+        return None
+
     def _set_upload_status_locked(
         self,
         job_id: str,
@@ -462,22 +482,28 @@ class _IOBackendMixin:
                             self._save_upload_manifest()
                         except OSError:
                             pass
-                        active_scene_id = self.scene_store.active_id
                     # ``get_state`` acquires ``self._lock``.  Never call it
                     # while holding that non-reentrant lock: doing so left
                     # every successful upload's placeholder in place and made
                     # the browser appear to load an empty scene forever.
+                    # Snapshot the uploaded scene, not whichever browser is
+                    # active when parsing finishes. Another page can select
+                    # its own tab during the CIF build; publishing that tab
+                    # here makes the uploader paint the other page's scene.
                     try:
-                        state = self.get_state(active_scene_id)
+                        upload_state = self.get_state(scene_id) if scene_id else None
                     except KeyError:
-                        # A user may close the pending tab while MolCrysKit
-                        # is still parsing.  The upload itself succeeded; use
-                        # whichever scene is active now instead of turning a
-                        # harmless tab close into a failed job.
-                        state = self.get_state()
+                        upload_state = None
                     with self._lock:
-                        self.pending_state = copy.deepcopy(state)
-                    render_state = state if state.get("structure") == bundle.name else None
+                        pending = self.pending_state
+                        pending_scene = (
+                            str(pending.get("scene_id") or "")
+                            if isinstance(pending, dict)
+                            else ""
+                        )
+                        if upload_state is not None and pending_scene in {"", str(scene_id)}:
+                            self.pending_state = copy.deepcopy(upload_state)
+                    render_state = upload_state
                     with self._lock:
                         # Report readiness only after the scene state and its
                         # active snapshot have been replaced.  Otherwise the

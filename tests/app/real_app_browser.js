@@ -423,7 +423,7 @@ async function runSessions(page, browser) {
   const first = await nonblank(page);
   const secondView = await nonblank(second);
   if (first.sceneId && secondView.sceneId && first.sceneId === secondView.sceneId) {
-    fail("two browsers collapsed onto one scene");
+    fail(`two browsers collapsed onto one scene ${first.sceneId} (${first.title} / ${secondView.title})`);
   }
   if (secondProblems.length) fail(secondProblems.join("\n"));
   await second.close();
