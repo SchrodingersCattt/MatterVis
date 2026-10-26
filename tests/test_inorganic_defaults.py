@@ -117,10 +117,16 @@ def test_nacl_keeps_mck_contact_but_hides_ionic_sticks():
         show_hydrogen=True,
         preset={},
     )
-    # mck 0.8.0: spanning 1-D contact graph -> framework replicas (4), not corner expansion (16)
-    assert len(unit_cell["draw_atoms"]) == 4
+    # Origin Na is a corner site (8 images) and Cl at (0.5, 0, 0) is an
+    # edge site (4 images). Symmetric 0/1 copies stay inside the cell;
+    # the old spanning-bond shell (4 atoms, including Cl at -0.5) does not.
+    assert len(unit_cell["draw_atoms"]) == 12
+    assert unit_cell["framework_context_replica_count"] == 0
     assert unit_cell["bonds"] == []
     assert unit_cell["suppressed_ionic_bond_count"] > 0
+    for atom in unit_cell["draw_atoms"]:
+        frac = atom["frac"]
+        assert all(-1e-8 <= float(component) <= 1.0 + 1e-8 for component in frac)
 
 
 def test_binary_ionic_default_state_uses_cell_and_atom_coordination(tmp_path: Path):
