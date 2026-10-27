@@ -10,7 +10,8 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass
+from enum import Enum
 from typing import Any
 
 import numpy as np
@@ -181,6 +182,10 @@ def snapshot_from_crystal(
         "frame_ref": ref.frame_ref,
         "metadata": canonical_metadata(getattr(crystal, "metadata", None)),
         "formula_moiety": getattr(crystal, "formula_moiety", None),
+        "molecule_info": [to_jsonable(dict(getattr(molecule, "info", None) or {})) for molecule in crystal.molecules],
+        "chemistry": _stored_or_live(crystal, "chemistry"),
+        "disorder_provenance": _stored_or_live(crystal, "disorder_provenance"),
+        "site_arrays": _extra_site_arrays(crystal),
     }
     encoded = json.dumps(body, sort_keys=True, separators=(",", ":"))
     fingerprint = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -220,15 +225,70 @@ def _site_view(record) -> SiteView:
     )
 
 
+def _stored_or_live(crystal, name: str):
+    stored = getattr(crystal, f"_persisted_{name}_json", None)
+    if stored is not None:
+        return stored
+    value = getattr(crystal, name, None)
+    if value is None:
+        return None
+    return to_jsonable(value)
+
+
 def canonical_metadata(metadata) -> dict[str, Any]:
     """JSON object used both for fingerprints and lossless session files."""
 
+    return to_jsonable(dict(metadata or {}))
+
+
+def to_jsonable(value: Any, *, _stack: set[int] | None = None) -> Any:
+    """Project dataclasses, enums, and arrays into JSON without dropping them."""
+
     from .errors import ValidationError
 
-    try:
-        return json.loads(json.dumps(dict(metadata or {}), sort_keys=True))
-    except TypeError as exc:
-        raise ValidationError(f"crystal.metadata is not JSON-serializable: {exc}") from exc
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        return float(value)
+    if isinstance(value, np.generic):
+        return to_jsonable(value.item(), _stack=_stack)
+    if isinstance(value, np.ndarray):
+        return to_jsonable(value.tolist(), _stack=_stack)
+    if isinstance(value, Enum):
+        return to_jsonable(value.value, _stack=_stack)
+    if isinstance(value, Mapping):
+        return {str(key): to_jsonable(item, _stack=_stack) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [to_jsonable(item, _stack=_stack) for item in value]
+    if is_dataclass(value) and not isinstance(value, type):
+        stack = set() if _stack is None else _stack
+        identity = id(value)
+        if identity in stack:
+            raise ValidationError(f"{type(value).__name__} contains a circular reference")
+        stack.add(identity)
+        try:
+            payload = {
+                field.name: to_jsonable(getattr(value, field.name), _stack=stack)
+                for field in fields(value)
+            }
+        finally:
+            stack.remove(identity)
+        payload["__type__"] = f"{type(value).__module__}.{type(value).__qualname__}"
+        return payload
+    raise ValidationError(f"crystal value of type {type(value).__name__} is not JSON-serializable")
+
+
+def _extra_site_arrays(crystal) -> list[dict[str, Any]]:
+    skipped = {"positions", "numbers"}
+    payloads = []
+    for molecule in crystal.molecules:
+        extra = {}
+        for name, values in molecule.arrays.items():
+            if name in skipped:
+                continue
+            extra[str(name)] = to_jsonable(np.asarray(values).tolist())
+        payloads.append(extra)
+    return payloads
 
 
 def _site_fingerprint(site: SiteView) -> list:
@@ -291,4 +351,5 @@ __all__ = [
     "content_equal",
     "properties_from_fingerprint",
     "snapshot_from_crystal",
+    "to_jsonable",
 ]

@@ -25,12 +25,12 @@ from molcrys_kit.constants.config import (
 )
 from molcrys_kit.structures.molecule import CrystalMolecule
 
-from .errors import MigrationError, PersistenceError
+from .errors import MigrationError, PersistenceError, ValidationError
 from .materialize import crystal_from_molecules
 from .properties import normalize_properties
 from .refs import StructureRef
 from .session import EffectSession
-from .snapshot import canonical_metadata, snapshot_from_crystal
+from .snapshot import canonical_metadata, snapshot_from_crystal, to_jsonable
 
 SCHEMA = "mattervis.effects/v1"
 LEGACY_SCENE_VERSION = 1
@@ -264,57 +264,49 @@ def _revision_payload(revision, viewer_name: str | None = None) -> dict[str, Any
     return payload
 
 
-_REPRESENTABLE_ARRAYS = {
-    KEY_OCCUPANCY,
-    KEY_DISORDER_GROUP,
-    KEY_ASSEMBLY,
-    KEY_LABEL,
-    KEY_ATOM_ID,
-    "numbers",
-    "positions",
-    "image_shift",
-}
-
-
 def _crystal_payload(crystal) -> dict[str, Any]:
-    if getattr(crystal, "extra_arrays", None):
-        raise PersistenceError("crystal.extra_arrays is not representable")
-    if getattr(crystal, "chemistry", None) not in (None, {}, []):
-        raise PersistenceError("crystal.chemistry is not representable")
-    if getattr(crystal, "disorder_provenance", None) not in (None, {}, []):
-        raise PersistenceError("crystal.disorder_provenance is not representable")
+    try:
+        if getattr(crystal, "extra_arrays", None):
+            to_jsonable(crystal.extra_arrays)
+        chemistry = None if getattr(crystal, "chemistry", None) is None else to_jsonable(crystal.chemistry)
+        disorder = None if getattr(crystal, "disorder_provenance", None) is None else to_jsonable(crystal.disorder_provenance)
+        metadata = canonical_metadata(getattr(crystal, "metadata", None))
+    except ValidationError as exc:
+        raise PersistenceError(str(exc)) from exc
     moiety = getattr(crystal, "formula_moiety", None)
     if moiety is not None and not isinstance(moiety, str):
         raise PersistenceError("crystal.formula_moiety is not representable")
     molecules = []
     for molecule in crystal.molecules:
-        info = getattr(molecule, "info", None) or {}
-        if info:
-            names = ", ".join(sorted(str(key) for key in info))
-            raise PersistenceError(f"crystal molecule info is not representable: {names}")
-        unknown = sorted(set(molecule.arrays) - _REPRESENTABLE_ARRAYS)
-        if unknown:
-            raise PersistenceError("crystal site array is not representable: " + ", ".join(unknown))
-        payload = {
-            "symbols": list(molecule.get_chemical_symbols()),
-            "positions": np.asarray(molecule.positions, dtype=float).tolist(),
-            "occupancy": [float(value) for value in molecule.arrays[KEY_OCCUPANCY]],
-            "disorder_group": [int(value) for value in molecule.arrays[KEY_DISORDER_GROUP]],
-            "assembly": [str(value) for value in molecule.arrays[KEY_ASSEMBLY]],
-            "label": [str(value) for value in molecule.arrays[KEY_LABEL]],
-            "site_id": [str(value) for value in molecule.arrays[KEY_ATOM_ID]],
-        }
-        if "image_shift" in molecule.arrays:
-            payload["image_shift"] = np.asarray(molecule.arrays["image_shift"]).tolist()
-        molecules.append(payload)
+        try:
+            info = to_jsonable(dict(getattr(molecule, "info", None) or {}))
+            arrays = {
+                str(name): to_jsonable(np.asarray(values).tolist())
+                for name, values in molecule.arrays.items()
+                if name not in {"positions", "numbers"}
+            }
+        except ValidationError as exc:
+            raise PersistenceError(str(exc)) from exc
+        molecules.append(
+            {
+                "symbols": list(molecule.get_chemical_symbols()),
+                "positions": np.asarray(molecule.positions, dtype=float).tolist(),
+                "info": info,
+                "arrays": arrays,
+            }
+        )
     body = {
         "lattice": np.asarray(crystal.lattice, dtype=float).tolist(),
         "pbc": [bool(value) for value in crystal.pbc],
         "molecules": molecules,
-        "metadata": canonical_metadata(getattr(crystal, "metadata", None)),
+        "metadata": metadata,
+        "chemistry": chemistry,
+        "disorder_provenance": disorder,
     }
     if moiety is not None:
         body["formula_moiety"] = moiety
+    if getattr(crystal, "extra_arrays", None):
+        body["extra_arrays"] = to_jsonable(crystal.extra_arrays)
     return body
 
 
@@ -330,16 +322,24 @@ def _crystal_from_payload(payload: Mapping[str, Any]):
             pbc=list(pbc),
         )
         count = len(atoms)
-        atoms.set_array(KEY_OCCUPANCY, np.asarray(molecule["occupancy"], dtype=float))
-        atoms.set_array(KEY_DISORDER_GROUP, np.asarray(molecule["disorder_group"], dtype=int))
-        atoms.set_array(KEY_ASSEMBLY, np.array(molecule["assembly"]))
-        atoms.set_array(KEY_LABEL, np.array(molecule["label"]))
-        atoms.set_array(KEY_ATOM_ID, np.array(molecule["site_id"], dtype=str))
-        if "image_shift" in molecule:
-            atoms.set_array("image_shift", np.asarray(molecule["image_shift"]))
-        if len(atoms.arrays[KEY_ATOM_ID]) != count:
+        arrays = molecule.get("arrays")
+        if arrays is None:
+            arrays = {
+                KEY_OCCUPANCY: molecule["occupancy"],
+                KEY_DISORDER_GROUP: molecule["disorder_group"],
+                KEY_ASSEMBLY: molecule["assembly"],
+                KEY_LABEL: molecule["label"],
+                KEY_ATOM_ID: molecule["site_id"],
+            }
+            if "image_shift" in molecule:
+                arrays["image_shift"] = molecule["image_shift"]
+        for name, values in arrays.items():
+            atoms.set_array(str(name), _array_from_json(values))
+        if KEY_ATOM_ID not in atoms.arrays or len(atoms.arrays[KEY_ATOM_ID]) != count:
             raise PersistenceError("persisted site ids do not match atom count")
-        molecules.append(CrystalMolecule(atoms, check_pbc=False))
+        wrapped = CrystalMolecule(atoms, check_pbc=False)
+        wrapped.info.update(dict(molecule.get("info") or {}))
+        molecules.append(wrapped)
     crystal = crystal_from_molecules(
         lattice,
         molecules,
@@ -348,7 +348,27 @@ def _crystal_from_payload(payload: Mapping[str, Any]):
     )
     if payload.get("formula_moiety") is not None:
         crystal.formula_moiety = str(payload["formula_moiety"])
+    _restore_json_field(crystal, "chemistry", payload.get("chemistry"))
+    _restore_json_field(crystal, "disorder_provenance", payload.get("disorder_provenance"))
+    if payload.get("extra_arrays"):
+        _restore_json_field(crystal, "extra_arrays", payload.get("extra_arrays"))
     return crystal
+
+
+def _restore_json_field(crystal, name: str, value) -> None:
+    if value is None:
+        return
+    try:
+        setattr(crystal, name, value)
+    except AttributeError:
+        setattr(crystal, f"_persisted_{name}_json", value)
+
+
+def _array_from_json(values):
+    array = np.asarray(values)
+    if array.dtype.kind in {"U", "O"}:
+        return np.array(values)
+    return array
 
 
 __all__ = [

@@ -41,14 +41,14 @@ def test_metadata_formula_and_image_shift_round_trip(tmp_path):
     assert np.array_equal(revived_shift, original_shift)
 
 
-def test_unrepresentable_metadata_and_site_arrays_are_rejected(tmp_path):
+def test_unrepresentable_metadata_is_rejected_and_numeric_arrays_round_trip(tmp_path):
     opaque = f1_ordered_nonorthogonal()
     opaque.metadata["bad"] = object()
     session = EffectSession()
     try:
         session.register(opaque, structure_id="opaque")
     except ValidationError as exc:
-        assert "metadata" in str(exc)
+        assert "object" in str(exc)
     else:
         raise AssertionError("non-serializable metadata was snapshotted")
 
@@ -56,9 +56,7 @@ def test_unrepresentable_metadata_and_site_arrays_are_rejected(tmp_path):
     custom.molecules[0].set_array("custom_spin", np.array([0.2, -0.2]))
     holder = EffectSession()
     holder.register(custom, structure_id="custom")
-    try:
-        save_session(holder, str(tmp_path / "custom.json"))
-    except PersistenceError as exc:
-        assert "custom_spin" in str(exc)
-    else:
-        raise AssertionError("unknown site array was dropped")
+    path = tmp_path / "custom.json"
+    save_session(holder, str(path))
+    revived = load_session(str(path)).checkout(load_session(str(path)).current_ref("custom"))
+    assert np.allclose(revived.molecules[0].arrays["custom_spin"], [0.2, -0.2])
