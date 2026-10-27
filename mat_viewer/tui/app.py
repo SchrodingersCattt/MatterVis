@@ -614,8 +614,15 @@ class CrystalTUI(App):
         if name == "operate":
             from .operate_command import execute_operate_command
 
-            message, crystal = execute_operate_command(self.controller.crystal, args)
+            message, crystal = execute_operate_command(
+                self.controller.crystal,
+                args,
+                session=getattr(self.controller, "_effect_session", None),
+                structure_id=getattr(self.controller, "_effect_structure_id", None),
+            )
             if crystal is not None:
+                self.controller._effect_session = getattr(crystal, "_effect_session", None)
+                self.controller._effect_structure_id = getattr(crystal, "_effect_structure_id", None)
                 self.controller.crystal = crystal
                 return message, self.controller.observe()
             return message, None

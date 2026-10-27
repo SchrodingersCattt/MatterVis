@@ -32,7 +32,9 @@ payload = observation.as_dict()
   transforms=[...])` (also accepted by `TerminalSession.from_file`) applies
   periodic repeat (display copies) and a neighbour-shell grow at load time.
   A new lattice is `mat-vis operate build-supercell` or the terminal command
-  `:operate build-supercell A B C`, not `repeat`. `label_mode="label_sym"`
+  `:operate build-supercell A B C`, not `repeat`. Successive terminal
+  operate commands keep one scientific session, so the second supercell
+  starts from the committed revision. `label_mode="label_sym"`
   then tells copies apart as `O1#k[i,j,k]` (symmetry operation, lattice shift).
 - `state` returns a detached `TerminalViewState`; each successful active
   view-state mutation increments its monotonic `revision` exactly once.
