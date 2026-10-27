@@ -254,8 +254,14 @@ class _AnalysisBackendMixin:
                 "spec_count": 0,
             }
 
+        # The legacy facade still hands the computation a state whose
+        # overlay flag is on, without writing that flag back. The
+        # scientific flag is what lets the core run when the stored
+        # overlay is off.
+        analysis_state = dict(state)
+        analysis_state["topology_enabled"] = True
         try:
-            geometry = self.topology_for_state(state, scientific=True)
+            geometry = self.topology_for_state(analysis_state, scientific=True)
         except Exception as exc:
             return {
                 "geometry": None,

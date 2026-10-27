@@ -188,10 +188,12 @@ def test_status_counts_follow_the_drawn_display_mode(tmp_path):
         refresh = registry.callbacks["refresh_workbench_status"]
 
         backend.patch_state({"display_mode": "formula_unit"}, broadcast=False)
+        bundle_scene = backend.get_bundle(backend.get_state()["structure"]).scene
+        load_atoms = len(bundle_scene.get("draw_atoms") or [])
         primed = backend.scene_for_state(backend.get_state())
         formula_atoms = len(primed.get("draw_atoms") or [])
-        bundle_scene = backend.get_bundle(backend.get_state()["structure"]).scene
-        assert len(bundle_scene.get("draw_atoms") or []) == formula_atoms
+        # Rendering a view must not overwrite the shared load-time scene.
+        assert len(backend.get_bundle(backend.get_state()["structure"]).scene.get("draw_atoms") or []) == load_atoms
 
         backend.patch_state({"display_mode": "unit_cell"}, broadcast=False)
         _label, scope, counts, atoms = refresh(backend.get_state(), "")
