@@ -171,11 +171,16 @@ def _distance(snapshot: ScientificSnapshot, query: Mapping[str, Any], *, result_
 
 
 def _composition(snapshot: ScientificSnapshot, query: Mapping[str, Any], *, result_id: str) -> AnalysisResult:
+    policy = str(query.get("hydrogen_policy") or "include")
+    if policy != "include":
+        raise ValidationError(
+            "hydrogen_policy must be 'include'; hiding hydrogens is a display filter and does not change composition"
+        )
     return _result(
         snapshot,
         result_id=result_id,
         kind="composition",
-        policy={"hydrogen_policy": str(query.get("hydrogen_policy") or "include")},
+        policy={"hydrogen_policy": policy},
         value={"species_counts": snapshot.species_counts, "n_sites": snapshot.n_sites},
         units="count",
     )

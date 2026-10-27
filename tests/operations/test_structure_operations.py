@@ -4,9 +4,16 @@ from __future__ import annotations
 
 import numpy as np
 
-from effect_builders import WATER, f1_ordered_nonorthogonal, f4_disorder, f5_host
+from effect_builders import F1_LATTICE, WATER, f1_ordered_nonorthogonal, f4_disorder, f5_host
 from mat_viewer.effects import EffectSession
-from mat_viewer.effects.errors import AmbiguousSelection, ClashError, UnsupportedOperation, ValidationError
+from mat_viewer.effects.errors import (
+    AmbiguousSelection,
+    ClashError,
+    InjectedFailure,
+    PropertyPolicyError,
+    UnsupportedOperation,
+    ValidationError,
+)
 from mat_viewer.effects.operations import IMPLEMENTED_COMMANDS
 
 
@@ -14,6 +21,47 @@ def _session(crystal, name="struct", properties=None):
     session = EffectSession()
     ref = session.register(crystal, structure_id=name, properties=properties)
     return session, ref
+
+
+def test_missing_property_policy_rejects_the_operation():
+    session, ref = _session(f1_ordered_nonorthogonal(), properties={"charges": [0.2, -0.2], "energy": -1.0})
+    try:
+        session.operate("build_supercell", {"a": 2, "b": 1, "c": 1}, structure_id=ref.id, expected_revision=1)
+    except PropertyPolicyError:
+        pass
+    else:
+        raise AssertionError("silent property drop")
+    assert session.current_ref(ref.id).revision == 1
+
+
+def test_disorder_count_zero_is_not_coerced():
+    session, ref = _session(f4_disorder(), name="disorder")
+    try:
+        session.operate(
+            "commit_disorder_candidate",
+            {"method": "enumerate", "count": 0, "candidate_index": 0},
+            structure_id=ref.id,
+            expected_revision=1,
+        )
+    except ValidationError:
+        pass
+    else:
+        raise AssertionError("count 0")
+    assert session.current_ref(ref.id).revision == 1
+
+
+def test_materialize_keeps_partial_occupancy():
+    session, ref = _session(f4_disorder(), name="disorder")
+    oxygen = next(site.site_id for site in session.snapshot(ref).sites if site.occupancy == 0.5)
+    result = session.operate(
+        "materialize_selection",
+        {"instances": [{"site_id": oxygen, "image": [0, 0, 0]}], "pbc": False},
+        structure_id=ref.id,
+        expected_revision=1,
+    )
+    produced = session.snapshot(result.output_ref).sites
+    assert len(produced) == 1
+    assert produced[0].occupancy == 0.5
 
 
 def test_required_commands_are_executable():
@@ -59,11 +107,23 @@ def test_t04_build_supercell_nonorthogonal():
     assert "energy" not in session._frames[(ref.id, "0")][-1].properties["structure"]
     assert session._frames[(ref.id, "0")][0].properties["structure"]["energy"] == -3.0
     images = {tuple(item["image"]) for item in result.mappings}
-    assert (0, 0, 0) in images and (1, 2, 0) in images
+    assert images == {(i, j, 0) for i in range(2) for j in range(3)}
+    assert len(result.mappings) == 12
+    scaled = np.array(F1_LATTICE, dtype=float).copy()
+    scaled[0] *= 2
+    scaled[1] *= 3
+    assert np.allclose(np.asarray(output.lattice), scaled)
+    source_frac = {site.site_id: np.asarray(site.fractional) for site in original.sites}
+    scaling = np.array([2, 3, 1], dtype=float)
+    for item in result.mappings:
+        produced = output.site(item["output_site_id"])
+        expected = (source_frac[item["source_site_id"]] + np.asarray(item["image"], dtype=float)) / scaling
+        assert np.allclose(produced.fractional, expected, atol=1e-6)
 
 
 def test_t05_strict_repetition_does_not_clamp():
     session, ref = _session(f1_ordered_nonorthogonal())
+    before = session.fingerprint(ref)
     for params in (
         {"a": 0, "b": 1, "c": 1},
         {"a": -2, "b": 1, "c": 1},
@@ -76,6 +136,7 @@ def test_t05_strict_repetition_does_not_clamp():
             pass
         else:
             raise AssertionError(params)
+        assert session.fingerprint(ref) == before
     try:
         session.operate(
             "build_supercell",
@@ -96,6 +157,7 @@ def test_t05_strict_repetition_does_not_clamp():
         pass
     else:
         raise AssertionError("nonperiodic")
+    assert session.fingerprint(ref) == before
     assert session.current_ref(ref.id).revision == 1
     assert session.counters.commits == 0
 
@@ -130,9 +192,16 @@ def test_t10_periodic_copy_is_one_transaction():
             expected_revision=session.current_ref(ref.id).revision,
             inject_failure="commit",
         )
-    except Exception:
+    except InjectedFailure:
         pass
+    else:
+        raise AssertionError("injected commit")
+    assert session.current_ref(ref.id).revision == 2
+    assert session.counters.commits == 1
     assert session.snapshot(session.current_ref(ref.id)).n_sites == 15
+    assert session.snapshot(ref).n_sites == 2
+    stored = session._frames[(ref.id, "0")][-1]
+    assert stored.provenance["steps"] == ["build_supercell", "delete_sites"]
 
 
 def test_t11_insert_preview_cancel_clash_and_idempotency():
@@ -168,7 +237,8 @@ def test_t11_insert_preview_cancel_clash_and_idempotency():
         request_id="insert-1",
     )
     assert replay.idempotent_replay
-    assert session.snapshot(session.current_ref(ref.id)).n_sites == 5
+    assert session.counters.commits == 1
+    assert session.snapshot(session.current_ref(ref.id)).fingerprint == session.snapshot(applied.output_ref).fingerprint
     try:
         session.operate(
             "insert_molecule",

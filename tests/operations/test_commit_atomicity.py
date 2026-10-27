@@ -66,6 +66,63 @@ def test_t19_structural_undo_does_not_track_display_edits():
     assert session.counters.display_edits == display_before + 2
 
 
+def test_commit_replay_after_undo_restores_the_same_revision():
+    session = EffectSession()
+    ref = session.register(f1_ordered_nonorthogonal(), structure_id="cell")
+    preview = session.preview("build_supercell", {"a": 2, "b": 1, "c": 1}, structure_id=ref.id, expected_revision=1)
+    committed = session.commit_candidate(preview.candidate_id, expected_revision=1, request_id="again")
+    session.undo("cell")
+    assert session.current_ref("cell").revision == 1
+    replay = session.commit_candidate(preview.candidate_id, expected_revision=1, request_id="again")
+    assert replay.idempotent_replay
+    assert session.current_ref("cell").revision == committed.output_ref.revision
+    assert session.counters.commits == 1
+
+
+def test_request_id_does_not_cross_structures():
+    session = EffectSession()
+    session.register(f1_ordered_nonorthogonal(), structure_id="left")
+    session.register(f1_ordered_nonorthogonal(), structure_id="right")
+    session.operate("build_supercell", {"a": 2, "b": 1, "c": 1}, structure_id="left", expected_revision=1, request_id="shared")
+    other = session.operate(
+        "build_supercell",
+        {"a": 3, "b": 1, "c": 1},
+        structure_id="right",
+        expected_revision=1,
+        request_id="shared",
+    )
+    assert other.idempotent_replay is False
+    assert session.snapshot(session.current_ref("left")).n_sites == 4
+    assert session.snapshot(session.current_ref("right")).n_sites == 6
+
+
+def test_reloaded_request_id_does_not_commit_twice(tmp_path):
+    from mat_viewer.effects.persistence import load_session, save_session
+
+    session = EffectSession()
+    ref = session.register(f1_ordered_nonorthogonal(), structure_id="cell")
+    session.operate(
+        "build_supercell",
+        {"a": 2, "b": 1, "c": 1},
+        structure_id=ref.id,
+        expected_revision=1,
+        request_id="persist-me",
+    )
+    path = tmp_path / "session.json"
+    save_session(session, str(path))
+    restored = load_session(str(path))
+    replay = restored.operate(
+        "build_supercell",
+        {"a": 9, "b": 9, "c": 9},
+        structure_id="cell",
+        expected_revision=1,
+        request_id="persist-me",
+    )
+    assert replay.idempotent_replay
+    assert restored.current_ref("cell").revision == 2
+    assert restored.snapshot(restored.current_ref("cell")).n_sites == 4
+
+
 def test_t16_frame_results_do_not_cross_frames():
     first, second = f6_frames()
     session = EffectSession()

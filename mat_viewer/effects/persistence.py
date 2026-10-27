@@ -45,7 +45,15 @@ def session_to_payload(session: EffectSession) -> dict[str, Any]:
                 "structure_id": structure_id,
                 "frame_ref": frame_ref,
                 "cursor": session._cursor[(structure_id, frame_ref)],
-                "revisions": [_revision_payload(item) for item in revisions],
+                "revisions": [
+                    _revision_payload(
+                        item,
+                        viewer_name=session._viewer_names.get(
+                            (structure_id, frame_ref, item.ref.revision)
+                        ),
+                    )
+                    for item in revisions
+                ],
             }
         requests = {
             key: value.to_dict()
@@ -106,10 +114,32 @@ def load_session(path: str) -> EffectSession:
         key = (structure_id, frame_ref)
         session._frames[key] = built
         session._cursor[key] = int(frame["cursor"])
-        for revision in built:
-            session._viewer_names[(revision.ref.id, revision.ref.frame_ref, revision.ref.revision)] = (
-                f"{revision.ref.id}@{revision.ref.revision}"
+        for item, revision in zip(frame["revisions"], built):
+            session._viewer_names[(revision.ref.id, revision.ref.frame_ref, revision.ref.revision)] = str(
+                item.get("viewer_name") or f"{structure_id}@{revision.ref.revision}"
             )
+    from .session import CommitResult
+
+    for key, body in (payload.get("requests") or {}).items():
+        if not isinstance(body, dict) or "output" not in body or "input" not in body:
+            continue
+        result = CommitResult(
+            input_ref=StructureRef(body["input"]["id"], int(body["input"]["revision"]), body["input"].get("frame_ref", "0")),
+            output_ref=StructureRef(body["output"]["id"], int(body["output"]["revision"]), body["output"].get("frame_ref", "0")),
+            command=str(body.get("command") or ""),
+            request_id=body.get("request_id"),
+            candidate_id=str(body.get("candidate_id") or ""),
+            mappings=list(body.get("mappings") or []),
+            diagnostics=list(body.get("diagnostics") or []),
+            warnings=list(body.get("property_warnings") or []),
+            fingerprint=str(body.get("fingerprint") or ""),
+            viewer_name=body.get("viewer_name"),
+        )
+        stored = session._frames.get((result.output_ref.id, result.output_ref.frame_ref), [])
+        match = next((item for item in stored if item.ref.revision == result.output_ref.revision), None)
+        if match is None or match.fingerprint != result.fingerprint:
+            continue
+        session._requests[str(key)] = result
     return session
 
 
@@ -214,14 +244,17 @@ def export_structure(snapshot: Mapping[str, Any] | Any, crystal, *, fmt: str) ->
     return {"format": "cif", "text": text, "warnings": warnings}
 
 
-def _revision_payload(revision) -> dict[str, Any]:
-    return {
+def _revision_payload(revision, viewer_name: str | None = None) -> dict[str, Any]:
+    payload = {
         "revision": revision.ref.revision,
         "fingerprint": revision.fingerprint,
         "properties": revision.properties,
         "provenance": revision.provenance,
         "crystal": _crystal_payload(revision.crystal),
     }
+    if viewer_name:
+        payload["viewer_name"] = viewer_name
+    return payload
 
 
 def _crystal_payload(crystal) -> dict[str, Any]:

@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
-from molcrys_kit.constants.config import KEY_ATOM_ID
+from molcrys_kit.constants.config import KEY_ASSEMBLY, KEY_ATOM_ID, KEY_DISORDER_GROUP
 from molcrys_kit.operations import (
     add_hydrogens,
     create_supercell,
@@ -332,12 +332,16 @@ def materialize_selection(crystal, params: Mapping[str, Any]) -> Outcome:
     records = {str(record.site_id): record for record in crystal.get_site_records()}
     symbols = []
     positions = []
+    occupancies = []
+    labels = []
+    disorder_groups = []
+    assemblies = []
     mappings = []
     index_map: list[int | None] = []
     for instance in instances:
         if not isinstance(instance, Mapping):
             raise AmbiguousSelection("each instance must name a source site_id and image")
-        ghost = instance.get("kind") in {"ghost", "annotation"} or instance.get("provenance") in {None, "none", "rendered"}
+        ghost = instance.get("kind") in {"ghost", "annotation"} or instance.get("provenance") in {"none", "rendered"}
         if ghost and not instance.get("site_id"):
             raise AmbiguousSelection("provenance-free ghosts and annotations are not scientific atoms")
         if "display_index" in instance and "site_id" not in instance:
@@ -350,6 +354,11 @@ def materialize_selection(crystal, params: Mapping[str, Any]) -> Outcome:
         cartesian = np.asarray(record.cartesian_position_A, dtype=float) + np.asarray(image, dtype=float) @ np.asarray(crystal.lattice, dtype=float)
         symbols.append(str(record.symbol))
         positions.append(cartesian)
+        occupancies.append(float(record.occupancy))
+        labels.append(str(record.label))
+        disorder_groups.append(int(record.disorder_group or 0))
+        assembly = record.disorder_assembly
+        assemblies.append("" if assembly in (None, ".", "") else str(assembly))
         index_map.append(int(record.global_index))
         mappings.append(
             {
@@ -363,7 +372,16 @@ def materialize_selection(crystal, params: Mapping[str, Any]) -> Outcome:
     length = float(max(10.0, np.max(span) + 8.0))
     lattice = np.eye(3) * length
     shifted = np.asarray(positions, dtype=float) - center + np.array([length, length, length]) / 2.0
-    molecule = molecule_from_spec(symbols, shifted, lattice=lattice, pbc=(False, False, False))
+    molecule = molecule_from_spec(
+        symbols,
+        shifted,
+        lattice=lattice,
+        pbc=(False, False, False),
+        occupancies=occupancies,
+        labels=labels,
+    )
+    molecule.set_array(KEY_DISORDER_GROUP, np.asarray(disorder_groups, dtype=int))
+    molecule.set_array(KEY_ASSEMBLY, np.array(assemblies))
     # Stamp the declared cluster ids before MolecularCrystal deduplicates.
     molecule.set_array(KEY_ATOM_ID, np.array([item["output_site_id"] for item in mappings], dtype=str))
     result = crystal_from_molecules(lattice, [molecule], pbc=(False, False, False), metadata={"materialized": "finite-cluster"})
@@ -389,7 +407,10 @@ def commit_disorder_candidate(crystal, params: Mapping[str, Any]) -> Outcome:
         method = str(params.get("method") or "enumerate")
         if method not in {"optimal", "enumerate", "random"}:
             raise ValidationError("disorder method must be optimal, enumerate, or random")
-        count = int(params.get("count") or 1)
+        if "count" in params and params.get("count") is not None:
+            count = _positive_int(params.get("count"), label="count")
+        else:
+            count = 1
         seed = params.get("seed")
         seed = None if seed in (None, "") else int(seed)
         if method == "random" and seed is None:
@@ -407,8 +428,10 @@ def commit_disorder_candidate(crystal, params: Mapping[str, Any]) -> Outcome:
         if not 0 <= index < len(replicas):
             raise ValidationError(f"candidate_index {index} is outside the generated set")
         retained, kept = replicas[index]
+        retained = retained.copy()
         kept_indices = [int(item) for item in kept]
     else:
+        retained = retained.copy()
         kept_indices = [int(item) for item in params.get("kept_indices") or []]
     mappings, index_map = _match_ids(crystal, retained, command="commit_disorder_candidate")
     return Outcome(

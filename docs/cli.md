@@ -55,6 +55,19 @@ mat-vis skills show visualize-materials --all
 | tui | Open a supported structure or trajectory frame in the terminal |
 | operate | Commit a structural operation. `operate build-supercell` builds a new lattice. There is no `operate supercell` alias. Display repeats stay on `tui --repeat` and `POST /api/v2/state` `supercell`. |
 
+### operate — structural commits
+
+```bash
+mat-vis operate build-supercell structure.cif --a 2 --b 3 --c 1 -o supercell.cif --json
+```
+
+`build-supercell` requires three positive integers. A nondiagonal matrix is
+rejected. `--preview` builds a candidate and does not write a new revision.
+Other commands (`build-slab`, `insert-molecule`, `delete-sites`,
+`replace-species`, `add-hydrogens`, `remove-solvent`,
+`materialize-selection`, `commit-disorder-candidate`) take `--params-json`.
+`operate supercell` is not a command.
+
 `inspect`, `capabilities`, and `render --check` are the agent preflight surface.
 `--check` resolves requirements only and never creates the output.
 

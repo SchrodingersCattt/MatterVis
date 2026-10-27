@@ -319,6 +319,8 @@ def operation_patch(operation: Operation) -> dict[str, Any]:
 
     payload = copy.deepcopy(dict(operation.payload))
     kind = operation.name
+    if kind == "operate":
+        return {}
     if kind == OperationKind.SET_DISPLAY_MODE.value:
         payload.pop("reset_topology_site", None)
     elif kind == OperationKind.SET_CAMERA.value:

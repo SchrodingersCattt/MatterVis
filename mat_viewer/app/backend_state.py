@@ -154,8 +154,8 @@ class _StateBackendMixin:
             replicas = patch.get("disorder_replicas") or []
             state["disorder_replicas"] = replicas if isinstance(replicas, list) else []
         # ``supercell`` is a v2 shorthand: ``{"a": Na, "b": Nb, "c": Nc}``
-        # is rewritten to a single ``repeat`` transform appended to the
-        # transforms list. Keeps the AI scripting path one-line for the
+        # replaces any existing display ``repeat``. It does not stack and
+        # it does not commit a structure. Keeps the AI scripting path one-line for the
         # most common "show me a 2x2x2" request without forcing the
         # caller to construct a transform spec.
         if "supercell" in patch and patch["supercell"] is not None:

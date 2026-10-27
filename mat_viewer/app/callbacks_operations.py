@@ -165,6 +165,20 @@ def _surface_formula_unit_warning(response: Any) -> None:
         return
 
 
+def _strict_repeat(value: Any, axis: str) -> int:
+    """Accept an integer repeat count. A whole-number float from the number input is that integer."""
+
+    if isinstance(value, (bool, str)):
+        raise ValueError(f"repetition along {axis} must be a positive integer")
+    if isinstance(value, float):
+        if not value.is_integer():
+            raise ValueError(f"repetition along {axis} must be a positive integer")
+        value = int(value)
+    if not isinstance(value, int) or value < 1:
+        raise ValueError(f"repetition along {axis} must be a positive integer")
+    return value
+
+
 def register_operations_callbacks(app, backend):
     _surface_error = surface_callback_error
 
@@ -425,7 +439,11 @@ def register_operations_callbacks(app, backend):
         try:
             result = backend.operate(
                 "build_supercell",
-                {"a": int(count_a), "b": int(count_b), "c": int(count_c)},
+                {
+                    "a": _strict_repeat(count_a, "a"),
+                    "b": _strict_repeat(count_b, "b"),
+                    "c": _strict_repeat(count_c, "c"),
+                },
                 scene_id=scene_id,
             )
         except Exception as exc:

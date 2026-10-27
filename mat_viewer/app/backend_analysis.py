@@ -178,9 +178,9 @@ class _AnalysisBackendMixin:
     ):
         """List disorder candidates and retain their scientific crystals.
 
-        Highlight indices remain a preview. ``candidate_id`` points at the
-        crystal stored on the effect session, which is what a later commit
-        applies.
+        Highlight indices remain a preview. The crystal objects stay on the
+        bundle until an explicit operate commit asks for one. This method
+        does not register a structure revision.
         """
         from ..operations.disorder import resolve_disorder as _resolve_disorder_replicas
 
@@ -204,29 +204,17 @@ class _AnalysisBackendMixin:
             return summaries
         by_kept = {}
         for replica_crystal, kept in replicas or []:
-            by_kept[tuple(sorted(int(index) for index in kept))] = (replica_crystal, [int(index) for index in kept])
-        session = self.effect_session()
-        structure_id = str(getattr(bundle, "scientific_structure_id", None) or bundle.name)
-        frame = str(getattr(bundle, "scientific_frame", "0"))
-        if not session.has(structure_id, frame):
-            session.register(crystal, structure_id=structure_id, frame_ref=frame, viewer_name=bundle.name)
-            bundle.scientific_structure_id = structure_id
-            bundle.scientific_revision = 1
-            bundle.scientific_frame = frame
+            by_kept[tuple(sorted(int(index) for index in kept))] = (replica_crystal.copy(), [int(index) for index in kept])
+        stash = {}
         for summary in summaries:
             kept_tuple = tuple(sorted(int(index) for index in summary.get("kept_indices") or []))
             found = by_kept.get(kept_tuple)
             if found is None:
                 continue
             replica_crystal, kept_indices = found
-            candidate = session.preview(
-                "commit_disorder_candidate",
-                {"crystal": replica_crystal, "kept_indices": kept_indices, "method": method, "seed": seed},
-                structure_id=structure_id,
-                expected_revision=session.current_ref(structure_id, frame).revision,
-                frame_ref=frame,
-            )
-            summary["candidate_id"] = candidate.candidate_id
+            stash[str(summary["id"])] = {"crystal": replica_crystal, "kept_indices": kept_indices}
+            summary["candidate_id"] = str(summary["id"])
+        bundle._disorder_candidate_crystals = stash
         return summaries
 
     def run_analysis(

@@ -230,8 +230,11 @@ class EffectSession:
         viewer_name: str | None = None,
     ) -> Candidate | CommitResult:
         with self._lock:
-            if request_id and not preview and request_id in self._requests and inject_failure is None:
-                replay = self._requests[request_id]
+            request_key = self._request_key(structure_id, frame_ref, request_id) if request_id else None
+            if request_key and not preview and request_key in self._requests and inject_failure is None:
+                replay = self._requests[request_key]
+                if replay.input_ref.id != str(structure_id) or replay.input_ref.frame_ref != str(frame_ref):
+                    raise RevisionConflict(f"request_id {request_id!r} belongs to a different structure")
                 replay.idempotent_replay = True
                 self._restore_request(replay)
                 return replay
@@ -247,7 +250,7 @@ class EffectSession:
             if inject_failure == "construct":
                 self.counters.rejected_commits += 1
                 raise InjectedFailure("injected construction failure")
-            outcome = run_operation(command, current.crystal, params or {})
+            outcome = run_operation(command, current.crystal.copy(), params or {})
             transformed, warnings = apply_property_policy(
                 current.properties,
                 property_policy,
@@ -302,10 +305,13 @@ class EffectSession:
                 raise KeyError(candidate_id)
             if candidate.status == "cancelled":
                 raise OperationRejected("cancelled candidates cannot be committed")
-            if candidate.status == "committed" and candidate.request_id and candidate.request_id in self._requests:
-                replay = self._requests[candidate.request_id]
-                replay.idempotent_replay = True
-                return replay
+            if candidate.status == "committed" and candidate.request_id:
+                request_key = self._request_key(candidate.input_ref.id, candidate.input_ref.frame_ref, candidate.request_id)
+                replay = self._requests.get(request_key)
+                if replay is not None:
+                    replay.idempotent_replay = True
+                    self._restore_request(replay)
+                    return replay
             current = self._current(candidate.input_ref.id, candidate.input_ref.frame_ref)
             if current.ref.revision != candidate.input_ref.revision or int(expected_revision) != current.ref.revision:
                 self.counters.rejected_commits += 1
@@ -380,8 +386,6 @@ class EffectSession:
         if current.ref != candidate.input_ref:
             self.counters.rejected_commits += 1
             raise RevisionConflict("structure revision changed before commit")
-        # Drop redo entries so a new commit cannot fork an invisible branch.
-        del self._frames[key][self._cursor[key] + 1 :]
         next_revision = current.ref.revision + 1
         ref = StructureRef(current.ref.id, next_revision, current.ref.frame_ref)
         provenance = {
@@ -397,7 +401,10 @@ class EffectSession:
             properties=candidate.properties,
             provenance=provenance,
         )
-        self._frames[key].append(revision)
+        # Replace the redo branch only after the new revision exists, so a
+        # failure while building it leaves the previous redo stack intact.
+        kept = self._frames[key][: self._cursor[key] + 1]
+        self._frames[key] = [*kept, revision]
         self._cursor[key] = len(self._frames[key]) - 1
         name = viewer_name or f"{ref.id}@{ref.revision}"
         self._viewer_names[(ref.id, ref.frame_ref, ref.revision)] = name
@@ -415,10 +422,14 @@ class EffectSession:
             viewer_name=name,
         )
         if candidate.request_id:
-            self._requests[candidate.request_id] = result
+            self._requests[self._request_key(ref.id, ref.frame_ref, candidate.request_id)] = result
         self.counters.commits += 1
         self.counters.structure_builds += 1
         return result
+
+    @staticmethod
+    def _request_key(structure_id: str, frame_ref: str | int | None, request_id: str) -> str:
+        return f"{structure_id}\n{frame_ref}\n{request_id}"
 
     def _restore_request(self, result: CommitResult) -> None:
         key = (result.output_ref.id, result.output_ref.frame_ref)

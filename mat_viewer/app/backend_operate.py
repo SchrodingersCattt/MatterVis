@@ -35,7 +35,8 @@ class _OperateBackendMixin:
         property_policy: Mapping[str, Any] | None = None,
         inject_failure: str | None = None,
     ) -> dict[str, Any]:
-        if str(command) in {"supercell", "operate_supercell"}:
+        command = str(command).strip().lower().replace("-", "_")
+        if command in {"supercell", "operate_supercell"}:
             raise ValueError("use build_supercell; display supercell remains a view repeat")
         pinned_scene = scene_id or self.active_scene_id()
         state = self.get_state(pinned_scene)
@@ -64,9 +65,17 @@ class _OperateBackendMixin:
             else getattr(bundle, "scientific_revision", None)
             or session.current_ref(structure_id, frame).revision
         )
+        params = dict(params or {})
+        if command == "commit_disorder_candidate" and params.get("crystal") is None:
+            candidate_id = str(params.get("candidate_id") or "")
+            retained = getattr(bundle, "_disorder_candidate_crystals", {}).get(candidate_id)
+            if retained is None:
+                raise ValueError(f"unknown disorder candidate {candidate_id!r}")
+            params["crystal"] = retained["crystal"]
+            params.setdefault("kept_indices", retained["kept_indices"])
         outcome = session.operate(
-            str(command),
-            params or {},
+            command,
+            params,
             structure_id=structure_id,
             expected_revision=pinned_revision,
             frame_ref=frame,
@@ -122,7 +131,8 @@ class _OperateBackendMixin:
         target = structure_id or str(getattr(bundle, "scientific_structure_id", None) or bundle.name)
         frame = str(getattr(bundle, "scientific_frame", "0"))
         ref = self.effect_session().undo(target, frame)
-        return {"structure": ref.to_dict(), "scene_id": pinned_scene, "effect": "undo"}
+        focused = self._focus_revision(ref, source_label=str(state.get("scene_label") or target))
+        return {"structure": ref.to_dict(), "scene_id": focused, "effect": "undo"}
 
     def redo_structure(self, structure_id: str | None = None, *, scene_id: str | None = None) -> dict[str, Any]:
         pinned_scene = scene_id or self.active_scene_id()
@@ -131,7 +141,41 @@ class _OperateBackendMixin:
         target = structure_id or str(getattr(bundle, "scientific_structure_id", None) or bundle.name)
         frame = str(getattr(bundle, "scientific_frame", "0"))
         ref = self.effect_session().redo(target, frame)
-        return {"structure": ref.to_dict(), "scene_id": pinned_scene, "effect": "redo"}
+        focused = self._focus_revision(ref, source_label=str(state.get("scene_label") or target))
+        return {"structure": ref.to_dict(), "scene_id": focused, "effect": "redo"}
+
+    def _focus_revision(self, ref, *, source_label: str) -> str:
+        """Show the scene already bound to this revision, without touching its camera."""
+
+        name = self.effect_session().viewer_name(ref)
+        scene_id = self._scene_for_bundle(name)
+        bundle = self.bundles.get(name)
+        if bundle is not None:
+            bundle.scientific_structure_id = ref.id
+            bundle.scientific_revision = ref.revision
+            bundle.scientific_frame = ref.frame_ref
+        if scene_id is not None:
+            self.set_active_scene(scene_id, broadcast=False)
+            return scene_id
+        if bundle is None:
+            from ..effects.materialize import loaded_crystal_from_crystal
+
+            built = loaded_crystal_from_crystal(
+                self.effect_session().checkout(ref),
+                name=name,
+                title=source_label,
+            )
+            built.scientific_structure_id = ref.id
+            built.scientific_revision = ref.revision
+            built.scientific_frame = ref.frame_ref
+            with self._lock:
+                self.bundles[name] = built
+                if name not in self.structure_names:
+                    self.structure_names.append(name)
+                scene = self.create_scene(structure=name, label=built.title)
+            return scene["id"]
+        scene = self.create_scene(structure=name, label=source_label)
+        return scene["id"]
 
     def _scene_for_bundle(self, bundle_name: str | None) -> str | None:
         if not bundle_name:

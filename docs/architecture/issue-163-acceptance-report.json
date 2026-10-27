@@ -23,7 +23,7 @@
   },
   "commands": {
     "python -m pytest tests/ -n 4 --dist loadfile": {
-      "result": "2049 passed, 70 skipped",
+            "result": "2056 passed, 70 skipped",
       "exit_code": 0,
       "elapsed_s": 95.27
     },

@@ -1,4 +1,4 @@
-# Structure transforms API
+# Display transforms API
 
 The viewer's **transforms** model is a per-scene display derivation
 ("grow", "repeat", "complete fragment", "slab", ...).

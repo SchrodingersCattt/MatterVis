@@ -30,7 +30,9 @@ payload = observation.as_dict()
   the canonical terminal loader.
 - `load_for_tui(path, repeat=(na, nb, nc), grow_radius=R, grow_seeds=selector,
   transforms=[...])` (also accepted by `TerminalSession.from_file`) applies
-  supercell / neighbour-shell transforms at load time. `label_mode="label_sym"`
+  periodic repeat (display copies) and a neighbour-shell grow at load time.
+  A new lattice is `mat-vis operate build-supercell` or the terminal command
+  `:operate build-supercell A B C`, not `repeat`. `label_mode="label_sym"`
   then tells copies apart as `O1#k[i,j,k]` (symmetry operation, lattice shift).
 - `state` returns a detached `TerminalViewState`; each successful active
   view-state mutation increments its monotonic `revision` exactly once.

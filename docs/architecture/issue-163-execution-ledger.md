@@ -18,5 +18,5 @@
 ## Checks
 
 - Focused effect tests passed (44).
-- Full `python -m pytest tests/ -n 4 --dist loadfile` on `4f12ed4`: 2049 passed, 70 skipped, exit 0.
+- Full `python -m pytest tests/ -n 4 --dist loadfile` after review fixes: 2056 passed, 70 skipped, exit 0.
 - Evidence file: `docs/architecture/issue-163-acceptance-report.json` (commit `0eee384`). The report commit does not change runtime code.

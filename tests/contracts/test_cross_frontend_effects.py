@@ -68,3 +68,6 @@ def test_operate_intent_is_a_view_noop():
     assert reduced["transforms"] == []
     assert reduced["camera"] == state["camera"]
     assert operation.name == "operate"
+    from mat_viewer.app.reducer import operation_patch
+
+    assert operation_patch(operation) == {}

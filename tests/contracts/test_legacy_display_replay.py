@@ -67,6 +67,22 @@ def test_t03_explicit_transform_list_keeps_order(tmp_path):
         backend.close(wait=False)
 
 
+def test_structural_undo_returns_to_the_source_scene(tmp_path):
+    backend = _backend(tmp_path)
+    try:
+        scene_id = backend.active_scene_id()
+        raw = len(backend.get_bundle("urea").raw_atoms)
+        committed = backend.operate("build_supercell", {"a": 2, "b": 1, "c": 1}, scene_id=scene_id)
+        expanded = backend.get_bundle(backend.get_state(committed["scene_id"])["structure"])
+        assert len(expanded.raw_atoms) == raw * 2
+        undone = backend.undo_structure(scene_id=committed["scene_id"])
+        shown = backend.get_bundle(backend.get_state(undone["scene_id"])["structure"])
+        assert len(shown.raw_atoms) == raw
+        assert shown.scientific_revision == 1
+    finally:
+        backend.close(wait=False)
+
+
 def test_by_symmetry_stays_explicitly_unsupported(tmp_path):
     backend = _backend(tmp_path)
     try:
