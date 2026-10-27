@@ -85,6 +85,7 @@ class _CoreBackendMixin:
         first_name = self.structure_names[0]
         self.current_state = self.default_state(first_name)
         self.scene_store = SceneStore.load(SceneStore.default_path(self.root_dir))
+        self._restore_committed_structures()
         # Persisted scenes can outlive the catalog (uploads land in
         # ``tempfile.gettempdir()`` and get GC'd; ``--cif`` may have
         # been dropped). Without prune, ``scene_state(active_id)``
@@ -812,6 +813,7 @@ class _CoreBackendMixin:
                     self.scene_store.save()
         except OSError as exc:  # pragma: no cover - disk-full / read-only mount
             print(f"[mat_viewer] could not persist scene store: {exc}", file=sys.stderr)
+        self._flush_effect_session()
 
     def apply_intent(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, dict):

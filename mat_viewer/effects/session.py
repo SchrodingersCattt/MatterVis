@@ -11,6 +11,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from threading import RLock
+from types import MappingProxyType
 from typing import Any
 from uuid import uuid4
 
@@ -54,6 +55,7 @@ class Candidate:
     invalid_structure_fields: set[str]
     property_policy: dict[str, Any]
     request_fingerprint: str = ""
+    sealed_mappings: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -67,6 +69,36 @@ class Candidate:
             "provenance": self.provenance,
             "fingerprint": self.fingerprint,
             "n_sites": int(sum(len(molecule) for molecule in self.crystal.molecules)),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateView:
+    """Detached preview. It does not carry the scientific crystal."""
+
+    candidate_id: str
+    command: str
+    input_ref: StructureRef
+    request_id: str | None
+    status: str
+    mappings: tuple
+    diagnostics: tuple[str, ...]
+    provenance: Mapping[str, Any]
+    fingerprint: str
+    n_sites: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "candidate_id": self.candidate_id,
+            "command": self.command,
+            "input": self.input_ref.to_dict(),
+            "request_id": self.request_id,
+            "status": self.status,
+            "mappings": [dict(item) for item in self.mappings],
+            "diagnostics": list(self.diagnostics),
+            "provenance": dict(self.provenance),
+            "fingerprint": self.fingerprint,
+            "n_sites": self.n_sites,
         }
 
 
@@ -235,7 +267,7 @@ class EffectSession:
         property_policy: Mapping[str, Any] | None = None,
         inject_failure: str | None = None,
         viewer_name: str | None = None,
-    ) -> Candidate | CommitResult:
+    ) -> CandidateView | CommitResult:
         with self._lock:
             request_key = self._request_key(structure_id, frame_ref, request_id) if request_id else None
             incoming_request = _request_fingerprint(command, params, property_policy)
@@ -285,11 +317,12 @@ class EffectSession:
                 provenance=candidate.provenance,
             )
             candidate.fingerprint = probe.fingerprint
+            candidate.sealed_mappings = tuple(_mapping_token(item) for item in candidate.mappings)
             self._candidates[candidate.candidate_id] = candidate
             if preview or inject_failure == "cancel":
                 if inject_failure == "cancel":
                     candidate.status = "cancelled"
-                return candidate
+                return _public_candidate(candidate)
             if candidate.status == "cancelled":
                 raise OperationRejected("cancelled candidates cannot be committed")
             return self._commit_locked(candidate, warnings=list(warnings), inject_failure=inject_failure, viewer_name=viewer_name)
@@ -343,11 +376,75 @@ class EffectSession:
                 candidate.request_id = request_id
             return self._commit_locked(candidate, warnings=[], inject_failure=inject_failure, viewer_name=viewer_name)
 
-    def cancel(self, candidate_id: str) -> Candidate:
+    def cancel(self, candidate_id: str) -> CandidateView:
         with self._lock:
             candidate = self._candidates[candidate_id]
             candidate.status = "cancelled"
-            return candidate
+            return _public_candidate(candidate)
+
+    def checkout_candidate(self, candidate_id: str):
+        """Return a private copy of a retained candidate crystal."""
+
+        with self._lock:
+            candidate = self._candidates.get(candidate_id)
+            if candidate is None:
+                raise KeyError(candidate_id)
+            if candidate.status == "cancelled":
+                raise OperationRejected("cancelled candidates cannot be checked out")
+            return candidate.crystal.copy()
+
+    def find_request_replay(
+        self,
+        *,
+        structure_id: str,
+        frame_ref: str | int | None = "0",
+        request_id: str | None = None,
+        command: str,
+        params: Mapping[str, Any] | None = None,
+        property_policy: Mapping[str, Any] | None = None,
+    ) -> CommitResult | None:
+        """Return a recorded commit for this request without moving the pointer."""
+
+        if not request_id:
+            return None
+        with self._lock:
+            replay = self._requests.get(self._request_key(structure_id, frame_ref, request_id))
+            if replay is None:
+                return None
+            return self._replay_request(
+                replay,
+                _request_fingerprint(command, params, property_policy),
+                request_id=request_id,
+            )
+
+    def rollback_commit(self, result: CommitResult) -> StructureRef:
+        """Undo a commit that never became the published structure.
+
+        The request id is released so a later retry can commit again.
+        The retired revision number is not reused.
+        """
+
+        with self._lock:
+            key = (result.output_ref.id, result.output_ref.frame_ref)
+            current = self._frames[key][self._cursor[key]]
+            if current.ref != result.output_ref:
+                raise RevisionConflict("cannot roll back a commit that is not current")
+            if self._cursor[key] <= 0:
+                raise ValidationError("cannot roll back the imported revision")
+            self._cursor[key] -= 1
+            if result.request_id:
+                self._requests.pop(
+                    self._request_key(result.output_ref.id, result.output_ref.frame_ref, result.request_id),
+                    None,
+                )
+            candidate = self._candidates.get(result.candidate_id)
+            if candidate is not None and candidate.status == "committed":
+                candidate.status = "ready"
+            if self.counters.commits:
+                self.counters.commits -= 1
+            if self.counters.structure_builds:
+                self.counters.structure_builds -= 1
+            return self._frames[key][self._cursor[key]].ref
 
     def undo(self, structure_id: str, frame_ref: str | int | None = "0") -> StructureRef:
         with self._lock:
@@ -395,6 +492,7 @@ class EffectSession:
         }
 
     def _commit_locked(self, candidate: Candidate, *, warnings, inject_failure, viewer_name) -> CommitResult:
+        self._revalidate_candidate(candidate)
         if inject_failure == "persist":
             self.counters.rejected_commits += 1
             raise InjectedFailure("injected persistence failure")
@@ -454,6 +552,26 @@ class EffectSession:
     @staticmethod
     def _request_key(structure_id: str, frame_ref: str | int | None, request_id: str) -> str:
         return f"{structure_id}\n{frame_ref}\n{request_id}"
+
+    def _revalidate_candidate(self, candidate: Candidate) -> None:
+        probe = snapshot_from_crystal(
+            candidate.crystal,
+            ref=candidate.input_ref,
+            properties=candidate.properties,
+            provenance=candidate.provenance,
+        )
+        output_ids = {site.site_id for site in probe.sites}
+        tokens = tuple(_mapping_token(item) for item in candidate.mappings)
+        mismatch = probe.fingerprint != candidate.fingerprint or tokens != candidate.sealed_mappings
+        if not mismatch:
+            for mapping in candidate.mappings:
+                output_id = mapping.get("output_site_id")
+                if output_id and str(output_id) not in output_ids:
+                    mismatch = True
+                    break
+        if mismatch:
+            self.counters.rejected_commits += 1
+            raise OperationRejected("candidate content no longer matches its sealed fingerprint and site mappings")
 
     def _replay_request(self, replay: CommitResult, incoming: str, *, request_id: str | None) -> CommitResult:
         """Return the recorded commit without moving the scientific pointer."""
@@ -524,6 +642,25 @@ class EffectSession:
         )
 
 
+def _public_candidate(candidate: Candidate) -> CandidateView:
+    return CandidateView(
+        candidate_id=candidate.candidate_id,
+        command=candidate.command,
+        input_ref=candidate.input_ref,
+        request_id=candidate.request_id,
+        status=candidate.status,
+        mappings=tuple(MappingProxyType(dict(item)) for item in candidate.mappings),
+        diagnostics=tuple(candidate.diagnostics),
+        provenance=MappingProxyType(dict(candidate.provenance)),
+        fingerprint=candidate.fingerprint,
+        n_sites=int(sum(len(molecule) for molecule in candidate.crystal.molecules)),
+    )
+
+
+def _mapping_token(mapping: Mapping[str, Any]) -> str:
+    return json.dumps(dict(mapping), sort_keys=True, separators=(",", ":"), default=str)
+
+
 def _request_fingerprint(command: str, params: Mapping[str, Any] | None, property_policy: Mapping[str, Any] | None) -> str:
     body = {
         "command": str(command),
@@ -563,4 +700,4 @@ def _plain_request_value(value: Any) -> Any:
     )
 
 
-__all__ = ["Candidate", "CommitResult", "Counters", "EffectSession"]
+__all__ = ["Candidate", "CandidateView", "CommitResult", "Counters", "EffectSession"]

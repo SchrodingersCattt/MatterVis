@@ -7,20 +7,69 @@ Display repetition is not accepted here.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from typing import Any
 
+from ..effects.errors import RevisionConflict
 from ..effects.materialize import loaded_crystal_from_crystal
-from ..effects.session import Candidate, CommitResult, EffectSession
+from ..effects.session import CandidateView, CommitResult, EffectSession
 
 
 class _OperateBackendMixin:
+    def _effect_session_path(self) -> str:
+        return os.path.join(self.root_dir, ".local", "effect-session.json")
+
     def effect_session(self) -> EffectSession:
         session = getattr(self, "_effect_session", None)
         if session is None:
-            session = EffectSession()
+            path = self._effect_session_path()
+            if os.path.exists(path):
+                from ..effects.persistence import load_session
+
+                session = load_session(path)
+            else:
+                session = EffectSession()
             self._effect_session = session
         return session
+
+    def _flush_effect_session(self) -> None:
+        session = getattr(self, "_effect_session", None)
+        if session is None:
+            return
+        from ..effects.persistence import save_session
+
+        try:
+            save_session(session, self._effect_session_path())
+        except OSError as exc:  # pragma: no cover - disk-full / read-only mount
+            print(f"[mat_viewer] could not persist effect session: {exc}")
+
+    def _restore_committed_structures(self) -> None:
+        """Reload scientific revisions before scene-store pruning."""
+
+        path = self._effect_session_path()
+        if not os.path.exists(path):
+            return
+        from ..effects.persistence import load_session
+
+        session = load_session(path)
+        self._effect_session = session
+        for (structure_id, frame_ref), revisions in session._frames.items():
+            for revision in revisions:
+                name = session.viewer_name(revision.ref)
+                existing = self.bundles.get(name)
+                if existing is not None:
+                    existing.scientific_structure_id = structure_id
+                    existing.scientific_revision = revision.ref.revision
+                    existing.scientific_frame = frame_ref
+                    continue
+                built = loaded_crystal_from_crystal(revision.crystal.copy(), name=name, title=name)
+                built.scientific_structure_id = structure_id
+                built.scientific_revision = revision.ref.revision
+                built.scientific_frame = frame_ref
+                self.bundles[name] = built
+                if name not in self.structure_names:
+                    self.structure_names.append(name)
 
     def operate(
         self,
@@ -34,6 +83,7 @@ class _OperateBackendMixin:
         preview: bool = False,
         property_policy: Mapping[str, Any] | None = None,
         inject_failure: str | None = None,
+        structure_id: str | None = None,
     ) -> dict[str, Any]:
         command = str(command).strip().lower().replace("-", "_")
         if command in {"supercell", "operate_supercell"}:
@@ -43,7 +93,12 @@ class _OperateBackendMixin:
         bundle_name = str(state.get("structure") or "")
         bundle = self.get_bundle(bundle_name)
         session = self.effect_session()
-        structure_id = str(getattr(bundle, "scientific_structure_id", None) or bundle.name)
+        resolved_structure_id = str(getattr(bundle, "scientific_structure_id", None) or bundle.name)
+        if structure_id is not None and str(structure_id) != resolved_structure_id:
+            raise RevisionConflict(
+                f"structure_id {structure_id} does not match scene target {resolved_structure_id}"
+            )
+        structure_id = resolved_structure_id
         frame = str(frame_ref if frame_ref is not None else getattr(bundle, "scientific_frame", "0"))
         if not session.has(structure_id, frame):
             crystal = getattr(bundle, "crystal", None)
@@ -73,30 +128,62 @@ class _OperateBackendMixin:
                 raise ValueError(f"unknown disorder candidate {candidate_id!r}")
             params["crystal"] = retained["crystal"]
             params.setdefault("kept_indices", retained["kept_indices"])
-        outcome = session.operate(
+        if not preview and inject_failure is None:
+            replay = session.find_request_replay(
+                structure_id=structure_id,
+                frame_ref=frame,
+                request_id=request_id,
+                command=command,
+                params=params,
+                property_policy=property_policy,
+            )
+            if replay is not None:
+                payload = replay.to_dict()
+                payload["source_scene_id"] = pinned_scene
+                payload["scene_id"] = self._scene_for_bundle(replay.viewer_name) or pinned_scene
+                return payload
+        view = session.operate(
             command,
             params,
             structure_id=structure_id,
             expected_revision=pinned_revision,
             frame_ref=frame,
             request_id=request_id,
-            preview=preview,
+            preview=True,
             property_policy=property_policy,
-            inject_failure=inject_failure,
+            inject_failure=inject_failure if inject_failure in {"validate", "construct", "cancel"} else None,
         )
-        if isinstance(outcome, Candidate):
-            payload = outcome.to_dict()
+        if not isinstance(view, CandidateView):
+            raise TypeError("operate preview returned an unknown result")
+        if preview or view.status == "cancelled" or inject_failure in {"validate", "construct", "cancel"}:
+            payload = view.to_dict()
             payload["scene_id"] = pinned_scene
             payload["effect"] = "preview"
             return payload
-        if not isinstance(outcome, CommitResult):
-            raise TypeError("operate returned an unknown result")
+        source_label = str(state.get("scene_label") or bundle_name)
+        try:
+            staged = loaded_crystal_from_crystal(
+                session.checkout_candidate(view.candidate_id),
+                name=f"{structure_id}@pending",
+                title=f"{source_label} {command}",
+            )
+        except Exception:
+            session.cancel(view.candidate_id)
+            raise
+        outcome = session.commit_candidate(
+            view.candidate_id,
+            expected_revision=pinned_revision,
+            request_id=request_id,
+            inject_failure=inject_failure,
+        )
+        try:
+            scene = self._install_published_bundle(staged, outcome, source_label=source_label)
+        except Exception:
+            self._discard_unpublished_bundle(str(outcome.viewer_name or ""))
+            session.rollback_commit(outcome)
+            raise
         payload = outcome.to_dict()
         payload["source_scene_id"] = pinned_scene
-        if outcome.idempotent_replay:
-            payload["scene_id"] = self._scene_for_bundle(outcome.viewer_name) or pinned_scene
-            return payload
-        scene = self._publish_committed_structure(outcome, source_label=str(state.get("scene_label") or bundle_name))
         payload["scene_id"] = scene["id"]
         return payload
 
@@ -110,17 +197,30 @@ class _OperateBackendMixin:
     ) -> dict[str, Any]:
         pinned_scene = scene_id or self.active_scene_id()
         state = self.get_state(pinned_scene)
-        outcome = self.effect_session().commit_candidate(
+        session = self.effect_session()
+        source_label = str(state.get("scene_label") or candidate_id)
+        try:
+            staged = loaded_crystal_from_crystal(
+                session.checkout_candidate(candidate_id),
+                name=f"{candidate_id}@pending",
+                title=source_label,
+            )
+        except Exception:
+            session.cancel(candidate_id)
+            raise
+        outcome = session.commit_candidate(
             candidate_id,
             expected_revision=int(expected_revision),
             request_id=request_id,
         )
+        try:
+            scene = self._install_published_bundle(staged, outcome, source_label=source_label)
+        except Exception:
+            self._discard_unpublished_bundle(str(outcome.viewer_name or ""))
+            session.rollback_commit(outcome)
+            raise
         payload = outcome.to_dict()
         payload["source_scene_id"] = pinned_scene
-        scene = self._publish_committed_structure(
-            outcome,
-            source_label=str(state.get("scene_label") or outcome.output_ref.id),
-        )
         payload["scene_id"] = scene["id"]
         return payload
 
@@ -185,17 +285,13 @@ class _OperateBackendMixin:
                 return str(scene_id)
         return None
 
-    def _publish_committed_structure(self, outcome: CommitResult, *, source_label: str) -> dict[str, Any]:
+    def _install_published_bundle(self, built, outcome: CommitResult, *, source_label: str) -> dict[str, Any]:
         name = str(outcome.viewer_name or f"{outcome.output_ref.id}@{outcome.output_ref.revision}")
         existing = self._scene_for_bundle(name)
         if existing is not None:
             return {"id": existing}
-        crystal = self.effect_session().checkout(outcome.output_ref)
-        built = loaded_crystal_from_crystal(
-            crystal,
-            name=name,
-            title=f"{source_label} {outcome.command}",
-        )
+        built.name = name
+        built.title = built.title or f"{source_label} {outcome.command}"
         built.scientific_structure_id = outcome.output_ref.id
         built.scientific_revision = outcome.output_ref.revision
         built.scientific_frame = outcome.output_ref.frame_ref
@@ -204,10 +300,33 @@ class _OperateBackendMixin:
             if name not in self.structure_names:
                 self.structure_names.append(name)
             self._drop_placeholder()
-            scene = self.create_scene(structure=name, label=built.title)
-        # A committed structure opens on its own cell, without the source view's repeat.
-        self.patch_state({"transforms": [], "display_mode": "unit_cell"}, scene_id=scene["id"], broadcast=False)
+            try:
+                scene = self.create_scene(structure=name, label=built.title)
+            except Exception:
+                self.bundles.pop(name, None)
+                if name in self.structure_names:
+                    self.structure_names.remove(name)
+                raise
+        try:
+            # A committed structure opens on its own cell, without the source view's repeat.
+            self.patch_state({"transforms": [], "display_mode": "unit_cell"}, scene_id=scene["id"], broadcast=False)
+        except Exception:
+            self._discard_unpublished_bundle(name)
+            with self._lock:
+                if scene["id"] in getattr(self.scene_store, "scenes", {}):
+                    self.delete_scene(scene["id"])
+            raise
         return scene
+
+    def _discard_unpublished_bundle(self, name: str) -> None:
+        if not name or self._scene_for_bundle(name) is not None:
+            return
+        with self._lock:
+            self.bundles.pop(name, None)
+            if name in self.structure_names and name not in {
+                scene.structure_name for scene in self.scene_store.scenes.values()
+            }:
+                self.structure_names.remove(name)
 
 
 __all__ = ["_OperateBackendMixin"]
