@@ -11,6 +11,7 @@ from mat_viewer.effects.errors import (
     ClashError,
     InjectedFailure,
     PropertyPolicyError,
+    RevisionConflict,
     UnsupportedOperation,
     ValidationError,
 )
@@ -229,15 +230,28 @@ def test_t11_insert_preview_cancel_clash_and_idempotency():
     )
     assert session.snapshot(applied.output_ref).n_sites == 5
     assert session.snapshot(ref).n_sites == 2
+    try:
+        session.operate(
+            "insert_molecule",
+            {**WATER, "origin": [1.0, 1.0, 1.0]},
+            structure_id=ref.id,
+            expected_revision=applied.output_ref.revision,
+            request_id="insert-1",
+        )
+    except RevisionConflict:
+        pass
+    else:
+        raise AssertionError("different payload reused a request id")
     replay = session.operate(
         "insert_molecule",
-        {**WATER, "origin": [1.0, 1.0, 1.0]},
+        {**WATER, "origin": [8.0, 8.0, 8.0], "origin_system": "cartesian"},
         structure_id=ref.id,
-        expected_revision=1,
+        expected_revision=applied.output_ref.revision,
         request_id="insert-1",
     )
     assert replay.idempotent_replay
     assert session.counters.commits == 1
+    assert session.current_ref(ref.id) == applied.output_ref
     assert session.snapshot(session.current_ref(ref.id)).fingerprint == session.snapshot(applied.output_ref).fingerprint
     try:
         session.operate(

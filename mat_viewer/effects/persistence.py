@@ -45,6 +45,10 @@ def session_to_payload(session: EffectSession) -> dict[str, Any]:
                 "structure_id": structure_id,
                 "frame_ref": frame_ref,
                 "cursor": session._cursor[(structure_id, frame_ref)],
+                "next_revision": session._next_revision.get(
+                    (structure_id, frame_ref),
+                    max(item.ref.revision for item in revisions) + 1,
+                ),
                 "revisions": [
                     _revision_payload(
                         item,
@@ -114,6 +118,8 @@ def load_session(path: str) -> EffectSession:
         key = (structure_id, frame_ref)
         session._frames[key] = built
         session._cursor[key] = int(frame["cursor"])
+        derived = max(item.ref.revision for item in built) + 1
+        session._next_revision[key] = max(int(frame.get("next_revision") or derived), derived)
         for item, revision in zip(frame["revisions"], built):
             session._viewer_names[(revision.ref.id, revision.ref.frame_ref, revision.ref.revision)] = str(
                 item.get("viewer_name") or f"{structure_id}@{revision.ref.revision}"
@@ -133,6 +139,7 @@ def load_session(path: str) -> EffectSession:
             diagnostics=list(body.get("diagnostics") or []),
             warnings=list(body.get("property_warnings") or []),
             fingerprint=str(body.get("fingerprint") or ""),
+            request_fingerprint=str(body.get("request_fingerprint") or ""),
             viewer_name=body.get("viewer_name"),
         )
         stored = session._frames.get((result.output_ref.id, result.output_ref.frame_ref), [])

@@ -66,7 +66,7 @@ def test_t19_structural_undo_does_not_track_display_edits():
     assert session.counters.display_edits == display_before + 2
 
 
-def test_commit_replay_after_undo_restores_the_same_revision():
+def test_commit_replay_after_undo_does_not_move_the_pointer():
     session = EffectSession()
     ref = session.register(f1_ordered_nonorthogonal(), structure_id="cell")
     preview = session.preview("build_supercell", {"a": 2, "b": 1, "c": 1}, structure_id=ref.id, expected_revision=1)
@@ -75,7 +75,8 @@ def test_commit_replay_after_undo_restores_the_same_revision():
     assert session.current_ref("cell").revision == 1
     replay = session.commit_candidate(preview.candidate_id, expected_revision=1, request_id="again")
     assert replay.idempotent_replay
-    assert session.current_ref("cell").revision == committed.output_ref.revision
+    assert replay.output_ref == committed.output_ref
+    assert session.current_ref("cell").revision == 1
     assert session.counters.commits == 1
 
 
@@ -111,16 +112,31 @@ def test_reloaded_request_id_does_not_commit_twice(tmp_path):
     path = tmp_path / "session.json"
     save_session(session, str(path))
     restored = load_session(str(path))
+    try:
+        restored.operate(
+            "build_supercell",
+            {"a": 9, "b": 9, "c": 9},
+            structure_id="cell",
+            expected_revision=2,
+            request_id="persist-me",
+        )
+    except RevisionConflict:
+        pass
+    else:
+        raise AssertionError("different payload reused a request id")
+    assert restored.current_ref("cell").revision == 2
+    assert restored.snapshot(restored.current_ref("cell")).n_sites == 4
     replay = restored.operate(
         "build_supercell",
-        {"a": 9, "b": 9, "c": 9},
+        {"a": 2, "b": 1, "c": 1},
         structure_id="cell",
-        expected_revision=1,
+        expected_revision=2,
         request_id="persist-me",
     )
     assert replay.idempotent_replay
     assert restored.current_ref("cell").revision == 2
     assert restored.snapshot(restored.current_ref("cell")).n_sites == 4
+    assert len(restored.revisions("cell")) == 2
 
 
 def test_t16_frame_results_do_not_cross_frames():

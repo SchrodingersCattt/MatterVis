@@ -31,8 +31,14 @@ snapshot = session.snapshot(result.output_ref)
 
 `expected_revision` must match the current revision. A candidate built
 against an older revision is rejected and does not change history.
-Repeating `request_id` returns the original commit instead of inserting
-the change again.
+Revision numbers are monotonic for a structure frame. Undo does not
+make the next commit reuse a retired number, so two scientific
+structures never share one `StructureRef`.
+
+Repeating `request_id` with the same canonical command, parameters, and
+property policy returns the recorded commit and leaves the current
+revision where it is. The same id with a different payload is rejected.
+A retry does not rewind the pointer to the older output.
 
 The same session implements `build_slab`, `insert_molecule`,
 `delete_sites`, `replace_species`, `add_hydrogens`, `remove_solvent`,

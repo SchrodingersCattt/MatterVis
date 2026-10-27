@@ -7,6 +7,7 @@ that boundary succeeds.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from threading import RLock
@@ -52,6 +53,7 @@ class Candidate:
     index_map: list[int | None]
     invalid_structure_fields: set[str]
     property_policy: dict[str, Any]
+    request_fingerprint: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -79,6 +81,7 @@ class CommitResult:
     diagnostics: list[str]
     warnings: list[dict[str, str]]
     fingerprint: str
+    request_fingerprint: str = ""
     idempotent_replay: bool = False
     viewer_name: str | None = None
 
@@ -94,6 +97,7 @@ class CommitResult:
             "diagnostics": list(self.diagnostics),
             "property_warnings": list(self.warnings),
             "fingerprint": self.fingerprint,
+            "request_fingerprint": self.request_fingerprint,
             "idempotent_replay": self.idempotent_replay,
             "viewer_name": self.viewer_name,
         }
@@ -122,6 +126,7 @@ class EffectSession:
     _results: dict[str, AnalysisResult] = field(default_factory=dict)
     _analysis_cache: dict[str, str] = field(default_factory=dict)
     _viewer_names: dict[tuple[str, str, int], str] = field(default_factory=dict)
+    _next_revision: dict[tuple[str, str], int] = field(default_factory=dict)
 
     def register(
         self,
@@ -148,6 +153,8 @@ class EffectSession:
             )
             self._frames[key] = [revision]
             self._cursor[key] = 0
+            # Revision numbers only increase. Undo never makes the next commit reuse one.
+            self._next_revision[key] = 2
             self._viewer_names[(ref.id, ref.frame_ref, ref.revision)] = viewer_name or ref.id
             self.counters.structure_builds += 1
             return ref
@@ -231,13 +238,9 @@ class EffectSession:
     ) -> Candidate | CommitResult:
         with self._lock:
             request_key = self._request_key(structure_id, frame_ref, request_id) if request_id else None
+            incoming_request = _request_fingerprint(command, params, property_policy)
             if request_key and not preview and request_key in self._requests and inject_failure is None:
-                replay = self._requests[request_key]
-                if replay.input_ref.id != str(structure_id) or replay.input_ref.frame_ref != str(frame_ref):
-                    raise RevisionConflict(f"request_id {request_id!r} belongs to a different structure")
-                replay.idempotent_replay = True
-                self._restore_request(replay)
-                return replay
+                return self._replay_request(self._requests[request_key], incoming_request, request_id=request_id)
             if inject_failure == "validate":
                 self.counters.rejected_commits += 1
                 raise InjectedFailure("injected validation failure")
@@ -273,6 +276,7 @@ class EffectSession:
                 index_map=list(outcome.index_map),
                 invalid_structure_fields=set(outcome.invalid_structure_fields),
                 property_policy=dict(property_policy or {}),
+                request_fingerprint=incoming_request,
             )
             probe = snapshot_from_crystal(
                 candidate.crystal,
@@ -306,12 +310,28 @@ class EffectSession:
             if candidate.status == "cancelled":
                 raise OperationRejected("cancelled candidates cannot be committed")
             if candidate.status == "committed" and candidate.request_id:
+                if request_id and request_id != candidate.request_id:
+                    self.counters.rejected_commits += 1
+                    raise RevisionConflict(
+                        f"request_id {request_id!r} does not match the committed candidate"
+                    )
                 request_key = self._request_key(candidate.input_ref.id, candidate.input_ref.frame_ref, candidate.request_id)
                 replay = self._requests.get(request_key)
                 if replay is not None:
-                    replay.idempotent_replay = True
-                    self._restore_request(replay)
-                    return replay
+                    return self._replay_request(
+                        replay,
+                        candidate.request_fingerprint,
+                        request_id=candidate.request_id,
+                    )
+            if request_id:
+                request_key = self._request_key(candidate.input_ref.id, candidate.input_ref.frame_ref, request_id)
+                existing = self._requests.get(request_key)
+                if existing is not None:
+                    return self._replay_request(
+                        existing,
+                        candidate.request_fingerprint,
+                        request_id=request_id,
+                    )
             current = self._current(candidate.input_ref.id, candidate.input_ref.frame_ref)
             if current.ref.revision != candidate.input_ref.revision or int(expected_revision) != current.ref.revision:
                 self.counters.rejected_commits += 1
@@ -386,7 +406,7 @@ class EffectSession:
         if current.ref != candidate.input_ref:
             self.counters.rejected_commits += 1
             raise RevisionConflict("structure revision changed before commit")
-        next_revision = current.ref.revision + 1
+        next_revision = self._allocate_revision(key)
         ref = StructureRef(current.ref.id, next_revision, current.ref.frame_ref)
         provenance = {
             "command": candidate.command,
@@ -403,8 +423,11 @@ class EffectSession:
         )
         # Replace the redo branch only after the new revision exists, so a
         # failure while building it leaves the previous redo stack intact.
+        # Retired numbers stay retired: the replacement gets a fresh revision.
+        discarded = list(self._frames[key][self._cursor[key] + 1 :])
         kept = self._frames[key][: self._cursor[key] + 1]
         self._frames[key] = [*kept, revision]
+        self._invalidate_revisions(discarded)
         self._cursor[key] = len(self._frames[key]) - 1
         name = viewer_name or f"{ref.id}@{ref.revision}"
         self._viewer_names[(ref.id, ref.frame_ref, ref.revision)] = name
@@ -419,6 +442,7 @@ class EffectSession:
             diagnostics=list(candidate.diagnostics),
             warnings=list(warnings),
             fingerprint=revision.fingerprint,
+            request_fingerprint=candidate.request_fingerprint,
             viewer_name=name,
         )
         if candidate.request_id:
@@ -431,12 +455,44 @@ class EffectSession:
     def _request_key(structure_id: str, frame_ref: str | int | None, request_id: str) -> str:
         return f"{structure_id}\n{frame_ref}\n{request_id}"
 
-    def _restore_request(self, result: CommitResult) -> None:
-        key = (result.output_ref.id, result.output_ref.frame_ref)
-        for index, revision in enumerate(self._frames.get(key, ())):
-            if revision.ref.revision == result.output_ref.revision and revision.fingerprint == result.fingerprint:
-                self._cursor[key] = index
-                return
+    def _replay_request(self, replay: CommitResult, incoming: str, *, request_id: str | None) -> CommitResult:
+        """Return the recorded commit without moving the scientific pointer."""
+
+        if replay.request_fingerprint != incoming:
+            self.counters.rejected_commits += 1
+            raise RevisionConflict(
+                f"request_id {request_id!r} was already used for a different operation"
+            )
+        replay.idempotent_replay = True
+        return replay
+
+    def _allocate_revision(self, key: tuple[str, str]) -> int:
+        nxt = self._next_revision.get(key)
+        if nxt is None:
+            existing = [item.ref.revision for item in self._frames.get(key, ())]
+            nxt = (max(existing) if existing else 0) + 1
+        self._next_revision[key] = int(nxt) + 1
+        return int(nxt)
+
+    def _invalidate_revisions(self, revisions: list[_Revision]) -> None:
+        if not revisions:
+            return
+        retired = {
+            (item.ref.id, item.ref.frame_ref, item.ref.revision)
+            for item in revisions
+        }
+        dropped = [
+            result_id
+            for result_id, result in self._results.items()
+            if (result.ref.id, result.ref.frame_ref, result.ref.revision) in retired
+        ]
+        for result_id in dropped:
+            self._results.pop(result_id, None)
+        if dropped:
+            gone = set(dropped)
+            self._analysis_cache = {
+                key: value for key, value in self._analysis_cache.items() if value not in gone
+            }
 
     def _current(self, structure_id: str, frame_ref: str | int | None) -> _Revision:
         key = (str(structure_id), str(frame_ref))
@@ -466,6 +522,45 @@ class EffectSession:
             fingerprint=snapshot.fingerprint,
             snapshot=snapshot,
         )
+
+
+def _request_fingerprint(command: str, params: Mapping[str, Any] | None, property_policy: Mapping[str, Any] | None) -> str:
+    body = {
+        "command": str(command),
+        "params": _plain_request_value(params or {}),
+        "property_policy": _plain_request_value(property_policy or {}),
+    }
+    return json.dumps(body, sort_keys=True, separators=(",", ":"))
+
+
+def _plain_request_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Mapping):
+        return {str(key): _plain_request_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain_request_value(item) for item in value]
+    tolist = getattr(value, "tolist", None)
+    if callable(tolist) and not isinstance(value, (str, bytes)):
+        return _plain_request_value(tolist())
+    if hasattr(value, "lattice") and hasattr(value, "molecules"):
+        molecules = []
+        for molecule in value.molecules:
+            positions = getattr(molecule, "positions", [])
+            molecules.append(
+                {
+                    "symbols": [str(symbol) for symbol in molecule.get_chemical_symbols()],
+                    "positions": _plain_request_value(positions),
+                }
+            )
+        return {
+            "lattice": _plain_request_value(value.lattice),
+            "pbc": [bool(item) for item in value.pbc],
+            "molecules": molecules,
+        }
+    raise ValidationError(
+        f"request parameters contain a non-canonical value of type {type(value).__name__}"
+    )
 
 
 __all__ = ["Candidate", "CommitResult", "Counters", "EffectSession"]
