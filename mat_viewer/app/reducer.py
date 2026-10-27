@@ -307,6 +307,10 @@ def operation_from_intent(payload: Mapping[str, Any]) -> Operation:
     # operation envelope so callers can log/order them consistently.
     if intent_type == "crud_scene":
         return Operation("crud_scene", data, scene_id=scene_id)
+    if intent_type == "operate":
+        # Structural commits are not view patches. The reducer keeps the
+        # view snapshot unchanged; ViewerBackend.operate performs the commit.
+        return Operation("operate", data, scene_id=scene_id)
     raise ValueError(f"unknown intent type: {intent_type}")
 
 

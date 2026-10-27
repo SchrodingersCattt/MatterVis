@@ -1,7 +1,8 @@
-"""Operation panel callbacks: display transforms + disorder resolve.
+"""Display-transform callbacks and the structural supercell commit.
 
-The transforms table moves from the left sidebar into the right
-"Operation" tab, alongside the existing disorder resolve section.
+The transform table is mounted in the Display tab. The structural
+supercell button commits through OperationService and does not write
+the legacy display repeat.
 """
 from __future__ import annotations
 
@@ -408,3 +409,30 @@ def register_operations_callbacks(app, backend):
             return no_update, _framed_state()
 
         return no_update, no_update
+
+    @app.callback(
+        Output("operate-status", "children"),
+        Input("operate-supercell-btn", "n_clicks"),
+        State("operate-supercell-a", "value"),
+        State("operate-supercell-b", "value"),
+        State("operate-supercell-c", "value"),
+        State("scene-tabs", "value"),
+        prevent_initial_call=True,
+    )
+    def commit_structural_supercell(_clicks, count_a, count_b, count_c, scene_id):
+        if not _clicks:
+            return no_update
+        try:
+            result = backend.operate(
+                "build_supercell",
+                {"a": int(count_a), "b": int(count_b), "c": int(count_c)},
+                scene_id=scene_id,
+            )
+        except Exception as exc:
+            _surface_error("Build supercell", exc)
+            return f"Supercell was not committed: {exc}"
+        output = result.get("output") or {}
+        return (
+            f"Committed build_supercell as {output.get('id')} revision {output.get('revision')} "
+            f"in scene {result.get('scene_id')}."
+        )
