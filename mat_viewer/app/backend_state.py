@@ -528,9 +528,9 @@ class _StateBackendMixin:
     def scene_for_state(self, state: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         state = self.current_state if state is None else state
         bundle = self.get_bundle(state["structure"])
-        # Phase 4: ``state["transforms"]`` is the structure-mutation
-        # pipeline. ``build_bundle_scene`` short-circuits when the list
-        # is empty so the no-transform path stays a single dict lookup.
+        # Display transforms derive the rendered scene. They do not commit
+        # a scientific structure. ``build_bundle_scene`` short-circuits
+        # when the list is empty so the no-transform path stays a lookup.
         transforms = list(state.get("transforms") or [])
         # Keep the historic ``backend_core.build_bundle_scene`` patch
         # point working for embedders and tests while the state methods
@@ -569,8 +569,6 @@ class _StateBackendMixin:
         scene_label = state.get("scene_label")
         if scene_label:
             scene["display_title"] = str(scene_label)
-        bundle.scene = scene
-        bundle.fragment_table = scene.get("fragment_table", bundle.fragment_table)
         property_spec = state.get("atom_property_color")
         if property_spec:
             from ..properties import (

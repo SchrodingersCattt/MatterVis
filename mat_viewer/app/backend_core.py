@@ -366,7 +366,7 @@ class _CoreBackendMixin:
             # Optional continuous per-atom colour field.  The stored shape is
             # the public AtomPropertyColorSpec serialized to JSON.
             "atom_property_color": None,
-            # Phase 4: list of structure-mutation transforms. See
+            # Display-only transform list. See
             # ``mat_viewer.transforms`` and
             # ``docs/agents/transforms_api.md`` for the schema. Empty list =
             # no transform; ``apply_transforms`` short-circuits.
@@ -912,6 +912,20 @@ class _CoreBackendMixin:
         elif intent_type == "upload_complete":
             state = self.get_state(scene_id)
             self.pending_state = copy.deepcopy(state)
+        elif intent_type == "operate":
+            outcome = self.operate(
+                str(data.get("command") or ""),
+                data.get("params") or {},
+                scene_id=scene_id,
+                expected_revision=data.get("expected_revision"),
+                frame_ref=data.get("frame_ref"),
+                request_id=data.get("request_id"),
+                preview=bool(data.get("preview", False)),
+                property_policy=data.get("property_policy"),
+            )
+            state = self.get_state(scene_id)
+            details["operate"] = outcome
+            invalidations = frozenset()
         else:
             raise ValueError(f"unknown intent type: {intent_type}")
 
@@ -1233,9 +1247,9 @@ class _CoreBackendMixin:
     def scene_for_state(self, state: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         state = self.current_state if state is None else state
         bundle = self.get_bundle(state["structure"])
-        # Phase 4: ``state["transforms"]`` is the structure-mutation
-        # pipeline. ``build_bundle_scene`` short-circuits when the list
-        # is empty so the no-transform path stays a single dict lookup.
+        # Display transforms derive the rendered scene. They do not commit
+        # a scientific structure. ``build_bundle_scene`` short-circuits
+        # when the list is empty so the no-transform path stays a lookup.
         transforms = list(state.get("transforms") or [])
         scene = build_bundle_scene(
             bundle,
@@ -1247,8 +1261,6 @@ class _CoreBackendMixin:
         scene_label = state.get("scene_label")
         if scene_label:
             scene["display_title"] = str(scene_label)
-        bundle.scene = scene
-        bundle.fragment_table = scene.get("fragment_table", bundle.fragment_table)
         property_spec = state.get("atom_property_color")
         if property_spec:
             from ..properties import (

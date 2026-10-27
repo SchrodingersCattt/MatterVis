@@ -12,7 +12,8 @@ from .backend_reducer import _ReducerBackendMixin
 from .backend_scenes import _SceneBackendMixin
 from .backend_io import _IOBackendMixin
 from .backend_journal import _JournalBackendMixin
-from .backend_operations import _OperationsBackendMixin
+from .backend_display import _DisplayBackendMixin
+from .backend_operate import _OperateBackendMixin
 from .backend_overlays import _OverlaysBackendMixin
 from .backend_selection import _SelectionBackendMixin
 from .backend_topology import _TopologyBackendMixin
@@ -29,7 +30,8 @@ class ViewerBackend(
     _StateBackendMixin,
     _CoreBackendMixin,
     _ReducerBackendMixin,
-    _OperationsBackendMixin,
+    _DisplayBackendMixin,
+    _OperateBackendMixin,
     _OverlaysBackendMixin,
     _SelectionBackendMixin,
     _AnalysisBackendMixin,
