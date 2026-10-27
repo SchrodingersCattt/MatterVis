@@ -81,4 +81,6 @@ source site. Deleting one periodic copy requires `delete_periodic_copy`
 or an explicit `build_supercell` followed by `delete_sites` on the
 mapped output site. `materialize_selection` freezes explicit
 site/image pairs into a `PBC=False` cluster and rejects provenance-free
-ghosts.
+ghosts. A periodic request must supply `cell` and `equivalences`; the
+committed crystal then uses that cell and those PBC flags. A periodic
+request without them is rejected and does not return a finite cluster.
