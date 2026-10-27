@@ -15,8 +15,8 @@
 - `delete_periodic_copy` is one commit composed of supercell construction and site deletion.
 - Legacy scene migration writes view configuration, keeps a `.bak`, and commits nothing.
 
-## Checks recorded before the acceptance report
+## Checks
 
-- `python -m pytest tests/architecture tests/contracts tests/operations tests/analysis` passed (44).
-- `python -m pytest tests/ -n 4 --dist loadfile -m "not integration and not slow"` passed 931, skipped 34, before the CLI line-limit adjustment.
-- Full `tests/` run is recorded in the acceptance report.
+- Focused effect tests passed (44).
+- Full `python -m pytest tests/ -n 4 --dist loadfile` on `4f12ed4`: 2049 passed, 70 skipped, exit 0.
+- Evidence file: `docs/architecture/issue-163-acceptance-report.json` (commit `0eee384`). The report commit does not change runtime code.
