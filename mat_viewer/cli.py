@@ -8,6 +8,7 @@ skills        Read bundled Agent Skills without loading a renderer.
 render        Generate publication-quality figures and animations.
 serve         Launch the interactive Dash browser viewer.
 tui           Launch or print the terminal viewer.
+operate       Commit a structural operation such as build-supercell.
 
 Usage::
 
@@ -1228,6 +1229,9 @@ def main(argv: Optional[list[str]] = None) -> None:
     )
     _build_serve_parser(subparsers)
     _build_tui_parser(subparsers)
+    from .effects.cli import build_operate_parser
+
+    build_operate_parser(subparsers)
 
     args = parser.parse_args(argv)
 
@@ -1247,6 +1251,13 @@ def main(argv: Optional[list[str]] = None) -> None:
             _fail(str(exc), json_output=False)
         from .app.serve_cli import serve_main
         serve_main(args)
+    elif args.command == "operate":
+        from .effects.cli import operate_main
+
+        try:
+            operate_main(args)
+        except Exception as exc:
+            _fail(str(exc), json_output=getattr(args, "json_output", False))
     elif args.command == "tui":
         try:
             resolve_requirements(

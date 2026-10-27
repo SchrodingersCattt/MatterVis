@@ -154,8 +154,8 @@ class _StateBackendMixin:
             replicas = patch.get("disorder_replicas") or []
             state["disorder_replicas"] = replicas if isinstance(replicas, list) else []
         # ``supercell`` is a v2 shorthand: ``{"a": Na, "b": Nb, "c": Nc}``
-        # is rewritten to a single ``repeat`` transform appended to the
-        # transforms list. Keeps the AI scripting path one-line for the
+        # replaces any existing display ``repeat``. It does not stack and
+        # it does not commit a structure. Keeps the AI scripting path one-line for the
         # most common "show me a 2x2x2" request without forcing the
         # caller to construct a transform spec.
         if "supercell" in patch and patch["supercell"] is not None:
@@ -528,9 +528,9 @@ class _StateBackendMixin:
     def scene_for_state(self, state: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         state = self.current_state if state is None else state
         bundle = self.get_bundle(state["structure"])
-        # Phase 4: ``state["transforms"]`` is the structure-mutation
-        # pipeline. ``build_bundle_scene`` short-circuits when the list
-        # is empty so the no-transform path stays a single dict lookup.
+        # Display transforms derive the rendered scene. They do not commit
+        # a scientific structure. ``build_bundle_scene`` short-circuits
+        # when the list is empty so the no-transform path stays a lookup.
         transforms = list(state.get("transforms") or [])
         # Keep the historic ``backend_core.build_bundle_scene`` patch
         # point working for embedders and tests while the state methods
@@ -569,8 +569,6 @@ class _StateBackendMixin:
         scene_label = state.get("scene_label")
         if scene_label:
             scene["display_title"] = str(scene_label)
-        bundle.scene = scene
-        bundle.fragment_table = scene.get("fragment_table", bundle.fragment_table)
         property_spec = state.get("atom_property_color")
         if property_spec:
             from ..properties import (

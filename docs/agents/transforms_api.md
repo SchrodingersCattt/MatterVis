@@ -1,24 +1,22 @@
-# Structure transforms API
+# Display transforms API
 
-The viewer's **transforms** model is the per-scene structure-mutation
-pipeline ("grow", "repeat", "complete fragment", "slab", ...).
+The viewer's **transforms** model is a per-scene display derivation
+("grow", "repeat", "complete fragment", "slab", ...).
 Each transform takes a base scene and produces a new scene whose
-`draw_atoms`, `bonds`, and `fragment_table` reflect the operation
-applied. Transforms compose in **list order**: each entry's input is
-the output of the previous one.
+`draw_atoms`, `bonds`, and `fragment_table` reflect the derivation.
+Transforms compose in **list order**: each entry's input is the output
+of the previous one. They do not commit a scientific structure.
 
-Internally the implementation keeps an explicit source/display split and
-retains MolCrysKit's public `SiteRecord`/`BondRecord` identities on every
-scene:
+Structural edits use `mat_viewer.effects.EffectSession` and the
+`mat-vis operate` command. `build_supercell` creates a new lattice and
+site list. The legacy `supercell` field on `POST /api/v2/state` and a
+`repeat` transform only draw periodic copies. There is no
+`operate supercell` alias.
 
-- `mat_viewer.ops.source` is for real `MolecularCrystal` in/out
-  operations such as a future saveable slab or true supercell.
-- `mat_viewer.ops.display` is for fast scene-dict in/out
-  operations used by the current transform pipeline.
-
-The REST transform list remains display-side today for compatibility;
-source-side outputs re-enter the viewer through the loader before they
-are rendered.
+Display scenes keep MolCrysKit `SiteRecord` and `BondRecord` identities
+on each drawn instance. A committed operation re-enters the viewer
+through `loaded_crystal_from_crystal`, which does not write a temporary
+CIF.
 
 ## Display-Mode Interaction
 

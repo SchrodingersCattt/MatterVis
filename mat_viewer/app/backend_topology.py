@@ -144,38 +144,6 @@ class _TopologyBackendMixin:
             return int(candidates[0]["index"])
         return None
 
-    # ---- polyhedron_specs CRUD ---------------------------------------
-    #
-    # All methods operate on the active scene's state by default;
-    # callers may pass ``scene_id`` to target a specific tab. They
-    # always return the persisted list of specs (post-normalisation)
-    # and emit a broadcast so every connected client picks up the
-    # change. Wraps ``patch_state`` so the existing version bump,
-    # autosave, and pending-state machinery just works.
-
-
-    def _effective_polyhedron_specs(self, state: dict[str, Any]) -> list[dict[str, Any]]:
-        """Resolve the per-render list of explicit named polyhedron specs.
-
-        MatterVis no longer synthesises auto-ligand specs from
-        ``topology_species_keys``; molecule-level packing shells are delegated
-        to MolCrysKit and require explicit centre/ligand formulas.
-
-        Phase 6: returns *all* specs (enabled or disabled). The renderer
-        decides per-spec visibility via the ``meta.spec_id`` tag the
-        overlay traces carry, and the figure cache key strips the
-        ``enabled`` flag (see ``_figure_state_cache_key``). That way
-        toggling the row checkbox is a cache HIT + trace-visibility
-        patch (~30 ms) instead of a cache MISS + full rebuild
-        (200-400 ms on the user's DAP-4321 scene). MolCrysKit still
-        runs ``find_polyhedra`` for every spec, but the result is
-        cached on the bundle so the cost is paid once per geometry.
-        """
-        explicit = list(state.get("polyhedron_specs") or [])
-        if explicit:
-            return [dict(spec) for spec in explicit]
-        return []
-
     def _topology_cache(self, bundle) -> OrderedDict:
         cache = getattr(bundle, "_topology_state_cache", None)
         if not isinstance(cache, OrderedDict):
@@ -203,8 +171,9 @@ class _TopologyBackendMixin:
         *,
         strict: bool = False,
         scene: Optional[dict[str, Any]] = None,
+        scientific: bool = False,
     ) -> Optional[dict[str, Any]]:
-        if not state.get("topology_enabled", False):
+        if not scientific and not state.get("topology_enabled", False):
             if strict:
                 raise TopologyUnavailable(
                     "topology is disabled for this scene",
@@ -299,8 +268,11 @@ class _TopologyBackendMixin:
         click_data: Optional[dict[str, Any]] = None,
         *,
         strict: bool = False,
+        scientific: bool = False,
     ):
-        context = self._topology_context(state, click_data=click_data, strict=strict)
+        context = self._topology_context(
+            state, click_data=click_data, strict=strict, scientific=scientific
+        )
         if context is None:
             return None
         bundle = context["bundle"]
@@ -344,8 +316,11 @@ class _TopologyBackendMixin:
         click_data: Optional[dict[str, Any]] = None,
         *,
         strict: bool = False,
+        scientific: bool = False,
     ):
-        context = self._topology_context(state, click_data=click_data, strict=strict)
+        context = self._topology_context(
+            state, click_data=click_data, strict=strict, scientific=scientific
+        )
         if context is None:
             return None
         bundle = context["bundle"]

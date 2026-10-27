@@ -34,6 +34,15 @@ flowchart TB
     tui["Textual UI [tui]"] --> select
 ```
 
+## Scientific effects
+
+Display, Analysis, and Operate are separate effects. Display changes a
+view. Analysis reads one immutable snapshot. Operate commits a new
+structure revision through `EffectSession`. The legacy `supercell`
+shorthand remains a display repeat. Details and the nine structural
+commands are in
+[display-operate-analysis.md](architecture/display-operate-analysis.md).
+
 ## Ownership
 
 | Layer | Owns | Must not own |

@@ -1,7 +1,8 @@
-"""Operation panel callbacks: display transforms + disorder resolve.
+"""Display-transform callbacks and the structural supercell commit.
 
-The transforms table moves from the left sidebar into the right
-"Operation" tab, alongside the existing disorder resolve section.
+The transform table is mounted in the Display tab. The structural
+supercell button commits through OperationService and does not write
+the legacy display repeat.
 """
 from __future__ import annotations
 
@@ -162,6 +163,20 @@ def _surface_formula_unit_warning(response: Any) -> None:
             continue
         emit_legacy_status(f"Warning: {text}")
         return
+
+
+def _strict_repeat(value: Any, axis: str) -> int:
+    """Accept an integer repeat count. A whole-number float from the number input is that integer."""
+
+    if isinstance(value, (bool, str)):
+        raise ValueError(f"repetition along {axis} must be a positive integer")
+    if isinstance(value, float):
+        if not value.is_integer():
+            raise ValueError(f"repetition along {axis} must be a positive integer")
+        value = int(value)
+    if not isinstance(value, int) or value < 1:
+        raise ValueError(f"repetition along {axis} must be a positive integer")
+    return value
 
 
 def register_operations_callbacks(app, backend):
@@ -408,3 +423,46 @@ def register_operations_callbacks(app, backend):
             return no_update, _framed_state()
 
         return no_update, no_update
+
+    @app.callback(
+        Output("operate-status", "children"),
+        Input("operate-supercell-btn", "n_clicks"),
+        State("operate-supercell-a", "value"),
+        State("operate-supercell-b", "value"),
+        State("operate-supercell-c", "value"),
+        State("scene-tabs", "value"),
+        prevent_initial_call=True,
+    )
+    def commit_structural_supercell(_clicks, count_a, count_b, count_c, scene_id):
+        if not _clicks:
+            return no_update
+        try:
+            state = backend.get_state(scene_id)
+            bundle = backend.get_bundle(str(state.get("structure") or ""))
+            structure_id = str(getattr(bundle, "scientific_structure_id", None) or bundle.name)
+            frame = str(getattr(bundle, "scientific_frame", "0"))
+            session = backend.effect_session()
+            expected_revision = (
+                session.current_ref(structure_id, frame).revision
+                if session.has(structure_id, frame)
+                else 1
+            )
+            result = backend.operate(
+                "build_supercell",
+                {
+                    "a": _strict_repeat(count_a, "a"),
+                    "b": _strict_repeat(count_b, "b"),
+                    "c": _strict_repeat(count_c, "c"),
+                },
+                scene_id=scene_id,
+                structure_id=structure_id,
+                expected_revision=expected_revision,
+            )
+        except Exception as exc:
+            _surface_error("Build supercell", exc)
+            return f"Supercell was not committed: {exc}"
+        output = result.get("output") or {}
+        return (
+            f"Committed build_supercell as {output.get('id')} revision {output.get('revision')} "
+            f"in scene {result.get('scene_id')}."
+        )

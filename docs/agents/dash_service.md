@@ -194,7 +194,7 @@ Notes for callers:
   but named polyhedra now render from `polyhedron_specs`),
   `topology_site_index` (primary site for the histogram /
   results panel), `topology_enabled`, `topology_hull_color`,
-  `transforms` (full ordered list of structure mutations; see
+  `transforms` (full ordered list of display derivations; see
   `transforms_api.md`),
   `overlay_overrides` (manual 2D component placement entries; paper
   anchors for fixed viewport components, world anchors plus pixel
@@ -369,8 +369,8 @@ Notes for callers:
   [`bond_groups_api.md`](bond_groups_api.md).
 - `GET /transforms` / `POST /transforms` / `PATCH /transforms/{id}` /
   `DELETE /transforms/{id}` / `POST /transforms/reorder`
-  Ordered list of structure mutations applied before rendering:
-  `repeat` (supercell), `grow_radius`, `grow_bonds`,
+  Ordered list of display derivations applied before rendering:
+  `repeat` (periodic copies), `grow_radius`, `grow_bonds`,
   `complete_fragment`, `complete_polyhedron`, `by_symmetry`, `slab`.
   See [`transforms_api.md`](transforms_api.md). The simplest case
   ("just give me a 2×2×2 view") can use the `supercell` shorthand on

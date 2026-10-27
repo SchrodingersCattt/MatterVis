@@ -1,0 +1,703 @@
+"""Single scientific session: snapshots, candidates, and atomic commits.
+
+Display and Analysis receive snapshots. Only ``commit`` advances a
+structure revision. Candidates stay out of the committed history until
+that boundary succeeds.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from threading import RLock
+from types import MappingProxyType
+from typing import Any
+from uuid import uuid4
+
+from .analysis import AnalysisResult, analyze, canonical_query, query_key
+from .errors import (
+    InjectedFailure,
+    OperationRejected,
+    RevisionConflict,
+    ValidationError,
+)
+from .operations import IMPLEMENTED_COMMANDS, run_operation
+from .properties import apply_property_policy, normalize_properties
+from .refs import StructureRef
+from .snapshot import ScientificSnapshot, snapshot_from_crystal
+
+
+@dataclass
+class _Revision:
+    ref: StructureRef
+    crystal: Any
+    properties: dict[str, Any]
+    provenance: dict[str, Any]
+    fingerprint: str
+    snapshot: ScientificSnapshot
+
+
+@dataclass
+class Candidate:
+    candidate_id: str
+    command: str
+    input_ref: StructureRef
+    request_id: str | None
+    status: str
+    mappings: list[dict[str, Any]]
+    diagnostics: list[str]
+    provenance: dict[str, Any]
+    fingerprint: str
+    crystal: Any
+    properties: dict[str, Any]
+    index_map: list[int | None]
+    invalid_structure_fields: set[str]
+    property_policy: dict[str, Any]
+    request_fingerprint: str = ""
+    sealed_mappings: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "candidate_id": self.candidate_id,
+            "command": self.command,
+            "input": self.input_ref.to_dict(),
+            "request_id": self.request_id,
+            "status": self.status,
+            "mappings": self.mappings,
+            "diagnostics": list(self.diagnostics),
+            "provenance": self.provenance,
+            "fingerprint": self.fingerprint,
+            "n_sites": int(sum(len(molecule) for molecule in self.crystal.molecules)),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateView:
+    """Detached preview. It does not carry the scientific crystal."""
+
+    candidate_id: str
+    command: str
+    input_ref: StructureRef
+    request_id: str | None
+    status: str
+    mappings: tuple
+    diagnostics: tuple[str, ...]
+    provenance: Mapping[str, Any]
+    fingerprint: str
+    n_sites: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "candidate_id": self.candidate_id,
+            "command": self.command,
+            "input": self.input_ref.to_dict(),
+            "request_id": self.request_id,
+            "status": self.status,
+            "mappings": [dict(item) for item in self.mappings],
+            "diagnostics": list(self.diagnostics),
+            "provenance": dict(self.provenance),
+            "fingerprint": self.fingerprint,
+            "n_sites": self.n_sites,
+        }
+
+
+@dataclass
+class CommitResult:
+    input_ref: StructureRef
+    output_ref: StructureRef
+    command: str
+    request_id: str | None
+    candidate_id: str
+    mappings: list[dict[str, Any]]
+    diagnostics: list[str]
+    warnings: list[dict[str, str]]
+    fingerprint: str
+    request_fingerprint: str = ""
+    idempotent_replay: bool = False
+    viewer_name: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": "committed",
+            "command": self.command,
+            "input": self.input_ref.to_dict(),
+            "output": self.output_ref.to_dict(),
+            "request_id": self.request_id,
+            "candidate_id": self.candidate_id,
+            "mappings": self.mappings,
+            "diagnostics": list(self.diagnostics),
+            "property_warnings": list(self.warnings),
+            "fingerprint": self.fingerprint,
+            "request_fingerprint": self.request_fingerprint,
+            "idempotent_replay": self.idempotent_replay,
+            "viewer_name": self.viewer_name,
+        }
+
+
+@dataclass
+class Counters:
+    structure_builds: int = 0
+    scientific_computations: int = 0
+    cache_hits: int = 0
+    commits: int = 0
+    rejected_commits: int = 0
+    display_edits: int = 0
+
+
+@dataclass
+class EffectSession:
+    """Authoritative structure revisions and their effect services."""
+
+    counters: Counters = field(default_factory=Counters)
+    _lock: RLock = field(default_factory=RLock)
+    _frames: dict[tuple[str, str], list[_Revision]] = field(default_factory=dict)
+    _cursor: dict[tuple[str, str], int] = field(default_factory=dict)
+    _candidates: dict[str, Candidate] = field(default_factory=dict)
+    _requests: dict[str, CommitResult] = field(default_factory=dict)
+    _results: dict[str, AnalysisResult] = field(default_factory=dict)
+    _analysis_cache: dict[str, str] = field(default_factory=dict)
+    _viewer_names: dict[tuple[str, str, int], str] = field(default_factory=dict)
+    _next_revision: dict[tuple[str, str], int] = field(default_factory=dict)
+
+    def register(
+        self,
+        crystal,
+        *,
+        structure_id: str,
+        frame_ref: str | int | None = "0",
+        properties: Mapping[str, Any] | None = None,
+        provenance: Mapping[str, Any] | None = None,
+        viewer_name: str | None = None,
+    ) -> StructureRef:
+        """Register an imported crystal as revision 1 without copying later edits into it."""
+
+        with self._lock:
+            key = (str(structure_id), str(frame_ref))
+            if key in self._frames:
+                return self._frames[key][self._cursor[key]].ref
+            ref = StructureRef(structure_id, 1, str(frame_ref))
+            revision = self._make_revision(
+                crystal.copy(),
+                ref=ref,
+                properties=normalize_properties(properties),
+                provenance={"origin": "import", **dict(provenance or {})},
+            )
+            self._frames[key] = [revision]
+            self._cursor[key] = 0
+            # Revision numbers only increase. Undo never makes the next commit reuse one.
+            self._next_revision[key] = 2
+            self._viewer_names[(ref.id, ref.frame_ref, ref.revision)] = viewer_name or ref.id
+            self.counters.structure_builds += 1
+            return ref
+
+    def has(self, structure_id: str, frame_ref: str | int | None = "0") -> bool:
+        return (str(structure_id), str(frame_ref)) in self._frames
+
+    def current_ref(self, structure_id: str, frame_ref: str | int | None = "0") -> StructureRef:
+        with self._lock:
+            return self._current(structure_id, frame_ref).ref
+
+    def snapshot(self, ref: StructureRef | None = None, *, structure_id: str | None = None, frame_ref: str | int | None = None) -> ScientificSnapshot:
+        with self._lock:
+            revision = self._resolve(ref, structure_id=structure_id, frame_ref=frame_ref)
+            return revision.snapshot
+
+    def checkout(self, ref: StructureRef):
+        """Return a private crystal copy. Callers cannot alias the stored object."""
+
+        with self._lock:
+            return self._resolve(ref).crystal.copy()
+
+    def fingerprint(self, ref: StructureRef | None = None, *, structure_id: str | None = None, frame_ref: str | int | None = None) -> str:
+        return self.snapshot(ref, structure_id=structure_id, frame_ref=frame_ref).fingerprint
+
+    def note_display_edit(self) -> None:
+        """Record a view-only edit. This cannot advance a structure revision."""
+
+        with self._lock:
+            self.counters.display_edits += 1
+
+    def analyze(self, ref: StructureRef, query: Mapping[str, Any]) -> AnalysisResult:
+        with self._lock:
+            revision = self._resolve(ref)
+            query = canonical_query(query)
+            key = f"{revision.ref.revision}:{query_key(revision.snapshot, query)}"
+            cached = self._analysis_cache.get(key)
+            if cached is not None:
+                self.counters.cache_hits += 1
+                return self._results[cached]
+            self.counters.scientific_computations += 1
+            result = analyze(revision.snapshot, query, result_id=f"analysis-{uuid4().hex[:12]}")
+            self._results[result.result_id] = result
+            self._analysis_cache[key] = result.result_id
+            return result
+
+    def result(self, result_id: str) -> AnalysisResult:
+        with self._lock:
+            try:
+                return self._results[result_id]
+            except KeyError as exc:
+                raise KeyError(result_id) from exc
+
+    def bind_result(self, result: AnalysisResult, ref: StructureRef) -> AnalysisResult:
+        """Refuse to attach a result computed for a different revision or frame."""
+
+        if result.ref.id != ref.id or result.ref.revision != ref.revision or result.ref.frame_ref != ref.frame_ref:
+            raise RevisionConflict(
+                "analysis result "
+                f"{result.ref.id}@{result.ref.revision} frame {result.ref.frame_ref} "
+                f"cannot bind to {ref.id}@{ref.revision} frame {ref.frame_ref}"
+            )
+        return result
+
+    def preview(self, command: str, params: Mapping[str, Any] | None = None, **kwargs) -> Candidate:
+        return self.operate(command, params, preview=True, **kwargs)
+
+    def operate(
+        self,
+        command: str,
+        params: Mapping[str, Any] | None = None,
+        *,
+        structure_id: str,
+        expected_revision: int,
+        frame_ref: str | int | None = "0",
+        request_id: str | None = None,
+        preview: bool = False,
+        property_policy: Mapping[str, Any] | None = None,
+        inject_failure: str | None = None,
+        viewer_name: str | None = None,
+    ) -> CandidateView | CommitResult:
+        with self._lock:
+            request_key = self._request_key(structure_id, frame_ref, request_id) if request_id else None
+            incoming_request = _request_fingerprint(command, params, property_policy)
+            if request_key and not preview and request_key in self._requests and inject_failure is None:
+                return self._replay_request(self._requests[request_key], incoming_request, request_id=request_id)
+            if inject_failure == "validate":
+                self.counters.rejected_commits += 1
+                raise InjectedFailure("injected validation failure")
+            current = self._current(structure_id, frame_ref)
+            if int(expected_revision) != current.ref.revision:
+                self.counters.rejected_commits += 1
+                raise RevisionConflict(
+                    f"expected revision {expected_revision} but {current.ref.id} is at {current.ref.revision}"
+                )
+            if inject_failure == "construct":
+                self.counters.rejected_commits += 1
+                raise InjectedFailure("injected construction failure")
+            outcome = run_operation(command, current.crystal.copy(), params or {})
+            transformed, warnings = apply_property_policy(
+                current.properties,
+                property_policy,
+                command=command,
+                index_map=outcome.index_map,
+                invalid_structure_fields=set(outcome.invalid_structure_fields),
+            )
+            candidate = Candidate(
+                candidate_id=f"cand-{uuid4().hex[:12]}",
+                command=command,
+                input_ref=current.ref,
+                request_id=request_id,
+                status="preview" if preview else "ready",
+                mappings=outcome.mappings,
+                diagnostics=list(outcome.diagnostics),
+                provenance=dict(outcome.provenance),
+                fingerprint="",
+                crystal=outcome.crystal,
+                properties=transformed,
+                index_map=list(outcome.index_map),
+                invalid_structure_fields=set(outcome.invalid_structure_fields),
+                property_policy=dict(property_policy or {}),
+                request_fingerprint=incoming_request,
+            )
+            probe = snapshot_from_crystal(
+                candidate.crystal,
+                ref=StructureRef(current.ref.id, current.ref.revision, current.ref.frame_ref),
+                properties=transformed,
+                provenance=candidate.provenance,
+            )
+            candidate.fingerprint = probe.fingerprint
+            candidate.sealed_mappings = tuple(_mapping_token(item) for item in candidate.mappings)
+            self._candidates[candidate.candidate_id] = candidate
+            if preview or inject_failure == "cancel":
+                if inject_failure == "cancel":
+                    candidate.status = "cancelled"
+                return _public_candidate(candidate)
+            if candidate.status == "cancelled":
+                raise OperationRejected("cancelled candidates cannot be committed")
+            return self._commit_locked(candidate, warnings=list(warnings), inject_failure=inject_failure, viewer_name=viewer_name)
+
+    def commit_candidate(
+        self,
+        candidate_id: str,
+        *,
+        expected_revision: int,
+        request_id: str | None = None,
+        inject_failure: str | None = None,
+        viewer_name: str | None = None,
+    ) -> CommitResult:
+        with self._lock:
+            candidate = self._candidates.get(candidate_id)
+            if candidate is None:
+                raise KeyError(candidate_id)
+            if candidate.status == "cancelled":
+                raise OperationRejected("cancelled candidates cannot be committed")
+            if candidate.status == "committed" and candidate.request_id:
+                if request_id and request_id != candidate.request_id:
+                    self.counters.rejected_commits += 1
+                    raise RevisionConflict(
+                        f"request_id {request_id!r} does not match the committed candidate"
+                    )
+                request_key = self._request_key(candidate.input_ref.id, candidate.input_ref.frame_ref, candidate.request_id)
+                replay = self._requests.get(request_key)
+                if replay is not None:
+                    return self._replay_request(
+                        replay,
+                        candidate.request_fingerprint,
+                        request_id=candidate.request_id,
+                    )
+            if request_id:
+                request_key = self._request_key(candidate.input_ref.id, candidate.input_ref.frame_ref, request_id)
+                existing = self._requests.get(request_key)
+                if existing is not None:
+                    return self._replay_request(
+                        existing,
+                        candidate.request_fingerprint,
+                        request_id=request_id,
+                    )
+            current = self._current(candidate.input_ref.id, candidate.input_ref.frame_ref)
+            if current.ref.revision != candidate.input_ref.revision or int(expected_revision) != current.ref.revision:
+                self.counters.rejected_commits += 1
+                raise RevisionConflict(
+                    f"candidate {candidate_id} was built at revision {candidate.input_ref.revision} "
+                    f"but the structure is now at {current.ref.revision}"
+                )
+            if request_id:
+                candidate.request_id = request_id
+            return self._commit_locked(candidate, warnings=[], inject_failure=inject_failure, viewer_name=viewer_name)
+
+    def cancel(self, candidate_id: str) -> CandidateView:
+        with self._lock:
+            candidate = self._candidates[candidate_id]
+            candidate.status = "cancelled"
+            return _public_candidate(candidate)
+
+    def checkout_candidate(self, candidate_id: str):
+        """Return a private copy of a retained candidate crystal."""
+
+        with self._lock:
+            candidate = self._candidates.get(candidate_id)
+            if candidate is None:
+                raise KeyError(candidate_id)
+            if candidate.status == "cancelled":
+                raise OperationRejected("cancelled candidates cannot be checked out")
+            return candidate.crystal.copy()
+
+    def find_request_replay(
+        self,
+        *,
+        structure_id: str,
+        frame_ref: str | int | None = "0",
+        request_id: str | None = None,
+        command: str,
+        params: Mapping[str, Any] | None = None,
+        property_policy: Mapping[str, Any] | None = None,
+    ) -> CommitResult | None:
+        """Return a recorded commit for this request without moving the pointer."""
+
+        if not request_id:
+            return None
+        with self._lock:
+            replay = self._requests.get(self._request_key(structure_id, frame_ref, request_id))
+            if replay is None:
+                return None
+            return self._replay_request(
+                replay,
+                _request_fingerprint(command, params, property_policy),
+                request_id=request_id,
+            )
+
+    def rollback_commit(self, result: CommitResult) -> StructureRef:
+        """Undo a commit that never became the published structure.
+
+        The request id is released so a later retry can commit again.
+        The retired revision number is not reused.
+        """
+
+        with self._lock:
+            key = (result.output_ref.id, result.output_ref.frame_ref)
+            current = self._frames[key][self._cursor[key]]
+            if current.ref != result.output_ref:
+                raise RevisionConflict("cannot roll back a commit that is not current")
+            if self._cursor[key] <= 0:
+                raise ValidationError("cannot roll back the imported revision")
+            self._cursor[key] -= 1
+            if result.request_id:
+                self._requests.pop(
+                    self._request_key(result.output_ref.id, result.output_ref.frame_ref, result.request_id),
+                    None,
+                )
+            candidate = self._candidates.get(result.candidate_id)
+            if candidate is not None and candidate.status == "committed":
+                candidate.status = "ready"
+            if self.counters.commits:
+                self.counters.commits -= 1
+            if self.counters.structure_builds:
+                self.counters.structure_builds -= 1
+            return self._frames[key][self._cursor[key]].ref
+
+    def undo(self, structure_id: str, frame_ref: str | int | None = "0") -> StructureRef:
+        with self._lock:
+            key = (str(structure_id), str(frame_ref))
+            cursor = self._cursor[key]
+            if cursor <= 0:
+                raise ValidationError("no structural operation to undo")
+            self._cursor[key] = cursor - 1
+            return self._frames[key][self._cursor[key]].ref
+
+    def redo(self, structure_id: str, frame_ref: str | int | None = "0") -> StructureRef:
+        with self._lock:
+            key = (str(structure_id), str(frame_ref))
+            cursor = self._cursor[key]
+            if cursor + 1 >= len(self._frames[key]):
+                raise ValidationError("no structural operation to redo")
+            self._cursor[key] = cursor + 1
+            return self._frames[key][self._cursor[key]].ref
+
+    def revisions(self, structure_id: str, frame_ref: str | int | None = "0") -> list[StructureRef]:
+        with self._lock:
+            key = (str(structure_id), str(frame_ref))
+            limit = self._cursor[key] + 1
+            return [item.ref for item in self._frames[key][:limit]]
+
+    def viewer_name(self, ref: StructureRef) -> str:
+        return self._viewer_names.get((ref.id, ref.frame_ref, ref.revision), ref.id)
+
+    def capabilities(self) -> dict[str, Any]:
+        return {
+            "schema": "mattervis.operate/v1",
+            "commands": [
+                {"name": name, "implemented": True, "effect": "operate"}
+                for name in IMPLEMENTED_COMMANDS
+            ],
+            "workflows": [
+                {
+                    "name": "delete_periodic_copy",
+                    "implemented": True,
+                    "steps": ["build_supercell", "delete_sites"],
+                    "commits": 1,
+                }
+            ],
+            "aliases_rejected": ["operate supercell", "supercell"],
+        }
+
+    def _commit_locked(self, candidate: Candidate, *, warnings, inject_failure, viewer_name) -> CommitResult:
+        self._revalidate_candidate(candidate)
+        if inject_failure == "persist":
+            self.counters.rejected_commits += 1
+            raise InjectedFailure("injected persistence failure")
+        if inject_failure == "commit":
+            self.counters.rejected_commits += 1
+            raise InjectedFailure("injected commit-boundary failure")
+        key = (candidate.input_ref.id, candidate.input_ref.frame_ref)
+        current = self._frames[key][self._cursor[key]]
+        if current.ref != candidate.input_ref:
+            self.counters.rejected_commits += 1
+            raise RevisionConflict("structure revision changed before commit")
+        next_revision = self._allocate_revision(key)
+        ref = StructureRef(current.ref.id, next_revision, current.ref.frame_ref)
+        provenance = {
+            "command": candidate.command,
+            "parent": current.ref.to_dict(),
+            "candidate_id": candidate.candidate_id,
+            "request_id": candidate.request_id,
+            **candidate.provenance,
+        }
+        revision = self._make_revision(
+            candidate.crystal.copy(),
+            ref=ref,
+            properties=candidate.properties,
+            provenance=provenance,
+        )
+        # Replace the redo branch only after the new revision exists, so a
+        # failure while building it leaves the previous redo stack intact.
+        # Retired numbers stay retired: the replacement gets a fresh revision.
+        discarded = list(self._frames[key][self._cursor[key] + 1 :])
+        kept = self._frames[key][: self._cursor[key] + 1]
+        self._frames[key] = [*kept, revision]
+        self._invalidate_revisions(discarded)
+        self._cursor[key] = len(self._frames[key]) - 1
+        name = viewer_name or f"{ref.id}@{ref.revision}"
+        self._viewer_names[(ref.id, ref.frame_ref, ref.revision)] = name
+        candidate.status = "committed"
+        result = CommitResult(
+            input_ref=candidate.input_ref,
+            output_ref=ref,
+            command=candidate.command,
+            request_id=candidate.request_id,
+            candidate_id=candidate.candidate_id,
+            mappings=candidate.mappings,
+            diagnostics=list(candidate.diagnostics),
+            warnings=list(warnings),
+            fingerprint=revision.fingerprint,
+            request_fingerprint=candidate.request_fingerprint,
+            viewer_name=name,
+        )
+        if candidate.request_id:
+            self._requests[self._request_key(ref.id, ref.frame_ref, candidate.request_id)] = result
+        self.counters.commits += 1
+        self.counters.structure_builds += 1
+        return result
+
+    @staticmethod
+    def _request_key(structure_id: str, frame_ref: str | int | None, request_id: str) -> str:
+        return f"{structure_id}\n{frame_ref}\n{request_id}"
+
+    def _revalidate_candidate(self, candidate: Candidate) -> None:
+        probe = snapshot_from_crystal(
+            candidate.crystal,
+            ref=candidate.input_ref,
+            properties=candidate.properties,
+            provenance=candidate.provenance,
+        )
+        output_ids = {site.site_id for site in probe.sites}
+        tokens = tuple(_mapping_token(item) for item in candidate.mappings)
+        mismatch = probe.fingerprint != candidate.fingerprint or tokens != candidate.sealed_mappings
+        if not mismatch:
+            for mapping in candidate.mappings:
+                output_id = mapping.get("output_site_id")
+                if output_id and str(output_id) not in output_ids:
+                    mismatch = True
+                    break
+        if mismatch:
+            self.counters.rejected_commits += 1
+            raise OperationRejected("candidate content no longer matches its sealed fingerprint and site mappings")
+
+    def _replay_request(self, replay: CommitResult, incoming: str, *, request_id: str | None) -> CommitResult:
+        """Return the recorded commit without moving the scientific pointer."""
+
+        if replay.request_fingerprint != incoming:
+            self.counters.rejected_commits += 1
+            raise RevisionConflict(
+                f"request_id {request_id!r} was already used for a different operation"
+            )
+        replay.idempotent_replay = True
+        return replay
+
+    def _allocate_revision(self, key: tuple[str, str]) -> int:
+        nxt = self._next_revision.get(key)
+        if nxt is None:
+            existing = [item.ref.revision for item in self._frames.get(key, ())]
+            nxt = (max(existing) if existing else 0) + 1
+        self._next_revision[key] = int(nxt) + 1
+        return int(nxt)
+
+    def _invalidate_revisions(self, revisions: list[_Revision]) -> None:
+        if not revisions:
+            return
+        retired = {
+            (item.ref.id, item.ref.frame_ref, item.ref.revision)
+            for item in revisions
+        }
+        dropped = [
+            result_id
+            for result_id, result in self._results.items()
+            if (result.ref.id, result.ref.frame_ref, result.ref.revision) in retired
+        ]
+        for result_id in dropped:
+            self._results.pop(result_id, None)
+        if dropped:
+            gone = set(dropped)
+            self._analysis_cache = {
+                key: value for key, value in self._analysis_cache.items() if value not in gone
+            }
+
+    def _current(self, structure_id: str, frame_ref: str | int | None) -> _Revision:
+        key = (str(structure_id), str(frame_ref))
+        try:
+            return self._frames[key][self._cursor[key]]
+        except KeyError as exc:
+            raise KeyError(f"unknown structure {structure_id} frame {frame_ref}") from exc
+
+    def _resolve(self, ref: StructureRef | None, *, structure_id: str | None = None, frame_ref: str | int | None = None) -> _Revision:
+        if ref is None:
+            if structure_id is None:
+                raise ValidationError("a structure reference is required")
+            return self._current(structure_id, "0" if frame_ref is None else frame_ref)
+        key = (ref.id, ref.frame_ref)
+        for revision in self._frames.get(key, ()):
+            if revision.ref.revision == ref.revision:
+                return revision
+        raise KeyError(f"unknown revision {ref.id}@{ref.revision} frame {ref.frame_ref}")
+
+    def _make_revision(self, crystal, *, ref: StructureRef, properties: dict[str, Any], provenance: dict[str, Any]) -> _Revision:
+        snapshot = snapshot_from_crystal(crystal, ref=ref, properties=properties, provenance=provenance)
+        return _Revision(
+            ref=ref,
+            crystal=crystal,
+            properties=properties,
+            provenance=dict(provenance),
+            fingerprint=snapshot.fingerprint,
+            snapshot=snapshot,
+        )
+
+
+def _public_candidate(candidate: Candidate) -> CandidateView:
+    return CandidateView(
+        candidate_id=candidate.candidate_id,
+        command=candidate.command,
+        input_ref=candidate.input_ref,
+        request_id=candidate.request_id,
+        status=candidate.status,
+        mappings=tuple(MappingProxyType(dict(item)) for item in candidate.mappings),
+        diagnostics=tuple(candidate.diagnostics),
+        provenance=MappingProxyType(dict(candidate.provenance)),
+        fingerprint=candidate.fingerprint,
+        n_sites=int(sum(len(molecule) for molecule in candidate.crystal.molecules)),
+    )
+
+
+def _mapping_token(mapping: Mapping[str, Any]) -> str:
+    return json.dumps(dict(mapping), sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _request_fingerprint(command: str, params: Mapping[str, Any] | None, property_policy: Mapping[str, Any] | None) -> str:
+    body = {
+        "command": str(command),
+        "params": _plain_request_value(params or {}),
+        "property_policy": _plain_request_value(property_policy or {}),
+    }
+    return json.dumps(body, sort_keys=True, separators=(",", ":"))
+
+
+def _plain_request_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Mapping):
+        return {str(key): _plain_request_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain_request_value(item) for item in value]
+    tolist = getattr(value, "tolist", None)
+    if callable(tolist) and not isinstance(value, (str, bytes)):
+        return _plain_request_value(tolist())
+    if hasattr(value, "lattice") and hasattr(value, "molecules"):
+        molecules = []
+        for molecule in value.molecules:
+            positions = getattr(molecule, "positions", [])
+            molecules.append(
+                {
+                    "symbols": [str(symbol) for symbol in molecule.get_chemical_symbols()],
+                    "positions": _plain_request_value(positions),
+                }
+            )
+        return {
+            "lattice": _plain_request_value(value.lattice),
+            "pbc": [bool(item) for item in value.pbc],
+            "molecules": molecules,
+        }
+    raise ValidationError(
+        f"request parameters contain a non-canonical value of type {type(value).__name__}"
+    )
+
+
+__all__ = ["Candidate", "CandidateView", "CommitResult", "Counters", "EffectSession"]

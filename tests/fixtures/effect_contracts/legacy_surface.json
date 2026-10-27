@@ -1,0 +1,924 @@
+{
+  "schema": "mattervis.legacy-surface/v1",
+  "baseline_commit": "4a5b4da53cda177e74e89d086792b68ed3771bdb",
+  "molcrys_kit_commit": "9bf0ffb0fb321d1084dbc444250b5f186af3c873",
+  "entries": [
+    {
+      "id": "GET /api/v1/perf",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v1_legacy.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v1/perf/clear",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v1_legacy.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v1/state",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v1_legacy.py",
+      "compatibility_test": "T02"
+    },
+    {
+      "id": "GET /api/v1/healthz",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v1_legacy.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v1/state",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v1_legacy.py",
+      "compatibility_test": "T02"
+    },
+    {
+      "id": "GET /api/v1/camera",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v1_legacy.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v1/camera",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v1_legacy.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v1/camera/action",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v1_legacy.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v1/upload",
+      "surface": "rest",
+      "effect": "import",
+      "writes_structure": false,
+      "module": "v1_legacy.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v1/structures",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v1_legacy.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v1/scene/<name>",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v1_legacy.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v1/topology",
+      "surface": "rest",
+      "effect": "legacy-composite-analysis",
+      "writes_structure": false,
+      "module": "v1_legacy.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v1/screenshot",
+      "surface": "rest",
+      "effect": "image-export",
+      "writes_structure": false,
+      "module": "v1_legacy.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v1/preset/save",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v1_legacy.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v1/preset/load",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v1_legacy.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v1/export",
+      "surface": "rest",
+      "effect": "image-export",
+      "writes_structure": false,
+      "module": "v1_legacy.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v1/export/cif",
+      "surface": "rest",
+      "effect": "structure-export",
+      "writes_structure": false,
+      "module": "v1_legacy.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v1/export/cif",
+      "surface": "rest",
+      "effect": "structure-export",
+      "writes_structure": false,
+      "module": "v1_legacy.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v2/atom-properties",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_atom_properties.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v2/config",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v2_config.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v2/config/colors/elements",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v2_config.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "PATCH /api/v2/config",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v2_config.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "DELETE /api/v2/config",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v2_config.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/config/reload",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v2_config.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v2/screenshot",
+      "surface": "rest",
+      "effect": "image-export",
+      "writes_structure": false,
+      "module": "v2_export.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/preset/save",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v2_export.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/preset/load",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v2_export.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/export",
+      "surface": "rest",
+      "effect": "image-export",
+      "writes_structure": false,
+      "module": "v2_export.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v2/export/cif",
+      "surface": "rest",
+      "effect": "structure-export",
+      "writes_structure": false,
+      "module": "v2_export.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/export/cif",
+      "surface": "rest",
+      "effect": "structure-export",
+      "writes_structure": false,
+      "module": "v2_export.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/intent",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v2_intent.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v2/operate/capabilities",
+      "surface": "rest",
+      "effect": "operate",
+      "writes_structure": true,
+      "module": "v2_operate.py",
+      "compatibility_test": "T22"
+    },
+    {
+      "id": "POST /api/v2/operate",
+      "surface": "rest",
+      "effect": "operate",
+      "writes_structure": true,
+      "module": "v2_operate.py",
+      "compatibility_test": "T22"
+    },
+    {
+      "id": "POST /api/v2/operate/commit",
+      "surface": "rest",
+      "effect": "operate",
+      "writes_structure": true,
+      "module": "v2_operate.py",
+      "compatibility_test": "T22"
+    },
+    {
+      "id": "POST /api/v2/operate/cancel",
+      "surface": "rest",
+      "effect": "operate",
+      "writes_structure": true,
+      "module": "v2_operate.py",
+      "compatibility_test": "T22"
+    },
+    {
+      "id": "POST /api/v2/operate/undo",
+      "surface": "rest",
+      "effect": "operate",
+      "writes_structure": true,
+      "module": "v2_operate.py",
+      "compatibility_test": "T22"
+    },
+    {
+      "id": "POST /api/v2/operate/redo",
+      "surface": "rest",
+      "effect": "operate",
+      "writes_structure": true,
+      "module": "v2_operate.py",
+      "compatibility_test": "T22"
+    },
+    {
+      "id": "GET /api/v2/polyhedra",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/polyhedra",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "PATCH /api/v2/polyhedra/<spec_id>",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "DELETE /api/v2/polyhedra/<spec_id>",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/polyhedra/reorder",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v2/atom_groups",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/atom_groups",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "PATCH /api/v2/atom_groups/<group_id>",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "DELETE /api/v2/atom_groups/<group_id>",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/atom_groups/reorder",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v2/bond_groups",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/bond_groups",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "PATCH /api/v2/bond_groups/<group_id>",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "DELETE /api/v2/bond_groups/<group_id>",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/bond_groups/reorder",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v2/transforms",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/transforms",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "PATCH /api/v2/transforms/<transform_id>",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "DELETE /api/v2/transforms/<transform_id>",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/transforms/reorder",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v2/overlay_overrides",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/overlay_overrides",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "PATCH /api/v2/overlay_overrides/<override_id>",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "DELETE /api/v2/overlay_overrides/<override_id>",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/overlay_overrides/reorder",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/polyhedra/<spec_id>/instance_overrides/<fragment_label>",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "DELETE /api/v2/polyhedra/<spec_id>/instance_overrides/<fragment_label>",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_overlays.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v2/perf",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v2_perf.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/perf/clear",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v2_perf.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v2/scenes",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v2_scenes.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/scenes",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v2_scenes.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "PATCH /api/v2/scenes/<scene_id>",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v2_scenes.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "DELETE /api/v2/scenes/<scene_id>",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v2_scenes.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/scenes/<scene_id>/duplicate",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v2_scenes.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/scenes/reorder",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v2_scenes.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/scenes/close_others",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v2_scenes.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v2/scenes/active",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v2_scenes.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/scenes/active",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v2_scenes.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v2/selection",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_selection.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/selection",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_selection.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "PATCH /api/v2/selection",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_selection.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v2/selection/targets",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_selection.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/selection/scope",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_selection.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/selection/targets",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_selection.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/selection/appearance",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_selection.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v2/style_overrides",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_selection.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "PATCH /api/v2/style_overrides",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_selection.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "DELETE /api/v2/selection",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_selection.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/selection/by_fragment",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_selection.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/selection/by_element",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_selection.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/selection/all",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_selection.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/selection/invert",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_selection.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/selection/by_box",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_selection.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/selection/promote",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_selection.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v2/state",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_state.py",
+      "compatibility_test": "T02"
+    },
+    {
+      "id": "GET /api/v2/healthz",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v2_state.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v2/view-updates",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_state.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/state",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_state.py",
+      "compatibility_test": "T02"
+    },
+    {
+      "id": "GET /api/v2/camera",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_state.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/camera",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_state.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/camera/action",
+      "surface": "rest",
+      "effect": "display",
+      "writes_structure": false,
+      "module": "v2_state.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/upload",
+      "surface": "rest",
+      "effect": "import",
+      "writes_structure": false,
+      "module": "v2_state.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v2/upload/<job_id>",
+      "surface": "rest",
+      "effect": "import",
+      "writes_structure": false,
+      "module": "v2_state.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v2/structures",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v2_state.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "GET /api/v2/scene/<name>",
+      "surface": "rest",
+      "effect": "session",
+      "writes_structure": false,
+      "module": "v2_state.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "POST /api/v2/topology",
+      "surface": "rest",
+      "effect": "legacy-composite-analysis",
+      "writes_structure": false,
+      "module": "v2_state.py",
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "cli:render",
+      "surface": "cli",
+      "effect": "display",
+      "writes_structure": false,
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "cli:inspect",
+      "surface": "cli",
+      "effect": "read",
+      "writes_structure": false,
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "cli:serve",
+      "surface": "cli",
+      "effect": "session",
+      "writes_structure": false,
+      "compatibility_test": "T22"
+    },
+    {
+      "id": "cli:tui",
+      "surface": "cli",
+      "effect": "display",
+      "writes_structure": false,
+      "compatibility_test": "T22"
+    },
+    {
+      "id": "cli:operate build-supercell",
+      "surface": "cli",
+      "effect": "operate",
+      "writes_structure": true,
+      "compatibility_test": "T22"
+    },
+    {
+      "id": "ws:set_state",
+      "surface": "websocket",
+      "effect": "display",
+      "writes_structure": false,
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "ws:intent",
+      "surface": "websocket",
+      "effect": "dispatch",
+      "writes_structure": false,
+      "compatibility_test": "T22"
+    },
+    {
+      "id": "ws:intent operate",
+      "surface": "websocket",
+      "effect": "operate",
+      "writes_structure": true,
+      "compatibility_test": "T22"
+    },
+    {
+      "id": "python:load_structure",
+      "surface": "python",
+      "effect": "import",
+      "writes_structure": false,
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "python:render",
+      "surface": "python",
+      "effect": "display",
+      "writes_structure": false,
+      "compatibility_test": "T01"
+    },
+    {
+      "id": "state.supercell",
+      "surface": "rest-field",
+      "effect": "display",
+      "writes_structure": false,
+      "notes": "Replaces the display repeat. 1x1x1 clears only repeat.",
+      "compatibility_test": "T02"
+    },
+    {
+      "id": "tui:repeat",
+      "surface": "tui",
+      "effect": "display",
+      "writes_structure": false,
+      "notes": "Loader --repeat is a display transform.",
+      "compatibility_test": "T07"
+    },
+    {
+      "id": "tui:operate build-supercell",
+      "surface": "tui",
+      "effect": "operate",
+      "writes_structure": true,
+      "compatibility_test": "T22"
+    }
+  ]
+}
