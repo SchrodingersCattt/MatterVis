@@ -1,12 +1,24 @@
 {
   "schema": "mattervis.issue-163-acceptance/v1",
+  "tested_commit": "84ff09d5ac9c391a0e5f46a21fc296876ac6ddc7",
   "base_commit": "4a5b4da53cda177e74e89d086792b68ed3771bdb",
+  "suite_timestamp_utc": "2026-10-27T06:50:03Z",
   "implementation_commits": [
     "b5e4aea refactor(core): add authoritative structure snapshots and commits",
     "b6bd7b9 refactor(display): move view transforms and layers out of mixed backends",
     "b6aeb9c feat(operate): expose structural commits on viewer, REST, CLI, and TUI",
     "eb0bbe5 test(acceptance): lock effect contracts and document the separation",
-    "4f12ed4 fix(analysis): keep the legacy analysis facade from writing view state"
+    "4f12ed4 fix(analysis): keep the legacy analysis facade from writing view state",
+    "27e6a87 fix(operate): keep commits idempotent and viewer undo on the restored revision",
+    "4e9d39a fix(operate): keep revision numbers unique and request retries in place",
+    "dfb233f fix(operate): seal candidates and roll back an unpublished commit",
+    "4cc0b2e fix(analysis): use a general minimum image and periodic neighbor images",
+    "a7de098 fix(analysis): retain disorder crystals from the same generation",
+    "6b6d61f fix(tui): keep one scientific session across operate commands",
+    "fc4ebe3 fix(api): require an explicit operate target and expected revision",
+    "5dff23a fix(operate): materialize a requested periodic cell instead of a cluster",
+    "3ffa793 fix(persistence): keep crystal metadata in the effect session",
+    "84ff09d fix(persistence): round-trip CIF metadata, chemistry, and site arrays"
   ],
   "python": "3.12.3",
   "platform": "Linux-6.12.94+-x86_64-with-glibc2.39",
@@ -23,41 +35,189 @@
   },
   "commands": {
     "python -m pytest tests/ -n 4 --dist loadfile": {
-            "result": "2056 passed, 70 skipped",
+      "result": "2073 passed, 70 skipped",
       "exit_code": 0,
-      "elapsed_s": 95.27
-    },
-    "python -m pytest tests/architecture tests/contracts tests/operations tests/analysis": {
-      "result": "44 passed",
-      "exit_code": 0
+      "elapsed_s": 95.6,
+      "junit_tests": 2143,
+      "junit_failures": 0,
+      "junit_errors": 0,
+      "junit_skipped": 70
     }
   },
   "t01_t24": {
-    "T01": "tests/architecture/test_effect_contracts.py::test_t01_display_and_analysis_do_not_commit",
-    "T02": "tests/contracts/test_legacy_display_replay.py::test_t02_supercell_shorthand_replaces_and_clears_only_repeat",
-    "T03": "tests/contracts/test_legacy_display_replay.py::test_t03_explicit_transform_list_keeps_order",
-    "T04": "tests/operations/test_structure_operations.py::test_t04_build_supercell_nonorthogonal",
-    "T05": "tests/operations/test_structure_operations.py::test_t05_strict_repetition_does_not_clamp",
-    "T06": "tests/analysis/test_input_revision_and_scope.py::test_t06_two_views_do_not_share_scientific_mutations",
-    "T07": "tests/analysis/test_display_independence.py::test_t07_hydrogen_visibility_does_not_edit_sites_or_bonds",
-    "T08": "tests/analysis/test_display_independence.py::test_t08_coordination_is_independent_of_visibility_and_camera",
-    "T09": "tests/analysis/test_input_revision_and_scope.py::test_t09_picked_image_and_minimum_image_stay_distinct",
-    "T10": "tests/operations/test_structure_operations.py::test_t10_periodic_copy_is_one_transaction",
-    "T11": "tests/operations/test_structure_operations.py::test_t11_insert_preview_cancel_clash_and_idempotency",
-    "T12": "tests/operations/test_structure_operations.py::test_t12_substitute_delete_hydrogen_and_solvent",
-    "T13": "tests/operations/test_structure_operations.py::test_t13_slab_preview_does_not_edit_bulk_and_keeps_angles",
-    "T14": "tests/operations/test_structure_operations.py::test_t14_disorder_candidate_is_the_scientific_structure",
-    "T15": "tests/operations/test_structure_operations.py::test_t15_materialize_finite_cluster_rejects_ghosts",
-    "T16": "tests/operations/test_commit_atomicity.py::test_t16_frame_results_do_not_cross_frames",
-    "T17": "tests/operations/test_commit_atomicity.py::test_t17_stale_candidate_and_stale_analysis_do_not_overwrite",
-    "T18": "tests/operations/test_commit_atomicity.py::test_t18_failure_injection_leaves_history_unchanged",
-    "T19": "tests/operations/test_commit_atomicity.py::test_t19_structural_undo_does_not_track_display_edits",
-    "T20": "tests/operations/test_structure_persistence.py::test_t20_save_reload_and_export_do_not_follow_display_state",
-    "T21": "tests/operations/test_structure_persistence.py::test_t21_legacy_migration_is_idempotent_and_strict",
-    "T22": "tests/contracts/test_cross_frontend_effects.py::test_t22_cli_matches_python_supercell",
-    "T23": "tests/architecture/test_legacy_core_removal.py and test_dependency_boundaries.py",
-    "T24": "tests/analysis/test_display_independence.py::test_t24_display_edits_do_not_rebuild_or_recompute"
+    "T01": {
+      "node": "tests/architecture/test_effect_contracts.py::test_t01_display_and_analysis_do_not_commit",
+      "status": "passed",
+      "time_s": 0.003,
+      "assertions": "executed in the full suite; failure would be a junit failure"
+    },
+    "T02": {
+      "node": "tests/contracts/test_legacy_display_replay.py::test_t02_supercell_shorthand_replaces_and_clears_only_repeat",
+      "status": "passed",
+      "time_s": 1.19,
+      "assertions": "executed in the full suite; failure would be a junit failure"
+    },
+    "T03": {
+      "node": "tests/contracts/test_legacy_display_replay.py::test_t03_explicit_transform_list_keeps_order",
+      "status": "passed",
+      "time_s": 0.52,
+      "assertions": "executed in the full suite; failure would be a junit failure"
+    },
+    "T04": {
+      "node": "tests/operations/test_structure_operations.py::test_t04_build_supercell_nonorthogonal",
+      "status": "passed",
+      "time_s": 0.009,
+      "assertions": "executed in the full suite; failure would be a junit failure"
+    },
+    "T05": {
+      "node": "tests/operations/test_structure_operations.py::test_t05_strict_repetition_does_not_clamp",
+      "status": "passed",
+      "time_s": 0.006,
+      "assertions": "executed in the full suite; failure would be a junit failure"
+    },
+    "T06": {
+      "node": "tests/analysis/test_input_revision_and_scope.py::test_t06_two_views_do_not_share_scientific_mutations",
+      "status": "passed",
+      "time_s": 0.024,
+      "assertions": "executed in the full suite; failure would be a junit failure"
+    },
+    "T07": {
+      "node": "tests/analysis/test_display_independence.py::test_t07_hydrogen_visibility_does_not_edit_sites_or_bonds",
+      "status": "passed",
+      "time_s": 0.004,
+      "assertions": "executed in the full suite; failure would be a junit failure"
+    },
+    "T08": {
+      "node": "tests/analysis/test_display_independence.py::test_t08_coordination_is_independent_of_visibility_and_camera",
+      "status": "passed",
+      "time_s": 0.006,
+      "assertions": "executed in the full suite; failure would be a junit failure"
+    },
+    "T09": {
+      "node": "tests/analysis/test_input_revision_and_scope.py::test_t09_picked_image_and_minimum_image_stay_distinct",
+      "status": "passed",
+      "time_s": 0.009,
+      "assertions": "executed in the full suite; failure would be a junit failure"
+    },
+    "T10": {
+      "node": "tests/operations/test_structure_operations.py::test_t10_periodic_copy_is_one_transaction",
+      "status": "passed",
+      "time_s": 0.054,
+      "assertions": "executed in the full suite; failure would be a junit failure"
+    },
+    "T11": {
+      "node": "tests/operations/test_structure_operations.py::test_t11_insert_preview_cancel_clash_and_idempotency",
+      "status": "passed",
+      "time_s": 0.01,
+      "assertions": "executed in the full suite; failure would be a junit failure"
+    },
+    "T12": {
+      "node": "tests/operations/test_structure_operations.py::test_t12_substitute_delete_hydrogen_and_solvent",
+      "status": "passed",
+      "time_s": 0.015,
+      "assertions": "executed in the full suite; failure would be a junit failure"
+    },
+    "T13": {
+      "node": "tests/operations/test_structure_operations.py::test_t13_slab_preview_does_not_edit_bulk_and_keeps_angles",
+      "status": "passed",
+      "time_s": 0.007,
+      "assertions": "executed in the full suite; failure would be a junit failure"
+    },
+    "T14": {
+      "node": "tests/operations/test_structure_operations.py::test_t14_disorder_candidate_is_the_scientific_structure",
+      "status": "passed",
+      "time_s": 0.012,
+      "assertions": "executed in the full suite; failure would be a junit failure"
+    },
+    "T15": {
+      "node": "tests/operations/test_structure_operations.py::test_t15_materialize_finite_cluster_rejects_ghosts",
+      "status": "passed",
+      "time_s": 0.005,
+      "assertions": "executed in the full suite; failure would be a junit failure"
+    },
+    "T16": {
+      "node": "tests/operations/test_commit_atomicity.py::test_t16_frame_results_do_not_cross_frames",
+      "status": "passed",
+      "time_s": 0.008,
+      "assertions": "executed in the full suite; failure would be a junit failure"
+    },
+    "T17": {
+      "node": "tests/operations/test_commit_atomicity.py::test_t17_stale_candidate_and_stale_analysis_do_not_overwrite",
+      "status": "passed",
+      "time_s": 0.009,
+      "assertions": "executed in the full suite; failure would be a junit failure"
+    },
+    "T18": {
+      "node": "tests/operations/test_commit_atomicity.py::test_t18_failure_injection_leaves_history_unchanged",
+      "status": "passed",
+      "time_s": 0.012,
+      "assertions": "executed in the full suite; failure would be a junit failure"
+    },
+    "T19": {
+      "node": "tests/operations/test_commit_atomicity.py::test_t19_structural_undo_does_not_track_display_edits",
+      "status": "passed",
+      "time_s": 0.006,
+      "assertions": "executed in the full suite; failure would be a junit failure"
+    },
+    "T20": {
+      "node": "tests/operations/test_structure_persistence.py::test_t20_save_reload_and_export_do_not_follow_display_state",
+      "status": "passed",
+      "time_s": 0.009,
+      "assertions": "executed in the full suite; failure would be a junit failure"
+    },
+    "T21": {
+      "node": "tests/operations/test_structure_persistence.py::test_t21_legacy_migration_is_idempotent_and_strict",
+      "status": "passed",
+      "time_s": 0.002,
+      "assertions": "executed in the full suite; failure would be a junit failure"
+    },
+    "T22": {
+      "node": "tests/contracts/test_cross_frontend_effects.py::test_t22_cli_matches_python_supercell",
+      "status": "passed",
+      "time_s": 1.488,
+      "assertions": "executed in the full suite; failure would be a junit failure"
+    },
+    "T24": {
+      "node": "tests/analysis/test_display_independence.py::test_t24_display_edits_do_not_rebuild_or_recompute",
+      "status": "passed",
+      "time_s": 0.205,
+      "assertions": "executed in the full suite; failure would be a junit failure"
+    },
+    "T23": {
+      "nodes": [
+        "tests/architecture/test_legacy_core_removal.py::test_obsolete_symbols_are_gone",
+        "tests/architecture/test_legacy_core_removal.py::test_rendered_scene_is_not_a_scientific_source",
+        "tests/architecture/test_legacy_core_removal.py::test_explicit_snapshot_materializes_without_a_cif",
+        "tests/architecture/test_dependency_boundaries.py::test_effect_core_import_is_free_of_dash_plotly_and_gpu",
+        "tests/architecture/test_dependency_boundaries.py::test_scene_for_state_does_not_write_bundle_scene"
+      ],
+      "status": "passed",
+      "time_s": 0.872
+    }
   },
+  "performance": {
+    "cold_composition_s": 0.0002459070001350483,
+    "warm_composition_s": 3.9216000004671514e-05,
+    "tracemalloc_peak_bytes": 12365,
+    "scientific_computations_after_one_cold_and_one_warm": 1,
+    "cache_hits": 1,
+    "structure_builds_after_import_and_one_commit": 2,
+    "commits": 1,
+    "request_replay_pointer_unchanged": true,
+    "request_replay_fingerprint_unchanged": true,
+    "note": "Cold and warm times are one composition query on F1. The warm call is a cache hit, so scientific_computations stays 1. T24 separately asserts display edits do not increment structure_builds or scientific_computations."
+  },
+  "review_regressions": [
+    "tests/operations/test_revision_identity.py",
+    "tests/operations/test_candidate_seal.py",
+    "tests/operations/test_publish_atomicity.py",
+    "tests/analysis/test_periodic_geometry.py",
+    "tests/operations/test_disorder_single_generation.py",
+    "tests/tui/test_operate_session.py",
+    "tests/operations/test_operate_route.py",
+    "tests/operations/test_periodic_materialize.py",
+    "tests/operations/test_metadata_persistence.py"
+  ],
   "operations": [
     "build_supercell",
     "build_slab",
@@ -78,8 +238,8 @@
   },
   "skips": "70 skipped in the full suite; browser tests are environment-skipped by the existing suite, not by new xfail markers.",
   "known_limitations": [
-    "TUI operate currently commits build-supercell only; other commands use the shared Python, REST, and viewer Operate API.",
     "Viewer undo moves the scientific pointer and does not close the scene created for the committed revision.",
-    "Unseeded random disorder candidates must be previewed and retained; commit without a seed or a stored crystal is rejected."
+    "TUI operate still commits build-supercell only. Successive commands share one scientific session.",
+    "Crystal chemistry and symmetry reload as their JSON projection when the MolecularCrystal property has no setter. Site arrays, molecule connectivity, and metadata values round-trip."
   ]
 }

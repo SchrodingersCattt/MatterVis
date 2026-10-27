@@ -17,6 +17,7 @@
 
 ## Checks
 
-- Focused effect tests passed (44).
-- Full `python -m pytest tests/ -n 4 --dist loadfile` after review fixes: 2056 passed, 70 skipped, exit 0.
-- Evidence file: `docs/architecture/issue-163-acceptance-report.json` (commit `0eee384`). The report commit does not change runtime code.
+- Focused effect tests passed (44) on the first implementation pass.
+- Full `python -m pytest tests/ -n 4 --dist loadfile` after the PR #246 review fixes, at `84ff09d`: 2073 passed, 70 skipped, exit 0, 95.60 s.
+- Evidence file: `docs/architecture/issue-163-acceptance-report.json`. The report commit does not change runtime code.
+- Review follow-ups on that commit: revision numbers are monotonic, a repeated request id does not move the pointer, candidates are sealed, publication failure rolls back, minimum-image distances use ASE, periodic coordination includes image neighbors, disorder crystals come from one generation, the TUI keeps one session, REST operate requires a target and expected revision, periodic materialization uses the supplied cell, and session files keep metadata and site arrays.
