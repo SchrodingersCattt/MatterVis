@@ -650,15 +650,14 @@ def _supercell_mapping(source, result, scaling: tuple[int, int, int]):
 
 
 def _nearest_host_distance(crystal, placed: np.ndarray) -> float:
+    from .analysis import minimum_image_distances
+
     host = np.vstack([np.asarray(molecule.positions, dtype=float) for molecule in crystal.molecules])
-    lattice = np.asarray(crystal.lattice, dtype=float)
-    inverse = np.linalg.inv(lattice)
-    fractional = placed @ inverse
-    host_fractional = host @ inverse
-    delta = fractional[:, None, :] - host_fractional[None, :, :]
-    periodic = np.asarray(crystal.pbc, dtype=bool)
-    delta[:, :, periodic] -= np.round(delta[:, :, periodic])
-    distances = np.linalg.norm(delta @ lattice, axis=-1)
+    placed = np.atleast_2d(np.asarray(placed, dtype=float))
+    if host.size == 0 or placed.size == 0:
+        return float("inf")
+    delta = placed[:, None, :] - host[None, :, :]
+    distances = minimum_image_distances(delta.reshape(-1, 3), crystal.lattice, crystal.pbc)
     return float(np.min(distances)) if distances.size else float("inf")
 
 

@@ -97,21 +97,17 @@ def _coordination(snapshot: ScientificSnapshot, query: Mapping[str, Any], *, res
         raise ValidationError("coordination cutoff must be positive")
     ligands = {str(item) for item in query.get("ligand_symbols") or []}
     center = snapshot.site(center_id)
-    rows = []
-    for site in snapshot.sites:
-        if site.site_id == center.site_id:
-            continue
-        if ligands and site.symbol not in ligands:
-            continue
-        distance = _minimum_image_distance(center.cartesian, site.cartesian, snapshot.lattice, snapshot.pbc)
-        if distance <= cutoff + 1e-8:
-            rows.append((distance, site))
-    rows.sort(key=lambda item: (item[0], item[1].site_id))
+    rows = _periodic_neighbors(snapshot, center, cutoff, ligands)
+    rows.sort(key=lambda item: (item[0], item[1].site_id, item[2]))
+    lattice = np.asarray(snapshot.lattice, dtype=float)
     detected = detect_coordination_number(
         [row[0] for row in rows],
         cutoff=cutoff,
-        coords=[row[1].cartesian for row in rows],
-        center=center.cartesian,
+        coords=[
+            np.asarray(site.cartesian, dtype=float) + np.asarray(image, dtype=float) @ lattice
+            for _distance, site, image in rows
+        ],
+        center=np.asarray(center.cartesian, dtype=float),
         enforce_enclosure=False,
     )
     value = {
@@ -123,10 +119,11 @@ def _coordination(snapshot: ScientificSnapshot, query: Mapping[str, Any], *, res
             {
                 "site_id": site.site_id,
                 "symbol": site.symbol,
+                "image": list(image),
                 "distance_A": distance,
                 "distance_mode": "minimum_image",
             }
-            for distance, site in rows[: int(detected["coordination_number"])]
+            for distance, site, image in rows[: int(detected["coordination_number"])]
         ],
     }
     return _result(
@@ -148,7 +145,7 @@ def _distance(snapshot: ScientificSnapshot, query: Mapping[str, Any], *, result_
     if mode == "picked_image":
         distance = float(np.linalg.norm(np.subtract(left["cartesian"], right["cartesian"])))
     else:
-        distance = _minimum_image_distance(
+        distance = minimum_image_distance(
             left["source_cartesian"],
             right["source_cartesian"],
             snapshot.lattice,
@@ -202,13 +199,72 @@ def _endpoint(snapshot: ScientificSnapshot, payload: Any, *, label: str) -> dict
     }
 
 
-def _minimum_image_distance(left, right, lattice, pbc) -> float:
-    matrix = np.asarray(lattice, dtype=float)
+def minimum_image_distance(left, right, lattice, pbc) -> float:
+    """Shortest periodic distance. Component-wise fractional rounding is not used."""
+
     delta = np.asarray(right, dtype=float) - np.asarray(left, dtype=float)
-    fractional = delta @ np.linalg.inv(matrix)
-    periodic = np.asarray(pbc, dtype=bool)
-    fractional[periodic] -= np.round(fractional[periodic])
-    return float(np.linalg.norm(fractional @ matrix))
+    return float(minimum_image_distances(delta, lattice, pbc)[0])
+
+
+def minimum_image_distances(deltas, lattice, pbc) -> np.ndarray:
+    """Return one minimum-image length for each Cartesian displacement."""
+
+    from ase.geometry import find_mic
+
+    vectors = np.atleast_2d(np.asarray(deltas, dtype=float))
+    _mic, distances = find_mic(
+        vectors,
+        np.asarray(lattice, dtype=float),
+        pbc=np.asarray(tuple(bool(flag) for flag in pbc), dtype=bool),
+    )
+    return np.asarray(distances, dtype=float).reshape(-1)
+
+
+def _periodic_neighbors(snapshot: ScientificSnapshot, center, cutoff: float, ligands: set[str]):
+    lattice = np.asarray(snapshot.lattice, dtype=float)
+    center_cart = np.asarray(center.cartesian, dtype=float)
+    ranges = _image_ranges(lattice, snapshot.pbc, cutoff)
+    rows = []
+    for site in snapshot.sites:
+        if ligands and site.symbol not in ligands:
+            continue
+        base = np.asarray(site.cartesian, dtype=float) - center_cart
+        for image in _images(ranges):
+            if site.site_id == center.site_id and image == (0, 0, 0):
+                continue
+            distance = float(np.linalg.norm(base + np.asarray(image, dtype=float) @ lattice))
+            if 1e-8 < distance <= cutoff + 1e-8:
+                rows.append((distance, site, image))
+    return rows
+
+
+def _image_ranges(lattice: np.ndarray, pbc, cutoff: float) -> list[range]:
+    periodic = tuple(bool(flag) for flag in pbc)
+    try:
+        volume = abs(float(np.linalg.det(lattice)))
+    except np.linalg.LinAlgError:
+        volume = 0.0
+    ranges = []
+    for axis, flag in enumerate(periodic):
+        if not flag:
+            ranges.append(range(1))
+            continue
+        others = [index for index in range(3) if index != axis]
+        face = np.cross(lattice[others[0]], lattice[others[1]])
+        norm = float(np.linalg.norm(face))
+        height = volume / norm if norm > 1e-12 and volume > 0.0 else float(np.linalg.norm(lattice[axis]))
+        count = int(np.ceil(float(cutoff) / max(height, 1e-8))) + 1
+        if count > 6:
+            raise ValidationError("coordination cutoff spans too many periodic cells")
+        ranges.append(range(-count, count + 1))
+    return ranges
+
+
+def _images(ranges: list[range]):
+    for first in ranges[0]:
+        for second in ranges[1]:
+            for third in ranges[2]:
+                yield (int(first), int(second), int(third))
 
 
 def _result(snapshot, *, result_id, kind, policy, value, units) -> AnalysisResult:
