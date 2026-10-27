@@ -182,38 +182,11 @@ class _AnalysisBackendMixin:
         bundle until an explicit operate commit asks for one. This method
         does not register a structure revision.
         """
-        from ..operations.disorder import resolve_disorder as _resolve_disorder_replicas
+        from ..operations.disorder import resolve_disorder_with_crystals
 
         state = self.get_state(scene_id)
         bundle = self.get_bundle(str(state.get("structure") or ""))
-        summaries = _resolve_disorder_replicas(bundle, method=method, count=count, seed=seed)
-        crystal = getattr(bundle, "crystal", None)
-        if crystal is None or not summaries:
-            return summaries
-        try:
-            # Generate the same seeded set once and retain each crystal.
-            from molcrys_kit.analysis.disorder.process import generate_ordered_replicas_from_disordered_sites
-            replicas = generate_ordered_replicas_from_disordered_sites(
-                crystal=crystal.copy(),
-                generate_count=int(count) if str(method) != "optimal" else 1,
-                method=str(method),
-                random_seed=None if seed in (None, "") else int(seed),
-                return_kept_indices=True,
-            )
-        except Exception:
-            return summaries
-        by_kept = {}
-        for replica_crystal, kept in replicas or []:
-            by_kept[tuple(sorted(int(index) for index in kept))] = (replica_crystal.copy(), [int(index) for index in kept])
-        stash = {}
-        for summary in summaries:
-            kept_tuple = tuple(sorted(int(index) for index in summary.get("kept_indices") or []))
-            found = by_kept.get(kept_tuple)
-            if found is None:
-                continue
-            replica_crystal, kept_indices = found
-            stash[str(summary["id"])] = {"crystal": replica_crystal, "kept_indices": kept_indices}
-            summary["candidate_id"] = str(summary["id"])
+        summaries, stash = resolve_disorder_with_crystals(bundle, method=method, count=count, seed=seed)
         bundle._disorder_candidate_crystals = stash
         return summaries
 
