@@ -49,8 +49,10 @@ Send one JSON object per line on stdin. Each object is
 - `show_axes: true` fits the scene above one footer row with the screen
   directions of a, b, c (`E`/`N`/... or `out`/`in` toward or away from you)
   and a scale bar. In the interactive viewer, Shift+A toggles the same row.
-- Start with `--repeat NA NB NC` for a supercell or `--grow-radius R` to add
-  neighbouring atoms within R angstrom of the cell, so molecules across cell
-  faces are visible. `--axes` turns the footer on from the start.
+- Start with `--repeat NA NB NC` to draw periodic copies, or `--grow-radius R`
+  to add neighbouring atoms within R angstrom of the cell, so molecules across
+  cell faces are visible. Both are display transforms. A new lattice is
+  `operate build-supercell`, not `--repeat`. `--axes` turns the footer on
+  from the start.
 
 This skill does not define the answer format and does not explain how to assign R or S.

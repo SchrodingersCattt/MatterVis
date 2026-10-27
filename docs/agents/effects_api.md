@@ -1,0 +1,75 @@
+# Scientific effects API
+
+MatterVis separates three effects:
+
+| Effect | Contract | Writes |
+|---|---|---|
+| Display | `(structure, view, request) -> (structure, view')` | view state only |
+| Analysis | `(structure, query) -> AnalysisResult` | analysis results only |
+| Operate | `(structure, command) -> candidate -> commit -> structure'` | a new structure revision |
+
+The legacy `supercell` field and `/api/v2/transforms` `repeat` draw periodic
+copies. `build_supercell` is the structural command. Do not send
+`operate supercell`.
+
+## Python
+
+```python
+from mat_viewer.effects import EffectSession
+
+session = EffectSession()
+ref = session.register(crystal, structure_id="urea")
+result = session.operate(
+    "build_supercell",
+    {"a": 2, "b": 2, "c": 1},
+    structure_id=ref.id,
+    expected_revision=ref.revision,
+    request_id="req-1",
+)
+snapshot = session.snapshot(result.output_ref)
+```
+
+`expected_revision` must match the current revision. A candidate built
+against an older revision is rejected and does not change history.
+Repeating `request_id` returns the original commit instead of inserting
+the change again.
+
+The same session implements `build_slab`, `insert_molecule`,
+`delete_sites`, `replace_species`, `add_hydrogens`, `remove_solvent`,
+`materialize_selection`, and `commit_disorder_candidate`.
+`delete_periodic_copy` runs supercell construction and one site deletion
+as a single commit.
+
+Site properties must be named in `property_policy`. Omitting a present
+field rejects the operation. `drop` requires a reason.
+
+Analysis queries are `composition`, `coordination`, and `distance`.
+Distance requests must set `distance_mode` to `picked_image` or
+`minimum_image`. Camera, color, and visibility keys are ignored.
+
+## CLI
+
+```bash
+mat-vis operate build-supercell structure.cif --a 2 --b 3 --c 1 -o supercell.cif --json
+```
+
+## REST
+
+`POST /api/v2/operate` with `command`, `params`, `expected_revision`,
+and `request_id`. Preview with `"preview": true`, then
+`POST /api/v2/operate/commit`. Cancel with `/operate/cancel`.
+Undo and redo are `/operate/undo` and `/operate/redo`.
+
+`GET /api/v2/operate/capabilities` lists the implemented commands.
+
+A WebSocket intent `{"type": "operate", "payload": {...}}` calls the
+same adapter. The view reducer does not treat that intent as a state patch.
+
+## Identity
+
+`StructureRef` is `(id, revision, frame_ref)`. A display image is not a
+source site. Deleting one periodic copy requires `delete_periodic_copy`
+or an explicit `build_supercell` followed by `delete_sites` on the
+mapped output site. `materialize_selection` freezes explicit
+site/image pairs into a `PBC=False` cluster and rejects provenance-free
+ghosts.

@@ -53,6 +53,7 @@ mat-vis skills show visualize-materials --all
 | render | Render a structure, one trajectory frame, or a GIF/MP4 animation |
 | serve | Launch the interactive Dash browser viewer |
 | tui | Open a supported structure or trajectory frame in the terminal |
+| operate | Commit a structural operation. `operate build-supercell` builds a new lattice. There is no `operate supercell` alias. Display repeats stay on `tui --repeat` and `POST /api/v2/state` `supercell`. |
 
 `inspect`, `capabilities`, and `render --check` are the agent preflight surface.
 `--check` resolves requirements only and never creates the output.

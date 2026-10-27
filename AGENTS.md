@@ -17,6 +17,7 @@ mat_viewer/
   api/                 REST + WebSocket blueprints
   render/              Plotly viewport / traces / cache internals
   structure/           CIF parsing, bonds, formula units, MolCrysKit bridge
+  effects/             scientific snapshots and Display/Analysis/Operate
   loader/              CIF/fragment bundle loading facade + upload helpers
   scene/               cell/cluster scene builder facade
   transforms/          repeat/grow/slab transform primitives and pipeline
