@@ -322,13 +322,7 @@ def materialize_selection(crystal, params: Mapping[str, Any]) -> Outcome:
     instances = params.get("instances")
     if not isinstance(instances, (list, tuple)) or not instances:
         raise ValidationError("materialize_selection requires explicit instances")
-    pbc_value = params.get("pbc", False)
-    if pbc_value not in (False, (False, False, False), [False, False, False]) and (
-        not params.get("cell") or not params.get("equivalences")
-    ):
-        raise UnsupportedOperation(
-            "periodic materialization requires an explicit cell and equivalence relations"
-        )
+    pbc_flags = _materialize_pbc(params.get("pbc", False))
     records = {str(record.site_id): record for record in crystal.get_site_records()}
     symbols = []
     positions = []
@@ -367,32 +361,38 @@ def materialize_selection(crystal, params: Mapping[str, Any]) -> Outcome:
                 "output_site_id": f"cluster:{len(symbols) - 1}",
             }
         )
+    if any(pbc_flags):
+        return _materialize_periodic_cell(
+            params,
+            symbols=symbols,
+            positions=positions,
+            occupancies=occupancies,
+            labels=labels,
+            disorder_groups=disorder_groups,
+            assemblies=assemblies,
+            mappings=mappings,
+            index_map=index_map,
+            pbc_flags=pbc_flags,
+        )
+    if "cell" in params or "equivalences" in params:
+        raise ValidationError("cell and equivalences require periodic pbc")
     center = np.mean(np.asarray(positions, dtype=float), axis=0)
     span = np.ptp(np.asarray(positions, dtype=float), axis=0)
     length = float(max(10.0, np.max(span) + 8.0))
     lattice = np.eye(3) * length
     shifted = np.asarray(positions, dtype=float) - center + np.array([length, length, length]) / 2.0
-    molecule = molecule_from_spec(
+    return _materialize_cluster(
         symbols,
         shifted,
+        occupancies,
+        labels,
+        disorder_groups,
+        assemblies,
+        mappings,
+        index_map,
         lattice=lattice,
-        pbc=(False, False, False),
-        occupancies=occupancies,
-        labels=labels,
-    )
-    molecule.set_array(KEY_DISORDER_GROUP, np.asarray(disorder_groups, dtype=int))
-    molecule.set_array(KEY_ASSEMBLY, np.array(assemblies))
-    # Stamp the declared cluster ids before MolecularCrystal deduplicates.
-    molecule.set_array(KEY_ATOM_ID, np.array([item["output_site_id"] for item in mappings], dtype=str))
-    result = crystal_from_molecules(lattice, [molecule], pbc=(False, False, False), metadata={"materialized": "finite-cluster"})
-    actual_ids = _ids(result.molecules[0])
-    for mapping, actual in zip(mappings, actual_ids):
-        mapping["output_site_id"] = actual
-    return Outcome(
-        crystal=result,
-        index_map=index_map,
-        mappings=mappings,
-        provenance={"command": "materialize_selection", "pbc": [False, False, False], "n_instances": len(mappings)},
+        pbc_flags=(False, False, False),
+        metadata={"materialized": "finite-cluster"},
         diagnostics=["finite cluster uses PBC=False and does not infer a cell from the view"],
     )
 
@@ -647,6 +647,156 @@ def _supercell_mapping(source, result, scaling: tuple[int, int, int]):
         mappings.append(item)
         index_map.append(int(item["source_global_index"]))
     return mappings, index_map
+
+
+def _materialize_pbc(value) -> tuple[bool, bool, bool]:
+    if value in (False, None):
+        return (False, False, False)
+    if value is True:
+        return (True, True, True)
+    if isinstance(value, (list, tuple)) and len(value) == 3:
+        return tuple(bool(item) for item in value)
+    raise ValidationError("pbc must be false, true, or three boolean flags")
+
+
+def _materialize_periodic_cell(
+    params,
+    *,
+    symbols,
+    positions,
+    occupancies,
+    labels,
+    disorder_groups,
+    assemblies,
+    mappings,
+    index_map,
+    pbc_flags,
+) -> Outcome:
+    if "cell" not in params or "equivalences" not in params:
+        raise UnsupportedOperation(
+            "periodic materialization requires an explicit cell and equivalence relations"
+        )
+    lattice = np.asarray(params["cell"], dtype=float)
+    if lattice.shape != (3, 3) or abs(float(np.linalg.det(lattice))) < 1e-8:
+        raise ValidationError("periodic materialization cell must be an invertible 3x3 matrix")
+    groups, grouped = _equivalence_groups(params["equivalences"], mappings)
+    inverse = np.linalg.inv(lattice)
+    fractionals = []
+    for cartesian in positions:
+        fractional = np.asarray(cartesian, dtype=float) @ inverse
+        for axis, flag in enumerate(pbc_flags):
+            if flag:
+                fractional[axis] %= 1.0
+        fractionals.append(fractional)
+    kept = []
+    for group in groups:
+        anchor = fractionals[group[0]]
+        for other in group[1:]:
+            if not _same_wrapped_fractional(anchor, fractionals[other], pbc_flags):
+                raise ValidationError("equivalence group does not land on one periodic site")
+        kept.append(group[0])
+    for index, fractional in enumerate(fractionals):
+        if index in grouped:
+            continue
+        if any(_same_wrapped_fractional(fractional, fractionals[earlier], pbc_flags) for earlier in kept):
+            raise ValidationError("periodic images coincide but were not declared equivalent")
+        kept.append(index)
+    selected_symbols = [symbols[index] for index in kept]
+    selected_positions = [fractionals[index] @ lattice for index in kept]
+    selected_mappings = [mappings[index] for index in kept]
+    return _materialize_cluster(
+        selected_symbols,
+        selected_positions,
+        [occupancies[index] for index in kept],
+        [labels[index] for index in kept],
+        [disorder_groups[index] for index in kept],
+        [assemblies[index] for index in kept],
+        selected_mappings,
+        [index_map[index] for index in kept],
+        lattice=lattice,
+        pbc_flags=pbc_flags,
+        metadata={"materialized": "periodic-cell"},
+        diagnostics=["periodic materialization uses the supplied cell and equivalence groups"],
+    )
+
+
+def _equivalence_groups(payload, mappings):
+    if not isinstance(payload, list):
+        raise ValidationError("equivalences must be a list of instance groups")
+    index = {
+        (str(item["source_site_id"]), tuple(int(value) for value in item["image"])): position
+        for position, item in enumerate(mappings)
+    }
+    groups = []
+    grouped: set[int] = set()
+    for group in payload:
+        if not isinstance(group, (list, tuple)) or len(group) < 2:
+            raise ValidationError("each equivalence group needs at least two instances")
+        indices = []
+        for member in group:
+            if not isinstance(member, Mapping):
+                raise ValidationError("equivalence members must name site_id and image")
+            key = (str(member.get("site_id") or ""), parse_image(member.get("image")))
+            if key not in index:
+                raise ValidationError(f"equivalence names an instance that was not selected: {key[0]}")
+            found = index[key]
+            if found in grouped:
+                raise ValidationError("an instance belongs to more than one equivalence group")
+            grouped.add(found)
+            indices.append(found)
+        groups.append(indices)
+    return groups, grouped
+
+
+def _same_wrapped_fractional(left, right, pbc_flags, tol: float = 1e-6) -> bool:
+    delta = np.abs(np.asarray(left, dtype=float) - np.asarray(right, dtype=float))
+    for axis, flag in enumerate(pbc_flags):
+        if flag:
+            delta[axis] = min(float(delta[axis]), 1.0 - float(delta[axis]))
+    return bool(np.all(delta <= tol))
+
+
+def _materialize_cluster(
+    symbols,
+    positions,
+    occupancies,
+    labels,
+    disorder_groups,
+    assemblies,
+    mappings,
+    index_map,
+    *,
+    lattice,
+    pbc_flags,
+    metadata,
+    diagnostics,
+) -> Outcome:
+    molecule = molecule_from_spec(
+        symbols,
+        positions,
+        lattice=lattice,
+        pbc=pbc_flags,
+        occupancies=occupancies,
+        labels=labels,
+    )
+    molecule.set_array(KEY_DISORDER_GROUP, np.asarray(disorder_groups, dtype=int))
+    molecule.set_array(KEY_ASSEMBLY, np.array(assemblies))
+    molecule.set_array(KEY_ATOM_ID, np.array([item["output_site_id"] for item in mappings], dtype=str))
+    result = crystal_from_molecules(lattice, [molecule], pbc=pbc_flags, metadata=metadata)
+    actual_ids = _ids(result.molecules[0])
+    for mapping, actual in zip(mappings, actual_ids):
+        mapping["output_site_id"] = actual
+    return Outcome(
+        crystal=result,
+        index_map=index_map,
+        mappings=mappings,
+        provenance={
+            "command": "materialize_selection",
+            "pbc": [bool(flag) for flag in pbc_flags],
+            "n_instances": len(mappings),
+        },
+        diagnostics=diagnostics,
+    )
 
 
 def _nearest_host_distance(crystal, placed: np.ndarray) -> float:
