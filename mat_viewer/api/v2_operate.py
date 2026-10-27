@@ -18,13 +18,25 @@ def register_operate_routes(v2, backend) -> dict:
     def operate_command():
         payload = request.get_json(force=True, silent=True) or {}
         command = payload.get("command")
-        if not command:
-            return jsonify({"error": "command is required"}), 400
+        structure_id = payload.get("structure_id")
+        scene_id = _scene_id_from_request()
+        if not command or not structure_id or not scene_id or payload.get("expected_revision") is None:
+            return jsonify(
+                {
+                    "error": "command, structure_id, scene_id, and expected_revision are required",
+                    "type": "ValidationError",
+                }
+            ), 400
+        try:
+            expected_revision = int(payload["expected_revision"])
+        except (TypeError, ValueError):
+            return jsonify({"error": "expected_revision must be an integer", "type": "ValidationError"}), 400
         result = backend.operate(
             str(command),
             payload.get("params") or {},
-            scene_id=_scene_id_from_request(),
-            expected_revision=payload.get("expected_revision"),
+            scene_id=str(scene_id),
+            structure_id=str(structure_id),
+            expected_revision=expected_revision,
             frame_ref=payload.get("frame_ref"),
             request_id=payload.get("request_id"),
             preview=bool(payload.get("preview", False)),
@@ -36,11 +48,15 @@ def register_operate_routes(v2, backend) -> dict:
     def operate_commit():
         payload = request.get_json(force=True, silent=True) or {}
         candidate_id = payload.get("candidate_id")
-        if not candidate_id:
-            return jsonify({"error": "candidate_id is required"}), 400
+        if not candidate_id or payload.get("expected_revision") is None:
+            return jsonify({"error": "candidate_id and expected_revision are required", "type": "ValidationError"}), 400
+        try:
+            expected_revision = int(payload["expected_revision"])
+        except (TypeError, ValueError):
+            return jsonify({"error": "expected_revision must be an integer", "type": "ValidationError"}), 400
         result = backend.commit_operation(
             str(candidate_id),
-            expected_revision=int(payload["expected_revision"]),
+            expected_revision=expected_revision,
             request_id=payload.get("request_id"),
             scene_id=_scene_id_from_request(),
         )

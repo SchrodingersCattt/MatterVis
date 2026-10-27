@@ -61,8 +61,11 @@ mat-vis operate build-supercell structure.cif --a 2 --b 3 --c 1 -o supercell.cif
 
 ## REST
 
-`POST /api/v2/operate` with `command`, `params`, `expected_revision`,
-and `request_id`. Preview with `"preview": true`, then
+`POST /api/v2/operate` requires `command`, `structure_id`, `scene_id`,
+and `expected_revision`. It does not inherit the active tab or the
+bundle's current revision. A missing target is HTTP 400. A structure
+that does not match the scene, or a stale `expected_revision`, is HTTP
+409. `request_id` is optional. Preview with `"preview": true`, then
 `POST /api/v2/operate/commit`. Cancel with `/operate/cancel`.
 Undo and redo are `/operate/undo` and `/operate/redo`.
 

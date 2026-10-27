@@ -437,6 +437,16 @@ def register_operations_callbacks(app, backend):
         if not _clicks:
             return no_update
         try:
+            state = backend.get_state(scene_id)
+            bundle = backend.get_bundle(str(state.get("structure") or ""))
+            structure_id = str(getattr(bundle, "scientific_structure_id", None) or bundle.name)
+            frame = str(getattr(bundle, "scientific_frame", "0"))
+            session = backend.effect_session()
+            expected_revision = (
+                session.current_ref(structure_id, frame).revision
+                if session.has(structure_id, frame)
+                else 1
+            )
             result = backend.operate(
                 "build_supercell",
                 {
@@ -445,6 +455,8 @@ def register_operations_callbacks(app, backend):
                     "c": _strict_repeat(count_c, "c"),
                 },
                 scene_id=scene_id,
+                structure_id=structure_id,
+                expected_revision=expected_revision,
             )
         except Exception as exc:
             _surface_error("Build supercell", exc)
