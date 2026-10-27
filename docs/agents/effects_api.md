@@ -40,6 +40,10 @@ property policy returns the recorded commit and leaves the current
 revision where it is. The same id with a different payload is rejected.
 A retry does not rewind the pointer to the older output.
 
+Session files keep crystal metadata, formula moiety, and the
+`image_shift` site array. A field the file cannot represent raises
+instead of being replaced.
+
 The same session implements `build_slab`, `insert_molecule`,
 `delete_sites`, `replace_species`, `add_hydrogens`, `remove_solvent`,
 `materialize_selection`, and `commit_disorder_candidate`.
