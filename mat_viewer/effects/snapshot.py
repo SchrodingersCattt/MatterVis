@@ -179,6 +179,8 @@ def snapshot_from_crystal(
         "bonds": [_bond_fingerprint(bond) for bond in bonds],
         "properties": property_payload,
         "frame_ref": ref.frame_ref,
+        "metadata": canonical_metadata(getattr(crystal, "metadata", None)),
+        "formula_moiety": getattr(crystal, "formula_moiety", None),
     }
     encoded = json.dumps(body, sort_keys=True, separators=(",", ":"))
     fingerprint = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -218,6 +220,17 @@ def _site_view(record) -> SiteView:
     )
 
 
+def canonical_metadata(metadata) -> dict[str, Any]:
+    """JSON object used both for fingerprints and lossless session files."""
+
+    from .errors import ValidationError
+
+    try:
+        return json.loads(json.dumps(dict(metadata or {}), sort_keys=True))
+    except TypeError as exc:
+        raise ValidationError(f"crystal.metadata is not JSON-serializable: {exc}") from exc
+
+
 def _site_fingerprint(site: SiteView) -> list:
     return [
         site.site_id,
@@ -228,6 +241,7 @@ def _site_fingerprint(site: SiteView) -> list:
         [round(value, 8) for value in site.cartesian],
         site.disorder_group,
         site.disorder_assembly,
+        list(site.image_shift),
     ]
 
 
@@ -273,6 +287,7 @@ __all__ = [
     "BondView",
     "ScientificSnapshot",
     "SiteView",
+    "canonical_metadata",
     "content_equal",
     "properties_from_fingerprint",
     "snapshot_from_crystal",
