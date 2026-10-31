@@ -285,3 +285,131 @@ def test_render_cli_reports_structured_empty_shell(tmp_path, capsys):
     assert payload["details"]["disorder_policy"] == "as_refined"
     assert payload["details"]["shell_points"] == 0
     assert payload["details"]["ligand"] == "Br"
+
+
+def _tetrahedron(distance: float = 1.49) -> np.ndarray:
+    raw = np.array(
+        [
+            [1.0, 1.0, 1.0],
+            [1.0, -1.0, -1.0],
+            [-1.0, 1.0, -1.0],
+            [-1.0, -1.0, 1.0],
+        ],
+        dtype=float,
+    )
+    raw /= np.linalg.norm(raw, axis=1)[:, None]
+    return raw * distance
+
+
+def _occupancy_only_cif(offset_angstrom: float, first: float, second: float) -> str:
+    """NC4 cation with two occupancy-only orientations and no disorder labels.
+
+    The second tetrahedron is translated along x. Carbon–nitrogen contacts
+    stay at 1.49 angstrom for the first orientation. Chlorine ligands match
+    the ordered octahedron.
+    """
+
+    cell = 20.0
+    site = np.array([10.0, 10.0, 10.0])
+    primary = site + _tetrahedron()
+    secondary = primary + np.array([offset_angstrom, 0.0, 0.0])
+    lines = [
+        "data_synthetic_occupancy_only_cation",
+        "_symmetry_space_group_name_H-M   'P 1'",
+        "_symmetry_Int_Tables_number       1",
+        "_cell_length_a                    20.0",
+        "_cell_length_b                    20.0",
+        "_cell_length_c                    20.0",
+        "_cell_angle_alpha                 90",
+        "_cell_angle_beta                  90",
+        "_cell_angle_gamma                 90",
+        "loop_",
+        "_symmetry_equiv_pos_as_xyz",
+        "x,y,z",
+        "loop_",
+        "_atom_site_label",
+        "_atom_site_type_symbol",
+        "_atom_site_fract_x",
+        "_atom_site_fract_y",
+        "_atom_site_fract_z",
+        "_atom_site_occupancy",
+        f"N1 N {site[0] / cell:.5f} {site[1] / cell:.5f} {site[2] / cell:.5f} 1.00",
+    ]
+    for index, (point, occupancy) in enumerate(
+        [(point, first) for point in primary] + [(point, second) for point in secondary],
+        start=1,
+    ):
+        frac = point / cell
+        lines.append(
+            f"C{index} C {frac[0]:.5f} {frac[1]:.5f} {frac[2]:.5f} {occupancy:.2f}"
+        )
+    for index, (axis, sign) in enumerate(
+        [(axis, sign) for axis in range(3) for sign in (-1.0, 1.0)],
+        start=1,
+    ):
+        point = site.copy()
+        point[axis] += sign * 5.0
+        frac = point / cell
+        lines.append(
+            f"Cl{index} Cl {frac[0]:.5f} {frac[1]:.5f} {frac[2]:.5f} 1.00"
+        )
+    return "\n".join(lines) + "\n"
+
+
+@pytest.mark.parametrize(
+    ("offset_angstrom", "first", "second"),
+    [(0.2, 0.62, 0.38), (0.05, 0.5, 0.5)],
+)
+def test_occupancy_only_disorder_draws_split_orientations(
+    tmp_path, offset_angstrom, first, second, capsys
+):
+    cif = tmp_path / "occupancy.cif"
+    cif.write_text(_occupancy_only_cif(offset_angstrom, first, second), encoding="utf-8")
+    structure = load_structure(cif)
+    bundle = structure.frames[0].bundle
+    cations = [
+        row
+        for row in bundle.topology_fragment_table
+        if row["formula"] != "Cl"
+    ]
+    assert len(cations) == 1
+    formula = cations[0]["formula"]
+    assert formula == "C8N"
+    spec = json.dumps(
+        {"id": "cage", "center": formula, "ligand": "Cl", "level": "molecule"}
+    )
+    major = _shell(cif, "major", spec)["spec_results"][0]["overlays"]
+    exclusive = _shell(cif, "exclusive", spec)["spec_results"][0]["overlays"]
+    assert major and exclusive
+    assert len(exclusive) > len(major)
+    assert all(item["hull"]["simplices"] for item in major + exclusive)
+    assert all(_hull_volume(item["shell_coords"]) > 0 for item in major + exclusive)
+
+    output = tmp_path / "occupancy.png"
+    main(
+        [
+            "render",
+            str(cif),
+            "-o",
+            str(output),
+            "--backend",
+            "cpu",
+            "--view",
+            "unit_cell",
+            "--no-hydrogen",
+            "--width",
+            "320",
+            "--height",
+            "240",
+            "--scale",
+            "1",
+            "--polyhedron",
+            spec,
+            "--json",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["polyhedra"][0]["disorder_policy"] == "major"
+    assert payload["polyhedra"][0]["coordination_numbers"][0] >= 4
+    assert _foreground_pixels(output) > 50

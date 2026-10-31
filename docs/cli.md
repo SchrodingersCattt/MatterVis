@@ -459,9 +459,10 @@ opacity or which atoms are drawn. Molecule identification defaults to
 `as_refined` and keeps every refined site. Only this shell flag defaults to
 `major`.
 
-`as_refined` keeps every refined site and queries the as-loaded molecule
-formula. `major` and `exclusive` query the displayed fragment formula.
-`exclusive` draws one shell per full orientation. If the
+`as_refined` keeps every refined site. `major` and `exclusive` query each
+realization of the indexed molecule, so a fused displayed formula still
+matches a split orientation. `exclusive` draws one shell per full
+orientation. If the
 chosen policy still cannot produce at
 least four non-coplanar ligand points, `mat-vis render` exits with
 `mattervis.polyhedron-shell-error/v1` (nested in `mattervis.error/v1` under

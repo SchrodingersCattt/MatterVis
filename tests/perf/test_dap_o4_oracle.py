@@ -49,7 +49,7 @@ def _require_expected_mck(entry: dict) -> None:
     if actual is None:
         pytest.skip("installed MolCrysKit distribution does not expose a source revision")
     if actual != expected:
-        pytest.skip(
+        pytest.fail(
             f"oracle requires MolCrysKit {expected}, installed revision is {actual or 'unknown'}"
         )
 
@@ -93,10 +93,10 @@ def test_installed_mck_revision_resolves_pep610_file_url(monkeypatch, tmp_path):
     assert observed == [["git", "-C", str(source), "rev-parse", "HEAD"]]
 
 
-def test_revision_mismatch_skips_the_oracle(monkeypatch):
+def test_revision_mismatch_is_an_explicit_failure(monkeypatch):
     monkeypatch.setattr(sys.modules[__name__], "_installed_mck_revision", lambda: "wrong-revision")
 
-    with pytest.raises(pytest.skip.Exception, match="requires MolCrysKit"):
+    with pytest.raises(pytest.fail.Exception, match="requires MolCrysKit"):
         _require_expected_mck({"producer": {"molcrys_kit_revision": "expected-revision"}})
 
 
@@ -108,7 +108,7 @@ def test_revision_check_skips_when_distribution_has_no_source_revision(monkeypat
 
 
 def test_dap4_pipeline_oracle():
-    entry = ENTRIES["dap4-mattervis-d28727b-mck-9bf0ffb"]
+    entry = ENTRIES["dap4-mattervis-d28727b-mck-3087ba1"]
     fixture = Path(__file__).resolve().parents[2] / "scripts" / "data" / "DAP-4.cif"
 
     assert hashlib.sha256(fixture.read_bytes()).hexdigest() == entry["fixture"]["sha256"]

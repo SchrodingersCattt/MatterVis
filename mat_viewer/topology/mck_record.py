@@ -15,8 +15,8 @@ from molcrys_kit.analysis.packing_shell import DEFAULT_CENTROID_OFFSET_FRAC
 from ..structure import molcrys_bridge
 from .disorder_policy import (
     DEFAULT_DISORDER_POLICY,
+    center_moiety_formulas,
     invoke_find_polyhedra,
-    normalize_disorder_policy,
 )
 
 
@@ -107,19 +107,16 @@ def _mck_polyhedron_record(
         )
         molecule = molecules[molecule_index]
         as_loaded = topology_analysis._as_loaded_molecule_formula(molecule)
-        # as_refined addresses the fused as-loaded molecule. major and
-        # exclusive address the displayed fragment, so every orientation of
-        # that moiety can be returned. A stub molecule without chemical
-        # symbols keeps the as-loaded signature.
-        if normalize_disorder_policy(disorder_policy) == "as_refined" or not hasattr(
-            molecule, "get_chemical_symbols"
-        ):
-            center_formula = as_loaded
-        else:
-            center_formula = str(display_formula)
+        # The displayed fragment can be the fused formula. Ask MolCrysKit
+        # for every realization of this molecule index instead, so a split
+        # orientation is still found. Stub molecules keep the as-loaded
+        # signature.
+        center_formulas = center_moiety_formulas(molecule, disorder_policy) or [
+            as_loaded
+        ]
     else:
         # Compatibility for lightweight bridge objects and third-party loaders.
-        center_formula = str(display_formula)
+        center_formulas = [str(display_formula)]
     # On level="molecule", MCK's ``cutoff`` IS the candidate search radius
     # that feeds gap+enclosure (per MCK PR #32). MV's state-level ``cutoff``
     # is the search radius too, so the kwarg name lines up after the MCK
@@ -133,21 +130,37 @@ def _mck_polyhedron_record(
         extra_kwargs["hard_cutoff"] = float(hard_cutoff)
     if fallback_max is not None:
         extra_kwargs["fallback_max"] = int(fallback_max)
-    records = invoke_find_polyhedra(
-        find_polyhedra_impl,
-        crystal,
-        molcrys_bridge.formula_to_moiety(str(center_formula)),
-        molcrys_bridge.formula_to_moiety(ligand_formula),
-        level="molecule",
-        disorder_policy=disorder_policy,
-        center_kind=str(center_kind or "centroid"),
-        cutoff=float(cutoff),
-        central_indices=[int(molecule_index)],
-        enforce_enclosure=bool(enforce_enclosure),
-        centroid_offset_frac=float(centroid_offset_frac),
-        **extra_kwargs,
-        **topology_analysis._mck_override_kwargs(find_polyhedra_impl),
-    )
+    ligand_moiety = molcrys_bridge.formula_to_moiety(ligand_formula)
+    records: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    for center_formula in center_formulas:
+        for item in invoke_find_polyhedra(
+            find_polyhedra_impl,
+            crystal,
+            molcrys_bridge.formula_to_moiety(str(center_formula)),
+            ligand_moiety,
+            level="molecule",
+            disorder_policy=disorder_policy,
+            center_kind=str(center_kind or "centroid"),
+            cutoff=float(cutoff),
+            central_indices=[int(molecule_index)],
+            enforce_enclosure=bool(enforce_enclosure),
+            centroid_offset_frac=float(centroid_offset_frac),
+            **extra_kwargs,
+            **topology_analysis._mck_override_kwargs(find_polyhedra_impl),
+        ):
+            identity = (
+                item.get("center_molecule_index"),
+                tuple(item.get("disorder_component_ids") or ()),
+                tuple(
+                    round(float(value), 6)
+                    for value in (item.get("center_position") or ())
+                ),
+            )
+            if identity in seen:
+                continue
+            seen.add(identity)
+            records.append(item)
     if not records:
         return None
     chosen = dict(records[0])

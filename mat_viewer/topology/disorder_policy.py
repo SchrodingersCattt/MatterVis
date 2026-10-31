@@ -7,11 +7,14 @@ refined site. ``find_polyhedra`` defaults to ``major`` and accepts the same
 * ``major`` (default) keeps the highest-occupancy component of each
   mutually exclusive family.
 * ``exclusive`` builds one shell per orientation.
-* ``as_refined`` keeps every refined site. A fused pair of orientations can
-  then fail to match a real moiety, and the shell stays empty.
+* ``as_refined`` keeps every refined site. The centre query uses that fused
+  realization, so a shell is drawn when the ligands still form one.
 
 MatterVis does not invent ligand coordinates when the selected policy still
-has no drawable hull.
+has no drawable hull. The centre moiety sent to ``find_polyhedra`` is the
+Hill formula of each realization from MolCrysKit's public disorder API,
+restricted to the source molecule index. The displayed fragment formula
+selects the centre and is not used as that moiety string.
 """
 
 from __future__ import annotations
@@ -68,6 +71,48 @@ def _accepts_disorder_policy(func: Any) -> bool:
         parameter.kind is inspect.Parameter.VAR_KEYWORD
         for parameter in parameters.values()
     )
+
+
+def center_moiety_formulas(molecule: Any, policy: str) -> list[str] | None:
+    """Hill formulas of every realization ``policy`` keeps on ``molecule``.
+
+    ``None`` means the molecule cannot report chemical symbols, so the
+    caller keeps the as-loaded signature. Each distinct realization is
+    returned. The first mask is not treated as the only centre.
+    """
+
+    if not hasattr(molecule, "get_chemical_symbols"):
+        return None
+    from molcrys_kit.analysis.disorder import disorder_realizations
+
+    try:
+        realizations = disorder_realizations(
+            molecule, normalize_disorder_policy(policy)
+        )
+    except (TypeError, ValueError, AttributeError):
+        return None
+    symbols = [str(symbol) for symbol in molecule.get_chemical_symbols()]
+    formulas: list[str] = []
+    for realization in realizations or []:
+        mask = getattr(realization, "mask", None)
+        if mask is None:
+            continue
+        flags = [bool(keep) for keep in mask]
+        if len(flags) != len(symbols):
+            continue
+        kept = [symbol for symbol, keep in zip(symbols, flags) if keep]
+        if not kept:
+            continue
+        formula = _hill_formula(kept)
+        if formula and formula not in formulas:
+            formulas.append(formula)
+    return formulas or None
+
+
+def _hill_formula(symbols: list[str]) -> str:
+    from ase import Atoms
+
+    return str(Atoms(symbols=symbols).get_chemical_formula(mode="hill", empirical=False))
 
 
 def invoke_find_polyhedra(

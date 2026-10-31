@@ -1,10 +1,10 @@
 {
   "schema": "mattervis.perf.pipeline-oracle/v1",
   "entries": {
-    "dap4-mattervis-d28727b-mck-9bf0ffb": {
+    "dap4-mattervis-d28727b-mck-3087ba1": {
       "producer": {
         "mattervis_revision": "d28727b60e3f4e01fbb452ac5dd684b6949b7331",
-        "molcrys_kit_revision": "9bf0ffb0fb321d1084dbc444250b5f186af3c873"
+        "molcrys_kit_revision": "3087ba1a4936f78cc22b0f66dcd89e25117c3143"
       },
       "fixture": {
         "path": "scripts/data/DAP-4.cif",

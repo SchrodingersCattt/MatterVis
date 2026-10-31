@@ -118,8 +118,9 @@ in the geometry cache key, and accepted by `POST /api/v2/polyhedra`,
 Molecule identification defaults to `as_refined`, so loading keeps every
 refined site. Only shell construction defaults to `major`. The policy is
 applied when the shell is built, by forwarding `disorder_policy` to MolCrysKit
-`find_polyhedra`. For `major` and `exclusive`, MatterVis sends the displayed
-fragment formula. For `as_refined`, it sends the as-loaded molecule formula.
+`find_polyhedra` together with the source molecule index. The centre moiety
+is the Hill formula of each realization from MolCrysKit's public disorder
+API, so a fused displayed formula still finds a split orientation.
 `exclusive` draws one overlay for every orientation whose hull has simplices.
 
 `as_refined` uses that fused component. If it is not a drawable hull, the
@@ -138,9 +139,9 @@ A JSON `disorder_policy` on one CLI `--polyhedron` object overrides
 `--polyhedron-disorder` for that overlay. Unknown values are rejected.
 
 MatterVis forwards `disorder_policy` to MolCrysKit and does not build a second
-shell from guessed coordinates. The centre formula for `major` and
-`exclusive` is the displayed fragment formula. `as_refined` uses the
-as-loaded molecule formula.
+shell from guessed coordinates. The centre moiety is taken from each
+realization of the indexed molecule. The displayed fragment formula selects
+which centre to draw.
 
 ## REST surface
 
