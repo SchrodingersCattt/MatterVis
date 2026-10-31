@@ -411,6 +411,15 @@ def test_occupancy_only_disorder_draws_split_orientations(
     assert len(cations) == 1
     formula = cations[0]["formula"]
     assert formula == "C8N"
+    molecule = bundle.molcrys_analysis.crystal.molecules[
+        cations[0]["source_molecule_index"]
+    ]
+    from mat_viewer.topology.analysis import _as_loaded_molecule_formula
+
+    assert _as_loaded_molecule_formula(molecule) == "C8N"
+    assert center_moiety_formulas(molecule, "major") == ["C4N"]
+    assert center_moiety_formulas(molecule, "exclusive") == ["C4N"]
+    assert center_moiety_formulas(molecule, "as_refined") == ["C8N"]
     spec = json.dumps(
         {"id": "cage", "center": formula, "ligand": "Cl", "level": "molecule"}
     )

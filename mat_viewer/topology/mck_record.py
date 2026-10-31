@@ -6,6 +6,7 @@ without moving the shape-label helpers out of ``topology.analysis``.
 
 from __future__ import annotations
 
+import logging
 import sys
 from typing import Any
 
@@ -17,7 +18,10 @@ from .disorder_policy import (
     DEFAULT_DISORDER_POLICY,
     center_moiety_formulas,
     invoke_find_polyhedra,
+    normalize_disorder_policy,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _mck_polyhedron_record(
@@ -107,15 +111,32 @@ def _mck_polyhedron_record(
         )
         molecule = molecules[molecule_index]
         as_loaded = topology_analysis._as_loaded_molecule_formula(molecule)
-        # The displayed fragment can be the fused formula. Ask MolCrysKit
-        # for every realization of this molecule index instead, so a split
-        # orientation is still found. Stub molecules keep the as-loaded
-        # signature.
-        center_formulas = center_moiety_formulas(molecule, disorder_policy) or [
-            as_loaded
-        ]
+        # The displayed fragment can be the fused as-refined formula.
+        # Naming that formula under major or exclusive matches no split
+        # view, so the query uses each realization of this molecule index.
+        # Stub molecules, and releases without the realization API, keep
+        # the as-loaded signature and say so.
+        policy = normalize_disorder_policy(disorder_policy)
+        realized = center_moiety_formulas(molecule, policy)
+        if realized:
+            center_formulas = [
+                formula
+                for formula in realized
+                if policy == "as_refined" or formula != as_loaded
+            ] or list(realized)
+        else:
+            center_formulas = [as_loaded]
+            if policy != "as_refined":
+                logger.warning(
+                    "Molecule %s has no realization formulas under %s; "
+                    "querying the as-loaded formula %s.",
+                    molecule_index,
+                    policy,
+                    as_loaded,
+                )
     else:
         # Compatibility for lightweight bridge objects and third-party loaders.
+        policy = normalize_disorder_policy(disorder_policy)
         center_formulas = [str(display_formula)]
     # On level="molecule", MCK's ``cutoff`` IS the candidate search radius
     # that feeds gap+enclosure (per MCK PR #32). MV's state-level ``cutoff``
@@ -162,6 +183,14 @@ def _mck_polyhedron_record(
             seen.add(identity)
             records.append(item)
     if not records:
+        logger.warning(
+            "No polyhedron shell for molecule %s under disorder_policy=%s "
+            "and centre formulas %s. The as-refined moiety is not used as "
+            "a silent fallback.",
+            molecule_index,
+            policy,
+            center_formulas,
+        )
         return None
     chosen = dict(records[0])
     chosen["extra_shells"] = [
