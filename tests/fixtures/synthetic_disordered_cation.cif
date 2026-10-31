@@ -1,7 +1,9 @@
 # Synthetic P1 cell. Two orientations of one molecular cation share an
-# ordered hub and are stored in a single molecule. Six ordered ligand
-# atoms sit on an octahedron around that hub. This is not a published
-# structure.
+# ordered nitrogen and are stored in one molecule. Each orientation is a
+# tetrahedron of carbon atoms at a carbon-nitrogen distance of 1.49 angstrom.
+# Six ordered chlorine atoms sit on an octahedron 5 angstrom from the
+# nitrogen, the same ligand positions as the ordered control. This is not a
+# published structure.
 data_synthetic_disordered_cation
 _symmetry_space_group_name_H-M   'P 1'
 _symmetry_Int_Tables_number       1
@@ -23,9 +25,15 @@ _atom_site_fract_z
 _atom_site_occupancy
 _atom_site_disorder_assembly
 _atom_site_disorder_group
-N1 N  0.50  0.50  0.50  1.00 . .
-C1 C  0.50  0.50  0.525 0.70 A 1
-C2 C  0.525 0.50  0.50  0.30 A 2
+N1 N  0.50000 0.50000 0.50000 1.00 . .
+C1 C  0.54301 0.54301 0.54301 0.70 A 1
+C2 C  0.54301 0.45699 0.45699 0.70 A 1
+C3 C  0.45699 0.54301 0.45699 0.70 A 1
+C4 C  0.45699 0.45699 0.54301 0.70 A 1
+C5 C  0.48944 0.55990 0.54301 0.30 A 2
+C6 C  0.55990 0.51056 0.45699 0.30 A 2
+C7 C  0.44010 0.48944 0.45699 0.30 A 2
+C8 C  0.51056 0.44010 0.54301 0.30 A 2
 Cl1 Cl 0.50  0.50  0.75  1.00 . .
 Cl2 Cl 0.50  0.50  0.25  1.00 . .
 Cl3 Cl 0.75  0.50  0.50  1.00 . .

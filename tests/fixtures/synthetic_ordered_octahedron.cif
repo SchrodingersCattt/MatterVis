@@ -1,5 +1,7 @@
 # Synthetic P1 cell. One ordered centre atom and six ordered ligand
-# atoms on an octahedron. This is not a published structure.
+# atoms on an octahedron, 5 angstrom from the centre. The ligand
+# fractional coordinates match the disordered cation fixture. This is
+# not a published structure.
 data_synthetic_ordered_octahedron
 _symmetry_space_group_name_H-M   'P 1'
 _symmetry_Int_Tables_number       1

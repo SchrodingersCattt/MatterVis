@@ -111,19 +111,19 @@ in the geometry cache key, and accepted by `POST /api/v2/polyhedra`,
 
 | Value | Meaning |
 |---|---|
-| `major` | Default. Highest-occupancy component of each mutually exclusive family, plus ordered atoms shared by every orientation. Ties break by atom count, then component label. |
-| `exclusive` | One shell per orientation. Other families stay on their major component. |
+| `major` | Default. Highest-occupancy component of each mutually exclusive family, plus ordered atoms shared by every orientation. Equal occupancies stay whole orientations. Ties break by occupancy sum, then atom count, then component label. |
+| `exclusive` | One full orientation per alternative. Other families stay on their major component. |
 | `as_refined` | Every refined site. Orientations that share an ordered atom stay in one component. |
 
 Molecule identification defaults to `as_refined`, so loading keeps every
 refined site. Only shell construction defaults to `major`. The policy is
 applied when the shell is built, by forwarding `disorder_policy` to MolCrysKit
-`find_polyhedra`. For `major` and `exclusive`, MatterVis sends the formula of
-the selected realization rather than the fused as-loaded formula. `exclusive`
-draws one overlay per orientation MolCrysKit returns.
+`find_polyhedra`. For `major` and `exclusive`, MatterVis sends the displayed
+fragment formula. For `as_refined`, it sends the as-loaded molecule formula.
+`exclusive` draws one overlay for every orientation whose hull has simplices.
 
 `as_refined` uses that fused component. If it is not a drawable hull, the
-shell stays empty. `major` uses the highest-occupancy component. Ordered
+shell stays empty. `major` uses the highest-occupancy orientation. Ordered
 crystals are unchanged under every policy.
 
 If the chosen policy still has fewer than four non-coplanar ligand points,
@@ -139,7 +139,8 @@ A JSON `disorder_policy` on one CLI `--polyhedron` object overrides
 
 MatterVis forwards `disorder_policy` to MolCrysKit and does not build a second
 shell from guessed coordinates. The centre formula for `major` and
-`exclusive` is the formula of the selected realization.
+`exclusive` is the displayed fragment formula. `as_refined` uses the
+as-loaded molecule formula.
 
 ## REST surface
 

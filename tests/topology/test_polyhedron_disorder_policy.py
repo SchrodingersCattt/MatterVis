@@ -1,10 +1,11 @@
 """Public disorder-component policy for polyhedron shells.
 
 The disordered fixture stores two orientations of one cation in a single
-molecule. The as-loaded formula does not match the highest-occupancy
-component, so the default policy reports an empty shell. ``major`` selects
-that component and the octahedron is drawable. An ordered octahedron is the
-control. No shell is invented when the policy still cannot draw one.
+molecule. Each orientation is a carbon tetrahedron around an ordered
+nitrogen. ``major`` keeps the higher-occupancy orientation and draws the
+same chlorine octahedron as the ordered control. ``exclusive`` draws one
+overlay per orientation. No shell is invented when the policy still cannot
+draw one.
 """
 
 from __future__ import annotations
@@ -27,7 +28,8 @@ from mat_viewer.topology.disorder_policy import (
 
 DISORDERED = Path("tests/fixtures/synthetic_disordered_cation.cif")
 ORDERED = Path("tests/fixtures/synthetic_ordered_octahedron.cif")
-SHELL = '{"id":"cage","center":"N","ligand":"Cl","level":"molecule"}'
+DISORDERED_SHELL = '{"id":"cage","center":"C4N","ligand":"Cl","level":"molecule"}'
+ORDERED_SHELL = '{"id":"cage","center":"N","ligand":"Cl","level":"molecule"}'
 
 pytestmark = pytest.mark.filterwarnings(
     "ignore:Structure contains disorder:UserWarning"
@@ -89,44 +91,45 @@ def test_shell_call_forwards_disorder_policy_unchanged():
     assert seen["kwargs"]["central_indices"] == [0]
 
 
-def _shell(path: Path, policy: str):
+def _shell(path: Path, policy: str, spec: str):
     structure = load_structure(path)
     return build_topology_data(
         structure,
-        [SHELL],
+        [spec],
         disorder_policy=policy,
         display="unit_cell",
         show_hydrogen=False,
     )
 
 
+def _hull_volume(shell_coords) -> float:
+    from scipy.spatial import ConvexHull
+
+    return float(ConvexHull(np.asarray(shell_coords, dtype=float)).volume)
+
+
 def test_disordered_cation_major_policy_matches_the_ordered_shell():
     structure = load_structure(DISORDERED)
     bundle = structure.frames[0].bundle
     formulas = [row["formula"] for row in bundle.topology_fragment_table]
-    assert formulas.count("N") == 1
+    assert formulas.count("C4N") == 1
     assert formulas.count("Cl") == 6
-    cation = next(
-        index
-        for index, row in enumerate(bundle.topology_fragment_table)
-        if row["formula"] == "N"
-    )
-    molecule_index = bundle.topology_fragment_table[cation]["source_molecule_index"]
-    molecule = bundle.molcrys_analysis.crystal.molecules[molecule_index]
-    assert molecule.get_chemical_formula() == "C2N"
+    cation = next(row for row in bundle.topology_fragment_table if row["formula"] == "C4N")
+    molecule = bundle.molcrys_analysis.crystal.molecules[cation["source_molecule_index"]]
+    assert molecule.get_chemical_formula() == "C8N"
 
-    built = _shell(DISORDERED, "major")
+    built = _shell(DISORDERED, "major", DISORDERED_SHELL)
     overlays = built["spec_results"][0]["overlays"]
-    ordered = _shell(ORDERED, "major")["spec_results"][0]["overlays"]
+    ordered = _shell(ORDERED, "major", ORDERED_SHELL)["spec_results"][0]["overlays"]
     assert overlays and ordered
     disordered_counts = sorted(len(item["shell_coords"]) for item in overlays)
     ordered_counts = sorted(len(item["shell_coords"]) for item in ordered)
     assert disordered_counts == ordered_counts
     assert disordered_counts[0] >= 4
     assert all(item["hull"]["simplices"] for item in overlays)
+    assert all(_hull_volume(item["shell_coords"]) > 0 for item in overlays)
     from mat_viewer.topology.analysis import analyze_topology
 
-    cation = next(row for row in bundle.topology_fragment_table if row["formula"] == "N")
     exclusive_analysis = analyze_topology(
         bundle,
         center_index=int(cation["index"]),
@@ -137,16 +140,20 @@ def test_disordered_cation_major_policy_matches_the_ordered_shell():
         centroid_offset_frac=0.25,
     )
     assert exclusive_analysis["extra_shells"]
-    assert not (exclusive_analysis["extra_shells"][0].get("hull") or {}).get("simplices")
-    exclusive = _shell(DISORDERED, "exclusive")["spec_results"][0]["overlays"]
-    assert len(exclusive) == len(overlays)
+    assert all(
+        (extra.get("hull") or {}).get("simplices")
+        for extra in exclusive_analysis["extra_shells"]
+    )
+    exclusive = _shell(DISORDERED, "exclusive", DISORDERED_SHELL)["spec_results"][0]["overlays"]
+    assert len(exclusive) > len(overlays)
     assert all(item["hull"]["simplices"] for item in exclusive)
+    assert all(_hull_volume(item["shell_coords"]) > 0 for item in exclusive)
 
 
 def test_ordered_octahedron_is_unchanged_by_either_policy():
     counts = []
     for policy in ("major", "as_refined"):
-        overlays = _shell(ORDERED, policy)["spec_results"][0]["overlays"]
+        overlays = _shell(ORDERED, policy, ORDERED_SHELL)["spec_results"][0]["overlays"]
         assert overlays
         assert all(item["hull"]["simplices"] for item in overlays)
         counts.append(sorted(len(item["shell_coords"]) for item in overlays))
@@ -159,7 +166,7 @@ def test_major_policy_does_not_invent_a_missing_shell():
     with pytest.raises(PolyhedronShellError) as caught:
         build_topology_data(
             structure,
-            ['{"id":"missing","center":"N","ligand":"Br","level":"molecule"}'],
+            ['{"id":"missing","center":"C4N","ligand":"Br","level":"molecule"}'],
             disorder_policy="major",
             display="unit_cell",
             show_hydrogen=False,
@@ -179,7 +186,7 @@ def _foreground_pixels(path: Path) -> int:
     return int(np.count_nonzero(opaque & ~white))
 
 
-def _render(tmp_path: Path, cif: Path, *extra: str) -> tuple[Path, str]:
+def _render(tmp_path: Path, cif: Path, spec: str, *extra: str) -> tuple[Path, str]:
     output = tmp_path / "shell.png"
     main(
         [
@@ -199,7 +206,7 @@ def _render(tmp_path: Path, cif: Path, *extra: str) -> tuple[Path, str]:
             "--scale",
             "1",
             "--polyhedron",
-            SHELL,
+            spec,
             "--json",
             *extra,
         ]
@@ -208,7 +215,9 @@ def _render(tmp_path: Path, cif: Path, *extra: str) -> tuple[Path, str]:
 
 
 def test_render_cli_major_policy_succeeds_for_disordered_and_ordered(tmp_path, capsys):
-    output, _ = _render(tmp_path, DISORDERED, "--polyhedron-disorder", "major")
+    output, _ = _render(
+        tmp_path, DISORDERED, DISORDERED_SHELL, "--polyhedron-disorder", "major"
+    )
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is True
     assert _foreground_pixels(output) > 50
@@ -235,7 +244,7 @@ def test_render_cli_major_policy_succeeds_for_disordered_and_ordered(tmp_path, c
             "--scale",
             "1",
             "--polyhedron",
-            SHELL,
+            ORDERED_SHELL,
             "--polyhedron-disorder",
             "major",
             "--json",
@@ -261,7 +270,7 @@ def test_render_cli_reports_structured_empty_shell(tmp_path, capsys):
                 "--view",
                 "unit_cell",
                 "--polyhedron",
-                '{"id":"missing","center":"N","ligand":"Br","level":"molecule"}',
+                '{"id":"missing","center":"C4N","ligand":"Br","level":"molecule"}',
                 "--polyhedron-disorder",
                 "as_refined",
                 "--json",

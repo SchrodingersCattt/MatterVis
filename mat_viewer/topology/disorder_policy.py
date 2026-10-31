@@ -70,39 +70,6 @@ def _accepts_disorder_policy(func: Any) -> bool:
     )
 
 
-def realization_formula(molecule: Any, policy: str) -> str | None:
-    """Hill formula MolCrysKit will match for ``policy``.
-
-    ``as_refined`` returns None so the caller keeps the as-loaded formula.
-    Other policies use the first chemically allowed realization. Ordered
-    molecules return None as well, because that realization keeps every atom.
-    """
-
-    if normalize_disorder_policy(policy) == "as_refined":
-        return None
-    if not hasattr(molecule, "get_chemical_symbols"):
-        return None
-    from molcrys_kit.analysis.disorder.policy import disorder_realizations
-
-    try:
-        realizations = disorder_realizations(molecule, policy)
-    except (TypeError, ValueError, AttributeError):
-        return None
-    if not realizations:
-        return None
-    mask = realizations[0].mask
-    symbols = list(molecule.get_chemical_symbols())
-    if len(mask) != len(symbols) or bool(mask.all()):
-        return None
-    kept = [symbol for symbol, keep in zip(symbols, mask) if bool(keep)]
-    if not kept:
-        return None
-    from ase import Atoms
-
-    formula = Atoms(symbols=kept).get_chemical_formula(mode="hill", empirical=False)
-    return str(formula)
-
-
 def invoke_find_polyhedra(
     func: Any,
     crystal: Any,
