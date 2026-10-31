@@ -63,7 +63,7 @@ The same routing as a quick table:
 | Render ORTEP / thermal ellipsoid figures | [`ortep_api.md`](ortep_api.md) |
 | Color atoms by charge, velocity, stress, or another per-atom field | [`atom_property_coloring.md`](atom_property_coloring.md) |
 | Add a/b/c (or x/y/z, k-path, dipole) direction indicators to any 3D plot | [`compass_api.md`](compass_api.md) |
-| Manage and analyse named coordination polyhedra while drawing is off (per-row colour, ligand restriction, per-instance overrides) | [`polyhedron_api.md`](polyhedron_api.md) |
+| Manage and analyse named coordination polyhedra while drawing is off (per-row colour, ligand restriction, per-instance overrides, disorder component) | [`polyhedron_api.md`](polyhedron_api.md) |
 | Apply per-element / per-group colour, visibility, material, or render-style overrides from API or CLI | [`atom_groups_api.md`](atom_groups_api.md) |
 | Draw anchored polarization, dipole, force, displacement, magnetic, or response vectors with real 3D depth | [`vector_overlays_api.md`](vector_overlays_api.md) |
 | Draw conventional, transformed, or simulation cells over one atomistic scene | [cell_overlays_api.md](cell_overlays_api.md) |

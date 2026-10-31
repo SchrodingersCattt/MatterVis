@@ -648,6 +648,7 @@ def test_polyhedron_summary_reports_effective_paint_and_count() -> None:
             "ligand": "O",
             "displayed_centers": 1,
             "unique_source_centers": 1,
+            "disorder_policy": "major",
             "center_images": False,
             "center_image_shifts": [[0, 0, 0]],
             "effective_colors": ["#0072B2"],

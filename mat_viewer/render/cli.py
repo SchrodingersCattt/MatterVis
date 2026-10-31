@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from .frame_selection import parse_frame_indices as _parse_frame_indices
-from .cli_controls import bond_thresholds_from_args
+from .cli_controls import add_polyhedron_disorder_argument, bond_thresholds_from_args
 
 _DISPLAY_MODES = ("auto", "formula_unit", "unit_cell", "asymmetric_unit", "cluster")
 _STYLES = ("ball_stick", "ball", "space_filling", "stick", "ortep", "wireframe")
@@ -419,9 +419,10 @@ def _build_render_parser(
             "Add a polyhedron overlay from a JSON object. Repeat for multiple overlays. "
             "Required keys: center, ligand. Optional: id, level=atom|molecule, site, sites, "
             "center_kind, cutoff, hard_cutoff, fallback_max, color, opacity, "
-            "edge_opacity."
+            "edge_opacity, disorder_policy."
         ),
     )
+    add_polyhedron_disorder_argument(p)
     p.add_argument(
         "--polyhedron-site",
         type=int,
@@ -631,8 +632,8 @@ def _build_cli_topology_data(
         args.polyhedron,
         site_index=args.polyhedron_site,
         cutoff=args.polyhedron_cutoff,
+        disorder_policy=getattr(args, "polyhedron_disorder", None),
     )
-
 
 def _build_style_overrides(args: argparse.Namespace) -> Dict[str, Any]:
     """Collect CLI flags into a style-override dict."""

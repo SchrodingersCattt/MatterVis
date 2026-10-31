@@ -28,6 +28,7 @@ Every spec is a flat dict with these fields:
 | `center_kind` | string | **Phase 5.** Molecule-level only: `"centroid"` (default), `"com"` (mass-weighted), or `"heavy_centroid"`. Forwarded to `find_polyhedra(center_kind=...)`; ignored at atom level. |
 | `hard_cutoff` | number \| null | **Phase 5.** Molecule-level only. `null` (default) keeps the natural first shell from MCK's gap+enclosure heuristic. A positive float (e.g. `8.0`) opts that spec into MCK's historical "fill the ball" mode and reproduces classic CN=12 cuboctahedra / CN=4 square-planar interpretations. Silently dropped on atom-level rows (MCK rejects the combination). |
 | `fallback_max` | int \| null | **Phase 5.** Optional upper bound on the chosen coordination number (1--64). `null` keeps MCK's own default. |
+| `disorder_policy` | string | `major` (default), `exclusive`, or `as_refined`. See [Disorder component](#disorder-component). |
 | `center_images` | bool | Include displayed periodic images of each center. At molecule level the cached center, shell, and hull translate together with the complete displayed fragment. Default `false`. |
 | `instance_overrides` | object | **Phase 4.** Per-fragment override map: `{fragment_label: {color, visible}}`. Empty `{}` means every matched fragment inherits the spec-level colour and visibility. Keys are the fragment-table labels exposed in `topology_data["spec_results"][i]["overlays"][j]["center_label"]`. |
 
@@ -41,7 +42,7 @@ the geometry cache.
 
 ```mermaid
 flowchart LR
-  A["state.polyhedron_specs<br/>(list of rows)"] --> G["spec_geometry_key<br/>(center_species, ligand_species,<br/>enforce_enclosure, centroid_offset_frac,<br/>level, center_kind, hard_cutoff, fallback_max)"]
+  A["state.polyhedron_specs<br/>(list of rows)"] --> G["spec_geometry_key<br/>(center_species, ligand_species,<br/>enforce_enclosure, centroid_offset_frac,<br/>level, center_kind, hard_cutoff, fallback_max,<br/>disorder_policy)"]
   A --> P["per-row paint:<br/>color, instance_overrides<br/>(NOT in geometry key)"]
   G --> K["_topology_state_cache key:<br/>(structure, display_mode, hydrogens,<br/>site_index, cutoff, spec_geometry_key,<br/>transforms_key)"]
   K --> M["analyze_topology -><br/>find_polyhedra(level=molecule)<br/>via molcrys_kit"]
@@ -100,6 +101,44 @@ as a rigid overlay; MatterVis does not re-search ligands around each display cop
 
 Render receipts report unique_source_centers, displayed_centers, and
 center_image_shifts. Periodic images increase only the displayed count.
+
+## Disorder component
+
+`disorder_policy` chooses which crystallographic disorder component is used
+when a spec builds a coordination shell. It is stored on the spec, included
+in the geometry cache key, and accepted by `POST /api/v2/polyhedra`,
+`PATCH /api/v2/polyhedra/{spec_id}`, and `POST /api/v2/topology`.
+
+| Value | Meaning |
+|---|---|
+| `major` | Default. Highest-occupancy component of each mutually exclusive family, plus ordered atoms shared by every orientation. Ties break by atom count, then component label. |
+| `exclusive` | One shell per orientation. Other families stay on their major component. |
+| `as_refined` | Every refined site. Orientations that share an ordered atom stay in one component. |
+
+Loading a structure keeps every refined site. The policy is applied when the
+shell is built, by forwarding `disorder_policy` to MolCrysKit
+`find_polyhedra`. For `major` and `exclusive`, MatterVis sends the formula of
+the selected realization rather than the fused as-loaded formula. `exclusive`
+draws one overlay per orientation MolCrysKit returns.
+
+`as_refined` uses that fused component. If it is not a drawable hull, the
+shell stays empty. `major` uses the highest-occupancy component. Ordered
+crystals are unchanged under every policy.
+
+If the chosen policy still has fewer than four non-coplanar ligand points,
+`mat-vis render` exits non-zero. With `--json` the stdout object is
+`mattervis.error/v1` and `details` is `mattervis.polyhedron-shell-error/v1`
+(`spec_id`, `disorder_policy`, `center`, `ligand`, `level`, `reason`,
+`shell_points`). Ligand coordinates are not invented. The topology query
+returns the empty shell and `gap_info.rejection_reason` instead of raising,
+so an analysis card can show the miss.
+
+A JSON `disorder_policy` on one CLI `--polyhedron` object overrides
+`--polyhedron-disorder` for that overlay. Unknown values are rejected.
+
+MatterVis forwards `disorder_policy` to MolCrysKit and does not build a second
+shell from guessed coordinates. The centre formula for `major` and
+`exclusive` is the formula of the selected realization.
 
 ## REST surface
 

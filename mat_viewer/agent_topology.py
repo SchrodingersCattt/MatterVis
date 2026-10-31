@@ -10,6 +10,11 @@ from typing import Any, Iterable, Sequence
 import numpy as np
 
 from .render.picking import polyhedron_instance_id
+from .topology.disorder_policy import (
+    DEFAULT_DISORDER_POLICY,
+    PolyhedronShellError,
+    normalize_disorder_policy,
+)
 
 _POLYHEDRON_KEYS = {
     "id",
@@ -32,6 +37,7 @@ _POLYHEDRON_KEYS = {
     "sites",
     "center_images",
     "instance_overrides",
+    "disorder_policy",
 }
 
 
@@ -132,8 +138,15 @@ def _parse_instance_overrides(
     return parsed
 
 
-def parse_polyhedron_specs(raw_specs: Iterable[str]) -> list[dict[str, Any]]:
+def parse_polyhedron_specs(
+    raw_specs: Iterable[str],
+    *,
+    disorder_policy: str | None = None,
+) -> list[dict[str, Any]]:
     """Parse repeatable CLI JSON without importing Dash normalizers."""
+    default_policy = normalize_disorder_policy(
+        disorder_policy, default=DEFAULT_DISORDER_POLICY
+    )
     specs: list[dict[str, Any]] = []
     for index, raw in enumerate(raw_specs):
         try:
@@ -239,6 +252,13 @@ def parse_polyhedron_specs(raw_specs: Iterable[str]) -> list[dict[str, Any]]:
                 f"polyhedron {index + 1}: center_images must be a JSON boolean"
             )
         instance_overrides = _parse_instance_overrides(payload, index)
+        try:
+            spec_policy = normalize_disorder_policy(
+                payload.get("disorder_policy", default_policy),
+                default=default_policy,
+            )
+        except ValueError as exc:
+            raise ValueError(f"polyhedron {index + 1}: {exc}") from exc
         spec_id = str(
             payload.get("spec_id") or payload.get("id") or f"polyhedron-{index + 1}"
         )
@@ -269,9 +289,38 @@ def parse_polyhedron_specs(raw_specs: Iterable[str]) -> list[dict[str, Any]]:
                 "edge_opacity": edge_opacity,
                 "center_images": center_images,
                 "instance_overrides": instance_overrides,
+                "disorder_policy": spec_policy,
             }
         )
     return specs
+
+
+def _polyhedron_shell_error(
+    spec: dict[str, Any],
+    *,
+    shell_points: int,
+    rejection_reason: str | None = None,
+) -> PolyhedronShellError:
+    """Structured failure for a shell that is still not drawable."""
+
+    policy = spec.get("disorder_policy") or DEFAULT_DISORDER_POLICY
+    points = int(shell_points)
+    message = (
+        f"polyhedron {spec['id']} ({spec['center_species']} -> "
+        f"{spec['ligand_species']}, disorder_policy={policy}) has no drawable "
+        f"non-coplanar shell ({points} ligand point(s); need at least 4)"
+    )
+    return PolyhedronShellError(
+        message,
+        spec_id=str(spec["id"]),
+        disorder_policy=str(policy),
+        level=str(spec.get("level") or "molecule"),
+        center=str(spec["center_species"]),
+        ligand=str(spec["ligand_species"]),
+        reason="no_drawable_shell",
+        shell_points=points,
+        rejection_reason=rejection_reason,
+    )
 
 
 def _matches(fragment: dict[str, Any], spec: dict[str, Any]) -> bool:
@@ -289,6 +338,7 @@ def prepare_fast_polyhedron_context(
     raw_specs: Sequence[str],
     *,
     default_cutoff: float | None = None,
+    disorder_policy: str | None = None,
 ) -> FastPolyhedronContext:
     """Cache generic atom-shell selection data for trajectory animation.
 
@@ -299,7 +349,7 @@ def prepare_fast_polyhedron_context(
     silently inventing molecule grouping rules in the renderer.
     """
 
-    specs = parse_polyhedron_specs(raw_specs)
+    specs = parse_polyhedron_specs(raw_specs, disorder_policy=disorder_policy)
     elements = np.asarray(frame.atomic_numbers)
     try:
         from ase.data import chemical_symbols
@@ -326,6 +376,14 @@ def prepare_fast_polyhedron_context(
             return FastPolyhedronContext(
                 (), cell, inverse_cell, False,
                 f"{spec['spec_id']} uses molecule-level chemistry",
+            )
+        if spec["disorder_policy"] != DEFAULT_DISORDER_POLICY:
+            return FastPolyhedronContext(
+                (),
+                cell,
+                inverse_cell,
+                False,
+                f"{spec['spec_id']} requests disorder_policy={spec['disorder_policy']}",
             )
         if center not in chemical_symbols or ligand not in chemical_symbols:
             return FastPolyhedronContext(
@@ -575,9 +633,10 @@ def build_topology_data(
     show_hydrogen: bool = True,
     include_boundary_replicas: bool = True,
     include_cross_boundary_bond_endpoints: bool = True,
+    disorder_policy: str | None = None,
 ) -> dict[str, Any] | None:
     """Build RenderPlan polyhedra from MolCrysKit topology primitives."""
-    specs = parse_polyhedron_specs(raw_specs)
+    specs = parse_polyhedron_specs(raw_specs, disorder_policy=disorder_policy)
     if not specs:
         return None
     if cutoff is not None and (not np.isfinite(cutoff) or float(cutoff) <= 0.0):
@@ -638,8 +697,10 @@ def build_topology_data(
                 enforce_enclosure=spec["enforce_enclosure"],
                 centroid_offset_frac=spec["centroid_offset_frac"],
                 fallback_max=spec["fallback_max"],
+                disorder_policy=spec["disorder_policy"],
             )
             overlays: list[dict[str, Any]] = []
+            largest_shell = 0
             for center in centers:
                 shell = shells.get(center["source_index"])
                 if shell is None:
@@ -651,9 +712,9 @@ def build_topology_data(
                     len(overlays),
                 )
                 hull = overlay.get("hull") or {}
-                if len(overlay.get("shell_coords") or []) < 4 or not hull.get(
-                    "simplices"
-                ):
+                shell_points = len(overlay.get("shell_coords") or [])
+                largest_shell = max(largest_shell, shell_points)
+                if shell_points < 4 or not hull.get("simplices"):
                     warnings.append(
                         f"polyhedron {spec['id']} skipped source atom "
                         f"{center['source_index']}: shell is not a drawable "
@@ -680,9 +741,7 @@ def build_topology_data(
                         overlay["visible"] = bool(override["visible"])
                 overlays.append(overlay)
             if not overlays:
-                raise ValueError(
-                    f"polyhedron {spec['id']} has no drawable non-coplanar shell"
-                )
+                raise _polyhedron_shell_error(spec, shell_points=largest_shell)
             spec_results.append({**spec, "overlays": overlays})
             continue
 
@@ -748,6 +807,8 @@ def build_topology_data(
                 f"polyhedron {spec['id']}"
             )
         overlays: list[dict[str, Any]] = []
+        largest_shell = 0
+        rejection_reason = None
         for display_fragment, topology_fragment, image_shift in candidates:
             result = analyze_topology(
                 bundle,
@@ -764,9 +825,12 @@ def build_topology_data(
                 center_kind=spec["center_kind"],
                 hard_cutoff=spec["hard_cutoff"],
                 fallback_max=spec["fallback_max"],
+                disorder_policy=spec["disorder_policy"],
             )
             hull = result.get("hull") or {}
             shell = result.get("shell_coords") or []
+            largest_shell = max(largest_shell, len(shell))
+            rejection_reason = (result.get("gap_info") or {}).get("rejection_reason")
             if len(shell) < 4 or not hull.get("simplices"):
                 warnings.append(
                     f"polyhedron {spec['id']} skipped displayed fragment "
@@ -809,9 +873,27 @@ def build_topology_data(
                 if "visible" in override:
                     overlay["visible"] = bool(override["visible"])
             overlays.append(overlay)
+            for extra in result.get("extra_shells") or ():
+                extra_shell = extra.get("shell_coords") or []
+                extra_hull = extra.get("hull") or {}
+                if len(extra_shell) < 4 or not extra_hull.get("simplices"):
+                    continue
+                extra_overlay = {
+                    **overlay,
+                    "center_coords": extra.get("center_coords"),
+                    "shell_coords": extra_shell,
+                    "distances": extra.get("distances") or [],
+                    "hull": extra_hull,
+                }
+                extra_overlay["instance_id"] = polyhedron_instance_id(
+                    spec["id"], extra_overlay, len(overlays)
+                )
+                overlays.append(extra_overlay)
         if not overlays:
-            raise ValueError(
-                f"polyhedron {spec['id']} has no drawable non-coplanar shell"
+            raise _polyhedron_shell_error(
+                spec,
+                shell_points=largest_shell,
+                rejection_reason=rejection_reason,
             )
         spec_results.append({**spec, "overlays": overlays})
     return {"spec_results": spec_results, "warnings": warnings}
@@ -874,6 +956,7 @@ def polyhedron_summary(topology_data) -> list[dict]:
             "ligand": result.get("ligand_species"),
             "displayed_centers": len(overlays),
             "unique_source_centers": len(source_centers) or len(overlays),
+            "disorder_policy": result.get("disorder_policy", DEFAULT_DISORDER_POLICY),
             "center_images": bool(result.get("center_images", False)),
             "center_image_shifts": [list(shift) for shift in center_image_shifts],
             "effective_colors": colors,

@@ -15,6 +15,7 @@ scalar controls and repeatable selector rules for mixed styles.
 | World-space vectors | `--vector-overlays` |
 | Auxiliary conventional/transformed/simulation cells | `--cell-overlays` |
 | Coordination polyhedra | Repeatable `--polyhedron` |
+| Polyhedron disorder component | `--polyhedron-disorder major\|exclusive\|as_refined`, or JSON `disorder_policy` |
 | MolCrysKit bond-perception scale | `--bond-scale` |
 | Frame selection and video speed | `--frame-range`, `--stride`, `--fps` |
 | Physical simulation time labels | `--display-time`, `--time-step`, `--time-step-unit`, `--dump-frequency`, `--first-frame-step`, `--time-position` |

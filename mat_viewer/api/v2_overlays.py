@@ -34,6 +34,7 @@ def register_overlay_routes(v2, backend) -> dict:
                 center_kind=payload.get("center_kind"),
                 hard_cutoff=payload.get("hard_cutoff"),
                 fallback_max=payload.get("fallback_max"),
+                disorder_policy=payload.get("disorder_policy"),
                 scene_id=_polyhedra_scene_id(),
                 spec_id=payload.get("id"),
             )

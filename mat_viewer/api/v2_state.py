@@ -46,7 +46,11 @@ def register_state_routes(v2, backend) -> dict:
     @v2.post("/state")
     def post_state():
         payload = request.get_json(force=True, silent=True) or {}
-        return jsonify(backend.patch_state(payload, scene_id=_scene_id_from_request()))
+        try:
+            state = backend.patch_state(payload, scene_id=_scene_id_from_request())
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(state)
 
     @v2.get("/camera")
     def get_camera():
@@ -151,6 +155,7 @@ def register_state_routes(v2, backend) -> dict:
                 level=payload.get("level", "molecule"),
                 enforce_enclosure=payload.get("enforce_enclosure", True),
                 centroid_offset_frac=payload.get("centroid_offset_frac"),
+                disorder_policy=payload.get("disorder_policy"),
             )
         )
 

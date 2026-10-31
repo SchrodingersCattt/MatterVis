@@ -89,10 +89,19 @@ hidden axes and labels, `atom-scale=0.65`, `bond-radius=0.08`, `2400x1800`, and
 target is one local event or molecule rather than the whole cell, use the
 auditable focus workflow instead of drawing the entire dense box.
 
-The current agent render CLI has no public disorder-style or major-only switch.
-It rejects the legacy `--config` escape hatch instead of accepting an option it
-cannot translate to `RenderSpec`. If a formal figure needs a different disorder
-policy, report that limitation and stop; do not invoke a private Web normalizer.
+Polyhedron and coordination-shell overlays take a public disorder component
+policy, forwarded to MolCrysKit. `--polyhedron-disorder` is `major`
+(default), `exclusive`, or `as_refined`. `major` keeps the highest-occupancy
+component of each mutually exclusive family. `exclusive` builds one shell per
+orientation. `as_refined` keeps every refined site and can return an empty
+shell when orientations are fused into one molecule. That failure is a
+structured error (`mattervis.polyhedron-shell-error/v1` inside
+`mattervis.error/v1` with `--json`). Stop on that error. Do not invent a
+shell and do not call a private loader.
+
+The policy chooses shell membership only. It does not fade atoms, hide minor
+sites, or set `disorder` / `minor_opacity`. Those remain viewer style controls.
+The render command still rejects the legacy `--config` escape hatch.
 
 TUI `--hide-partial` removes all occupancy below approximately 0.99, not only
 minor disorder alternatives.

@@ -418,6 +418,7 @@ def render_array_input(
     polyhedron_specs: Sequence[str] = (),
     polyhedron_site: int | None = None,
     polyhedron_cutoff: float | None = None,
+    polyhedron_disorder: str | None = None,
     animation_time: Any = None,
     frame_annotation: Any = None,
     profile_path: str | Path | None = None,
@@ -534,6 +535,7 @@ def render_array_input(
             frames[0],
             polyhedron_specs,
             default_cutoff=polyhedron_cutoff,
+            disorder_policy=polyhedron_disorder,
         )
         if candidate_context.supported:
             polyhedron_context = candidate_context
@@ -556,6 +558,7 @@ def render_array_input(
         from ase import Atoms
         from ..agent import prepare_render
         from ..agent_topology import build_topology_data
+        from ..topology.disorder_policy import PolyhedronShellError
         from ..loader.bundle_builder import build_loaded_crystal_from_atoms
         from ..loader.structure_input import (
             StructureFrame,
@@ -623,7 +626,10 @@ def render_array_input(
                         [spec],
                         site_index=polyhedron_site,
                         cutoff=polyhedron_cutoff,
+                        disorder_policy=polyhedron_disorder,
                     )
+                except PolyhedronShellError:
+                    raise
                 except (ValueError, RuntimeError) as exc:
                     overlay_errors.append(f"frame={frame_index} spec={spec}: {type(exc).__name__}: {exc}")
                     continue

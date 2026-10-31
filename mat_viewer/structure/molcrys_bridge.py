@@ -15,6 +15,7 @@ heuristics.
 from __future__ import annotations
 
 import copy
+import inspect
 import re
 
 import molcrys_kit
@@ -894,12 +895,21 @@ def analyze(
         return analyze_crystal(crystal, include_chemistry=include_chemistry)
 
     ase_atoms = _ase_atoms_from_raw(raw_atoms, M, mk)
-    identified = mk["identify_molecules"](
-        ase_atoms,
-        max_atoms=max_atoms,
-        bond_scale=bond_scale,
-        bond_thresholds=bond_thresholds,
-    )
+    identify = mk["identify_molecules"]
+    identify_kwargs = {
+        "max_atoms": max_atoms,
+        "bond_scale": bond_scale,
+        "bond_thresholds": bond_thresholds,
+    }
+    try:
+        parameters = inspect.signature(identify).parameters
+    except (TypeError, ValueError):
+        parameters = {}
+    if "disorder_policy" in parameters:
+        # Keep every refined site at load time. Shell construction applies
+        # its own disorder policy and must still be able to see minor sites.
+        identify_kwargs["disorder_policy"] = "as_refined"
+    identified = identify(ase_atoms, **identify_kwargs)
 
     crystal = mk["MolecularCrystal"](
         ase_atoms.get_cell(), identified, pbc=tuple(ase_atoms.get_pbc())

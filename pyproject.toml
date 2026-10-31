@@ -26,11 +26,12 @@ dependencies = [
     "matplotlib",
     "pillow",
     "ase",
-    # BondRecord.role and MolecularCrystal.get_connectivity_report() are not
-    # in the PyPI 0.8.0 release. Track MolCrysKit commit 9bf0ffb (the
-    # squash of PR 197) until that API is published, then restore a
-    # version range. Do not invent a PyPI version for this commit.
-    "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@9bf0ffb0fb321d1084dbc444250b5f186af3c873",
+    # PyPI 0.8.0 does not include BondRecord.role,
+    # MolecularCrystal.get_connectivity_report(), or find_polyhedra
+    # disorder_policy (major / exclusive / as_refined). Track commit
+    # 1f235f25 until those APIs are published, then restore a version
+    # range. Do not invent a PyPI version for this commit.
+    "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@1f235f252edc781ca5c117e5646c4be633af86ac",
 ]
 
 [project.scripts]

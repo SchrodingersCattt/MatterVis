@@ -444,6 +444,27 @@ separate.
 The same polyhedron path is used for animated CPU renders, so `--polyhedron`
 stays depth-tested and frame-synchronous in GIF and MP4 output as well.
 
+`--polyhedron-disorder` chooses which crystallographic disorder component is
+used to build those shells. It is forwarded to MolCrysKit `find_polyhedra`.
+
+| Value | Meaning |
+|---|---|
+| `major` | Default. Highest-occupancy component of each mutually exclusive family. |
+| `exclusive` | One shell per orientation. |
+| `as_refined` | Every refined site, including orientations fused into one molecule. |
+
+A JSON `disorder_policy` on one `--polyhedron` object overrides the flag for
+that overlay. The flag selects shell membership only; it does not change atom
+opacity or which atoms are drawn. Structure loading still keeps every refined
+site.
+
+`as_refined` keeps every refined site. `major` sends the highest-occupancy
+component's formula, and `exclusive` draws one shell per orientation. If the
+chosen policy still cannot produce at
+least four non-coplanar ligand points, `mat-vis render` exits with
+`mattervis.polyhedron-shell-error/v1` (nested in `mattervis.error/v1` under
+`--json`). The command does not invent ligand coordinates.
+
 `--cell-overlays` and `--bond-scale` require the general renderer. An explicit batch request fails instead of silently dropping either option.
 
 

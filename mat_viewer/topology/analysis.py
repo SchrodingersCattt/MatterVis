@@ -18,15 +18,25 @@ from molcrys_kit.analysis.packing_shell import (
 from molcrys_kit.analysis.packing_shell import (
     hull_encloses_center as _hull_encloses_center,
 )
-from molcrys_kit.analysis.shape import classify_shell
 from molcrys_kit.structures.polyhedra import (
-    all_ideal_polyhedra,
     convex_hull_payload,
     ideal_polyhedra_for_cn,
+)
+from .shape_payload import (
+    _MAX_REGISTERED_CN,
+    _classify_shell_payload,
+    _empty_shape_payload,
+    classify_shell,
 )
 
 from ..config import current_config, element_color
 from ..structure import molcrys_bridge
+from .disorder_policy import (
+    DEFAULT_DISORDER_POLICY,
+    invoke_find_polyhedra,
+    normalize_disorder_policy,
+    realization_formula,
+)
 
 # Dropdown and persisted rows may still carry the historical "(auto)" token.
 # It is not a ligand formula. MolCrysKit rejects it, and MatterVis does not
@@ -96,13 +106,6 @@ __all__ = [
 ]
 
 
-# ``classify_shell`` is intentionally exhaustive for the small registered
-# coordination polyhedra (CN 4--12).  Applying the same residual sweep to a
-# periodic atom shell with hundreds of image neighbours is combinatorial and
-# can monopolise the render worker.  Large shells still get a useful local
-# shape classification below: the nearest registered-size points are fit with
-# the rigid (k=0) classifier, while the full shell CN remains in the payload.
-_MAX_REGISTERED_CN = max(int(cn) for cn in all_ideal_polyhedra())
 
 
 def _mck_override_kwargs(func) -> dict[str, object]:
@@ -212,6 +215,7 @@ def _mck_polyhedron_record(
     center_kind: str = "centroid",
     hard_cutoff: float | None = None,
     fallback_max: int | None = None,
+    disorder_policy: str = DEFAULT_DISORDER_POLICY,
 ) -> dict[str, Any] | None:
     ligand_formula = _ligand_formula_for_molcryskit(ligand_species)
     if level == "atom":
@@ -233,11 +237,13 @@ def _mck_polyhedron_record(
         atom_kwargs: dict[str, Any] = {}
         if fallback_max is not None:
             atom_kwargs["fallback_max"] = int(fallback_max)
-        records = find_polyhedra_impl(
+        records = invoke_find_polyhedra(
+            find_polyhedra_impl,
             crystal,
             central_symbol,
             ligand_formula,
             level="atom",
+            disorder_policy=disorder_policy,
             cutoff=float(cutoff),
             enforce_enclosure=bool(enforce_enclosure),
             centroid_offset_frac=float(centroid_offset_frac),
@@ -282,6 +288,9 @@ def _mck_polyhedron_record(
         center_formula = compute_topo_signature(
             molecules[molecule_index]
         ).split("|", 1)[0]
+        resolved = realization_formula(molecules[molecule_index], disorder_policy)
+        if resolved:
+            center_formula = resolved
     else:
         # Compatibility for lightweight bridge objects and third-party loaders.
         center_formula = str(display_formula)
@@ -298,11 +307,13 @@ def _mck_polyhedron_record(
         extra_kwargs["hard_cutoff"] = float(hard_cutoff)
     if fallback_max is not None:
         extra_kwargs["fallback_max"] = int(fallback_max)
-    records = find_polyhedra_impl(
+    records = invoke_find_polyhedra(
+        find_polyhedra_impl,
         crystal,
         molcrys_bridge.formula_to_moiety(str(center_formula)),
         molcrys_bridge.formula_to_moiety(ligand_formula),
         level="molecule",
+        disorder_policy=disorder_policy,
         center_kind=str(center_kind or "centroid"),
         cutoff=float(cutoff),
         central_indices=[int(molecule_index)],
@@ -311,7 +322,18 @@ def _mck_polyhedron_record(
         **extra_kwargs,
         **_mck_override_kwargs(find_polyhedra_impl),
     )
-    return records[0] if records else None
+    if not records:
+        return None
+    chosen = dict(records[0])
+    chosen["extra_shells"] = [
+        {
+            "center_position": item.get("center_position"),
+            "shell_coords": item.get("shell_coords") or [],
+            "shell_distances": item.get("shell_distances") or [],
+        }
+        for item in records[1:]
+    ]
+    return chosen
 
 
 def extract_atom_coordination_shells(
@@ -324,6 +346,7 @@ def extract_atom_coordination_shells(
     enforce_enclosure: bool = True,
     centroid_offset_frac: float = DEFAULT_CENTROID_OFFSET_FRAC,
     fallback_max: int | None = None,
+    disorder_policy: str = DEFAULT_DISORDER_POLICY,
 ) -> dict[int, dict[str, Any]]:
     """Return atom-level shells keyed by raw crystallographic atom index."""
     ligand_formula = _ligand_formula_for_molcryskit(ligand_species)
@@ -331,19 +354,21 @@ def extract_atom_coordination_shells(
     public_module = sys.modules.get("mat_viewer.topology")
     find_polyhedra_impl = getattr(public_module, "find_polyhedra", find_polyhedra)
     atom_kwargs: dict[str, Any] = {}
+    selected_indices = None
     if source_indices is not None:
-        atom_kwargs["central_indices"] = sorted(
-            {int(index) for index in source_indices}
-        )
+        selected_indices = sorted({int(index) for index in source_indices})
     if cutoff is not None:
         atom_kwargs["cutoff"] = float(cutoff)
     if fallback_max is not None:
         atom_kwargs["fallback_max"] = int(fallback_max)
-    records = find_polyhedra_impl(
+    records = invoke_find_polyhedra(
+        find_polyhedra_impl,
         crystal,
         str(center_species),
         ligand_formula,
         level="atom",
+        disorder_policy=disorder_policy,
+        central_indices=selected_indices,
         enforce_enclosure=bool(enforce_enclosure),
         centroid_offset_frac=float(centroid_offset_frac),
         **atom_kwargs,
@@ -457,7 +482,9 @@ def _extract_coordination_shell_static(
     center_kind: str = "centroid",
     hard_cutoff: float | None = None,
     fallback_max: int | None = None,
+    disorder_policy: str = DEFAULT_DISORDER_POLICY,
 ) -> dict[str, Any]:
+    disorder_policy = normalize_disorder_policy(disorder_policy)
     fragments = classify_fragments(bundle)
     center_fragment = next(
         (frag for frag in fragments if int(frag["index"]) == int(center_index)), None
@@ -476,6 +503,7 @@ def _extract_coordination_shell_static(
         center_kind=center_kind,
         hard_cutoff=hard_cutoff,
         fallback_max=fallback_max,
+        disorder_policy=disorder_policy,
     )
     if record is None:
         source_center = np.array(center_fragment["center"], dtype=float)
@@ -497,7 +525,10 @@ def _extract_coordination_shell_static(
             "cutoff": None,
             "search_cutoff": float(cutoff),
             "hard_cutoff": None,
+            "disorder_policy": disorder_policy,
+            "rejection_reason": "no_shell",
         }
+        extra_shells: list[dict[str, Any]] = []
     else:
         source_center = np.array(record["center_position"], dtype=float)
         source_shell_coords = np.array(record.get("shell_coords") or [], dtype=float)
@@ -527,7 +558,26 @@ def _extract_coordination_shell_static(
             "cutoff": record.get("cutoff"),
             "search_cutoff": record.get("search_cutoff"),
             "hard_cutoff": record.get("hard_cutoff"),
+            "disorder_policy": disorder_policy,
+            "rejection_reason": record.get("rejection_reason"),
         }
+        extra_shells = []
+        for extra in record.get("extra_shells") or []:
+            coords = np.asarray(extra.get("shell_coords") or [], dtype=float)
+            if coords.size == 0:
+                coords = np.zeros((0, 3), dtype=float)
+            extra_shells.append(
+                {
+                    "source_center_coords": np.asarray(
+                        extra.get("center_position") or source_center, dtype=float
+                    ),
+                    "source_shell_coords": coords,
+                    "distances": [
+                        float(value) for value in extra.get("shell_distances") or []
+                    ],
+                    "source_hull": convex_hull_payload(coords),
+                }
+            )
     # MolCrysKit reports shell members by source molecule index.  The
     # analysis card needs the stable MatterVis fragment identity as well;
     # leaving this translation to the renderer produced ``?(?)`` labels and
@@ -607,6 +657,7 @@ def _extract_coordination_shell_static(
         "source_hull": hull,
         "distances": shell_distances,
         "all_distances": shell_distances,
+        "extra_shells": extra_shells,
     }
 
 
@@ -626,6 +677,7 @@ def extract_coordination_shell(
     center_kind: str = "centroid",
     hard_cutoff: float | None = None,
     fallback_max: int | None = None,
+    disorder_policy: str = DEFAULT_DISORDER_POLICY,
 ) -> dict[str, Any]:
     ligand_tuple = _query_ligand_species(ligand_species)
     static = _extract_coordination_shell_static(
@@ -640,6 +692,7 @@ def extract_coordination_shell(
         center_kind=center_kind,
         hard_cutoff=hard_cutoff,
         fallback_max=fallback_max,
+        disorder_policy=disorder_policy,
     )
     source_center = np.asarray(static["source_center_coords"], dtype=float)
     plot_center = (
@@ -662,6 +715,20 @@ def extract_coordination_shell(
         else np.zeros((0, 3), dtype=float)
     )
     hull = _shift_hull_payload(static.get("source_hull"), delta)
+    extra_shells = []
+    for extra in static.get("extra_shells") or []:
+        src_center = np.asarray(extra["source_center_coords"], dtype=float)
+        src_shell = np.asarray(extra["source_shell_coords"], dtype=float)
+        extra_shells.append(
+            {
+                "source_center_coords": src_center,
+                "source_shell_coords": src_shell,
+                "distances": extra.get("distances") or [],
+                "center_coords": (src_center + delta).tolist(),
+                "shell_coords": (src_shell + delta).tolist() if src_shell.size else [],
+                "hull": _shift_hull_payload(extra.get("source_hull"), delta),
+            }
+        )
     return {
         "center_index": int(center_index),
         "center_label": display_label or static["default_label"],
@@ -682,6 +749,7 @@ def extract_coordination_shell(
         "distances": static["distances"],
         "all_distances": static["all_distances"],
         "pool_coords": pool_coords_arr.tolist(),
+        "extra_shells": extra_shells,
     }
 
 
@@ -701,6 +769,7 @@ def _analyze_topology_uncached(
     center_kind: str = "centroid",
     hard_cutoff: float | None = None,
     fallback_max: int | None = None,
+    disorder_policy: str = DEFAULT_DISORDER_POLICY,
 ) -> dict[str, Any]:
     shell = extract_coordination_shell(
         bundle,
@@ -717,6 +786,7 @@ def _analyze_topology_uncached(
         center_kind=center_kind,
         hard_cutoff=hard_cutoff,
         fallback_max=fallback_max,
+        disorder_policy=disorder_policy,
     )
     center = shell["center_coords"]
     shell_coords = shell["shell_coords"]
@@ -764,124 +834,6 @@ def _analyze_topology_uncached(
     }
 
 
-def _classify_shell_payload(
-    shell_coords: list | np.ndarray,
-    center: list | np.ndarray,
-) -> dict[str, Any]:
-    """Run ``classify_shell`` defensively and return a JSON-safe payload.
-
-    ``classify_shell`` raises on degenerate inputs (CN < 1, all points
-    collinear, etc.) which we don't want to bubble up to the renderer
-    text-panel call site; an empty / partial shell should just degrade to
-    ``primary_label = None`` rather than crash the whole topology card.
-    """
-    if len(np.asarray(shell_coords)) == 0:
-        return _empty_shape_payload()
-    coords_arr = np.asarray(shell_coords, dtype=float)
-    classification_coords = coords_arr
-    bounded_sample = False
-    sample_indices: list[int] = []
-    if len(coords_arr) > _MAX_REGISTERED_CN:
-        # A shell can contain many periodic image neighbours when the source
-        # cell is small.  The registered shape catalogue cannot describe an
-        # arbitrary CN, and classify_shell's residual decomposition would
-        # enumerate C(N, k) subsets.  Fit the nearest registered-size local
-        # cage with the rigid path instead; retain the true CN below so the
-        # caller can distinguish the approximation from a complete shell.
-        center_arr = np.asarray(center, dtype=float)
-        distances = np.linalg.norm(coords_arr - center_arr, axis=1)
-        sample_indices = np.argsort(distances, kind="mergesort")[
-            :_MAX_REGISTERED_CN
-        ].astype(int).tolist()
-        classification_coords = coords_arr[sample_indices]
-        bounded_sample = True
-    try:
-        # Delegate the shell label policy to molcrys_kit's current
-        # classifier. Earlier MatterVis pinned ``max_strip=0`` to force a
-        # rigid CN=N CShM match, but that bypassed MCK's newer core/residual
-        # decomposition and mislabelled registered derived shells such as
-        # EAP-4 AX11 (tricapped cube) as rigid CN=11 alternatives. Leaving
-        # ``max_strip`` unset keeps MV aligned with upstream MCK labels while
-        # still returning a JSON-safe payload for the renderer/scripts.
-        result = classify_shell(
-            classification_coords,
-            center=center,
-            n_random_inits=4,
-            top_k=3,
-            max_strip=0 if bounded_sample else None,
-        )
-    except Exception as exc:
-        return {**_empty_shape_payload(), "error": str(exc)}
-    payload = _sanitize_shape_payload(result)
-    if bounded_sample:
-        payload["coordination_number"] = len(coords_arr)
-        payload["diagnostics"] = {
-            **(payload.get("diagnostics") or {}),
-            "search_mode": "bounded_local_cage",
-            "sample_size": len(classification_coords),
-            "sample_indices": sample_indices,
-            "max_registered_cn": _MAX_REGISTERED_CN,
-        }
-    return payload
-
-
-# Fields under ``shape["topology"]`` (and inside each candidate's
-# ``core.topology``) carry molcrys_kit's polyhedron-registry namedtuples
-# (``FaceInfo``, ``EdgeInfo``, etc.) that are not JSON-serialisable and
-# not actionable for any downstream consumer in this repo. Strip them so
-# ``analyze_topology`` keeps its "JSON-safe payload" contract.
-_SHAPE_DROP_KEYS = ("topology",)
-
-
-def _sanitize_shape_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    cleaned = {
-        key: value for key, value in payload.items() if key not in _SHAPE_DROP_KEYS
-    }
-    if isinstance(cleaned.get("core"), dict):
-        cleaned["core"] = {
-            key: value
-            for key, value in cleaned["core"].items()
-            if key not in _SHAPE_DROP_KEYS
-        }
-    cleaned["candidates"] = [
-        _sanitize_candidate(item) for item in cleaned.get("candidates") or []
-    ]
-    cleaned["alternatives"] = [
-        _sanitize_candidate(item) for item in cleaned.get("alternatives") or []
-    ]
-    if isinstance(cleaned.get("best_match"), dict):
-        cleaned["best_match"] = _sanitize_candidate(cleaned["best_match"])
-    return cleaned
-
-
-def _sanitize_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
-    cleaned = {
-        key: value for key, value in candidate.items() if key not in _SHAPE_DROP_KEYS
-    }
-    if isinstance(cleaned.get("core"), dict):
-        cleaned["core"] = {
-            key: value
-            for key, value in cleaned["core"].items()
-            if key not in _SHAPE_DROP_KEYS
-        }
-    return cleaned
-
-
-def _empty_shape_payload() -> dict[str, Any]:
-    return {
-        "coordination_number": 0,
-        "primary_label": None,
-        "label_modifier": None,
-        "label_source": None,
-        "confidence_gap": None,
-        "cshm_value": None,
-        "core": None,
-        "residuals": [],
-        "structural_description": "",
-        "alternatives": [],
-        "best_match": None,
-        "candidates": [],
-    }
 
 
 def analyze_topology(
@@ -900,6 +852,7 @@ def analyze_topology(
     center_kind: str = "centroid",
     hard_cutoff: float | None = None,
     fallback_max: int | None = None,
+    disorder_policy: str = DEFAULT_DISORDER_POLICY,
 ) -> dict[str, Any]:
     """Cached primary-site analysis. The heavy ``planarity_analysis`` pass
     runs ``itertools.combinations`` of size 5 over the shell, which gets
@@ -916,6 +869,7 @@ def analyze_topology(
     center_kind = str(center_kind or "centroid")
     hard_cap = float(hard_cutoff) if hard_cutoff is not None else None
     fallback = int(fallback_max) if fallback_max is not None else None
+    disorder_policy = normalize_disorder_policy(disorder_policy)
     cache = getattr(bundle, "_analyze_topology_cache", None)
     if cache is None:
         cache = {}
@@ -937,6 +891,7 @@ def analyze_topology(
                 center_kind=center_kind,
                 hard_cutoff=hard_cap,
                 fallback_max=fallback,
+                disorder_policy=disorder_policy,
             )
     key = (
         int(center_index),
@@ -951,6 +906,7 @@ def analyze_topology(
         center_kind,
         hard_cap,
         fallback,
+        disorder_policy,
     )
     cached = cache.get(key)
     if cached is None:
@@ -969,6 +925,7 @@ def analyze_topology(
             center_kind=center_kind,
             hard_cutoff=hard_cap,
             fallback_max=fallback,
+            disorder_policy=disorder_policy,
         )
         cache[key] = cached
     # Display fields shift per call (camera / formula-unit centering); patch
@@ -987,6 +944,21 @@ def analyze_topology(
         out["hull"] = _shift_hull_payload(
             out.get("source_hull") or out.get("hull"), delta
         )
+        shifted = []
+        for extra in out.get("extra_shells") or ():
+            src_center = np.asarray(extra["source_center_coords"], dtype=float)
+            src_shell = np.asarray(extra["source_shell_coords"], dtype=float)
+            shifted.append(
+                {
+                    **extra,
+                    "center_coords": (src_center + delta).tolist(),
+                    "shell_coords": (
+                        (src_shell + delta).tolist() if src_shell.size else []
+                    ),
+                    "hull": _shift_hull_payload(extra.get("source_hull"), delta),
+                }
+            )
+        out["extra_shells"] = shifted
     if display_label is not None:
         out["center_label"] = display_label
     if display_type is not None:
