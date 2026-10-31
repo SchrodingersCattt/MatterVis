@@ -1,7 +1,7 @@
 """Disorder policy for coordination shells.
 
-Molecule identification keeps every refined site. Shell construction asks
-MolCrysKit which orientation to use. ``find_polyhedra`` accepts the same
+``identify_molecules`` defaults to ``as_refined``, so loading keeps every
+refined site. ``find_polyhedra`` defaults to ``major`` and accepts the same
 ``disorder_policy`` values:
 
 * ``major`` (default) keeps the highest-occupancy component of each

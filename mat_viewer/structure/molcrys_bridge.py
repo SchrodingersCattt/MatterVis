@@ -906,8 +906,9 @@ def analyze(
     except (TypeError, ValueError):
         parameters = {}
     if "disorder_policy" in parameters:
-        # Keep every refined site at load time. Shell construction applies
-        # its own disorder policy and must still be able to see minor sites.
+        # identify_molecules defaults to as_refined (every refined site).
+        # Pass it explicitly so loading cannot follow the shell default,
+        # which is major. Minor sites stay available to draw.
         identify_kwargs["disorder_policy"] = "as_refined"
     identified = identify(ase_atoms, **identify_kwargs)
 

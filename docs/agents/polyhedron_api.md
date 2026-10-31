@@ -115,8 +115,9 @@ in the geometry cache key, and accepted by `POST /api/v2/polyhedra`,
 | `exclusive` | One shell per orientation. Other families stay on their major component. |
 | `as_refined` | Every refined site. Orientations that share an ordered atom stay in one component. |
 
-Loading a structure keeps every refined site. The policy is applied when the
-shell is built, by forwarding `disorder_policy` to MolCrysKit
+Molecule identification defaults to `as_refined`, so loading keeps every
+refined site. Only shell construction defaults to `major`. The policy is
+applied when the shell is built, by forwarding `disorder_policy` to MolCrysKit
 `find_polyhedra`. For `major` and `exclusive`, MatterVis sends the formula of
 the selected realization rather than the fused as-loaded formula. `exclusive`
 draws one overlay per orientation MolCrysKit returns.

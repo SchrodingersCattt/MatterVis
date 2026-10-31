@@ -455,8 +455,9 @@ used to build those shells. It is forwarded to MolCrysKit `find_polyhedra`.
 
 A JSON `disorder_policy` on one `--polyhedron` object overrides the flag for
 that overlay. The flag selects shell membership only; it does not change atom
-opacity or which atoms are drawn. Structure loading still keeps every refined
-site.
+opacity or which atoms are drawn. Molecule identification defaults to
+`as_refined` and keeps every refined site. Only this shell flag defaults to
+`major`.
 
 `as_refined` keeps every refined site. `major` sends the highest-occupancy
 component's formula, and `exclusive` draws one shell per orientation. If the
