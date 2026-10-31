@@ -188,6 +188,7 @@ The main subcommands cover:
 | **Using the library** | [API Reference](docs/agents/) · [CLI Reference](docs/cli.md) |
 | **AI agent (calling MatterVis)** | [Caller API Contracts](docs/agents/) |
 | **AI agent (modifying code)** | [AGENTS.md](AGENTS.md) · [Developer Notes](docs/dev-notes.md) |
+| **Contributing** | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | **Topology scores** | [Scores Reference](docs/scores.md) |
 
 [`mat_viewer/`](mat_viewer/) — source code · [`scripts/`](scripts/) — runnable demo scripts · [`docs/`](docs/) — full documentation
