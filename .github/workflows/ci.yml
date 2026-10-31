@@ -321,3 +321,25 @@ jobs:
               if packaged not in names:
                   missing.append(packaged)
           assert not missing, missing
+
+  # Warn-only. continue-on-error keeps a checkout or script failure from
+  # failing the workflow. The script exits 0 and emits ::warning::.
+  docs-policy-warn:
+    name: Docs policy (warn only)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    continue-on-error: true
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Warn when code changes lack docs or an exemption
+        continue-on-error: true
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          DOCS_POLICY_BASE_REF: ${{ github.base_ref }}
+          DOCS_POLICY_BASE: origin/${{ github.base_ref }}
+        run: python3 .github/scripts/docs_policy_warn.py
