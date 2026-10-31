@@ -21,7 +21,9 @@ GPU_INSTALL = 'python -m pip install "matter-vis[gpu]"'
 MOLCRYSKIT_MINIMUM = "0.8.0"
 # Exclusive upper bound of the numeric window CI still checks. The
 # development pin below is a git commit, not a pretend PyPI release:
-# PyPI 0.8.0 has neither BondRecord.role nor get_connectivity_report.
+# PyPI 0.8.0 has neither BondRecord.role, get_connectivity_report, nor
+# disorder_realizations. Molecule-level shells fall back to the as-loaded
+# formula on that release instead of raising this floor.
 MOLCRYSKIT_UPPER = "0.9.0"
 MOLCRYSKIT_REQUIREMENT = f"molcrys-kit>={MOLCRYSKIT_MINIMUM},<{MOLCRYSKIT_UPPER}"
 MOLCRYSKIT_SOURCE_MINIMUM = MOLCRYSKIT_MINIMUM

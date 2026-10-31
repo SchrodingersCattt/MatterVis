@@ -119,8 +119,11 @@ Molecule identification defaults to `as_refined`, so loading keeps every
 refined site. Only shell construction defaults to `major`. The policy is
 applied when the shell is built, by forwarding `disorder_policy` to MolCrysKit
 `find_polyhedra` together with the source molecule index. The centre moiety
-is the Hill formula of each realization from MolCrysKit's public disorder
-API, so a fused displayed formula still finds a split orientation.
+is the Hill formula of each realization from MolCrysKit's public
+`disorder_realizations` API, so a fused displayed formula still finds a
+split orientation. Releases inside `molcrys-kit>=0.8.0,<0.9.0` that do not
+export that helper use the as-loaded molecule formula instead, which keeps
+ordered shells working. Split orientations require the development pin.
 `exclusive` draws one overlay for every orientation whose hull has simplices.
 
 `as_refined` uses that fused component. If it is not a drawable hull, the

@@ -1,9 +1,9 @@
 {
   "schema": "mattervis.perf.pipeline-oracle/v1",
   "entries": {
-    "dap4-mattervis-d28727b-mck-3087ba1": {
+    "dap4-mattervis-47c5ae3-mck-3087ba1": {
       "producer": {
-        "mattervis_revision": "d28727b60e3f4e01fbb452ac5dd684b6949b7331",
+        "mattervis_revision": "47c5ae3557fc4fa2f7b522b83a921c7c6113863d",
         "molcrys_kit_revision": "3087ba1a4936f78cc22b0f66dcd89e25117c3143"
       },
       "fixture": {

@@ -11,6 +11,7 @@ draw one.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -20,8 +21,10 @@ from mat_viewer.agent import load_structure
 from mat_viewer.agent_topology import build_topology_data, parse_polyhedron_specs
 from mat_viewer.cache_keys import topology_spec_geometry_key
 from mat_viewer.cli import main
+from mat_viewer.topology import disorder_policy as disorder_policy_module
 from mat_viewer.topology.disorder_policy import (
     PolyhedronShellError,
+    center_moiety_formulas,
     invoke_find_polyhedra,
     normalize_disorder_policy,
 )
@@ -89,6 +92,39 @@ def test_shell_call_forwards_disorder_policy_unchanged():
     assert seen["central"] == "C N"
     assert seen["kwargs"]["disorder_policy"] == "exclusive"
     assert seen["kwargs"]["central_indices"] == [0]
+
+
+class _SymbolMolecule:
+    def get_chemical_symbols(self):
+        return ["C", "C", "C", "C", "N"]
+
+
+def test_missing_realization_api_keeps_the_as_loaded_formula(monkeypatch, caplog):
+    monkeypatch.setattr(disorder_policy_module, "_missing_realization_api", False)
+    real_import = __import__
+
+    def _import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "molcrys_kit.analysis.disorder":
+            raise ImportError("cannot import name 'disorder_realizations'")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr("builtins.__import__", _import)
+    with caplog.at_level(logging.WARNING):
+        assert center_moiety_formulas(_SymbolMolecule(), "major") is None
+        assert center_moiety_formulas(_SymbolMolecule(), "exclusive") is None
+    assert caplog.text.count("as-loaded formula") == 1
+
+
+def test_realization_api_errors_are_warned(monkeypatch, caplog):
+    def _boom(_molecule, _policy):
+        raise TypeError("disorder_realizations signature changed")
+
+    monkeypatch.setattr(
+        disorder_policy_module, "_load_disorder_realizations", lambda: _boom
+    )
+    with caplog.at_level(logging.WARNING):
+        assert center_moiety_formulas(_SymbolMolecule(), "major") is None
+    assert "signature changed" in caplog.text
 
 
 def _shell(path: Path, policy: str, spec: str):

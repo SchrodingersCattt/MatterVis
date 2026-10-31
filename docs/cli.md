@@ -461,8 +461,10 @@ opacity or which atoms are drawn. Molecule identification defaults to
 
 `as_refined` keeps every refined site. `major` and `exclusive` query each
 realization of the indexed molecule, so a fused displayed formula still
-matches a split orientation. `exclusive` draws one shell per full
-orientation. If the
+matches a split orientation. A MolCrysKit build inside
+`molcrys-kit>=0.8.0,<0.9.0` that has no realization helper uses the
+as-loaded molecule formula, which keeps ordered shells working. `exclusive`
+draws one shell per full orientation. If the
 chosen policy still cannot produce at
 least four non-coplanar ligand points, `mat-vis render` exits with
 `mattervis.polyhedron-shell-error/v1` (nested in `mattervis.error/v1` under
