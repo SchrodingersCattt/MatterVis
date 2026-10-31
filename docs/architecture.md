@@ -97,3 +97,21 @@ true-vector PDF/SVG remain the reference paths.
 `mat-vis capabilities` and `mat-vis render --check` are the authoritative
 dependency resolver. No skill or installer maintains a second dependency
 table.
+
+## Documentation of the render interface
+
+MatterVis is a pure render interface. Stable docs describe geometry, bond
+graphs, and display modes: which public records and periodic images are
+shown, and how a backend lowers an existing `RenderPlan`. Chemistry
+semantics — molecule grouping, PBC unwrapping, packing shells, shape
+classification, disorder resolution, slabs, and related provenance — are
+documented in MolCrysKit, the chemistry source in the diagram above.
+
+Do not document chemistry heuristics (ionic or halide whitelists,
+`is_ionic_solid` gates) as renderer behavior.
+
+In-scope render, CLI, WebGL session/upload, architecture, and user-visible
+display-policy changes update these docs in the same pull request. Missing
+docs on an in-scope change is review P1. Paths, the out-of-scope list, and
+the pull request template are in
+[CONTRIBUTING.md](../CONTRIBUTING.md#documentation-policy).

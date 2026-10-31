@@ -127,6 +127,40 @@ public contract in `docs/agents/` if the payload changes.
 
 ## Documentation Maintenance
 
+In-scope changes update stable docs in the **same** pull request. Missing
+docs on an in-scope pull request is review **P1**. The contributor-facing
+copy, including template fields and the out-of-scope list, is
+[CONTRIBUTING.md](CONTRIBUTING.md#documentation-policy).
+
+In scope:
+
+- CLI / flags → `docs/cli.md`
+- Architecture, session isolation, upload, and worker contracts →
+  `docs/architecture.md` or `docs/architecture/`
+- Display modes, bond graph / radius policy, and selection verification
+- Perf, scores, and QA notes when those contracts change
+- `docs/agents/` or `AGENTS.md` when a public contract or standing agent
+  rule changes
+
+Out of scope (pull request body contains `Docs: N/A` plus a one-line
+reason):
+
+- Pure refactors, test/CI-only changes, private helpers, and docs-only
+  pull requests
+- Pinning MolCrysKit without a MatterVis behavior change (note the pin
+  in the pull request body; update docs only if MatterVis contract text
+  mentions the pin)
+
+MatterVis is a pure render interface. Docs stay geometry, bond-graph,
+and display-mode oriented. Chemistry documentation belongs in MolCrysKit.
+Do not document or add chemistry heuristics (ionic/halide whitelists,
+`is_ionic_solid` gates) in the renderer.
+
+A warn-only CI check flags `mat_viewer/`, `frontend/`, or server changes
+that touch neither `docs/**`, `AGENTS.md`, nor `CONTRIBUTING.md` and whose
+pull request body lacks a substantive `Docs: N/A`. It does not fail the
+build, and a green run does not prove the docs are substantively complete.
+
 - When adding or changing a **public API** function or class, update the
   matching file in `docs/agents/`.
 - When adding a new **user-facing feature**, add it to the Capability Map
