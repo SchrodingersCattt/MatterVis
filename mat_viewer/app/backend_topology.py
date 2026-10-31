@@ -574,6 +574,7 @@ class _TopologyBackendMixin:
         level: str = "molecule",
         enforce_enclosure: bool = True,
         centroid_offset_frac: Optional[float] = DEFAULT_CENTROID_OFFSET_FRAC,
+        disorder_policy: Optional[str] = None,
     ) -> dict[str, Any]:
         if cutoff <= 0 or cutoff > 1000:
             raise ApiError("cutoff must be in the range (0, 1000]", status_code=400)
@@ -614,6 +615,7 @@ class _TopologyBackendMixin:
                     center_species=center_species,
                     enforce_enclosure=enforce_enclosure,
                     centroid_offset_frac=_coerce_centroid_offset_frac(centroid_offset_frac),
+                    disorder_policy=disorder_policy,
                 )
             except ValueError as exc:
                 raise ApiError(str(exc), status_code=400) from exc
@@ -631,6 +633,7 @@ class _TopologyBackendMixin:
                         "enabled": True,
                         "enforce_enclosure": enforce_enclosure,
                         "centroid_offset_frac": centroid_offset_frac,
+                        "disorder_policy": disorder_policy,
                     }
                 ],
                 fallback_color=state.get("topology_hull_color", "#7C5CBF"),

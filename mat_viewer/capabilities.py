@@ -21,7 +21,9 @@ GPU_INSTALL = 'python -m pip install "matter-vis[gpu]"'
 MOLCRYSKIT_MINIMUM = "0.8.0"
 # Exclusive upper bound of the numeric window CI still checks. The
 # development pin below is a git commit, not a pretend PyPI release:
-# PyPI 0.8.0 has neither BondRecord.role nor get_connectivity_report.
+# PyPI 0.8.0 has neither BondRecord.role, get_connectivity_report, nor
+# disorder_realizations. Molecule-level shells fall back to the as-loaded
+# formula on that release instead of raising this floor.
 MOLCRYSKIT_UPPER = "0.9.0"
 MOLCRYSKIT_REQUIREMENT = f"molcrys-kit>={MOLCRYSKIT_MINIMUM},<{MOLCRYSKIT_UPPER}"
 MOLCRYSKIT_SOURCE_MINIMUM = MOLCRYSKIT_MINIMUM
@@ -29,8 +31,9 @@ MOLCRYSKIT_SOURCE_MINIMUM = MOLCRYSKIT_MINIMUM
 # runtime requirements; released installs stay on this range once the
 # role/regime API is published.
 MOLCRYSKIT_INSTALL = f'python -m pip install "{MOLCRYSKIT_REQUIREMENT}"'
-# Squash of MolCrysKit PR 197. pyproject.toml must name this same commit.
-MOLCRYSKIT_SOURCE_COMMIT = "9bf0ffb0fb321d1084dbc444250b5f186af3c873"
+# Development pin for find_polyhedra disorder_policy. pyproject.toml must
+# name this same commit. Restore a release range once the API is on PyPI.
+MOLCRYSKIT_SOURCE_COMMIT = "d02ce08ab28826f87d976aef98fefb8b86998075"
 MOLCRYSKIT_DEVELOPMENT_REQUIREMENT = (
     "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@"
     f"{MOLCRYSKIT_SOURCE_COMMIT}"

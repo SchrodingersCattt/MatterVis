@@ -19,8 +19,14 @@ Use the base CPU renderer and the public polyhedron JSON contract:
 mat-vis render structure.cif -o coordination.svg --backend cpu \
   --view unit_cell --camera-axis c --orthogonal \
   --polyhedron '{"id":"cn8","center":"M8","ligand":"X","level":"atom","fallback_max":8}' \
+  --polyhedron-disorder major \
   --width 1600 --height 1200 --scale 1 --json
 ```
+
+`--polyhedron-disorder` is `major` (default), `exclusive`, or `as_refined`.
+`major` follows the highest-occupancy orientation. A non-drawable result is a
+structured error and is not replaced with guessed geometry. See
+[`polyhedron_api.md`](polyhedron_api.md#disorder-component).
 
 Run the same command with `--check` before rendering. Replace placeholder
 species at the call site. Repeat `--polyhedron` for additional shells or render

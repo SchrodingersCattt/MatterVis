@@ -266,6 +266,7 @@ class DisplayService:
         center_kind: str | None = None,
         hard_cutoff: float | None = None,
         fallback_max: int | None = None,
+        disorder_policy: str | None = None,
         scene_id: str | None = None,
         spec_id: str | None = None,
     ) -> dict[str, Any]:
@@ -286,6 +287,7 @@ class DisplayService:
                 "center_kind": center_kind,
                 "hard_cutoff": hard_cutoff,
                 "fallback_max": fallback_max,
+                "disorder_policy": disorder_policy,
             },
             fallback_color=fallback_color,
             existing_ids=existing_ids,

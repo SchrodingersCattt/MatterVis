@@ -7,6 +7,24 @@ import math
 from pathlib import Path
 
 
+def add_polyhedron_disorder_argument(parser: argparse.ArgumentParser) -> None:
+    """Add the shell disorder-policy flag used by ``mat-vis render``."""
+
+    parser.add_argument(
+        "--polyhedron-disorder",
+        choices=("major", "exclusive", "as_refined"),
+        default="major",
+        help=(
+            "Disorder component used to build polyhedron shells. "
+            "major (default) keeps the highest-occupancy component. "
+            "exclusive builds one shell per orientation. "
+            "as_refined keeps every refined site. "
+            "A JSON disorder_policy on --polyhedron overrides this default. "
+            "A shell that is still not drawable is a structured error."
+        ),
+    )
+
+
 def add_bond_policy_arguments(parser: argparse.ArgumentParser) -> None:
     """Add the shared MolCrysKit connectivity controls to a parser."""
     parser.add_argument(
@@ -351,12 +369,17 @@ def _validate_render_options(args: argparse.Namespace) -> None:
             raise ValueError("--polyhedron-site requires --polyhedron")
         if args.polyhedron_cutoff is not None:
             raise ValueError("--polyhedron-cutoff requires --polyhedron")
+        if getattr(args, "polyhedron_disorder", "major") not in (None, "major"):
+            raise ValueError("--polyhedron-disorder requires --polyhedron")
     else:
         if args.polyhedron_cutoff is not None and args.polyhedron_cutoff <= 0.0:
             raise ValueError("--polyhedron-cutoff must be greater than zero")
         from ..agent_topology import parse_polyhedron_specs
 
-        parse_polyhedron_specs(args.polyhedron)
+        parse_polyhedron_specs(
+            args.polyhedron,
+            disorder_policy=getattr(args, "polyhedron_disorder", None),
+        )
     if not math.isfinite(args.cell_width) or args.cell_width <= 0.0:
         raise ValueError("--cell-width must be finite and greater than zero")
     if args.field_of_view is not None:

@@ -84,3 +84,26 @@ def bind_deferred_cli_symbols(namespace: dict[str, Any]) -> None:
     """Install lazy command helpers into ``namespace`` (``cli`` globals)."""
     for key, (module, name) in _BINDINGS.items():
         namespace[key] = _Deferred(module, name)
+
+
+def fail_cli(message: str, *, json_output: bool, emit, code: int = 2, details: dict | None = None) -> None:
+    """Print a CLI error and exit. ``details`` is included in ``--json`` output."""
+
+    import sys
+
+    print(f"Error: {message}", file=sys.stderr)
+    if json_output:
+        payload = {"schema": "mattervis.error/v1", "ok": False, "error": message}
+        if details:
+            payload["details"] = details
+        emit(payload, json_output=True)
+    raise SystemExit(code)
+
+
+def fail_cli_exception(exc: BaseException, *, json_output: bool, fail) -> None:
+    """Exit from a render failure, keeping polyhedron shell errors structured."""
+
+    from .topology.disorder_policy import PolyhedronShellError
+
+    details = exc.to_dict() if isinstance(exc, PolyhedronShellError) else None
+    fail(str(exc), json_output=json_output, details=details)
