@@ -815,7 +815,7 @@ class _CoreBackendMixin:
             print(f"[mat_viewer] could not persist scene store: {exc}", file=sys.stderr)
         self._flush_effect_session()
 
-    def apply_intent(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def apply_intent(self, payload: dict[str, Any], *, broadcast: bool | None = None) -> dict[str, Any]:
         if not isinstance(payload, dict):
             raise ValueError("intent payload must be an object")
         base_version = payload.get("base_version")
@@ -851,6 +851,11 @@ class _CoreBackendMixin:
         )
         details: dict[str, Any] = {}
 
+        def _broadcast(default: bool) -> bool:
+            # Omit ``broadcast`` for in-process GUI intents. HTTP and the
+            # WebSocket pass True so the same command reaches an open page.
+            return default if broadcast is None else bool(broadcast)
+
         # Phase 3 bridge: translate the wire envelope once, then use the pure
         # reducer to calculate the transition's invalidation facts.  The
         # existing normalizer/patch path remains responsible for compatibility
@@ -859,10 +864,10 @@ class _CoreBackendMixin:
 
         if intent_type in {"set_style", "set_display_options"}:
             state, invalidations = self.apply_operation(
-                operation, scene_id=scene_id, broadcast=False
+                operation, scene_id=scene_id, broadcast=_broadcast(False)
             )
         elif intent_type in {"patch_state", "apply_transform"}:
-            state, invalidations = self.apply_operation(operation, scene_id=scene_id)
+            state, invalidations = self.apply_operation(operation, scene_id=scene_id, broadcast=_broadcast(True))
         elif intent_type == "set_camera":
             # Drag persistence opts into a locked generation/revision
             # compare-and-set. Other set_camera callers leave the keys out.
@@ -874,7 +879,7 @@ class _CoreBackendMixin:
                 state, invalidations = self.apply_operation(
                     operation,
                     scene_id=scene_id,
-                    broadcast=False,
+                    broadcast=_broadcast(False),
                     expected_camera_revision=payload.get("expected_camera_revision"),
                     expected_scene_generation=payload.get("expected_scene_generation"),
                     _camera_fence=fenced,
@@ -885,7 +890,7 @@ class _CoreBackendMixin:
                 state = self.get_state(scene_id)
         elif intent_type == "set_active_scene":
             target = data.get("scene_id") or scene_id
-            self.set_active_scene(str(target), broadcast=True)
+            self.set_active_scene(str(target), broadcast=_broadcast(True), focus_clients=_broadcast(True))
             state = self.get_state(str(target))
         elif intent_type == "crud_scene":
             action = str(data.get("action") or "")
@@ -1047,29 +1052,6 @@ class _CoreBackendMixin:
             }
             for name in self.structure_names
         ]
-
-    def _drop_placeholder(self) -> None:
-        # The placeholder is a bootstrap scene as well as a catalog entry.
-        # Removing only the bundle left a stale blank tab behind after the
-        # first upload (and made later tab labels appear to be lost).  Drop it
-        # whenever a real structure is present, while preserving it when the
-        # viewer is genuinely empty.
-        has_real_structure = any(
-            name != PLACEHOLDER_STRUCTURE for name in self.structure_names
-        )
-        if not has_real_structure:
-            return
-        self.structure_names = [
-            name for name in self.structure_names if name != PLACEHOLDER_STRUCTURE
-        ]
-        self.bundles.pop(PLACEHOLDER_STRUCTURE, None)
-        for scene_id, scene in list(self.scene_store.scenes.items()):
-            if scene.structure_name == PLACEHOLDER_STRUCTURE:
-                self.scene_store.remove(scene_id, save=False)
-                self._render_revisions.pop(str(scene_id), None)
-        if self.scene_store.active_id:
-            self.current_state = self.scene_state(self.scene_store.active_id)
-        self._request_scene_store_save()
 
     def get_bundle(self, name: str) -> LoadedCrystal:
         if name in self.bundles:

@@ -10,6 +10,33 @@ from ..loader.cif_export import loaded_crystal_to_cif
 
 
 class _IOBackendMixin:
+    def _drop_placeholder(self) -> None:
+        # The placeholder is a bootstrap scene as well as a catalog entry.
+        # Removing only the bundle left a stale blank tab behind after the
+        # first upload (and made later tab labels appear to be lost).  Drop it
+        # whenever a real structure is present, while preserving it when the
+        # viewer is genuinely empty.
+        has_real_structure = any(
+            name != PLACEHOLDER_STRUCTURE for name in self.structure_names
+        )
+        if not has_real_structure:
+            return
+        self.structure_names = [
+            name for name in self.structure_names if name != PLACEHOLDER_STRUCTURE
+        ]
+        self.bundles.pop(PLACEHOLDER_STRUCTURE, None)
+        removed_placeholder = False
+        for scene_id, scene in list(self.scene_store.scenes.items()):
+            if scene.structure_name == PLACEHOLDER_STRUCTURE:
+                self.scene_store.remove(scene_id, save=False)
+                self._render_revisions.pop(str(scene_id), None)
+                removed_placeholder = True
+        if self.scene_store.active_id:
+            self.current_state = self.scene_state(self.scene_store.active_id)
+        self._request_scene_store_save()
+        if removed_placeholder:
+            self._publish_scene_catalog(focus=False)
+
     def upload_status(self, job_id: str) -> dict[str, Any]:
         """Return the public status for one asynchronous CIF upload.
 
@@ -652,6 +679,11 @@ class _IOBackendMixin:
                     # store.  Their IDs may be identical to the new scenes.
                     self._figure_broadcasts.clear()
                 self.scene_store.save()
+                scenes_replaced = True
+            else:
+                scenes_replaced = False
+        else:
+            scenes_replaced = False
         for bundle in self.bundles.values():
             bundle.scene_cache.clear()
             cache = getattr(bundle, "_topology_state_cache", None)
@@ -668,6 +700,15 @@ class _IOBackendMixin:
             self._bump_version()
         else:
             self.patch_state(self.default_state(structure))
+        if scenes_replaced:
+            # The loaded preset is an explicit session replacement. Tell every
+            # open page which tab is active, and queue that scene's frame
+            # without waiting for a Dash callback.
+            self._publish_scene_catalog(focus=True)
+            if self.scene_store.active_id:
+                scheduler = getattr(self, "_schedule_committed_render", None)
+                if scheduler is not None:
+                    scheduler(self.get_state(), "full")
         return {"path": target, "state": self.get_state()}
 
     @staticmethod
@@ -769,6 +810,9 @@ class _IOBackendMixin:
             "build_sha": build_sha(),
             "asset_sha": asset_sha(),
         }
+        catalog = getattr(self, "scene_catalog", None)
+        if catalog is not None:
+            snapshot["scene_catalog"] = catalog(focus=False)
         if include_figure:
             latest = self.latest_figure_broadcast()
             if (

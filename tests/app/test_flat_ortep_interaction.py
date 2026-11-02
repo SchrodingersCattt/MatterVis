@@ -101,6 +101,9 @@ def test_flat_ortep_camera_drag_replaces_cached_embedded_image(monkeypatch, tmp_
     monkeypatch.setattr("mat_viewer.ortep.flat_render.render_ortep_flat", fake_render)
     backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
     try:
+        # Count only the synchronous ``figure_for_state`` renders. The
+        # commit-time worker would rasterize the same cameras again.
+        backend._render_worker.request_figure_build = lambda *args, **kwargs: False
         # Keep the test focused on cache/state behaviour while using a tiny
         # deterministic scene in place of the catalog structure.
         backend.scene_for_state = lambda _state=None: _scene()

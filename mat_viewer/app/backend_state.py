@@ -14,7 +14,14 @@ from .rightclick import _normalize_polyhedron_specs
 from .selectors import show_hydrogen, viewport_signature
 from .shared import *
 from .style_helpers import *
-from .view_updates import UpdateKind, classify_change, make_update, state_versions
+from .view_updates import (
+    UpdateKind,
+    classify_change,
+    committed_render_kind,
+    make_update,
+    requires_complete_frame,
+    state_versions,
+)
 
 
 class _StateBackendMixin:
@@ -303,6 +310,7 @@ class _StateBackendMixin:
         # other UI-originated patch where the browser is already
         # authoritative for the field being changed.
         rebuild_projection_image = False
+        schedule_kind = None
         with self._lock:
             target_scene_id = (
                 scene_id or (patch or {}).get("scene_id") or self.scene_store.active_id
@@ -378,6 +386,7 @@ class _StateBackendMixin:
                     working_state["selection"] = _normalize_selection({})
                     working_state["style_override_warnings"] = removed
                 working_state = self._reconcile_semantic_targets(working_state)
+            schedule_kind = committed_render_kind(state_before, working_state)
             before_versions = state_versions(state_before)
             # Maintain independent clocks.  A display patch can reuse the
             # current geometry; a camera patch never invalidates either.
@@ -509,11 +518,39 @@ class _StateBackendMixin:
         # Flat ORTEP rasterizes the camera basis. Queue its combined image
         # after releasing the backend lock; worker completion takes the locks
         # in the other order. Ordinary Plotly patches keep the fast path.
+        # Geometry, analysis, and other complete-frame edits are scheduled
+        # here as well, so an API write does not wait for Dash ``update_view``.
         if rebuild_projection_image:
             worker = getattr(self, "_render_worker", None)
             if worker is not None:
                 worker.request_figure_build(state, force=True)
+        elif schedule_kind is not None:
+            self._schedule_committed_render(state, schedule_kind)
         return state
+
+    def _schedule_committed_render(self, state: dict[str, Any], change_kind: Any) -> bool:
+        """Enqueue a complete frame when the committed change needs one.
+
+        Lightweight camera, overlay, and display patches stay on the journal's
+        view-update path. The worker deduplicates a second request from
+        ``update_view`` for the same scene snapshot.
+        """
+        if not isinstance(state, dict) or not requires_complete_frame(change_kind, state):
+            return False
+        worker = getattr(self, "_render_worker", None)
+        if worker is None:
+            return False
+        flat_ortep_camera = (
+            change_kind == UpdateKind.CAMERA
+            and state.get("material") == "flat"
+            and state.get("style") == "ortep"
+        )
+        # Pass ``force`` only when it changes the worker's fast path. Callers
+        # that replace ``request_figure_build`` with a one-argument spy stay
+        # compatible with ordinary complete-frame requests.
+        if flat_ortep_camera:
+            return bool(worker.request_figure_build(state, force=True))
+        return bool(worker.request_figure_build(state))
 
     def pop_pending_state(self) -> Optional[dict[str, Any]]:
         with self._lock:

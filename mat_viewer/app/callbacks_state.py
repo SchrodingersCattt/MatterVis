@@ -397,10 +397,9 @@ def register_state_callbacks(app, backend):
         A poll response can be in flight while a close or upload event is
         changing the scene store; allowing that older response to write the
         tab children recreates a scene that the backend has already removed.
-        The state poll still refreshes the active scene's controls through its
-        dedicated callback. Scene-tab structure is rebuilt only after an
-        explicit scene event or native upload, so one callback owns the DOM
-        without an older poll response able to overwrite it.
+        The state poll still refreshes controls. Tabs rebuild after an explicit
+        scene event, upload, or scene-catalog message, so an older poll response
+        cannot overwrite that DOM.
         """
         from dash.exceptions import MissingCallbackContextException
         try:
@@ -417,6 +416,14 @@ def register_state_callbacks(app, backend):
                 else:
                     active = browser_scene if browser_scene in backend.scene_store.scenes else backend.active_scene_id()
                 return backend.scene_tabs(), [], active or no_update
+
+        if not native_upload and isinstance(_scene_event, dict) and _scene_event.get("source") == "scene_catalog":
+            decision, selected = backend.scene_catalog_selection(_scene_event, browser_scene)
+            if decision in {"stale", "empty"}:
+                return no_update, no_update, no_update
+            if decision == "keep":
+                return backend.scene_tabs(), [], no_update
+            return backend.scene_tabs(), [], selected
 
         options = backend.scene_options()
         if not options:
