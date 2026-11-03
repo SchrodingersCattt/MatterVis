@@ -521,7 +521,7 @@ class _SelectionBackendMixin:
         A numeric ``ts`` keeps an older gesture from overwriting a newer one.
         Payloads without ``ts`` still commit.
         """
-        with self._lock:
+        with self._hold_backend_lock():
             expected = selection.get("target_revision")
             if expected is not None and str(expected) != str(self.get_state(scene_id).get("target_revision", 0)):
                 return False

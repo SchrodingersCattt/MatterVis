@@ -56,6 +56,10 @@ class _CoreBackendMixin:
         self.server_started_at = time.time()
         self.catalog = get_default_catalog(root_dir=self.root_dir)
         self._lock = threading.RLock()
+        # Depth of ``_hold_backend_lock`` on this thread. Render scheduling
+        # waits until the depth returns to zero so a nested state write cannot
+        # take the render-worker lock while this lock is still held.
+        self._backend_lock_tls = threading.local()
         # Upload requests reserve their digest/name before the background
         # parser starts.  Keeping these maps on the backend makes concurrent
         # multipart requests idempotent and gives the browser a durable way to

@@ -31,7 +31,11 @@ encoded in approved display text such as site labels.
 
 `capture_state` publishes state only. A committed scene change schedules the
 ordinary worker build itself, so an external API write does not wait for Dash
-`update_view`. `update_view` still returns a completed frame from the existing
+`update_view`. The worker lock is acquired before the backend lock. Frame
+publication therefore reads scene state outside the worker lock, and a
+selection commit that still holds the backend lock defers its build until
+that lock is released. Taking the locks in the other order deadlocks shutdown
+and every later state read. `update_view` still returns a completed frame from the existing
 broadcast journal and requests a build only when that journal does not yet
 have the current revision. The worker deduplicates the two requests. Neither
 path synchronously calls `figure_for_state` on a Dash request thread. Tab
