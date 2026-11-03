@@ -19,6 +19,7 @@ const source = fs.readFileSync(process.argv[1], 'utf8');
 const end = source.indexOf('  function stampGestureScene(');
 if (end < 0) throw new Error('gesture stamp not found');
 const calls = [];
+const status = {hidden: true, textContent: '', attrs: {}, setAttribute(name, value) { this.attrs[name] = value; }};
 const gd = {
   layout: {
     scene: {camera: {eye: {x: 1, y: 0, z: 0}, center: {x: 0, y: 0, z: 0}, up: {x: 0, y: 0, z: 1}}},
@@ -36,6 +37,7 @@ const document = {
   body: null,
   documentElement: null,
   getElementById(id) {
+    if (id === 'mv-render-status') return status;
     if (id === 'fast-view-metadata') {
       return {textContent: JSON.stringify({scene_id: 'scene-a', render_revision: 1, server_started_at: 'epoch'})};
     }
@@ -63,6 +65,9 @@ window.__mvFenceTest = {
   mark: markActive,
   release: releaseGestureScene,
   generation: function() { return gestureGeneration; },
+  park(id, figure) { pendingFigureByScene[String(id)] = {figure: figure}; },
+  parked(id) { return pendingFigureByScene[String(id)]; },
+  retry: scheduleQueuedSceneFigureRetry,
 };
 })();`, sandbox);
 
@@ -101,6 +106,13 @@ const fence = sandbox.window.__mvFenceTest;
   assert.equal(sandbox.window.__mvGestureSceneId, 'scene-a', 'a newer drag on the same scene was cleared');
   fence.release(fence.generation(), 'scene-a');
   assert.equal(sandbox.window.__mvGestureSceneId, '', 'the active drag was not released');
+
+  fence.park('scene-a', {data: [], layout: {meta: {mattervis_render: {scene_id: 'scene-a', render_revision: 1}}}});
+  fence.retry('scene-a', 120);
+  assert.equal(status.textContent, 'Scene frame was not applied');
+  assert.equal(status.attrs['data-level'], 'error');
+  assert.equal(sandbox.window.__mvRenderStatus.scene_id, 'scene-a');
+  assert.equal(fence.parked('scene-a'), undefined);
 })().catch((error) => {
   console.error(error);
   process.exit(1);

@@ -789,16 +789,27 @@ def register_view_callbacks(app, backend):
             return (no_update,) * 4
         state = backend.get_state((agent_state or {}).get("scene_id"))
         scene_id = state.get("scene_id")
-        previous_state = getattr(update_view, "_last_state", None)
+        scene_key = str(scene_id or "")
+        previous_by_scene = getattr(update_view, "_last_state_by_scene", None)
+        if not isinstance(previous_by_scene, dict):
+            previous_by_scene = {}
+            update_view._last_state_by_scene = previous_by_scene
+        # The first look at a scene is a complete frame, which is how a tab
+        # switch obtains a figure. After that, classify against this scene's
+        # own snapshot so a delayed edit is not compared with another scene.
+        # The last-kind override applies only before any scene has been seen.
+        previous_state = previous_by_scene.get(scene_key)
         change_kind = classify_change(previous_state, state)
-        if previous_state is None:
+        if previous_state is None and not previous_by_scene:
             try:
                 change_kind = UpdateKind(
-                    backend._last_update_kind_by_scene.get(str(scene_id), change_kind.value)
+                    backend._last_update_kind_by_scene.get(scene_key, change_kind.value)
                 )
             except (AttributeError, ValueError):
                 pass
-        update_view._last_state = copy.deepcopy(state)
+        stored = copy.deepcopy(state)
+        previous_by_scene[scene_key] = stored
+        update_view._last_state = stored
         if change_kind in {
             UpdateKind.CAMERA,
             UpdateKind.OVERLAY,

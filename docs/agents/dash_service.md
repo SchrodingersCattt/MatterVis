@@ -171,8 +171,14 @@ Notes for callers:
   `scene_id`, `render_revision`, and `server_started_at`. Reset/align revisions
   invalidate in-flight frames even when molecular geometry has not changed.
   Cache hits refresh both layout and scene `uirevision` through the existing
-  style owner. Clients preserve the live camera only for the same scene, server
-  epoch and `uirevision`; explicit camera revisions use the supplied camera.
+  style owner. `uirevision` includes the scene id, structure name, camera
+  revision, and viewport signature, so two scenes that share a structure and
+  camera do not keep one WebGL camera. Clients preserve the live camera only
+  for the same scene, server epoch and `uirevision`; explicit camera revisions
+  use the supplied camera. A duplicate scene schedules its own complete frame.
+  An in-flight build publishes only for its current scene identity; a newer
+  complete-frame identity is requeued and an older one cannot roll that scene
+  back.
 - The backend commit schedules ordinary complete frames through the render
   worker. The built-in Dash view reads the validated frame journal and
   requests a build only when that journal is behind the committed revision.

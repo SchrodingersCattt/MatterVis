@@ -30,7 +30,9 @@ from .scene_controls import (
     _stamp_scene_or_camera_differs,
     claim_browser_scene,
     claim_poll_publish,
+    filled_scene_id,
     note_interaction_epoch,
+    remember_filled_scene,
     poll_request_is_stale,
     split_poll_fence,
 )
@@ -573,7 +575,7 @@ def register_state_callbacks(app, backend):
             if not scene_id or scene_id not in backend.scene_store.scenes:
                 return (no_update,) * n_outputs
             state = backend.restore_display_defaults(scene_id=scene_id, broadcast=True)
-            filled_controls_scene["id"] = str(state.get("scene_id") or scene_id)
+            remember_filled_scene(filled_controls_scene, client_id, state.get("scene_id") or scene_id)
             return (*scene_control_outputs(state), no_update)
         if triggered == "scene-tabs":
             if not scene_id or scene_id not in backend.scene_store.scenes:
@@ -720,7 +722,7 @@ def register_state_callbacks(app, backend):
                 _restore_pending_if_absent(backend, state)
                 return (no_update,) * n_outputs
         else:
-            filled_controls_scene["id"] = str(state.get("scene_id") or "")
+            remember_filled_scene(filled_controls_scene, client_id, state.get("scene_id") or "")
         # Defence-in-depth against the camera-snap-back bug: even when
         # the poll path legitimately picks up an externally-driven
         # state change (REST agent, WebSocket, scene CRUD), do NOT push
@@ -859,7 +861,7 @@ def register_state_callbacks(app, backend):
             return no_update, no_update, no_update
         if scene_id and scene_id not in backend.scene_store.scenes:
             return no_update, no_update, no_update
-        filled = filled_controls_scene["id"]
+        filled = filled_scene_id(filled_controls_scene, client_id)
         if filled and scene_id and str(scene_id) != str(filled):
             return no_update, no_update, no_update
         if scene_id:

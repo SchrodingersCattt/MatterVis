@@ -834,6 +834,17 @@
     // old figure is still mounted. Keep the retry bounded, but long enough to
     // bridge that handoff instead of dropping the only complete frame.
     if (attempt >= 120) {
+      const selected = typeof currentSceneId === "function" ? currentSceneId() : null;
+      if (selected && String(selected) === key) {
+        const message = "Scene frame was not applied";
+        const statusNode = document.getElementById("mv-render-status");
+        if (statusNode) {
+          statusNode.hidden = false;
+          statusNode.textContent = message;
+          statusNode.setAttribute("data-level", "error");
+        }
+        window.__mvRenderStatus = {scene_id: key, level: "error", message: message};
+      }
       delete pendingFigureByScene[key];
       return;
     }

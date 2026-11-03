@@ -13,7 +13,7 @@ from .normalizers import *
 from .normalizers import _normalize_selection
 from .reducer import LEGACY_STYLE_STATE_FIELDS
 from .rightclick import _normalize_polyhedron_specs
-from .selectors import show_hydrogen, viewport_signature
+from .selectors import scene_uirevision, show_hydrogen, viewport_signature
 from .shared import *
 from .style_helpers import *
 from .view_updates import (
@@ -920,11 +920,14 @@ class _StateBackendMixin:
         # cube and a new state with a 12 Å cube, Plotly would silently
         # "preserve UI state" for the cube too, which is what made the
         # molecule look squashed after switching back to ``formula_unit``.
+        # The scene id keeps a duplicate from inheriting the source scene's
+        # WebGL camera when the structure name and viewport still match.
         layout_signature = viewport_signature(state)
-        style["uirevision"] = "{name}__{rev}__{sig}".format(
-            name=scene.get("name", "scene"),
-            rev=int(state.get("camera_revision", 0) or 0),
-            sig=layout_signature,
+        style["uirevision"] = scene_uirevision(
+            state.get("scene_id"),
+            scene.get("name"),
+            state.get("camera_revision", 0),
+            layout_signature,
         )
         # The interactive Dash app uses a separate SVG overlay for the
         # compass to avoid Plotly.relayout calls that interrupt gl3d's

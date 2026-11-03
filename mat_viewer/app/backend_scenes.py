@@ -459,6 +459,10 @@ class _SceneBackendMixin:
         self._bump_version()
         self._request_scene_store_save()
         self._publish_scene_catalog(focus=False)
+        # The copy's tab label arrives with the catalog. The canvas title
+        # arrives only with a figure, and a duplicate used to leave that
+        # frame unscheduled at render revision 0.
+        self._schedule_scene_render(scene.id, state_before, state_after)
         return scene.to_dict()
 
     @_scene_transaction

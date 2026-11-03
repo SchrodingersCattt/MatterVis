@@ -114,6 +114,15 @@ agent-state poll, which re-reads the selected scene when its version clocks
 move. In-process GUI edits that already own the gesture do not echo that
 gesture back through the poll.
 
+Publication is scene-scoped. A figure, camera, or sidebar capture for
+scene A does not apply to scene B. `layout.scene.uirevision` includes the
+scene id, so two scenes that share a structure and viewport do not keep
+one WebGL camera. Duplicating a scene schedules a complete frame for the
+copy. A build that is already running is published only when its
+generation, render revision, and camera revision are still current; a
+newer complete-frame identity is requeued, and an older one is dropped.
+The delivery contract is `docs/reliability-scene-delivery.md`.
+
 ## Documentation of the render interface
 
 MatterVis is a pure render interface. Stable docs describe geometry, bond

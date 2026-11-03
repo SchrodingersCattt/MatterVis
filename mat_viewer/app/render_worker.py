@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from collections import OrderedDict
-from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 import copy
 import json
 import os
 import threading
+from collections import OrderedDict
+from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from typing import Any
 
 from .backend_topology import compute_topology_geometry_payload
-from .view_updates import UpdateKind
+from .view_updates import UpdateKind, committed_render_kind, requires_complete_frame
 
 
 # Opt-in process-based topology worker via environment variable.
@@ -285,9 +285,55 @@ class AsyncRenderWorker:
         except (KeyError, TypeError, ValueError, AttributeError):
             return None
 
-    def _resubmit_camera_advanced(self, state: dict[str, Any], *, reason: str) -> bool:
-        """Queue the current camera revision after a stale build result."""
-        current = self._camera_advanced_state(state)
+    def _publication_identity(self, state: dict[str, Any]) -> tuple[int, int, int] | None:
+        try:
+            return (
+                int(state.get("scene_generation", 0) or 0),
+                int(state.get("render_revision", -1)),
+                int(state.get("camera_revision", 0) or 0),
+            )
+        except (TypeError, ValueError):
+            return None
+
+    def _live_state_if_newer(self, state: dict[str, Any]) -> dict[str, Any] | None:
+        """Return the live scene when a stale build still needs a frame.
+
+        A camera-only advance keeps the existing recovery. Any other requeue
+        requires a strictly newer publication identity and a transition that
+        still needs a complete frame. Display and overlay edits bump
+        ``render_revision`` without a worker build, and an older identity is
+        never requeued, so a late build cannot roll the scene back or replace
+        a local patch with a full frame.
+        """
+        if self._closed:
+            return None
+        camera_state = self._camera_advanced_state(state)
+        if camera_state is not None:
+            return camera_state
+        scene_id = state.get("scene_id")
+        if not scene_id:
+            return None
+        try:
+            if scene_id not in self.backend.scene_store.scenes:
+                return None
+            current = self.backend.get_state(scene_id)
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return None
+        if not isinstance(current, dict):
+            return None
+        if str(current.get("scene_id") or scene_id) != str(scene_id):
+            return None
+        live_id = self._publication_identity(current)
+        snapshot_id = self._publication_identity(state)
+        if live_id is None or snapshot_id is None or live_id <= snapshot_id:
+            return None
+        if not requires_complete_frame(committed_render_kind(state, current), current):
+            return None
+        return current
+
+    def _resubmit_live_state(self, state: dict[str, Any], *, reason: str) -> bool:
+        """Queue the live scene after a build that is no longer current."""
+        current = self._live_state_if_newer(state)
         if current is None:
             return False
         # ``force`` bypasses the camera-only fast path: this is the recovery
@@ -471,7 +517,7 @@ class AsyncRenderWorker:
         def _job() -> None:
             self._set_task_status(render_key, status="running")
             if not self._is_current(state):
-                if self._resubmit_camera_advanced(state, reason=reason):
+                if self._resubmit_live_state(state, reason=reason):
                     self._set_task_status(render_key, status="superseded")
                 else:
                     self._set_task_status(render_key, status="cancelled")
@@ -492,7 +538,7 @@ class AsyncRenderWorker:
                 published = isinstance(payload, dict) and payload.get("type") == "figure"
             if published:
                 self._set_task_status(render_key, status="completed")
-            elif self._resubmit_camera_advanced(state, reason=reason):
+            elif self._resubmit_live_state(state, reason=reason):
                 self._set_task_status(render_key, status="superseded")
             else:
                 self._set_task_status(render_key, status="cancelled")
