@@ -359,6 +359,7 @@ export requires `[plotly-export]`; a failure is reported without substitution.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--show-hydrogen` / `--no-hydrogen` | on | Show/hide hydrogen atoms |
+| `--include-boundary-replicas` / `--no-boundary-replicas` | periodic input on | Unit-cell fragment copies; see below |
 | `--show-cell` / `--no-cell` | auto | On for periodic input and off for nonperiodic or synthetic-cell input; explicit flags override |
 | `--show-labels` / `--no-labels` | off | Show/hide atom labels |
 | `--show-axes` / `--no-axes` | off | Show/hide the camera-projected crystallographic a/b/c compass |
@@ -369,6 +370,24 @@ export requires `[plotly-export]`; a failure is reported without substitution.
 The cell and lattice compass are foreground overlays, so dense atoms, bonds,
 or polyhedra do not depth-occlude them. `--monochrome` remains a rejected
 legacy flag.
+
+`--include-boundary-replicas` and `--no-boundary-replicas` apply to
+`--view unit_cell`. When neither flag is set, periodic input includes the
+replicas and nonperiodic input does not. Both choices are invariant under an
+integer lattice translation of the stored coordinates.
+
+`--include-boundary-replicas` places each finite molecule so its anchor site
+lies in the home cell, then copies the whole fragment when any member lies
+near a face, edge, or corner. `--no-boundary-replicas` wraps every site into
+the half-open home cell and does not add those near-face copies. Ball-and-stick,
+stick, wireframe, and ORTEP still draw the periodic images required for a
+MolCrysKit bond that crosses a cell face, and every such stick ends on a
+displayed atom. `--style ball` and `--style space_filling` do not add those
+bond-context images. A Python caller can also pass
+`include_cross_boundary_bond_endpoints=False` (the viewer `wrap_into_cell`
+token does this together with `include_boundary_replicas=False`) to keep only
+the wrapped sites and omit the crossing sticks. Display does not change source
+coordinates, bond identity, or the stored periodic shifts.
 
 ### Numeric parameters
 

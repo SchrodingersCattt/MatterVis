@@ -7,6 +7,7 @@ scalar controls and repeatable selector rules for mixed styles.
 | Public capability | CLI surface |
 |---|---|
 | Display mode | `--view` |
+| Unit-cell boundary replicas | `--include-boundary-replicas` / `--no-boundary-replicas` |
 | Camera axis, direction, position, target, up, projection, fit distance, FOV, orthographic scale, camera fit, and clipping | `--camera-axis`, `--view-direction`, `--camera-position`, `--camera-target`, `--camera-up`, `--orthogonal` / `--perspective`, `--camera-distance`, `--field-of-view`, `--ortho-scale`, `--camera-fit`, `--camera-clip` |
 | Representation, shading, backend, canvas, background, atom/bond scale, visibility, cell, labels, rings, and ORTEP | Direct `mat-vis render` flags |
 | Sphere and cylinder mesh quality | `--sphere-detail`, `--cylinder-sides` |
