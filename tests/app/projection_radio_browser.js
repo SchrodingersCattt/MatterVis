@@ -128,12 +128,23 @@ module.exports = async function projectionRadio(page, clickTab, waitForServerSta
 
     await clickTab(page, 'DAP-4');
     await waitRadio(sceneA, 'orthographic');
+    // The agent poll rewrites ``agent-state-store`` while a scene's version
+    // clocks are ahead of the browser stamp. Dash keeps only the newest
+    // callback for that output, so a poll landing after this injection drops
+    // the token and the held request never appears. Pause polling until the
+    // stale response is released, same as the native-click case above.
+    await page.evaluate(() => window.dash_clientside.set_props('agent-state-poll', {disabled: true}));
+    await page.waitForTimeout(600);
     const releaseOldScene = await holdStoreResponse({...sceneA, projection: 'orthographic'},
       'delayed-old-scene');
-    await clickTab(page, 'ionic_nacl');
-    await waitRadio(sceneB, 'perspective');
-    await releaseOldScene();
-    await waitRadio(sceneB, 'perspective');
+    try {
+      await clickTab(page, 'ionic_nacl');
+      await waitRadio(sceneB, 'perspective');
+      await releaseOldScene();
+      await waitRadio(sceneB, 'perspective');
+    } finally {
+      await page.evaluate(() => window.dash_clientside.set_props('agent-state-poll', {disabled: false}));
+    }
     const projectionA = await page.evaluate(async id =>
       (await fetch('/api/v2/state?scene_id=' + encodeURIComponent(id))
         .then(response => response.json())).projection, sceneA.scene_id);
