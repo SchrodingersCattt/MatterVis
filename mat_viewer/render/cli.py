@@ -211,7 +211,7 @@ def _build_render_parser(
         "--no-boundary-replicas",
         dest="include_boundary_replicas",
         action="store_false",
-        help="Omit nonessential boundary replicas in unit-cell views.",
+        help="Omit near-face fragment replicas; stick styles keep bond-context images.",
     )
     p.set_defaults(include_boundary_replicas=None)
     p.add_argument(
