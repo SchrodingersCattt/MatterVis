@@ -35,7 +35,13 @@ ordinary worker build itself, so an external API write does not wait for Dash
 publication therefore reads scene state outside the worker lock, and a
 selection commit that still holds the backend lock defers its build until
 that lock is released. Taking the locks in the other order deadlocks shutdown
-and every later state read. `update_view` still returns a completed frame from the existing
+and every later state read. Shutdown also must not hold the backend lock
+across the scene-file replace: the snapshot is taken under the backend lock
+and the scene-store lock, both are released, then the file is replaced.
+Pool joins are bounded because ``Executor.shutdown(wait=True)`` has no
+timeout on the supported Python versions. A scene-store generation that
+changes during the replace stays dirty. See
+`docs/reliability-worker-shutdown.md`. `update_view` still returns a completed frame from the existing
 broadcast journal and requests a build only when that journal does not yet
 have the current revision. The worker deduplicates the two requests. Neither
 path synchronously calls `figure_for_state` on a Dash request thread. Tab

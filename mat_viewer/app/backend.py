@@ -3,6 +3,7 @@ from __future__ import annotations
 import atexit
 import threading
 
+from .render_worker import shutdown_executor
 from .shared import ApiError, TopologyUnavailable
 from .backend_analysis import _AnalysisBackendMixin
 from .backend_camera import _CameraBackendMixin
@@ -46,28 +47,57 @@ class ViewerBackend(
         self.close()
 
     def close(self, *, wait: bool = True) -> None:
-        """Release background workers and flush pending scene state once."""
+        """Release background workers and flush pending scene state once.
+
+        Render pools are stopped before the final flush, and each pool join
+        is bounded. The flush and ``atexit`` unregister still run when
+        shutdown raises, so a failed close does not leave a second flush
+        registered or drop a scene mutation already marked dirty.
+        """
         with self._close_lock:
             if self._closed:
                 return
             self._closed = True
 
-        extension_host = getattr(self, "_extension_structures", None)
-        if extension_host is not None:
-            extension_host.writer.close()
-        self._persist_stop.set()
-        self._persist_event.set()
-        if threading.current_thread() is not self._persist_thread:
-            self._persist_thread.join(timeout=_PERSIST_THREAD_JOIN_TIMEOUT_SECONDS)
-        self._render_worker.shutdown(wait=wait)
-        load_executor = getattr(self, "_load_executor", None)
-        if load_executor is not None:
+        try:
+            self._persist_stop.set()
+            self._persist_event.set()
             try:
-                load_executor.shutdown(wait=wait, cancel_futures=not wait)
-            except TypeError:  # pragma: no cover - Python < 3.9 compatibility
-                load_executor.shutdown(wait=wait)
-        self.flush_scene_store()
-        atexit.unregister(self._atexit_flush_callback)
+                extension_host = getattr(self, "_extension_structures", None)
+                if extension_host is not None:
+                    extension_host.writer.close()
+                self._render_worker.shutdown(wait=wait)
+                load_executor = getattr(self, "_load_executor", None)
+                if load_executor is not None:
+                    shutdown_executor(load_executor, wait=wait)
+            finally:
+                self._join_persist_thread()
+        finally:
+            try:
+                self.flush_scene_store()
+                self._retry_dirty_scene_flush()
+            finally:
+                atexit.unregister(self._atexit_flush_callback)
+
+    def _retry_dirty_scene_flush(self) -> None:
+        """One more flush when the bounded wait could not take the backend lock.
+
+        The thread is a daemon. It does not keep ``close`` running, and it
+        does not clear a generation it failed to write.
+        """
+        store = getattr(self, "scene_store", None)
+        if store is None or not store.is_dirty():
+            return
+        threading.Thread(
+            target=self.flush_scene_store,
+            name="mattervis-scene-store-flush",
+            daemon=True,
+        ).start()
+
+    def _join_persist_thread(self) -> None:
+        if threading.current_thread() is self._persist_thread:
+            return
+        self._persist_thread.join(timeout=_PERSIST_THREAD_JOIN_TIMEOUT_SECONDS)
 
 
 __all__ = ["ApiError", "TopologyUnavailable", "ViewerBackend"]

@@ -73,7 +73,10 @@ shorthand-issued `repeat`), so it shows up later under
 executors. Long-lived services keep one backend for the service lifetime.
 Short-lived callers must either use it as a context manager or call its
 idempotent `close()` method so pending scene state is flushed and those
-background resources are released:
+background resources are released. `close()` bounds each pool join, then
+flushes. A mutation that lands while a snapshot is being replaced stays
+dirty and is written by a later attempt. The lock order is
+`docs/reliability-worker-shutdown.md`.
 
 ```python
 from mat_viewer.app.backend import ViewerBackend

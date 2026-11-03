@@ -16,8 +16,9 @@ lock in the contract:
 
 from __future__ import annotations
 
-from pathlib import Path
+import threading
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -38,11 +39,39 @@ def _isolated_log_file(monkeypatch, tmp_path):
 
 
 def test_record_returns_strictly_monotonic_seq():
+    # Sequence numbers are process-global. Another thread (or an explicit
+    # record from a second writer) may land between two calls, so adjacency
+    # is not the contract. ``clear()`` does not restart the counter.
     a = perf_log.record("a")
+    perf_log.record("other-writer")
     b = perf_log.record("b")
     c = perf_log.record("c")
-    assert b["seq"] == a["seq"] + 1
-    assert c["seq"] == b["seq"] + 1
+    assert a["seq"] < b["seq"] < c["seq"]
+
+
+def test_concurrent_writers_have_unique_monotonic_seqs():
+    """Each writer's own sequences increase, and no sequence is shared."""
+    sequences: list[list[int]] = []
+    guard = threading.Lock()
+
+    def writer(label: str) -> None:
+        own = [perf_log.record(label)["seq"] for _ in range(40)]
+        with guard:
+            sequences.append(own)
+
+    threads = [
+        threading.Thread(target=writer, args=(f"writer-{index}",))
+        for index in range(8)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    flat = [seq for own in sequences for seq in own]
+    assert len(flat) == len(set(flat))
+    for own in sequences:
+        assert all(own[index] < own[index + 1] for index in range(len(own) - 1))
 
 
 def test_recent_returns_chronological_order_and_filters_by_since():

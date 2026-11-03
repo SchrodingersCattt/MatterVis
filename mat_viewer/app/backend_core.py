@@ -808,13 +808,12 @@ class _CoreBackendMixin:
             self.flush_scene_store()
 
     def flush_scene_store(self) -> None:
-        if not getattr(self, "scene_store", None):
+        store = getattr(self, "scene_store", None)
+        if not store:
             return
         try:
-            # Persist only completed native/extension scene transactions.
-            with self._lock:
-                if self.scene_store.is_dirty():
-                    self.scene_store.save()
+            # Snapshot under the backend lock. The file replace runs outside it.
+            store.flush_durable(self._lock)
         except OSError as exc:  # pragma: no cover - disk-full / read-only mount
             print(f"[mat_viewer] could not persist scene store: {exc}", file=sys.stderr)
         self._flush_effect_session()

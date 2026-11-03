@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import tempfile
 import threading
 import time
 import uuid
@@ -13,6 +14,19 @@ from ..presets import json_safe
 
 
 SCENE_STORE_FILENAME = "crystal_view_scenes.json"
+# A flush retries when a mutation lands during the file replace. Each attempt
+# snapshots under the caller's lock; the replace itself does not hold it.
+_SCENE_STORE_FLUSH_ATTEMPTS = 3
+# Bound the wait for that lock so a worker still inside a state read cannot
+# keep process shutdown blocked on the scene file.
+_SCENE_STORE_LOCK_WAIT_SECONDS = 1.0
+
+
+def _discard_temporary(path: str) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
 
 
 def _now() -> float:
@@ -113,6 +127,7 @@ class SceneStore:
         self.order: list[str] = []
         self.active_id: str | None = None
         self._dirty = False
+        self._generation = 0
         self._lock = threading.RLock()
 
     @classmethod
@@ -140,26 +155,87 @@ class SceneStore:
         return store
 
     def save(self) -> None:
+        """Write one snapshot. A newer mutation during the replace stays dirty."""
+        payload, generation = self.export_payload()
+        self.write_payload(payload)
+        self.mark_clean_if(generation)
+
+    def export_payload(self) -> tuple[dict[str, Any], int]:
+        """Return a consistent snapshot and the generation it was taken from."""
         with self._lock:
-            os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
             payload = {
                 "version": 1,
                 "active_id": self.active_id,
                 "order": list(self.order),
                 "scenes": [self.scenes[scene_id].to_dict() for scene_id in self.order],
             }
-        with open(self.path, "w", encoding="utf-8") as handle:
-            json.dump(json_safe(payload), handle, indent=2, ensure_ascii=False)
-        with self._lock:
-            self._dirty = False
+            return payload, self._generation
+
+    def write_payload(self, payload: dict[str, Any]) -> None:
+        """Replace the scene file without holding the store lock.
+
+        The replace is atomic. A crash mid-write leaves the previous file.
+        """
+        directory = os.path.dirname(os.path.abspath(self.path)) or "."
+        os.makedirs(directory, exist_ok=True)
+        descriptor, temporary = tempfile.mkstemp(
+            prefix=".crystal-view-scenes-",
+            suffix=".tmp",
+            dir=directory,
+        )
+        installed = False
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                json.dump(json_safe(payload), handle, indent=2, ensure_ascii=False)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, self.path)
+            installed = True
+        finally:
+            if not installed:
+                _discard_temporary(temporary)
 
     def mark_dirty(self) -> None:
         with self._lock:
             self._dirty = True
+            self._generation += 1
+
+    def mark_clean_if(self, generation: int) -> bool:
+        """Clear dirty only when no mutation arrived after ``generation``."""
+        with self._lock:
+            if self._generation != generation:
+                return False
+            self._dirty = False
+            return True
 
     def is_dirty(self) -> bool:
         with self._lock:
             return bool(self._dirty)
+
+    def flush_durable(self, backend_lock) -> None:
+        """Persist without holding ``backend_lock`` across the file replace.
+
+        Lock order is ``backend_lock``, then this store's lock. The replace
+        runs after both are released. A mutation during the replace bumps the
+        generation and is written by a later attempt.
+        """
+        for _ in range(_SCENE_STORE_FLUSH_ATTEMPTS):
+            if not backend_lock.acquire(timeout=_SCENE_STORE_LOCK_WAIT_SECONDS):
+                return
+            try:
+                if not self.is_dirty():
+                    return
+                payload, generation = self.export_payload()
+            finally:
+                backend_lock.release()
+            self.write_payload(payload)
+            if not backend_lock.acquire(timeout=_SCENE_STORE_LOCK_WAIT_SECONDS):
+                return
+            try:
+                if self.mark_clean_if(generation):
+                    return
+            finally:
+                backend_lock.release()
 
     def ensure(self, structures: Iterable[str], *, default_state_factory=None) -> None:
         structures = [str(item) for item in structures]

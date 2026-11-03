@@ -23,6 +23,40 @@ _TOPOLOGY_WORKER_MODE = os.environ.get("MATTERVIS_TOPOLOGY_WORKER", "thread")
 # Terminal render records are diagnostic. Keep the newest window so a long
 # session cannot grow one entry per render key without bound.
 _TASK_STATUS_LIMIT = 256
+# ``Executor.shutdown(wait=True)`` has no timeout on Python 3.10–3.12.
+# A worker blocked on the backend lock must not keep ``ViewerBackend.close``
+# inside that join until the outer pytest timeout.
+_POOL_SHUTDOWN_WAIT_SECONDS = 5.0
+
+
+def shutdown_executor(pool, *, wait: bool) -> None:
+    """Stop an executor. A waiting shutdown joins for a bounded interval.
+
+    The executor marks itself shut down before it joins worker threads, so a
+    timed-out wait has still rejected new work. The running callable is not
+    killed. Committed scene state is flushed by the backend, not by this join.
+    """
+    if not wait:
+        _call_executor_shutdown(pool, wait=False)
+        return
+
+    def _stop() -> None:
+        _call_executor_shutdown(pool, wait=True)
+
+    thread = threading.Thread(
+        target=_stop,
+        name="mattervis-pool-shutdown",
+        daemon=True,
+    )
+    thread.start()
+    thread.join(_POOL_SHUTDOWN_WAIT_SECONDS)
+
+
+def _call_executor_shutdown(pool, *, wait: bool) -> None:
+    try:
+        pool.shutdown(wait=wait, cancel_futures=True)
+    except TypeError:  # pragma: no cover - executors without cancel_futures
+        pool.shutdown(wait=wait)
 
 
 class AsyncRenderWorker:
@@ -39,6 +73,8 @@ class AsyncRenderWorker:
     Lock order is worker lock, then the backend lock. Publishing a frame
     reads scene state, so that read stays outside the worker lock. Callers
     that already hold the backend lock must enqueue only after releasing it.
+    ``shutdown(wait=True)`` bounds each pool join so a blocked worker cannot
+    hold backend close until the process timeout.
     """
 
     def __init__(self, backend):
@@ -422,8 +458,8 @@ class AsyncRenderWorker:
             self._latest_render_by_scene.clear()
             self._render_futures.clear()
         if wait:
-            self._compute_pool.shutdown(wait=True, cancel_futures=True)
-            self._finalize_pool.shutdown(wait=True, cancel_futures=True)
+            shutdown_executor(self._compute_pool, wait=True)
+            shutdown_executor(self._finalize_pool, wait=True)
             return
-        self._finalize_pool.shutdown(wait=False, cancel_futures=True)
-        self._compute_pool.shutdown(wait=False, cancel_futures=True)
+        shutdown_executor(self._finalize_pool, wait=False)
+        shutdown_executor(self._compute_pool, wait=False)

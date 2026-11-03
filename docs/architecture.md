@@ -131,3 +131,12 @@ display-policy changes update these docs in the same pull request. Missing
 docs on an in-scope change is review P1. Paths, the out-of-scope list, and
 the pull request template are in
 [CONTRIBUTING.md](../CONTRIBUTING.md#documentation-policy).
+
+## Scene-store shutdown
+
+`ViewerBackend.close()` signals the persistence thread, stops render
+executors with a fixed wait, joins that thread, and flushes the scene
+store in a `finally` block. The backend lock is not held across the
+scene-file replace. A mutation that arrives during the replace stays
+dirty. The lock order, the bounds, and the root cause of the shutdown
+hang are in `docs/reliability-worker-shutdown.md`.
