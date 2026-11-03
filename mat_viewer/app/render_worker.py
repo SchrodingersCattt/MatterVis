@@ -35,6 +35,10 @@ class AsyncRenderWorker:
 
     Final Plotly JSON assembly always runs in a daemon thread before
     the result is pushed to WebSocket subscribers.
+
+    Lock order is worker lock, then the backend lock. Publishing a frame
+    reads scene state, so that read stays outside the worker lock. Callers
+    that already hold the backend lock must enqueue only after releasing it.
     """
 
     def __init__(self, backend):
@@ -102,12 +106,13 @@ class AsyncRenderWorker:
         )
 
     def _report_error(self, state: dict[str, Any], exc: Exception) -> None:
-        with self._lock:
-            if self._is_current(state):
-                self.backend.broadcast_render_error(
-                    scene_id=state.get("scene_id"),
-                    error=f"{type(exc).__name__}: {exc}",
-                )
+        # ``broadcast_render_error`` takes the backend lock. Do not call it
+        # while ``self._lock`` is held.
+        if self._is_current(state):
+            self.backend.broadcast_render_error(
+                scene_id=state.get("scene_id"),
+                error=f"{type(exc).__name__}: {exc}",
+            )
 
     def _camera_advanced_state(self, state: dict[str, Any]) -> dict[str, Any] | None:
         """Return the live state when only the camera changed mid-build.
@@ -259,15 +264,14 @@ class AsyncRenderWorker:
                 return
             self.backend._store_topology_geometry(structure, cache_key, geometry)
             fig, topology_data = self.backend.figure_for_state(state, async_topology=False)
-            with self._lock:
-                if self._is_current(state):
-                    self.backend.broadcast_figure(
-                        scene_id=state.get("scene_id"),
-                        figure=fig.to_plotly_json(),
-                        topology_data=topology_data,
-                        state=state,
-                        reason="topology-ready",
-                    )
+            if self._is_current(state):
+                self.backend.broadcast_figure(
+                    scene_id=state.get("scene_id"),
+                    figure=fig.to_plotly_json(),
+                    topology_data=topology_data,
+                    state=state,
+                    reason="topology-ready",
+                )
         except Exception as exc:
             self._report_error(state, exc)
         finally:
@@ -354,28 +358,25 @@ class AsyncRenderWorker:
                     self._set_task_status(render_key, status="cancelled")
                 return
             fig, topology_data = self.backend.figure_for_state(state, async_topology=False)
-            stale = False
-            with self._lock:
-                if self._is_current(state):
-                    payload = self.backend.broadcast_figure(
-                        scene_id=state.get("scene_id"),
-                        figure=fig.to_plotly_json(),
-                        topology_data=topology_data,
-                        state=state,
-                        reason=reason,
-                    )
-                    published = isinstance(payload, dict) and payload.get("type") == "figure"
-                    if published:
-                        self._set_task_status(render_key, status="completed")
-                    else:
-                        stale = True
-                else:
-                    stale = True
-            if stale:
-                if self._resubmit_camera_advanced(state, reason=reason):
-                    self._set_task_status(render_key, status="superseded")
-                else:
-                    self._set_task_status(render_key, status="cancelled")
+            # Publish outside the worker lock. ``broadcast_figure`` takes the
+            # backend lock, and a selection commit may already hold that lock
+            # while it waits to enqueue the next build.
+            published = False
+            if self._is_current(state):
+                payload = self.backend.broadcast_figure(
+                    scene_id=state.get("scene_id"),
+                    figure=fig.to_plotly_json(),
+                    topology_data=topology_data,
+                    state=state,
+                    reason=reason,
+                )
+                published = isinstance(payload, dict) and payload.get("type") == "figure"
+            if published:
+                self._set_task_status(render_key, status="completed")
+            elif self._resubmit_camera_advanced(state, reason=reason):
+                self._set_task_status(render_key, status="superseded")
+            else:
+                self._set_task_status(render_key, status="cancelled")
 
         def completed(future: Future) -> None:
             with self._lock:

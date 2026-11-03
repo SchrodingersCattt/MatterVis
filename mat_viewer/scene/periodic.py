@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 from molcrys_kit.utils.geometry import frac_to_cart
 
+from ..render.display_modes import _wrap_fractional
 from ..structure.bonds import bonds_conflict
 from ..structure.cif_parse import parse_asu
 from ..structure.formula_unit import select_formula_unit
@@ -84,14 +85,19 @@ def manifested_bond_endpoints(ai, aj, cell, display_mode: str, record_distance):
 
     The display lifter already chose the image pair. When that pair's
     separation is the record distance, those centres are the contact.
-    Minimum-image search is ambiguous for a bond of exactly half a lattice
-    vector and can swing the stick out of the cell. A pair whose separation
-    is not the record distance is a wrapped copy; the minimum image is the
-    contact in that case.
+    A strict unit-cell pair that does not match keeps those centres so the
+    length check can drop it instead of ending on an undrawn image.
+    Outside that mode, a wrapped copy uses the minimum image. That search
+    is ambiguous for a bond of exactly half a lattice vector.
     """
     start = np.asarray(ai["cart"], dtype=float)
     direct_end = np.asarray(aj["cart"], dtype=float)
     if _length_matches_record(_segment_length(start, direct_end), record_distance):
+        return start, direct_end.copy()
+    if ai.get("_strict_unit_cell") or aj.get("_strict_unit_cell"):
+        # The lifter already chose this manifested pair. A minimum-image
+        # end would leave those centres and land on an image that was not
+        # drawn. The length check then drops the unmatched segment.
         return start, direct_end.copy()
     return _bond_endpoints(ai, aj, cell, display_mode)
 
@@ -221,6 +227,69 @@ def _periodic_component_ranks(
         for source_index in component:
             ranks[source_index] = rank
     return ranks
+
+def _stored_cell_index(atom: dict[str, Any]) -> tuple[int, int, int] | None:
+    """Integer cell of a source site relative to its strict-cell home image.
+
+    MolCrysKit's ``right_image_shift`` is measured from the stored
+    fractional coordinates. Strict unit-cell display folds those
+    coordinates into ``[0, 1)``, so the display shift is the stored
+    shift plus the difference of those folds.
+    """
+    stored = np.asarray(atom.get("frac"), dtype=float)
+    anchor = atom.get("_wrapped_frac", atom.get("frac"))
+    home = _wrap_fractional(anchor)
+    if (
+        home is None
+        or stored.shape != (3,)
+        or not np.all(np.isfinite(stored))
+    ):
+        return None
+    delta = stored - home
+    image = np.rint(delta).astype(int)
+    if not np.allclose(delta, image, rtol=0.0, atol=_SOURCE_IMAGE_TOL):
+        return None
+    return tuple(int(value) for value in image)
+
+
+def _bond_records_in_wrapped_home(
+    source_atoms: list[dict[str, Any]],
+    canonical_bond_records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Express bond image shifts relative to wrapped home sites.
+
+    ``left@q → right@(q + S)`` in the stored frame becomes
+    ``left_home@q → right_home@(q + S + n_right - n_left)`` after each
+    site is folded by its integer cell ``n``. The returned records are
+    copies. Canonical MolCrysKit shifts are left unchanged.
+    """
+    cells = [_stored_cell_index(atom) for atom in source_atoms]
+    adjusted: list[dict[str, Any]] = []
+    for record in canonical_bond_records:
+        copied = dict(record)
+        try:
+            left = int(record["left"])
+            right = int(record["right"])
+            relation = tuple(int(value) for value in record["right_image_shift"])
+        except (KeyError, TypeError, ValueError):
+            adjusted.append(copied)
+            continue
+        if (
+            len(relation) != 3
+            or not 0 <= left < len(cells)
+            or not 0 <= right < len(cells)
+            or cells[left] is None
+            or cells[right] is None
+        ):
+            adjusted.append(copied)
+            continue
+        copied["right_image_shift"] = [
+            relation[axis] + cells[right][axis] - cells[left][axis]
+            for axis in range(3)
+        ]
+        adjusted.append(copied)
+    return adjusted
+
 
 def _manifest_strict_bonded_images(
     draw_atoms: list[dict[str, Any]],

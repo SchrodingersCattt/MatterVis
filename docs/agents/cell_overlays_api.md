@@ -87,9 +87,16 @@ renderer request fails rather than dropping the overlay.
 The unit_cell view controls displayed periodic copies independently of cell
 overlays:
 
-- include_boundary_replicas=false keeps the strict half-open source cell.
-- include_boundary_replicas=true copies a complete molecular fragment when a
-  member lies near a face, edge, or corner.
+- include_boundary_replicas=false wraps sites into the half-open home cell
+  and omits near-face fragment copies. Stick styles still add the periodic
+  images required for a boundary-crossing bond; those images, and the bond
+  endpoints, match for inputs that differ by an integer lattice translation.
+  include_cross_boundary_bond_endpoints=false omits that bond context and
+  does not draw a stick to an atom that is not displayed.
+- include_boundary_replicas=true places each finite molecule so its anchor
+  lies in the home cell, then copies the complete fragment when a member lies
+  near a face, edge, or corner. The same integer translation of the input
+  does not change that display.
 - molecule-level polyhedron center_images=false keeps only centers whose
   displayed/source fractional-center offset is (0, 0, 0); this is the
   half-open source image even when a fragment row carries a relative

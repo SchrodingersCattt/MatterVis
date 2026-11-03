@@ -75,6 +75,7 @@ __all__ = [
 ]
 
 from .periodic import (
+    _bond_records_in_wrapped_home,
     _canonical_display_bond_pairs,
     _manifest_spanning_bond_context,
     _manifest_strict_bonded_images,
@@ -277,6 +278,13 @@ def build_scene_from_atoms(
 
     image_records = list(canonical_records)
     strict_cell = display_mode == "unit_cell" and not include_boundary_replicas
+    # Strict cells draw wrapped homes. Bond shifts stay in the stored
+    # frame on the scene; only the display lifter uses the wrapped frame.
+    display_bond_records = (
+        _bond_records_in_wrapped_home(source_atoms, image_records)
+        if strict_cell
+        else image_records
+    )
     bonded_image_replica_count = 0
     framework_context_replica_count = 0
     # Lattice sites already carry their symmetric boundary images. Adding
@@ -285,14 +293,14 @@ def build_scene_from_atoms(
     if (
         not lattice_site_display
         and strict_cell
-        and image_records
+        and display_bond_records
         and include_cross_boundary_bond_endpoints
     ):
         bonded_image_replica_count = _manifest_strict_bonded_images(
             draw_atoms,
             source_atoms,
             M,
-            image_records,
+            display_bond_records,
         )
     elif (
         not lattice_site_display
@@ -340,7 +348,7 @@ def build_scene_from_atoms(
     bond_pairs, canonical_stats, pair_metadata = _canonical_display_bond_pairs(
         draw_atoms,
         source_atoms,
-        canonical_records,
+        display_bond_records,
     )
     bonds = []
     conflict_drops = 0

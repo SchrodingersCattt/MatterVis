@@ -55,8 +55,9 @@ draw. Override auto only for a stated scientific reason.
   assembly. It is useful for diagnosis but is not raw `_atom_site` or major-only.
 - `unit_cell` gives crystal context and normally adds complete boundary-fragment
   replicas. Use `--no-boundary-replicas --style ball` for a strict home-cell
-  atoms-only view. Bonded styles retain canonical cross-boundary endpoints when
-  needed to show connectivity.
+  atoms-only view. Bonded styles still draw the periodic images needed to
+  finish a boundary-crossing bond. Those images match for coordinates that
+  differ by an integer lattice vector, and each stick ends on a displayed atom.
 - `cluster` disables PBC for an already finite input. It does not select a centre,
   radius, molecule, or connected component.
 

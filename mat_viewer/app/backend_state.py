@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import threading
+from contextlib import contextmanager
 from typing import Any, Optional
 
 from ..config import current_config
@@ -25,6 +27,65 @@ from .view_updates import (
 
 
 class _StateBackendMixin:
+    def _backend_lock_local(self) -> threading.local:
+        local = getattr(self, "_backend_lock_tls", None)
+        if local is None:
+            local = threading.local()
+            self._backend_lock_tls = local
+        return local
+
+    @contextmanager
+    def _hold_backend_lock(self):
+        """Hold ``self._lock`` and schedule deferred renders after release.
+
+        Callers may nest state writes under this lock. The render worker
+        publishes frames by taking the worker lock and then this lock, so a
+        nested ``patch_state`` must not enqueue a build until the outermost
+        acquisition has been released.
+        """
+
+        local = self._backend_lock_local()
+        local.depth = int(getattr(local, "depth", 0) or 0) + 1
+        self._lock.acquire()
+        try:
+            yield
+        finally:
+            self._lock.release()
+            local.depth = int(local.depth) - 1
+            if local.depth == 0:
+                pending = list(getattr(local, "deferred", ()) or ())
+                local.deferred = []
+                for state, schedule_kind, force in pending:
+                    self._run_deferred_render(state, schedule_kind, force)
+
+    def _defer_or_run_render(
+        self,
+        state: dict[str, Any],
+        schedule_kind: Any,
+        *,
+        force: bool,
+    ) -> None:
+        if not force and schedule_kind is None:
+            return
+        local = self._backend_lock_local()
+        if int(getattr(local, "depth", 0) or 0) > 0:
+            pending = getattr(local, "deferred", None)
+            if pending is None:
+                pending = []
+                local.deferred = pending
+            pending.append((state, schedule_kind, force))
+            return
+        self._run_deferred_render(state, schedule_kind, force)
+
+    def _run_deferred_render(self, state: dict[str, Any], schedule_kind: Any, force: bool) -> None:
+        if force:
+            worker = getattr(self, "_render_worker", None)
+            if worker is not None:
+                worker.request_figure_build(state, force=True)
+            return
+        if schedule_kind is not None:
+            self._schedule_committed_render(state, schedule_kind)
+
     def normalize_state(
         self, patch: Optional[dict[str, Any]], scene_id: Optional[str] = None
     ) -> dict[str, Any]:
@@ -520,12 +581,13 @@ class _StateBackendMixin:
         # in the other order. Ordinary Plotly patches keep the fast path.
         # Geometry, analysis, and other complete-frame edits are scheduled
         # here as well, so an API write does not wait for Dash ``update_view``.
-        if rebuild_projection_image:
-            worker = getattr(self, "_render_worker", None)
-            if worker is not None:
-                worker.request_figure_build(state, force=True)
-        elif schedule_kind is not None:
-            self._schedule_committed_render(state, schedule_kind)
+        # A caller that still holds ``_hold_backend_lock`` (selection commits)
+        # defers this enqueue until that outer lock is released.
+        self._defer_or_run_render(
+            state,
+            schedule_kind,
+            force=bool(rebuild_projection_image),
+        )
         return state
 
     def _schedule_committed_render(self, state: dict[str, Any], change_kind: Any) -> bool:

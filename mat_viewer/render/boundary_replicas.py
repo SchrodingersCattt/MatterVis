@@ -19,6 +19,61 @@ _PERIODIC_FACE_TOL: float = 3e-2
 _SOURCE_IMAGE_TOL: float = 1e-5
 
 
+def _home_cell_index(frac: Any) -> tuple[int, int, int] | None:
+    """Integer cell of a displayed fractional coordinate.
+
+    The offset matches ``_periodic_translations_for_atom`` so folding a
+    fragment into this cell does not invent a second neighbour image.
+    """
+    arr = np.asarray(frac, dtype=float)
+    if arr.shape != (3,) or not np.all(np.isfinite(arr)):
+        return None
+    return tuple(int(value) for value in np.floor(arr + _SOURCE_IMAGE_TOL).astype(int))
+
+
+def _fragment_anchor(atoms: list[dict[str, Any]]) -> dict[str, Any]:
+    """Lowest source index, then list order, as the fragment's cell anchor."""
+
+    def _order(item: tuple[int, dict[str, Any]]) -> tuple[int, int]:
+        index, atom = item
+        try:
+            source = int(atom.get("_source_index", index))
+        except (TypeError, ValueError):
+            source = index
+        return (source, index)
+
+    return min(enumerate(atoms), key=_order)[1]
+
+
+def _place_fragment_in_home_cell(
+    atoms: list[dict[str, Any]],
+    lattice: np.ndarray,
+) -> None:
+    """Translate a finite fragment so its anchor lies in the home cell.
+
+    The same integer is applied to every member. Relative geometry, and
+    therefore MolCrysKit image shifts, stay intact while the absolute
+    cell of the stored coordinates drops out of the display.
+    """
+    if not atoms:
+        return
+    cell_index = _home_cell_index(_fragment_anchor(atoms).get("frac"))
+    if cell_index is None or cell_index == (0, 0, 0):
+        return
+    shift = np.asarray(cell_index, dtype=float)
+    shift_cart = frac_to_cart(shift, lattice)
+    for atom in atoms:
+        frac = np.asarray(atom.get("frac"), dtype=float)
+        if frac.shape != (3,) or not np.all(np.isfinite(frac)):
+            continue
+        atom["frac"] = frac - shift
+        cart = atom.get("cart")
+        if cart is None:
+            atom["cart"] = frac_to_cart(atom["frac"], lattice)
+        else:
+            atom["cart"] = np.asarray(cart, dtype=float) - shift_cart
+
+
 def expand_boundary_replicas(
     atoms: list[dict[str, Any]],
     M: Any,
@@ -38,6 +93,12 @@ def expand_boundary_replicas(
 
     Returns a new list; atoms inside ``(tol, 1-tol)`` along every axis
     are passed through unchanged.
+
+    Finite fragments are first translated by one integer cell so the
+    anchor site lies in the home cell. Face images are then taken from
+    that canonical placement, so an integer lattice translation of the
+    input does not change the displayed copies. Cell-spanning components
+    stay on their wrapped crystallographic sites.
     """
     if not atoms:
         return atoms
@@ -152,6 +213,7 @@ def expand_boundary_replicas(
             # and asymmetric chunks outside the cell. Scene assembly adds the
             # exact neighbouring context from signed MCK BondRecords instead.
             continue
+        _place_fragment_in_home_cell(molecule_atoms, M_arr)
         out.extend(molecule_atoms)
         for effective in sorted(_molecule_periodic_translations(molecule_atoms)):
             shift_arr = np.array(effective, dtype=float)
@@ -170,6 +232,7 @@ def expand_boundary_replicas(
                 out.append(replica)
 
     for atom in ungrouped:
+        _place_fragment_in_home_cell([atom], M_arr)
         out.append(atom)
         for shift in sorted(_periodic_translations_for_atom(atom)):
             if shift == (0, 0, 0):
