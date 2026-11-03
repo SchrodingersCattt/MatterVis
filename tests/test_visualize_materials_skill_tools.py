@@ -168,7 +168,11 @@ def test_released_molcryskit_minimum_is_consistent() -> None:
         assert "BondRecord.role" in text
         assert "get_connectivity_report" in text
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    assert 'python -m pip install -e ".[all,test]"' in ci
+    pinned_install = 'python -m pip install -c requirements/ci-constraints.txt -e ".[all,test]"'
+    assert pinned_install in ci
+    assert pinned_install in (ROOT / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8"
+    )
     assert "molcrys-kit>=" not in ci
 
     development = (SKILL / "references" / "capabilities-and-install.md").read_text(

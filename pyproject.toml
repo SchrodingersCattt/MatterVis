@@ -22,6 +22,8 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Visualization",
 ]
 dependencies = [
+    # Library ranges stay here. The merge gate installs
+    # requirements/ci-constraints.txt and does not float these ranges.
     "numpy",
     "matplotlib",
     "pillow",

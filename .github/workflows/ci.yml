@@ -17,11 +17,18 @@ concurrency:
 env:
   MOLCRYSKIT_MINIMUM: "0.8.0"
   MOLCRYSKIT_UPPER: "0.9.0"
+  # Deliberate toolchain baseline. The compatibility-drift workflow is the
+  # place that floats these. A run_attempt above 1 is a rerun, not a clean
+  # first-attempt success. Cancellations are concurrency, not flakes.
+  CI_NODE_VERSION: "22.23.4"
+  CI_CHROME_VERSION: "156.0.8078.47"
+  CI_PLAYWRIGHT_CORE: "1.64.1"
+  CI_PIP_VERSION: "26.3"
 
 jobs:
   fast-tests:
     name: Fast tests (Python 3.12, pinned molcrys-kit)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -34,10 +41,10 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install pinned chemistry dependency and all test dependencies
+      - name: Install pinned molcrys-kit and test dependencies
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[all,test]"
+          python -m pip install "pip==${CI_PIP_VERSION}"
+          python -m pip install -c requirements/ci-constraints.txt -e ".[all,test]"
           python - << 'PY'
           import os
           from importlib.metadata import version
@@ -80,6 +87,7 @@ jobs:
               )
           print(f"molcrys-kit {raw} (BondRecord.role, get_connectivity_report)")
           PY
+          python .github/scripts/record_ci_environment.py --output-dir ci-diagnostics
 
       - name: Run fast tests
         run: |
@@ -89,6 +97,10 @@ jobs:
             --durations=25 --durations-min=0.25 \
             --junitxml=pytest-fast.xml | tee pytest-fast.log
 
+      - name: Write fast-test failure signatures
+        if: always()
+        run: python .github/scripts/junit_failure_signatures.py pytest-fast.xml --output ci-diagnostics/failure-signatures.json
+
       - name: Upload fast-test timings
         if: always()
         uses: actions/upload-artifact@v4
@@ -97,10 +109,11 @@ jobs:
           path: |
             pytest-fast.log
             pytest-fast.xml
+            ci-diagnostics/
 
   full-tests:
-    name: Full tests (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    name: Full tests (Python ${{ matrix.python-version }}, pinned molcrys-kit)
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -117,10 +130,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: Install minimum chemistry dependency and all test dependencies
+      - name: Install pinned molcrys-kit and test dependencies
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[all,test]"
+          python -m pip install "pip==${CI_PIP_VERSION}"
+          python -m pip install -c requirements/ci-constraints.txt -e ".[all,test]"
           python - << 'PY'
           from molcrys_kit.structures import BondRecord
           from molcrys_kit.structures.crystal import MolecularCrystal
@@ -133,6 +146,7 @@ jobs:
                   "MolecularCrystal.get_connectivity_report"
               )
           PY
+          python .github/scripts/record_ci_environment.py --output-dir ci-diagnostics
 
       - name: Run tests
         run: |
@@ -143,6 +157,10 @@ jobs:
             --junitxml=pytest-full-${{ matrix.python-version }}.xml \
             | tee pytest-full-${{ matrix.python-version }}.log
 
+      - name: Write full-test failure signatures
+        if: always()
+        run: python .github/scripts/junit_failure_signatures.py pytest-full-${{ matrix.python-version }}.xml --output ci-diagnostics/failure-signatures.json
+
       - name: Upload full-test timings
         if: always()
         uses: actions/upload-artifact@v4
@@ -151,10 +169,11 @@ jobs:
           path: |
             pytest-full-${{ matrix.python-version }}.log
             pytest-full-${{ matrix.python-version }}.xml
+            ci-diagnostics/
 
   minimal-install:
     name: Minimal base install and CPU smoke test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -167,10 +186,10 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install minimum chemistry dependency and base MatterVis only
+      - name: Install base MatterVis with pinned molcrys-kit
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install .
+          python -m pip install "pip==${CI_PIP_VERSION}"
+          python -m pip install -c requirements/ci-constraints.txt .
           python - << 'PY'
           from molcrys_kit.structures import BondRecord
           from molcrys_kit.structures.crystal import MolecularCrystal
@@ -184,13 +203,22 @@ jobs:
               )
           PY
           python -m pip check
+          python .github/scripts/record_ci_environment.py --output-dir ci-diagnostics
 
       - name: Verify browser-free CIF to PNG, PDF, and SVG
         run: python tests/minimal_install_smoke.py
 
+      - name: Upload minimal-install environment
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-diagnostics-minimal-install
+          path: ci-diagnostics/
+          if-no-files-found: ignore
+
   camera-webgl:
     name: Camera WebGL regression
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -206,17 +234,17 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: ${{ env.CI_NODE_VERSION }}
 
       - name: Install Chrome
         uses: browser-actions/setup-chrome@v1
         with:
-          chrome-version: stable
+          chrome-version: ${{ env.CI_CHROME_VERSION }}
 
-      - name: Install test dependencies
+      - name: Install pinned molcrys-kit and test dependencies
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[all,test]"
+          python -m pip install "pip==${CI_PIP_VERSION}"
+          python -m pip install -c requirements/ci-constraints.txt -e ".[all,test]"
           python - << 'PY'
           from molcrys_kit.structures import BondRecord
           from molcrys_kit.structures.crystal import MolecularCrystal
@@ -229,16 +257,31 @@ jobs:
                   "MolecularCrystal.get_connectivity_report"
               )
           PY
-          npm install --no-save playwright-core
+          npm install --no-save "playwright-core@${CI_PLAYWRIGHT_CORE}"
+          python .github/scripts/record_ci_environment.py --output-dir ci-diagnostics
 
       - name: Run orthographic, perspective, and reset browser regression
         env:
           MATTERVIS_REQUIRE_BROWSER: "1"
-        run: python -m pytest tests/app/test_camera_browser_regression.py tests/app/test_real_app_browser_regression.py tests/app/test_layout_responsive.py tests/app/test_status_bar_browser.py -q --tb=short
+        run: python -m pytest tests/app/test_camera_browser_regression.py tests/app/test_real_app_browser_regression.py tests/app/test_layout_responsive.py tests/app/test_status_bar_browser.py -q --tb=short --junitxml=pytest-browser.xml
+
+      - name: Write browser failure signatures
+        if: always()
+        run: python .github/scripts/junit_failure_signatures.py pytest-browser.xml --output ci-diagnostics/failure-signatures.json
+
+      - name: Upload browser diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-diagnostics-browser
+          path: |
+            ci-diagnostics/
+            pytest-browser.xml
+          if-no-files-found: ignore
 
   benchmark-smoke:
     name: Benchmark manifest smoke
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -251,10 +294,10 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install benchmark dependencies
+      - name: Install pinned molcrys-kit and benchmark dependencies
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[all,test]"
+          python -m pip install "pip==${CI_PIP_VERSION}"
+          python -m pip install -c requirements/ci-constraints.txt -e ".[all,test]"
           python - << 'PY'
           from molcrys_kit.structures import BondRecord
           from molcrys_kit.structures.crystal import MolecularCrystal
@@ -267,6 +310,7 @@ jobs:
                   "MolecularCrystal.get_connectivity_report"
               )
           PY
+          python .github/scripts/record_ci_environment.py --output-dir ci-diagnostics
 
       - name: Run stable benchmark smoke subset
         run: |
@@ -274,16 +318,19 @@ jobs:
             --output benchmark-smoke.json --csv benchmark-smoke.csv
 
       - name: Upload benchmark smoke results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: mattervis-benchmark-smoke
           path: |
             benchmark-smoke.json
             benchmark-smoke.csv
+            ci-diagnostics/
+          if-no-files-found: ignore
 
   build-package:
     name: Build source and wheel distributions
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -298,8 +345,10 @@ jobs:
 
       - name: Build distributions
         run: |
-          python -m pip install --upgrade pip build
+          python -m pip install "pip==${CI_PIP_VERSION}"
+          python -m pip install -c requirements/ci-constraints.txt build
           python -m build
+          python .github/scripts/record_ci_environment.py --output-dir ci-diagnostics
 
       - name: Verify wheel contains only the mat_viewer package
         shell: python
@@ -322,11 +371,19 @@ jobs:
                   missing.append(packaged)
           assert not missing, missing
 
-  # Warn-only. continue-on-error keeps a checkout or script failure from
-  # failing the workflow. The script exits 0 and emits ::warning::.
+      - name: Upload package-build environment
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-diagnostics-package-build
+          path: ci-diagnostics/
+          if-no-files-found: ignore
+
+  # Warn-only. A checkout or script failure here must not fail the workflow.
+  # The script exits 0 and emits a warning annotation.
   docs-policy-warn:
     name: Docs policy (warn only)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.event_name == 'pull_request'
     continue-on-error: true
     steps:
