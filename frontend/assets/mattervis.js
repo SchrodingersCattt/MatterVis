@@ -1101,7 +1101,9 @@
 
   function sceneCatalogDomDiffers(scenes) {
     var entries = sceneCatalogEntries();
-    if (entries === null) return true;
+    // A missing tab root is not a catalog change. Treating it as a difference
+    // rebuilds the strip before Dash has mounted it.
+    if (entries === null) return false;
     var expected = Array.isArray(scenes) ? scenes : [];
     if (entries.length !== expected.length) return true;
     for (var index = 0; index < entries.length; index += 1) {
@@ -1120,11 +1122,14 @@
       var applied = window.__mvSceneCatalogApplied || {seq: -1, focus: false};
       if (seq < Number(applied.seq)) return;
       var sameSeq = seq === Number(applied.seq);
+      // One catalog sequence is applied once. Repeating it because the DOM
+      // parser still disagrees rebuilds the tabs, and that rebuild bumps the
+      // server version and delivers the same sequence again.
+      if (sameSeq && !(message.focus && !applied.focus)) return;
       var domDiffers = sceneCatalogDomDiffers(message.scenes);
       var selected = "";
       try { selected = String(currentSceneId() || ""); } catch (_) { selected = ""; }
       var focusSwitch = !!message.focus && String(message.active_id || "") !== selected;
-      if (sameSeq && !(message.focus && !applied.focus) && !domDiffers && !focusSwitch) return;
       window.__mvSceneCatalogApplied = {
         seq: seq,
         focus: !!message.focus || (sameSeq && !!applied.focus),

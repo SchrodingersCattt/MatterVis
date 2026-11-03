@@ -340,6 +340,34 @@ def test_http_journal_carries_the_scene_catalog(tmp_path, monkeypatch):
         app.crystal_backend.close()
 
 
+def test_parallel_figure_build_keeps_one_topology_object(tmp_path, monkeypatch):
+    from mat_viewer.app import backend_camera
+
+    backend = ViewerBackend(
+        preset_path=str(tmp_path / "preset.json"),
+        root_dir=str(tmp_path),
+    )
+    backend._render_worker.request_figure_build = lambda *args, **kwargs: False
+    try:
+        state = backend.get_state()
+        key = backend._figure_state_cache_key(state)
+        winner = {"shared": True}
+        original = backend_camera.build_figure
+
+        def raced(*args, **kwargs):
+            fig = original(*args, **kwargs)
+            backend._figure_cache[key] = (fig.to_plotly_json(), winner)
+            return fig
+
+        monkeypatch.setattr(backend_camera, "build_figure", raced)
+        _figure, topology = backend.figure_for_state(state)
+        assert topology is winner
+        _again_figure, again = backend.figure_for_state(state)
+        assert again is winner
+    finally:
+        backend.close()
+
+
 def test_websocket_intent_requests_broadcast(backend, monkeypatch):
     seen = {}
 

@@ -74,6 +74,9 @@ assert.equal(calls[0].data.catalog_seq, 2);
 
 reconcile({scene_catalog_seq: 1, scenes: [{id: 'a', label: 'Alpha'}], active_id: 'a', focus: true});
 assert.equal(calls.length, 1, 'an older catalog must not move the tab');
+dom.tabs = [];
+reconcile({scene_catalog_seq: 2, scenes: [{id: 'gone', label: 'Gone'}], active_id: 'gone', focus: false});
+assert.equal(calls.length, 1, 'a catalog sequence is applied once');
 
 dom.tabs = [tab('a', 'Alpha'), tab('b', 'Beta')];
 reconcile({scene_catalog_seq: 3, scenes: [{id: 'a', label: 'Alpha'}, {id: 'b', label: 'Beta'}], active_id: 'b', focus: true});
