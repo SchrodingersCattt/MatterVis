@@ -1,4 +1,39 @@
 /* Real Dash radio delivery under scene switches and delayed store callbacks. */
+function trackDashInflight(page) {
+  let inflight = 0;
+  const pending = new Set();
+  const onRequest = (request) => {
+    if (new URL(request.url()).pathname !== "/_dash-update-component") return;
+    inflight += 1;
+    pending.add(request);
+  };
+  const onDone = (request) => {
+    if (!pending.delete(request)) return;
+    inflight -= 1;
+  };
+  page.on("request", onRequest);
+  page.on("requestfinished", onDone);
+  page.on("requestfailed", onDone);
+  return {
+    async quiet(timeout = 20000) {
+      const deadline = Date.now() + timeout;
+      while (Date.now() < deadline) {
+        if (inflight === 0) {
+          await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve())));
+          if (inflight === 0) return;
+        }
+        await page.waitForTimeout(50);
+      }
+      throw new Error("dash callbacks did not drain");
+    },
+    stop() {
+      page.off("request", onRequest);
+      page.off("requestfinished", onDone);
+      page.off("requestfailed", onDone);
+    },
+  };
+}
+
 module.exports = async function projectionRadio(page, clickTab, waitForServerState) {
   const states = await page.evaluate(async () => {
     const scenes = await fetch('/api/v2/scenes').then(response => response.json());
@@ -76,9 +111,9 @@ module.exports = async function projectionRadio(page, clickTab, waitForServerSta
       await delivered;
       await response;
       await page.unroute('**/_dash-update-component*', handler);
-      await page.waitForTimeout(300);
     };
   }
+  const dash = trackDashInflight(page);
   try {
     await page.evaluate(async ({states, expected}) => {
       for (let index = 0; index < states.length; index += 1) {
@@ -134,7 +169,7 @@ module.exports = async function projectionRadio(page, clickTab, waitForServerSta
     // the token and the held request never appears. Pause polling until the
     // stale response is released, same as the native-click case above.
     await page.evaluate(() => window.dash_clientside.set_props('agent-state-poll', {disabled: true}));
-    await page.waitForTimeout(600);
+    await dash.quiet();
     const releaseOldScene = await holdStoreResponse({...sceneA, projection: 'orthographic'},
       'delayed-old-scene');
     try {
@@ -152,6 +187,7 @@ module.exports = async function projectionRadio(page, clickTab, waitForServerSta
     console.log('projection-radio observations ' + JSON.stringify(observations));
     if (errors.length) throw new Error('projection radio page errors: ' + errors.join('; '));
   } finally {
+    dash.stop();
     page.off('pageerror', recordError);
     await page.evaluate(async states => {
       for (const state of states) {

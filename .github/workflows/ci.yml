@@ -236,6 +236,14 @@ jobs:
           MATTERVIS_REQUIRE_BROWSER: "1"
         run: python -m pytest tests/app/test_camera_browser_regression.py tests/app/test_real_app_browser_regression.py tests/app/test_layout_responsive.py tests/app/test_status_bar_browser.py -q --tb=short
 
+      - name: Upload browser failure artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-artifacts
+          path: browser-artifacts/
+          if-no-files-found: ignore
+
   benchmark-smoke:
     name: Benchmark manifest smoke
     runs-on: ubuntu-latest

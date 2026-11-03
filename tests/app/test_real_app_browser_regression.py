@@ -8,23 +8,20 @@ app and drive those sequences.
 from __future__ import annotations
 
 import os
+import re
 import shutil
-import socket
 import subprocess
-import threading
 import time
 from pathlib import Path
 
 import pytest
-from werkzeug.serving import make_server
 
-from mat_viewer.app.factory import create_app
+from tests.app.real_app_server import bind_failed, start_mattervis
 from tests.app.test_camera_browser_regression import (
     _chrome,
     _playwright_module,
     _unavailable,
 )
-
 
 pytestmark = [
     pytest.mark.browser,
@@ -35,73 +32,74 @@ pytestmark = [
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER = Path(__file__).resolve().parent / "real_app_browser.js"
+# The restart test rebinds one known port after the first listener has
+# stopped. Five seconds bounds that retry; it is not a scene-readiness sleep.
+_PORT_REBIND_DEADLINE_SECONDS = 5.0
+_BROWSER_CIFS = [
+    str(ROOT / "docs/images/showcase_dap7.cif"),
+    str(ROOT / "scripts/data/DAP-4.cif"),
+    str(ROOT / "benchmarks/structures/molecular_water.cif"),
+    str(ROOT / "benchmarks/structures/ionic_nacl.cif"),
+]
 
 
-def _port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
-
-
-def _mattervis_server(tmp_path_factory):
+def _require_browser():
     node = shutil.which("node")
     chrome = _chrome()
     playwright = _playwright_module(node) if node else None
     if not node or not chrome or not playwright:
         _unavailable("real-app browser gate needs node, Chrome/Chromium, and Playwright")
     os.environ["MATTERVIS_PREWARM"] = "0"
-
-    root = tmp_path_factory.mktemp("mattervis-browser")
-    app = create_app(
-        root_dir=str(root),
-        cif_paths=[
-            str(ROOT / "docs/images/showcase_dap7.cif"),
-            str(ROOT / "scripts/data/DAP-4.cif"),
-            str(ROOT / "benchmarks/structures/molecular_water.cif"),
-            str(ROOT / "benchmarks/structures/ionic_nacl.cif"),
-        ],
-    )
-    @app.server.get("/_test/render-status")
-    def render_status():
-        # Read-only browser-test fence: a startup worker must not accidentally
-        # repair a mixed patch whose lightweight delivery omitted the camera.
-        backend = app.crystal_backend
-        worker = backend._render_worker
-        with worker._lock:
-            pending = {"render": len(worker._pending_render), "topology": len(worker._pending)}
-        return {
-            "pending": pending,
-            "pending_state": backend.peek_pending_state() is not None,
-            "cursor": backend.figure_journal_seq(),
-        }
-
-    server = make_server("127.0.0.1", _port(), app.server, threaded=True)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://127.0.0.1:{server.server_port}", node, chrome, playwright
-    finally:
-        server.shutdown()
-        backend = getattr(app, "crystal_backend", None)
-        if backend is not None:
-            backend.close()
+    return node, chrome, playwright
 
 
-@pytest.fixture(scope="module")
-def mattervis_url(tmp_path_factory):
-    yield from _mattervis_server(tmp_path_factory)
+def _artifact_dir() -> Path:
+    current = os.environ.get("PYTEST_CURRENT_TEST", "browser-case")
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", current.split(" (", 1)[0])[-180:]
+    path = ROOT / "browser-artifacts" / slug
+    if path.exists():
+        shutil.rmtree(path)
+    path.mkdir(parents=True)
+    return path
+
+
+def _write_streams(directory: Path, stdout: str, stderr: str) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "node-stdout.txt").write_text(stdout or "", encoding="utf-8")
+    (directory / "node-stderr.txt").write_text(stderr or "", encoding="utf-8")
+
+
+def _fail_browser(directory: Path, stdout: str, stderr: str, fallback: str) -> None:
+    _write_streams(directory, stdout, stderr)
+    tail = (stderr or stdout or fallback)[-4000:]
+    pytest.fail(f"{tail}\nfull browser logs: {directory}")
 
 
 @pytest.fixture
-def fresh_mattervis_url(tmp_path_factory):
-    # The surface fixture assumes the default DAP-4 view. Earlier drag tests
-    # persist a different camera in the shared module server and can put the
-    # test meshes off-screen, despite starting a fresh browser context.
-    yield from _mattervis_server(tmp_path_factory)
+def mattervis_url(tmp_path):
+    """One app, scene store, and port for this test only."""
+    node, chrome, playwright = _require_browser()
+    running = start_mattervis(str(tmp_path), _BROWSER_CIFS)
+    try:
+        yield running.url, node, chrome, playwright
+    finally:
+        running.stop()
+
+
+@pytest.fixture
+def fresh_mattervis_url(mattervis_url):
+    """Same isolation as ``mattervis_url``. The name marks a default-view case."""
+    yield mattervis_url
 
 
 def _run(mattervis_url, mode: str, structure: str = "", upload: str = "", timeout: int = 160) -> None:
     url, node, chrome, playwright = mattervis_url
+    artifacts = _artifact_dir()
+    env = {
+        **os.environ,
+        "NODE_PATH": str(ROOT / "node_modules"),
+        "MATTERVIS_BROWSER_ARTIFACTS": str(artifacts),
+    }
     try:
         result = subprocess.run(
             [node, str(RUNNER), playwright, chrome, url, mode, upload, structure],
@@ -110,20 +108,21 @@ def _run(mattervis_url, mode: str, structure: str = "", upload: str = "", timeou
             timeout=timeout,
             check=False,
             cwd=str(ROOT),
-            env={**os.environ, "NODE_PATH": str(ROOT / "node_modules")},
+            env=env,
         )
     except subprocess.TimeoutExpired as exc:
-        err = (exc.stderr or b"") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
-        out = (exc.stdout or b"") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        err = exc.stderr or ""
+        out = exc.stdout or ""
         if isinstance(err, bytes):
             err = err.decode("utf-8", "replace")
         if isinstance(out, bytes):
             out = out.decode("utf-8", "replace")
-        pytest.fail((err or out or "browser regression timed out")[-4000:])
+        _fail_browser(artifacts, out, err, "browser regression timed out")
     if result.stdout:
         print(result.stdout)
     if result.returncode != 0:
-        pytest.fail((result.stderr or result.stdout or "browser regression failed")[-4000:])
+        _fail_browser(artifacts, result.stdout, result.stderr, "browser regression failed")
+    _write_streams(artifacts, result.stdout, result.stderr)
 
 
 @pytest.mark.timeout(180)
@@ -203,28 +202,24 @@ def test_one_hundred_scene_switches_do_not_leak_sockets(mattervis_url):
     _run(mattervis_url, "leak", timeout=220)
 
 
-def _start_server(app, port: int):
-    last_error = None
-    for _ in range(20):
+def _rebind(root: Path, cif_paths: list[str], port: int):
+    """Bind ``port`` again after its previous listener has stopped."""
+    deadline = time.monotonic() + _PORT_REBIND_DEADLINE_SECONDS
+    last_error: BaseException | None = None
+    while True:
         try:
-            server = make_server("127.0.0.1", port, app.server, threaded=True)
-        except OSError as exc:
+            return start_mattervis(str(root), cif_paths, port=port)
+        except BaseException as exc:
+            if not bind_failed(exc):
+                raise
             last_error = exc
-            time.sleep(0.25)
-            continue
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-        return server
-    raise last_error
+            if time.monotonic() >= deadline:
+                raise last_error
 
 
 @pytest.mark.timeout(420)
 def test_persisted_store_survives_restart_and_reconnect(tmp_path):
-    node = shutil.which("node")
-    chrome = _chrome()
-    playwright = _playwright_module(node) if node else None
-    if not node or not chrome or not playwright:
-        _unavailable("real-app browser gate needs node, Chrome/Chromium, and Playwright")
-    os.environ["MATTERVIS_PREWARM"] = "0"
+    node, chrome, playwright = _require_browser()
     root = tmp_path / "persisted"
     root.mkdir()
     cifs = [
@@ -232,56 +227,63 @@ def test_persisted_store_survives_restart_and_reconnect(tmp_path):
         str(ROOT / "scripts/data/DAP-4.cif"),
     ]
     upload = str(ROOT / "benchmarks/structures/porous_framework.cif")
-    port = _port()
+    running = start_mattervis(str(root), cifs)
     ready = tmp_path / "restart-ready"
-    app = create_app(root_dir=str(root), cif_paths=cifs)
-    server = _start_server(app, port)
-    url = f"http://127.0.0.1:{port}"
+    artifacts = _artifact_dir()
     proc = subprocess.Popen(
-        [node, str(RUNNER), playwright, chrome, url, "restart", upload, "DAP-4", str(ready)],
+        [
+            node,
+            str(RUNNER),
+            playwright,
+            chrome,
+            running.url,
+            "restart",
+            upload,
+            "DAP-4",
+            str(ready),
+        ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         cwd=str(ROOT),
-        env={**os.environ, "NODE_PATH": str(ROOT / "node_modules")},
+        env={
+            **os.environ,
+            "NODE_PATH": str(ROOT / "node_modules"),
+            "MATTERVIS_BROWSER_ARTIFACTS": str(artifacts),
+        },
     )
-    app2 = None
-    server2 = None
+    restarted = None
+    first_stopped = False
     try:
-        deadline = time.time() + 180
-        while time.time() < deadline and not ready.exists():
+        deadline = time.monotonic() + 180
+        while time.monotonic() < deadline and not ready.exists():
             if proc.poll() is not None:
                 out, err = proc.communicate()
-                pytest.fail((err or out or "browser exited before restart")[-4000:])
-            time.sleep(0.25)
+                _fail_browser(artifacts, out, err, "browser exited before restart")
+            time.sleep(0.05)
         if not ready.exists():
             pytest.fail("browser did not reach the persisted-scene restart point")
-        server.shutdown()
-        app.crystal_backend.close()
-        app2 = create_app(root_dir=str(root), cif_paths=cifs)
-        server2 = _start_server(app2, port)
+        port = running.port
+        first_stopped = True
+        running.stop()
+        restarted = _rebind(root, cifs, port)
         try:
             out, err = proc.communicate(timeout=240)
         except subprocess.TimeoutExpired:
             proc.kill()
             out, err = proc.communicate()
-            pytest.fail((err or out or "restart browser regression timed out")[-4000:])
+            _fail_browser(artifacts, out, err, "restart browser regression timed out")
         if proc.returncode != 0:
-            pytest.fail((err or out or "restart browser regression failed")[-4000:])
+            _fail_browser(artifacts, out, err, "restart browser regression failed")
+        _write_streams(artifacts, out, err)
     finally:
         if proc.poll() is None:
             proc.kill()
             proc.communicate()
-        try:
-            server.shutdown()
-        except Exception:
-            pass
-        if server2 is not None:
-            server2.shutdown()
-        for viewer in (app, app2):
-            backend = getattr(viewer, "crystal_backend", None)
-            if backend is not None:
-                backend.close()
+        if not first_stopped:
+            running.stop()
+        if restarted is not None:
+            restarted.stop()
 
 
 @pytest.mark.timeout(180)

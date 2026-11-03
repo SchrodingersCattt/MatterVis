@@ -3,7 +3,14 @@
  * optional structure, optional restart-ready file.
  */
 const fs = require("node:fs");
+const path = require("node:path");
 const zlib = require("node:zlib");
+// Distinct wheel notches. This is input spacing, not a server-state wait.
+const WHEEL_EVENT_GAP_MS = 40;
+// Pointer sampling while searching for a pickable pixel.
+const SCAN_POINTER_GAP_MS = 115;
+// Health probe while the restarted process is not accepting connections.
+const RESTART_HEALTH_POLL_MS = 300;
 // waitForFunction treats an async predicate's Promise as truthy even when
 // it eventually resolves false. Await server observations in Node instead.
 const waitForServerState = require("./browser_wait");
@@ -27,7 +34,21 @@ async function graphReady(page) {
     const gd = document.querySelector("#crystal-graph .js-plotly-plot");
     const scene = gd && gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
     return !!(scene && scene.glplot && scene.camera && gd.data && gd.data.length);
-  }, { timeout: 90000 });
+  }, null, { timeout: 90000 });
+}
+
+function waitForDashChange(page, propId) {
+  return page.waitForResponse((response) => {
+    let payload;
+    try {
+      if (new URL(response.url()).pathname !== "/_dash-update-component") return false;
+      payload = response.request().postDataJSON();
+    } catch (_) {
+      return false;
+    }
+    const changed = (payload && payload.changedPropIds) || [];
+    return changed.some((item) => String(item).indexOf(propId) === 0);
+  }, {timeout: 20000});
 }
 
 async function readView(page) {
@@ -155,11 +176,28 @@ async function wheel(page, deltaY, times) {
   const box = await canvas.boundingBox();
   if (!box) throw new Error("crystal canvas has no box");
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  const before = await page.evaluate(() => {
+    const eye = document.querySelector("#crystal-graph .js-plotly-plot")._fullLayout.scene._scene.camera.eye;
+    return Math.hypot(
+      Number(eye[0] !== undefined ? eye[0] : eye.x),
+      Number(eye[1] !== undefined ? eye[1] : eye.y),
+      Number(eye[2] !== undefined ? eye[2] : eye.z),
+    );
+  });
   for (let i = 0; i < times; i += 1) {
     await page.mouse.wheel(0, deltaY);
-    await page.waitForTimeout(40);
+    await page.waitForTimeout(WHEEL_EVENT_GAP_MS);
   }
-  await page.waitForTimeout(200);
+  await page.waitForFunction((previous) => {
+    const eye = document.querySelector("#crystal-graph .js-plotly-plot")._fullLayout.scene._scene.camera.eye;
+    if (!eye) return false;
+    const dist = Math.hypot(
+      Number(eye[0] !== undefined ? eye[0] : eye.x),
+      Number(eye[1] !== undefined ? eye[1] : eye.y),
+      Number(eye[2] !== undefined ? eye[2] : eye.z),
+    );
+    return Number.isFinite(dist) && Math.abs(dist - previous) / Math.max(previous, 1e-6) > 0.02;
+  }, before, {timeout: 20000});
 }
 
 async function runReset(page) {
@@ -175,7 +213,7 @@ async function runReset(page) {
     const eye = camera.eye;
     const dist = Math.hypot(Number(eye[0] !== undefined ? eye[0] : eye.x), Number(eye[1] !== undefined ? eye[1] : eye.y), Number(eye[2] !== undefined ? eye[2] : eye.z));
     return Number.isFinite(dist) && dist > 0.05;
-  }, { timeout: 20000 });
+  }, null, { timeout: 20000 });
   } catch (error) {
     fail(`orthographic camera was not numeric: ${JSON.stringify(await readView(page))} (${error.message})`);
   }
@@ -198,10 +236,13 @@ async function runReset(page) {
   await page.waitForFunction(() => {
     const gd = document.querySelector("#crystal-graph .js-plotly-plot");
     return !!(gd && gd._fullLayout.scene._scene.camera && !gd._fullLayout.scene._scene.camera._ortho);
-  }, { timeout: 20000 });
+  }, null, { timeout: 20000 });
+  const firstReset = waitForDashChange(page, "view-reset");
   await page.locator("#view-reset").click();
-  await page.waitForTimeout(400);
+  await firstReset;
+  const secondReset = waitForDashChange(page, "view-reset");
   await page.locator("#view-reset").click();
+  await secondReset;
   await page.waitForFunction((expected) => {
     const gd = document.querySelector("#crystal-graph .js-plotly-plot");
     const eye = gd._fullLayout.scene._scene.camera.eye;
@@ -253,7 +294,10 @@ async function runGestures(page) {
   if (structure) await clickTab(page, structure);
   await graphReady(page);
   await page.locator("#view-projection input[value='orthographic']").click();
-  await page.waitForTimeout(300);
+  await page.waitForFunction(() => {
+    const camera = document.querySelector("#crystal-graph .js-plotly-plot")._fullLayout.scene._scene.camera;
+    return !!(camera && camera._ortho);
+  }, null, {timeout: 20000});
   const ortho = await nonblank(page);
   if (!ortho.ortho) fail("orthographic radio did not reach the GL camera");
   const fitResult = await postAction(page, {action: "fit"});
@@ -271,8 +315,9 @@ async function runGestures(page) {
     const dot = got.reduce((sum, value, index) => sum + value * want[index], 0) / (gotNorm * wantNorm);
     return dot >= 0.95;
   }, fitEye, {timeout: 20000});
+  const alignedResponse = waitForDashChange(page, "view-align-a");
   await page.locator("#view-align-a").click();
-  await page.waitForTimeout(400);
+  await alignedResponse;
   const aligned = await nonblank(page);
   const alignedEye = [
     eyeComponent(aligned.eye, 0, "x"),
@@ -316,8 +361,14 @@ async function runGestures(page) {
   await page.mouse.down();
   await page.mouse.move(box.x + box.width / 2 + 90, box.y + box.height / 2 + 40, {steps: 6});
   await page.mouse.up();
+  const resetResponse = waitForDashChange(page, "view-reset");
   await page.locator("#view-reset").click();
-  await page.waitForTimeout(500);
+  await resetResponse;
+  await page.waitForFunction(() => {
+    const camera = document.querySelector("#crystal-graph .js-plotly-plot")._fullLayout.scene._scene.camera;
+    const radio = document.querySelector("#view-projection input:checked");
+    return !!(camera && camera._ortho) && (!radio || radio.value === "orthographic");
+  }, null, {timeout: 20000});
   const reset = await nonblank(page);
   if (reset.radio && reset.radio !== "orthographic") fail(`reset changed the radio to ${reset.radio}`);
   if (!reset.ortho) fail("reset dropped orthographic projection");
@@ -346,13 +397,19 @@ async function runHeld(page) {
   await page.mouse.down();
   await page.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2 + 30, {steps: 8});
   await page.mouse.up();
-  await page.waitForTimeout(250);
+  // mouse.up resolves after the event turn. A camera relayout scheduled there
+  // is visible on the next frame. Plotly's own drag path does not always call
+  // the replaced Plotly.relayout, so an empty hold is still a real run: the
+  // distance assertion below is unchanged.
+  await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
   await page.evaluate(() => { window.__holdDragRelayout = false; });
+  const resetResponse = waitForDashChange(page, "view-reset");
   await page.locator("#view-reset").click();
-  await page.waitForTimeout(600);
+  await resetResponse;
   const reset = await nonblank(page);
-  await page.evaluate(() => { (window.__heldRelease || []).splice(0).forEach((release) => release()); });
-  await page.waitForTimeout(500);
+  await page.evaluate(() => Promise.all((window.__heldRelease || []).splice(0).map((release) => release())));
   const after = await nonblank(page);
   if (Math.abs(after.dist - reset.dist) / Math.max(reset.dist, 1e-6) > 0.45) {
     fail(`held drag overwrote reset (${reset.dist} -> ${after.dist})`);
@@ -395,9 +452,10 @@ async function runRapid(page) {
   }
 }
 
-async function runSessions(page, browser) {
+async function runSessions(page) {
   const secondProblems = [];
-  const second = await browser.newPage({viewport: {width: 1200, height: 800}});
+  const second = await page.context().newPage();
+  await second.setViewportSize({width: 1200, height: 800});
   second.on("pageerror", (error) => {
     const text = String(error && error.message || error);
     if (/c\.on is not a function|Invalid frame header/i.test(text)) secondProblems.push(text);
@@ -407,19 +465,36 @@ async function runSessions(page, browser) {
   await graphReady(second);
   await clickTab(page, "ionic_nacl");
   await clickTab(second, "molecular_water");
+  const secondScene = (await readView(second)).sceneId;
   if (uploadPath) {
     await page.setInputFiles("#scene-cif-upload-input", uploadPath);
-    await page.waitForTimeout(1500);
+    await page.waitForFunction(() => {
+      const tabs = document.getElementById("scene-tabs");
+      return !!(tabs && /porous_framework/i.test(tabs.textContent || ""));
+    }, null, {timeout: 90000});
   }
-  await second.waitForTimeout(500);
+  if (secondScene) {
+    await second.waitForFunction((sceneId) => {
+      const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+      const meta = gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
+      return !!(meta && String(meta.scene_id) === sceneId);
+    }, secondScene, {timeout: 20000});
+  }
   const other = await selectedTabLabel(second);
   const otherView = await readView(second);
   if (!/water/i.test(other) && !/water/i.test(otherView.title) && !/water/i.test(otherView.sceneId)) {
     fail(`upload on the first page stole the second page selection: ${other} / ${otherView.title} / ${otherView.sceneId}`);
   }
+  const resetResponse = waitForDashChange(page, "view-reset");
+  const orthoResponse = waitForDashChange(second, "view-projection");
   await page.locator("#view-reset").click();
   await second.locator("#view-projection input[value='orthographic']").click();
-  await page.waitForTimeout(400);
+  await resetResponse;
+  await orthoResponse;
+  await second.waitForFunction(() => {
+    const camera = document.querySelector("#crystal-graph .js-plotly-plot")._fullLayout.scene._scene.camera;
+    return !!(camera && camera._ortho);
+  }, null, {timeout: 20000});
   const first = await nonblank(page);
   const secondView = await nonblank(second);
   if (first.sceneId && secondView.sceneId && first.sceneId === secondView.sceneId) {
@@ -462,7 +537,7 @@ async function runRestart(page) {
     await page.waitForFunction(() => {
       const tabs = document.getElementById("scene-tabs");
       return tabs && /porous_framework/i.test(tabs.textContent || "");
-    }, { timeout: 90000 });
+    }, null, { timeout: 90000 });
   }
   const health = await page.evaluate(async (url) => {
     const response = await fetch(url, { cache: "no-store" });
@@ -489,7 +564,7 @@ async function runRestart(page) {
     } catch (_error) {
       /* The first process is down until the restarted server binds. */
     }
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(RESTART_HEALTH_POLL_MS);
   }
   if (!restarted) fail("server did not restart");
   await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
@@ -627,7 +702,7 @@ async function scanCanvas(page, callback, options) {
   if (!box) fail("crystal canvas has no box");
   const columns = (options && options.columns) || 14;
   const rows = (options && options.rows) || 10;
-  const pause = (options && options.pause) || 115;
+  const pause = (options && options.pause) || SCAN_POINTER_GAP_MS;
   for (let row = 1; row < rows; row += 1) {
     const y = box.y + (box.height * row) / rows;
     for (let column = 1; column < columns; column += 1) {
@@ -661,12 +736,39 @@ async function runSemanticPick(page) {
     },{kind,exclude});
   }
   async function selected(ids) {
-    await page.waitForFunction(async ids=>{
+    await waitForServerState(page, async ids=>{
       const bridge=window.MatterVisSemantic;
       const r=await fetch('/api/v2/selection?scene_id='+encodeURIComponent(bridge.sceneId())).then(r=>r.json());
       const targets=r.selection.targets||[];
       return ids.length===targets.length && ids.every(id=>targets.some(t=>t.id===id));
     },ids,{timeout:20000});
+  }
+  async function dragAway(x, y, button) {
+    const before = await page.evaluate(() => {
+      const camera = document.querySelector("#crystal-graph .js-plotly-plot")._fullLayout.scene._scene.camera;
+      const eye = camera.eye;
+      const center = camera.center || {x: 0, y: 0, z: 0};
+      const component = (value, index, key) => Number(value[index] !== undefined ? value[index] : value[key]);
+      return {
+        eye: [component(eye, 0, "x"), component(eye, 1, "y"), component(eye, 2, "z")],
+        center: [component(center, 0, "x"), component(center, 1, "y"), component(center, 2, "z")],
+      };
+    });
+    await page.mouse.move(x, y);
+    await page.mouse.down(button ? {button} : undefined);
+    await page.mouse.move(x + 70, y + 30, {steps: 8});
+    await page.mouse.up(button ? {button} : undefined);
+    await page.waitForFunction((previous) => {
+      const camera = document.querySelector("#crystal-graph .js-plotly-plot")._fullLayout.scene._scene.camera;
+      if (!camera || !camera.eye) return false;
+      const component = (value, index, key) => Number(value && value[index] !== undefined ? value[index] : value && value[key]);
+      const eye = [component(camera.eye, 0, "x"), component(camera.eye, 1, "y"), component(camera.eye, 2, "z")];
+      const center = camera.center || {x: 0, y: 0, z: 0};
+      const nextCenter = [component(center, 0, "x"), component(center, 1, "y"), component(center, 2, "z")];
+      const eyeShift = Math.hypot(eye[0] - previous.eye[0], eye[1] - previous.eye[1], eye[2] - previous.eye[2]);
+      const centerShift = Math.hypot(nextCenter[0] - previous.center[0], nextCenter[1] - previous.center[1], nextCenter[2] - previous.center[2]);
+      return [eyeShift, centerShift].every(Number.isFinite) && (eyeShift > 0.02 || centerShift > 0.02);
+    }, before, {timeout: 20000});
   }
   const atom=await targetPixel('atom');if(!atom) fail('no visible local atom pick');
   let hoverRequests=0;
@@ -687,14 +789,14 @@ async function runSemanticPick(page) {
   await selected([atom.target.id]);
   await page.keyboard.press('Escape');await selected([]);
   // Drag ends far enough away to be an orbit, never a selection gesture.
-  await page.mouse.move(atom.x,atom.y);await page.mouse.down();await page.mouse.move(atom.x+70,atom.y+30,{steps:8});await page.mouse.up();await page.waitForTimeout(500);await selected([]);
-  await page.mouse.move(atom.x,atom.y);await page.mouse.down({button:'right'});await page.mouse.move(atom.x+70,atom.y+30,{steps:8});await page.mouse.up({button:'right'});await page.waitForTimeout(400);await selected([]);
+  await dragAway(atom.x, atom.y);await selected([]);
+  await dragAway(atom.x, atom.y, "right");await selected([]);
   const afterOrbit=await targetPixel('atom');if(!afterOrbit) fail('picking lost after orbit');
   await page.mouse.click(afterOrbit.x,afterOrbit.y);await selected([afterOrbit.target.id]);
   const inspector=page.locator('#mv-selection-appearance');
   await inspector.getByLabel('Color',{exact:true}).fill('#aa6688');
   await inspector.getByRole('button',{name:'Apply',exact:true}).click();
-  await page.waitForFunction(async target=>{const r=await fetch('/api/v2/style_overrides?scene_id='+encodeURIComponent(window.MatterVisSemantic.sceneId())).then(r=>r.json());return r.style_overrides[target.id]?.color==='#aa6688';},afterOrbit.target);
+  await waitForServerState(page, async target=>{const r=await fetch('/api/v2/style_overrides?scene_id='+encodeURIComponent(window.MatterVisSemantic.sceneId())).then(r=>r.json());return r.style_overrides[target.id]?.color==='#aa6688';},afterOrbit.target);
   // A saved exact color survives deselection and a live element-palette edit.
   await page.keyboard.press('Escape');await selected([]);
   const inherited=await page.evaluate(async target=>{
@@ -704,7 +806,7 @@ async function runSemanticPick(page) {
     return sibling ? {kind:'atom',id:sibling[6]} : null;
   },afterOrbit.target);
   if(!inherited) fail('palette fixture needs a same-element sibling');
-  await page.waitForFunction(async targets=>{
+  await waitForServerState(page, async targets=>{
     const r=await fetch('/api/v2/selection/appearance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scene_id:window.MatterVisSemantic.sceneId(),targets})}).then(r=>r.json());
     return r.items[0].effective.color==='#aa6688' && r.items[1].effective.color==='#8299ac';
   },[afterOrbit.target,inherited]);
@@ -712,8 +814,8 @@ async function runSemanticPick(page) {
   await page.mouse.click(exactPoint.x,exactPoint.y);await selected([afterOrbit.target.id]);
   await page.waitForFunction(()=>document.querySelector('[aria-label="Inherit Color"]')?.disabled===false);
   await inspector.getByRole('button',{name:'Inherit Color',exact:true}).click();
-  await page.waitForFunction(async target=>{const r=await fetch('/api/v2/style_overrides?scene_id='+encodeURIComponent(window.MatterVisSemantic.sceneId())).then(r=>r.json());return !r.style_overrides[target.id]?.color;},afterOrbit.target);
-  await page.waitForFunction(async target=>{const body=await fetch('/api/v2/selection/appearance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scene_id:window.MatterVisSemantic.sceneId(),targets:[target]})}).then(r=>r.json());return body.items[0].effective.color==='#8299ac';},afterOrbit.target);
+  await waitForServerState(page, async target=>{const r=await fetch('/api/v2/style_overrides?scene_id='+encodeURIComponent(window.MatterVisSemantic.sceneId())).then(r=>r.json());return !r.style_overrides[target.id]?.color;},afterOrbit.target);
+  await waitForServerState(page, async target=>{const body=await fetch('/api/v2/selection/appearance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scene_id:window.MatterVisSemantic.sceneId(),targets:[target]})}).then(r=>r.json());return body.items[0].effective.color==='#8299ac';},afterOrbit.target);
   const bond=await targetPixel('bond');if(!bond) fail('no visible bond segment '+JSON.stringify(await page.evaluate(()=>{const g=window.MatterVisSemantic.graph(),idx=window.MatterVisScenePicking.index(g);return {counts:idx.primitives.reduce((a,p)=>(a[p.type]=(a[p.type]||0)+1,a),{}),traces:g._fullData.filter(t=>(t.meta||{}).mv_role==='bond_selection').map(t=>({meta:t.meta,cd:t.customdata?.[0]}))};})));
   await page.keyboard.down('Control');await page.mouse.click(bond.x,bond.y);await page.keyboard.up('Control');await selected([afterOrbit.target.id,bond.target.id]);
   // Rapid motion stays local, keeps at most one overlay and no stale tooltip.
@@ -955,7 +1057,24 @@ async function runOrthoDrag(page) {
   await leftDrag(page, box);
   await rightDrag(page, box);
   await page.mouse.up({ button: "right" });
-  await page.waitForTimeout(600);
+  await page.waitForFunction((previous) => {
+    const camera = document.querySelector("#crystal-graph .js-plotly-plot")._fullLayout.scene._scene.camera;
+    if (!camera || !camera._ortho || !camera.eye) return false;
+    const eye = camera.eye;
+    const center = camera.center || {x: 0, y: 0, z: 0};
+    const dist = Math.hypot(
+      Number(eye[0] !== undefined ? eye[0] : eye.x),
+      Number(eye[1] !== undefined ? eye[1] : eye.y),
+      Number(eye[2] !== undefined ? eye[2] : eye.z),
+    );
+    const cx = Number(center[0] !== undefined ? center[0] : center.x);
+    const cy = Number(center[1] !== undefined ? center[1] : center.y);
+    const cz = Number(center[2] !== undefined ? center[2] : center.z);
+    const pc = previous.center || {x: 0, y: 0, z: 0};
+    const centerShift = Math.hypot(cx - Number(pc.x || 0), cy - Number(pc.y || 0), cz - Number(pc.z || 0));
+    const zoom = Math.abs(dist - Number(previous.dist)) / Math.max(Number(previous.dist), 1e-6);
+    return centerShift > 0.02 || zoom > 0.02;
+  }, {dist: before.dist, center: before.center}, {timeout: 20000});
   const draggedInk = await canvasInk(page);
   const dragged = await readView(page);
   if (!dragged.ortho || dragged.sceneId !== before.sceneId || draggedInk < CANVAS_INK_FLOOR) {
@@ -1012,14 +1131,20 @@ async function runSwitch(page) {
   await page.waitForFunction(() => {
     const status = document.getElementById("upload-status");
     return status && /porous_framework/i.test(status.textContent || "");
-  }, { timeout: 90000 });
+  }, null, { timeout: 90000 });
   await clickTab(page, "porous_framework");
   const view = await readView(page);
   if (!/porous_framework/i.test(view.title) && !/porous_framework/i.test(view.sceneId)) {
     fail(`canvas stayed on ${view.title || view.sceneId || "an unknown scene"} after upload`);
   }
+  const resetResponse = waitForDashChange(page, "view-reset");
   await page.locator("#view-reset").click();
-  await page.waitForTimeout(500);
+  await resetResponse;
+  await page.waitForFunction((sceneId) => {
+    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+    const meta = gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
+    return !!(meta && String(meta.scene_id) === sceneId && gd.data && gd.data.length);
+  }, (await readView(page)).sceneId, {timeout: 20000});
   const after = await readView(page);
   if (!/porous_framework/i.test(after.title) && !/porous_framework/i.test(after.sceneId)) {
     fail("reset snapped the canvas off the uploaded scene");
@@ -1162,8 +1287,12 @@ async function runSurfacePick(page) {
       ]}})});
     if(!response.ok) throw Error(await response.text());
   },entities);
-  await page.waitForFunction(()=>window.MatterVisSemantic.graph().data.some(t=>t.meta?.geometry_id==='surface-left'),null,{timeout:30000});
-  await page.waitForTimeout(800);
+  await page.waitForFunction(() => {
+    const api = window.MatterVisScenePicking;
+    const graph = window.MatterVisSemantic && window.MatterVisSemantic.graph();
+    const index = api && graph && api.index(graph);
+    return !!(index && index.primitives.some((primitive) => primitive.target && primitive.target.id === "surface-left"));
+  }, null, {timeout: 30000});
   const snapshots=[];
   async function pixel(kind,id){return page.evaluate(({kind,id})=>{
     const api=window.MatterVisScenePicking,g=window.MatterVisSemantic.graph(),idx=api.index(g);
@@ -1176,7 +1305,6 @@ async function runSurfacePick(page) {
     const hit=await pixel('geometry',id);if(!hit) fail('surface face not pickable: '+id);
     await page.evaluate(hit=>document.getElementById('crystal-graph').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:hit.x,clientY:hit.y,button:2})),hit);
     await page.waitForFunction(id=>window.MatterVisSemantic.selected()[0]?.id===id,id,{timeout:3000}).catch(async error=>{fail(error.message+JSON.stringify(await page.evaluate(({x,y})=>({debug:document.getElementById('crystal-graph').__mvContextDebug,bound:document.getElementById('crystal-graph').dataset.rcmBound,selected:window.MatterVisSemantic.selected(),hits:window.MatterVisScenePicking.hits(window.MatterVisSemantic.graph(),x,y)}),hit)));});
-    await page.waitForTimeout(400);
     snapshots.push(hit.target);
   }
   const facet=await pixel('facet');if(!facet) fail('BFDH face not pickable');
@@ -1185,18 +1313,23 @@ async function runSurfacePick(page) {
   await page.waitForFunction(id=>window.MatterVisSemantic.selected()[0]?.id===id,facet.target.id);
   await page.keyboard.press('Escape');
   // Camera projection changes retain the semantic mesh identity and local hit index.
-  await page.waitForFunction(async()=>{const g=window.MatterVisSemantic.graph(),state=await fetch('/api/v2/state?scene_id='+encodeURIComponent(window.MatterVisSemantic.sceneId())).then(r=>r.json());return !state.selection.targets.length && Number(g.layout.meta.mattervis_render?.render_revision||0)>=Number(state.render_revision||0);});
+  await waitForServerState(page, async()=>{const g=window.MatterVisSemantic.graph(),state=await fetch('/api/v2/state?scene_id='+encodeURIComponent(window.MatterVisSemantic.sceneId())).then(r=>r.json());return !state.selection.targets.length && Number(g.layout.meta.mattervis_render?.render_revision||0)>=Number(state.render_revision||0);});
   await page.evaluate(async()=>{const id=window.MatterVisSemantic.sceneId(),state=await fetch('/api/v2/state?scene_id='+encodeURIComponent(id)).then(r=>r.json());await fetch('/api/v2/state',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scene_id:id,projection:'orthographic',camera_revision:Number(state.camera_revision||0)+1,camera:{eye:{x:1.25,y:1.25,z:1.25},up:{x:0,y:0,z:1},center:{x:0,y:0,z:0},projection:{type:'orthographic'}}})});});
   await page.locator('#view-projection input[value=orthographic]').check();
   // Drive the same camera owner used by delivered view updates; this gate
   // verifies picking after the projection transition, independently of HTTP polling.
   await page.evaluate(()=>window.MatterVisViewCamera.applyAsync({eye:{x:1.25,y:1.25,z:1.25},up:{x:0,y:0,z:1},center:{x:0,y:0,z:0},projection:{type:'orthographic'}},{scene_id:window.MatterVisSemantic.sceneId()}));
   await page.waitForFunction(()=>window.MatterVisSemantic.graph()._fullLayout.scene._scene.camera._ortho,null,{timeout:5000}).catch(async error=>fail(error.message+JSON.stringify(await projectionStatus(page))));
-  await page.waitForTimeout(300);
-  const ortho=await pixel('geometry','surface-left');if(!ortho) fail('orthographic mesh face not pickable '+JSON.stringify(await page.evaluate(()=>{const g=window.MatterVisSemantic.graph(),idx=window.MatterVisScenePicking.index(g);return {camera:g.layout.scene.camera,traces:g.data.map(t=>t.meta?.geometry_id),primitives:idx.primitives.slice(0,3),rect:idx.rect};})));
+  let ortho=null;
+  const orthoDeadline=Date.now()+20000;
+  while(Date.now()<orthoDeadline && !ortho){
+    ortho=await pixel('geometry','surface-left');
+    if(!ortho) await page.waitForTimeout(100);
+  }
+  if(!ortho) fail('orthographic mesh face not pickable '+JSON.stringify(await page.evaluate(()=>{const g=window.MatterVisSemantic.graph(),idx=window.MatterVisScenePicking.index(g);return {camera:g.layout.scene.camera,traces:g.data.map(t=>t.meta?.geometry_id),primitives:idx.primitives.slice(0,3),rect:idx.rect};})));
   await page.mouse.click(ortho.x,ortho.y);
   if(process.env.MATTERVIS_VISUAL_OUTPUT){
-    await page.waitForTimeout(600);
+    await page.waitForFunction(id=>window.MatterVisSemantic.selected()[0]?.id===id,ortho.target.id,{timeout:20000});
     await page.locator('#crystal-graph').screenshot({path:process.env.MATTERVIS_VISUAL_OUTPUT+'/surfaces-light.png'});
     await page.evaluate(async()=>{await fetch('/api/v2/state',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scene_id:window.MatterVisSemantic.sceneId(),background:'#202833'})});});
     await page.waitForFunction(()=>window.MatterVisSemantic.graph().layout.paper_bgcolor==='#202833');
@@ -1232,6 +1365,10 @@ async function runSurfacePick(page) {
 
 
 let activeBrowser;
+let activeContext;
+let tracingStarted = false;
+const consoleEvents = [];
+const networkEvents = [];
 (async () => {
   log("launch " + mode);
   const browser = await chromium.launch({
@@ -1240,19 +1377,44 @@ let activeBrowser;
     args: ["--no-sandbox", "--disable-dev-shm-usage", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--enable-webgl"],
   });
   activeBrowser = browser;
-  const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+  const context = await browser.newContext({viewport: {width: 1400, height: 900}});
+  activeContext = context;
+  const artifactDir = process.env.MATTERVIS_BROWSER_ARTIFACTS || "";
+  let tracing = false;
+  if (artifactDir) {
+    fs.mkdirSync(artifactDir, {recursive: true});
+    try {
+      await context.tracing.start({screenshots: true, snapshots: true});
+      tracing = true;
+      tracingStarted = true;
+    } catch (error) {
+      log("tracing unavailable " + error.message);
+    }
+  }
+  const problems = [];
+  function watch(target) {
+    target.on("console", (msg) => {
+      const text = msg.text();
+      consoleEvents.push({type: msg.type(), text});
+      if (/Invalid frame header|Too many active WebGL|c\.on is not a function/i.test(text)) problems.push(text);
+    });
+    target.on("pageerror", (error) => {
+      const text = String(error && error.message || error);
+      consoleEvents.push({type: "pageerror", text});
+      if (/c\.on is not a function|Invalid frame header/i.test(text)) problems.push(text);
+    });
+    target.on("requestfailed", (request) => {
+      networkEvents.push({url: request.url(), failure: request.failure() && request.failure().errorText});
+    });
+    target.on("response", (response) => {
+      if (response.status() >= 400) networkEvents.push({url: response.url(), status: response.status()});
+    });
+  }
+  context.on("page", watch);
+  const page = await context.newPage();
   if (mode === "mixed-projection-http") {
     await page.addInitScript(() => { window.MATTERVIS_WS_FIGURE = false; });
   }
-  const problems = [];
-  page.on("console", (msg) => {
-    const text = msg.text();
-    if (/Invalid frame header|Too many active WebGL|c\.on is not a function/i.test(text)) problems.push(text);
-  });
-  page.on("pageerror", (error) => {
-    const text = String(error && error.message || error);
-    if (/c\.on is not a function|Invalid frame header/i.test(text)) problems.push(text);
-  });
   log("goto");
   await page.goto(base, { waitUntil: "domcontentloaded", timeout: 30000 });
   log("graph");
@@ -1264,7 +1426,7 @@ let activeBrowser;
   else if (mode === "gestures") await runGestures(page);
   else if (mode === "held") await runHeld(page);
   else if (mode === "rapid") await runRapid(page);
-  else if (mode === "sessions") await runSessions(page, browser);
+  else if (mode === "sessions") await runSessions(page);
   else if (mode === "leak") await runLeak(page);
   else if (mode === "restart") await runRestart(page);
   else if (mode === "nacl-frame") await runNaclFrame(page);
@@ -1277,9 +1439,71 @@ let activeBrowser;
   else if (mode === "formula-unit-transforms") await require("./transform_formula_unit_browser")(page, clickTab, waitForServerState);
   else fail("unknown mode " + mode);
   if (problems.length) fail(problems.slice(0, 8).join("\n"));
+  if (tracing) await context.tracing.stop();
+  await context.close();
   await browser.close();
 })().catch(async (error) => {
-  if (activeBrowser) await activeBrowser.close();
   console.error(error);
+  const artifactDir = process.env.MATTERVIS_BROWSER_ARTIFACTS || "";
+  if (artifactDir && activeContext) {
+    fs.mkdirSync(artifactDir, {recursive: true});
+    fs.writeFileSync(path.join(artifactDir, "error.txt"), String(error && error.stack || error));
+    fs.writeFileSync(path.join(artifactDir, "console.json"), JSON.stringify(consoleEvents, null, 2));
+    fs.writeFileSync(path.join(artifactDir, "network.json"), JSON.stringify(networkEvents, null, 2));
+    const pages = activeContext.pages();
+    for (let index = 0; index < pages.length; index += 1) {
+      const current = pages[index];
+      if (current.isClosed()) continue;
+      try {
+        await current.screenshot({path: path.join(artifactDir, `page-${index}.png`), fullPage: true});
+      } catch (shotError) {
+        fs.writeFileSync(path.join(artifactDir, `page-${index}-screenshot-error.txt`), String(shotError));
+      }
+      try {
+        const diagnostics = await current.evaluate(async () => {
+          async function read(url) {
+            try {
+              const response = await fetch(url, {cache: "no-store"});
+              return await response.json();
+            } catch (fetchError) {
+              return {error: String(fetchError)};
+            }
+          }
+          const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+          return {
+            figure: typeof window.__mattervisFigureDiagnostics === "function"
+              ? window.__mattervisFigureDiagnostics() : null,
+            renderStatus: window.__mvRenderStatus || null,
+            viewDiag: window.__mv_view_diag || null,
+            cameraDiag: window.__mv_camera_diag || null,
+            scenes: await read("/api/v2/scenes"),
+            state: await read("/api/v2/state"),
+            render: await read("/_test/render-status"),
+            meta: (gd && gd.layout && gd.layout.meta) || null,
+            title: (gd && gd.layout && gd.layout.title) || null,
+          };
+        });
+        fs.writeFileSync(
+          path.join(artifactDir, `page-${index}-diagnostics.json`),
+          JSON.stringify(diagnostics, null, 2),
+        );
+      } catch (diagError) {
+        fs.writeFileSync(path.join(artifactDir, `page-${index}-diagnostics-error.txt`), String(diagError));
+      }
+    }
+    if (tracingStarted) {
+      try {
+        await activeContext.tracing.stop({path: path.join(artifactDir, "trace.zip")});
+      } catch (traceError) {
+        fs.writeFileSync(path.join(artifactDir, "trace-error.txt"), String(traceError));
+      }
+    }
+  }
+  if (activeContext) {
+    try { await activeContext.close(); } catch (_) {}
+  }
+  if (activeBrowser) {
+    try { await activeBrowser.close(); } catch (_) {}
+  }
   process.exit(1);
 });
