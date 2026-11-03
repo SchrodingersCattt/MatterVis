@@ -1,11 +1,12 @@
 from __future__ import annotations
-# ruff: noqa: F401,F403,F405
 
+# ruff: noqa: F401,F403,F405
 import copy
 from functools import wraps
 
-from .shared import *
 from ..scenes.core import Scene
+from .shared import *
+from .view_updates import committed_render_kind
 
 
 def _scene_transaction(method):
@@ -102,7 +103,87 @@ class _SceneBackendMixin:
             )
         self._bump_version()
         self._request_scene_store_save()
+        if restored:
+            self._publish_scene_catalog(focus=False)
         return {"restored": restored, "active_id": self.scene_store.active_id}
+
+    def scene_catalog_seq(self) -> int:
+        return int(getattr(self, "_scene_catalog_seq", 0) or 0)
+
+    def scene_catalog(self, *, focus: bool = False) -> dict[str, Any]:
+        """Slim scene list carried by the existing snapshot and journal."""
+        scenes = [
+            {
+                "id": item.get("id"),
+                "label": item.get("label"),
+                "structure_name": item.get("structure_name"),
+            }
+            for item in self.scene_store.list()
+        ]
+        return {
+            "scene_catalog_seq": self.scene_catalog_seq(),
+            "scenes": scenes,
+            "active_id": self.scene_store.active_id,
+            "focus": bool(focus),
+            "version": int(getattr(self, "version", 0) or 0),
+        }
+
+    def _publish_scene_catalog(self, *, focus: bool = False) -> dict[str, Any] | None:
+        """Append one scene-list envelope to the figure journal.
+
+        The WebSocket snapshot carries the same catalog. ``focus`` is set
+        only for an explicit active-scene request; creating or editing a
+        scene leaves the browser's selected tab alone.
+        """
+        lock = getattr(self, "_figure_broadcast_lock", None)
+        if lock is None:
+            return None
+        self._scene_catalog_seq = self.scene_catalog_seq() + 1
+        payload = self.scene_catalog(focus=focus)
+        payload["type"] = "scene_catalog"
+        with lock:
+            self._figure_broadcast_seq = int(getattr(self, "_figure_broadcast_seq", 0) or 0) + 1
+            payload["figure_seq"] = self._figure_broadcast_seq
+            broadcasts = getattr(self, "_figure_broadcasts", None)
+            if broadcasts is None:
+                broadcasts = self._figure_broadcasts = []
+            broadcasts.append(copy.deepcopy(payload))
+            del broadcasts[:-32]
+        return payload
+
+    def scene_catalog_selection(self, event: dict[str, Any], browser_scene: Any) -> tuple[str, Any]:
+        """Choose how an open page applies one scene-catalog message.
+
+        Returns ``("stale"|"empty"|"keep"|"select", scene_id)``. ``keep``
+        leaves the browser's selected tab in place.
+        """
+        options = self.scene_options()
+        if not options:
+            return "empty", None
+        try:
+            event_seq = int((event or {}).get("catalog_seq") or 0)
+        except (TypeError, ValueError):
+            event_seq = 0
+        current_seq = self.scene_catalog_seq()
+        if event_seq and current_seq and event_seq < current_seq:
+            return "stale", None
+        ids = {str(item["id"]) for item in options}
+        if bool((event or {}).get("focus")) or str(browser_scene or "") not in ids:
+            return "select", self.active_scene_id() or options[0]["id"]
+        return "keep", None
+
+    def _schedule_scene_render(self, scene_id: str, before: dict[str, Any], after: dict[str, Any]) -> None:
+        kind = committed_render_kind(before, after)
+        if kind is None:
+            return
+        scheduler = getattr(self, "_schedule_committed_render", None)
+        if scheduler is None:
+            return
+        try:
+            state = self.get_state(scene_id)
+        except (KeyError, TypeError, ValueError):
+            state = after
+        scheduler(state, kind)
 
     def scene_options(self) -> list[dict[str, Any]]:
         return self.scene_store.list()
@@ -217,6 +298,7 @@ class _SceneBackendMixin:
             self.pending_state = self._state_snapshot(after, scene_id)
         self._bump_version()
         self._request_scene_store_save()
+        self._schedule_scene_render(scene_id, before, after)
         return after
 
     def active_scene_id(self) -> Optional[str]:
@@ -266,6 +348,7 @@ class _SceneBackendMixin:
         payload["requested_label"] = str(requested_label)
         payload["label_renamed"] = payload["label"] != str(requested_label)
         self._request_scene_store_save()
+        self._publish_scene_catalog(focus=False)
         return payload
 
     @_scene_transaction
@@ -298,6 +381,9 @@ class _SceneBackendMixin:
             self.pending_state = self._state_snapshot(self.current_state, scene_id)
         self._bump_version()
         self._request_scene_store_save()
+        if state_before.get("scene_label") != state_after.get("scene_label"):
+            self._publish_scene_catalog(focus=False)
+        self._schedule_scene_render(scene_id, state_before, state_after)
         return scene.to_dict()
 
     @_scene_transaction
@@ -318,6 +404,7 @@ class _SceneBackendMixin:
         )
         self._bump_version()
         self._request_scene_store_save()
+        self._publish_scene_catalog(focus=False)
         return removed.to_dict()
 
     @_scene_transaction
@@ -352,6 +439,7 @@ class _SceneBackendMixin:
         if removed:
             self._bump_version()
             self._request_scene_store_save()
+            self._publish_scene_catalog(focus=False)
         return {"kept": self.scene_store.get(keep_id).to_dict(), "removed": removed}
 
     @_scene_transaction
@@ -370,6 +458,7 @@ class _SceneBackendMixin:
         self.pending_state = self._state_snapshot(self.current_state, scene.id)
         self._bump_version()
         self._request_scene_store_save()
+        self._publish_scene_catalog(focus=False)
         return scene.to_dict()
 
     @_scene_transaction
@@ -377,11 +466,16 @@ class _SceneBackendMixin:
         order = self.scene_store.reorder(order, save=False)
         self._bump_version()
         self._request_scene_store_save()
+        self._publish_scene_catalog(focus=False)
         return order
 
     @_scene_transaction
     def set_active_scene(
-        self, scene_id: str, *, broadcast: bool = True
+        self,
+        scene_id: str,
+        *,
+        broadcast: bool = True,
+        focus_clients: bool = False,
     ) -> dict[str, Any]:
         # ``broadcast`` controls whether ``pending_state`` is armed for
         # the next ``sync_agent_state`` poll. The REST API agent path
@@ -400,6 +494,10 @@ class _SceneBackendMixin:
             self.pending_state = self._state_snapshot(self.current_state, scene.id)
         self._bump_version()
         self._request_scene_store_save()
+        # ``broadcast`` arms the control poll. ``focus_clients`` is the
+        # separate explicit request that moves the open tab strip.
+        if focus_clients:
+            self._publish_scene_catalog(focus=True)
         return scene.to_dict()
 
     @staticmethod

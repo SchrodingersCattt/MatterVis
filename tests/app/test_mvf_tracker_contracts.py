@@ -81,7 +81,9 @@ def test_bfdh_morphology_notifies_the_viewer(tmp_path, monkeypatch):
         pending = backend.pending_state
         assert pending and pending["bfdh_morphology"]["enabled"] is True
         registry.callbacks["update_view"](pending, None, None)
-        assert calls == [scene_id]
+        # The analysis commit queues the frame. ``update_view`` asks again;
+        # the real worker deduplicates that second request.
+        assert calls == [scene_id, scene_id]
     finally:
         backend.close()
 

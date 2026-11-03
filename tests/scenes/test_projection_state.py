@@ -209,8 +209,13 @@ def test_mixed_geometry_projection_keeps_the_complete_frame_owner(viewer, monkey
 
     backend.patch_state({"projection": "orthographic", "atom_scale": before["atom_scale"] + 0.1})
 
+    # The geometry transaction still owns the camera. It does not emit a
+    # separate camera envelope. The commit itself queues the complete frame,
+    # so the open viewer does not wait for Dash ``update_view``.
     assert backend.figure_broadcasts_since(cursor) == []
-    assert requested == []
+    assert len(requested) == 1
+    assert requested[0][0]["scene_id"] == before["scene_id"]
+    assert requested[0][0]["atom_scale"] == before["atom_scale"] + 0.1
 
 
 def test_mixed_projection_without_saved_camera_delivers_projection_only(empty_viewer):

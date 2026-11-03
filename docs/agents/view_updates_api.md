@@ -38,7 +38,28 @@ A state transaction that changes both projection and lightweight display,
 overlay, or analysis settings publishes separate camera and local-update
 envelopes with the same committed scene and versions. Consumers must process
 both kinds; the local-update envelope does not apply camera fields. Geometry
-transactions continue to deliver the camera in their complete frame.
+transactions continue to deliver the camera in their complete frame. The
+backend enqueues that complete frame when the state write commits, including
+when the caller is an external script and Dash `update_view` does not run.
+A second request for the same snapshot is deduplicated by the render worker.
+
+The same journal also carries scene-list envelopes:
+
+```json
+{
+  "type": "scene_catalog",
+  "scene_catalog_seq": 4,
+  "active_id": "scene_a",
+  "focus": false,
+  "scenes": [{"id": "scene_a", "label": "DAP-4", "structure_name": "DAP-4"}]
+}
+```
+
+`GET /view-updates` repeats the current catalog as `scene_catalog`, and the
+WebSocket state snapshot includes the same object. `focus` is false for
+create, rename, and delete. It is true only for an explicit active-scene
+request. The browser applies one catalog reconciler to the existing scene-tab
+callback and ignores an older `scene_catalog_seq`.
 Flat ORTEP also queues its combined image in the background because its
 camera basis is rasterized into the image.
 When a scene has no saved camera, the mixed camera envelope contains only

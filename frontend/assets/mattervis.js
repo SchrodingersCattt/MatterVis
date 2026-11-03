@@ -1082,6 +1082,71 @@
   }
   function inGraph(target) { return !!(target && target.closest && target.closest("#crystal-graph")); }
 
+  function sceneCatalogEntries() {
+    var root = document.getElementById("scene-tabs");
+    if (!root || typeof root.querySelectorAll !== "function") return null;
+    var nodes = root.querySelectorAll("[id^='scene-tab-']");
+    var entries = [];
+    for (var index = 0; index < nodes.length; index += 1) {
+      var tab = nodes[index];
+      if (!tab || !tab.id || tab.id === "scene-tabs") continue;
+      if (tab.id.indexOf("scene-tab-close-") === 0 || tab.id.indexOf("scene-tab-label-") === 0) continue;
+      if (tab.id.indexOf("scene-tab-") !== 0) continue;
+      var text = typeof tab.querySelector === "function" ? tab.querySelector(".scene-tab-text") : null;
+      var label = text ? String(text.textContent || "").trim() : null;
+      entries.push({id: tab.id.slice("scene-tab-".length), label: label});
+    }
+    return entries;
+  }
+
+  function sceneCatalogDomDiffers(scenes) {
+    var entries = sceneCatalogEntries();
+    // A missing tab root is not a catalog change. Treating it as a difference
+    // rebuilds the strip before Dash has mounted it.
+    if (entries === null) return false;
+    var expected = Array.isArray(scenes) ? scenes : [];
+    if (entries.length !== expected.length) return true;
+    for (var index = 0; index < entries.length; index += 1) {
+      var scene = expected[index] || {};
+      if (String(entries[index].id) !== String(scene.id || "")) return true;
+      if (entries[index].label !== null && String(entries[index].label) !== String(scene.label || "")) return true;
+    }
+    return false;
+  }
+
+  function reconcileSceneCatalog(message) {
+    try {
+      if (!message || typeof message !== "object" || !Array.isArray(message.scenes)) return;
+      var seq = Number(message.scene_catalog_seq || 0);
+      if (!Number.isFinite(seq)) seq = 0;
+      var applied = window.__mvSceneCatalogApplied || {seq: -1, focus: false};
+      if (seq < Number(applied.seq)) return;
+      var sameSeq = seq === Number(applied.seq);
+      // One catalog sequence is applied once. Repeating it because the DOM
+      // parser still disagrees rebuilds the tabs, and that rebuild bumps the
+      // server version and delivers the same sequence again.
+      if (sameSeq && !(message.focus && !applied.focus)) return;
+      var domDiffers = sceneCatalogDomDiffers(message.scenes);
+      var selected = "";
+      try { selected = String(currentSceneId() || ""); } catch (_) { selected = ""; }
+      var focusSwitch = !!message.focus && String(message.active_id || "") !== selected;
+      window.__mvSceneCatalogApplied = {
+        seq: seq,
+        focus: !!message.focus || (sameSeq && !!applied.focus),
+      };
+      if (!domDiffers && !focusSwitch) return;
+      setDashStore("scene-event-store", {
+        seq: Date.now(),
+        source: "scene_catalog",
+        catalog_seq: seq,
+        focus: !!message.focus,
+        active_id: message.active_id || null,
+        version: message.version,
+      });
+    } catch (_) {}
+  }
+  window.MatterVisReconcileSceneCatalog = reconcileSceneCatalog;
+
   // ── Right-click menu (right_click_menu.js) ─────────────────────
   let lastHovered = null, lastClient = {x:0,y:0};
   // Keep additive/toggle picks isolated per scene.  A single browser-global
@@ -1772,6 +1837,7 @@
         window.fetch("/api/v2/view-updates?since=" + encodeURIComponent(since), {credentials:"same-origin"})
           .then(function(response){ return response.ok ? response.json() : null; })
           .then(function(body){
+            if (body && body.scene_catalog) reconcileSceneCatalog(body.scene_catalog);
             (body && body.updates || []).forEach(deliverFallbackPayload);
           })
           .catch(function(){})
@@ -1790,6 +1856,10 @@
     }
     function handleFigurePayload(p) {
       if (!p || typeof p !== "object") return;
+      if (p.type === "scene_catalog") {
+        reconcileSceneCatalog(p);
+        return;
+      }
       var seq = Number(p.figure_seq || p.seq || 0);
       // Figure sequence numbers are global across scenes, while delivery
       // fences are scene-scoped. A frame for scene B can legitimately have a
@@ -1925,8 +1995,13 @@
        * plain snapshot without ever becoming a figure transport. Keep the
        * journal poll alive until a real view envelope arrives; camera and
        * display updates must not wait for the socket's eventual close. */
-      if (!p || typeof p !== "object" ||
-          (!p.type && !p.figure && p.figure_seq === undefined && p.seq === undefined)) return;
+      if (!p || typeof p !== "object") return;
+      if (p.type === "scene_catalog") {
+        reconcileSceneCatalog(p);
+        return;
+      }
+      if (p.scene_catalog) reconcileSceneCatalog(p.scene_catalog);
+      if (!p.type && !p.figure && p.figure_seq === undefined && p.seq === undefined) return;
       stopHttpFallback();
       handleFigurePayload(p);
     });

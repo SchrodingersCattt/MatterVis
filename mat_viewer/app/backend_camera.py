@@ -405,13 +405,19 @@ class _CameraBackendMixin:
             # figure shape, so subsequent hits with different
             # ``enabled`` combinations all land on the same entry.
             with self._figure_cache_lock:
-                self._figure_cache[cache_key] = (
-                    fig.to_plotly_json(),
-                    topology_data,
-                )
+                # Two builders can finish the same key together (a committed
+                # scene schedules a worker while a caller also builds). The
+                # first stored topology stays the shared object.
+                existing = self._figure_cache.get(cache_key)
+                if existing is None:
+                    existing = (fig.to_plotly_json(), topology_data)
+                    self._figure_cache[cache_key] = existing
+                    while len(self._figure_cache) > FIGURE_CACHE_MAX:
+                        self._figure_cache.popitem(last=False)
                 self._figure_cache.move_to_end(cache_key)
-                while len(self._figure_cache) > FIGURE_CACHE_MAX:
-                    self._figure_cache.popitem(last=False)
+            if existing[1] is not topology_data:
+                fig = _figure_from_cached_dict(existing[0])
+                topology_data = existing[1]
         # Apply the live ``enabled`` flags to this fresh build too --
         # the figure cache snapshot above stored the un-patched
         # version, so we need to mirror the cache-hit branch's

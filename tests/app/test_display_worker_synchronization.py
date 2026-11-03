@@ -66,7 +66,6 @@ def capture(backend, monkeypatch, options, *, trigger="display-options", **chang
     ))
     state = backend.get_state()
     state.update(changes)
-    queued_before = len(backend._render_worker._finalize_pool.jobs)
     emitted, _checklist, _stamp = registry.callbacks["capture_state"](
         state["scene_id"], state["display_mode"], options,
         state["atom_scale"], state["bond_radius"], state["minor_opacity"],
@@ -75,10 +74,13 @@ def capture(backend, monkeypatch, options, *, trigger="display-options", **chang
         ["enabled"] if state["topology_enabled"] else [],
         [], "auto", None, "viridis", "auto", None, None, None, "#BDBDBD", ["show"],
     )
-    assert len(backend._render_worker._finalize_pool.jobs) == queued_before
+    # The commit schedules a complete frame. ``update_view`` may still run,
+    # but it must not enqueue a second build for the same snapshot.
+    queued_after_commit = len(backend._render_worker._finalize_pool.jobs)
     callbacks_view.register_view_callbacks(registry, backend)
     from dash import no_update
     assert registry.callbacks["update_view"](emitted, None, None, None) == (no_update,) * 4
+    assert len(backend._render_worker._finalize_pool.jobs) == queued_after_commit
     return emitted
 
 
@@ -190,8 +192,6 @@ def test_update_view_queues_flat_ortep_camera_rebuild(backend):
 
 @pytest.mark.parametrize("nested", [False, True])
 def test_mixed_flat_ortep_projection_queues_one_image_outside_backend_lock(backend, monkeypatch, nested):
-    backend.patch_state({"material": "flat", "style": "ortep"}, broadcast=False)
-    before = backend.get_state()
     worker = backend._render_worker
     requested = []
     built = []
@@ -210,6 +210,15 @@ def test_mixed_flat_ortep_projection_queues_one_image_outside_backend_lock(backe
 
     monkeypatch.setattr(worker, "request_figure_build", request)
     monkeypatch.setattr(backend, "figure_for_state", build)
+    backend.patch_state({"material": "flat", "style": "ortep"}, broadcast=False)
+    # The style change is its own complete frame. Measure only the later
+    # projection image.
+    requested.clear()
+    worker._finalize_pool.jobs.clear()
+    worker._pending_render.clear()
+    worker._render_futures.clear()
+    worker._latest_render_by_scene.clear()
+    before = backend.get_state()
     patch = {"minor_opacity": before["minor_opacity"] + 0.1}
     patch.update({"camera": {"projection": {"type": "orthographic"}}} if nested else {"projection": "orthographic"})
 

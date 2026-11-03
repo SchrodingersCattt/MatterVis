@@ -41,7 +41,16 @@ def register_state_routes(v2, backend) -> dict:
         else:
             pending = False
             terminal = False
-        return jsonify({"updates": events, "cursor": backend.latest_figure_seq(), "pending": pending, "terminal": terminal})
+        body = {
+            "updates": events,
+            "cursor": backend.latest_figure_seq(),
+            "pending": pending,
+            "terminal": terminal,
+        }
+        catalog = getattr(backend, "scene_catalog", None)
+        if catalog is not None:
+            body["scene_catalog"] = catalog(focus=False)
+        return jsonify(body)
 
     @v2.post("/state")
     def post_state():

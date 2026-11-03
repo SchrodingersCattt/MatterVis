@@ -13,6 +13,6 @@ def register_intent_routes(v2, backend) -> dict:
             kind="http",
             intent_type=payload.get("type") if isinstance(payload, dict) else None,
         ):
-            return jsonify(backend.apply_intent(payload))
+            return jsonify(backend.apply_intent(payload, broadcast=True))
 
     return locals()

@@ -98,6 +98,22 @@ true-vector PDF/SVG remain the reference paths.
 dependency resolver. No skill or installer maintains a second dependency
 table.
 
+## Live API session
+
+An already-open Dash page and an external script share one `SceneStore`.
+`POST /api/v2/state`, `POST /api/v2/intent`, scene CRUD, and the figure
+WebSocket all commit through `ViewerBackend`. That commit schedules a
+complete frame on `AsyncRenderWorker` when the change needs one, and
+publishes a lightweight `view_update` when it does not. The page applies
+those journal envelopes over the existing WebSocket, falling back to
+`GET /api/v2/view-updates`. Scene-list changes travel in the same snapshot
+and journal as `scene_catalog`. The page rebuilds the existing tab strip
+and keeps the selected tab unless the caller explicitly focuses a scene or
+the selected scene has been removed. Control widgets follow the existing
+agent-state poll, which re-reads the selected scene when its version clocks
+move. In-process GUI edits that already own the gesture do not echo that
+gesture back through the poll.
+
 ## Documentation of the render interface
 
 MatterVis is a pure render interface. Stable docs describe geometry, bond

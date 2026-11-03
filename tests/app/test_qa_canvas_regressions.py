@@ -316,7 +316,10 @@ def test_repeat_counts_differ_and_clear_removes_them(tmp_path: Path):
         fig, _ = backend.figure_for_state(backend.get_state(scene_id))
         box = next(trace for trace in fig.data if getattr(trace, "name", "") == "unit-cell-box")
         # The outline is the supercell, not the home cell the repeats grew out of.
-        assert max(box.x) > float(np_max_cell(base_scene)) * 1.5
+        # A worker may have cached this figure first. Plotly then returns the
+        # mesh axis as a typed-array envelope, and ``max`` of that dict is the
+        # string key ``dtype``.
+        assert _coord_max(box.x) > float(np_max_cell(base_scene)) * 1.5
         backend.commit_patch({"transforms": []}, scene_id=scene_id, broadcast=False)
         backend.add_transform("repeat", {"a": 3, "b": 3, "c": 3}, scene_id=scene_id)
         three_scene = backend.scene_for_state(backend.get_state(scene_id))
@@ -337,6 +340,20 @@ def np_max_cell(scene: dict) -> float:
 
     matrix = np.asarray(scene["M"], dtype=float)
     return float(np.linalg.norm(matrix, axis=1).max())
+
+
+def _coord_max(values) -> float:
+    """Largest finite coordinate, including a Plotly ``bdata`` envelope."""
+    import base64
+
+    import numpy as np
+
+    if isinstance(values, dict) and "bdata" in values and "dtype" in values:
+        raw = base64.b64decode(values["bdata"])
+        values = np.frombuffer(raw, dtype=np.dtype(str(values["dtype"])))
+    array = np.asarray(values, dtype=float).reshape(-1)
+    finite = array[np.isfinite(array)]
+    return float(finite.max())
 
 
 def test_resolve_disorder_on_a_scene_without_occupancy_is_empty(tmp_path: Path):
