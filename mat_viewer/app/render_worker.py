@@ -29,16 +29,20 @@ _TASK_STATUS_LIMIT = 256
 _POOL_SHUTDOWN_WAIT_SECONDS = 5.0
 
 
-def shutdown_executor(pool, *, wait: bool) -> None:
-    """Stop an executor. A waiting shutdown joins for a bounded interval.
+def shutdown_executor(pool, *, wait: bool) -> bool:
+    """Stop an executor. Return whether its workers have finished.
 
-    The executor marks itself shut down before it joins worker threads, so a
-    timed-out wait has still rejected new work. The running callable is not
-    killed. Committed scene state is flushed by the backend, not by this join.
+    A waiting shutdown joins for a bounded interval. The executor marks
+    itself shut down before it joins worker threads, so a timed-out wait
+    has still rejected new work. The running callable is not killed.
+    Workers still alive after that bound are detached from interpreter
+    shutdown and this function returns False. Returning from ``close``
+    is not the same as releasing those workers. Committed scene state is
+    flushed by the backend, not by this join.
     """
     if not wait:
         _call_executor_shutdown(pool, wait=False)
-        return
+        return _detach_unfinished_workers(pool)
 
     def _stop() -> None:
         _call_executor_shutdown(pool, wait=True)
@@ -50,6 +54,41 @@ def shutdown_executor(pool, *, wait: bool) -> None:
     )
     thread.start()
     thread.join(_POOL_SHUTDOWN_WAIT_SECONDS)
+    return _detach_unfinished_workers(pool)
+
+
+def _detach_unfinished_workers(pool) -> bool:
+    """Return True when no pool thread is still running.
+
+    CPython records a non-daemon thread's state lock at start and waits
+    for that lock during interpreter shutdown. Clearing the daemon flag
+    later does not remove the lock, so a timed-out join would still keep
+    the process alive. Dropping the lock lets the process exit. The
+    callable keeps running until the process ends, which is why the
+    caller must report that the pool is not quiescent.
+    """
+    threads = [
+        worker
+        for worker in list(getattr(pool, "_threads", ()) or ())
+        if worker.is_alive()
+    ]
+    if not threads:
+        return True
+    # Interpreter shutdown joins two private sets, not the public daemon
+    # flag. A non-daemon thread registers its state lock at start, and
+    # ThreadPoolExecutor joins every worker still in its queue map.
+    with threading._shutdown_locks_lock:
+        for worker in threads:
+            lock = getattr(worker, "_tstate_lock", None)
+            if lock is not None:
+                threading._shutdown_locks.discard(lock)
+            worker._daemonic = True
+    from concurrent.futures import thread as futures_thread
+
+    with futures_thread._global_shutdown_lock:
+        for worker in threads:
+            futures_thread._threads_queues.pop(worker, None)
+    return False
 
 
 def _call_executor_shutdown(pool, *, wait: bool) -> None:
@@ -74,11 +113,14 @@ class AsyncRenderWorker:
     reads scene state, so that read stays outside the worker lock. Callers
     that already hold the backend lock must enqueue only after releasing it.
     ``shutdown(wait=True)`` bounds each pool join so a blocked worker cannot
-    hold backend close until the process timeout.
+    hold backend close until the process timeout. Workers still running
+    after that bound are detached from interpreter shutdown, and
+    ``quiescent`` is False.
     """
 
     def __init__(self, backend):
         self.backend = backend
+        self.quiescent = True
         max_workers = max(1, min(4, os.cpu_count() or 1))
         if _TOPOLOGY_WORKER_MODE == "process":
             self._compute_pool = ProcessPoolExecutor(
@@ -448,7 +490,7 @@ class AsyncRenderWorker:
         future.add_done_callback(completed)
         return True
 
-    def shutdown(self, *, wait: bool = False) -> None:
+    def shutdown(self, *, wait: bool = False) -> bool:
         with self._lock:
             self._closed = True
             self._pending.clear()
@@ -458,8 +500,10 @@ class AsyncRenderWorker:
             self._latest_render_by_scene.clear()
             self._render_futures.clear()
         if wait:
-            shutdown_executor(self._compute_pool, wait=True)
-            shutdown_executor(self._finalize_pool, wait=True)
-            return
-        shutdown_executor(self._finalize_pool, wait=False)
-        shutdown_executor(self._compute_pool, wait=False)
+            compute_done = shutdown_executor(self._compute_pool, wait=True)
+            finalize_done = shutdown_executor(self._finalize_pool, wait=True)
+        else:
+            finalize_done = shutdown_executor(self._finalize_pool, wait=False)
+            compute_done = shutdown_executor(self._compute_pool, wait=False)
+        self.quiescent = bool(compute_done and finalize_done)
+        return self.quiescent

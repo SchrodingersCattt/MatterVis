@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import atexit
 import json
+import os
+import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -12,7 +15,9 @@ import pytest
 
 from mat_viewer.app.backend import ViewerBackend
 from mat_viewer.scenes import core as scene_core
-from mat_viewer.scenes.core import SceneStore
+from mat_viewer.scenes.core import SceneStore, SceneStorePersistError
+
+_CHILD_TIMEOUT_SECONDS = 20.0
 
 
 def _backend(tmp_path: Path) -> ViewerBackend:
@@ -99,6 +104,7 @@ def test_close_returns_while_a_finalize_job_is_blocked(tmp_path: Path):
     holder.join(12)
     alive = holder.is_alive()
     elapsed = time.monotonic() - started_at
+    assert backend.workers_quiescent is False
     release.set()
     future.result(timeout=5)
     if alive:
@@ -141,3 +147,115 @@ def test_close_flushes_and_unregisters_when_shutdown_fails(tmp_path, monkeypatch
     finally:
         monkeypatch.setattr(backend._render_worker, "shutdown", original_shutdown)
         original_shutdown(wait=False)
+
+
+def _run_child(function_name: str, *args: str) -> subprocess.CompletedProcess[str]:
+    code = (
+        "from tests.app.test_worker_shutdown import "
+        f"{function_name}; {function_name}()"
+    )
+    env = {**os.environ, "MATTERVIS_PREWARM": "0"}
+    process = subprocess.Popen(
+        [sys.executable, "-c", code, *args],
+        cwd=str(Path(__file__).resolve().parents[2]),
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=_CHILD_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        stdout, stderr = process.communicate()
+        pytest.fail(
+            "child did not exit within "
+            f"{_CHILD_TIMEOUT_SECONDS:.0f}s\n{stdout}\n{stderr}"
+        )
+    return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
+
+
+def child_blocked_worker() -> None:
+    """Process entry: close while a finalize worker stays blocked, then exit."""
+    root = sys.argv[1]
+    report_path = Path(sys.argv[2])
+    backend = ViewerBackend(preset_path=str(Path(root) / "preset.json"), root_dir=root)
+    started = threading.Event()
+
+    def block() -> None:
+        started.set()
+        threading.Event().wait()
+
+    backend._render_worker._finalize_pool.submit(block)
+    if not started.wait(timeout=10):
+        raise SystemExit("blocked worker did not start")
+    backend.close()
+    report_path.write_text(
+        json.dumps({
+            "close_returned": True,
+            "workers_quiescent": backend.workers_quiescent,
+        }),
+        encoding="utf-8",
+    )
+
+
+def child_blocked_lock_exit() -> None:
+    """Process entry: final flush cannot take the lock, then exit immediately."""
+    root = Path(sys.argv[1])
+    report_path = Path(sys.argv[2])
+    backend = ViewerBackend(preset_path=str(root / "preset.json"), root_dir=str(root))
+    held = threading.Event()
+
+    def hold() -> None:
+        backend._lock.acquire()
+        held.set()
+        threading.Event().wait()
+
+    threading.Thread(target=hold, name="hold-backend-lock", daemon=True).start()
+    if not held.wait(timeout=5):
+        raise SystemExit("backend lock was not held")
+    scene = backend.scene_store.add(
+        label="unflushed",
+        structure_name=backend.scene_store.get().structure_name,
+        save=False,
+    )
+    backend.scene_store.mark_dirty()
+    outcome = "returned"
+    try:
+        backend.close()
+    except SceneStorePersistError:
+        outcome = "SceneStorePersistError"
+    except Exception as exc:  # noqa: BLE001 - the parent asserts the type name
+        outcome = type(exc).__name__
+    report_path.write_text(
+        json.dumps({
+            "outcome": outcome,
+            "dirty": backend.scene_store.is_dirty(),
+            "scene_id": scene.id,
+        }),
+        encoding="utf-8",
+    )
+    os._exit(0)
+
+
+def test_blocked_worker_process_exits_and_reports_non_quiescence(tmp_path: Path):
+    report_path = tmp_path / "report.json"
+    completed = _run_child("child_blocked_worker", str(tmp_path), str(report_path))
+    assert completed.returncode == 0, completed.stderr
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["close_returned"] is True
+    assert report["workers_quiescent"] is False
+
+
+def test_blocked_lock_close_fails_before_immediate_exit(tmp_path: Path):
+    report_path = tmp_path / "report.json"
+    completed = _run_child("child_blocked_lock_exit", str(tmp_path), str(report_path))
+    assert completed.returncode == 0, completed.stderr
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["outcome"] == "SceneStorePersistError"
+    assert report["dirty"] is True
+    disk = json.loads(
+        (tmp_path / ".local" / "crystal_view_scenes.json").read_text(encoding="utf-8")
+    )
+    disk_ids = [item["id"] for item in disk["scenes"]]
+    assert report["scene_id"] not in disk_ids

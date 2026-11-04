@@ -136,7 +136,11 @@ the pull request template are in
 
 `ViewerBackend.close()` signals the persistence thread, stops render
 executors with a fixed wait, joins that thread, and flushes the scene
-store in a `finally` block. The backend lock is not held across the
-scene-file replace. A mutation that arrives during the replace stays
-dirty. The lock order, the bounds, and the root cause of the shutdown
-hang are in `docs/reliability-worker-shutdown.md`.
+store in a `finally` block. Workers still running after that wait are
+detached from interpreter shutdown and `workers_quiescent` is false.
+The backend lock is not held across the scene-file replace. `save` and
+`flush_durable` share one flush lock from snapshot through conditional
+clean. A mutation that arrives during the replace stays dirty. A final
+flush that leaves the store dirty raises `SceneStorePersistError`.
+The lock order, the bounds, and the root cause of the shutdown hang
+are in `docs/reliability-worker-shutdown.md`.
