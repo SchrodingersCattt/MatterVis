@@ -60,12 +60,24 @@ def shutdown_executor(pool, *, wait: bool) -> bool:
 def _detach_unfinished_workers(pool) -> bool:
     """Return True when no pool thread is still running.
 
-    CPython records a non-daemon thread's state lock at start and waits
-    for that lock during interpreter shutdown. Clearing the daemon flag
-    later does not remove the lock, so a timed-out join would still keep
-    the process alive. Dropping the lock lets the process exit. The
-    callable keeps running until the process ends, which is why the
-    caller must report that the pool is not quiescent.
+    There is no public API that removes a running worker from interpreter
+    shutdown. ``Thread.daemon = True`` raises ``RuntimeError`` once the
+    thread has started, and ``Executor.shutdown`` cannot time out or
+    forget that thread. CPython 3.10–3.12 still joins it from two private
+    registries:
+
+    * ``threading._shutdown`` acquires every lock in
+      ``threading._shutdown_locks``. The lock is registered at thread
+      start. Assigning the public daemon flag later does not remove it.
+    * ``concurrent.futures.thread._python_exit`` joins every thread still
+      in ``_threads_queues``. Setting ``_daemonic`` does not remove that
+      entry.
+
+    Both registrations are dropped, and ``_daemonic`` is set so a later
+    pass treats the worker as a daemon. A registry that this interpreter
+    does not expose is skipped. Alive workers still make this return
+    False, so ``close`` reports the pool non-quiescent and continues the
+    scene-store flush. The callable keeps running until the process ends.
     """
     threads = [
         worker
@@ -74,21 +86,50 @@ def _detach_unfinished_workers(pool) -> bool:
     ]
     if not threads:
         return True
-    # Interpreter shutdown joins two private sets, not the public daemon
-    # flag. A non-daemon thread registers its state lock at start, and
-    # ThreadPoolExecutor joins every worker still in its queue map.
-    with threading._shutdown_locks_lock:
+    _drop_interpreter_shutdown_locks(threads)
+    _drop_executor_shutdown_entries(threads)
+    for worker in threads:
+        _mark_worker_daemonic(worker)
+    return False
+
+
+def _drop_interpreter_shutdown_locks(threads) -> None:
+    locks = getattr(threading, "_shutdown_locks", None)
+    guard = getattr(threading, "_shutdown_locks_lock", None)
+    if locks is None or guard is None:
+        return
+    with guard:
         for worker in threads:
             lock = getattr(worker, "_tstate_lock", None)
             if lock is not None:
-                threading._shutdown_locks.discard(lock)
-            worker._daemonic = True
+                locks.discard(lock)
+
+
+def _drop_executor_shutdown_entries(threads) -> None:
     from concurrent.futures import thread as futures_thread
 
-    with futures_thread._global_shutdown_lock:
+    queues = getattr(futures_thread, "_threads_queues", None)
+    guard = getattr(futures_thread, "_global_shutdown_lock", None)
+    if queues is None or guard is None:
+        return
+    with guard:
         for worker in threads:
-            futures_thread._threads_queues.pop(worker, None)
-    return False
+            queues.pop(worker, None)
+
+
+def _mark_worker_daemonic(worker) -> None:
+    """Mark a running worker daemon without the public setter.
+
+    The public ``daemon`` property refuses a thread that has already
+    started. ``_daemonic`` is the field that property writes, and it is
+    the flag CPython consults if the worker is registered again.
+    """
+    try:
+        worker.daemon = True
+    except RuntimeError:
+        pass
+    if hasattr(worker, "_daemonic"):
+        worker._daemonic = True
 
 
 def _call_executor_shutdown(pool, *, wait: bool) -> None:

@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from mat_viewer.app.backend import ViewerBackend
+from mat_viewer.app.render_worker import _detach_unfinished_workers
 from mat_viewer.scenes import core as scene_core
 from mat_viewer.scenes.core import SceneStore, SceneStorePersistError
 
@@ -245,6 +246,58 @@ def test_blocked_worker_process_exits_and_reports_non_quiescence(tmp_path: Path)
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["close_returned"] is True
     assert report["workers_quiescent"] is False
+
+
+class _RunningWorker:
+    """Stand-in for a pool thread that has already started."""
+
+    def __init__(self) -> None:
+        self._tstate_lock = threading.Lock()
+        self._daemonic = False
+        self.alive = True
+
+    def is_alive(self) -> bool:
+        return self.alive
+
+    @property
+    def daemon(self) -> bool:
+        return self._daemonic
+
+    @daemon.setter
+    def daemon(self, value: bool) -> None:
+        raise RuntimeError("cannot set daemon status of active thread")
+
+
+def test_detach_drops_private_shutdown_registrations():
+    from concurrent.futures import thread as futures_thread
+
+    worker = _RunningWorker()
+    pool = type("Pool", (), {"_threads": [worker]})()
+    threading._shutdown_locks.add(worker._tstate_lock)
+    futures_thread._threads_queues[worker] = object()
+    try:
+        assert _detach_unfinished_workers(pool) is False
+        assert worker._tstate_lock not in threading._shutdown_locks
+        assert worker not in futures_thread._threads_queues
+        assert worker._daemonic is True
+        worker.alive = False
+        assert _detach_unfinished_workers(pool) is True
+    finally:
+        threading._shutdown_locks.discard(worker._tstate_lock)
+        futures_thread._threads_queues.pop(worker, None)
+
+
+def test_detach_stays_non_quiescent_without_private_registries(monkeypatch):
+    from concurrent.futures import thread as futures_thread
+
+    worker = _RunningWorker()
+    pool = type("Pool", (), {"_threads": [worker]})()
+    monkeypatch.delattr(threading, "_shutdown_locks", raising=False)
+    monkeypatch.delattr(threading, "_shutdown_locks_lock", raising=False)
+    monkeypatch.delattr(futures_thread, "_threads_queues", raising=False)
+    monkeypatch.delattr(futures_thread, "_global_shutdown_lock", raising=False)
+    assert _detach_unfinished_workers(pool) is False
+    assert worker._daemonic is True
 
 
 def test_blocked_lock_close_fails_before_immediate_exit(tmp_path: Path):

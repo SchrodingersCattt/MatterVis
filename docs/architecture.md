@@ -138,6 +138,9 @@ the pull request template are in
 executors with a fixed wait, joins that thread, and flushes the scene
 store in a `finally` block. Workers still running after that wait are
 detached from interpreter shutdown and `workers_quiescent` is false.
+The detach drops CPython's private shutdown registries because a running
+thread cannot be marked daemon through the public setter. A registry
+that is not present is skipped, and the pool stays non-quiescent.
 The backend lock is not held across the scene-file replace. `save` and
 `flush_durable` share one flush lock from snapshot through conditional
 clean. A mutation that arrives during the replace stays dirty. A final

@@ -49,6 +49,28 @@ generation, `close` raises `SceneStorePersistError` after unregistering
 the atexit flush. It does not start another flush that might still be
 running when the process exits.
 
+## Interpreter detach
+
+No public API removes a running worker from interpreter shutdown.
+`Thread.daemon = True` raises `RuntimeError` after the thread has
+started, and `Executor.shutdown` has no timeout and no forget-this-thread
+argument. On CPython 3.10–3.12 the process still joins that worker from
+two private registries:
+
+- `threading._shutdown` acquires every lock in `threading._shutdown_locks`.
+  The lock is registered when the thread starts. Changing the daemon flag
+  later does not remove it.
+- `concurrent.futures.thread._python_exit` joins every thread still listed
+  in `_threads_queues`. Setting `_daemonic` alone does not remove that
+  entry.
+
+The timed-out join drops both registrations and sets `_daemonic`, which is
+the field the public daemon property writes before a thread starts. A
+registry this interpreter does not expose is skipped. The worker is still
+unfinished, so `workers_quiescent` stays false, and a dirty store still
+raises `SceneStorePersistError`. The skip exists so a missing private name
+cannot turn `close` into `AttributeError` before that flush.
+
 ## Root cause
 
 | Symptom | Cause |

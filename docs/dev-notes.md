@@ -42,7 +42,10 @@ A per-store flush lock covers that snapshot, replace, and conditional
 clean for both `save` and `flush_durable`. Pool joins are bounded because
 ``Executor.shutdown(wait=True)`` has no timeout on the supported Python
 versions. Workers still running after the bound are detached from
-interpreter shutdown and reported non-quiescent. A scene-store generation
+interpreter shutdown and reported non-quiescent. A running thread cannot
+be marked daemon with the public setter, so the detach drops CPython's
+private shutdown registries; a registry that is not present is skipped
+and the pool is still reported non-quiescent. A scene-store generation
 that changes during the replace stays dirty, and a final flush that
 cannot persist it raises. See `docs/reliability-worker-shutdown.md`. `update_view` still returns a completed frame from the existing
 broadcast journal and requests a build only when that journal does not yet
