@@ -25,6 +25,17 @@ store survive from one test to the next when they share a server.
   promise as truthy before the response arrives. Server observations go through
   `tests/app/browser_wait.js`. Timeout options are the third argument
   (`waitForFunction(fn, arg, options)`), never the second.
+- Two-client sessions open the second client with `browser.newContext()` and
+  `context.newPage()`, and close that context in `finally`.
+  `page.context().newPage()` stays in the first client's context, so it shares
+  cookies, storage, and the Dash client identity. After each client has
+  initialized, the test checks that the two Plotly graphs keep different scene
+  ids, camera metadata, and `mattervis_render` records.
+- An upload is ready only after this upload's `POST /api/v2/upload` transaction
+  names a `scene_id` that was not in the scene list beforehand, the job leaves
+  `pending` when it has a job id, and that id is painted on the uploading
+  page's figure. A structure name already present in the tab strip is not
+  readiness.
 - Intentional delayed-callback tests hold and release the Dash request with
   Playwright routing. They do not sleep until a poll happens to finish. After
   the agent poll is disabled, the test waits until no

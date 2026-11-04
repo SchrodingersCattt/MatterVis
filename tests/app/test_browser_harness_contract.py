@@ -121,6 +121,20 @@ def test_browser_runners_await_server_state_outside_wait_for_function():
     assert violations == []
 
 
+def test_two_client_sessions_use_independent_browser_contexts():
+    source = (APP_JS / "real_app_browser.js").read_text(encoding="utf-8")
+    assert "page.context().newPage()" not in source
+    start = source.index("function isUploadPost")
+    end = source.index("async function runLeak")
+    body = source[start:end]
+    assert "browser.newContext(" in body
+    assert "context.newPage(" in body
+    assert "finally" in body
+    assert 'pathname === "/api/v2/upload"' in body
+    assert "porous_framework" not in body
+    assert "waitForThisUpload(" in body
+
+
 def test_real_app_browser_tests_do_not_share_a_server():
     source = REAL_APP_TEST.read_text(encoding="utf-8")
     assert 'scope="module"' not in source

@@ -452,56 +452,192 @@ async function runRapid(page) {
   }
 }
 
-async function runSessions(page) {
-  const secondProblems = [];
-  const second = await page.context().newPage();
-  await second.setViewportSize({width: 1200, height: 800});
-  second.on("pageerror", (error) => {
-    const text = String(error && error.message || error);
-    if (/c\.on is not a function|Invalid frame header/i.test(text)) secondProblems.push(text);
+async function figureIdentity(page) {
+  return page.evaluate(() => {
+    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+    const scene = gd && gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
+    const camera = scene && scene.camera;
+    const eye = camera && camera.eye;
+    const meta = gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
+    const title = gd && gd.layout && gd.layout.title;
+    const text = String((title && (title.text || title)) || "");
+    const component = (value, index, name) => {
+      if (!value) return null;
+      const raw = value[index] !== undefined && value[index] !== null ? value[index] : value[name];
+      const number = Number(raw);
+      return Number.isFinite(number) ? number : null;
+    };
+    return {
+      sceneId: meta && meta.scene_id ? String(meta.scene_id) : "",
+      title: text,
+      ortho: !!(camera && camera._ortho),
+      eye: [
+        component(eye, 0, "x"),
+        component(eye, 1, "y"),
+        component(eye, 2, "z"),
+      ],
+      render: meta ? {
+        scene_id: String(meta.scene_id || ""),
+        scene_generation: Number(meta.scene_generation || 0),
+        camera_revision: Number(meta.camera_revision || 0),
+        render_revision: Number(meta.render_revision || 0),
+      } : null,
+    };
   });
-  await second.goto(base, {waitUntil: "domcontentloaded", timeout: 30000});
-  await graphReady(page);
-  await graphReady(second);
-  await clickTab(page, "ionic_nacl");
-  await clickTab(second, "molecular_water");
-  const secondScene = (await readView(second)).sceneId;
-  if (uploadPath) {
-    await page.setInputFiles("#scene-cif-upload-input", uploadPath);
-    await page.waitForFunction(() => {
-      const tabs = document.getElementById("scene-tabs");
-      return !!(tabs && /porous_framework/i.test(tabs.textContent || ""));
-    }, null, {timeout: 90000});
+}
+
+function assertSeparateClients(first, second, label) {
+  if (!first || !second || !first.sceneId || !second.sceneId || !first.render || !second.render) {
+    fail(`${label} missing figure metadata ${JSON.stringify({first, second})}`);
   }
-  if (secondScene) {
-    await second.waitForFunction((sceneId) => {
-      const gd = document.querySelector("#crystal-graph .js-plotly-plot");
-      const meta = gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
-      return !!(meta && String(meta.scene_id) === sceneId);
-    }, secondScene, {timeout: 20000});
+  if (first.sceneId === second.sceneId || first.render.scene_id === second.render.scene_id) {
+    fail(`${label} collapsed onto one scene ${JSON.stringify({first, second})}`);
   }
-  const other = await selectedTabLabel(second);
-  const otherView = await readView(second);
-  if (!/water/i.test(other) && !/water/i.test(otherView.title) && !/water/i.test(otherView.sceneId)) {
-    fail(`upload on the first page stole the second page selection: ${other} / ${otherView.title} / ${otherView.sceneId}`);
+  if (first.render.scene_id !== first.sceneId || second.render.scene_id !== second.sceneId) {
+    fail(`${label} figure metadata does not match the mounted scene ${JSON.stringify({first, second})}`);
   }
-  const resetResponse = waitForDashChange(page, "view-reset");
-  const orthoResponse = waitForDashChange(second, "view-projection");
-  await page.locator("#view-reset").click();
-  await second.locator("#view-projection input[value='orthographic']").click();
-  await resetResponse;
-  await orthoResponse;
-  await second.waitForFunction(() => {
-    const camera = document.querySelector("#crystal-graph .js-plotly-plot")._fullLayout.scene._scene.camera;
-    return !!(camera && camera._ortho);
-  }, null, {timeout: 20000});
-  const first = await nonblank(page);
-  const secondView = await nonblank(second);
-  if (first.sceneId && secondView.sceneId && first.sceneId === secondView.sceneId) {
-    fail(`two browsers collapsed onto one scene ${first.sceneId} (${first.title} / ${secondView.title})`);
+  if (!first.eye.every(Number.isFinite) || !second.eye.every(Number.isFinite)) {
+    fail(`${label} camera metadata is incomplete ${JSON.stringify({first, second})}`);
   }
-  if (secondProblems.length) fail(secondProblems.join("\n"));
-  await second.close();
+}
+
+async function listSceneIds(page) {
+  return page.evaluate(async () => {
+    const body = await fetch("/api/v2/scenes", {cache: "no-store"}).then((response) => response.json());
+    return ((body && body.scenes) || []).map((scene) => String(scene.id));
+  });
+}
+
+function isUploadPost(response) {
+  try {
+    const url = new URL(response.url());
+    return response.request().method() === "POST" && url.pathname === "/api/v2/upload";
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function waitForThisUpload(page, beforeIds) {
+  const posted = page.waitForResponse(isUploadPost, {timeout: 90000});
+  await page.setInputFiles("#scene-cif-upload-input", uploadPath);
+  const response = await posted;
+  let meta = {};
+  try {
+    meta = await response.json();
+  } catch (_error) {
+    meta = {};
+  }
+  if (!response.ok()) {
+    fail(`upload transaction failed: ${response.status()} ${JSON.stringify(meta)}`);
+  }
+  const sceneId = meta && meta.scene_id ? String(meta.scene_id) : "";
+  const jobId = meta && meta.job_id ? String(meta.job_id) : "";
+  if (!sceneId || beforeIds.includes(sceneId)) {
+    fail(
+      "upload did not acknowledge a new scene_id: "
+      + JSON.stringify({meta, beforeIds}),
+    );
+  }
+  if (jobId && meta.status === "pending") {
+    await waitForServerState(page, async (wanted) => {
+      const body = await fetch(
+        "/api/v2/upload/" + encodeURIComponent(wanted.jobId),
+        {cache: "no-store"},
+      ).then((statusResponse) => statusResponse.json());
+      const status = body && body.status;
+      const id = body && body.scene_id ? String(body.scene_id) : "";
+      const ready = status === "ready" || status === "complete" || status === "success";
+      return ready && (!id || id === wanted.sceneId);
+    }, {jobId, sceneId}, {timeout: 90000});
+  }
+  await page.waitForFunction((id) => {
+    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+    const render = gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
+    return !!(render && String(render.scene_id) === id && gd.data && gd.data.length);
+  }, sceneId, {timeout: 90000});
+  const painted = await figureIdentity(page);
+  if (painted.sceneId !== sceneId || !painted.render || painted.render.scene_id !== sceneId) {
+    fail(`uploaded scene ${sceneId} was not painted on the uploading page ${JSON.stringify(painted)}`);
+  }
+  return sceneId;
+}
+
+async function runSessions(page, browser) {
+  const secondProblems = [];
+  // Opening another page inside the first client's context would share
+  // cookies, storage, and the Dash client identity. Use a new context.
+  const context = await browser.newContext({viewport: {width: 1200, height: 800}});
+  try {
+    const second = await context.newPage();
+    second.on("pageerror", (error) => {
+      const text = String(error && error.message || error);
+      if (/c\.on is not a function|Invalid frame header/i.test(text)) secondProblems.push(text);
+    });
+    await second.goto(base, {waitUntil: "domcontentloaded", timeout: 30000});
+    await graphReady(page);
+    await graphReady(second);
+    const firstInit = await figureIdentity(page);
+    const secondInit = await figureIdentity(second);
+    if (!firstInit.sceneId || !firstInit.render || !secondInit.sceneId || !secondInit.render) {
+      fail(`clients did not initialize figure metadata ${JSON.stringify({firstInit, secondInit})}`);
+    }
+    if (!firstInit.eye.every(Number.isFinite) || !secondInit.eye.every(Number.isFinite)) {
+      fail(`clients initialized without camera metadata ${JSON.stringify({firstInit, secondInit})}`);
+    }
+    await clickTab(page, "ionic_nacl");
+    await clickTab(second, "molecular_water");
+    const firstOwned = await figureIdentity(page);
+    const secondOwned = await figureIdentity(second);
+    assertSeparateClients(firstOwned, secondOwned, "independently initialized clients");
+    let uploadedScene = "";
+    if (uploadPath) {
+      const beforeIds = await listSceneIds(page);
+      uploadedScene = await waitForThisUpload(page, beforeIds);
+    }
+    const other = await figureIdentity(second);
+    if (
+      other.sceneId !== secondOwned.sceneId
+      || !other.render
+      || other.render.scene_id !== secondOwned.sceneId
+      || other.render.camera_revision !== secondOwned.render.camera_revision
+      || other.ortho !== secondOwned.ortho
+    ) {
+      fail(`upload on the first page rewrote the second page ${JSON.stringify({secondOwned, other})}`);
+    }
+    const firstBeforeGesture = await figureIdentity(page);
+    const resetResponse = waitForDashChange(page, "view-reset");
+    const orthoResponse = waitForDashChange(second, "view-projection");
+    await page.locator("#view-reset").click();
+    await second.locator("#view-projection input[value='orthographic']").click();
+    await resetResponse;
+    await orthoResponse;
+    await second.waitForFunction(() => {
+      const camera = document.querySelector("#crystal-graph .js-plotly-plot")._fullLayout.scene._scene.camera;
+      return !!(camera && camera._ortho);
+    }, null, {timeout: 20000});
+    const first = await figureIdentity(page);
+    const secondView = await figureIdentity(second);
+    await nonblank(page);
+    await nonblank(second);
+    assertSeparateClients(first, secondView, "two browsers");
+    if (first.sceneId !== firstBeforeGesture.sceneId || first.render.scene_id !== firstBeforeGesture.sceneId) {
+      fail(`first client lost its scene during the other client's camera change ${JSON.stringify({firstBeforeGesture, first})}`);
+    }
+    if (uploadedScene && first.sceneId !== uploadedScene) {
+      fail(`uploading page left its acknowledged scene ${uploadedScene} for ${first.sceneId}`);
+    }
+    if (
+      !secondView.ortho
+      || secondView.sceneId !== secondOwned.sceneId
+      || secondView.render.scene_id !== secondOwned.sceneId
+      || secondView.render.camera_revision < secondOwned.render.camera_revision
+    ) {
+      fail(`second client lost its scene or camera ${JSON.stringify({secondOwned, secondView})}`);
+    }
+    if (secondProblems.length) fail(secondProblems.join("\n"));
+  } finally {
+    await context.close();
+  }
 }
 
 async function runLeak(page) {
@@ -1426,7 +1562,7 @@ const networkEvents = [];
   else if (mode === "gestures") await runGestures(page);
   else if (mode === "held") await runHeld(page);
   else if (mode === "rapid") await runRapid(page);
-  else if (mode === "sessions") await runSessions(page);
+  else if (mode === "sessions") await runSessions(page, browser);
   else if (mode === "leak") await runLeak(page);
   else if (mode === "restart") await runRestart(page);
   else if (mode === "nacl-frame") await runNaclFrame(page);
