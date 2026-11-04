@@ -43,7 +43,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[all,test]"
           npm install --no-save playwright-core
-          python .github/scripts/record_ci_environment.py --output-dir ci-diagnostics
+          python .github/scripts/record_ci_environment.py --output-dir ci-diagnostics --expected-runner ubuntu-latest
 
       - name: Launch Chrome with floating Playwright
         env:

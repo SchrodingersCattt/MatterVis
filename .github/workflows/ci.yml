@@ -87,7 +87,7 @@ jobs:
               )
           print(f"molcrys-kit {raw} (BondRecord.role, get_connectivity_report)")
           PY
-          python .github/scripts/record_ci_environment.py --output-dir ci-diagnostics
+          python .github/scripts/record_ci_environment.py --output-dir ci-diagnostics --expected-runner ubuntu-24.04
 
       - name: Run fast tests
         run: |
@@ -146,7 +146,7 @@ jobs:
                   "MolecularCrystal.get_connectivity_report"
               )
           PY
-          python .github/scripts/record_ci_environment.py --output-dir ci-diagnostics
+          python .github/scripts/record_ci_environment.py --output-dir ci-diagnostics --expected-runner ubuntu-24.04
 
       - name: Run tests
         run: |
@@ -203,7 +203,7 @@ jobs:
               )
           PY
           python -m pip check
-          python .github/scripts/record_ci_environment.py --output-dir ci-diagnostics
+          python .github/scripts/record_ci_environment.py --output-dir ci-diagnostics --expected-runner ubuntu-24.04
 
       - name: Verify browser-free CIF to PNG, PDF, and SVG
         run: python tests/minimal_install_smoke.py
@@ -258,7 +258,7 @@ jobs:
               )
           PY
           npm install --no-save "playwright-core@${CI_PLAYWRIGHT_CORE}"
-          python .github/scripts/record_ci_environment.py --output-dir ci-diagnostics
+          python .github/scripts/record_ci_environment.py --output-dir ci-diagnostics --expected-runner ubuntu-24.04
 
       - name: Run orthographic, perspective, and reset browser regression
         env:
@@ -277,6 +277,14 @@ jobs:
           path: |
             ci-diagnostics/
             pytest-browser.xml
+          if-no-files-found: ignore
+
+      - name: Upload browser failure artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-artifacts
+          path: browser-artifacts/
           if-no-files-found: ignore
 
   benchmark-smoke:
@@ -310,7 +318,7 @@ jobs:
                   "MolecularCrystal.get_connectivity_report"
               )
           PY
-          python .github/scripts/record_ci_environment.py --output-dir ci-diagnostics
+          python .github/scripts/record_ci_environment.py --output-dir ci-diagnostics --expected-runner ubuntu-24.04
 
       - name: Run stable benchmark smoke subset
         run: |
@@ -344,11 +352,13 @@ jobs:
           cache: pip
 
       - name: Build distributions
+        env:
+          PIP_CONSTRAINT: requirements/ci-constraints.txt
         run: |
           python -m pip install "pip==${CI_PIP_VERSION}"
-          python -m pip install -c requirements/ci-constraints.txt build
-          python -m build
-          python .github/scripts/record_ci_environment.py --output-dir ci-diagnostics
+          python -m pip install -c requirements/ci-constraints.txt build setuptools "setuptools-scm[toml]"
+          python -m build --no-isolation
+          python .github/scripts/record_ci_environment.py --output-dir ci-diagnostics --expected-runner ubuntu-24.04
 
       - name: Verify wheel contains only the mat_viewer package
         shell: python

@@ -30,6 +30,26 @@ def _molcrys() -> dict[str, object]:
     }
 
 
+def _actual_os() -> dict[str, str | None]:
+    """Read the machine OS. This is not the workflow runner label."""
+    release: dict[str, str] = {}
+    path = Path("/etc/os-release")
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            release[key] = value.strip().strip('"')
+    return {
+        "system": platform.system(),
+        "release": platform.release(),
+        "platform": platform.platform(),
+        "id": release.get("ID"),
+        "version_id": release.get("VERSION_ID"),
+        "pretty_name": release.get("PRETTY_NAME"),
+    }
+
+
 def _tool_version(command: list[str]) -> str | None:
     try:
         completed = subprocess.run(
@@ -49,6 +69,11 @@ def _tool_version(command: list[str]) -> str | None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", default="ci-diagnostics")
+    parser.add_argument(
+        "--expected-runner",
+        required=True,
+        help="runs-on label declared by the calling workflow",
+    )
     args = parser.parse_args()
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -62,6 +87,7 @@ def main() -> None:
     payload = {
         "python": sys.version,
         "platform": platform.platform(),
+        "actual_os": _actual_os(),
         "molcrys_kit": _molcrys(),
         "node": _tool_version(["node", "--version"]),
         "chrome": _tool_version(["google-chrome", "--version"])
@@ -71,7 +97,7 @@ def main() -> None:
             "chrome": os.environ.get("CI_CHROME_VERSION"),
             "playwright_core": os.environ.get("CI_PLAYWRIGHT_CORE"),
             "pip": os.environ.get("CI_PIP_VERSION"),
-            "ubuntu": "ubuntu-24.04",
+            "runner": args.expected_runner,
         },
         "github": {
             "workflow": os.environ.get("GITHUB_WORKFLOW"),

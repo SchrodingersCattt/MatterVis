@@ -28,6 +28,33 @@ so those ranges do not float in either workflow.
 already ignored in `pytest.ini`. The lock stops a later pytest from
 moving the gate by itself.
 
+## Package build
+
+The source and wheel jobs in `ci.yml` and `release.yml` install
+`build`, `setuptools`, and `setuptools-scm` with
+`-c requirements/ci-constraints.txt`, set `PIP_CONSTRAINT` to that
+file, and run `python -m build --no-isolation`. The backends are
+`setuptools==84.2.1` and `setuptools-scm==8.3.1`. That setuptools-scm
+release depends on `packaging`, `setuptools`, and, below Python 3.11,
+`tomli`, which are already pinned. `build==1.6.1` and
+`pyproject-hooks==1.3.3` are pinned in the same file. The jobs build
+with those installed versions.
+
+## Runner label and actual OS
+
+`record_ci_environment.py` takes `--expected-runner` from the calling
+workflow. The merge-gate jobs pass `ubuntu-24.04`. The
+compatibility-drift workflow passes `ubuntu-latest`, the same label
+as its `runs-on`. The JSON field `declared.runner` is that label.
+`actual_os` is separate and comes from `platform` and
+`/etc/os-release` (`id`, `version_id`, `pretty_name`).
+
+The Camera WebGL job uploads both `browser-artifacts/` and
+`ci-diagnostics-browser` with `if: always()`. `browser-artifacts/` is
+the browser trace directory. `ci-diagnostics-browser` is the
+environment JSON, the freeze, the JUnit file, and the failure
+signatures.
+
 ## MolCrysKit
 
 Every install job uses the git commit in `pyproject.toml`:

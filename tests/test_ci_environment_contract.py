@@ -10,8 +10,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CI = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+RELEASE = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
 DRIFT = (ROOT / ".github/workflows/compatibility-drift.yml").read_text(encoding="utf-8")
+RECORDER = (ROOT / ".github/scripts/record_ci_environment.py").read_text(encoding="utf-8")
 CONSTRAINTS = ROOT / "requirements/ci-constraints.txt"
+BUILD_INSTALL = (
+    "python -m pip install -c requirements/ci-constraints.txt "
+    'build setuptools "setuptools-scm[toml]"'
+)
 MOLCRYS_COMMIT = "d02ce08ab28826f87d976aef98fefb8b86998075"
 
 
@@ -53,6 +59,49 @@ def test_merge_gate_uses_the_pinned_toolchain() -> None:
     assert "continue-on-error" not in before
     assert "continue-on-error: true" in docs
     assert "minimum chemistry" not in CI.lower()
+
+
+def test_package_build_uses_pinned_backends_without_isolation() -> None:
+    lines = _requirement_lines()
+    assert "setuptools==84.2.1" in lines
+    assert "setuptools-scm==8.3.1" in lines
+    assert "build==1.6.1" in lines
+    assert "pyproject-hooks==1.3.3" in lines
+    for workflow in (CI, RELEASE):
+        assert "PIP_CONSTRAINT: requirements/ci-constraints.txt" in workflow
+        assert BUILD_INSTALL in workflow
+        assert "python -m build --no-isolation" in workflow
+        assert "python -m build\n" not in workflow
+
+
+def test_expected_runner_comes_from_each_workflow() -> None:
+    assert "ubuntu-24.04" not in RECORDER
+    assert "ubuntu-latest" not in RECORDER
+    assert "--expected-runner" in RECORDER
+    for workflow, runner in ((CI, "ubuntu-24.04"), (DRIFT, "ubuntu-latest")):
+        runs = [
+            line.strip()
+            for line in workflow.splitlines()
+            if line.strip().startswith("runs-on:")
+        ]
+        calls = [
+            line.strip()
+            for line in workflow.splitlines()
+            if "record_ci_environment.py" in line
+        ]
+        assert runs
+        assert calls
+        assert all(line == f"runs-on: {runner}" for line in runs)
+        assert all(f"--expected-runner {runner}" in line for line in calls)
+
+
+def test_camera_job_keeps_traces_and_environment_artifacts() -> None:
+    camera = CI.split("camera-webgl:", 1)[1].split("benchmark-smoke:", 1)[0]
+    assert "name: browser-artifacts" in camera
+    assert "path: browser-artifacts/" in camera
+    assert "name: ci-diagnostics-browser" in camera
+    assert "pytest-browser.xml" in camera
+    assert "ci-diagnostics/" in camera
 
 
 def test_drift_workflow_is_scheduled_and_not_advisory() -> None:
@@ -104,6 +153,8 @@ def test_attempt_record_marks_a_rerun(tmp_path: Path, monkeypatch) -> None:
             str(ROOT / ".github/scripts/record_ci_environment.py"),
             "--output-dir",
             str(tmp_path),
+            "--expected-runner",
+            "ubuntu-latest",
         ],
         env={**os.environ, "GITHUB_RUN_ATTEMPT": "2", "GITHUB_RUN_ID": "99"},
     )
@@ -112,3 +163,9 @@ def test_attempt_record_marks_a_rerun(tmp_path: Path, monkeypatch) -> None:
     assert attempt["first_attempt"] is False
     assert "cancel" in attempt["note"]
     assert (tmp_path / "ci-freeze.txt").is_file()
+    environment = json.loads((tmp_path / "ci-environment.json").read_text(encoding="utf-8"))
+    assert environment["declared"]["runner"] == "ubuntu-latest"
+    actual = environment["actual_os"]
+    assert actual["platform"]
+    assert actual["pretty_name"]
+    assert actual["pretty_name"] != environment["declared"]["runner"]

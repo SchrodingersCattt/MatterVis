@@ -3,6 +3,8 @@
 # x86_64 manylinux. The compatibility-drift workflow installs without
 # this file. Regenerate from pyproject.toml with a 3.10 resolution;
 # do not widen a pin on the merge gate to chase an upstream release.
+# Package builds use the setuptools and setuptools-scm pins below.
+# setuptools-scm 8.3.1 stays on packaging, setuptools, and tomli.
 #
 annotated-types==0.8.0
     # via pydantic
@@ -234,7 +236,11 @@ scipy==1.15.3
     #   pymatgen
     #   scikit-image
 setuptools==84.2.1
-    # via dash
+    # via
+    #   dash
+    #   matter-vis (pyproject.toml build-system)
+setuptools-scm==8.3.1
+    # via matter-vis (pyproject.toml build-system)
 simple-websocket==1.1.0
     # via flask-sock
 simplejson==4.2.0
