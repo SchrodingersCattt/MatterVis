@@ -42,13 +42,19 @@ must not change scene B, and a stale revision must not replace a newer one.
   callback is covered separately.
 - If the selected scene's parked frame is still unapplied after the existing
   retry budget, the render status reports `Scene frame was not applied` and
-  the parked frame is dropped. The budget does not grow.
+  the parked frame is dropped. The budget does not grow. A frame parked for
+  a scene that is not selected is kept when that budget ends, so a later
+  selection can still paint it.
+- Duplicating a scene publishes the catalog with `focus: false`. Other open
+  pages keep their selected tab. The page that clicked Duplicate selects
+  that catalog's `active_id` and flushes the copy's parked frame. The
+  catalog flag is not turned on, so the selection stays on that page.
 
 ## Root causes
 
 | Symptom | Cause |
 | --- | --- |
-| Duplicate canvas title never settles, render revision stays 0 | `duplicate_scene` published the catalog and did not schedule a figure. The browser dropped the missing frame after the retry budget with no status. |
+| Duplicate canvas title never settles | The copy's figure completed, but the `focus: false` catalog replaced the tab event before the duplicating page selected the copy. That page stayed on the source scene, the copy frame was parked, and the retry budget then dropped it. The title stayed on the source. The duplicating page now selects the catalog `active_id` locally; other pages still keep their tab. |
 | Drag on one scene reframes the next scene | The relayout wrapper applied the gesture whenever the saved camera owner was not the mounted scene. `uirevision` omitted the scene id, so a duplicate reused the source scene's WebGL camera. A settled gesture could also copy the new canvas generation onto the old gesture. |
 | Two browsers collapse onto one scene's controls | The filled-scene guard was one process-wide id. The last tab claim decided which browser's sidebar capture was allowed to write. |
 | Delayed view callback rebuilds the wrong scene | `update_view` kept one previous snapshot. A callback for scene A that arrived after scene B was classified as a scene change. The first look at a scene stays a complete frame; only later callbacks use that scene's own snapshot. |

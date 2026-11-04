@@ -47,7 +47,7 @@ const sandbox = {
     Plotly: null,
     WebSocket: null,
     dash_clientside: {
-      set_props(id, props) { calls.push({id, data: props.data}); return true; },
+      set_props(id, props) { calls.push({id, data: props.data, props}); return true; },
     },
   },
   document: {
@@ -86,6 +86,22 @@ assert.equal(calls[1].data.active_id, 'b');
 
 reconcile({scene_catalog_seq: 3, scenes: [{id: 'a', label: 'Alpha'}, {id: 'b', label: 'Beta'}], active_id: 'a', focus: false});
 assert.equal(calls.length, 2, 'a repeated catalog must not focus backward');
+assert.equal(calls.filter((call) => call.id === 'scene-tabs').length, 0, 'focus:false must not move another page');
+
+dom.tabs = [tab('a', 'Alpha')];
+dom.selected = 'a';
+sandbox.window.__mvOwnSceneFocus = true;
+reconcile({scene_catalog_seq: 4, scenes: [{id: 'a', label: 'Alpha'}, {id: 'b', label: 'Beta'}], active_id: 'b', focus: false});
+const tabCall = calls.find((call) => call.id === 'scene-tabs');
+assert.ok(tabCall, 'the duplicating page selects the new scene');
+assert.equal(tabCall.props.value, 'b');
+assert.equal(sandbox.window.__mvOwnSceneFocus, false);
+const catalogCall = calls.find((call) => call.id === 'scene-event-store' && call.data.catalog_seq === 4);
+assert.equal(catalogCall.data.focus, false);
+assert.equal(catalogCall.data.active_id, 'b');
+
+reconcile({scene_catalog_seq: 5, scenes: [{id: 'a', label: 'Alpha'}, {id: 'c', label: 'Gamma'}], active_id: 'c', focus: false});
+assert.equal(calls.filter((call) => call.id === 'scene-tabs').length, 1, 'a later catalog does not move a page that did not click Duplicate');
 """
     result = subprocess.run(
         [node, "-e", program, str(MATTERVIS_JS)],
@@ -103,3 +119,5 @@ def test_http_fallback_and_snapshot_feed_the_same_reconciler():
     assert 'if (p.type === "scene_catalog")' in source
     assert "if (p.scene_catalog) reconcileSceneCatalog(p.scene_catalog);" in source
     assert "window.MatterVisReconcileSceneCatalog = reconcileSceneCatalog;" in source
+    assert 'closest("#scene-new-tab-btn")' in source
+    assert "window.__mvOwnSceneFocus = true;" in source

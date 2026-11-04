@@ -108,8 +108,10 @@ publishes a lightweight `view_update` when it does not. The page applies
 those journal envelopes over the existing WebSocket, falling back to
 `GET /api/v2/view-updates`. Scene-list changes travel in the same snapshot
 and journal as `scene_catalog`. The page rebuilds the existing tab strip
-and keeps the selected tab unless the caller explicitly focuses a scene or
-the selected scene has been removed. Control widgets follow the existing
+and keeps the selected tab unless the caller explicitly focuses a scene,
+the selected scene has been removed, or this page clicked Duplicate. That
+click selects the new scene on this page only. Other pages keep their tab
+because the catalog is published with `focus: false`. Control widgets follow the existing
 agent-state poll, which re-reads the selected scene when its version clocks
 move. In-process GUI edits that already own the gesture do not echo that
 gesture back through the poll.

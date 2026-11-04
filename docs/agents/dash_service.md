@@ -152,9 +152,13 @@ Notes for callers:
   `scene_catalog` envelope to the same journal and include
   `scene_catalog` on the WebSocket snapshot and on `GET /view-updates`.
   The page rebuilds its existing tab strip from that message. The
-  selected tab stays put. `POST /scenes/active` and a `set_active_scene`
-  intent set `focus: true` and move the open tab. Deleting the selected
-  scene moves the page to the scene that remains active.
+  selected tab stays put, except on the page that clicked Duplicate:
+  that page selects the catalog `active_id` locally. `focus` stays
+  false for create, rename, delete, reorder, duplicate, and undo, so
+  other open pages do not move. `POST /scenes/active` and a
+  `set_active_scene` intent set `focus: true` and move every open tab.
+  Deleting the selected scene moves the page to the scene that remains
+  active.
 - `POST /intent` and a WebSocket `intent` message broadcast to the open
   page. The same intent types, when the Dash UI calls them in-process,
   still suppress that echo so a drag or a local style edit is not

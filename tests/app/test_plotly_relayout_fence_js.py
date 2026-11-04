@@ -113,6 +113,11 @@ const fence = sandbox.window.__mvFenceTest;
   assert.equal(status.attrs['data-level'], 'error');
   assert.equal(sandbox.window.__mvRenderStatus.scene_id, 'scene-a');
   assert.equal(fence.parked('scene-a'), undefined);
+
+  fence.park('scene-b', {data: [], layout: {meta: {mattervis_render: {scene_id: 'scene-b', render_revision: 1}}}});
+  fence.retry('scene-b', 120);
+  assert.equal(fence.parked('scene-b').figure.layout.meta.mattervis_render.scene_id, 'scene-b');
+  assert.equal(status.textContent, 'Scene frame was not applied');
 })().catch((error) => {
   console.error(error);
   process.exit(1);
