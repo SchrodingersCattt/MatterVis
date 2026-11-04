@@ -121,7 +121,10 @@ one WebGL camera. Duplicating a scene schedules a complete frame for the
 copy. A build that is already running is published only when its
 generation, render revision, and camera revision are still current; a
 newer complete-frame identity is requeued, and an older one is dropped.
-The delivery contract is `docs/reliability-scene-delivery.md`.
+`update_view` supplies that frame from the requesting browser's mounted
+figure: a process-wide camera or display classification does not skip the
+frame when the mounted figure still belongs to another scene. The delivery
+contract is `docs/reliability-scene-delivery.md`.
 
 ## Documentation of the render interface
 

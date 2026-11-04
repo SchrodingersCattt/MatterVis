@@ -316,6 +316,120 @@ def test_first_look_at_a_scene_still_requests_its_frame(backend, monkeypatch):
     assert requested == [scene_b]
 
 
+def _mounted_figure(scene_id, *, title, projection="perspective", render_revision=0, camera_revision=0):
+    return {
+        "data": [{"type": "scatter3d", "x": [0], "y": [0], "z": [0]}],
+        "layout": {
+            "title": {"text": title},
+            "scene": {
+                "camera": {
+                    "eye": {"x": 1, "y": 1, "z": 1},
+                    "projection": {"type": projection},
+                }
+            },
+            "meta": {
+                "mattervis_render": {
+                    "scene_id": scene_id,
+                    "scene_generation": 0,
+                    "render_revision": render_revision,
+                    "camera_revision": camera_revision,
+                }
+            },
+        },
+    }
+
+
+def _drain_figure_jobs(worker, limit=8):
+    for _ in range(limit):
+        if not worker._finalize_pool.jobs:
+            return
+        worker._finalize_pool.run_next()
+
+
+def test_other_client_receives_mounted_scene_after_camera_change(backend, monkeypatch):
+    """Client B must get S from the journal when B's figure is still T.
+
+    The process-wide per-scene snapshot can already classify S as a camera
+    change because client A visited it. That must not skip the frame for a
+    caller whose mounted figure is a different scene.
+    """
+    scene_s = backend.active_scene_id()
+    state_s = backend.get_state(scene_s)
+    scene_t = backend.create_scene(
+        structure=state_s["structure"], label="Client T"
+    )["id"]
+    def _state_figure(snapshot, **kwargs):
+        payload = {
+            "data": [{"type": "scatter3d", "x": [0], "y": [0], "z": [0]}],
+            "layout": {
+                "title": {"text": snapshot.get("scene_label") or snapshot.get("structure") or ""},
+                "scene": {
+                    "camera": {
+                        "eye": {"x": 1.0, "y": 1.0, "z": 1.0},
+                        "up": {"x": 0, "y": 0, "z": 1},
+                        "center": {"x": 0, "y": 0, "z": 0},
+                        "projection": {"type": snapshot.get("projection") or "perspective"},
+                    },
+                    "uirevision": f"{snapshot.get('scene_id')}__{snapshot.get('camera_revision')}",
+                },
+            },
+        }
+        backend._stamp_figure_render_metadata(payload, snapshot)
+        return SimpleNamespace(to_plotly_json=lambda: payload), None
+
+    monkeypatch.setattr(backend, "figure_for_state", _state_figure)
+    registry = CallbackRegistry()
+    callbacks_view.register_view_callbacks(registry, backend)
+    update = registry.callbacks["update_view"]
+    update._last_state_by_scene = {}
+    update({"scene_id": scene_s}, _mounted_figure(scene_s, title=state_s.get("scene_label") or "S"), None)
+    backend.set_projection("orthographic", scene_id=scene_s, broadcast=False)
+    live = backend.get_state(scene_s)
+    _drain_figure_jobs(backend._render_worker)
+    event = backend.latest_figure_broadcast(scene_s)
+    assert event is not None
+    assert event["state"]["camera_revision"] == live["camera_revision"]
+    assert event["render_revision"] == live["render_revision"]
+
+    result = update(
+        {"scene_id": scene_s},
+        _mounted_figure(scene_t, title="Client T"),
+        None,
+    )
+    figure = result[0]
+    assert figure is not no_update
+    render = figure["layout"]["meta"]["mattervis_render"]
+    camera = figure["layout"]["scene"]["camera"]
+    projection = camera.get("projection")
+    projection_name = projection.get("type") if isinstance(projection, dict) else projection
+    assert render["scene_id"] == scene_s
+    assert render["render_revision"] == live["render_revision"]
+    assert render["camera_revision"] == live["camera_revision"]
+    assert projection_name == "orthographic"
+    assert figure["layout"]["title"]["text"] == (live.get("scene_label") or live.get("structure"))
+
+
+def test_mounted_caller_keeps_a_camera_change_on_the_local_path(backend, monkeypatch):
+    scene_s = backend.active_scene_id()
+    label = backend.get_state(scene_s).get("scene_label") or "S"
+    registry = CallbackRegistry()
+    callbacks_view.register_view_callbacks(registry, backend)
+    update = registry.callbacks["update_view"]
+    update._last_state_by_scene = {}
+    update({"scene_id": scene_s}, _mounted_figure(scene_s, title=label), None)
+    backend.set_projection("orthographic", scene_id=scene_s, broadcast=False)
+    requested = []
+
+    def spy(state, force=False):
+        requested.append(str(state.get("scene_id") or ""))
+        return False
+
+    monkeypatch.setattr(backend._render_worker, "request_figure_build", spy)
+    result = update({"scene_id": scene_s}, _mounted_figure(scene_s, title=label), None)
+    assert result == (no_update,) * 4
+    assert requested == []
+
+
 def test_reordered_projection_store_cannot_change_the_other_scene(backend, monkeypatch):
     scene_a = backend.active_scene_id()
     scene_b = backend.create_scene(structure=backend.get_state()["structure"], label="Second")["id"]

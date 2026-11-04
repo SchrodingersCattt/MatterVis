@@ -136,9 +136,11 @@ Notes for callers:
   (including `atom_scale` and `display_mode`) enqueues
   `AsyncRenderWorker` at the backend write. The open page does not wait
   for Dash `update_view`. Camera, overlay, and ordinary display patches
-  stay on the lightweight `view_update` envelope. Flat ORTEP still
-  rebuilds its image when the camera changes, because the camera basis
-  is rasterized into that image.
+  stay on the lightweight `view_update` envelope when the requesting
+  page's mounted figure is already that scene. A page whose mounted
+  figure still belongs to another scene receives the selected scene's
+  complete frame instead. Flat ORTEP still rebuilds its image when the
+  camera changes, because the camera basis is rasterized into that image.
 - `pending_state` is armed for a broadcast write to the active scene
   (REST `POST /state`, WebSocket `set_state`, and external `/intent`
   calls). The existing agent-state poll writes the matching page's

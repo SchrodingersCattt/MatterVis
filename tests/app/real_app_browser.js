@@ -640,6 +640,68 @@ async function runSessions(page, browser) {
   }
 }
 
+async function runCrossClient(page, browser) {
+  // Client A visits S and changes its camera. Client B stays on T, then
+  // switches to S. B's Plotly graph must show S, not the process-wide
+  // snapshot A already classified.
+  const context = await browser.newContext({viewport: {width: 1200, height: 800}});
+  try {
+    const clientB = await context.newPage();
+    await clientB.goto(base, {waitUntil: "domcontentloaded", timeout: 30000});
+    await graphReady(page);
+    await graphReady(clientB);
+    await clickTab(page, "ionic_nacl");
+    await clickTab(clientB, "molecular_water");
+    const sceneS = await figureIdentity(page);
+    const sceneT = await figureIdentity(clientB);
+    assertSeparateClients(sceneS, sceneT, "cross-client setup");
+    const orthoResponse = waitForDashChange(page, "view-projection");
+    await page.locator("#view-projection input[value='orthographic']").click();
+    await orthoResponse;
+    await page.waitForFunction(() => {
+      const camera = document.querySelector("#crystal-graph .js-plotly-plot")._fullLayout.scene._scene.camera;
+      return !!(camera && camera._ortho);
+    }, null, {timeout: 20000});
+    const changed = await figureIdentity(page);
+    if (changed.sceneId !== sceneS.sceneId || !changed.ortho) {
+      fail(`client A left scene S during the projection change ${JSON.stringify(changed)}`);
+    }
+    const stillT = await figureIdentity(clientB);
+    if (stillT.sceneId !== sceneT.sceneId || !stillT.render || stillT.render.scene_id !== sceneT.sceneId) {
+      fail(`client B left T while A changed S ${JSON.stringify({sceneT, stillT})}`);
+    }
+    await clickTab(clientB, "ionic_nacl");
+    try {
+      await waitForServerState(clientB, async (sceneId) => {
+        const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+        const scene = gd && gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
+        const camera = scene && scene.camera;
+        const render = gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render;
+        const title = gd && gd.layout && gd.layout.title;
+        const text = String((title && (title.text || title)) || "").toLowerCase();
+        const radio = document.querySelector("#view-projection input:checked");
+        if (!camera || !camera._ortho || !render || String(render.scene_id) !== sceneId) return false;
+        if (!text.includes("ionic_nacl") && !text.includes("nacl")) return false;
+        if (!radio || radio.value !== "orthographic") return false;
+        const state = await fetch(
+          "/api/v2/state?scene_id=" + encodeURIComponent(sceneId),
+          {cache: "no-store"},
+        ).then((response) => response.json());
+        return String(state.scene_id) === sceneId
+          && state.projection === "orthographic"
+          && Number(state.render_revision) === Number(render.render_revision)
+          && Number(state.camera_revision || 0) === Number(render.camera_revision || 0);
+      }, sceneS.sceneId, {timeout: 60000});
+    } catch (error) {
+      const arrived = await figureIdentity(clientB).catch(() => null);
+      const view = await readView(clientB).catch(() => null);
+      fail(`client B graph did not adopt S: ${error.message} graph=${JSON.stringify({arrived, view})}`);
+    }
+  } finally {
+    await context.close();
+  }
+}
+
 async function runLeak(page) {
   await graphReady(page);
   for (let i = 0; i < 100; i += 1) {
@@ -1563,6 +1625,7 @@ const networkEvents = [];
   else if (mode === "held") await runHeld(page);
   else if (mode === "rapid") await runRapid(page);
   else if (mode === "sessions") await runSessions(page, browser);
+  else if (mode === "cross-client") await runCrossClient(page, browser);
   else if (mode === "leak") await runLeak(page);
   else if (mode === "restart") await runRestart(page);
   else if (mode === "nacl-frame") await runNaclFrame(page);

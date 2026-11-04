@@ -170,6 +170,12 @@ def test_rapid_scene_switch_during_drag(mattervis_url):
 
 
 @pytest.mark.timeout(180)
+def test_second_client_plots_the_scene_after_the_other_clients_camera_change(mattervis_url):
+    """Client B's canvas follows S after A changes S while B is still on T."""
+    _run(mattervis_url, "cross-client", timeout=160)
+
+
+@pytest.mark.timeout(180)
 def test_two_browsers_keep_separate_scenes_during_upload(mattervis_url):
     upload = ROOT / "benchmarks/structures/porous_framework.cif"
     _run(mattervis_url, "sessions", upload=str(upload))

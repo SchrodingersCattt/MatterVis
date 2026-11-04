@@ -11,7 +11,7 @@ from .editor_tables import *
 from .editor_transforms import *
 from .rightclick import *
 from ..cache_keys import topology_side_panel_cache_key
-from .view_updates import UpdateKind, classify_change, make_update
+from .view_updates import UpdateKind, classify_change, make_update, mounted_scene_id
 from .projection_controls import selected_scene_projection, triggered_component_ids
 from .backend import ViewerBackend
 
@@ -810,11 +810,15 @@ def register_view_callbacks(app, backend):
         stored = copy.deepcopy(state)
         previous_by_scene[scene_key] = stored
         update_view._last_state = stored
+        # The snapshot above is process-wide. Skip a camera/display/overlay
+        # frame only when this browser is already mounted on the scene.
+        caller_scene = mounted_scene_id(current_figure)
+        caller_needs_this_scene = bool(caller_scene) and caller_scene != scene_key
         if change_kind in {
             UpdateKind.CAMERA,
             UpdateKind.OVERLAY,
             UpdateKind.DISPLAY,
-        }:
+        } and not caller_needs_this_scene:
             # Labels, opacity, polyhedron visibility and Axes are delivered
             # by the clientside submitter.  No worker and no full figure
             # response is needed for these changes.

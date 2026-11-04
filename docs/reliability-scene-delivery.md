@@ -26,9 +26,13 @@ must not change scene B, and a stale revision must not replace a newer one.
   that camera belongs to the mounted scene. A settled gesture does not copy
   the mounted scene's generation onto a gesture that still names another scene.
 - `update_view` classifies a callback against the previous snapshot of the
-  same scene. The first look at a scene is still a complete frame, so a tab
-  switch can publish that scene's figure. A later callback for scene A is not
-  compared with scene B.
+  same scene. That snapshot is process-wide and is not a substitute for the
+  requesting browser's mounted figure. Camera, overlay, and ordinary display
+  deltas skip a new figure only when `current_figure` is already stamped
+  with that scene. A browser whose mounted figure still belongs to another
+  scene receives the selected scene's journal frame, including its title,
+  render revision, camera revision, and projection. The first look at a
+  scene is still a complete frame.
 - Sidebar capture is per browser. The last writer remains `filled["id"]` for
   unfenced callers. `filled["by_client"]` is the guard used when the request
   carries a client id.
@@ -48,6 +52,7 @@ must not change scene B, and a stale revision must not replace a newer one.
 | Drag on one scene reframes the next scene | The relayout wrapper applied the gesture whenever the saved camera owner was not the mounted scene. `uirevision` omitted the scene id, so a duplicate reused the source scene's WebGL camera. A settled gesture could also copy the new canvas generation onto the old gesture. |
 | Two browsers collapse onto one scene's controls | The filled-scene guard was one process-wide id. The last tab claim decided which browser's sidebar capture was allowed to write. |
 | Delayed view callback rebuilds the wrong scene | `update_view` kept one previous snapshot. A callback for scene A that arrived after scene B was classified as a scene change. The first look at a scene stays a complete frame; only later callbacks use that scene's own snapshot. |
+| Selected tab and the live canvas diverge after another browser visited the scene | The per-scene snapshot is process-wide. A camera or display delta skipped the frame without reading the requesting browser's mounted `current_figure`. |
 | In-flight build discarded after a complete-frame edit that never scheduled | Recovery requeued only a camera revision. A newer geometry identity was cancelled. Display and overlay clocks still do not requeue. |
 | Projection radio and a delayed store | The server already ignores a store for a different scene. The failure to observe that callback was harness timing, not this publication path. |
 
@@ -57,11 +62,15 @@ must not change scene B, and a stale revision must not replace a newer one.
 `tests/app/test_plotly_relayout_fence_js.py` hold the worker or the Plotly
 relayout call and reorder the scene packets. They do not sleep.
 
-Twenty consecutive runs of those two files completed with no failures:
+Twenty consecutive runs of those two files completed with no failures,
+including after frame supply began using the caller's mounted figure:
 
 ```
 python3 -m pytest tests/app/test_scene_delivery_races.py tests/app/test_plotly_relayout_fence_js.py -q --tb=line
 ```
 
-Each run builds a fresh backend. Five fresh CI browser workers are not claimed
-from this local repeat.
+Each run builds a fresh backend. The two-browser Plotly check is
+`test_second_client_plots_the_scene_after_the_other_clients_camera_change`.
+It passed once locally on an isolated server. Five fresh CI browser workers
+are not claimed from this local repeat, and this pull request does not treat
+the Camera WebGL job as passed until that job is green.
