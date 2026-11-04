@@ -638,8 +638,19 @@
           }
           const touchesCamera=layout["scene.camera"] || (layout.scene && layout.scene.camera) ||
             Object.keys(layout).some(function(key){return key.indexOf("scene.camera.")===0;});
-          if (gestureId && canvasId && gestureId!==canvasId && touchesCamera && gd && gd.__mvSceneCamera && gd.__mvSceneCameraOwner===canvasId) {
-            return Promise.resolve(original.call(this, gd, {"scene.camera": JSON.parse(JSON.stringify(gd.__mvSceneCamera))}));
+          if (!window.__mvRestoreOwnedCamera && gestureId && canvasId && gestureId!==canvasId && touchesCamera) {
+            // The drag belongs to another scene. Restore this canvas only
+            // when its saved camera is actually its own; otherwise drop the
+            // relayout so scene A's gesture cannot reframe scene B.
+            if (gd && gd.__mvSceneCamera && gd.__mvSceneCameraOwner===canvasId) {
+              window.__mvAllowCameraRelayout = true;
+              const restored = original.call(this, gd, {"scene.camera": JSON.parse(JSON.stringify(gd.__mvSceneCamera))});
+              const clearAllow = function () { window.__mvAllowCameraRelayout = false; };
+              if (restored && typeof restored.then === "function") restored.then(clearAllow, clearAllow);
+              else clearAllow();
+              return Promise.resolve(restored);
+            }
+            return Promise.resolve(gd || args[0]);
           }
         }
         if (render&&!figureMetadataIsCurrent(render,target)) return Promise.resolve(args[0]);
@@ -779,7 +790,14 @@
             throw err;
           });
         }
-        return original.apply(this,args);
+        const allowCamera = name === "relayout" && layout && (layout["scene.camera"] || (layout.scene && layout.scene.camera) ||
+          Object.keys(layout).some(function (key) { return key.indexOf("scene.camera.") === 0; }));
+        if (allowCamera) window.__mvAllowCameraRelayout = true;
+        try {
+          return original.apply(this, args);
+        } finally {
+          if (allowCamera) window.__mvAllowCameraRelayout = false;
+        }
       };
       wrapped.__mattervisRenderGate=true;
       wrapped.__mattervisOriginal=original;
@@ -2133,6 +2151,13 @@
     if (gd && window.MatterVisViewCamera && typeof window.MatterVisViewCamera.installWheelZoom === "function") {
       window.MatterVisViewCamera.installWheelZoom(gd);
     }
+    if (gd && typeof gd.on === "function" && !gd.__mvForeignCameraBound) {
+      gd.__mvForeignCameraBound = true;
+      gd.on("plotly_relayout", function () {
+        if (window.__mvAllowCameraRelayout || window.__mvRestoreOwnedCamera) return;
+        restoreOwnedCamera(gestureGeneration, foreignGuardScene());
+      });
+    }
   }
   let rebindScheduled = false;
   let rebindObserver = null;
@@ -2174,6 +2199,12 @@
     if (window.__mvGestureSceneId && age < 450) return;
     const render = renderMetadataFromLayout(gd.layout);
     if (!render) return;
+    const gestureId = window.__mvGestureSceneId ? String(window.__mvGestureSceneId) : "";
+    const canvasId = render.scene_id ? String(render.scene_id) : "";
+    // A gesture that still names another scene must not inherit this
+    // canvas's generation. That copy lets a late relayout pass the server
+    // fence as if the drag had started on the newly mounted scene.
+    if (gestureId && canvasId && gestureId !== canvasId) return;
     if (render.scene_generation !== undefined && render.scene_generation !== null) {
       window.__mvGestureSceneGeneration = render.scene_generation;
     }
@@ -2184,6 +2215,83 @@
     else if (Number.isFinite(live)) revision = live;
     else if (Number.isFinite(metaRev)) revision = metaRev;
     if (revision !== null) window.__mvGestureCameraRevision = revision;
+  }
+  const FOREIGN_CAMERA_CENTER_TOLERANCE = 0.2;
+  function armForeignCameraGuard(generation, sceneId) {
+    window.__mvForeignGuard = sceneId ? {generation: generation, sceneId: String(sceneId)} : null;
+  }
+  function foreignGuardScene() {
+    const guard = window.__mvForeignGuard;
+    if (guard && guard.generation === gestureGeneration && guard.sceneId) return String(guard.sceneId);
+    return window.__mvGestureSceneId ? String(window.__mvGestureSceneId) : "";
+  }
+  function cameraCenterOffset(live, want) {
+    if (!live || !want) return Infinity;
+    const component = function (value, index, key) {
+      const raw = value[index] !== undefined && value[index] !== null ? value[index] : value[key];
+      return Number(raw);
+    };
+    const axes = ["x", "y", "z"];
+    const delta = axes.map(function (key, index) {
+      return component(live, index, key) - component(want, index, key);
+    });
+    if (!delta.every(Number.isFinite)) return Infinity;
+    return Math.hypot(delta[0], delta[1], delta[2]);
+  }
+  function ownedCanvasCamera(gd, canvasId) {
+    if (gd && gd.__mvSceneCamera && gd.__mvSceneCameraOwner === canvasId) return gd.__mvSceneCamera;
+    return (gd && gd.layout && gd.layout.scene && gd.layout.scene.camera) || null;
+  }
+  function releaseGestureScene(generation, stamped) {
+    if (generation !== gestureGeneration) return;
+    if ((window.__mvGestureSceneId || "") === (stamped || "")) window.__mvGestureSceneId = "";
+  }
+  function restoreOwnedCamera(generation, gestureId) {
+    const foreign = gestureId ? String(gestureId) : "";
+    if (!foreign || generation !== gestureGeneration) return;
+    const gd = graphDiv();
+    if (!gd || gd.__mvForeignRestore || !window.Plotly || typeof window.Plotly.relayout !== "function") return;
+    const render = renderMetadataFromLayout(gd.layout);
+    const canvasId = render && render.scene_id ? String(render.scene_id) : "";
+    if (!canvasId || foreign === canvasId) return;
+    const camera = ownedCanvasCamera(gd, canvasId);
+    if (!camera) return;
+    const scene = gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
+    const live = scene && scene.camera && scene.camera.center;
+    if (cameraCenterOffset(live, camera.center) <= FOREIGN_CAMERA_CENTER_TOLERANCE) return;
+    gd.__mvForeignRestore = true;
+    window.__mvRestoreOwnedCamera = true;
+    let pending = null;
+    try {
+      pending = window.Plotly.relayout(gd, {"scene.camera": JSON.parse(JSON.stringify(camera))});
+    } catch (_error) {
+      window.__mvRestoreOwnedCamera = false;
+      gd.__mvForeignRestore = false;
+      return;
+    }
+    const clear = function () {
+      window.__mvRestoreOwnedCamera = false;
+      gd.__mvForeignRestore = false;
+    };
+    if (pending && typeof pending.then === "function") pending.then(clear, clear);
+    else clear();
+  }
+  function scheduleOwnedCameraRestore(generation, gestureId) {
+    if (!gestureId) return;
+    const step = function () {
+      if (generation !== gestureGeneration) return;
+      if ((window.__mvGestureSceneId || "") !== gestureId) return;
+      restoreOwnedCamera(generation, gestureId);
+      if (generation !== gestureGeneration) return;
+      if ((window.__mvGestureSceneId || "") !== gestureId) return;
+      // Plotly can commit the foreign drag after the replacement figure
+      // has already painted. Keep the mounted camera in place until this
+      // gesture's own clear timer runs.
+      if (typeof window.requestAnimationFrame === "function") window.requestAnimationFrame(step);
+      else setTimeout(step, 16);
+    };
+    if (typeof window.requestAnimationFrame === "function") window.requestAnimationFrame(step);
+    else setTimeout(step, 0);
   }
   function stampGestureScene(sceneId, kind) {
     const id = sceneId ? String(sceneId) : "";
@@ -2241,9 +2349,15 @@
   document.addEventListener("pointerup", function() {
     window.__mvGestureEndedAt = Date.now();
     if (interactionActive) markInactiveSoon();
+    const generation = gestureGeneration;
     const stamped = window.__mvGestureSceneId || "";
+    armForeignCameraGuard(generation, stamped);
+    scheduleOwnedCameraRestore(generation, stamped);
     setTimeout(function() {
-      if ((window.__mvGestureSceneId || "") === stamped) window.__mvGestureSceneId = "";
+      // A later pointerdown on the same scene reuses this id. Clearing by
+      // id alone drops that newer drag, and its relayout then lands on
+      // whichever scene is mounted when it commits.
+      releaseGestureScene(generation, stamped);
     }, 1000);
   });
   document.addEventListener("pointercancel", function() {

@@ -54,3 +54,18 @@ store survive from one test to the next when they share a server.
 
 `/_test/render-status` exists only on this test server. It reads worker
 counters and does not mutate the scene.
+
+## Cross-scene camera
+
+A pointer drag is stamped with the scene under the pointer. The stamp
+stays until that drag's own generation ends. A later drag on the same
+scene is a new generation, so the first timer cannot clear it. Plotly may
+commit the camera after another scene is already mounted. That relayout
+is not applied to the mounted scene. The WebGL camera is put back to the
+camera saved for the mounted scene, including when the drag commits
+through Plotly's own relayout event. A gesture that still names the
+other scene does not take the mounted scene's generation, so a late
+capture cannot pass the server fence as a drag that started on the newly
+shown scene. The real-app check is a right-drag on one structure while
+the tab changes to another: the destination center and its stored camera
+stay put.
