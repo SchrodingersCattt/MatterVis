@@ -24,7 +24,9 @@ from a terminal.
 
 The buffer is bounded (default 1000 events) and lock-protected so the
 log can be safely consumed from request handlers while callbacks
-write to it from worker threads.
+write to it from worker threads. ``seq`` is one process-wide counter.
+``clear`` drops the ring and does not restart it, so two records from
+one caller are strictly increasing but not necessarily adjacent.
 """
 from __future__ import annotations
 
