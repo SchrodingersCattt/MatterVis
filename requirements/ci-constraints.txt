@@ -1,0 +1,300 @@
+# CI lock for the merge gate.
+# Python 3.10, 3.11, and 3.12 re-resolve to these same versions on
+# x86_64 manylinux. The compatibility-drift workflow installs without
+# this file. Regenerate from pyproject.toml with a 3.10 resolution;
+# do not widen a pin on the merge gate to chase an upstream release.
+# Package builds use the setuptools and setuptools-scm pins below.
+# setuptools-scm 8.3.1 stays on packaging, setuptools, and tomli.
+#
+annotated-types==0.8.0
+    # via pydantic
+ase==3.29.0
+    # via
+    #   matter-vis (pyproject.toml)
+    #   molcrys-kit
+backports-zstd==1.8.0
+    # via flask-compress
+bibtexparser==2.1.0
+    # via pymatgen
+blinker==1.9.0
+    # via flask
+brotli==1.2.1
+    # via flask-compress
+certifi==2026.10.23
+    # via requests
+cffi==2.1.1
+    # via wgpu
+charset-normalizer==3.5.2
+    # via requests
+choreographer==1.4.0
+    # via kaleido
+click==8.5.0
+    # via
+    #   flask
+    #   molcrys-kit
+cloudpickle==3.1.2
+    # via joblib
+comm==0.2.3
+    # via dash
+contourpy==1.3.2
+    # via matplotlib
+coverage==7.16.2
+    # via pytest-cov
+cycler==0.12.1
+    # via matplotlib
+dash==4.5.0
+    # via matter-vis (pyproject.toml)
+exceptiongroup==1.3.1
+    # via pytest
+execnet==2.1.2
+    # via pytest-xdist
+flask==3.1.3
+    # via
+    #   dash
+    #   flask-compress
+    #   flask-sock
+flask-compress==1.26
+    # via matter-vis (pyproject.toml)
+flask-sock==0.7.0
+    # via matter-vis (pyproject.toml)
+fonttools==4.65.0
+    # via matplotlib
+gemmi==0.7.5
+    # via matter-vis (pyproject.toml)
+h11==0.16.0
+    # via wsproto
+idna==3.20
+    # via requests
+imageio==2.38.0
+    # via
+    #   matter-vis (pyproject.toml)
+    #   scikit-image
+imageio-ffmpeg==0.8.1
+    # via matter-vis (pyproject.toml)
+importlib-metadata==9.0.1
+    # via dash
+iniconfig==2.3.1
+    # via pytest
+itsdangerous==2.2.0
+    # via flask
+janus==2.0.0
+    # via dash
+jinja2==3.1.6
+    # via flask
+joblib==1.6.0
+    # via pymatgen
+kaleido==1.5.0
+    # via matter-vis (pyproject.toml)
+kiwisolver==1.5.1
+    # via matplotlib
+lazy-loader==0.6
+    # via scikit-image
+linkify-it-py==2.2.0
+    # via markdown-it-py
+logistro==2.0.1
+    # via
+    #   choreographer
+    #   kaleido
+markdown-it-py==4.2.0
+    # via
+    #   mdit-py-plugins
+    #   rich
+    #   textual
+markupsafe==3.0.4
+    # via
+    #   flask
+    #   jinja2
+    #   werkzeug
+matplotlib==3.10.9
+    # via
+    #   matter-vis (pyproject.toml)
+    #   ase
+    #   pymatgen
+mdit-py-plugins==0.6.1
+    # via textual
+mdurl==0.1.2
+    # via markdown-it-py
+molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@d02ce08ab28826f87d976aef98fefb8b86998075
+    # via matter-vis (pyproject.toml)
+monty==2025.3.3
+    # via pymatgen
+mpmath==1.3.0
+    # via sympy
+narwhals==2.28.0
+    # via plotly
+nest-asyncio==1.6.0
+    # via dash
+networkx==3.4.2
+    # via
+    #   molcrys-kit
+    #   pymatgen
+    #   scikit-image
+numpy==2.2.6
+    # via
+    #   matter-vis (pyproject.toml)
+    #   ase
+    #   contourpy
+    #   imageio
+    #   matplotlib
+    #   molcrys-kit
+    #   monty
+    #   pandas
+    #   pymatgen
+    #   rendercanvas
+    #   scikit-image
+    #   scipy
+    #   spglib
+    #   tifffile
+orjson==3.13.0
+    # via pymatgen
+packaging==26.3
+    # via
+    #   kaleido
+    #   lazy-loader
+    #   matplotlib
+    #   plotly
+    #   pytest
+    #   scikit-image
+palettable==3.3.3
+    # via pymatgen
+pandas==2.3.3
+    # via pymatgen
+pillow==12.3.0
+    # via
+    #   matter-vis (pyproject.toml)
+    #   imageio
+    #   matplotlib
+    #   scikit-image
+platformdirs==4.12.4
+    # via
+    #   choreographer
+    #   textual
+plotly==7.1.0
+    # via
+    #   matter-vis (pyproject.toml)
+    #   dash
+    #   pymatgen
+pluggy==1.7.0
+    # via
+    #   pytest
+    #   pytest-cov
+pycparser==3.11
+    # via cffi
+pydantic==2.14.2
+    # via dash
+pydantic-core==2.50.2
+    # via pydantic
+pygments==2.21.0
+    # via
+    #   pytest
+    #   rich
+    #   textual
+pylatexenc==2.11
+    # via bibtexparser
+pymatgen==2025.10.7
+    # via molcrys-kit
+pyparsing==3.3.3
+    # via matplotlib
+pytest==9.2.0
+    # via
+    #   matter-vis (pyproject.toml)
+    #   pytest-cov
+    #   pytest-timeout
+    #   pytest-xdist
+pytest-cov==7.1.0
+    # via matter-vis (pyproject.toml)
+pytest-timeout==2.4.0
+    # via matter-vis (pyproject.toml)
+pytest-xdist==3.8.0
+    # via matter-vis (pyproject.toml)
+python-dateutil==3.0.0
+    # via
+    #   matplotlib
+    #   pandas
+pytz==2026.6
+    # via pandas
+rendercanvas==2.7.2
+    # via wgpu
+requests==2.34.2
+    # via
+    #   dash
+    #   pymatgen
+retrying==1.4.2
+    # via dash
+rich==15.0.0
+    # via textual
+ruamel-yaml==0.19.1
+    # via
+    #   monty
+    #   pymatgen
+scikit-image==0.25.2
+    # via matter-vis (pyproject.toml)
+scipy==1.15.3
+    # via
+    #   ase
+    #   molcrys-kit
+    #   pymatgen
+    #   scikit-image
+setuptools==84.2.1
+    # via
+    #   dash
+    #   matter-vis (pyproject.toml build-system)
+setuptools-scm==8.3.1
+    # via matter-vis (pyproject.toml build-system)
+simple-websocket==1.1.0
+    # via flask-sock
+simplejson==4.2.0
+    # via choreographer
+six==1.17.0
+    # via python-dateutil
+spglib==2.7.0
+    # via pymatgen
+sympy==1.14.0
+    # via pymatgen
+tabulate==0.10.0
+    # via pymatgen
+textual==8.2.8
+    # via matter-vis (pyproject.toml)
+tifffile==2025.5.10
+    # via scikit-image
+tomli==2.5.0
+    # via
+    #   matter-vis (pyproject.toml)
+    #   coverage
+    #   pytest
+tqdm==4.70.1
+    # via pymatgen
+typing-extensions==4.16.0
+    # via
+    #   ase
+    #   dash
+    #   exceptiongroup
+    #   pydantic
+    #   pydantic-core
+    #   spglib
+    #   textual
+    #   typing-inspection
+typing-inspection==0.4.4
+    # via pydantic
+tzdata==2026.6
+    # via
+    #   pandas
+    #   python-dateutil
+uncertainties==3.2.3
+    # via pymatgen
+urllib3==2.8.0
+    # via requests
+werkzeug==3.1.9
+    # via
+    #   dash
+    #   flask
+wgpu==0.31.0
+    # via matter-vis (pyproject.toml)
+wsproto==1.3.2
+    # via simple-websocket
+zipp==4.1.2
+    # via importlib-metadata
+build==1.6.1
+    # via CI package build
+pyproject-hooks==1.3.3
+    # via build
