@@ -2245,8 +2245,19 @@
     const kind = window.__mvGestureKind ? String(window.__mvGestureKind) : "";
     if (kind === "wheel") return;
     const ended = Number(window.__mvGestureEndedAt || 0);
+    // An in-progress drag keeps the revision from pointerdown. Reset can
+    // still win that commit. The pointer-up relayout is the one camera
+    // event that belongs to the gesture: it keeps the same revision.
+    // Any later relayout, even inside the settle window, is a new command
+    // and must read the live clock. Leaving it on the gesture revision
+    // makes the server reject a same-scene refit, and the offscreen view
+    // stays where the drag put it.
+    if (!ended && window.__mvGestureSceneId) return;
     const age = ended ? (Date.now() - ended) : 0;
-    if (window.__mvGestureSceneId && age < 450) return;
+    if (window.__mvGestureSceneId && age < 450 && !window.__mvGesturePointerRelayoutSeen) {
+      window.__mvGesturePointerRelayoutSeen = true;
+      return;
+    }
     const render = renderMetadataFromLayout(gd.layout);
     if (!render) return;
     const gestureId = window.__mvGestureSceneId ? String(window.__mvGestureSceneId) : "";
@@ -2392,9 +2403,17 @@
   document.addEventListener("pointerdown", function(e) {
     if (!inGraph(e.target)) return;
     window.__mvGestureEndedAt = 0;
+    window.__mvGesturePointerRelayoutSeen = false;
     const sceneId = canvasSceneId() || window.__mvGestureSceneId || "";
     stampGestureScene(sceneId, "pointer");
     markActive();
+  }, true);
+  document.addEventListener("pointerup", function() {
+    // Capture runs before Plotly's pointerup relayout. The ended clock has
+    // to be set first so that relayout is the gesture's own commit, and a
+    // command that follows it can read the live revision.
+    window.__mvGestureEndedAt = Date.now();
+    window.__mvGesturePointerRelayoutSeen = false;
   }, true);
   document.addEventListener("pointerup", function() {
     window.__mvGestureEndedAt = Date.now();

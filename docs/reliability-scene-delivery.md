@@ -25,6 +25,10 @@ must not change scene B, and a stale revision must not replace a newer one.
   mounted canvas. It restores the mounted scene's own saved camera only when
   that camera belongs to the mounted scene. A settled gesture does not copy
   the mounted scene's generation onto a gesture that still names another scene.
+  The pointer-up relayout keeps the revision from gesture start. A later
+  camera relayout on that same scene reads the live camera clock, including
+  inside the settle window, so the server can accept a refit of an offscreen
+  drag.
 - `update_view` classifies a callback against the previous snapshot of the
   same scene. That snapshot is process-wide and is not a substitute for the
   requesting browser's mounted figure. Camera, overlay, and ordinary display
