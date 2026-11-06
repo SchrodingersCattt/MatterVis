@@ -84,6 +84,15 @@ command on the same scene also needs this acknowledgement so the projection
 radio cannot remain on the previous value after a superseded poll. A
 server-side "filled controls" flag alone cannot confirm browser delivery.
 
+A pointer-drag relayout whose gesture scene is not the mounted canvas is
+not applied there. The canvas is restored only from a camera saved for
+that same scene, including a drag Plotly commits after the tab has
+changed. The scene stamp is cleared only for the generation that armed
+it, so a second drag on the same scene is not dropped while the first
+timer is still running. The gesture also does not inherit the mounted
+scene's generation, so a late capture cannot satisfy the server fence as
+a drag that started after the tab change.
+
 Partial camera captures merge against the revision-fenced backend camera,
 not the Dash camera store, which may still predate a projection command.
 The relayout decoder must preserve both dotted projection forms as well as

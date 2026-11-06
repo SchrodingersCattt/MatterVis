@@ -34,12 +34,15 @@ module.exports = async function projectionMixed(page, clickTab, waitForServerSta
       return state.projection === projection && state.camera && state.camera.eye;
     }, projection);
   }
-  // Six unchanged, idle seconds cover multiple normal Dash polls and exclude
-  // an earlier worker frame that could otherwise hide a missing camera event.
+  // Six unchanged journal cursors, sampled once a second, cover multiple
+  // normal Dash polls. The sample gap observes quiescence; it does not
+  // stand in for a scene revision that has not arrived yet.
+  const QUIET_SAMPLE_MS = 1000;
+  const QUIET_SAMPLES = 6;
   let stable = 0, previousCursor = -1, before;
   const deadline = Date.now() + 45000;
-  while (Date.now() < deadline && stable < 6) {
-    await page.waitForTimeout(1000);
+  while (Date.now() < deadline && stable < QUIET_SAMPLES) {
+    await page.waitForTimeout(QUIET_SAMPLE_MS);
     before = await snapshot();
     const {state, meta, controls, status} = before;
     const ready = !status.pending.render && !status.pending.topology && !status.pending_state
@@ -50,7 +53,7 @@ module.exports = async function projectionMixed(page, clickTab, waitForServerSta
     stable = ready ? stable + 1 : 0;
     previousCursor = status.cursor;
   }
-  if (stable < 6) throw new Error('mixed projection initial scene never settled: ' + JSON.stringify(before));
+  if (stable < QUIET_SAMPLES) throw new Error('mixed projection initial scene never settled: ' + JSON.stringify(before));
   const projection = before.projection === 'orthographic' ? 'perspective' : 'orthographic';
   const opacity = 0.31;
   const result = await page.evaluate(async ({id, projection, opacity, cursor}) => {
