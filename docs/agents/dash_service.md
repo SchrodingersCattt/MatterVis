@@ -136,9 +136,11 @@ Notes for callers:
   (including `atom_scale` and `display_mode`) enqueues
   `AsyncRenderWorker` at the backend write. The open page does not wait
   for Dash `update_view`. Camera, overlay, and ordinary display patches
-  stay on the lightweight `view_update` envelope. Flat ORTEP still
-  rebuilds its image when the camera changes, because the camera basis
-  is rasterized into that image.
+  stay on the lightweight `view_update` envelope when the requesting
+  page's mounted figure is already that scene. A page whose mounted
+  figure still belongs to another scene receives the selected scene's
+  complete frame instead. Flat ORTEP still rebuilds its image when the
+  camera changes, because the camera basis is rasterized into that image.
 - `pending_state` is armed for a broadcast write to the active scene
   (REST `POST /state`, WebSocket `set_state`, and external `/intent`
   calls). The existing agent-state poll writes the matching page's
@@ -150,9 +152,13 @@ Notes for callers:
   `scene_catalog` envelope to the same journal and include
   `scene_catalog` on the WebSocket snapshot and on `GET /view-updates`.
   The page rebuilds its existing tab strip from that message. The
-  selected tab stays put. `POST /scenes/active` and a `set_active_scene`
-  intent set `focus: true` and move the open tab. Deleting the selected
-  scene moves the page to the scene that remains active.
+  selected tab stays put, except on the page that clicked Duplicate:
+  that page selects the catalog `active_id` locally. `focus` stays
+  false for create, rename, delete, reorder, duplicate, and undo, so
+  other open pages do not move. `POST /scenes/active` and a
+  `set_active_scene` intent set `focus: true` and move every open tab.
+  Deleting the selected scene moves the page to the scene that remains
+  active.
 - `POST /intent` and a WebSocket `intent` message broadcast to the open
   page. The same intent types, when the Dash UI calls them in-process,
   still suppress that echo so a drag or a local style edit is not
@@ -171,8 +177,14 @@ Notes for callers:
   `scene_id`, `render_revision`, and `server_started_at`. Reset/align revisions
   invalidate in-flight frames even when molecular geometry has not changed.
   Cache hits refresh both layout and scene `uirevision` through the existing
-  style owner. Clients preserve the live camera only for the same scene, server
-  epoch and `uirevision`; explicit camera revisions use the supplied camera.
+  style owner. `uirevision` includes the scene id, structure name, camera
+  revision, and viewport signature, so two scenes that share a structure and
+  camera do not keep one WebGL camera. Clients preserve the live camera only
+  for the same scene, server epoch and `uirevision`; explicit camera revisions
+  use the supplied camera. A duplicate scene schedules its own complete frame.
+  An in-flight build publishes only for its current scene identity; a newer
+  complete-frame identity is requeued and an older one cannot roll that scene
+  back.
 - The backend commit schedules ordinary complete frames through the render
   worker. The built-in Dash view reads the validated frame journal and
   requests a build only when that journal is behind the committed revision.

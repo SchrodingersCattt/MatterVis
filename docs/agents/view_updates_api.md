@@ -57,9 +57,11 @@ The same journal also carries scene-list envelopes:
 
 `GET /view-updates` repeats the current catalog as `scene_catalog`, and the
 WebSocket state snapshot includes the same object. `focus` is false for
-create, rename, and delete. It is true only for an explicit active-scene
-request. The browser applies one catalog reconciler to the existing scene-tab
-callback and ignores an older `scene_catalog_seq`.
+create, rename, delete, reorder, duplicate, and undo. It is true only for an
+explicit active-scene request. The browser applies one catalog reconciler to
+the existing scene-tab callback and ignores an older `scene_catalog_seq`.
+The page that clicked Duplicate selects that catalog's `active_id` in the
+browser. Other pages keep the selected tab while `focus` is false.
 Flat ORTEP also queues its combined image in the background because its
 camera basis is rasterized into the image.
 When a scene has no saved camera, the mixed camera envelope contains only

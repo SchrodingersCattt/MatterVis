@@ -834,6 +834,22 @@
     // old figure is still mounted. Keep the retry bounded, but long enough to
     // bridge that handoff instead of dropping the only complete frame.
     if (attempt >= 120) {
+      const selected = typeof currentSceneId === "function" ? currentSceneId() : null;
+      // The selected scene reports a missed paint and drops its frame. A
+      // frame for a scene that is not selected stays parked: the duplicating
+      // page can still be on the source tab when this budget ends, and
+      // deleting the copy's only complete frame leaves the old title up.
+      if (selected && String(selected) !== key) return;
+      if (selected && String(selected) === key) {
+        const message = "Scene frame was not applied";
+        const statusNode = document.getElementById("mv-render-status");
+        if (statusNode) {
+          statusNode.hidden = false;
+          statusNode.textContent = message;
+          statusNode.setAttribute("data-level", "error");
+        }
+        window.__mvRenderStatus = {scene_id: key, level: "error", message: message};
+      }
       delete pendingFigureByScene[key];
       return;
     }
@@ -1132,6 +1148,31 @@
     return false;
   }
 
+  function claimOwnDuplicatedScene(message) {
+    // Catalog publication uses focus:false so other open pages keep their
+    // tab. The page that clicked Duplicate still has to land on the new
+    // scene; otherwise the copy's figure stays parked and the canvas title
+    // remains the source scene.
+    if (!window.__mvOwnSceneFocus) return;
+    var nextId = message && message.active_id;
+    if (nextId === null || nextId === undefined || nextId === "") return;
+    window.__mvOwnSceneFocus = false;
+    var selected = "";
+    try { selected = String(currentSceneId() || ""); } catch (_) { selected = ""; }
+    if (String(nextId) === selected) return;
+    nextId = String(nextId);
+    if (typeof window.MatterVisSelectScene === "function") window.MatterVisSelectScene(nextId);
+    if (window.dash_clientside && typeof window.dash_clientside.set_props === "function") {
+      window.dash_clientside.set_props("scene-tabs", {value: nextId});
+    }
+    if (typeof flushQueuedSceneFigure === "function") {
+      flushQueuedSceneFigure(nextId);
+      [0, 50, 250].forEach(function (delay) {
+        setTimeout(function () { flushQueuedSceneFigure(nextId); }, delay);
+      });
+    }
+  }
+
   function reconcileSceneCatalog(message) {
     try {
       if (!message || typeof message !== "object" || !Array.isArray(message.scenes)) return;
@@ -1152,6 +1193,7 @@
         seq: seq,
         focus: !!message.focus || (sameSeq && !!applied.focus),
       };
+      claimOwnDuplicatedScene(message);
       if (!domDiffers && !focusSwitch) return;
       setDashStore("scene-event-store", {
         seq: Date.now(),
@@ -1682,6 +1724,14 @@
     });
   }
 
+  if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+    document.addEventListener("click", function (event) {
+      var button = event.target && event.target.closest && event.target.closest("#scene-new-tab-btn");
+      if (!button) return;
+      window.__mvOwnSceneFocus = true;
+    }, true);
+  }
+
   document.addEventListener("click", function (event) {
     const select = event.target && event.target.closest && event.target.closest(".tab-select");
     if (select) {
@@ -2195,8 +2245,19 @@
     const kind = window.__mvGestureKind ? String(window.__mvGestureKind) : "";
     if (kind === "wheel") return;
     const ended = Number(window.__mvGestureEndedAt || 0);
+    // An in-progress drag keeps the revision from pointerdown. Reset can
+    // still win that commit. The pointer-up relayout is the one camera
+    // event that belongs to the gesture: it keeps the same revision.
+    // Any later relayout, even inside the settle window, is a new command
+    // and must read the live clock. Leaving it on the gesture revision
+    // makes the server reject a same-scene refit, and the offscreen view
+    // stays where the drag put it.
+    if (!ended && window.__mvGestureSceneId) return;
     const age = ended ? (Date.now() - ended) : 0;
-    if (window.__mvGestureSceneId && age < 450) return;
+    if (window.__mvGestureSceneId && age < 450 && !window.__mvGesturePointerRelayoutSeen) {
+      window.__mvGesturePointerRelayoutSeen = true;
+      return;
+    }
     const render = renderMetadataFromLayout(gd.layout);
     if (!render) return;
     const gestureId = window.__mvGestureSceneId ? String(window.__mvGestureSceneId) : "";
@@ -2342,9 +2403,17 @@
   document.addEventListener("pointerdown", function(e) {
     if (!inGraph(e.target)) return;
     window.__mvGestureEndedAt = 0;
+    window.__mvGesturePointerRelayoutSeen = false;
     const sceneId = canvasSceneId() || window.__mvGestureSceneId || "";
     stampGestureScene(sceneId, "pointer");
     markActive();
+  }, true);
+  document.addEventListener("pointerup", function() {
+    // Capture runs before Plotly's pointerup relayout. The ended clock has
+    // to be set first so that relayout is the gesture's own commit, and a
+    // command that follows it can read the live revision.
+    window.__mvGestureEndedAt = Date.now();
+    window.__mvGesturePointerRelayoutSeen = false;
   }, true);
   document.addEventListener("pointerup", function() {
     window.__mvGestureEndedAt = Date.now();

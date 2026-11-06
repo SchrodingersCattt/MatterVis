@@ -41,7 +41,7 @@ Derived state must not be persisted as independent truth.
 | `show_labels` | `"labels" in display_options` plus label mode. |
 | `monochrome` | Atom-group rule, not a display option. |
 | `fast_rendering` | Derived from explicit setting plus the explicitly selected `material == "flat"`; never from atom count. |
-| `uirevision` | Function of scene name, `camera_revision`, and viewport signature. |
+| `uirevision` | Function of scene id, scene name, `camera_revision`, and viewport signature. |
 | `fragment_options` | Derived from resolved scene fragment table. |
 | `topology_payload` | Derived from scene geometry, selected site, cutoff, and specs. |
 | `figure` | Derived from render model, topology payload, style, and compatible camera. |

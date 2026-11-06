@@ -250,7 +250,42 @@ def claim_browser_scene(client_id, scene_id, filled: dict, epoch=None) -> None:
                 and observed > _browser_epochs.get(str(client_id), 0)
             ):
                 _browser_epochs[str(client_id)] = observed
-        filled["id"] = delivered
+        _remember_filled_scene_locked(filled, client_id, delivered)
+
+
+def _remember_filled_scene_locked(filled: dict, client_id, scene_id) -> None:
+    """Point the capture guard at ``scene_id`` while ``_fence_lock`` is held."""
+    delivered = str(scene_id or "")
+    filled["id"] = delivered
+    if not client_id:
+        return
+    clients = filled.get("by_client")
+    if not isinstance(clients, dict):
+        clients = {}
+        filled["by_client"] = clients
+    clients[str(client_id)] = delivered
+
+
+def remember_filled_scene(filled: dict, client_id, scene_id) -> None:
+    """Record the scene whose controls were just published for one browser.
+
+    ``filled["id"]`` stays the last writer so an unfenced caller keeps the
+    historical guard. ``filled["by_client"]`` is the per-browser guard.
+    """
+    with _fence_lock:
+        _remember_filled_scene_locked(filled, client_id, scene_id)
+
+
+def filled_scene_id(filled: dict, client_id=None) -> str:
+    """Scene id the next sidebar capture may write for this browser."""
+    with _fence_lock:
+        if client_id:
+            clients = filled.get("by_client")
+            if isinstance(clients, dict):
+                recorded = clients.get(str(client_id))
+                if recorded:
+                    return str(recorded)
+        return str(filled.get("id") or "")
 
 
 def poll_request_is_stale(client_id, scene_id, epoch, *, supplied: bool) -> bool:
@@ -280,7 +315,7 @@ def claim_poll_publish(
                 _browser_epochs[key] = int(0 if epoch is None else epoch)
             except (TypeError, ValueError):
                 return False
-        filled["id"] = delivered
+        _remember_filled_scene_locked(filled, client_id, delivered)
         return True
 
 

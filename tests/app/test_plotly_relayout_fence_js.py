@@ -19,6 +19,7 @@ const source = fs.readFileSync(process.argv[1], 'utf8');
 const end = source.indexOf('  function stampGestureScene(');
 if (end < 0) throw new Error('gesture stamp not found');
 const calls = [];
+const status = {hidden: true, textContent: '', attrs: {}, setAttribute(name, value) { this.attrs[name] = value; }};
 const gd = {
   layout: {
     scene: {camera: {eye: {x: 1, y: 0, z: 0}, center: {x: 0, y: 0, z: 0}, up: {x: 0, y: 0, z: 1}}},
@@ -36,6 +37,7 @@ const document = {
   body: null,
   documentElement: null,
   getElementById(id) {
+    if (id === 'mv-render-status') return status;
     if (id === 'fast-view-metadata') {
       return {textContent: JSON.stringify({scene_id: 'scene-a', render_revision: 1, server_started_at: 'epoch'})};
     }
@@ -63,6 +65,9 @@ window.__mvFenceTest = {
   mark: markActive,
   release: releaseGestureScene,
   generation: function() { return gestureGeneration; },
+  park(id, figure) { pendingFigureByScene[String(id)] = {figure: figure}; },
+  parked(id) { return pendingFigureByScene[String(id)]; },
+  retry: scheduleQueuedSceneFigureRetry,
 };
 })();`, sandbox);
 
@@ -93,6 +98,25 @@ const fence = sandbox.window.__mvFenceTest;
   fence.refresh(gd, {'scene.camera': {eye: {x: 1, y: 0, z: 0}}});
   assert.equal(sandbox.window.__mvGestureSceneGeneration, 7, 'same-scene gesture did not take the live generation');
 
+  sandbox.window.__mvGestureSceneId = 'canvas-b';
+  sandbox.window.__mvGestureKind = 'pointer';
+  sandbox.window.__mvGestureEndedAt = 0;
+  sandbox.window.__mvGesturePointerRelayoutSeen = false;
+  sandbox.window.__mvGestureCameraRevision = 1;
+  sandbox.window.__mvGestureSceneGeneration = 4;
+  gd.__mvCameraRevision = 2;
+  gd.layout.meta.mattervis_render.camera_revision = 1;
+  gd.layout.meta.mattervis_render.scene_generation = 7;
+  fence.refresh(gd, {'scene.camera': {eye: {x: 1, y: 0, z: 0}}});
+  assert.equal(sandbox.window.__mvGestureCameraRevision, 1, 'an in-progress drag kept the gesture revision');
+  assert.equal(sandbox.window.__mvGesturePointerRelayoutSeen, false, 'an in-progress drag consumed the pointer-up relayout');
+  sandbox.window.__mvGestureEndedAt = Date.now();
+  fence.refresh(gd, {'scene.camera': {eye: {x: 1, y: 0, z: 0}}});
+  assert.equal(sandbox.window.__mvGestureCameraRevision, 1, 'the pointer-up relayout kept the gesture revision');
+  fence.refresh(gd, {'scene.camera': {eye: {x: 0, y: 0, z: 50}}});
+  assert.equal(sandbox.window.__mvGestureCameraRevision, 2, 'a later same-scene relayout did not read the live camera clock');
+  assert.equal(sandbox.window.__mvGestureSceneGeneration, 7, 'a later same-scene relayout did not take the live generation');
+
   sandbox.window.__mvGestureSceneId = 'scene-a';
   fence.mark();
   const firstGeneration = fence.generation();
@@ -101,6 +125,18 @@ const fence = sandbox.window.__mvFenceTest;
   assert.equal(sandbox.window.__mvGestureSceneId, 'scene-a', 'a newer drag on the same scene was cleared');
   fence.release(fence.generation(), 'scene-a');
   assert.equal(sandbox.window.__mvGestureSceneId, '', 'the active drag was not released');
+
+  fence.park('scene-a', {data: [], layout: {meta: {mattervis_render: {scene_id: 'scene-a', render_revision: 1}}}});
+  fence.retry('scene-a', 120);
+  assert.equal(status.textContent, 'Scene frame was not applied');
+  assert.equal(status.attrs['data-level'], 'error');
+  assert.equal(sandbox.window.__mvRenderStatus.scene_id, 'scene-a');
+  assert.equal(fence.parked('scene-a'), undefined);
+
+  fence.park('scene-b', {data: [], layout: {meta: {mattervis_render: {scene_id: 'scene-b', render_revision: 1}}}});
+  fence.retry('scene-b', 120);
+  assert.equal(fence.parked('scene-b').figure.layout.meta.mattervis_render.scene_id, 'scene-b');
+  assert.equal(status.textContent, 'Scene frame was not applied');
 })().catch((error) => {
   console.error(error);
   process.exit(1);

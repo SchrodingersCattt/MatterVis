@@ -108,11 +108,25 @@ publishes a lightweight `view_update` when it does not. The page applies
 those journal envelopes over the existing WebSocket, falling back to
 `GET /api/v2/view-updates`. Scene-list changes travel in the same snapshot
 and journal as `scene_catalog`. The page rebuilds the existing tab strip
-and keeps the selected tab unless the caller explicitly focuses a scene or
-the selected scene has been removed. Control widgets follow the existing
+and keeps the selected tab unless the caller explicitly focuses a scene,
+the selected scene has been removed, or this page clicked Duplicate. That
+click selects the new scene on this page only. Other pages keep their tab
+because the catalog is published with `focus: false`. Control widgets follow the existing
 agent-state poll, which re-reads the selected scene when its version clocks
 move. In-process GUI edits that already own the gesture do not echo that
 gesture back through the poll.
+
+Publication is scene-scoped. A figure, camera, or sidebar capture for
+scene A does not apply to scene B. `layout.scene.uirevision` includes the
+scene id, so two scenes that share a structure and viewport do not keep
+one WebGL camera. Duplicating a scene schedules a complete frame for the
+copy. A build that is already running is published only when its
+generation, render revision, and camera revision are still current; a
+newer complete-frame identity is requeued, and an older one is dropped.
+`update_view` supplies that frame from the requesting browser's mounted
+figure: a process-wide camera or display classification does not skip the
+frame when the mounted figure still belongs to another scene. The delivery
+contract is `docs/reliability-scene-delivery.md`.
 
 ## Documentation of the render interface
 

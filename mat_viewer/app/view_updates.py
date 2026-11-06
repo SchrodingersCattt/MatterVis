@@ -217,6 +217,33 @@ def committed_render_kind(
     return None
 
 
+def mounted_scene_id(figure: Any) -> str:
+    """Return the scene id stamped on a caller's mounted Plotly figure.
+
+    Dash passes that figure as callback state for the requesting browser.
+    A process-wide snapshot of the same scene does not say whether this
+    caller is still showing a different one.
+    """
+
+    if not isinstance(figure, Mapping):
+        return ""
+    layout = figure.get("layout")
+    if not isinstance(layout, Mapping):
+        return ""
+    meta = layout.get("meta")
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except (TypeError, ValueError):
+            return ""
+    if not isinstance(meta, Mapping):
+        return ""
+    render = meta.get("mattervis_render")
+    if not isinstance(render, Mapping):
+        return ""
+    return str(render.get("scene_id") or "")
+
+
 def classify_change(
     before: Mapping[str, Any] | None,
     after: Mapping[str, Any] | None,
