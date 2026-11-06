@@ -924,9 +924,18 @@ async function runSemanticPick(page) {
     return page.evaluate(({kind,exclude})=>{
       const api=window.MatterVisScenePicking,gd=window.MatterVisSemantic.graph(),idx=api.index(gd);
       if(!idx) return null;
+      const graph=document.getElementById('crystal-graph');
+      // The pick index does not know about the appearance panel. A midpoint
+      // that lands on that panel never reaches the canvas, so it is not a click.
+      function onCanvas(x, y) {
+        const el = document.elementFromPoint(x, y);
+        if (!el || !graph || !graph.contains(el)) return false;
+        return !(el.closest && el.closest('#mv-selection-appearance,.mv-canvas-toolbar,.modebar,.mv-hover-inspector'));
+      }
       for(const p of idx.primitives) {
         if(!p.target || p.target.kind!==kind || p.target.id===exclude) continue;
         const q=p.p || (p.type==='bond' ? [(p.a[0]+p.b[0])/2,(p.a[1]+p.b[1])/2] : [(p.a[0]+p.b[0]+p.c[0])/3,(p.a[1]+p.b[1]+p.c[1])/3]);
+        if(!onCanvas(q[0], q[1])) continue;
         const hit=api.hits(gd,q[0],q[1]);
         if(hit && hit[0] && hit[0].id===p.target.id) return {x:q[0],y:q[1],target:p.target};
       }
