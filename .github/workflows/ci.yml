@@ -287,14 +287,6 @@ jobs:
           path: browser-artifacts/
           if-no-files-found: ignore
 
-      - name: Upload browser failure artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: browser-artifacts
-          path: browser-artifacts/
-          if-no-files-found: ignore
-
   benchmark-smoke:
     name: Benchmark manifest smoke
     runs-on: ubuntu-24.04
