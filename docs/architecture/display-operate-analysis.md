@@ -57,6 +57,8 @@ Present site or structure properties require a policy of `copy`,
 `transform`, `recompute`, or `drop` with a reason. Energy and stress are
 not silently copied onto a supercell. For a rotation, `transform` rotates
 Cartesian `forces` and `velocities` and replaces `adp` with `R U R^T`.
+That rotation applies to the moving rigid body, including a bond-axis
+atom whose position stays put. The fixed side keeps its original tensor.
 `copy` keeps the stored numbers. Preview candidates are readable at
 `GET /api/v2/operate/candidates/<candidate_id>` before commit.
 

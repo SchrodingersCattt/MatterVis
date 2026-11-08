@@ -74,8 +74,10 @@ These geometric edits preserve the input bond graph and do not relax the
 structure. On the moved atoms, per-atom `u_cart` and a `transform` policy
 for `adp` become `R U R^T`. A `transform` policy for `forces` or
 `velocities` rotates those Cartesian vectors. `copy` keeps the stored
-numbers. The fixed side of a fragment rotation is not rotated. Translations
-do not rotate vectors or tensors.
+numbers. The fixed side of a fragment rotation keeps its tensors and
+vectors. An atom on the moving side is rotated with that fragment even
+when it lies on the bond axis and its Cartesian position does not change.
+Translations do not rotate vectors or tensors.
 
 `reperceive_bonds` builds a revision-local candidate using `bond_scale` and an
 optional list of `{ "elements": ["C", "O"], "distance_A": 1.7 }` thresholds.

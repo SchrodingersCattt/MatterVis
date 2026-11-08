@@ -7,7 +7,8 @@
         "molcrys_kit_revision": "d02ce08ab28826f87d976aef98fefb8b86998075"
       },
       "validated_molcrys_kit_revisions": [
-        "602487aac447e6bbb22408d2194ba7aa67fcf488"
+        "602487aac447e6bbb22408d2194ba7aa67fcf488",
+        "f4f81afa4f2b57ad7fa8e88e4816cbcb96a30556"
       ],
       "fixture": {
         "path": "scripts/data/DAP-4.cif",
