@@ -30,9 +30,9 @@ dependencies = [
     "ase",
     # PyPI 0.8.0 does not include BondRecord.role,
     # MolecularCrystal.get_connectivity_report(), or find_polyhedra
-    # disorder_policy (major / exclusive / as_refined). Track the merged
-    # commit 602487aa until those APIs are published, then restore a version
-    # range. Do not invent a PyPI version for this commit.
+    # disorder_policy (major / exclusive / as_refined). Track proposed commit
+    # 602487aa until those APIs are published, then restore a version range.
+    # Do not invent a PyPI version for this commit.
     # identify_molecules defaults to as_refined; only shell construction
     # defaults to major. Exclusive shell selection keeps whole orientations.
     "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@602487aac447e6bbb22408d2194ba7aa67fcf488",
