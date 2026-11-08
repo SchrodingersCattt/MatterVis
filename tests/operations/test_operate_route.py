@@ -75,3 +75,50 @@ def test_operate_route_rejects_missing_and_mismatched_targets(tmp_path):
         assert backend.effect_session().current_ref("urea").revision == revision
     finally:
         backend.close(wait=False)
+
+
+def test_preview_candidate_snapshot_exposes_sites_and_bonds(tmp_path):
+    backend, client = _client(tmp_path)
+    try:
+        scene_id = backend.active_scene_id()
+        preview = client.post(
+            "/api/v2/operate",
+            json={
+                "command": "build_supercell",
+                "params": {"a": 2, "b": 1, "c": 1},
+                "structure_id": "urea",
+                "scene_id": scene_id,
+                "expected_revision": 1,
+                "preview": True,
+            },
+        )
+        assert preview.status_code == 200
+        body = preview.get_json()
+        assert body["effect"] == "preview"
+        assert body["candidate_snapshot_path"] == f"/api/v2/operate/candidates/{body['candidate_id']}"
+        assert "sites" not in body
+        assert "bonds" not in body
+        snapshot = client.get(body["candidate_snapshot_path"])
+        assert snapshot.status_code == 200
+        payload = snapshot.get_json()
+        source = backend.effect_session().snapshot(structure_id="urea")
+        sites = payload["snapshot"]["sites"]
+        bonds = payload["snapshot"]["bonds"]
+        assert payload["preview"] is True
+        assert payload["input"]["revision"] == 1
+        assert payload["status"] == "preview"
+        assert len(sites) == source.n_sites * 2
+        assert len(sites[0]["cartesian"]) == 3
+        assert "molecule_index" in sites[0]
+        assert "image_shift" in sites[0]
+        assert bonds
+        assert {"left_site_id", "right_site_id", "distance_A"} <= set(bonds[0])
+        assert backend.effect_session().current_ref("urea").revision == 1
+        missing = client.get("/api/v2/operate/candidates/cand-missing")
+        assert missing.status_code == 404
+        cancelled = client.post("/api/v2/operate/cancel", json={"candidate_id": body["candidate_id"]})
+        assert cancelled.status_code == 200
+        denied = client.get(body["candidate_snapshot_path"])
+        assert denied.status_code == 400
+    finally:
+        backend.close(wait=False)

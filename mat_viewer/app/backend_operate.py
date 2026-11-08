@@ -159,6 +159,10 @@ class _OperateBackendMixin:
             payload = view.to_dict()
             payload["scene_id"] = pinned_scene
             payload["effect"] = "preview"
+            if view.status != "cancelled":
+                payload["candidate_snapshot_path"] = (
+                    f"/api/v2/operate/candidates/{view.candidate_id}"
+                )
             return payload
         source_label = str(state.get("scene_label") or bundle_name)
         try:

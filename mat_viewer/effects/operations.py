@@ -19,10 +19,6 @@ from molcrys_kit.operations import (
     create_supercell,
     generate_topological_slab,
     remove_solvents,
-    rotate_fragment_in_crystal,
-    rotate_molecule,
-    translate_atom,
-    translate_molecule,
 )
 
 from .errors import (
@@ -38,6 +34,11 @@ from .materialize import (
     replace_symbols,
 )
 from .refs import parse_image
+from .site_geometry import (
+    STALE_REPERCEPTION_KEYS,
+    coordinate_edit,
+    rebase_unwrapped_image_shifts,
+)
 
 
 @dataclass
@@ -49,6 +50,8 @@ class Outcome:
     invalid_structure_fields: set[str] = field(default_factory=lambda: {"energy", "stress"})
     status: str = "ok"
     provenance: dict[str, Any] = field(default_factory=dict)
+    # Source global index -> active Cartesian rotation applied to that site.
+    site_orientations: dict[int, tuple[tuple[float, float, float], ...]] = field(default_factory=dict)
 
 
 def run_operation(command: str, crystal, params: Mapping[str, Any] | None) -> Outcome:
@@ -284,72 +287,38 @@ def replace_species(crystal, params: Mapping[str, Any]) -> Outcome:
 
 
 def transform_coordinates(command: str, crystal, params: Mapping[str, Any]) -> Outcome:
-    """Apply a source-site geometry edit through MolCrysKit's public operations."""
-    records = {str(record.site_id): record for record in crystal.get_site_records()}
-    if command == "rotate_fragment":
-        sites = params.get("sites")
-        if not isinstance(sites, (list, tuple)) or len(sites) != 2:
-            raise ValidationError("rotate_fragment requires two ordered source sites")
-        ordered = []
-        for site in sites:
-            parsed = _explicit_source_sites({"sites": [site]})
-            ordered.append(next(iter(parsed)))
-        if any(site_id not in records for site_id in ordered):
-            raise ValidationError("rotate_fragment references an unknown source site")
-        left, right = (records[site_id] for site_id in ordered)
-        if left.molecule_index != right.molecule_index:
-            raise ValidationError("fragment bond sites must belong to the same molecule")
-        try:
-            angle = float(params["angle"])
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ValidationError("angle must be a finite number in degrees") from exc
-        if not np.isfinite(angle):
-            raise ValidationError("angle must be a finite number in degrees")
-        result = rotate_fragment_in_crystal(
-            crystal, int(left.molecule_index), int(left.local_index), int(right.local_index),
-            angle, moving_side=str(params.get("moving_side") or "j"),
-        )
-        details = {"sites": ordered, "angle": angle, "moving_side": str(params.get("moving_side") or "j")}
-    else:
-        targets = _explicit_source_sites(params)
-        missing = sorted(targets - set(records))
-        if missing:
-            raise ValidationError("unknown site ids: " + ", ".join(missing))
-        result = crystal
-        if command in {"translate_atom", "translate_molecule"}:
-            vector = np.asarray(params.get("vector"), dtype=float)
-            if vector.shape != (3,) or not np.all(np.isfinite(vector)):
-                raise ValidationError("vector must contain three finite Cartesian displacements in Å")
-            if command == "translate_atom":
-                for site_id in sorted(targets):
-                    record = records[site_id]
-                    result = translate_atom(result, int(record.molecule_index), int(record.local_index), vector)
-            else:
-                for index in sorted({int(records[site_id].molecule_index) for site_id in targets}):
-                    result = translate_molecule(result, index, vector)
-            details = {"site_ids": sorted(targets), "vector_A": vector.tolist()}
-        else:
-            axis = np.asarray(params.get("axis"), dtype=float)
-            try:
-                angle = float(params["angle"])
-            except (KeyError, TypeError, ValueError) as exc:
-                raise ValidationError("angle must be a finite number in degrees") from exc
-            if axis.shape != (3,) or not np.all(np.isfinite(axis)) or not np.isfinite(angle):
-                raise ValidationError("axis and angle must contain finite values")
-            center = str(params.get("center") or "com")
-            for index in sorted({int(records[site_id].molecule_index) for site_id in targets}):
-                result = rotate_molecule(result, index, axis, angle, center=center)
-            details = {"site_ids": sorted(targets), "axis": axis.tolist(), "angle": angle, "center": center}
+    """Apply a source-site geometry edit through MolCrysKit's public operations.
+
+    MolCrysKit rotates Cartesian positions and leaves laboratory-frame arrays
+    such as ``u_cart`` in the input orientation. The geometry helper applies
+    that same rotation and records it for session properties.
+    """
+    result, details, orientations = coordinate_edit(
+        command,
+        crystal,
+        params,
+        explicit_sites=_explicit_source_sites,
+    )
     mappings, index_map = _match_ids(crystal, result, command=command)
     return Outcome(
-        crystal=result, index_map=index_map, mappings=mappings,
+        crystal=result,
+        index_map=index_map,
+        mappings=mappings,
         provenance={"command": command, **details},
-        diagnostics=["Geometric edit retains the input bond graph; no energy optimization was performed."],
+        diagnostics=[
+            "Geometric edit retains the input bond graph; no energy optimization was performed."
+        ],
+        site_orientations=orientations,
     )
 
 
 def reperceive_bonds(crystal, params: Mapping[str, Any]) -> Outcome:
-    """Build a revision-local bond graph without modifying global user config."""
+    """Build a revision-local bond graph without modifying global user config.
+
+    Source site identities are preserved. Image shifts are rebased onto the
+    unwrapped coordinates, and stored fractional-coordinate arrays that still
+    describe the previous image are dropped.
+    """
     from molcrys_kit.structures.crystal import MolecularCrystal
 
     try:
@@ -385,7 +354,9 @@ def reperceive_bonds(crystal, params: Mapping[str, Any]) -> Outcome:
     result.extra_arrays = {
         key: np.asarray(value)[np.asarray(index_map, dtype=int)].copy()
         for key, value in crystal.extra_arrays.items()
+        if key not in STALE_REPERCEPTION_KEYS
     }
+    rebase_unwrapped_image_shifts(crystal, result)
     return Outcome(
         crystal=result, index_map=index_map, mappings=mappings,
         provenance={"command": "reperceive_bonds", "bond_scale": scale, "bond_thresholds": list(pairs)},

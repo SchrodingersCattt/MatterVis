@@ -43,8 +43,8 @@ is the scientific clock. They are not interchangeable.
 | `insert_molecule` | molecule construction plus clash check | no energy minimization |
 | `delete_sites` | explicit site ids | source sites, not display indexes |
 | `replace_species` | explicit site ids | occupancy is not rewritten |
-| `translate_atom`, `translate_molecule`, `rotate_molecule`, `rotate_fragment` | MolCrysKit coordinate operations | source site IDs; original graph retained; no relaxation |
-| `reperceive_bonds` | `MolecularCrystal.from_ase` | revision-local scale and element-pair thresholds; source site IDs mapped |
+| `translate_atom`, `translate_molecule`, `rotate_molecule`, `rotate_fragment` | MolCrysKit coordinate operations | source site IDs; original graph retained; no relaxation. Rotations apply `R` to Cartesian vectors and `R U R^T` to `u_cart` / `adp` on moved atoms |
+| `reperceive_bonds` | `MolecularCrystal.from_ase` | revision-local scale and element-pair thresholds; source site IDs mapped; image shifts rebased to the unwrapped coordinates; stale `frac_x/y/z` arrays dropped |
 | `add_hydrogens` | `add_hydrogens` | torsion search is rejected |
 | `remove_solvent` | `remove_solvents` or explicit molecule indexes | no automatic solvent guess |
 | `materialize_selection` | explicit site/image pairs | finite cluster, `PBC=False` |
@@ -55,7 +55,10 @@ the mapped image, commit once.
 
 Present site or structure properties require a policy of `copy`,
 `transform`, `recompute`, or `drop` with a reason. Energy and stress are
-not silently copied onto a supercell.
+not silently copied onto a supercell. For a rotation, `transform` rotates
+Cartesian `forces` and `velocities` and replaces `adp` with `R U R^T`.
+`copy` keeps the stored numbers. Preview candidates are readable at
+`GET /api/v2/operate/candidates/<candidate_id>` before commit.
 
 ## Persistence
 

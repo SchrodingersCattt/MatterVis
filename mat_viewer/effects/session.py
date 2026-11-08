@@ -292,6 +292,7 @@ class EffectSession:
                 command=command,
                 index_map=outcome.index_map,
                 invalid_structure_fields=set(outcome.invalid_structure_fields),
+                site_orientations=outcome.site_orientations,
             )
             candidate = Candidate(
                 candidate_id=f"cand-{uuid4().hex[:12]}",
@@ -392,6 +393,34 @@ class EffectSession:
             if candidate.status == "cancelled":
                 raise OperationRejected("cancelled candidates cannot be checked out")
             return candidate.crystal.copy()
+
+    def candidate_snapshot(self, candidate_id: str) -> dict[str, Any]:
+        """Return a read-only site and bond snapshot for one candidate.
+
+        The snapshot describes the candidate crystal. ``input`` is the
+        revision it was built from. Reading it does not commit.
+        """
+
+        with self._lock:
+            candidate = self._candidates.get(candidate_id)
+            if candidate is None:
+                raise KeyError(candidate_id)
+            if candidate.status == "cancelled":
+                raise OperationRejected("cancelled candidates have no structure snapshot")
+            snapshot = snapshot_from_crystal(
+                candidate.crystal,
+                ref=candidate.input_ref,
+                properties=candidate.properties,
+                provenance=candidate.provenance,
+            )
+            return {
+                "candidate_id": candidate.candidate_id,
+                "command": candidate.command,
+                "status": candidate.status,
+                "input": candidate.input_ref.to_dict(),
+                "preview": candidate.status != "committed",
+                "snapshot": snapshot.to_dict(),
+            }
 
     def find_request_replay(
         self,

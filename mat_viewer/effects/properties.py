@@ -11,10 +11,16 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+import numpy as np
+
 from .errors import PropertyPolicyError
 
 SITE_FIELDS = ("charges", "forces", "adp", "velocities", "scalars", "formal_charges")
 STRUCTURE_FIELDS = ("energy", "stress")
+# Laboratory-frame quantities. ``transform`` during a rotation applies R
+# to vectors and ``R U R^T`` to tensors. Other site fields are reindexed only.
+_CARTESIAN_VECTOR_FIELDS = frozenset({"forces", "velocities"})
+_CARTESIAN_TENSOR_FIELDS = frozenset({"adp"})
 
 
 def empty_properties() -> dict[str, Any]:
@@ -83,12 +89,17 @@ def apply_property_policy(
     command: str,
     index_map: list[int | None],
     invalid_structure_fields: set[str],
+    site_orientations: Mapping[int, Any] | None = None,
 ) -> tuple[dict[str, Any], tuple[dict[str, str], ...]]:
     """Return transformed properties and the explicit drop record.
 
     ``index_map[output_index]`` is the source global index, or ``None``
     when the output site is new. Structure-level fields listed by the
     operation as invalid cannot be copied or blindly transformed.
+
+    ``site_orientations`` maps a source global index to the active Cartesian
+    rotation applied to that site. ``transform`` uses it for Cartesian
+    vector and tensor fields. ``copy`` keeps the stored numbers.
     """
 
     current = normalize_properties(properties)
@@ -141,7 +152,13 @@ def apply_property_policy(
                         )
                     destination[key] = _freeze_scalar_or_sequence(spec["value"])
                     continue
-                destination[key] = _map_site_values(key, value, index_map, spec)
+                destination[key] = _map_site_values(
+                    key,
+                    value,
+                    index_map,
+                    spec,
+                    site_orientations or {},
+                )
                 continue
             raise PropertyPolicyError(f"unknown property action {action!r} for {key!r}")
 
@@ -153,7 +170,13 @@ def apply_property_policy(
     return {"site": site_out, "structure": structure_out}, tuple(dropped)
 
 
-def _map_site_values(key: str, values: tuple, index_map: list[int | None], spec: Mapping[str, Any]) -> tuple:
+def _map_site_values(
+    key: str,
+    values: tuple,
+    index_map: list[int | None],
+    spec: Mapping[str, Any],
+    site_orientations: Mapping[int, Any],
+) -> tuple:
     supplied = spec.get("new_values")
     supplied_map: dict[int, Any] = {}
     if isinstance(supplied, Mapping):
@@ -181,8 +204,49 @@ def _map_site_values(key: str, values: tuple, index_map: list[int | None], spec:
             continue
         if not 0 <= int(source_index) < len(values):
             raise PropertyPolicyError(f"property {key!r} source index {source_index} is outside the input")
-        output.append(values[int(source_index)])
+        output.append(
+            _orient_property(key, values[int(source_index)], site_orientations.get(int(source_index)))
+        )
     return tuple(output)
+
+
+def _orient_property(key: str, value: Any, rotation: Any) -> Any:
+    """Rotate one laboratory-frame property value, or return it unchanged."""
+
+    if rotation is None or key not in _CARTESIAN_VECTOR_FIELDS | _CARTESIAN_TENSOR_FIELDS:
+        return value
+    matrix = np.asarray(rotation, dtype=float)
+    if matrix.shape != (3, 3) or not np.all(np.isfinite(matrix)):
+        raise PropertyPolicyError(f"property {key!r} rotation must be a finite 3x3 matrix")
+    if key in _CARTESIAN_VECTOR_FIELDS:
+        vector = _numeric_rows(value, key, shape=(3,))
+        return _freeze_scalar_or_sequence((matrix @ vector).tolist())
+    tensor, flat = _tensor_value(key, value)
+    rotated = matrix @ tensor @ matrix.T
+    if flat:
+        return _freeze_scalar_or_sequence(rotated.reshape(9).tolist())
+    return _freeze_scalar_or_sequence(rotated.tolist())
+
+
+def _numeric_rows(value: Any, key: str, *, shape: tuple[int, ...]) -> np.ndarray:
+    array = np.asarray(value, dtype=float)
+    if array.shape != shape or not np.all(np.isfinite(array)):
+        expected = "x".join(str(item) for item in shape)
+        raise PropertyPolicyError(
+            f"property {key!r} must contain finite values with shape ({expected}) to rotate"
+        )
+    return array
+
+
+def _tensor_value(key: str, value: Any) -> tuple[np.ndarray, bool]:
+    array = np.asarray(value, dtype=float)
+    if array.shape == (3, 3) and np.all(np.isfinite(array)):
+        return array, False
+    if array.shape == (9,) and np.all(np.isfinite(array)):
+        return array.reshape(3, 3), True
+    raise PropertyPolicyError(
+        f"property {key!r} must be a finite 3x3 tensor or 9 components to rotate"
+    )
 
 
 __all__ = [

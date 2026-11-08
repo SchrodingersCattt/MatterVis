@@ -129,6 +129,287 @@ def test_bond_reperception_is_revision_local_and_keeps_site_ids():
     assert session.snapshot(ref).fingerprint == before.fingerprint
 
 
+def _boundary_contact():
+    from ase import Atoms
+    from molcrys_kit.constants.config import (
+        KEY_ATOM_ID,
+        KEY_FRAC_X,
+        KEY_FRAC_Y,
+        KEY_FRAC_Z,
+        KEY_IMAGE_SHIFT,
+    )
+    from molcrys_kit.structures.crystal import MolecularCrystal
+
+    lattice = np.eye(3) * 10.0
+    carbon = Atoms("C", positions=[[0.4, 5.0, 5.0]], cell=lattice, pbc=True)
+    oxygen = Atoms("O", positions=[[9.6, 5.0, 5.0]], cell=lattice, pbc=True)
+    for atoms, site_id, fractional in (
+        (carbon, "site-c", (0.04, 0.5, 0.5)),
+        (oxygen, "site-o", (0.96, 0.5, 0.5)),
+    ):
+        atoms.set_array(KEY_ATOM_ID, np.array([site_id]))
+        atoms.set_array(KEY_IMAGE_SHIFT, np.zeros((1, 3), dtype=int))
+        atoms.set_array(KEY_FRAC_X, np.array([fractional[0]]))
+        atoms.set_array(KEY_FRAC_Y, np.array([fractional[1]]))
+        atoms.set_array(KEY_FRAC_Z, np.array([fractional[2]]))
+    return MolecularCrystal(lattice, [carbon, oxygen], pbc=(True, True, True))
+
+
+def _pair_threshold(distance_A: float) -> dict:
+    return {
+        "bond_scale": 1.0,
+        "bond_thresholds": [{"elements": ["C", "O"], "distance_A": distance_A}],
+    }
+
+
+def _molecule_groups(crystal) -> list[tuple[str, ...]]:
+    grouped: dict[int, list[str]] = {}
+    for record in crystal.get_site_records():
+        grouped.setdefault(int(record.molecule_index), []).append(str(record.site_id))
+    return sorted(tuple(sorted(site_ids)) for site_ids in grouped.values())
+
+
+def test_bond_reperception_toggles_a_periodic_contact_and_rebases_images():
+    session, ref = _session(_boundary_contact(), name="boundary")
+    original = session.snapshot(ref)
+    source = session.checkout(ref)
+    assert _molecule_groups(source) == [("site-c",), ("site-o",)]
+    assert source.get_bond_records() == []
+    assert all("frac_x" in molecule.arrays for molecule in source.molecules)
+
+    separate = session.preview(
+        "reperceive_bonds",
+        _pair_threshold(0.5),
+        structure_id=ref.id,
+        expected_revision=ref.revision,
+    )
+    rejected = session.checkout_candidate(separate.candidate_id)
+    assert rejected.get_bond_records() == []
+    assert _molecule_groups(rejected) == [("site-c",), ("site-o",)]
+    assert session.snapshot(ref).fingerprint == original.fingerprint
+
+    candidate = session.preview(
+        "reperceive_bonds",
+        _pair_threshold(1.2),
+        structure_id=ref.id,
+        expected_revision=ref.revision,
+    )
+    merged = session.checkout_candidate(candidate.candidate_id)
+    by_id = {str(record.site_id): record for record in merged.get_site_records()}
+    assert _molecule_groups(merged) == [("site-c", "site-o")]
+    assert set(by_id) == {"site-c", "site-o"}
+    np.testing.assert_allclose(by_id["site-c"].cartesian_position_A, [0.4, 5.0, 5.0])
+    np.testing.assert_allclose(by_id["site-o"].cartesian_position_A, [-0.4, 5.0, 5.0])
+    assert tuple(int(value) for value in by_id["site-c"].image_shift) == (0, 0, 0)
+    assert tuple(int(value) for value in by_id["site-o"].image_shift) == (-1, 0, 0)
+    bonds = merged.get_bond_records()
+    assert len(bonds) == 1
+    bond = bonds[0]
+    by_global = {int(record.global_index): str(record.site_id) for record in merged.get_site_records()}
+    assert by_global[int(bond.left_global_index)] == "site-c"
+    assert by_global[int(bond.right_global_index)] == "site-o"
+    assert tuple(int(value) for value in bond.right_image_shift) == (-1, 0, 0)
+    np.testing.assert_allclose(bond.vector_A, [-0.8, 0.0, 0.0], atol=1e-8)
+    image_delta = np.asarray(by_id["site-o"].image_shift, dtype=int) - np.asarray(
+        by_id["site-c"].image_shift, dtype=int
+    )
+    assert tuple(int(value) for value in image_delta) == tuple(int(value) for value in bond.right_image_shift)
+    for molecule in merged.molecules:
+        assert "frac_x" not in molecule.arrays
+        assert "frac_y" not in molecule.arrays
+        assert "frac_z" not in molecule.arrays
+    preview = session.candidate_snapshot(candidate.candidate_id)
+    assert preview["preview"] is True
+    assert preview["command"] == "reperceive_bonds"
+    assert preview["input"]["revision"] == ref.revision
+    assert len(preview["snapshot"]["bonds"]) == 1
+    assert {site["molecule_index"] for site in preview["snapshot"]["sites"]} == {0}
+    assert {tuple(site["image_shift"]) for site in preview["snapshot"]["sites"]} == {(0, 0, 0), (-1, 0, 0)}
+    retained = session.checkout(ref)
+    assert _molecule_groups(retained) == [("site-c",), ("site-o",)]
+    assert all(tuple(int(value) for value in record.image_shift) == (0, 0, 0) for record in retained.get_site_records())
+    assert all("frac_x" in molecule.arrays for molecule in retained.molecules)
+    assert session.snapshot(ref).fingerprint == original.fingerprint
+    committed = session.commit_candidate(candidate.candidate_id, expected_revision=ref.revision)
+    assert _molecule_groups(session.checkout(committed.output_ref)) == [("site-c", "site-o")]
+    session.undo(ref.id)
+    assert session.snapshot(structure_id=ref.id).fingerprint == original.fingerprint
+    assert _molecule_groups(session.checkout(ref)) == [("site-c",), ("site-o",)]
+
+
+def _chain_with_adp():
+    from ase import Atoms
+    from molcrys_kit.constants.config import KEY_U_CART
+    from molcrys_kit.structures.crystal import MolecularCrystal
+
+    lattice = np.eye(3) * 20.0
+    atoms = Atoms(
+        "CCCC",
+        positions=[[1.0, 1.0, 1.0], [2.4, 1.0, 1.0], [3.8, 1.0, 1.0], [5.1, 1.5, 1.0]],
+        cell=lattice,
+        pbc=True,
+    )
+    crystal = MolecularCrystal.from_ase(atoms)
+    assert len(crystal.molecules) == 1
+    rows = np.full((len(crystal.molecules[0]), 9), np.nan)
+    rows[0] = np.diag([0.08, 0.01, 0.01]).reshape(9)
+    rows[2] = np.diag([0.02, 0.08, 0.01]).reshape(9)
+    rows[3] = np.diag([0.02, 0.08, 0.01]).reshape(9)
+    crystal.molecules[0].set_array(KEY_U_CART, rows)
+    return crystal
+
+
+def _records_by_local(crystal):
+    records = list(crystal.get_site_records())
+    assert len({record.molecule_index for record in records}) == 1
+    return {int(record.local_index): record for record in records}
+
+
+def test_rotations_transform_anisotropic_adp_and_force_vectors():
+    from molcrys_kit.constants.config import KEY_U_CART
+    from mat_viewer.effects.snapshot import properties_from_fingerprint
+
+    crystal = _chain_with_adp()
+    original_u = np.array(crystal.molecules[0].arrays[KEY_U_CART], copy=True)
+    forces = [[1.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 3.0], [4.0, 0.0, 0.0]]
+    adp = [
+        np.diag([0.08, 0.01, 0.01]).tolist(),
+        np.diag([0.08, 0.01, 0.01]).tolist(),
+        np.diag([0.02, 0.08, 0.01]).tolist(),
+        np.diag([0.02, 0.08, 0.01]).tolist(),
+    ]
+    charges = [0.1, 0.2, 0.3, 0.4]
+    session, ref = _session(
+        crystal,
+        name="rotate-adp",
+        properties={"forces": forces, "adp": adp, "charges": charges},
+    )
+    anchor = session.snapshot(ref).sites[0]
+    copied = session.preview(
+        "rotate_molecule",
+        {"sites": [anchor.site_id], "axis": [0, 0, 1], "angle": 90},
+        structure_id=ref.id,
+        expected_revision=ref.revision,
+        property_policy={
+            "forces": {"action": "copy"},
+            "adp": {"action": "copy"},
+            "charges": {"action": "copy"},
+        },
+    )
+    assert session._candidates[copied.candidate_id].properties["site"]["forces"][0] == (1.0, 0.0, 0.0)
+    rotated = session.preview(
+        "rotate_molecule",
+        {"sites": [anchor.site_id], "axis": [0, 0, 1], "angle": 90, "center": "com"},
+        structure_id=ref.id,
+        expected_revision=ref.revision,
+        property_policy={
+            "forces": {"action": "transform"},
+            "adp": {"action": "transform"},
+            "charges": {"action": "transform"},
+        },
+    )
+    produced = session.checkout_candidate(rotated.candidate_id)
+    produced_u = np.asarray(produced.molecules[0].arrays[KEY_U_CART], dtype=float)
+    np.testing.assert_allclose(produced_u[0].reshape(3, 3), np.diag([0.01, 0.08, 0.01]), atol=1e-8)
+    assert np.all(np.isnan(produced_u[1]))
+    z_turn = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+    expected_moving = z_turn @ np.diag([0.02, 0.08, 0.01]) @ z_turn.T
+    np.testing.assert_allclose(produced_u[2].reshape(3, 3), expected_moving, atol=1e-8)
+    np.testing.assert_allclose(produced_u[3].reshape(3, 3), expected_moving, atol=1e-8)
+    np.testing.assert_allclose(
+        session.checkout(ref).molecules[0].arrays[KEY_U_CART],
+        original_u,
+        equal_nan=True,
+    )
+    stored = session._candidates[rotated.candidate_id].properties["site"]
+    expected_forces = [(0.0, 1.0, 0.0), (-2.0, 0.0, 0.0), (0.0, 0.0, 3.0), (0.0, 4.0, 0.0)]
+    np.testing.assert_allclose(stored["forces"], expected_forces, atol=1e-8)
+    np.testing.assert_allclose(stored["adp"][0], np.diag([0.01, 0.08, 0.01]), atol=1e-8)
+    assert stored["charges"] == tuple(charges)
+    committed = session.commit_candidate(rotated.candidate_id, expected_revision=ref.revision)
+    committed_u = np.asarray(session.checkout(committed.output_ref).molecules[0].arrays[KEY_U_CART], dtype=float)
+    np.testing.assert_allclose(committed_u[0].reshape(3, 3), np.diag([0.01, 0.08, 0.01]), atol=1e-8)
+    committed_properties = properties_from_fingerprint(session.snapshot(committed.output_ref).properties)
+    np.testing.assert_allclose(committed_properties["site"]["forces"], expected_forces, atol=1e-8)
+    session.undo(ref.id)
+    np.testing.assert_allclose(
+        session.checkout(ref).molecules[0].arrays[KEY_U_CART],
+        original_u,
+        equal_nan=True,
+    )
+
+    by_local = _records_by_local(session.checkout(ref))
+    fragment = session.preview(
+        "rotate_fragment",
+        {"sites": [by_local[1].site_id, by_local[2].site_id], "angle": 90, "moving_side": "j"},
+        structure_id=ref.id,
+        expected_revision=ref.revision,
+        property_policy={
+            "forces": {"action": "transform"},
+            "adp": {"action": "transform"},
+            "charges": {"action": "transform"},
+        },
+    )
+    fragment_crystal = session.checkout_candidate(fragment.candidate_id)
+    fragment_u = np.asarray(fragment_crystal.molecules[0].arrays[KEY_U_CART], dtype=float)
+    x_turn = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
+    expected_fragment = x_turn @ np.diag([0.02, 0.08, 0.01]) @ x_turn.T
+    np.testing.assert_allclose(fragment_u[0].reshape(3, 3), np.diag([0.08, 0.01, 0.01]), atol=1e-8)
+    assert np.all(np.isnan(fragment_u[1]))
+    np.testing.assert_allclose(fragment_u[2].reshape(3, 3), expected_fragment, atol=1e-8)
+    np.testing.assert_allclose(fragment_u[3].reshape(3, 3), expected_fragment, atol=1e-8)
+    fragment_sites = _records_by_local(fragment_crystal)
+    np.testing.assert_allclose(
+        fragment_sites[2].cartesian_position_A,
+        by_local[2].cartesian_position_A,
+        atol=1e-8,
+    )
+    assert not np.allclose(fragment_sites[3].cartesian_position_A, by_local[3].cartesian_position_A)
+    fragment_forces = session._candidates[fragment.candidate_id].properties["site"]["forces"]
+    np.testing.assert_allclose(fragment_forces[0], forces[0], atol=1e-8)
+    np.testing.assert_allclose(fragment_forces[1], forces[1], atol=1e-8)
+    np.testing.assert_allclose(fragment_forces[2], x_turn @ np.asarray(forces[2]), atol=1e-8)
+    np.testing.assert_allclose(fragment_forces[3], x_turn @ np.asarray(forces[3]), atol=1e-8)
+    fragment_adp = session._candidates[fragment.candidate_id].properties["site"]["adp"]
+    np.testing.assert_allclose(fragment_adp[0], adp[0], atol=1e-8)
+    np.testing.assert_allclose(fragment_adp[2], expected_fragment, atol=1e-8)
+    np.testing.assert_allclose(
+        session.checkout(ref).molecules[0].arrays[KEY_U_CART],
+        original_u,
+        equal_nan=True,
+    )
+
+
+def test_translation_does_not_rotate_adp_or_forces():
+    from molcrys_kit.constants.config import KEY_U_CART
+
+    crystal = _chain_with_adp()
+    original_u = np.array(crystal.molecules[0].arrays[KEY_U_CART], copy=True)
+    forces = [[1.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 3.0], [4.0, 0.0, 0.0]]
+    session, ref = _session(crystal, name="translate-adp", properties={"forces": forces})
+    site = session.snapshot(ref).sites[0]
+    candidate = session.preview(
+        "translate_molecule",
+        {"sites": [site.site_id], "vector": [0.3, 0.0, 0.0]},
+        structure_id=ref.id,
+        expected_revision=ref.revision,
+        property_policy={"forces": {"action": "transform"}},
+    )
+    produced = session.checkout_candidate(candidate.candidate_id)
+    np.testing.assert_allclose(produced.molecules[0].arrays[KEY_U_CART], original_u, equal_nan=True)
+    assert session._candidates[candidate.candidate_id].properties["site"]["forces"] == (
+        (1.0, 0.0, 0.0),
+        (0.0, 2.0, 0.0),
+        (0.0, 0.0, 3.0),
+        (4.0, 0.0, 0.0),
+    )
+    np.testing.assert_allclose(
+        session.checkout(ref).molecules[0].arrays[KEY_U_CART],
+        original_u,
+        equal_nan=True,
+    )
+
+
 def test_rotate_molecule_updates_bond_geometry_without_mutating_input():
     session, ref = _session(f1_ordered_nonorthogonal())
     before = session.snapshot(ref)

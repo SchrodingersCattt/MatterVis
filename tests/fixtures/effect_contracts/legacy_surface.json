@@ -260,6 +260,14 @@
       "compatibility_test": "T22"
     },
     {
+      "id": "GET /api/v2/operate/candidates/<candidate_id>",
+      "surface": "rest",
+      "effect": "operate",
+      "writes_structure": false,
+      "module": "v2_operate.py",
+      "compatibility_test": "T22"
+    },
+    {
       "id": "POST /api/v2/operate",
       "surface": "rest",
       "effect": "operate",
