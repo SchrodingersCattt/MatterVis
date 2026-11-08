@@ -59,9 +59,9 @@ signatures.
 
 Every install job uses the git commit in `pyproject.toml`:
 
-`f4f81afa4f2b57ad7fa8e88e4816cbcb96a30556`
+`ee45c7e7c9e44f50b0b55ed46ee5dca306550541`
 
-That commit reports version `0.8.1.dev18`. The fast-job window check
+That commit reports version `0.8.1.dev17`. The fast-job window check
 still requires the installed version to be at least 0.8.0 and below
 0.9.0. The window is a check on the pin. It is not a PyPI minimum
 install. Job names say pinned molcrys-kit for that reason. PyPI
