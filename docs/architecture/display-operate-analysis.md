@@ -43,6 +43,8 @@ is the scientific clock. They are not interchangeable.
 | `insert_molecule` | molecule construction plus clash check | no energy minimization |
 | `delete_sites` | explicit site ids | source sites, not display indexes |
 | `replace_species` | explicit site ids | occupancy is not rewritten |
+| `translate_atom`, `translate_molecule`, `rotate_molecule`, `rotate_fragment` | MolCrysKit coordinate operations | source site IDs; original graph retained; no relaxation |
+| `reperceive_bonds` | `MolecularCrystal.from_ase` | revision-local scale and element-pair thresholds; source site IDs mapped |
 | `add_hydrogens` | `add_hydrogens` | torsion search is rejected |
 | `remove_solvent` | `remove_solvents` or explicit molecule indexes | no automatic solvent guess |
 | `materialize_selection` | explicit site/image pairs | finite cluster, `PBC=False` |

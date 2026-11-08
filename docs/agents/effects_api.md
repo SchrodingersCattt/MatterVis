@@ -47,6 +47,15 @@ instead of being replaced.
 The same session implements `build_slab`, `insert_molecule`,
 `delete_sites`, `replace_species`, `add_hydrogens`, `remove_solvent`,
 `materialize_selection`, and `commit_disorder_candidate`.
+`translate_atom`, `translate_molecule`, `rotate_molecule`, and
+`rotate_fragment` use source site IDs in the `sites` list. Translations use
+Cartesian `vector` values in Å; rotations use `axis` and `angle` in degrees.
+Fragment rotation takes two ordered sites and an optional `moving_side`.
+These geometric edits preserve the input graph and do not perform relaxation.
+`reperceive_bonds` builds a revision-local candidate using `bond_scale` and an
+optional list of `{ "elements": ["C", "O"], "distance_A": 1.7 }` thresholds.
+It does not patch global configuration. Review regrouped molecules and commit
+the candidate explicitly before subsequent structural operations.
 `delete_periodic_copy` runs supercell construction and one site deletion
 as a single commit.
 

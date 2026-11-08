@@ -72,12 +72,92 @@ def test_required_commands_are_executable():
         "insert_molecule",
         "delete_sites",
         "replace_species",
+        "translate_atom",
+        "translate_molecule",
+        "rotate_molecule",
+        "rotate_fragment",
+        "reperceive_bonds",
         "add_hydrogens",
         "remove_solvent",
         "materialize_selection",
         "commit_disorder_candidate",
     }
     assert "supercell" not in IMPLEMENTED_COMMANDS
+
+
+def test_coordinate_edits_preview_commit_and_undo():
+    session, ref = _session(f1_ordered_nonorthogonal())
+    original = session.snapshot(ref)
+    site = original.sites[0]
+    candidate = session.preview(
+        "translate_atom", {"sites": [site.site_id], "vector": [0.25, 0.0, 0.0]},
+        structure_id=ref.id, expected_revision=ref.revision,
+    )
+    assert session.current_ref(ref.id) == ref
+    moved = session.checkout_candidate(candidate.candidate_id)
+    moved_site = next(record for record in moved.get_site_records() if record.site_id == site.site_id)
+    np.testing.assert_allclose(moved_site.cartesian_position_A, np.asarray(site.cartesian) + [0.25, 0, 0])
+    result = session.commit_candidate(candidate.candidate_id, expected_revision=ref.revision)
+    assert session.snapshot(result.output_ref).site(site.site_id).cartesian != site.cartesian
+    session.undo(ref.id)
+    assert session.snapshot(structure_id=ref.id).fingerprint == original.fingerprint
+
+
+def test_molecule_transform_rejects_display_image():
+    session, ref = _session(f1_ordered_nonorthogonal())
+    site = session.snapshot(ref).sites[0]
+    try:
+        session.preview(
+            "translate_molecule", {"sites": [{"site_id": site.site_id, "image": [1, 0, 0]}], "vector": [1, 0, 0]},
+            structure_id=ref.id, expected_revision=ref.revision,
+        )
+    except AmbiguousSelection:
+        pass
+    else:
+        raise AssertionError("display-only periodic image accepted as a scientific site")
+
+
+def test_bond_reperception_is_revision_local_and_keeps_site_ids():
+    session, ref = _session(f1_ordered_nonorthogonal())
+    before = session.snapshot(ref)
+    candidate = session.preview(
+        "reperceive_bonds", {"bond_scale": 0.5}, structure_id=ref.id, expected_revision=ref.revision,
+    )
+    changed = session.checkout_candidate(candidate.candidate_id)
+    assert {str(site.site_id) for site in changed.get_site_records()} == {site.site_id for site in before.sites}
+    assert session.current_ref(ref.id) == ref
+    assert session.snapshot(ref).fingerprint == before.fingerprint
+
+
+def test_rotate_molecule_updates_bond_geometry_without_mutating_input():
+    session, ref = _session(f1_ordered_nonorthogonal())
+    before = session.snapshot(ref)
+    candidate = session.preview(
+        "rotate_molecule", {"sites": [before.sites[0].site_id], "axis": [0, 0, 1], "angle": 90},
+        structure_id=ref.id, expected_revision=ref.revision,
+    )
+    after = session.checkout_candidate(candidate.candidate_id)
+    assert session.snapshot(ref).fingerprint == before.fingerprint
+    assert {record.site_id for record in after.get_site_records()} == {site.site_id for site in before.sites}
+    assert not np.allclose(after.molecules[0].positions, np.array([site.cartesian for site in before.sites]))
+
+
+def test_rotate_fragment_uses_ordered_sites_of_one_molecule():
+    from ase import Atoms
+    from molcrys_kit.structures.crystal import MolecularCrystal
+
+    atoms = Atoms("CCCC", positions=[[1, 1, 1], [2.4, 1, 1], [3.8, 1, 1], [5.1, 1.5, 1]],
+                  cell=np.eye(3) * 15, pbc=True)
+    session, ref = _session(MolecularCrystal.from_ase(atoms))
+    before = session.snapshot(ref)
+    assert len({site.molecule_index for site in before.sites}) == 1
+    candidate = session.preview(
+        "rotate_fragment", {"sites": [before.sites[1].site_id, before.sites[2].site_id], "angle": 60},
+        structure_id=ref.id, expected_revision=ref.revision,
+    )
+    after = session.checkout_candidate(candidate.candidate_id)
+    assert not np.allclose(after.molecules[0].positions[-1], before.sites[-1].cartesian)
+    assert session.snapshot(ref).fingerprint == before.fingerprint
 
 
 def test_t04_build_supercell_nonorthogonal():
