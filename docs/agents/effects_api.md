@@ -47,6 +47,49 @@ instead of being replaced.
 The same session implements `build_slab`, `insert_molecule`,
 `delete_sites`, `replace_species`, `add_hydrogens`, `remove_solvent`,
 `materialize_selection`, and `commit_disorder_candidate`.
+`translate_atom` and `translate_molecule` take source site IDs in `sites`
+and a Cartesian `vector` in Å:
+
+```json
+{"sites": ["site-1"], "vector": [0.25, 0.0, 0.0]}
+```
+
+`rotate_molecule` takes source site IDs, a Cartesian `axis` with three
+components, `angle` in degrees, and an optional `center` of `com` or
+`centroid`:
+
+```json
+{"sites": ["site-1"], "axis": [0, 0, 1], "angle": 90, "center": "com"}
+```
+
+`rotate_fragment` does not take `axis`. The directed bond is the two
+ordered source sites, from the first site toward the second. `angle` is in
+degrees and `moving_side` is `j` (default) or `i`:
+
+```json
+{"sites": ["site-2", "site-3"], "angle": 60, "moving_side": "j"}
+```
+
+These geometric edits preserve the input bond graph and do not relax the
+structure. On the moved atoms, per-atom `u_cart` and a `transform` policy
+for `adp` become `R U R^T`. A `transform` policy for `forces` or
+`velocities` rotates those Cartesian vectors. `copy` keeps the stored
+numbers. The fixed side of a fragment rotation keeps its tensors and
+vectors. An atom on the moving side is rotated with that fragment even
+when it lies on the bond axis and its Cartesian position does not change.
+Translations do not rotate vectors or tensors.
+
+`reperceive_bonds` builds a revision-local candidate using `bond_scale` and an
+optional list of `{ "elements": ["C", "O"], "distance_A": 1.7 }` thresholds.
+It does not patch global configuration. Source site IDs are preserved.
+Image shifts are rebased onto the unwrapped coordinates, and stored
+`frac_x`, `frac_y`, and `frac_z` arrays are dropped because they describe
+the previous unwrapping. Review the candidate bond graph and molecule
+grouping, then commit the candidate explicitly before subsequent structural
+operations. `session.candidate_snapshot(candidate_id)` returns that
+read-only site, bond, molecule-index, and image-shift snapshot without
+committing.
+
 `delete_periodic_copy` runs supercell construction and one site deletion
 as a single commit.
 
@@ -69,9 +112,16 @@ mat-vis operate build-supercell structure.cif --a 2 --b 3 --c 1 -o supercell.cif
 and `expected_revision`. It does not inherit the active tab or the
 bundle's current revision. A missing target is HTTP 400. A structure
 that does not match the scene, or a stale `expected_revision`, is HTTP
-409. `request_id` is optional. Preview with `"preview": true`, then
-`POST /api/v2/operate/commit`. Cancel with `/operate/cancel`.
-Undo and redo are `/operate/undo` and `/operate/redo`.
+409. `request_id` is optional. Preview with `"preview": true`. The preview
+body identifies the candidate and includes `candidate_snapshot_path`. It
+does not include coordinates or bonds. Read those from
+`GET /api/v2/operate/candidates/<candidate_id>` before
+`POST /api/v2/operate/commit`. That route returns the candidate sites,
+bonds, molecule indices, and image shifts and does not create a revision.
+`ref` inside the snapshot is the input revision the candidate was built
+from. A missing candidate is HTTP 404. A cancelled candidate is HTTP 400.
+Cancel with `/operate/cancel`. Undo and redo are `/operate/undo` and
+`/operate/redo`.
 
 `GET /api/v2/operate/capabilities` lists the implemented commands.
 

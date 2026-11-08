@@ -48,7 +48,8 @@ def _require_expected_mck(entry: dict) -> None:
     actual = _installed_mck_revision()
     if actual is None:
         pytest.skip("installed MolCrysKit distribution does not expose a source revision")
-    if actual != expected:
+    validated = entry.get("validated_molcrys_kit_revisions", [])
+    if actual != expected and actual not in validated:
         pytest.fail(
             f"oracle requires MolCrysKit {expected}, installed revision is {actual or 'unknown'}"
         )
@@ -98,6 +99,14 @@ def test_revision_mismatch_is_an_explicit_failure(monkeypatch):
 
     with pytest.raises(pytest.fail.Exception, match="requires MolCrysKit"):
         _require_expected_mck({"producer": {"molcrys_kit_revision": "expected-revision"}})
+
+
+def test_revision_check_accepts_an_explicitly_validated_revision(monkeypatch):
+    monkeypatch.setattr(sys.modules[__name__], "_installed_mck_revision", lambda: "validated-revision")
+    _require_expected_mck({
+        "producer": {"molcrys_kit_revision": "original-revision"},
+        "validated_molcrys_kit_revisions": ["validated-revision"],
+    })
 
 
 def test_revision_check_skips_when_distribution_has_no_source_revision(monkeypatch):

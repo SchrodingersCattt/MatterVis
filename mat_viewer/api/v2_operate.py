@@ -14,6 +14,10 @@ def register_operate_routes(v2, backend) -> dict:
     def operate_capabilities():
         return jsonify(backend.effect_session().capabilities())
 
+    @v2.get("/operate/candidates/<candidate_id>")
+    def operate_candidate_snapshot(candidate_id: str):
+        return jsonify(backend.effect_session().candidate_snapshot(str(candidate_id)))
+
     @v2.post("/operate")
     def operate_command():
         payload = request.get_json(force=True, silent=True) or {}

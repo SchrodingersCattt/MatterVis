@@ -7,6 +7,7 @@ Chemistry that MolCrysKit already publishes is called directly.
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -33,6 +34,11 @@ from .materialize import (
     replace_symbols,
 )
 from .refs import parse_image
+from .site_geometry import (
+    STALE_REPERCEPTION_KEYS,
+    coordinate_edit,
+    rebase_unwrapped_image_shifts,
+)
 
 
 @dataclass
@@ -44,6 +50,8 @@ class Outcome:
     invalid_structure_fields: set[str] = field(default_factory=lambda: {"energy", "stress"})
     status: str = "ok"
     provenance: dict[str, Any] = field(default_factory=dict)
+    # Source global index -> active Cartesian rotation applied to that site.
+    site_orientations: dict[int, tuple[tuple[float, float, float], ...]] = field(default_factory=dict)
 
 
 def run_operation(command: str, crystal, params: Mapping[str, Any] | None) -> Outcome:
@@ -58,6 +66,10 @@ def run_operation(command: str, crystal, params: Mapping[str, Any] | None) -> Ou
         return delete_sites(crystal, params)
     if command == "replace_species":
         return replace_species(crystal, params)
+    if command in {"translate_atom", "translate_molecule", "rotate_molecule", "rotate_fragment"}:
+        return transform_coordinates(command, crystal, params)
+    if command == "reperceive_bonds":
+        return reperceive_bonds(crystal, params)
     if command == "add_hydrogens":
         return add_hydrogens_op(crystal, params)
     if command == "remove_solvent":
@@ -80,6 +92,11 @@ IMPLEMENTED_COMMANDS = (
     "insert_molecule",
     "delete_sites",
     "replace_species",
+    "translate_atom",
+    "translate_molecule",
+    "rotate_molecule",
+    "rotate_fragment",
+    "reperceive_bonds",
     "add_hydrogens",
     "remove_solvent",
     "materialize_selection",
@@ -266,6 +283,84 @@ def replace_species(crystal, params: Mapping[str, Any]) -> Outcome:
         index_map=index_map,
         mappings=mappings,
         provenance={"command": "replace_species", "symbol": symbol, "site_ids": sorted(targets)},
+    )
+
+
+def transform_coordinates(command: str, crystal, params: Mapping[str, Any]) -> Outcome:
+    """Apply a source-site geometry edit through MolCrysKit's public operations.
+
+    MolCrysKit rotates Cartesian positions and leaves laboratory-frame arrays
+    such as ``u_cart`` in the input orientation. The geometry helper applies
+    that same rotation and records it for session properties.
+    """
+    result, details, orientations = coordinate_edit(
+        command,
+        crystal,
+        params,
+        explicit_sites=_explicit_source_sites,
+    )
+    mappings, index_map = _match_ids(crystal, result, command=command)
+    return Outcome(
+        crystal=result,
+        index_map=index_map,
+        mappings=mappings,
+        provenance={"command": command, **details},
+        diagnostics=[
+            "Geometric edit retains the input bond graph; no energy optimization was performed."
+        ],
+        site_orientations=orientations,
+    )
+
+
+def reperceive_bonds(crystal, params: Mapping[str, Any]) -> Outcome:
+    """Build a revision-local bond graph without modifying global user config.
+
+    Source site identities are preserved. Image shifts are rebased onto the
+    unwrapped coordinates, and stored fractional-coordinate arrays that still
+    describe the previous image are dropped.
+    """
+    from molcrys_kit.structures.crystal import MolecularCrystal
+
+    try:
+        scale = float(params.get("bond_scale", 1.0))
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("bond_scale must be a positive finite number") from exc
+    if not np.isfinite(scale) or scale <= 0:
+        raise ValidationError("bond_scale must be a positive finite number")
+    pairs = params.get("bond_thresholds") or []
+    if not isinstance(pairs, list):
+        raise ValidationError("bond_thresholds must be a list of element pairs")
+    thresholds = {}
+    for item in pairs:
+        if not isinstance(item, Mapping) or not isinstance(item.get("elements"), (list, tuple)) or len(item["elements"]) != 2:
+            raise ValidationError("each bond threshold needs two elements")
+        first, second = (str(value) for value in item["elements"])
+        _known_element(first)
+        _known_element(second)
+        try:
+            distance = float(item["distance_A"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValidationError("bond threshold must be a positive finite distance") from exc
+        if not np.isfinite(distance) or distance <= 0:
+            raise ValidationError("bond threshold must be a positive finite distance")
+        thresholds[(first, second)] = distance
+    result = MolecularCrystal.from_ase(crystal.to_ase(), bond_scale=scale, bond_thresholds=thresholds or None)
+    result.metadata = copy.deepcopy(crystal.metadata)
+    result.formula_moiety = crystal.formula_moiety
+    result.disorder_provenance = copy.deepcopy(crystal.disorder_provenance)
+    mappings, index_map = _match_ids(crystal, result, command="reperceive_bonds")
+    if any(index is None for index in index_map) or len(index_map) != len(crystal.get_site_records()):
+        raise ValidationError("bond perception could not preserve source site identities")
+    result.extra_arrays = {
+        key: np.asarray(value)[np.asarray(index_map, dtype=int)].copy()
+        for key, value in crystal.extra_arrays.items()
+        if key not in STALE_REPERCEPTION_KEYS
+    }
+    rebase_unwrapped_image_shifts(crystal, result)
+    return Outcome(
+        crystal=result, index_map=index_map, mappings=mappings,
+        provenance={"command": "reperceive_bonds", "bond_scale": scale, "bond_thresholds": list(pairs)},
+        diagnostics=["Bond perception may change molecular grouping; review the candidate before committing."],
     )
 
 

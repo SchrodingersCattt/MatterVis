@@ -63,10 +63,26 @@ mat-vis operate build-supercell structure.cif --a 2 --b 3 --c 1 -o supercell.cif
 
 `build-supercell` requires three positive integers. A nondiagonal matrix is
 rejected. `--preview` builds a candidate and does not write a new revision.
-Other commands (`build-slab`, `insert-molecule`, `delete-sites`,
-`replace-species`, `add-hydrogens`, `remove-solvent`,
-`materialize-selection`, `commit-disorder-candidate`) take `--params-json`.
-`operate supercell` is not a command.
+Other commands take `--params-json`: `build-slab`, `insert-molecule`,
+`delete-sites`, `replace-species`, `translate-atom`, `translate-molecule`,
+`rotate-molecule`, `rotate-fragment`, `reperceive-bonds`, `add-hydrogens`,
+`remove-solvent`, `materialize-selection`, and `commit-disorder-candidate`.
+`rotate-molecule` takes `sites`, a 3-vector `axis`, and `angle` in degrees.
+`rotate-fragment` takes two ordered `sites` and `angle`; it does not take
+`axis`. `operate supercell` is not a command.
+
+```bash
+mat-vis operate rotate-molecule structure.cif \
+  --params-json '{"sites":["site-1"],"axis":[0,0,1],"angle":90}' --preview --json
+mat-vis operate rotate-fragment structure.cif \
+  --params-json '{"sites":["site-2","site-3"],"angle":60,"moving_side":"j"}' --preview --json
+mat-vis operate translate-atom structure.cif \
+  --params-json '{"sites":["site-1"],"vector":[0.25,0,0]}' --preview --json
+mat-vis operate translate-molecule structure.cif \
+  --params-json '{"sites":["site-1"],"vector":[0.25,0,0]}' --preview --json
+mat-vis operate reperceive-bonds structure.cif \
+  --params-json '{"bond_scale":1.0}' --preview --json
+```
 
 `inspect`, `capabilities`, and `render --check` are the agent preflight surface.
 `--check` resolves requirements only and never creates the output.
