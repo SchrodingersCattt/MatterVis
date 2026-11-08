@@ -33,7 +33,7 @@ MOLCRYSKIT_SOURCE_MINIMUM = MOLCRYSKIT_MINIMUM
 MOLCRYSKIT_INSTALL = f'python -m pip install "{MOLCRYSKIT_REQUIREMENT}"'
 # Development pin for find_polyhedra disorder_policy. pyproject.toml must
 # name this same commit. Restore a release range once the API is on PyPI.
-MOLCRYSKIT_SOURCE_COMMIT = "d02ce08ab28826f87d976aef98fefb8b86998075"
+MOLCRYSKIT_SOURCE_COMMIT = "602487aac447e6bbb22408d2194ba7aa67fcf488"
 MOLCRYSKIT_DEVELOPMENT_REQUIREMENT = (
     "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@"
     f"{MOLCRYSKIT_SOURCE_COMMIT}"

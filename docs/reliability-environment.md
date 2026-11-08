@@ -59,7 +59,7 @@ signatures.
 
 Every install job uses the git commit in `pyproject.toml`:
 
-`d02ce08ab28826f87d976aef98fefb8b86998075`
+`602487aac447e6bbb22408d2194ba7aa67fcf488`
 
 That commit reports version `0.8.1.dev5`. The fast-job window check
 still requires the installed version to be at least 0.8.0 and below
