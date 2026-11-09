@@ -7,6 +7,7 @@ queued for the named browser). Do not block a UI callback on a future.
 from __future__ import annotations
 
 import logging
+import stat
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
@@ -55,6 +56,15 @@ class StructureWriter:
     """
 
     schema = "mattervis.structures/v1"
+
+    @staticmethod
+    def _remove_candidate(path: Path) -> None:
+        """Remove an owned source file on POSIX and Windows hosts."""
+        try:
+            path.chmod(stat.S_IREAD | stat.S_IWRITE)
+        except FileNotFoundError:
+            return
+        path.unlink(missing_ok=True)
 
     def __init__(self, host: StructureHost):
         self.host = host
@@ -161,7 +171,7 @@ class StructureWriter:
                     # A post-commit binding failure must not delete a source
                     # already owned by a live scene (or its native Undo entry).
                     if not published:
-                        path.unlink(missing_ok=True)
+                        self._remove_candidate(path)
                     raise
 
             future = self._pool.submit(work)
@@ -174,7 +184,7 @@ class StructureWriter:
             # retained until host shutdown as documented.
             def cleanup_cancelled(done: Future[str]) -> None:
                 if done.cancelled():
-                    path.unlink(missing_ok=True)
+                    self._remove_candidate(path)
 
             future.add_done_callback(cleanup_cancelled)
             return future
@@ -219,6 +229,8 @@ class StructureWriter:
         def cleanup():
             self._pool.shutdown(wait=True)
             if self._storage is not None:
+                for path in Path(self._storage.name).glob("*.cif"):
+                    self._remove_candidate(path)
                 self._storage.cleanup()
 
         from threading import Thread

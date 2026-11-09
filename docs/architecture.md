@@ -128,6 +128,19 @@ figure: a process-wide camera or display classification does not skip the
 frame when the mounted figure still belongs to another scene. The delivery
 contract is `docs/reliability-scene-delivery.md`.
 
+## CIF upload and native extension files
+
+Uploaded CIFs use a content hash for the on-disk name. Writers create private
+temporary files concurrently, then the backend lock publishes only the first
+complete file for that hash. Retries verify and reuse that immutable source;
+Windows readers can keep an open handle without blocking a replace of the
+shared upload.
+
+Native structure writes keep successful candidate CIFs read-only until host
+shutdown. Failed and cancelled candidates, and retained files at shutdown, are
+made owner-writable before deletion so Windows honors the same lifecycle as
+POSIX.
+
 ## Documentation of the render interface
 
 MatterVis is a pure render interface. Stable docs describe geometry, bond

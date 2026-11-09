@@ -140,10 +140,12 @@ class _IOBackendMixin:
 
         digest = hashlib.sha256(data).hexdigest()
 
-        # The file path is content-addressed, so concurrent requests for the
-        # same bytes may safely write it before taking the backend lock.  The
-        # lock below then makes digest/name reservation atomic and prevents two
-        # requests from creating a ``foo_2`` tab for one upload.
+        # The file path is content-addressed. Each request can write a private
+        # temporary file concurrently, then the backend lock elects one file
+        # as the digest's immutable source before any parser opens it. Replacing
+        # an existing target while another Windows worker has it open can fail
+        # with a sharing violation, so duplicate retries discard their private
+        # temporary file instead.
 
         upload_dir = os.path.realpath(os.path.join(tempfile.gettempdir(), "mat_viewer_uploads"))
         os.makedirs(upload_dir, exist_ok=True)
@@ -174,7 +176,15 @@ class _IOBackendMixin:
             try:
                 with os.fdopen(fd, "wb") as handle:
                     handle.write(data)
-                os.replace(temporary_path, path)
+                with self._lock:
+                    if os.path.exists(path):
+                        with open(path, "rb") as existing:
+                            existing_digest = hashlib.sha256(existing.read()).hexdigest()
+                        if existing_digest != digest:
+                            raise RuntimeError("content-addressed upload digest collision")
+                        os.unlink(temporary_path)
+                    else:
+                        os.replace(temporary_path, path)
             finally:
                 try:
                     os.unlink(temporary_path)
