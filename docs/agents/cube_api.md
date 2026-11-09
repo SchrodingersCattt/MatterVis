@@ -93,7 +93,12 @@ mat-vis render density.cube -o density.svg --backend cpu \
 
 The wireframe inherits `--isosurface-positive-color` and
 `--isosurface-negative-color`. `--isosurface-stride` controls the marching-cubes
-mesh density. Because this is a pure wireframe, rear edges are intentionally
+mesh density.
+
+Pass `--isosurface-color-cube` to sample a second cube, with the same grid
+shape, onto those vertices. `--isosurface-colormap bgr` maps the low end to
+blue, the middle to green, and the high end to red. `--isosurface-color-range`
+sets that mapping; omit it to use the finite min and max of the color cube. Because this is a pure wireframe, rear edges are intentionally
 visible; hidden-line removal is not promised. Dense meshes can produce large
 SVG/PDF files.
 

@@ -138,6 +138,7 @@ def isosurface_primitives(
             normals = entry.get("normals")
             name = str(entry.get("id") or entry.get("name") or index)
             color = entry.get("color", "#D55E00" if index == 0 else "#0072B2")
+            vertex_colors = entry.get("vertex_colors")
             opacity = float(entry.get("opacity", 0.55))
             metadata = {
                 "kind": "isosurface",
@@ -157,6 +158,7 @@ def isosurface_primitives(
             normals = entry[2] if len(entry) >= 3 else None
             name = str(index)
             color = "#D55E00" if index == 0 else "#0072B2"
+            vertex_colors = None
             opacity = 0.55
             metadata = {"kind": "isosurface", "name": name}
         else:
@@ -204,6 +206,7 @@ def isosurface_primitives(
                     normals=normals,
                     alpha=opacity,
                     metadata=metadata,
+                    vertex_colors=vertex_colors,
                 )
             )
         )

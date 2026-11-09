@@ -66,6 +66,9 @@ def test_backend_neutral_spec_fields_have_cli_destinations() -> None:
             "isosurface_stride": "isosurface_stride",
             "isosurface_ambient": "isosurface_ambient",
             "isosurface_diffuse": "isosurface_diffuse",
+            "isosurface_color_cube": "isosurface_color_cube",
+            "isosurface_color_range": "isosurface_color_range",
+            "isosurface_colormap": "isosurface_colormap",
         },
         AtomPropertyColorSpec: {
             "fields": "color_by",

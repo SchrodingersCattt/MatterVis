@@ -624,9 +624,11 @@ def _rasterize_mesh(
             np.linalg.norm(camera_vertex_normals, axis=1, keepdims=True), 1e-12
         )
         vertex_illumination = ambient + diffuse * np.abs(camera_vertex_normals @ light)
-        vertex_rgb_all = (
-            np.asarray(primitive.rgba[:3])[None, :] * vertex_illumination[:, None]
-        )
+        if primitive.vertex_colors is None:
+            base_rgb = np.asarray(primitive.rgba[:3])[None, :]
+        else:
+            base_rgb = np.asarray(primitive.vertex_colors, dtype=float)[:, :3]
+        vertex_rgb_all = base_rgb * vertex_illumination[:, None]
     rgba = (*primitive.rgba[:3], float(primitive.rgba[3]))
     for triangle_index, indices in enumerate(primitive.triangles):
         if normal_lengths[triangle_index] < 1e-14:

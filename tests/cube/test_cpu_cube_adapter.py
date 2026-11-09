@@ -141,6 +141,32 @@ def test_wireframe_isosurface_compiles_to_colored_line_primitives() -> None:
     ]
 
 
+def test_color_cube_assigns_distinct_vertex_colors(tmp_path: Path) -> None:
+    cube = _cube(tmp_path)
+    color_values = np.linspace(-1.0, 1.0, cube.values.size).reshape(cube.values.shape)
+
+    meshes = cube_isosurface_meshes(
+        cube,
+        isovalue=0.5,
+        color_values=color_values,
+        color_range=(-1.0, 1.0),
+        colormap="bgr",
+    )
+
+    colors = np.vstack([mesh["vertex_colors"] for mesh in meshes])
+    assert colors.shape[1] == 3
+    assert float(colors.max() - colors.min()) > 0.2
+
+
+def test_color_cube_rejects_a_different_grid(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="same grid shape"):
+        cube_isosurface_meshes(
+            _cube(tmp_path),
+            isovalue=0.5,
+            color_values=np.zeros((2, 2, 2)),
+        )
+
+
 def test_cube_mesh_material_coefficients_are_validated(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match=r"ambient \+ diffuse"):
         cube_isosurface_meshes(

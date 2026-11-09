@@ -390,6 +390,24 @@ def _build_render_parser(
         default=0.32,
         help="Cube isosurface diffuse-light coefficient (default: 0.32).",
     )
+    p.add_argument(
+        "--isosurface-color-cube",
+        default=None,
+        help="Second cube whose values are sampled onto the isosurface.",
+    )
+    p.add_argument(
+        "--isosurface-color-range",
+        nargs=2,
+        type=float,
+        default=None,
+        metavar=("MIN", "MAX"),
+        help="Range used to map the color cube onto the colormap.",
+    )
+    p.add_argument(
+        "--isosurface-colormap",
+        default="bgr",
+        help="Colormap for the color cube. 'bgr' is blue-green-red; other names use Matplotlib.",
+    )
 
     # Config escape-hatch
     p.add_argument(

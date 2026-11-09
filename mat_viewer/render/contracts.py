@@ -210,6 +210,9 @@ class RenderSpec:
     isosurface_stride: int = 2
     isosurface_ambient: float = 0.68
     isosurface_diffuse: float = 0.32
+    isosurface_color_cube: str | None = None
+    isosurface_color_range: tuple[float, float] | None = None
+    isosurface_colormap: str = "bgr"
 
     def __post_init__(self) -> None:
         if self.backend not in ("cpu", "matplotlib", "plotly", "gpu"):
@@ -282,6 +285,10 @@ class RenderSpec:
             raise ValueError(
                 "isosurface_ambient + isosurface_diffuse must not exceed 1"
             )
+        if self.isosurface_color_range is not None:
+            low, high = self.isosurface_color_range
+            if not np.isfinite(low) or not np.isfinite(high) or high <= low:
+                raise ValueError("isosurface_color_range must be finite and increasing")
         lat, lon = self.sphere_detail
         if int(lat) != lat or int(lon) != lon or int(lat) < 2 or int(lon) < 3:
             raise ValueError("sphere_detail must be at least (2, 3)")
@@ -301,6 +308,7 @@ class TriangleMeshPrimitive:
     vertex_normals: np.ndarray | None = None
     double_sided: bool = True
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    vertex_colors: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         if not self.semantic_id:
@@ -320,11 +328,19 @@ class TriangleMeshPrimitive:
             normals = _readonly_array(normals, shape_tail=(3,), name="vertex_normals")
             if normals.shape != vertices.shape:
                 raise ValueError("vertex_normals must match vertices")
+        colors = self.vertex_colors
+        if colors is not None:
+            colors = _readonly_array(colors, shape_tail=(3,), name="vertex_colors")
+            if colors.shape != (len(vertices), 3):
+                raise ValueError("vertex_colors must have shape (N, 3)")
+            if not np.all(np.isfinite(colors)):
+                raise ValueError("vertex_colors must be finite")
         object.__setattr__(self, "vertices", vertices)
         object.__setattr__(self, "triangles", triangles)
         object.__setattr__(self, "vertex_normals", normals)
         object.__setattr__(self, "rgba", _rgba(self.rgba))
         object.__setattr__(self, "metadata", _metadata(self.metadata))
+        object.__setattr__(self, "vertex_colors", colors)
 
 
 @dataclass(frozen=True, slots=True)

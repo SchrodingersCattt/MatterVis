@@ -204,6 +204,11 @@ def prepare_render(
         from .render.planning import _coerce_render_spec
 
         effective_spec = _coerce_render_spec(render_spec)
+        color_values = None
+        if effective_spec.isosurface_color_cube:
+            from .cube.io import read_cube
+
+            color_values = read_cube(effective_spec.isosurface_color_cube).values
         source = ensure_cube_isosurfaces(
             source,
             isovalue=effective_spec.isosurface_isovalue,
@@ -213,6 +218,9 @@ def prepare_render(
             stride=effective_spec.isosurface_stride,
             ambient=effective_spec.isosurface_ambient,
             diffuse=effective_spec.isosurface_diffuse,
+            color_values=color_values,
+            color_range=effective_spec.isosurface_color_range,
+            colormap=effective_spec.isosurface_colormap,
         )
     resolve_requirements("cpu").require()
     from .render.planning import prepare_render as _prepare_render

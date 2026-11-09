@@ -138,6 +138,7 @@ def mesh_primitive(
     alpha: float | None = None,
     double_sided: bool = True,
     metadata: dict[str, Any] | None = None,
+    vertex_colors: Any | None = None,
 ) -> TriangleMeshPrimitive:
     """Wrap a precomputed indexed mesh without importing its generator.
 
@@ -154,6 +155,9 @@ def mesh_primitive(
         rgba=color_to_rgba(color, alpha=alpha),
         double_sided=double_sided,
         metadata=metadata or {},
+        vertex_colors=(
+            np.asarray(vertex_colors, dtype=float) if vertex_colors is not None else None
+        ),
     )
 
 

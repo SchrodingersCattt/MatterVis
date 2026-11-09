@@ -1172,6 +1172,13 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                 isosurface_negative_color=args.isosurface_negative_color,
                 isosurface_stride=args.isosurface_stride,
                 isosurface_ambient=args.isosurface_ambient, isosurface_diffuse=args.isosurface_diffuse,
+                isosurface_color_cube=args.isosurface_color_cube,
+                isosurface_color_range=(
+                    None
+                    if args.isosurface_color_range is None
+                    else tuple(args.isosurface_color_range)
+                ),
+                isosurface_colormap=args.isosurface_colormap,
             )
             atom_groups, bond_groups = _style_groups(args)
             animation_time = _animation_time_from_args(args)
