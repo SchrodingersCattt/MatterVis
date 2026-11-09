@@ -9,7 +9,6 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Self
 
 import pytest
 
@@ -68,7 +67,7 @@ class _WaitTrackingLock:
     def release(self) -> None:
         self._inner.release()
 
-    def __enter__(self) -> Self:
+    def __enter__(self):
         self.acquire()
         return self
 
