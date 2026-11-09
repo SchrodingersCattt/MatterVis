@@ -28,7 +28,11 @@ must not change scene B, and a stale revision must not replace a newer one.
   The pointer-up relayout keeps the revision from gesture start. A later
   camera relayout on that same scene reads the live camera clock, including
   inside the settle window, so the server can accept a refit of an offscreen
-  drag.
+  drag. That clock is `scene_id:scene_generation`. A typed camera envelope
+  carries `scene_generation` beside `versions`, not inside it. The apply
+  path reads that sibling. Reading only `versions` stores the new revision
+  on an empty generation, the next fence sends the figure's older revision,
+  and the server rejects the offscreen repair.
 - `update_view` classifies a callback against the previous snapshot of the
   same scene. That snapshot is process-wide and is not a substitute for the
   requesting browser's mounted figure. Camera, overlay, and ordinary display
