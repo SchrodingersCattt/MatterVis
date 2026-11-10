@@ -367,8 +367,8 @@ def isosurface_overlay_traces(scene: dict, style: dict) -> list[dict]:
         )
     surface_material = material_from_style(style)
     opacity = surface_material.opacity
-    # Wireframe lines are unlit. Surface traces must carry the shared material
-    # or fail here, before marching cubes, instead of drawing a flat color.
+    # Wireframe lines are unlit. Surface traces carry the shared material.
+    # A coefficient Plotly cannot store fails here, before marching cubes.
     surface_shading = (
         plotly_surface_kwargs(surface_material) if mode == "surface" else {}
     )

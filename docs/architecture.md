@@ -97,10 +97,12 @@ true-vector PDF/SVG remain the reference paths.
 Cube isosurface meshes carry one shading material: ambient, diffuse,
 specular, shininess, opacity, and a separate light scale. CPU raster and
 vector export evaluate that record on both sides of the surface. Plotly mesh
-traces use it when their lighting model can represent the weights, and raise
-when they would otherwise clamp the light. The GPU backend rejects the mesh
-instead of drawing a flat color. The material does not add a scalar field or
-a colormap; a second color cube remains the albedo.
+and volume traces receive the same coefficients. Plotly's shader clamps the
+Lambert sum and uses Cook-Torrance highlights, so those pixels are not
+identical to the CPU where the sum exceeds 1. A coefficient outside the
+interval Plotly can store is rejected rather than clamped. The GPU backend
+rejects the mesh instead of drawing a flat color. The material does not add
+a scalar field or a colormap; a second color cube remains the albedo.
 
 `mat-vis capabilities` and `mat-vis render --check` are the authoritative
 dependency resolver. No skill or installer maintains a second dependency

@@ -127,13 +127,27 @@ mat-vis render density.cube -o density.png --backend cpu \
 | CPU PNG | Per-vertex Blinn-Phong when normals are present. Flat shading uses one illumination per face and still multiplies the vertex colors. Both sides keep the scalar color. |
 | CPU SVG/PDF | One shaded color per triangle, after averaging vertex colors. The specular term is included. Rear faces keep that color. |
 | Matplotlib | One shaded color per triangle for a uniform phase color. Per-vertex colors are still an error; use CPU or Plotly. |
-| Plotly mesh | The same record is copied into Mesh3d lighting. Fresnel is 0 so the scalar color is not rim-tinted. Roughness is `1 / (1 + shininess / 32)`. Plotly clamps `ambient + diffuse * light_scale` to 1 before multiplying by the color, so a material above that clamp, including both presets, raises `IsosurfaceShadingUnsupported` instead of drawing a flatter sheet. The historical default sums to 1 and is accepted. Plotly's highlight is Cook-Torrance, not a bit-identical Blinn-Phong lobe. |
-| Plotly volume (`orbital_isosurface_traces`) | Does not evaluate this record. Use the mesh traces or the CPU backend. |
+| Plotly mesh and volume | The shared coefficients are copied into `lighting`. `diffuse` and `specular` there are the record times `light_scale`. Fresnel is 0. Roughness is `1 / (1 + shininess / 32)`. Named presets are forwarded unchanged. Plotly stores ambient and diffuse in `[0, 1]` and specular in `[0, 2]`; a product outside that interval raises `IsosurfaceShadingUnsupported` and is not clamped. |
 | GPU | Rejects an isosurface mesh with `GPUUnsupportedError` before drawing. The current shader would otherwise store one flat color. Wireframe lines stay on the existing unlit line rules. |
 
-`orbital_mesh_traces` now uses this record. Its previous fixed lighting
-(ambient 0.85, diffuse 0.55, specular 0.2) is not the default anymore. The
-trace `opacity` argument is unchanged and still defaults to 0.6.
+Plotly's shader is not the CPU shade. It evaluates
+`min(ambient + diffuse * max(n·l, 0), 1) * color` and a Cook-Torrance
+highlight. The CPU multiplies the albedo by
+`ambient + diffuse * light_scale * |n·l|`, adds a Blinn-Phong highlight,
+and clips the product. Both named presets have an ambient-plus-diffuse sum
+above 1, so on a dark scalar color the CPU can stay brighter than Plotly
+where the Lambert factor exceeds 1. The weights sent to Plotly are still
+the shared record; they are not reduced to remove that difference.
+
+`orbital_isosurface_traces` applies this lighting. Leaving `material`
+unset used to omit `lighting` and inherit Plotly's volume defaults. It now
+sets the historical pair (ambient 0.68, diffuse 0.32, specular 0). Opacity
+still defaults to 0.55.
+
+`orbital_mesh_traces` uses the same historical pair when `material` is
+omitted. That replaced the older fixed lighting (ambient 0.85, diffuse
+0.55, specular 0.2) and is unchanged here. The trace `opacity` argument
+still defaults to 0.6.
 
 ## Isosurface color
 

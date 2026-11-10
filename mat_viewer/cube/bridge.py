@@ -120,8 +120,8 @@ def build_cube_figure(
         Style overrides (isosurface_*, atom_scale, bond_radius, etc.).
         ``isosurface_material``, ``isosurface_specular``,
         ``isosurface_shininess``, and ``isosurface_light_scale`` select the
-        shared isosurface material. A Plotly surface that cannot represent
-        those weights raises instead of drawing a flat color.
+        shared isosurface material. Plotly receives those weights unchanged.
+        A coefficient it cannot store raises instead of being clamped.
     display_mode : str
         Display mode for the structure ("formula_unit", "unit_cell", etc.).
     show_hydrogen : bool

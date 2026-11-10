@@ -128,22 +128,31 @@ def test_two_sided_shade_keeps_scalar_color_and_scales_light() -> None:
     assert np.allclose(clipped, np.ones(3))
 
 
-def test_plotly_accepts_the_historical_material_and_rejects_presets() -> None:
+def test_plotly_forwards_presets_and_rejects_unstorable_coefficients() -> None:
     lighting = plotly_lighting(resolve_isosurface_material())
-    assert lighting["ambient"] == 0.68
-    assert lighting["diffuse"] == 0.32
-    assert lighting["specular"] == 0.0
-    assert lighting["fresnel"] == 0.0
-    assert lighting["roughness"] == pytest.approx(0.5)
-    soft = plotly_lighting(
-        resolve_isosurface_material(ambient=0.4, diffuse=0.4, specular=0.3, shininess=16)
-    )
-    assert soft["specular"] == pytest.approx(0.3)
-    assert soft["roughness"] == pytest.approx(1.0 / (1.0 + 16.0 / 32.0))
-    with pytest.raises(IsosurfaceShadingUnsupported, match="clamps"):
-        plotly_lighting(MATTE_MATERIAL)
-    with pytest.raises(IsosurfaceShadingUnsupported, match="clamps"):
-        plotly_lighting(GLOSSY_MATERIAL)
+    assert lighting == {
+        "ambient": 0.68,
+        "diffuse": 0.32,
+        "specular": 0.0,
+        "roughness": pytest.approx(0.5),
+        "fresnel": 0.0,
+    }
+    matte = plotly_lighting(MATTE_MATERIAL)
+    glossy = plotly_lighting(GLOSSY_MATERIAL)
+    assert matte["ambient"] == MATTE_MATERIAL.ambient
+    assert matte["diffuse"] == MATTE_MATERIAL.diffuse
+    assert matte["specular"] == 0.0
+    assert matte["fresnel"] == 0.0
+    assert glossy["ambient"] == GLOSSY_MATERIAL.ambient
+    assert glossy["diffuse"] == GLOSSY_MATERIAL.diffuse
+    assert glossy["specular"] == GLOSSY_MATERIAL.specular
+    assert glossy["roughness"] == pytest.approx(1.0 / (1.0 + GLOSSY_MATERIAL.shininess / 32.0))
+    assert matte["ambient"] + matte["diffuse"] > 1.0
+    assert glossy["ambient"] + glossy["diffuse"] > 1.0
+    with pytest.raises(IsosurfaceShadingUnsupported, match="not clamped"):
+        plotly_lighting(resolve_isosurface_material(ambient=1.5, diffuse=0.0))
+    with pytest.raises(IsosurfaceShadingUnsupported, match="not clamped"):
+        plotly_lighting(resolve_isosurface_material(ambient=0.2, diffuse=0.4, light_scale=3.0))
 
 
 def _camera() -> CameraSpec:
@@ -281,7 +290,7 @@ def test_gpu_rejects_isosurface_material_instead_of_drawing_flat() -> None:
         lower_plan(_plan(front))
 
 
-def test_plotly_mesh_trace_uses_the_historical_material_or_rejects_matte() -> None:
+def test_plotly_mesh_trace_forwards_the_historical_material_and_matte() -> None:
     pytest.importorskip("skimage")
     from mat_viewer.cube.io import CubeAtom, CubeData
     from mat_viewer.render.traces_isosurface import isosurface_overlay_traces
@@ -308,12 +317,87 @@ def test_plotly_mesh_trace_uses_the_historical_material_or_rejects_matte() -> No
     assert traces[0]["lighting"]["fresnel"] == 0.0
     assert traces[0]["opacity"] == pytest.approx(0.7)
     assert "lightposition" in traces[0]
-    with pytest.raises(IsosurfaceShadingUnsupported):
+    preset_traces = isosurface_overlay_traces(
+        scene,
+        {
+            "isosurface_isovalue": 0.5,
+            "isosurface_stride": 1,
+            "isosurface_material": "matte",
+        },
+    )
+    assert preset_traces[0]["lighting"]["ambient"] == MATTE_MATERIAL.ambient
+    assert preset_traces[0]["lighting"]["diffuse"] == MATTE_MATERIAL.diffuse
+    assert preset_traces[0]["lighting"]["specular"] == 0.0
+    with pytest.raises(IsosurfaceShadingUnsupported, match="not clamped"):
         isosurface_overlay_traces(
             scene,
             {
                 "isosurface_isovalue": 0.5,
                 "isosurface_stride": 1,
-                "isosurface_material": "matte",
+                "isosurface_ambient": 1.5,
+                "isosurface_diffuse": 0.0,
             },
         )
+
+
+def _radial_cube():
+    from pathlib import Path
+
+    from mat_viewer.cube.io import CubeAtom, CubeData
+
+    coordinates = np.indices((8, 8, 8), dtype=float)
+    radius = np.sqrt(sum((coordinates[axis] - 3.5) ** 2 for axis in range(3)))
+    return CubeData(
+        title="field",
+        comment="radial",
+        atoms=[CubeAtom(6, 6.0, np.zeros(3))],
+        origin=np.zeros(3),
+        axes=np.eye(3) * 0.4,
+        values=2.0 - radius,
+        path=Path("field.cube"),
+    )
+
+
+def test_volume_shells_apply_the_shared_material() -> None:
+    pytest.importorskip("plotly")
+    from mat_viewer.cube.core import orbital_isosurface_traces
+
+    cube = _radial_cube()
+    historical = orbital_isosurface_traces(cube, isovalue=0.5)
+    assert historical
+    assert historical[0].opacity == pytest.approx(0.55)
+    assert historical[0].lighting.ambient == pytest.approx(0.68)
+    assert historical[0].lighting.diffuse == pytest.approx(0.32)
+    assert historical[0].lighting.specular == pytest.approx(0.0)
+    assert historical[0].lighting.fresnel == pytest.approx(0.0)
+    assert historical[0].lightposition.x == pytest.approx(-3200.0)
+
+    glossy = orbital_isosurface_traces(cube, isovalue=0.5, material="glossy", opacity=0.4)
+    assert glossy[0].opacity == pytest.approx(0.4)
+    assert glossy[0].lighting.ambient == pytest.approx(GLOSSY_MATERIAL.ambient)
+    assert glossy[0].lighting.diffuse == pytest.approx(GLOSSY_MATERIAL.diffuse)
+    assert glossy[0].lighting.specular == pytest.approx(GLOSSY_MATERIAL.specular)
+
+
+def test_orbital_mesh_default_lighting_stays_historical() -> None:
+    pytest.importorskip("plotly")
+    pytest.importorskip("skimage")
+    from mat_viewer.cube.core import orbital_mesh_traces
+
+    cube = _radial_cube()
+    traces = orbital_mesh_traces(cube, isovalue=0.5, stride=2)
+    assert traces
+    assert traces[0].opacity == pytest.approx(0.6)
+    assert traces[0].lighting.ambient == pytest.approx(0.68)
+    assert traces[0].lighting.diffuse == pytest.approx(0.32)
+    assert traces[0].lighting.specular == pytest.approx(0.0)
+    assert traces[0].lighting.fresnel == pytest.approx(0.0)
+
+    glossy = orbital_mesh_traces(cube, isovalue=0.5, stride=2, material="glossy", opacity=0.6)
+    assert glossy[0].opacity == pytest.approx(0.6)
+    assert glossy[0].lighting.ambient == pytest.approx(GLOSSY_MATERIAL.ambient)
+    assert glossy[0].lighting.diffuse == pytest.approx(GLOSSY_MATERIAL.diffuse)
+    assert glossy[0].lighting.specular == pytest.approx(GLOSSY_MATERIAL.specular)
+    assert (
+        glossy[0].lighting.ambient + glossy[0].lighting.diffuse > 1.0
+    )

@@ -65,13 +65,24 @@ def orbital_isosurface_traces(
     positive_color: str = "#D55E00",
     negative_color: str = "#0072B2",
     opacity: float = 0.55,
+    material: str | None = None,
 ) -> list[go.Isosurface]:
     """Create positive and negative orbital isosurface traces (Plotly volume).
 
-    These volume shells do not evaluate the shared isosurface material.
-    Use ``orbital_mesh_traces`` or the CPU renderer when the surface must
-    be shaded.
+    Lighting is the shared isosurface material. Omitting ``material`` uses
+    the historical Lambert pair (ambient 0.68, diffuse 0.32, specular 0),
+    not Plotly's implicit volume lighting. ``opacity`` still defaults to
+    0.55. A coefficient Plotly cannot store raises
+    ``IsosurfaceShadingUnsupported`` instead of being clamped.
     """
+    from ..render.isosurface_material import (
+        plotly_surface_kwargs,
+        resolve_isosurface_material,
+    )
+
+    surface_shading = plotly_surface_kwargs(
+        resolve_isosurface_material(material, opacity=float(opacity))
+    )
     x, y, z, values = cube_grid(cube, stride=stride)
     iso = (
         float(isovalue)
@@ -94,6 +105,8 @@ def orbital_isosurface_traces(
                 surface_count=1,
                 opacity=opacity,
                 colorscale=[[0.0, positive_color], [1.0, positive_color]],
+                lighting=surface_shading["lighting"],
+                lightposition=surface_shading["lightposition"],
                 caps=dict(x_show=False, y_show=False, z_show=False),
                 showscale=False,
                 name="+ orbital",
@@ -111,6 +124,8 @@ def orbital_isosurface_traces(
                 surface_count=1,
                 opacity=opacity,
                 colorscale=[[0.0, negative_color], [1.0, negative_color]],
+                lighting=surface_shading["lighting"],
+                lightposition=surface_shading["lightposition"],
                 caps=dict(x_show=False, y_show=False, z_show=False),
                 showscale=False,
                 name="- orbital",
@@ -200,10 +215,13 @@ def orbital_mesh_traces(
     Kaleido). This is the recommended path for publication-quality figures.
 
     ``material`` is ``matte``, ``glossy``, or omitted. The omitted material
-    is the shared historical Lambert pair (ambient 0.68, diffuse 0.32,
-    specular 0), not the previous fixed Plotly lighting. Plotly rejects a
-    material whose ambient and scaled diffuse exceed 1 instead of clamping
-    it. Trace opacity stays the ``opacity`` argument.
+    stays the shared historical Lambert pair (ambient 0.68, diffuse 0.32,
+    specular 0). That replaced the older fixed Plotly lighting (ambient
+    0.85, diffuse 0.55, specular 0.2) and is not changed further here.
+    Named presets are forwarded as stored. A coefficient outside the
+    interval Plotly can store raises ``IsosurfaceShadingUnsupported``
+    instead of being clamped. Trace opacity stays the ``opacity`` argument
+    and still defaults to 0.6.
     """
     try:
         from skimage.measure import marching_cubes

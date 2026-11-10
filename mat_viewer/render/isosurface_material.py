@@ -290,29 +290,53 @@ def shade_albedo(
     return rgb
 
 
-def plotly_lighting(material: IsosurfaceMaterial) -> dict[str, float]:
-    """Map the record onto Plotly mesh lighting, or reject it.
+def _require_plotly_interval(name: str, value: float, low: float, high: float) -> None:
+    """Reject a coefficient Plotly cannot store.
 
-    Plotly clamps ``ambient + diffuse`` before multiplying by the color, and
-    its highlight is Cook-Torrance roughness rather than Blinn-Phong
-    shininess. A material whose directional weights exceed that clamp is
-    rejected instead of being flattened. Fresnel stays ``0`` so the scalar
-    color is not rim-tinted. Roughness is ``1 / (1 + shininess / 32)``.
+    Plotly's lighting properties are closed intervals. Clamping a value into
+    that interval would change the shared material, so an out-of-range
+    coefficient is an error.
     """
-    diffuse = float(material.diffuse) * float(material.light_scale)
-    if float(material.ambient) + diffuse > 1.0 + 1.0e-9:
+    if value < low - 1.0e-12 or value > high + 1.0e-12:
         raise IsosurfaceShadingUnsupported(
-            "Plotly clamps ambient + diffuse * light_scale to 1 and would "
-            "flatten this cube isosurface material "
-            f"(ambient={material.ambient:g}, diffuse={material.diffuse:g}, "
-            f"light_scale={material.light_scale:g}). Use the CPU backend."
+            f"Plotly lighting stores {name} in [{low:g}, {high:g}] and cannot "
+            f"represent {value:g} from the shared isosurface material. "
+            "The coefficient is not clamped. Use the CPU backend."
         )
+
+
+def plotly_lighting(material: IsosurfaceMaterial) -> dict[str, float]:
+    """Map the shared record onto Plotly lighting without rewriting it.
+
+    ``diffuse`` and ``specular`` sent to Plotly are the shared weights times
+    ``light_scale``, because Plotly has no separate light scale. Ambient is
+    not scaled. Fresnel stays ``0`` so the scalar color is not rim-tinted.
+    Roughness is ``1 / (1 + shininess / 32)``. Named presets are inside
+    Plotly's stored intervals and are forwarded unchanged.
+
+    Plotly then uses a different shader. Its Lambert term is
+    ``min(ambient + diffuse * max(n·l, 0), 1) * color``, and the highlight
+    is Cook-Torrance rather than Blinn-Phong. The CPU multiplies the albedo
+    by ``ambient + diffuse * light_scale * |n·l|``, adds a Blinn-Phong
+    highlight, and clips the product. Where the Lambert factor exceeds 1, a
+    dark scalar color can stay brighter on the CPU than in Plotly. The
+    numbers given to Plotly are still the shared record; they are not
+    reduced to hide that difference. A coefficient outside the interval
+    Plotly can store raises :class:`IsosurfaceShadingUnsupported`.
+    """
+    ambient = float(material.ambient)
+    diffuse = float(material.diffuse) * float(material.light_scale)
+    specular = float(material.specular) * float(material.light_scale)
     roughness = 1.0 / (1.0 + float(material.shininess) / DEFAULT_SHININESS)
+    _require_plotly_interval("ambient", ambient, 0.0, 1.0)
+    _require_plotly_interval("diffuse", diffuse, 0.0, 1.0)
+    _require_plotly_interval("specular", specular, 0.0, 2.0)
+    _require_plotly_interval("roughness", roughness, 0.0, 1.0)
     return {
-        "ambient": float(material.ambient),
+        "ambient": ambient,
         "diffuse": diffuse,
-        "specular": float(material.specular) * float(material.light_scale),
-        "roughness": float(min(1.0, max(0.0, roughness))),
+        "specular": specular,
+        "roughness": float(roughness),
         "fresnel": 0.0,
     }
 
