@@ -881,9 +881,12 @@ def _identify_source_partitions(atoms, identify, identify_kwargs, molecule_indic
         raise ValueError("molecule_index must contain one integer per atom")
     if np.any(values < 0):
         raise ValueError("molecule_index values must be non-negative")
+    partitions: dict[int, list[int]] = {}
+    for index, source_id in enumerate(values):
+        partitions.setdefault(int(source_id), []).append(index)
     molecules = []
-    for source_id in np.unique(values):
-        source_indices = np.flatnonzero(values == source_id)
+    for source_id in sorted(partitions):
+        source_indices = np.asarray(partitions[source_id], dtype=int)
         for molecule in identify(atoms[source_indices], **identify_kwargs):
             info = molecule.info
             info["atom_indices"] = [
