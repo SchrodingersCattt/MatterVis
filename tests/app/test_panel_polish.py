@@ -119,6 +119,34 @@ def test_atom_list_renderer_marks_a_truncated_sample():
         if isinstance(children, str):
             texts.append(children)
     assert any(text.startswith("Showing 12 of 15") for text in texts)
+    assert atom_list_model(scene)["visual_copies"] == 0
+    assert not any("repeated drawings" in text for text in texts)
+
+
+def test_atom_list_names_visual_copies_as_repeated_drawings():
+    """Boundary, bonded-image, and framework copies are not extra source sites."""
+    scene = {
+        "draw_atoms": [
+            {"label": "C1", "elem": "C"},
+            {"label": "C1b", "elem": "C", "_is_boundary_replica": True},
+            {"label": "N1b", "elem": "N", "_is_bonded_image_replica": True},
+            {"label": "O1b", "elem": "O", "_is_framework_context_replica": True},
+        ]
+    }
+    model = atom_list_model(scene)
+    assert model["total"] == 4
+    assert model["visual_copies"] == 3
+    assert [row["label"] for row in model["rows"]] == ["C1", "C1b", "N1b", "O1b"]
+
+    texts = []
+    for node in walk_layout(html.Div(render_atom_list(scene))):
+        children = getattr(node, "children", None)
+        if isinstance(children, str):
+            texts.append(children)
+    assert (
+        "3 visual copies of 4 displayed atoms are repeated drawings, "
+        "not extra source sites."
+    ) in texts
 
 
 def test_workbench_layout_includes_status_bar_atom_list_and_log_filter(tmp_path, monkeypatch):
