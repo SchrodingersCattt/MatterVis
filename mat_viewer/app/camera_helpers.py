@@ -63,6 +63,40 @@ _SUMMARY_SCOPE_LABELS = {
 }
 
 
+def _disorder_summary_inputs(state: dict) -> tuple:
+    """Fields that change which atoms the disorder summary is counting."""
+    from ..transforms import transforms_cache_key
+
+    options = state.get("display_options") or ()
+    if isinstance(options, (str, bytes)):
+        options = ()
+    option_set = set(options)
+    return (
+        state.get("structure"),
+        state.get("display_mode"),
+        "hydrogens" in option_set,
+        "wrap_into_cell" in option_set,
+        transforms_cache_key(state.get("transforms") or []),
+    )
+
+
+def _disorder_summary_for_scope_change(backend, previous_state, state):
+    """Return a new summary when the drawn subset changed before the figure.
+
+    ``no_update`` means the card already describes this scope. The figure
+    worker can still be drawing. The summary only reads the scene, so a
+    scope change must not wait for that frame.
+    """
+    if not isinstance(previous_state, dict):
+        return no_update
+    if _disorder_summary_inputs(previous_state) == _disorder_summary_inputs(state):
+        return no_update
+    try:
+        return _structure_summary(backend.scene_for_state(state))
+    except (KeyError, ValueError, OSError, TypeError):
+        return no_update
+
+
 def _summary_scope_label(scene: dict) -> str:
     return _SUMMARY_SCOPE_LABELS.get(str(scene.get("display_mode") or ""), "This view")
 
