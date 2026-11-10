@@ -343,6 +343,17 @@ CAPABILITY_REGISTRY: Mapping[str, CapabilitySpec] = {
         packages=("scikit-image",),
         imports=("skimage",),
     ),
+    "vtk": CapabilitySpec(
+        name="vtk",
+        description="PyVista offscreen cube figures",
+        extra="vtk",
+        packages=("pyvista", "scikit-image"),
+        imports=("pyvista", "skimage"),
+        note=(
+            "Optional PNG path for a depth-peeled isosurface figure. "
+            "It is not a mat-vis render backend and does not infer bonds."
+        ),
+    ),
     "animation": CapabilitySpec(
         name="animation",
         description="GIF and MP4 encoding",
@@ -380,6 +391,7 @@ REQUIREMENT_ALIASES: Mapping[str, tuple[str, ...]] = {
     "tui": ("tui",),
     "cube": ("cube",),
     "isosurface": ("cube",),
+    "vtk": ("vtk",),
     "animation": ("animation",),
     "gif": ("animation",),
     "mp4": ("animation",),

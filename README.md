@@ -72,6 +72,7 @@ Install only the frontend the requested output needs:
 | `[web]` | Dash, REST, WebSocket, compression, and Plotly |
 | `[tui]` | Textual terminal UI |
 | `[cube]` | Cube input inspection and isosurfaces |
+| `[vtk]` | PyVista offscreen cube figures |
 | `[animation]` | GIF/MP4 encoders |
 | `[all]` | Every optional frontend |
 | `[test]` | Test tools |

@@ -180,3 +180,35 @@ If marching cubes reports that the level does not cross the data, choose an
 explicit isovalue inside the scalar range. If isolated noise components remain,
 use the component-size and atom-mask controls deliberately; absence of their
 optional implementation is an error rather than a visual fallback.
+
+## VTK offscreen figures
+
+`mat_viewer.render.vtk_cube.render_cube_figure` writes one PNG through
+PyVista. It is not a `mat-vis render --backend` choice. The orthographic
+camera, the three lights, and the depth peeling are arguments of this
+function, and the function does not consume a `RenderPlan`.
+
+Install it with the `vtk` extra:
+
+```console
+python -m pip install "matter-vis[vtk]"
+```
+
+PyVista is imported only when the function is called. The call takes the
+isosurface grid, the color grid, `look` (from the camera toward the scene),
+`up`, and `parallel_scale`. `periodic=True` pads one wrapped voxel and drops
+faces whose mean index lies outside the original grid. `repeat` tiles the
+finished mesh and the atoms; it is not `periodic_image_policy`. Taubin
+smoothing runs before the colors are sampled onto the moved vertices.
+
+A custom colormap has five RGB stops. The neutral stop is placed at
+`(0 - color_min) / (color_max - color_min)`, so an asymmetric range does
+not put the middle color at two thirds by accident.
+
+`bonds` are index pairs in the unrepeated cell. A repeat translates those
+pairs with each cell. Pass `bond_finder(xyz, atomic_numbers)` when contacts
+that cross a cell boundary have to be chosen after the repeat. This function
+does not choose elements or distance cutoffs.
+
+Two calls with the same arrays write the same PNG on one machine. A different
+VTK build can move a few edge pixels.
