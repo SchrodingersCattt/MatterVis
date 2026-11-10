@@ -143,6 +143,7 @@ def lowered_from_frame(
     bonded: bool,
     tracker: Any,
     min_atom_radius: float | None = None,
+    shading: str = "smooth",
 ) -> LoweredPlan:
     """Build instanced sphere and bond packets from one frame's arrays."""
 
@@ -153,6 +154,13 @@ def lowered_from_frame(
         bond_radius=bond_radius,
         min_atom_radius=min_atom_radius,
     )
+    shading_mode = str(shading).strip().lower()
+    if shading_mode not in {"smooth", "flat"}:
+        raise GPUUnsupportedError(
+            "GPU FrameBatch shading must be 'smooth' or 'flat', "
+            f"got {shading!r}"
+        )
+    flat = shading_mode == "flat"
     packets: list[DrawPacket] = []
     for index, (position, number) in enumerate(
         zip(frame.positions, frame.atomic_numbers, strict=True)
@@ -173,7 +181,7 @@ def lowered_from_frame(
                 indices=None,
                 rgba=(*rgb, 1.0),
                 rect=(0.0, 0.0, 1.0, 1.0),
-                metadata={"radius": float(radii[atomic_number])},
+                metadata={"radius": float(radii[atomic_number]), "flat": flat},
             )
         )
     if bonded:
@@ -216,7 +224,7 @@ def lowered_from_frame(
                         indices=None,
                         rgba=(*rgb, 1.0),
                         rect=(0.0, 0.0, 1.0, 1.0),
-                        metadata={"radius": float(bond_radius)},
+                        metadata={"radius": float(bond_radius), "flat": flat},
                     )
                 )
     if show_cell and (frame.natoms or bool(np.any(frame.pbc))):
@@ -379,6 +387,7 @@ def render_gpu_animation(
                     cell_width_px=float(getattr(render_spec, "cell_width_px", 2.0)),
                     bonded=tracker is not None,
                     tracker=tracker,
+                    shading=str(getattr(render_spec, "shading", "smooth")),
                 )
                 frame_digests.append(lowered.plan_sha256)
                 png = session.render_lowered(lowered)

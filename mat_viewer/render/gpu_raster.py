@@ -51,28 +51,35 @@ def _cpu_overlay_lines(packets: tuple[DrawPacket, ...]) -> tuple[DrawPacket, ...
     return tuple(packet for packet in packets if line_needs_cpu_overlay(packet))
 
 
-def split_raster_packets(
-    packets: tuple[DrawPacket, ...],
-) -> tuple[tuple[DrawPacket, ...], tuple[DrawPacket, ...]]:
-    """Split depth-tested draws from 1 px lines that must stay on top.
+def uniform_binding_visibility(wgpu: Any) -> int:
+    """Return bind-group visibility for the shared frame uniform.
 
-    Instanced shapes and CPU-composited strokes are omitted. Depth-disabled
-    unit-width lines are returned second so a later mesh cannot cover them.
-    The CPU rasterizer gives those lines a depth of negative infinity.
+    Instance fragment shaders read ``uniforms.light`` and ``uniforms.flat``.
+    Vertex-only visibility makes those pipelines invalid.
     """
 
-    main: list[DrawPacket] = []
-    overlays: list[DrawPacket] = []
-    for packet in packets:
-        if packet.kind in {"sphere", "cylinder", "ellipsoid"}:
-            continue
-        if line_needs_cpu_overlay(packet):
-            continue
-        if packet.kind == "line" and not bool(packet.metadata.get("depth_test", True)):
-            overlays.append(packet)
-        else:
-            main.append(packet)
-    return tuple(main), tuple(overlays)
+    stage = getattr(wgpu, "ShaderStage", None)
+    vertex = int(getattr(stage, "VERTEX", 1))
+    fragment = int(getattr(stage, "FRAGMENT", 2))
+    return vertex | fragment
+
+
+def split_raster_packets(
+    packets: tuple[DrawPacket, ...],
+) -> tuple[DrawPacket, ...]:
+    """Return the packets drawn in the depth-tested GPU pass.
+
+    Instanced shapes are drawn separately. Lines that need the CPU stroker,
+    including every depth-disabled stroke, are omitted so the later composite
+    can place them above depth-tested colour.
+    """
+
+    return tuple(
+        packet
+        for packet in packets
+        if packet.kind not in {"sphere", "cylinder", "ellipsoid"}
+        and not line_needs_cpu_overlay(packet)
+    )
 
 
 def composite_overlay_lines(
@@ -243,13 +250,11 @@ def wgpu_rgba(
             index_usage |= usage_buffer
             buffer_usage = usage_buffer | map_read
             shader = device.create_shader_module(code=_WGSL)
-            stage = getattr(wgpu, "ShaderStage", None)
-            vertex_stage = getattr(stage, "VERTEX", 1)
             uniform_layout = device.create_bind_group_layout(
                 entries=[
                     {
                         "binding": 0,
-                        "visibility": vertex_stage,
+                        "visibility": uniform_binding_visibility(wgpu),
                         "buffer": {"type": "uniform"},
                     }
                 ]
@@ -393,9 +398,9 @@ def wgpu_rgba(
             cache=state,
         )
         overlay_packets = _cpu_overlay_lines(tuple(lowered.packets))
-        main_packets, final_lines = split_raster_packets(tuple(lowered.packets))
+        main_packets = split_raster_packets(tuple(lowered.packets))
         camera_by_viewport = lowered.cameras
-        for packet in (*main_packets, *final_lines):
+        for packet in main_packets:
             camera = camera_by_viewport.get(packet.viewport_id)
             if camera is None:
                 raise GPUUnsupportedError(

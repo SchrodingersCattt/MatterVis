@@ -271,8 +271,9 @@ usable adapter with `mat-vis capabilities --require gpu --json` before
 rendering. Transparent primitives, dashed lines, and text fail explicitly.
 Opaque meshes, instanced spheres, cylinders, and solid ellipsoids are drawn
 on the device. Lines wider than one pixel, including the default unit-cell
-edges, are composited from the GPU depth buffer inside each viewport.
-Depth-disabled one-pixel lines are drawn after opaque geometry. The command
+edges, are composited from the GPU depth buffer inside each viewport,
+together with depth-disabled lines. A depth-disabled stroke stays in front
+of a depth-tested one. The command
 never falls back to CPU. GPU output is not supersampled: `scale`,
 `sphere_detail`, and `cylinder_sides` do not change the GPU image size or
 the fixed instance meshes.

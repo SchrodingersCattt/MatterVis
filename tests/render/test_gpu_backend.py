@@ -336,21 +336,29 @@ def test_wide_and_ortep_lines_use_the_cpu_overlay() -> None:
         metadata={"kind": "unit_cell"},
     )
     thin = LinePrimitive(
-        "axis",
+        "overlay",
         np.asarray([[[0.0, 0.0, 0.0], [0.0, 1.0, 0.0]]], dtype=float),
         rgba=(0.0, 0.0, 0.0, 1.0),
         width_px=1.0,
         depth_test=False,
     )
+    depth_tested = LinePrimitive(
+        "axis",
+        np.asarray([[[0.0, 0.0, 0.0], [0.0, 0.0, 1.0]]], dtype=float),
+        rgba=(0.0, 0.0, 0.0, 1.0),
+        width_px=1.0,
+        depth_test=True,
+    )
     hatch = LinePrimitive(
         "hatch",
-        np.asarray([[[0.0, 0.0, 0.0], [0.0, 0.0, 1.0]]], dtype=float),
+        np.asarray([[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]], dtype=float),
         rgba=(0.1, 0.1, 0.1, 1.0),
         width_px=0.7,
         metadata={"kind": "ortep_hatch"},
     )
-    lowered = gpu.lower_plan(_plan(wide, thin, hatch))
+    lowered = gpu.lower_plan(_plan(wide, thin, depth_tested, hatch))
     assert [line_needs_cpu_overlay(packet) for packet in lowered.packets] == [
+        True,
         True,
         False,
         True,
@@ -660,7 +668,8 @@ def test_wide_lines_composite_inside_each_viewport() -> None:
     )
 
 
-def test_depth_disabled_lines_are_drawn_after_meshes() -> None:
+def test_depth_disabled_lines_share_the_cpu_overlay() -> None:
+    from mat_viewer.render.gpu_packets import line_needs_cpu_overlay
     from mat_viewer.render.gpu_raster import split_raster_packets
 
     edge = LinePrimitive(
@@ -671,10 +680,55 @@ def test_depth_disabled_lines_are_drawn_after_meshes() -> None:
         depth_test=False,
     )
     lowered = gpu.lower_plan(_plan(edge, _triangle()))
-    main, final = split_raster_packets(lowered.packets)
+    assert line_needs_cpu_overlay(lowered.packets[0])
+    main = split_raster_packets(lowered.packets)
     assert [packet.kind for packet in main] == ["mesh"]
-    assert [packet.semantic_id for packet in final] == ["edge"]
-    assert [packet.semantic_id for packet in (*main, *final)] == ["triangle", "edge"]
+
+
+def test_depth_disabled_line_stays_in_front_of_a_wide_depth_tested_line() -> None:
+    from mat_viewer.render.gpu_raster import composite_overlay_lines
+
+    def packet(name: str, end: tuple[float, float, float], rgba, width: float, depth: bool):
+        return gpu.DrawPacket(
+            kind="line",
+            semantic_id=name,
+            viewport_id="main",
+            vertices=np.asarray([[(0.0, 0.0, 0.0), end]], dtype=np.float32).reshape(-1, 3),
+            indices=None,
+            rgba=rgba,
+            rect=(0.0, 0.0, 1.0, 1.0),
+            metadata={"depth_test": depth, "width_px": width},
+        )
+
+    camera = CameraSpec.looking_along(
+        (0.0, 0.0, 1.0), up=(0.0, 1.0, 0.0), distance=8.0, ortho_scale=2.0, near=0.1, far=30.0
+    )
+    width = height = 32
+    background = np.full((height, width, 4), 255, dtype=np.uint8)
+    lowered = gpu.LoweredPlan(
+        width=width,
+        height=height,
+        background=(1.0, 1.0, 1.0, 1.0),
+        packets=(),
+        plan_sha256="cross",
+        cameras={"main": camera},
+    )
+    # The wide stroke is listed second. Depth-disabled colour must still win.
+    painted = np.frombuffer(
+        composite_overlay_lines(
+            background.tobytes(),
+            np.ones((height, width), dtype=np.float32),
+            lowered,
+            (
+                packet("thin", (1.0, 0.0, 0.0), (1.0, 0.0, 0.0, 1.0), 1.0, False),
+                packet("wide", (0.0, 1.0, 0.0), (0.0, 0.0, 1.0, 1.0), 8.0, True),
+            ),
+        ),
+        dtype=np.uint8,
+    ).reshape(height, width, 4)
+    center = painted[height // 2, width // 2]
+    assert center[0] > center[2]
+    assert np.any((painted[:, :, 2] > 200) & (painted[:, :, 0] < 30))
 
 
 def test_frame_identity_tracks_positions_colors_and_camera() -> None:
@@ -718,11 +772,144 @@ def test_frame_identity_tracks_positions_colors_and_camera() -> None:
     recolored = digest(frame(color=(10, 20, 30)), camera_a)
     reframed = digest(frame(), camera_b)
     assert len({base, moved, recolored, reframed}) == 4
+    flat = lowered_from_frame(
+        frame(),
+        camera_a,
+        width=16,
+        height=16,
+        background=(1.0, 1.0, 1.0, 1.0),
+        atom_scale=1.0,
+        bond_radius=0.15,
+        show_hydrogen=True,
+        show_cell=False,
+        cell_color="#333333",
+        cell_width_px=2.0,
+        bonded=False,
+        tracker=None,
+        shading="flat",
+    )
+    assert flat.packets[0].metadata["flat"] is True
+    smooth = lowered_from_frame(
+        frame(),
+        camera_a,
+        width=16,
+        height=16,
+        background=(1.0, 1.0, 1.0, 1.0),
+        atom_scale=1.0,
+        bond_radius=0.15,
+        show_hydrogen=True,
+        show_cell=False,
+        cell_color="#333333",
+        cell_width_px=2.0,
+        bonded=False,
+        tracker=None,
+        shading="smooth",
+    )
+    assert smooth.packets[0].metadata["flat"] is False
+    assert flat.plan_sha256 != smooth.plan_sha256
     import hashlib
 
     same_length = hashlib.sha256("\n".join((base, base)).encode()).hexdigest()
     changed_frame = hashlib.sha256("\n".join((base, moved)).encode()).hexdigest()
     assert same_length != changed_frame
+
+
+def test_uniform_binding_includes_the_fragment_stage() -> None:
+    from mat_viewer.render.gpu_raster import uniform_binding_visibility
+
+    class Stages:
+        VERTEX = 0x1
+        FRAGMENT = 0x2
+        COMPUTE = 0x4
+
+    class Runtime:
+        ShaderStage = Stages
+
+    visibility = uniform_binding_visibility(Runtime)
+    assert visibility & Stages.VERTEX
+    assert visibility & Stages.FRAGMENT
+    assert not visibility & Stages.COMPUTE
+
+
+def test_instance_pipelines_accept_fragment_uniform_visibility() -> None:
+    pytest.importorskip("wgpu")
+    import importlib
+
+    from mat_viewer.render.gpu_draw import (
+        _CYLINDER_WGSL,
+        _ELLIPSOID_WGSL,
+        _SPHERE_WGSL,
+        _pipeline,
+    )
+    from mat_viewer.render.gpu_raster import uniform_binding_visibility
+    from mat_viewer.render.gpu_runtime import _request_adapter, _request_device
+
+    wgpu = importlib.import_module("wgpu")
+    try:
+        adapter = _request_adapter(wgpu)
+        device = None if adapter is None else _request_device(adapter)
+    except Exception as exc:
+        pytest.skip(f"no wgpu device: {type(exc).__name__}: {exc}")
+    if device is None:
+        pytest.skip("wgpu did not provide a device")
+    try:
+        visibility = uniform_binding_visibility(wgpu)
+        assert visibility & int(wgpu.ShaderStage.FRAGMENT)
+        layout = device.create_bind_group_layout(
+            entries=[
+                {
+                    "binding": 0,
+                    "visibility": visibility,
+                    "buffer": {"type": "uniform"},
+                }
+            ]
+        )
+        pipeline_layout = device.create_pipeline_layout(bind_group_layouts=[layout])
+        mesh = {
+            "array_stride": 24,
+            "attributes": [
+                {"format": "float32x3", "offset": 0, "shader_location": 0},
+                {"format": "float32x3", "offset": 12, "shader_location": 1},
+            ],
+        }
+        cases = (
+            (_SPHERE_WGSL, "vs_sphere", "fs_sphere", {"array_stride": 32, "step_mode": "instance", "attributes": [
+                {"format": "float32x3", "offset": 0, "shader_location": 2},
+                {"format": "float32", "offset": 12, "shader_location": 3},
+                {"format": "float32x4", "offset": 16, "shader_location": 4},
+            ]}),
+            (_CYLINDER_WGSL, "vs_cylinder", "fs_cylinder", {"array_stride": 48, "step_mode": "instance", "attributes": [
+                {"format": "float32x3", "offset": 0, "shader_location": 2},
+                {"format": "float32", "offset": 12, "shader_location": 3},
+                {"format": "float32x3", "offset": 16, "shader_location": 4},
+                {"format": "float32x4", "offset": 32, "shader_location": 5},
+            ]}),
+            (_ELLIPSOID_WGSL, "vs_ellipsoid", "fs_ellipsoid", {"array_stride": 96, "step_mode": "instance", "attributes": [
+                {"format": "float32x3", "offset": 0, "shader_location": 2},
+                {"format": "float32", "offset": 12, "shader_location": 3},
+                {"format": "float32x3", "offset": 16, "shader_location": 4},
+                {"format": "float32x3", "offset": 32, "shader_location": 5},
+                {"format": "float32x3", "offset": 48, "shader_location": 6},
+                {"format": "float32x3", "offset": 64, "shader_location": 7},
+                {"format": "float32x4", "offset": 80, "shader_location": 8},
+            ]}),
+        )
+        for code, entry, fragment, instance in cases:
+            shader = device.create_shader_module(code=code)
+            pipeline = _pipeline(
+                device,
+                shader,
+                pipeline_layout,
+                [mesh, instance],
+                entry=entry,
+                fragment=fragment,
+                blend=None,
+            )
+            assert pipeline is not None
+    finally:
+        destroy = getattr(device, "destroy", None)
+        if callable(destroy):
+            destroy()
 
 
 def test_missing_vertex_normals_select_flat_instance_shading() -> None:

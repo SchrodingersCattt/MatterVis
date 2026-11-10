@@ -90,8 +90,8 @@ at the operation that needs them:
 
 The GPU backend is explicit. It lowers the same immutable `RenderPlan`,
 draws opaque meshes and instanced spheres, cylinders, and solid ellipsoids,
-and composites lines that are not one pixel wide from the GPU depth buffer,
-using each viewport's own camera and pixel crop. It does not apply CPU
+and composites depth-disabled lines together with lines that are not one
+pixel wide, using each viewport's own camera and pixel crop. It does not apply CPU
 supersampling or the CPU sphere and cylinder tessellation controls.
 Transparent primitives, dashed lines, and text are rejected. It never
 substitutes the CPU renderer when the optional dependency, the device, or a

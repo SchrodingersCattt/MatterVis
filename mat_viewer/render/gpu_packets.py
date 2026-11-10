@@ -207,14 +207,18 @@ def lowered_plan_digest(lowered: LoweredPlan) -> str:
 def line_needs_cpu_overlay(packet: DrawPacket) -> bool:
     """Return whether a line must be composited on the CPU.
 
-    The GPU line list is one pixel wide. ORTEP hatch and principal-axis
-    strokes, and every other non-unit width, keep the CPU stroker so
-    ``width_px`` and depth testing match the raster backend.
+    The GPU line list is one pixel wide and depth-tested. ORTEP hatch and
+    principal-axis strokes, every other width, and every depth-disabled line
+    use the CPU stroker. Depth-disabled strokes then share that stroker's
+    negative-infinity priority, so a later depth-tested wide line cannot
+    cover them.
     """
 
     if packet.kind != "line":
         return False
     if str(packet.metadata.get("kind", "")) in _CPU_OVERLAY_LINE_KINDS:
+        return True
+    if not bool(packet.metadata.get("depth_test", True)):
         return True
     width = float(packet.metadata.get("width_px", _GPU_LINE_WIDTH_PX))
     return abs(width - _GPU_LINE_WIDTH_PX) > _LINE_WIDTH_EPSILON_PX

@@ -19,12 +19,12 @@ Probe results are available from `mat-vis capabilities --json` and
 
 Opaque triangle meshes are drawn directly. Spheres, cylinders, and solid
 ellipsoids are instanced from the plan's analytic shape records. One-pixel
-opaque lines use the GPU line list. Depth-disabled one-pixel lines are drawn
-after opaque geometry, so a later mesh does not cover them. Wider strokes,
-including the default unit-cell edges, and ORTEP hatch or principal-axis
-lines are composited on the CPU inside each viewport's pixel crop and
-camera. A plan may contain more than one panel. Dashed lines, text, and
-transparent primitives raise `GPUUnsupportedError`. There is no CPU fallback
+opaque lines that are depth-tested use the GPU line list. Depth-disabled
+lines of any width, wider strokes, including the default unit-cell edges,
+and ORTEP hatch or principal-axis lines are composited together on the CPU
+inside each viewport's pixel crop and camera. A depth-disabled stroke stays
+in front of a depth-tested one. A plan may contain more than one panel.
+Dashed lines, text, and transparent primitives raise `GPUUnsupportedError`. There is no CPU fallback
 when the optional dependency, the device, or a primitive is unsupported.
 
 Viewport rectangles use the CPU image convention: `y = 0` is the top.
@@ -40,7 +40,8 @@ existing explicit backends. GIF and MP4 also require `matter-vis[animation]`.
 One `GpuSession` draws the whole animation, with at most one frame in flight.
 Ball and ball-and-stick frames that are already `FrameBatch` arrays, and that
 do not request a display mode, labels, axes, groups, overlays, topology, or
-atom-property colours, are drawn from those arrays. Structure frames and every
+atom-property colours, are drawn from those arrays. That path honours
+``RenderSpec.shading`` of ``smooth`` or ``flat``. Structure frames and every
 other representation go through the planned `RenderPlan` on that same session,
 so the displayed atoms match the CPU path. Instanced meshes are shaded with
 the CPU camera-space light in world space. They are not pixel-identical to
