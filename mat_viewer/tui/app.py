@@ -607,9 +607,25 @@ class CrystalTUI(App):
                 "select A | next atom | inspect [A] | stereo [A] | name [A] | why [A] | "
                 "focus A [depth] | distance A B [direct|mic] | "
                 "angle A B C [direct|mic] | dihedral A B C D [direct|mic_chain] | "
-                "slice off|depth|a|b|c [index] [width] | parallax on|off | clear",
+                "slice off|depth|a|b|c [index] [width] | parallax on|off | clear | "
+                "operate build-supercell A B C",
                 None,
             )
+        if name == "operate":
+            from .operate_command import execute_operate_command
+
+            message, crystal = execute_operate_command(
+                self.controller.crystal,
+                args,
+                session=getattr(self.controller, "_effect_session", None),
+                structure_id=getattr(self.controller, "_effect_structure_id", None),
+            )
+            if crystal is not None:
+                self.controller._effect_session = getattr(crystal, "_effect_session", None)
+                self.controller._effect_structure_id = getattr(crystal, "_effect_structure_id", None)
+                self.controller.crystal = crystal
+                return message, self.controller.observe()
+            return message, None
         if name == "slice":
             if not 1 <= len(args) <= 3:
                 raise ValueError("slice requires axis [index] [width]")

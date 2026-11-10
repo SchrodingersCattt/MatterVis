@@ -180,6 +180,7 @@ def topology_spec_geometry_key(
             str(spec.get("center_kind") or "centroid"),
             _hashable(spec.get("hard_cutoff")),
             _hashable(spec.get("fallback_max")),
+            str(spec.get("disorder_policy") or "major"),
         )
         for spec in specs or ()
     )

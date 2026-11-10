@@ -1,6 +1,13 @@
 # Operation Model
 
-Every user action should be represented as a typed operation.  The operation
+In this document, an operation is a typed **view action** handled by
+`reduce_state`. It is not a structural Operate command. Structural
+edits (`build_supercell`, `delete_sites`, and the other commands in
+`mat_viewer.effects`) commit a new scientific revision and do not pass
+through this reducer. See
+[Display, Operate, and Analysis](../architecture/display-operate-analysis.md).
+
+Every view action should be represented as a typed operation. The view
 reducer is pure:
 
 \[

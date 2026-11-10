@@ -1,9 +1,11 @@
 from mat_viewer.app.view_updates import (
     UpdateKind,
     classify_change,
+    committed_render_kind,
     display_state_key,
     geometry_state_key,
     make_update,
+    requires_complete_frame,
     update_applies,
 )
 
@@ -133,6 +135,18 @@ def test_update_serialization_copies_nested_payload_and_scene_generation():
     assert serialized["scene_generation"] == 7
     assert serialized["payload"]["camera"]["eye"]["x"] == 1.0
     assert serialized["payload"]["items"][0]["id"] == "a"
+
+
+def test_noop_patch_does_not_request_a_complete_frame():
+    state = _state()
+    assert classify_change(state, dict(state)) is UpdateKind.FULL
+    assert committed_render_kind(state, dict(state)) is None
+    assert requires_complete_frame(UpdateKind.DISPLAY, state) is False
+    assert requires_complete_frame(UpdateKind.OVERLAY, state) is False
+    assert requires_complete_frame(UpdateKind.CAMERA, state) is False
+    assert requires_complete_frame(UpdateKind.GEOMETRY, state) is True
+    flat = _state(material="flat", style="ortep")
+    assert requires_complete_frame(UpdateKind.CAMERA, flat) is True
 
 
 def test_update_delivery_identity_defaults_to_kind_and_preserves_explicit_ids():

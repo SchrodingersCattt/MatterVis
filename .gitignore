@@ -16,6 +16,8 @@ catalog.local.json
 uploads/
 exports/
 scripts/_outputs/
+browser-artifacts/
+node_modules/
 scripts/data/HPEP.cif
 scripts/data/MPEP.cif
 scripts/data/PEP.cif

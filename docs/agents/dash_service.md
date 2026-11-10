@@ -73,7 +73,16 @@ shorthand-issued `repeat`), so it shows up later under
 executors. Long-lived services keep one backend for the service lifetime.
 Short-lived callers must either use it as a context manager or call its
 idempotent `close()` method so pending scene state is flushed and those
-background resources are released:
+background resources are released when the pools go idle. `close()` bounds
+each pool join, then flushes. `workers_quiescent` is false when a worker
+was still running after that bound; returning from `close` is not itself
+a release of that worker. Unfinished workers are removed from CPython's
+private interpreter-shutdown registries, because `Thread.daemon` cannot
+be set after the thread starts and `Executor.shutdown` cannot forget a
+running worker. A registry that is not present is skipped. A final flush
+that cannot persist the current generation raises `SceneStorePersistError`. A mutation that lands while a
+snapshot is being replaced stays dirty and is written by a later attempt
+of the same flush. The lock order is `docs/reliability-worker-shutdown.md`.
 
 ```python
 from mat_viewer.app.backend import ViewerBackend
@@ -84,11 +93,13 @@ with ViewerBackend(preset_path="preset.json") as backend:
 
 ## Live update contract
 
-The WebSocket is the **only** push channel; REST mutations don't reply
-with the full re-rendered figure. Callers that want the figure must
-either subscribe to `/api/v2/ws` and consume the `version`-bumped
-snapshot, or poll `GET /screenshot?at_version=N` with the version
-returned by the mutating call.
+The WebSocket is the push channel for an already-open page. REST
+mutations do not reply with the full re-rendered figure. A committed
+scene change schedules its own render on the existing worker, then the
+open page receives it through the figure journal (WebSocket, or
+`GET /view-updates` when the socket is down). Callers that want a PNG
+can still poll `GET /screenshot?at_version=N` with the version returned
+by the mutating call.
 
 ```mermaid
 sequenceDiagram
@@ -106,23 +117,52 @@ sequenceDiagram
     API->>B: apply patch (scene_id=s2)
     B->>S: mutate scene row, bump version → N+1
     B-->>B: mark SceneStore dirty (debounced save)
-    B-->>B: arm pending_state = deepcopy(current_state)
+    B-->>B: schedule the complete frame on the render worker
+    B-->>B: arm pending_state when the patched scene is the active scene
     API-->>C: 200 OK
 
-    loop WS tick (~0.5s)
-        W->>B: pop_pending_state()
-        B-->>W: snapshot {version: N+1, state, structures, figure?}
-        W-->>C: push snapshot
+    loop WS tick
+        W->>B: snapshot {version, state, structures, scene_catalog}
+        W->>B: journal frames and view updates since the cursor
+        W-->>C: push snapshot and journal envelopes
     end
 
-    C->>C: rebuild Plotly figure from snapshot
+    C->>C: apply the journal frame for the scene this page is showing
 ```
 
 Notes for callers:
 
-- `pending_state` is armed on every state-mutating call (REST or
-  WebSocket `set_state`), and consumed once per WS tick — clients see
-  one push per version, not one push per call.
+- A committed geometry, analysis, or other complete-frame change
+  (including `atom_scale` and `display_mode`) enqueues
+  `AsyncRenderWorker` at the backend write. The open page does not wait
+  for Dash `update_view`. Camera, overlay, and ordinary display patches
+  stay on the lightweight `view_update` envelope when the requesting
+  page's mounted figure is already that scene. A page whose mounted
+  figure still belongs to another scene receives the selected scene's
+  complete frame instead. Flat ORTEP still rebuilds its image when the
+  camera changes, because the camera basis is rasterized into that image.
+- `pending_state` is armed for a broadcast write to the active scene
+  (REST `POST /state`, WebSocket `set_state`, and external `/intent`
+  calls). The existing agent-state poll writes the matching page's
+  controls from that snapshot, and it also re-reads the selected scene
+  when the browser's control acknowledgement is behind the live
+  versions. A write to some other scene does not switch the selected
+  tab. Selecting that tab later shows the committed state.
+- Scene create, rename, delete, reorder, duplicate, and undo append a
+  `scene_catalog` envelope to the same journal and include
+  `scene_catalog` on the WebSocket snapshot and on `GET /view-updates`.
+  The page rebuilds its existing tab strip from that message. The
+  selected tab stays put, except on the page that clicked Duplicate:
+  that page selects the catalog `active_id` locally. `focus` stays
+  false for create, rename, delete, reorder, duplicate, and undo, so
+  other open pages do not move. `POST /scenes/active` and a
+  `set_active_scene` intent set `focus: true` and move every open tab.
+  Deleting the selected scene moves the page to the scene that remains
+  active.
+- `POST /intent` and a WebSocket `intent` message broadcast to the open
+  page. The same intent types, when the Dash UI calls them in-process,
+  still suppress that echo so a drag or a local style edit is not
+  written back over the gesture.
 - `subscribe_figure` pushes completed figure deltas as separate
   `{"type":"figure","figure_seq":...,"scene_id":...,"render_revision":...,"figure":...}`
   frames. `render_revision` is monotonic per scene and changes only when
@@ -137,12 +177,20 @@ Notes for callers:
   `scene_id`, `render_revision`, and `server_started_at`. Reset/align revisions
   invalidate in-flight frames even when molecular geometry has not changed.
   Cache hits refresh both layout and scene `uirevision` through the existing
-  style owner. Clients preserve the live camera only for the same scene, server
-  epoch and `uirevision`; explicit camera revisions use the supplied camera.
-- The built-in Dash view schedules ordinary updates through the render worker
-  and reads its validated frame journal. The existing five-second state poll
-  also delivers completed frames when WebSocket is unavailable (including
-  image-backed flat/ORTEP figures). There is no new endpoint or message type.
+  style owner. `uirevision` includes the scene id, structure name, camera
+  revision, and viewport signature, so two scenes that share a structure and
+  camera do not keep one WebGL camera. Clients preserve the live camera only
+  for the same scene, server epoch and `uirevision`; explicit camera revisions
+  use the supplied camera. A duplicate scene schedules its own complete frame.
+  An in-flight build publishes only for its current scene identity; a newer
+  complete-frame identity is requeued and an older one cannot roll that scene
+  back.
+- The backend commit schedules ordinary complete frames through the render
+  worker. The built-in Dash view reads the validated frame journal and
+  requests a build only when that journal is behind the committed revision.
+  `GET /view-updates` delivers the same journal when WebSocket is unavailable
+  (including image-backed flat/ORTEP figures). Scene-list changes use a
+  `scene_catalog` envelope on that journal. There is no new endpoint.
   Both positional Plotly calls and Dash's `react(gd, {data, layout})` use one
   serialized browser gate, deferred during interaction. The same completed
   frame arriving through both transports is applied once; rejected renders
@@ -194,7 +242,7 @@ Notes for callers:
   but named polyhedra now render from `polyhedron_specs`),
   `topology_site_index` (primary site for the histogram /
   results panel), `topology_enabled`, `topology_hull_color`,
-  `transforms` (full ordered list of structure mutations; see
+  `transforms` (full ordered list of display derivations; see
   `transforms_api.md`),
   `overlay_overrides` (manual 2D component placement entries; paper
   anchors for fixed viewport components, world anchors plus pixel
@@ -285,11 +333,13 @@ Notes for callers:
 - `GET /scenes`
   Lists scene tabs and the active scene id.
 - `POST /scenes`
-  Creates a tab. Body: `{"structure": "DAP-4", "label": "view A",
-  "state": {...}}`. If the requested label already exists, the
-  server appends a numeric suffix and echoes
-  `{"requested_label": "...", "label_renamed": true}` in the returned
-  scene payload.
+  Creates a tab and makes it the process-wide active scene. An
+  already-open page adds the tab and keeps the tab it is showing.
+  Body: `{"structure": "DAP-4", "label": "view A", "state": {...}}`.
+  If the requested label already exists, the server appends a numeric
+  suffix and echoes `{"requested_label": "...", "label_renamed": true}`
+  in the returned scene payload. Call `POST /scenes/active` to focus
+  the new tab in the open page.
 - `PATCH /scenes/{id}`
   Renames or patches a tab.
 - `DELETE /scenes/{id}`
@@ -305,7 +355,8 @@ Notes for callers:
   `{"kept": {...scene}, "removed": [{...scene}, ...]}`. The UI surfaces
   this through the "Close others" button next to the Duplicate-tab `+`.
 - `GET /scenes/active` / `POST /scenes/active`
-  Reads or changes the active scene.
+  Reads or changes the active scene. `POST` also focuses that scene in
+  an already-open page.
 - `POST /upload`
   Multipart form upload with field `file`. Uploaded CIFs are recorded
   in `.local/crystal_view_uploads.json` by SHA-256 and restored on
@@ -317,10 +368,12 @@ Notes for callers:
   that tab, otherwise a fresh scene tab is materialised. Either path
   bumps the state version, so a WebSocket subscriber or `GET /state`
   poller will see `structure` equal the uploaded name immediately
-  after the response. The response keeps legacy `atom_count` and also
-  exposes `parsed_atom_count`, `displayed_atom_count`, and
-  `asu_atom_count` so clients can distinguish CIF parsing from the
-  current display slice.
+  after the response. The response includes `scene_id` for the tab
+  that owns this upload. Select that id. The process-wide active scene
+  can already belong to another browser. The response keeps legacy
+  `atom_count` and also exposes `parsed_atom_count`,
+  `displayed_atom_count`, and `asu_atom_count` so clients can
+  distinguish CIF parsing from the current display slice.
 - `GET /structures`
   Lists the loaded catalog and uploaded structures.
 - `GET /scene/{name}`
@@ -367,8 +420,8 @@ Notes for callers:
   [`bond_groups_api.md`](bond_groups_api.md).
 - `GET /transforms` / `POST /transforms` / `PATCH /transforms/{id}` /
   `DELETE /transforms/{id}` / `POST /transforms/reorder`
-  Ordered list of structure mutations applied before rendering:
-  `repeat` (supercell), `grow_radius`, `grow_bonds`,
+  Ordered list of display derivations applied before rendering:
+  `repeat` (periodic copies), `grow_radius`, `grow_bonds`,
   `complete_fragment`, `complete_polyhedron`, `by_symmetry`, `slab`.
   See [`transforms_api.md`](transforms_api.md). The simplest case
   ("just give me a 2×2×2 view") can use the `supercell` shorthand on

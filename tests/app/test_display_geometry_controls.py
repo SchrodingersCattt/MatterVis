@@ -135,6 +135,9 @@ def backend(tmp_path, water_path, preset):
     preset_path = tmp_path / "preset.json"
     preset_path.write_text(json.dumps(preset), encoding="utf-8")
     backend = ViewerBackend(preset_path=str(preset_path), root_dir=str(tmp_path))
+    # This test counts synchronous ``build_figure`` calls. The commit-time
+    # worker would build the same frames on another thread.
+    backend._render_worker.request_figure_build = lambda *args, **kwargs: False
     try:
         # Real loader, with local registration to avoid upload/prewarm jobs.
         bundle = build_loaded_crystal(

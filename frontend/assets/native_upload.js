@@ -50,6 +50,10 @@
       status: payload && payload.status,
       names: (payload && payload.names) || [],
     };
+    // The upload's own scene. Dash must not fall through to the
+    // process-wide active scene, which another browser may have selected
+    // while this CIF was parsing.
+    if (payload && payload.scene_id) data.scene_id = String(payload.scene_id);
     if (window.dash_clientside && typeof window.dash_clientside.set_props === "function") {
       window.dash_clientside.set_props("native-upload-sync", { data: data });
       return;
@@ -64,13 +68,22 @@
   }
 
   async function forceActiveSceneFromServer(payload) {
-    try {
-      const response = await fetch("/api/v2/scenes", { cache: "no-store" });
-      if (!response.ok) {
-        return;
+    // Prefer the scene id the upload response named. ``GET /api/v2/scenes``
+    // reports one process-wide active id, and the other browser can change
+    // it between the POST and this read.
+    let activeId = payload && payload.scene_id ? String(payload.scene_id) : "";
+    if (!activeId) {
+      try {
+        const response = await fetch("/api/v2/scenes", { cache: "no-store" });
+        if (response.ok) {
+          const scenesPayload = await response.json();
+          activeId = (scenesPayload && scenesPayload.active_id) || "";
+        }
+      } catch (_err) {
+        activeId = "";
       }
-      const scenesPayload = await response.json();
-      const activeId = scenesPayload && scenesPayload.active_id;
+    }
+    try {
       if (activeId && window.dash_clientside && typeof window.dash_clientside.set_props === "function") {
         // The upload completion is authoritative for the selected scene. The
         // persistent figure client will queue its frame until this value is
@@ -161,8 +174,9 @@
     throw new Error("Timed out while processing " + file.name);
   }
 
-  async function waitForSceneAndSwitch(uploadedNames) {
+  async function waitForSceneAndSwitch(uploadedNames, sceneId) {
     if (!uploadedNames || !uploadedNames.length) return;
+    const ownedScene = sceneId ? String(sceneId) : "";
     // Upload completion is already exposed by the HTTP job endpoint.  Do not
     // open a second figure connection here: transient per-upload sockets
     // race the figure subscriber during repeated uploads and can leave the
@@ -179,7 +193,11 @@
           scenes.map(function (scene) { return scene && scene.structure_name; })
         );
         if (uploadedNames.every(function (name) { return present.has(name); })) {
-          await forceActiveSceneFromServer({ status: "success", names: uploadedNames });
+          await forceActiveSceneFromServer({
+            status: "success",
+            names: uploadedNames,
+            scene_id: ownedScene,
+          });
           setStatus("Loaded: " + uploadedNames.join(", "), "success");
           return;
         }
@@ -189,7 +207,7 @@
       await delay(250);
     }
     setStatus("Uploaded: " + uploadedNames.join(", "), "success");
-    triggerDashSync({ status: "success", names: uploadedNames });
+    triggerDashSync({ status: "success", names: uploadedNames, scene_id: ownedScene });
   }
 
   function uploadOne(file, index, total) {
@@ -249,6 +267,7 @@
     }
     setDropzoneBusy(dropzone, true);
     const names = [];
+    let sceneId = "";
     try {
       for (let i = 0; i < list.length; i += 1) {
         const file = list[i];
@@ -258,14 +277,15 @@
         );
         const meta = await uploadOne(file, i + 1, list.length);
         names.push(meta.name || file.name);
+        if (meta && meta.scene_id) sceneId = String(meta.scene_id);
         setStatus("Processing complete: " + names.join(", "), "success");
       }
       setStatus("Uploaded CIF(s): " + names.join(", ") + ". Updating scene...", "success");
-      const payload = { status: "success", names: names };
       // Wait for the scene store to expose every completed upload, then
-      // switch exactly once. Awaiting this sequence prevents a stale tab
-      // value from winning a Dash callback race with the upload completion.
-      await waitForSceneAndSwitch(names);
+      // switch exactly once to the scene this upload owns. Awaiting this
+      // sequence prevents a stale tab value, or the other browser's active
+      // scene, from winning a Dash callback race with the upload completion.
+      await waitForSceneAndSwitch(names, sceneId);
     } catch (err) {
       setStatus("Upload failed: " + (err && err.message ? err.message : String(err)), "error");
       triggerDashSync({ status: "error", names: names });

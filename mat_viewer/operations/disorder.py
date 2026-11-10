@@ -34,13 +34,15 @@ def _coerce_seed(seed: Any) -> int | None:
         return None
 
 
-def _generate_mck_replicas(
+def _call_mck_replicas(
     cif_path: str,
     *,
     method: str,
     count: int,
     seed: int | None,
-) -> tuple[tuple[int, ...], ...]:
+) -> list[tuple[Any, tuple[int, ...]]]:
+    """One MolCrysKit generation, retaining each ordered crystal."""
+
     from molcrys_kit.analysis.disorder import (
         generate_ordered_replicas_from_disordered_sites,
     )
@@ -77,17 +79,27 @@ def _generate_mck_replicas(
                 return_kept_indices=True,
                 crystal=parsed.crystal,
             )
-    out: list[tuple[int, ...]] = []
+    out: list[tuple[Any, tuple[int, ...]]] = []
     for item in replicas or []:
         if not isinstance(item, tuple) or len(item) != 2:
             continue
-        _crystal, kept_indices = item
+        crystal, kept_indices = item
         try:
             kept = tuple(sorted({int(idx) for idx in kept_indices}))
         except (TypeError, ValueError):
             continue
-        out.append(kept)
-    return tuple(out)
+        out.append((crystal, kept))
+    return out
+
+
+def _generate_mck_replicas(
+    cif_path: str,
+    *,
+    method: str,
+    count: int,
+    seed: int | None,
+) -> tuple[tuple[int, ...], ...]:
+    return tuple(kept for _crystal, kept in _call_mck_replicas(cif_path, method=method, count=count, seed=seed))
 
 
 @lru_cache(maxsize=32)
@@ -203,6 +215,17 @@ def resolve_disorder(
     count: int,
     seed: int | None = None,
 ) -> list[dict[str, Any]]:
+    summaries, _crystals = resolve_disorder_with_crystals(bundle, method=method, count=count, seed=seed)
+    return summaries
+
+
+def resolve_disorder_with_crystals(
+    bundle: Any,
+    *,
+    method: str,
+    count: int,
+    seed: int | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
     """Return ordered-replica summaries for a loaded CIF bundle.
 
     Each summary carries ``highlight_indices`` -- the ``raw_atoms`` indices
@@ -216,7 +239,7 @@ def resolve_disorder(
     """
     cif_path = str(getattr(bundle, "cif_path", "") or "")
     if not cif_path:
-        return []
+        return [], {}
 
     raw_atoms = list(getattr(bundle, "raw_atoms", []) or [])
     # A loaded scene the structure summary calls "none detected" has atoms
@@ -224,7 +247,7 @@ def resolve_disorder(
     # replicas. An empty raw-atom list is not that signal: callers that only
     # have a CIF path still go through MolCrysKit.
     if raw_atoms and not _disorder_raw_indices(raw_atoms):
-        return []
+        return [], {}
 
     method = _coerce_method(method)
     count = _coerce_count(count, method=method)
@@ -232,16 +255,18 @@ def resolve_disorder(
 
     source_disorder = _source_disorder_detected(bundle)
     if source_disorder is False:
-        return []
+        return [], {}
 
     try:
-        optimal_sets = _mck_replicas(cif_path, method="optimal", count=1, seed=None)
-        replica_sets = _mck_replicas(cif_path, method=method, count=count, seed=seed)
+        optimal_full = _call_mck_replicas(cif_path, method="optimal", count=1, seed=None)
+        replica_full = _call_mck_replicas(cif_path, method=method, count=count, seed=seed)
     except Exception:
-        return []
+        return [], {}
 
+    optimal_sets = tuple(kept for _crystal, kept in optimal_full)
+    replica_sets = tuple(kept for _crystal, kept in replica_full)
     if not replica_sets:
-        return []
+        return [], {}
 
     disorder_sites = _disorder_raw_indices(raw_atoms)
 
@@ -293,4 +318,18 @@ def resolve_disorder(
                 "dropped_indices": dropped,
             }
         )
-    return out
+    by_kept: dict[tuple[int, ...], Any] = {}
+    for crystal, kept in replica_full:
+        by_kept.setdefault(kept, crystal)
+    retained: dict[str, dict[str, Any]] = {}
+    for summary in out:
+        kept_tuple = tuple(int(index) for index in summary["kept_indices"])
+        crystal = by_kept.get(kept_tuple)
+        if crystal is None:
+            continue
+        summary["candidate_id"] = str(summary["id"])
+        retained[str(summary["id"])] = {
+            "crystal": crystal.copy(),
+            "kept_indices": list(kept_tuple),
+        }
+    return out, retained

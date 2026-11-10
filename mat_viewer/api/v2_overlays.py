@@ -34,6 +34,7 @@ def register_overlay_routes(v2, backend) -> dict:
                 center_kind=payload.get("center_kind"),
                 hard_cutoff=payload.get("hard_cutoff"),
                 fallback_max=payload.get("fallback_max"),
+                disorder_policy=payload.get("disorder_policy"),
                 scene_id=_polyhedra_scene_id(),
                 spec_id=payload.get("id"),
             )
@@ -224,7 +225,7 @@ def register_overlay_routes(v2, backend) -> dict:
 
     # ----- transforms (Phase 4) ----------------------------------------
     #
-    # Per-scene structure-mutation pipeline. Each entry is a transform
+    # Per-scene display-derivation pipeline. Each entry is a transform
     # spec dict {id, name, kind, params, enabled}. Order matters --
     # later transforms see the results of earlier ones. See
     # See docs/agents/transforms_api.md for the parameter schema per kind.

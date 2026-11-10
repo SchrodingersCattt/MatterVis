@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from collections import OrderedDict
-from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 import copy
 import json
 import os
 import threading
+from collections import OrderedDict
+from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from typing import Any
 
 from .backend_topology import compute_topology_geometry_payload
-from .view_updates import UpdateKind
+from .view_updates import UpdateKind, committed_render_kind, requires_complete_frame
 
 
 # Opt-in process-based topology worker via environment variable.
@@ -23,6 +23,120 @@ _TOPOLOGY_WORKER_MODE = os.environ.get("MATTERVIS_TOPOLOGY_WORKER", "thread")
 # Terminal render records are diagnostic. Keep the newest window so a long
 # session cannot grow one entry per render key without bound.
 _TASK_STATUS_LIMIT = 256
+# ``Executor.shutdown(wait=True)`` has no timeout on Python 3.10–3.12.
+# A worker blocked on the backend lock must not keep ``ViewerBackend.close``
+# inside that join until the outer pytest timeout.
+_POOL_SHUTDOWN_WAIT_SECONDS = 5.0
+
+
+def shutdown_executor(pool, *, wait: bool) -> bool:
+    """Stop an executor. Return whether its workers have finished.
+
+    A waiting shutdown joins for a bounded interval. The executor marks
+    itself shut down before it joins worker threads, so a timed-out wait
+    has still rejected new work. The running callable is not killed.
+    Workers still alive after that bound are detached from interpreter
+    shutdown and this function returns False. Returning from ``close``
+    is not the same as releasing those workers. Committed scene state is
+    flushed by the backend, not by this join.
+    """
+    if not wait:
+        _call_executor_shutdown(pool, wait=False)
+        return _detach_unfinished_workers(pool)
+
+    def _stop() -> None:
+        _call_executor_shutdown(pool, wait=True)
+
+    thread = threading.Thread(
+        target=_stop,
+        name="mattervis-pool-shutdown",
+        daemon=True,
+    )
+    thread.start()
+    thread.join(_POOL_SHUTDOWN_WAIT_SECONDS)
+    return _detach_unfinished_workers(pool)
+
+
+def _detach_unfinished_workers(pool) -> bool:
+    """Return True when no pool thread is still running.
+
+    There is no public API that removes a running worker from interpreter
+    shutdown. ``Thread.daemon = True`` raises ``RuntimeError`` once the
+    thread has started, and ``Executor.shutdown`` cannot time out or
+    forget that thread. CPython 3.10–3.12 still joins it from two private
+    registries:
+
+    * ``threading._shutdown`` acquires every lock in
+      ``threading._shutdown_locks``. The lock is registered at thread
+      start. Assigning the public daemon flag later does not remove it.
+    * ``concurrent.futures.thread._python_exit`` joins every thread still
+      in ``_threads_queues``. Setting ``_daemonic`` does not remove that
+      entry.
+
+    Both registrations are dropped, and ``_daemonic`` is set so a later
+    pass treats the worker as a daemon. A registry that this interpreter
+    does not expose is skipped. Alive workers still make this return
+    False, so ``close`` reports the pool non-quiescent and continues the
+    scene-store flush. The callable keeps running until the process ends.
+    """
+    threads = [
+        worker
+        for worker in list(getattr(pool, "_threads", ()) or ())
+        if worker.is_alive()
+    ]
+    if not threads:
+        return True
+    _drop_interpreter_shutdown_locks(threads)
+    _drop_executor_shutdown_entries(threads)
+    for worker in threads:
+        _mark_worker_daemonic(worker)
+    return False
+
+
+def _drop_interpreter_shutdown_locks(threads) -> None:
+    locks = getattr(threading, "_shutdown_locks", None)
+    guard = getattr(threading, "_shutdown_locks_lock", None)
+    if locks is None or guard is None:
+        return
+    with guard:
+        for worker in threads:
+            lock = getattr(worker, "_tstate_lock", None)
+            if lock is not None:
+                locks.discard(lock)
+
+
+def _drop_executor_shutdown_entries(threads) -> None:
+    from concurrent.futures import thread as futures_thread
+
+    queues = getattr(futures_thread, "_threads_queues", None)
+    guard = getattr(futures_thread, "_global_shutdown_lock", None)
+    if queues is None or guard is None:
+        return
+    with guard:
+        for worker in threads:
+            queues.pop(worker, None)
+
+
+def _mark_worker_daemonic(worker) -> None:
+    """Mark a running worker daemon without the public setter.
+
+    The public ``daemon`` property refuses a thread that has already
+    started. ``_daemonic`` is the field that property writes, and it is
+    the flag CPython consults if the worker is registered again.
+    """
+    try:
+        worker.daemon = True
+    except RuntimeError:
+        pass
+    if hasattr(worker, "_daemonic"):
+        worker._daemonic = True
+
+
+def _call_executor_shutdown(pool, *, wait: bool) -> None:
+    try:
+        pool.shutdown(wait=wait, cancel_futures=True)
+    except TypeError:  # pragma: no cover - executors without cancel_futures
+        pool.shutdown(wait=wait)
 
 
 class AsyncRenderWorker:
@@ -35,10 +149,19 @@ class AsyncRenderWorker:
 
     Final Plotly JSON assembly always runs in a daemon thread before
     the result is pushed to WebSocket subscribers.
+
+    Lock order is worker lock, then the backend lock. Publishing a frame
+    reads scene state, so that read stays outside the worker lock. Callers
+    that already hold the backend lock must enqueue only after releasing it.
+    ``shutdown(wait=True)`` bounds each pool join so a blocked worker cannot
+    hold backend close until the process timeout. Workers still running
+    after that bound are detached from interpreter shutdown, and
+    ``quiescent`` is False.
     """
 
     def __init__(self, backend):
         self.backend = backend
+        self.quiescent = True
         max_workers = max(1, min(4, os.cpu_count() or 1))
         if _TOPOLOGY_WORKER_MODE == "process":
             self._compute_pool = ProcessPoolExecutor(
@@ -102,12 +225,13 @@ class AsyncRenderWorker:
         )
 
     def _report_error(self, state: dict[str, Any], exc: Exception) -> None:
-        with self._lock:
-            if self._is_current(state):
-                self.backend.broadcast_render_error(
-                    scene_id=state.get("scene_id"),
-                    error=f"{type(exc).__name__}: {exc}",
-                )
+        # ``broadcast_render_error`` takes the backend lock. Do not call it
+        # while ``self._lock`` is held.
+        if self._is_current(state):
+            self.backend.broadcast_render_error(
+                scene_id=state.get("scene_id"),
+                error=f"{type(exc).__name__}: {exc}",
+            )
 
     def _camera_advanced_state(self, state: dict[str, Any]) -> dict[str, Any] | None:
         """Return the live state when only the camera changed mid-build.
@@ -161,9 +285,55 @@ class AsyncRenderWorker:
         except (KeyError, TypeError, ValueError, AttributeError):
             return None
 
-    def _resubmit_camera_advanced(self, state: dict[str, Any], *, reason: str) -> bool:
-        """Queue the current camera revision after a stale build result."""
-        current = self._camera_advanced_state(state)
+    def _publication_identity(self, state: dict[str, Any]) -> tuple[int, int, int] | None:
+        try:
+            return (
+                int(state.get("scene_generation", 0) or 0),
+                int(state.get("render_revision", -1)),
+                int(state.get("camera_revision", 0) or 0),
+            )
+        except (TypeError, ValueError):
+            return None
+
+    def _live_state_if_newer(self, state: dict[str, Any]) -> dict[str, Any] | None:
+        """Return the live scene when a stale build still needs a frame.
+
+        A camera-only advance keeps the existing recovery. Any other requeue
+        requires a strictly newer publication identity and a transition that
+        still needs a complete frame. Display and overlay edits bump
+        ``render_revision`` without a worker build, and an older identity is
+        never requeued, so a late build cannot roll the scene back or replace
+        a local patch with a full frame.
+        """
+        if self._closed:
+            return None
+        camera_state = self._camera_advanced_state(state)
+        if camera_state is not None:
+            return camera_state
+        scene_id = state.get("scene_id")
+        if not scene_id:
+            return None
+        try:
+            if scene_id not in self.backend.scene_store.scenes:
+                return None
+            current = self.backend.get_state(scene_id)
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return None
+        if not isinstance(current, dict):
+            return None
+        if str(current.get("scene_id") or scene_id) != str(scene_id):
+            return None
+        live_id = self._publication_identity(current)
+        snapshot_id = self._publication_identity(state)
+        if live_id is None or snapshot_id is None or live_id <= snapshot_id:
+            return None
+        if not requires_complete_frame(committed_render_kind(state, current), current):
+            return None
+        return current
+
+    def _resubmit_live_state(self, state: dict[str, Any], *, reason: str) -> bool:
+        """Queue the live scene after a build that is no longer current."""
+        current = self._live_state_if_newer(state)
         if current is None:
             return False
         # ``force`` bypasses the camera-only fast path: this is the recovery
@@ -259,15 +429,14 @@ class AsyncRenderWorker:
                 return
             self.backend._store_topology_geometry(structure, cache_key, geometry)
             fig, topology_data = self.backend.figure_for_state(state, async_topology=False)
-            with self._lock:
-                if self._is_current(state):
-                    self.backend.broadcast_figure(
-                        scene_id=state.get("scene_id"),
-                        figure=fig.to_plotly_json(),
-                        topology_data=topology_data,
-                        state=state,
-                        reason="topology-ready",
-                    )
+            if self._is_current(state):
+                self.backend.broadcast_figure(
+                    scene_id=state.get("scene_id"),
+                    figure=fig.to_plotly_json(),
+                    topology_data=topology_data,
+                    state=state,
+                    reason="topology-ready",
+                )
         except Exception as exc:
             self._report_error(state, exc)
         finally:
@@ -348,34 +517,31 @@ class AsyncRenderWorker:
         def _job() -> None:
             self._set_task_status(render_key, status="running")
             if not self._is_current(state):
-                if self._resubmit_camera_advanced(state, reason=reason):
+                if self._resubmit_live_state(state, reason=reason):
                     self._set_task_status(render_key, status="superseded")
                 else:
                     self._set_task_status(render_key, status="cancelled")
                 return
             fig, topology_data = self.backend.figure_for_state(state, async_topology=False)
-            stale = False
-            with self._lock:
-                if self._is_current(state):
-                    payload = self.backend.broadcast_figure(
-                        scene_id=state.get("scene_id"),
-                        figure=fig.to_plotly_json(),
-                        topology_data=topology_data,
-                        state=state,
-                        reason=reason,
-                    )
-                    published = isinstance(payload, dict) and payload.get("type") == "figure"
-                    if published:
-                        self._set_task_status(render_key, status="completed")
-                    else:
-                        stale = True
-                else:
-                    stale = True
-            if stale:
-                if self._resubmit_camera_advanced(state, reason=reason):
-                    self._set_task_status(render_key, status="superseded")
-                else:
-                    self._set_task_status(render_key, status="cancelled")
+            # Publish outside the worker lock. ``broadcast_figure`` takes the
+            # backend lock, and a selection commit may already hold that lock
+            # while it waits to enqueue the next build.
+            published = False
+            if self._is_current(state):
+                payload = self.backend.broadcast_figure(
+                    scene_id=state.get("scene_id"),
+                    figure=fig.to_plotly_json(),
+                    topology_data=topology_data,
+                    state=state,
+                    reason=reason,
+                )
+                published = isinstance(payload, dict) and payload.get("type") == "figure"
+            if published:
+                self._set_task_status(render_key, status="completed")
+            elif self._resubmit_live_state(state, reason=reason):
+                self._set_task_status(render_key, status="superseded")
+            else:
+                self._set_task_status(render_key, status="cancelled")
 
         def completed(future: Future) -> None:
             with self._lock:
@@ -411,7 +577,7 @@ class AsyncRenderWorker:
         future.add_done_callback(completed)
         return True
 
-    def shutdown(self, *, wait: bool = False) -> None:
+    def shutdown(self, *, wait: bool = False) -> bool:
         with self._lock:
             self._closed = True
             self._pending.clear()
@@ -421,8 +587,10 @@ class AsyncRenderWorker:
             self._latest_render_by_scene.clear()
             self._render_futures.clear()
         if wait:
-            self._compute_pool.shutdown(wait=True, cancel_futures=True)
-            self._finalize_pool.shutdown(wait=True, cancel_futures=True)
-            return
-        self._finalize_pool.shutdown(wait=False, cancel_futures=True)
-        self._compute_pool.shutdown(wait=False, cancel_futures=True)
+            compute_done = shutdown_executor(self._compute_pool, wait=True)
+            finalize_done = shutdown_executor(self._finalize_pool, wait=True)
+        else:
+            finalize_done = shutdown_executor(self._finalize_pool, wait=False)
+            compute_done = shutdown_executor(self._compute_pool, wait=False)
+        self.quiescent = bool(compute_done and finalize_done)
+        return self.quiescent

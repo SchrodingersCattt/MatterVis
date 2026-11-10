@@ -1,5 +1,4 @@
 from __future__ import annotations
-# ruff: noqa: F401,F403,F405
 
 from .shared import *
 
@@ -15,7 +14,28 @@ def _operation_panel_section(disorder_resolve: dict[str, Any] | None = None):
     disorder_resolve = disorder_resolve or {}
     return html.Section(
         [
-            html.Div("Operation", className="analysis-section-title"),
+            html.Div("Structural operations", className="analysis-section-title"),
+            html.Div(
+                "These commands commit a new structure revision. "
+                "Display repeats stay in the Display tab and do not edit the source.",
+                className="operation-help-text",
+            ),
+            html.Div(
+                [
+                    html.Div("Build supercell", className="operation-subsection-title"),
+                    html.Div(
+                        [
+                            dcc.Input(id="operate-supercell-a", type="number", min=1, step=1, value=2, debounce=True, className="operation-number-input"),
+                            dcc.Input(id="operate-supercell-b", type="number", min=1, step=1, value=2, debounce=True, className="operation-number-input"),
+                            dcc.Input(id="operate-supercell-c", type="number", min=1, step=1, value=1, debounce=True, className="operation-number-input"),
+                            html.Button("Commit supercell", id="operate-supercell-btn", n_clicks=0, className="operation-button"),
+                        ],
+                        className="operation-control-row",
+                    ),
+                    html.Div(id="operate-status", className="operation-help-text"),
+                ],
+                className="operation-subsection",
+            ),
             html.Div(
                 [
                     html.Div("Resolve disorder", className="operation-subsection-title"),

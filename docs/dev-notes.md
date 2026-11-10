@@ -29,10 +29,30 @@ encoded in approved display text such as site labels.
 
 ## Interactive figure scheduling and delivery
 
-`capture_state` publishes state only. `update_view` schedules the ordinary
-worker build or returns a completed frame from the existing broadcast journal;
-it does not synchronously call `figure_for_state`. Tab switches follow the same
-owner instead of directly reconstructing and broadcasting cached dictionaries.
+`capture_state` publishes state only. A committed scene change schedules the
+ordinary worker build itself, so an external API write does not wait for Dash
+`update_view`. The worker lock is acquired before the backend lock. Frame
+publication therefore reads scene state outside the worker lock, and a
+selection commit that still holds the backend lock defers its build until
+that lock is released. Taking the locks in the other order deadlocks shutdown
+and every later state read. Shutdown also must not hold the backend lock
+across the scene-file replace: the snapshot is taken under the backend lock
+and the scene-store lock, both are released, then the file is replaced.
+A per-store flush lock covers that snapshot, replace, and conditional
+clean for both `save` and `flush_durable`. Pool joins are bounded because
+``Executor.shutdown(wait=True)`` has no timeout on the supported Python
+versions. Workers still running after the bound are detached from
+interpreter shutdown and reported non-quiescent. A running thread cannot
+be marked daemon with the public setter, so the detach drops CPython's
+private shutdown registries; a registry that is not present is skipped
+and the pool is still reported non-quiescent. A scene-store generation
+that changes during the replace stays dirty, and a final flush that
+cannot persist it raises. See `docs/reliability-worker-shutdown.md`. `update_view` still returns a completed frame from the existing
+broadcast journal and requests a build only when that journal does not yet
+have the current revision. The worker deduplicates the two requests. Neither
+path synchronously calls `figure_for_state` on a Dash request thread. Tab
+switches follow the same owner instead of directly reconstructing and
+broadcasting cached dictionaries.
 The existing state poll supplies the no-WebSocket fallback. Server checks cover
 both render and camera revisions, including when work finishes after Reset.
 Patch broadcasts retain the transaction's confirmed update kind. Do not
@@ -75,6 +95,15 @@ re-emits the selected scene's controls even without a pending state. A camera
 command on the same scene also needs this acknowledgement so the projection
 radio cannot remain on the previous value after a superseded poll. A
 server-side "filled controls" flag alone cannot confirm browser delivery.
+
+A pointer-drag relayout whose gesture scene is not the mounted canvas is
+not applied there. The canvas is restored only from a camera saved for
+that same scene, including a drag Plotly commits after the tab has
+changed. The scene stamp is cleared only for the generation that armed
+it, so a second drag on the same scene is not dropped while the first
+timer is still running. The gesture also does not inherit the mounted
+scene's generation, so a late capture cannot satisfy the server fence as
+a drag that started after the tab change.
 
 Partial camera captures merge against the revision-fenced backend camera,
 not the Dash camera store, which may still predate a projection command.

@@ -58,7 +58,6 @@ pip install matter-vis
 ```bash
 git clone https://github.com/SchrodingersCattt/MatterVis.git
 cd MatterVis
-python -m pip install "molcrys-kit>=0.8.0,<0.9.0"
 pip install -e .
 ```
 
@@ -87,6 +86,12 @@ mat-vis capabilities --require static-web-export --json
 
 MolCrysKit is required and is the only chemistry structure source. MatterVis
 does not fall back to private MolCrysKit fields or local chemistry heuristics.
+Extended versus molecular presentation comes from
+``MolecularCrystal.get_connectivity_report()``. Ball-and-stick strokes both
+``covalent`` and ``coordination`` edges from ``BondRecord.role``; ball and
+space-filling do not draw those sticks. The development pin in
+``pyproject.toml`` tracks the MolCrysKit commit that exposes those fields
+until the API is on PyPI.
 
 ## Quick Start
 
@@ -183,6 +188,7 @@ The main subcommands cover:
 | **Using the library** | [API Reference](docs/agents/) · [CLI Reference](docs/cli.md) |
 | **AI agent (calling MatterVis)** | [Caller API Contracts](docs/agents/) |
 | **AI agent (modifying code)** | [AGENTS.md](AGENTS.md) · [Developer Notes](docs/dev-notes.md) |
+| **Contributing** | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | **Topology scores** | [Scores Reference](docs/scores.md) |
 
 [`mat_viewer/`](mat_viewer/) — source code · [`scripts/`](scripts/) — runnable demo scripts · [`docs/`](docs/) — full documentation

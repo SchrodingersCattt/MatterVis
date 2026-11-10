@@ -53,6 +53,36 @@ mat-vis skills show visualize-materials --all
 | render | Render a structure, one trajectory frame, or a GIF/MP4 animation |
 | serve | Launch the interactive Dash browser viewer |
 | tui | Open a supported structure or trajectory frame in the terminal |
+| operate | Commit a structural operation. `operate build-supercell` builds a new lattice. There is no `operate supercell` alias. Display repeats stay on `tui --repeat` and `POST /api/v2/state` `supercell`. |
+
+### operate — structural commits
+
+```bash
+mat-vis operate build-supercell structure.cif --a 2 --b 3 --c 1 -o supercell.cif --json
+```
+
+`build-supercell` requires three positive integers. A nondiagonal matrix is
+rejected. `--preview` builds a candidate and does not write a new revision.
+Other commands take `--params-json`: `build-slab`, `insert-molecule`,
+`delete-sites`, `replace-species`, `translate-atom`, `translate-molecule`,
+`rotate-molecule`, `rotate-fragment`, `reperceive-bonds`, `add-hydrogens`,
+`remove-solvent`, `materialize-selection`, and `commit-disorder-candidate`.
+`rotate-molecule` takes `sites`, a 3-vector `axis`, and `angle` in degrees.
+`rotate-fragment` takes two ordered `sites` and `angle`; it does not take
+`axis`. `operate supercell` is not a command.
+
+```bash
+mat-vis operate rotate-molecule structure.cif \
+  --params-json '{"sites":["site-1"],"axis":[0,0,1],"angle":90}' --preview --json
+mat-vis operate rotate-fragment structure.cif \
+  --params-json '{"sites":["site-2","site-3"],"angle":60,"moving_side":"j"}' --preview --json
+mat-vis operate translate-atom structure.cif \
+  --params-json '{"sites":["site-1"],"vector":[0.25,0,0]}' --preview --json
+mat-vis operate translate-molecule structure.cif \
+  --params-json '{"sites":["site-1"],"vector":[0.25,0,0]}' --preview --json
+mat-vis operate reperceive-bonds structure.cif \
+  --params-json '{"bond_scale":1.0}' --preview --json
+```
 
 `inspect`, `capabilities`, and `render --check` are the agent preflight surface.
 `--check` resolves requirements only and never creates the output.
@@ -349,6 +379,7 @@ export requires `[plotly-export]`; a failure is reported without substitution.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--show-hydrogen` / `--no-hydrogen` | on | Show/hide hydrogen atoms |
+| `--include-boundary-replicas` / `--no-boundary-replicas` | periodic input on | Unit-cell fragment copies; see below |
 | `--show-cell` / `--no-cell` | auto | On for periodic input and off for nonperiodic or synthetic-cell input; explicit flags override |
 | `--show-labels` / `--no-labels` | off | Show/hide atom labels |
 | `--show-axes` / `--no-axes` | off | Show/hide the camera-projected crystallographic a/b/c compass |
@@ -359,6 +390,24 @@ export requires `[plotly-export]`; a failure is reported without substitution.
 The cell and lattice compass are foreground overlays, so dense atoms, bonds,
 or polyhedra do not depth-occlude them. `--monochrome` remains a rejected
 legacy flag.
+
+`--include-boundary-replicas` and `--no-boundary-replicas` apply to
+`--view unit_cell`. When neither flag is set, periodic input includes the
+replicas and nonperiodic input does not. Both choices are invariant under an
+integer lattice translation of the stored coordinates.
+
+`--include-boundary-replicas` places each finite molecule so its anchor site
+lies in the home cell, then copies the whole fragment when any member lies
+near a face, edge, or corner. `--no-boundary-replicas` wraps every site into
+the half-open home cell and does not add those near-face copies. Ball-and-stick,
+stick, wireframe, and ORTEP still draw the periodic images required for a
+MolCrysKit bond that crosses a cell face, and every such stick ends on a
+displayed atom. `--style ball` and `--style space_filling` do not add those
+bond-context images. A Python caller can also pass
+`include_cross_boundary_bond_endpoints=False` (the viewer `wrap_into_cell`
+token does this together with `include_boundary_replicas=False`) to keep only
+the wrapped sites and omit the crossing sticks. Display does not change source
+coordinates, bond identity, or the stored periodic shifts.
 
 ### Numeric parameters
 
@@ -433,6 +482,32 @@ separate.
 
 The same polyhedron path is used for animated CPU renders, so `--polyhedron`
 stays depth-tested and frame-synchronous in GIF and MP4 output as well.
+
+`--polyhedron-disorder` chooses which crystallographic disorder component is
+used to build those shells. It is forwarded to MolCrysKit `find_polyhedra`.
+
+| Value | Meaning |
+|---|---|
+| `major` | Default. Highest-occupancy component of each mutually exclusive family. |
+| `exclusive` | One shell per orientation. |
+| `as_refined` | Every refined site, including orientations fused into one molecule. |
+
+A JSON `disorder_policy` on one `--polyhedron` object overrides the flag for
+that overlay. The flag selects shell membership only; it does not change atom
+opacity or which atoms are drawn. Molecule identification defaults to
+`as_refined` and keeps every refined site. Only this shell flag defaults to
+`major`.
+
+`as_refined` keeps every refined site. `major` and `exclusive` query each
+realization of the indexed molecule, so a fused displayed formula still
+matches a split orientation. A MolCrysKit build inside
+`molcrys-kit>=0.8.0,<0.9.0` that has no realization helper uses the
+as-loaded molecule formula, which keeps ordered shells working. `exclusive`
+draws one shell per full orientation. If the
+chosen policy still cannot produce at
+least four non-coplanar ligand points, `mat-vis render` exits with
+`mattervis.polyhedron-shell-error/v1` (nested in `mattervis.error/v1` under
+`--json`). The command does not invent ligand coordinates.
 
 `--cell-overlays` and `--bond-scale` require the general renderer. An explicit batch request fails instead of silently dropping either option.
 

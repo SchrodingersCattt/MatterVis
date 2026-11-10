@@ -58,7 +58,7 @@ def register_scene_routes(v2, backend) -> dict:
         scene_id = payload.get("scene_id") or payload.get("id")
         if not scene_id:
             return jsonify({"error": "scene_id is required"}), 400
-        return jsonify(backend.set_active_scene(scene_id))
+        return jsonify(backend.set_active_scene(scene_id, focus_clients=True))
 
 
     return locals()

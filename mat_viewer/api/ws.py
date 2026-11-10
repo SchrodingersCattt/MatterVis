@@ -97,7 +97,7 @@ def handle_ws_message(backend, payload: dict) -> None:
         return None
     if payload.get("type") == "intent":
         inner = payload.get("payload", {}) or {}
-        return backend.apply_intent(inner)
+        return backend.apply_intent(inner, broadcast=True)
     if payload.get("type") != "set_state":
         return None
     inner = payload.get("payload", {}) or {}

@@ -14,6 +14,11 @@ from typing import Any
 import numpy as np
 
 HYDROGEN_RADIUS_BOND_FACTOR = 1.5
+# Coordination ball-and-stick uses the same cylinders as a covalent stick.
+# The compact 0.46 ball-stick scale sits on the display radius and leaves
+# the sphere no larger than the cylinder. A coordination endpoint stays at
+# least this many bond-radii across so the contact reads as ball-and-stick.
+COORDINATION_RADIUS_BOND_FACTOR = 2.0
 
 
 def hydrogen_radius_floor(
@@ -53,11 +58,17 @@ def atom_visual_radius(
     style: Mapping[str, Any] | None = None,
     bond_radius: float | None = None,
     min_atom_radius: float | None = None,
+    coordination: bool = False,
 ) -> float:
     """Return one backend-neutral rendered atom radius.
 
     Non-hydrogen caller radii are preserved.  H/D receives the display floor
     after the representation's compact ball-stick scale is applied.
+    ``coordination`` is set by the caller for an endpoint of a MolCrysKit
+    coordination edge when the active style strokes sticks. The sphere is
+    then at least ``COORDINATION_RADIUS_BOND_FACTOR`` times the bond
+    cylinder, so the compact ball-stick scale cannot swallow the atom.
+    Ball and space-filling callers leave the flag false.
     """
     value = float(atom_radius)
     scale = float(atom_scale)
@@ -75,6 +86,13 @@ def atom_visual_radius(
                 min_atom_radius=min_atom_radius,
             ),
         )
+    if coordination:
+        if bond_radius is None and style is not None:
+            bond_radius = style.get("bond_radius", 0.15)
+        cylinder = float(0.15 if bond_radius is None else bond_radius)
+        if cylinder <= 0.0 or not np.isfinite(cylinder):
+            raise ValueError("bond_radius must be positive")
+        rendered = max(rendered, COORDINATION_RADIUS_BOND_FACTOR * cylinder)
     return rendered
 
 
@@ -109,6 +127,7 @@ def clamp_displacement_radius(
 
 
 __all__ = [
+    "COORDINATION_RADIUS_BOND_FACTOR",
     "HYDROGEN_RADIUS_BOND_FACTOR",
     "atom_visual_radius",
     "clamp_displacement_radius",

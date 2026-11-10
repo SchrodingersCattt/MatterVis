@@ -8,6 +8,7 @@ skills        Read bundled Agent Skills without loading a renderer.
 render        Generate publication-quality figures and animations.
 serve         Launch the interactive Dash browser viewer.
 tui           Launch or print the terminal viewer.
+operate       Commit a structural operation such as build-supercell.
 
 Usage::
 
@@ -88,7 +89,7 @@ def _build_render_parser(
                 "Add a base-renderer polyhedron from JSON. Required: center, "
                 "ligand. Optional: id, level, site, sites, center_kind, cutoff, "
                 "hard_cutoff, fallback_max, color, opacity, edge_opacity, "
-                "center_images, instance_overrides."
+                "center_images, instance_overrides, disorder_policy."
             )
     parser.add_argument(
         "--backend",
@@ -636,14 +637,13 @@ def _emit(payload: dict, *, json_output: bool) -> None:
         print(f"{key}: {value}")
 
 
-def _fail(message: str, *, json_output: bool, code: int = 2) -> None:
-    print(f"Error: {message}", file=sys.stderr)
-    if json_output:
-        _emit(
-            {"schema": "mattervis.error/v1", "ok": False, "error": message},
-            json_output=True,
-        )
-    raise SystemExit(code)
+def _fail(message: str, *, json_output: bool, code: int = 2, details: dict | None = None) -> None:
+    from .cli_lazy import fail_cli
+    fail_cli(message, json_output=json_output, emit=_emit, code=code, details=details)
+
+def _fail_exception(exc: BaseException, *, json_output: bool) -> None:
+    from .cli_lazy import fail_cli_exception
+    fail_cli_exception(exc, json_output=json_output, fail=_fail)
 
 
 def _flatten_requirements(groups: list[list[str]]) -> list[str]:
@@ -1077,7 +1077,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
             install_command=check_payload["requirements"]["install"],
         )
     except Exception as exc:
-        _fail(str(exc), json_output=args.json_output)
+        _fail_exception(exc, json_output=args.json_output)
     if fast_result is not None:
         _emit(fast_result, json_output=args.json_output)
         return
@@ -1125,6 +1125,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                 args.polyhedron,
                 site_index=args.polyhedron_site,
                 cutoff=args.polyhedron_cutoff,
+                disorder_policy=args.polyhedron_disorder,
                 display=display,
                 show_hydrogen=args.show_hydrogen,
                 include_boundary_replicas=include_boundary_replicas,
@@ -1187,7 +1188,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
         payload = _render_result_payload(result, structure, args, camera)
         payload["polyhedra"] = polyhedron_summary(topology_data)
     except Exception as exc:
-        _fail(str(exc), json_output=args.json_output)
+        _fail_exception(exc, json_output=args.json_output)
     _emit(payload, json_output=args.json_output)
 
 
@@ -1219,6 +1220,9 @@ def main(argv: Optional[list[str]] = None) -> None:
     )
     _build_serve_parser(subparsers)
     _build_tui_parser(subparsers)
+    from .effects.cli import build_operate_parser
+
+    build_operate_parser(subparsers)
 
     args = parser.parse_args(argv)
 
@@ -1238,6 +1242,13 @@ def main(argv: Optional[list[str]] = None) -> None:
             _fail(str(exc), json_output=False)
         from .app.serve_cli import serve_main
         serve_main(args)
+    elif args.command == "operate":
+        from .effects.cli import operate_main
+
+        try:
+            operate_main(args)
+        except Exception as exc:
+            _fail(str(exc), json_output=getattr(args, "json_output", False))
     elif args.command == "tui":
         try:
             resolve_requirements(

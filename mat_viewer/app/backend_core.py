@@ -13,7 +13,7 @@ from .normalizers import *
 from .reducer import LEGACY_STYLE_STATE_FIELDS
 from .render_worker import AsyncRenderWorker
 from .rightclick import _normalize_polyhedron_specs
-from .selectors import show_hydrogen, viewport_signature
+from .selectors import scene_uirevision, show_hydrogen, viewport_signature
 from .shared import *
 from .style_helpers import *
 from .view_updates import (
@@ -56,6 +56,10 @@ class _CoreBackendMixin:
         self.server_started_at = time.time()
         self.catalog = get_default_catalog(root_dir=self.root_dir)
         self._lock = threading.RLock()
+        # Depth of ``_hold_backend_lock`` on this thread. Render scheduling
+        # waits until the depth returns to zero so a nested state write cannot
+        # take the render-worker lock while this lock is still held.
+        self._backend_lock_tls = threading.local()
         # Upload requests reserve their digest/name before the background
         # parser starts.  Keeping these maps on the backend makes concurrent
         # multipart requests idempotent and gives the browser a durable way to
@@ -85,6 +89,7 @@ class _CoreBackendMixin:
         first_name = self.structure_names[0]
         self.current_state = self.default_state(first_name)
         self.scene_store = SceneStore.load(SceneStore.default_path(self.root_dir))
+        self._restore_committed_structures()
         # Persisted scenes can outlive the catalog (uploads land in
         # ``tempfile.gettempdir()`` and get GC'd; ``--cif`` may have
         # been dropped). Without prune, ``scene_state(active_id)``
@@ -224,24 +229,22 @@ class _CoreBackendMixin:
             default_species = [species_present[0]["formula"]]
         else:
             default_species = []
-        # Ionic and extended inorganic cells (NaCl, CsCl, CaF2, rutile, and
-        # perovskites) are lattice views rather than isolated molecules.  The
-        # chemistry profile is conservative about carbon-containing frameworks
-        # so MOFs and molecular salts keep their existing defaults.
-        # Scene metadata is normally stamped by the loader. Recompute the
-        # conservative inorganic profile from canonical raw atoms when a
-        # legacy/cache scene predates those fields; otherwise such structures
-        # silently fall back to the molecular formula-unit presentation.
+        # Extended crystals (MolCrysKit connectivity rank 1–3, including
+        # coordination edges) are lattice views. Molecular crystals keep
+        # formula-unit ball-and-stick. Scenes saved before the connectivity
+        # report still use the inorganic composition profile, and an explicit
+        # legacy ``is_ionic_solid`` flag, so a cache restore does not fall
+        # back to a molecular presentation.
         raw_profile = (
             inorganic_solid_profile(bundle.raw_atoms)
             if "is_inorganic_solid" not in scene
             else {}
         )
-        ionic = bool(scene.get("is_ionic_solid", False))
         inorganic = bool(
             scene.get("is_inorganic_solid", False)
             or raw_profile.get("is_inorganic_solid", False)
         )
+        regime = scene.get("connectivity_regime")
         inorganic_cations = list(
             scene.get("inorganic_cation_elements")
             or raw_profile.get("inorganic_cation_elements", ())
@@ -250,7 +253,12 @@ class _CoreBackendMixin:
             scene.get("inorganic_anion_elements")
             or raw_profile.get("inorganic_anion_elements", ())
         )
-        lattice_default = ionic or inorganic
+        if regime == "extended":
+            lattice_default = True
+        elif regime == "molecular":
+            lattice_default = False
+        else:
+            lattice_default = bool(scene.get("is_ionic_solid", False)) or inorganic
         default_display_mode = style.get(
             "display_mode", scene.get("display_mode", "formula_unit")
         )
@@ -363,7 +371,7 @@ class _CoreBackendMixin:
             # Optional continuous per-atom colour field.  The stored shape is
             # the public AtomPropertyColorSpec serialized to JSON.
             "atom_property_color": None,
-            # Phase 4: list of structure-mutation transforms. See
+            # Display-only transform list. See
             # ``mat_viewer.transforms`` and
             # ``docs/agents/transforms_api.md`` for the schema. Empty list =
             # no transform; ``apply_transforms`` short-circuits.
@@ -800,17 +808,17 @@ class _CoreBackendMixin:
             self.flush_scene_store()
 
     def flush_scene_store(self) -> None:
-        if not getattr(self, "scene_store", None):
+        store = getattr(self, "scene_store", None)
+        if not store:
             return
         try:
-            # Persist only completed native/extension scene transactions.
-            with self._lock:
-                if self.scene_store.is_dirty():
-                    self.scene_store.save()
+            # Snapshot under the backend lock. The file replace runs outside it.
+            store.flush_durable(self._lock)
         except OSError as exc:  # pragma: no cover - disk-full / read-only mount
             print(f"[mat_viewer] could not persist scene store: {exc}", file=sys.stderr)
+        self._flush_effect_session()
 
-    def apply_intent(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def apply_intent(self, payload: dict[str, Any], *, broadcast: bool | None = None) -> dict[str, Any]:
         if not isinstance(payload, dict):
             raise ValueError("intent payload must be an object")
         base_version = payload.get("base_version")
@@ -846,6 +854,11 @@ class _CoreBackendMixin:
         )
         details: dict[str, Any] = {}
 
+        def _broadcast(default: bool) -> bool:
+            # Omit ``broadcast`` for in-process GUI intents. HTTP and the
+            # WebSocket pass True so the same command reaches an open page.
+            return default if broadcast is None else bool(broadcast)
+
         # Phase 3 bridge: translate the wire envelope once, then use the pure
         # reducer to calculate the transition's invalidation facts.  The
         # existing normalizer/patch path remains responsible for compatibility
@@ -854,10 +867,10 @@ class _CoreBackendMixin:
 
         if intent_type in {"set_style", "set_display_options"}:
             state, invalidations = self.apply_operation(
-                operation, scene_id=scene_id, broadcast=False
+                operation, scene_id=scene_id, broadcast=_broadcast(False)
             )
         elif intent_type in {"patch_state", "apply_transform"}:
-            state, invalidations = self.apply_operation(operation, scene_id=scene_id)
+            state, invalidations = self.apply_operation(operation, scene_id=scene_id, broadcast=_broadcast(True))
         elif intent_type == "set_camera":
             # Drag persistence opts into a locked generation/revision
             # compare-and-set. Other set_camera callers leave the keys out.
@@ -869,7 +882,7 @@ class _CoreBackendMixin:
                 state, invalidations = self.apply_operation(
                     operation,
                     scene_id=scene_id,
-                    broadcast=False,
+                    broadcast=_broadcast(False),
                     expected_camera_revision=payload.get("expected_camera_revision"),
                     expected_scene_generation=payload.get("expected_scene_generation"),
                     _camera_fence=fenced,
@@ -880,7 +893,7 @@ class _CoreBackendMixin:
                 state = self.get_state(scene_id)
         elif intent_type == "set_active_scene":
             target = data.get("scene_id") or scene_id
-            self.set_active_scene(str(target), broadcast=True)
+            self.set_active_scene(str(target), broadcast=_broadcast(True), focus_clients=_broadcast(True))
             state = self.get_state(str(target))
         elif intent_type == "crud_scene":
             action = str(data.get("action") or "")
@@ -909,6 +922,20 @@ class _CoreBackendMixin:
         elif intent_type == "upload_complete":
             state = self.get_state(scene_id)
             self.pending_state = copy.deepcopy(state)
+        elif intent_type == "operate":
+            outcome = self.operate(
+                str(data.get("command") or ""),
+                data.get("params") or {},
+                scene_id=scene_id,
+                expected_revision=data.get("expected_revision"),
+                frame_ref=data.get("frame_ref"),
+                request_id=data.get("request_id"),
+                preview=bool(data.get("preview", False)),
+                property_policy=data.get("property_policy"),
+            )
+            state = self.get_state(scene_id)
+            details["operate"] = outcome
+            invalidations = frozenset()
         else:
             raise ValueError(f"unknown intent type: {intent_type}")
 
@@ -1028,29 +1055,6 @@ class _CoreBackendMixin:
             }
             for name in self.structure_names
         ]
-
-    def _drop_placeholder(self) -> None:
-        # The placeholder is a bootstrap scene as well as a catalog entry.
-        # Removing only the bundle left a stale blank tab behind after the
-        # first upload (and made later tab labels appear to be lost).  Drop it
-        # whenever a real structure is present, while preserving it when the
-        # viewer is genuinely empty.
-        has_real_structure = any(
-            name != PLACEHOLDER_STRUCTURE for name in self.structure_names
-        )
-        if not has_real_structure:
-            return
-        self.structure_names = [
-            name for name in self.structure_names if name != PLACEHOLDER_STRUCTURE
-        ]
-        self.bundles.pop(PLACEHOLDER_STRUCTURE, None)
-        for scene_id, scene in list(self.scene_store.scenes.items()):
-            if scene.structure_name == PLACEHOLDER_STRUCTURE:
-                self.scene_store.remove(scene_id, save=False)
-                self._render_revisions.pop(str(scene_id), None)
-        if self.scene_store.active_id:
-            self.current_state = self.scene_state(self.scene_store.active_id)
-        self._request_scene_store_save()
 
     def get_bundle(self, name: str) -> LoadedCrystal:
         if name in self.bundles:
@@ -1230,9 +1234,9 @@ class _CoreBackendMixin:
     def scene_for_state(self, state: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         state = self.current_state if state is None else state
         bundle = self.get_bundle(state["structure"])
-        # Phase 4: ``state["transforms"]`` is the structure-mutation
-        # pipeline. ``build_bundle_scene`` short-circuits when the list
-        # is empty so the no-transform path stays a single dict lookup.
+        # Display transforms derive the rendered scene. They do not commit
+        # a scientific structure. ``build_bundle_scene`` short-circuits
+        # when the list is empty so the no-transform path stays a lookup.
         transforms = list(state.get("transforms") or [])
         scene = build_bundle_scene(
             bundle,
@@ -1244,8 +1248,6 @@ class _CoreBackendMixin:
         scene_label = state.get("scene_label")
         if scene_label:
             scene["display_title"] = str(scene_label)
-        bundle.scene = scene
-        bundle.fragment_table = scene.get("fragment_table", bundle.fragment_table)
         property_spec = state.get("atom_property_color")
         if property_spec:
             from ..properties import (
@@ -1488,11 +1490,14 @@ class _CoreBackendMixin:
         # cube and a new state with a 12 Å cube, Plotly would silently
         # "preserve UI state" for the cube too, which is what made the
         # molecule look squashed after switching back to ``formula_unit``.
+        # The scene id keeps a duplicate from inheriting the source scene's
+        # WebGL camera when the structure name and viewport still match.
         layout_signature = viewport_signature(state)
-        style["uirevision"] = "{name}__{rev}__{sig}".format(
-            name=scene.get("name", "scene"),
-            rev=int(state.get("camera_revision", 0) or 0),
-            sig=layout_signature,
+        style["uirevision"] = scene_uirevision(
+            state.get("scene_id"),
+            scene.get("name"),
+            state.get("camera_revision", 0),
+            layout_signature,
         )
         # The interactive Dash app uses a separate SVG overlay for the
         # compass to avoid Plotly.relayout calls that interrupt gl3d's

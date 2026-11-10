@@ -265,6 +265,7 @@ def _normalize_polyhedron_spec(
         raw.get("edge_width"), 3.0, minimum=0.0, maximum=20.0
     )
     flatshading = bool(raw.get("flatshading", True))
+    disorder_policy = _coerce_disorder_policy(raw.get("disorder_policy"))
     return {
         "id": spec_id,
         "name": name,
@@ -296,7 +297,19 @@ def _normalize_polyhedron_spec(
         "edge_opacity": edge_opacity,
         "edge_width": edge_width,
         "flatshading": flatshading,
+        "disorder_policy": disorder_policy,
     }
+
+
+def _coerce_disorder_policy(raw: Any) -> str:
+    """Return ``all`` or ``major`` for a polyhedron spec.
+
+    Unknown values are rejected. Omitted values keep every loaded orientation.
+    """
+
+    from ..topology.disorder_policy import normalize_disorder_policy
+
+    return normalize_disorder_policy(raw)
 
 
 def _coerce_instance_overrides(raw: Any) -> dict[str, dict[str, Any]]:

@@ -43,6 +43,7 @@ The same routing as a quick table:
 | If you want to… | Read |
 |---|---|
 | Drive the running Dash viewer over HTTP/WebSocket | [`dash_service.md`](dash_service.md) |
+| Update an already-open viewer from an external script without reloading the page | [`dash_service.md`](dash_service.md) |
 | Download the active loaded source structure as CIF | [`dash_service.md#rest-endpoints`](dash_service.md) |
 | Detect a running server whose code is older than the files on disk | [`dash_service.md`](dash_service.md) |
 | Register, reload and focus native Web/TUI scenes from extension workers | [`extensions_api.md#native-structure-writes-v1`](extensions_api.md#native-structure-writes-v1) |
@@ -64,14 +65,18 @@ The same routing as a quick table:
 | Render ORTEP / thermal ellipsoid figures | [`ortep_api.md`](ortep_api.md) |
 | Color atoms by charge, velocity, stress, or another per-atom field | [`atom_property_coloring.md`](atom_property_coloring.md) |
 | Add a/b/c (or x/y/z, k-path, dipole) direction indicators to any 3D plot | [`compass_api.md`](compass_api.md) |
-| Manage and analyse named coordination polyhedra while drawing is off (per-row colour, ligand restriction, per-instance overrides) | [`polyhedron_api.md`](polyhedron_api.md) |
+| Manage and analyse named coordination polyhedra while drawing is off (per-row colour, ligand restriction, per-instance overrides, disorder component) | [`polyhedron_api.md`](polyhedron_api.md) |
 | Apply per-element / per-group colour, visibility, material, or render-style overrides from API or CLI | [`atom_groups_api.md`](atom_groups_api.md) |
 | Draw anchored polarization, dipole, force, displacement, magnetic, or response vectors with real 3D depth | [`vector_overlays_api.md`](vector_overlays_api.md) |
 | Draw conventional, transformed, or simulation cells over one atomistic scene | [cell_overlays_api.md](cell_overlays_api.md) |
 | Recolour, hide, restyle, thin out, or fade chemical bonds by selector from API or CLI | [`bond_groups_api.md`](bond_groups_api.md) |
 | Draw styled, depth-tested display-only bond hints without changing chemical connectivity | [`scene_api.md#display-only-bond-annotations`](scene_api.md#display-only-bond-annotations) |
 | Repeat a unit cell, grow by radius / bonds, complete fragments / polyhedra, or generate a slab | [`transforms_api.md`](transforms_api.md) |
-| Wrap displayed unit-cell atoms into the home cell without changing source coordinates | [`scene_api.md`](scene_api.md) |
+| Commit a structural supercell, slab, insertion, deletion, substitution, hydrogen, solvent, cluster, or disorder candidate | [`effects_api.md`](effects_api.md) |
+| Preview and commit atom/molecule coordinate edits or revision-local bond perception | [`effects_api.md`](effects_api.md) |
+| Inspect a preview candidate's coordinates, bonds, and molecule grouping before commit | [`effects_api.md`](effects_api.md) |
+| Wrap displayed unit-cell atoms into the home cell, including bond-context images that stay aligned across lattice translations, without changing source coordinates | [`scene_api.md`](scene_api.md) |
+| Draw unit-cell ball-and-stick sticks from MolCrysKit bond role and connectivity regime | [`scene_api.md`](scene_api.md) |
 | Audit which backend-neutral render controls are available from the CLI | [`cli-api-parity.md`](cli-api-parity.md) |
 | Use the optional native offscreen GPU PNG backend | [`gpu_backend.md`](gpu_backend.md) |
 | Read or override global MatterVis defaults | [`config_api.md`](config_api.md) |

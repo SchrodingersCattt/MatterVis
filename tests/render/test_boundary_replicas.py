@@ -927,7 +927,7 @@ def test_strict_unit_cell_can_omit_cross_boundary_bond_endpoints():
     cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
     M = np.eye(3) * 10.0
     atoms = [
-        _atom("C1", [-0.02, 0.5, 0.5], M),
+        _atom("C1", [0.98, 0.5, 0.5], M),
         _atom("C2", [0.02, 0.5, 0.5], M),
     ]
     records = [{"left": 0, "right": 1, "right_image_shift": [1, 0, 0]}]
@@ -956,7 +956,7 @@ def test_strict_unit_cell_manifests_cross_boundary_bonded_images():
     cell = gemmi.UnitCell(10.0, 10.0, 10.0, 90.0, 90.0, 90.0)
     M = np.eye(3) * 10.0
     atoms = [
-        _atom("C1", [-0.02, 0.5, 0.5], M),
+        _atom("C1", [0.98, 0.5, 0.5], M),
         _atom("C2", [0.02, 0.5, 0.5], M),
     ]
     records = [{"left": 0, "right": 1, "right_image_shift": [1, 0, 0]}]

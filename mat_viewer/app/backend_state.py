@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import threading
+from contextlib import contextmanager
 from typing import Any, Optional
 
 from ..config import current_config
@@ -11,13 +13,79 @@ from .normalizers import *
 from .normalizers import _normalize_selection
 from .reducer import LEGACY_STYLE_STATE_FIELDS
 from .rightclick import _normalize_polyhedron_specs
-from .selectors import show_hydrogen, viewport_signature
+from .selectors import scene_uirevision, show_hydrogen, viewport_signature
 from .shared import *
 from .style_helpers import *
-from .view_updates import UpdateKind, classify_change, make_update, state_versions
+from .view_updates import (
+    UpdateKind,
+    classify_change,
+    committed_render_kind,
+    make_update,
+    requires_complete_frame,
+    state_versions,
+)
 
 
 class _StateBackendMixin:
+    def _backend_lock_local(self) -> threading.local:
+        local = getattr(self, "_backend_lock_tls", None)
+        if local is None:
+            local = threading.local()
+            self._backend_lock_tls = local
+        return local
+
+    @contextmanager
+    def _hold_backend_lock(self):
+        """Hold ``self._lock`` and schedule deferred renders after release.
+
+        Callers may nest state writes under this lock. The render worker
+        publishes frames by taking the worker lock and then this lock, so a
+        nested ``patch_state`` must not enqueue a build until the outermost
+        acquisition has been released.
+        """
+
+        local = self._backend_lock_local()
+        local.depth = int(getattr(local, "depth", 0) or 0) + 1
+        self._lock.acquire()
+        try:
+            yield
+        finally:
+            self._lock.release()
+            local.depth = int(local.depth) - 1
+            if local.depth == 0:
+                pending = list(getattr(local, "deferred", ()) or ())
+                local.deferred = []
+                for state, schedule_kind, force in pending:
+                    self._run_deferred_render(state, schedule_kind, force)
+
+    def _defer_or_run_render(
+        self,
+        state: dict[str, Any],
+        schedule_kind: Any,
+        *,
+        force: bool,
+    ) -> None:
+        if not force and schedule_kind is None:
+            return
+        local = self._backend_lock_local()
+        if int(getattr(local, "depth", 0) or 0) > 0:
+            pending = getattr(local, "deferred", None)
+            if pending is None:
+                pending = []
+                local.deferred = pending
+            pending.append((state, schedule_kind, force))
+            return
+        self._run_deferred_render(state, schedule_kind, force)
+
+    def _run_deferred_render(self, state: dict[str, Any], schedule_kind: Any, force: bool) -> None:
+        if force:
+            worker = getattr(self, "_render_worker", None)
+            if worker is not None:
+                worker.request_figure_build(state, force=True)
+            return
+        if schedule_kind is not None:
+            self._schedule_committed_render(state, schedule_kind)
+
     def normalize_state(
         self, patch: Optional[dict[str, Any]], scene_id: Optional[str] = None
     ) -> dict[str, Any]:
@@ -154,8 +222,8 @@ class _StateBackendMixin:
             replicas = patch.get("disorder_replicas") or []
             state["disorder_replicas"] = replicas if isinstance(replicas, list) else []
         # ``supercell`` is a v2 shorthand: ``{"a": Na, "b": Nb, "c": Nc}``
-        # is rewritten to a single ``repeat`` transform appended to the
-        # transforms list. Keeps the AI scripting path one-line for the
+        # replaces any existing display ``repeat``. It does not stack and
+        # it does not commit a structure. Keeps the AI scripting path one-line for the
         # most common "show me a 2x2x2" request without forcing the
         # caller to construct a transform spec.
         if "supercell" in patch and patch["supercell"] is not None:
@@ -303,6 +371,7 @@ class _StateBackendMixin:
         # other UI-originated patch where the browser is already
         # authoritative for the field being changed.
         rebuild_projection_image = False
+        schedule_kind = None
         with self._lock:
             target_scene_id = (
                 scene_id or (patch or {}).get("scene_id") or self.scene_store.active_id
@@ -378,6 +447,7 @@ class _StateBackendMixin:
                     working_state["selection"] = _normalize_selection({})
                     working_state["style_override_warnings"] = removed
                 working_state = self._reconcile_semantic_targets(working_state)
+            schedule_kind = committed_render_kind(state_before, working_state)
             before_versions = state_versions(state_before)
             # Maintain independent clocks.  A display patch can reuse the
             # current geometry; a camera patch never invalidates either.
@@ -509,11 +579,40 @@ class _StateBackendMixin:
         # Flat ORTEP rasterizes the camera basis. Queue its combined image
         # after releasing the backend lock; worker completion takes the locks
         # in the other order. Ordinary Plotly patches keep the fast path.
-        if rebuild_projection_image:
-            worker = getattr(self, "_render_worker", None)
-            if worker is not None:
-                worker.request_figure_build(state, force=True)
+        # Geometry, analysis, and other complete-frame edits are scheduled
+        # here as well, so an API write does not wait for Dash ``update_view``.
+        # A caller that still holds ``_hold_backend_lock`` (selection commits)
+        # defers this enqueue until that outer lock is released.
+        self._defer_or_run_render(
+            state,
+            schedule_kind,
+            force=bool(rebuild_projection_image),
+        )
         return state
+
+    def _schedule_committed_render(self, state: dict[str, Any], change_kind: Any) -> bool:
+        """Enqueue a complete frame when the committed change needs one.
+
+        Lightweight camera, overlay, and display patches stay on the journal's
+        view-update path. The worker deduplicates a second request from
+        ``update_view`` for the same scene snapshot.
+        """
+        if not isinstance(state, dict) or not requires_complete_frame(change_kind, state):
+            return False
+        worker = getattr(self, "_render_worker", None)
+        if worker is None:
+            return False
+        flat_ortep_camera = (
+            change_kind == UpdateKind.CAMERA
+            and state.get("material") == "flat"
+            and state.get("style") == "ortep"
+        )
+        # Pass ``force`` only when it changes the worker's fast path. Callers
+        # that replace ``request_figure_build`` with a one-argument spy stay
+        # compatible with ordinary complete-frame requests.
+        if flat_ortep_camera:
+            return bool(worker.request_figure_build(state, force=True))
+        return bool(worker.request_figure_build(state))
 
     def pop_pending_state(self) -> Optional[dict[str, Any]]:
         with self._lock:
@@ -528,9 +627,9 @@ class _StateBackendMixin:
     def scene_for_state(self, state: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         state = self.current_state if state is None else state
         bundle = self.get_bundle(state["structure"])
-        # Phase 4: ``state["transforms"]`` is the structure-mutation
-        # pipeline. ``build_bundle_scene`` short-circuits when the list
-        # is empty so the no-transform path stays a single dict lookup.
+        # Display transforms derive the rendered scene. They do not commit
+        # a scientific structure. ``build_bundle_scene`` short-circuits
+        # when the list is empty so the no-transform path stays a lookup.
         transforms = list(state.get("transforms") or [])
         # Keep the historic ``backend_core.build_bundle_scene`` patch
         # point working for embedders and tests while the state methods
@@ -569,8 +668,6 @@ class _StateBackendMixin:
         scene_label = state.get("scene_label")
         if scene_label:
             scene["display_title"] = str(scene_label)
-        bundle.scene = scene
-        bundle.fragment_table = scene.get("fragment_table", bundle.fragment_table)
         property_spec = state.get("atom_property_color")
         if property_spec:
             from ..properties import (
@@ -823,11 +920,14 @@ class _StateBackendMixin:
         # cube and a new state with a 12 Å cube, Plotly would silently
         # "preserve UI state" for the cube too, which is what made the
         # molecule look squashed after switching back to ``formula_unit``.
+        # The scene id keeps a duplicate from inheriting the source scene's
+        # WebGL camera when the structure name and viewport still match.
         layout_signature = viewport_signature(state)
-        style["uirevision"] = "{name}__{rev}__{sig}".format(
-            name=scene.get("name", "scene"),
-            rev=int(state.get("camera_revision", 0) or 0),
-            sig=layout_signature,
+        style["uirevision"] = scene_uirevision(
+            state.get("scene_id"),
+            scene.get("name"),
+            state.get("camera_revision", 0),
+            layout_signature,
         )
         # The interactive Dash app uses a separate SVG overlay for the
         # compass to avoid Plotly.relayout calls that interrupt gl3d's

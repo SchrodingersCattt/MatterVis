@@ -308,6 +308,7 @@ def compute_topology_geometry(
     analysis_center_kind = str(analysis_spec.get("center_kind") or "centroid")
     analysis_hard_cutoff = analysis_spec.get("hard_cutoff")
     analysis_fallback_max = analysis_spec.get("fallback_max")
+    analysis_disorder_policy = analysis_spec.get("disorder_policy") or "major"
 
     # A null or "(auto)" ligand is persisted state, not a MolCrysKit query.
     # Skipping the call keeps the render worker from surfacing ValueError
@@ -328,6 +329,7 @@ def compute_topology_geometry(
             center_kind=analysis_center_kind,
             hard_cutoff=analysis_hard_cutoff,
             fallback_max=analysis_fallback_max,
+            disorder_policy=analysis_disorder_policy,
         )
     else:
         primary = _empty_primary(display_fragment)
@@ -345,6 +347,7 @@ def compute_topology_geometry(
         spec_center_kind = str(spec.get("center_kind") or "centroid")
         spec_hard_cutoff = spec.get("hard_cutoff")
         spec_fallback_max = spec.get("fallback_max")
+        spec_disorder_policy = spec.get("disorder_policy") or "major"
         if ligand is None:
             warnings.append(
                 f"{spec.get('name') or center_species}: {EXPLICIT_LIGAND_MESSAGE}"
@@ -361,6 +364,7 @@ def compute_topology_geometry(
                     "center_kind": spec_center_kind,
                     "hard_cutoff": spec_hard_cutoff,
                     "fallback_max": spec_fallback_max,
+                    "disorder_policy": spec_disorder_policy,
                     "overlays": [],
                 }
             )
@@ -377,6 +381,7 @@ def compute_topology_geometry(
                 enforce_enclosure=enforce_enclosure,
                 centroid_offset_frac=centroid_offset_frac,
                 fallback_max=spec_fallback_max,
+                disorder_policy=spec_disorder_policy,
             )
             overlays = []
             for overlay_ordinal, center in enumerate(atom_centers):
@@ -408,6 +413,7 @@ def compute_topology_geometry(
                     "center_kind": spec_center_kind,
                     "hard_cutoff": spec_hard_cutoff,
                     "fallback_max": spec_fallback_max,
+                    "disorder_policy": spec_disorder_policy,
                     "overlays": overlays,
                 }
             )
@@ -469,6 +475,7 @@ def compute_topology_geometry(
                     center_kind=spec_center_kind,
                     hard_cutoff=spec_hard_cutoff,
                     fallback_max=spec_fallback_max,
+                    disorder_policy=spec_disorder_policy,
                 )
             except Exception:
                 continue
@@ -522,6 +529,7 @@ def compute_topology_geometry(
                 "center_kind": spec_center_kind,
                 "hard_cutoff": spec_hard_cutoff,
                 "fallback_max": spec_fallback_max,
+                "disorder_policy": spec_disorder_policy,
                 "overlays": overlays,
             }
         )

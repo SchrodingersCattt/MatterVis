@@ -638,8 +638,19 @@
           }
           const touchesCamera=layout["scene.camera"] || (layout.scene && layout.scene.camera) ||
             Object.keys(layout).some(function(key){return key.indexOf("scene.camera.")===0;});
-          if (gestureId && canvasId && gestureId!==canvasId && touchesCamera && gd && gd.__mvSceneCamera && gd.__mvSceneCameraOwner===canvasId) {
-            return Promise.resolve(original.call(this, gd, {"scene.camera": JSON.parse(JSON.stringify(gd.__mvSceneCamera))}));
+          if (!window.__mvRestoreOwnedCamera && gestureId && canvasId && gestureId!==canvasId && touchesCamera) {
+            // The drag belongs to another scene. Restore this canvas only
+            // when its saved camera is actually its own; otherwise drop the
+            // relayout so scene A's gesture cannot reframe scene B.
+            if (gd && gd.__mvSceneCamera && gd.__mvSceneCameraOwner===canvasId) {
+              window.__mvAllowCameraRelayout = true;
+              const restored = original.call(this, gd, {"scene.camera": JSON.parse(JSON.stringify(gd.__mvSceneCamera))});
+              const clearAllow = function () { window.__mvAllowCameraRelayout = false; };
+              if (restored && typeof restored.then === "function") restored.then(clearAllow, clearAllow);
+              else clearAllow();
+              return Promise.resolve(restored);
+            }
+            return Promise.resolve(gd || args[0]);
           }
         }
         if (render&&!figureMetadataIsCurrent(render,target)) return Promise.resolve(args[0]);
@@ -779,7 +790,14 @@
             throw err;
           });
         }
-        return original.apply(this,args);
+        const allowCamera = name === "relayout" && layout && (layout["scene.camera"] || (layout.scene && layout.scene.camera) ||
+          Object.keys(layout).some(function (key) { return key.indexOf("scene.camera.") === 0; }));
+        if (allowCamera) window.__mvAllowCameraRelayout = true;
+        try {
+          return original.apply(this, args);
+        } finally {
+          if (allowCamera) window.__mvAllowCameraRelayout = false;
+        }
       };
       wrapped.__mattervisRenderGate=true;
       wrapped.__mattervisOriginal=original;
@@ -816,6 +834,22 @@
     // old figure is still mounted. Keep the retry bounded, but long enough to
     // bridge that handoff instead of dropping the only complete frame.
     if (attempt >= 120) {
+      const selected = typeof currentSceneId === "function" ? currentSceneId() : null;
+      // The selected scene reports a missed paint and drops its frame. A
+      // frame for a scene that is not selected stays parked: the duplicating
+      // page can still be on the source tab when this budget ends, and
+      // deleting the copy's only complete frame leaves the old title up.
+      if (selected && String(selected) !== key) return;
+      if (selected && String(selected) === key) {
+        const message = "Scene frame was not applied";
+        const statusNode = document.getElementById("mv-render-status");
+        if (statusNode) {
+          statusNode.hidden = false;
+          statusNode.textContent = message;
+          statusNode.setAttribute("data-level", "error");
+        }
+        window.__mvRenderStatus = {scene_id: key, level: "error", message: message};
+      }
       delete pendingFigureByScene[key];
       return;
     }
@@ -1081,6 +1115,97 @@
     }, INTERACTION_SETTLE_MS);
   }
   function inGraph(target) { return !!(target && target.closest && target.closest("#crystal-graph")); }
+
+  function sceneCatalogEntries() {
+    var root = document.getElementById("scene-tabs");
+    if (!root || typeof root.querySelectorAll !== "function") return null;
+    var nodes = root.querySelectorAll("[id^='scene-tab-']");
+    var entries = [];
+    for (var index = 0; index < nodes.length; index += 1) {
+      var tab = nodes[index];
+      if (!tab || !tab.id || tab.id === "scene-tabs") continue;
+      if (tab.id.indexOf("scene-tab-close-") === 0 || tab.id.indexOf("scene-tab-label-") === 0) continue;
+      if (tab.id.indexOf("scene-tab-") !== 0) continue;
+      var text = typeof tab.querySelector === "function" ? tab.querySelector(".scene-tab-text") : null;
+      var label = text ? String(text.textContent || "").trim() : null;
+      entries.push({id: tab.id.slice("scene-tab-".length), label: label});
+    }
+    return entries;
+  }
+
+  function sceneCatalogDomDiffers(scenes) {
+    var entries = sceneCatalogEntries();
+    // A missing tab root is not a catalog change. Treating it as a difference
+    // rebuilds the strip before Dash has mounted it.
+    if (entries === null) return false;
+    var expected = Array.isArray(scenes) ? scenes : [];
+    if (entries.length !== expected.length) return true;
+    for (var index = 0; index < entries.length; index += 1) {
+      var scene = expected[index] || {};
+      if (String(entries[index].id) !== String(scene.id || "")) return true;
+      if (entries[index].label !== null && String(entries[index].label) !== String(scene.label || "")) return true;
+    }
+    return false;
+  }
+
+  function claimOwnDuplicatedScene(message) {
+    // Catalog publication uses focus:false so other open pages keep their
+    // tab. The page that clicked Duplicate still has to land on the new
+    // scene; otherwise the copy's figure stays parked and the canvas title
+    // remains the source scene.
+    if (!window.__mvOwnSceneFocus) return;
+    var nextId = message && message.active_id;
+    if (nextId === null || nextId === undefined || nextId === "") return;
+    window.__mvOwnSceneFocus = false;
+    var selected = "";
+    try { selected = String(currentSceneId() || ""); } catch (_) { selected = ""; }
+    if (String(nextId) === selected) return;
+    nextId = String(nextId);
+    if (typeof window.MatterVisSelectScene === "function") window.MatterVisSelectScene(nextId);
+    if (window.dash_clientside && typeof window.dash_clientside.set_props === "function") {
+      window.dash_clientside.set_props("scene-tabs", {value: nextId});
+    }
+    if (typeof flushQueuedSceneFigure === "function") {
+      flushQueuedSceneFigure(nextId);
+      [0, 50, 250].forEach(function (delay) {
+        setTimeout(function () { flushQueuedSceneFigure(nextId); }, delay);
+      });
+    }
+  }
+
+  function reconcileSceneCatalog(message) {
+    try {
+      if (!message || typeof message !== "object" || !Array.isArray(message.scenes)) return;
+      var seq = Number(message.scene_catalog_seq || 0);
+      if (!Number.isFinite(seq)) seq = 0;
+      var applied = window.__mvSceneCatalogApplied || {seq: -1, focus: false};
+      if (seq < Number(applied.seq)) return;
+      var sameSeq = seq === Number(applied.seq);
+      // One catalog sequence is applied once. Repeating it because the DOM
+      // parser still disagrees rebuilds the tabs, and that rebuild bumps the
+      // server version and delivers the same sequence again.
+      if (sameSeq && !(message.focus && !applied.focus)) return;
+      var domDiffers = sceneCatalogDomDiffers(message.scenes);
+      var selected = "";
+      try { selected = String(currentSceneId() || ""); } catch (_) { selected = ""; }
+      var focusSwitch = !!message.focus && String(message.active_id || "") !== selected;
+      window.__mvSceneCatalogApplied = {
+        seq: seq,
+        focus: !!message.focus || (sameSeq && !!applied.focus),
+      };
+      claimOwnDuplicatedScene(message);
+      if (!domDiffers && !focusSwitch) return;
+      setDashStore("scene-event-store", {
+        seq: Date.now(),
+        source: "scene_catalog",
+        catalog_seq: seq,
+        focus: !!message.focus,
+        active_id: message.active_id || null,
+        version: message.version,
+      });
+    } catch (_) {}
+  }
+  window.MatterVisReconcileSceneCatalog = reconcileSceneCatalog;
 
   // ── Right-click menu (right_click_menu.js) ─────────────────────
   let lastHovered = null, lastClient = {x:0,y:0};
@@ -1599,6 +1724,14 @@
     });
   }
 
+  if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+    document.addEventListener("click", function (event) {
+      var button = event.target && event.target.closest && event.target.closest("#scene-new-tab-btn");
+      if (!button) return;
+      window.__mvOwnSceneFocus = true;
+    }, true);
+  }
+
   document.addEventListener("click", function (event) {
     const select = event.target && event.target.closest && event.target.closest(".tab-select");
     if (select) {
@@ -1772,6 +1905,7 @@
         window.fetch("/api/v2/view-updates?since=" + encodeURIComponent(since), {credentials:"same-origin"})
           .then(function(response){ return response.ok ? response.json() : null; })
           .then(function(body){
+            if (body && body.scene_catalog) reconcileSceneCatalog(body.scene_catalog);
             (body && body.updates || []).forEach(deliverFallbackPayload);
           })
           .catch(function(){})
@@ -1790,6 +1924,10 @@
     }
     function handleFigurePayload(p) {
       if (!p || typeof p !== "object") return;
+      if (p.type === "scene_catalog") {
+        reconcileSceneCatalog(p);
+        return;
+      }
       var seq = Number(p.figure_seq || p.seq || 0);
       // Figure sequence numbers are global across scenes, while delivery
       // fences are scene-scoped. A frame for scene B can legitimately have a
@@ -1925,8 +2063,13 @@
        * plain snapshot without ever becoming a figure transport. Keep the
        * journal poll alive until a real view envelope arrives; camera and
        * display updates must not wait for the socket's eventual close. */
-      if (!p || typeof p !== "object" ||
-          (!p.type && !p.figure && p.figure_seq === undefined && p.seq === undefined)) return;
+      if (!p || typeof p !== "object") return;
+      if (p.type === "scene_catalog") {
+        reconcileSceneCatalog(p);
+        return;
+      }
+      if (p.scene_catalog) reconcileSceneCatalog(p.scene_catalog);
+      if (!p.type && !p.figure && p.figure_seq === undefined && p.seq === undefined) return;
       stopHttpFallback();
       handleFigurePayload(p);
     });
@@ -2058,6 +2201,13 @@
     if (gd && window.MatterVisViewCamera && typeof window.MatterVisViewCamera.installWheelZoom === "function") {
       window.MatterVisViewCamera.installWheelZoom(gd);
     }
+    if (gd && typeof gd.on === "function" && !gd.__mvForeignCameraBound) {
+      gd.__mvForeignCameraBound = true;
+      gd.on("plotly_relayout", function () {
+        if (window.__mvAllowCameraRelayout || window.__mvRestoreOwnedCamera) return;
+        restoreOwnedCamera(gestureGeneration, foreignGuardScene());
+      });
+    }
   }
   let rebindScheduled = false;
   let rebindObserver = null;
@@ -2095,10 +2245,27 @@
     const kind = window.__mvGestureKind ? String(window.__mvGestureKind) : "";
     if (kind === "wheel") return;
     const ended = Number(window.__mvGestureEndedAt || 0);
+    // An in-progress drag keeps the revision from pointerdown. Reset can
+    // still win that commit. The pointer-up relayout is the one camera
+    // event that belongs to the gesture: it keeps the same revision.
+    // Any later relayout, even inside the settle window, is a new command
+    // and must read the live clock. Leaving it on the gesture revision
+    // makes the server reject a same-scene refit, and the offscreen view
+    // stays where the drag put it.
+    if (!ended && window.__mvGestureSceneId) return;
     const age = ended ? (Date.now() - ended) : 0;
-    if (window.__mvGestureSceneId && age < 450) return;
+    if (window.__mvGestureSceneId && age < 450 && !window.__mvGesturePointerRelayoutSeen) {
+      window.__mvGesturePointerRelayoutSeen = true;
+      return;
+    }
     const render = renderMetadataFromLayout(gd.layout);
     if (!render) return;
+    const gestureId = window.__mvGestureSceneId ? String(window.__mvGestureSceneId) : "";
+    const canvasId = render.scene_id ? String(render.scene_id) : "";
+    // A gesture that still names another scene must not inherit this
+    // canvas's generation. That copy lets a late relayout pass the server
+    // fence as if the drag had started on the newly mounted scene.
+    if (gestureId && canvasId && gestureId !== canvasId) return;
     if (render.scene_generation !== undefined && render.scene_generation !== null) {
       window.__mvGestureSceneGeneration = render.scene_generation;
     }
@@ -2109,6 +2276,83 @@
     else if (Number.isFinite(live)) revision = live;
     else if (Number.isFinite(metaRev)) revision = metaRev;
     if (revision !== null) window.__mvGestureCameraRevision = revision;
+  }
+  const FOREIGN_CAMERA_CENTER_TOLERANCE = 0.2;
+  function armForeignCameraGuard(generation, sceneId) {
+    window.__mvForeignGuard = sceneId ? {generation: generation, sceneId: String(sceneId)} : null;
+  }
+  function foreignGuardScene() {
+    const guard = window.__mvForeignGuard;
+    if (guard && guard.generation === gestureGeneration && guard.sceneId) return String(guard.sceneId);
+    return window.__mvGestureSceneId ? String(window.__mvGestureSceneId) : "";
+  }
+  function cameraCenterOffset(live, want) {
+    if (!live || !want) return Infinity;
+    const component = function (value, index, key) {
+      const raw = value[index] !== undefined && value[index] !== null ? value[index] : value[key];
+      return Number(raw);
+    };
+    const axes = ["x", "y", "z"];
+    const delta = axes.map(function (key, index) {
+      return component(live, index, key) - component(want, index, key);
+    });
+    if (!delta.every(Number.isFinite)) return Infinity;
+    return Math.hypot(delta[0], delta[1], delta[2]);
+  }
+  function ownedCanvasCamera(gd, canvasId) {
+    if (gd && gd.__mvSceneCamera && gd.__mvSceneCameraOwner === canvasId) return gd.__mvSceneCamera;
+    return (gd && gd.layout && gd.layout.scene && gd.layout.scene.camera) || null;
+  }
+  function releaseGestureScene(generation, stamped) {
+    if (generation !== gestureGeneration) return;
+    if ((window.__mvGestureSceneId || "") === (stamped || "")) window.__mvGestureSceneId = "";
+  }
+  function restoreOwnedCamera(generation, gestureId) {
+    const foreign = gestureId ? String(gestureId) : "";
+    if (!foreign || generation !== gestureGeneration) return;
+    const gd = graphDiv();
+    if (!gd || gd.__mvForeignRestore || !window.Plotly || typeof window.Plotly.relayout !== "function") return;
+    const render = renderMetadataFromLayout(gd.layout);
+    const canvasId = render && render.scene_id ? String(render.scene_id) : "";
+    if (!canvasId || foreign === canvasId) return;
+    const camera = ownedCanvasCamera(gd, canvasId);
+    if (!camera) return;
+    const scene = gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
+    const live = scene && scene.camera && scene.camera.center;
+    if (cameraCenterOffset(live, camera.center) <= FOREIGN_CAMERA_CENTER_TOLERANCE) return;
+    gd.__mvForeignRestore = true;
+    window.__mvRestoreOwnedCamera = true;
+    let pending = null;
+    try {
+      pending = window.Plotly.relayout(gd, {"scene.camera": JSON.parse(JSON.stringify(camera))});
+    } catch (_error) {
+      window.__mvRestoreOwnedCamera = false;
+      gd.__mvForeignRestore = false;
+      return;
+    }
+    const clear = function () {
+      window.__mvRestoreOwnedCamera = false;
+      gd.__mvForeignRestore = false;
+    };
+    if (pending && typeof pending.then === "function") pending.then(clear, clear);
+    else clear();
+  }
+  function scheduleOwnedCameraRestore(generation, gestureId) {
+    if (!gestureId) return;
+    const step = function () {
+      if (generation !== gestureGeneration) return;
+      if ((window.__mvGestureSceneId || "") !== gestureId) return;
+      restoreOwnedCamera(generation, gestureId);
+      if (generation !== gestureGeneration) return;
+      if ((window.__mvGestureSceneId || "") !== gestureId) return;
+      // Plotly can commit the foreign drag after the replacement figure
+      // has already painted. Keep the mounted camera in place until this
+      // gesture's own clear timer runs.
+      if (typeof window.requestAnimationFrame === "function") window.requestAnimationFrame(step);
+      else setTimeout(step, 16);
+    };
+    if (typeof window.requestAnimationFrame === "function") window.requestAnimationFrame(step);
+    else setTimeout(step, 0);
   }
   function stampGestureScene(sceneId, kind) {
     const id = sceneId ? String(sceneId) : "";
@@ -2159,16 +2403,30 @@
   document.addEventListener("pointerdown", function(e) {
     if (!inGraph(e.target)) return;
     window.__mvGestureEndedAt = 0;
+    window.__mvGesturePointerRelayoutSeen = false;
     const sceneId = canvasSceneId() || window.__mvGestureSceneId || "";
     stampGestureScene(sceneId, "pointer");
     markActive();
   }, true);
   document.addEventListener("pointerup", function() {
+    // Capture runs before Plotly's pointerup relayout. The ended clock has
+    // to be set first so that relayout is the gesture's own commit, and a
+    // command that follows it can read the live revision.
+    window.__mvGestureEndedAt = Date.now();
+    window.__mvGesturePointerRelayoutSeen = false;
+  }, true);
+  document.addEventListener("pointerup", function() {
     window.__mvGestureEndedAt = Date.now();
     if (interactionActive) markInactiveSoon();
+    const generation = gestureGeneration;
     const stamped = window.__mvGestureSceneId || "";
+    armForeignCameraGuard(generation, stamped);
+    scheduleOwnedCameraRestore(generation, stamped);
     setTimeout(function() {
-      if ((window.__mvGestureSceneId || "") === stamped) window.__mvGestureSceneId = "";
+      // A later pointerdown on the same scene reuses this id. Clearing by
+      // id alone drops that newer drag, and its relayout then lands on
+      // whichever scene is mounted when it commits.
+      releaseGestureScene(generation, stamped);
     }, 1000);
   });
   document.addEventListener("pointercancel", function() {

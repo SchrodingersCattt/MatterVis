@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 from molcrys_kit.utils.geometry import frac_to_cart
 
+from ..render.display_modes import _wrap_fractional
 from ..structure.bonds import bonds_conflict
 from ..structure.cif_parse import parse_asu
 from ..structure.formula_unit import select_formula_unit
@@ -49,6 +50,113 @@ def _bond_endpoints(ai, aj, cell, display_mode: str):
     else:
         end = np.array(_nearest_pbc_cart(ai["cart"], aj["cart"], cell), dtype=float)
     return start, end
+
+
+# Records that do not carry a MolCrysKit distance still refuse a segment
+# longer than this, so a wrapped pair cannot paint a cell-long line.
+# Contacts that do carry ``distance`` are kept when the segment matches
+# that length, including first-neighbor contacts longer than the guard.
+LEGACY_MAX_RENDERED_BOND_LENGTH_A = 3.5
+# Slack between a manifested pair and BondRecord.distance. Lattice rounding
+# stays well inside this; a wrong image is angstroms away.
+BOND_RECORD_LENGTH_TOLERANCE_A = 0.08
+
+
+def _segment_length(start, end) -> float:
+    return float(
+        np.linalg.norm(np.asarray(end, dtype=float) - np.asarray(start, dtype=float))
+    )
+
+
+def _length_matches_record(length: float, record_distance) -> bool:
+    if record_distance is None:
+        return False
+    try:
+        expected = float(record_distance)
+    except (TypeError, ValueError):
+        return False
+    if not np.isfinite(expected) or expected <= 0.0:
+        return False
+    return abs(float(length) - expected) <= BOND_RECORD_LENGTH_TOLERANCE_A
+
+
+def manifested_bond_endpoints(ai, aj, cell, display_mode: str, record_distance):
+    """Return the Cartesian stick for one lifted MolCrysKit edge.
+
+    The display lifter already chose the image pair. When that pair's
+    separation is the record distance, those centres are the contact.
+    A strict unit-cell pair that does not match keeps those centres so the
+    length check can drop it instead of ending on an undrawn image.
+    Outside that mode, a wrapped copy uses the minimum image. That search
+    is ambiguous for a bond of exactly half a lattice vector.
+    """
+    start = np.asarray(ai["cart"], dtype=float)
+    direct_end = np.asarray(aj["cart"], dtype=float)
+    if _length_matches_record(_segment_length(start, direct_end), record_distance):
+        return start, direct_end.copy()
+    if ai.get("_strict_unit_cell") or aj.get("_strict_unit_cell"):
+        # The lifter already chose this manifested pair. A minimum-image
+        # end would leave those centres and land on an image that was not
+        # drawn. The length check then drops the unmatched segment.
+        return start, direct_end.copy()
+    return _bond_endpoints(ai, aj, cell, display_mode)
+
+
+def rendered_bond_keeps_record(start, end, record_distance) -> bool:
+    """Keep a segment that is the MolCrysKit contact, not a cell-long line."""
+    length = _segment_length(start, end)
+    if record_distance is None:
+        return length <= LEGACY_MAX_RENDERED_BOND_LENGTH_A
+    return _length_matches_record(length, record_distance)
+
+
+def stamp_coordination_sites(
+    draw_atoms: list[dict[str, Any]],
+    bonds: list[dict[str, Any]],
+    canonical_bond_records: list[dict[str, Any]] | None,
+) -> None:
+    """Mark display atoms that belong to a MolCrysKit coordination edge.
+
+    A boundary copy can have no stick of its own when its neighbour image
+    is outside the view. The source atom's role still decides the sphere,
+    so every image of a coordination site stays larger than the cylinder.
+    """
+    endpoints = {
+        index
+        for bond in bonds
+        if bond.get("role") == "coordination"
+        for index in (int(bond["i"]), int(bond["j"]))
+    }
+    sources: set[int] = set()
+    for record in canonical_bond_records or []:
+        if str(record.get("role") or "") != "coordination":
+            continue
+        for key in ("left", "right"):
+            try:
+                sources.add(int(record[key]))
+            except (KeyError, TypeError, ValueError):
+                continue
+    for index, atom in enumerate(draw_atoms):
+        try:
+            source = int(atom.get("_source_index", index))
+        except (TypeError, ValueError):
+            source = index
+        atom["_coordination_site"] = index in endpoints or source in sources
+
+
+def _display_pair_fields(record: dict[str, Any]) -> dict[str, Any]:
+    """Role and distance carried from one canonical record onto a display pair."""
+    role = record.get("role")
+    if role not in {"covalent", "coordination"}:
+        role = "covalent"
+    distance = record.get("distance", record.get("distance_A"))
+    try:
+        distance = None if distance is None else float(distance)
+    except (TypeError, ValueError):
+        distance = None
+    if distance is not None and (not np.isfinite(distance) or distance <= 0.0):
+        distance = None
+    return {"role": str(role), "distance": distance}
 
 _SOURCE_IMAGE_TOL = 1e-5
 
@@ -119,6 +227,69 @@ def _periodic_component_ranks(
         for source_index in component:
             ranks[source_index] = rank
     return ranks
+
+def _stored_cell_index(atom: dict[str, Any]) -> tuple[int, int, int] | None:
+    """Integer cell of a source site relative to its strict-cell home image.
+
+    MolCrysKit's ``right_image_shift`` is measured from the stored
+    fractional coordinates. Strict unit-cell display folds those
+    coordinates into ``[0, 1)``, so the display shift is the stored
+    shift plus the difference of those folds.
+    """
+    stored = np.asarray(atom.get("frac"), dtype=float)
+    anchor = atom.get("_wrapped_frac", atom.get("frac"))
+    home = _wrap_fractional(anchor)
+    if (
+        home is None
+        or stored.shape != (3,)
+        or not np.all(np.isfinite(stored))
+    ):
+        return None
+    delta = stored - home
+    image = np.rint(delta).astype(int)
+    if not np.allclose(delta, image, rtol=0.0, atol=_SOURCE_IMAGE_TOL):
+        return None
+    return tuple(int(value) for value in image)
+
+
+def _bond_records_in_wrapped_home(
+    source_atoms: list[dict[str, Any]],
+    canonical_bond_records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Express bond image shifts relative to wrapped home sites.
+
+    ``left@q → right@(q + S)`` in the stored frame becomes
+    ``left_home@q → right_home@(q + S + n_right - n_left)`` after each
+    site is folded by its integer cell ``n``. The returned records are
+    copies. Canonical MolCrysKit shifts are left unchanged.
+    """
+    cells = [_stored_cell_index(atom) for atom in source_atoms]
+    adjusted: list[dict[str, Any]] = []
+    for record in canonical_bond_records:
+        copied = dict(record)
+        try:
+            left = int(record["left"])
+            right = int(record["right"])
+            relation = tuple(int(value) for value in record["right_image_shift"])
+        except (KeyError, TypeError, ValueError):
+            adjusted.append(copied)
+            continue
+        if (
+            len(relation) != 3
+            or not 0 <= left < len(cells)
+            or not 0 <= right < len(cells)
+            or cells[left] is None
+            or cells[right] is None
+        ):
+            adjusted.append(copied)
+            continue
+        copied["right_image_shift"] = [
+            relation[axis] + cells[right][axis] - cells[left][axis]
+            for axis in range(3)
+        ]
+        adjusted.append(copied)
+    return adjusted
+
 
 def _manifest_strict_bonded_images(
     draw_atoms: list[dict[str, Any]],
@@ -415,13 +586,16 @@ def _canonical_display_bond_pairs(
     draw_atoms: list[dict[str, Any]],
     source_atoms: list[dict[str, Any]],
     canonical_bond_records: list[dict[str, Any]],
-) -> tuple[list[tuple[int, int]], dict[str, int]]:
+) -> tuple[list[tuple[int, int]], dict[str, int], dict[tuple[int, int], dict[str, Any]]]:
     """Lift PBC-aware canonical records to matching display atom instances.
 
     For a canonical record ``(left, right, S)`` and a visible instance
     ``left@q``, the sole valid target is ``right@(q + S)``.  The lookup is
     linear in manifested atoms plus valid edge copies; it never re-perceives
-    bonds or forms a Cartesian product of replica sets.
+    bonds or forms a Cartesian product of replica sets. The third return
+    value maps each sorted display pair to the record's ``role`` and
+    ``distance`` so the renderer can stroke that edge without reclassifying
+    elements.
     """
     instances: dict[tuple[int, tuple[int, int, int]], int] = {}
     fragment_instances: dict[
@@ -463,9 +637,15 @@ def _canonical_display_bond_pairs(
                 pass
 
     pairs: set[tuple[int, int]] = set()
+    pair_metadata: dict[tuple[int, int], dict[str, Any]] = {}
     missing_targets = 0
     instance_lookups = 0
     max_copies_per_record = 0
+
+    def _remember(pair_key: tuple[int, int], record: dict[str, Any]) -> None:
+        if pair_key not in pair_metadata:
+            pair_metadata[pair_key] = _display_pair_fields(record)
+
     for record in canonical_bond_records:
         try:
             left = int(record["left"])
@@ -492,6 +672,7 @@ def _canonical_display_bond_pairs(
             pair_key = tuple(sorted(pair))
             pairs.add(pair_key)
             emitted_for_record.add(pair_key)
+            _remember(pair_key, record)
         directions = (
             (left, right, relation),
             (right, left, tuple(-value for value in relation)),
@@ -511,6 +692,7 @@ def _canonical_display_bond_pairs(
                 pair_key = tuple(sorted((source_draw_index, target_draw_index)))
                 pairs.add(pair_key)
                 emitted_for_record.add(pair_key)
+                _remember(pair_key, record)
             max_copies_per_record = max(max_copies_per_record, len(emitted_for_record))
 
     return sorted(pairs), {
@@ -520,7 +702,7 @@ def _canonical_display_bond_pairs(
         "instance_lookups": instance_lookups,
         "missing_target_instances": missing_targets,
         "max_copies_per_record": max_copies_per_record,
-    }
+    }, pair_metadata
 
 def _prune_unconnected_spanning_replicas(
     draw_atoms: list[dict[str, Any]],
@@ -529,7 +711,7 @@ def _prune_unconnected_spanning_replicas(
 ) -> list[dict[str, Any]]:
     if not canonical_bond_records:
         return draw_atoms
-    pairs, _stats = _canonical_display_bond_pairs(
+    pairs, _stats, _pair_metadata = _canonical_display_bond_pairs(
         draw_atoms,
         source_atoms,
         canonical_bond_records,

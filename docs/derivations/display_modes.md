@@ -165,8 +165,22 @@ point is the direct Cartesian position
 \vec p_j = \vec x_j.
 \]
 
-Otherwise, the end point is the nearest periodic image of atom \(j\) relative
-to atom \(i\):
+When that separation is the MolCrysKit bond length, the displayed centres are
+the contact. A strict unit-cell pair that does not have that length is not
+minimum-imaged onto an undrawn point; the segment is omitted. With bond-context
+images enabled, the strict cell first folds each stored site by its integer
+cell \(n\) and rewrites the display shift to
+
+\[
+\vec S' = \vec S + \vec n_j - \vec n_i
+\]
+
+before choosing which periodic images to draw. \(\vec S'\) is display-only.
+The stored `right_image_shift` is unchanged, and two inputs that differ by an
+integer lattice translation produce the same \(\vec S'\).
+
+Otherwise, outside that strict cell, the end point is the nearest periodic
+image of atom \(j\) relative to atom \(i\):
 
 \[
 \vec p_j =
@@ -267,9 +281,14 @@ wireframe is still drawn.
   images are added by the mode.
 - `unit_cell` boundary replicas are whole-fragment replicas whenever a
   MolCrysKit molecule index is present.
+- A finite fragment is translated into the anchor site's home cell before
+  those replicas are chosen, so the displayed images do not depend on which
+  integer cell the input used.
 - The drift-corrected shift is `canonical_shift - mck_drift`; skipping the
   case `mck_drift not in canonical_shifts` is required to avoid duplicating
   ordinary boundary-crossing molecules.
 - Bond endpoint imaging must be explicit in the display policy.  It should not
   be hidden inside a generic renderer pass.
+- Strict-cell bond-context images use the wrapped-home shift
+  `S + n_right - n_left`. Drawn endpoints lie on displayed atoms.
 

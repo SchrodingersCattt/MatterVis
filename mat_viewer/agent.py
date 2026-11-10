@@ -13,8 +13,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from .capabilities import (
-    MOLCRYSKIT_INSTALL,
-    MOLCRYSKIT_REQUIREMENT,
+    MOLCRYSKIT_DEVELOPMENT_INSTALL,
     MissingCapabilityError,
     capabilities,
     molcryskit_contract_missing,
@@ -134,9 +133,9 @@ def require_molcryskit_contract() -> None:
     if missing:
         raise RuntimeError(
             "The installed MolCrysKit lacks the renderer-ready public contract "
-            f"({', '.join(missing)}). MatterVis requires "
-            f"{MOLCRYSKIT_REQUIREMENT}; "
-            f"upgrade MolCrysKit before rendering with: {MOLCRYSKIT_INSTALL}."
+            f"({', '.join(missing)}). This checkout needs BondRecord.role and "
+            "MolecularCrystal.get_connectivity_report. Install the pinned "
+            f"source with: {MOLCRYSKIT_DEVELOPMENT_INSTALL}."
         )
 
 

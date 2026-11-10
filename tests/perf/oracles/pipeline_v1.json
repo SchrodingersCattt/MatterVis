@@ -1,25 +1,30 @@
 {
   "schema": "mattervis.perf.pipeline-oracle/v1",
   "entries": {
-    "dap4-mattervis-051df0b-mck-f2188c1": {
+    "dap4-mattervis-e7386dc-mck-d02ce08": {
       "producer": {
-        "mattervis_revision": "9cf98e80999e693b2cf89706b4cfd22f4a98cd3d",
-        "molcrys_kit_revision": "f2188c14e245b87d99dc1d13ab72e37993d972b0"
+        "mattervis_revision": "e7386dcc0629bc5280ffb7dee62e8b954a66b056",
+        "molcrys_kit_revision": "d02ce08ab28826f87d976aef98fefb8b86998075"
       },
+      "validated_molcrys_kit_revisions": [
+        "602487aac447e6bbb22408d2194ba7aa67fcf488",
+        "f4f81afa4f2b57ad7fa8e88e4816cbcb96a30556",
+        "ee45c7e7c9e44f50b0b55ed46ee5dca306550541"
+      ],
       "fixture": {
         "path": "scripts/data/DAP-4.cif",
         "sha256": "b126b65d267ae4a6930e203c2124af09c137d466d27613792f83cf519bbc454b"
       },
       "oracle": {
         "schema": "mattervis.perf.oracle/v1",
-        "overall_digest": "b58eab4591e3e0d8c3308df3578aac4ac3b785b15ed1fe883ee0ae5e1bc449c2",
+        "overall_digest": "d967dbc2a61207db1853badb333b60c1eb39b117ca22d98e318f9ad6a1821425",
         "section_digests": {
           "analysis": "4aca310f8f4cb8158e346811e206695aa48d42d28dfbcd84874e58398716fcb0",
           "disorder": "eb21f31cadb3609b05005ec3880f758da1bad4fbe94c44e5cafd035c6d36f0f8",
           "figure": "8466672d9f1b6d520c74c9368a943b38bef96eb52fd410d97f5c3d2a63a78331",
           "formula_unit": "b822193b5a1556495a2a39f4c997c575a293dfb082335b272d6c6c7ecb283166",
           "raw_atoms": "4e50c03399881384aa7bbb960c652d5379798bb491ae3c29c6b0271262729dbe",
-          "scene": "9f9bbc678c7226c6dfde3c57825b30444c3ccca1e65131ad08737114192054c8"
+          "scene": "b198d7f34a7cfb5213768cac194f6833e3f720016940f42f847a0e46430a9fdf"
         },
         "counts": {
           "canonical_bonds": 312,
@@ -34,7 +39,7 @@
           "molecules": 40,
           "raw_atoms": 336,
           "scene_atoms": 361,
-          "scene_bonds": 304
+          "scene_bonds": 297
         }
       },
       "platform_oracles": {

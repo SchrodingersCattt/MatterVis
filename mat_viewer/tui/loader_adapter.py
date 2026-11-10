@@ -102,6 +102,68 @@ def _transform_label(transforms: list[dict] | None) -> str:
     return ", ".join(parts)
 
 
+def _attach_unmanifested_canonical_bonds(scene: dict) -> None:
+    """Keep a canonical edge whose periodic image was not drawn.
+
+    Non-CIF terminal views measure source atoms in the home cell. An
+    extended lattice does not grow an exterior image for that edge, so the
+    MolCrysKit record would otherwise vanish. The direct source-source
+    segment is what the collapsed view reports; minimum-image length is
+    derived from it later.
+    """
+    records = list(scene.get("_canonical_bond_records") or [])
+    atoms = list(scene.get("draw_atoms") or [])
+    if not records or not atoms:
+        return
+    home_by_source: dict[int, int] = {}
+    for index, atom in enumerate(atoms):
+        if atom.get("_is_boundary_replica") or atom.get("_is_bonded_image_replica"):
+            continue
+        if atom.get("_is_framework_context_replica"):
+            continue
+        shift = tuple(int(value) for value in atom.get("_image_shift") or (0, 0, 0))
+        if shift != (0, 0, 0):
+            continue
+        try:
+            source = int(atom.get("_source_index", index))
+        except (TypeError, ValueError):
+            continue
+        home_by_source.setdefault(source, index)
+    bonds = list(scene.get("bonds") or [])
+    existing = {
+        tuple(sorted((int(bond["i"]), int(bond["j"]))))
+        for bond in bonds
+    }
+    for record in records:
+        try:
+            left = int(record["left"])
+            right = int(record["right"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if left == right or left not in home_by_source or right not in home_by_source:
+            continue
+        pair = tuple(sorted((home_by_source[left], home_by_source[right])))
+        if pair in existing:
+            continue
+        start = np.asarray(atoms[pair[0]]["cart"], dtype=float)
+        end = np.asarray(atoms[pair[1]]["cart"], dtype=float)
+        role = record.get("role")
+        if role not in {"covalent", "coordination"}:
+            role = "covalent"
+        bonds.append(
+            {
+                "i": pair[0],
+                "j": pair[1],
+                "start": start.copy(),
+                "end": end.copy(),
+                "role": role,
+                "distance": record.get("distance", record.get("distance_A")),
+            }
+        )
+        existing.add(pair)
+    scene["bonds"] = bonds
+
+
 def _load_bundle(
     bundle,
     *,
@@ -129,6 +191,8 @@ def _load_bundle(
     )
     canonical_composition = _element_counts_from_raw(bundle.raw_atoms)
     is_cif = input_format == "cif"
+    if not is_cif:
+        _attach_unmanifested_canonical_bonds(scene)
     ir = _crystal_ir_from_scene(
         scene,
         source_path=path,

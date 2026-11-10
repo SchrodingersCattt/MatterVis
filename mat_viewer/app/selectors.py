@@ -413,6 +413,25 @@ def viewport_signature(
     )
 
 
+def scene_uirevision(scene_id: Any, name: Any, camera_revision: Any, layout_signature: str) -> str:
+    """Plotly UI token for one scene.
+
+    The scene id is part of the token. Two scenes that share a structure
+    name, camera revision, and viewport would otherwise keep one WebGL camera.
+    """
+
+    try:
+        revision = int(camera_revision or 0)
+    except (TypeError, ValueError):
+        revision = 0
+    return "{scene}__{name}__{rev}__{sig}".format(
+        scene=scene_id or "",
+        name="scene" if name is None else name,
+        rev=revision,
+        sig=layout_signature,
+    )
+
+
 # Names used by the migration notes and by downstream callers that prefer the
 # selector vocabulary over the older ``show_*`` helpers.
 select_display_options = display_option_set

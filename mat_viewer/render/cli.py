@@ -10,7 +10,11 @@ import sys
 from pathlib import Path
 from typing import Any, Dict
 
-from .cli_controls import add_isosurface_arguments, bond_thresholds_from_args
+from .cli_controls import (
+    add_isosurface_arguments,
+    add_polyhedron_disorder_argument,
+    bond_thresholds_from_args,
+)
 from .frame_selection import parse_frame_indices as _parse_frame_indices
 
 _DISPLAY_MODES = ("auto", "formula_unit", "unit_cell", "asymmetric_unit", "cluster")
@@ -211,7 +215,7 @@ def _build_render_parser(
         "--no-boundary-replicas",
         dest="include_boundary_replicas",
         action="store_false",
-        help="Omit nonessential boundary replicas in unit-cell views.",
+        help="Omit near-face fragment replicas; stick styles keep bond-context images.",
     )
     p.set_defaults(include_boundary_replicas=None)
     p.add_argument(
@@ -355,9 +359,10 @@ def _build_render_parser(
             "Add a polyhedron overlay from a JSON object. Repeat for multiple overlays. "
             "Required keys: center, ligand. Optional: id, level=atom|molecule, site, sites, "
             "center_kind, cutoff, hard_cutoff, fallback_max, color, opacity, "
-            "edge_opacity."
+            "edge_opacity, disorder_policy."
         ),
     )
+    add_polyhedron_disorder_argument(p)
     p.add_argument(
         "--polyhedron-site",
         type=int,
@@ -567,8 +572,8 @@ def _build_cli_topology_data(
         args.polyhedron,
         site_index=args.polyhedron_site,
         cutoff=args.polyhedron_cutoff,
+        disorder_policy=getattr(args, "polyhedron_disorder", None),
     )
-
 
 def _build_style_overrides(args: argparse.Namespace) -> Dict[str, Any]:
     """Collect CLI flags into a style-override dict."""

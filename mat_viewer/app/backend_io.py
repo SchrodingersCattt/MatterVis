@@ -10,6 +10,33 @@ from ..loader.cif_export import loaded_crystal_to_cif
 
 
 class _IOBackendMixin:
+    def _drop_placeholder(self) -> None:
+        # The placeholder is a bootstrap scene as well as a catalog entry.
+        # Removing only the bundle left a stale blank tab behind after the
+        # first upload (and made later tab labels appear to be lost).  Drop it
+        # whenever a real structure is present, while preserving it when the
+        # viewer is genuinely empty.
+        has_real_structure = any(
+            name != PLACEHOLDER_STRUCTURE for name in self.structure_names
+        )
+        if not has_real_structure:
+            return
+        self.structure_names = [
+            name for name in self.structure_names if name != PLACEHOLDER_STRUCTURE
+        ]
+        self.bundles.pop(PLACEHOLDER_STRUCTURE, None)
+        removed_placeholder = False
+        for scene_id, scene in list(self.scene_store.scenes.items()):
+            if scene.structure_name == PLACEHOLDER_STRUCTURE:
+                self.scene_store.remove(scene_id, save=False)
+                self._render_revisions.pop(str(scene_id), None)
+                removed_placeholder = True
+        if self.scene_store.active_id:
+            self.current_state = self.scene_state(self.scene_store.active_id)
+        self._request_scene_store_save()
+        if removed_placeholder:
+            self._publish_scene_catalog(focus=False)
+
     def upload_status(self, job_id: str) -> dict[str, Any]:
         """Return the public status for one asynchronous CIF upload.
 
@@ -34,6 +61,26 @@ class _IOBackendMixin:
                 if value:
                     payload[field] = str(value)
             return payload
+
+    def upload_scene_id(self, bundle: Any) -> str | None:
+        """Return the scene tab that owns ``bundle``.
+
+        Re-uploads and placeholder jobs both have a scene before the HTTP
+        response returns. The browser selects this id. Reading
+        ``active_scene_id()`` instead follows whichever client wrote the
+        process-wide active scene last.
+        """
+        noted = getattr(bundle, "_upload_scene_id", None)
+        if noted:
+            return str(noted)
+        name = getattr(bundle, "name", None)
+        if not name:
+            return None
+        with self._lock:
+            for scene_id, scene in self.scene_store.scenes.items():
+                if scene.structure_name == name:
+                    return str(scene_id)
+        return None
 
     def _set_upload_status_locked(
         self,
@@ -462,22 +509,28 @@ class _IOBackendMixin:
                             self._save_upload_manifest()
                         except OSError:
                             pass
-                        active_scene_id = self.scene_store.active_id
                     # ``get_state`` acquires ``self._lock``.  Never call it
                     # while holding that non-reentrant lock: doing so left
                     # every successful upload's placeholder in place and made
                     # the browser appear to load an empty scene forever.
+                    # Snapshot the uploaded scene, not whichever browser is
+                    # active when parsing finishes. Another page can select
+                    # its own tab during the CIF build; publishing that tab
+                    # here makes the uploader paint the other page's scene.
                     try:
-                        state = self.get_state(active_scene_id)
+                        upload_state = self.get_state(scene_id) if scene_id else None
                     except KeyError:
-                        # A user may close the pending tab while MolCrysKit
-                        # is still parsing.  The upload itself succeeded; use
-                        # whichever scene is active now instead of turning a
-                        # harmless tab close into a failed job.
-                        state = self.get_state()
+                        upload_state = None
                     with self._lock:
-                        self.pending_state = copy.deepcopy(state)
-                    render_state = state if state.get("structure") == bundle.name else None
+                        pending = self.pending_state
+                        pending_scene = (
+                            str(pending.get("scene_id") or "")
+                            if isinstance(pending, dict)
+                            else ""
+                        )
+                        if upload_state is not None and pending_scene in {"", str(scene_id)}:
+                            self.pending_state = copy.deepcopy(upload_state)
+                    render_state = upload_state
                     with self._lock:
                         # Report readiness only after the scene state and its
                         # active snapshot have been replaced.  Otherwise the
@@ -626,6 +679,11 @@ class _IOBackendMixin:
                     # store.  Their IDs may be identical to the new scenes.
                     self._figure_broadcasts.clear()
                 self.scene_store.save()
+                scenes_replaced = True
+            else:
+                scenes_replaced = False
+        else:
+            scenes_replaced = False
         for bundle in self.bundles.values():
             bundle.scene_cache.clear()
             cache = getattr(bundle, "_topology_state_cache", None)
@@ -642,6 +700,15 @@ class _IOBackendMixin:
             self._bump_version()
         else:
             self.patch_state(self.default_state(structure))
+        if scenes_replaced:
+            # The loaded preset is an explicit session replacement. Tell every
+            # open page which tab is active, and queue that scene's frame
+            # without waiting for a Dash callback.
+            self._publish_scene_catalog(focus=True)
+            if self.scene_store.active_id:
+                scheduler = getattr(self, "_schedule_committed_render", None)
+                if scheduler is not None:
+                    scheduler(self.get_state(), "full")
         return {"path": target, "state": self.get_state()}
 
     @staticmethod
@@ -743,6 +810,9 @@ class _IOBackendMixin:
             "build_sha": build_sha(),
             "asset_sha": asset_sha(),
         }
+        catalog = getattr(self, "scene_catalog", None)
+        if catalog is not None:
+            snapshot["scene_catalog"] = catalog(focus=False)
         if include_figure:
             latest = self.latest_figure_broadcast()
             if (

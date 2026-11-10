@@ -41,12 +41,25 @@ def register_state_routes(v2, backend) -> dict:
         else:
             pending = False
             terminal = False
-        return jsonify({"updates": events, "cursor": backend.latest_figure_seq(), "pending": pending, "terminal": terminal})
+        body = {
+            "updates": events,
+            "cursor": backend.latest_figure_seq(),
+            "pending": pending,
+            "terminal": terminal,
+        }
+        catalog = getattr(backend, "scene_catalog", None)
+        if catalog is not None:
+            body["scene_catalog"] = catalog(focus=False)
+        return jsonify(body)
 
     @v2.post("/state")
     def post_state():
         payload = request.get_json(force=True, silent=True) or {}
-        return jsonify(backend.patch_state(payload, scene_id=_scene_id_from_request()))
+        try:
+            state = backend.patch_state(payload, scene_id=_scene_id_from_request())
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(state)
 
     @v2.get("/camera")
     def get_camera():
@@ -97,6 +110,12 @@ def register_state_routes(v2, backend) -> dict:
         if getattr(bundle, "_upload_pending", False):
             meta["status"] = "pending"
             meta["job_id"] = getattr(bundle, "_upload_job_id", None)
+        # The scene this upload owns. Callers must select this id. The
+        # process-wide active scene can already belong to another browser
+        # by the time the response is read.
+        scene_id = backend.upload_scene_id(bundle)
+        if scene_id:
+            meta["scene_id"] = scene_id
         return jsonify(meta)
 
     @v2.get("/upload/<job_id>")
@@ -145,6 +164,7 @@ def register_state_routes(v2, backend) -> dict:
                 level=payload.get("level", "molecule"),
                 enforce_enclosure=payload.get("enforce_enclosure", True),
                 centroid_offset_frac=payload.get("centroid_offset_frac"),
+                disorder_policy=payload.get("disorder_policy"),
             )
         )
 

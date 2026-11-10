@@ -375,6 +375,7 @@ def render_batch_if_selected(
             polyhedron_specs=tuple(args.polyhedron),
             polyhedron_site=args.polyhedron_site,
             polyhedron_cutoff=args.polyhedron_cutoff,
+            polyhedron_disorder=getattr(args, "polyhedron_disorder", None),
             animation_time=_animation_time_from_args(args),
             frame_annotation=_frame_annotation_from_args(args),
             profile_path=args.profile_json,

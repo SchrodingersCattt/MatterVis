@@ -158,6 +158,92 @@ def _needs_complete_frame(before: Mapping[str, Any], after: Mapping[str, Any]) -
     return _polyhedron_specs_need_rebuild(before, after)
 
 
+def requires_complete_frame(
+    kind: UpdateKind | str,
+    state: Mapping[str, Any] | None = None,
+) -> bool:
+    """Return whether a committed change must enqueue a full figure.
+
+    Camera, overlay, and ordinary display patches stay on the local journal
+    path. Flat ORTEP rasterizes the camera into the image, so that one camera
+    change is a complete frame. Analysis and geometry edits are too.
+    """
+
+    value = kind.value if isinstance(kind, UpdateKind) else str(kind or "")
+    if value in {
+        UpdateKind.GEOMETRY.value,
+        UpdateKind.FULL.value,
+        UpdateKind.ANALYSIS.value,
+    }:
+        return True
+    state = state or {}
+    return (
+        value == UpdateKind.CAMERA.value
+        and state.get("material") == "flat"
+        and state.get("style") == "ortep"
+    )
+
+
+def committed_render_kind(
+    before: Mapping[str, Any] | None,
+    after: Mapping[str, Any] | None,
+) -> UpdateKind | None:
+    """Classify a real transition.
+
+    ``classify_change`` returns ``FULL`` when no earlier rule matches, which
+    includes a patch that did not change render state. Callers that enqueue
+    worker builds use this helper so a no-op does not schedule a frame.
+    """
+
+    if not isinstance(after, Mapping):
+        return None
+    if not isinstance(before, Mapping):
+        return UpdateKind.FULL
+    kind = classify_change(before, after)
+    if kind != UpdateKind.FULL:
+        return kind
+    if str(before.get("scene_id") or "") != str(after.get("scene_id") or ""):
+        return UpdateKind.FULL
+    if before.get("scene_label") != after.get("scene_label"):
+        return UpdateKind.FULL
+    if geometry_state_key(before) != geometry_state_key(after):
+        return UpdateKind.GEOMETRY
+    if before.get("bfdh_morphology") != after.get("bfdh_morphology"):
+        return UpdateKind.ANALYSIS
+    if display_state_key(before) != display_state_key(after):
+        return UpdateKind.DISPLAY
+    if before.get("camera") != after.get("camera") or before.get("projection") != after.get("projection"):
+        return UpdateKind.CAMERA
+    return None
+
+
+def mounted_scene_id(figure: Any) -> str:
+    """Return the scene id stamped on a caller's mounted Plotly figure.
+
+    Dash passes that figure as callback state for the requesting browser.
+    A process-wide snapshot of the same scene does not say whether this
+    caller is still showing a different one.
+    """
+
+    if not isinstance(figure, Mapping):
+        return ""
+    layout = figure.get("layout")
+    if not isinstance(layout, Mapping):
+        return ""
+    meta = layout.get("meta")
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except (TypeError, ValueError):
+            return ""
+    if not isinstance(meta, Mapping):
+        return ""
+    render = meta.get("mattervis_render")
+    if not isinstance(render, Mapping):
+        return ""
+    return str(render.get("scene_id") or "")
+
+
 def classify_change(
     before: Mapping[str, Any] | None,
     after: Mapping[str, Any] | None,
