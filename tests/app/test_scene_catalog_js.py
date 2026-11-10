@@ -113,6 +113,60 @@ assert.equal(calls.filter((call) => call.id === 'scene-tabs').length, 1, 'a late
     assert result.returncode == 0, result.stderr
 
 
+def test_string_tab_label_rename_still_reconciles():
+    """Dash before 4.0 puts the scene name in the tab text, not scene-tab-text."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    program = r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const assert = require('node:assert/strict');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+const stop = source.indexOf('  // ── Right-click menu');
+const calls = [];
+const dom = {tabs: [{id: 'scene-tab-a', textContent: 'Alpha', querySelector() { return null; }}]};
+const tabs = {
+  querySelector(sel) {
+    if (String(sel).indexOf('aria-selected') >= 0) return {id: 'scene-tab-a'};
+    return null;
+  },
+  querySelectorAll() { return dom.tabs; },
+};
+const sandbox = {
+  console, Date, JSON, Number, String, Object, Array, Promise,
+  setTimeout() {}, clearTimeout() {}, requestAnimationFrame() {},
+  MutationObserver: function () { this.observe = function () {}; },
+  window: {
+    location: {protocol: 'http:', host: 'localhost'},
+    Plotly: null, WebSocket: null,
+    dash_clientside: {set_props(id, props) { calls.push({id, data: props.data}); return true; }},
+  },
+  document: {
+    getElementById(id) { return id === 'scene-tabs' ? tabs : null; },
+    querySelectorAll() { return []; },
+    addEventListener() {},
+  },
+};
+vm.createContext(sandbox);
+vm.runInContext(source.slice(0, stop) + '\n})();', sandbox);
+const reconcile = sandbox.window.MatterVisReconcileSceneCatalog;
+reconcile({scene_catalog_seq: 1, scenes: [{id: 'a', label: 'Alpha'}], active_id: 'a', focus: false});
+assert.equal(calls.length, 0);
+reconcile({scene_catalog_seq: 2, scenes: [{id: 'a', label: 'Renamed'}], active_id: 'a', focus: false});
+assert.equal(calls.length, 1);
+assert.equal(calls[0].data.source, 'scene_catalog');
+"""
+    result = subprocess.run(
+        [node, "-e", program, str(MATTERVIS_JS)],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def test_http_fallback_and_snapshot_feed_the_same_reconciler():
     source = MATTERVIS_JS.read_text(encoding="utf-8")
     assert "if (body && body.scene_catalog) reconcileSceneCatalog(body.scene_catalog);" in source

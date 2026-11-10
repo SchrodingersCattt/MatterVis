@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import dash_tabs
 from .shared import dcc, html
 from .display_controls import display_option_hint, display_option_items, visible_display_options
 from .camera_helpers import _structure_summary
@@ -104,15 +105,20 @@ def build_left_panel(
                         parent_className="scene-tabs",
                         **_SCENE_TAB_EXTRAS,
                     ),
-                    # Kept as an empty compatibility target for older Dash
-                    # callbacks; close controls now live inside each tab label.
+                    # Empty when the close control sits inside the tab label.
+                    # Older Dash keeps the same control in this row.
                     html.Div(
                         id="scene-tab-close-row",
-                        children=[],
+                        children=backend.scene_tab_close_row(),
                         className="scene-tab-close-row",
                     ),
                 ],
-                className="scene-tabs-card",
+                className="scene-tabs-card"
+                + (
+                    ""
+                    if dash_tabs.tab_label_accepts_components()
+                    else " scene-tabs-card--string-labels"
+                ),
             ),
             html.Div(
                 [

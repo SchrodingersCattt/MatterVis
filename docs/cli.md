@@ -516,7 +516,17 @@ least four non-coplanar ligand points, `mat-vis render` exits with
 
 ## `serve` — Browser viewer
 
-Requires `python -m pip install "matter-vis[web]"`; this extra includes Plotly.
+Requires `python -m pip install "matter-vis[web]"`; this extra includes Plotly
+and `dash>=2.18.2`.
+
+Dash 2.18.2 through 3.x accept only a string for `dcc.Tab.label`. Those
+releases show each scene name as that string and place the per-tab close
+control in `scene-tab-close-row`. Dash 4.0 and later accept a component
+label, and the close control sits inside the tab. Both presentations
+select a scene through `scene-tabs` and close it with the `tab-close`
+button. A `dash` extra with no lower bound lets an existing Dash 2.18.2
+install satisfy the dependency, build the component label, and replace
+the viewer with the layout error screen.
 
 ```
 mat-vis serve [options]

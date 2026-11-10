@@ -47,7 +47,11 @@ mat-vis = "mat_viewer.cli:main"
 [project.optional-dependencies]
 plotly = ["plotly"]
 plotly-export = ["plotly", "kaleido"]
-web = ["plotly", "dash", "flask-sock", "flask-compress"]
+# 2.18.2 is the oldest Dash release the viewer callback graph is written
+# against. Component tab labels start in Dash 4.0; earlier releases in
+# this range receive a string label. Do not raise the floor to Dash 4
+# solely to keep a component in dcc.Tab.label.
+web = ["plotly", "dash>=2.18.2", "flask-sock", "flask-compress"]
 tui = ["textual"]
 cube = ["scikit-image"]
 animation = ["imageio", "imageio-ffmpeg"]
@@ -55,7 +59,7 @@ gpu = ["wgpu>=0.20"]
 all = [
     "plotly",
     "kaleido",
-    "dash",
+    "dash>=2.18.2",
     "flask-sock",
     "flask-compress",
     "textual",

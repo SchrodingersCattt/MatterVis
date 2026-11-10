@@ -1215,7 +1215,15 @@
       if (tab.id.indexOf("scene-tab-close-") === 0 || tab.id.indexOf("scene-tab-label-") === 0) continue;
       if (tab.id.indexOf("scene-tab-") !== 0) continue;
       var text = typeof tab.querySelector === "function" ? tab.querySelector(".scene-tab-text") : null;
-      var label = text ? String(text.textContent || "").trim() : null;
+      var label = null;
+      if (text) {
+        label = String(text.textContent || "").trim();
+      } else if (typeof tab.textContent === "string") {
+        // A string dcc.Tab label has no nested scene-tab-text node. The
+        // tab's own text is the scene name, so a rename still differs.
+        var raw = String(tab.textContent).replace(/\s+/g, " ").trim();
+        label = raw || null;
+      }
       entries.push({id: tab.id.slice("scene-tab-".length), label: label});
     }
     return entries;
@@ -2192,8 +2200,10 @@
   function ensureSceneTabTooltips() {
     document.querySelectorAll("#scene-tabs [id^='scene-tab-']").forEach(function (tab) {
       if (!tab || tab.id.indexOf("scene-tab-close-") === 0 || tab.id === "scene-tabs") return;
-      const text = tab.querySelector(".scene-tab-text");
-      const fullName = text && (text.getAttribute("title") || text.textContent || "").trim();
+      const text = typeof tab.querySelector === "function" ? tab.querySelector(".scene-tab-text") : null;
+      const fullName = text
+        ? String(text.getAttribute("title") || text.textContent || "").trim()
+        : String(tab.textContent || "").replace(/\s+/g, " ").trim();
       if (!fullName) return;
       // Dash may render dcc.Tab's React label inside a wrapper that does not
       // inherit the label's title. Put the native tooltip on the actual tab

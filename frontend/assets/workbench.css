@@ -255,6 +255,38 @@
   display: none;
 }
 
+/* Dash before 4.0 rejects a component in dcc.Tab.label. The strip above
+   keeps a string label, and the same per-tab close control is shown here. */
+.scene-tabs-card--string-labels .scene-tab-close-row {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 6px 8px 8px;
+}
+
+.scene-tabs-card--string-labels .scene-tab-label {
+  align-items: center;
+  background: var(--mv-panel);
+  border: 1px solid var(--mv-line);
+  border-radius: 6px;
+  color: var(--mv-muted);
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  max-width: var(--mv-scene-tab-max-width);
+  min-height: 28px;
+  min-width: 0;
+  padding: 4px 6px 4px 8px;
+}
+
+.scene-tabs-card--string-labels .scene-tab-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .mv-style-row {
   align-items: flex-start;
   display: flex;

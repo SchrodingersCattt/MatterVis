@@ -133,7 +133,7 @@ mat-vis render structure.cif -o figure.pdf \
 mat-vis render structure.cif -o si_figure.html --backend plotly \
   --show-hydrogen --show-labels
 
-# Launch the interactive browser viewer
+# Launch the interactive browser viewer (Dash 2.18.2 or newer)
 python -m pip install "matter-vis[web]"
 mat-vis serve --cif structure.cif
 ```
