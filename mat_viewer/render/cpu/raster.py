@@ -20,7 +20,8 @@ from ..contracts import (
     TriangleMeshPrimitive,
     ViewportPlan,
 )
-from .raster_math import _clip_polygon_attributes, _dash_visible, _edge, _edge_array
+from .raster_lines import rasterize_lines as _rasterize_lines
+from .raster_math import _clip_polygon_attributes, _edge, _edge_array
 
 _DEPTH_EPSILON = 1.0e-9
 
@@ -617,6 +618,10 @@ def _rasterize_mesh(
     vertex_inside = (vertex_depths >= float(transform.spec.near) - 1e-12) & (
         vertex_depths <= float(transform.spec.far) + 1e-12
     )
+    if primitive.vertex_colors is None:
+        shaded_base = np.asarray(primitive.rgba[:3], dtype=float)
+    else:
+        shaded_base = np.asarray(primitive.vertex_colors, dtype=float)[:, :3]
     vertex_rgb_all = None
     if primitive.vertex_normals is not None:
         camera_vertex_normals = primitive.vertex_normals @ rotation.T
@@ -624,11 +629,7 @@ def _rasterize_mesh(
             np.linalg.norm(camera_vertex_normals, axis=1, keepdims=True), 1e-12
         )
         vertex_illumination = ambient + diffuse * np.abs(camera_vertex_normals @ light)
-        if primitive.vertex_colors is None:
-            base_rgb = np.asarray(primitive.rgba[:3])[None, :]
-        else:
-            base_rgb = np.asarray(primitive.vertex_colors, dtype=float)[:, :3]
-        vertex_rgb_all = base_rgb * vertex_illumination[:, None]
+        vertex_rgb_all = shaded_base * vertex_illumination[:, None]
     rgba = (*primitive.rgba[:3], float(primitive.rgba[3]))
     for triangle_index, indices in enumerate(primitive.triangles):
         if normal_lengths[triangle_index] < 1e-14:
@@ -640,16 +641,19 @@ def _rasterize_mesh(
             continue
         if vertex_rgb_all is None:
             lambert = abs(float(camera_normals[triangle_index] @ light))
-            if primitive.metadata.get("kind") == "polyhedron":
+            if (
+                primitive.vertex_colors is None
+                and primitive.metadata.get("kind") == "polyhedron"
+            ):
                 face_rgb = _polyhedron_face_rgb(primitive.rgba[:3], lambert)
-            else:
+                triangle_rgb = np.tile(face_rgb, (3, 1))
+            elif primitive.vertex_colors is None:
                 face_rgb = np.asarray(primitive.rgba[:3]) * (
                     ambient + diffuse * lambert
                 )
-            triangle_rgb = np.tile(
-                face_rgb,
-                (3, 1),
-            )
+                triangle_rgb = np.tile(face_rgb, (3, 1))
+            else:
+                triangle_rgb = shaded_base[indices] * (ambient + diffuse * lambert)
         else:
             triangle_rgb = vertex_rgb_all[indices]
         stable_order = primitive_order * 1_000_000 + triangle_index * 16
@@ -794,80 +798,6 @@ def _rasterize_triangle(
                     (float(rgb[0]), float(rgb[1]), float(rgb[2]), rgba[3]),
                 ),
             )
-
-
-def _rasterize_lines(
-    primitive: LinePrimitive,
-    transform: CameraTransform,
-    color: np.ndarray,
-    z_buffer: np.ndarray,
-    order_buffer: np.ndarray,
-    fragments: dict[int, list[_Fragment]],
-    primitive_order: int,
-    *,
-    width_scale: int,
-) -> None:
-    height, width = z_buffer.shape
-    half_width = max(0.5, primitive.width_px * width_scale * 0.5)
-    for segment_index, segment in enumerate(primitive.segments):
-        clipped = transform.clip_segment_world(segment[0], segment[1])
-        if clipped is None:
-            continue
-        camera_segment = np.asarray(clipped)
-        projected = transform.project_camera(camera_segment)
-        first, second = projected.xy
-        vector = second - first
-        length_squared = float(vector @ vector)
-        screen_length = float(np.sqrt(length_squared))
-        if length_squared < 1e-16:
-            continue
-        minimum_x = max(0, int(np.floor(min(first[0], second[0]) - half_width)))
-        maximum_x = min(width - 1, int(np.ceil(max(first[0], second[0]) + half_width)))
-        minimum_y = max(0, int(np.floor(min(first[1], second[1]) - half_width)))
-        maximum_y = min(height - 1, int(np.ceil(max(first[1], second[1]) + half_width)))
-        stable_order = primitive_order * 1_000_000 + segment_index
-        for y_value in range(minimum_y, maximum_y + 1):
-            for x_value in range(minimum_x, maximum_x + 1):
-                point = np.asarray([x_value + 0.5, y_value + 0.5])
-                parameter = float(
-                    np.clip((point - first) @ vector / length_squared, 0.0, 1.0)
-                )
-                if primitive.dash and not _dash_visible(
-                    parameter * screen_length, primitive.dash
-                ):
-                    continue
-                closest = first + parameter * vector
-                if float(np.linalg.norm(point - closest)) > half_width:
-                    continue
-                if transform.spec.projection == "perspective":
-                    depth = 1.0 / (
-                        (1.0 - parameter) / projected.depth[0]
-                        + parameter / projected.depth[1]
-                    )
-                else:
-                    depth = float(
-                        (1.0 - parameter) * projected.depth[0]
-                        + parameter * projected.depth[1]
-                    )
-                if not primitive.depth_test:
-                    depth = -np.inf
-                if primitive.rgba[3] >= 1.0 - 1e-12:
-                    existing = z_buffer[y_value, x_value]
-                    if depth < existing - _DEPTH_EPSILON or (
-                        (depth == existing or abs(depth - existing) <= _DEPTH_EPSILON)
-                        and stable_order < order_buffer[y_value, x_value]
-                    ):
-                        z_buffer[y_value, x_value] = depth
-                        order_buffer[y_value, x_value] = stable_order
-                        color[y_value, x_value] = primitive.rgba
-                else:
-                    _append_fragment(
-                        fragments,
-                        y_value * width + x_value,
-                        _Fragment(
-                            depth, stable_order, primitive.semantic_id, primitive.rgba
-                        ),
-                    )
 
 
 def _append_fragment(

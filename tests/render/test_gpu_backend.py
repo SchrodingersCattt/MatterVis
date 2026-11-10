@@ -65,6 +65,20 @@ def test_lower_plan_preserves_camera_and_semantic_ids() -> None:
             dash=(2.0, 1.0),
         ),
         TextPrimitive("label", (0, 0, 0), "C"),
+        TriangleMeshPrimitive(
+            semantic_id="colored-triangle",
+            vertices=np.asarray([[-1, -1, 0], [1, -1, 0], [0, 1, 0]], dtype=float),
+            triangles=np.asarray([[0, 1, 2]], dtype=int),
+            rgba=(0.2, 0.4, 0.8, 1.0),
+            vertex_colors=np.asarray([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]),
+        ),
+        LinePrimitive(
+            "colored-line",
+            np.asarray([[[0, 0, 0], [1, 0, 0]]], dtype=float),
+            rgba=(0.1, 0.1, 0.1, 1.0),
+            width_px=1.0,
+            endpoint_colors=np.asarray([[[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]]),
+        ),
     ],
 )
 def test_lower_plan_rejects_features_without_gpu_parity(primitive) -> None:

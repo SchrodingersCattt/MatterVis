@@ -10,8 +10,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict
 
+from .cli_controls import add_isosurface_arguments, bond_thresholds_from_args
 from .frame_selection import parse_frame_indices as _parse_frame_indices
-from .cli_controls import bond_thresholds_from_args
 
 _DISPLAY_MODES = ("auto", "formula_unit", "unit_cell", "asymmetric_unit", "cluster")
 _STYLES = ("ball_stick", "ball", "space_filling", "stick", "ortep", "wireframe")
@@ -277,53 +277,7 @@ def _build_render_parser(
             "bond radius when omitted."
         ),
     )
-    p.add_argument(
-        "--isovalue",
-        type=float,
-        default=None,
-        help=(
-            "Explicit positive cube isosurface magnitude. Reuse the same value "
-            "for quantitatively comparable scalar-field panels."
-        ),
-    )
-    p.add_argument(
-        "--isosurface-opacity",
-        type=float,
-        default=None,
-        metavar="VALUE",
-        help="Cube isosurface opacity in (0, 1] (default: style value).",
-    )
-    p.add_argument(
-        "--isosurface-mode",
-        choices=("surface", "wireframe"),
-        default="surface",
-        help="Cube isosurface display mode (default: surface).",
-    )
-    p.add_argument(
-        "--isosurface-wireframe-width",
-        type=float,
-        default=1.0,
-        help="Cube isosurface wireframe line width in pixels (default: 1.0).",
-    )
-    p.add_argument(
-        "--isosurface-wireframe-opacity",
-        type=float,
-        default=1.0,
-        help="Cube isosurface wireframe opacity in [0,1] (default: 1.0).",
-    )
-    p.add_argument(
-        "--periodic-isosurface",
-        dest="periodic_isosurface",
-        action="store_true",
-        default=None,
-        help="Close cube scalar values across opposite unit-cell faces.",
-    )
-    p.add_argument(
-        "--no-periodic-isosurface",
-        dest="periodic_isosurface",
-        action="store_false",
-        help="Do not close cube scalar values across unit-cell faces.",
-    )
+    add_isosurface_arguments(p)
     p.add_argument(
         "--camera-distance",
         type=float,
@@ -371,48 +325,6 @@ def _build_render_parser(
         choices=_ORTEP_MODES,
         default="ortep_axes",
         help="ORTEP rendering variant (default: ortep_axes).",
-    )
-
-    # Colors, stride, ambient, diffuse extend the isosurface controls
-    # added alongside --isovalue and --isosurface-opacity above.
-    p.add_argument("--isosurface-positive-color", default="#D55E00", help="Positive cube isosurface colour.")
-    p.add_argument("--isosurface-negative-color", default="#0072B2", help="Negative cube isosurface colour.")
-    p.add_argument("--isosurface-stride", type=int, default=2, help="Cube grid stride for isosurface extraction.")
-    p.add_argument(
-        "--isosurface-ambient",
-        type=float,
-        default=0.68,
-        help="Cube isosurface ambient-light coefficient (default: 0.68).",
-    )
-    p.add_argument(
-        "--isosurface-diffuse",
-        type=float,
-        default=0.32,
-        help="Cube isosurface diffuse-light coefficient (default: 0.32).",
-    )
-    p.add_argument(
-        "--isosurface-color-cube",
-        default=None,
-        help="Second cube whose values are sampled onto the isosurface.",
-    )
-    p.add_argument(
-        "--isosurface-color-range",
-        nargs=2,
-        type=float,
-        default=None,
-        metavar=("MIN", "MAX"),
-        help="Range used to map the color cube onto the colormap.",
-    )
-    p.add_argument(
-        "--isosurface-color-center",
-        type=float,
-        default=None,
-        help="Value placed at the middle of the isosurface colormap.",
-    )
-    p.add_argument(
-        "--isosurface-colormap",
-        default="bgr",
-        help="Colormap for the color cube. 'bgr' is blue-green-red; other names use Matplotlib.",
     )
 
     # Config escape-hatch

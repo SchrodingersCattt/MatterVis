@@ -382,6 +382,7 @@ class LinePrimitive:
     dash: tuple[float, ...] = ()
     depth_test: bool = True
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    endpoint_colors: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         if not self.semantic_id:
@@ -394,10 +395,20 @@ class LinePrimitive:
         dash = tuple(float(item) for item in self.dash)
         if any(not np.isfinite(item) or item <= 0.0 for item in dash):
             raise ValueError("dash entries must be positive")
+        endpoint_colors = self.endpoint_colors
+        if endpoint_colors is not None:
+            endpoint_colors = _readonly_array(
+                endpoint_colors, shape_tail=(2, 3), name="endpoint_colors"
+            )
+            if endpoint_colors.shape != (len(segments), 2, 3):
+                raise ValueError("endpoint_colors must have shape (N, 2, 3)")
+            if not np.all(np.isfinite(endpoint_colors)):
+                raise ValueError("endpoint_colors must be finite")
         object.__setattr__(self, "segments", segments)
         object.__setattr__(self, "rgba", _rgba(self.rgba))
         object.__setattr__(self, "dash", dash)
         object.__setattr__(self, "metadata", _metadata(self.metadata))
+        object.__setattr__(self, "endpoint_colors", endpoint_colors)
 
 
 @dataclass(frozen=True, slots=True)
@@ -546,10 +557,22 @@ class RenderPlan:
                         digest.update(
                             primitive.vertex_normals.astype("<f8", copy=False).tobytes()
                         )
+                    if primitive.vertex_colors is not None:
+                        digest.update(b"vertex_colors")
+                        digest.update(
+                            primitive.vertex_colors.astype("<f8", copy=False).tobytes()
+                        )
                 elif isinstance(primitive, LinePrimitive):
                     digest.update(
                         primitive.segments.astype("<f8", copy=False).tobytes()
                     )
+                    if primitive.endpoint_colors is not None:
+                        digest.update(b"endpoint_colors")
+                        digest.update(
+                            primitive.endpoint_colors.astype(
+                                "<f8", copy=False
+                            ).tobytes()
+                        )
         return digest.hexdigest()
 
 

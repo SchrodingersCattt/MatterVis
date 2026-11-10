@@ -23,6 +23,7 @@ from ..contracts import (
 from ..compass_overlay import draw_matplotlib_compass
 from ..property_colorbar import draw_matplotlib_colorbar
 from .bsp import BSPPolygon, build_bsp, traverse_back_to_front
+from .raster_lines import _clipped_endpoint_rgb
 from .visibility import anchor_occluded, projected_polygon_depth
 
 _EPSILON = 1.0e-8
@@ -264,10 +265,14 @@ def _mesh_polygons(
                 if averaged_length > 1e-14:
                     shading_normal = rotation @ (averaged / averaged_length)
             illumination = ambient + diffuse * abs(float(shading_normal @ light))
+            if primitive.vertex_colors is None:
+                base_rgb = primitive.rgba[:3]
+            else:
+                base_rgb = np.mean(primitive.vertex_colors[indices], axis=0)
             rgba = (
-                float(primitive.rgba[0]) * illumination,
-                float(primitive.rgba[1]) * illumination,
-                float(primitive.rgba[2]) * illumination,
+                float(base_rgb[0]) * illumination,
+                float(base_rgb[1]) * illumination,
+                float(base_rgb[2]) * illumination,
                 float(primitive.rgba[3]),
             )
             clipped = transform.clip_polygon_camera(camera_vertices[indices])
@@ -328,6 +333,14 @@ def _line_pieces(
             projection = transform.project_camera(camera)
             if not np.all(np.isfinite(projection.xy)):
                 continue
+            endpoint_rgb = None
+            if primitive.endpoint_colors is not None:
+                endpoint_rgb = _clipped_endpoint_rgb(
+                    transform,
+                    segment,
+                    clipped,
+                    primitive.endpoint_colors[segment_index],
+                )
             raw.append(
                 {
                     "primitive": primitive,
@@ -335,6 +348,7 @@ def _line_pieces(
                     "depths": projection.depth,
                     "breaks": {0.0, 1.0},
                     "order": primitive_order * 1_000_000 + segment_index,
+                    "rgb": endpoint_rgb,
                 }
             )
 
@@ -399,12 +413,25 @@ def _line_pieces(
                 insertion = len(polygons)
             start = _interpolate_xy(segment["xy"], start_t)
             end = _interpolate_xy(segment["xy"], end_t)
+            if segment["rgb"] is None:
+                piece_rgba = primitive.rgba
+            else:
+                rgb = (
+                    (1.0 - midpoint_t) * segment["rgb"][0]
+                    + midpoint_t * segment["rgb"][1]
+                )
+                piece_rgba = (
+                    float(rgb[0]),
+                    float(rgb[1]),
+                    float(rgb[2]),
+                    float(primitive.rgba[3]),
+                )
             result.append(
                 VectorLinePiece(
                     semantic_id=primitive.semantic_id,
                     start=(float(start[0]), float(start[1])),
                     end=(float(end[0]), float(end[1])),
-                    rgba=primitive.rgba,
+                    rgba=piece_rgba,
                     width_px=primitive.width_px,
                     dash=primitive.dash,
                     insertion_index=insertion,

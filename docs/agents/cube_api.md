@@ -66,15 +66,61 @@ the canonical loader before adding the isosurface overlay.
   the positive/negative value range or fails when no surface can exist.
 - `cube_isosurface_meshes(cube, ...)` in `mat_viewer.cube.cpu` lazily uses
   scikit-image and returns backend-neutral vertices, triangles, normals,
-  colour, opacity, and ambient/diffuse material coefficients.
+  colour, opacity, and ambient/diffuse material coefficients. Pass
+  `color_cube` to attach per-vertex RGB sampled from a second `CubeData`.
 - `ensure_cube_isosurfaces(structure)` attaches those meshes to the canonical
-  scene consumed by CPU or Plotly renderers.
+  scene consumed by CPU or Plotly renderers. Prepared meshes are kept only
+  while the source grid, isovalue, stride, material, and color-cube settings
+  are unchanged.
 
 The static CPU renderer accepts `--isosurface-ambient` and
 `--isosurface-diffuse` coefficients. Their sum must not exceed one. Defaults
 (`0.68` and `0.32`) preserve the standard material; lower ambient and higher
 diffuse values increase directional contrast without introducing white
 specular highlights.
+
+## Isosurface color
+
+`--isosurface-color-cube` samples a second cube onto the isosurface in
+physical coordinates. The position of a mesh vertex is the source cube's
+origin plus that vertex in the scene frame. The color value is the
+trilinear sample of the full-resolution color grid at the index implied by
+the color cube's own origin and voxel axes. Equal array shapes are not
+enough: a different origin or voxel vector selects a different scalar, and a
+vertex that falls outside the color grid is an error.
+
+`--isosurface-stride` coarsens only the marching-cubes mesh. It does not
+downsample the color cube. `--isosurface-colormap bgr` maps the low end to
+blue, the middle to green, and the high end to red. Other names use
+Matplotlib. `--isosurface-color-range MIN MAX` sets that mapping. Omit it to
+use the finite minimum and maximum of the color cube. A finite constant cube
+with no range uses the colormap midpoint, which is green for `bgr`. A
+supplied range maps a constant value through that range.
+`--isosurface-color-center` places one value, often zero, at the middle of
+an asymmetric range.
+
+A sample that interpolates a nonfinite voxel is an error. Nonfinite voxels
+that the surface does not touch do not, by themselves, change the finite
+samples. Omitting the color cube keeps the positive and negative phase
+colors.
+
+| Mode | Backend | Color |
+|---|---|---|
+| `surface` | CPU PNG | Per-vertex color. Smooth shading uses vertex normals; flat shading keeps the same colors with one illumination per face. |
+| `surface` | CPU SVG/PDF | Per-face average of the vertex colors. Vector fills are one color per triangle. |
+| `surface` | Plotly | `Mesh3d` vertex colors. |
+| `wireframe` | CPU PNG/SVG/PDF | Edge colors interpolated from the sampled endpoints. |
+| `wireframe` | Plotly | Error. Use the CPU backend or `surface`. |
+| either | matplotlib or GPU | Error. Those backends do not accept per-vertex or per-endpoint colors. |
+
+```console
+mat-vis render density.cube -o density.png --backend cpu \
+  --isovalue 0.005 \
+  --isosurface-color-cube potential.cube \
+  --isosurface-color-range -0.04 0.02 \
+  --isosurface-color-center 0 \
+  --isosurface-colormap bgr
+```
 
 ## Isosurface wireframe
 
@@ -92,17 +138,12 @@ mat-vis render density.cube -o density.svg --backend cpu \
 ```
 
 The wireframe inherits `--isosurface-positive-color` and
-`--isosurface-negative-color`. `--isosurface-stride` controls the marching-cubes
-mesh density.
-
-Pass `--isosurface-color-cube` to sample a second cube, with the same grid
-shape, onto those vertices. `--isosurface-colormap bgr` maps the low end to
-blue, the middle to green, and the high end to red. `--isosurface-color-range`
-sets that mapping; omit it to use the finite min and max of the color cube.
-`--isosurface-color-center` places one value, often zero, at the middle of
-the colormap when the numeric range is asymmetric. Because this is a pure wireframe, rear edges are intentionally
-visible; hidden-line removal is not promised. Dense meshes can produce large
-SVG/PDF files.
+`--isosurface-negative-color` when no color cube is given.
+`--isosurface-stride` controls the marching-cubes mesh density. Sampled
+endpoint colors are described in [Isosurface color](#isosurface-color).
+Because this is a pure wireframe, rear edges are intentionally visible;
+hidden-line removal is not promised. Dense meshes can produce large SVG/PDF
+files.
 
 Standalone `bond_traces`, `build_orbital_figure`, and
 `build_orbital_panel_figure` are intentionally not exported. They inferred

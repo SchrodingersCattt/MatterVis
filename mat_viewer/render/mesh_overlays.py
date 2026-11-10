@@ -14,6 +14,7 @@ from .geometry import (
     mesh_primitive,
     polyhedron_edges_primitive,
     polyhedron_primitive,
+    triangle_mesh_edge_index_pairs,
     triangle_mesh_edge_segments,
 )
 
@@ -174,40 +175,38 @@ def isosurface_primitives(
         if len(vertex_array) == 0 or len(triangle_array) == 0:
             warnings.append(f"isosurface {name} is empty and was skipped")
             continue
-        results.append(
-            (
+        if render_spec is not None and render_spec.isosurface_mode == "wireframe":
+            if vertex_colors is None:
+                segments = triangle_mesh_edge_segments(vertex_array, triangle_array)
+                endpoint_colors = None
+            else:
+                pairs = triangle_mesh_edge_index_pairs(vertex_array, triangle_array)
+                segments = vertex_array[pairs] if len(pairs) else np.empty((0, 2, 3))
+                endpoint_colors = np.asarray(vertex_colors, dtype=float)[pairs]
+            results.append(
                 LinePrimitive(
                     semantic_id=f"isosurface:{index}:{name}:wireframe",
-                    segments=triangle_mesh_edge_segments(
-                        vertex_array, triangle_array
-                    ),
+                    segments=segments,
                     rgba=color_to_rgba(
                         color,
-                        alpha=(
-                            render_spec.isosurface_wireframe_opacity
-                            if render_spec is not None
-                            else 1.0
-                        ),
+                        alpha=render_spec.isosurface_wireframe_opacity,
                     ),
-                    width_px=(
-                        render_spec.isosurface_wireframe_width
-                        if render_spec is not None
-                        else 1.0
-                    ),
+                    width_px=render_spec.isosurface_wireframe_width,
                     metadata={**metadata, "mode": "wireframe"},
+                    endpoint_colors=endpoint_colors,
                 )
-                if render_spec is not None
-                and render_spec.isosurface_mode == "wireframe"
-                else mesh_primitive(
-                    f"isosurface:{index}:{name}",
-                    vertex_array,
-                    triangle_array,
-                    color,
-                    normals=normals,
-                    alpha=opacity,
-                    metadata=metadata,
-                    vertex_colors=vertex_colors,
-                )
+            )
+            continue
+        results.append(
+            mesh_primitive(
+                f"isosurface:{index}:{name}",
+                vertex_array,
+                triangle_array,
+                color,
+                normals=normals,
+                alpha=opacity,
+                metadata=metadata,
+                vertex_colors=vertex_colors,
             )
         )
     return results, warnings

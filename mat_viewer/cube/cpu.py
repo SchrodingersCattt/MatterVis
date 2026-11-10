@@ -10,82 +10,8 @@ from typing import Any
 
 import numpy as np
 
+from .color_field import isosurface_preparation_token, vertex_colors_for_surface
 from .io import CubeData, default_isovalue
-
-
-def _sample_trilinear(grid: np.ndarray, points: np.ndarray) -> np.ndarray:
-    """Sample ``grid`` at floating index coordinates."""
-    if points.size == 0:
-        return np.empty(0, dtype=float)
-    maximum = np.asarray(grid.shape, dtype=float) - 1.0
-    coords = np.clip(np.asarray(points, dtype=float), 0.0, maximum)
-    base = np.floor(coords).astype(int)
-    upper = np.minimum(base + 1, np.asarray(grid.shape, dtype=int) - 1)
-    fraction = coords - base
-    i0, j0, k0 = base.T
-    i1, j1, k1 = upper.T
-    di, dj, dk = fraction.T
-    c000 = grid[i0, j0, k0]
-    c100 = grid[i1, j0, k0]
-    c010 = grid[i0, j1, k0]
-    c110 = grid[i1, j1, k0]
-    c001 = grid[i0, j0, k1]
-    c101 = grid[i1, j0, k1]
-    c011 = grid[i0, j1, k1]
-    c111 = grid[i1, j1, k1]
-    c00 = c000 * (1.0 - di) + c100 * di
-    c01 = c001 * (1.0 - di) + c101 * di
-    c10 = c010 * (1.0 - di) + c110 * di
-    c11 = c011 * (1.0 - di) + c111 * di
-    c0 = c00 * (1.0 - dj) + c10 * dj
-    c1 = c01 * (1.0 - dj) + c11 * dj
-    return c0 * (1.0 - dk) + c1 * dk
-
-
-def _colormap_rgb(
-    name: str,
-    values: np.ndarray,
-    vmin: float,
-    vmax: float,
-    center: float | None = None,
-) -> np.ndarray:
-    """Map scalars into RGB. ``bgr`` runs blue, green, red.
-
-    ``center`` is placed at the middle of the colormap. Use 0 for a signed
-    field whose neutral value should stay green when the numeric range is
-    asymmetric.
-    """
-    if not np.isfinite(vmin) or not np.isfinite(vmax) or vmax <= vmin:
-        raise ValueError("isosurface color range must be finite and increasing")
-    array = np.asarray(values, dtype=float)
-    if center is None:
-        normalized = (array - vmin) / (vmax - vmin)
-    else:
-        if not np.isfinite(center) or not vmin < center < vmax:
-            raise ValueError("isosurface color center must lie strictly inside the range")
-        normalized = np.empty_like(array)
-        low = array <= center
-        normalized[low] = 0.5 * (array[low] - vmin) / (center - vmin)
-        normalized[~low] = 0.5 + 0.5 * (array[~low] - center) / (vmax - center)
-    normalized = np.clip(normalized, 0.0, 1.0)
-    if name == "bgr":
-        rgb = np.zeros((normalized.size, 3), dtype=float)
-        low = normalized <= 0.5
-        rising = np.zeros_like(normalized)
-        rising[low] = normalized[low] / 0.5
-        rising[~low] = (normalized[~low] - 0.5) / 0.5
-        rgb[low, 1] = rising[low]
-        rgb[low, 2] = 1.0 - rising[low]
-        rgb[~low, 0] = rising[~low]
-        rgb[~low, 1] = 1.0 - rising[~low]
-        return rgb
-    import matplotlib
-
-    try:
-        cmap = matplotlib.colormaps[name]
-    except KeyError as exc:
-        raise ValueError(f"unknown isosurface colormap {name!r}") from exc
-    return np.asarray(cmap(normalized), dtype=float)[:, :3]
 
 
 def cube_isosurface_meshes(
@@ -99,12 +25,16 @@ def cube_isosurface_meshes(
     opacity: float = 0.55,
     ambient: float = 0.68,
     diffuse: float = 0.32,
-    color_values: np.ndarray | None = None,
+    color_cube: CubeData | None = None,
     color_range: tuple[float, float] | None = None,
     color_center: float | None = None,
     colormap: str = "bgr",
 ) -> list[dict[str, Any]]:
-    """Extract positive/negative phases as world-space triangle meshes."""
+    """Extract positive/negative phases as world-space triangle meshes.
+
+    ``color_cube`` is sampled at each vertex's physical position on the full
+    color grid. ``stride`` coarsens the marching-cubes mesh only.
+    """
     try:
         from skimage.measure import marching_cubes
     except ImportError as exc:  # pragma: no cover - exercised in minimal CI
@@ -134,20 +64,6 @@ def cube_isosurface_meshes(
         raise ValueError(
             "Cube isosurface ambient + diffuse coefficients must not exceed 1"
         )
-    color_grid = None
-    if color_values is not None:
-        color_grid = np.asarray(color_values, dtype=float)
-        if color_grid.shape != cube.values.shape:
-            raise ValueError(
-                "isosurface color cube must have the same grid shape as the source cube"
-            )
-        color_grid = color_grid[::stride, ::stride, ::stride]
-        if color_range is None:
-            finite = color_grid[np.isfinite(color_grid)]
-            if finite.size == 0:
-                raise ValueError("isosurface color cube has no finite values")
-            color_range = (float(np.min(finite)), float(np.max(finite)))
-
     basis = np.asarray(cube.axes, dtype=float) * stride
     inverse_normal = np.linalg.inv(basis).T
     meshes: list[dict[str, Any]] = []
@@ -186,12 +102,15 @@ def cube_isosurface_meshes(
                 }
             },
         }
-        if color_grid is not None:
-            if color_range is None:
-                raise ValueError("isosurface color range is missing")
-            sampled = _sample_trilinear(color_grid, vertices)
-            mesh["vertex_colors"] = _colormap_rgb(
-                colormap, sampled, color_range[0], color_range[1], color_center
+        if color_cube is not None:
+            mesh["vertex_colors"] = vertex_colors_for_surface(
+                cube,
+                color_cube,
+                vertices,
+                stride=stride,
+                color_range=color_range,
+                color_center=color_center,
+                colormap=colormap,
             )
         meshes.append(mesh)
     if not meshes:
@@ -209,12 +128,17 @@ def ensure_cube_isosurfaces(
     stride: int = 2,
     ambient: float = 0.68,
     diffuse: float = 0.32,
-    color_values: np.ndarray | None = None,
+    color_cube: CubeData | None = None,
     color_range: tuple[float, float] | None = None,
     color_center: float | None = None,
     colormap: str = "bgr",
 ) -> Any:
-    """Attach backend-neutral isosurfaces to every Cube scene in ``source``."""
+    """Attach backend-neutral isosurfaces to every Cube scene in ``source``.
+
+    Meshes are reused only when the source grid and the isovalue, stride,
+    material, and color-cube settings still match. A later call with a color
+    cube replaces an uncolored cache.
+    """
     bundles: list[Any] = []
     if hasattr(source, "frames"):
         bundles.extend(
@@ -232,21 +156,56 @@ def ensure_cube_isosurfaces(
             cube = scene.get("cube_data")
         if cube is None:
             continue
-        if isinstance(scene, dict) and scene.get("isosurfaces"):
+        token = isosurface_preparation_token(
+            cube,
+            isovalue=isovalue,
+            opacity=opacity,
+            positive_color=positive_color,
+            negative_color=negative_color,
+            stride=stride,
+            ambient=ambient,
+            diffuse=diffuse,
+            color_cube=color_cube,
+            color_range=color_range,
+            color_center=color_center,
+            colormap=colormap,
+        )
+        cached = scene.get("isosurfaces") if isinstance(scene, dict) else None
+        cached_token = (
+            scene.get("isosurface_preparation") if isinstance(scene, dict) else None
+        )
+        if cached and cached_token == token:
+            cube.surface_meshes = cached
+            for cached_scene in (getattr(bundle, "scene_cache", {}) or {}).values():
+                if (
+                    isinstance(cached_scene, dict)
+                    and cached_scene.get("isosurface_preparation") != token
+                ):
+                    cached_scene["isosurfaces"] = cached
+                    cached_scene["isosurface_preparation"] = token
             continue
         meshes = cube_isosurface_meshes(
-            cube, isovalue=isovalue, opacity=opacity,
-            positive_color=positive_color, negative_color=negative_color,
-            stride=stride, ambient=ambient, diffuse=diffuse,
-            color_values=color_values, color_range=color_range,
-            color_center=color_center, colormap=colormap,
+            cube,
+            isovalue=isovalue,
+            opacity=opacity,
+            positive_color=positive_color,
+            negative_color=negative_color,
+            stride=stride,
+            ambient=ambient,
+            diffuse=diffuse,
+            color_cube=color_cube,
+            color_range=color_range,
+            color_center=color_center,
+            colormap=colormap,
         )
-        setattr(cube, "surface_meshes", meshes)
+        cube.surface_meshes = meshes
         if isinstance(scene, dict):
             scene["isosurfaces"] = meshes
+            scene["isosurface_preparation"] = token
         for cached_scene in (getattr(bundle, "scene_cache", {}) or {}).values():
             if isinstance(cached_scene, dict):
                 cached_scene["isosurfaces"] = meshes
+                cached_scene["isosurface_preparation"] = token
     return source
 
 
