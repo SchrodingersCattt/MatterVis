@@ -9,6 +9,8 @@ follows ``Tab._base_nodes`` so both contracts serve the viewer.
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
+import sys
 
 try:
     import tomllib
@@ -45,6 +47,26 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def _close_id(scene_id: str) -> str:
     return f"scene-tab-close-{scene_id}"
+
+
+def test_factory_import_does_not_cycle_through_package_getattr() -> None:
+    """``from mat_viewer.app.factory import create_app`` must succeed alone.
+
+    ``app/__init__.__getattr__`` loads ``dash_impl`` for any missing name.
+    A relative ``from . import dash_tabs`` inside ``layout_left_panel`` hits
+    that hook while ``factory`` is still initializing, so this import path
+    raises ``ImportError`` for ``create_app``. ``from mat_viewer.app import
+    create_app`` loads ``dash_impl`` first and can hide the cycle.
+    """
+    completed = subprocess.run(
+        [sys.executable, "-c", "from mat_viewer.app.factory import create_app"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_web_extra_declares_the_dash_floor() -> None:

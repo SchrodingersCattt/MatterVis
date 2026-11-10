@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import dash_tabs
 from .shared import dcc, html
 from .display_controls import display_option_hint, display_option_items, visible_display_options
 from .camera_helpers import _structure_summary
@@ -36,6 +35,12 @@ def build_left_panel(
     preset_path: str,
     property_visible_range: Any = None,
 ):
+    # Import the submodule by name. ``from . import dash_tabs`` is attribute
+    # access on this package, and ``app/__init__.py`` resolves unknown names
+    # by importing ``dash_impl``, which imports ``factory`` while ``factory``
+    # is still loading this module.
+    from .dash_tabs import tab_label_accepts_components
+
     static_export_resolution = resolve_requirements("static-web-export")
     static_export_hint = (
         ""
@@ -116,7 +121,7 @@ def build_left_panel(
                 className="scene-tabs-card"
                 + (
                     ""
-                    if dash_tabs.tab_label_accepts_components()
+                    if tab_label_accepts_components()
                     else " scene-tabs-card--string-labels"
                 ),
             ),
