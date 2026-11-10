@@ -602,19 +602,41 @@
       const gestureRev = Number(window.__mvGestureCameraRevision);
       return Number.isFinite(live) && Number.isFinite(gestureRev) && live > gestureRev;
     }
-    /* Sampled while the pointer is down. A replot that started before the
-     * drag, or an internal resize that does not go through the wrapped
-     * size path, commits the pre-drag eye on the way out. */
+    /* The sample belongs to one pointer gesture and one scene generation
+     * and server session. A later press must not restore it before that
+     * press has sampled its own eye. */
+    function dragSampleKey() {
+      return [
+        String(window.__mvGestureSerial || 0),
+        String(window.__mvGestureSceneId || ""),
+        window.__mvGestureSceneGeneration == null ? "" : String(window.__mvGestureSceneGeneration),
+        window.__mvGestureServerEpoch != null ? String(window.__mvGestureServerEpoch) : ""
+      ].join("|");
+    }
+    function retireDragSample() {
+      window.__mvGestureSerial = Number(window.__mvGestureSerial || 0) + 1;
+      window.__mvInProgressDragCamera = null;
+    }
+    function dragSampleCamera() {
+      const saved = window.__mvInProgressDragCamera;
+      if (!saved || !saved.camera || saved.key !== dragSampleKey()) return null;
+      return saved.camera;
+    }
     function noteInProgressDrag(gd) {
       if (!sameSceneDragInProgress(gd) || !window.mattervisCurrentCamera) return;
       const camera = window.mattervisCurrentCamera(gd);
       if (!camera || !camera.eye || !camera.center || !camera.up) return;
-      try { window.__mvInProgressDragCamera = JSON.parse(JSON.stringify(camera)); } catch (_) {}
+      try {
+        window.__mvInProgressDragCamera = {
+          camera: JSON.parse(JSON.stringify(camera)),
+          key: dragSampleKey()
+        };
+      } catch (_) {}
     }
     function restoreInProgressDrag(gd) {
       if (!gd || gd.__mvRestoringDrag || !window.Plotly || typeof window.Plotly.relayout !== "function") return Promise.resolve();
       if (!sameSceneDragInProgress(gd) || newerCameraCommand(gd)) return Promise.resolve();
-      const saved = window.__mvInProgressDragCamera;
+      const saved = dragSampleCamera();
       if (!saved) return Promise.resolve();
       const now = window.mattervisCurrentCamera ? window.mattervisCurrentCamera(gd) : null;
       if (!now || camerasClose(now, saved)) return Promise.resolve();
@@ -631,6 +653,7 @@
     }
     window.__mvNoteInProgressDrag = noteInProgressDrag;
     window.__mvRestoreInProgressDrag = restoreInProgressDrag;
+    window.__mvRetireDragSample = retireDragSample;
     /* A width/height relayout is a full gl3d replot: it emits plotly_relayout
      * and calls setViewport. Dash keeps only the latest relayoutData, so that
      * size event can hide the offscreen camera payload and the replot can
@@ -644,17 +667,21 @@
       const latest = gd && gd.__mvLatestCamera;
       const commandArrived = !!(latest && latest !== commandAtStart);
       const after = window.mattervisCurrentCamera ? window.mattervisCurrentCamera(gd) : null;
-      const sampled = !commandArrived && sameSceneDragInProgress(gd) && !newerCameraCommand(gd)
-        ? window.__mvInProgressDragCamera : null;
-      const dragPose = sampled && !camerasClose(after, sampled) ? sampled : before;
-      if (!commandArrived && sameSceneDragInProgress(gd) && dragPose && !camerasClose(after, dragPose)) {
-        const dragged = cameraOnlyPatch(dragPose);
-        if (dragged) return Promise.resolve(window.Plotly.relayout(gd, dragged)).catch(function () {});
+      const commandWins = commandArrived || newerCameraCommand(gd);
+      if (!commandWins && sameSceneDragInProgress(gd)) {
+        const sampled = dragSampleCamera();
+        const dragPose = sampled && !camerasClose(after, sampled) ? sampled : before;
+        if (dragPose && !camerasClose(after, dragPose)) {
+          const dragged = cameraOnlyPatch(dragPose);
+          if (dragged) return Promise.resolve(window.Plotly.relayout(gd, dragged)).catch(function () {});
+        }
       }
       if (!latest || !latest.snapshot) return Promise.resolve();
       if (camerasClose(after, latest.snapshot)) return Promise.resolve();
       const commandWasLive = camerasClose(before, latest.snapshot);
-      if (!commandArrived && !commandWasLive) return Promise.resolve();
+      /* A revision that is already ahead did not have to arrive inside this
+       * size wrap. The captured pre-replot eye must not replace it. */
+      if (!commandArrived && !commandWasLive && !newerCameraCommand(gd)) return Promise.resolve();
       const patch = cameraOnlyPatch(latest.snapshot);
       if (!patch) return Promise.resolve();
       return Promise.resolve(window.Plotly.relayout(gd, patch)).catch(function () {});
@@ -2442,6 +2469,7 @@
   function stampGestureScene(sceneId, kind) {
     const id = sceneId ? String(sceneId) : "";
     if (!id) return;
+    if (window.__mvRetireDragSample) window.__mvRetireDragSample();
     const gd = graphDiv();
     const render = renderMetadataFromLayout(gd && gd.layout);
     const generation = render && render.scene_generation !== undefined
@@ -2494,6 +2522,7 @@
   }, true);
   document.addEventListener("pointerdown", function(e) {
     if (!inGraph(e.target)) return;
+    if (window.__mvRetireDragSample) window.__mvRetireDragSample();
     window.__mvGestureEndedAt = 0;
     window.__mvGesturePointerRelayoutSeen = false;
     const sceneId = canvasSceneId() || window.__mvGestureSceneId || "";
@@ -2503,9 +2532,11 @@
   document.addEventListener("pointerup", function() {
     // Capture runs before Plotly's pointerup relayout. The ended clock has
     // to be set first so that relayout is the gesture's own commit, and a
-    // command that follows it can read the live revision.
+    // command that follows it can read the live revision. Drop the sampled
+    // orbit with the gesture so the next press cannot restore it.
     window.__mvGestureEndedAt = Date.now();
     window.__mvGesturePointerRelayoutSeen = false;
+    if (window.__mvRetireDragSample) window.__mvRetireDragSample();
   }, true);
   document.addEventListener("pointerup", function() {
     window.__mvGestureEndedAt = Date.now();

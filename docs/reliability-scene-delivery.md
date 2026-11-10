@@ -44,10 +44,13 @@ must not change scene B, and a stale revision must not replace a newer one.
   reuses the scene id with a new generation, or a restarted server, does not
   receive the pre-remount drag eye. A camera command that arrives during that
   replot still wins. A frame or internal replot that finishes while that
-  drag is still down puts the sampled drag eye back when the generation and
-  session still match. A camera command that has already advanced the
-  revision is left in place. After the gesture ends, only a commanded
-  camera is restored.
+  drag is still down puts that gesture's sampled eye back when the
+  generation and session still match. The sample is dropped when the
+  gesture is stamped or released, so a later press cannot restore the
+  previous orbit before it samples its own eye. A size replot does not
+  put back a captured pose once a newer camera revision is already
+  current, even when that command arrived before the replot. After the
+  gesture ends, only a commanded camera is restored.
 - `update_view` classifies a callback against the previous snapshot of the
   same scene. That snapshot is process-wide and is not a substitute for the
   requesting browser's mounted figure. Camera, overlay, and ordinary display

@@ -944,24 +944,37 @@ async function runDragReplot(page) {
   const before = await page.evaluate(readEye);
   const box = await page.locator("#crystal-graph canvas").first().boundingBox();
   if (!box) fail("crystal canvas has no box");
-  const x = box.x + box.width * 0.55;
-  const y = box.y + box.height * 0.45;
-  await page.mouse.move(x, y);
-  await page.mouse.down();
-  await page.mouse.move(x + 90, y + 40, {steps: 8});
-  await page.waitForFunction((previous) => {
-    const scene = document.querySelector("#crystal-graph .js-plotly-plot")._fullLayout.scene._scene;
-    const live = scene && typeof scene.getCamera === "function" ? scene.getCamera() : scene && scene.camera;
-    const eye = live && live.eye;
-    const component = (value, index, key) => Number(value && value[index] !== undefined ? value[index] : value && value[key]);
-    if (!eye) return false;
-    const next = [component(eye, 0, "x"), component(eye, 1, "y"), component(eye, 2, "z")];
-    const shift = Math.hypot(next[0] - previous[0], next[1] - previous[1], next[2] - previous[2]);
-    return Number.isFinite(shift) && shift > 0.02;
-  }, before, {timeout: 20000});
-  const dragged = await page.evaluate(readEye);
-  // A replot commits the pre-drag eye while the button is still down.
-  // The same generation and session have to put the orbit back.
+  const starts = [
+    [box.x + box.width * 0.45, box.y + box.height * 0.5],
+    [box.x + box.width * 0.32, box.y + box.height * 0.62],
+    [box.x + box.width * 0.58, box.y + box.height * 0.4],
+  ];
+  let dragged = null;
+  for (const [sx, sy] of starts) {
+    await page.mouse.move(sx, sy);
+    await page.mouse.down();
+    await page.mouse.move(sx + 140, sy + 80, {steps: 12});
+    try {
+      await page.waitForFunction((previous) => {
+        const scene = document.querySelector("#crystal-graph .js-plotly-plot")._fullLayout.scene._scene;
+        const live = scene && typeof scene.getCamera === "function" ? scene.getCamera() : scene && scene.camera;
+        const eye = live && live.eye;
+        const component = (value, index, key) => Number(value && value[index] !== undefined ? value[index] : value && value[key]);
+        if (!eye) return false;
+        const next = [component(eye, 0, "x"), component(eye, 1, "y"), component(eye, 2, "z")];
+        const shift = Math.hypot(next[0] - previous[0], next[1] - previous[1], next[2] - previous[2]);
+        return Number.isFinite(shift) && shift > 0.02;
+      }, before, {timeout: 4000});
+      dragged = await page.evaluate(readEye);
+      break;
+    } catch (error) {
+      await page.mouse.up();
+    }
+  }
+  if (!dragged) fail("orbit did not move the live camera");
+  // A full Plotly.react is deferred until the press ends, so it cannot be
+  // the in-drag snap. This relayout is the replot that finishes while the
+  // button is down; its afterplot runs the same restore the frame uses.
   await page.evaluate((original) => {
     const gd = document.querySelector("#crystal-graph .js-plotly-plot");
     return window.Plotly.relayout(gd, {"scene.camera.eye": {x: original[0], y: original[1], z: original[2]}});
@@ -990,6 +1003,21 @@ async function runDragReplot(page) {
   const stayed = Math.hypot(replaced[0] - before[0], replaced[1] - before[1], replaced[2] - before[2]);
   if (!(stayed < 0.05)) fail("new generation restored the previous drag eye " + JSON.stringify({before, replaced, dragged}));
   await page.mouse.up();
+  // The next press has not moved, so it has no sample of its own. Putting
+  // the pre-drag eye back must not revive the orbit from the press that ended.
+  await page.mouse.down();
+  const untouched = await page.evaluate((original) => {
+    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+    const component = (value, index, key) => Number(value && value[index] !== undefined ? value[index] : value && value[key]);
+    return window.Plotly.relayout(gd, {"scene.camera.eye": {x: original[0], y: original[1], z: original[2]}}).then(() => {
+      const eye = document.querySelector("#crystal-graph .js-plotly-plot")._fullLayout.scene._scene.camera.eye;
+      return [component(eye, 0, "x"), component(eye, 1, "y"), component(eye, 2, "z")];
+    });
+  }, before);
+  await page.mouse.up();
+  const leaked = Math.hypot(untouched[0] - dragged[0], untouched[1] - dragged[1], untouched[2] - dragged[2]);
+  const held = Math.hypot(untouched[0] - before[0], untouched[1] - before[1], untouched[2] - before[2]);
+  if (!(leaked > 0.05 && held < 0.05)) fail("later press restored the previous orbit " + JSON.stringify({before, dragged, untouched}));
 }
 
 async function runSemanticPick(page) {

@@ -185,9 +185,11 @@ Notes for callers:
   epoch. A width/height replot during an in-progress drag restores the live
   drag camera only when that drag's scene generation and, when both sides
   have one, server session still match the mounted figure. A frame or
-  replot that finishes during that drag puts the sampled eye back under
-  the same rule. Explicit camera revisions use the supplied camera and
-  still win over that drag. A duplicate scene schedules its own complete frame.
+  replot that finishes during that drag puts that gesture's sampled eye
+  back under the same rule. The sample is cleared when the gesture is
+  stamped or released. A newer camera revision wins over both the sample
+  and a pose captured before the replot. Explicit camera revisions use
+  the supplied camera and still win over that drag. A duplicate scene schedules its own complete frame.
   An in-flight build publishes only for its current scene identity; a newer
   complete-frame identity is requeued and an older one cannot roll that scene
   back.
