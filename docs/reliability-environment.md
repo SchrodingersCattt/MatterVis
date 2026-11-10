@@ -55,6 +55,15 @@ the browser trace directory. `ci-diagnostics-browser` is the
 environment JSON, the freeze, the JUnit file, and the failure
 signatures.
 
+## Web extra Dash range
+
+`pyproject.toml` requires `dash>=2.18.2` for the `web` and `all` extras.
+The merge gate still installs `dash==4.5.0` from
+`requirements/ci-constraints.txt`. That pin is inside the declared range.
+It is not the minimum. Dash 4.0 is the first release that accepts a
+component as `dcc.Tab.label`. Older releases in the range use a string
+label and keep the per-tab close control in `scene-tab-close-row`.
+
 ## MolCrysKit
 
 Every install job uses the git commit in `pyproject.toml`:
