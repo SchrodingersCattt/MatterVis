@@ -595,6 +595,42 @@
       if (gestureEpoch && canvasEpoch && gestureEpoch !== canvasEpoch) return false;
       return true;
     }
+    function newerCameraCommand(gd) {
+      const render = renderMetadataFromLayout(gd && gd.layout);
+      if (!render) return false;
+      const live = scopedLiveRevision(gd, render.scene_id, render.scene_generation, render.server_started_at);
+      const gestureRev = Number(window.__mvGestureCameraRevision);
+      return Number.isFinite(live) && Number.isFinite(gestureRev) && live > gestureRev;
+    }
+    /* Sampled while the pointer is down. A replot that started before the
+     * drag, or an internal resize that does not go through the wrapped
+     * size path, commits the pre-drag eye on the way out. */
+    function noteInProgressDrag(gd) {
+      if (!sameSceneDragInProgress(gd) || !window.mattervisCurrentCamera) return;
+      const camera = window.mattervisCurrentCamera(gd);
+      if (!camera || !camera.eye || !camera.center || !camera.up) return;
+      try { window.__mvInProgressDragCamera = JSON.parse(JSON.stringify(camera)); } catch (_) {}
+    }
+    function restoreInProgressDrag(gd) {
+      if (!gd || gd.__mvRestoringDrag || !window.Plotly || typeof window.Plotly.relayout !== "function") return Promise.resolve();
+      if (!sameSceneDragInProgress(gd) || newerCameraCommand(gd)) return Promise.resolve();
+      const saved = window.__mvInProgressDragCamera;
+      if (!saved) return Promise.resolve();
+      const now = window.mattervisCurrentCamera ? window.mattervisCurrentCamera(gd) : null;
+      if (!now || camerasClose(now, saved)) return Promise.resolve();
+      const patch = cameraOnlyPatch(saved);
+      if (!patch) return Promise.resolve();
+      gd.__mvRestoringDrag = true;
+      let pending = null;
+      try { pending = window.Plotly.relayout(gd, patch); }
+      catch (_) { gd.__mvRestoringDrag = false; return Promise.resolve(); }
+      const clear = function () { gd.__mvRestoringDrag = false; };
+      if (pending && typeof pending.then === "function") return pending.then(clear, clear);
+      clear();
+      return Promise.resolve();
+    }
+    window.__mvNoteInProgressDrag = noteInProgressDrag;
+    window.__mvRestoreInProgressDrag = restoreInProgressDrag;
     /* A width/height relayout is a full gl3d replot: it emits plotly_relayout
      * and calls setViewport. Dash keeps only the latest relayoutData, so that
      * size event can hide the offscreen camera payload and the replot can
@@ -608,8 +644,11 @@
       const latest = gd && gd.__mvLatestCamera;
       const commandArrived = !!(latest && latest !== commandAtStart);
       const after = window.mattervisCurrentCamera ? window.mattervisCurrentCamera(gd) : null;
-      if (!commandArrived && sameSceneDragInProgress(gd) && before && !camerasClose(after, before)) {
-        const dragged = cameraOnlyPatch(before);
+      const sampled = !commandArrived && sameSceneDragInProgress(gd) && !newerCameraCommand(gd)
+        ? window.__mvInProgressDragCamera : null;
+      const dragPose = sampled && !camerasClose(after, sampled) ? sampled : before;
+      if (!commandArrived && sameSceneDragInProgress(gd) && dragPose && !camerasClose(after, dragPose)) {
+        const dragged = cameraOnlyPatch(dragPose);
         if (dragged) return Promise.resolve(window.Plotly.relayout(gd, dragged)).catch(function () {});
       }
       if (!latest || !latest.snapshot) return Promise.resolve();
@@ -760,7 +799,7 @@
               if (window.MatterVisViewCamera && typeof window.MatterVisViewCamera.installCanvasRefit === "function") {
                 window.MatterVisViewCamera.installCanvasRefit(gd);
               }
-              return result;
+              return restoreInProgressDrag(gd).then(function () { return result; });
             });
           };
           // Both Dash signatures and WS pass here. Retry after failures;
@@ -2226,8 +2265,11 @@
     if (gd && typeof gd.on === "function" && !gd.__mvForeignCameraBound) {
       gd.__mvForeignCameraBound = true;
       gd.on("plotly_relayout", function () {
-        if (window.__mvAllowCameraRelayout || window.__mvRestoreOwnedCamera) return;
+        if (window.__mvAllowCameraRelayout || window.__mvRestoreOwnedCamera || gd.__mvRestoringDrag) return;
         restoreOwnedCamera(gestureGeneration, foreignGuardScene());
+      });
+      gd.on("plotly_afterplot", function () {
+        if (window.__mvRestoreInProgressDrag) window.__mvRestoreInProgressDrag(gd);
       });
     }
   }
@@ -2446,6 +2488,10 @@
       }, 500);
     }
   }
+  document.addEventListener("pointermove", function () {
+    const gd = graphDiv();
+    if (gd && window.__mvNoteInProgressDrag) window.__mvNoteInProgressDrag(gd);
+  }, true);
   document.addEventListener("pointerdown", function(e) {
     if (!inGraph(e.target)) return;
     window.__mvGestureEndedAt = 0;
@@ -3117,6 +3163,7 @@
     if (!dragPollActive) return;
     if (window.__mv_compass_diag) window.__mv_compass_diag.drag_poll_ticks += 1;
     const camera = liveSceneCamera(gd);
+    if (typeof window.__mvNoteInProgressDrag === "function") window.__mvNoteInProgressDrag(gd);
     const key = dragCameraKey(camera);
     if (key && key !== dragPollLastKey) {
       dragPollLastKey = key;

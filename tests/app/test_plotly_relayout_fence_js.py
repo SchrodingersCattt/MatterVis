@@ -191,6 +191,47 @@ const fence = sandbox.window.__mvFenceTest;
   gd.layout.meta.mattervis_render.server_started_at = 'epoch';
   displayedCamera = null;
 
+  function restoredDrag(list) {
+    return list.some(function (patch) {
+      return patch['scene.camera.eye'] && patch['scene.camera.eye'].x === 2;
+    });
+  }
+  sandbox.window.__mvGestureEndedAt = 0;
+  sandbox.window.__mvGestureSceneId = 'canvas-b';
+  sandbox.window.__mvGestureSceneGeneration = 7;
+  sandbox.window.__mvGestureServerEpoch = 'epoch';
+  sandbox.window.__mvGestureCameraRevision = 1;
+  gd.layout.meta.mattervis_render.camera_revision = 1;
+  displayedCamera = {current: dragged};
+  sandbox.window.__mvNoteInProgressDrag(gd);
+  displayedCamera = {current: committed};
+  calls.length = 0;
+  await sandbox.window.__mvRestoreInProgressDrag(gd);
+  assert.equal(restoredDrag(calls), true, 'a replot during the drag did not restore the sampled eye');
+
+  gd.layout.meta.mattervis_render.scene_generation = 8;
+  calls.length = 0;
+  await sandbox.window.__mvRestoreInProgressDrag(gd);
+  assert.equal(restoredDrag(calls), false, 'a replot on a new generation restored the previous drag eye');
+  gd.layout.meta.mattervis_render.scene_generation = 7;
+
+  gd.layout.meta.mattervis_render.server_started_at = 'restarted';
+  calls.length = 0;
+  await sandbox.window.__mvRestoreInProgressDrag(gd);
+  assert.equal(restoredDrag(calls), false, 'a replot after restart restored the previous drag eye');
+  gd.layout.meta.mattervis_render.server_started_at = 'epoch';
+
+  gd.__mvCameraRevisionScope = 'canvas-b:7';
+  gd.__mvCameraRevisionEpoch = 'epoch';
+  gd.__mvCameraRevision = 4;
+  calls.length = 0;
+  await sandbox.window.__mvRestoreInProgressDrag(gd);
+  assert.equal(restoredDrag(calls), false, 'a newer camera command lost to the in-progress drag');
+  delete gd.__mvCameraRevision;
+  delete gd.__mvCameraRevisionScope;
+  delete gd.__mvCameraRevisionEpoch;
+  displayedCamera = null;
+
   sandbox.window.__mvGestureSceneId = 'scene-a';
   fence.mark();
   const firstGeneration = fence.generation();
