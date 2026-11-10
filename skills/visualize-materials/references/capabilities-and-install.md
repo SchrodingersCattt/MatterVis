@@ -31,6 +31,7 @@ error. Never install `[all]` when a smaller reported extra is sufficient.
 | Dash viewer, REST, and WebSocket service | `web` | `python -m pip install "matter-vis[web]"` |
 | Interactive terminal UI | `tui` | `python -m pip install "matter-vis[tui]"` |
 | Cube input inspection and isosurfaces | `cube` | `python -m pip install "matter-vis[cube]"` |
+| PyVista offscreen cube figures | `vtk` | `python -m pip install "matter-vis[vtk]"` |
 | GIF/MP4 encoding | `animation` | `python -m pip install "matter-vis[animation]"` |
 | Native offscreen opaque PNG via wgpu | `gpu` | `python -m pip install "matter-vis[gpu]"` |
 <!-- capability-matrix:end -->
