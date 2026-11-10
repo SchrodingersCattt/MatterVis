@@ -310,6 +310,8 @@ gd.__mvCameraRevisionScope='a:7';
 gd.__mvCameraRevision=4;
 gd.layout=layout('b',8,0);
 emit('pointerdown',{{target:{{closest:()=>graph}}}});
+assert.equal(sandbox.window.__mvGestureServerEpoch,'epoch','pointerdown did not stamp the server session');
+assert.equal(sandbox.window.__mvGestureSceneGeneration,8,'pointerdown did not stamp the mounted generation');
 const capture=vm.runInNewContext('('+callbackSource+')',sandbox);
 const dragged=capture({{'scene.camera':{{eye:{{x:1}}}}}});
 assert.equal(dragged.scene_id,'b');

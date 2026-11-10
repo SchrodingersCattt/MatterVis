@@ -182,10 +182,11 @@ Notes for callers:
   camera do not keep one WebGL camera. Clients preserve the live camera only
   for the same scene, scene generation, server epoch, and `uirevision`. A
   transient camera revision is read back only for that same generation and
-  epoch. A width/height replot during an in-progress drag on the mounted
-  scene restores the live drag camera; explicit camera revisions use the
-  supplied camera and still win over that drag. A duplicate scene schedules
-  its own complete frame.
+  epoch. A width/height replot during an in-progress drag restores the live
+  drag camera only when that drag's scene generation and, when both sides
+  have one, server session still match the mounted figure. Explicit camera
+  revisions use the supplied camera and still win over that drag. A duplicate
+  scene schedules its own complete frame.
   An in-flight build publishes only for its current scene identity; a newer
   complete-frame identity is requeued and an older one cannot roll that scene
   back.

@@ -584,15 +584,25 @@
       const render = renderMetadataFromLayout(gd && gd.layout);
       const canvasId = render && render.scene_id ? String(render.scene_id) : "";
       const gestureId = window.__mvGestureSceneId ? String(window.__mvGestureSceneId) : "";
-      return !!(gestureId && canvasId && gestureId === canvasId);
+      if (!gestureId || !canvasId || gestureId !== canvasId) return false;
+      /* A remount can reuse the scene id with a new generation, and a
+       * restarted server can reuse both. The drag eye belongs only to the
+       * generation and session stamped at pointer-down. */
+      if (canvasRevisionScope(gestureId, window.__mvGestureSceneGeneration) !==
+          canvasRevisionScope(canvasId, render.scene_generation)) return false;
+      const gestureEpoch = window.__mvGestureServerEpoch != null ? String(window.__mvGestureServerEpoch) : "";
+      const canvasEpoch = render.server_started_at != null ? String(render.server_started_at) : "";
+      if (gestureEpoch && canvasEpoch && gestureEpoch !== canvasEpoch) return false;
+      return true;
     }
     /* A width/height relayout is a full gl3d replot: it emits plotly_relayout
      * and calls setViewport. Dash keeps only the latest relayoutData, so that
      * size event can hide the offscreen camera payload and the replot can
      * paint the pre-refit camera again. Drop the size event, then put back a
      * camera command the replot moved. An in-progress drag has no command yet;
-     * put its live camera back or pointer-up stores the pre-drag eye. A Reset
-     * that arrives during the replot still wins. */
+     * put its live camera back only when the mounted generation and, when
+     * both sides have one, the server session still match the gesture.
+     * A Reset that arrives during the replot still wins. */
     function restoreCommandedCamera(gd, before, commandAtStart) {
       if (!window.Plotly || typeof window.Plotly.relayout !== "function") return Promise.resolve();
       const latest = gd && gd.__mvLatestCamera;
@@ -2420,6 +2430,8 @@
     window.__mvLastGestureSceneId = sceneId;
     window.__mvGestureKind = kind || "pointer";
     window.__mvGestureSceneGeneration = generation;
+    window.__mvGestureServerEpoch = render && render.server_started_at != null
+      ? render.server_started_at : null;
     window.__mvGestureCameraRevision = revision;
     if (kind === "wheel") {
       const stamp = id + ":" + String(Date.now());

@@ -38,8 +38,11 @@ must not change scene B, and a stale revision must not replace a newer one.
   and session match the mounted figure. A revision left by another scene, or
   by a restarted session that reused the generation number, is not that clock.
 - A width/height relayout is a full gl3d replot. During an in-progress drag
-  on the mounted scene it puts the live drag camera back, so pointer-up does
-  not store the pre-drag eye. A camera command that arrives during that
+  it puts the live drag camera back only when the gesture's scene id and
+  scene generation still match the mounted figure, and, when both the gesture
+  and the figure have a server session, those sessions match. A remount that
+  reuses the scene id with a new generation, or a restarted server, does not
+  receive the pre-remount drag eye. A camera command that arrives during that
   replot still wins. After the gesture ends, only a commanded camera is
   restored.
 - `update_view` classifies a callback against the previous snapshot of the

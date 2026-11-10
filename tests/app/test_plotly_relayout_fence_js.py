@@ -145,6 +145,8 @@ const fence = sandbox.window.__mvFenceTest;
   sandbox.window.__mvGestureSceneId = 'canvas-b';
   sandbox.window.__mvGestureKind = 'pointer';
   sandbox.window.__mvGestureEndedAt = 0;
+  sandbox.window.__mvGestureSceneGeneration = 7;
+  sandbox.window.__mvGestureServerEpoch = 'epoch';
   calls.length = 0;
   await plot.relayout(gd, {width: 800, height: 600});
   assert.equal(calls.length, 2, 'a size replot during a drag did not restore the live camera');
@@ -158,12 +160,35 @@ const fence = sandbox.window.__mvFenceTest;
   assert.equal(calls.length, 1, 'a size replot after pointer-up restored a finished drag');
 
   sandbox.window.__mvGestureEndedAt = 0;
+  sandbox.window.__mvGestureSceneGeneration = 7;
+  sandbox.window.__mvGestureServerEpoch = 'epoch';
   gd.__mvLatestCamera = {snapshot: dragged};
   displayedCamera = {current: dragged, afterSize: committed, commandDuringSize: {snapshot: committed}};
   calls.length = 0;
   await plot.relayout(gd, {width: 700, height: 500});
   assert.equal(calls.some(function (patch) { return patch['scene.camera.eye'] && patch['scene.camera.eye'].x === 2; }), false, 'a size replot let the drag overwrite Reset');
   delete gd.__mvLatestCamera;
+  displayedCamera = null;
+
+  sandbox.window.__mvGestureEndedAt = 0;
+  sandbox.window.__mvGestureSceneId = 'canvas-b';
+  sandbox.window.__mvGestureSceneGeneration = 7;
+  sandbox.window.__mvGestureServerEpoch = 'epoch';
+  gd.layout.meta.mattervis_render.scene_generation = 8;
+  displayedCamera = {current: dragged, afterSize: committed};
+  calls.length = 0;
+  await plot.relayout(gd, {width: 810, height: 610});
+  assert.equal(calls.some(function (patch) { return patch['scene.camera.eye'] && patch['scene.camera.eye'].x === 2; }), false, 'a new generation reused the in-progress drag eye');
+  gd.layout.meta.mattervis_render.scene_generation = 7;
+
+  sandbox.window.__mvGestureSceneGeneration = 7;
+  sandbox.window.__mvGestureServerEpoch = 'epoch';
+  gd.layout.meta.mattervis_render.server_started_at = 'restarted';
+  displayedCamera = {current: dragged, afterSize: committed};
+  calls.length = 0;
+  await plot.relayout(gd, {width: 820, height: 620});
+  assert.equal(calls.some(function (patch) { return patch['scene.camera.eye'] && patch['scene.camera.eye'].x === 2; }), false, 'a restarted session reused the in-progress drag eye');
+  gd.layout.meta.mattervis_render.server_started_at = 'epoch';
   displayedCamera = null;
 
   sandbox.window.__mvGestureSceneId = 'scene-a';
