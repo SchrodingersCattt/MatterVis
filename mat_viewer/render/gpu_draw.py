@@ -2,6 +2,10 @@
 
 The unit meshes are uploaded once per frame. Each atom or bond is one
 instance, so a crystal does not pay a unique high-resolution mesh per site.
+Ellipsoid normals use the inverse-transpose of the principal-axis scale,
+matching :func:`mat_viewer.render.geometry.ellipsoid_mesh`. Cylinder caps
+use axial normals in world space. Lighting is the CPU camera-space light
+expressed in world space.
 """
 
 from __future__ import annotations
@@ -10,6 +14,36 @@ import math
 from typing import Any
 
 import numpy as np
+
+from .gpu_camera import uniform_bytes
+from .gpu_errors import GPUUnsupportedError
+
+
+def ellipsoid_shading_normal(
+    local_normal: np.ndarray,
+    lengths: np.ndarray,
+    axes: np.ndarray,
+) -> np.ndarray:
+    """World shading normal for one unit-sphere direction.
+
+    ``axes`` stores principal directions as columns. This is the same
+    inverse-transpose transform used by ``ellipsoid_mesh`` and by the
+    ellipsoid instance shader.
+    """
+
+    safe = np.maximum(np.asarray(lengths, dtype=np.float64), 1e-8)
+    scaled = np.asarray(local_normal, dtype=np.float64) / safe
+    normal = np.asarray(axes, dtype=np.float64) @ scaled
+    norm = float(np.linalg.norm(normal))
+    if norm < 1e-12:
+        return np.zeros(3, dtype=np.float64)
+    return normal / norm
+
+
+def instance_batch_key(packet: Any) -> tuple[Any, ...]:
+    """Group instances that share a shape, viewport camera, and rectangle."""
+
+    return (packet.kind, packet.viewport_id, tuple(float(value) for value in packet.rect))
 
 
 def _unit_sphere(lat: int = 8, lon: int = 12) -> tuple[np.ndarray, np.ndarray]:
@@ -51,8 +85,8 @@ def _unit_cylinder(sides: int = 12) -> tuple[np.ndarray, np.ndarray]:
     for j in range(sides):
         phi = 2.0 * math.pi * j / sides
         ring.append((math.cos(phi), math.sin(phi)))
-    positions = []
-    normals = []
+    positions: list[tuple[float, float, float]] = []
+    normals: list[tuple[float, float, float]] = []
     for z in (0.0, 1.0):
         for x, y in ring:
             positions.append((x, y, z))
@@ -63,9 +97,13 @@ def _unit_cylinder(sides: int = 12) -> tuple[np.ndarray, np.ndarray]:
     top_center = len(positions)
     positions.append((0.0, 0.0, 1.0))
     normals.append((0.0, 0.0, 1.0))
+    cap_bottom: list[int] = []
+    cap_top: list[int] = []
     for x, y in ring:
+        cap_bottom.append(len(positions))
         positions.append((x, y, 0.0))
         normals.append((0.0, 0.0, -1.0))
+        cap_top.append(len(positions))
         positions.append((x, y, 1.0))
         normals.append((0.0, 0.0, 1.0))
     points = np.asarray(positions, dtype=np.float32)
@@ -75,24 +113,23 @@ def _unit_cylinder(sides: int = 12) -> tuple[np.ndarray, np.ndarray]:
         nxt = (j + 1) % sides
         triangles.append([j, nxt, sides + j])
         triangles.append([nxt, sides + nxt, sides + j])
-        triangles.append([bottom_center, nxt, j])
-        triangles.append([top_center, sides + j, sides + nxt])
+        triangles.append([bottom_center, cap_bottom[nxt], cap_bottom[j]])
+        triangles.append([top_center, cap_top[j], cap_top[nxt]])
     faces = np.asarray(triangles, dtype=np.uint32)
     return np.concatenate([points, norms], axis=1).astype("<f4", copy=False), faces
 
 
 _SPHERE_WGSL = """
-struct Uniforms { view_proj: mat4x4<f32>, };
+struct Uniforms { view_proj: mat4x4<f32>, light: vec3<f32>, };
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 struct VertexOut { @builtin(position) position: vec4<f32>, @location(0) color: vec4<f32>, };
-const LIGHT: vec3<f32> = vec3<f32>(-0.248, 0.326, 0.910);
 @vertex fn vs_sphere(
   @location(0) local: vec3<f32>, @location(1) normal: vec3<f32>,
   @location(2) center: vec3<f32>, @location(3) radius: f32, @location(4) color: vec4<f32>
 ) -> VertexOut {
   var out: VertexOut;
   let world = center + local * radius;
-  let lit = 0.68 + 0.32 * abs(dot(normalize(normal), LIGHT));
+  let lit = 0.68 + 0.32 * abs(dot(normalize(normal), normalize(uniforms.light)));
   out.position = uniforms.view_proj * vec4<f32>(world, 1.0);
   out.color = vec4<f32>(color.rgb * lit, color.a);
   return out;
@@ -101,10 +138,9 @@ const LIGHT: vec3<f32> = vec3<f32>(-0.248, 0.326, 0.910);
 """
 
 _CYLINDER_WGSL = """
-struct Uniforms { view_proj: mat4x4<f32>, };
+struct Uniforms { view_proj: mat4x4<f32>, light: vec3<f32>, };
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 struct VertexOut { @builtin(position) position: vec4<f32>, @location(0) color: vec4<f32>, };
-const LIGHT: vec3<f32> = vec3<f32>(-0.248, 0.326, 0.910);
 @vertex fn vs_cylinder(
   @location(0) local: vec3<f32>, @location(1) normal: vec3<f32>,
   @location(2) start: vec3<f32>, @location(3) radius: f32,
@@ -112,14 +148,15 @@ const LIGHT: vec3<f32> = vec3<f32>(-0.248, 0.326, 0.910);
 ) -> VertexOut {
   var out: VertexOut;
   let axis = end - start;
-  let axis_n = normalize(axis);
+  let axis_n = axis / max(length(axis), 1e-8);
   let helper = select(vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(1.0, 0.0, 0.0), abs(axis_n.z) > 0.9);
   let side = normalize(cross(axis_n, helper));
   let side2 = cross(axis_n, side);
   let radial = side * local.x + side2 * local.y;
   let world = start + axis * local.z + radial * radius;
-  let n = select(radial, normal, abs(normal.z) > 0.5);
-  let lit = 0.68 + 0.32 * abs(dot(normalize(n), LIGHT));
+  let cap_n = axis_n * normal.z;
+  let n = select(radial, cap_n, abs(normal.z) > 0.5);
+  let lit = 0.68 + 0.32 * abs(dot(normalize(n), normalize(uniforms.light)));
   out.position = uniforms.view_proj * vec4<f32>(world, 1.0);
   out.color = vec4<f32>(color.rgb * lit, color.a);
   return out;
@@ -128,10 +165,9 @@ const LIGHT: vec3<f32> = vec3<f32>(-0.248, 0.326, 0.910);
 """
 
 _ELLIPSOID_WGSL = """
-struct Uniforms { view_proj: mat4x4<f32>, };
+struct Uniforms { view_proj: mat4x4<f32>, light: vec3<f32>, };
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 struct VertexOut { @builtin(position) position: vec4<f32>, @location(0) color: vec4<f32>, };
-const LIGHT: vec3<f32> = vec3<f32>(-0.248, 0.326, 0.910);
 @vertex fn vs_ellipsoid(
   @location(0) local: vec3<f32>, @location(1) normal: vec3<f32>,
   @location(2) center: vec3<f32>, @location(3) length0: f32,
@@ -140,10 +176,14 @@ const LIGHT: vec3<f32> = vec3<f32>(-0.248, 0.326, 0.910);
   @location(8) color: vec4<f32>
 ) -> VertexOut {
   var out: VertexOut;
-  let scaled = local * vec3<f32>(length0, lengths.y, lengths.z);
+  let lengths3 = vec3<f32>(length0, lengths.y, lengths.z);
+  let safe = max(lengths3, vec3<f32>(1e-8));
+  let scaled = local * lengths3;
   let world = center + axis0 * scaled.x + axis1 * scaled.y + axis2 * scaled.z;
-  let n = normalize(axis0 * normal.x + axis1 * normal.y + axis2 * normal.z);
-  let lit = 0.68 + 0.32 * abs(dot(n, LIGHT));
+  let n = normalize(
+    axis0 * (normal.x / safe.x) + axis1 * (normal.y / safe.y) + axis2 * (normal.z / safe.z)
+  );
+  let lit = 0.68 + 0.32 * abs(dot(n, normalize(uniforms.light)));
   out.position = uniforms.view_proj * vec4<f32>(world, 1.0);
   out.color = vec4<f32>(color.rgb * lit, color.a);
   return out;
@@ -186,6 +226,21 @@ def _pipeline(
     )
 
 
+def _viewport(render_pass: Any, lowered: Any, rect: tuple[float, float, float, float]) -> None:
+    x, y, width, height = rect
+    pixel_x = x * lowered.width
+    pixel_y = (1.0 - y - height) * lowered.height
+    pixel_width = width * lowered.width
+    pixel_height = height * lowered.height
+    render_pass.set_viewport(pixel_x, pixel_y, pixel_width, pixel_height, 0.0, 1.0)
+    render_pass.set_scissor_rect(
+        max(0, int(round(pixel_x))),
+        max(0, int(round(pixel_y))),
+        max(1, int(round(pixel_width))),
+        max(1, int(round(pixel_height))),
+    )
+
+
 def draw_instanced_shapes(
     *,
     device: Any,
@@ -201,13 +256,11 @@ def draw_instanced_shapes(
 ) -> None:
     """Draw sphere, cylinder, and ellipsoid packets with one mesh per shape."""
 
-    from .gpu import GPUUnsupportedError, _camera_matrix
-
-    groups: dict[tuple[str, tuple[float, float, float, float]], list[Any]] = {}
+    groups: dict[tuple[Any, ...], list[Any]] = {}
     for packet in lowered.packets:
         if packet.kind not in {"sphere", "cylinder", "ellipsoid"}:
             continue
-        groups.setdefault((packet.kind, packet.rect), []).append(packet)
+        groups.setdefault(instance_batch_key(packet), []).append(packet)
     if not groups:
         return
     stored = cache if cache is not None else {}
@@ -261,9 +314,33 @@ def draw_instanced_shapes(
             ],
         }
         pipelines = {
-            "sphere": _pipeline(device, sphere_shader, pipeline_layout, mesh_buffers + [sphere_instance], entry="vs_sphere", fragment="fs_sphere", blend=None),
-            "cylinder": _pipeline(device, cylinder_shader, pipeline_layout, mesh_buffers + [cylinder_instance], entry="vs_cylinder", fragment="fs_cylinder", blend=None),
-            "ellipsoid": _pipeline(device, ellipsoid_shader, pipeline_layout, mesh_buffers + [ellipsoid_instance], entry="vs_ellipsoid", fragment="fs_ellipsoid", blend=None),
+            "sphere": _pipeline(
+                device,
+                sphere_shader,
+                pipeline_layout,
+                mesh_buffers + [sphere_instance],
+                entry="vs_sphere",
+                fragment="fs_sphere",
+                blend=None,
+            ),
+            "cylinder": _pipeline(
+                device,
+                cylinder_shader,
+                pipeline_layout,
+                mesh_buffers + [cylinder_instance],
+                entry="vs_cylinder",
+                fragment="fs_cylinder",
+                blend=None,
+            ),
+            "ellipsoid": _pipeline(
+                device,
+                ellipsoid_shader,
+                pipeline_layout,
+                mesh_buffers + [ellipsoid_instance],
+                entry="vs_ellipsoid",
+                fragment="fs_ellipsoid",
+                blend=None,
+            ),
         }
         stored["instance_pipelines"] = pipelines
         stored["unit_vertex_buffers"] = {
@@ -272,7 +349,9 @@ def draw_instanced_shapes(
         }
         stored["unit_index_buffers"] = {
             "sphere": _buffer(device, sphere_indices.astype("<u4").tobytes(), index_usage, durable),
-            "cylinder": _buffer(device, cylinder_indices.astype("<u4").tobytes(), index_usage, durable),
+            "cylinder": _buffer(
+                device, cylinder_indices.astype("<u4").tobytes(), index_usage, durable
+            ),
         }
         stored["unit_index_counts"] = {
             "sphere": len(sphere_indices.ravel()),
@@ -281,10 +360,13 @@ def draw_instanced_shapes(
     index_buffers = stored["unit_index_buffers"]
     vertex_buffers = stored["unit_vertex_buffers"]
     index_counts = stored["unit_index_counts"]
-    for (kind, rect), packets in groups.items():
+    for key, packets in groups.items():
+        kind = key[0]
         camera = lowered.cameras.get(packets[0].viewport_id)
         if camera is None:
-            raise GPUUnsupportedError(f"GPU packet {packets[0].semantic_id!r} has no viewport camera")
+            raise GPUUnsupportedError(
+                f"GPU packet {packets[0].semantic_id!r} has no viewport camera"
+            )
         rows = []
         for packet in packets:
             color = np.asarray(packet.rgba, dtype=np.float32)
@@ -316,23 +398,20 @@ def draw_instanced_shapes(
                 rows.append(row)
         payload = np.asarray(rows, dtype="<f4")
         instance_buffer = _buffer(device, payload.tobytes(), vertex_usage, resources)
+        rect = packets[0].rect
         aspect = (lowered.width * rect[2]) / max(lowered.height * rect[3], 1.0e-12)
-        matrix = _camera_matrix(camera, aspect=aspect).astype("<f4", copy=False).tobytes()
-        uniform = matrix + bytes(max(0, 256 - len(matrix)))
-        uniform_buffer = _buffer(device, uniform, uniform_usage, resources)
+        uniform_buffer = _buffer(
+            device,
+            uniform_bytes(camera, aspect=aspect),
+            uniform_usage,
+            resources,
+        )
         bind_group = device.create_bind_group(
             layout=uniform_layout,
             entries=[{"binding": 0, "resource": {"buffer": uniform_buffer}}],
         )
-        x, y, width, height = rect
-        render_pass.set_viewport(
-            x * lowered.width,
-            (1.0 - y - height) * lowered.height,
-            width * lowered.width,
-            height * lowered.height,
-            0.0,
-            1.0,
-        )
+        resources.append(bind_group)
+        _viewport(render_pass, lowered, rect)
         mesh_kind = "sphere" if kind == "ellipsoid" else kind
         render_pass.set_pipeline(pipelines[kind])
         render_pass.set_bind_group(0, bind_group)

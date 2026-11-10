@@ -40,6 +40,64 @@ _CELL_EDGES = (
 )
 
 
+def _nonempty(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, (str, bytes)):
+        return bool(value)
+    try:
+        return len(value) > 0
+    except TypeError:
+        return True
+
+
+def frame_batch_fast_path(
+    source: Any,
+    *,
+    representation: str,
+    view: Any = None,
+    render_spec: Any = None,
+    topology_data: Any = None,
+    cell_overlays: Any = None,
+    vector_overlays: Any = None,
+    atom_groups: Any = None,
+    bond_groups: Any = None,
+    atom_property_color: Any = None,
+) -> bool:
+    """Return whether one session can draw these frames from stored arrays.
+
+    The fast path reads ``FrameBatch`` positions directly. It does not apply
+    a display mode, atom or bond groups, overlays, topology, labels, axes,
+    or property colours. Empty group lists are not a request. Structure
+    frames stay on the planned renderer so the displayed atom set matches
+    the CPU path.
+    """
+
+    if representation not in {"ball", "ball_stick"}:
+        return False
+    frames = tuple(getattr(source, "frames", ()) or ())
+    if not frames or not isinstance(frames[0], FrameBatch):
+        return False
+    if view is not None or atom_property_color is not None:
+        return False
+    if any(
+        _nonempty(item)
+        for item in (
+            topology_data,
+            cell_overlays,
+            vector_overlays,
+            atom_groups,
+            bond_groups,
+        )
+    ):
+        return False
+    if bool(getattr(render_spec, "show_labels", False)) or bool(
+        getattr(render_spec, "show_axes", False)
+    ):
+        return False
+    return True
+
+
 def _rgb(value: Any) -> tuple[float, float, float, float]:
     text = str(value).strip().lstrip("#")
     if len(text) == 6:
@@ -83,12 +141,17 @@ def lowered_from_frame(
     cell_width_px: float,
     bonded: bool,
     tracker: Any,
+    min_atom_radius: float | None = None,
 ) -> LoweredPlan:
     """Build instanced sphere and bond packets from one frame's arrays."""
 
     from .cpu.batch import element_style_tables
 
-    colors, radii = element_style_tables(atom_scale)
+    colors, radii = element_style_tables(
+        atom_scale,
+        bond_radius=bond_radius,
+        min_atom_radius=min_atom_radius,
+    )
     packets: list[DrawPacket] = []
     for index, (position, number) in enumerate(
         zip(frame.positions, frame.atomic_numbers, strict=True)
@@ -205,7 +268,27 @@ def render_gpu_animation(
     """Encode an animation with one GPU session and at most one frame in flight."""
 
     representation = str(getattr(render_spec, "representation", "ball_stick"))
-    if representation not in {"ball", "ball_stick"}:
+    batch_options = dict(
+        representation=representation,
+        view=view,
+        render_spec=render_spec,
+        topology_data=topology_data,
+        cell_overlays=cell_overlays,
+        vector_overlays=vector_overlays,
+        atom_groups=atom_groups,
+        bond_groups=bond_groups,
+        atom_property_color=atom_property_color,
+    )
+    frames = tuple(getattr(source, "frames", ()) or ())
+    batch_frames = bool(frames) and isinstance(frames[0], FrameBatch)
+    if not frame_batch_fast_path(source, **batch_options):
+        if batch_frames and representation in {"ball", "ball_stick"}:
+            raise GPUUnsupportedError(
+                "GPU FrameBatch animation draws only the stored spheres, bonds, "
+                "and cell. Display mode, groups, overlays, topology, axes, and "
+                "property colors need planned structure frames; text is "
+                "unsupported on the GPU."
+            )
         return render_animation(
             source,
             output,
@@ -222,13 +305,8 @@ def render_gpu_animation(
             annotation_spec=annotation_spec,
             atom_property_color=atom_property_color,
         )
-    if any(
-        value is not None
-        for value in (topology_data, cell_overlays, vector_overlays, atom_groups, bond_groups)
-    ):
-        raise GPUUnsupportedError(
-            "GPU ball animation draws FrameBatch spheres, bonds, and the cell"
-        )
+    if len(frames) < 2:
+        raise ValueError("animation output requires at least two selected frames")
     frames = _frames(source)
     if camera is None:
         raise GPUUnsupportedError("GPU ball animation requires a camera")
@@ -285,6 +363,7 @@ def render_gpu_animation(
                     bond_radius=float(getattr(render_spec, "bond_radius", 0.15)),
                     show_hydrogen=bool(getattr(render_spec, "show_hydrogen", True)),
                     show_cell=bool(getattr(render_spec, "show_cell", True)),
+                    min_atom_radius=getattr(render_spec, "min_atom_radius", None),
                     cell_color=str(getattr(render_spec, "cell_color", "#333333")),
                     cell_width_px=float(getattr(render_spec, "cell_width_px", 2.0)),
                     bonded=tracker is not None,

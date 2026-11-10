@@ -308,3 +308,266 @@ def test_gpu_cli_check_reports_missing_device_without_loading_input(capsys, tmp_
     assert payload["backend"] == "gpu"
     assert payload["ok"] is False
     assert payload["requirements"]["missing_capabilities"] == ["gpu"]
+
+
+def test_cylinder_packet_rejects_coincident_endpoints() -> None:
+    with pytest.raises(ValueError, match="distinct endpoints"):
+        gpu.DrawPacket(
+            kind="cylinder",
+            semantic_id="bond",
+            viewport_id="main",
+            vertices=np.zeros((2, 3)),
+            indices=None,
+            rgba=(1.0, 1.0, 1.0, 1.0),
+            rect=(0.0, 0.0, 1.0, 1.0),
+            metadata={"radius": 0.1},
+        )
+
+
+def test_wide_and_ortep_lines_use_the_cpu_overlay() -> None:
+    from mat_viewer.render.gpu_packets import line_needs_cpu_overlay
+
+    wide = LinePrimitive(
+        "unit-cell",
+        np.asarray([[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]], dtype=float),
+        rgba=(0.2, 0.2, 0.2, 1.0),
+        width_px=2.0,
+        depth_test=False,
+        metadata={"kind": "unit_cell"},
+    )
+    thin = LinePrimitive(
+        "axis",
+        np.asarray([[[0.0, 0.0, 0.0], [0.0, 1.0, 0.0]]], dtype=float),
+        rgba=(0.0, 0.0, 0.0, 1.0),
+        width_px=1.0,
+        depth_test=False,
+    )
+    hatch = LinePrimitive(
+        "hatch",
+        np.asarray([[[0.0, 0.0, 0.0], [0.0, 0.0, 1.0]]], dtype=float),
+        rgba=(0.1, 0.1, 0.1, 1.0),
+        width_px=0.7,
+        metadata={"kind": "ortep_hatch"},
+    )
+    lowered = gpu.lower_plan(_plan(wide, thin, hatch))
+    assert [line_needs_cpu_overlay(packet) for packet in lowered.packets] == [
+        True,
+        False,
+        True,
+    ]
+
+
+def test_ellipsoid_shading_normal_matches_mesh() -> None:
+    from mat_viewer.render.geometry import ellipsoid_mesh, ellipsoid_principal_axes
+    from mat_viewer.render.gpu_draw import _ELLIPSOID_WGSL, ellipsoid_shading_normal
+
+    displacement = np.diag([1.0, 0.25, 0.05])
+    lengths, axes = ellipsoid_principal_axes(displacement)
+    _vertices, _triangles, normals = ellipsoid_mesh(
+        (0.0, 0.0, 0.0), displacement, lat_steps=4, lon_steps=6
+    )
+    got = ellipsoid_shading_normal(np.array([0.0, 0.0, 1.0]), lengths, axes)
+    assert np.allclose(got, normals[0], atol=1e-5)
+    assert "normal.x / safe.x" in _ELLIPSOID_WGSL
+
+
+def test_cylinder_caps_use_axial_normals() -> None:
+    from mat_viewer.render.gpu_draw import _CYLINDER_WGSL, _unit_cylinder
+
+    interleaved, faces = _unit_cylinder(sides=12)
+    normals = interleaved[:, 3:6]
+    saw_cap = False
+    saw_side = False
+    for triangle in faces:
+        axial = np.abs(normals[triangle, 2])
+        if np.any(axial > 0.5):
+            assert np.all(axial > 0.5)
+            saw_cap = True
+        else:
+            assert np.all(axial < 1e-6)
+            saw_side = True
+    assert saw_cap and saw_side
+    assert "axis_n * normal.z" in _CYLINDER_WGSL
+
+
+def test_instance_batches_do_not_merge_viewports() -> None:
+    from mat_viewer.render.gpu_draw import instance_batch_key
+
+    def packet(viewport: str) -> gpu.DrawPacket:
+        return gpu.DrawPacket(
+            kind="sphere",
+            semantic_id="atom",
+            viewport_id=viewport,
+            vertices=np.zeros((1, 3)),
+            indices=None,
+            rgba=(0.2, 0.4, 0.8, 1.0),
+            rect=(0.0, 0.0, 1.0, 1.0),
+            metadata={"radius": 0.3},
+        )
+
+    assert instance_batch_key(packet("left")) != instance_batch_key(packet("right"))
+
+
+def test_gpu_light_matches_the_cpu_camera_light() -> None:
+    from mat_viewer.render.gpu_camera import uniform_bytes, world_light
+
+    camera = CameraSpec.looking_along((1.0, 0.2, 0.4), up=(0.0, 0.0, 1.0))
+    light = world_light(camera)
+    assert light.shape == (3,)
+    assert float(np.linalg.norm(light)) == pytest.approx(1.0, abs=1e-5)
+    uploaded = np.frombuffer(uniform_bytes(camera, aspect=1.25)[64:76], dtype="<f4")
+    assert np.allclose(uploaded, light)
+
+
+def test_session_close_releases_cached_instance_buffers() -> None:
+    destroyed: list[str] = []
+
+    class Buffer:
+        def destroy(self) -> None:
+            destroyed.append("buffer")
+
+    class Device:
+        def destroy(self) -> None:
+            destroyed.append("device")
+
+    session = gpu.GpuSession()
+    session._cache["device"] = Device()
+    session._cache["_instance_resources"] = [Buffer()]
+    session.close()
+    assert destroyed == ["buffer", "device"]
+    assert session._cache == {}
+    with pytest.raises(gpu.GPUError, match="closed"):
+        session.render_frame(_plan(_triangle()))
+
+
+def test_ready_session_keeps_its_device_between_frames() -> None:
+    from mat_viewer.render.gpu_raster import _release_frame
+
+    destroyed: list[str] = []
+
+    class Buffer:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def destroy(self) -> None:
+            destroyed.append(self.name)
+
+    state = {
+        "ready": True,
+        "ephemeral": False,
+        "device": Buffer("device"),
+        "_instance_resources": [Buffer("unit-mesh")],
+    }
+    _release_frame(state, [Buffer("frame")], drop_device=False)
+    assert destroyed == ["frame"]
+    assert state["ready"] is True
+    assert state["_instance_resources"][0].name == "unit-mesh"
+
+
+
+def _batch_frame() -> object:
+    from mat_viewer.loader.frame_batch import FrameBatch
+
+    return FrameBatch(
+        positions=np.asarray([[0.0, 0.0, 0.0]], dtype=float),
+        atomic_numbers=np.asarray([1], dtype=np.uint8),
+        atom_ids=None,
+        origin=np.zeros(3),
+        cell=np.eye(3),
+        pbc=np.asarray([False, False, False]),
+        timestep=0,
+        source_index=0,
+    )
+
+
+def test_frame_batch_hydrogen_uses_the_bond_radius_floor() -> None:
+    from mat_viewer.render.cpu.batch import element_style_tables
+    from mat_viewer.render.gpu_batch import lowered_from_frame
+
+    camera = CameraSpec.looking_along((0.0, 0.0, 1.0), up=(0.0, 1.0, 0.0))
+    lowered = lowered_from_frame(
+        _batch_frame(),
+        camera,
+        width=16,
+        height=16,
+        background=(1.0, 1.0, 1.0, 1.0),
+        atom_scale=1.0,
+        bond_radius=0.2,
+        show_hydrogen=True,
+        show_cell=False,
+        cell_color="#333333",
+        cell_width_px=1.0,
+        bonded=False,
+        tracker=None,
+    )
+    _colors, radii = element_style_tables(1.0, bond_radius=0.2)
+    assert lowered.packets[0].metadata["radius"] == pytest.approx(float(radii[1]))
+
+
+def test_empty_group_lists_keep_the_frame_batch_path() -> None:
+    from types import SimpleNamespace
+
+    from mat_viewer.render.gpu_batch import frame_batch_fast_path
+
+    frame = _batch_frame()
+    source = SimpleNamespace(frames=(frame, frame))
+    assert frame_batch_fast_path(
+        source,
+        representation="ball",
+        atom_groups=[],
+        bond_groups=[],
+    )
+
+
+def test_structure_frames_use_the_planned_gpu_session(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from mat_viewer.render.gpu_batch import render_gpu_animation
+
+    sentinel = object()
+    monkeypatch.setattr(
+        "mat_viewer.render.gpu_batch.render_animation",
+        lambda *args, **kwargs: sentinel,
+    )
+    source = SimpleNamespace(
+        frames=(SimpleNamespace(bundle=object()), SimpleNamespace(bundle=object()))
+    )
+    assert (
+        render_gpu_animation(
+            source,
+            "movie.gif",
+            render_spec=SimpleNamespace(representation="ball"),
+            atom_groups=[],
+            bond_groups=[],
+        )
+        is sentinel
+    )
+
+
+def test_frame_batch_property_color_is_not_ignored() -> None:
+    from types import SimpleNamespace
+
+    from mat_viewer.render.gpu_batch import render_gpu_animation
+
+    frame = _batch_frame()
+    with pytest.raises(gpu.GPUUnsupportedError, match="property"):
+        render_gpu_animation(
+            SimpleNamespace(frames=(frame, frame)),
+            "movie.gif",
+            render_spec=SimpleNamespace(representation="ball"),
+            atom_property_color={"field": "charge"},
+        )
+
+
+def test_frame_batch_animation_requires_two_frames() -> None:
+    from types import SimpleNamespace
+
+    from mat_viewer.render.gpu_batch import render_gpu_animation
+
+    with pytest.raises(ValueError, match="at least two"):
+        render_gpu_animation(
+            SimpleNamespace(frames=(_batch_frame(),)),
+            "movie.gif",
+            render_spec=SimpleNamespace(representation="ball"),
+        )
+

@@ -261,15 +261,18 @@ the numeric base renderer. PNG, GIF, and MP4 can all use the batch path.
 | .pdf | Vector PDF | CPU 3D, Matplotlib projected 2D, or explicit Plotly + Kaleido |
 | .svg | Vector SVG | CPU 3D, Matplotlib projected 2D, or explicit Plotly + Kaleido |
 | .html | Interactive 3D | Plotly (`[plotly]`) |
-| .gif | Multi-frame animation | CPU + `[animation]` |
-| .mp4 | H.264 animation | CPU + `[animation]` |
+| .gif | Multi-frame animation | CPU or native GPU, plus `[animation]` |
+| .mp4 | H.264 animation | CPU or native GPU, plus `[animation]` |
 
 Use `--backend cpu|matplotlib|plotly|gpu`; there is no backend or representation fallback.
-The `gpu` backend is an opt-in, PNG-only offscreen renderer. Install
-`matter-vis[gpu]` and verify a usable adapter with
-`mat-vis capabilities --require gpu --json` before rendering. Unsupported
-transparent, dashed, text, or depth-disabled primitives fail explicitly; the
-command never falls back to CPU.
+The `gpu` backend is opt-in for PNG, GIF, and MP4. Install
+`matter-vis[gpu]` (and `matter-vis[animation]` for GIF/MP4) and verify a
+usable adapter with `mat-vis capabilities --require gpu --json` before
+rendering. Transparent primitives, dashed lines, and text fail explicitly.
+Opaque meshes, instanced spheres, cylinders, and solid ellipsoids are drawn
+on the device. Lines wider than one pixel, including the default unit-cell
+edges, are composited from the GPU depth buffer. The command never falls
+back to CPU.
 Base MatterVis provides CPU 3D and Matplotlib projected 2D PNG/PDF/SVG, ORTEP, rings, polyhedra, and
 ordinary structure inputs. Run `mat-vis capabilities --require FEATURE --json`
 for an exact install command before using an optional frontend.
@@ -319,9 +322,10 @@ recorded but appear only when explicitly written into the label template.
 Table provenance includes the resolved path, column, row mapping, and SHA256.
 Generic annotations and the physical-time shortcut are mutually exclusive.
 
-Animations preserve one requested representation, camera, and CPU backend
-across every frame. Plotly GIF/MP4 is rejected explicitly; MatterVis never
-substitutes one frame backend for another.
+Animations preserve one requested representation, camera, and backend
+across every frame. Plotly GIF/MP4 is rejected explicitly. CPU and GPU are
+the animation backends; MatterVis never substitutes one frame backend for
+another.
 
 ### Display options
 
@@ -330,7 +334,7 @@ substitutes one frame backend for another.
 | --view MODE | auto | Periodic input uses unit_cell; nonperiodic or synthetic-cell input uses cluster |
 | --style STYLE | ball_stick | ball_stick, ball, space_filling, stick, ortep, or wireframe |
 | --shading MODE | smooth | smooth or flat mesh shading |
-| --backend BACKEND | cpu | cpu (3D), matplotlib (projected 2D), plotly, or explicit native GPU PNG; never selected by fallback |
+| --backend BACKEND | cpu | cpu (3D), matplotlib (projected 2D), plotly, or explicit native GPU PNG/GIF/MP4; never selected by fallback |
 | --orthogonal | yes | Orthographic projection |
 | --perspective | no | Perspective projection |
 | --isovalue VALUE | automatic | Explicit positive cube isosurface magnitude |
