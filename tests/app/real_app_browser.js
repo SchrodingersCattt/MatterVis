@@ -704,8 +704,20 @@ async function runCrossClient(page, browser) {
 
 async function runLeak(page) {
   await graphReady(page);
+  const started = Date.now();
   for (let i = 0; i < 100; i += 1) {
-    await clickTab(page, i % 2 === 0 ? "ionic_nacl" : "molecular_water");
+    const name = i % 2 === 0 ? "ionic_nacl" : "molecular_water";
+    const before = Date.now();
+    await clickTab(page, name);
+    if (i % 10 === 9) {
+      const census = await page.evaluate(() => ({
+        sockets: (window.__mvCensus || {}).socketsOpen || 0,
+        webgl: (window.__mvCensus || {}).webglContexts || 0,
+        canvases: document.getElementById("crystal-graph")
+          ? document.getElementById("crystal-graph").querySelectorAll("canvas").length : 0,
+      }));
+      log(`leak ${i + 1}/100 ${Date.now() - before}ms elapsed ${Date.now() - started}ms ${JSON.stringify(census)}`);
+    }
   }
   const census = await page.evaluate(() => {
     const root = document.getElementById("crystal-graph");
@@ -1591,7 +1603,13 @@ const networkEvents = [];
   if (artifactDir) {
     fs.mkdirSync(artifactDir, {recursive: true});
     try {
-      await context.tracing.start({screenshots: true, snapshots: true});
+      // Screenshot traces and DOM snapshots together make each WebGL
+      // Plotly.react pay for a frame capture. On one core that stretches a
+      // scene switch from under a second to about two, so 100 switches miss
+      // the process budget before the socket census runs. The census keeps
+      // DOM snapshots. A failed run still writes its own page screenshot.
+      const screenshots = mode !== "leak";
+      await context.tracing.start({screenshots, snapshots: true});
       tracing = true;
       tracingStarted = true;
     } catch (error) {
