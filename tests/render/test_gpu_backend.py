@@ -39,10 +39,58 @@ def _triangle(*, alpha: float = 1.0) -> TriangleMeshPrimitive:
     )
 
 
+def test_gpu_session_rejects_a_second_in_flight_frame() -> None:
+    session = gpu.GpuSession()
+    session._in_flight = 1
+    with pytest.raises(gpu.GPUError, match="in-flight"):
+        session.render_frame(_plan(_triangle()))
+    session._in_flight = 0
+    session.close()
+
+
+def test_frame_batch_lowers_to_instanced_packets() -> None:
+    from mat_viewer.loader.frame_batch import FrameBatch
+    from mat_viewer.render.gpu_batch import lowered_from_frame
+
+    frame = FrameBatch(
+        positions=np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=float),
+        atomic_numbers=np.asarray([11, 17], dtype=np.uint8),
+        atom_ids=None,
+        origin=np.zeros(3),
+        cell=np.eye(3) * 4.0,
+        pbc=np.asarray([True, True, True]),
+        timestep=0,
+        source_index=0,
+    )
+    camera = CameraSpec.looking_along((0.0, 0.0, 1.0), up=(0.0, 1.0, 0.0))
+    lowered = lowered_from_frame(
+        frame,
+        camera,
+        width=32,
+        height=24,
+        background=(1.0, 1.0, 1.0, 1.0),
+        atom_scale=1.0,
+        bond_radius=0.15,
+        show_hydrogen=True,
+        show_cell=True,
+        cell_color="#333333",
+        cell_width_px=2.0,
+        bonded=False,
+        tracker=None,
+    )
+    assert [packet.kind for packet in lowered.packets] == ["sphere", "sphere", "line"]
+    assert lowered.packets[-1].metadata["depth_test"] is False
+
+
+def test_gpu_animation_formats_are_declared() -> None:
+    assert requirements_for_render("clip.gif", "gpu") == ("gif", "gpu", "animation")
+    assert requirements_for_render("clip.mp4", "gpu") == ("mp4", "gpu", "animation")
+
+
 def test_gpu_requirements_are_explicit_and_png_only() -> None:
     assert requirements_for_render("figure.png", "gpu") == ("png", "gpu")
     assert resolve_requirements("gpu").capabilities == ("core", "gpu")
-    with pytest.raises(ValueError, match="GPU backend currently supports PNG"):
+    with pytest.raises(ValueError, match="GPU backend supports PNG"):
         requirements_for_render("figure.svg", "gpu")
 
 
@@ -54,10 +102,57 @@ def test_lower_plan_preserves_camera_and_semantic_ids() -> None:
     assert lowered.packets[0].vertices.flags.writeable is False
 
 
+def test_transparent_triangle_is_rejected() -> None:
+    with pytest.raises(gpu.GPUUnsupportedError, match="transparent"):
+        gpu.lower_plan(_plan(_triangle(alpha=0.5)))
+
+
+def test_cell_edges_lower_when_width_is_not_one_pixel() -> None:
+    edges = LinePrimitive(
+        "unit-cell",
+        np.asarray([[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]], dtype=float),
+        rgba=(0.2, 0.2, 0.2, 1.0),
+        width_px=2.0,
+        depth_test=False,
+        metadata={"kind": "unit_cell"},
+    )
+    lowered = gpu.lower_plan(_plan(edges))
+    assert lowered.packets[0].kind == "line"
+    assert lowered.packets[0].metadata["depth_test"] is False
+    assert lowered.packets[0].metadata["width_px"] == pytest.approx(2.0)
+
+
+def test_sphere_and_bond_lower_to_instances() -> None:
+    sphere = TriangleMeshPrimitive(
+        semantic_id="atom",
+        vertices=np.zeros((4, 3)),
+        triangles=np.asarray([[0, 1, 2]]),
+        rgba=(0.1, 0.2, 0.3, 1.0),
+        metadata={
+            "_raster_shape": "sphere",
+            "_raster_center": (1.0, 2.0, 3.0),
+            "_raster_radius": 0.4,
+        },
+    )
+    bond = TriangleMeshPrimitive(
+        semantic_id="bond",
+        vertices=np.zeros((4, 3)),
+        triangles=np.asarray([[0, 1, 2]]),
+        rgba=(0.4, 0.5, 0.6, 1.0),
+        metadata={
+            "_raster_shape": "cylinder",
+            "_raster_start": (0.0, 0.0, 0.0),
+            "_raster_end": (1.0, 0.0, 0.0),
+            "_raster_radius": 0.15,
+        },
+    )
+    lowered = gpu.lower_plan(_plan(sphere, bond))
+    assert [packet.kind for packet in lowered.packets] == ["sphere", "cylinder"]
+
+
 @pytest.mark.parametrize(
     "primitive",
     [
-        _triangle(alpha=0.5),
         LinePrimitive(
             "dashed",
             np.asarray([[[0, 0, 0], [1, 0, 0]]], dtype=float),
@@ -159,7 +254,7 @@ def test_gpu_render_receipt_has_stage_timings_without_device(monkeypatch, tmp_pa
     monkeypatch.setattr(
         gpu,
         "_wgpu_rgba",
-        lambda lowered, probe_info: (
+        lambda lowered, probe_info, cache=None: (
             bytes(lowered.width * lowered.height * 4),
             {"upload": 0.01, "draw": 0.02, "readback": 0.03},
         ),

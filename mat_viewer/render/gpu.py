@@ -1,11 +1,9 @@
 """Small optional WebGPU backend for backend-neutral :class:`RenderPlan` objects.
 
-The GPU backend is deliberately conservative.  The first implementation only
-accepts opaque triangle meshes and opaque, undashed line segments.  Text,
-transparent primitives, and geometry that cannot be represented by the tiny
-headless pipeline are rejected before a device is requested.  This makes the
-module useful as a capability probe and as a stable lowering boundary while
-keeping the eventual interactive renderer free to grow independently.
+The GPU backend draws opaque meshes and instanced spheres, cylinders, and
+ellipsoids.  Text stays on the CPU.  Transparent primitives are rejected:
+on an A800, source-alpha blending of two overlapping triangles did not match
+the CPU image, so there is no silent CPU fallback.
 
 ``wgpu`` is an optional dependency and is imported only from :func:`probe` or
 :func:`render`.  Importing :mod:`mat_viewer.render.gpu` is therefore safe in a
@@ -94,7 +92,7 @@ class DrawPacket:
     opaque colour per packet rather than inventing a material system.
     """
 
-    kind: Literal["mesh", "line"]
+    kind: Literal["mesh", "line", "sphere", "cylinder", "ellipsoid"]
     semantic_id: str
     viewport_id: str
     vertices: np.ndarray
@@ -104,8 +102,10 @@ class DrawPacket:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.kind not in {"mesh", "line"}:
-            raise ValueError("DrawPacket.kind must be 'mesh' or 'line'")
+        if self.kind not in {"mesh", "line", "sphere", "cylinder", "ellipsoid"}:
+            raise ValueError(
+                "DrawPacket.kind must be 'mesh', 'line', 'sphere', 'cylinder', or 'ellipsoid'"
+            )
         if not self.semantic_id or not self.viewport_id:
             raise ValueError("DrawPacket ids must be non-empty")
         vertices = np.asarray(self.vertices, dtype=np.float32)
@@ -121,20 +121,40 @@ class DrawPacket:
                 raise ValueError("mesh packet indices must have shape (M, 3)")
             if indices.size and int(indices.max()) >= len(vertices):
                 raise ValueError("mesh packet index is out of range")
-        else:
+        elif self.kind == "line":
             if self.indices is not None:
                 raise ValueError("line packets do not use indices")
             if len(vertices) % 2:
                 raise ValueError("line packet vertices must contain pairs")
+            indices = None
+        elif self.kind == "sphere":
+            if self.indices is not None or len(vertices) != 1:
+                raise ValueError("sphere packets need one center and no indices")
+            if float(self.metadata.get("radius", 0.0)) <= 0.0:
+                raise ValueError("sphere packets require a positive radius")
+            indices = None
+        elif self.kind == "cylinder":
+            if self.indices is not None or len(vertices) != 2:
+                raise ValueError("cylinder packets need two endpoints and no indices")
+            if float(self.metadata.get("radius", 0.0)) <= 0.0:
+                raise ValueError("cylinder packets require a positive radius")
+            indices = None
+        else:
+            if self.indices is not None or len(vertices) != 1:
+                raise ValueError("ellipsoid packets need one center and no indices")
+            lengths = np.asarray(self.metadata.get("lengths", []), dtype=float)
+            axes = np.asarray(self.metadata.get("axes", []), dtype=float)
+            if lengths.shape != (3,) or axes.shape != (3, 3):
+                raise ValueError("ellipsoid packets require lengths (3,) and axes (3, 3)")
             indices = None
         rgba = tuple(float(channel) for channel in self.rgba)
         if len(rgba) != 4 or not np.all(np.isfinite(rgba)):
             raise ValueError("DrawPacket.rgba must contain four finite channels")
         if any(channel < 0.0 or channel > 1.0 for channel in rgba):
             raise ValueError("DrawPacket.rgba channels must lie in [0, 1]")
-        if rgba[3] < 1.0 - 1e-7:
+        if rgba[3] < 1.0 - 1e-7 and self.kind == "line":
             raise GPUUnsupportedError(
-                f"GPU MVP accepts opaque packets only; {self.semantic_id!r} is transparent"
+                f"GPU line packets must be opaque; {self.semantic_id!r} is transparent"
             )
         rect = tuple(float(item) for item in self.rect)
         if len(rect) != 4 or not np.all(np.isfinite(rect)):
@@ -213,9 +233,9 @@ def _adapter_name(adapter: Any) -> str | None:
         except Exception:
             info = None
     if isinstance(info, Mapping):
-        value = info.get("description") or info.get("device") or info.get("name")
+        value = info.get("device") or info.get("name") or info.get("description")
     else:
-        value = getattr(info, "description", None) or getattr(info, "device", None)
+        value = getattr(info, "device", None) or getattr(info, "description", None)
     value = value or getattr(adapter, "name", None)
     return str(value) if value else None
 
@@ -348,7 +368,7 @@ def _opaque_rgba(value: Any, semantic_id: str) -> tuple[float, float, float, flo
         raise GPUUnsupportedError(f"primitive {semantic_id!r} has an invalid RGBA colour")
     if rgba[3] < 1.0 - 1e-7:
         raise GPUUnsupportedError(
-            f"GPU MVP accepts opaque primitives only; {semantic_id!r} has alpha {rgba[3]:.3g}"
+            f"GPU backend does not support transparent primitives ({semantic_id!r})"
         )
     if any(channel < 0.0 or channel > 1.0 for channel in rgba):
         raise GPUUnsupportedError(f"primitive {semantic_id!r} has out-of-range colour channels")
@@ -371,32 +391,79 @@ def lower_plan(plan: RenderPlan) -> LoweredPlan:
             semantic_id = str(getattr(primitive, "semantic_id", ""))
             if isinstance(primitive, TriangleMeshPrimitive):
                 rgba = _opaque_rgba(primitive.rgba, semantic_id)
-                packets.append(
-                    DrawPacket(
-                        kind="mesh",
-                        semantic_id=semantic_id,
-                        viewport_id=viewport.semantic_id,
-                        vertices=primitive.vertices,
-                        indices=primitive.triangles,
-                        rgba=rgba,
-                        rect=viewport.rect,
-                        metadata=primitive.metadata,
+                shape = str(primitive.metadata.get("_raster_shape") or "")
+                if shape == "sphere":
+                    packets.append(
+                        DrawPacket(
+                            kind="sphere",
+                            semantic_id=semantic_id,
+                            viewport_id=viewport.semantic_id,
+                            vertices=np.asarray(
+                                [primitive.metadata["_raster_center"]], dtype=np.float32
+                            ),
+                            indices=None,
+                            rgba=rgba,
+                            rect=viewport.rect,
+                            metadata={"radius": float(primitive.metadata["_raster_radius"])},
+                        )
                     )
-                )
+                elif shape == "cylinder":
+                    packets.append(
+                        DrawPacket(
+                            kind="cylinder",
+                            semantic_id=semantic_id,
+                            viewport_id=viewport.semantic_id,
+                            vertices=np.asarray(
+                                [
+                                    primitive.metadata["_raster_start"],
+                                    primitive.metadata["_raster_end"],
+                                ],
+                                dtype=np.float32,
+                            ),
+                            indices=None,
+                            rgba=rgba,
+                            rect=viewport.rect,
+                            metadata={"radius": float(primitive.metadata["_raster_radius"])},
+                        )
+                    )
+                elif shape == "ellipsoid":
+                    packets.append(
+                        DrawPacket(
+                            kind="ellipsoid",
+                            semantic_id=semantic_id,
+                            viewport_id=viewport.semantic_id,
+                            vertices=np.asarray(
+                                [primitive.metadata["_raster_center"]], dtype=np.float32
+                            ),
+                            indices=None,
+                            rgba=rgba,
+                            rect=viewport.rect,
+                            metadata={
+                                "lengths": tuple(primitive.metadata["_raster_lengths"]),
+                                "axes": np.asarray(
+                                    primitive.metadata["_raster_axes"], dtype=float
+                                ).reshape(3, 3),
+                            },
+                        )
+                    )
+                else:
+                    packets.append(
+                        DrawPacket(
+                            kind="mesh",
+                            semantic_id=semantic_id,
+                            viewport_id=viewport.semantic_id,
+                            vertices=primitive.vertices,
+                            indices=primitive.triangles,
+                            rgba=rgba,
+                            rect=viewport.rect,
+                            metadata=primitive.metadata,
+                        )
+                    )
             elif isinstance(primitive, LinePrimitive):
                 rgba = _opaque_rgba(primitive.rgba, semantic_id)
                 if primitive.dash:
                     raise GPUUnsupportedError(
-                        f"GPU MVP does not support dashed lines ({semantic_id!r})"
-                    )
-                if not primitive.depth_test:
-                    raise GPUUnsupportedError(
-                        f"GPU MVP requires depth-tested lines ({semantic_id!r})"
-                    )
-                if abs(float(primitive.width_px) - 1.0) > 1.0e-6:
-                    raise GPUUnsupportedError(
-                        "GPU MVP supports one-pixel line segments only; "
-                        f"{semantic_id!r} requests width_px={primitive.width_px:g}"
+                        f"GPU backend does not support dashed lines ({semantic_id!r})"
                     )
                 packets.append(
                     DrawPacket(
@@ -407,7 +474,11 @@ def lower_plan(plan: RenderPlan) -> LoweredPlan:
                         indices=None,
                         rgba=rgba,
                         rect=viewport.rect,
-                        metadata=primitive.metadata,
+                        metadata={
+                            **dict(primitive.metadata),
+                            "depth_test": bool(primitive.depth_test),
+                            "width_px": float(primitive.width_px),
+                        },
                     )
                 )
             elif isinstance(primitive, TextPrimitive):
@@ -445,6 +516,77 @@ def lower_to_draw_packets(plan: RenderPlan) -> LoweredPlan:
     return lower_plan(plan)
 
 
+def _ndc_to_camera_depth(depth_ndc: np.ndarray, camera: Any) -> np.ndarray:
+    """Convert WebGPU window depth to the CPU composite's positive camera depth."""
+
+    near = float(camera.near)
+    far = float(camera.far)
+    span = near - far
+    if str(camera.projection) == "perspective":
+        p22 = far / span
+        p23 = near * far / span
+        z_view = p23 / (-depth_ndc - p22)
+    else:
+        z_view = (depth_ndc - near / span) * span
+    return np.asarray(-z_view, dtype=np.float32)
+
+
+def _composite_depth_overlays(
+    rgba: bytes,
+    lowered: LoweredPlan,
+    packets: tuple[DrawPacket, ...],
+    *,
+    device: Any,
+    depth_texture: Any,
+    wgpu: Any,
+) -> bytes:
+    """Draw ORTEP hatch and octant lines on the read-back colour and depth."""
+
+    width = int(lowered.width)
+    height = int(lowered.height)
+    row_bytes = width * 4
+    padded = ((row_bytes + 255) // 256) * 256
+    usage = _usage(wgpu, "COPY_DST") | _usage(wgpu, "MAP_READ")
+    buffer = device.create_buffer(size=padded * height, usage=usage)
+    encoder = device.create_command_encoder()
+    encoder.copy_texture_to_buffer(
+        {"texture": depth_texture},
+        {"buffer": buffer, "bytes_per_row": padded, "rows_per_image": height},
+        (width, height, 1),
+    )
+    _submit_and_wait(device, [encoder.finish()])
+    raw = _map_readback_sync(buffer, wgpu=wgpu, device=device)
+    depth = np.empty((height, width), dtype=np.float32)
+    for row in range(height):
+        start = row * padded
+        depth[row] = np.frombuffer(raw[start : start + row_bytes], dtype="<f4", count=width)
+    viewports = {packet.viewport_id for packet in packets}
+    if len(viewports) != 1:
+        raise GPUUnsupportedError("ORTEP depth overlay requires one viewport")
+    camera = lowered.cameras[next(iter(viewports))]
+    linear = _ndc_to_camera_depth(depth, camera)
+    image = np.frombuffer(rgba, dtype=np.uint8).reshape(height, width, 4).copy()
+    from .contracts import LinePrimitive
+    from .cpu.raster import composite_primitives
+
+    primitives = [
+        LinePrimitive(
+            packet.semantic_id,
+            np.asarray(packet.vertices, dtype=float).reshape(-1, 2, 3),
+            rgba=tuple(packet.rgba),
+            width_px=float(packet.metadata.get("width_px", 1.0)),
+            depth_test=bool(packet.metadata.get("depth_test", True)),
+            metadata={"kind": packet.metadata.get("kind")},
+        )
+        for packet in packets
+    ]
+    composited, _depth = composite_primitives(image, linear, camera, primitives)
+    destroy = getattr(buffer, "destroy", None)
+    if callable(destroy):
+        destroy()
+    return np.ascontiguousarray(composited).tobytes()
+
+
 def _camera_matrix(camera: Any, *, aspect: float) -> np.ndarray:
     """Build a column-major world-to-clip matrix for the MVP shader."""
 
@@ -471,7 +613,7 @@ def _camera_matrix(camera: Any, *, aspect: float) -> np.ndarray:
             [
                 [f / max(aspect, 1e-12), 0, 0, 0],
                 [0, f, 0, 0],
-                [0, 0, (far + near) / (near - far), (2 * far * near) / (near - far)],
+                [0, 0, far / (near - far), (near * far) / (near - far)],
                 [0, 0, -1, 0],
             ],
             dtype=np.float32,
@@ -487,7 +629,7 @@ def _camera_matrix(camera: Any, *, aspect: float) -> np.ndarray:
             [
                 [1 / half_x, 0, 0, 0],
                 [0, 1 / half_y, 0, 0],
-                [0, 0, 2 / (near - far), (far + near) / (near - far)],
+                [0, 0, 1 / (near - far), near / (near - far)],
                 [0, 0, 0, 1],
             ],
             dtype=np.float32,
@@ -529,7 +671,12 @@ def _map_readback_sync(readback: Any, *, wgpu: Any, device: Any) -> bytes:
     )
 
 
-def _wgpu_rgba(lowered: LoweredPlan, *, probe_info: GPUProbe) -> tuple[bytes, dict[str, float]]:
+def _wgpu_rgba(
+    lowered: LoweredPlan,
+    *,
+    probe_info: GPUProbe,
+    cache: dict[str, Any] | None = None,
+) -> tuple[bytes, dict[str, float]]:
     """Render packets to an off-screen RGBA texture and read it back.
 
     The function intentionally uses only synchronous ``wgpu`` calls.  A few
@@ -540,70 +687,88 @@ def _wgpu_rgba(lowered: LoweredPlan, *, probe_info: GPUProbe) -> tuple[bytes, di
 
     del probe_info  # retained in the signature for callers that cache probes
     started = time.perf_counter()
-    wgpu = _import_wgpu()
-    adapter = _request_adapter(wgpu)
-    if adapter is None:
-        raise GPUUnavailableError("wgpu could not find a compatible adapter")
-    device = _request_device(adapter)
-    if device is None:
-        raise GPUUnavailableError("wgpu adapter did not provide a device")
-    resources: list[Any] = []
+    state = cache if cache is not None else {}
+    if not state.get("ready"):
+        wgpu = _import_wgpu()
+        adapter = _request_adapter(wgpu)
+        if adapter is None:
+            raise GPUUnavailableError("wgpu could not find a compatible adapter")
+        device = _request_device(adapter)
+        if device is None:
+            raise GPUUnavailableError("wgpu adapter did not provide a device")
 
-    usage_texture = getattr(getattr(wgpu, "TextureUsage", object()), "RENDER_ATTACHMENT", None)
-    # BufferUsage.COPY_SRC and TextureUsage.COPY_SRC have different bit values;
-    # do not use the generic buffer-first helper for a texture descriptor.
-    copy_src = getattr(getattr(wgpu, "TextureUsage", object()), "COPY_SRC", None)
-    usage_buffer = _usage(wgpu, "COPY_DST")
-    map_read = _usage(wgpu, "MAP_READ")
-    uniform_usage = _usage(wgpu, "UNIFORM")
-    vertex_usage = _usage(wgpu, "VERTEX")
-    index_usage = _usage(wgpu, "INDEX")
-    if None in (
-        usage_texture,
-        copy_src,
-        usage_buffer,
-        map_read,
-        uniform_usage,
-        vertex_usage,
-        index_usage,
-    ):
-        raise GPUUnavailableError("wgpu runtime does not expose the required buffer/texture usages")
-    # Every staging buffer is populated with ``queue.write_buffer`` and must
-    # therefore include COPY_DST in addition to its binding usage.
-    uniform_usage |= usage_buffer
-    vertex_usage |= usage_buffer
-    index_usage |= usage_buffer
-    buffer_usage = usage_buffer | map_read
-    texture = device.create_texture(
-        size=(lowered.width, lowered.height, 1),
-        format="rgba8unorm",
-        usage=usage_texture | copy_src,
-    )
-    resources.append(texture)
-    target = texture.create_view()
-    depth_texture = device.create_texture(
-        size=(lowered.width, lowered.height, 1),
-        format="depth24plus",
-        usage=usage_texture,
-    )
-    resources.append(depth_texture)
-    depth_view = depth_texture.create_view()
-    shader = device.create_shader_module(code=_WGSL)
-    stage = getattr(wgpu, "ShaderStage", None)
-    vertex_stage = getattr(stage, "VERTEX", 1)
-    uniform_layout = device.create_bind_group_layout(
-        entries=[
-            {
-                "binding": 0,
-                "visibility": vertex_stage,
-                "buffer": {"type": "uniform"},
-            }
-        ]
-    )
-    pipeline_layout = device.create_pipeline_layout(bind_group_layouts=[uniform_layout])
+        usage_texture = getattr(getattr(wgpu, "TextureUsage", object()), "RENDER_ATTACHMENT", None)
+        # BufferUsage.COPY_SRC and TextureUsage.COPY_SRC have different bit values;
+        # do not use the generic buffer-first helper for a texture descriptor.
+        copy_src = getattr(getattr(wgpu, "TextureUsage", object()), "COPY_SRC", None)
+        usage_buffer = _usage(wgpu, "COPY_DST")
+        map_read = _usage(wgpu, "MAP_READ")
+        uniform_usage = _usage(wgpu, "UNIFORM")
+        vertex_usage = _usage(wgpu, "VERTEX")
+        index_usage = _usage(wgpu, "INDEX")
+        if None in (
+            usage_texture,
+            copy_src,
+            usage_buffer,
+            map_read,
+            uniform_usage,
+            vertex_usage,
+            index_usage,
+        ):
+            raise GPUUnavailableError("wgpu runtime does not expose the required buffer/texture usages")
+        # Every staging buffer is populated with ``queue.write_buffer`` and must
+        # therefore include COPY_DST in addition to its binding usage.
+        uniform_usage |= usage_buffer
+        vertex_usage |= usage_buffer
+        index_usage |= usage_buffer
+        buffer_usage = usage_buffer | map_read
+        shader = device.create_shader_module(code=_WGSL)
+        stage = getattr(wgpu, "ShaderStage", None)
+        vertex_stage = getattr(stage, "VERTEX", 1)
+        uniform_layout = device.create_bind_group_layout(
+            entries=[
+                {
+                    "binding": 0,
+                    "visibility": vertex_stage,
+                    "buffer": {"type": "uniform"},
+                }
+            ]
+        )
+        pipeline_layout = device.create_pipeline_layout(bind_group_layouts=[uniform_layout])
 
-    def make_pipeline(topology: str) -> Any:
-        return device.create_render_pipeline(
+        def make_pipeline(topology: str) -> Any:
+            return device.create_render_pipeline(
+                layout=pipeline_layout,
+                vertex={
+                    "module": shader,
+                    "entry_point": "vs_main",
+                    "buffers": [
+                        {
+                            "array_stride": 28,
+                            "attributes": [
+                                {"format": "float32x3", "offset": 0, "shader_location": 0},
+                                {"format": "float32x4", "offset": 12, "shader_location": 1},
+                            ],
+                        }
+                    ],
+                },
+                primitive={"topology": topology, "cull_mode": "none"},
+                fragment={
+                    "module": shader,
+                    "entry_point": "fs_main",
+                    "targets": [{"format": "rgba8unorm"}],
+                },
+                depth_stencil={
+                "format": "depth32float",
+                "depth_write_enabled": True,
+                "depth_compare": "less",
+                },
+                multisample={"count": 1},
+            )
+
+        mesh_pipeline = make_pipeline("triangle-list")
+        line_pipeline = make_pipeline("line-list")
+        overlay_pipeline = device.create_render_pipeline(
             layout=pipeline_layout,
             vertex={
                 "module": shader,
@@ -618,22 +783,66 @@ def _wgpu_rgba(lowered: LoweredPlan, *, probe_info: GPUProbe) -> tuple[bytes, di
                     }
                 ],
             },
-            primitive={"topology": topology, "cull_mode": "none"},
+            primitive={"topology": "line-list", "cull_mode": "none"},
             fragment={
                 "module": shader,
                 "entry_point": "fs_main",
                 "targets": [{"format": "rgba8unorm"}],
             },
             depth_stencil={
-                "format": "depth24plus",
-                "depth_write_enabled": True,
-                "depth_compare": "less",
+                "format": "depth32float",
+                "depth_write_enabled": False,
+                "depth_compare": "always",
             },
             multisample={"count": 1},
         )
-
-    mesh_pipeline = make_pipeline("triangle-list")
-    line_pipeline = make_pipeline("line-list")
+        state.update(
+            {
+                "ready": True,
+                "wgpu": wgpu,
+                "device": device,
+                "uniform_layout": uniform_layout,
+                "pipeline_layout": pipeline_layout,
+                "mesh_pipeline": mesh_pipeline,
+                "line_pipeline": line_pipeline,
+                "overlay_pipeline": overlay_pipeline,
+                "uniform_usage": uniform_usage,
+                "vertex_usage": vertex_usage,
+                "index_usage": index_usage,
+                "buffer_usage": buffer_usage,
+                "usage_texture": usage_texture,
+                "copy_src": copy_src,
+                "ephemeral": cache is None,
+            }
+        )
+    wgpu = state["wgpu"]
+    device = state["device"]
+    uniform_layout = state["uniform_layout"]
+    pipeline_layout = state["pipeline_layout"]
+    mesh_pipeline = state["mesh_pipeline"]
+    line_pipeline = state["line_pipeline"]
+    overlay_pipeline = state["overlay_pipeline"]
+    uniform_usage = state["uniform_usage"]
+    vertex_usage = state["vertex_usage"]
+    index_usage = state["index_usage"]
+    buffer_usage = state["buffer_usage"]
+    usage_texture = state["usage_texture"]
+    copy_src = state["copy_src"]
+    resources: list[Any] = []
+    texture = device.create_texture(
+        size=(lowered.width, lowered.height, 1),
+        format="rgba8unorm",
+        usage=usage_texture | copy_src,
+    )
+    resources.append(texture)
+    target = texture.create_view()
+    depth_texture = device.create_texture(
+        size=(lowered.width, lowered.height, 1),
+        format="depth32float",
+        usage=usage_texture | copy_src,
+    )
+    resources.append(depth_texture)
+    depth_view = depth_texture.create_view()
     encoder = device.create_command_encoder()
     clear = tuple(float(c) for c in lowered.background)
     render_pass = encoder.begin_render_pass(
@@ -655,7 +864,23 @@ def _wgpu_rgba(lowered: LoweredPlan, *, probe_info: GPUProbe) -> tuple[bytes, di
     )
 
     camera_by_viewport = lowered.cameras
+    from .gpu_draw import draw_instanced_shapes
+
+    draw_instanced_shapes(
+        device=device,
+        render_pass=render_pass,
+        lowered=lowered,
+        pipeline_layout=pipeline_layout,
+        uniform_layout=uniform_layout,
+        uniform_usage=uniform_usage,
+        vertex_usage=vertex_usage,
+        index_usage=index_usage,
+        resources=resources,
+        cache=state,
+    )
     for packet in lowered.packets:
+        if packet.kind in {"sphere", "cylinder", "ellipsoid"}:
+            continue
         camera = camera_by_viewport.get(packet.viewport_id)
         if camera is None:
             raise GPUUnsupportedError(
@@ -718,7 +943,10 @@ def _wgpu_rgba(lowered: LoweredPlan, *, probe_info: GPUProbe) -> tuple[bytes, di
             render_pass.set_index_buffer(index_buffer, "uint32")
             render_pass.draw_indexed(len(index_data) // 4, 1, 0, 0, 0)
         else:
-            render_pass.set_pipeline(line_pipeline)
+            if str(packet.metadata.get("kind", "")) in {"ortep_hatch", "ortep_axes"}:
+                continue
+            depth_test = bool(packet.metadata.get("depth_test", True))
+            render_pass.set_pipeline(line_pipeline if depth_test else overlay_pipeline)
             render_pass.draw(len(packet.vertices), 1, 0, 0)
     render_pass.end()
 
@@ -736,19 +964,43 @@ def _wgpu_rgba(lowered: LoweredPlan, *, probe_info: GPUProbe) -> tuple[bytes, di
         (lowered.width, lowered.height, 1),
     )
     commands = encoder.finish()
+    upload_elapsed = time.perf_counter() - started
+    draw_started = time.perf_counter()
     _submit_and_wait(device, [commands])
+    draw_elapsed = time.perf_counter() - draw_started
+    readback_started = time.perf_counter()
     mapped_bytes = _map_readback_sync(readback, wgpu=wgpu, device=device)
+    readback_elapsed = time.perf_counter() - readback_started
     rgba = b"".join(
         mapped_bytes[row * padded_row : row * padded_row + unpadded_row]
         for row in range(lowered.height)
     )
-    _release_gpu_resources(resources, device)
+    overlay_packets = tuple(
+        packet
+        for packet in lowered.packets
+        if packet.kind == "line"
+        and str(packet.metadata.get("kind", "")) in {"ortep_hatch", "ortep_axes"}
+    )
+    if overlay_packets:
+        rgba = _composite_depth_overlays(
+            rgba,
+            lowered,
+            overlay_packets,
+            device=device,
+            depth_texture=depth_texture,
+            wgpu=wgpu,
+        )
+    _release_gpu_resources(
+        resources,
+        device,
+        release_device=bool(state.get("ephemeral")),
+    )
     elapsed = time.perf_counter() - started
     return rgba, {
         "device_render": elapsed,
-        "upload": elapsed,
-        "draw": elapsed,
-        "readback": 0.0,
+        "upload": upload_elapsed,
+        "draw": draw_elapsed,
+        "readback": readback_elapsed,
     }
 
 
@@ -768,7 +1020,25 @@ def _encode_png(rgba: bytes, width: int, height: int) -> bytes:
     return stream.getvalue()
 
 
-def render(plan: RenderPlan, output: str | Path | None = None) -> RenderResult:
+def render_animation(source: Any, output: str | Path, **kwargs: Any) -> RenderResult:
+    """Encode GIF/MP4 one frame at a time through the same GPU device path.
+
+    At most one frame is on the device. The animation extra supplies the
+    encoder; a missing encoder is an explicit error, not a CPU render.
+    """
+
+    from .animation_adapter import render_animation as _encode
+
+    with GpuSession() as session:
+        return _encode(source, output, frame_renderer=session.render_frame, **kwargs)
+
+
+def render(
+    plan: RenderPlan,
+    output: str | Path | None = None,
+    *,
+    cache: dict[str, Any] | None = None,
+) -> RenderResult:
     """Render an opaque MVP plan through WebGPU without CPU fallback.
 
     The current implementation validates/lower plans fully and then requires a
@@ -788,7 +1058,12 @@ def render(plan: RenderPlan, output: str | Path | None = None) -> RenderResult:
             f"GPU MVP only supports PNG output; got {output_format or output!r}"
         )
     probe_started = time.perf_counter()
-    probed = probe()
+    if cache is not None and cache.get("probe") is not None:
+        probed = cache["probe"]
+    else:
+        probed = probe()
+        if cache is not None and probed.available:
+            cache["probe"] = probed
     probe_elapsed = time.perf_counter() - probe_started
     if not probed.available:
         raise GPUUnavailableError(probed.reason or "no usable WebGPU adapter")
@@ -797,7 +1072,7 @@ def render(plan: RenderPlan, output: str | Path | None = None) -> RenderResult:
     # error is preferable to claiming a successful GPU render when a wgpu
     # version does not provide the synchronous off-screen APIs this MVP uses.
     try:
-        rgba, gpu_timing = _wgpu_rgba(lowered, probe_info=probed)
+        rgba, gpu_timing = _wgpu_rgba(lowered, probe_info=probed, cache=cache)
     except GPUError:
         raise
     except Exception as exc:
@@ -828,7 +1103,7 @@ def render(plan: RenderPlan, output: str | Path | None = None) -> RenderResult:
             "requested_backend": "gpu",
             "actual_backend": "gpu",
             "gpu": probed.to_dict(),
-            "formats": {"color": "rgba8unorm", "depth": "depth24plus"},
+            "formats": {"color": "rgba8unorm", "depth": "depth32float"},
             "packet_count": len(lowered.packets),
             "timing_s": {
                 # Keep stage names stable for machine-readable receipts. The
@@ -850,16 +1125,17 @@ def render(plan: RenderPlan, output: str | Path | None = None) -> RenderResult:
 
 
 class GpuSession:
-    """Small lifecycle wrapper for callers that render more than one plan.
+    """One WebGPU device shared by a PNG sequence or an animation.
 
-    The first vertical slice still creates a device per frame so resources are
-    bounded and failures are isolated.  The session API gives the future
-    persistent trajectory path a stable seam without exposing mutable
-    application state to shaders.
+    At most one frame is in flight.  Pipelines stay on the device; colour
+    and depth textures are created for that frame and released before the
+    next one starts.
     """
 
     def __init__(self) -> None:
         self._closed = False
+        self._in_flight = 0
+        self._cache: dict[str, Any] = {}
         self._last_result: RenderResult | None = None
 
     def _ensure_open(self) -> None:
@@ -878,8 +1154,38 @@ class GpuSession:
         self, plan: RenderPlan, output: str | Path | None = None
     ) -> RenderResult:
         self._ensure_open()
-        self._last_result = render(plan, output=output)
+        if self._in_flight:
+            raise GPUError("GPU session allows one in-flight frame")
+        self._in_flight += 1
+        try:
+            self._last_result = render(plan, output=output, cache=self._cache)
+        finally:
+            self._in_flight -= 1
         return self._last_result
+
+    def render_lowered(self, lowered: LoweredPlan) -> bytes:
+        """Render one already-lowered frame and return PNG bytes.
+
+        The caller keeps the device.  A second call waits until this one
+        has finished readback, because ``_in_flight`` admits only one frame.
+        """
+
+        self._ensure_open()
+        if self._in_flight:
+            raise GPUError("GPU session allows one in-flight frame")
+        self._in_flight += 1
+        try:
+            if self._cache.get("probe") is None:
+                probed = probe()
+                if not probed.available:
+                    raise GPUUnavailableError(probed.reason or "no usable WebGPU adapter")
+                self._cache["probe"] = probed
+            rgba, _timing = _wgpu_rgba(
+                lowered, probe_info=self._cache["probe"], cache=self._cache
+            )
+            return _encode_png(rgba, lowered.width, lowered.height)
+        finally:
+            self._in_flight -= 1
 
     def readback(self) -> bytes:
         self._ensure_open()
@@ -892,6 +1198,11 @@ class GpuSession:
         raise GPUError("the last GPU frame has no readable output")
 
     def close(self) -> None:
+        device = self._cache.get("device")
+        destroy = getattr(device, "destroy", None)
+        if callable(destroy):
+            destroy()
+        self._cache.clear()
         self._last_result = None
         self._closed = True
 
@@ -924,4 +1235,5 @@ __all__ = [
     "probe",
     "probe_gpu",
     "render",
+    "render_animation",
 ]

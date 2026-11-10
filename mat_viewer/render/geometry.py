@@ -484,13 +484,24 @@ def ellipsoid_primitive(
         lat_steps=lat_steps,
         lon_steps=lon_steps,
     )
+    center_array = _point(center, name="center")
+    lengths, axes = ellipsoid_principal_axes(displacement, probability=probability)
+    payload = dict(metadata or {})
+    payload.update(
+        {
+            "_raster_shape": "ellipsoid",
+            "_raster_center": tuple(float(value) for value in center_array),
+            "_raster_lengths": tuple(float(value) for value in lengths),
+            "_raster_axes": axes.reshape(-1).tolist(),
+        }
+    )
     return TriangleMeshPrimitive(
         semantic_id=semantic_id,
         vertices=vertices,
         triangles=triangles,
         vertex_normals=normals,
         rgba=color_to_rgba(color, alpha=alpha),
-        metadata=metadata or {},
+        metadata=payload,
     )
 
 
@@ -517,6 +528,7 @@ def ellipsoid_axes_primitive(
         segments=np.asarray(segments),
         rgba=color_to_rgba(color),
         width_px=width_px,
+        metadata={"kind": "ortep_axes"},
     )
 
 

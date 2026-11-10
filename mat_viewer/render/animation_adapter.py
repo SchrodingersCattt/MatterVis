@@ -28,6 +28,7 @@ def render_animation(
     time_spec: Any = None,
     annotation_spec: Any = None,
     atom_property_color: Any = None,
+    frame_renderer: Any = None,
 ) -> RenderResult:
     """Render selected source frames with one CPU camera, then encode lazily."""
     try:
@@ -117,7 +118,7 @@ def render_animation(
                 bond_groups=bond_groups,
                 atom_property_color=property_context,
             )
-            frame_result = render_png(plan)
+            frame_result = (frame_renderer or render_png)(plan)
             if frame_result.data is None:  # pragma: no cover - renderer contract guard
                 raise RuntimeError("CPU frame renderer did not return PNG bytes")
             with Image.open(BytesIO(frame_result.data)) as image:
