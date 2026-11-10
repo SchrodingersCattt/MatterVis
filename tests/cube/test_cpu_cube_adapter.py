@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from mat_viewer.cli import main
-from mat_viewer.cube.color_field import colormap_rgb
+from mat_viewer.cube.color_field import _sample_trilinear, colormap_rgb
 from mat_viewer.cube.cpu import cube_isosurface_meshes, ensure_cube_isosurfaces
 from mat_viewer.cube.io import CubeAtom, CubeData
 from mat_viewer.render.contracts import LinePrimitive, RenderSpec, TriangleMeshPrimitive
@@ -511,6 +511,34 @@ def test_nonfinite_color_voxels_away_from_the_surface_are_ignored(
     )
 
     assert meshes[0]["vertex_colors"][0, 1] > 0.95
+
+
+def test_exact_grid_point_ignores_a_zero_weight_nonfinite_corner() -> None:
+    grid = np.zeros((2, 2, 2))
+    grid[1, 1, 1] = np.nan
+
+    sampled = _sample_trilinear(grid, np.asarray([[0.0, 0.0, 0.0]]))
+
+    assert sampled[0] == pytest.approx(0.0)
+
+
+def test_grid_face_ignores_zero_weight_nonfinite_voxels() -> None:
+    grid = np.zeros((2, 2, 2))
+    grid[:, :, 0] = np.asarray([[0.0, 4.0], [2.0, 6.0]])
+    grid[:, :, 1] = np.nan
+
+    sampled = _sample_trilinear(grid, np.asarray([[0.5, 0.5, 0.0]]))
+
+    assert sampled[0] == pytest.approx(3.0)
+
+
+def test_nonzero_weight_on_a_nonfinite_corner_stays_nonfinite() -> None:
+    grid = np.zeros((2, 2, 2))
+    grid[1, 0, 0] = np.nan
+
+    sampled = _sample_trilinear(grid, np.asarray([[0.5, 0.0, 0.0]]))
+
+    assert not np.isfinite(sampled[0])
 
 
 def test_nonfinite_color_samples_are_an_error(tmp_path: Path) -> None:

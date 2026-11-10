@@ -9,6 +9,42 @@ from ..contracts import LinePrimitive
 from .raster_math import _dash_visible
 
 
+def endpoint_screen_weight(
+    screen_t: float,
+    depth0: float,
+    depth1: float,
+    *,
+    perspective: bool,
+) -> float:
+    """Return the weight of endpoint 1 at a projected-segment parameter.
+
+    ``depth0`` and ``depth1`` are the positive camera depths from
+    ``project_camera`` (``-camera_z``). Orthographic color follows the
+    screen parameter. Perspective color uses
+    ``(t / depth1) / ((1 - t) / depth0 + t / depth1)``. Depths 1 and 9
+    therefore give the screen midpoint weights 0.9 and 0.1, matching the
+    perspective-correct depth already used for the Z buffer.
+    """
+    parameter = float(np.clip(screen_t, 0.0, 1.0))
+    if not perspective:
+        return parameter
+    near_depth = float(depth0)
+    far_depth = float(depth1)
+    if (
+        not np.isfinite(near_depth)
+        or not np.isfinite(far_depth)
+        or near_depth <= 0.0
+        or far_depth <= 0.0
+    ):
+        return parameter
+    near_weight = (1.0 - parameter) / near_depth
+    far_weight = parameter / far_depth
+    denominator = near_weight + far_weight
+    if denominator <= 0.0:
+        return parameter
+    return far_weight / denominator
+
+
 def _clipped_endpoint_rgb(
     transform: CameraTransform,
     segment: np.ndarray,
@@ -95,7 +131,13 @@ def rasterize_lines(
                 if endpoint_rgb is None:
                     sample_rgba = primitive.rgba
                 else:
-                    rgb = (1.0 - parameter) * endpoint_rgb[0] + parameter * endpoint_rgb[1]
+                    color_t = endpoint_screen_weight(
+                        parameter,
+                        float(projected.depth[0]),
+                        float(projected.depth[1]),
+                        perspective=transform.spec.projection == "perspective",
+                    )
+                    rgb = (1.0 - color_t) * endpoint_rgb[0] + color_t * endpoint_rgb[1]
                     sample_rgba = (
                         float(rgb[0]),
                         float(rgb[1]),

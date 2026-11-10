@@ -99,17 +99,19 @@ supplied range maps a constant value through that range.
 `--isosurface-color-center` places one value, often zero, at the middle of
 an asymmetric range.
 
-A sample that interpolates a nonfinite voxel is an error. Nonfinite voxels
-that the surface does not touch do not, by themselves, change the finite
-samples. Omitting the color cube keeps the positive and negative phase
-colors.
+A nonfinite voxel with nonzero trilinear weight makes that sample an error.
+A nonfinite voxel with zero weight does not: an exact grid point or grid
+face ignores the unused corners, so `NaN * 0` is not evaluated. Nonfinite
+voxels the surface does not touch are ignored. Omitting the color cube
+keeps the positive and negative phase colors.
 
 | Mode | Backend | Color |
 |---|---|---|
 | `surface` | CPU PNG | Per-vertex color. Smooth shading uses vertex normals; flat shading keeps the same colors with one illumination per face. |
 | `surface` | CPU SVG/PDF | Per-face average of the vertex colors. Vector fills are one color per triangle. |
 | `surface` | Plotly | `Mesh3d` vertex colors. |
-| `wireframe` | CPU PNG/SVG/PDF | Edge colors interpolated from the sampled endpoints. |
+| `wireframe` | CPU PNG | Endpoint colors along the projected edge. Perspective uses camera depth (`-z`), so depths 1 and 9 give the screen midpoint weights 0.9 and 0.1. |
+| `wireframe` | CPU SVG/PDF | The same blend, drawn as solid steps of 4 px. A span is not replaced by its midpoint color. |
 | `wireframe` | Plotly | Error. Use the CPU backend or `surface`. |
 | either | matplotlib or GPU | Error. Those backends do not accept per-vertex or per-endpoint colors. |
 

@@ -163,8 +163,10 @@ def vertex_colors_for_surface(
     """Return RGB samples for one isosurface phase.
 
     A finite constant color cube and no explicit range maps every vertex to
-    the colormap midpoint. Interpolation that touches a nonfinite voxel is an
-    error; nonfinite voxels the surface does not touch are ignored.
+    the colormap midpoint. A nonfinite voxel with nonzero interpolation
+    weight makes that sample an error. A nonfinite voxel with zero weight,
+    including the unused corners of an exact grid point or grid face, is
+    ignored.
     """
     samples = sample_color_cube(source, color, mesh_indices, stride=stride)
     if samples.size and not np.all(np.isfinite(samples)):
@@ -182,7 +184,12 @@ def vertex_colors_for_surface(
 
 
 def _sample_trilinear(grid: np.ndarray, points: np.ndarray) -> np.ndarray:
-    """Sample ``grid`` at floating index coordinates."""
+    """Sample ``grid`` at floating index coordinates.
+
+    Corners with zero weight are not read. ``NaN * 0`` would otherwise
+    poison an exact grid point or face when an unused corner is nonfinite.
+    A nonfinite corner with positive weight still makes the sample nonfinite.
+    """
     if points.size == 0:
         return np.empty(0, dtype=float)
     maximum = np.asarray(grid.shape, dtype=float) - 1.0
@@ -193,21 +200,26 @@ def _sample_trilinear(grid: np.ndarray, points: np.ndarray) -> np.ndarray:
     i0, j0, k0 = base.T
     i1, j1, k1 = upper.T
     di, dj, dk = fraction.T
-    c000 = grid[i0, j0, k0]
-    c100 = grid[i1, j0, k0]
-    c010 = grid[i0, j1, k0]
-    c110 = grid[i1, j1, k0]
-    c001 = grid[i0, j0, k1]
-    c101 = grid[i1, j0, k1]
-    c011 = grid[i0, j1, k1]
-    c111 = grid[i1, j1, k1]
-    c00 = c000 * (1.0 - di) + c100 * di
-    c01 = c001 * (1.0 - di) + c101 * di
-    c10 = c010 * (1.0 - di) + c110 * di
-    c11 = c011 * (1.0 - di) + c111 * di
-    c0 = c00 * (1.0 - dj) + c10 * dj
-    c1 = c01 * (1.0 - dj) + c11 * dj
-    return c0 * (1.0 - dk) + c1 * dk
+    corners = (
+        (grid[i0, j0, k0], (1.0 - di) * (1.0 - dj) * (1.0 - dk)),
+        (grid[i1, j0, k0], di * (1.0 - dj) * (1.0 - dk)),
+        (grid[i0, j1, k0], (1.0 - di) * dj * (1.0 - dk)),
+        (grid[i1, j1, k0], di * dj * (1.0 - dk)),
+        (grid[i0, j0, k1], (1.0 - di) * (1.0 - dj) * dk),
+        (grid[i1, j0, k1], di * (1.0 - dj) * dk),
+        (grid[i0, j1, k1], (1.0 - di) * dj * dk),
+        (grid[i1, j1, k1], di * dj * dk),
+    )
+    total = np.zeros(di.shape, dtype=float)
+    nonfinite = np.zeros(di.shape, dtype=bool)
+    for value, weight in corners:
+        active = weight > 0.0
+        finite = np.isfinite(value)
+        nonfinite |= active & ~finite
+        usable = active & finite
+        total[usable] += weight[usable] * value[usable]
+    total[nonfinite] = np.nan
+    return total
 
 
 def _grid_digest(grid: CubeData) -> str:
