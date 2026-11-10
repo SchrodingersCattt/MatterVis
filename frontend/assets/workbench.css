@@ -1,5 +1,10 @@
-/* Native workbench: quiet scientific controls around the structure canvas. */
+/* Native workbench: quiet scientific controls around the structure canvas.
+   Chrome and native controls share one color-scheme. The plotted structure
+   keeps its scene background. */
 :root {
+  color-scheme: light;
+  --mv-page: #ffffff;
+  --mv-canvas: #ffffff;
   --mv-ink: #172b4d;
   --mv-muted: #667085;
   --mv-line: #d9e2ec;
@@ -7,25 +12,81 @@
   --mv-panel: #ffffff;
   --mv-accent: #0f766e;
   --mv-accent-soft: #e7f4f1;
+  --mv-control-bg: #ffffff;
+  --mv-control-ink: #344054;
+  --mv-control-line: #c7d2df;
+  --mv-control-hover: #f2f8f7;
+  --mv-summary-bg: #e7f4f1;
+  --mv-summary-ink: #245b56;
+  --mv-summary-line: #c9e7e0;
+  --mv-drop-bg: #ffffff;
+  --mv-drop-line: #aab8c8;
+  --mv-drop-hover: #f7fcfb;
+  --mv-selection-dock: 290px;
   /* Interaction cues stay neutral and compact in both browser themes. */
   --mv-hover-tip-bg: rgba(23, 43, 77, 0.94);
   --mv-hover-tip-ink: #ffffff;
   --mv-scene-tab-max-width: 220px;
 }
 
+:root[data-mattervis-theme="light"] {
+  color-scheme: light;
+}
+
 :root[data-mattervis-theme="dark"] {
+  color-scheme: dark;
+  --mv-page: #12161c;
+  --mv-canvas: #12161c;
+  --mv-ink: #e7edf2;
+  --mv-muted: #aeb9c4;
+  --mv-line: #3a4658;
+  --mv-soft: #171c22;
+  --mv-panel: #20252b;
+  --mv-accent: #5eead4;
+  --mv-accent-soft: #14332f;
+  --mv-control-bg: #20252b;
+  --mv-control-ink: #e7edf2;
+  --mv-control-line: #515d68;
+  --mv-control-hover: #243b38;
+  --mv-summary-bg: #14332f;
+  --mv-summary-ink: #b7ebe3;
+  --mv-summary-line: #245e56;
+  --mv-drop-bg: #171c22;
+  --mv-drop-line: #515d68;
+  --mv-drop-hover: #1c3330;
   --mv-hover-tip-bg: rgba(8, 12, 16, 0.94);
   --mv-hover-tip-ink: #f4f7fa;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-mattervis-theme="light"]) {
+    color-scheme: dark;
+    --mv-page: #12161c;
+    --mv-canvas: #12161c;
+    --mv-ink: #e7edf2;
+    --mv-muted: #aeb9c4;
+    --mv-line: #3a4658;
+    --mv-soft: #171c22;
+    --mv-panel: #20252b;
+    --mv-accent: #5eead4;
+    --mv-accent-soft: #14332f;
+    --mv-control-bg: #20252b;
+    --mv-control-ink: #e7edf2;
+    --mv-control-line: #515d68;
+    --mv-control-hover: #243b38;
+    --mv-summary-bg: #14332f;
+    --mv-summary-ink: #b7ebe3;
+    --mv-summary-line: #245e56;
+    --mv-drop-bg: #171c22;
+    --mv-drop-line: #515d68;
+    --mv-drop-hover: #1c3330;
     --mv-hover-tip-bg: rgba(8, 12, 16, 0.94);
     --mv-hover-tip-ink: #f4f7fa;
   }
 }
 
 #viewer-root {
+  background: var(--mv-page);
   color: var(--mv-ink);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: 13px;
@@ -34,7 +95,12 @@
 
 #center-panel {
   position: relative;
-  background: #ffffff;
+  background: var(--mv-canvas);
+}
+
+#mv-extension-panels {
+  background: var(--mv-soft);
+  color: var(--mv-ink);
 }
 
 /* Plotly hover layers and the modebar stay inside the canvas. The server-log
@@ -106,7 +172,7 @@
 
 #left-panel .scene-tab-scroll {
   align-items: center;
-  background: rgba(255, 255, 255, 0.94);
+  background: var(--mv-panel);
   border: 1px solid var(--mv-line);
   border-radius: 6px;
   box-shadow: 0 1px 2px rgba(23, 43, 77, 0.12);
@@ -135,20 +201,6 @@
 
 #left-panel .scene-tab-scroll--next {
   right: 4px;
-}
-
-:root[data-mattervis-theme="dark"] #left-panel .scene-tab-scroll {
-  background: rgba(17, 22, 29, 0.94);
-  border-color: #3a4658;
-  color: var(--mv-hover-tip-ink);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-mattervis-theme="light"]) #left-panel .scene-tab-scroll {
-    background: rgba(17, 22, 29, 0.94);
-    border-color: #3a4658;
-    color: var(--mv-hover-tip-ink);
-  }
 }
 
 /* Dash 4 puts the component id on `.tab-container` and the outer shell at
@@ -318,10 +370,10 @@
 }
 
 .mv-canvas-tool {
-  background: rgba(255, 255, 255, 0.94);
-  border: 1px solid #c7d2df;
+  background: var(--mv-control-bg);
+  border: 1px solid var(--mv-control-line);
   border-radius: 7px;
-  color: #172b4d;
+  color: var(--mv-control-ink);
   cursor: pointer;
   font: 650 12px/1 Inter, ui-sans-serif, system-ui, sans-serif;
   padding: 7px 10px;
@@ -362,8 +414,8 @@
 }
 
 .disorder-row.is-selected {
-  background: #e7f4f1;
-  outline: 1px solid #86bdb4;
+  background: var(--mv-accent-soft);
+  outline: 1px solid var(--mv-accent);
 }
 
 #left-panel .rc-slider,
@@ -394,6 +446,8 @@ html, body {
   margin: 0;
   height: 100%;
   overflow: hidden;
+  background: var(--mv-page);
+  color: var(--mv-ink);
 }
 
 /* Dash mounts the app in a wrapper. Without this, the page scrollbar
@@ -431,10 +485,10 @@ html, body {
 }
 
 .structure-summary-card {
-  background: var(--mv-accent-soft);
-  border: 1px solid #c9e7e0;
+  background: var(--mv-summary-bg);
+  border: 1px solid var(--mv-summary-line);
   border-radius: 8px;
-  color: #245b56 !important;
+  color: var(--mv-summary-ink) !important;
   font-size: 12px !important;
   line-height: 1.45;
   margin-bottom: 16px !important;
@@ -454,8 +508,8 @@ html, body {
 
 .upload-dropzone {
   align-items: center;
-  background: #ffffff;
-  border: 1px dashed #aab8c8;
+  background: var(--mv-drop-bg);
+  border: 1px dashed var(--mv-drop-line);
   border-radius: 8px;
   color: var(--mv-muted);
   cursor: pointer;
@@ -471,7 +525,7 @@ html, body {
 
 .upload-dropzone:hover,
 .upload-dropzone:focus-visible {
-  background: #f7fcfb;
+  background: var(--mv-drop-hover);
   border-color: var(--mv-accent);
   outline: none;
 }
@@ -500,10 +554,10 @@ html, body {
 }
 
 #left-panel button {
-  background: #ffffff;
-  border: 1px solid #c7d2df;
+  background: var(--mv-control-bg);
+  border: 1px solid var(--mv-control-line);
   border-radius: 7px;
-  color: #344054;
+  color: var(--mv-control-ink);
   cursor: pointer;
   font-weight: 650;
   min-height: 30px;
@@ -512,9 +566,9 @@ html, body {
 }
 
 #left-panel button:hover {
-  background: #f2f8f7;
-  border-color: #86bdb4;
-  color: #155e59;
+  background: var(--mv-control-hover);
+  border-color: var(--mv-accent);
+  color: var(--mv-accent);
 }
 
 #left-panel .scene-batch-close-btn,
@@ -535,9 +589,9 @@ html, body {
 
 #left-panel #scene-new-tab-btn:hover,
 #left-panel .scene-new-tab-btn:hover {
-  background: #ecfdf5;
+  background: var(--mv-accent-soft);
   border-color: var(--mv-accent);
-  color: #115e59;
+  color: var(--mv-accent);
 }
 
 #left-panel #scene-new-tab-btn:focus-visible,
@@ -547,10 +601,11 @@ html, body {
 }
 
 #left-panel input:not([type="checkbox"]):not([type="radio"]):not([type="color"]) {
-  background: #ffffff;
-  border: 1px solid #c7d2df;
+  background: var(--mv-control-bg);
+  border: 1px solid var(--mv-control-line);
   border-radius: 7px;
   box-sizing: border-box;
+  color: var(--mv-ink);
   min-height: 34px;
   padding: 7px 9px;
 }
@@ -562,7 +617,7 @@ html, body {
 
 #left-panel .Select-control,
 #left-panel .Select-menu-outer {
-  border-color: #c7d2df;
+  border-color: var(--mv-control-line);
   border-radius: 7px;
 }
 
@@ -672,7 +727,7 @@ html, body {
 
 .mv-status-spinner {
   animation: mv-status-spin 0.8s linear infinite;
-  border: 2px solid #c7d2df;
+  border: 2px solid var(--mv-control-line);
   border-radius: 50%;
   border-top-color: var(--mv-accent);
   box-sizing: border-box;

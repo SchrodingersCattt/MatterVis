@@ -616,7 +616,12 @@ The full list (authoritative; the diagram only groups them):
 - `mv-status-bar`, `mv-status-structure`, `mv-status-scope`,
   `mv-status-counts`, `mv-status-busy`: canvas status bar and the
   working/rendering indicator. Counts follow the scene drawn for the
-  current display mode and transforms.
+  current display mode and transforms. A rename refreshes
+  `mv-status-structure` from the live scene in the same round as the tab
+  strip (`scene-event-store`), without waiting for another
+  `agent-state-store` write or a scene switch. The sidebar
+  `#upload-status` line (`Loaded: …`) follows the selected tab's
+  `.scene-tab-text` when that text changes, including a same-scene rename.
 - `perf-log-level`: server-log level filter (`debug` shows all,
   `info` hides fast callbacks, `warn` and `error` are stricter)
 - `save-preset-btn`

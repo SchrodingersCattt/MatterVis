@@ -225,19 +225,26 @@
   // example, a tooltip/class update) cannot repeatedly scroll the active tab.
   // A null selection is transient while Dash swaps tab nodes; retain the last
   // known scene so that clearing and restoring the same selection is a no-op.
+  function sceneTabLabel(node) {
+    if (!node) return "";
+    const named = node.querySelector ? node.querySelector(".scene-tab-text") : null;
+    const source = named || node;
+    return String(source.textContent || "").replace(/\s+/g, " ").trim();
+  }
   function noteLoadedScene(sceneId, node) {
     const status = document.getElementById("upload-status");
     if (!status) return;
     const current = String(status.textContent || "").trim();
     if (/^Uploading\b/.test(current)) return;
     const tab = node || sceneTabNodeForId(sceneId);
-    const label = tab ? String(tab.textContent || "").replace(/\s+/g, " ").trim() : "";
+    const label = sceneTabLabel(tab);
     if (!label) return;
     status.textContent = "Loaded: " + label;
     status.style.color = "#047857";
     status.className = "";
   }
   let observedSceneTabId = null;
+  let notedSceneLabel = "";
   let pendingSceneTabScrollId = null;
   let lastScrolledSceneId = null;
   function syncSceneTabSelection(schedule) {
@@ -246,6 +253,7 @@
     const changed = observedSceneTabId !== null &&
       String(current) !== String(observedSceneTabId);
     observedSceneTabId = String(current);
+    const labelNow = sceneTabLabel(sceneTabNodeForId(String(current)));
     if (changed && pendingSceneTabScrollId !== null &&
         String(current) !== String(pendingSceneTabScrollId)) {
       pendingSceneTabScrollId = null;
@@ -258,7 +266,13 @@
     // the old canvas is not lost.
     if (changed) {
       resyncScene(String(current));
+    }
+    // A rename keeps the same scene id. Refresh Loaded when that tab's text
+    // changes, and leave an in-progress upload line alone while the text
+    // is unchanged.
+    if (labelNow && (changed || labelNow !== notedSceneLabel)) {
       noteLoadedScene(String(current));
+      notedSceneLabel = labelNow;
     }
     if (schedule && String(current) !== lastScrolledSceneId &&
         (changed || pendingMatches)) {
@@ -1901,6 +1915,8 @@
       observer.observe(root, {
         attributes: true,
         attributeFilter: ["aria-selected", "class"],
+        childList: true,
+        characterData: true,
         subtree: true,
       });
     }

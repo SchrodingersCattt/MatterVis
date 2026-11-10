@@ -183,7 +183,10 @@ def test_tab_switch_names_the_loaded_scene():
     assert "noteLoadedScene(clickedSceneId, clickedNode)" in body
     sync = source.index("function syncSceneTabSelection")
     sync_body = source[sync:source.index("function scrollSceneTabIntoView", sync)]
-    assert "noteLoadedScene(String(current))" in sync_body
+    resync = sync_body.index("resyncScene(String(current))")
+    loaded = sync_body.index("noteLoadedScene(String(current))")
+    assert resync < loaded
+    assert "characterData: true" in source[source.index("function bindSceneTabIntent"):source.index("// ── WS figure fast lane")]
 
 
 def test_scene_tab_tooltip_is_applied_to_actual_tab_node():

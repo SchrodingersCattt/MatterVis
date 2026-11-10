@@ -1031,21 +1031,35 @@ async function runSemanticPick(page) {
       const api=window.MatterVisScenePicking,gd=window.MatterVisSemantic.graph(),idx=api.index(gd);
       if(!idx) return null;
       const graph=document.getElementById('crystal-graph');
-      // The pick index does not know about the appearance panel. A midpoint
-      // that lands on that panel never reaches the canvas, so it is not a click.
+      const panel=document.getElementById('mv-selection-appearance');
+      const graphRect=graph ? graph.getBoundingClientRect() : null;
+      // A docked inspector must not cover the plot. A primitive whose screen
+      // point is inside the graph and inside the open panel is a failure,
+      // not a point to skip.
+      function covered(x, y) {
+        if (!panel || panel.hidden || !graphRect) return false;
+        const rect = panel.getBoundingClientRect();
+        const insideGraph = x >= graphRect.left && x <= graphRect.right && y >= graphRect.top && y <= graphRect.bottom;
+        const insidePanel = x > rect.left + 1 && x < rect.right - 1 && y > rect.top + 1 && y < rect.bottom - 1;
+        return insideGraph && insidePanel;
+      }
       function onCanvas(x, y) {
         const el = document.elementFromPoint(x, y);
         if (!el || !graph || !graph.contains(el)) return false;
-        return !(el.closest && el.closest('#mv-selection-appearance,.mv-canvas-toolbar,.modebar,.mv-hover-inspector'));
+        return !(el.closest && el.closest('.mv-canvas-toolbar,.modebar,.mv-hover-inspector'));
       }
+      let coveredPoint = null;
+      let found = null;
       for(const p of idx.primitives) {
         if(!p.target || p.target.kind!==kind || p.target.id===exclude) continue;
         const q=p.p || (p.type==='bond' ? [(p.a[0]+p.b[0])/2,(p.a[1]+p.b[1])/2] : [(p.a[0]+p.b[0]+p.c[0])/3,(p.a[1]+p.b[1]+p.c[1])/3]);
-        if(!onCanvas(q[0], q[1])) continue;
+        if (covered(q[0], q[1])) coveredPoint = {x:q[0], y:q[1], id:p.target.id};
+        if(found || !onCanvas(q[0], q[1])) continue;
         const hit=api.hits(gd,q[0],q[1]);
-        if(hit && hit[0] && hit[0].id===p.target.id) return {x:q[0],y:q[1],target:p.target};
+        if(hit && hit[0] && hit[0].id===p.target.id) found = {x:q[0],y:q[1],target:p.target};
       }
-      return null;
+      if (coveredPoint) return {covered: coveredPoint};
+      return found;
     },{kind,exclude});
   }
   async function selected(ids) {
@@ -1057,6 +1071,18 @@ async function runSemanticPick(page) {
     },ids,{timeout:20000});
   }
   async function dragAway(x, y, button) {
+    let lastError = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await dragAwayOnce(x, y, button);
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError;
+  }
+  async function dragAwayOnce(x, y, button) {
     const before = await page.evaluate(() => {
       const camera = document.querySelector("#crystal-graph .js-plotly-plot")._fullLayout.scene._scene.camera;
       const eye = camera.eye;
@@ -1067,9 +1093,19 @@ async function runSemanticPick(page) {
         center: [component(center, 0, "x"), component(center, 1, "y"), component(center, 2, "z")],
       };
     });
+    const delta = await page.evaluate(({x, y}) => {
+      const box = document.getElementById('crystal-graph').getBoundingClientRect();
+      let dx = 70;
+      let dy = 30;
+      if (x + dx > box.right - 12) dx = -70;
+      if (y + dy > box.bottom - 12) dy = -30;
+      if (x + dx < box.left + 12) dx = 40;
+      if (y + dy < box.top + 12) dy = 24;
+      return {dx, dy};
+    }, {x, y});
     await page.mouse.move(x, y);
     await page.mouse.down(button ? {button} : undefined);
-    await page.mouse.move(x + 70, y + 30, {steps: 8});
+    await page.mouse.move(x + delta.dx, y + delta.dy, {steps: 8});
     await page.mouse.up(button ? {button} : undefined);
     await page.waitForFunction((previous) => {
       const camera = document.querySelector("#crystal-graph .js-plotly-plot")._fullLayout.scene._scene.camera;
@@ -1081,9 +1117,9 @@ async function runSemanticPick(page) {
       const eyeShift = Math.hypot(eye[0] - previous.eye[0], eye[1] - previous.eye[1], eye[2] - previous.eye[2]);
       const centerShift = Math.hypot(nextCenter[0] - previous.center[0], nextCenter[1] - previous.center[1], nextCenter[2] - previous.center[2]);
       return [eyeShift, centerShift].every(Number.isFinite) && (eyeShift > 0.02 || centerShift > 0.02);
-    }, before, {timeout: 20000});
+    }, before, {timeout: 8000});
   }
-  const atom=await targetPixel('atom');if(!atom) fail('no visible local atom pick');
+  let atom=await targetPixel('atom');if(!atom || atom.covered) fail('no visible local atom pick '+JSON.stringify(atom));
   let hoverRequests=0;
   const observer=request=>{if(/selection\/by_box/.test(request.url())) hoverRequests++;};page.on('request',observer);
   await page.mouse.move(atom.x,atom.y);
@@ -1091,8 +1127,40 @@ async function runSemanticPick(page) {
   await page.waitForFunction(label=>document.getElementById('mv-hover-inspector')?.textContent.includes(label),atom.target.label);
   await page.mouse.click(atom.x,atom.y);await selected([atom.target.id]);
   await page.waitForSelector('#mv-selection-appearance:not([hidden])');
+  await page.waitForFunction(() => {
+    const panel = document.getElementById('mv-selection-appearance');
+    const canvas = document.querySelector('#crystal-graph canvas');
+    const gd = document.querySelector('#crystal-graph .js-plotly-plot');
+    if (!panel || panel.hidden || !canvas || !gd || !gd._fullLayout) return false;
+    const layoutWidth = Number(gd._fullLayout.width || 0);
+    const canvasBox = canvas.getBoundingClientRect();
+    if (!(layoutWidth > 40) || Math.abs(layoutWidth - canvasBox.width) > 4) return false;
+    const dock = panel.getBoundingClientRect();
+    if (!(dock.width > 40)) return false;
+    const overlapW = Math.min(dock.right, canvasBox.right) - Math.max(dock.left, canvasBox.left);
+    const overlapH = Math.min(dock.bottom, canvasBox.bottom) - Math.max(dock.top, canvasBox.top);
+    return !(overlapW > 1 && overlapH > 1);
+  }, null, {timeout: 10000});
   await page.waitForFunction(()=>{const c=document.querySelector('.mv-focus-canvas');return c && c.getContext('2d').getImageData(0,0,c.width,c.height).data.some((v,i)=>i%4===3 && v>0);});
-  const second=await targetPixel('atom',atom.target.id);if(!second) fail('no second atom');
+  const moved=await targetPixel('atom');
+  if(!moved || moved.covered || moved.target.id!==atom.target.id) {
+    const again=await page.evaluate((id)=>{
+      const api=window.MatterVisScenePicking,gd=window.MatterVisSemantic.graph(),idx=api.index(gd);
+      const graph=document.getElementById('crystal-graph');
+      const primitive=idx.primitives.find((item)=>item.target && item.target.id===id && item.p);
+      if(!primitive) return null;
+      const el=document.elementFromPoint(primitive.p[0], primitive.p[1]);
+      if(!el || !graph || !graph.contains(el)) return null;
+      const hit=api.hits(gd, primitive.p[0], primitive.p[1]);
+      if(!hit || !hit[0] || hit[0].id!==id) return null;
+      return {x:primitive.p[0], y:primitive.p[1], target:primitive.target};
+    }, atom.target.id);
+    if(!again) fail('open selection dock moved the selected atom off the plot');
+    atom=again;
+  } else {
+    atom=moved;
+  }
+  const second=await targetPixel('atom',atom.target.id);if(!second || second.covered) fail('selection panel blocked an atom pick '+JSON.stringify(second));
   await page.keyboard.down('Control');await page.mouse.click(second.x,second.y);await page.keyboard.up('Control');await selected([atom.target.id,second.target.id]);
   await page.keyboard.down('Control');await page.mouse.click(second.x,second.y);await page.keyboard.up('Control');await selected([atom.target.id]);
   await page.keyboard.press('Escape');await selected([]);
@@ -1129,7 +1197,7 @@ async function runSemanticPick(page) {
   await inspector.getByRole('button',{name:'Inherit Color',exact:true}).click();
   await waitForServerState(page, async target=>{const r=await fetch('/api/v2/style_overrides?scene_id='+encodeURIComponent(window.MatterVisSemantic.sceneId())).then(r=>r.json());return !r.style_overrides[target.id]?.color;},afterOrbit.target);
   await waitForServerState(page, async target=>{const body=await fetch('/api/v2/selection/appearance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scene_id:window.MatterVisSemantic.sceneId(),targets:[target]})}).then(r=>r.json());return body.items[0].effective.color==='#8299ac';},afterOrbit.target);
-  const bond=await targetPixel('bond');if(!bond) fail('no visible bond segment '+JSON.stringify(await page.evaluate(()=>{const g=window.MatterVisSemantic.graph(),idx=window.MatterVisScenePicking.index(g);return {counts:idx.primitives.reduce((a,p)=>(a[p.type]=(a[p.type]||0)+1,a),{}),traces:g._fullData.filter(t=>(t.meta||{}).mv_role==='bond_selection').map(t=>({meta:t.meta,cd:t.customdata?.[0]}))};})));
+  const bond=await targetPixel('bond');if(!bond || bond.covered) fail('selection panel blocked a bond pick '+JSON.stringify(bond && bond.covered ? bond : await page.evaluate(()=>{const g=window.MatterVisSemantic.graph(),idx=window.MatterVisScenePicking.index(g);return {counts:idx.primitives.reduce((a,p)=>(a[p.type]=(a[p.type]||0)+1,a),{}),traces:g._fullData.filter(t=>(t.meta||{}).mv_role==='bond_selection').map(t=>({meta:t.meta,cd:t.customdata?.[0]}))};})));
   await page.keyboard.down('Control');await page.mouse.click(bond.x,bond.y);await page.keyboard.up('Control');await selected([afterOrbit.target.id,bond.target.id]);
   // Rapid motion stays local, keeps at most one overlay and no stale tooltip.
   for(let n=0;n<15;n++) await page.mouse.move(n%2?bond.x:afterOrbit.x,n%2?bond.y:afterOrbit.y);
@@ -1544,8 +1612,12 @@ async function runSceneControls(page) {
         .map((node) => node.textContent || "");
       const title = document.querySelector("#crystal-graph .js-plotly-plot");
       const text = title && title.layout && title.layout.title && (title.layout.title.text || title.layout.title);
+      const loaded = (document.getElementById("upload-status") || {}).textContent || "";
+      const footer = (document.getElementById("mv-status-structure") || {}).textContent || "";
       return labels.some((label) => label.includes(name))
-        && String(text || "").includes(name);
+        && String(text || "").includes(name)
+        && loaded.includes(name)
+        && footer.includes(name);
     }, renamed, {timeout: 45000});
   } catch (error) {
     let diagnostics = null;
@@ -1558,6 +1630,8 @@ async function runSceneControls(page) {
           title: String(title && (title.text || title) || ""),
           rename: (document.getElementById("scene-tab-rename-input") || {}).value || "",
           banner: (document.getElementById("status-banner") || {}).textContent || "",
+          loaded: (document.getElementById("upload-status") || {}).textContent || "",
+          footer: (document.getElementById("mv-status-structure") || {}).textContent || "",
           render: gd && gd.layout && gd.layout.meta && gd.layout.meta.mattervis_render,
           cameraClock: gd && {scope: gd.__mvCameraRevisionScope, epoch: gd.__mvCameraRevisionEpoch, revision: gd.__mvCameraRevision},
           expected: gd && window.MatterVisExpectedRender && window.MatterVisExpectedRender(gd.layout?.meta?.mattervis_render?.scene_id),
@@ -1571,14 +1645,27 @@ async function runSceneControls(page) {
     fail(`rename did not settle: ${JSON.stringify(diagnostics)} (${error.message})`);
   }
   const afterRename = await readView(page);
-  if (!afterRename.title.includes(renamed)) fail(`canvas title did not follow rename: ${afterRename.title}`);
+  const chrome = await page.evaluate((name) => ({
+    loaded: (document.getElementById("upload-status") || {}).textContent || "",
+    footer: (document.getElementById("mv-status-structure") || {}).textContent || "",
+    name,
+  }), renamed);
+  if (!afterRename.title.includes(renamed) || !chrome.loaded.includes(renamed) || !chrome.footer.includes(renamed)) {
+    fail(`scene labels diverged after rename: ${JSON.stringify({title: afterRename.title, ...chrome})}`);
+  }
 
   await commitSceneRename(page, "   ");
   await page.waitForFunction(() => /scene action failed:.*cannot be empty/i.test(
     document.getElementById("status-banner")?.textContent || ""
   ), null, {timeout: 30000});
   const afterEmpty = await readView(page);
-  if (!afterEmpty.title.includes(renamed)) fail(`empty rename changed canvas title: ${afterEmpty.title}`);
+  const still = await page.evaluate(() => ({
+    loaded: (document.getElementById("upload-status") || {}).textContent || "",
+    footer: (document.getElementById("mv-status-structure") || {}).textContent || "",
+  }));
+  if (!afterEmpty.title.includes(renamed) || !still.loaded.includes(renamed) || !still.footer.includes(renamed)) {
+    fail(`empty rename changed a visible label: ${JSON.stringify({title: afterEmpty.title, ...still})}`);
+  }
 }
 
 async function runSurfacePick(page) {
@@ -1677,6 +1764,82 @@ async function runSurfacePick(page) {
 }
 
 
+function luminance(color) {
+  const match = String(color || "").match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  if (!match) return null;
+  const red = Number(match[1]);
+  const green = Number(match[2]);
+  const blue = Number(match[3]);
+  return (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
+}
+
+async function themeSample(page) {
+  return page.evaluate(() => {
+    function channel(color) {
+      const match = String(color || "").match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+      return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+    }
+    const rootStyle = getComputedStyle(document.documentElement);
+    const side = getComputedStyle(document.getElementById("left-panel"));
+    const center = getComputedStyle(document.getElementById("center-panel"));
+    const radio = document.querySelector("#view-projection input[type='radio']");
+    const checkbox = document.querySelector("#display-options input[type='checkbox']");
+    const control = radio || checkbox;
+    let extension = document.getElementById("mv-extension-panels");
+    let created = false;
+    if (!extension) {
+      extension = document.createElement("aside");
+      extension.id = "mv-extension-panels";
+      (document.getElementById("viewer-root") || document.body).appendChild(extension);
+      created = true;
+    }
+    const extensionStyle = getComputedStyle(extension);
+    const sample = {
+      scheme: rootStyle.colorScheme,
+      controlScheme: control ? getComputedStyle(control).colorScheme : "",
+      side: side.backgroundColor,
+      center: center.backgroundColor,
+      extension: extensionStyle.backgroundColor,
+      controlKind: control ? control.type : "",
+    };
+    if (created) extension.remove();
+    return sample;
+  }).then((sample) => ({
+    ...sample,
+    sideLum: luminance(sample.side),
+    centerLum: luminance(sample.center),
+    extensionLum: luminance(sample.extension),
+  }));
+}
+
+function assertTheme(sample, dark) {
+  const scheme = dark ? "dark" : "light";
+  if (sample.scheme !== scheme || sample.controlScheme !== scheme) {
+    fail(`native controls and document color-scheme diverged ${JSON.stringify(sample)}`);
+  }
+  const surfaces = [sample.sideLum, sample.centerLum, sample.extensionLum];
+  if (surfaces.some((value) => value === null)) fail(`theme surface was not a color ${JSON.stringify(sample)}`);
+  if (dark && surfaces.some((value) => value >= 0.45)) {
+    fail(`dark preference left a pale workbench ${JSON.stringify(sample)}`);
+  }
+  if (!dark && surfaces.some((value) => value <= 0.75)) {
+    fail(`light preference left a dark workbench ${JSON.stringify(sample)}`);
+  }
+}
+
+async function runTheme(page) {
+  await graphReady(page);
+  await page.emulateMedia({colorScheme: "dark"});
+  assertTheme(await themeSample(page), true);
+  await page.evaluate(() => document.documentElement.setAttribute("data-mattervis-theme", "light"));
+  assertTheme(await themeSample(page), false);
+  await page.evaluate(() => document.documentElement.setAttribute("data-mattervis-theme", "dark"));
+  await page.emulateMedia({colorScheme: "light"});
+  assertTheme(await themeSample(page), true);
+  await page.evaluate(() => document.documentElement.removeAttribute("data-mattervis-theme"));
+  assertTheme(await themeSample(page), false);
+}
+
 let activeBrowser;
 let activeContext;
 let tracingStarted = false;
@@ -1752,6 +1915,7 @@ const networkEvents = [];
   else if (mode === "nacl-frame") await runNaclFrame(page);
   else if (mode === "surface-pick") await runSurfacePick(page);
   else if (mode === "semantic-pick") await runSemanticPick(page);
+  else if (mode === "theme") await runTheme(page);
   else if (mode === "drag-replot") await runDragReplot(page);
   else if (mode === "ortho-drag") await runOrthoDrag(page);
   else if (mode === "mixed-projection" || mode === "mixed-projection-http") await require("./projection_mixed_browser")(page, clickTab, waitForServerState);

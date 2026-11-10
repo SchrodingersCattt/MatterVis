@@ -37,9 +37,70 @@
     if(token!==serial || id!==sceneId) return;
     editing=targets;report=value;render();
   }
+  const DOCK='--mv-selection-dock';
+  function dockWidth(){
+    const probe=document.documentElement;
+    if(!probe || typeof getComputedStyle!=='function') return 290;
+    const parsed=parseFloat(getComputedStyle(probe).getPropertyValue(DOCK));
+    return Number.isFinite(parsed) && parsed>0 ? parsed : 290;
+  }
+  function placeChrome(open, width){
+    const center=document.getElementById('center-panel');
+    const bar=document.getElementById('mv-status-bar');
+    const log=document.getElementById('perf-log-panel');
+    if(center && center.style) center.style.paddingRight=open ? width+'px' : '';
+    if(bar && bar.style) bar.style.right=open ? width+'px' : '';
+    if(log && log.style) log.style.right=open ? (width+14)+'px' : '';
+  }
+  function layoutDock(){
+    if(!panel) return;
+    const center=document.getElementById('center-panel');
+    const open=!panel.hidden && !!center && typeof center.getBoundingClientRect==='function';
+    const width=Math.min(dockWidth(), Math.round((window.innerWidth||800)*0.4));
+    placeChrome(open, width);
+    if(!open) return;
+    const rect=center.getBoundingClientRect();
+    panel.style.top=rect.top+'px';
+    panel.style.left=Math.max(rect.left, rect.right-width)+'px';
+    panel.style.width=width+'px';
+    panel.style.height=Math.max(rect.height, 0)+'px';
+  }
+  function mount(next){
+    const body=document.body;
+    const center=document.getElementById('center-panel');
+    if(body && center && body!==center && typeof body.appendChild==='function' && typeof center.getBoundingClientRect==='function'){
+      if(next.parentElement!==body) body.appendChild(next);
+      if(!center.__mvDockWatch && typeof ResizeObserver==='function'){
+        center.__mvDockWatch=true;
+        const observer=new ResizeObserver(function(){layoutDock();});
+        observer.observe(center);
+        window.addEventListener('resize', layoutDock);
+      }
+      layoutDock();
+      return;
+    }
+    const graph=document.getElementById('crystal-graph');
+    if(graph && typeof graph.appendChild==='function' && next.parentElement!==graph) graph.appendChild(next);
+  }
+  function refitDock(){
+    layoutDock();
+    const run=function(){
+      const api=window.MatterVisPanelResize;
+      if(api && typeof api.resizeScene==='function') api.resizeScene();
+    };
+    if(typeof requestAnimationFrame==='function') requestAnimationFrame(function(){requestAnimationFrame(run);});
+    else run();
+  }
+  let dockShown=false;
+  function syncDock(){
+    const shown=!!(panel && !panel.hidden);
+    if(shown===dockShown){layoutDock();return;}
+    dockShown=shown;
+    refitDock();
+  }
   function render(){
-    if(!panel){const graph=document.getElementById('crystal-graph');if(!graph) return;panel=node('section');panel.id='mv-selection-appearance';panel.className='mv-appearance';panel.setAttribute('aria-label','Selection and Appearance');graph.appendChild(panel);}
-    panel.replaceChildren();panel.hidden=!selected.length;if(panel.hidden) return;
+    if(!panel){panel=node('section');panel.id='mv-selection-appearance';panel.className='mv-appearance';panel.setAttribute('aria-label','Selection and Appearance');mount(panel);}
+    panel.replaceChildren();panel.hidden=!selected.length;syncDock();if(panel.hidden) return;
     panel.appendChild(node('h3','Selection / Appearance'));
     const identity=node('p',selected.length===1 ? selected[0].kind+' · '+(selected[0].label||selected[0].id) : selected.length+' selected objects');identity.title=selected.map(t=>t.id).join('\n');panel.appendChild(identity);
     const scope=node('select');scope.setAttribute('aria-label','Edit scope');
