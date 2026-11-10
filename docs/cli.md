@@ -342,6 +342,12 @@ substitutes one frame backend for another.
 | --isosurface-color-range MIN MAX | finite min/max | Colormap range; a constant field with no range uses the midpoint |
 | --isosurface-color-center VALUE | none | Value placed at the middle of the colormap |
 | --isosurface-colormap NAME | bgr | `bgr` or a Matplotlib colormap name |
+| --isosurface-material NAME | historical Lambert pair | `matte` or `glossy`. Replaces the light coefficients. Not combined with the coefficient flags |
+| --isosurface-ambient VALUE | 0.68 | Ambient weight. Not required to sum to 1 with diffuse |
+| --isosurface-diffuse VALUE | 0.32 | Diffuse weight |
+| --isosurface-specular VALUE | 0 | White highlight weight |
+| --isosurface-shininess VALUE | 32 | Highlight exponent, at least 1 |
+| --isosurface-light-scale VALUE | 1 | Multiplies diffuse and specular only |
 | --periodic-isosurface / --no-periodic-isosurface | off | Enable or disable scalar closure across cell faces |
 
 Static exports omit browser-only picking traces. Interactive HTML retains them.

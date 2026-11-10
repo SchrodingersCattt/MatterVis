@@ -414,7 +414,11 @@ pixels to remain in front of later depth tests.
 Entries in `scene["isosurfaces"]` may carry a `metadata` mapping in addition
 to `vertices`, `triangles`, `normals`, `color`, and `opacity`.  The mapping is
 preserved by the backend-neutral overlay adapter, so a renderer can opt into
-an analytic path without changing the public mesh schema.  The CPU renderer
+an analytic path without changing the public mesh schema.  Cube isosurface
+meshes store the shared shading record at `metadata["material"]`
+(`ambient`, `diffuse`, `specular`, `shininess`, `opacity`, `light_scale`).
+See [Isosurface material](cube_api.md#isosurface-material). When that record
+includes `opacity`, it is the surface alpha.  The CPU renderer
 currently recognises the following optional sphere keys:
 
 - `_raster_shape="sphere"`, `_raster_center`, and `_raster_radius` select the

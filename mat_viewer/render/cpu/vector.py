@@ -11,6 +11,7 @@ from typing import Iterable
 import numpy as np
 
 from ..camera import CameraTransform, triangulate_polygon
+from ..compass_overlay import draw_matplotlib_compass
 from ..contracts import (
     LinePrimitive,
     RENDER_RESULT_SCHEMA,
@@ -20,7 +21,11 @@ from ..contracts import (
     TriangleMeshPrimitive,
     ViewportPlan,
 )
-from ..compass_overlay import draw_matplotlib_compass
+from ..isosurface_material import (
+    camera_light_direction,
+    material_from_record,
+    shade_albedo,
+)
 from ..property_colorbar import draw_matplotlib_colorbar
 from .bsp import BSPPolygon, build_bsp, traverse_back_to_front
 from .raster_lines import _clipped_endpoint_rgb, endpoint_screen_weight
@@ -302,8 +307,7 @@ def _mesh_polygons(
 ) -> list[BSPPolygon]:
     result: list[BSPPolygon] = []
     rotation = transform.view_matrix[:3, :3]
-    light = np.asarray([-0.32, 0.42, 1.0])
-    light /= np.linalg.norm(light)
+    light = camera_light_direction()
     meshes = sorted(
         (
             item
@@ -314,9 +318,7 @@ def _mesh_polygons(
     )
     for primitive_order, primitive in enumerate(meshes):
         camera_vertices = transform.world_to_camera(primitive.vertices)
-        material = primitive.metadata.get("material", {})
-        ambient = float(material.get("ambient", 0.68))
-        diffuse = float(material.get("diffuse", 0.32))
+        material = material_from_record(primitive.metadata.get("material"))
         for triangle_index, indices in enumerate(primitive.triangles):
             world_triangle = primitive.vertices[indices]
             normal = np.cross(
@@ -335,15 +337,15 @@ def _mesh_polygons(
                 averaged_length = float(np.linalg.norm(averaged))
                 if averaged_length > 1e-14:
                     shading_normal = rotation @ (averaged / averaged_length)
-            illumination = ambient + diffuse * abs(float(shading_normal @ light))
             if primitive.vertex_colors is None:
                 base_rgb = primitive.rgba[:3]
             else:
                 base_rgb = np.mean(primitive.vertex_colors[indices], axis=0)
+            shaded = shade_albedo(base_rgb, shading_normal, material, light=light)
             rgba = (
-                float(base_rgb[0]) * illumination,
-                float(base_rgb[1]) * illumination,
-                float(base_rgb[2]) * illumination,
+                float(shaded[0]),
+                float(shaded[1]),
+                float(shaded[2]),
                 float(primitive.rgba[3]),
             )
             clipped = transform.clip_polygon_camera(camera_vertices[indices])

@@ -66,7 +66,12 @@ def orbital_isosurface_traces(
     negative_color: str = "#0072B2",
     opacity: float = 0.55,
 ) -> list[go.Isosurface]:
-    """Create positive and negative orbital isosurface traces (Plotly volume)."""
+    """Create positive and negative orbital isosurface traces (Plotly volume).
+
+    These volume shells do not evaluate the shared isosurface material.
+    Use ``orbital_mesh_traces`` or the CPU renderer when the surface must
+    be shaded.
+    """
     x, y, z, values = cube_grid(cube, stride=stride)
     iso = (
         float(isovalue)
@@ -185,6 +190,7 @@ def orbital_mesh_traces(
     min_volume_voxels: int = 0,
     atom_mask_radius: float | None = None,
     extra_atom_positions: np.ndarray | None = None,
+    material: str | None = None,
 ) -> list[go.Mesh3d]:
     """Build positive/negative orbital surfaces as ``go.Mesh3d`` traces.
 
@@ -192,6 +198,12 @@ def orbital_mesh_traces(
     renders reliably both interactively and via kaleido static export
     (unlike ``go.Isosurface`` whose volume ray-marching can drop out under
     Kaleido). This is the recommended path for publication-quality figures.
+
+    ``material`` is ``matte``, ``glossy``, or omitted. The omitted material
+    is the shared historical Lambert pair (ambient 0.68, diffuse 0.32,
+    specular 0), not the previous fixed Plotly lighting. Plotly rejects a
+    material whose ambient and scaled diffuse exceed 1 instead of clamping
+    it. Trace opacity stays the ``opacity`` argument.
     """
     try:
         from skimage.measure import marching_cubes
@@ -201,7 +213,14 @@ def orbital_mesh_traces(
             "install with `pip install scikit-image`"
         ) from exc
 
+    from ..render.isosurface_material import (
+        plotly_surface_kwargs,
+        resolve_isosurface_material,
+    )
+
     stride = max(1, int(stride))
+    surface_material = resolve_isosurface_material(material, opacity=float(opacity))
+    surface_shading = plotly_surface_kwargs(surface_material)
     values = cube.values[::stride, ::stride, ::stride]
     iso = (
         float(isovalue)
@@ -280,8 +299,8 @@ def orbital_mesh_traces(
             color=color,
             opacity=opacity,
             flatshading=flatshading,
-            lighting=dict(ambient=0.85, diffuse=0.55, specular=0.2, roughness=0.55),
-            lightposition=dict(x=200, y=200, z=200),
+            lighting=surface_shading["lighting"],
+            lightposition=surface_shading["lightposition"],
             name=name,
             hoverinfo="name",
             showlegend=False,

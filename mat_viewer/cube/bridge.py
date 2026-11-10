@@ -118,6 +118,10 @@ def build_cube_figure(
         static figures when the figure is built.
     style : dict, optional
         Style overrides (isosurface_*, atom_scale, bond_radius, etc.).
+        ``isosurface_material``, ``isosurface_specular``,
+        ``isosurface_shininess``, and ``isosurface_light_scale`` select the
+        shared isosurface material. A Plotly surface that cannot represent
+        those weights raises instead of drawing a flat color.
     display_mode : str
         Display mode for the structure ("formula_unit", "unit_cell", etc.).
     show_hydrogen : bool

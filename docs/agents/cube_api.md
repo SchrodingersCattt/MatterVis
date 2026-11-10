@@ -66,18 +66,74 @@ the canonical loader before adding the isosurface overlay.
   the positive/negative value range or fails when no surface can exist.
 - `cube_isosurface_meshes(cube, ...)` in `mat_viewer.cube.cpu` lazily uses
   scikit-image and returns backend-neutral vertices, triangles, normals,
-  colour, opacity, and ambient/diffuse material coefficients. Pass
-  `color_cube` to attach per-vertex RGB sampled from a second `CubeData`.
+  colour, and one shared shading material. Pass `color_cube` to attach
+  per-vertex RGB sampled from a second `CubeData`. Those colors stay the
+  albedo; the material shades them and does not add a scalar field.
 - `ensure_cube_isosurfaces(structure)` attaches those meshes to the canonical
   scene consumed by CPU or Plotly renderers. Prepared meshes are kept only
   while the source grid, isovalue, stride, material, and color-cube settings
   are unchanged.
 
-The static CPU renderer accepts `--isosurface-ambient` and
-`--isosurface-diffuse` coefficients. Their sum must not exceed one. Defaults
-(`0.68` and `0.32`) preserve the standard material; lower ambient and higher
-diffuse values increase directional contrast without introducing white
-specular highlights.
+## Isosurface material
+
+The shared record is `mat_viewer.render.isosurface_material.IsosurfaceMaterial`.
+It is stored on each mesh at `metadata["material"]` and carries:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `ambient` | 0.68 | Weight of light that does not depend on the normal. |
+| `diffuse` | 0.32 | Weight of `\|n · light\|`. Independent of ambient. |
+| `specular` | 0 | Weight of the white highlight. |
+| `shininess` | 32 | Blinn-Phong exponent, at least 1. Unused while specular is 0. |
+| `opacity` | 0.55 | Surface alpha. The same value is copied to the mesh `opacity`. |
+| `light_scale` | 1 | Multiplies diffuse and specular only. |
+
+Ambient and diffuse are not required to sum to 1. The directional light is a
+separate unit vector in camera space, `(-0.32, 0.42, 1)`, and `light_scale`
+changes its strength without rewriting the surface weights. The shaded color
+is clipped to `[0, 1]`. Coefficients are not renormalized.
+
+A back-facing normal is flipped before the diffuse and specular terms, so the
+scalar or phase color remains the albedo on both sides of a thin sheet.
+Wireframe mode does not use this shade: its lines stay the phase or sampled
+endpoint colors.
+
+Two presets replace the light coefficients. Opacity can be combined with
+either preset. A preset and an explicit light coefficient together is an
+error.
+
+| Preset | ambient | diffuse | specular | shininess | light_scale |
+|---|---|---|---|---|---|
+| `matte` | 0.62 | 0.55 | 0 | 32 | 1 |
+| `glossy` | 0.38 | 0.72 | 0.18 | 16 | 1 |
+
+`matte` is the print preset: the dark side of a fold stays near 0.62 of the
+scalar color, and there is no highlight. `glossy` adds a broad highlight.
+Omitting the preset keeps the historical 0.68 / 0.32 Lambert pair with
+specular 0, so existing figures do not change until a coefficient or preset
+is set.
+
+```console
+mat-vis render density.cube -o density.png --backend cpu \
+  --isosurface-material matte
+mat-vis render density.cube -o density.png --backend cpu \
+  --isosurface-ambient 0.45 --isosurface-diffuse 0.70 \
+  --isosurface-specular 0.15 --isosurface-shininess 24 \
+  --isosurface-light-scale 1
+```
+
+| Backend | Surface shading |
+|---|---|
+| CPU PNG | Per-vertex Blinn-Phong when normals are present. Flat shading uses one illumination per face and still multiplies the vertex colors. Both sides keep the scalar color. |
+| CPU SVG/PDF | One shaded color per triangle, after averaging vertex colors. The specular term is included. Rear faces keep that color. |
+| Matplotlib | One shaded color per triangle for a uniform phase color. Per-vertex colors are still an error; use CPU or Plotly. |
+| Plotly mesh | The same record is copied into Mesh3d lighting. Fresnel is 0 so the scalar color is not rim-tinted. Roughness is `1 / (1 + shininess / 32)`. Plotly clamps `ambient + diffuse * light_scale` to 1 before multiplying by the color, so a material above that clamp, including both presets, raises `IsosurfaceShadingUnsupported` instead of drawing a flatter sheet. The historical default sums to 1 and is accepted. Plotly's highlight is Cook-Torrance, not a bit-identical Blinn-Phong lobe. |
+| Plotly volume (`orbital_isosurface_traces`) | Does not evaluate this record. Use the mesh traces or the CPU backend. |
+| GPU | Rejects an isosurface mesh with `GPUUnsupportedError` before drawing. The current shader would otherwise store one flat color. Wireframe lines stay on the existing unlit line rules. |
+
+`orbital_mesh_traces` now uses this record. Its previous fixed lighting
+(ambient 0.85, diffuse 0.55, specular 0.2) is not the default anymore. The
+trace `opacity` argument is unchanged and still defaults to 0.6.
 
 ## Isosurface color
 
@@ -99,6 +155,8 @@ supplied range maps a constant value through that range.
 `--isosurface-color-center` places one value, often zero, at the middle of
 an asymmetric range.
 
+Sampled colors are the albedo for the shared material. Shading multiplies
+them and may add a white specular term; it does not replace the colormap.
 A nonfinite voxel with nonzero trilinear weight makes that sample an error.
 A nonfinite voxel with zero weight does not: an exact grid point or grid
 face ignores the unused corners, so `NaN * 0` is not evaluated. Nonfinite
@@ -107,12 +165,12 @@ keeps the positive and negative phase colors.
 
 | Mode | Backend | Color |
 |---|---|---|
-| `surface` | CPU PNG | Per-vertex color. Smooth shading uses vertex normals; flat shading keeps the same colors with one illumination per face. |
+| `surface` | CPU PNG | Per-vertex color, then the shared material. Smooth shading uses vertex normals; flat shading keeps the same colors with one illumination per face. |
 | `surface` | CPU SVG/PDF | Per-face average of the vertex colors. Vector fills are one color per triangle. |
 | `surface` | Plotly | `Mesh3d` vertex colors. |
 | `wireframe` | CPU PNG | Endpoint colors along the projected edge. Perspective uses camera depth (`-z`), so depths 1 and 9 give the screen midpoint weights 0.9 and 0.1. |
 | `wireframe` | CPU SVG/PDF | The same blend, drawn as solid steps of 4 px. A span is not replaced by its midpoint color. |
-| `wireframe` | Plotly | Error. Use the CPU backend or `surface`. |
+| `wireframe` | Plotly | Error for per-endpoint colors. Use the CPU backend or `surface`. Wireframe lines are unlit and do not apply the shared material. |
 | either | matplotlib or GPU | Error. Those backends do not accept per-vertex or per-endpoint colors. |
 
 ```console

@@ -18,6 +18,11 @@ from .contracts import (
     TextPrimitive,
     TriangleMeshPrimitive,
 )
+from .isosurface_material import (
+    camera_light_direction,
+    material_from_record,
+    shade_albedo,
+)
 
 
 def _rgba(value) -> tuple[float, float, float, float]:
@@ -106,14 +111,47 @@ def _viewport_artists(viewport, *, width: int, height: int, dpi: float):
 
             camera_vertices = transform.world_to_camera(primitive.vertices)
             projected = transform.project_camera(camera_vertices)
+            shade_surface = primitive.metadata.get("kind") == "isosurface"
+            surface_material = (
+                material_from_record(primitive.metadata.get("material"))
+                if shade_surface
+                else None
+            )
+            surface_light = camera_light_direction() if shade_surface else None
+            rotation = transform.view_matrix[:3, :3]
             for triangle_index, indices in enumerate(primitive.triangles):
                 if not bool(np.all(projected.visible[indices])):
                     continue
                 depth = float(np.mean(projected.depth[indices]))
+                facecolor = _rgba(primitive.rgba)
+                if shade_surface and surface_material is not None and surface_light is not None:
+                    corners = primitive.vertices[indices]
+                    normal = np.cross(corners[1] - corners[0], corners[2] - corners[0])
+                    length = float(np.linalg.norm(normal))
+                    if length < 1.0e-14:
+                        continue
+                    shading_normal = rotation @ (normal / length)
+                    if primitive.vertex_normals is not None:
+                        averaged = np.mean(primitive.vertex_normals[indices], axis=0)
+                        averaged_length = float(np.linalg.norm(averaged))
+                        if averaged_length > 1.0e-14:
+                            shading_normal = rotation @ (averaged / averaged_length)
+                    shaded = shade_albedo(
+                        np.asarray(primitive.rgba[:3]),
+                        shading_normal,
+                        surface_material,
+                        light=surface_light,
+                    )
+                    facecolor = (
+                        float(shaded[0]),
+                        float(shaded[1]),
+                        float(shaded[2]),
+                        float(primitive.rgba[3]),
+                    )
                 patch = Polygon(
                     projected.xy[indices],
                     closed=True,
-                    facecolor=_rgba(primitive.rgba),
+                    facecolor=facecolor,
                     edgecolor="none",
                 )
                 artists.append(

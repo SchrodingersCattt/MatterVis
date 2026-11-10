@@ -20,6 +20,11 @@ from ..contracts import (
     TriangleMeshPrimitive,
     ViewportPlan,
 )
+from ..isosurface_material import (
+    camera_light_direction,
+    material_from_record,
+    shade_albedo,
+)
 from .raster_lines import rasterize_lines as _rasterize_lines
 from .raster_math import _clip_polygon_attributes, _edge, _edge_array
 
@@ -596,11 +601,8 @@ def _rasterize_mesh(
 ) -> None:
     camera_vertices = transform.world_to_camera(primitive.vertices)
     rotation = transform.view_matrix[:3, :3]
-    light = np.asarray([-0.32, 0.42, 1.0], dtype=float)
-    light /= np.linalg.norm(light)
-    material = primitive.metadata.get("material", {})
-    ambient = float(material.get("ambient", 0.68))
-    diffuse = float(material.get("diffuse", 0.32))
+    light = camera_light_direction()
+    material = material_from_record(primitive.metadata.get("material"))
     triangle_indices = np.asarray(primitive.triangles, dtype=int)
     if len(triangle_indices) == 0:
         return
@@ -628,8 +630,9 @@ def _rasterize_mesh(
         camera_vertex_normals /= np.maximum(
             np.linalg.norm(camera_vertex_normals, axis=1, keepdims=True), 1e-12
         )
-        vertex_illumination = ambient + diffuse * np.abs(camera_vertex_normals @ light)
-        vertex_rgb_all = shaded_base * vertex_illumination[:, None]
+        vertex_rgb_all = shade_albedo(
+            shaded_base, camera_vertex_normals, material, light=light
+        )
     rgba = (*primitive.rgba[:3], float(primitive.rgba[3]))
     for triangle_index, indices in enumerate(primitive.triangles):
         if normal_lengths[triangle_index] < 1e-14:
@@ -640,7 +643,8 @@ def _rasterize_mesh(
         ):
             continue
         if vertex_rgb_all is None:
-            lambert = abs(float(camera_normals[triangle_index] @ light))
+            face_normal = camera_normals[triangle_index]
+            lambert = abs(float(face_normal @ light))
             if (
                 primitive.vertex_colors is None
                 and primitive.metadata.get("kind") == "polyhedron"
@@ -648,12 +652,17 @@ def _rasterize_mesh(
                 face_rgb = _polyhedron_face_rgb(primitive.rgba[:3], lambert)
                 triangle_rgb = np.tile(face_rgb, (3, 1))
             elif primitive.vertex_colors is None:
-                face_rgb = np.asarray(primitive.rgba[:3]) * (
-                    ambient + diffuse * lambert
+                face_rgb = shade_albedo(
+                    np.asarray(primitive.rgba[:3]), face_normal, material, light=light
                 )
                 triangle_rgb = np.tile(face_rgb, (3, 1))
             else:
-                triangle_rgb = shaded_base[indices] * (ambient + diffuse * lambert)
+                triangle_rgb = shade_albedo(
+                    shaded_base[indices],
+                    np.repeat(face_normal[None, :], 3, axis=0),
+                    material,
+                    light=light,
+                )
         else:
             triangle_rgb = vertex_rgb_all[indices]
         stable_order = primitive_order * 1_000_000 + triangle_index * 16

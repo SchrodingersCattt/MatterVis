@@ -16,6 +16,16 @@ from typing import Any, Literal, Mapping, TypeAlias
 
 import numpy as np
 
+from .isosurface_material import (
+    DEFAULT_AMBIENT,
+    DEFAULT_DIFFUSE,
+    DEFAULT_LIGHT_SCALE,
+    DEFAULT_SHININESS,
+    DEFAULT_SPECULAR,
+    coefficient_matches_preset_or_default,
+    preset_material,
+)
+
 Projection = Literal["orthographic", "perspective"]
 Backend = Literal["cpu", "matplotlib", "plotly", "gpu"]
 DisplayMode = Literal["formula_unit", "unit_cell", "asymmetric_unit", "cluster"]
@@ -208,8 +218,12 @@ class RenderSpec:
     isosurface_positive_color: str = "#D55E00"
     isosurface_negative_color: str = "#0072B2"
     isosurface_stride: int = 2
-    isosurface_ambient: float = 0.68
-    isosurface_diffuse: float = 0.32
+    isosurface_ambient: float = DEFAULT_AMBIENT
+    isosurface_diffuse: float = DEFAULT_DIFFUSE
+    isosurface_specular: float = DEFAULT_SPECULAR
+    isosurface_shininess: float = DEFAULT_SHININESS
+    isosurface_light_scale: float = DEFAULT_LIGHT_SCALE
+    isosurface_material: Literal["matte", "glossy"] | None = None
     isosurface_color_cube: str | None = None
     isosurface_color_range: tuple[float, float] | None = None
     isosurface_color_center: float | None = None
@@ -276,16 +290,70 @@ class RenderSpec:
             raise ValueError("isosurface_opacity must lie in [0, 1]")
         if int(self.isosurface_stride) != self.isosurface_stride or int(self.isosurface_stride) <= 0:
             raise ValueError("isosurface_stride must be a positive integer")
+        if self.isosurface_material is not None:
+            preset = preset_material(self.isosurface_material)
+            conflicts = [
+                name
+                for name, current, default, preset_value in (
+                    (
+                        "isosurface_ambient",
+                        self.isosurface_ambient,
+                        DEFAULT_AMBIENT,
+                        preset.ambient,
+                    ),
+                    (
+                        "isosurface_diffuse",
+                        self.isosurface_diffuse,
+                        DEFAULT_DIFFUSE,
+                        preset.diffuse,
+                    ),
+                    (
+                        "isosurface_specular",
+                        self.isosurface_specular,
+                        DEFAULT_SPECULAR,
+                        preset.specular,
+                    ),
+                    (
+                        "isosurface_shininess",
+                        self.isosurface_shininess,
+                        DEFAULT_SHININESS,
+                        preset.shininess,
+                    ),
+                    (
+                        "isosurface_light_scale",
+                        self.isosurface_light_scale,
+                        DEFAULT_LIGHT_SCALE,
+                        preset.light_scale,
+                    ),
+                )
+                if not coefficient_matches_preset_or_default(
+                    current, default=default, preset_value=preset_value
+                )
+            ]
+            if conflicts:
+                raise ValueError(
+                    "isosurface_material replaces the light coefficients; "
+                    "do not also set "
+                    + ", ".join(conflicts)
+                )
+            object.__setattr__(self, "isosurface_ambient", preset.ambient)
+            object.__setattr__(self, "isosurface_diffuse", preset.diffuse)
+            object.__setattr__(self, "isosurface_specular", preset.specular)
+            object.__setattr__(self, "isosurface_shininess", preset.shininess)
+            object.__setattr__(self, "isosurface_light_scale", preset.light_scale)
         for name, value in (
             ("isosurface_ambient", self.isosurface_ambient),
             ("isosurface_diffuse", self.isosurface_diffuse),
+            ("isosurface_specular", self.isosurface_specular),
+            ("isosurface_light_scale", self.isosurface_light_scale),
         ):
             if not np.isfinite(value) or float(value) < 0.0:
                 raise ValueError(f"{name} must be finite and non-negative")
-        if float(self.isosurface_ambient) + float(self.isosurface_diffuse) > 1.0:
-            raise ValueError(
-                "isosurface_ambient + isosurface_diffuse must not exceed 1"
-            )
+        if (
+            not np.isfinite(self.isosurface_shininess)
+            or float(self.isosurface_shininess) < 1.0
+        ):
+            raise ValueError("isosurface_shininess must be finite and at least 1")
         if self.isosurface_color_range is not None:
             low, high = self.isosurface_color_range
             if not np.isfinite(low) or not np.isfinite(high) or high <= low:
