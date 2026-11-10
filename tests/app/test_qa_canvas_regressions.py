@@ -173,8 +173,19 @@ def test_ortep_style_does_not_change_display_scope_or_leave_a_caption(tmp_path: 
     backend = _backend(tmp_path)
     try:
         scene_id = backend.active_scene_id()
+        # The ionic default registers one coordination spec. ``patch_state``
+        # queues a full frame for a style change, and ``figure_for_state``
+        # forces topology on, so that spec runs shell classification
+        # (about 19s on an idle host, in molcrys shape matching). ``close``
+        # then waits out the pool join while that worker is still running.
+        # Display scope and the publication caption do not read the shell.
         backend.patch_state(
-            {"display_mode": "unit_cell", "style": "ball_stick", "material": "mesh"},
+            {
+                "display_mode": "unit_cell",
+                "style": "ball_stick",
+                "material": "mesh",
+                "polyhedron_specs": [],
+            },
             scene_id=scene_id,
             broadcast=False,
         )
@@ -186,17 +197,22 @@ def test_ortep_style_does_not_change_display_scope_or_leave_a_caption(tmp_path: 
         state = backend.get_state(scene_id)
         assert state["display_mode"] == "unit_cell"
         assert state["style"] == "ortep"
+        assert state["polyhedron_specs"] == []
         backend.patch_state(
             {"style": "ball_stick", "material": "mesh"},
             scene_id=scene_id,
             broadcast=False,
         )
-        fig, _ = backend.figure_for_state(backend.get_state(scene_id))
+        fig, topology = backend.figure_for_state(backend.get_state(scene_id))
+        assert topology is None
+        assert fig.data
         texts = [
             str(getattr(item, "text", "") or "")
             for item in (fig.layout.annotations or [])
         ]
         assert all("2D ORTEP Publication Mode" not in text for text in texts)
+        assert backend.get_state(scene_id)["display_mode"] == "unit_cell"
+        assert backend.get_state(scene_id)["style"] == "ball_stick"
     finally:
         backend.close()
 
