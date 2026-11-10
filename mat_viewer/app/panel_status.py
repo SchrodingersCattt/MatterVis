@@ -13,6 +13,29 @@ DISPLAY_MODE_LABELS = {
 
 ATOM_LIST_LIMIT = 12
 
+# Scene assembly stamps these on Cartesian repeats of a source site.
+# They are drawings, not additional crystallographic sites.
+_VISUAL_COPY_FLAGS = (
+    "_is_boundary_replica",
+    "_is_framework_context_replica",
+    "_is_bonded_image_replica",
+)
+
+
+def atom_is_visual_copy(atom: Any) -> bool:
+    """Return whether scene assembly marked this atom as a repeated drawing."""
+    if not isinstance(atom, dict):
+        return False
+    return any(bool(atom.get(flag)) for flag in _VISUAL_COPY_FLAGS)
+
+
+def visual_copy_phrase(count: int) -> str:
+    """Name a count of repeated drawings without calling them source sites."""
+    count = int(count)
+    if count == 1:
+        return "1 visual copy"
+    return f"{count} visual copies"
+
 
 def status_bar_parts(state: dict[str, Any] | None, scene: dict[str, Any] | None) -> tuple[str, str, str]:
     """Return ``(structure label, scope label, atom/bond counts)``."""
@@ -26,9 +49,20 @@ def status_bar_parts(state: dict[str, Any] | None, scene: dict[str, Any] | None)
         or "No structure"
     )
     mode = DISPLAY_MODE_LABELS.get(str(state.get("display_mode") or ""), "")
-    atoms = scene.get("draw_atoms") or []
-    bonds = scene.get("bonds") or []
-    counts = f"{len(atoms)} atoms · {len(bonds)} bonds" if (atoms or bonds) else ""
+    atoms = list(scene.get("draw_atoms") or [])
+    bonds = list(scene.get("bonds") or [])
+    copies = sum(1 for atom in atoms if atom_is_visual_copy(atom))
+    if atoms or bonds:
+        if copies:
+            site_word = "source site" if len(atoms) - copies == 1 else "source sites"
+            counts = (
+                f"{len(atoms) - copies} {site_word} + {visual_copy_phrase(copies)}"
+                f" · {len(bonds)} bonds"
+            )
+        else:
+            counts = f"{len(atoms)} atoms · {len(bonds)} bonds"
+    else:
+        counts = ""
     return str(label), mode, counts
 
 
@@ -47,7 +81,13 @@ def atom_list_model(scene: dict[str, Any] | None, *, limit: int = ATOM_LIST_LIMI
         label = str(atom.get("label") or element or "?")
         occupancy = atom.get("occupancy", atom.get("occ"))
         rows.append({"label": label, "element": element, "occupancy": occupancy})
-    return {"rows": rows, "total": len(atoms), "limit": limit}
+    copies = sum(1 for atom in atoms if atom_is_visual_copy(atom))
+    return {
+        "rows": rows,
+        "total": len(atoms),
+        "limit": limit,
+        "visual_copies": copies,
+    }
 
 
 def render_atom_list(scene: dict[str, Any] | None, *, limit: int = ATOM_LIST_LIMIT):
@@ -78,6 +118,15 @@ def render_atom_list(scene: dict[str, Any] | None, *, limit: int = ATOM_LIST_LIM
         rows.append(
             html.Div(
                 f"Showing {shown} of {model['total']} atoms",
+                className="atom-list-more",
+            )
+        )
+    copies = int(model.get("visual_copies") or 0)
+    if copies:
+        rows.append(
+            html.Div(
+                f"{visual_copy_phrase(copies)} of {model['total']} displayed atoms"
+                " are repeated drawings, not extra source sites.",
                 className="atom-list-more",
             )
         )
