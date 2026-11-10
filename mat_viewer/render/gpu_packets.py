@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
+import json
 from types import MappingProxyType
 from typing import Any, Literal, Mapping
 
@@ -144,6 +146,64 @@ class LoweredPlan:
         }
 
 
+def _json_value(value: Any) -> Any:
+    if isinstance(value, np.ndarray):
+        return np.asarray(value).tolist()
+    if isinstance(value, (tuple, list)):
+        return [_json_value(item) for item in value]
+    if isinstance(value, (np.floating, float)):
+        return float(value)
+    if isinstance(value, (np.integer, int)) and not isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (np.bool_, bool)):
+        return bool(value)
+    return value
+
+
+def lowered_plan_digest(lowered: LoweredPlan) -> str:
+    """Hash the camera, canvas, and packet fields that change the picture.
+
+    Positions alone are not enough: the same atom count can change colour,
+    bonds, the cell, or the camera without changing that one array.
+    """
+
+    cameras = {
+        viewport_id: {
+            "position": list(camera.position),
+            "target": list(camera.target),
+            "up": list(camera.up),
+            "projection": str(camera.projection),
+            "fov_y_deg": float(camera.fov_y_deg),
+            "near": float(camera.near),
+            "far": float(camera.far),
+            "ortho_scale": float(camera.ortho_scale),
+        }
+        for viewport_id, camera in lowered.cameras.items()
+    }
+    packets = [
+        {
+            "kind": packet.kind,
+            "rgba": list(packet.rgba),
+            "rect": list(packet.rect),
+            "vertices": np.asarray(packet.vertices).tolist(),
+            "metadata": {
+                key: _json_value(packet.metadata[key])
+                for key in sorted(packet.metadata)
+            },
+        }
+        for packet in lowered.packets
+    ]
+    payload = {
+        "width": int(lowered.width),
+        "height": int(lowered.height),
+        "background": list(lowered.background),
+        "cameras": cameras,
+        "packets": packets,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def line_needs_cpu_overlay(packet: DrawPacket) -> bool:
     """Return whether a line must be composited on the CPU.
 
@@ -207,7 +267,10 @@ def lower_plan(plan: RenderPlan) -> LoweredPlan:
                             indices=None,
                             rgba=rgba,
                             rect=viewport.rect,
-                            metadata={"radius": float(primitive.metadata["_raster_radius"])},
+                            metadata={
+                                "radius": float(primitive.metadata["_raster_radius"]),
+                                "flat": primitive.vertex_normals is None,
+                            },
                         )
                     )
                 elif shape == "cylinder":
@@ -226,7 +289,10 @@ def lower_plan(plan: RenderPlan) -> LoweredPlan:
                             indices=None,
                             rgba=rgba,
                             rect=viewport.rect,
-                            metadata={"radius": float(primitive.metadata["_raster_radius"])},
+                            metadata={
+                                "radius": float(primitive.metadata["_raster_radius"]),
+                                "flat": primitive.vertex_normals is None,
+                            },
                         )
                     )
                 elif shape == "ellipsoid":
@@ -246,6 +312,7 @@ def lower_plan(plan: RenderPlan) -> LoweredPlan:
                                 "axes": np.asarray(
                                     primitive.metadata["_raster_axes"], dtype=float
                                 ).reshape(3, 3),
+                                "flat": primitive.vertex_normals is None,
                             },
                         )
                     )

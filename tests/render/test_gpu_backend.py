@@ -571,3 +571,192 @@ def test_frame_batch_animation_requires_two_frames() -> None:
             render_spec=SimpleNamespace(representation="ball"),
         )
 
+
+def test_viewport_pixel_origin_matches_the_cpu_top() -> None:
+    from mat_viewer.render.contracts import ViewportPlan
+    from mat_viewer.render.cpu.raster import _viewport_bounds
+    from mat_viewer.render.gpu_camera import viewport_pixel_bounds
+
+    rect = (0.05, 0.1, 0.4, 0.2)
+    camera = CameraSpec.looking_along((0.0, 0.0, 1.0), up=(0.0, 1.0, 0.0))
+    panel = ViewportPlan("lower", camera=camera, primitives=(), rect=rect)
+    assert viewport_pixel_bounds(rect, 200, 100) == _viewport_bounds(panel, 200, 100)
+    _left, top, _right, bottom = viewport_pixel_bounds(rect, 200, 100)
+    assert (top, bottom) == (10, 30)
+
+
+def test_wide_lines_composite_inside_each_viewport() -> None:
+    from mat_viewer.render.cpu.raster import composite_primitives
+    from mat_viewer.render.gpu_raster import composite_overlay_lines
+
+    def stroke(name: str, rgba: tuple[float, float, float, float]) -> LinePrimitive:
+        return LinePrimitive(
+            name,
+            np.asarray([[[-0.4, 0.0, 0.0], [0.4, 0.0, 0.0]]], dtype=float),
+            rgba=rgba,
+            width_px=4.0,
+            depth_test=False,
+        )
+
+    def packet(name: str, viewport: str, rect: tuple[float, float, float, float], rgba):
+        primitive = stroke(name, rgba)
+        return gpu.DrawPacket(
+            kind="line",
+            semantic_id=name,
+            viewport_id=viewport,
+            vertices=primitive.segments.reshape(-1, 3),
+            indices=None,
+            rgba=rgba,
+            rect=rect,
+            metadata={"depth_test": False, "width_px": 4.0},
+        )
+
+    top_camera = CameraSpec.looking_along(
+        (0.0, 0.0, 1.0), up=(0.0, 1.0, 0.0), distance=8.0, ortho_scale=1.5, near=0.1, far=30.0
+    )
+    bottom_camera = CameraSpec.looking_along(
+        (0.0, 0.0, 1.0), up=(0.0, 1.0, 0.0), distance=8.0, ortho_scale=3.0, near=0.1, far=30.0
+    )
+    width, height = 48, 24
+    background = np.full((height, width, 4), 255, dtype=np.uint8)
+    depth = np.ones((height, width), dtype=np.float32)
+    lowered = gpu.LoweredPlan(
+        width=width,
+        height=height,
+        background=(1.0, 1.0, 1.0, 1.0),
+        packets=(),
+        plan_sha256="crop",
+        cameras={"top": top_camera, "bottom": bottom_camera},
+    )
+    painted = np.frombuffer(
+        composite_overlay_lines(
+            background.tobytes(),
+            depth,
+            lowered,
+            (
+                packet("top-line", "top", (0.0, 0.0, 1.0, 0.5), (1.0, 0.0, 0.0, 1.0)),
+                packet("bottom-line", "bottom", (0.0, 0.5, 1.0, 0.5), (0.0, 0.0, 1.0, 1.0)),
+            ),
+        ),
+        dtype=np.uint8,
+    ).reshape(height, width, 4)
+
+    def reference(camera: CameraSpec, rgba: tuple[float, float, float, float], rows: slice):
+        result, _depth = composite_primitives(
+            background[rows],
+            depth[rows],
+            camera,
+            [stroke("only", rgba)],
+        )
+        image = np.frombuffer(result, dtype=np.uint8).reshape(background[rows].shape)
+        assert np.any(np.any(image[:, :, :3] != 255, axis=2))
+        return image
+
+    assert np.array_equal(
+        painted[:12], reference(top_camera, (1.0, 0.0, 0.0, 1.0), slice(0, 12))
+    )
+    assert np.array_equal(
+        painted[12:], reference(bottom_camera, (0.0, 0.0, 1.0, 1.0), slice(12, 24))
+    )
+
+
+def test_depth_disabled_lines_are_drawn_after_meshes() -> None:
+    from mat_viewer.render.gpu_raster import split_raster_packets
+
+    edge = LinePrimitive(
+        "edge",
+        np.asarray([[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]], dtype=float),
+        rgba=(0.0, 0.0, 0.0, 1.0),
+        width_px=1.0,
+        depth_test=False,
+    )
+    lowered = gpu.lower_plan(_plan(edge, _triangle()))
+    main, final = split_raster_packets(lowered.packets)
+    assert [packet.kind for packet in main] == ["mesh"]
+    assert [packet.semantic_id for packet in final] == ["edge"]
+    assert [packet.semantic_id for packet in (*main, *final)] == ["triangle", "edge"]
+
+
+def test_frame_identity_tracks_positions_colors_and_camera() -> None:
+    from mat_viewer.loader.frame_batch import FrameBatch
+    from mat_viewer.render.gpu_batch import lowered_from_frame
+
+    def frame(x: float = 0.0, color: tuple[int, int, int] | None = None) -> FrameBatch:
+        return FrameBatch(
+            positions=np.asarray([[x, 0.0, 0.0]], dtype=float),
+            atomic_numbers=np.asarray([6], dtype=np.uint8),
+            atom_ids=None,
+            origin=np.zeros(3),
+            cell=np.eye(3),
+            pbc=np.asarray([False, False, False]),
+            timestep=0,
+            source_index=0,
+            atom_colors=None if color is None else np.asarray([color], dtype=np.uint8),
+        )
+
+    def digest(item: FrameBatch, camera: CameraSpec) -> str:
+        return lowered_from_frame(
+            item,
+            camera,
+            width=16,
+            height=16,
+            background=(1.0, 1.0, 1.0, 1.0),
+            atom_scale=1.0,
+            bond_radius=0.15,
+            show_hydrogen=True,
+            show_cell=False,
+            cell_color="#333333",
+            cell_width_px=2.0,
+            bonded=False,
+            tracker=None,
+        ).plan_sha256
+
+    camera_a = CameraSpec.looking_along((0.0, 0.0, 1.0), up=(0.0, 1.0, 0.0), ortho_scale=2.0)
+    camera_b = CameraSpec.looking_along((1.0, 0.0, 0.0), up=(0.0, 0.0, 1.0), ortho_scale=4.0)
+    base = digest(frame(), camera_a)
+    moved = digest(frame(x=1.0), camera_a)
+    recolored = digest(frame(color=(10, 20, 30)), camera_a)
+    reframed = digest(frame(), camera_b)
+    assert len({base, moved, recolored, reframed}) == 4
+    import hashlib
+
+    same_length = hashlib.sha256("\n".join((base, base)).encode()).hexdigest()
+    changed_frame = hashlib.sha256("\n".join((base, moved)).encode()).hexdigest()
+    assert same_length != changed_frame
+
+
+def test_missing_vertex_normals_select_flat_instance_shading() -> None:
+    from mat_viewer.render.gpu_camera import uniform_bytes
+    from mat_viewer.render.gpu_draw import _ELLIPSOID_WGSL, instance_batch_key
+
+    def ellipsoid(normals: np.ndarray | None) -> TriangleMeshPrimitive:
+        return TriangleMeshPrimitive(
+            "ellipsoid",
+            vertices=np.zeros((4, 3)),
+            triangles=np.asarray([[0, 1, 2]]),
+            rgba=(0.2, 0.3, 0.4, 1.0),
+            vertex_normals=normals,
+            metadata={
+                "_raster_shape": "ellipsoid",
+                "_raster_center": (0.0, 0.0, 0.0),
+                "_raster_lengths": (1.0, 0.4, 0.2),
+                "_raster_axes": np.eye(3).reshape(-1).tolist(),
+            },
+        )
+
+    smooth = gpu.lower_plan(_plan(ellipsoid(np.zeros((4, 3))))).packets[0]
+    flat = gpu.lower_plan(_plan(ellipsoid(None))).packets[0]
+    assert smooth.metadata["flat"] is False
+    assert flat.metadata["flat"] is True
+    assert instance_batch_key(smooth) != instance_batch_key(flat)
+    assert "uniforms.flat" in _ELLIPSOID_WGSL
+    assert "dpdx" in _ELLIPSOID_WGSL
+    camera = CameraSpec.looking_along((0.0, 0.0, 1.0), up=(0.0, 1.0, 0.0))
+    assert np.frombuffer(uniform_bytes(camera, aspect=1.0, flat=True)[76:80], dtype="<f4")[
+        0
+    ] == pytest.approx(1.0)
+    assert np.frombuffer(uniform_bytes(camera, aspect=1.0, flat=False)[76:80], dtype="<f4")[
+        0
+    ] == pytest.approx(0.0)
+
+

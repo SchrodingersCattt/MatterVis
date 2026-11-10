@@ -89,18 +89,48 @@ def _camera_matrix(camera: Any, *, aspect: float) -> np.ndarray:
     return (projection @ view).T.astype(np.float32, copy=False)
 
 
-def uniform_bytes(camera: Any, *, aspect: float) -> bytes:
-    """Pack the view-projection matrix and world light into one uniform buffer.
+def viewport_pixel_bounds(
+    rect: tuple[float, float, float, float],
+    canvas_width: int,
+    canvas_height: int,
+) -> tuple[int, int, int, int]:
+    """Return ``left, top, right, bottom`` in top-origin pixels.
 
-    ``view_proj`` occupies bytes 0–63. ``light`` is a ``vec3`` at byte 64,
-    which is the next 16-byte slot after a ``mat4x4``.
+    ``rect`` is ``(x, y, width, height)`` in the unit square. ``y`` is the
+    distance from the top of the image, matching
+    ``cpu.raster._viewport_bounds``. The WebGPU framebuffer uses the same
+    top-left origin, so this rectangle is also the viewport and scissor.
+    """
+
+    x, y, rect_width, rect_height = (float(value) for value in rect)
+    width = max(int(canvas_width), 1)
+    height = max(int(canvas_height), 1)
+    left = int(round(x * width))
+    top = int(round(y * height))
+    right = int(round((x + rect_width) * width))
+    bottom = int(round((y + rect_height) * height))
+    left = min(max(left, 0), width - 1)
+    top = min(max(top, 0), height - 1)
+    right = min(max(right, left + 1), width)
+    bottom = min(max(bottom, top + 1), height)
+    return left, top, right, bottom
+
+
+def uniform_bytes(camera: Any, *, aspect: float, flat: bool = False) -> bytes:
+    """Pack the view-projection matrix, world light, and flat-shading flag.
+
+    ``view_proj`` occupies bytes 0–63. ``light`` is a ``vec3`` at byte 64.
+    ``flat`` is a ``f32`` at byte 76, the next aligned slot after that
+    ``vec3``. A value above 0.5 selects face normals for instanced shapes.
     """
 
     matrix = _camera_matrix(camera, aspect=aspect).astype("<f4", copy=False).tobytes()
     light = np.asarray(world_light(camera), dtype="<f4").tobytes()
+    flat_flag = np.asarray([1.0 if flat else 0.0], dtype="<f4").tobytes()
     blob = bytearray(_UNIFORM_BYTES)
     blob[: len(matrix)] = matrix
     blob[64 : 64 + len(light)] = light
+    blob[76 : 76 + len(flat_flag)] = flat_flag
     return bytes(blob)
 
 

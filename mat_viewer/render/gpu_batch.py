@@ -22,6 +22,7 @@ from .gpu import (
     LoweredPlan,
     render_animation,
 )
+from .gpu_packets import lowered_plan_digest
 
 
 _CELL_EDGES = (
@@ -237,7 +238,16 @@ def lowered_from_frame(
                 },
             )
         )
-    digest = hashlib.sha256(np.ascontiguousarray(frame.positions).tobytes()).hexdigest()
+    digest = lowered_plan_digest(
+        LoweredPlan(
+            width=int(width),
+            height=int(height),
+            background=background,
+            packets=tuple(packets),
+            plan_sha256="",
+            cameras={"main": camera},
+        )
+    )
     return LoweredPlan(
         width=int(width),
         height=int(height),
@@ -350,6 +360,7 @@ def render_gpu_animation(
         from molcrys_kit.structures import VerletBondTracker
 
         tracker = VerletBondTracker(skin=0.5)
+    frame_digests: list[str] = []
     try:
         with GpuSession() as session:
             for ordinal, frame in enumerate(frames):
@@ -369,6 +380,7 @@ def render_gpu_animation(
                     bonded=tracker is not None,
                     tracker=tracker,
                 )
+                frame_digests.append(lowered.plan_sha256)
                 png = session.render_lowered(lowered)
                 with Image.open(BytesIO(png)) as image:
                     frame_image = image.convert("RGB")
@@ -391,7 +403,7 @@ def render_gpu_animation(
         format=destination.suffix.lower().lstrip("."),
         width=width,
         height=height,
-        plan_sha256=hashlib.sha256(str(len(frames)).encode()).hexdigest(),
+        plan_sha256=hashlib.sha256("\n".join(frame_digests).encode()).hexdigest(),
         output_sha256=hashlib.sha256(data).hexdigest(),
         output=destination,
         data=None,

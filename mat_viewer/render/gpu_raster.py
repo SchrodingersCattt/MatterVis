@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 
 from .contracts import LinePrimitive
-from .gpu_camera import _ndc_to_camera_depth, uniform_bytes
+from .gpu_camera import _ndc_to_camera_depth, uniform_bytes, viewport_pixel_bounds
 from .gpu_draw import draw_instanced_shapes
 from .gpu_errors import GPUUnavailableError, GPUUnsupportedError
 from .gpu_packets import DrawPacket, LoweredPlan, line_needs_cpu_overlay
@@ -51,6 +51,83 @@ def _cpu_overlay_lines(packets: tuple[DrawPacket, ...]) -> tuple[DrawPacket, ...
     return tuple(packet for packet in packets if line_needs_cpu_overlay(packet))
 
 
+def split_raster_packets(
+    packets: tuple[DrawPacket, ...],
+) -> tuple[tuple[DrawPacket, ...], tuple[DrawPacket, ...]]:
+    """Split depth-tested draws from 1 px lines that must stay on top.
+
+    Instanced shapes and CPU-composited strokes are omitted. Depth-disabled
+    unit-width lines are returned second so a later mesh cannot cover them.
+    The CPU rasterizer gives those lines a depth of negative infinity.
+    """
+
+    main: list[DrawPacket] = []
+    overlays: list[DrawPacket] = []
+    for packet in packets:
+        if packet.kind in {"sphere", "cylinder", "ellipsoid"}:
+            continue
+        if line_needs_cpu_overlay(packet):
+            continue
+        if packet.kind == "line" and not bool(packet.metadata.get("depth_test", True)):
+            overlays.append(packet)
+        else:
+            main.append(packet)
+    return tuple(main), tuple(overlays)
+
+
+def composite_overlay_lines(
+    rgba: bytes,
+    depth_ndc: np.ndarray,
+    lowered: LoweredPlan,
+    packets: tuple[DrawPacket, ...],
+) -> bytes:
+    """Composite wide lines inside each viewport crop.
+
+    Each crop uses that viewport's camera and pixel aspect. A second panel
+    does not reuse the first camera or the full-image projection.
+    """
+
+    width = int(lowered.width)
+    height = int(lowered.height)
+    image = np.frombuffer(rgba, dtype=np.uint8).reshape(height, width, 4).copy()
+    depth = np.asarray(depth_ndc, dtype=np.float32)
+    if depth.shape != (height, width):
+        raise GPUUnsupportedError("GPU depth overlay does not match the colour image")
+    groups: dict[tuple[Any, ...], list[DrawPacket]] = {}
+    for packet in packets:
+        groups.setdefault((packet.viewport_id, tuple(packet.rect)), []).append(packet)
+    from .cpu.raster import composite_primitives
+
+    for (viewport_id, rect), group in groups.items():
+        camera = lowered.cameras.get(viewport_id)
+        if camera is None:
+            raise GPUUnsupportedError(
+                f"GPU packet {group[0].semantic_id!r} has no viewport camera"
+            )
+        left, top, right, bottom = viewport_pixel_bounds(rect, width, height)
+        primitives = [
+            LinePrimitive(
+                packet.semantic_id,
+                np.asarray(packet.vertices, dtype=float).reshape(-1, 2, 3),
+                rgba=tuple(packet.rgba),
+                width_px=float(packet.metadata.get("width_px", 1.0)),
+                depth_test=bool(packet.metadata.get("depth_test", True)),
+                metadata={"kind": packet.metadata.get("kind")},
+            )
+            for packet in group
+        ]
+        composited, _depth = composite_primitives(
+            image[top:bottom, left:right],
+            _ndc_to_camera_depth(depth[top:bottom, left:right], camera),
+            camera,
+            primitives,
+        )
+        image[top:bottom, left:right] = np.frombuffer(composited, dtype=np.uint8).reshape(
+            bottom - top, right - left, 4
+        )
+    return np.ascontiguousarray(image).tobytes()
+
+
 def _composite_depth_overlays(
     rgba: bytes,
     lowered: LoweredPlan,
@@ -85,27 +162,7 @@ def _composite_depth_overlays(
             depth[row] = np.frombuffer(
                 raw[start : start + row_bytes], dtype="<f4", count=width
             )
-        viewports = {packet.viewport_id for packet in packets}
-        if len(viewports) != 1:
-            raise GPUUnsupportedError("GPU depth overlay requires one viewport")
-        camera = lowered.cameras[next(iter(viewports))]
-        linear = _ndc_to_camera_depth(depth, camera)
-        image = np.frombuffer(rgba, dtype=np.uint8).reshape(height, width, 4).copy()
-        from .cpu.raster import composite_primitives
-
-        primitives = [
-            LinePrimitive(
-                packet.semantic_id,
-                np.asarray(packet.vertices, dtype=float).reshape(-1, 2, 3),
-                rgba=tuple(packet.rgba),
-                width_px=float(packet.metadata.get("width_px", 1.0)),
-                depth_test=bool(packet.metadata.get("depth_test", True)),
-                metadata={"kind": packet.metadata.get("kind")},
-            )
-            for packet in packets
-        ]
-        composited, _depth = composite_primitives(image, linear, camera, primitives)
-        return np.ascontiguousarray(composited).tobytes()
+        return composite_overlay_lines(rgba, depth, lowered, packets)
     finally:
         release_gpu_resources([buffer], device, release_device=False)
 
@@ -336,19 +393,18 @@ def wgpu_rgba(
             cache=state,
         )
         overlay_packets = _cpu_overlay_lines(tuple(lowered.packets))
-        overlay_ids = {id(packet) for packet in overlay_packets}
+        main_packets, final_lines = split_raster_packets(tuple(lowered.packets))
         camera_by_viewport = lowered.cameras
-        for packet in lowered.packets:
-            if packet.kind in {"sphere", "cylinder", "ellipsoid"} or id(packet) in overlay_ids:
-                continue
+        for packet in (*main_packets, *final_lines):
             camera = camera_by_viewport.get(packet.viewport_id)
             if camera is None:
                 raise GPUUnsupportedError(
                     f"GPU packet {packet.semantic_id!r} has no viewport camera"
                 )
-            aspect = (lowered.width * packet.rect[2]) / max(
-                lowered.height * packet.rect[3], 1.0e-12
+            left, top, right, bottom = viewport_pixel_bounds(
+                packet.rect, lowered.width, lowered.height
             )
+            aspect = (right - left) / max(bottom - top, 1)
             uniform_data = uniform_bytes(camera, aspect=aspect)
             uniform_buffer = device.create_buffer(
                 size=len(uniform_data),
@@ -372,21 +428,8 @@ def wgpu_rgba(
             )
             resources.append(vertex_buffer)
             device.queue.write_buffer(vertex_buffer, 0, interleaved.tobytes())
-            x, y, width, height = packet.rect
-            render_pass.set_viewport(
-                x * lowered.width,
-                (1.0 - y - height) * lowered.height,
-                width * lowered.width,
-                height * lowered.height,
-                0.0,
-                1.0,
-            )
-            render_pass.set_scissor_rect(
-                max(0, int(round(x * lowered.width))),
-                max(0, int(round((1.0 - y - height) * lowered.height))),
-                max(1, int(round(width * lowered.width))),
-                max(1, int(round(height * lowered.height))),
-            )
+            render_pass.set_viewport(left, top, right - left, bottom - top, 0.0, 1.0)
+            render_pass.set_scissor_rect(left, top, right - left, bottom - top)
             render_pass.set_bind_group(0, bind_group)
             render_pass.set_vertex_buffer(0, vertex_buffer)
             if packet.kind == "mesh":

@@ -271,8 +271,11 @@ usable adapter with `mat-vis capabilities --require gpu --json` before
 rendering. Transparent primitives, dashed lines, and text fail explicitly.
 Opaque meshes, instanced spheres, cylinders, and solid ellipsoids are drawn
 on the device. Lines wider than one pixel, including the default unit-cell
-edges, are composited from the GPU depth buffer. The command never falls
-back to CPU.
+edges, are composited from the GPU depth buffer inside each viewport.
+Depth-disabled one-pixel lines are drawn after opaque geometry. The command
+never falls back to CPU. GPU output is not supersampled: `scale`,
+`sphere_detail`, and `cylinder_sides` do not change the GPU image size or
+the fixed instance meshes.
 Base MatterVis provides CPU 3D and Matplotlib projected 2D PNG/PDF/SVG, ORTEP, rings, polyhedra, and
 ordinary structure inputs. Run `mat-vis capabilities --require FEATURE --json`
 for an exact install command before using an optional frontend.

@@ -15,7 +15,7 @@ from typing import Any
 
 import numpy as np
 
-from .gpu_camera import uniform_bytes
+from .gpu_camera import uniform_bytes, viewport_pixel_bounds
 from .gpu_errors import GPUUnsupportedError
 
 
@@ -43,7 +43,7 @@ def ellipsoid_shading_normal(
 def instance_batch_key(packet: Any) -> tuple[Any, ...]:
     """Group instances that share a shape, viewport camera, and rectangle."""
 
-    return (packet.kind, packet.viewport_id, tuple(float(value) for value in packet.rect))
+    return (packet.kind, packet.viewport_id, tuple(float(value) for value in packet.rect), bool(packet.metadata.get("flat", False)))
 
 
 def _unit_sphere(lat: int = 8, lon: int = 12) -> tuple[np.ndarray, np.ndarray]:
@@ -120,27 +120,60 @@ def _unit_cylinder(sides: int = 12) -> tuple[np.ndarray, np.ndarray]:
 
 
 _SPHERE_WGSL = """
-struct Uniforms { view_proj: mat4x4<f32>, light: vec3<f32>, };
+struct Uniforms { view_proj: mat4x4<f32>, light: vec3<f32>, flat: f32, };
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
-struct VertexOut { @builtin(position) position: vec4<f32>, @location(0) color: vec4<f32>, };
+struct VertexOut {
+  @builtin(position) position: vec4<f32>,
+  @location(0) color: vec4<f32>,
+  @location(1) base: vec4<f32>,
+  @location(2) world: vec3<f32>,
+  @location(3) smooth_n: vec3<f32>,
+};
+fn face_lit(base: vec4<f32>, world: vec3<f32>, smooth_n: vec3<f32>) -> vec4<f32> {
+  let derived = cross(dpdx(world), dpdy(world));
+  let derived_len = length(derived);
+  let n = select(smooth_n, derived / max(derived_len, 1e-8), derived_len > 1e-8);
+  let lit = 0.68 + 0.32 * abs(dot(normalize(n), normalize(uniforms.light)));
+  return vec4<f32>(base.rgb * lit, base.a);
+}
 @vertex fn vs_sphere(
   @location(0) local: vec3<f32>, @location(1) normal: vec3<f32>,
   @location(2) center: vec3<f32>, @location(3) radius: f32, @location(4) color: vec4<f32>
 ) -> VertexOut {
   var out: VertexOut;
   let world = center + local * radius;
-  let lit = 0.68 + 0.32 * abs(dot(normalize(normal), normalize(uniforms.light)));
+  let n = normalize(normal);
+  let lit = 0.68 + 0.32 * abs(dot(n, normalize(uniforms.light)));
   out.position = uniforms.view_proj * vec4<f32>(world, 1.0);
   out.color = vec4<f32>(color.rgb * lit, color.a);
+  out.base = color;
+  out.world = world;
+  out.smooth_n = n;
   return out;
 }
-@fragment fn fs_sphere(in: VertexOut) -> @location(0) vec4<f32> { return in.color; }
+@fragment fn fs_sphere(in: VertexOut) -> @location(0) vec4<f32> {
+  if (uniforms.flat > 0.5) { return face_lit(in.base, in.world, in.smooth_n); }
+  return in.color;
+}
 """
 
 _CYLINDER_WGSL = """
-struct Uniforms { view_proj: mat4x4<f32>, light: vec3<f32>, };
+struct Uniforms { view_proj: mat4x4<f32>, light: vec3<f32>, flat: f32, };
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
-struct VertexOut { @builtin(position) position: vec4<f32>, @location(0) color: vec4<f32>, };
+struct VertexOut {
+  @builtin(position) position: vec4<f32>,
+  @location(0) color: vec4<f32>,
+  @location(1) base: vec4<f32>,
+  @location(2) world: vec3<f32>,
+  @location(3) smooth_n: vec3<f32>,
+};
+fn face_lit(base: vec4<f32>, world: vec3<f32>, smooth_n: vec3<f32>) -> vec4<f32> {
+  let derived = cross(dpdx(world), dpdy(world));
+  let derived_len = length(derived);
+  let n = select(smooth_n, derived / max(derived_len, 1e-8), derived_len > 1e-8);
+  let lit = 0.68 + 0.32 * abs(dot(normalize(n), normalize(uniforms.light)));
+  return vec4<f32>(base.rgb * lit, base.a);
+}
 @vertex fn vs_cylinder(
   @location(0) local: vec3<f32>, @location(1) normal: vec3<f32>,
   @location(2) start: vec3<f32>, @location(3) radius: f32,
@@ -159,15 +192,34 @@ struct VertexOut { @builtin(position) position: vec4<f32>, @location(0) color: v
   let lit = 0.68 + 0.32 * abs(dot(normalize(n), normalize(uniforms.light)));
   out.position = uniforms.view_proj * vec4<f32>(world, 1.0);
   out.color = vec4<f32>(color.rgb * lit, color.a);
+  out.base = color;
+  out.world = world;
+  out.smooth_n = n;
   return out;
 }
-@fragment fn fs_cylinder(in: VertexOut) -> @location(0) vec4<f32> { return in.color; }
+@fragment fn fs_cylinder(in: VertexOut) -> @location(0) vec4<f32> {
+  if (uniforms.flat > 0.5) { return face_lit(in.base, in.world, in.smooth_n); }
+  return in.color;
+}
 """
 
 _ELLIPSOID_WGSL = """
-struct Uniforms { view_proj: mat4x4<f32>, light: vec3<f32>, };
+struct Uniforms { view_proj: mat4x4<f32>, light: vec3<f32>, flat: f32, };
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
-struct VertexOut { @builtin(position) position: vec4<f32>, @location(0) color: vec4<f32>, };
+struct VertexOut {
+  @builtin(position) position: vec4<f32>,
+  @location(0) color: vec4<f32>,
+  @location(1) base: vec4<f32>,
+  @location(2) world: vec3<f32>,
+  @location(3) smooth_n: vec3<f32>,
+};
+fn face_lit(base: vec4<f32>, world: vec3<f32>, smooth_n: vec3<f32>) -> vec4<f32> {
+  let derived = cross(dpdx(world), dpdy(world));
+  let derived_len = length(derived);
+  let n = select(smooth_n, derived / max(derived_len, 1e-8), derived_len > 1e-8);
+  let lit = 0.68 + 0.32 * abs(dot(normalize(n), normalize(uniforms.light)));
+  return vec4<f32>(base.rgb * lit, base.a);
+}
 @vertex fn vs_ellipsoid(
   @location(0) local: vec3<f32>, @location(1) normal: vec3<f32>,
   @location(2) center: vec3<f32>, @location(3) length0: f32,
@@ -186,9 +238,15 @@ struct VertexOut { @builtin(position) position: vec4<f32>, @location(0) color: v
   let lit = 0.68 + 0.32 * abs(dot(n, normalize(uniforms.light)));
   out.position = uniforms.view_proj * vec4<f32>(world, 1.0);
   out.color = vec4<f32>(color.rgb * lit, color.a);
+  out.base = color;
+  out.world = world;
+  out.smooth_n = n;
   return out;
 }
-@fragment fn fs_ellipsoid(in: VertexOut) -> @location(0) vec4<f32> { return in.color; }
+@fragment fn fs_ellipsoid(in: VertexOut) -> @location(0) vec4<f32> {
+  if (uniforms.flat > 0.5) { return face_lit(in.base, in.world, in.smooth_n); }
+  return in.color;
+}
 """
 
 
@@ -227,18 +285,9 @@ def _pipeline(
 
 
 def _viewport(render_pass: Any, lowered: Any, rect: tuple[float, float, float, float]) -> None:
-    x, y, width, height = rect
-    pixel_x = x * lowered.width
-    pixel_y = (1.0 - y - height) * lowered.height
-    pixel_width = width * lowered.width
-    pixel_height = height * lowered.height
-    render_pass.set_viewport(pixel_x, pixel_y, pixel_width, pixel_height, 0.0, 1.0)
-    render_pass.set_scissor_rect(
-        max(0, int(round(pixel_x))),
-        max(0, int(round(pixel_y))),
-        max(1, int(round(pixel_width))),
-        max(1, int(round(pixel_height))),
-    )
+    left, top, right, bottom = viewport_pixel_bounds(rect, lowered.width, lowered.height)
+    render_pass.set_viewport(left, top, right - left, bottom - top, 0.0, 1.0)
+    render_pass.set_scissor_rect(left, top, right - left, bottom - top)
 
 
 def draw_instanced_shapes(
@@ -399,10 +448,15 @@ def draw_instanced_shapes(
         payload = np.asarray(rows, dtype="<f4")
         instance_buffer = _buffer(device, payload.tobytes(), vertex_usage, resources)
         rect = packets[0].rect
-        aspect = (lowered.width * rect[2]) / max(lowered.height * rect[3], 1.0e-12)
+        left, top, right, bottom = viewport_pixel_bounds(rect, lowered.width, lowered.height)
+        aspect = (right - left) / max(bottom - top, 1)
         uniform_buffer = _buffer(
             device,
-            uniform_bytes(camera, aspect=aspect),
+            uniform_bytes(
+                camera,
+                aspect=aspect,
+                flat=bool(packets[0].metadata.get("flat", False)),
+            ),
             uniform_usage,
             resources,
         )
