@@ -180,8 +180,12 @@ Notes for callers:
   style owner. `uirevision` includes the scene id, structure name, camera
   revision, and viewport signature, so two scenes that share a structure and
   camera do not keep one WebGL camera. Clients preserve the live camera only
-  for the same scene, server epoch and `uirevision`; explicit camera revisions
-  use the supplied camera. A duplicate scene schedules its own complete frame.
+  for the same scene, scene generation, server epoch, and `uirevision`. A
+  transient camera revision is read back only for that same generation and
+  epoch. A width/height replot during an in-progress drag on the mounted
+  scene restores the live drag camera; explicit camera revisions use the
+  supplied camera and still win over that drag. A duplicate scene schedules
+  its own complete frame.
   An in-flight build publishes only for its current scene identity; a newer
   complete-frame identity is requeued and an older one cannot roll that scene
   back.

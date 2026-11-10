@@ -579,19 +579,31 @@
       if (projection) patch["scene.camera.projection.type"] = String(projection);
       return patch;
     }
+    function sameSceneDragInProgress(gd) {
+      if (window.__mvGestureEndedAt) return false;
+      const render = renderMetadataFromLayout(gd && gd.layout);
+      const canvasId = render && render.scene_id ? String(render.scene_id) : "";
+      const gestureId = window.__mvGestureSceneId ? String(window.__mvGestureSceneId) : "";
+      return !!(gestureId && canvasId && gestureId === canvasId);
+    }
     /* A width/height relayout is a full gl3d replot: it emits plotly_relayout
      * and calls setViewport. Dash keeps only the latest relayoutData, so that
      * size event can hide the offscreen camera payload and the replot can
      * paint the pre-refit camera again. Drop the size event, then put back a
-     * camera command the replot moved. */
+     * camera command the replot moved. An in-progress drag has no command yet;
+     * put its live camera back or pointer-up stores the pre-drag eye. A Reset
+     * that arrives during the replot still wins. */
     function restoreCommandedCamera(gd, before, commandAtStart) {
+      if (!window.Plotly || typeof window.Plotly.relayout !== "function") return Promise.resolve();
       const latest = gd && gd.__mvLatestCamera;
-      if (!latest || !latest.snapshot || !window.Plotly || typeof window.Plotly.relayout !== "function") {
-        return Promise.resolve();
-      }
+      const commandArrived = !!(latest && latest !== commandAtStart);
       const after = window.mattervisCurrentCamera ? window.mattervisCurrentCamera(gd) : null;
+      if (!commandArrived && sameSceneDragInProgress(gd) && before && !camerasClose(after, before)) {
+        const dragged = cameraOnlyPatch(before);
+        if (dragged) return Promise.resolve(window.Plotly.relayout(gd, dragged)).catch(function () {});
+      }
+      if (!latest || !latest.snapshot) return Promise.resolve();
       if (camerasClose(after, latest.snapshot)) return Promise.resolve();
-      const commandArrived = latest !== commandAtStart;
       const commandWasLive = camerasClose(before, latest.snapshot);
       if (!commandArrived && !commandWasLive) return Promise.resolve();
       const patch = cameraOnlyPatch(latest.snapshot);
@@ -2236,7 +2248,8 @@
   /* A pointer-up relayout must keep the revision from gesture start so
    * Reset can still win. A later camera relayout is not that drag: read
    * the live canvas clock or the server rejects it and the offscreen
-   * view sticks. */
+   * view sticks. That clock is only the revision stored for this
+   * scene:generation and server session. */
   function refreshSettledGestureStamp(gd, layout) {
     if (!layout || !gd) return;
     const touches = layout["scene.camera"] || (layout.scene && layout.scene.camera) ||
@@ -2269,13 +2282,33 @@
     if (render.scene_generation !== undefined && render.scene_generation !== null) {
       window.__mvGestureSceneGeneration = render.scene_generation;
     }
-    const live = Number(gd.__mvCameraRevision);
+    const live = scopedLiveRevision(gd, render.scene_id, render.scene_generation, render.server_started_at);
     const metaRev = Number(render.camera_revision);
     let revision = null;
     if (Number.isFinite(live) && Number.isFinite(metaRev)) revision = Math.max(live, metaRev);
     else if (Number.isFinite(live)) revision = live;
     else if (Number.isFinite(metaRev)) revision = metaRev;
     if (revision !== null) window.__mvGestureCameraRevision = revision;
+  }
+  function canvasRevisionScope(sceneId, generation) {
+    const id = sceneId ? String(sceneId) : "";
+    const value = generation === undefined || generation === null ? "" : String(generation);
+    return id + ":" + value;
+  }
+  /* The transient revision belongs to one scene generation and one server
+   * session. A later relayout may read it only when both match the mounted
+   * figure. Another scene, or a restarted session that reused the generation
+   * number, keeps the figure's own revision. */
+  function scopedLiveRevision(gd, sceneId, generation, serverStartedAt) {
+    if (!gd) return NaN;
+    const scope = canvasRevisionScope(sceneId, generation);
+    const liveScope = gd.__mvCameraRevisionScope != null ? String(gd.__mvCameraRevisionScope) : "";
+    if (liveScope !== scope) return NaN;
+    const liveEpoch = gd.__mvCameraRevisionEpoch != null ? String(gd.__mvCameraRevisionEpoch) : "";
+    const renderEpoch = serverStartedAt != null ? String(serverStartedAt) : "";
+    if (liveEpoch && renderEpoch && liveEpoch !== renderEpoch) return NaN;
+    const live = Number(gd.__mvCameraRevision);
+    return Number.isFinite(live) ? live : NaN;
   }
   const FOREIGN_CAMERA_CENTER_TOLERANCE = 0.2;
   function armForeignCameraGuard(generation, sceneId) {
@@ -2361,20 +2394,21 @@
     const render = renderMetadataFromLayout(gd && gd.layout);
     const generation = render && render.scene_generation !== undefined
       ? render.scene_generation : null;
-    // view_camera.js scopes the transient revision to scene:generation.
-    // A full-scene Plotly.react reuses the graph div and does not clear it,
-    // so a revision left by scene A must not be stamped onto scene B.
-    const scope = id + ":" + (generation === null || generation === undefined ? "" : String(generation));
-    const liveScope = gd && gd.__mvCameraRevisionScope != null ? String(gd.__mvCameraRevisionScope) : "";
-    const liveRevision = Number(gd && gd.__mvCameraRevision);
+    // view_camera.js scopes the transient revision to scene:generation and
+    // the server session. A full-scene Plotly.react reuses the graph div and
+    // does not clear it, so a revision left by scene A, or by the previous
+    // server session, must not be stamped onto the mounted figure.
+    const liveRevision = gd
+      ? scopedLiveRevision(gd, id, generation, render && render.server_started_at)
+      : NaN;
     const metadataRevision = render && render.camera_revision !== undefined
       ? Number(render.camera_revision || 0) : null;
     // A typed camera command advances the transient revision without rewriting
     // figure metadata. A later full frame can carry a still newer revision in
     // metadata while the transient number stays behind. Use the newer of the
-    // two when they name the same scene generation.
+    // two when they name the same scene generation and session.
     let revision = null;
-    if (liveScope === scope && Number.isFinite(liveRevision)) {
+    if (Number.isFinite(liveRevision)) {
       revision = Number.isFinite(metadataRevision)
         ? Math.max(liveRevision, metadataRevision)
         : liveRevision;

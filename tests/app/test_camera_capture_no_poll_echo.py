@@ -333,6 +333,14 @@ assert.equal(refreshed.camera_revision,5,'stale transient revision beat the full
 emit('wheel',{{target:{{closest:()=>graph}}}});
 const refreshedZoom=capture({{'scene.camera':{{eye:{{x:4}}}}}});
 assert.equal(refreshedZoom.camera_revision,5,'wheel kept the stale transient revision');
+gd.__mvCameraRevisionScope='a:7';
+gd.__mvCameraRevisionEpoch='previous-session';
+gd.__mvCameraRevision=11;
+gd.layout=layout('a',7,5);
+emit('pointerdown',{{target:{{closest:()=>graph}}}});
+const restarted=capture({{'scene.camera':{{eye:{{x:5}}}}}});
+assert.equal(restarted.scene_generation,7);
+assert.equal(restarted.camera_revision,5,'a restarted session reused the previous camera revision');
 """
     result = subprocess.run([node, "-e", program, str(source)], capture_output=True,
                             text=True, timeout=15)

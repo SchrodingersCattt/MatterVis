@@ -28,8 +28,13 @@ const gd = {
   __mvSceneCamera: {eye: {x: 0, y: 1, z: 0}, center: {x: 0, y: 0, z: 0}, up: {x: 0, y: 0, z: 1}},
   __mvSceneCameraOwner: 'scene-a',
 };
+let displayedCamera = null;
 function relayout(target, patch) {
   calls.push(patch);
+  if (patch && patch.width && displayedCamera) {
+    if (displayedCamera.commandDuringSize) target.__mvLatestCamera = displayedCamera.commandDuringSize;
+    if (displayedCamera.afterSize) displayedCamera.current = displayedCamera.afterSize;
+  }
   return Promise.resolve(target);
 }
 const document = {
@@ -113,9 +118,53 @@ const fence = sandbox.window.__mvFenceTest;
   sandbox.window.__mvGestureEndedAt = Date.now();
   fence.refresh(gd, {'scene.camera': {eye: {x: 1, y: 0, z: 0}}});
   assert.equal(sandbox.window.__mvGestureCameraRevision, 1, 'the pointer-up relayout kept the gesture revision');
+  gd.__mvCameraRevisionScope = 'canvas-b:7';
+  gd.__mvCameraRevisionEpoch = 'epoch';
   fence.refresh(gd, {'scene.camera': {eye: {x: 0, y: 0, z: 50}}});
   assert.equal(sandbox.window.__mvGestureCameraRevision, 2, 'a later same-scene relayout did not read the live camera clock');
   assert.equal(sandbox.window.__mvGestureSceneGeneration, 7, 'a later same-scene relayout did not take the live generation');
+
+  gd.__mvCameraRevisionScope = 'scene-a:3';
+  gd.__mvCameraRevision = 9;
+  gd.__mvCameraRevisionEpoch = 'epoch';
+  fence.refresh(gd, {'scene.camera': {eye: {x: 0, y: 0, z: 50}}});
+  assert.equal(sandbox.window.__mvGestureCameraRevision, 1, 'a later relayout adopted another scene revision');
+  assert.equal(sandbox.window.__mvGestureSceneGeneration, 7, 'a foreign revision changed the mounted generation');
+
+  gd.__mvCameraRevisionScope = 'canvas-b:7';
+  gd.__mvCameraRevisionEpoch = 'previous-session';
+  gd.__mvCameraRevision = 9;
+  fence.refresh(gd, {'scene.camera': {eye: {x: 0, y: 0, z: 50}}});
+  assert.equal(sandbox.window.__mvGestureCameraRevision, 1, 'a later relayout adopted another session revision');
+
+  const dragged = {eye: {x: 2, y: 0, z: 0}, center: {x: 0, y: 0, z: 0}, up: {x: 0, y: 0, z: 1}, projection: {type: 'perspective'}};
+  const committed = {eye: {x: 1, y: 0, z: 0}, center: {x: 0, y: 0, z: 0}, up: {x: 0, y: 0, z: 1}, projection: {type: 'perspective'}};
+  displayedCamera = {current: dragged, afterSize: committed};
+  sandbox.window.mattervisCurrentCamera = function () { return displayedCamera.current; };
+  gd.emit = function () { return gd; };
+  sandbox.window.__mvGestureSceneId = 'canvas-b';
+  sandbox.window.__mvGestureKind = 'pointer';
+  sandbox.window.__mvGestureEndedAt = 0;
+  calls.length = 0;
+  await plot.relayout(gd, {width: 800, height: 600});
+  assert.equal(calls.length, 2, 'a size replot during a drag did not restore the live camera');
+  assert.equal(calls[0].width, 800);
+  assert.equal(calls[1]['scene.camera.eye'].x, 2, 'the size replot committed the pre-drag eye');
+
+  sandbox.window.__mvGestureEndedAt = Date.now();
+  displayedCamera = {current: dragged, afterSize: committed};
+  calls.length = 0;
+  await plot.relayout(gd, {width: 640, height: 480});
+  assert.equal(calls.length, 1, 'a size replot after pointer-up restored a finished drag');
+
+  sandbox.window.__mvGestureEndedAt = 0;
+  gd.__mvLatestCamera = {snapshot: dragged};
+  displayedCamera = {current: dragged, afterSize: committed, commandDuringSize: {snapshot: committed}};
+  calls.length = 0;
+  await plot.relayout(gd, {width: 700, height: 500});
+  assert.equal(calls.some(function (patch) { return patch['scene.camera.eye'] && patch['scene.camera.eye'].x === 2; }), false, 'a size replot let the drag overwrite Reset');
+  delete gd.__mvLatestCamera;
+  displayedCamera = null;
 
   sandbox.window.__mvGestureSceneId = 'scene-a';
   fence.mark();
