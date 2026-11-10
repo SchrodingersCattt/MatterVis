@@ -43,6 +43,19 @@ def _viewport_artists(viewport, *, width: int, height: int, dpi: float):
     transform = CameraTransform(viewport.camera, width, height)
     artists: list[tuple[float, int, str, Any]] = []
     for primitive in viewport.primitives:
+        if (
+            isinstance(primitive, TriangleMeshPrimitive)
+            and primitive.vertex_colors is not None
+        ):
+            raise ValueError(
+                "matplotlib backend does not render per-vertex colors; "
+                "use the CPU or Plotly backend"
+            )
+        if isinstance(primitive, LinePrimitive) and primitive.endpoint_colors is not None:
+            raise ValueError(
+                "matplotlib backend does not render per-endpoint line colors; "
+                "use the CPU backend"
+            )
         if isinstance(primitive, TriangleMeshPrimitive):
             shape = primitive.metadata.get("_raster_shape")
             if shape == "sphere":

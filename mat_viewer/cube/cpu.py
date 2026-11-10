@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 
+from .color_field import isosurface_preparation_token, vertex_colors_for_surface
 from .io import CubeData, default_isovalue
 
 
@@ -24,8 +25,16 @@ def cube_isosurface_meshes(
     opacity: float = 0.55,
     ambient: float = 0.68,
     diffuse: float = 0.32,
+    color_cube: CubeData | None = None,
+    color_range: tuple[float, float] | None = None,
+    color_center: float | None = None,
+    colormap: str = "bgr",
 ) -> list[dict[str, Any]]:
-    """Extract positive/negative phases as world-space triangle meshes."""
+    """Extract positive/negative phases as world-space triangle meshes.
+
+    ``color_cube`` is sampled at each vertex's physical position on the full
+    color grid. ``stride`` coarsens the marching-cubes mesh only.
+    """
     try:
         from skimage.measure import marching_cubes
     except ImportError as exc:  # pragma: no cover - exercised in minimal CI
@@ -55,7 +64,6 @@ def cube_isosurface_meshes(
         raise ValueError(
             "Cube isosurface ambient + diffuse coefficients must not exceed 1"
         )
-
     basis = np.asarray(cube.axes, dtype=float) * stride
     inverse_normal = np.linalg.inv(basis).T
     meshes: list[dict[str, Any]] = []
@@ -79,23 +87,32 @@ def cube_isosurface_meshes(
         lengths = np.linalg.norm(world_normals, axis=1)
         valid = lengths > 1.0e-12
         world_normals[valid] /= lengths[valid, None]
-        meshes.append(
-            {
-                "id": semantic_id,
-                "name": "+ orbital" if level > 0 else "- orbital",
-                "vertices": world_vertices,
-                "triangles": np.asarray(faces, dtype=np.int64),
-                "normals": world_normals,
-                "color": color,
-                "opacity": float(opacity),
-                "metadata": {
-                    "material": {
-                        "ambient": float(ambient),
-                        "diffuse": float(diffuse),
-                    }
-                },
-            }
-        )
+        mesh = {
+            "id": semantic_id,
+            "name": "+ orbital" if level > 0 else "- orbital",
+            "vertices": world_vertices,
+            "triangles": np.asarray(faces, dtype=np.int64),
+            "normals": world_normals,
+            "color": color,
+            "opacity": float(opacity),
+            "metadata": {
+                "material": {
+                    "ambient": float(ambient),
+                    "diffuse": float(diffuse),
+                }
+            },
+        }
+        if color_cube is not None:
+            mesh["vertex_colors"] = vertex_colors_for_surface(
+                cube,
+                color_cube,
+                vertices,
+                stride=stride,
+                color_range=color_range,
+                color_center=color_center,
+                colormap=colormap,
+            )
+        meshes.append(mesh)
     if not meshes:
         raise ValueError(f"Cube has no surface crossing isovalue {iso:g}")
     return meshes
@@ -111,8 +128,17 @@ def ensure_cube_isosurfaces(
     stride: int = 2,
     ambient: float = 0.68,
     diffuse: float = 0.32,
+    color_cube: CubeData | None = None,
+    color_range: tuple[float, float] | None = None,
+    color_center: float | None = None,
+    colormap: str = "bgr",
 ) -> Any:
-    """Attach backend-neutral isosurfaces to every Cube scene in ``source``."""
+    """Attach backend-neutral isosurfaces to every Cube scene in ``source``.
+
+    Meshes are reused only when the source grid and the isovalue, stride,
+    material, and color-cube settings still match. A later call with a color
+    cube replaces an uncolored cache.
+    """
     bundles: list[Any] = []
     if hasattr(source, "frames"):
         bundles.extend(
@@ -130,19 +156,56 @@ def ensure_cube_isosurfaces(
             cube = scene.get("cube_data")
         if cube is None:
             continue
-        if isinstance(scene, dict) and scene.get("isosurfaces"):
+        token = isosurface_preparation_token(
+            cube,
+            isovalue=isovalue,
+            opacity=opacity,
+            positive_color=positive_color,
+            negative_color=negative_color,
+            stride=stride,
+            ambient=ambient,
+            diffuse=diffuse,
+            color_cube=color_cube,
+            color_range=color_range,
+            color_center=color_center,
+            colormap=colormap,
+        )
+        cached = scene.get("isosurfaces") if isinstance(scene, dict) else None
+        cached_token = (
+            scene.get("isosurface_preparation") if isinstance(scene, dict) else None
+        )
+        if cached and cached_token == token:
+            cube.surface_meshes = cached
+            for cached_scene in (getattr(bundle, "scene_cache", {}) or {}).values():
+                if (
+                    isinstance(cached_scene, dict)
+                    and cached_scene.get("isosurface_preparation") != token
+                ):
+                    cached_scene["isosurfaces"] = cached
+                    cached_scene["isosurface_preparation"] = token
             continue
         meshes = cube_isosurface_meshes(
-            cube, isovalue=isovalue, opacity=opacity,
-            positive_color=positive_color, negative_color=negative_color,
-            stride=stride, ambient=ambient, diffuse=diffuse,
+            cube,
+            isovalue=isovalue,
+            opacity=opacity,
+            positive_color=positive_color,
+            negative_color=negative_color,
+            stride=stride,
+            ambient=ambient,
+            diffuse=diffuse,
+            color_cube=color_cube,
+            color_range=color_range,
+            color_center=color_center,
+            colormap=colormap,
         )
-        setattr(cube, "surface_meshes", meshes)
+        cube.surface_meshes = meshes
         if isinstance(scene, dict):
             scene["isosurfaces"] = meshes
+            scene["isosurface_preparation"] = token
         for cached_scene in (getattr(bundle, "scene_cache", {}) or {}).values():
             if isinstance(cached_scene, dict):
                 cached_scene["isosurfaces"] = meshes
+                cached_scene["isosurface_preparation"] = token
     return source
 
 

@@ -338,6 +338,10 @@ substitutes one frame backend for another.
 | --isosurface-mode MODE | surface | surface or complete triangulated wireframe |
 | --isosurface-wireframe-width VALUE | 1.0 | Wireframe line width in pixels |
 | --isosurface-wireframe-opacity VALUE | 1.0 | Wireframe line opacity in [0, 1] |
+| --isosurface-color-cube PATH | none | Second cube sampled in physical coordinates onto the isosurface |
+| --isosurface-color-range MIN MAX | finite min/max | Colormap range; a constant field with no range uses the midpoint |
+| --isosurface-color-center VALUE | none | Value placed at the middle of the colormap |
+| --isosurface-colormap NAME | bgr | `bgr` or a Matplotlib colormap name |
 | --periodic-isosurface / --no-periodic-isosurface | off | Enable or disable scalar closure across cell faces |
 
 Static exports omit browser-only picking traces. Interactive HTML retains them.

@@ -17,8 +17,9 @@ Probe results are available from `mat-vis capabilities --json` and
 
 The renderer lowers immutable triangle meshes and one-pixel, opaque,
 depth-tested line segments into validated `GpuDrawPacket` objects. Transparent
-primitives, dashed or depth-disabled lines, text, and other unsupported
-features raise `GPUUnsupportedError` before a device is used. Missing
+primitives, dashed or depth-disabled lines, text, per-vertex mesh colors,
+per-endpoint line colors, and other unsupported features raise
+`GPUUnsupportedError` before a device is used. Missing
 dependencies or devices raise `GPUUnavailableError`; no CPU fallback is
 attempted. GIF/MP4, HTML, PDF, and SVG remain on their existing explicit
 backends.
