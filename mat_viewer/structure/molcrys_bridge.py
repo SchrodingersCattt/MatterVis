@@ -868,6 +868,38 @@ def analyze_crystal(crystal, *, include_chemistry: bool = False) -> CrystalAnaly
     )
 
 
+def _identify_source_partitions(atoms, identify, identify_kwargs, molecule_indices):
+    """Perceive bonds inside, never between, explicit source molecule IDs.
+
+    MolCrysKit owns bond perception and periodic unwrapping. Its per-partition
+    result indices are relative to that partition, so remap only provenance
+    indices back to the original ASE frame before constructing the crystal.
+    A disconnected source partition may still yield multiple MCK components.
+    """
+    values = np.asarray(molecule_indices)
+    if values.shape != (len(atoms),) or not np.issubdtype(values.dtype, np.integer):
+        raise ValueError("molecule_index must contain one integer per atom")
+    if np.any(values < 0):
+        raise ValueError("molecule_index values must be non-negative")
+    molecules = []
+    for source_id in np.unique(values):
+        source_indices = np.flatnonzero(values == source_id)
+        for molecule in identify(atoms[source_indices], **identify_kwargs):
+            info = molecule.info
+            info["atom_indices"] = [
+                int(source_indices[int(index)]) for index in info["atom_indices"]
+            ]
+            info["bond_pairs"] = [
+                (int(source_indices[int(left)]), int(source_indices[int(right)]))
+                for left, right in info.get("bond_pairs", ())
+            ]
+            for record in info.get("bond_records", ()):
+                record["left"] = int(source_indices[int(record["left"])])
+                record["right"] = int(source_indices[int(record["right"])])
+            molecules.append(molecule)
+    return molecules
+
+
 def analyze(
     raw_atoms,
     M,
@@ -876,6 +908,7 @@ def analyze(
     bond_scale: float = 1.0,
     bond_thresholds=None,
     include_chemistry: bool = False,
+    molecule_indices=None,
 ):
     """Run MolCrysKit on ``raw_atoms`` (full unit cell) and return a
     :class:`CrystalAnalysis` summarising species + per-FU counts.
@@ -910,7 +943,13 @@ def analyze(
         # Pass it explicitly so loading cannot follow the shell default,
         # which is major. Minor sites stay available to draw.
         identify_kwargs["disorder_policy"] = "as_refined"
-    identified = identify(ase_atoms, **identify_kwargs)
+    identified = (
+        identify(ase_atoms, **identify_kwargs)
+        if molecule_indices is None
+        else _identify_source_partitions(
+            ase_atoms, identify, identify_kwargs, molecule_indices
+        )
+    )
 
     crystal = mk["MolecularCrystal"](
         ase_atoms.get_cell(), identified, pbc=tuple(ase_atoms.get_pbc())

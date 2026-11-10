@@ -40,6 +40,12 @@ through canonical loading, molecule grouping, PBC unwrapping, and scene
 construction. Omit them to retain the configured defaults. The CLI exposes the
 same controls as `--bond-scale` and repeatable `--bond-threshold Zn,N=2.5`.
 
+ASE-readable frames with an integer `molecule_index` array constrain
+MolCrysKit bond perception to each source group. Disconnected parts of a group
+may become separate components; sites from different groups are not merged.
+IDs may be non-contiguous, and the original per-atom array remains available
+in the bundle. Frames without this array retain whole-frame bond perception.
+
 ### Auxiliary cells
 
 `agent.prepare_render` and `agent.render` accept `cell_overlays=[...]`.
