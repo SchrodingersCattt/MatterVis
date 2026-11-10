@@ -1163,12 +1163,46 @@ async function runSemanticPick(page) {
   const second=await targetPixel('atom',atom.target.id);if(!second || second.covered) fail('selection panel blocked an atom pick '+JSON.stringify(second));
   await page.keyboard.down('Control');await page.mouse.click(second.x,second.y);await page.keyboard.up('Control');await selected([atom.target.id,second.target.id]);
   await page.keyboard.down('Control');await page.mouse.click(second.x,second.y);await page.keyboard.up('Control');await selected([atom.target.id]);
+  const openWidth = await page.evaluate(() => Number(document.querySelector('#crystal-graph .js-plotly-plot')._fullLayout.width || 0));
   await page.keyboard.press('Escape');await selected([]);
+  await page.waitForFunction((previous) => {
+    const center = document.getElementById('center-panel');
+    const bar = document.getElementById('mv-status-bar');
+    const log = document.getElementById('perf-log-panel');
+    const panel = document.getElementById('mv-selection-appearance');
+    const gd = document.querySelector('#crystal-graph .js-plotly-plot');
+    const canvas = document.querySelector('#crystal-graph canvas');
+    if (!center || !gd || !gd._fullLayout || !canvas) return false;
+    const pad = parseFloat(getComputedStyle(center).paddingRight) || 0;
+    const reserved = (value) => {
+      const parsed = parseFloat(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+    const layoutWidth = Number(gd._fullLayout.width || 0);
+    const canvasWidth = canvas.getBoundingClientRect().width;
+    return (!panel || panel.hidden)
+      && pad < 1
+      && reserved(bar && bar.style.right) < 1
+      && reserved(log && log.style.right) < 1
+      && layoutWidth > previous + 20
+      && Math.abs(layoutWidth - canvasWidth) <= 4;
+  }, openWidth, {timeout: 10000});
+  const afterClear = await targetPixel('atom');
+  if (!afterClear || afterClear.covered) fail('cleared selection left the plot gutter in place');
+  atom = afterClear;
   // Right click with cleared hover and no pointermove must use click position.
   await page.evaluate(()=>window.MatterVisInvalidateSemanticHover());
   await page.evaluate(hit=>document.getElementById('crystal-graph').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:hit.x,clientY:hit.y,button:2})),atom);
   await selected([atom.target.id]);
   await page.keyboard.press('Escape');await selected([]);
+  await page.waitForFunction(() => {
+    const center = document.getElementById('center-panel');
+    const gd = document.querySelector('#crystal-graph .js-plotly-plot');
+    const canvas = document.querySelector('#crystal-graph canvas');
+    if (!center || !gd || !gd._fullLayout || !canvas) return false;
+    const pad = parseFloat(getComputedStyle(center).paddingRight) || 0;
+    return pad < 1 && Math.abs(Number(gd._fullLayout.width || 0) - canvas.getBoundingClientRect().width) <= 4;
+  }, null, {timeout: 10000});
   // Drag ends far enough away to be an orbit, never a selection gesture.
   await dragAway(atom.x, atom.y);await selected([]);
   await dragAway(atom.x, atom.y, "right");await selected([]);
@@ -1205,6 +1239,30 @@ async function runSemanticPick(page) {
   if(hoverRequests) fail('hover issued '+hoverRequests+' coordinate requests');
   page.off('request',observer);
   if(await page.locator('.mv-focus-canvas').count()!==1) fail('focus overlays leaked');
+  const dockedWidth = await page.evaluate(() => Number(document.querySelector('#crystal-graph .js-plotly-plot')._fullLayout.width || 0));
+  await page.evaluate(() => {
+    const bridge = window.MatterVisSemantic;
+    window.MatterVisSemantic = Object.assign({}, bridge, {
+      sceneId: () => 'scene-handoff-hide',
+      selected: () => [],
+    });
+  });
+  await page.waitForFunction((previous) => {
+    const center = document.getElementById('center-panel');
+    const bar = document.getElementById('mv-status-bar');
+    const panel = document.getElementById('mv-selection-appearance');
+    const gd = document.querySelector('#crystal-graph .js-plotly-plot');
+    const canvas = document.querySelector('#crystal-graph canvas');
+    if (!center || !gd || !gd._fullLayout || !canvas) return false;
+    const pad = parseFloat(getComputedStyle(center).paddingRight) || 0;
+    const barRight = parseFloat(bar && bar.style.right);
+    const layoutWidth = Number(gd._fullLayout.width || 0);
+    return (!panel || panel.hidden)
+      && pad < 1
+      && !(Number.isFinite(barRight) && barRight > 1)
+      && layoutWidth > previous + 20
+      && Math.abs(layoutWidth - canvas.getBoundingClientRect().width) <= 4;
+  }, dockedWidth, {timeout: 5000});
 }
 
 // A blank orthographic canvas is the page background. DAP-4's unit cell

@@ -98,6 +98,11 @@
     dockShown=shown;
     refitDock();
   }
+  function concealDock(){
+    if(!panel) return;
+    panel.hidden=true;
+    syncDock();
+  }
   function render(){
     if(!panel){panel=node('section');panel.id='mv-selection-appearance';panel.className='mv-appearance';panel.setAttribute('aria-label','Selection and Appearance');mount(panel);}
     panel.replaceChildren();panel.hidden=!selected.length;syncDock();if(panel.hidden) return;
@@ -168,7 +173,7 @@
     const detail=event.detail;
     if(sceneId!==detail.sceneId) history=[];
     sceneId=detail.sceneId;selected=detail.targets.slice();
-    if(!selected.length){serial++;editing=[];if(panel) panel.hidden=true;return;}
+    if(!selected.length){serial++;editing=[];concealDock();return;}
     load(selected).catch(error);
   });
   // Scene handoffs do not share draft inputs or undo history. The same
@@ -181,7 +186,7 @@
     const bridgeSelected=(bridge.selected()||[]).slice();
     if(live!==sceneId){
       serial++;clearTimeout(previewTimer);sceneId=live;history=[];selected=bridgeSelected;
-      if(panel) panel.hidden=true;
+      concealDock();
       if(selected.length) load(selected).catch(error);
       return;
     }

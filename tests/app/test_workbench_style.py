@@ -48,3 +48,6 @@ def test_workbench_styles_define_scene_hierarchy_and_focus_tokens() -> None:
     assert "position:absolute" not in dock
     assert "paddingRight" in script
     assert "document.body" in script
+    compact = "".join(script.split())
+    assert "if(!selected.length){serial++;editing=[];concealDock();return;}" in compact
+    assert "concealDock();if(selected.length)load(selected)" in compact

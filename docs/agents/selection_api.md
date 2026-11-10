@@ -121,10 +121,13 @@ renderer without depending on Plotly internals.
 ## Selection / Appearance inspector
 
 A viewport click opens **Selection / Appearance**. The inspector is a column
-beside the plot (`#mv-selection-appearance` on `#viewer-root`), not an overlay
-on `#crystal-graph`. Opening or closing it changes the canvas width and the
-plot refits, so atoms and bonds that remain in view stay on the canvas and
-can be picked. Pointer events on the column do not reach the plot.
+beside the plot. `#mv-selection-appearance` is appended to `document.body`
+(or inside `#crystal-graph` when that host is unavailable). It is not an
+overlay on the plot. Opening it reserves `#center-panel` padding and refits
+the figure to the content box; closing it (clear, Esc, or a scene handoff)
+drops that padding and the status-bar and server-log offsets, then refits
+again. Atoms and bonds that remain in view stay on the canvas and can be
+picked. Pointer events on the column do not reach the plot.
 
 Its default scope is the
 selected visible instances. Color, opacity, visibility, atom radius/material/
