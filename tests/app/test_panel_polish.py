@@ -52,6 +52,17 @@ def test_status_bar_names_scope_and_counts():
     assert counts == "2 atoms · 1 bonds"
 
 
+def test_status_bar_separates_visual_copies_from_source_sites():
+    _label, _scope, counts = status_bar_parts(
+        {"display_mode": "unit_cell"},
+        {
+            "draw_atoms": [{}, {"_is_boundary_replica": True}, {"_is_bonded_image_replica": True}],
+            "bonds": [{}, {}],
+        },
+    )
+    assert counts == "1 source site + 2 visual copies · 2 bonds"
+
+
 def test_atom_list_samples_the_displayed_atoms():
     scene = {
         "draw_atoms": [
@@ -156,6 +167,13 @@ def test_panel_assets_define_status_loading_and_log_grouping():
     assert "calc(28px + 12px)" in panels
 
 
+def _status_drawn_atoms(counts: str) -> int:
+    """Return drawn atoms, adding visual copies back onto source sites."""
+    head = counts.split("·", 1)[0]
+    numbers = [int(item) for item in head.replace("+", " ").split() if item.isdigit()]
+    return sum(numbers)
+
+
 def _listed_atom_total(nodes) -> int:
     rows = 0
     for node in walk_layout(html.Div(nodes)):
@@ -198,7 +216,7 @@ def test_status_counts_follow_the_drawn_display_mode(tmp_path):
         backend.patch_state({"display_mode": "unit_cell"}, broadcast=False)
         _label, scope, counts, atoms = refresh(backend.get_state(), "")
         assert scope == "Unit cell"
-        cell_atoms = int(str(counts).split(" ", 1)[0])
+        cell_atoms = _status_drawn_atoms(str(counts))
         assert cell_atoms != formula_atoms
         assert _listed_atom_total(atoms) == cell_atoms
 
