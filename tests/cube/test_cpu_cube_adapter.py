@@ -158,6 +158,26 @@ def test_color_cube_assigns_distinct_vertex_colors(tmp_path: Path) -> None:
     assert float(colors.max() - colors.min()) > 0.2
 
 
+def test_color_center_puts_zero_on_green(tmp_path: Path) -> None:
+    cube = _cube(tmp_path)
+    flat = np.zeros(cube.values.shape)
+    flat.ravel()[:] = 0.0
+
+    meshes = cube_isosurface_meshes(
+        cube,
+        isovalue=0.5,
+        color_values=flat,
+        color_range=(-0.04, 0.02),
+        color_center=0.0,
+        colormap="bgr",
+    )
+
+    color = meshes[0]["vertex_colors"][0]
+    assert color[0] < 0.05
+    assert color[1] > 0.95
+    assert color[2] < 0.05
+
+
 def test_color_cube_rejects_a_different_grid(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="same grid shape"):
         cube_isosurface_meshes(

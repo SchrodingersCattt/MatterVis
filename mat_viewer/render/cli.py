@@ -404,6 +404,12 @@ def _build_render_parser(
         help="Range used to map the color cube onto the colormap.",
     )
     p.add_argument(
+        "--isosurface-color-center",
+        type=float,
+        default=None,
+        help="Value placed at the middle of the isosurface colormap.",
+    )
+    p.add_argument(
         "--isosurface-colormap",
         default="bgr",
         help="Colormap for the color cube. 'bgr' is blue-green-red; other names use Matplotlib.",

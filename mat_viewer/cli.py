@@ -1178,6 +1178,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                     if args.isosurface_color_range is None
                     else tuple(args.isosurface_color_range)
                 ),
+                isosurface_color_center=args.isosurface_color_center,
                 isosurface_colormap=args.isosurface_colormap,
             )
             atom_groups, bond_groups = _style_groups(args)

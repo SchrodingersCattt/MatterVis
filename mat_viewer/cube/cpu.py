@@ -42,11 +42,32 @@ def _sample_trilinear(grid: np.ndarray, points: np.ndarray) -> np.ndarray:
     return c0 * (1.0 - dk) + c1 * dk
 
 
-def _colormap_rgb(name: str, values: np.ndarray, vmin: float, vmax: float) -> np.ndarray:
-    """Map scalars into RGB. ``bgr`` runs blue, green, red."""
+def _colormap_rgb(
+    name: str,
+    values: np.ndarray,
+    vmin: float,
+    vmax: float,
+    center: float | None = None,
+) -> np.ndarray:
+    """Map scalars into RGB. ``bgr`` runs blue, green, red.
+
+    ``center`` is placed at the middle of the colormap. Use 0 for a signed
+    field whose neutral value should stay green when the numeric range is
+    asymmetric.
+    """
     if not np.isfinite(vmin) or not np.isfinite(vmax) or vmax <= vmin:
         raise ValueError("isosurface color range must be finite and increasing")
-    normalized = np.clip((np.asarray(values, dtype=float) - vmin) / (vmax - vmin), 0.0, 1.0)
+    array = np.asarray(values, dtype=float)
+    if center is None:
+        normalized = (array - vmin) / (vmax - vmin)
+    else:
+        if not np.isfinite(center) or not vmin < center < vmax:
+            raise ValueError("isosurface color center must lie strictly inside the range")
+        normalized = np.empty_like(array)
+        low = array <= center
+        normalized[low] = 0.5 * (array[low] - vmin) / (center - vmin)
+        normalized[~low] = 0.5 + 0.5 * (array[~low] - center) / (vmax - center)
+    normalized = np.clip(normalized, 0.0, 1.0)
     if name == "bgr":
         rgb = np.zeros((normalized.size, 3), dtype=float)
         low = normalized <= 0.5
@@ -80,6 +101,7 @@ def cube_isosurface_meshes(
     diffuse: float = 0.32,
     color_values: np.ndarray | None = None,
     color_range: tuple[float, float] | None = None,
+    color_center: float | None = None,
     colormap: str = "bgr",
 ) -> list[dict[str, Any]]:
     """Extract positive/negative phases as world-space triangle meshes."""
@@ -169,7 +191,7 @@ def cube_isosurface_meshes(
                 raise ValueError("isosurface color range is missing")
             sampled = _sample_trilinear(color_grid, vertices)
             mesh["vertex_colors"] = _colormap_rgb(
-                colormap, sampled, color_range[0], color_range[1]
+                colormap, sampled, color_range[0], color_range[1], color_center
             )
         meshes.append(mesh)
     if not meshes:
@@ -189,6 +211,7 @@ def ensure_cube_isosurfaces(
     diffuse: float = 0.32,
     color_values: np.ndarray | None = None,
     color_range: tuple[float, float] | None = None,
+    color_center: float | None = None,
     colormap: str = "bgr",
 ) -> Any:
     """Attach backend-neutral isosurfaces to every Cube scene in ``source``."""
@@ -215,7 +238,8 @@ def ensure_cube_isosurfaces(
             cube, isovalue=isovalue, opacity=opacity,
             positive_color=positive_color, negative_color=negative_color,
             stride=stride, ambient=ambient, diffuse=diffuse,
-            color_values=color_values, color_range=color_range, colormap=colormap,
+            color_values=color_values, color_range=color_range,
+            color_center=color_center, colormap=colormap,
         )
         setattr(cube, "surface_meshes", meshes)
         if isinstance(scene, dict):

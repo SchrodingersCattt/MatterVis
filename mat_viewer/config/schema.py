@@ -130,6 +130,7 @@ BUILTIN_STYLE: dict[str, Any] = {
     "isosurface_diffuse": 0.32,
     "isosurface_color_cube": None,
     "isosurface_color_range": None,
+    "isosurface_color_center": None,
     "isosurface_colormap": "bgr",
     "isosurface_periodic": False,
     "isosurface_image_policy": "cell",

@@ -212,6 +212,7 @@ class RenderSpec:
     isosurface_diffuse: float = 0.32
     isosurface_color_cube: str | None = None
     isosurface_color_range: tuple[float, float] | None = None
+    isosurface_color_center: float | None = None
     isosurface_colormap: str = "bgr"
 
     def __post_init__(self) -> None:
@@ -289,6 +290,10 @@ class RenderSpec:
             low, high = self.isosurface_color_range
             if not np.isfinite(low) or not np.isfinite(high) or high <= low:
                 raise ValueError("isosurface_color_range must be finite and increasing")
+            if self.isosurface_color_center is not None and not (
+                low < self.isosurface_color_center < high
+            ):
+                raise ValueError("isosurface_color_center must lie inside the range")
         lat, lon = self.sphere_detail
         if int(lat) != lat or int(lon) != lon or int(lat) < 2 or int(lon) < 3:
             raise ValueError("sphere_detail must be at least (2, 3)")

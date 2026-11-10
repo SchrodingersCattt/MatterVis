@@ -220,6 +220,7 @@ def prepare_render(
             diffuse=effective_spec.isosurface_diffuse,
             color_values=color_values,
             color_range=effective_spec.isosurface_color_range,
+            color_center=effective_spec.isosurface_color_center,
             colormap=effective_spec.isosurface_colormap,
         )
     resolve_requirements("cpu").require()
