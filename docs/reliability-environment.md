@@ -15,6 +15,7 @@ without becoming a required check.
 | Chrome | 156.0.8078.47 |
 | playwright-core | 1.64.1 |
 | Python packages | `requirements/ci-constraints.txt` |
+| Headless VTK figure | system package `libosmesa6` on the fast and full test jobs |
 
 `requirements/ci-constraints.txt` was resolved for Python 3.10 on
 manylinux and re-resolved to the same versions for 3.11 and 3.12.

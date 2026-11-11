@@ -184,31 +184,49 @@ optional implementation is an error rather than a visual fallback.
 ## VTK offscreen figures
 
 `mat_viewer.render.vtk_cube.render_cube_figure` writes one PNG through
-PyVista. It is not a `mat-vis render --backend` choice. The orthographic
-camera, the three lights, and the depth peeling are arguments of this
-function, and the function does not consume a `RenderPlan`.
+PyVista. It is not a `mat-vis render --backend` choice and it does not
+consume a `RenderPlan`.
 
-Install it with the `vtk` extra:
+Install the Python extra with:
 
 ```console
 python -m pip install "matter-vis[vtk]"
 ```
 
-PyVista is imported only when the function is called. The call takes the
-isosurface grid, the color grid, `look` (from the camera toward the scene),
-`up`, and `parallel_scale`. `periodic=True` pads one wrapped voxel and drops
-faces whose mean index lies outside the original grid. `repeat` tiles the
-finished mesh and the atoms; it is not `periodic_image_policy`. Taubin
-smoothing runs before the colors are sampled onto the moved vertices.
+PyVista is imported only when the function is called. Headless Linux also
+needs a system OSMesa or EGL library (Debian/Ubuntu: `libosmesa6`). MatterVis
+does not install system libraries. If no display and neither library is
+loadable, the call raises `RuntimeError` before opening a window. A missing
+library used to abort the interpreter inside VTK.
 
-A custom colormap has five RGB stops. The neutral stop is placed at
-`(0 - color_min) / (color_max - color_min)`, so an asymmetric range does
-not put the middle color at two thirds by accident.
+The isosurface grid and the color grid share one `origin`, one `axes` matrix,
+and one shape. Voxel vectors are rows. A vertex index `(i, j, k)` is the
+physical point `origin + (i, j, k) @ axes`, the same frame as `CubeData`.
+Resample a color cube that uses a different grid before calling this
+function. Omit `color_min` and `color_max` to use the finite minimum and
+maximum of the color grid. A constant grid with no range uses the colormap
+midpoint. `color_center` places one value, often zero, at the middle of an
+asymmetric range; omitting it keeps a linear map. `colormap_stops` is a
+sequence of at least two RGB triples in `0..255`. The default stops run blue,
+cyan, green, yellow, red.
 
-`bonds` are index pairs in the unrepeated cell. A repeat translates those
-pairs with each cell. Pass `bond_finder(xyz, atomic_numbers)` when contacts
-that cross a cell boundary have to be chosen after the repeat. This function
-does not choose elements or distance cutoffs.
+`isovalue=None` uses `default_isovalue`. One level is drawn. `periodic=True`
+appends the wrapped endpoint plane (index `N` copies index 0), the same
+closure as the CPU cube path, so the surface can reach the cell faces.
+`repeat` translates the finished mesh, the atoms, and the supplied bonds by
+`axes * shape`. It is not `periodic_image_policy`. Pass
+`bond_finder(xyz, atomic_numbers)` when contacts that cross a cell boundary
+have to be chosen after the repeat. This function does not choose elements
+or distance cutoffs. Colors and radii are caller-supplied maps keyed by
+atomic number.
+
+`look` and `up` are directions. The camera distance and the three lights
+scale with the scene radius, and the focal point is the center of the mesh
+and atom bounds, so a volume with no atoms still frames. `parallel_scale` is
+the orthographic half-height in the length unit of `axes`. `depth_peels`
+above 1 turns on depth peeling for this window. Taubin smoothing runs before
+colors are sampled onto the moved vertices. A pass that collapses the mesh
+bounds is discarded. Smoothing can pull a periodic boundary off the cell face.
 
 Two calls with the same arrays write the same PNG on one machine. A different
 VTK build can move a few edge pixels.
