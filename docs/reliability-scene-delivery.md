@@ -28,7 +28,29 @@ must not change scene B, and a stale revision must not replace a newer one.
   The pointer-up relayout keeps the revision from gesture start. A later
   camera relayout on that same scene reads the live camera clock, including
   inside the settle window, so the server can accept a refit of an offscreen
-  drag.
+  drag. That clock is `scene_id:scene_generation` plus the server session
+  (`server_started_at`) when both the transient revision and the mounted
+  figure have one. A typed camera envelope carries `scene_generation` beside
+  `versions`, not inside it. The apply path reads that sibling. Reading only
+  `versions` stores the new revision on an empty generation, the next fence
+  sends the figure's older revision, and the server rejects the offscreen
+  repair. A later relayout reads the transient revision only when its scope
+  and session match the mounted figure. A revision left by another scene, or
+  by a restarted session that reused the generation number, is not that clock.
+- A width/height relayout is a full gl3d replot. During an in-progress drag
+  it puts the live drag camera back only when the gesture's scene id and
+  scene generation still match the mounted figure, and, when both the gesture
+  and the figure have a server session, those sessions match. A remount that
+  reuses the scene id with a new generation, or a restarted server, does not
+  receive the pre-remount drag eye. A camera command that arrives during that
+  replot still wins. A frame or internal replot that finishes while that
+  drag is still down puts that gesture's sampled eye back when the
+  generation and session still match. The sample is dropped when the
+  gesture is stamped or released, so a later press cannot restore the
+  previous orbit before it samples its own eye. A size replot does not
+  put back a captured pose once a newer camera revision is already
+  current, even when that command arrived before the replot. After the
+  gesture ends, only a commanded camera is restored.
 - `update_view` classifies a callback against the previous snapshot of the
   same scene. That snapshot is process-wide and is not a substitute for the
   requesting browser's mounted figure. Camera, overlay, and ordinary display

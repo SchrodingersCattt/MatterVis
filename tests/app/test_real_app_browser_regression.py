@@ -191,6 +191,17 @@ def test_orthographic_unit_cell_drag_keeps_dap4_visible(mattervis_url):
     _run(mattervis_url, "ortho-drag", structure="DAP-4", timeout=220)
 
 
+@pytest.mark.timeout(180)
+def test_drag_survives_a_frame_that_was_copied_before_the_orbit(mattervis_url):
+    """A frame that captured the pre-drag eye must not erase the orbit.
+
+    The copy happens before the pointer moves. The frame paints while the
+    button is still down. The eye has to stay on the orbit for the same
+    scene generation and server session.
+    """
+    _run(mattervis_url, "drag-replot", structure="DAP-4", timeout=160)
+
+
 @pytest.mark.timeout(240)
 def test_semantic_atom_click_survives_gl_fallback(mattervis_url):
     """A native click keeps the atom and an additive non-atom target.

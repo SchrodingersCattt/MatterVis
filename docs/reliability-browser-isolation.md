@@ -51,6 +51,10 @@ store survive from one test to the next when they share a server.
   and network logs, and scene/camera/render JSON under `browser-artifacts/`.
   The pytest process writes the full Node stdout and stderr next to them.
   CI uploads that directory with `if: always()`. Assertions are unchanged.
+  The 100-switch socket census records DOM snapshots and not trace
+  screenshots. Capturing both during each WebGL scene swap stalls
+  `Plotly.react` long enough that the loop misses its process budget before
+  the census. A failed run still writes a page screenshot from the error path.
 
 `/_test/render-status` exists only on this test server. It reads worker
 counters and does not mutate the scene.

@@ -421,3 +421,90 @@ def test_only_mattervis_opens_the_figure_socket():
         if "/api/v2/ws" in text and "WebSocket" in text:
             hits.append(path.name)
     assert hits == ["mattervis.js"]
+
+
+def test_camera_envelope_keeps_scene_generation_beside_versions():
+    """A projection camera envelope must stamp scene:generation, not an empty scope.
+
+    ``versions`` carries the three clocks only. ``scene_generation`` is a
+    sibling. Losing it makes the next relayout fence report the figure's
+    older camera revision, and the server rejects the offscreen refit.
+    """
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the frontend regression")
+    source = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "view_updates.js"
+    program = r"""
+const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+const gd = {layout: {meta: {mattervis_render: {
+  scene_id: 'scene-a', scene_generation: 3, camera_revision: 1, camera_version: 1,
+  geometry_version: 1, display_version: 1, server_started_at: '2026-11-09T00:34:11',
+}}}, data: []};
+const seen = [];
+const sandbox = {
+  console, Promise, Number, String, Object, Array, JSON,
+  window: {
+    MatterVisViewCamera: {
+      graph: () => gd,
+      applyAsync: (camera, options) => {
+        seen.push({camera, options});
+        const scope = String(options.scene_id || '') + ':' + String(
+          options.scene_generation === undefined || options.scene_generation === null ? '' : options.scene_generation
+        );
+        gd.__mvCameraRevisionScope = scope;
+        gd.__mvCameraRevisionEpoch = String(options.server_started_at || '');
+        gd.__mvCameraRevision = Number(options.camera_version);
+        return Promise.resolve(true);
+      },
+    },
+    Plotly: {},
+  },
+};
+vm.createContext(sandbox);
+vm.runInContext(source, sandbox);
+const update = {
+  type: 'view_update',
+  update_kind: 'camera',
+  kind: 'camera',
+  operation_id: 'camera',
+  scene_id: 'scene-a',
+  scene_generation: 3,
+  server_started_at: '2026-11-09T00:34:11',
+  versions: {geometry_version: 1, display_version: 1, camera_version: 2},
+  geometry_version: 1,
+  display_version: 1,
+  camera_version: 2,
+  payload: {
+    command: 'projection',
+    camera: {
+      eye: {x: 1.8, y: 0, z: 0},
+      center: {x: 0, y: 0, z: 0},
+      up: {x: 0, y: 0, z: 1},
+      projection: {type: 'orthographic'},
+    },
+  },
+};
+(async () => {
+  assert.equal(await sandbox.window.MatterVisViewUpdates.submit(update), 'camera');
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].options.scene_generation, 3);
+  assert.equal(gd.__mvCameraRevisionScope, 'scene-a:3');
+  assert.equal(gd.__mvCameraRevision, 2);
+  const render = gd.layout.meta.mattervis_render;
+  const scope = String(render.scene_id) + ':' + String(render.scene_generation);
+  const liveScope = String(gd.__mvCameraRevisionScope || '');
+  const metaRev = Number(render.camera_revision);
+  const live = Number(gd.__mvCameraRevision);
+  const revision = liveScope === scope && Number.isFinite(live) ? Math.max(live, metaRev) : metaRev;
+  assert.equal(revision, 2, 'the next relayout fence used the figure revision');
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+"""
+    result = subprocess.run(
+        [node, "-e", program, str(source)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout

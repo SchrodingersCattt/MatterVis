@@ -579,21 +579,109 @@
       if (projection) patch["scene.camera.projection.type"] = String(projection);
       return patch;
     }
+    function sameSceneDragInProgress(gd) {
+      if (window.__mvGestureEndedAt) return false;
+      const render = renderMetadataFromLayout(gd && gd.layout);
+      const canvasId = render && render.scene_id ? String(render.scene_id) : "";
+      const gestureId = window.__mvGestureSceneId ? String(window.__mvGestureSceneId) : "";
+      if (!gestureId || !canvasId || gestureId !== canvasId) return false;
+      /* A remount can reuse the scene id with a new generation, and a
+       * restarted server can reuse both. The drag eye belongs only to the
+       * generation and session stamped at pointer-down. */
+      if (canvasRevisionScope(gestureId, window.__mvGestureSceneGeneration) !==
+          canvasRevisionScope(canvasId, render.scene_generation)) return false;
+      const gestureEpoch = window.__mvGestureServerEpoch != null ? String(window.__mvGestureServerEpoch) : "";
+      const canvasEpoch = render.server_started_at != null ? String(render.server_started_at) : "";
+      if (gestureEpoch && canvasEpoch && gestureEpoch !== canvasEpoch) return false;
+      return true;
+    }
+    function newerCameraCommand(gd) {
+      const render = renderMetadataFromLayout(gd && gd.layout);
+      if (!render) return false;
+      const live = scopedLiveRevision(gd, render.scene_id, render.scene_generation, render.server_started_at);
+      const gestureRev = Number(window.__mvGestureCameraRevision);
+      return Number.isFinite(live) && Number.isFinite(gestureRev) && live > gestureRev;
+    }
+    /* The sample belongs to one pointer gesture and one scene generation
+     * and server session. A later press must not restore it before that
+     * press has sampled its own eye. */
+    function dragSampleKey() {
+      return [
+        String(window.__mvGestureSerial || 0),
+        String(window.__mvGestureSceneId || ""),
+        window.__mvGestureSceneGeneration == null ? "" : String(window.__mvGestureSceneGeneration),
+        window.__mvGestureServerEpoch != null ? String(window.__mvGestureServerEpoch) : ""
+      ].join("|");
+    }
+    function retireDragSample() {
+      window.__mvGestureSerial = Number(window.__mvGestureSerial || 0) + 1;
+      window.__mvInProgressDragCamera = null;
+    }
+    function dragSampleCamera() {
+      const saved = window.__mvInProgressDragCamera;
+      if (!saved || !saved.camera || saved.key !== dragSampleKey()) return null;
+      return saved.camera;
+    }
+    function noteInProgressDrag(gd) {
+      if (!sameSceneDragInProgress(gd) || !window.mattervisCurrentCamera) return;
+      const camera = window.mattervisCurrentCamera(gd);
+      if (!camera || !camera.eye || !camera.center || !camera.up) return;
+      try {
+        window.__mvInProgressDragCamera = {
+          camera: JSON.parse(JSON.stringify(camera)),
+          key: dragSampleKey()
+        };
+      } catch (_) {}
+    }
+    function restoreInProgressDrag(gd) {
+      if (!gd || gd.__mvRestoringDrag || !window.Plotly || typeof window.Plotly.relayout !== "function") return Promise.resolve();
+      if (!sameSceneDragInProgress(gd) || newerCameraCommand(gd)) return Promise.resolve();
+      const saved = dragSampleCamera();
+      if (!saved) return Promise.resolve();
+      const now = window.mattervisCurrentCamera ? window.mattervisCurrentCamera(gd) : null;
+      if (!now || camerasClose(now, saved)) return Promise.resolve();
+      const patch = cameraOnlyPatch(saved);
+      if (!patch) return Promise.resolve();
+      gd.__mvRestoringDrag = true;
+      let pending = null;
+      try { pending = window.Plotly.relayout(gd, patch); }
+      catch (_) { gd.__mvRestoringDrag = false; return Promise.resolve(); }
+      const clear = function () { gd.__mvRestoringDrag = false; };
+      if (pending && typeof pending.then === "function") return pending.then(clear, clear);
+      clear();
+      return Promise.resolve();
+    }
+    window.__mvNoteInProgressDrag = noteInProgressDrag;
+    window.__mvRestoreInProgressDrag = restoreInProgressDrag;
+    window.__mvRetireDragSample = retireDragSample;
     /* A width/height relayout is a full gl3d replot: it emits plotly_relayout
      * and calls setViewport. Dash keeps only the latest relayoutData, so that
      * size event can hide the offscreen camera payload and the replot can
      * paint the pre-refit camera again. Drop the size event, then put back a
-     * camera command the replot moved. */
+     * camera command the replot moved. An in-progress drag has no command yet;
+     * put its live camera back only when the mounted generation and, when
+     * both sides have one, the server session still match the gesture.
+     * A Reset that arrives during the replot still wins. */
     function restoreCommandedCamera(gd, before, commandAtStart) {
+      if (!window.Plotly || typeof window.Plotly.relayout !== "function") return Promise.resolve();
       const latest = gd && gd.__mvLatestCamera;
-      if (!latest || !latest.snapshot || !window.Plotly || typeof window.Plotly.relayout !== "function") {
-        return Promise.resolve();
-      }
+      const commandArrived = !!(latest && latest !== commandAtStart);
       const after = window.mattervisCurrentCamera ? window.mattervisCurrentCamera(gd) : null;
+      const commandWins = commandArrived || newerCameraCommand(gd);
+      if (!commandWins && sameSceneDragInProgress(gd)) {
+        const sampled = dragSampleCamera();
+        const dragPose = sampled && !camerasClose(after, sampled) ? sampled : before;
+        if (dragPose && !camerasClose(after, dragPose)) {
+          const dragged = cameraOnlyPatch(dragPose);
+          if (dragged) return Promise.resolve(window.Plotly.relayout(gd, dragged)).catch(function () {});
+        }
+      }
+      if (!latest || !latest.snapshot) return Promise.resolve();
       if (camerasClose(after, latest.snapshot)) return Promise.resolve();
-      const commandArrived = latest !== commandAtStart;
       const commandWasLive = camerasClose(before, latest.snapshot);
-      if (!commandArrived && !commandWasLive) return Promise.resolve();
+      /* A revision that is already ahead did not have to arrive inside this
+       * size wrap. The captured pre-replot eye must not replace it. */
+      if (!commandArrived && !commandWasLive && !newerCameraCommand(gd)) return Promise.resolve();
       const patch = cameraOnlyPatch(latest.snapshot);
       if (!patch) return Promise.resolve();
       return Promise.resolve(window.Plotly.relayout(gd, patch)).catch(function () {});
@@ -738,7 +826,7 @@
               if (window.MatterVisViewCamera && typeof window.MatterVisViewCamera.installCanvasRefit === "function") {
                 window.MatterVisViewCamera.installCanvasRefit(gd);
               }
-              return result;
+              return restoreInProgressDrag(gd).then(function () { return result; });
             });
           };
           // Both Dash signatures and WS pass here. Retry after failures;
@@ -2204,8 +2292,11 @@
     if (gd && typeof gd.on === "function" && !gd.__mvForeignCameraBound) {
       gd.__mvForeignCameraBound = true;
       gd.on("plotly_relayout", function () {
-        if (window.__mvAllowCameraRelayout || window.__mvRestoreOwnedCamera) return;
+        if (window.__mvAllowCameraRelayout || window.__mvRestoreOwnedCamera || gd.__mvRestoringDrag) return;
         restoreOwnedCamera(gestureGeneration, foreignGuardScene());
+      });
+      gd.on("plotly_afterplot", function () {
+        if (window.__mvRestoreInProgressDrag) window.__mvRestoreInProgressDrag(gd);
       });
     }
   }
@@ -2236,7 +2327,8 @@
   /* A pointer-up relayout must keep the revision from gesture start so
    * Reset can still win. A later camera relayout is not that drag: read
    * the live canvas clock or the server rejects it and the offscreen
-   * view sticks. */
+   * view sticks. That clock is only the revision stored for this
+   * scene:generation and server session. */
   function refreshSettledGestureStamp(gd, layout) {
     if (!layout || !gd) return;
     const touches = layout["scene.camera"] || (layout.scene && layout.scene.camera) ||
@@ -2269,13 +2361,33 @@
     if (render.scene_generation !== undefined && render.scene_generation !== null) {
       window.__mvGestureSceneGeneration = render.scene_generation;
     }
-    const live = Number(gd.__mvCameraRevision);
+    const live = scopedLiveRevision(gd, render.scene_id, render.scene_generation, render.server_started_at);
     const metaRev = Number(render.camera_revision);
     let revision = null;
     if (Number.isFinite(live) && Number.isFinite(metaRev)) revision = Math.max(live, metaRev);
     else if (Number.isFinite(live)) revision = live;
     else if (Number.isFinite(metaRev)) revision = metaRev;
     if (revision !== null) window.__mvGestureCameraRevision = revision;
+  }
+  function canvasRevisionScope(sceneId, generation) {
+    const id = sceneId ? String(sceneId) : "";
+    const value = generation === undefined || generation === null ? "" : String(generation);
+    return id + ":" + value;
+  }
+  /* The transient revision belongs to one scene generation and one server
+   * session. A later relayout may read it only when both match the mounted
+   * figure. Another scene, or a restarted session that reused the generation
+   * number, keeps the figure's own revision. */
+  function scopedLiveRevision(gd, sceneId, generation, serverStartedAt) {
+    if (!gd) return NaN;
+    const scope = canvasRevisionScope(sceneId, generation);
+    const liveScope = gd.__mvCameraRevisionScope != null ? String(gd.__mvCameraRevisionScope) : "";
+    if (liveScope !== scope) return NaN;
+    const liveEpoch = gd.__mvCameraRevisionEpoch != null ? String(gd.__mvCameraRevisionEpoch) : "";
+    const renderEpoch = serverStartedAt != null ? String(serverStartedAt) : "";
+    if (liveEpoch && renderEpoch && liveEpoch !== renderEpoch) return NaN;
+    const live = Number(gd.__mvCameraRevision);
+    return Number.isFinite(live) ? live : NaN;
   }
   const FOREIGN_CAMERA_CENTER_TOLERANCE = 0.2;
   function armForeignCameraGuard(generation, sceneId) {
@@ -2357,24 +2469,26 @@
   function stampGestureScene(sceneId, kind) {
     const id = sceneId ? String(sceneId) : "";
     if (!id) return;
+    if (window.__mvRetireDragSample) window.__mvRetireDragSample();
     const gd = graphDiv();
     const render = renderMetadataFromLayout(gd && gd.layout);
     const generation = render && render.scene_generation !== undefined
       ? render.scene_generation : null;
-    // view_camera.js scopes the transient revision to scene:generation.
-    // A full-scene Plotly.react reuses the graph div and does not clear it,
-    // so a revision left by scene A must not be stamped onto scene B.
-    const scope = id + ":" + (generation === null || generation === undefined ? "" : String(generation));
-    const liveScope = gd && gd.__mvCameraRevisionScope != null ? String(gd.__mvCameraRevisionScope) : "";
-    const liveRevision = Number(gd && gd.__mvCameraRevision);
+    // view_camera.js scopes the transient revision to scene:generation and
+    // the server session. A full-scene Plotly.react reuses the graph div and
+    // does not clear it, so a revision left by scene A, or by the previous
+    // server session, must not be stamped onto the mounted figure.
+    const liveRevision = gd
+      ? scopedLiveRevision(gd, id, generation, render && render.server_started_at)
+      : NaN;
     const metadataRevision = render && render.camera_revision !== undefined
       ? Number(render.camera_revision || 0) : null;
     // A typed camera command advances the transient revision without rewriting
     // figure metadata. A later full frame can carry a still newer revision in
     // metadata while the transient number stays behind. Use the newer of the
-    // two when they name the same scene generation.
+    // two when they name the same scene generation and session.
     let revision = null;
-    if (liveScope === scope && Number.isFinite(liveRevision)) {
+    if (Number.isFinite(liveRevision)) {
       revision = Number.isFinite(metadataRevision)
         ? Math.max(liveRevision, metadataRevision)
         : liveRevision;
@@ -2386,6 +2500,8 @@
     window.__mvLastGestureSceneId = sceneId;
     window.__mvGestureKind = kind || "pointer";
     window.__mvGestureSceneGeneration = generation;
+    window.__mvGestureServerEpoch = render && render.server_started_at != null
+      ? render.server_started_at : null;
     window.__mvGestureCameraRevision = revision;
     if (kind === "wheel") {
       const stamp = id + ":" + String(Date.now());
@@ -2400,8 +2516,13 @@
       }, 500);
     }
   }
+  document.addEventListener("pointermove", function () {
+    const gd = graphDiv();
+    if (gd && window.__mvNoteInProgressDrag) window.__mvNoteInProgressDrag(gd);
+  }, true);
   document.addEventListener("pointerdown", function(e) {
     if (!inGraph(e.target)) return;
+    if (window.__mvRetireDragSample) window.__mvRetireDragSample();
     window.__mvGestureEndedAt = 0;
     window.__mvGesturePointerRelayoutSeen = false;
     const sceneId = canvasSceneId() || window.__mvGestureSceneId || "";
@@ -2411,9 +2532,11 @@
   document.addEventListener("pointerup", function() {
     // Capture runs before Plotly's pointerup relayout. The ended clock has
     // to be set first so that relayout is the gesture's own commit, and a
-    // command that follows it can read the live revision.
+    // command that follows it can read the live revision. Drop the sampled
+    // orbit with the gesture so the next press cannot restore it.
     window.__mvGestureEndedAt = Date.now();
     window.__mvGesturePointerRelayoutSeen = false;
+    if (window.__mvRetireDragSample) window.__mvRetireDragSample();
   }, true);
   document.addEventListener("pointerup", function() {
     window.__mvGestureEndedAt = Date.now();
@@ -3071,6 +3194,7 @@
     if (!dragPollActive) return;
     if (window.__mv_compass_diag) window.__mv_compass_diag.drag_poll_ticks += 1;
     const camera = liveSceneCamera(gd);
+    if (typeof window.__mvNoteInProgressDrag === "function") window.__mvNoteInProgressDrag(gd);
     const key = dragCameraKey(camera);
     if (key && key !== dragPollLastKey) {
       dragPollLastKey = key;

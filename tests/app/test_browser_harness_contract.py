@@ -158,6 +158,17 @@ def test_isolated_server_publishes_status_and_releases_its_port(tmp_path, monkey
     assert not _port_still_bound(port)
 
 
+def test_scene_switch_census_trace_does_not_capture_screenshots():
+    """Screenshot traces stall WebGL scene swaps across the 100-switch census."""
+    source = (APP_JS / "real_app_browser.js").read_text(encoding="utf-8")
+    marker = 'const screenshots = mode !== "leak";'
+    assert marker in source
+    start = source.index("context.tracing.start")
+    call = source[start:source.index(");", start)]
+    assert "screenshots" in call and "snapshots: true" in call
+    assert "screenshots: true, snapshots: true" not in source
+
+
 def test_failed_bind_closes_the_app_before_the_port_is_retried(tmp_path, monkeypatch):
     monkeypatch.setenv("MATTERVIS_PREWARM", "0")
     running = start_mattervis(str(tmp_path), [])

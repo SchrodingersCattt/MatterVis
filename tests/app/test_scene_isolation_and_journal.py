@@ -2,16 +2,205 @@
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
 import threading
+import time
+from pathlib import Path
 
 import pytest
 
 from mat_viewer.app import ViewerBackend
 
+# The race below calls the real patch and journal paths. A fixed join is the
+# wrong oracle: each read copies the capped journal window, so a busy machine
+# can still be making progress when that join expires. Failure is an opposite
+# lock wait that stays latched, and the check runs in a child so a stall
+# cannot keep the pytest process alive.
+_RACE_ITERATIONS = 1000
+_LOCK_STALL_SECONDS = 2.0
+_LOCK_POLL_SECONDS = 0.05
+_HEARTBEAT_SECONDS = 0.25
+_RACE_CHILD_TIMEOUT_SECONDS = 40.0
+_DETECTOR_SELF_TIMEOUT_SECONDS = 8.0
+_OPPOSITE_ORDER_CHILD_TIMEOUT_SECONDS = 12.0
+
 
 def _backend(tmp_path):
     backend = ViewerBackend(preset_path=str(tmp_path / "preset.json"), root_dir=str(tmp_path))
     return backend
+
+
+class _WaitTrackingLock:
+    """Proxy a lock and record threads blocked inside acquire.
+
+    The waiter set is updated before the inner acquire and cleared when it
+    returns, including when a timeout expires. A lock-order cycle leaves the
+    two racers waiting on opposite locks.
+    """
+
+    def __init__(self, inner: threading.Lock | threading.RLock) -> None:
+        self._inner = inner
+        self._meta = threading.Lock()
+        self._waiters: set[int] = set()
+
+    def waiters(self) -> set[int]:
+        with self._meta:
+            return set(self._waiters)
+
+    def acquire(self, blocking: bool = True, timeout: float = -1):
+        ident = threading.get_ident()
+        if blocking:
+            with self._meta:
+                self._waiters.add(ident)
+        try:
+            if timeout == -1:
+                return self._inner.acquire(blocking)
+            return self._inner.acquire(blocking, timeout)
+        finally:
+            if blocking:
+                with self._meta:
+                    self._waiters.discard(ident)
+
+    def release(self) -> None:
+        self._inner.release()
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        self.release()
+        return False
+
+
+def _write_report(path: Path, payload: dict[str, object]) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload), encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def _load_report(path: Path) -> dict[str, object]:
+    if not path.is_file():
+        return {}
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {"status": "unreadable"}
+    return loaded if isinstance(loaded, dict) else {"status": "unreadable"}
+
+
+def _opposite_wait(
+    backend_lock: _WaitTrackingLock,
+    journal_lock: _WaitTrackingLock,
+    writer_id: int | None,
+    reader_id: int | None,
+) -> str:
+    if writer_id is None or reader_id is None:
+        return ""
+    backend_waiters = backend_lock.waiters()
+    journal_waiters = journal_lock.waiters()
+    if writer_id in journal_waiters and reader_id in backend_waiters:
+        return "writer waited on the journal lock while reader waited on the backend lock"
+    if writer_id in backend_waiters and reader_id in journal_waiters:
+        return "writer waited on the backend lock while reader waited on the journal lock"
+    return ""
+
+
+def _watch_opposite_wait(
+    backend_lock: _WaitTrackingLock,
+    journal_lock: _WaitTrackingLock,
+    writer: threading.Thread,
+    reader: threading.Thread,
+    started: float,
+    *,
+    on_sample,
+    self_timeout: float | None,
+) -> tuple[str, str]:
+    stall_since: float | None = None
+    while True:
+        now = time.monotonic()
+        both_alive = writer.is_alive() and reader.is_alive()
+        detail = ""
+        if both_alive:
+            detail = _opposite_wait(backend_lock, journal_lock, writer.ident, reader.ident)
+        if detail:
+            if stall_since is None:
+                stall_since = now
+            elif now - stall_since >= _LOCK_STALL_SECONDS:
+                return "deadlock", detail
+        else:
+            stall_since = None
+        on_sample(detail)
+        if not writer.is_alive() and not reader.is_alive():
+            return "finished", ""
+        if self_timeout is not None and now - started >= self_timeout:
+            return "error", "lock-order watchdog did not report a stall"
+        time.sleep(_LOCK_POLL_SECONDS)
+
+
+def _run_child(
+    function_name: str,
+    *args: str,
+    timeout: float,
+) -> subprocess.CompletedProcess[str]:
+    code = (
+        "from tests.app.test_scene_isolation_and_journal import "
+        f"{function_name}; {function_name}()"
+    )
+    env = {**os.environ, "MATTERVIS_PREWARM": "0"}
+    process = subprocess.Popen(
+        [sys.executable, "-c", code, *args],
+        cwd=str(Path(__file__).resolve().parents[2]),
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        stdout, stderr = process.communicate()
+    return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
+
+
+def _format_race_failure(
+    completed: subprocess.CompletedProcess[str],
+    report: dict[str, object],
+) -> str:
+    status = report.get("status", "missing")
+    detail = str(report.get("detail") or "")
+    lines = [
+        f"journal race failed: status={status} returncode={completed.returncode}",
+        (
+            "writer_iterations="
+            f"{report.get('writer_iterations')} reader_iterations="
+            f"{report.get('reader_iterations')} elapsed_s={report.get('elapsed_s')}"
+        ),
+    ]
+    if status == "deadlock":
+        lines.append(f"opposite lock order: {detail}")
+    elif status == "running":
+        if detail:
+            lines.append(f"opposite lock wait in progress: {detail}")
+        else:
+            lines.append(
+                "child was still making progress and was killed at the hard cap; "
+                "this is not a lock-order deadlock"
+            )
+    elif detail:
+        lines.append(detail)
+    errors = report.get("errors") or []
+    if isinstance(errors, list) and errors:
+        lines.append("errors: " + "; ".join(str(item) for item in errors))
+    if completed.stdout:
+        lines.append(completed.stdout)
+    if completed.stderr:
+        lines.append(completed.stderr)
+    return "\n".join(lines)
 
 
 def test_patch_of_inactive_scene_does_not_replace_the_active_state(tmp_path):
@@ -50,51 +239,246 @@ def test_reset_keeps_the_active_projection(tmp_path):
         backend.close()
 
 
-def test_journal_read_does_not_deadlock_with_state_patch(tmp_path):
-    backend = _backend(tmp_path)
+def child_journal_patch_race() -> None:
+    """Process entry: race camera patches against journal reads, then exit."""
+    root = Path(sys.argv[1])
+    report_path = Path(sys.argv[2])
     try:
-        state = backend.get_state()
-        figure = {
-            "data": [{"type": "scatter3d", "x": [0], "y": [0], "z": [0]}],
-            "layout": {"scene": {"camera": state.get("camera") or {}}},
-        }
-        backend.broadcast_figure(scene_id=state["scene_id"], figure=figure, state=state)
-        barrier = threading.Barrier(2)
-        errors: list[BaseException] = []
+        _journal_patch_race(root, report_path)
+    except Exception as exc:  # noqa: BLE001 - the parent report is the failure
+        _write_report(
+            report_path,
+            {
+                "status": "error",
+                "detail": f"{type(exc).__name__}: {exc}",
+                "writer_iterations": 0,
+                "reader_iterations": 0,
+                "elapsed_s": 0,
+                "errors": [],
+            },
+        )
+        os._exit(1)
 
-        def writer():
-            try:
-                barrier.wait(timeout=5)
-                for index in range(1000):
-                    eye = 1.0 + (index % 5) * 0.01
-                    backend.patch_state(
-                        {"camera": {"eye": {"x": eye, "y": 1.0, "z": 1.0}, "center": {"x": 0, "y": 0, "z": 0}, "up": {"x": 0, "y": 0, "z": 1}}},
-                        broadcast=True,
-                    )
-            except BaseException as exc:  # noqa: BLE001 - the assertion reports it
-                errors.append(exc)
 
-        def reader():
-            try:
-                barrier.wait(timeout=5)
-                for _ in range(1000):
-                    backend.figure_broadcasts_since(0)
-                    backend.latest_figure_broadcast()
-            except BaseException as exc:  # noqa: BLE001
-                errors.append(exc)
+def _journal_patch_race(root: Path, report_path: Path) -> None:
+    backend = ViewerBackend(preset_path=str(root / "preset.json"), root_dir=str(root))
+    state = backend.get_state()
+    figure = {
+        "data": [{"type": "scatter3d", "x": [0], "y": [0], "z": [0]}],
+        "layout": {"scene": {"camera": state.get("camera") or {}}},
+    }
+    backend.broadcast_figure(scene_id=state["scene_id"], figure=figure, state=state)
+    backend_lock = _WaitTrackingLock(backend._lock)
+    journal_lock = _WaitTrackingLock(backend._figure_broadcast_lock)
+    backend._lock = backend_lock
+    backend._figure_broadcast_lock = journal_lock
+    progress = {"writer": 0, "reader": 0}
+    errors: list[str] = []
+    error_lock = threading.Lock()
+    barrier = threading.Barrier(2)
 
-        threads = [threading.Thread(target=writer), threading.Thread(target=reader)]
-        for thread in threads:
-            thread.start()
-        # A loaded CI worker shares the machine with the rest of the suite.
-        # Thirty seconds is enough for the thousand-iteration race and still
-        # fails if the two locks are taken in opposite orders.
-        for thread in threads:
-            thread.join(timeout=30)
-            assert not thread.is_alive(), "state patch and journal read deadlocked"
-        assert errors == []
-    finally:
-        backend.close()
+    def writer() -> None:
+        try:
+            barrier.wait(timeout=5)
+            for index in range(_RACE_ITERATIONS):
+                eye = 1.0 + (index % 5) * 0.01
+                backend.patch_state(
+                    {
+                        "camera": {
+                            "eye": {"x": eye, "y": 1.0, "z": 1.0},
+                            "center": {"x": 0, "y": 0, "z": 0},
+                            "up": {"x": 0, "y": 0, "z": 1},
+                        }
+                    },
+                    broadcast=True,
+                )
+                progress["writer"] = index + 1
+        except Exception as exc:  # noqa: BLE001 - the parent report is the failure
+            with error_lock:
+                errors.append(f"{type(exc).__name__}: {exc}")
+
+    def reader() -> None:
+        try:
+            barrier.wait(timeout=5)
+            for index in range(_RACE_ITERATIONS):
+                backend.figure_broadcasts_since(0)
+                backend.latest_figure_broadcast()
+                progress["reader"] = index + 1
+        except Exception as exc:  # noqa: BLE001 - the parent report is the failure
+            with error_lock:
+                errors.append(f"{type(exc).__name__}: {exc}")
+
+    writer_thread = threading.Thread(target=writer, name="journal-race-writer", daemon=True)
+    reader_thread = threading.Thread(target=reader, name="journal-race-reader", daemon=True)
+    started = time.monotonic()
+    last_heartbeat = 0.0
+    writer_thread.start()
+    reader_thread.start()
+
+    def on_sample(detail: str) -> None:
+        nonlocal last_heartbeat
+        now = time.monotonic()
+        if now - last_heartbeat < _HEARTBEAT_SECONDS:
+            return
+        last_heartbeat = now
+        with error_lock:
+            captured = list(errors)
+        _write_report(
+            report_path,
+            {
+                "status": "running",
+                "detail": detail,
+                "writer_iterations": progress["writer"],
+                "reader_iterations": progress["reader"],
+                "elapsed_s": round(now - started, 3),
+                "errors": captured,
+            },
+        )
+
+    status, detail = _watch_opposite_wait(
+        backend_lock,
+        journal_lock,
+        writer_thread,
+        reader_thread,
+        started,
+        on_sample=on_sample,
+        self_timeout=None,
+    )
+    elapsed = round(time.monotonic() - started, 3)
+    with error_lock:
+        captured = list(errors)
+    if status == "deadlock":
+        _write_report(
+            report_path,
+            {
+                "status": "deadlock",
+                "detail": detail,
+                "writer_iterations": progress["writer"],
+                "reader_iterations": progress["reader"],
+                "elapsed_s": elapsed,
+                "errors": captured,
+            },
+        )
+        os._exit(2)
+    if captured or progress["writer"] != _RACE_ITERATIONS or progress["reader"] != _RACE_ITERATIONS:
+        _write_report(
+            report_path,
+            {
+                "status": "error",
+                "detail": detail or "race ended before both sides finished",
+                "writer_iterations": progress["writer"],
+                "reader_iterations": progress["reader"],
+                "elapsed_s": elapsed,
+                "errors": captured,
+            },
+        )
+        os._exit(1)
+    backend.close()
+    _write_report(
+        report_path,
+        {
+            "status": "ok",
+            "detail": "",
+            "writer_iterations": progress["writer"],
+            "reader_iterations": progress["reader"],
+            "elapsed_s": elapsed,
+            "errors": [],
+        },
+    )
+
+
+def test_journal_read_does_not_deadlock_with_state_patch(tmp_path: Path):
+    """Camera patches and journal reads must not take the locks in opposite orders.
+
+    The child exits on a latched opposite-lock wait. A slow copy of the journal
+    window keeps the iteration counters moving and is not reported as a deadlock.
+    The parent kills the child at a hard cap so a stalled worker cannot outlive
+    the test the way a non-daemon ``join`` timeout did.
+    """
+    report_path = tmp_path / "report.json"
+    completed = _run_child(
+        "child_journal_patch_race",
+        str(tmp_path),
+        str(report_path),
+        timeout=_RACE_CHILD_TIMEOUT_SECONDS,
+    )
+    report = _load_report(report_path)
+    assert completed.returncode == 0 and report.get("status") == "ok", _format_race_failure(
+        completed, report
+    )
+    assert report["writer_iterations"] == _RACE_ITERATIONS
+    assert report["reader_iterations"] == _RACE_ITERATIONS
+
+
+def child_opposite_lock_order() -> None:
+    """Process entry: two locks taken in opposite orders must be reported."""
+    report_path = Path(sys.argv[1])
+    backend_lock = _WaitTrackingLock(threading.Lock())
+    journal_lock = _WaitTrackingLock(threading.Lock())
+    writer_in = threading.Event()
+    reader_in = threading.Event()
+
+    def writer() -> None:
+        with backend_lock:
+            writer_in.set()
+            if not reader_in.wait(timeout=5):
+                return
+            with journal_lock:
+                return
+
+    def reader() -> None:
+        with journal_lock:
+            reader_in.set()
+            if not writer_in.wait(timeout=5):
+                return
+            with backend_lock:
+                return
+
+    writer_thread = threading.Thread(target=writer, name="opposite-writer", daemon=True)
+    reader_thread = threading.Thread(target=reader, name="opposite-reader", daemon=True)
+    started = time.monotonic()
+    writer_thread.start()
+    reader_thread.start()
+    status, detail = _watch_opposite_wait(
+        backend_lock,
+        journal_lock,
+        writer_thread,
+        reader_thread,
+        started,
+        on_sample=lambda _detail: None,
+        self_timeout=_DETECTOR_SELF_TIMEOUT_SECONDS,
+    )
+    _write_report(
+        report_path,
+        {
+            "status": status if status != "finished" else "error",
+            "detail": detail or "threads ended without an opposite-lock stall",
+            "writer_iterations": 0,
+            "reader_iterations": 0,
+            "elapsed_s": round(time.monotonic() - started, 3),
+            "errors": [],
+        },
+    )
+    os._exit(2 if status == "deadlock" else 1)
+
+
+def test_opposite_lock_order_stall_exits_without_hanging(tmp_path: Path):
+    """The watchdog must name a real opposite-order stall and the child must exit."""
+    report_path = tmp_path / "report.json"
+    started = time.monotonic()
+    completed = _run_child(
+        "child_opposite_lock_order",
+        str(report_path),
+        timeout=_OPPOSITE_ORDER_CHILD_TIMEOUT_SECONDS,
+    )
+    elapsed = time.monotonic() - started
+    report = _load_report(report_path)
+    assert completed.returncode == 2, _format_race_failure(completed, report)
+    assert report.get("status") == "deadlock"
+    assert report.get("detail") == (
+        "writer waited on the journal lock while reader waited on the backend lock"
+    )
+    assert elapsed < _OPPOSITE_ORDER_CHILD_TIMEOUT_SECONDS
 
 
 def test_selection_commit_enqueues_render_without_the_backend_lock(tmp_path):

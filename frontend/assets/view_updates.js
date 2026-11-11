@@ -44,19 +44,37 @@
     }
     if (gd) root.__mvDeliveryGraph = gd;
   }
+  function present(value) {
+    return value !== undefined && value !== null && value !== "";
+  }
+  /* ``versions`` holds the three clocks only. ``scene_generation`` is a
+   * sibling on the envelope. Reading it from ``versions`` stores the new
+   * camera revision on an empty generation, and the next relayout fence
+   * then sends the figure's older revision. */
+  function envelopeGeneration(update) {
+    if (!update || typeof update !== "object") return undefined;
+    if (present(update.scene_generation)) return update.scene_generation;
+    var versions = update.versions;
+    if (versions && typeof versions === "object" && present(versions.scene_generation)) return versions.scene_generation;
+    return undefined;
+  }
+  function generationOf(update, gd) {
+    var generation = envelopeGeneration(update);
+    if (!present(generation)) generation = meta(update).scene_generation;
+    if (!present(generation) && gd) generation = currentMeta(gd).scene_generation;
+    return present(generation) ? generation : "";
+  }
   function deliveryKey(update, gd) {
     var scene = update.scene_id;
     var render = currentMeta(gd);
     var v = meta(update);
     var epoch = String(update.server_started_at || render.server_started_at || root.__mvServerEpoch || "");
     var operation = String(update.operation_id || "");
-    return [epoch, scene || render.scene_id || "", String(v.scene_generation || render.scene_generation || ""), Number(v.geometry_version || v.geometry || 0), Number(v.display_version || 0), Number(v.camera_version || v.camera_revision || 0), operation].join(":");
+    return [epoch, scene || render.scene_id || "", String(generationOf(update, gd)), Number(v.geometry_version || v.geometry || 0), Number(v.display_version || 0), Number(v.camera_version || v.camera_revision || 0), operation].join(":");
   }
   function cameraScope(update, gd) {
     var render = currentMeta(gd);
-    var generation = meta(update).scene_generation;
-    if (generation === undefined || generation === null || generation === "") generation = render.scene_generation || "";
-    return String(update.scene_id || render.scene_id || "") + ":" + String(generation);
+    return String(update.scene_id || render.scene_id || "") + ":" + String(generationOf(update, gd));
   }
   function cameraRevision(update) {
     var value = Number(meta(update).camera_version || meta(update).camera_revision || 0);
@@ -65,12 +83,10 @@
   function versionScope(update, gd) {
     var render = currentMeta(gd);
     var scene = String((update && update.scene_id) || render.scene_id || "");
-    var value = meta(update).scene_generation;
-    if (value === undefined || value === null || value === "") value = render.scene_generation || "";
     /* Geometry/display/camera versions restart when a scene is remounted.
      * Keeping the generation in this scope prevents a prior graph's high
      * revision from making valid commands for the new graph look stale. */
-    return scene + ":" + String(value);
+    return scene + ":" + String(generationOf(update, gd));
   }
   function remembered(update, gd) {
     return latestVersions[versionScope(update, gd)] || {geometry: 0, display: 0, camera: 0};
@@ -149,7 +165,7 @@
     var current = Math.max(Number(render.geometry_version || render.render_revision || 0), seen.geometry);
     var geometry = Number(v.geometry_version || v.geometry || 0);
     if (sameScene && geometry && current && geometry < current) return false;
-    var generation = v.scene_generation !== undefined ? String(v.scene_generation) : "";
+    var generation = present(generationOf(update, null)) ? String(generationOf(update, null)) : "";
     if (sameScene && generation && render.scene_generation !== undefined && generation !== String(render.scene_generation)) return false;
     var display = Number(v.display_version || 0), currentDisplay = Math.max(Number(render.display_version || 0), seen.display);
     var camera = Number(v.camera_version || v.camera_revision || 0), currentCamera = Math.max(Number(render.camera_version || render.camera_revision || 0), seen.camera);
@@ -322,7 +338,7 @@
       }
       var cameraOptions = {
         scene_id: snapshot.scene_id,
-        scene_generation: meta(snapshot).scene_generation,
+        scene_generation: generationOf(snapshot, gd),
         camera_version: revision,
         server_started_at: snapshot.server_started_at,
         command: String(camera.command || snapshot.reason || ""),
