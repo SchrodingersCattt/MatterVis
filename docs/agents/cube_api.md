@@ -220,6 +220,14 @@ have to be chosen after the repeat. This function does not choose elements
 or distance cutoffs. Colors and radii are caller-supplied maps keyed by
 atomic number.
 
+The isosurface shade is `surface_ambient`, `surface_diffuse`,
+`surface_specular`, and `surface_specular_power`. Atom and bond
+coefficients are the matching `atom_*` and `bond_*` arguments.
+`surface_specular_power` is the Phong exponent, not a 0–1 weight.
+The renderer lights both sides of the sheet, so an open isosurface stays
+visible when a normal points away from the camera. The defaults leave the
+previous coefficients unchanged.
+
 `look` and `up` are directions. The camera distance and the three lights
 scale with the scene radius, and the focal point is the center of the mesh
 and atom bounds, so a volume with no atoms still frames. `parallel_scale` is
