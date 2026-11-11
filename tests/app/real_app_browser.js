@@ -704,8 +704,20 @@ async function runCrossClient(page, browser) {
 
 async function runLeak(page) {
   await graphReady(page);
+  const started = Date.now();
   for (let i = 0; i < 100; i += 1) {
-    await clickTab(page, i % 2 === 0 ? "ionic_nacl" : "molecular_water");
+    const name = i % 2 === 0 ? "ionic_nacl" : "molecular_water";
+    const before = Date.now();
+    await clickTab(page, name);
+    if (i % 10 === 9) {
+      const census = await page.evaluate(() => ({
+        sockets: (window.__mvCensus || {}).socketsOpen || 0,
+        webgl: (window.__mvCensus || {}).webglContexts || 0,
+        canvases: document.getElementById("crystal-graph")
+          ? document.getElementById("crystal-graph").querySelectorAll("canvas").length : 0,
+      }));
+      log(`leak ${i + 1}/100 ${Date.now() - before}ms elapsed ${Date.now() - started}ms ${JSON.stringify(census)}`);
+    }
   }
   const census = await page.evaluate(() => {
     const root = document.getElementById("crystal-graph");
@@ -912,6 +924,100 @@ async function scanCanvas(page, callback, options) {
     }
   }
   return null;
+}
+
+async function runDragReplot(page) {
+  await graphReady(page);
+  if (structure) await clickTab(page, structure);
+  await page.waitForFunction(() => {
+    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+    return !!(gd && gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene && gd._fullLayout.scene._scene.camera);
+  });
+  const readEye = () => {
+    const scene = document.querySelector("#crystal-graph .js-plotly-plot")._fullLayout.scene._scene;
+    const live = scene && typeof scene.getCamera === "function" ? scene.getCamera() : scene && scene.camera;
+    const eye = live && live.eye;
+    const component = (value, index, key) => Number(value && value[index] !== undefined ? value[index] : value && value[key]);
+    if (!eye) return null;
+    return [component(eye, 0, "x"), component(eye, 1, "y"), component(eye, 2, "z")];
+  };
+  const before = await page.evaluate(readEye);
+  const box = await page.locator("#crystal-graph canvas").first().boundingBox();
+  if (!box) fail("crystal canvas has no box");
+  const starts = [
+    [box.x + box.width * 0.45, box.y + box.height * 0.5],
+    [box.x + box.width * 0.32, box.y + box.height * 0.62],
+    [box.x + box.width * 0.58, box.y + box.height * 0.4],
+  ];
+  let dragged = null;
+  for (const [sx, sy] of starts) {
+    await page.mouse.move(sx, sy);
+    await page.mouse.down();
+    await page.mouse.move(sx + 140, sy + 80, {steps: 12});
+    try {
+      await page.waitForFunction((previous) => {
+        const scene = document.querySelector("#crystal-graph .js-plotly-plot")._fullLayout.scene._scene;
+        const live = scene && typeof scene.getCamera === "function" ? scene.getCamera() : scene && scene.camera;
+        const eye = live && live.eye;
+        const component = (value, index, key) => Number(value && value[index] !== undefined ? value[index] : value && value[key]);
+        if (!eye) return false;
+        const next = [component(eye, 0, "x"), component(eye, 1, "y"), component(eye, 2, "z")];
+        const shift = Math.hypot(next[0] - previous[0], next[1] - previous[1], next[2] - previous[2]);
+        return Number.isFinite(shift) && shift > 0.02;
+      }, before, {timeout: 4000});
+      dragged = await page.evaluate(readEye);
+      break;
+    } catch (error) {
+      await page.mouse.up();
+    }
+  }
+  if (!dragged) fail("orbit did not move the live camera");
+  // A full Plotly.react is deferred until the press ends, so it cannot be
+  // the in-drag snap. This relayout is the replot that finishes while the
+  // button is down; its afterplot runs the same restore the frame uses.
+  await page.evaluate((original) => {
+    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+    return window.Plotly.relayout(gd, {"scene.camera.eye": {x: original[0], y: original[1], z: original[2]}});
+  }, before);
+  await page.waitForFunction((orbit) => {
+    const scene = document.querySelector("#crystal-graph .js-plotly-plot")._fullLayout.scene._scene;
+    const live = scene && typeof scene.getCamera === "function" ? scene.getCamera() : scene && scene.camera;
+    const eye = live && live.eye;
+    const component = (value, index, key) => Number(value && value[index] !== undefined ? value[index] : value && value[key]);
+    if (!eye) return false;
+    const next = [component(eye, 0, "x"), component(eye, 1, "y"), component(eye, 2, "z")];
+    const shift = Math.hypot(next[0] - orbit[0], next[1] - orbit[1], next[2] - orbit[2]);
+    return Number.isFinite(shift) && shift < 0.05;
+  }, dragged, {timeout: 20000});
+  // A new generation must not receive that orbit.
+  const replaced = await page.evaluate((original) => {
+    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+    const render = gd.layout.meta.mattervis_render;
+    render.scene_generation = Number(render.scene_generation || 0) + 1;
+    const component = (value, index, key) => Number(value && value[index] !== undefined ? value[index] : value && value[key]);
+    return window.Plotly.relayout(gd, {"scene.camera.eye": {x: original[0], y: original[1], z: original[2]}}).then(() => {
+      const eye = document.querySelector("#crystal-graph .js-plotly-plot")._fullLayout.scene._scene.camera.eye;
+      return [component(eye, 0, "x"), component(eye, 1, "y"), component(eye, 2, "z")];
+    });
+  }, before);
+  const stayed = Math.hypot(replaced[0] - before[0], replaced[1] - before[1], replaced[2] - before[2]);
+  if (!(stayed < 0.05)) fail("new generation restored the previous drag eye " + JSON.stringify({before, replaced, dragged}));
+  await page.mouse.up();
+  // The next press has not moved, so it has no sample of its own. Putting
+  // the pre-drag eye back must not revive the orbit from the press that ended.
+  await page.mouse.down();
+  const untouched = await page.evaluate((original) => {
+    const gd = document.querySelector("#crystal-graph .js-plotly-plot");
+    const component = (value, index, key) => Number(value && value[index] !== undefined ? value[index] : value && value[key]);
+    return window.Plotly.relayout(gd, {"scene.camera.eye": {x: original[0], y: original[1], z: original[2]}}).then(() => {
+      const eye = document.querySelector("#crystal-graph .js-plotly-plot")._fullLayout.scene._scene.camera.eye;
+      return [component(eye, 0, "x"), component(eye, 1, "y"), component(eye, 2, "z")];
+    });
+  }, before);
+  await page.mouse.up();
+  const leaked = Math.hypot(untouched[0] - dragged[0], untouched[1] - dragged[1], untouched[2] - dragged[2]);
+  const held = Math.hypot(untouched[0] - before[0], untouched[1] - before[1], untouched[2] - before[2]);
+  if (!(leaked > 0.05 && held < 0.05)) fail("later press restored the previous orbit " + JSON.stringify({before, dragged, untouched}));
 }
 
 async function runSemanticPick(page) {
@@ -1591,7 +1697,13 @@ const networkEvents = [];
   if (artifactDir) {
     fs.mkdirSync(artifactDir, {recursive: true});
     try {
-      await context.tracing.start({screenshots: true, snapshots: true});
+      // Screenshot traces and DOM snapshots together make each WebGL
+      // Plotly.react pay for a frame capture. On one core that stretches a
+      // scene switch from under a second to about two, so 100 switches miss
+      // the process budget before the socket census runs. The census keeps
+      // DOM snapshots. A failed run still writes its own page screenshot.
+      const screenshots = mode !== "leak";
+      await context.tracing.start({screenshots, snapshots: true});
       tracing = true;
       tracingStarted = true;
     } catch (error) {
@@ -1640,6 +1752,7 @@ const networkEvents = [];
   else if (mode === "nacl-frame") await runNaclFrame(page);
   else if (mode === "surface-pick") await runSurfacePick(page);
   else if (mode === "semantic-pick") await runSemanticPick(page);
+  else if (mode === "drag-replot") await runDragReplot(page);
   else if (mode === "ortho-drag") await runOrthoDrag(page);
   else if (mode === "mixed-projection" || mode === "mixed-projection-http") await require("./projection_mixed_browser")(page, clickTab, waitForServerState);
   else if (mode === "projection-radio") await require("./projection_radio_browser")(page, clickTab, waitForServerState);

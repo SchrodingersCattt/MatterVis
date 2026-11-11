@@ -257,6 +257,11 @@ def lower_plan(plan: RenderPlan) -> LoweredPlan:
         for primitive in viewport.primitives:
             semantic_id = str(getattr(primitive, "semantic_id", ""))
             if isinstance(primitive, TriangleMeshPrimitive):
+                if primitive.vertex_colors is not None:
+                    raise GPUUnsupportedError(
+                        "GPU backend does not render per-vertex colors "
+                        f"({semantic_id!r}); use the CPU or Plotly backend"
+                    )
                 rgba = _opaque_rgba(primitive.rgba, semantic_id)
                 shape = str(primitive.metadata.get("_raster_shape") or "")
                 if shape == "sphere":
@@ -334,6 +339,11 @@ def lower_plan(plan: RenderPlan) -> LoweredPlan:
                         )
                     )
             elif isinstance(primitive, LinePrimitive):
+                if primitive.endpoint_colors is not None:
+                    raise GPUUnsupportedError(
+                        "GPU backend does not render per-endpoint line colors "
+                        f"({semantic_id!r}); use the CPU backend"
+                    )
                 rgba = _opaque_rgba(primitive.rgba, semantic_id)
                 if primitive.dash:
                     raise GPUUnsupportedError(

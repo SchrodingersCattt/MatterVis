@@ -23,7 +23,13 @@ from ..contracts import (
 from ..compass_overlay import draw_matplotlib_compass
 from ..property_colorbar import draw_matplotlib_colorbar
 from .bsp import BSPPolygon, build_bsp, traverse_back_to_front
+from .raster_lines import _clipped_endpoint_rgb, endpoint_screen_weight
 from .visibility import anchor_occluded, projected_polygon_depth
+
+# Screen length of one solid step in a vector edge gradient. Matplotlib
+# strokes are one color, so a colored edge is a deterministic sequence of
+# these steps rather than a single midpoint color.
+VECTOR_GRADIENT_STEP_PX = 4.0
 
 _EPSILON = 1.0e-8
 
@@ -37,6 +43,23 @@ class ProjectedPolygon:
 
 
 @dataclass(frozen=True, slots=True)
+class EdgeGradient:
+    """Perspective-correct endpoint colors for one visibility span.
+
+    ``t0`` and ``t1`` are screen parameters on the clipped segment.
+    ``depth0`` and ``depth1`` are that segment's positive camera depths.
+    """
+
+    rgb0: tuple[float, float, float]
+    rgb1: tuple[float, float, float]
+    depth0: float
+    depth1: float
+    t0: float
+    t1: float
+    perspective: bool
+
+
+@dataclass(frozen=True, slots=True)
 class VectorLinePiece:
     semantic_id: str
     start: tuple[float, float]
@@ -47,6 +70,65 @@ class VectorLinePiece:
     insertion_index: int
     depth: float
     stable_order: int
+    gradient: EdgeGradient | None = None
+
+
+def _gradient_rgba(
+    gradient: EdgeGradient,
+    screen_t: float,
+    alpha: float,
+) -> tuple[float, float, float, float]:
+    weight = endpoint_screen_weight(
+        screen_t,
+        gradient.depth0,
+        gradient.depth1,
+        perspective=gradient.perspective,
+    )
+    rgb = (1.0 - weight) * np.asarray(gradient.rgb0) + weight * np.asarray(gradient.rgb1)
+    return (float(rgb[0]), float(rgb[1]), float(rgb[2]), float(alpha))
+
+
+def _draw_line_piece(axes, piece: VectorLinePiece, *, dpi: float) -> None:
+    """Draw one span. Colored spans step along the edge instead of one fill."""
+    width = piece.width_px * 72.0 / dpi
+    if piece.gradient is None:
+        _plot_stroke(axes, piece.start, piece.end, piece.rgba, width, piece.dash)
+        return
+    start = np.asarray(piece.start, dtype=float)
+    end = np.asarray(piece.end, dtype=float)
+    length = float(np.linalg.norm(end - start))
+    steps = max(1, int(np.ceil(length / VECTOR_GRADIENT_STEP_PX)))
+    if np.allclose(piece.gradient.rgb0, piece.gradient.rgb1):
+        steps = 1
+    for index in range(steps):
+        u0 = index / steps
+        u1 = (index + 1) / steps
+        screen_t = piece.gradient.t0 + (piece.gradient.t1 - piece.gradient.t0) * (
+            0.5 * (u0 + u1)
+        )
+        rgba = _gradient_rgba(piece.gradient, screen_t, piece.rgba[3])
+        _plot_stroke(
+            axes,
+            tuple(start + (end - start) * u0),
+            tuple(start + (end - start) * u1),
+            rgba,
+            width,
+            piece.dash,
+        )
+
+
+def _plot_stroke(axes, start, end, rgba, width: float, dash: tuple[float, ...]) -> None:
+    (line,) = axes.plot(
+        [start[0], end[0]],
+        [start[1], end[1]],
+        color=rgba,
+        linewidth=width,
+        solid_capstyle="round",
+        antialiased=True,
+        rasterized=False,
+    )
+    if dash:
+        line.set_dashes(dash)
 
 
 def render_vector(
@@ -119,17 +201,7 @@ def render_vector(
                     buckets.get(index, []),
                     key=lambda item: (-item.depth, item.stable_order, item.semantic_id),
                 ):
-                    (line,) = axes.plot(
-                        [piece.start[0], piece.end[0]],
-                        [piece.start[1], piece.end[1]],
-                        color=piece.rgba,
-                        linewidth=piece.width_px * 72.0 / dpi,
-                        solid_capstyle="round",
-                        antialiased=True,
-                        rasterized=False,
-                    )
-                    if piece.dash:
-                        line.set_dashes(piece.dash)
+                    _draw_line_piece(axes, piece, dpi=dpi)
 
             for painter_index, projected in enumerate(polygons):
                 draw_lines(painter_index)
@@ -264,10 +336,14 @@ def _mesh_polygons(
                 if averaged_length > 1e-14:
                     shading_normal = rotation @ (averaged / averaged_length)
             illumination = ambient + diffuse * abs(float(shading_normal @ light))
+            if primitive.vertex_colors is None:
+                base_rgb = primitive.rgba[:3]
+            else:
+                base_rgb = np.mean(primitive.vertex_colors[indices], axis=0)
             rgba = (
-                float(primitive.rgba[0]) * illumination,
-                float(primitive.rgba[1]) * illumination,
-                float(primitive.rgba[2]) * illumination,
+                float(base_rgb[0]) * illumination,
+                float(base_rgb[1]) * illumination,
+                float(base_rgb[2]) * illumination,
                 float(primitive.rgba[3]),
             )
             clipped = transform.clip_polygon_camera(camera_vertices[indices])
@@ -328,6 +404,14 @@ def _line_pieces(
             projection = transform.project_camera(camera)
             if not np.all(np.isfinite(projection.xy)):
                 continue
+            endpoint_rgb = None
+            if primitive.endpoint_colors is not None:
+                endpoint_rgb = _clipped_endpoint_rgb(
+                    transform,
+                    segment,
+                    clipped,
+                    primitive.endpoint_colors[segment_index],
+                )
             raw.append(
                 {
                     "primitive": primitive,
@@ -335,6 +419,7 @@ def _line_pieces(
                     "depths": projection.depth,
                     "breaks": {0.0, 1.0},
                     "order": primitive_order * 1_000_000 + segment_index,
+                    "rgb": endpoint_rgb,
                 }
             )
 
@@ -399,12 +484,27 @@ def _line_pieces(
                 insertion = len(polygons)
             start = _interpolate_xy(segment["xy"], start_t)
             end = _interpolate_xy(segment["xy"], end_t)
+            gradient = None
+            if segment["rgb"] is None:
+                piece_rgba = primitive.rgba
+            else:
+                gradient = EdgeGradient(
+                    rgb0=tuple(float(channel) for channel in segment["rgb"][0]),
+                    rgb1=tuple(float(channel) for channel in segment["rgb"][1]),
+                    depth0=float(segment["depths"][0]),
+                    depth1=float(segment["depths"][1]),
+                    t0=float(start_t),
+                    t1=float(end_t),
+                    perspective=transform.spec.projection == "perspective",
+                )
+                piece_rgba = _gradient_rgba(gradient, 0.5 * (start_t + end_t), primitive.rgba[3])
             result.append(
                 VectorLinePiece(
                     semantic_id=primitive.semantic_id,
                     start=(float(start[0]), float(start[1])),
                     end=(float(end[0]), float(end[1])),
-                    rgba=primitive.rgba,
+                    rgba=piece_rgba,
+                    gradient=gradient,
                     width_px=primitive.width_px,
                     dash=primitive.dash,
                     insertion_index=insertion,

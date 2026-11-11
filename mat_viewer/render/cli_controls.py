@@ -445,3 +445,142 @@ def _frame_annotation_from_args(args: argparse.Namespace):
         template=args.frame_label,
         position=args.frame_label_position,
     )
+
+
+def add_isosurface_arguments(parser: argparse.ArgumentParser) -> None:
+    """Register cube isosurface controls, including the second-cube color field."""
+    parser.add_argument(
+        "--isovalue",
+        type=float,
+        default=None,
+        help=(
+            "Explicit positive cube isosurface magnitude. Reuse the same value "
+            "for quantitatively comparable scalar-field panels."
+        ),
+    )
+    parser.add_argument(
+        "--isosurface-opacity",
+        type=float,
+        default=None,
+        metavar="VALUE",
+        help="Cube isosurface opacity in (0, 1] (default: style value).",
+    )
+    parser.add_argument(
+        "--isosurface-mode",
+        choices=("surface", "wireframe"),
+        default="surface",
+        help="Cube isosurface display mode (default: surface).",
+    )
+    parser.add_argument(
+        "--isosurface-wireframe-width",
+        type=float,
+        default=1.0,
+        help="Cube isosurface wireframe line width in pixels (default: 1.0).",
+    )
+    parser.add_argument(
+        "--isosurface-wireframe-opacity",
+        type=float,
+        default=1.0,
+        help="Cube isosurface wireframe opacity in [0,1] (default: 1.0).",
+    )
+    parser.add_argument(
+        "--periodic-isosurface",
+        dest="periodic_isosurface",
+        action="store_true",
+        default=None,
+        help="Close cube scalar values across opposite unit-cell faces.",
+    )
+    parser.add_argument(
+        "--no-periodic-isosurface",
+        dest="periodic_isosurface",
+        action="store_false",
+        help="Do not close cube scalar values across unit-cell faces.",
+    )
+    parser.add_argument(
+        "--isosurface-positive-color",
+        default="#D55E00",
+        help="Positive cube isosurface colour.",
+    )
+    parser.add_argument(
+        "--isosurface-negative-color",
+        default="#0072B2",
+        help="Negative cube isosurface colour.",
+    )
+    parser.add_argument(
+        "--isosurface-stride",
+        type=int,
+        default=2,
+        help="Cube grid stride for isosurface extraction.",
+    )
+    parser.add_argument(
+        "--isosurface-ambient",
+        type=float,
+        default=0.68,
+        help="Cube isosurface ambient-light coefficient (default: 0.68).",
+    )
+    parser.add_argument(
+        "--isosurface-diffuse",
+        type=float,
+        default=0.32,
+        help="Cube isosurface diffuse-light coefficient (default: 0.32).",
+    )
+    parser.add_argument(
+        "--isosurface-color-cube",
+        default=None,
+        help=(
+            "Second cube sampled in physical coordinates onto the isosurface. "
+            "The surface must lie inside that grid. Mesh stride does not "
+            "downsample the color field."
+        ),
+    )
+    parser.add_argument(
+        "--isosurface-color-range",
+        nargs=2,
+        type=float,
+        default=None,
+        metavar=("MIN", "MAX"),
+        help=(
+            "Finite increasing range mapping the color cube onto the colormap. "
+            "Omit to use the finite minimum and maximum; a constant field then "
+            "uses the colormap midpoint."
+        ),
+    )
+    parser.add_argument(
+        "--isosurface-color-center",
+        type=float,
+        default=None,
+        help="Value placed at the middle of the isosurface colormap.",
+    )
+    parser.add_argument(
+        "--isosurface-colormap",
+        default="bgr",
+        help=(
+            "Colormap for the color cube. 'bgr' is blue-green-red; other names "
+            "use Matplotlib."
+        ),
+    )
+
+
+def isosurface_render_fields(args: argparse.Namespace) -> dict[str, object]:
+    """Return the RenderSpec isosurface fields stored on ``args``."""
+    color_range = args.isosurface_color_range
+    return {
+        "isosurface_mode": args.isosurface_mode,
+        "isosurface_wireframe_width": args.isosurface_wireframe_width,
+        "isosurface_wireframe_opacity": args.isosurface_wireframe_opacity,
+        "isosurface_isovalue": args.isovalue,
+        "isosurface_opacity": (
+            args.isosurface_opacity if args.isosurface_opacity is not None else 0.55
+        ),
+        "isosurface_positive_color": args.isosurface_positive_color,
+        "isosurface_negative_color": args.isosurface_negative_color,
+        "isosurface_stride": args.isosurface_stride,
+        "isosurface_ambient": args.isosurface_ambient,
+        "isosurface_diffuse": args.isosurface_diffuse,
+        "isosurface_color_cube": args.isosurface_color_cube,
+        "isosurface_color_range": (
+            None if color_range is None else (float(color_range[0]), float(color_range[1]))
+        ),
+        "isosurface_color_center": args.isosurface_color_center,
+        "isosurface_colormap": args.isosurface_colormap,
+    }

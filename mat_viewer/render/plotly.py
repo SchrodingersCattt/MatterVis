@@ -68,22 +68,33 @@ def _primitive_trace(primitive, *, scene: str):
     if isinstance(primitive, TriangleMeshPrimitive):
         vertices = primitive.vertices
         triangles = primitive.triangles
-        return _tag_trace(go.Mesh3d(
-            x=vertices[:, 0],
-            y=vertices[:, 1],
-            z=vertices[:, 2],
-            i=triangles[:, 0],
-            j=triangles[:, 1],
-            k=triangles[:, 2],
-            color=_rgba((*primitive.rgba[:3], 1.0)),
-            opacity=primitive.rgba[3],
-            flatshading=primitive.vertex_normals is None,
-            name=primitive.semantic_id,
-            hoverinfo="name",
-            showscale=False,
-            scene=scene,
-        ), primitive)
+        payload: dict[str, Any] = {
+            "x": vertices[:, 0],
+            "y": vertices[:, 1],
+            "z": vertices[:, 2],
+            "i": triangles[:, 0],
+            "j": triangles[:, 1],
+            "k": triangles[:, 2],
+            "opacity": primitive.rgba[3],
+            "flatshading": primitive.vertex_normals is None,
+            "name": primitive.semantic_id,
+            "hoverinfo": "name",
+            "showscale": False,
+            "scene": scene,
+        }
+        if primitive.vertex_colors is None:
+            payload["color"] = _rgba((*primitive.rgba[:3], 1.0))
+        else:
+            payload["vertexcolor"] = [
+                _rgba((*tuple(rgb), 1.0)) for rgb in primitive.vertex_colors
+            ]
+        return _tag_trace(go.Mesh3d(**payload), primitive)
     if isinstance(primitive, LinePrimitive):
+        if primitive.endpoint_colors is not None:
+            raise ValueError(
+                "Plotly does not render per-endpoint isosurface wireframe colors; "
+                "use the CPU backend or isosurface_mode='surface'"
+            )
         coordinates = [[], [], []]
         for start, end in primitive.segments:
             for axis in range(3):

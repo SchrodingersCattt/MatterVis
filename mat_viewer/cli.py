@@ -1082,6 +1082,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
         _emit(fast_result, json_output=args.json_output)
         return
     from .agent import load_structure, render
+    from .render.cli_controls import isosurface_render_fields
     from .render.contracts import RenderSpec, ViewSpec
     try:
         context = (
@@ -1162,17 +1163,7 @@ def _agent_render_main(args: argparse.Namespace) -> None:
                 ortep_hydrogen_radius=args.ortep_hydrogen_radius, missing_adp_policy=args.missing_adp_policy,
                 sphere_detail=tuple(args.sphere_detail),
                 cylinder_sides=args.cylinder_sides,
-                isosurface_mode=args.isosurface_mode, isosurface_wireframe_width=args.isosurface_wireframe_width,
-                isosurface_wireframe_opacity=args.isosurface_wireframe_opacity, isosurface_isovalue=args.isovalue,
-                isosurface_opacity=(
-                    args.isosurface_opacity
-                    if args.isosurface_opacity is not None
-                    else 0.55
-                ),
-                isosurface_positive_color=args.isosurface_positive_color,
-                isosurface_negative_color=args.isosurface_negative_color,
-                isosurface_stride=args.isosurface_stride,
-                isosurface_ambient=args.isosurface_ambient, isosurface_diffuse=args.isosurface_diffuse,
+                **isosurface_render_fields(args),
             )
             atom_groups, bond_groups = _style_groups(args)
             animation_time = _animation_time_from_args(args)

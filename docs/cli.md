@@ -268,7 +268,8 @@ Use `--backend cpu|matplotlib|plotly|gpu`; there is no backend or representation
 The `gpu` backend is opt-in for PNG, GIF, and MP4. Install
 `matter-vis[gpu]` (and `matter-vis[animation]` for GIF/MP4) and verify a
 usable adapter with `mat-vis capabilities --require gpu --json` before
-rendering. Transparent primitives, dashed lines, and text fail explicitly.
+rendering. Transparent primitives, dashed lines, text, per-vertex mesh
+colors, and per-endpoint line colors fail explicitly.
 Opaque meshes, instanced spheres, cylinders, and solid ellipsoids are drawn
 on the device. Lines wider than one pixel, including the default unit-cell
 edges, are composited from the GPU depth buffer inside each viewport,
@@ -346,6 +347,10 @@ another.
 | --isosurface-mode MODE | surface | surface or complete triangulated wireframe |
 | --isosurface-wireframe-width VALUE | 1.0 | Wireframe line width in pixels |
 | --isosurface-wireframe-opacity VALUE | 1.0 | Wireframe line opacity in [0, 1] |
+| --isosurface-color-cube PATH | none | Second cube sampled in physical coordinates onto the isosurface |
+| --isosurface-color-range MIN MAX | finite min/max | Colormap range; a constant field with no range uses the midpoint |
+| --isosurface-color-center VALUE | none | Value placed at the middle of the colormap |
+| --isosurface-colormap NAME | bgr | `bgr` or a Matplotlib colormap name |
 | --periodic-isosurface / --no-periodic-isosurface | off | Enable or disable scalar closure across cell faces |
 
 Static exports omit browser-only picking traces. Interactive HTML retains them.

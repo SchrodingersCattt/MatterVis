@@ -28,8 +28,13 @@ const gd = {
   __mvSceneCamera: {eye: {x: 0, y: 1, z: 0}, center: {x: 0, y: 0, z: 0}, up: {x: 0, y: 0, z: 1}},
   __mvSceneCameraOwner: 'scene-a',
 };
+let displayedCamera = null;
 function relayout(target, patch) {
   calls.push(patch);
+  if (patch && patch.width && displayedCamera) {
+    if (displayedCamera.commandDuringSize) target.__mvLatestCamera = displayedCamera.commandDuringSize;
+    if (displayedCamera.afterSize) displayedCamera.current = displayedCamera.afterSize;
+  }
   return Promise.resolve(target);
 }
 const document = {
@@ -113,9 +118,174 @@ const fence = sandbox.window.__mvFenceTest;
   sandbox.window.__mvGestureEndedAt = Date.now();
   fence.refresh(gd, {'scene.camera': {eye: {x: 1, y: 0, z: 0}}});
   assert.equal(sandbox.window.__mvGestureCameraRevision, 1, 'the pointer-up relayout kept the gesture revision');
+  gd.__mvCameraRevisionScope = 'canvas-b:7';
+  gd.__mvCameraRevisionEpoch = 'epoch';
   fence.refresh(gd, {'scene.camera': {eye: {x: 0, y: 0, z: 50}}});
   assert.equal(sandbox.window.__mvGestureCameraRevision, 2, 'a later same-scene relayout did not read the live camera clock');
   assert.equal(sandbox.window.__mvGestureSceneGeneration, 7, 'a later same-scene relayout did not take the live generation');
+
+  gd.__mvCameraRevisionScope = 'scene-a:3';
+  gd.__mvCameraRevision = 9;
+  gd.__mvCameraRevisionEpoch = 'epoch';
+  fence.refresh(gd, {'scene.camera': {eye: {x: 0, y: 0, z: 50}}});
+  assert.equal(sandbox.window.__mvGestureCameraRevision, 1, 'a later relayout adopted another scene revision');
+  assert.equal(sandbox.window.__mvGestureSceneGeneration, 7, 'a foreign revision changed the mounted generation');
+
+  gd.__mvCameraRevisionScope = 'canvas-b:7';
+  gd.__mvCameraRevisionEpoch = 'previous-session';
+  gd.__mvCameraRevision = 9;
+  fence.refresh(gd, {'scene.camera': {eye: {x: 0, y: 0, z: 50}}});
+  assert.equal(sandbox.window.__mvGestureCameraRevision, 1, 'a later relayout adopted another session revision');
+
+  const dragged = {eye: {x: 2, y: 0, z: 0}, center: {x: 0, y: 0, z: 0}, up: {x: 0, y: 0, z: 1}, projection: {type: 'perspective'}};
+  const committed = {eye: {x: 1, y: 0, z: 0}, center: {x: 0, y: 0, z: 0}, up: {x: 0, y: 0, z: 1}, projection: {type: 'perspective'}};
+  displayedCamera = {current: dragged, afterSize: committed};
+  sandbox.window.mattervisCurrentCamera = function () { return displayedCamera.current; };
+  gd.emit = function () { return gd; };
+  sandbox.window.__mvGestureSceneId = 'canvas-b';
+  sandbox.window.__mvGestureKind = 'pointer';
+  sandbox.window.__mvGestureEndedAt = 0;
+  sandbox.window.__mvGestureSceneGeneration = 7;
+  sandbox.window.__mvGestureServerEpoch = 'epoch';
+  calls.length = 0;
+  await plot.relayout(gd, {width: 800, height: 600});
+  assert.equal(calls.length, 2, 'a size replot during a drag did not restore the live camera');
+  assert.equal(calls[0].width, 800);
+  assert.equal(calls[1]['scene.camera.eye'].x, 2, 'the size replot committed the pre-drag eye');
+
+  sandbox.window.__mvGestureEndedAt = Date.now();
+  displayedCamera = {current: dragged, afterSize: committed};
+  calls.length = 0;
+  await plot.relayout(gd, {width: 640, height: 480});
+  assert.equal(calls.length, 1, 'a size replot after pointer-up restored a finished drag');
+
+  sandbox.window.__mvGestureEndedAt = 0;
+  sandbox.window.__mvGestureSceneGeneration = 7;
+  sandbox.window.__mvGestureServerEpoch = 'epoch';
+  gd.__mvLatestCamera = {snapshot: dragged};
+  displayedCamera = {current: dragged, afterSize: committed, commandDuringSize: {snapshot: committed}};
+  calls.length = 0;
+  await plot.relayout(gd, {width: 700, height: 500});
+  assert.equal(calls.some(function (patch) { return patch['scene.camera.eye'] && patch['scene.camera.eye'].x === 2; }), false, 'a size replot let the drag overwrite Reset');
+  delete gd.__mvLatestCamera;
+  displayedCamera = null;
+
+  sandbox.window.__mvGestureEndedAt = 0;
+  sandbox.window.__mvGestureSceneId = 'canvas-b';
+  sandbox.window.__mvGestureSceneGeneration = 7;
+  sandbox.window.__mvGestureServerEpoch = 'epoch';
+  gd.layout.meta.mattervis_render.scene_generation = 8;
+  displayedCamera = {current: dragged, afterSize: committed};
+  calls.length = 0;
+  await plot.relayout(gd, {width: 810, height: 610});
+  assert.equal(calls.some(function (patch) { return patch['scene.camera.eye'] && patch['scene.camera.eye'].x === 2; }), false, 'a new generation reused the in-progress drag eye');
+  gd.layout.meta.mattervis_render.scene_generation = 7;
+
+  sandbox.window.__mvGestureSceneGeneration = 7;
+  sandbox.window.__mvGestureServerEpoch = 'epoch';
+  gd.layout.meta.mattervis_render.server_started_at = 'restarted';
+  displayedCamera = {current: dragged, afterSize: committed};
+  calls.length = 0;
+  await plot.relayout(gd, {width: 820, height: 620});
+  assert.equal(calls.some(function (patch) { return patch['scene.camera.eye'] && patch['scene.camera.eye'].x === 2; }), false, 'a restarted session reused the in-progress drag eye');
+  gd.layout.meta.mattervis_render.server_started_at = 'epoch';
+  displayedCamera = null;
+
+  function restoredDrag(list) {
+    return list.some(function (patch) {
+      return patch['scene.camera.eye'] && patch['scene.camera.eye'].x === 2;
+    });
+  }
+  sandbox.window.__mvGestureEndedAt = 0;
+  sandbox.window.__mvGestureSceneId = 'canvas-b';
+  sandbox.window.__mvGestureSceneGeneration = 7;
+  sandbox.window.__mvGestureServerEpoch = 'epoch';
+  sandbox.window.__mvGestureCameraRevision = 1;
+  gd.layout.meta.mattervis_render.camera_revision = 1;
+  displayedCamera = {current: dragged};
+  sandbox.window.__mvNoteInProgressDrag(gd);
+  displayedCamera = {current: committed};
+  calls.length = 0;
+  await sandbox.window.__mvRestoreInProgressDrag(gd);
+  assert.equal(restoredDrag(calls), true, 'a replot during the drag did not restore the sampled eye');
+
+  gd.layout.meta.mattervis_render.scene_generation = 8;
+  calls.length = 0;
+  await sandbox.window.__mvRestoreInProgressDrag(gd);
+  assert.equal(restoredDrag(calls), false, 'a replot on a new generation restored the previous drag eye');
+  gd.layout.meta.mattervis_render.scene_generation = 7;
+
+  gd.layout.meta.mattervis_render.server_started_at = 'restarted';
+  calls.length = 0;
+  await sandbox.window.__mvRestoreInProgressDrag(gd);
+  assert.equal(restoredDrag(calls), false, 'a replot after restart restored the previous drag eye');
+  gd.layout.meta.mattervis_render.server_started_at = 'epoch';
+
+  gd.__mvCameraRevisionScope = 'canvas-b:7';
+  gd.__mvCameraRevisionEpoch = 'epoch';
+  gd.__mvCameraRevision = 4;
+  calls.length = 0;
+  await sandbox.window.__mvRestoreInProgressDrag(gd);
+  assert.equal(restoredDrag(calls), false, 'a newer camera command lost to the in-progress drag');
+  delete gd.__mvCameraRevision;
+  delete gd.__mvCameraRevisionScope;
+  delete gd.__mvCameraRevisionEpoch;
+  displayedCamera = null;
+
+  // A later press, before it samples, must not restore the previous orbit.
+  gd.layout.meta.mattervis_render.scene_generation = 7;
+  gd.layout.meta.mattervis_render.server_started_at = 'epoch';
+  sandbox.window.__mvGestureEndedAt = 0;
+  sandbox.window.__mvGestureSceneId = 'canvas-b';
+  sandbox.window.__mvGestureSceneGeneration = 7;
+  sandbox.window.__mvGestureServerEpoch = 'epoch';
+  sandbox.window.__mvGestureCameraRevision = 1;
+  displayedCamera = {current: dragged};
+  sandbox.window.__mvNoteInProgressDrag(gd);
+  sandbox.window.__mvRetireDragSample();
+  sandbox.window.__mvGestureSceneGeneration = 8;
+  gd.layout.meta.mattervis_render.scene_generation = 8;
+  sandbox.window.__mvGestureEndedAt = 0;
+  displayedCamera = {current: committed};
+  calls.length = 0;
+  await sandbox.window.__mvRestoreInProgressDrag(gd);
+  assert.equal(restoredDrag(calls), false, 'a later press restored the previous generation orbit before sampling');
+
+  gd.layout.meta.mattervis_render.scene_generation = 7;
+  sandbox.window.__mvGestureSceneGeneration = 7;
+  sandbox.window.__mvGestureServerEpoch = 'epoch';
+  sandbox.window.__mvGestureEndedAt = 0;
+  displayedCamera = {current: dragged};
+  sandbox.window.__mvNoteInProgressDrag(gd);
+  sandbox.window.__mvRetireDragSample();
+  sandbox.window.__mvGestureServerEpoch = 'restarted';
+  gd.layout.meta.mattervis_render.server_started_at = 'restarted';
+  sandbox.window.__mvGestureEndedAt = 0;
+  calls.length = 0;
+  await sandbox.window.__mvRestoreInProgressDrag(gd);
+  assert.equal(restoredDrag(calls), false, 'a later press restored the previous session orbit before sampling');
+  gd.layout.meta.mattervis_render.server_started_at = 'epoch';
+  sandbox.window.__mvGestureServerEpoch = 'epoch';
+
+  // The live revision is already ahead, and the command object does not
+  // change during the size wrap. The captured pre-replot eye must not win.
+  sandbox.window.__mvGestureEndedAt = 0;
+  sandbox.window.__mvGestureSceneGeneration = 7;
+  sandbox.window.__mvGestureCameraRevision = 1;
+  gd.__mvCameraRevisionScope = 'canvas-b:7';
+  gd.__mvCameraRevisionEpoch = 'epoch';
+  gd.__mvCameraRevision = 4;
+  gd.__mvLatestCamera = {snapshot: committed};
+  displayedCamera = {current: dragged, afterSize: {eye: {x: 9, y: 0, z: 0}, center: {x: 0, y: 0, z: 0}, up: {x: 0, y: 0, z: 1}, projection: {type: 'perspective'}}};
+  calls.length = 0;
+  await plot.relayout(gd, {width: 830, height: 640});
+  assert.equal(restoredDrag(calls), false, 'a size replot restored a stale eye over an already newer command');
+  assert.equal(calls.some(function (patch) { return patch['scene.camera.eye'] && patch['scene.camera.eye'].x === 1; }), true, 'a size replot did not keep the newer command');
+  delete gd.__mvLatestCamera;
+  delete gd.__mvCameraRevision;
+  delete gd.__mvCameraRevisionScope;
+  delete gd.__mvCameraRevisionEpoch;
+  displayedCamera = null;
 
   sandbox.window.__mvGestureSceneId = 'scene-a';
   fence.mark();

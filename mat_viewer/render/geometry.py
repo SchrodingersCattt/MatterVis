@@ -138,6 +138,7 @@ def mesh_primitive(
     alpha: float | None = None,
     double_sided: bool = True,
     metadata: dict[str, Any] | None = None,
+    vertex_colors: Any | None = None,
 ) -> TriangleMeshPrimitive:
     """Wrap a precomputed indexed mesh without importing its generator.
 
@@ -154,7 +155,35 @@ def mesh_primitive(
         rgba=color_to_rgba(color, alpha=alpha),
         double_sided=double_sided,
         metadata=metadata or {},
+        vertex_colors=(
+            np.asarray(vertex_colors, dtype=float) if vertex_colors is not None else None
+        ),
     )
+
+
+def triangle_mesh_edge_index_pairs(vertices: Any, triangles: Any) -> np.ndarray:
+    """Return sorted unique edge endpoint indices with shape (E, 2)."""
+    points = np.asarray(vertices, dtype=float)
+    faces = np.asarray(triangles, dtype=np.int64)
+    if points.ndim != 2 or points.shape[1:] != (3,):
+        raise ValueError("vertices must have shape (N, 3)")
+    if faces.ndim != 2 or faces.shape[1:] != (3,):
+        raise ValueError("triangles must have shape (M, 3)")
+    if faces.size and (int(faces.min()) < 0 or int(faces.max()) >= len(points)):
+        raise ValueError("triangles contain an out-of-range vertex index")
+    edges: set[tuple[int, int]] = set()
+    for first, second, third in faces.tolist():
+        edges.update(
+            {
+                tuple(sorted((int(first), int(second)))),
+                tuple(sorted((int(second), int(third)))),
+                tuple(sorted((int(third), int(first)))),
+            }
+        )
+    ordered_edges = sorted(edges)
+    if not ordered_edges:
+        return np.empty((0, 2), dtype=np.int64)
+    return np.asarray(ordered_edges, dtype=np.int64)
 
 
 def triangle_mesh_edge_segments(vertices: Any, triangles: Any) -> np.ndarray:
@@ -165,29 +194,10 @@ def triangle_mesh_edge_segments(vertices: Any, triangles: Any) -> np.ndarray:
     reuse meshes already prepared by the optional marching-cubes adapter.
     """
     points = np.asarray(vertices, dtype=float)
-    faces = np.asarray(triangles, dtype=np.int64)
-    if points.ndim != 2 or points.shape[1:] != (3,):
-        raise ValueError("vertices must have shape (N, 3)")
-    if faces.ndim != 2 or faces.shape[1:] != (3,):
-        raise ValueError("triangles must have shape (M, 3)")
-    if faces.size and (faces.min() < 0 or faces.max() >= len(points)):
-        raise ValueError("triangles contain an out-of-range vertex index")
-    edges: set[tuple[int, int]] = set()
-    for first, second, third in faces.tolist():
-        edges.update(
-            {
-                tuple(sorted((first, second))),
-                tuple(sorted((second, third))),
-                tuple(sorted((third, first))),
-            }
-        )
-    ordered_edges = sorted(edges)
-    if not ordered_edges:
+    pairs = triangle_mesh_edge_index_pairs(points, triangles)
+    if len(pairs) == 0:
         return np.empty((0, 2, 3), dtype=float)
-    return np.asarray(
-        [[points[first], points[second]] for first, second in ordered_edges],
-        dtype=float,
-    )
+    return np.array(points[pairs], dtype=float, copy=True)
 
 
 def sphere_primitive(

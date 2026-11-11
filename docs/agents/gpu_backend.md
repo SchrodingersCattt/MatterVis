@@ -24,7 +24,8 @@ lines of any width, wider strokes, including the default unit-cell edges,
 and ORTEP hatch or principal-axis lines are composited together on the CPU
 inside each viewport's pixel crop and camera. A depth-disabled stroke stays
 in front of a depth-tested one. A plan may contain more than one panel.
-Dashed lines, text, and transparent primitives raise `GPUUnsupportedError`. There is no CPU fallback
+Dashed lines, text, transparent primitives, per-vertex mesh colors, and
+per-endpoint line colors raise `GPUUnsupportedError`. There is no CPU fallback
 when the optional dependency, the device, or a primitive is unsupported.
 
 Viewport rectangles use the CPU image convention: `y = 0` is the top.
