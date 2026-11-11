@@ -107,6 +107,17 @@ def render_cube_figure(
     sphere_resolution: int = 18,
     depth_peels: int = 8,
     colormap_stops: Sequence[tuple[int, int, int]] | None = None,
+    surface_ambient: float = _SURFACE_AMBIENT,
+    surface_diffuse: float = _SURFACE_DIFFUSE,
+    surface_specular: float = _SURFACE_SPECULAR,
+    surface_specular_power: float = _SURFACE_SPECULAR_POWER,
+    atom_ambient: float = _ATOM_AMBIENT,
+    atom_diffuse: float = _ATOM_DIFFUSE,
+    atom_specular: float = _ATOM_SPECULAR,
+    atom_specular_power: float = _ATOM_SPECULAR_POWER,
+    bond_ambient: float = _BOND_AMBIENT,
+    bond_diffuse: float = _BOND_DIFFUSE,
+    bond_specular: float = _BOND_SPECULAR,
 ) -> None:
     """Write one PNG. ``look`` points from the camera toward the scene.
 
@@ -120,7 +131,9 @@ def render_cube_figure(
     Pass ``color_center`` (often 0) to place that value at the middle of the
     colormap. ``parallel_scale`` is the orthographic half-height in the same
     length unit as ``axes``. ``depth_peels`` above 1 enables depth peeling on
-    this window.
+    this window. ``surface_ambient``, ``surface_diffuse``, ``surface_specular``,
+    and ``surface_specular_power`` shade the isosurface. Atom and bond
+    coefficients are separate. VTK's specular power is the Phong exponent.
     """
 
     iso_grid = _as_grid("iso", iso)
@@ -147,6 +160,21 @@ def render_cube_figure(
     if not np.isfinite(radius) or radius <= 0.0:
         raise ValueError("bond_radius must be finite and positive")
     bond_rgb = _rgb01("bond_color", bond_color)
+    surface_shade = _shade(
+        "surface",
+        surface_ambient,
+        surface_diffuse,
+        surface_specular,
+        surface_specular_power,
+    )
+    atom_shade = _shade(
+        "atom", atom_ambient, atom_diffuse, atom_specular, atom_specular_power
+    )
+    bond_shade = (
+        _unit_interval("bond_ambient", bond_ambient),
+        _unit_interval("bond_diffuse", bond_diffuse),
+        _unit_interval("bond_specular", bond_specular),
+    )
     resolution = _positive_int("sphere_resolution", sphere_resolution, minimum=3)
     peels = _positive_int("depth_peels", depth_peels, minimum=1)
     frame_scale = float(parallel_scale)
@@ -223,7 +251,26 @@ def render_cube_figure(
         resolution,
         peels,
         destination,
+        surface_shade,
+        atom_shade,
+        bond_shade,
     )
+
+
+def _shade(name, ambient, diffuse, specular, power) -> tuple[float, float, float, float]:
+    return (
+        _unit_interval(f"{name}_ambient", ambient),
+        _unit_interval(f"{name}_diffuse", diffuse),
+        _unit_interval(f"{name}_specular", specular),
+        _positive_power(f"{name}_specular_power", power),
+    )
+
+
+def _positive_power(name: str, value) -> float:
+    power = float(value)
+    if not np.isfinite(power) or power <= 0.0:
+        raise ValueError(f"{name} must be finite and positive")
+    return power
 
 
 def _colormap(
@@ -532,6 +579,9 @@ def _draw(
     sphere_resolution,
     depth_peels,
     output,
+    surface_shade,
+    atom_shade,
+    bond_shade,
 ) -> None:
     from matplotlib.colors import ListedColormap
 
@@ -547,6 +597,7 @@ def _draw(
     try:
         plotter.set_background("white")
         plotter.renderer.SetAmbient(*_RENDERER_AMBIENT)
+        plotter.renderer.SetTwoSidedLighting(True)
         _apply_depth_peeling(plotter, depth_peels)
         plotter.add_mesh(
             mesh,
@@ -555,10 +606,10 @@ def _draw(
             clim=list(clim),
             opacity=opacity,
             smooth_shading=True,
-            specular=_SURFACE_SPECULAR,
-            specular_power=_SURFACE_SPECULAR_POWER,
-            diffuse=_SURFACE_DIFFUSE,
-            ambient=_SURFACE_AMBIENT,
+            ambient=surface_shade[0],
+            diffuse=surface_shade[1],
+            specular=surface_shade[2],
+            specular_power=surface_shade[3],
             show_scalar_bar=False,
         )
         if len(bonds):
@@ -576,9 +627,9 @@ def _draw(
             plotter.add_mesh(
                 tubes,
                 color=bond_color,
-                specular=_BOND_SPECULAR,
-                ambient=_BOND_AMBIENT,
-                diffuse=_BOND_DIFFUSE,
+                ambient=bond_shade[0],
+                diffuse=bond_shade[1],
+                specular=bond_shade[2],
             )
         for atomic_number in np.unique(atomic_numbers):
             number = int(atomic_number)
@@ -593,10 +644,10 @@ def _draw(
                 cloud.glyph(geom=sphere, orient=False, scale=False),
                 color=element_color[number],
                 smooth_shading=True,
-                specular=_ATOM_SPECULAR,
-                specular_power=_ATOM_SPECULAR_POWER,
-                ambient=_ATOM_AMBIENT,
-                diffuse=_ATOM_DIFFUSE,
+                ambient=atom_shade[0],
+                diffuse=atom_shade[1],
+                specular=atom_shade[2],
+                specular_power=atom_shade[3],
             )
         plotter.camera_position = [tuple(camera), tuple(focal), tuple(screen_up)]
         plotter.camera.parallel_projection = True
@@ -609,6 +660,7 @@ def _draw(
                     position=tuple(position),
                     focal_point=tuple(focal),
                     intensity=intensity,
+                    positional=False,
                 )
             )
         plotter.screenshot(str(output))
