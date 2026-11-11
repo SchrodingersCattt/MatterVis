@@ -1,6 +1,9 @@
 """Revision identity, atomic publication, failure and lifecycle contract."""
+import stat
+import time
 from concurrent.futures import CancelledError
 from dataclasses import FrozenInstanceError
+from pathlib import Path
 from threading import Event, RLock
 
 import pytest
@@ -199,11 +202,93 @@ def test_shutdown_from_commit_listener_does_not_delete_committed_source(host):
         pending.result(5)
     # The write committed, but shutdown prevented a binding. Its file still
     # belongs to the host; a post-commit failure cannot remove live content.
-    from pathlib import Path
     assert len(host.sources) == 1
     assert len(list(Path(host.writer._storage.name).iterdir())) == 1
     with pytest.raises(RevisionUnavailable):
         host.revisions.lookup(revision("closing"))
+
+
+def _reject_readonly_unlink(monkeypatch):
+    """POSIX allows unlinking a read-only file. Windows does not."""
+    real_unlink = Path.unlink
+
+    def unlink(self, missing_ok=False):
+        if self.exists() and not (self.stat().st_mode & stat.S_IWRITE):
+            raise PermissionError(13, "Access is denied")
+        return real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+
+
+def _wait_until(predicate, timeout=5.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.02)
+    return bool(predicate())
+
+
+def test_failed_candidate_is_removed_when_windows_rejects_readonly_unlink(
+    host, monkeypatch
+):
+    _reject_readonly_unlink(monkeypatch)
+    with pytest.raises(ValueError, match="invalid source"):
+        host.writer.register(b"invalid", format="cif").result(5)
+    storage = Path(host.writer._storage.name)
+    assert list(storage.glob("*.cif")) == []
+
+
+def test_cleanup_failure_does_not_mask_the_source_error(host, monkeypatch):
+    def unlink(self, missing_ok=False):
+        raise PermissionError(13, "Access is denied")
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    with pytest.raises(ValueError, match="invalid source"):
+        host.writer.register(b"invalid", format="cif").result(5)
+
+
+def test_shutdown_removes_readonly_candidates_when_windows_rejects_unlink(
+    host, monkeypatch
+):
+    _reject_readonly_unlink(monkeypatch)
+    host.writer.register(b"valid", format="cif", label="Kept").result(5)
+    storage = Path(host.writer._storage.name)
+    candidates = list(storage.glob("*.cif"))
+    assert len(candidates) == 1
+    assert not candidates[0].stat().st_mode & stat.S_IWRITE
+    host.writer.close()
+
+    def gone() -> bool:
+        if not storage.exists():
+            return True
+        return list(storage.glob("*.cif")) == []
+
+    assert _wait_until(gone)
+
+
+def test_shutdown_still_removes_other_candidates_when_one_unlink_fails(
+    host, monkeypatch
+):
+    host.writer.register(b"valid", format="cif", label="One").result(5)
+    host.writer.register(b"valid", format="cif", label="Two").result(5)
+    storage = Path(host.writer._storage.name)
+    names = {path.name for path in storage.glob("*.cif")}
+    assert len(names) == 2
+    blocked = min(names)
+    attempted: list[str] = []
+    real_unlink = Path.unlink
+
+    def unlink(self, missing_ok=False):
+        attempted.append(self.name)
+        if self.name == blocked:
+            raise PermissionError(13, "Access is denied")
+        return real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    host.writer.close()
+    assert _wait_until(lambda: set(attempted) >= names)
+    assert set(attempted) >= names
 
 
 def test_commit_failure_preserves_previous_binding(host, monkeypatch):
