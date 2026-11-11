@@ -66,6 +66,15 @@ class StructureWriter:
             return
         path.unlink(missing_ok=True)
 
+    def _discard_candidate(self, path: Path) -> None:
+        """Remove a candidate without masking the caller's exception."""
+        try:
+            self._remove_candidate(path)
+        except OSError:
+            logging.getLogger(__name__).exception(
+                "failed to remove an owned structure candidate"
+            )
+
     def __init__(self, host: StructureHost):
         self.host = host
         self._lock = RLock()
@@ -170,8 +179,9 @@ class StructureWriter:
                 except BaseException:
                     # A post-commit binding failure must not delete a source
                     # already owned by a live scene (or its native Undo entry).
+                    # A Windows unlink failure must not replace that error.
                     if not published:
-                        self._remove_candidate(path)
+                        self._discard_candidate(path)
                     raise
 
             future = self._pool.submit(work)
@@ -184,7 +194,7 @@ class StructureWriter:
             # retained until host shutdown as documented.
             def cleanup_cancelled(done: Future[str]) -> None:
                 if done.cancelled():
-                    self._remove_candidate(path)
+                    self._discard_candidate(path)
 
             future.add_done_callback(cleanup_cancelled)
             return future
@@ -228,10 +238,15 @@ class StructureWriter:
         # Queue cleanup after in-flight work; pending commits reject _closed.
         def cleanup():
             self._pool.shutdown(wait=True)
-            if self._storage is not None:
-                for path in Path(self._storage.name).glob("*.cif"):
-                    self._remove_candidate(path)
-                self._storage.cleanup()
+            storage = self._storage
+            if storage is None:
+                return
+            # One undeletable file must not skip the rest. TemporaryDirectory
+            # then removes whatever is still writable, including on Windows
+            # after the read-only bit has been cleared.
+            for path in Path(storage.name).glob("*.cif"):
+                self._discard_candidate(path)
+            storage.cleanup()
 
         from threading import Thread
 

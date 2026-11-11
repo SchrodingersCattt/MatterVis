@@ -130,16 +130,22 @@ contract is `docs/reliability-scene-delivery.md`.
 
 ## CIF upload and native extension files
 
-Uploaded CIFs use a content hash for the on-disk name. Writers create private
-temporary files concurrently, then the backend lock publishes only the first
-complete file for that hash. Retries verify and reuse that immutable source;
-Windows readers can keep an open handle without blocking a replace of the
-shared upload.
+Uploaded CIFs are named from a content hash plus the sanitized filename.
+Each request writes a private temporary file. The backend lock covers
+concurrent requests in one process and publishes that file only when the
+destination is absent. A later retry does not replace the published path.
+It checks the full digest when the file can be read, and that read does
+not hold the backend lock. A Windows sharing violation on the read leaves
+the published bytes in place when the file size still matches, so an open
+handle does not fail the retry and does not have to survive a replace. A
+destination whose bytes or size differ is left unchanged and the retry
+fails.
 
-Native structure writes keep successful candidate CIFs read-only until host
-shutdown. Failed and cancelled candidates, and retained files at shutdown, are
-made owner-writable before deletion so Windows honors the same lifecycle as
-POSIX.
+Native structure writes mark candidate CIFs read-only until host shutdown.
+Failed and cancelled candidates, and retained files at shutdown, are made
+owner-writable before deletion. A deletion error does not replace the
+original write failure. Windows can then remove the same files POSIX would
+remove.
 
 ## Documentation of the render interface
 
