@@ -350,8 +350,9 @@ CAPABILITY_REGISTRY: Mapping[str, CapabilitySpec] = {
         packages=("pyvista", "scikit-image"),
         imports=("pyvista", "skimage"),
         note=(
-            "Optional PNG path for a depth-peeled isosurface figure. "
-            "It is not a mat-vis render backend and does not infer bonds."
+            "Optional PNG path for one offscreen isosurface figure. "
+            "It is not a mat-vis render backend and does not infer bonds. "
+            "Headless Linux needs an OSMesa or EGL library."
         ),
     ),
     "animation": CapabilitySpec(
