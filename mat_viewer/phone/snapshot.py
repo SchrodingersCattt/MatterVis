@@ -37,6 +37,30 @@ def display(snapshot: dict[str, Any], *, disorder_group: str | int | None = None
 
 def operate_commit_major(path: str | Path) -> dict[str, Any]:
     """Commit the major disorder component through EffectSession."""
+    snapshot, _ = _commit_major(path)
+    return snapshot
+
+
+def operate_commit_major_with_cif(path: str | Path) -> dict[str, Any]:
+    """Commit the major disorder component once and also export it as CIF.
+
+    Returns ``{"snapshot": ..., "cif": ...}``. ``snapshot`` is exactly what
+    :func:`operate_commit_major` returns. ``cif`` is MolCrysKit's public P1
+    ``write_cif`` text for the same committed crystal object that produced
+    the snapshot: one EffectSession operation, no second chemistry run, and
+    no reconstruction from display coordinates.
+    """
+    snapshot, committed = _commit_major(path)
+    from molcrys_kit.io import write_cif
+
+    text = write_cif(committed, representation="p1")
+    if not isinstance(text, str):
+        raise TypeError("MolCrysKit CIF writer returned non-text output")
+    return {"snapshot": snapshot, "cif": text if text.endswith("\n") else text + "\n"}
+
+
+def _commit_major(path: str | Path) -> tuple[dict[str, Any], Any]:
+    """Run the single commit operation; return its snapshot and crystal."""
     from mat_viewer.effects import EffectSession
     from molcrys_kit.analysis.disorder.process import (
         generate_ordered_replicas_from_disordered_sites,
@@ -69,7 +93,7 @@ def operate_commit_major(path: str | Path) -> dict[str, Any]:
     snapshot["revision"] = int(committed.output_ref.revision)
     snapshot["source"] = str(path)
     snapshot["operation"] = "commit_disorder_candidate"
-    return snapshot
+    return snapshot, saved
 
 
 def _read(path: str | Path, **kwargs):
