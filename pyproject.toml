@@ -35,7 +35,7 @@ dependencies = [
     # Do not invent a PyPI version for this commit.
     # identify_molecules defaults to as_refined; only shell construction
     # defaults to major. Exclusive shell selection keeps whole orientations.
-    "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@16d58726a56e26ee7a2e0df98e4d84476bb081e8",
+    "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@1ef0d5155ae69dfcfcbd248138eb428c929a3d13",
 ]
 
 [project.scripts]
