@@ -62,4 +62,4 @@ def test_operate_commits_a_new_revision(tmp_path: Path):
         committed = operate_commit_major(path)
     assert committed["revision"] == 2
     assert committed["operation"] == "commit_disorder_candidate"
-    assert committed["sites"]
+    assert len(committed["sites"]) == 1
