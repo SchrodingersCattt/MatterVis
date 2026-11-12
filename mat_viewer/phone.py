@@ -38,14 +38,29 @@ def display(snapshot: dict[str, Any], *, disorder_group: str | int | None = None
 def operate_commit_major(path: str | Path) -> dict[str, Any]:
     """Commit the major disorder component through EffectSession."""
     from mat_viewer.effects import EffectSession
+    from molcrys_kit.analysis.disorder.process import (
+        generate_ordered_replicas_from_disordered_sites,
+    )
 
     source = _read(path)
-    major = _read(path, disorder_policy="major")
+    replicas = generate_ordered_replicas_from_disordered_sites(
+        str(path),
+        method="optimal",
+        generate_count=1,
+        return_kept_indices=True,
+    )
+    if not replicas:
+        raise ValueError("disorder generation produced no candidate")
+    major, kept = replicas[0]
     session = EffectSession()
     ref = session.register(source, structure_id="phone")
     committed = session.operate(
         "commit_disorder_candidate",
-        {"crystal": major, "kept_indices": [], "method": "major"},
+        {
+            "crystal": major,
+            "kept_indices": [int(index) for index in kept],
+            "method": "optimal",
+        },
         structure_id=ref.id,
         expected_revision=ref.revision,
     )
