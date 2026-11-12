@@ -31,11 +31,15 @@ dependencies = [
     # PyPI 0.8.0 does not include BondRecord.role,
     # MolecularCrystal.get_connectivity_report(), or find_polyhedra
     # disorder_policy (major / exclusive / as_refined). Track post-merge main
-    # commit ee45c7e7 until those APIs are published, then restore a version range.
+    # commit 0c8b1c10 until those APIs are published, then restore a version range.
+    # This commit also carries the phone path (fractional-site Atoms stand-in).
+    # requirements/ci-constraints.txt, mat_viewer/capabilities.py and
+    # tests/test_ci_environment_contract.py must name this same commit; pip
+    # rejects a constraint file whose direct URL differs from this one.
     # Do not invent a PyPI version for this commit.
     # identify_molecules defaults to as_refined; only shell construction
     # defaults to major. Exclusive shell selection keeps whole orientations.
-    "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@1ef0d5155ae69dfcfcbd248138eb428c929a3d13",
+    "molcrys-kit @ git+https://github.com/SchrodingersCattt/MolCrysKit.git@0c8b1c10161323ba4e0caf097f19d572b36b322c",
 ]
 
 [project.scripts]

@@ -77,3 +77,31 @@ The mixed `_OperationsBackendMixin`, `_STRUCTURAL_OP_KINDS`, and
 bodies live in `DisplayService`. `molecular_crystal_from_scene` rejects
 rendered traces and materializes only an explicit `scientific_snapshot`.
 There is no `mat_viewer.ops.source` or `mat_viewer.ops.display` package.
+
+## Phone snapshots
+
+`mat_viewer.phone` is the Android-facing facade over the same effects. It
+imports no desktop chemistry (ASE, SciPy, pymatgen, spglib, Matplotlib,
+Pillow) on its own path; the MolCrysKit commit that provides the phone
+path is named in `pyproject.toml`.
+
+`mat_viewer/phone/` is a folder-first package: `__init__.py` re-exports the
+public functions below and `snapshot.py` holds the implementation, so
+`from mat_viewer.phone import analyze_cif` is unchanged.
+
+| Function | Returns |
+|---|---|
+| `analyze_cif(path)` | Revision-1 snapshot: `cell`, `sites` (Cartesian `position`, `occupancy`, `alpha`, `disorder_group`, `disorder_assembly`), `bonds` |
+| `display(snapshot, disorder_group=None)` | View-only copy; sets `visible`, never `occupancy` |
+| `operate_commit_major(path)` | Snapshot of the committed major disorder component (`operation = "commit_disorder_candidate"`, `revision = 2`) |
+| `operate_commit_major_with_cif(path)` | `{"snapshot": <identical to operate_commit_major>, "cif": <str>}` |
+
+`operate_commit_major` and `operate_commit_major_with_cif` share one
+internal operation: a single `EffectSession.operate` call and a single
+MolCrysKit replica generation. The CIF is MolCrysKit's public
+`write_cif(crystal, representation="p1")` applied to the same checked-out
+crystal that produced the snapshot — never to display coordinates and never
+after a second chemistry run. The CIF is a complete P1 cell and re-reads
+through `analyze_cif` to the same cell, symbols, positions and occupancies.
+The writer must be importable without ASE; that is a MolCrysKit contract,
+and the phone-like test in `tests/test_phone_snapshot.py` enforces it.

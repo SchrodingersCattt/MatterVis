@@ -18,7 +18,7 @@ BUILD_INSTALL = (
     "python -m pip install -c requirements/ci-constraints.txt "
     'build setuptools "setuptools-scm[toml]"'
 )
-MOLCRYS_COMMIT = "ee45c7e7c9e44f50b0b55ed46ee5dca306550541"
+MOLCRYS_COMMIT = "0c8b1c10161323ba4e0caf097f19d572b36b322c"
 
 
 def _requirement_lines() -> list[str]:
@@ -43,6 +43,26 @@ def test_constraints_pin_every_package_and_the_molcrys_commit() -> None:
     assert molcrys.endswith(MOLCRYS_COMMIT)
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert MOLCRYS_COMMIT in pyproject
+
+
+def test_molcrys_pin_is_identical_in_every_declaration() -> None:
+    """pip rejects a constraint whose direct URL differs from pyproject's."""
+    from mat_viewer.capabilities import (
+        MOLCRYSKIT_DEVELOPMENT_REQUIREMENT,
+        MOLCRYSKIT_SOURCE_COMMIT,
+    )
+
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    declared = [
+        line.strip().strip('",')
+        for line in pyproject.splitlines()
+        if line.strip().startswith('"molcrys-kit @')
+    ]
+    constrained = [
+        line for line in _requirement_lines() if line.startswith("molcrys-kit @")
+    ]
+    assert declared == constrained == [MOLCRYSKIT_DEVELOPMENT_REQUIREMENT]
+    assert MOLCRYSKIT_SOURCE_COMMIT == MOLCRYS_COMMIT
 
 
 def test_merge_gate_uses_the_pinned_toolchain() -> None:
