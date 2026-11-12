@@ -1,8 +1,11 @@
 """The phone snapshot keeps display changes off the chemistry path."""
 
+import subprocess
 import sys
 import warnings
 from pathlib import Path
+
+import pytest
 
 MOLCRYS = Path(__file__).resolve().parents[2] / "MolCrysKit"
 if MOLCRYS.is_dir():
@@ -63,3 +66,40 @@ def test_operate_commits_a_new_revision(tmp_path: Path):
     assert committed["revision"] == 2
     assert committed["operation"] == "commit_disorder_candidate"
     assert len(committed["sites"]) == 1
+
+
+@pytest.mark.timeout(180)
+def test_operate_does_not_import_desktop_chemistry(tmp_path: Path):
+    path = tmp_path / "disorder.cif"
+    path.write_text(CIF, encoding="utf-8")
+    script = r"""
+import sys
+from pathlib import Path
+molcrys = Path.cwd().parent / "MolCrysKit"
+if molcrys.is_dir():
+    sys.path.insert(0, str(molcrys))
+blocked = ("ase", "scipy", "matplotlib", "pymatgen", "spglib", "PIL")
+
+class Block:
+    def find_spec(self, name, path, target=None):
+        if name.split(".")[0] in blocked:
+            raise ImportError(name)
+        return None
+
+sys.meta_path.insert(0, Block())
+import warnings
+from mat_viewer.phone import operate_commit_major
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", UserWarning)
+    committed = operate_commit_major(sys.argv[1])
+assert committed["revision"] == 2
+assert len(committed["sites"]) == 1
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script, str(path)],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
