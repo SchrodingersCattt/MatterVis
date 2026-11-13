@@ -50,6 +50,7 @@ plotly-export = ["plotly", "kaleido"]
 web = ["plotly", "dash", "flask-sock", "flask-compress"]
 tui = ["textual"]
 cube = ["scikit-image"]
+vtk = ["pyvista", "scikit-image"]
 animation = ["imageio", "imageio-ffmpeg"]
 gpu = ["wgpu>=0.20"]
 all = [
@@ -60,6 +61,7 @@ all = [
     "flask-compress",
     "textual",
     "scikit-image",
+    "pyvista",
     "imageio",
     "imageio-ffmpeg",
     "wgpu>=0.20",

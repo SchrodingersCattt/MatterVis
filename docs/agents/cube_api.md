@@ -180,3 +180,61 @@ If marching cubes reports that the level does not cross the data, choose an
 explicit isovalue inside the scalar range. If isolated noise components remain,
 use the component-size and atom-mask controls deliberately; absence of their
 optional implementation is an error rather than a visual fallback.
+
+## VTK offscreen figures
+
+`mat_viewer.render.vtk_cube.render_cube_figure` writes one PNG through
+PyVista. It is not a `mat-vis render --backend` choice and it does not
+consume a `RenderPlan`.
+
+Install the Python extra with:
+
+```console
+python -m pip install "matter-vis[vtk]"
+```
+
+PyVista is imported only when the function is called. Headless Linux also
+needs a system OSMesa or EGL library (Debian/Ubuntu: `libosmesa6`). MatterVis
+does not install system libraries. If no display and neither library is
+loadable, the call raises `RuntimeError` before opening a window. A missing
+library used to abort the interpreter inside VTK.
+
+The isosurface grid and the color grid share one `origin`, one `axes` matrix,
+and one shape. Voxel vectors are rows. A vertex index `(i, j, k)` is the
+physical point `origin + (i, j, k) @ axes`, the same frame as `CubeData`.
+Resample a color cube that uses a different grid before calling this
+function. Omit `color_min` and `color_max` to use the finite minimum and
+maximum of the color grid. A constant grid with no range uses the colormap
+midpoint. `color_center` places one value, often zero, at the middle of an
+asymmetric range; omitting it keeps a linear map. `colormap_stops` is a
+sequence of at least two RGB triples in `0..255`. The default stops run blue,
+cyan, green, yellow, red.
+
+`isovalue=None` uses `default_isovalue`. One level is drawn. `periodic=True`
+appends the wrapped endpoint plane (index `N` copies index 0), the same
+closure as the CPU cube path, so the surface can reach the cell faces.
+`repeat` translates the finished mesh, the atoms, and the supplied bonds by
+`axes * shape`. It is not `periodic_image_policy`. Pass
+`bond_finder(xyz, atomic_numbers)` when contacts that cross a cell boundary
+have to be chosen after the repeat. This function does not choose elements
+or distance cutoffs. Colors and radii are caller-supplied maps keyed by
+atomic number.
+
+The isosurface shade is `surface_ambient`, `surface_diffuse`,
+`surface_specular`, and `surface_specular_power`. Atom and bond
+coefficients are the matching `atom_*` and `bond_*` arguments.
+`surface_specular_power` is the Phong exponent, not a 0–1 weight.
+The renderer lights both sides of the sheet, so an open isosurface stays
+visible when a normal points away from the camera. The defaults leave the
+previous coefficients unchanged.
+
+`look` and `up` are directions. The camera distance and the three lights
+scale with the scene radius, and the focal point is the center of the mesh
+and atom bounds, so a volume with no atoms still frames. `parallel_scale` is
+the orthographic half-height in the length unit of `axes`. `depth_peels`
+above 1 turns on depth peeling for this window. Taubin smoothing runs before
+colors are sampled onto the moved vertices. A pass that collapses the mesh
+bounds is discarded. Smoothing can pull a periodic boundary off the cell face.
+
+Two calls with the same arrays write the same PNG on one machine. A different
+VTK build can move a few edge pixels.
